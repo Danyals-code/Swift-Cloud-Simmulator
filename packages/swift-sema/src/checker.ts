@@ -1,17 +1,21 @@
 import type { Diagnostic, DiagnosticCode, SourceSpan } from '@studio/shared'
 import type {
   Block,
+  ConformanceModel,
   Condition,
   Decl,
   EnumDecl,
   Expr,
+  ExtensionDecl,
   Pattern,
+  ProtocolDecl,
   SourceFileNode,
   Stmt,
   StructDecl,
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
+import { collectConformance } from '@studio/swift-syntax'
 import {
   isKnownGlobal,
   KNOWN_ATTRIBUTES,
@@ -47,6 +51,18 @@ export class Checker {
   private readonly types = new Map<string, TypeInfo>()
   /** Enum declarations, kept apart from types because they have cases rather than properties. */
   private readonly enums = new Map<string, EnumDecl>()
+  private readonly protocols = new Map<string, ProtocolDecl>()
+  /**
+   * Every associated-type name declared anywhere.
+   *
+   * Not scoped to its own protocol, deliberately. Scoping it properly needs the
+   * protocol a use site belongs to, and getting that wrong reports "unknown type
+   * 'Item'" on correct code — a false positive, which costs more than the missed
+   * error of accepting `Item` in a type that never declared it.
+   */
+  private readonly associatedTypeNames = new Set<string>()
+  /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
+  private conformance: ConformanceModel = collectConformance([])
   private readonly globalScope = new Scope()
   /** Non-zero inside a closure, where `$0` shorthand is legal. */
   private closureDepth = 0
@@ -59,6 +75,11 @@ export class Checker {
     // Pass 1: collect every module-level type before checking any body, so that
     // declaration order does not matter — `ContentView()` may appear above its own
     // declaration, as it does in the reference app.
+    //
+    // The conformance merge runs first because `describeStruct` needs it: after
+    // `extension` exists, a declaration no longer knows all of its own members, and
+    // the "does this View have a body?" check reads that merged list.
+    this.conformance = collectConformance(files)
     for (const file of files) this.collectDeclarations(file)
 
     const entryPoint = this.resolveEntryPoint(files)
@@ -98,6 +119,15 @@ export class Checker {
         }
         this.enums.set(decl.name, decl)
         this.globalScope.declare({ name: decl.name, kind: 'type', span: decl.nameSpan })
+      } else if (decl.kind === 'protocolDecl') {
+        this.protocols.set(decl.name, decl)
+        this.globalScope.declare({ name: decl.name, kind: 'type', span: decl.nameSpan })
+        // Collected in pass 1, not while checking the protocol's own body: a type
+        // annotation naming `Item` may be checked before the protocol that declares
+        // it is reached, and order must not decide whether a name resolves.
+        for (const associated of decl.associatedTypes) {
+          this.associatedTypeNames.add(associated.name)
+        }
       } else if (decl.kind === 'funcDecl') {
         this.globalScope.declare({ name: decl.name, kind: 'function', span: decl.nameSpan })
       } else if (decl.kind === 'varDecl') {
@@ -107,10 +137,16 @@ export class Checker {
   }
 
   private describeStruct(decl: StructDecl): TypeInfo {
+    // The merged list, not `decl.members`: `var body` may be supplied by an extension
+    // or inherited from a protocol default, and reporting "add a body" for a View that
+    // has one in an extension is exactly the false positive gate 4 forbids.
+    const members = this.conformance.types.get(decl.name)?.members ?? decl.members
     const properties: PropertyInfo[] = []
-    const methods = decl.members.filter((m): m is Extract<Decl, { kind: 'funcDecl' }> => m.kind === 'funcDecl')
+    const methods = members.filter(
+      (m): m is Extract<Decl, { kind: 'funcDecl' }> => m.kind === 'funcDecl',
+    )
 
-    for (const member of decl.members) {
+    for (const member of members) {
       if (member.kind !== 'varDecl') continue
       properties.push({
         name: member.name,
@@ -121,7 +157,8 @@ export class Checker {
       })
     }
 
-    const conformances = decl.inherits.map((t) => t.name)
+    const merged = this.conformance.types.get(decl.name)?.conformances
+    const conformances = merged ? [...merged] : decl.inherits.map((t) => t.name)
     return {
       name: decl.name,
       decl,
@@ -191,6 +228,11 @@ export class Checker {
         this.checkStruct(decl)
         return
 
+      case 'protocolDecl':
+      case 'extensionDecl':
+        this.checkTypeBody(decl)
+        return
+
       case 'funcDecl': {
         this.checkAttributes(decl.attributes)
         const inner = scope.child()
@@ -230,14 +272,41 @@ export class Checker {
   }
 
   private checkStruct(decl: StructDecl): void {
+    const info = this.types.get(decl.name)
+
+    if (info?.isView && !info.properties.some((p) => p.name === 'body')) {
+      this.report(
+        decl.nameSpan,
+        'error',
+        'not_conformant',
+        `Type '${decl.name}' does not conform to protocol 'View'. Add a 'body' property.`,
+      )
+    }
+
+    this.checkTypeBody(decl)
+  }
+
+  /**
+   * Checks the members of a type, protocol or extension body.
+   *
+   * The scope is seeded from the *merged* member list, so a method written in one
+   * extension can call one written in another — which is the whole reason people
+   * split a type across extensions. Falling back to the body's own members keeps a
+   * protocol body working, since a protocol contributes to conformers rather than
+   * having merged members of its own.
+   */
+  private checkTypeBody(decl: StructDecl | ProtocolDecl | ExtensionDecl): void {
     this.checkAttributes(decl.attributes)
 
-    const info = this.types.get(decl.name)
     const scope = this.globalScope.child()
+    const visible = this.conformance.types.get(decl.name)?.members ?? decl.members
+    const seen = new Set<string>()
 
     // Every member is visible to every other member, regardless of order.
-    for (const member of decl.members) {
+    for (const member of [...visible, ...decl.members]) {
       if (member.kind === 'varDecl') {
+        if (seen.has(member.name)) continue
+        seen.add(member.name)
         scope.declare({ name: member.name, kind: 'property', span: member.nameSpan })
         // `@State var count` also exposes the projection `$count`.
         if (propertyWrapperOf(member)) {
@@ -248,13 +317,11 @@ export class Checker {
       }
     }
 
-    if (info?.isView && !info.properties.some((p) => p.name === 'body')) {
-      this.report(
-        decl.nameSpan,
-        'error',
-        'not_conformant',
-        `Type '${decl.name}' does not conform to protocol 'View'. Add a 'body' property.`,
-      )
+    // An associated type is a name that only exists inside the protocol body.
+    if (decl.kind === 'protocolDecl') {
+      for (const associated of decl.associatedTypes) {
+        scope.declare({ name: associated.name, kind: 'type', span: associated.nameSpan })
+      }
     }
 
     for (const member of decl.members) this.checkDeclaration(member, scope)
@@ -301,6 +368,8 @@ export class Checker {
           !KNOWN_TYPES.has(base) &&
           !this.types.has(base) &&
           !this.enums.has(base) &&
+          !this.protocols.has(base) &&
+          !this.associatedTypeNames.has(base) &&
           !isKnownGlobal(base)
         ) {
           this.report(

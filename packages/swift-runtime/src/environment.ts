@@ -1,5 +1,8 @@
 import type { SourceSpan } from '@studio/shared'
-import type { StructValue, SwiftValue } from './values'
+import type { EnumValue, StructValue, SwiftValue } from './values'
+
+/** What `self` may be inside a member body: an instance, or an enum case. */
+export type SelfValue = StructValue | EnumValue
 
 export interface Binding {
   value: SwiftValue
@@ -21,8 +24,15 @@ export class Environment {
 
   constructor(
     readonly parent: Environment | null = null,
-    /** The receiver for implicit member access inside a method or computed property. */
-    readonly self: StructValue | null = null,
+    /**
+     * The receiver for implicit member access inside a method or computed property.
+     *
+     * An enum case is a receiver too: `var title: String { rawValue }` inside an enum
+     * reads a member of `self` exactly as a struct's computed property does, and
+     * restricting this to structs is what used to make that particular — and very
+     * ordinary — line fail to resolve.
+     */
+    readonly self: SelfValue | null = null,
   ) {}
 
   define(name: string, value: SwiftValue, isLet: boolean, span: SourceSpan): void {
@@ -39,11 +49,11 @@ export class Environment {
   }
 
   /** Nearest enclosing `self`, for implicit property access. */
-  resolveSelf(): StructValue | null {
+  resolveSelf(): SelfValue | null {
     return this.self ?? this.parent?.resolveSelf() ?? null
   }
 
-  child(self: StructValue | null = null): Environment {
+  child(self: SelfValue | null = null): Environment {
     return new Environment(this, self)
   }
 

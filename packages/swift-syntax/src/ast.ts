@@ -92,11 +92,14 @@ export type Decl =
   | ImportDecl
   | StructDecl
   | EnumDecl
+  | ProtocolDecl
+  | ExtensionDecl
   | FuncDecl
   | VarDecl
   | InitDecl
   | UnsupportedDecl
   | ErrorDecl
+
 
 export interface DeclBase extends NodeBase {
   readonly attributes: readonly Attribute[]
@@ -153,8 +156,56 @@ export interface EnumCase extends NodeBase {
   readonly rawValue: Expr | null
 }
 
+/**
+ * A `protocol`.
+ *
+ * Requirements and default implementations live in the same member list, and what
+ * separates them is whether the member has a body: `func area() -> Double` is a
+ * requirement, `func describe() -> String { … }` is a default every conformer
+ * inherits unless it overrides. That is exactly how Swift reads it, and it means no
+ * second member list to keep in step.
+ *
+ * `associatedtype` is recorded by name only. The interpreter is dynamically typed,
+ * so an associated type has nothing to constrain at runtime — recording it keeps
+ * the name resolvable inside the protocol body instead of reporting it unresolved.
+ */
+export interface ProtocolDecl extends DeclBase {
+  readonly kind: 'protocolDecl'
+  readonly name: string
+  readonly nameSpan: SourceSpan
+  /** Protocols this one refines: `protocol Card: Identifiable`. */
+  readonly inherits: readonly NamedType[]
+  readonly members: readonly Decl[]
+  readonly associatedTypes: readonly AssociatedType[]
+}
+
+export interface AssociatedType extends NodeBase {
+  readonly name: string
+  readonly nameSpan: SourceSpan
+}
+
+/**
+ * An `extension`.
+ *
+ * Extends a named type with members, conformances, or both. Modelled as a separate
+ * declaration rather than folded into the type it extends, because the two are
+ * written apart — often in different files — and folding at parse time would make
+ * the tree depend on file order. Merging happens once, downstream, where every file
+ * is in hand.
+ */
+export interface ExtensionDecl extends DeclBase {
+  readonly kind: 'extensionDecl'
+  /** The name of the type being extended. */
+  readonly name: string
+  readonly nameSpan: SourceSpan
+  /** Conformances the extension adds: `extension Card: Identifiable`. */
+  readonly inherits: readonly NamedType[]
+  readonly members: readonly Decl[]
+}
+
 export interface FuncDecl extends DeclBase {
   readonly kind: 'funcDecl'
+
   readonly name: string
   readonly nameSpan: SourceSpan
   readonly params: readonly Param[]
@@ -177,7 +228,16 @@ export interface VarDecl extends DeclBase {
   readonly initializer: Expr | null
   /** Present for computed properties: `var body: some View { … }`. */
   readonly accessor: Block | null
+  /**
+   * `{ get }` or `{ get set }` — a protocol's property requirement.
+   *
+   * Distinguished from a computed property because there is no body to run: it says
+   * a conformer must have this property, not how to compute it. `accessor` is null
+   * whenever this is set.
+   */
+  readonly requirement: 'get' | 'get set' | null
 }
+
 
 /**
  * A construct the parser recognised but the subset does not support — `class`,
@@ -599,6 +659,11 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
     case 'structDecl':
       node.members.forEach(visit)
       return
+    case 'protocolDecl':
+    case 'extensionDecl':
+      node.members.forEach(visit)
+      return
+
     case 'funcDecl':
       node.params.forEach((p) => {
         if (p.type) visit(p.type)

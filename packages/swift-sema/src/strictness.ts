@@ -62,10 +62,22 @@ class StrictnessLinter {
   private readonly diagnostics: Diagnostic[] = []
   /** Names in scope, innermost last. */
   private readonly scopes: Map<string, Binding>[] = [new Map()]
+  /** Struct and class declarations by name, so an extension knows what it extends. */
+  private readonly owners = new Map<string, StructDecl>()
 
   constructor(private readonly model: SemanticModel) {}
 
   run(files: readonly SourceFileNode[]): Diagnostic[] {
+    // Struct and class declarations are indexed first so that an extension can be
+    // linted against the type it extends. Without the owner, an extension method on a
+    // *class* would be told to declare itself `mutating` — a warning on correct Swift,
+    // which is the one thing this pass must never do.
+    for (const file of files) {
+      for (const decl of file.declarations) {
+        if (decl.kind === 'structDecl') this.owners.set(decl.name, decl)
+      }
+    }
+
     for (const file of files) {
       for (const decl of file.declarations) this.declaration(decl)
     }
@@ -79,6 +91,14 @@ class StrictnessLinter {
       case 'structDecl':
         this.struct(decl)
         return
+      case 'extensionDecl':
+        this.members(decl.members, this.owners.get(decl.name) ?? null)
+        return
+      case 'protocolDecl':
+        // A protocol's defaults have no concrete `self`, so `mutating` cannot be
+        // judged. Only the bodies are walked.
+        this.members(decl.members, null)
+        return
       case 'funcDecl':
         this.func(decl)
         return
@@ -91,21 +111,28 @@ class StrictnessLinter {
   }
 
   private struct(decl: StructDecl): void {
+    this.members(decl.members, decl)
+  }
+
+  private members(members: readonly Decl[], owner: StructDecl | null): void {
     this.push()
     try {
       // Properties are visible to every member, so they are declared before any
       // body is walked rather than as each is reached.
-      for (const member of decl.members) {
+      for (const member of members) {
+        if (member.kind === 'varDecl') this.declare(member.name, this.bindingFor(member))
+      }
+      for (const member of owner?.members ?? []) {
         if (member.kind === 'varDecl') this.declare(member.name, this.bindingFor(member))
       }
 
-      for (const member of decl.members) {
+      for (const member of members) {
         if (member.kind === 'varDecl') {
           this.propertyWrapperOnLet(member)
           if (member.initializer) this.expression(member.initializer)
           if (member.accessor) this.block(member.accessor)
         } else if (member.kind === 'funcDecl') {
-          this.func(member, decl)
+          this.func(member, owner)
         }
       }
     } finally {

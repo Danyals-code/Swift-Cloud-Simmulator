@@ -17,6 +17,7 @@ import type {
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
+import { collectConformance, type ConformanceModel } from '@studio/swift-syntax'
 import {
   bindingLValue,
   Environment,
@@ -108,12 +109,23 @@ const MAX_SAFE_INT = Number.MAX_SAFE_INTEGER
 export class Interpreter {
   private steps = 0
   private readonly frames: StackFrame[] = []
+  /** Declared result types, innermost last, so `return .case` knows its own type. */
+  private readonly returnTypes: (string | null)[] = []
   private readonly host: InterpreterHost
   private readonly stepBudget: number
 
   readonly globals = new Environment()
   readonly types = new Map<string, StructDecl>()
   readonly enums = new Map<string, EnumDecl>()
+  /**
+   * Members merged across extensions, protocol defaults and superclasses.
+   *
+   * Every member lookup goes through this rather than through a declaration's own
+   * `members`, because after `extension` exists a declaration no longer knows all of
+   * its own members. Built once per load; the merge is syntactic and the files do not
+   * change between loads.
+   */
+  private conformance: ConformanceModel = collectConformance([])
 
   constructor(options: InterpreterOptions = {}) {
     this.host = options.host ?? {}
@@ -124,6 +136,8 @@ export class Interpreter {
 
   /** Registers top-level declarations. Types and functions first, so order is irrelevant. */
   load(files: readonly SourceFileNode[]): void {
+    this.conformance = collectConformance(files)
+
     for (const file of files) {
       for (const decl of file.declarations) {
         if (decl.kind === 'structDecl') this.types.set(decl.name, decl)
@@ -147,6 +161,16 @@ export class Interpreter {
         this.globals.define(decl.name, copyValue(value), decl.isLet, decl.span)
       }
     }
+  }
+
+  /** Every member a named type has, extensions and inherited defaults included. */
+  membersOf(typeName: string): readonly Decl[] {
+    return this.conformance.types.get(typeName)?.members ?? []
+  }
+
+  /** Whether a type conforms to a protocol, directly or through another protocol. */
+  conformsTo(typeName: string, protocolName: string): boolean {
+    return this.conformance.types.get(typeName)?.conformances.has(protocolName) ?? false
   }
 
   /**
@@ -203,14 +227,16 @@ export class Interpreter {
     }
     const env = this.globals.child(instance)
 
-    const stored = decl.members.filter(
-      (m): m is VarDecl => m.kind === 'varDecl' && m.accessor === null,
+    const members = this.membersOf(typeName)
+    const stored = members.filter(
+      (m): m is VarDecl =>
+        m.kind === 'varDecl' && m.accessor === null && m.requirement === null && !isStaticDecl(m),
     )
 
     // Declared initialiser wins over the memberwise one, which is also Swift's rule:
     // writing an `init` suppresses the synthesised member-wise initialiser for a class
     // entirely, and for a struct once it is in the same file.
-    const initialiser = decl.members.find(
+    const initialiser = members.find(
       (m): m is InitDecl => m.kind === 'initDecl' && m.body !== null,
     )
 
@@ -293,22 +319,25 @@ export class Interpreter {
 
     const decl = this.enums.get(target.typeName)
     if (!decl) return undefined
+    const members = this.membersOf(target.typeName)
 
-    const computed = decl.members.find(
+    const computed = members.find(
       (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && m.accessor !== null,
     )
     if (computed?.accessor) {
-      const scope = this.globals.child(null)
-      scope.define('self', target, true, span)
-      return this.runBody(`${target.typeName}.${member}`, computed.accessor, scope, span)
+      return this.runBody(
+        `${target.typeName}.${member}`,
+        computed.accessor,
+        this.globals.child(target),
+        span,
+        namedTypeOf(computed.typeAnnotation),
+      )
     }
 
-    const method = decl.members.find((m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member)
-    if (method) {
-      const scope = this.globals.child(null)
-      scope.define('self', target, true, span)
-      return { kind: 'function', decl: method, self: null, env: scope }
-    }
+    const method = members.find(
+      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null,
+    )
+    if (method) return { kind: 'function', decl: method, self: null, env: this.globals.child(target) }
 
     return undefined
   }
@@ -318,18 +347,24 @@ export class Interpreter {
     const field = target.fields.get(member)
     if (field !== undefined) return field
 
-    const decl = this.types.get(target.typeName)
-    if (!decl) return undefined
+    const members = this.membersOf(target.typeName)
+    if (members.length === 0) return undefined
 
-    const computed = decl.members.find(
+    const computed = members.find(
       (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && m.accessor !== null,
     )
     if (computed?.accessor) {
-      return this.runBody(`${target.typeName}.${member}`, computed.accessor, this.globals.child(target), span)
+      return this.runBody(
+        `${target.typeName}.${member}`,
+        computed.accessor,
+        this.globals.child(target),
+        span,
+        namedTypeOf(computed.typeAnnotation),
+      )
     }
 
-    const method = decl.members.find(
-      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member,
+    const method = members.find(
+      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null,
     )
     if (method) return { kind: 'function', decl: method, self: target, env: this.globals }
 
@@ -345,8 +380,19 @@ export class Interpreter {
    * `var body: some View` works. That expression is evaluated exactly once: running
    * the block for effects and *then* re-evaluating the expression for its value would
    * double every side effect in it.
+   *
+   * `expected` is the declared result type, and it is the only context a bare `.case`
+   * in a `return` has to resolve against — `func next() -> Step { return .two }` says
+   * what `.two` means nowhere else. Pushed as a stack rather than passed down because
+   * the `return` may be nested arbitrarily deep inside the body.
    */
-  private runBody(name: string, body: Block, env: Environment, span: SourceSpan): SwiftValue {
+  private runBody(
+    name: string,
+    body: Block,
+    env: Environment,
+    span: SourceSpan,
+    expected: string | null = null,
+  ): SwiftValue {
     // Runaway *recursion* would exhaust the JS call stack long before the step budget
     // fires, surfacing as a RangeError from inside the interpreter rather than as a
     // diagnostic about the user's code. Capping call depth keeps the failure ours to
@@ -362,9 +408,10 @@ export class Interpreter {
     }
 
     this.frames.push({ name, span })
+    this.returnTypes.push(expected)
     try {
       const only = body.statements.length === 1 ? body.statements[0] : undefined
-      if (only?.kind === 'exprStmt') return this.evaluate(only.expression, env)
+      if (only?.kind === 'exprStmt') return this.evaluateExpecting(only.expression, env, expected)
 
       this.executeBlock(body, env)
       return VOID
@@ -373,6 +420,7 @@ export class Interpreter {
       throw error
     } finally {
       this.frames.pop()
+      this.returnTypes.pop()
     }
   }
 
@@ -475,7 +523,7 @@ export class Interpreter {
 
     if (!decl.body) return VOID
     const label = fn.self ? `${fn.self.typeName}.${decl.name}` : decl.name
-    return this.runBody(label, decl.body, env, span)
+    return this.runBody(label, decl.body, env, span, namedTypeOf(decl.returnType))
   }
 
   private bindParameters(
@@ -627,7 +675,11 @@ export class Interpreter {
       }
 
       case 'returnStmt':
-        throw new ReturnSignal(statement.value ? this.evaluate(statement.value, env) : VOID)
+        throw new ReturnSignal(
+          statement.value
+            ? this.evaluateExpecting(statement.value, env, this.returnTypes[this.returnTypes.length - 1] ?? null)
+            : VOID,
+        )
 
       case 'unsupportedStmt':
         throw new UnsupportedAtRuntime(statement.feature, statement.span)
@@ -758,25 +810,30 @@ export class Interpreter {
    * initialiser, which is the one behaviour a live preview must not have.
    */
   private staticMember(typeName: string, member: string, span: SourceSpan): SwiftValue | undefined {
-    const members =
-      this.types.get(typeName)?.members ?? this.enums.get(typeName)?.members ?? null
-    if (!members) return undefined
+    const members = this.membersOf(typeName)
+    if (members.length === 0) return undefined
 
-    const isStatic = (decl: { modifiers: readonly { name: string }[] }): boolean =>
-      decl.modifiers.some((m) => m.name === 'static' || m.name === 'class')
+    const isStatic = isStaticDecl
 
     const property = members.find(
       (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && isStatic(m),
     )
     if (property) {
       if (property.accessor) {
-        return this.runBody(`${typeName}.${member}`, property.accessor, this.globals.child(null), span)
+        return this.runBody(
+          `${typeName}.${member}`,
+          property.accessor,
+          this.globals.child(null),
+          span,
+          namedTypeOf(property.typeAnnotation),
+        )
       }
       return property.initializer ? this.evaluate(property.initializer, this.globals) : NIL
     }
 
     const method = members.find(
-      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && isStatic(m),
+      (m): m is FuncDecl =>
+        m.kind === 'funcDecl' && m.name === member && isStatic(m) && m.body !== null,
     )
     return method ? { kind: 'function', decl: method, self: null, env: this.globals } : undefined
   }
@@ -793,7 +850,15 @@ export class Interpreter {
    * value that compares equal to nothing.
    */
   coerceToEnum(value: SwiftValue, typeName: string | null): SwiftValue {
-    if (!typeName || value.kind !== 'opaque') return value
+    if (!typeName) return value
+
+    // `var width: Double` given the literal `3`. Swift converts at the literal, since
+    // `3` there is a `Double` literal and never an `Int` — so `Rect(width: 3).width`
+    // is 3.0 and prints as such. Without this the value stays an Int and every
+    // arithmetic result downstream loses its fractional formatting.
+    if (typeName === 'Double' && value.kind === 'int') return double(value.value)
+
+    if (value.kind !== 'opaque') return value
 
     const decl = this.enums.get(typeName)
     if (!decl) return value
@@ -858,9 +923,16 @@ export class Interpreter {
         env.define(decl.name, copyValue(value), decl.isLet, decl.nameSpan)
         return
       }
-      case 'funcDecl':
-        env.define(decl.name, { kind: 'function', decl, self: env.resolveSelf(), env }, true, decl.nameSpan)
+      case 'funcDecl': {
+        const receiver = env.resolveSelf()
+        env.define(
+          decl.name,
+          { kind: 'function', decl, self: receiver?.kind === 'struct' ? receiver : null, env },
+          true,
+          decl.nameSpan,
+        )
         return
+      }
       case 'structDecl':
         this.types.set(decl.name, decl)
         return
@@ -1031,8 +1103,20 @@ export class Interpreter {
 
     const self = env.resolveSelf()
     if (self) {
-      const member = this.memberOfStruct(self, name.startsWith('$') ? name.slice(1) : name, span)
+      const bare = name.startsWith('$') ? name.slice(1) : name
+      const member =
+        self.kind === 'struct'
+          ? this.memberOfStruct(self, bare, span)
+          : this.memberOfEnum(self, bare, span)
       if (member !== undefined) return unwrapProjection(member)
+    }
+
+    // Inside `extension Int`, `self` is a binding rather than a receiver, so a call to
+    // a sibling extension method has to find its way back through it.
+    const selfBinding = env.lookup('self')?.value
+    if (selfBinding) {
+      const extended = this.userMember(selfBinding, name, span)
+      if (extended !== undefined) return unwrapProjection(extended)
     }
 
     if (this.types.has(name) || this.enums.has(name)) return { kind: 'type', name }
@@ -1085,10 +1169,58 @@ export class Interpreter {
     const builtin = getBuiltinProperty(target, member)
     if (builtin !== undefined) return builtin
 
+    const extended = this.userMember(target, member, span)
+    if (extended !== undefined) return unwrapProjection(extended)
+
     const fromHost = this.host.getMember?.(target, member, span)
     if (fromHost !== undefined) return fromHost
 
     this.trap(`Value of type '${typeNameOf(target)}' has no member '${member}'`, span)
+  }
+
+  /**
+   * A member a user `extension` added to a value the interpreter otherwise handles
+   * entirely through its built-in table — `extension Int`, `extension String`,
+   * `extension Array`.
+   *
+   * Checked *after* the built-in table, so an extension can never shadow a stdlib
+   * member and silently change what existing code means.
+   *
+   * `self` is bound as an ordinary name rather than as a receiver, because a receiver
+   * has to be a struct or an enum case. Nothing is lost: a built-in has no stored
+   * properties for implicit access to find, and a call to a sibling extension method
+   * resolves through the `self` binding instead.
+   */
+  private userMember(
+    target: SwiftValue,
+    member: string,
+    span: SourceSpan,
+  ): SwiftValue | undefined {
+    if (target.kind === 'struct' || target.kind === 'enum' || target.kind === 'type') return undefined
+
+    const members = this.membersOf(typeNameOf(target))
+    if (members.length === 0) return undefined
+
+    const scope = this.globals.child(null)
+    scope.define('self', target, true, span)
+
+    const computed = members.find(
+      (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && m.accessor !== null,
+    )
+    if (computed?.accessor) {
+      return this.runBody(
+        `${typeNameOf(target)}.${member}`,
+        computed.accessor,
+        scope,
+        span,
+        namedTypeOf(computed.typeAnnotation),
+      )
+    }
+
+    const method = members.find(
+      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null,
+    )
+    return method ? { kind: 'function', decl: method, self: null, env: scope } : undefined
   }
 
   private evaluateCall(
@@ -1238,6 +1370,12 @@ export class Interpreter {
       return builtin
     }
 
+    const extended = this.userMember(target, member, memberSpan)
+    if (extended?.kind === 'function') return this.callFunction(extended, allArgs, span)
+    if (extended?.kind === 'closure') {
+      return this.callClosure(extended, allArgs.map((a) => a.value), span)
+    }
+
     const fromHost = this.host.callMember?.(target, member, this.hostCall(args, trailingClosure, span))
     if (fromHost !== undefined) return fromHost
 
@@ -1308,7 +1446,7 @@ export class Interpreter {
     }
 
     const self = env.resolveSelf()
-    if (self?.fields.has(name)) {
+    if (self?.kind === 'struct' && self.fields.has(name)) {
       const current = self.fields.get(name)
       if (asProjection(current)) return current!
       return projection(fieldLValue(self, name, `self.${name}`))
@@ -1325,7 +1463,7 @@ export class Interpreter {
         if (binding) return throughProjection(bindingLValue(binding, expr.name))
 
         const self = env.resolveSelf()
-        if (self?.fields.has(expr.name)) {
+        if (self?.kind === 'struct' && self.fields.has(expr.name)) {
           return throughProjection(fieldLValue(self, expr.name, expr.name))
         }
         return null
@@ -1571,6 +1709,16 @@ export class Interpreter {
         this.trap(`Unary operator '${operator}' is not supported`, span)
     }
   }
+}
+
+/**
+ * `static` — or `class`, which means static-and-overridable on a class.
+ *
+ * Matters more than it looks: a `static let` is not a stored property, so counting it
+ * as one would shift every memberwise-initialiser argument by a position.
+ */
+function isStaticDecl(decl: { modifiers: readonly { name: string }[] }): boolean {
+  return decl.modifiers.some((m) => m.name === 'static' || m.name === 'class')
 }
 
 /**

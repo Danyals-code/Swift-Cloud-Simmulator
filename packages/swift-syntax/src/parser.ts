@@ -10,8 +10,10 @@ import {
 } from './tokens'
 import type {
   Argument,
+  AssociatedType,
   Attribute,
   Block,
+
   ClosureExpr,
   ClosureParam,
   Condition,
@@ -38,9 +40,8 @@ export interface ParseResult {
 
 /** Declarations outside the subset, mapped to the name the diagnostic should use. */
 const UNSUPPORTED_DECLARATIONS: Readonly<Record<string, string>> = {
-  protocol: 'protocol',
-  extension: 'extension',
   typealias: 'typealias',
+
   subscript: 'subscript',
   operator: 'operator declaration',
   associatedtype: 'associatedtype',
@@ -217,7 +218,10 @@ export class Parser {
     if (this.checkKeyword('struct')) return this.parseStruct(attributes, modifiers, false)
     if (this.checkKeyword('class')) return this.parseStruct(attributes, modifiers, true)
     if (this.checkKeyword('enum')) return this.parseEnum(attributes, modifiers)
+    if (this.checkKeyword('protocol')) return this.parseProtocol(attributes, modifiers)
+    if (this.checkKeyword('extension')) return this.parseExtension(attributes, modifiers)
     if (this.checkKeyword('func')) return this.parseFunc(attributes, modifiers)
+
     if (this.checkKeyword('var') || this.checkKeyword('let')) {
       return this.parseVar(attributes, modifiers)
     }
@@ -424,7 +428,125 @@ export class Parser {
     return { span: this.spanFrom(start), name, nameSpan, associated, rawValue }
   }
 
+  /**
+   * A `protocol`.
+   *
+   * The body is an ordinary type body, so a requirement and a default implementation
+   * parse through exactly the same path — the difference is a missing body, which the
+   * existing `parseFunc` and `parseVar` already represent. `associatedtype` is the one
+   * member that has no equivalent elsewhere, so it is lifted out here.
+   */
+  private parseProtocol(attributes: Attribute[], modifiers: Modifier[]): Decl {
+    const start = this.advance() // 'protocol'
+    const { name, span: nameSpan } = this.expectIdentifier('a protocol name')
+
+    // `protocol Container<Item>` is primary-associated-type syntax, which names an
+    // associated type rather than declaring a generic parameter.
+    const associatedTypes: AssociatedType[] = []
+    if (this.check('<')) {
+      this.advance()
+      while (!this.atEnd && !this.check('>')) {
+        if (this.current.kind === 'identifier') {
+          const token = this.advance()
+          associatedTypes.push({ span: token.span, name: token.text, nameSpan: token.span })
+        } else this.advance()
+        if (!this.match(',')) break
+      }
+      this.expect('>', 'to close the primary associated types')
+    }
+
+    const inherits = this.parseInheritanceClause()
+    const members: Decl[] = []
+
+    if (this.expect('{', 'to begin the protocol body')) {
+      while (!this.atEnd && !this.check('}') && !this.atProbableTopLevelDeclaration()) {
+        this.skipSemicolons()
+        if (this.check('}') || this.atEnd) break
+        const before = this.index
+
+        if (this.checkKeyword('associatedtype') || this.check('associatedtype')) {
+          this.advance()
+          const associated = this.expectIdentifier('an associated type name')
+          associatedTypes.push({
+            span: associated.span,
+            name: associated.name,
+            nameSpan: associated.span,
+          })
+          // `associatedtype Item: Equatable = Int` — constraint and default are both
+          // type-level, and nothing at runtime can act on either.
+          if (this.match(':')) this.parseType()
+          if (this.match('=')) this.parseType()
+        } else {
+          const member = this.parseDeclaration()
+          if (member) members.push(member)
+        }
+
+        if (this.index === before) this.advance()
+      }
+      this.expect('}', 'to close the protocol body')
+    }
+
+    return {
+      kind: 'protocolDecl',
+      span: this.spanFrom(start),
+      attributes,
+      modifiers,
+      name,
+      nameSpan,
+      inherits,
+      members,
+      associatedTypes,
+    }
+  }
+
+  /**
+   * An `extension`.
+   *
+   * The extended type is parsed as a type rather than an identifier so that
+   * `extension Array where Element == Int` and `extension Optional<String>` reach the
+   * same place as `extension Card` — the generic arguments and the `where` clause are
+   * dropped, because the interpreter dispatches on the base name alone.
+   */
+  private parseExtension(attributes: Attribute[], modifiers: Modifier[]): Decl {
+    const start = this.advance() // 'extension'
+    const extended = this.parseType()
+
+    let name = ''
+    let nameSpan = extended.span
+    if (extended.kind === 'namedType') name = extended.name
+    else if (extended.kind === 'arrayType') name = 'Array'
+    else if (extended.kind === 'dictionaryType') name = 'Dictionary'
+    else if (extended.kind === 'optionalType') name = 'Optional'
+    else {
+      this.error(extended.span, 'unexpected_token', 'Expected a type name to extend.')
+      nameSpan = extended.span
+    }
+
+    const inherits = this.parseInheritanceClause()
+    if (this.checkKeyword('where') || this.check('where')) {
+      // A constrained extension applies to some instantiations and not others, which
+      // needs a type checker to decide. Applying it unconditionally is the lenient
+      // reading, and lenient is the house rule.
+      this.advance()
+      while (!this.atEnd && !this.check('{')) this.advance()
+    }
+
+    const members = this.parseTypeBody('extension')
+
+    return {
+      kind: 'extensionDecl',
+      span: this.spanFrom(start),
+      attributes,
+      modifiers,
+      name,
+      nameSpan,
+      inherits,
+      members,
+    }
+  }
+
   private parseInheritanceClause(): NamedType[] {
+
     const inherits: NamedType[] = []
     if (this.match(':')) {
       do {
@@ -556,9 +678,17 @@ export class Parser {
     // A computed property: `var body: some View { … }`. Distinguished from a
     // trailing closure by the absence of an initialiser — `var x = Foo { }` is an
     // initialiser with a trailing closure, `var x: T { }` is a getter.
+    //
+    // `{ get }` and `{ get set }` look like getters but are protocol requirements:
+    // they say a conformer must have the property, without saying how. Parsing them
+    // as bodies would produce a getter that evaluates the identifier `get`.
     let accessor: Block | null = null
-    if (!initializer && this.check('{')) accessor = this.parseBlock()
-    else if (initializer && this.check('{') && !this.current.newlineBefore) {
+    let requirement: 'get' | 'get set' | null = null
+    if (!initializer && this.check('{')) {
+      requirement = this.tryParseAccessorRequirement()
+      if (!requirement) accessor = this.parseBlock()
+    } else if (initializer && this.check('{') && !this.current.newlineBefore) {
+
       // `var x = 1 { didSet { … } }` — property observers are out of scope.
       this.unsupported(this.current.span, 'property observers (willSet/didSet)')
       this.skipBalanced('{', '}')
@@ -575,10 +705,42 @@ export class Parser {
       typeAnnotation,
       initializer,
       accessor,
+      requirement,
     }
   }
 
+  /**
+   * `{ get }` / `{ get set }`, consumed only when that is the entire brace body.
+   *
+   * Anything else — including `{ get { … } set { … } }`, which is a real computed
+   * property with explicit accessors — is left for `parseBlock`, so the index is
+   * restored before returning null.
+   */
+  private tryParseAccessorRequirement(): 'get' | 'get set' | null {
+    const before = this.index
+    this.advance() // '{'
+
+    const words: string[] = []
+    while (!this.atEnd && (this.check('get') || this.check('set'))) {
+      words.push(this.advance().text)
+      // An accessor with a body is an implementation, not a requirement.
+      if (this.check('{')) {
+        this.index = before
+        return null
+      }
+    }
+
+    if (words.length > 0 && this.check('}') && words[0] === 'get') {
+      this.advance() // '}'
+      return words.length === 2 && words[1] === 'set' ? 'get set' : 'get'
+    }
+
+    this.index = before
+    return null
+  }
+
   private parseUnsupportedDecl(feature: string): Decl {
+
     const start = this.advance()
     const name = this.current.kind === 'identifier' ? this.advance().text : null
 

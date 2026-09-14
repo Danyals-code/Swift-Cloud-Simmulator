@@ -124,9 +124,9 @@ describe('declarations', () => {
 
 describe('unsupported constructs are named, not mangled', () => {
   it.each([
-    ['protocol P {}', 'protocol'],
-    ['extension Int {}', 'extension'],
     ['typealias X = Int', 'typealias'],
+    ['subscript(i: Int) -> Int { 0 }', 'subscript'],
+    ['deinit { }', 'deinit'],
   ])('reports %s as %s', (source, feature) => {
     const { diagnostics } = parse(source)
     const warning = diagnostics.find((d) => d.code === 'unsupported_language_feature')
@@ -146,7 +146,7 @@ describe('unsupported constructs are named, not mangled', () => {
 
   it('keeps parsing declarations after an unsupported one', () => {
     const file = parseClean(`
-      protocol Ignored { func inner() }
+      typealias Ignored = Int
       struct Kept: View { var body: some View { Text("x") } }
     `)
     expect(kindsOf(file)).toEqual(['unsupportedDecl', 'structDecl'])

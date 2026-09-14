@@ -345,3 +345,128 @@ struct Card: View {
     expect(byName.get('body')).toMatchObject({ isComputed: true })
   })
 })
+
+describe('protocols and extensions (Phase 8a)', () => {
+  it('resolves a protocol named as a conformance', () => {
+    expect(
+      errors(
+        app(
+          'Text("x")',
+          `protocol Titled { var title: String { get } }
+struct Card: Titled { var title: String }`,
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  it('does not warn that a user protocol is an unknown type', () => {
+    expect(
+      warnings(
+        app(
+          'Text("x")',
+          `protocol Shape { func area() -> Double }
+struct Box: Shape {
+    var side: Double
+    func area() -> Double { side * side }
+}`,
+        ),
+      ).map((d) => d.message),
+    ).toEqual([])
+  })
+
+  it('accepts a View whose body is written in an extension', () => {
+    // The reason `describeStruct` reads the merged member list. Splitting a long view
+    // across extensions is ordinary style, and reporting "add a body" for one is the
+    // exact false positive gate 4 forbids.
+    expect(
+      errors(
+        app(
+          'Text("x")',
+          `struct Split: View {}
+extension Split {
+    var body: some View { Text("hi") }
+}`,
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  it('accepts a conformance added by an extension', () => {
+    expect(
+      errors(
+        app(
+          'Text("x")',
+          `struct Late {}
+extension Late: View {
+    var body: some View { Text("hi") }
+}`,
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  it('still reports a View with no body anywhere', () => {
+    // The check has to stay capable of firing, or widening it to extensions would
+    // have quietly turned it off.
+    expect(errors(app('Text("x")', 'struct Empty: View {}'))).toEqual([
+      "Type 'Empty' does not conform to protocol 'View'. Add a 'body' property.",
+    ])
+  })
+
+  it('resolves a method one extension adds from inside another', () => {
+    expect(
+      errors(
+        app(
+          'Text("x")',
+          `struct Chain {}
+extension Chain { func first() -> String { "a" } }
+extension Chain { func second() -> String { first() } }`,
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  it('resolves an associated type used inside its protocol', () => {
+    expect(
+      warnings(
+        app(
+          'Text("x")',
+          `protocol Container {
+    associatedtype Item
+    func first() -> Item
+}`,
+        ),
+      ).map((d) => d.message),
+    ).toEqual([])
+  })
+
+  it('records extension members on the type', () => {
+    const info = model(
+      app(
+        'Text("x")',
+        `struct Card: View {
+    var title: String
+}
+extension Card {
+    var body: some View { Text(title) }
+    func shout() -> String { title }
+}`,
+      ),
+    ).types.get('Card')!
+    expect(info.properties.map((p) => p.name)).toEqual(['title', 'body'])
+    expect(info.methods.map((m) => m.name)).toEqual(['shout'])
+    expect(info.isView).toBe(true)
+  })
+
+  it('records a conformance reached through a refined protocol', () => {
+    const info = model(
+      app(
+        'Text("x")',
+        `protocol Base {}
+protocol Refined: Base {}
+struct Impl: Refined {}`,
+      ),
+    ).types.get('Impl')!
+    expect([...info.conformances].sort()).toEqual(['Base', 'Refined'])
+  })
+})

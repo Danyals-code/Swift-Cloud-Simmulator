@@ -1,5 +1,5 @@
 import type { SourceSpan, UIEvent } from '@studio/shared'
-import type { SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
+import type { Decl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
   asProjection,
@@ -483,7 +483,7 @@ export class AppRuntime {
       const decl = this.interpreter.types.get(instance.typeName)
       if (!decl) continue
 
-      for (const property of decl.members) {
+      for (const property of this.interpreter.membersOf(instance.typeName)) {
         if (property.kind !== 'varDecl') continue
         if (!property.attributes.some((a) => a.name === 'GestureState')) continue
 
@@ -522,11 +522,13 @@ export class AppRuntime {
       this.seedState(instance, decl, identity)
       this.live.set(identity, instance)
 
-      if (this.rootTypeName === null && decl.inherits.some((t) => t.name === 'View')) {
+      // Conformance and `body` both come from the merged member list: either may be
+      // written in an extension, which is how a long view is normally split up.
+      if (this.rootTypeName === null && this.interpreter.conformsTo(instance.typeName, 'View')) {
         this.rootTypeName = instance.typeName
       }
 
-      const body = decl.members.find(
+      const body = this.interpreter.membersOf(instance.typeName).find(
         (m): m is VarDecl => m.kind === 'varDecl' && m.name === 'body' && m.accessor !== null,
       )
       if (!body?.accessor) return []
@@ -562,7 +564,7 @@ export class AppRuntime {
   }
 
   private seedState(instance: StructValue, decl: StructDecl, identity: string): void {
-    for (const property of statefulProperties(decl)) {
+    for (const property of statefulProperties(this.interpreter.membersOf(decl.name))) {
       const initial = instance.fields.get(property.name)
       if (initial === undefined) continue
 
@@ -587,7 +589,7 @@ export class AppRuntime {
    * placeholder the initialiser left behind.
    */
   private seedEnvironment(instance: StructValue, decl: StructDecl): void {
-    for (const member of decl.members) {
+    for (const member of this.interpreter.membersOf(decl.name)) {
       if (member.kind !== 'varDecl') continue
 
       const environment = member.attributes.find((a) => a.name === 'Environment')
@@ -613,10 +615,9 @@ export class AppRuntime {
   /** Copies `@State` values out of a pass's instances and back into their boxes. */
   private harvest(instances: ReadonlyMap<string, StructValue> = this.live): void {
     for (const [identity, instance] of instances) {
-      const decl = this.interpreter.types.get(instance.typeName)
-      if (!decl) continue
+      if (!this.interpreter.types.has(instance.typeName)) continue
 
-      for (const property of statefulProperties(decl)) {
+      for (const property of statefulProperties(this.interpreter.membersOf(instance.typeName))) {
         const value = instance.fields.get(property.name)
         if (value === undefined) continue
         this.state.store(identity, property.name, value, fingerprint(property.initializer))
@@ -632,8 +633,8 @@ export class AppRuntime {
  * is the entire difference between them. A `@StateObject` is created once and kept;
  * an `@ObservedObject` is handed in from outside and owned by whoever made it.
  */
-function statefulProperties(decl: StructDecl): VarDecl[] {
-  return decl.members.filter(
+function statefulProperties(members: readonly Decl[]): VarDecl[] {
+  return members.filter(
     (m): m is VarDecl =>
       m.kind === 'varDecl' &&
       m.attributes.some(
