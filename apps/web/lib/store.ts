@@ -19,7 +19,7 @@ import {
   type ProjectStore,
 } from '@studio/project-model'
 import type { DeviceKey } from '@studio/sim-shell'
-import type { FileId } from '@studio/shared'
+import type { FileId, SourceSpan } from '@studio/shared'
 
 const AUTOSAVE_MS = 500
 
@@ -60,6 +60,8 @@ export interface StudioState {
 
   setDevice: (device: DeviceKey) => void
   setPreview: (settings: Partial<PreviewSettings>) => void
+  /** Rewrites every span to `newName`, returning how many were changed. */
+  renameSymbol: (spans: readonly SourceSpan[], newName: string) => number
   applyTemplate: (templateId: string) => void
 }
 
@@ -215,6 +217,37 @@ export const useStudio = create<StudioState>((set, get) => {
 
     setPreview(settings) {
       set({ preview: { ...get().preview, ...settings } })
+    },
+
+    renameSymbol(spans, newName) {
+      const { project } = get()
+      if (!project || spans.length === 0 || !newName) return 0
+
+      // Grouped by file and applied back to front, because every edit before a span
+      // shifts the ones after it. Getting that backwards corrupts the file in a way
+      // that looks like a parser bug.
+      const byFile = new Map<FileId, { start: number; end: number }[]>()
+      for (const span of spans) {
+        const list = byFile.get(span.file) ?? []
+        list.push({ start: span.start, end: span.end })
+        byFile.set(span.file, list)
+      }
+
+      let next = project
+      for (const [fileId, edits] of byFile) {
+        const file = next.files.find((f) => f.id === fileId)
+        if (!file) continue
+
+        let text = file.text
+        for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
+          text = text.slice(0, edit.start) + newName + text.slice(edit.end)
+        }
+        next = withFileText(next, fileId, text)
+      }
+
+      set({ project: { ...next, updatedAt: Date.now() } })
+      scheduleSave()
+      return spans.length
     },
 
     applyTemplate(templateId) {

@@ -158,11 +158,12 @@ export interface CompilerApi {
   complete(files: readonly SourceFile[], fileId: FileId, offset: number): Promise<CompletionResult>
   definition(files: readonly SourceFile[], fileId: FileId, offset: number): Promise<SymbolInfo | null>
   hover(files: readonly SourceFile[], fileId: FileId, offset: number): Promise<SymbolInfo | null>
+  /** The name at `offset` and every occurrence of it, project-wide, for rename. */
   references(
     files: readonly SourceFile[],
     fileId: FileId,
     offset: number,
-  ): Promise<readonly SourceSpan[]>
+  ): Promise<{ readonly name: string; readonly spans: readonly SourceSpan[] }>
 }
 
 /** One completion candidate. Mirrors `SymbolInfo` in `swift-sema`. */

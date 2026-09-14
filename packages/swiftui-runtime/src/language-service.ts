@@ -1,10 +1,12 @@
 import type { SourceFile } from '@studio/shared'
 import { Parser, type SourceFileNode } from '@studio/swift-syntax'
+import type { SourceSpan } from '@studio/shared'
 import {
   completionsAt,
   definitionAt,
   hoverAt,
-  referencesAt,
+  nameAt,
+  referencesOf,
   type CompletionResult,
   type SymbolInfo,
 } from '@studio/swift-sema'
@@ -53,13 +55,21 @@ export function hoverFor(
   return hoverAt(parseAll(files), fileId, text, offset)
 }
 
+/**
+ * Every occurrence of the name at `offset`, across the whole project.
+ *
+ * The name is read from the file the caret is in; the search covers all of them,
+ * because a rename that stops at the file boundary leaves the others referring to
+ * something that no longer exists.
+ */
 export function referencesFor(
   files: readonly SourceFile[],
   fileId: string,
   offset: number,
-): readonly { file: string; start: number; end: number }[] {
+): { readonly name: string; readonly spans: readonly SourceSpan[] } {
   const text = files.find((f) => f.id === fileId)?.text ?? ''
-  return referencesAt(text, offset, fileId)
+  const name = nameAt(text, offset)
+  return name ? { name, spans: referencesOf(files, name) } : { name: '', spans: [] }
 }
 
 export type { CompletionResult, SymbolInfo }

@@ -6,6 +6,7 @@ import type {
   CompileResult,
   CompilerApi,
   CompletionResult,
+  SourceSpan,
   SymbolInfo,
   MeasuredFontData,
   SourceFile,
@@ -203,6 +204,16 @@ export function useCompiler(
           return await ensureWorker().api.hover(files, fileId, offset)
         } catch {
           return null
+        }
+      },
+      references: async (
+        fileId: string,
+        offset: number,
+      ): Promise<{ name: string; spans: readonly SourceSpan[] }> => {
+        try {
+          return await ensureWorker().api.references(files, fileId, offset)
+        } catch {
+          return { name: '', spans: [] }
         }
       },
     }),

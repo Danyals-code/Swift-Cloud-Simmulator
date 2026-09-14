@@ -737,3 +737,73 @@ test('Phase 9 — a corrupt share link falls back instead of failing', async ({ 
   await expect(page.getByTestId('render-tree')).toBeVisible()
   await expect(page.locator('.cm-content')).toContainText('import SwiftUI', { timeout: 8_000 })
 })
+
+test('Phase 10 — F2 renames every occurrence and says how many first', async ({ page }) => {
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type(
+    'struct V: View { var title = "hi"; var body: some View { Text(title) } }',
+  )
+  await page.keyboard.press('Escape')
+
+  // Put the caret in the declaration, then rename.
+  await page.getByTestId('editor').getByText('title', { exact: true }).first().click()
+  await page.keyboard.press('F2')
+
+  const bar = page.getByTestId('rename-bar')
+  await expect(bar).toBeVisible({ timeout: 5000 })
+  // The count is stated before anything changes: matching is by name, so two unrelated
+  // symbols spelled the same look identical to the analyser. A wrong number is the
+  // user's cue to press Escape.
+  await expect(page.getByTestId('rename-count')).toHaveText('2 occurrences in 1 file')
+
+  await page.getByTestId('rename-input').fill('heading')
+  await page.keyboard.press('Enter')
+
+  await expect(bar).toBeHidden()
+  const text = await editorText(page)
+  expect(text).toContain('var heading = "hi"')
+  expect(text).toContain('Text(heading)')
+  expect(text).not.toContain('title')
+})
+
+test('Phase 10 — rename leaves a same-spelled string alone', async ({ page }) => {
+  // The reason references are matched on lexer tokens rather than on text: an edit
+  // inside a string leaves no compile error behind to notice it by.
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('struct V: View { var count = 1; var body: some View { Text("count") } }')
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId('editor').getByText('count', { exact: true }).first().click()
+  await page.keyboard.press('F2')
+  await expect(page.getByTestId('rename-count')).toHaveText('1 occurrence in 1 file', {
+    timeout: 5000,
+  })
+
+  await page.getByTestId('rename-input').fill('total')
+  await page.keyboard.press('Enter')
+
+  const text = await editorText(page)
+  expect(text).toContain('var total = 1')
+  expect(text).toContain('Text("count")')
+})
+
+test('Phase 10 — Escape cancels a rename without changing anything', async ({ page }) => {
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('struct V: View { var label = "x"; var body: some View { Text(label) } }')
+  await page.keyboard.press('Escape')
+  const before = await editorText(page)
+
+  await page.getByTestId('editor').getByText('label', { exact: true }).first().click()
+  await page.keyboard.press('F2')
+  await expect(page.getByTestId('rename-bar')).toBeVisible({ timeout: 5000 })
+
+  await page.getByTestId('rename-input').press('Escape')
+  await expect(page.getByTestId('rename-bar')).toBeHidden()
+  expect(await editorText(page)).toBe(before)
+})

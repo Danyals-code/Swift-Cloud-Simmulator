@@ -10,7 +10,7 @@ import type {
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
-import { collectConformance, typeName as typeNameOf } from '@studio/swift-syntax'
+import { collectConformance, Lexer, typeName as typeNameOf } from '@studio/swift-syntax'
 import {
   PROPERTY_WRAPPERS,
   SUPPORTED_MODIFIERS,
@@ -699,28 +699,56 @@ export function hoverAt(
 }
 
 /**
- * Every occurrence of the name at `offset`, for rename.
+ * Every occurrence of a name across the project, for rename.
  *
- * Textual, and deliberately so: a rename that misses an occurrence produces code that
- * does not compile, which the user sees immediately, whereas a rename that changes an
- * unrelated name of the same spelling is a silent bug. So this reports *all*
- * occurrences of the identifier and leaves the decision with the user, rather than
- * pretending to a precision the checker cannot supply.
+ * Matched on **identifier tokens**, not on text. The lexer already knows what is a
+ * name and what is the inside of a string or a comment, so `count` in
+ * `// the count so far` and in `"count: 3"` is excluded exactly rather than
+ * heuristically — and those are the two places a textual rename quietly corrupts
+ * something that does not show up as a compile error afterwards.
+ *
+ * What it still cannot do is tell two *different* symbols that share a spelling apart;
+ * that needs the type checker. So it reports every occurrence and the caller says how
+ * many, in how many files, before applying anything. Ambiguity the analyser cannot
+ * resolve belongs to the user, and the way to hand it over is to state what will
+ * change.
  */
-export function referencesAt(text: string, offset: number, file: string): SourceSpan[] {
-  const name = nameAt(text, offset)
+export function referencesOf(
+  files: readonly { readonly id: string; readonly text: string }[],
+  name: string,
+): SourceSpan[] {
   if (!name) return []
 
   const spans: SourceSpan[] = []
-  const pattern = new RegExp(`(?<![A-Za-z0-9_$])${escapeRegExp(name)}(?![A-Za-z0-9_$])`, 'g')
-  for (const match of text.matchAll(pattern)) {
-    spans.push({ file, start: match.index, end: match.index + name.length })
+
+  const scan = (text: string, file: string, baseOffset: number): void => {
+    for (const token of Lexer.tokenize(text, file, baseOffset).tokens) {
+      // A string interpolation is *code* inside a literal, and the lexer keeps the
+      // token stream flat — so the identifiers in `"total: \(count)"` are not in it.
+      // Missing them leaves a rename half-applied and the file referring to a name
+      // that no longer exists.
+      if (token.kind === 'stringLiteral') {
+        for (const segment of token.segments ?? []) {
+          if (segment.kind === 'interpolation') scan(segment.value, file, segment.span.start)
+        }
+        continue
+      }
+
+      // `keyword` as well as `identifier`: a name may be one in some positions and the
+      // other elsewhere — `some`, `any`, and every enum case named after a keyword.
+      if (token.kind !== 'identifier' && token.kind !== 'keyword') continue
+      if (token.text === name) spans.push(token.span)
+    }
   }
-  return spans
+
+  for (const file of files) scan(file.text, file.id, 0)
+  return spans.sort((a, b) => a.start - b.start)
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** Every occurrence of the name at `offset`, within one file. */
+export function referencesAt(text: string, offset: number, file: string): SourceSpan[] {
+  const name = nameAt(text, offset)
+  return name ? referencesOf([{ id: file, text }], name) : []
 }
 
 /** The whole identifier the caret sits in or beside. */

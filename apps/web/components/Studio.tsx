@@ -5,7 +5,7 @@ import { downloadProjectZip, type ExportFormat } from '@studio/exporter'
 import { encodeProject, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice, type DeviceKey } from '@studio/sim-shell'
-import type { FileId, RenderNode, UIEvent } from '@studio/shared'
+import type { FileId, RenderNode, SourceSpan, UIEvent } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import { useCompiler } from '../lib/useCompiler'
 import { ConsolePane } from './ConsolePane'
@@ -36,6 +36,7 @@ export function Studio() {
   const deleteFile = useStudio((s) => s.deleteFile)
   const setDevice = useStudio((s) => s.setDevice)
   const setPreview = useStudio((s) => s.setPreview)
+  const renameSymbol = useStudio((s) => s.renameSymbol)
   const applyTemplate = useStudio((s) => s.applyTemplate)
 
   const [showPreview, setShowPreview] = useState(true)
@@ -135,6 +136,9 @@ export function Studio() {
 
   const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
 
+  /** The rename in progress, if F2 found something to rename. */
+  const [rename, setRename] = useState<{ name: string; spans: readonly SourceSpan[] } | null>(null)
+
   /**
    * Copies a link that carries the whole project.
    *
@@ -217,6 +221,17 @@ export function Studio() {
             onClose={closeFile}
           />
 
+          {rename ? (
+            <RenameBar
+              rename={rename}
+              onCancel={() => setRename(null)}
+              onConfirm={(newName) => {
+                renameSymbol(rename.spans, newName)
+                setRename(null)
+              }}
+            />
+          ) : null}
+
           <div className="min-h-0 flex-1">
             {activeFile ? (
               <EditorPane
@@ -231,6 +246,7 @@ export function Studio() {
                 fileId={activeFile.id}
                 language={language}
                 onOpenFile={revealSpanIn}
+                onRename={(name, spans) => setRename({ name, spans })}
               />
             ) : (
               <p className="p-4 text-sm text-zinc-600">No file selected.</p>
@@ -274,5 +290,60 @@ export function Studio() {
         />
       ) : null}
     </main>
+  )
+}
+
+/**
+ * The rename prompt.
+ *
+ * It states the count and the file spread before anything changes, because that is the
+ * one thing the analyser cannot decide for the user: matching is by name, so two
+ * unrelated symbols spelled the same are indistinguishable to it. "12 occurrences in
+ * 3 files" is how that ambiguity gets handed over — a number that looks wrong is a
+ * reason to press Escape.
+ */
+function RenameBar({
+  rename,
+  onConfirm,
+  onCancel,
+}: {
+  rename: { name: string; spans: readonly SourceSpan[] }
+  onConfirm: (newName: string) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState(rename.name)
+  const files = new Set(rename.spans.map((s) => s.file)).size
+
+  return (
+    <form
+      className="flex items-center gap-3 border-b border-white/5 bg-[#141418] px-3 py-2 text-xs"
+      data-testid="rename-bar"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (value && value !== rename.name) onConfirm(value)
+        else onCancel()
+      }}
+    >
+      <span className="text-zinc-400">
+        Rename <span className="font-mono text-zinc-200">{rename.name}</span>
+      </span>
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onCancel()
+        }}
+        spellCheck={false}
+        aria-label="New name"
+        data-testid="rename-input"
+        className="w-48 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-zinc-100 outline-none focus:border-sky-500"
+      />
+      <span className="text-zinc-500" data-testid="rename-count">
+        {rename.spans.length} {rename.spans.length === 1 ? 'occurrence' : 'occurrences'} in{' '}
+        {files} {files === 1 ? 'file' : 'files'}
+      </span>
+      <span className="ml-auto text-zinc-600">Enter to rename · Esc to cancel</span>
+    </form>
   )
 }

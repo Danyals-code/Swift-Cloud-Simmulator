@@ -16,7 +16,8 @@ import {
   type CompletionResult as CmCompletionResult,
 } from '@codemirror/autocomplete'
 import { hoverTooltip } from '@codemirror/view'
-import type { Diagnostic, SymbolInfo } from '@studio/shared'
+import { search, searchKeymap } from '@codemirror/search'
+import type { Diagnostic, SourceSpan, SymbolInfo } from '@studio/shared'
 
 /**
  * What the editor may ask the compiler worker about a caret position.
@@ -28,6 +29,10 @@ export interface EditorLanguageService {
   complete(fileId: string, offset: number): Promise<{ from: number; items: readonly SymbolInfo[] }>
   definition(fileId: string, offset: number): Promise<SymbolInfo | null>
   hover(fileId: string, offset: number): Promise<SymbolInfo | null>
+  references(
+    fileId: string,
+    offset: number,
+  ): Promise<{ name: string; spans: readonly SourceSpan[] }>
 }
 
 /** CodeMirror's own icon vocabulary, which decides the glyph beside each item. */
@@ -56,6 +61,8 @@ export interface EditorPaneProps {
   language?: EditorLanguageService
   /** Jump to a declaration in another file. Called only when the span names one. */
   onOpenFile?: (fileId: string, offset: number) => void
+  /** F2: the host asks the user for a new name and applies the spans. */
+  onRename?: (name: string, spans: readonly SourceSpan[]) => void
   /**
    * Scroll to and select an offset. Carries a nonce so that clicking the same
    * diagnostic twice reveals it twice — a bare offset would compare equal and the
@@ -81,6 +88,7 @@ export function EditorPane({
   fileId,
   language,
   onOpenFile,
+  onRename,
 }: EditorPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -95,12 +103,14 @@ export function EditorPane({
   const languageRef = useRef(language)
   const fileIdRef = useRef(fileId)
   const onOpenFileRef = useRef(onOpenFile)
+  const onRenameRef = useRef(onRename)
   useEffect(() => {
     onChangeRef.current = onChange
     onSaveRef.current = onSave
     languageRef.current = language
     fileIdRef.current = fileId
     onOpenFileRef.current = onOpenFile
+    onRenameRef.current = onRename
   })
 
   useEffect(() => {
@@ -188,7 +198,29 @@ export function EditorPane({
         const { from, to } = wordRangeAt(view.state.doc.toString(), pos)
         return { pos: from, end: to, above: true, create: () => ({ dom: tooltipFor(symbol) }) }
       }),
+      // In-file find and replace, from CodeMirror's own implementation. Project-wide
+      // rename is F2 below; these two answer different questions and neither
+      // substitutes for the other.
+      search({ top: true }),
+      keymap.of(searchKeymap),
       keymap.of([
+        {
+          // Rename every occurrence of the symbol under the caret, across all files.
+          key: 'F2',
+          preventDefault: true,
+          run: (view) => {
+            void (async () => {
+              const service = languageRef.current
+              const file = fileIdRef.current
+              if (!service || !file) return
+              const found = await service.references(file, view.state.selection.main.head)
+              if (found.name && found.spans.length > 0) {
+                onRenameRef.current?.(found.name, found.spans)
+              }
+            })()
+            return true
+          },
+        },
         {
           // Go to definition. F12 is the near-universal binding; Mod-click is handled
           // by the DOM handler below, because CodeMirror's keymap sees no clicks.

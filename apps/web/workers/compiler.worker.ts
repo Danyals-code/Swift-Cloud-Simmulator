@@ -87,7 +87,7 @@ const api: CompilerApi = {
     files: readonly SourceFile[],
     fileId: FileId,
     offset: number,
-  ): Promise<readonly SourceSpan[]> {
+  ): Promise<{ readonly name: string; readonly spans: readonly SourceSpan[] }> {
     return referencesFor(files, fileId, offset)
   },
 }
