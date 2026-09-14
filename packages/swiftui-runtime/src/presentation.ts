@@ -98,8 +98,18 @@ export interface LifecycleHook {
   readonly watched?: SwiftValue
 }
 
+/** A `.searchable` field, which belongs above the content rather than inside it. */
+export interface SearchField {
+  readonly text: string
+  readonly prompt: string
+  readonly path: string
+}
+
 export interface ResolvedUI {
   readonly content: readonly ViewValue[]
+  readonly search: SearchField | null
+  /** True when the content asked to extend under the device's edges. */
+  readonly ignoresSafeArea: boolean
   readonly navigationBar: NavigationBar | null
   readonly tabBar: TabBar | null
   readonly overlay: Overlay | null
@@ -142,6 +152,22 @@ export class UIState {
     if (current.length > depth) this.navigation.set(id, current.slice(0, depth))
   }
 
+  /** How far a list row has been swiped open, in points. */
+  private swipes = new Map<string, number>()
+
+  swipeOffset(row: string): number {
+    return this.swipes.get(row) ?? 0
+  }
+
+  setSwipeOffset(row: string, offset: number): void {
+    if (offset <= 0) this.swipes.delete(row)
+    else this.swipes.set(row, offset)
+  }
+
+  closeSwipes(): void {
+    this.swipes.clear()
+  }
+
   selectedTab(id: string): number {
     return this.tabs.get(id) ?? 0
   }
@@ -153,6 +179,7 @@ export class UIState {
   clear(): void {
     this.navigation.clear()
     this.tabs.clear()
+    this.swipes.clear()
   }
 }
 
@@ -186,6 +213,8 @@ class Resolver {
 
     return {
       content: screen.content,
+      search: this.findSearchField(screen.content),
+      ignoresSafeArea: collectModifier(screen.content, 'ignoresSafeArea') !== null,
       navigationBar: screen.navigationBar,
       tabBar: withTabs.tabBar,
       overlay,
@@ -209,8 +238,12 @@ class Resolver {
   }
 
   private stamp(view: ViewValue, path: string): ViewValue {
+    const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.closure ?? null
+
     const children = view.childKeys
-      ? view.children.map((child, i) => this.stamp(child, `${path}-${keySegment(view.childKeys![i], i)}`))
+      ? view.children.map((child, i) =>
+          this.stampRow(child, `${path}-${keySegment(view.childKeys![i], i)}`, onDelete, i),
+        )
       : this.stampList(view.children, path)
 
     const intent = this.intentFor(view)
@@ -244,6 +277,27 @@ class Resolver {
         })
       }
     }
+  }
+
+  /**
+   * Stamps one row of a collection, wiring up its delete action if it has one.
+   *
+   * `.onDelete` is written on the `ForEach`, not on the row — but it is the *row*
+   * that gets swiped, and the closure needs to know which offset was deleted. Both
+   * facts are only available here, where the parent and the index are in hand.
+   */
+  private stampRow(
+    view: ViewValue,
+    path: string,
+    onDelete: ClosureValue | null,
+    offset: number,
+  ): ViewValue {
+    const stamped = this.stamp(view, path)
+    if (!onDelete) return stamped
+
+    this.register(`${path}/swipe`, { kind: 'swipe', row: path })
+    this.register(`${path}/delete`, { kind: 'delete', closure: onDelete, offset, row: path })
+    return { ...stamped, swipe: { offset: this.ctx.state.swipeOffset(path), path } }
   }
 
   /**
@@ -500,6 +554,35 @@ class Resolver {
         },
       },
     }
+  }
+
+  /**
+   * The `.searchable` field, if the screen has one.
+   *
+   * Registered as a control writing its binding, exactly like a `TextField` — because
+   * that is all `.searchable` is. What it adds is placement: iOS puts the field above
+   * the content rather than in it, which is why this is resolved here and not by the
+   * layout pass.
+   */
+  private findSearchField(views: readonly ViewValue[]): SearchField | null {
+    for (const { view, modifier } of allModifiers(views)) {
+      if (modifier.name !== 'searchable') continue
+
+      const binding = labelled(modifier.args, 'text') ?? modifier.args[0]?.value
+      const projection = asProjection(binding)
+      if (!binding || !projection) continue
+
+      const path = `${view.path ?? 'v'}/search`
+      this.register(path, { kind: 'write', binding, value: projection.get() })
+
+      const current = projection.get()
+      return {
+        text: current.kind === 'string' ? current.value : '',
+        prompt: stringArg(labelled(modifier.args, 'prompt')) ?? 'Search',
+        path,
+      }
+    }
+    return null
   }
 
   // ------------------------------------------------------------- overlays

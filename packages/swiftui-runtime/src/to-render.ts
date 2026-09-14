@@ -69,6 +69,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
     ...(node.shadow ? { shadow: node.shadow } : {}),
     ...(node.transform ? { transform: node.transform } : {}),
     ...(node.animation ? { animation: node.animation } : {}),
+    ...(node.transition ? { transition: node.transition } : {}),
     ...(node.filter ? { filter: node.filter } : {}),
     ...(node.material ? { material: node.material } : {}),
     ...(node.debugName

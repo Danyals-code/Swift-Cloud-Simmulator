@@ -93,6 +93,8 @@ export const RenderTreeView = memo(function RenderTreeView({
         textRendering: 'optimizeLegibility',
       }}
     >
+      <TransitionKeyframes />
+
       {(byParent.get('') ?? []).map((node) => (
         <RenderNodeView
           key={node.id}
@@ -108,6 +110,44 @@ export const RenderTreeView = memo(function RenderTreeView({
     </div>
   )
 })
+
+/**
+ * The keyframes entry transitions play.
+ *
+ * Expressed as CSS rather than driven from JavaScript, and that is the whole design:
+ * a CSS animation plays when an element is *mounted* and never again, which is
+ * exactly `.transition`'s semantics. React keys nodes by their stable id, so an
+ * element only remounts when the view it represents genuinely appeared — no hooks, no
+ * per-node bookkeeping, and nothing to get out of step with the tree.
+ */
+function TransitionKeyframes() {
+  return (
+    <style>{`
+      @keyframes studio-opacity { from { opacity: 0 } }
+      @keyframes studio-scale { from { opacity: 0; transform: scale(0.85) } }
+      @keyframes studio-move-top { from { opacity: 0; transform: translateY(-24px) } }
+      @keyframes studio-move-bottom { from { opacity: 0; transform: translateY(24px) } }
+      @keyframes studio-move-leading { from { opacity: 0; transform: translateX(-24px) } }
+      @keyframes studio-move-trailing { from { opacity: 0; transform: translateX(24px) } }
+    `}</style>
+  )
+}
+
+/** The keyframe name for a transition spec. */
+function transitionAnimation(node: RenderNode): string | undefined {
+  const transition = node.transition
+  if (!transition) return undefined
+
+  const name =
+    transition.kind === 'scale'
+      ? 'studio-scale'
+      : transition.kind === 'opacity'
+        ? 'studio-opacity'
+        : // `.slide` is a move from the leading edge unless an edge was named.
+          `studio-move-${transition.edge ?? (transition.kind === 'slide' ? 'leading' : 'bottom')}`
+
+  return `${name} ${Math.round(transition.duration * 1000)}ms cubic-bezier(0.42, 0, 0.58, 1) both`
+}
 
 /**
  * The highlight rect. Drawn above everything and never itself hit-testable.
@@ -209,6 +249,7 @@ function RenderNodeView({
         }
       : {}),
     ...(node.filter ? { filter: cssFilter(node.filter) } : {}),
+    ...(node.transition ? { animation: transitionAnimation(node) } : {}),
     ...(node.material
       ? {
           // A material is a translucent panel over a blurred backdrop, which is

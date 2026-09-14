@@ -49,6 +49,13 @@ export interface ViewValue {
    * got are provably about the same reader.
    */
   readonly geometryKey?: string
+  /**
+   * How far this list row is swiped open, and the path its actions are keyed by.
+   *
+   * Set by the resolver for rows in a `ForEach` that has `.onDelete`, because the
+   * row is what gets swiped while the modifier is written on its parent.
+   */
+  readonly swipe?: { readonly offset: number; readonly path: string }
 }
 
 /**
@@ -67,6 +74,10 @@ export type ViewIntent =
   | { readonly kind: 'run'; readonly closure: ClosureValue }
   /** A gesture attached with `.gesture(…)`; the event decides which handlers run. */
   | { readonly kind: 'gesture'; readonly gesture: SwiftValue }
+  /** Dragging a list row sideways to reveal its actions. */
+  | { readonly kind: 'swipe'; readonly row: string }
+  /** `.onDelete` — remove the row at this offset from the collection. */
+  | { readonly kind: 'delete'; readonly closure: ClosureValue; readonly offset: number; readonly row: string }
 
 export interface ViewArg {
   readonly label: string | null

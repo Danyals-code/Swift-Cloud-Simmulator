@@ -162,6 +162,21 @@ export interface AnimationSpec {
   readonly bounce?: number
 }
 
+/**
+ * How a node animates *in* when it first appears.
+ *
+ * Only entry is modelled. Exit would mean keeping a node alive after the view that
+ * produced it is gone, which needs the renderer to own a shadow copy of the tree —
+ * and a half-built version of that is worse than none, because a view that lingers
+ * after its state says it should not is a preview telling a lie.
+ */
+export interface TransitionSpec {
+  readonly kind: 'opacity' | 'slide' | 'scale' | 'move'
+  readonly edge?: 'top' | 'bottom' | 'leading' | 'trailing'
+  /** seconds */
+  readonly duration: number
+}
+
 /** A paint-time transform. Does not affect layout, exactly as in SwiftUI. */
 export interface TransformSpec {
   readonly scaleX: number
@@ -262,6 +277,7 @@ export interface RenderNode {
   }
   readonly transform?: TransformSpec
   readonly animation?: AnimationSpec
+  readonly transition?: TransitionSpec
   readonly filter?: FilterSpec
   /** `.regularMaterial` and friends: a translucent, blurred backdrop. */
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }

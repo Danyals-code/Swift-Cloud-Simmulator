@@ -33,6 +33,9 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   // collections and navigation
   'List', 'Section', 'Form',
   'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView',
+  'DisclosureGroup', 'AnyView',
+  // controls drawn plainly
+  'DatePicker', 'ColorPicker', 'TextEditor', 'Menu', 'ShareLink', 'Gauge', 'AsyncImage',
   // shapes and drawing
   'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path', 'Canvas',
   // styles
@@ -56,7 +59,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'font', 'bold', 'italic', 'fontWeight',
   'lineLimit', 'multilineTextAlignment', 'textCase',
   // transforms, filters and motion
-  'scaleEffect', 'rotationEffect', 'animation',
+  'scaleEffect', 'rotationEffect', 'animation', 'transition',
   'blur', 'saturation', 'brightness', 'contrast', 'grayscale',
   // drawing styles
   'fill', 'stroke', 'trim',
@@ -74,6 +77,15 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'gesture', 'simultaneousGesture', 'highPriorityGesture',
   // lifecycle
   'onAppear', 'onDisappear', 'task', 'onChange',
+  // lists and forms
+  'searchable', 'onDelete', 'onMove', 'swipeActions', 'contextMenu', 'badge',
+  'listRowSeparator', 'listRowInsets', 'scrollIndicators',
+  // text entry
+  'keyboardType', 'submitLabel', 'onSubmit', 'focused',
+  // styles that are recognised and drawn plainly
+  'toggleStyle', 'pickerStyle', 'labelStyle', 'monospaced', 'placeholder',
+  // device edges
+  'ignoresSafeArea', 'safeAreaInset', 'id', 'zIndex',
   // Environment injection.
   'environment', 'environmentObject',
   // The deprecated spelling of `.tint`, and a `Color` property of the same name.
@@ -82,28 +94,22 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
 
 /** Real SwiftUI views that the preview does not draw yet, with the phase that adds them. */
 export const UNIMPLEMENTED_VIEWS: ReadonlyMap<string, number> = new Map([
-  ['AnyView', 7],
   ['NavigationSplitView', 7],
-  ['DatePicker', 7], ['ColorPicker', 7], ['TextEditor', 7],
-  ['Menu', 7], ['ShareLink', 7], ['Gauge', 7],
-  ['AsyncImage', 7], ['TimelineView', 7], ['Chart', 7],
-  ['Table', 7], ['OutlineGroup', 7], ['DisclosureGroup', 7],
+
+  ['TimelineView', 7], ['Chart', 7],
+  ['Table', 7], ['OutlineGroup', 7],
 ])
 
 /** Real SwiftUI modifiers the preview ignores for now. */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
-  ['mask', 7],
-  ['toggleStyle', 7], ['pickerStyle', 7], ['labelStyle', 7],
-  ['transition', 7], ['matchedGeometryEffect', 7], ['phaseAnimator', 7],
-  ['popover', 7], ['searchable', 7], ['refreshable', 7], ['onDelete', 7], ['onMove', 7],
-  ['swipeActions', 7], ['contextMenu', 7], ['badge', 7],
-  ['safeAreaInset', 7], ['ignoresSafeArea', 7], ['alignmentGuide', 7],
-  ['id', 7], ['zIndex', 7],
+  ['mask', 7], ['popover', 7], ['refreshable', 7], ['alignmentGuide', 7],
+  ['kerning', 7], ['minimumScaleFactor', 7], ['fontDesign', 7],
+  ['scrollDismissesKeyboard', 7], ['scrollTargetBehavior', 7],
+  ['symbolRenderingMode', 7], ['imageScale', 7], ['interpolation', 7],
+  ['matchedGeometryEffect', 7], ['phaseAnimator', 7], ['keyframeAnimator', 7],
   ['kerning', 7],
   ['monospaced', 7], ['fontDesign', 7], ['minimumScaleFactor', 7],
-  ['listRowSeparator', 7], ['listRowInsets', 7], ['scrollIndicators', 7],
   ['scrollDismissesKeyboard', 7], ['scrollTargetBehavior', 7],
-  ['keyboardType', 7], ['submitLabel', 7], ['onSubmit', 7], ['focused', 7],
   ['symbolRenderingMode', 7], ['imageScale', 7], ['interpolation', 7],
 ])
 

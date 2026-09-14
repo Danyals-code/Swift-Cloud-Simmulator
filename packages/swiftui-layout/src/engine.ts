@@ -24,6 +24,7 @@ import {
   type StackElement,
   type TableElement,
   type TextAlign,
+  type TransitionHint,
 } from './elements'
 import { FontMetricsTable, measureText, type TextLineBox } from './metrics'
 import type { ProposedDimension, ProposedSize } from './proposal'
@@ -108,6 +109,7 @@ export interface PlacedNode {
   }
   readonly transform?: { readonly scaleX: number; readonly scaleY: number; readonly rotate: number }
   readonly animation?: AnimationHint
+  readonly transition?: TransitionHint
   readonly filter?: FilterSpec
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
   readonly a11y?: {
@@ -1332,10 +1334,11 @@ function debugInfo(element: LayoutElement): {
 function decorations(
   env: LayoutEnvironment,
   parent: string | null,
-): { parent?: string; animation?: AnimationHint } {
+): { parent?: string; animation?: AnimationHint; transition?: TransitionHint } {
   return {
     ...(parent ? { parent } : {}),
     ...(env.animation ? { animation: env.animation } : {}),
+    ...(env.transition ? { transition: env.transition } : {}),
   }
 }
 

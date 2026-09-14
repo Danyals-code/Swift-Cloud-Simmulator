@@ -138,6 +138,7 @@ function render(request: CompileRequest, evaluation: EvaluationResult): RenderTr
           colorScheme: scheme,
           typeScale: request.typeScale ?? 1,
         }).element,
+        ignoresSafeArea: false,
         navigationBar: null,
         tabBar: null,
         overlay: null,
@@ -146,12 +147,17 @@ function render(request: CompileRequest, evaluation: EvaluationResult): RenderTr
   const barHeight = screen.navigationBar?.height ?? 0
   const tabHeight = screen.tabBar ? TAB_BAR_HEIGHT : 0
 
-  const contentBounds: Rect = {
-    x: safeArea.leading,
-    y: safeArea.top + barHeight,
-    width: canvas.width - safeArea.leading - safeArea.trailing,
-    height: canvas.height - safeArea.top - safeArea.bottom - barHeight - tabHeight,
-  }
+  // `.ignoresSafeArea()` is a statement about the *device*, so the pipeline is where
+  // it belongs: it changes the rect the root is proposed, which no modifier wrapper
+  // inside the tree could reach.
+  const contentBounds: Rect = screen.ignoresSafeArea
+    ? { x: 0, y: 0, width: canvas.width, height: canvas.height }
+    : {
+        x: safeArea.leading,
+        y: safeArea.top + barHeight,
+        width: canvas.width - safeArea.leading - safeArea.trailing,
+        height: canvas.height - safeArea.top - safeArea.bottom - barHeight - tabHeight,
+      }
 
   // SwiftUI centres root content in its window: a VStack hugging its content sits in
   // the middle of the screen rather than pinned to the top.

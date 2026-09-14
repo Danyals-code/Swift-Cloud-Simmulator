@@ -78,6 +78,11 @@ export function fontForToken(name: string, scale = 1): ResolvedFont | null {
   }
 }
 
+/** The monospaced body face, as `.monospaced()` selects. */
+export function monospacedFont(scale = 1): ResolvedFont {
+  return { ...bodyFont(scale), family: MONO_FAMILY }
+}
+
 /** The body font at a given Dynamic Type scale — the root environment's font. */
 export function bodyFont(scale = 1): ResolvedFont {
   return fontForToken('body', scale)!

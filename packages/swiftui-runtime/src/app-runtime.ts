@@ -9,6 +9,7 @@ import {
   ExecutionBudgetExceeded,
   int,
   Interpreter,
+  indexSet,
   str,
   SwiftTrap,
   UnsupportedAtRuntime,
@@ -392,6 +393,29 @@ export class AppRuntime {
         this.runGesture(intent.gesture, event)
         return
 
+      case 'swipe': {
+        // Dragging a row leftwards reveals its actions; letting go snaps to open or
+        // closed rather than leaving the row half-way, which is what iOS does.
+        if (event.kind !== 'drag') return
+        const revealed = Math.max(0, Math.min(SWIPE_WIDTH, -event.translation.x))
+        this.ui.setSwipeOffset(
+          intent.row,
+          event.phase === 'ended' ? (revealed > SWIPE_WIDTH / 2 ? SWIPE_WIDTH : 0) : revealed,
+        )
+        return
+      }
+
+      case 'delete': {
+        this.interpreter.callClosure(
+          intent.closure,
+          [indexSet([intent.offset])],
+          intent.closure.span,
+        )
+        // The row is gone, so nothing should stay swiped open behind it.
+        this.ui.closeSwipes()
+        return
+      }
+
       case 'adjust': {
         const binding = asProjection(intent.binding)
         if (!binding) return
@@ -624,6 +648,9 @@ function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): Sw
   if (first?.kind !== 'keyPath' || !first.components) return undefined
   return { kind: 'opaque', typeName: 'KeyPath', payload: { components: first.components } }
 }
+
+/** How far a list row slides to reveal its delete action. */
+const SWIPE_WIDTH = 88
 
 /** `WindowGroup` holds the app's content; it is a scene, not a view. */
 function isSceneWrapper(view: ViewValue): boolean {

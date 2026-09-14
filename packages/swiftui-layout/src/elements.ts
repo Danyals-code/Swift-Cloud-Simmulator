@@ -323,6 +323,8 @@ export type LayoutModifier =
     }
   /** Carried through to the renderer, which animates the change with CSS. */
   | { readonly kind: 'animate'; readonly hint: AnimationHint }
+  /** `.transition(…)` — how this subtree animates in when it first appears. */
+  | { readonly kind: 'transition'; readonly spec: TransitionHint }
   | {
       readonly kind: 'hitTarget'
       readonly handlerId: string
@@ -364,6 +366,12 @@ export interface AnimationHint {
   readonly bounce?: number
 }
 
+export interface TransitionHint {
+  readonly kind: 'opacity' | 'slide' | 'scale' | 'move'
+  readonly edge?: 'top' | 'bottom' | 'leading' | 'trailing'
+  readonly duration: number
+}
+
 /**
  * Values inherited down the tree.
  *
@@ -392,6 +400,8 @@ export interface LayoutEnvironment {
    * frame does not contain, such as a background's fill.
    */
   readonly animation?: AnimationHint
+  /** Inherited: `.transition` on a container applies to what appears inside it. */
+  readonly transition?: TransitionHint
   /**
    * A weight or slant set independently of the face.
    *
@@ -455,6 +465,8 @@ export function childEnvironment(
       return { ...env, cornerRadius: modifier.cornerRadius }
     case 'animate':
       return { ...env, animation: modifier.hint }
+    case 'transition':
+      return { ...env, transition: modifier.spec }
     case 'textStyle':
       return {
         ...env,

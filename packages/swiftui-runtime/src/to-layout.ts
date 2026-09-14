@@ -32,6 +32,7 @@ import {
   bodyFont,
   colorForName,
   fontForToken,
+  monospacedFont,
   numberArg,
   resolveColorArg,
   resolveColorPayload,
@@ -45,12 +46,14 @@ import {
   ANIMATION_TYPE,
   COLOR_TYPE,
   TOKEN_TYPE,
+  TRANSITION_TYPE,
   handlerIdFor,
   payloadOf,
   type AnimationPayload,
   type ColorPayload,
   type ModifierValue,
   type TokenPayload,
+  type TransitionPayload,
   type ViewArg,
   type ViewValue,
 } from './view-value'
@@ -74,6 +77,8 @@ export interface ConversionResult {
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
   readonly content: LayoutElement
+  /** True when the content extends under the device's edges. */
+  readonly ignoresSafeArea: boolean
   readonly navigationBar: { readonly element: LayoutElement; readonly height: number } | null
   readonly tabBar: LayoutElement | null
   readonly overlay: {
@@ -112,6 +117,8 @@ const ROW_MIN_HEIGHT = 44
 const ROW_INSET = 16
 const SEPARATOR_HEIGHT = 0.5
 const SWITCH = { width: 51, height: 31, knob: 27 }
+/** Must match the runtime's swipe width, or the action would not line up. */
+const SWIPE_WIDTH = 88
 
 export interface ConversionOptions {
   readonly colorScheme?: ColorScheme
@@ -160,7 +167,23 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const safeArea = options.safeArea ?? ZERO_INSETS
   const converter = new Converter(hitTargets, scheme, options.typeScale ?? 1, safeArea)
 
-  const content = joinRoot(converter.convertList(ui.content, 'v', 'vertical'), 'vertical')
+  const body = converter.convertList(ui.content, 'v', 'vertical')
+
+  // A search field belongs above the content, not inside it, which is where iOS puts
+  // it and what stops it scrolling away with the list.
+  const content = ui.search
+    ? {
+        kind: 'stack' as const,
+        id: 'root-search',
+        axis: 'vertical' as const,
+        spacing: 0,
+        alignment: CENTER,
+        children: [
+          converter.searchField(ui.search.text, ui.search.prompt, ui.search.path),
+          joinRoot(body, 'vertical'),
+        ],
+      }
+    : joinRoot(body, 'vertical')
 
   const navigationBar = ui.navigationBar
     ? {
@@ -180,7 +203,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
       }
     : null
 
-  return { content, navigationBar, tabBar, overlay, hitTargets }
+  return { content, ignoresSafeArea: ui.ignoresSafeArea, navigationBar, tabBar, overlay, hitTargets }
 }
 
 function joinRoot(children: LayoutElement[], axis: Axis): LayoutElement {
@@ -465,7 +488,12 @@ class Converter {
       // A `Group` is not a container — it exists so a builder can exceed its child
       // limit, and its children belong to the enclosing stack. `ForEach` is the same:
       // its rows are siblings of whatever surrounds it, never a nested stack.
-      if (TRANSPARENT_VIEWS.has(view.name) && view.modifiers.length === 0) {
+      //
+      // A `ForEach` stays transparent even when it carries modifiers, because the
+      // modifiers it carries — `.onDelete`, `.onMove` — describe the *collection*
+      // rather than a box around it. Treating it as opaque made an entire list
+      // collapse into one unrecognised view.
+      if (isTransparent(view)) {
         out.push(...this.convertList(view.children, path, axis))
         return
       }
@@ -502,11 +530,12 @@ class Converter {
     label: string,
     view?: ViewValue,
     disabled = false,
+    override?: { value?: string; placeholder?: string; min?: number; max?: number },
   ): LayoutElement {
     const handlerId = handlerIdFor(path)
     this.hitTargets.set(handlerId, path)
 
-    const control = view ? this.controlState(view) : {}
+    const control = override ?? (view ? this.controlState(view) : {})
 
     return {
       kind: 'modified',
@@ -771,7 +800,36 @@ class Converter {
         return this.picker(view, path, origin)
 
       case 'Link':
+      case 'ShareLink':
         return this.link(view, path, origin)
+
+      case 'AsyncImage':
+        return this.asyncImage(view, path, origin)
+
+      case 'DatePicker':
+      case 'ColorPicker':
+        return this.picker(view, path, origin)
+
+      case 'TextEditor':
+        return this.textField({ ...view, name: 'TextField' }, path, origin)
+
+      case 'DisclosureGroup':
+        return this.disclosureGroup(view, path, origin)
+
+      case 'Gauge':
+        return this.gauge(view, path, origin)
+
+      case 'AnyView':
+        // Type erasure is a compile-time concern; at runtime it is its content.
+        return {
+          kind: 'stack',
+          id: path,
+          axis: 'vertical',
+          spacing: 0,
+          alignment: CENTER,
+          children: this.convertList(view.children, path, 'vertical'),
+          ...origin,
+        }
 
       case BACK_BUTTON:
         return this.backButton(view, path, origin)
@@ -970,9 +1028,7 @@ class Converter {
     let current: { header: LayoutElement | null; rows: LayoutElement[] } = { header: null, rows: [] }
 
     const flatten = (views: readonly ViewValue[]): ViewValue[] =>
-      views.flatMap((v) =>
-        v.name === 'ForEach' && v.modifiers.length === 0 ? flatten(v.children) : [v],
-      )
+      views.flatMap((v) => (v.name === 'ForEach' ? flatten(v.children) : [v]))
 
     for (const child of flatten(view.children)) {
       if (child.name === 'Section') {
@@ -998,7 +1054,9 @@ class Converter {
   /** One list row: system insets, a 44pt floor, and any row background applied. */
   private listRow(view: ViewValue, fallback: string): LayoutElement {
     const path = view.path ?? fallback
-    const content = this.convert(view, path, 'horizontal')
+    const content = view.swipe
+      ? this.swipeableRow(view, this.convert(view, path, 'horizontal'), path)
+      : this.convert(view, path, 'horizontal')
 
     const padded: LayoutElement = {
       kind: 'modified',
@@ -1033,7 +1091,7 @@ class Converter {
   /** `Grid { GridRow { … } }` — the two-dimensional form, aligned across rows. */
   private table(view: ViewValue, path: string, origin: object): LayoutElement {
     const flattened = view.children.flatMap((child) =>
-      child.name === 'ForEach' && child.modifiers.length === 0 ? child.children : [child],
+      child.name === 'ForEach' ? child.children : [child],
     )
 
     const rows = flattened.map((row, index) =>
@@ -1051,6 +1109,58 @@ class Converter {
       alignment: stackAlignment(view.args, 'vertical'),
       ...origin,
     }
+  }
+
+  /**
+   * A row that can be swiped to reveal a delete action.
+   *
+   * The action sits *behind* the row and the row slides over it, which is how iOS
+   * does it and why the offset is a paint-time translation rather than a layout
+   * change: the row keeps its place in the list while it moves.
+   */
+  private swipeableRow(view: ViewValue, content: LayoutElement, path: string): LayoutElement {
+    const swipe = view.swipe!
+    const offset = swipe.offset
+
+    const action = this.withHitTarget(
+      this.background(
+        {
+          kind: 'modified',
+          id: `${path}delframe`,
+          modifier: { kind: 'frame', width: SWIPE_WIDTH, alignment: CENTER },
+          child: {
+            kind: 'modified',
+            id: `${path}delcolor`,
+            modifier: { kind: 'foregroundStyle', color: rgba(255, 255, 255) },
+            child: { kind: 'text', id: `${path}deltext`, text: 'Delete' },
+          },
+        },
+        `${path}delbg`,
+        this.color('red'),
+      ),
+      `${swipe.path}/delete`,
+      'button',
+      'Delete',
+    )
+
+    const sliding: LayoutElement = {
+      kind: 'modified',
+      id: `${path}swipeoffset`,
+      modifier: { kind: 'offset', x: -offset, y: 0 },
+      child: content,
+    }
+
+    return this.withHitTarget(
+      {
+        kind: 'zstack',
+        id: `${path}swipe`,
+        alignment: { horizontal: 'trailing', vertical: 'center' },
+        children: offset > 0 ? [action, sliding] : [sliding],
+      },
+      `${swipe.path}/swipe`,
+      'drag',
+      'Swipe row',
+    )
   }
 
   private grid(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -1560,6 +1670,164 @@ class Converter {
     }
   }
 
+  /**
+   * `AsyncImage` — the placeholder, always.
+   *
+   * A preview cannot fetch the image: there is no network in the worker, and adding
+   * one would make the preview's output depend on something outside the project. What
+   * it *can* do honestly is render exactly what the user wrote as `placeholder:`,
+   * which is what a real device shows first anyway.
+   */
+  private asyncImage(view: ViewValue, path: string, origin: object): LayoutElement {
+    const placeholder = view.modifiers.find((m) => m.name === 'placeholder')
+    void placeholder
+
+    const children = this.convertList(view.children, path, 'vertical')
+    if (children.length > 0) {
+      return {
+        kind: 'zstack',
+        id: path,
+        alignment: CENTER,
+        children,
+        ...origin,
+      }
+    }
+
+    return {
+      kind: 'modified',
+      id: `${path}bg`,
+      modifier: {
+        kind: 'background',
+        content: {
+          kind: 'fill',
+          id: `${path}fill`,
+          fill: { kind: 'solid', color: this.color('systemFill') },
+        },
+      },
+      child: {
+        kind: 'modified',
+        id: `${path}round`,
+        modifier: { kind: 'cornerRadius', radius: 6 },
+        child: { kind: 'empty', id: path, ...origin },
+      },
+    }
+  }
+
+  /** `DisclosureGroup` — the label row with a chevron, and its content beneath. */
+  private disclosureGroup(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0)) ?? ''
+    const chevron = resolveSymbol('chevron.down')
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'vertical',
+      spacing: 8,
+      alignment: { horizontal: 'leading', vertical: 'center' },
+      children: [
+        {
+          kind: 'stack',
+          id: `${path}row`,
+          axis: 'horizontal',
+          spacing: 8,
+          alignment: CENTER,
+          children: [
+            { kind: 'text', id: `${path}title`, text: title },
+            { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
+            {
+              kind: 'modified',
+              id: `${path}chevcolor`,
+              modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
+              child: {
+                kind: 'image',
+                id: `${path}chev`,
+                glyph: chevron.glyph,
+                resizable: false,
+                approximated: true,
+              },
+            },
+          ],
+        },
+        ...this.convertList(view.children, path, 'vertical'),
+      ],
+      ...origin,
+    }
+  }
+
+  /** `Gauge` — a labelled bar, which is the accessible form of every gauge style. */
+  private gauge(view: ViewValue, path: string, origin: object): LayoutElement {
+    const value = numberArg(bindingValue(labelled(view.args, 'value')) ?? undefined) ?? 0
+    const range = labelled(view.args, 'in')
+    const min = range?.kind === 'range' ? range.lower : 0
+    const max = range?.kind === 'range' ? range.upper : 1
+    const fraction = max === min ? 0 : Math.max(0, Math.min(1, (value - min) / (max - min)))
+
+    return this.progressView(
+      {
+        ...view,
+        name: 'ProgressView',
+        args: [
+          { label: 'value', value: { kind: 'double', value: fraction } },
+          { label: 'total', value: { kind: 'double', value: 1 } },
+        ],
+      },
+      path,
+      origin,
+    )
+  }
+
+  /** The search field `.searchable` adds above a list. */
+  searchField(text: string, placeholder: string, path: string): LayoutElement {
+    const glyph = resolveSymbol('magnifyingglass')
+
+    const row: LayoutElement = {
+      kind: 'stack',
+      id: `${path}row`,
+      axis: 'horizontal',
+      spacing: 6,
+      alignment: CENTER,
+      children: [
+        {
+          kind: 'modified',
+          id: `${path}iconcolor`,
+          modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
+          child: {
+            kind: 'image',
+            id: `${path}icon`,
+            glyph: glyph.glyph,
+            resizable: false,
+            approximated: true,
+          },
+        },
+        {
+          kind: 'modified',
+          id: `${path}fieldframe`,
+          modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER },
+          child: { kind: 'empty', id: `${path}field` },
+        },
+      ],
+    }
+
+    const padded: LayoutElement = {
+      kind: 'modified',
+      id: `${path}pad`,
+      modifier: { kind: 'padding', insets: insets(7, 8, 7, 8) },
+      child: row,
+    }
+
+    const styled = this.background(padded, `${path}bg`, this.color('systemFill'), 10)
+
+    return {
+      kind: 'modified',
+      id: `${path}outer`,
+      modifier: { kind: 'padding', insets: insets(8, ROW_INSET, 8, ROW_INSET) },
+      child: this.withHitTarget(styled, path, 'textField', placeholder || 'Search', undefined, false, {
+        value: text,
+        placeholder: placeholder || 'Search',
+      }),
+    }
+  }
+
   private link(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0)) ?? ''
     return {
@@ -1615,10 +1883,6 @@ class Converter {
 
       case 'italic':
         return { kind: 'fontTrait', italic: true }
-
-      case 'fontDesign':
-      case 'monospaced':
-        return { kind: 'unsupported', name: modifier.name }
 
       case 'foregroundStyle':
       case 'foregroundColor':
@@ -1696,9 +1960,6 @@ class Converter {
         return degrees === null ? null : { kind: 'rotate', degrees }
       }
 
-      case 'zIndex':
-        return { kind: 'unsupported', name: 'zIndex' }
-
       case 'blur':
         return { kind: 'filter', filter: { blur: numberArg(labelled(args, 'radius')) ?? numberArg(positional(args, 0)) ?? 0 } }
 
@@ -1734,6 +1995,43 @@ class Converter {
       case 'trim':
         // Read directly off the shape or path they style, not applied as wrappers.
         return null
+
+      case 'ignoresSafeArea':
+      case 'safeAreaInset':
+        // Read by the pipeline, which owns the device's edges.
+        return null
+
+      case 'zIndex':
+      case 'id':
+      case 'listRowSeparator':
+      case 'listRowInsets':
+      case 'scrollIndicators':
+      case 'keyboardType':
+      case 'submitLabel':
+      case 'onSubmit':
+      case 'focused':
+      case 'searchable':
+      case 'onDelete':
+      case 'onMove':
+      case 'swipeActions':
+      case 'toggleStyle':
+      case 'pickerStyle':
+      case 'labelStyle':
+      case 'placeholder':
+      case 'contextMenu':
+      case 'badge':
+        // Recognised, and either read elsewhere or deliberately inert. Recorded as
+        // applied rather than as a coverage gap, because the code *is* honoured —
+        // just not by a wrapper around this view.
+        return null
+
+      case 'monospaced':
+        return { kind: 'font', font: monospacedFont(this.typeScale) }
+
+      case 'kerning':
+      case 'minimumScaleFactor':
+      case 'fontDesign':
+        return { kind: 'unsupported', name: modifier.name }
 
       case 'position':
         return {
@@ -1783,6 +2081,22 @@ class Converter {
       case 'animation': {
         const hint = animationHint(args[0]?.value)
         return hint ? { kind: 'animate', hint } : null
+      }
+
+      case 'transition': {
+        const spec = payloadOf<TransitionPayload>(args[0]?.value, TRANSITION_TYPE)
+        if (!spec || spec.kind === 'identity') return null
+        const edge = spec.edge
+        return {
+          kind: 'transition',
+          spec: {
+            kind: spec.kind,
+            ...(edge === 'top' || edge === 'bottom' || edge === 'leading' || edge === 'trailing'
+              ? { edge }
+              : {}),
+            duration: 0.3,
+          },
+        }
       }
 
       // Recognised and deliberately inert: these change behaviour the preview does
@@ -1913,6 +2227,18 @@ class Converter {
 }
 
 // -------------------------------------------------------------------- helpers
+
+/**
+ * Whether a view contributes its children to the enclosing container.
+ *
+ * `ForEach` always does, whatever modifiers it carries: the ones it takes describe
+ * the collection rather than a box around it. The others do so only when unmodified,
+ * because a modifier on a `Group` genuinely wraps the group.
+ */
+function isTransparent(view: ViewValue): boolean {
+  if (view.name === 'ForEach') return true
+  return TRANSPARENT_VIEWS.has(view.name) && view.modifiers.length === 0
+}
 
 function labelled(args: readonly ViewArg[], label: string): SwiftValue | undefined {
   return args.find((a) => a.label === label)?.value

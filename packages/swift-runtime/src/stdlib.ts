@@ -1,6 +1,7 @@
 import type { CallArgument } from './host'
 import {
   array,
+  asIndexSet,
   bool,
   copyValue,
   describe,
@@ -287,6 +288,27 @@ function arrayMethod(
   trap: Trap,
 ): SwiftValue | undefined {
   switch (member) {
+    // `move(fromOffsets:toOffset:)` — what `.onMove` calls.
+    case 'move': {
+      const from = asIndexSet(args.find((a) => a.label === 'fromOffsets')?.value)
+      const toValue = args.find((a) => a.label === 'toOffset')?.value
+      if (from && (toValue?.kind === 'int' || toValue?.kind === 'double')) {
+        const moving = [...from]
+          .sort((a, b) => a - b)
+          .map((i) => target.elements[i])
+          .filter((v): v is SwiftValue => v !== undefined)
+
+        for (const index of [...from].sort((a, b) => b - a)) target.elements.splice(index, 1)
+
+        // The destination is an offset into the *original* collection, so it shifts
+        // by however many removed elements sat before it.
+        const removedBefore = [...from].filter((i) => i < toValue.value).length
+        target.elements.splice(Math.max(0, toValue.value - removedBefore), 0, ...moving)
+        return VOID
+      }
+      break
+    }
+
     case 'append': {
       const value = arg(0)
       if (!value) return undefined
@@ -303,6 +325,17 @@ function arrayMethod(
       return VOID
     }
     case 'remove': {
+      // `remove(atOffsets:)` is what `.onDelete` calls. The indices are walked in
+      // descending order so that each deletion cannot shift the position of one still
+      // to come — the classic way this goes wrong is deleting the wrong rows.
+      const offsets = asIndexSet(labelled('atOffsets'))
+      if (offsets) {
+        for (const index of [...offsets].sort((a, b) => b - a)) {
+          if (index >= 0 && index < target.elements.length) target.elements.splice(index, 1)
+        }
+        return VOID
+      }
+
       const at = labelled('at')
       if (!at) return undefined
       const index = numericValue(at)

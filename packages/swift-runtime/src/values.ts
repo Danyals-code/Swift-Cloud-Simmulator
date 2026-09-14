@@ -202,6 +202,31 @@ export function opaque(typeName: string, payload: unknown): OpaqueValue {
   return { kind: 'opaque', typeName, payload }
 }
 
+// ------------------------------------------------------------------ index sets
+
+/**
+ * `IndexSet` — a set of positions in a collection.
+ *
+ * Foundation rather than SwiftUI, which is why it lives here: `remove(atOffsets:)`
+ * and `move(fromOffsets:toOffset:)` are `Array` methods, and the interpreter owns
+ * `Array`. The host constructs them; the standard library consumes them.
+ */
+export const INDEX_SET_TYPE = 'IndexSet'
+
+export interface IndexSetPayload {
+  readonly indices: readonly number[]
+}
+
+export function indexSet(indices: readonly number[]): OpaqueValue {
+  return { kind: 'opaque', typeName: INDEX_SET_TYPE, payload: { indices: [...indices] } }
+}
+
+export function asIndexSet(value: SwiftValue | undefined): readonly number[] | null {
+  return value !== undefined && value.kind === 'opaque' && value.typeName === INDEX_SET_TYPE
+    ? (value.payload as IndexSetPayload).indices
+    : null
+}
+
 // ------------------------------------------------------------------ key paths
 
 /** `\.self`, `\.id` — an unapplied property accessor. */
