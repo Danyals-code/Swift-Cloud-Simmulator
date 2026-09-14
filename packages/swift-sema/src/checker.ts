@@ -18,6 +18,7 @@ import type {
 import { collectConformance } from '@studio/swift-syntax'
 import {
   isKnownGlobal,
+  isKnownModifier,
   KNOWN_ATTRIBUTES,
   KNOWN_TYPES,
   PROPERTY_WRAPPERS,
@@ -62,6 +63,8 @@ export class Checker {
    * more than the missed error of accepting `T` in a function that never declared it.
    */
   private readonly typeParameterNames = new Set<string>()
+  /** Non-zero while checking the body of an extension on a type the preview owns. */
+  private inViewExtension = 0
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
   private conformance: ConformanceModel = collectConformance([])
   private readonly globalScope = new Scope()
@@ -321,6 +324,20 @@ export class Checker {
    */
   private checkTypeBody(decl: StructDecl | ProtocolDecl | ExtensionDecl): void {
     this.checkAttributes(decl.attributes)
+
+    // `extension View` and `extension Text` extend something the preview owns, so
+    // `self` inside is a view rather than a declared type.
+    const extendsAView =
+      decl.kind === 'extensionDecl' && !this.types.has(decl.name) && !this.enums.has(decl.name)
+    if (extendsAView) this.inViewExtension++
+    try {
+      this.checkTypeMembers(decl)
+    } finally {
+      if (extendsAView) this.inViewExtension--
+    }
+  }
+
+  private checkTypeMembers(decl: StructDecl | ProtocolDecl | ExtensionDecl): void {
 
     const scope = this.globalScope.child()
     const visible = this.conformance.types.get(decl.name)?.members ?? decl.members
@@ -693,6 +710,12 @@ export class Checker {
     if (scope.has(name)) return
     if (isKnownGlobal(name)) return
     if (this.types.has(name)) return
+
+    // Inside `extension View`, `self` is a view, so an unqualified `modifier(…)` or
+    // `padding(…)` is a call on it — the idiom the whole extension exists for. The
+    // checker has no receiver type to confirm that with, and reporting it would put a
+    // red error on the most common way to write a reusable modifier.
+    if (this.inViewExtension > 0 && isKnownModifier(name)) return
 
     // `$0`-style closure shorthand.
     if (this.closureDepth > 0 && /^\$\d+$/.test(name)) return

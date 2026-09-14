@@ -49,6 +49,8 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
 
 /** Modifiers the preview applies. */
 export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
+  // composition
+  'modifier',
   // layout
   'frame', 'padding', 'offset', 'position', 'fixedSize', 'clipShape', 'clipped',
   'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill',
@@ -123,6 +125,8 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'ToolbarItemPlacement', 'Binding', 'UUID', 'Date',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
+  'ViewModifier', 'ButtonStyle', 'LabelStyle', 'ToggleStyle', 'Configuration',
+  'ButtonStyleConfiguration', 'Layout', 'PreferenceKey', 'Animatable',
   'Codable', 'Decodable', 'Encodable', 'CaseIterable', 'CustomStringConvertible',
   'LayoutDirection', 'UserInterfaceSizeClass', 'Locale',
   'View', 'App', 'Scene', 'Identifiable', 'Equatable', 'Hashable', 'Comparable', 'Codable',

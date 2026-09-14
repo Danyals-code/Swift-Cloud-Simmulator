@@ -1419,6 +1419,37 @@ export class Interpreter {
       // `print` and friends.
       const builtin = this.callGlobalBuiltin(callee.name, allArgs, span)
       if (builtin !== undefined) return builtin
+
+      // An unqualified call inside a member body means `self.name(…)`. It matters for
+      // any receiver the environment cannot hold — `extension Int`, and a method
+      // written in `extension View`, where `self` is a view value rather than a
+      // struct. `evaluateIdentifier` already resolves bare *names* this way; a call
+      // had no equivalent, so `modifier(Boxed())` inside such a method resolved
+      // nowhere.
+      // `self` may be a binding — `extension Int`, or a method on `extension View`
+      // called on a view value — or the environment's receiver, which is how a view
+      // written as a struct reaches its `extension View` methods: the merge hands
+      // them to every conformer as protocol defaults.
+      //
+      // The receiver case is deliberately narrow. Offering *any* unresolved call in
+      // *any* method to the host means a mistyped function name comes back as an
+      // unrecognised-but-harmless modifier, which is the worst kind of wrong: the code
+      // looks honoured and is not. So it applies only inside a method declared in an
+      // extension of something the project did not declare, which is exactly where
+      // `self` is a view and `padding(8)` means `self.padding(8)`.
+      const owner = this.owners[this.owners.length - 1]
+      const inForeignExtension =
+        typeof owner === 'string' && !this.types.has(owner) && !this.enums.has(owner)
+      const receiver =
+        env.lookup('self')?.value ?? (inForeignExtension ? (env.resolveSelf() ?? undefined) : undefined)
+      if (receiver) {
+        const onSelf = this.host.callMember?.(
+          receiver,
+          callee.name,
+          this.hostCall(args, trailingClosure, span),
+        )
+        if (onSelf !== undefined) return onSelf
+      }
     }
 
     // A method or modifier call: `value.member(args)`.

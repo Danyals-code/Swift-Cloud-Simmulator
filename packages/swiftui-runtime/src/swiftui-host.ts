@@ -167,6 +167,32 @@ export class SwiftUIHost implements InterpreterHost {
   scopeIdentity: (<T>(key: string, fn: () => T) => T) | null = null
 
   /**
+   * Calls a method on a user struct, by name.
+   *
+   * Supplied by the pipeline for the same reason as `expandStruct`: a custom
+   * `ViewModifier` is wired up by calling its `body(content:)`, and a `ButtonStyle` by
+   * calling its `makeBody(configuration:)`. Both are ordinary methods on a struct the
+   * host cannot call itself.
+   */
+  callMethod: ((receiver: SwiftValue, name: string, args: readonly SwiftValue[]) => SwiftValue | undefined) | null =
+    null
+
+  /** Whether a user type conforms to a protocol. Supplied with `callMethod`. */
+  conformsTo: ((typeName: string, protocolName: string) => boolean) | null = null
+
+  /**
+   * Calls a method the project declared in `extension View`.
+   *
+   * `extension View { func cardStyle() -> some View { … } }` is how nearly every real
+   * SwiftUI codebase names a reusable modifier chain, and the receiver is a *view* —
+   * `Text("x").cardStyle()` — not a struct whose own type declares the method. So the
+   * lookup has to start from the protocol rather than from the value.
+   */
+  callViewExtension:
+    | ((name: string, receiver: SwiftValue, call: HostCall) => SwiftValue | undefined)
+    | null = null
+
+  /**
    * The SwiftUI environment, as a dynamic scope.
    *
    * Owned by the host because it is the host that expands views, and the environment
@@ -580,6 +606,15 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
+    // `.modifier(Shadowed())` — a custom `ViewModifier`. Its `body(content:)` takes
+    // the view it is applied to and returns a new one, so the content is handed over
+    // as a value: inside the modifier, `content.padding()` is then an ordinary
+    // modifier on an ordinary view, with nothing special about it at all.
+    if (member === 'modifier') {
+      const applied = this.applyViewModifier(target, call)
+      if (applied !== undefined) return applied
+    }
+
     if (target.kind === 'type' && (target.name === 'Task' || target.name === 'MainActor')) {
       if (member === 'detached' || member === 'run') return this.runTask(call)
       // `Task.sleep` and `Task.yield` are the suspension points, and there is nothing
@@ -593,6 +628,14 @@ export class SwiftUIHost implements InterpreterHost {
     // touches the target — by which point a struct would already have been expanded.
     if (member === 'environmentObject' || member === 'environment') {
       return this.withInjectedEnvironment(target, member, call)
+    }
+
+    // A method the project wrote in `extension View`. Checked before the generic
+    // modifier path, which accepts any name at all and would otherwise swallow it as
+    // an unrecognised-but-harmless modifier.
+    if (asView(target) !== null || target.kind === 'struct') {
+      const extended = this.callViewExtension?.(member, target, call)
+      if (extended !== undefined) return extended
     }
 
     // A modifier on a view returns a *new* view with the modifier appended, so the
@@ -801,6 +844,24 @@ export class SwiftUIHost implements InterpreterHost {
       }
     }
     return undefined
+  }
+
+  /**
+   * `.modifier(SomeModifier())`.
+   *
+   * Returns undefined — "not a custom modifier" — unless the argument is a struct
+   * that conforms to `ViewModifier` and has a `body`. SwiftUI's own `.modifier` never
+   * reaches here, so declining is the safe answer and the built-in path still runs.
+   */
+  private applyViewModifier(target: SwiftValue, call: HostCall): SwiftValue | undefined {
+    const argument = call.args[0]?.value
+    if (!argument || argument.kind !== 'struct') return undefined
+    if (!this.conformsTo?.(argument.typeName, 'ViewModifier')) return undefined
+
+    const content = asView(target) ?? this.expandForModifier(target, call.span)
+    if (!content) return undefined
+
+    return this.callMethod?.(argument, 'body', [view(content)])
   }
 
   /**

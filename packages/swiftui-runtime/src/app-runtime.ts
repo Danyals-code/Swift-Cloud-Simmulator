@@ -1,5 +1,5 @@
 import type { SourceSpan, UIEvent } from '@studio/shared'
-import type { Decl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
+import type { Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
   asProjection,
@@ -16,6 +16,7 @@ import {
   UnsupportedAtRuntime,
   valuesEqual,
   type ClosureValue,
+  type HostCall,
   type StructValue,
   type SwiftValue,
 } from '@studio/swift-runtime'
@@ -153,6 +154,10 @@ export class AppRuntime {
     this.interpreter = new Interpreter({ host: this.host })
     this.host.expandStruct = (value) => this.expand(value)
     this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
+    this.host.callMethod = (receiver, name, args) => this.callMethod(receiver, name, args)
+    this.host.conformsTo = (typeName, protocolName) =>
+      this.interpreter.conformsTo(typeName, protocolName)
+    this.host.callViewExtension = (name, receiver, call) => this.callViewExtension(name, receiver, call)
     this.interpreter.load(files)
 
     this.entryTypeName = model.entryPoint?.name ?? null
@@ -555,6 +560,68 @@ export class AppRuntime {
    * correct: a sheet body that force-unwraps its selection must not run while there
    * is no selection.
    */
+  /**
+   * Calls a named method on a user struct.
+   *
+   * The seam a custom `ViewModifier` needs: its `body(content:)` is an ordinary method
+   * on an ordinary struct, and the host cannot call one. Scoped by the receiver's type
+   * name so a modifier holding `@State` gets its own identity rather than sharing the
+   * caller's.
+   */
+  private callMethod(
+    receiver: SwiftValue,
+    name: string,
+    args: readonly SwiftValue[],
+  ): SwiftValue | undefined {
+    if (receiver.kind !== 'struct') return undefined
+
+    const method = this.interpreter
+      .membersOf(receiver.typeName)
+      .find((m): m is FuncDecl => m.kind === 'funcDecl' && m.name === name && m.body !== null)
+    if (!method) return undefined
+
+    return this.identity.scope(receiver.typeName, () =>
+      this.interpreter.callFunction(
+        { kind: 'function', decl: method, self: receiver, env: this.interpreter.globals },
+        args.map((value) => ({ label: null, value, span: method.span })),
+        method.span,
+      ),
+    )
+  }
+
+  /**
+   * Calls a method declared in `extension View`, with `self` bound to the receiver.
+   *
+   * `self` is bound as a *name* rather than as the environment's receiver, because a
+   * view value is neither a struct nor an enum case and only those can be receivers.
+   * Nothing is lost: the same path already carries `extension Int`, and an unqualified
+   * call inside the body resolves back through the binding.
+   */
+  private callViewExtension(
+    name: string,
+    receiver: SwiftValue,
+    call: HostCall,
+  ): SwiftValue | undefined {
+    const method = this.interpreter
+      .membersOf('View')
+      .find((m): m is FuncDecl => m.kind === 'funcDecl' && m.name === name && m.body !== null)
+    if (!method) return undefined
+
+    const env = this.interpreter.globals.child(null)
+    env.define('self', receiver, true, method.span)
+
+    const args = [...call.args]
+    if (call.trailingClosure) {
+      args.push({ label: null, value: call.trailingClosure, span: call.span })
+    }
+
+    return this.interpreter.callFunction(
+      { kind: 'function', decl: method, self: null, env },
+      args,
+      call.span,
+    )
+  }
+
   private buildViews(closure: ClosureValue, args: readonly SwiftValue[] = []): readonly ViewValue[] {
     const produced = this.interpreter.runViewBuilder(closure, args)
     return produced.flatMap((value) => {
