@@ -5,12 +5,24 @@ names the feature — never a silent wrong answer (FR-3.9).
 
 Legend: **T1** = Phase 1–2 must-have · **T2** = Phase 3–4 · **T3** = Phase 6 · **✗** = out of scope.
 
-**Status after Phase 7.** The vertical slice deliberately shipped a narrow language — structs,
+**Status after Phase 8.** The vertical slice deliberately shipped a narrow language — structs,
 functions, closures, `if` and `for`. Phase 7 reopened it, because `ObservableObject` needs reference
-semantics and half of real view-model code will not parse without `guard` and `switch`. What now
-runs, and what still does not, is listed in the
+semantics and half of real view-model code will not parse without `guard` and `switch`. Phase 8
+finished the job: protocols and extensions, generics, error handling, `inout`, `super`, and
+`async`/`await`. What now runs, and what still does not, is listed in the
 [coverage matrix's language section](05-SWIFTUI-COVERAGE.md#swift-language) — that table is the
 current truth; the tiers below are the original plan.
+
+Three of the T1/T2 rows below now read differently in practice, and the matrix says so rather than
+this table pretending otherwise:
+
+- **Generics are erased**, not merely erased at runtime: constraints are recorded and never checked.
+  The row below says "constraints checked for conformance only"; nothing checks them. A dynamically
+  typed interpreter has nothing to check against, and the export hands the user's exact source to a
+  real compiler that does.
+- **Protocols have no witness tables.** Conformance is a syntactic merge — a conformer inherits
+  every default its protocols declare, and nothing verifies it satisfies the requirements.
+- **`async` does not suspend.** Everything concurrent runs immediately and in order.
 
 ## Declarations
 

@@ -774,6 +774,139 @@ const DRAWING = app(
 }`,
 )
 
+const STYLED = app(
+  'StyledApp',
+  'ContentView',
+  `/// A modifier written as a struct. Its body receives the view it is applied to,
+/// so content below is an ordinary view carrying ordinary modifiers.
+struct Card: ViewModifier {
+    var tint: Color
+
+    func body(content: Content) -> some View {
+        content
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(0.15))
+            .cornerRadius(14)
+    }
+}
+
+/// The idiom every real codebase uses to name a modifier chain.
+extension View {
+    func card(_ tint: Color) -> some View {
+        modifier(Card(tint: tint))
+    }
+
+    func sectionTitle() -> some View {
+        font(.caption)
+            .textCase(.uppercase)
+            .foregroundStyle(.secondary)
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Today")
+                .sectionTitle()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Write the tests first")
+                    .font(.headline)
+                Text("Then the code has somewhere to be wrong.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .card(.blue)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Name the limitation")
+                    .font(.headline)
+                Text("A partial feature with nothing said is a bug.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .card(.orange)
+
+            Spacer()
+        }
+        .padding(20)
+    }
+}`,
+)
+
+const LOADER = app(
+  'LoaderApp',
+  'ContentView',
+  `enum LoadError: Error {
+    case offline
+    case empty
+}
+
+/// A protocol with a default implementation, supplied the only way Swift allows:
+/// in an extension. Every conformer gets summary() without writing it.
+protocol Describable {
+    var title: String { get }
+}
+
+extension Describable {
+    func summary() -> String {
+        "Loaded: " + title
+    }
+}
+
+struct Article: Describable {
+    let title: String
+}
+
+struct ContentView: View {
+    @State private var status = "Tap to load"
+    @State private var failNext = false
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Error handling")
+                .font(.title2)
+                .bold()
+
+            Text(status)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .frame(height: 44)
+
+            Toggle("Make it fail", isOn: $failNext)
+                .padding(.horizontal, 40)
+
+            Button("Load") {
+                load()
+            }
+            .buttonStyle(.borderedProminent)
+
+            Spacer()
+        }
+        .padding(24)
+    }
+
+    func fetch() throws -> Article {
+        if failNext {
+            throw LoadError.offline
+        }
+        return Article(title: "A Swift interpreter in a browser")
+    }
+
+    func load() {
+        do {
+            let article = try fetch()
+            status = article.summary()
+        } catch LoadError.offline {
+            status = "No connection."
+        } catch {
+            status = "Something else went wrong."
+        }
+    }
+}`,
+)
+
 const DRAGGABLE = app(
   'DragApp',
   'ContentView',
@@ -911,6 +1044,18 @@ export const TEMPLATES: readonly Template[] = [
     name: 'Drag',
     description: 'A drag gesture with @GestureState, and a spring on release.',
     source: DRAGGABLE,
+  },
+  {
+    id: 'styled',
+    name: 'Styled',
+    description: 'A custom ViewModifier, and extension View naming a modifier chain.',
+    source: STYLED,
+  },
+  {
+    id: 'loader',
+    name: 'Loader',
+    description: 'A protocol with a default, and do/catch handling a thrown error.',
+    source: LOADER,
   },
 ]
 

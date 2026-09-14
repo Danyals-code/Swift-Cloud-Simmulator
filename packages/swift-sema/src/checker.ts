@@ -343,9 +343,14 @@ export class Checker {
     this.checkAttributes(decl.attributes)
 
     // `extension View` and `extension Text` extend something the preview owns, so
-    // `self` inside is a view rather than a declared type.
+    // `self` inside is a view rather than a declared type. A protocol the *project*
+    // declared is excluded: its members are known, so there is nothing to be lenient
+    // about and every unresolved name there is a real one.
     const extendsAView =
-      decl.kind === 'extensionDecl' && !this.types.has(decl.name) && !this.enums.has(decl.name)
+      decl.kind === 'extensionDecl' &&
+      !this.types.has(decl.name) &&
+      !this.enums.has(decl.name) &&
+      !this.protocols.has(decl.name)
     if (extendsAView) this.inViewExtension++
     try {
       this.checkTypeMembers(decl)
@@ -357,11 +362,16 @@ export class Checker {
   private checkTypeMembers(decl: StructDecl | ProtocolDecl | ExtensionDecl): void {
 
     const scope = this.globalScope.child()
+    // A protocol's *requirements* are in scope inside an extension of it: that is what
+    // `extension Describable { func summary() { title } }` is for, and `title` is
+    // declared by the protocol rather than by anything the merge produces.
+    const requirements =
+      decl.kind === 'extensionDecl' ? (this.protocols.get(decl.name)?.members ?? []) : []
     const visible = this.conformance.types.get(decl.name)?.members ?? decl.members
     const seen = new Set<string>()
 
     // Every member is visible to every other member, regardless of order.
-    for (const member of [...visible, ...decl.members]) {
+    for (const member of [...visible, ...requirements, ...decl.members]) {
       if (member.kind === 'varDecl') {
         if (seen.has(member.name)) continue
         seen.add(member.name)

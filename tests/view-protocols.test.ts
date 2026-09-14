@@ -255,3 +255,49 @@ struct ContentView: View {
     expect(result.diagnostics.some((d) => d.severity === 'error')).toBe(true)
   })
 })
+
+describe('a contextual member reaching a host type', () => {
+  it('resolves .blue against a Color property', () => {
+    // `.blue` has no base, so it arrives as a bare token. Only the declared type says
+    // what it meant — and a Color belongs to the host, so the interpreter has to ask.
+    // Without this the token reaches the property intact and the first modifier called
+    // on it fails three layers from where the mistake actually is.
+    const result = run(`import SwiftUI
+${APP}
+struct Tinted: ViewModifier {
+    var tint: Color
+
+    func body(content: Content) -> some View {
+        content.background(tint.opacity(0.2))
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        Text("x").modifier(Tinted(tint: .blue))
+    }
+}
+`)
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect((result.renderTree?.nodes ?? []).some((n) => n.background)).toBe(true)
+  })
+
+  it('resolves .blue through a function parameter', () => {
+    const result = run(`import SwiftUI
+${APP}
+extension View {
+    func tinted(_ tint: Color) -> some View {
+        background(tint.opacity(0.2))
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        Text("x").tinted(.orange)
+    }
+}
+`)
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect((result.renderTree?.nodes ?? []).some((n) => n.background)).toBe(true)
+  })
+})

@@ -45,15 +45,15 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0-6 complete, plus Phase 7's breadth pass.** The studio parses, checks,
-runs and renders real Swift across multiple files, and exports a complete Xcode
-project.
+**Phases 0-8 complete.** The studio parses, checks, runs and renders real Swift
+across multiple files, and exports a complete Xcode project.
 
 What it handles now is most of the SwiftUI people actually write:
 
-- **Language** — structs and classes, enums with raw and associated values,
-  `switch` with pattern matching, `if let` and `guard let`, loops, closures, key
-  paths.
+- **Language** — structs and classes with inheritance and `super`, protocols and
+  extensions, enums with raw and associated values, `switch` with pattern
+  matching, `if let` and `guard let`, loops, closures, key paths, generics,
+  `throws` / `do-catch`, `inout`.
 - **Structure** — navigation stacks and links, tabs, lists, forms, sheets,
   alerts, scroll views, grids, `ForEach`.
 - **State** — `@State`, `@Binding`, `ObservableObject` with `@StateObject` and
@@ -62,6 +62,10 @@ What it handles now is most of the SwiftUI people actually write:
   `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`.
 - **Drawing** — `Path`, `Canvas`, shapes with `.fill` and `.stroke`, gradients,
   materials, colour filters, `withAnimation` and transitions.
+- **Reuse** — custom `ViewModifier` and `extension View { func … }`, the two ways
+  a real codebase names a modifier chain.
+- **The editor** — completion from the project's own declarations as well as
+  SwiftUI's, go to definition, hover, and quick fixes that apply themselves.
 
 The [coverage matrix](docs/05-SWIFTUI-COVERAGE.md) is the exact contract, and it
 is honest about the 🟡 rows as well as the ✅ ones.
@@ -79,25 +83,31 @@ Three things are outstanding, and none of them is hidden:
   transmitted. The instrument is built and visible in the studio's Coverage
   panel; its ranking is empty by construction until someone uses it.
 
-Not built: code completion (the Phase 4 gate shortfall), `.swiftpm` export, share
-links, generics, `async`/`await`, and the remaining ⬜ rows in the coverage
-matrix — each marked "—" rather than a phase, because a phase number is a promise.
+Two limitations are worth knowing before you meet them, and both are stated in
+the matrix rather than discovered: **concurrency does not suspend** — everything
+async runs immediately and in order — and **generics are erased**, so constraints
+are recorded and never enforced.
+
+Not built: `.swiftpm` export, share links, `ButtonStyle`, `PreferenceKey`, and the
+remaining ⬜ rows in the coverage matrix — each marked "—" rather than a phase,
+because a phase number is a promise.
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 786 passing |
-| End-to-end | 31 / 31 passing |
-| Templates rendering with zero placeholders | 15 / 15 |
-| Coverage matrix | 89 ✅ · 35 🟡 · 32 ⬜ |
+| Unit tests | 936 passing |
+| End-to-end | 43 / 43 passing |
+| Templates rendering with zero placeholders | 17 / 17 |
+| Coverage matrix | 95 ✅ · 39 🟡 · 29 ⬜ · 3 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 388 KB gzipped / 450 KB budget (86% — worth watching) |
+| Client JS | 397 KB gzipped / 450 KB budget (88% — worth watching) |
 
-Next: the rest of [Phase 7](docs/03-ROADMAP.md) is à la carte — a real `swiftc`
-verification service, accounts, AI codegen, GitHub export — and whatever the
-coverage telemetry says people reached for.
+Next: [Phase 7's à-la-carte items](docs/03-ROADMAP.md) — a real `swiftc`
+verification service, accounts, AI codegen, GitHub export — each of which needs
+hosting, a key or an OAuth app; and whatever the coverage telemetry says people
+reached for.
 
 ## Getting started
 

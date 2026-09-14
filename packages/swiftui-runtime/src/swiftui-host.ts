@@ -847,6 +847,23 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   /**
+   * Turns a contextual token into the host value its declared type calls for.
+   *
+   * Only named types the host actually owns, and only from a token — anything else is
+   * declined, because guessing here would replace a value the user built with one the
+   * host invented.
+   */
+  coerceToType(value: SwiftValue, typeName: string): SwiftValue | undefined {
+    if (value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return undefined
+    const name = (value.payload as TokenPayload).name
+
+    if (typeName === 'Color') return color({ name })
+    if (typeName === 'Animation') return this.animationToken(name)
+    if (typeName === 'AnyTransition') return this.transitionToken(name)
+    return undefined
+  }
+
+  /**
    * `.modifier(SomeModifier())`.
    *
    * Returns undefined — "not a custom modifier" — unless the argument is a struct

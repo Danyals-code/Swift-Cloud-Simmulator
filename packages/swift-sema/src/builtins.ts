@@ -126,6 +126,7 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
   'ViewModifier', 'ButtonStyle', 'LabelStyle', 'ToggleStyle', 'Configuration',
+  'Content', 'Body',
   'ButtonStyleConfiguration', 'Layout', 'PreferenceKey', 'Animatable',
   'Codable', 'Decodable', 'Encodable', 'CaseIterable', 'CustomStringConvertible',
   'LayoutDirection', 'UserInterfaceSizeClass', 'Locale',

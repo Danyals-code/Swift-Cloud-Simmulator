@@ -288,6 +288,77 @@ each is either genuinely out of scope for a browser preview (`.refreshable`, `Ti
 
 ---
 
+## Phase 8 — Language depth and IDE depth — **done (2026-09-14)**
+
+Not in the original plan either. Phase 7 closed with the coverage matrix at 89 ✅, and what
+remained split cleanly in two: constructs the *language* could not express, and an editor that
+had syntax colouring and diagnostics and nothing else. Both were chosen together, and the order
+was forced — the editor features need a symbol index, and the language decides what symbols
+exist.
+
+### The language half
+
+| | |
+| --- | --- |
+| **8a** | `protocol`, requirements, `extension`, protocol defaults, class inheritance |
+| **8b** | generics, erased |
+| **8c** | `throws` / `try` / `do-catch`, `inout`, `super` |
+| **8d** | `async` / `await` / `Task`, run synchronously |
+| **8e** | custom `ViewModifier`, `extension View` |
+
+**One merge, shared.** Once `extension` exists a declaration no longer knows all of its own
+members — they may be written in the type, in any number of extensions, in a protocol it conforms
+to, or in a superclass. `collectConformance` does that merge once, in `swift-syntax`, because the
+checker and the interpreter are sibling packages and anything either derived privately would
+drift. Precedence and emission order turned out to be separate questions: own beats extension
+beats protocol default beats inherited, but they are *emitted* in declaration order, which is what
+stored-property initialisation needs.
+
+Three decisions worth keeping:
+
+- **Generics are erased.** A dynamically typed interpreter carries the real value whatever the
+  annotation said, so a substitution pass would compute something nothing reads. Names resolve,
+  constraints are recorded, nothing is enforced.
+- **Concurrency does not suspend**, and that is one rule rather than several special cases. The
+  alternatives need suspension the interpreter does not have, and a half-built version would make
+  ordering depend on which case a program happened to hit.
+- **`super` resolves against the type that declared the running method**, not the receiver's type.
+  The two agree at two levels and disagree at three, where the receiver reading recurses forever.
+
+### The IDE half
+
+| | |
+| --- | --- |
+| **8f** | the symbol index: completion, go to definition, hover, references |
+| **8g** | quick fixes — "did you mean", "add a body", "mark as mutating" |
+
+This is Phase 4's shortfall. `@codemirror/autocomplete` was not installed.
+
+The governing rule is the editor's version of gate 4: **a wrong answer is worse than no answer.**
+A list that omits something costs a keystroke; one that offers a name which does not exist, or
+jumps to the wrong declaration, teaches the user not to trust the editor — and then the feature is
+worse than absent. So a `.` whose receiver cannot be resolved offers modifiers and nothing else, a
+contextual `.home` matching two enums offers no jump at all, and a typo suggests a replacement only
+when the edit distance is small relative to the name's length.
+
+The index is stateless. Completion could reuse the parse from the last compile, but the editor asks
+*between* compiles — that is what the debounce is for — so the cached tree is one keystroke stale
+exactly when it is consulted.
+
+**What Phase 8 found by accident**, each shipped in an earlier phase and each fixed here: a parser
+that hung on `case .some(let v)` because `some` is a keyword and `expectIdentifier` reports without
+advancing; two loops with no progress guard; a `catch` clause whose span ended at its own opening
+brace; a `static let` counted as a stored property; `Rect(width: 3)` storing an `Int` in a `Double`
+field; and the host shadowing a project's own `Task` type, which is Swift's rule backwards.
+
+The matrix moved from 89 ✅ to **95 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
+
+Still unbuilt and marked as such: `ButtonStyle` and friends (the style has to travel down the
+environment), `Layout`, `PreferenceKey` (a value travelling *up* the tree), `Animatable`, and
+structured concurrency.
+
+---
+
 ## Cross-cutting workstreams
 
 Running through every phase, not bolted on at the end:

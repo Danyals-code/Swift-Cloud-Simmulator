@@ -425,7 +425,7 @@ enough for the slice"); it was brought forward on request.
 
 | # | Gate | Result |
 | --- | --- | --- |
-| 1 | A second file defines a type the first uses; completions and diagnostics cross the boundary | **Diagnostics: passing.** Completions: not built — see 4.9 |
+| 1 | A second file defines a type the first uses; completions and diagnostics cross the boundary | **Passing as of Phase 8.** Diagnostics crossed the boundary in Phase 4; completion arrived in 8f |
 | 2 | Every template renders with zero unsupported placeholders | **Passing** — 33 conformance assertions across 5 templates |
 | 3 | Clicking a rendered element jumps the editor to the right line | **Passing** |
 | 4 | Dark mode and Dynamic Type re-render without losing state | **Passing** |
@@ -437,7 +437,7 @@ Verified: **11/11 packages typecheck**, **lint clean**, **384 unit tests**, **26
 
 | Planned | Status | Reasoning |
 | --- | --- | --- |
-| **Code completion** | **Not built** | The largest single item in Phase 4 and the only gate-1 shortfall. It needs a `complete(file, offset)` worker RPC and a CodeMirror source fed from the symbol table — real work, not a stub, and worth its own pass rather than a rushed one. Cross-file *diagnostics* work, which is the half of gate 1 that proves the multi-file model. |
+| **Code completion** | **Built in Phase 8f** | It was the only gate-1 shortfall, and it did need its own pass: a `complete(files, file, offset)` worker RPC, a symbol index that walks scopes the way Swift does — a type body order-independent, a function body top-to-bottom — and a CodeMirror source that replaces the built-in word-based one rather than joining it. Go to definition, hover and quick fixes came with it. |
 | Find/replace across the project | Not built | Lower value than the gates while projects are a handful of files. |
 | Asset import and `Image("name")` | Not built | `Image` is not in the slice's view set, so an asset pipeline would have nothing to draw. |
 | Onboarding tour | Not built | Premature while the product is still gaining capabilities each phase. |
@@ -784,8 +784,7 @@ Listed so it is a choice rather than an oversight: multi-file projects, dark mod
 navigation, lists, sheets, animation, gestures beyond tap, images and SF Symbols, `@Binding` and
 `ObservableObject`, completions, the view inspector, templates, share links, `.swiftpm` export.
 
-*As of Phase 7, everything in that list has landed except completions, share links and `.swiftpm`
-export.*
+*As of Phase 8, everything in that list has landed except share links and `.swiftpm` export.*
 
 Each is a phase in [03-ROADMAP.md](03-ROADMAP.md) and each is additive on top of the spine the slice
 builds.

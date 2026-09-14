@@ -917,7 +917,11 @@ export class Interpreter {
     if (value.kind !== 'opaque') return value
 
     const decl = this.enums.get(typeName)
-    if (!decl) return value
+    if (!decl) {
+      // Not an enum this project declared. `Color`, `Font` and the rest belong to the
+      // host, and only the host can turn `.blue` into one.
+      return this.host.coerceToType?.(value, typeName) ?? value
+    }
 
     const name = (value.payload as { name?: string } | null)?.name
     if (typeof name !== 'string') return value

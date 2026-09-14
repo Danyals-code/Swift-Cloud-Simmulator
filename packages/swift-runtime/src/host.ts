@@ -72,6 +72,19 @@ export interface InterpreterHost {
    */
   callValue?(target: SwiftValue, call: HostCall): SwiftValue | undefined
 
+  /**
+   * Resolves a contextual member against a type the host owns.
+   *
+   * `.blue` has no base, so it arrives as an opaque token carrying only a name. When a
+   * declaration says the expected type — `func card(_ tint: Color)`, `var tint: Color`
+   * — the token can become the thing it obviously meant. The interpreter does this
+   * itself for enums it declared; a `Color` belongs to the host, so it has to ask.
+   *
+   * Without it, `.blue` reaches a `Color` property as a token and the first modifier
+   * called on it fails three layers from where the mistake actually is.
+   */
+  coerceToType?(value: SwiftValue, typeName: string): SwiftValue | undefined
+
   /** `print(...)` and anything else that writes to the console. */
   log?(message: string, span: SourceSpan): void
 }

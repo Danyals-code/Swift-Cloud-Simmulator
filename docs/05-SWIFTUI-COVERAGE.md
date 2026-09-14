@@ -4,15 +4,19 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after Phase 7's coverage pass.
+Last updated after Phase 8's language pass: **95 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
 
 Anything not listed renders a labelled placeholder box and is counted by the coverage telemetry
 (FR-4.11, NFR-6). Those counts are visible in the studio's **Coverage** panel and never leave the
 browser; they are what decides what gets built next.
 
 A ⬜ row is not a promise of a date — it is a statement that the construct is recognised, reported by
-name, and exported to Xcode unchanged. Phase 7 is where the remaining rows are picked up, ordered by
-what the telemetry says people actually reach for.
+name, and exported to Xcode unchanged. A row with a phase number is a commitment; a row with a `—` is
+a judgement that the construct does not belong in a browser preview, or that it is a larger piece of
+work to be chosen deliberately rather than swept up.
+
+A 🟡 row always names its limitation, either in its own Notes column or under **Known
+approximations** below. "Partial" with nothing said is indistinguishable from a bug.
 
 ## Layout
 
@@ -187,6 +191,9 @@ what the telemetry says people actually reach for.
 | `matchedGeometryEffect` | ⬜ | — | FLIP across identity change |
 | `.phaseAnimator` / `.keyframeAnimator` | ⬜ | — | |
 | `Animatable` / `animatableData` | ⬜ | — | |
+| Custom `ViewModifier` + `.modifier(…)` | ✅ | 8 | `body(content:)` is called with the view as a value |
+| `extension View { func … }` | ✅ | 8 | the idiom for a reusable modifier chain |
+| `ButtonStyle` / `LabelStyle` / `ToggleStyle` | ⬜ | — | the style has to travel down the environment |
 
 ## Environment and app structure
 
@@ -205,7 +212,7 @@ what the telemetry says people actually reach for.
 | `horizontalSizeClass` / `verticalSizeClass` | ✅ | 7 | derived from the device size |
 | `dismiss` | ✅ | 7 |
 | `openURL` | ⬜ | — |
-| `PreferenceKey` | ⬜ | — |
+| `PreferenceKey` | ⬜ | — | needs a value to travel *up* the tree |
 | `#Preview` macro / `PreviewProvider` | ⬜ | — |
 
 ## Accessibility
@@ -233,12 +240,16 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | Key paths (`\.self`, `\.id`, `\Type.member`) | ✅ | 6 | applied, not type-checked |
 | Closures, trailing closures, `$0` | ✅ | 1 | |
 | Contextual member syntax (`.home` for an enum) | ✅ | 7 | resolved where a declaration states the type |
-| `protocol` / `extension` | ⬜ | — | conformance is recorded but not checked |
-| `inout` parameters | ⬜ | — | the projection mechanism would carry it |
-| Generics | ⬜ | — | |
-| `async` / `await` / `Task` | ⬜ | — | `.task` runs synchronously |
-| `throws` / `do-catch` | ⬜ | — | |
-| Inheritance, `override`, `super` | ⬜ | — | single-level classes only |
+| `protocol`, requirements, `extension` | ✅ | 8 | defaults from `extension P`, merged once for the whole toolchain |
+| `associatedtype` | 🟡 | 8 | the name resolves; nothing constrains it |
+| `inout` parameters | ✅ | 8 | the same projection `@Binding` uses |
+| Generics (`<T>`, constraints, `where`) | 🟡 | 8 | **erased** — parsed and resolvable, never enforced |
+| `throws` / `try` / `try?` / `try!` / `do-catch` | ✅ | 8 | clauses match in order; an unmatched throw keeps travelling |
+| Inheritance, `override`, `super` | ✅ | 8 | `super` resolves against the type that *declared* the method |
+| `async` / `await` / `Task { }` | 🟡 | 8 | runs synchronously and in order; nothing suspends |
+| `Task.sleep` / `Task.yield` | 🟡 | 8 | return immediately — see below |
+| `typealias`, `subscript`, `operator` declarations | ⬜ | — | |
+| `actor`, `@Sendable`, structured concurrency | ⬜ | — | needs suspension the interpreter does not have |
 
 ## Known approximations
 
@@ -263,7 +274,18 @@ Listed in the exported README so nothing is a surprise on the Mac:
 7. **Transitions are entry only.** Animating a view *out* means keeping it alive after the state
    says it is gone, which needs the renderer to own a shadow copy of the tree. A half-built version
    of that is worse than none: a view that lingers is a preview telling a lie.
-8. **Performance** — the interpreter is far slower than compiled Swift; do not judge frame rates.
+8. **Concurrency does not suspend.** One rule covers all of it: everything async runs immediately
+   and in order. `await` is transparent, an `async` function runs like any other, `Task { … }` runs
+   its body where it is written, and `Task.sleep` returns at once. The alternatives are worse in a
+   way that is hard to see up front — deferring a `Task` body, or splitting one at a `sleep`, needs
+   suspension the interpreter does not have, and a half-built version would make ordering depend on
+   which special case a program happened to hit. One rule that is always true beats several that are
+   usually true.
+9. **Generics are erased.** Parameter names resolve and constraints are recorded; nothing is
+   substituted and no constraint is enforced. A dynamically typed interpreter carries the real value
+   at runtime whatever the annotation said, and constraint checking is what the export hands to a
+   real compiler.
+10. **Performance** — the interpreter is far slower than compiled Swift; do not judge frame rates.
 
 ## The strictness pass (R5)
 

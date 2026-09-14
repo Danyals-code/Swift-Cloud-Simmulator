@@ -52,8 +52,8 @@ swiftui-web-studio/
 │     ├─ components/              editor, file tree, device chrome, inspector, console
 │     └─ workers/                 worker entry that wires the packages together
 ├─ packages/
-│  ├─ swift-syntax/               lexer, parser, AST, source ranges, incremental reparse, printer
-│  ├─ swift-sema/                 name resolution, scopes, type checker, diagnostics, completions
+│  ├─ swift-syntax/               lexer, parser, AST, source ranges, conformance merge, printer
+│  ├─ swift-sema/                 name resolution, scopes, diagnostics, strictness lint, symbol index
 │  ├─ swift-runtime/              interpreter, value model, stdlib shims, async scheduler
 │  ├─ swiftui-runtime/            View protocol, ViewBuilder, modifiers, state/observation, identity
 │  ├─ swiftui-layout/             proposal/response layout engine + text metrics client
@@ -77,11 +77,16 @@ Node and, later, reused headlessly (CI conformance runs, a CLI, a VS Code extens
 source text
    │  lexer         → Token[]  (trivia preserved: comments + whitespace attached to tokens)
    │  parser        → AST      (every node carries a SourceRange; error nodes are first-class)
+   │  conformance   → the members each type actually has, merged across
+   │                  extensions, protocol defaults and superclasses (§4.4)
    │  binder        → Scope tree, symbol table, module-level declarations
-   │  type checker  → TypedAST (each expression annotated with a resolved Type)
+   │  checker       → Diagnostic[] + SemanticModel (types, properties, entry point)
    ▼
-TypedAST + Diagnostic[]
+SemanticModel + Diagnostic[]
 ```
+
+*As built, the last stage is a name resolver rather than the `TypedAST` the plan called for — see
+§4.3 for what that means and why.*
 
 **Error recovery is a requirement, not a nicety.** The user is mid-keystroke most of the time. The
 parser inserts `ErrorNode`s and resynchronises at statement and declaration boundaries so a single
@@ -127,6 +132,33 @@ Deliberately a *simplified bidirectional* checker, not Swift's full constraint s
 - Protocol witness tables built at bind time; `some View` treated as an opaque box over the concrete
   type recorded at the return site.
 
+**What Phase 8 actually built is less than this, deliberately.** There is no constraint solver and
+no witness table: conformance is a *syntactic* merge (§4.4), and generics are erased with their
+constraints recorded and never enforced. Both follow from gate 4 — a false positive is worse than a
+missed error — and from the fact that the export hands the user's exact source to a real compiler,
+which is where type checking belongs. The checker reports what it is certain of: a name that
+resolves nowhere, a real SwiftUI construct the preview cannot draw, an entry-point problem.
+
+### 4.4 The conformance merge (`collectConformance`)
+
+Once `extension` exists, a declaration no longer knows all of its own members — they may be written
+in the type, in any number of extensions, in a protocol it conforms to, or in a superclass. The
+merge happens once, in `swift-syntax`, because `swift-sema` and `swift-runtime` are *sibling*
+packages: anything either derived privately would drift, and "what members does `Card` have?" is a
+question they must never answer differently.
+
+Two orderings, and conflating them is a bug that took a test to find:
+
+- **Precedence** — own beats extension beats protocol default beats inherited.
+- **Emission** — declaration order: superclass, then the type's own body, then what was added around
+  it. Stored properties initialise in this order, so a body written in an extension must not come
+  before the property it reads.
+
+The merge also records *which type declared each member*, keyed on the declaration node. Only `super`
+needs that, and only `super` cannot be written without it: `super.speak()` means "start above the
+type that declared the method now running", which is a fact about the source and not about the
+receiver. They agree at two levels of inheritance and disagree at three.
+
 The checker's job is to catch the mistakes people actually make (wrong type passed, missing
 argument, unknown member, missing conformance) and to power completions. It is explicitly allowed to
 be more permissive than swiftc — R5 covers the drift, and the strictness lint pass flags the gap.
@@ -164,13 +196,24 @@ A tree-walking interpreter over the TypedAST, with:
 - Traps (`nil` force-unwrap, out-of-range index, overflow, failed `as!`) raised as a `SwiftTrap`
   carrying the source range, surfaced as the red overlay in FR-6.4.
 
-### 5.3 Concurrency
+### 5.3 Concurrency — one rule, and it is a limitation
 
-`async`/`await` is implemented by making the interpreter's evaluator a generator: an `await` yields
-a continuation the scheduler resumes when the awaited job settles. A single cooperative queue plus a
-`MainActor` marker is enough for realistic SwiftUI code (`.task {}`, `Task.sleep`, async data
-loading) without implementing real actor isolation. Structured concurrency cancellation is modelled
-as a cancellation flag checked at suspension points.
+**Built (Phase 8d): everything async runs immediately and in order.** `await` is transparent, an
+`async` function runs like any other, `Task { … }` and `MainActor.run { … }` run their bodies where
+they are written, and `Task.sleep` and `Task.yield` return at once.
+
+The plan above — a generator-based evaluator whose `await` yields a continuation for a cooperative
+scheduler to resume — was not built, and the reason is worth recording rather than leaving as a
+silent gap. Turning the evaluator into a generator means every one of the forty-odd `evaluate` and
+`execute` paths becomes a generator, and every caller of them too; a suspension point missed in one
+branch is a hang, which Phase 8b has already demonstrated is the failure mode this project can least
+afford.
+
+The middle options are worse than either end. Deferring a `Task` body to the next pass, or splitting
+one at its first `Task.sleep`, makes ordering depend on which special case a program happens to hit
+— several rules that are usually true, where one rule that is always true can at least be stated in
+a sentence and tested. It is stated in the coverage matrix under **Known approximations**, and a
+`Task.sleep` that returns immediately is visible rather than subtly wrong.
 
 ## 6. SwiftUI runtime (`swiftui-runtime`)
 
