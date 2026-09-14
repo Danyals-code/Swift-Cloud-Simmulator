@@ -4,7 +4,7 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after Phase 8's language pass: **95 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
+Last updated after Phase 9: **96 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
 
 Anything not listed renders a labelled placeholder box and is counted by the coverage telemetry
 (FR-4.11, NFR-6). Those counts are visible in the studio's **Coverage** panel and never leave the
@@ -193,7 +193,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Animatable` / `animatableData` | ⬜ | — | |
 | Custom `ViewModifier` + `.modifier(…)` | ✅ | 8 | `body(content:)` is called with the view as a value |
 | `extension View { func … }` | ✅ | 8 | the idiom for a reusable modifier chain |
-| `ButtonStyle` / `LabelStyle` / `ToggleStyle` | ⬜ | — | the style has to travel down the environment |
+| Custom `ButtonStyle` | ✅ | 9 | applies to every button below it, not only the one it is written on |
+| Custom `ToggleStyle` / `LabelStyle` | ⬜ | — | the same mechanism, but a Toggle's configuration carries a *binding* |
 
 ## Environment and app structure
 

@@ -359,6 +359,54 @@ structured concurrency.
 
 ---
 
+## Phase 9 — The deferred items that need no one else's servers — **done (2026-09-14)**
+
+Phase 8 closed with a short list of things marked "still unbuilt", and a separate list
+of Phase 7's à-la-carte items that each need a container host, an API key or an OAuth
+app. This phase is everything in the first list that could be finished without
+anything in the second.
+
+| | |
+| --- | --- |
+| **9a** | custom `ButtonStyle` |
+| **9b** | `.swiftpm`, `Package.swift` and `project.yml` exports |
+| **9c** | share links, carried in the URL |
+
+**9a — the resolver is the only traversal that sees the whole tree.** A style is not a
+modifier on the view it is written on: it applies to every `Button` *below* it, which
+is what makes one line at the top of a screen restyle all of them. So the resolver
+carries a stack of styles in scope rather than each button reading a modifier where it
+sits. The `Button` itself survives and only its label changes — its action, path and
+hit target are the button's *behaviour*, and a style describes appearance.
+
+**9b — three formats, three different questions.** `.swiftpm` is the only route from
+the browser to a real device that does not involve a Mac. `Package.swift` is for
+depending on the code. `project.yml` is for teams who would rather generate the Xcode
+project than commit it. Phase 5's gate 2 now applies across the format list rather
+than per format, so a format added later cannot opt out of "the bytes arrive
+unchanged" quietly.
+
+**9c — the local-only decision made share links easier, not harder.** Phase 0 recorded
+"no `/api/share`, no database, no accounts", which reads like a reason links could not
+exist. A link that needs a server needs an owner, a retention policy and a bill, and
+rots when any lapses; a link that carries its own payload needs none of them. The cost
+is a size limit, and the limit is set by chat clients rather than browsers.
+
+### What Phase 9 deliberately did not build
+
+Each of these was looked at and left, with the reason:
+
+| | Why |
+| --- | --- |
+| Custom `ToggleStyle` / `LabelStyle` | The same mechanism as `ButtonStyle`, except a Toggle's configuration carries a **binding** the style writes through. Half of that is worse than none. |
+| `Layout` protocol / `AnyLayout` | Needs a `Subviews` proxy and callbacks from `swiftui-layout` back into the interpreter — a real seam, and custom layout conformances are rare in app code. |
+| `PreferenceKey` | A value travelling *up* the tree needs a second pass and a re-render when a handler writes state. `GeometryReader` already covers most of what people reach for it for. |
+| `Animatable` | Interpolating an arbitrary value needs an animation system that owns the frames. Ours is CSS keyframes, deliberately. |
+
+The matrix moved to **96 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
+
+---
+
 ## Cross-cutting workstreams
 
 Running through every phase, not bolted on at the end:

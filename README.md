@@ -11,7 +11,7 @@ author.
   └──────────────────────────┘        └───────────────────────┘
                 │
                 ▼
-     Export ▸ MyApp.xcodeproj · MyApp.swiftpm · Package.swift · .zip · GitHub
+     Export ▸ MyApp.xcodeproj · MyApp.swiftpm · Package.swift · project.yml
 ```
 
 ## The one design principle everything follows
@@ -45,8 +45,9 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0-8 complete.** The studio parses, checks, runs and renders real Swift
-across multiple files, and exports a complete Xcode project.
+**Phases 0-9 complete.** The studio parses, checks, runs and renders real Swift
+across multiple files, exports to four project formats, and shares a project
+through a link that needs no server.
 
 What it handles now is most of the SwiftUI people actually write:
 
@@ -62,8 +63,8 @@ What it handles now is most of the SwiftUI people actually write:
   `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`.
 - **Drawing** — `Path`, `Canvas`, shapes with `.fill` and `.stroke`, gradients,
   materials, colour filters, `withAnimation` and transitions.
-- **Reuse** — custom `ViewModifier` and `extension View { func … }`, the two ways
-  a real codebase names a modifier chain.
+- **Reuse** — custom `ViewModifier`, `extension View { func … }` and custom
+  `ButtonStyle`: the three ways a real codebase names a look and applies it.
 - **The editor** — completion from the project's own declarations as well as
   SwiftUI's, go to definition, hover, and quick fixes that apply themselves.
 
@@ -72,11 +73,12 @@ is honest about the 🟡 rows as well as the ✅ ones.
 
 Three things are outstanding, and none of them is hidden:
 
-- **"Opens in Xcode and builds with zero edits" needs a Mac.** Everything
-  checkable without one is checked — the pbxproj parses, its object graph
-  resolves, and the bundle is structurally complete. See
+- **"Opens in Xcode and builds with zero edits" needs a Mac**, and `.swiftpm`
+  needs an iPad for the same reason. Everything checkable without them is checked
+  — the pbxproj parses, its object graph resolves, every bundle is structurally
+  complete, and each format carries the user's bytes unchanged. See
   [docs/06-VERTICAL-SLICE.md](docs/06-VERTICAL-SLICE.md) section 4.12.
-- **The conformance corpus is 15 projects, not the 100 Phase 6's first gate asks
+- **The conformance corpus is 17 projects, not the 100 Phase 6's first gate asks
   for.** Eighty-five more authored in a single pass would be padding; the corpus
   grows as real projects arrive. See section 4.15.
 - **Coverage telemetry has no data**, because nothing has shipped and nothing is
@@ -88,21 +90,23 @@ the matrix rather than discovered: **concurrency does not suspend** — everythi
 async runs immediately and in order — and **generics are erased**, so constraints
 are recorded and never enforced.
 
-Not built: `.swiftpm` export, share links, `ButtonStyle`, `PreferenceKey`, and the
-remaining ⬜ rows in the coverage matrix — each marked "—" rather than a phase,
-because a phase number is a promise.
+Not built: custom `ToggleStyle`, the `Layout` protocol, `PreferenceKey`,
+`Animatable`, and the remaining ⬜ rows in the coverage matrix — each marked "—"
+rather than a phase, because a phase number is a promise, and each with its reason
+recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-build).
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 936 passing |
-| End-to-end | 43 / 43 passing |
+| Unit tests | 1015 passing |
+| End-to-end | 47 / 47 passing |
 | Templates rendering with zero placeholders | 17 / 17 |
-| Coverage matrix | 95 ✅ · 39 🟡 · 29 ⬜ · 3 ✗ |
+| Export formats | 4 — .xcodeproj, .swiftpm, Package.swift, project.yml |
+| Coverage matrix | 96 ✅ · 39 🟡 · 29 ⬜ · 3 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 397 KB gzipped / 450 KB budget (88% — worth watching) |
+| Client JS | 400 KB gzipped / 450 KB budget (89% — worth watching) |
 
 Next: [Phase 7's à-la-carte items](docs/03-ROADMAP.md) — a real `swiftc`
 verification service, accounts, AI codegen, GitHub export — each of which needs

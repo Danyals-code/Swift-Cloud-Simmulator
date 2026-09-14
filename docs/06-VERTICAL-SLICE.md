@@ -502,7 +502,7 @@ MyApp/
 | --- | --- | --- |
 | 1 | Opens in Xcode and builds with zero edits | **Not verified — needs a Mac.** See 4.12 |
 | 2 | Re-exporting an unchanged project is byte-identical | **Passing** |
-| 3 | `.swiftpm` opens in Swift Playgrounds | Deferred — outside the slice |
+| 3 | `.swiftpm` opens in Swift Playgrounds | **Built in Phase 9b.** Generated and tested; whether Swift Playgrounds accepts the manifest needs an iPad, like gate 1 needs a Mac |
 | 4 | Every `.swift` file is byte-identical to the editor buffer | **Passing** — 28 hostile-content cases |
 | 5 | A share URL round-trips a project | Deferred — outside the slice |
 
@@ -784,7 +784,7 @@ Listed so it is a choice rather than an oversight: multi-file projects, dark mod
 navigation, lists, sheets, animation, gestures beyond tap, images and SF Symbols, `@Binding` and
 `ObservableObject`, completions, the view inspector, templates, share links, `.swiftpm` export.
 
-*As of Phase 8, everything in that list has landed except share links and `.swiftpm` export.*
+*As of Phase 9, everything in that list has landed.*
 
 Each is a phase in [03-ROADMAP.md](03-ROADMAP.md) and each is additive on top of the spine the slice
 builds.
