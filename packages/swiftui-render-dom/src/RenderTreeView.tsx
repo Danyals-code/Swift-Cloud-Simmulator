@@ -127,29 +127,69 @@ function RenderNodeView({
   )
 }
 
+/**
+ * Paints text.
+ *
+ * When the layout engine resolved line boxes, each line is positioned absolutely at
+ * the offset the engine computed. Letting CSS re-wrap instead would mean two
+ * different algorithms deciding where the breaks go — and the frame the engine
+ * reported would no longer match the text actually drawn in it.
+ */
 function TextContent({ node }: { node: RenderNode }) {
   const payload = node.text!
   const first = payload.runs[0]
+  if (!first) return null
+
+  const justify =
+    payload.alignment === 'center'
+      ? 'center'
+      : payload.alignment === 'trailing'
+        ? 'flex-end'
+        : 'flex-start'
+
+  const typography: CSSProperties = {
+    fontFamily: first.font.family,
+    fontSize: first.font.size,
+    fontWeight: first.font.weight,
+    fontStyle: first.font.italic ? 'italic' : 'normal',
+    lineHeight: `${first.font.lineHeight}px`,
+    color: cssColor(first.color),
+    whiteSpace: 'pre',
+  }
+
+  if (payload.lines && payload.lines.length > 0) {
+    return (
+      <>
+        {payload.lines.map((line, i) => (
+          <div
+            key={i}
+            style={{
+              ...typography,
+              position: 'absolute',
+              left: 0,
+              top: line.origin.y,
+              width: '100%',
+              height: first.font.lineHeight,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: justify,
+            }}
+          >
+            {line.text}
+          </div>
+        ))}
+      </>
+    )
+  }
 
   return (
     <div
       style={{
+        ...typography,
         display: 'flex',
         height: '100%',
         alignItems: 'center',
-        justifyContent:
-          payload.alignment === 'center'
-            ? 'center'
-            : payload.alignment === 'trailing'
-              ? 'flex-end'
-              : 'flex-start',
-        // Phase 3 fills in resolved line boxes; until then the browser wraps and
-        // whiteSpace:pre keeps the runs from collapsing their spacing.
-        whiteSpace: 'pre',
-        fontFamily: first?.font.family,
-        fontSize: first?.font.size,
-        fontWeight: first?.font.weight,
-        lineHeight: `${first?.font.lineHeight ?? 0}px`,
+        justifyContent: justify,
       }}
     >
       {payload.runs.map((run, i) => (

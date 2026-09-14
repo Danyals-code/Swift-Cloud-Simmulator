@@ -310,6 +310,87 @@ Verified: **11/11 packages typecheck**, **lint clean**, **299 unit tests**, **16
   and then re-evaluating the expression for its implicit return doubles every side effect
   in it.
 
+## 4.6 Phase 3 task list — **complete**
+
+Built and verified 2026-09-14. The preview is now the app.
+
+### Layout engine (`swiftui-layout`)
+- [x] Proposal/response protocol: `ProposedSize` -> `sizeThatFits` -> `place`
+- [x] Stack algorithm measuring children **least-flexible-first** — the reason `Spacer` works
+- [x] `VStack` `HStack` `ZStack` `Spacer`, with spacing and alignment
+- [x] Modifiers as *nesting* rather than a flat list: `frame` `padding` `background`
+      `font` `foregroundStyle` `opacity` `cornerRadius`
+- [x] `.frame(maxWidth:.infinity)` changing the proposal passed down, not the response passed up
+- [x] Inherited environment for font, colour, opacity and corner radius
+- [x] Synchronous text measurement with grapheme-aware greedy line breaking
+- [x] Memoised `(element, proposal, font)` sizing, shared by the measure and place passes
+- [x] Flat `PlacedNode` output with absolute frames
+
+### Text metrics
+- [x] Built-in advance-width estimates, so layout is deterministic in tests and in Node
+- [x] Real per-weight measurement on the main thread, handed to the worker at startup
+- [x] Waits for `document.fonts.ready`, so a fallback face is never baked in
+
+### View identity and state (`swiftui-runtime`)
+- [x] `IdentityPath`: parent identity + type name + sibling ordinal
+- [x] `StateStore`: `@State` boxes keyed by identity, outliving the view structs
+- [x] View structs recreated every pass, exactly as in SwiftUI
+- [x] State destroyed when a view leaves the tree, fresh when it returns
+- [x] State carried across edits unless the property's *initialiser* changed
+
+### Rendering
+- [x] `ViewValue` -> `LayoutElement` -> `PlacedNode` -> `RenderTree`
+- [x] iOS text styles and system colours resolved from tokens
+- [x] Engine-resolved line boxes painted directly, so CSS never re-wraps
+- [x] Hit targets covering a Button's full padded area
+- [x] Unimplemented views rendering a labelled placeholder naming the phase
+
+### Phase 3 gate
+
+| # | Gate | Result |
+| --- | --- | --- |
+| 1 | A counter app increments in the preview on tap | **Passing** — verified in the browser and in e2e |
+| 2 | `HStack { Text; Spacer; Text }` places exactly as SwiftUI does | **Passing** — buttons land at x=40 and end at x=353 on a 393pt screen |
+| 3 | `.padding().background()` differs from `.background().padding()` | **Passing** — falls out of modifier nesting |
+| 4 | `GeometryReader` reports the correct size | Deferred — outside the slice |
+| 5 | An edit repaints under 250 ms without resetting unrelated `@State` | **Passing** |
+| 6 | An `ObservableObject` shared by two siblings updates both | Deferred — outside the slice |
+| 7 | NFR-1 interaction budgets met | **Passing** — see below |
+
+Measured, full pipeline (parse, check, evaluate, lay out, render):
+
+| Workload | Budget | Actual |
+| --- | --- | --- |
+| 500-line project | 120 ms | **1.6 ms** |
+| 2,000-line project | 120 ms | **3.2 ms** |
+| 200-row stack | 120 ms | **5.9 ms** |
+| Tap to repaint | 32 ms | **0.2 ms** |
+
+Verified: **11/11 packages typecheck**, **lint clean**, **351 unit tests**, **16/16 e2e**,
+**347 KB gzipped** against a 450 KB budget.
+
+### 4.7 — Deviations and findings
+
+| Planned | Actual | Why |
+| --- | --- | --- |
+| Async text measurement via a main-thread port | **Synchronous, against a measured table** | An async port infects every layout call site and causes a visible reflow on the first frame. Measuring the real font once at startup and shipping the advance table to the worker keeps layout synchronous *and* accurate. |
+| Root always placed at the bounds origin | **Alignment is a parameter** | SwiftUI centres root content in its window, but that is a *window* policy, not a layout one. Making it a parameter keeps the engine neutral and the 40 golden tests readable. |
+| Modifiers as an ordered list on a view | **Nested wrappers** | A flat list cannot represent the difference between `.padding().background()` and `.background().padding()` at all. Nesting makes gate 3 fall out for free. |
+| `@State` on one long-lived root instance (Phase 2) | **Identity-keyed boxes** | The Phase 2 model could not give two sibling `Counter()` views independent state — they shared one struct and moved together. |
+
+**Found by building it:**
+
+- The `Spacer` case is not about `Spacer` at all: it is about *measurement order*.
+  Measuring children in source order lets the first greedy child swallow the stack.
+  Ordering by flexibility — least flexible first — is what makes the whole thing work,
+  and it is a four-line sort.
+- `Infinity` cannot be used as the unbounded proposal. The moment a greedy child
+  consumes it, `remaining / childrenLeft` becomes `NaN`, and one `NaN` silently
+  poisons every frame downstream. A large finite value keeps the arithmetic total.
+- Summing per-character advances ignores kerning. For Latin UI text the error is well
+  under 1% of line width and never accumulates across lines, because each line
+  re-measures from its own characters.
+
 ## 5. Slice definition of done
 
 1. The reference app in §1 renders in the device frame.

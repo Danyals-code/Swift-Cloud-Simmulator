@@ -4,6 +4,10 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
+Last updated after Phase 3. 🟡 entries: `.background` takes colours and views but not materials;
+`.font` takes text styles but not `.bold`/`.italic`/custom weights; `.cornerRadius` rounds fills but
+does not yet clip arbitrary content.
+
 Anything not listed renders a labelled placeholder box and logs a telemetry event (FR-4.11, NFR-6).
 Those telemetry counts are what decide what gets built next.
 
@@ -11,10 +15,10 @@ Those telemetry counts are what decide what gets built next.
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `VStack` / `HStack` / `ZStack` | ⬜ | 3 | alignment, spacing |
-| `Spacer` | ⬜ | 3 | minLength; the canonical test of the layout engine |
+| `VStack` / `HStack` / `ZStack` | ✅ | 3 | alignment, spacing |
+| `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
 | `Divider` | ⬜ | 3 | |
-| `Group` | ⬜ | 3 | |
+| `Group` | ✅ | 3 | |
 | `ForEach` | ⬜ | 3 | ranges, `Identifiable`, `id:` key paths |
 | `ScrollView` | ⬜ | 3 | axes, indicators, `ScrollViewReader` in 6 |
 | `GeometryReader` | ⬜ | 3 | |
@@ -29,7 +33,7 @@ Those telemetry counts are what decide what gets built next.
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | ⬜ | 3 | interpolation, concatenation, `Date`/number formatting in 6 |
+| `Text` | ✅ | 3 | interpolation, concatenation, `Date`/number formatting in 6 |
 | `Label` | ⬜ | 3 | |
 | `Image` | ⬜ | 3 | SF Symbol names mapped to an open icon set (R2); asset images in 4 |
 | `AsyncImage` | ⬜ | 6 | |
@@ -46,7 +50,7 @@ Those telemetry counts are what decide what gets built next.
 
 | View | Status | Phase |
 | --- | --- | --- |
-| `Button` | ⬜ | 3 |
+| `Button` | ✅ | 3 |
 | `Toggle` | ⬜ | 3 |
 | `Slider` | ⬜ | 3 |
 | `Stepper` | ⬜ | 3 |
@@ -87,9 +91,9 @@ Those telemetry counts are what decide what gets built next.
 
 | Modifier | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `.frame(width:height:alignment:)` | ⬜ | 3 | |
-| `.frame(minWidth:idealWidth:maxWidth:...)` | ⬜ | 3 | the flexible form; `.infinity` handling |
-| `.padding` | ⬜ | 3 | all edge-set forms |
+| `.frame(width:height:alignment:)` | ✅ | 3 | |
+| `.frame(minWidth:idealWidth:maxWidth:...)` | ✅ | 3 | the flexible form; `.infinity` handling |
+| `.padding` | ✅ | 3 | all edge-set forms |
 | `.fixedSize` | ⬜ | 3 | |
 | `.layoutPriority` | ⬜ | 3 | |
 | `.offset` / `.position` | ⬜ | 3 | |
@@ -102,12 +106,12 @@ Those telemetry counts are what decide what gets built next.
 
 | Modifier | Status | Phase |
 | --- | --- | --- |
-| `.foregroundStyle` / `.foregroundColor` | ⬜ | 3 |
-| `.background` (colour, shape, view, material) | ⬜ | 3 |
+| `.foregroundStyle` / `.foregroundColor` | ✅ | 3 |
+| `.background` (colour, shape, view, material) | 🟡 | 3 |
 | `.overlay` | ⬜ | 3 |
-| `.font` / `.bold` / `.italic` / `.fontWeight` / `.fontDesign` | ⬜ | 3 |
-| `.opacity` | ⬜ | 3 |
-| `.cornerRadius` / `.clipShape` / `.clipped` | ⬜ | 3 |
+| `.font` / `.bold` / `.italic` / `.fontWeight` / `.fontDesign` | 🟡 | 3 |
+| `.opacity` | ✅ | 3 |
+| `.cornerRadius` / `.clipShape` / `.clipped` | 🟡 | 3 |
 | `.shadow` | ⬜ | 3 |
 | `.border` | ⬜ | 3 |
 | `.rotationEffect` / `.scaleEffect` | ⬜ | 3 |
@@ -121,10 +125,10 @@ Those telemetry counts are what decide what gets built next.
 
 | Item | Status | Phase |
 | --- | --- | --- |
-| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ⬜ | 3 |
+| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 |
 | `Path` (custom) | ⬜ | 6 |
 | `.fill` / `.stroke` / `.strokeBorder` / `trim` | ⬜ | 3/6 |
-| `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ⬜ | 3 |
+| `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 |
 | Dark-mode colour resolution | ⬜ | 3 |
 | `LinearGradient` / `RadialGradient` / `AngularGradient` | ⬜ | 3 |
 | `Material` (`.ultraThinMaterial` etc.) | 🟡 | 6 | CSS `backdrop-filter` approximation |
@@ -161,9 +165,9 @@ Those telemetry counts are what decide what gets built next.
 
 | Feature | Status | Phase |
 | --- | --- | --- |
-| `App` / `@main` / `WindowGroup` | ⬜ | 3 |
+| `App` / `@main` / `WindowGroup` | ✅ | 3 |
 | `Scene` phases | ⬜ | 6 |
-| `.environment` / `.environmentObject` | ⬜ | 3 |
+| `.environment` / `.environmentObject` | ⬜ | 4 |
 | `colorScheme`, `dynamicTypeSize`, `locale`, `layoutDirection` | ⬜ | 4 |
 | `horizontalSizeClass` / `verticalSizeClass` | ⬜ | 6 |
 | `dismiss`, `openURL` | ⬜ | 6 |

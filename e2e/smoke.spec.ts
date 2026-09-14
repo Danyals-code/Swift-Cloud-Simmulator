@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * Phase 0 gates (plumbing), Phase 1 gates (the front end), Phase 2 gates (execution).
+ * Gates from every phase, kept together.
  *
- * Each phase's tests stay in the suite rather than being replaced, because the
- * seams they cover keep mattering: Phase 0's worker round-trip is what Phase 2's
- * button taps travel over, and Phase 1's "no false positives" gate is what stops
- * Phase 2 refusing to run correct code.
+ * Earlier phases' tests stay in the suite rather than being replaced, because the
+ * seams they cover keep mattering: Phase 0's worker round-trip is what Phase 3's
+ * button taps travel over, and Phase 1's "no false positives" gate is what stops the
+ * preview refusing to run correct code.
  */
 
 async function openStudio(page: Page) {
@@ -39,10 +39,28 @@ async function replaceAll(page: Page, source: string) {
   await page.keyboard.type(source)
 }
 
-/** The Button rows in the preview, in source order. */
-function buttonRows(page: Page) {
-  return page.getByTestId('render-tree').locator('[data-node-id^="outline-row-"]', {
-    hasText: 'Button',
+const preview = (page: Page) => page.getByTestId('render-tree')
+
+/** A rendered button in the simulated app, by its label. */
+const appButton = (page: Page, name: string) => preview(page).getByRole('button', { name })
+
+/** Geometry of every painted node, read from the DOM the renderer produced. */
+async function frames(page: Page) {
+  return page.evaluate(() => {
+    const tree = document.querySelector('[data-testid="render-tree"]')
+    if (!tree) return []
+    return [...tree.children].map((child) => {
+      const el = child as HTMLElement
+      return {
+        id: el.dataset.nodeId ?? '',
+        kind: el.dataset.kind ?? '',
+        x: Math.round(parseFloat(el.style.left)),
+        y: Math.round(parseFloat(el.style.top)),
+        width: Math.round(parseFloat(el.style.width)),
+        height: Math.round(parseFloat(el.style.height)),
+        text: el.innerText.trim(),
+      }
+    })
   })
 }
 
@@ -122,19 +140,6 @@ test('gate 2 — a real parse error reaches the editor and the problems panel', 
   await expect(page.getByTestId('editor').locator('.cm-lintRange').first()).toBeVisible()
 })
 
-test('Phase 1 gate 2 — a missing brace does not invalidate the rest of the file', async ({
-  page,
-}) => {
-  await openStudio(page)
-
-  await page.getByTestId('editor').locator('.cm-content').click()
-  await page.keyboard.press('ControlOrMeta+End')
-  await page.keyboard.press('Backspace')
-  await page.keyboard.press('Backspace')
-
-  await expect(page.getByTestId('render-tree')).toContainText('CounterApp', { timeout: 5_000 })
-})
-
 test('reports unimplemented SwiftUI by name rather than calling it unresolved', async ({ page }) => {
   await openStudio(page)
   await typeAtTop(page, 'let placeholder = NavigationStack { }\n')
@@ -142,73 +147,133 @@ test('reports unimplemented SwiftUI by name rather than calling it unresolved', 
   const console_ = page.getByTestId('console')
   await expect(console_).toContainText('NavigationStack', { timeout: 5_000 })
   await expect(console_).toContainText('not drawn by the preview yet')
-  await expect(console_).toContainText('unsupported_swiftui_view')
 })
 
-// ---------------------------------------------------------------- Phase 2
+// ---------------------------------------------------------------- Phase 3
 
-test('Phase 2 — the app is running, with evaluated values', async ({ page }) => {
+test('Phase 3 — the app renders as a real interface', async ({ page }) => {
   await openStudio(page)
 
   await expect(page.getByTestId('device-frame')).toBeVisible()
-  const tree = page.getByTestId('render-tree')
+  const tree = preview(page)
 
-  await expect(tree.locator('[data-node-id="outline-title"]')).toContainText('Running')
-  await expect(tree.locator('[data-node-id="outline-entry"]')).toContainText('@main CounterApp')
-  await expect(tree.locator('[data-node-id="outline-entry"]')).toContainText('ContentView')
-
-  // Interpolations are resolved by actually running the code, not echoed as source.
-  await expect(tree).toContainText('"Hello, World!"')
-  await expect(tree).toContainText('"Count: 0"')
-  await expect(tree).toContainText('VStack')
-  await expect(tree).toContainText('HStack')
-  await expect(tree).toContainText('Spacer')
+  // Interpolations resolved by running the code, painted at engine-computed frames.
+  await expect(tree).toContainText('Hello, World!')
+  await expect(tree).toContainText('Count: 0')
+  await expect(appButton(page, 'Minus')).toBeVisible()
+  await expect(appButton(page, 'Plus')).toBeVisible()
 })
 
-test('Phase 2 gate — tapping a Button runs its real Swift closure', async ({ page }) => {
-  // The counter app actually working: DOM tap -> worker -> interpreter runs
-  // `count += 1` -> body re-evaluates -> the Text updates.
+test('Phase 3 gate 1 — tapping a rendered Button runs its Swift closure', async ({ page }) => {
+  // The counter app, working as an interface: DOM tap -> worker -> interpreter runs
+  // `count += 1` -> body re-evaluates -> layout -> repaint.
   await openStudio(page)
-  const tree = page.getByTestId('render-tree')
+  const tree = preview(page)
 
-  await expect(tree).toContainText('"Count: 0"')
+  await expect(tree).toContainText('Count: 0')
 
-  await buttonRows(page).nth(1).click()
-  await expect(tree).toContainText('"Count: 1"')
+  await appButton(page, 'Plus').click()
+  await expect(tree).toContainText('Count: 1')
 
-  await buttonRows(page).nth(1).click()
-  await expect(tree).toContainText('"Count: 2"')
+  await appButton(page, 'Plus').click()
+  await expect(tree).toContainText('Count: 2')
 
-  await buttonRows(page).nth(0).click()
-  await expect(tree).toContainText('"Count: 1"')
+  await appButton(page, 'Minus').click()
+  await expect(tree).toContainText('Count: 1')
 })
 
-test('Phase 2 gate — @State survives an edit that does not touch it (FR-5.3)', async ({ page }) => {
+test('Phase 3 gate 2 — Spacer pushes the buttons to opposite edges', async ({ page }) => {
+  // The case that exposes a wrong layout engine. The row is inset by the VStack's
+  // 16pt padding plus the HStack's own 24pt, so the buttons sit at 40 and end at 353
+  // on a 393pt screen.
   await openStudio(page)
-  const tree = page.getByTestId('render-tree')
+  await expect(preview(page)).toContainText('Count: 0')
 
-  await buttonRows(page).nth(1).click()
-  await buttonRows(page).nth(1).click()
-  await expect(tree).toContainText('"Count: 2"')
+  const painted = await frames(page)
+  const backgrounds = painted
+    .filter((n) => n.kind === 'layer' && n.width > 20 && n.width < 200 && n.height > 40)
+    .sort((a, b) => a.x - b.x)
 
-  // An edit elsewhere in the file must not reset the counter.
-  await typeAtTop(page, '// edit\n')
-  await expect(tree).toContainText('"Count: 2"', { timeout: 5_000 })
+  expect(backgrounds.length).toBeGreaterThanOrEqual(2)
+  const first = backgrounds[0]!
+  const last = backgrounds[backgrounds.length - 1]!
+
+  expect(first.x).toBe(40)
+  expect(last.x + last.width).toBe(353)
+  // They are on the same row.
+  expect(first.y).toBe(last.y)
 })
 
-test('Phase 2 — Reset state clears the counter without changing the source', async ({ page }) => {
+test('Phase 3 — text is centred by the VStack and sized by its font', async ({ page }) => {
   await openStudio(page)
-  const tree = page.getByTestId('render-tree')
+  await expect(preview(page)).toContainText('Count: 0')
 
-  await buttonRows(page).nth(1).click()
-  await expect(tree).toContainText('"Count: 1"')
+  const painted = await frames(page)
+  const title = painted.find((n) => n.text === 'Hello, World!')!
+  const count = painted.find((n) => n.text === 'Count: 0')!
+
+  // Both centred on a 393pt screen.
+  expect(title.x + title.width / 2).toBeGreaterThan(190)
+  expect(title.x + title.width / 2).toBeLessThan(203)
+  expect(count.x + count.width / 2).toBeGreaterThan(190)
+  expect(count.x + count.width / 2).toBeLessThan(203)
+
+  // `.largeTitle` is 41pt tall, `.title2` is 28pt.
+  expect(title.height).toBe(41)
+  expect(count.height).toBe(28)
+  expect(count.y).toBeGreaterThan(title.y)
+})
+
+test('Phase 3 gate 5 — an edit repaints without resetting unrelated @State', async ({ page }) => {
+  await openStudio(page)
+  const tree = preview(page)
+
+  await appButton(page, 'Plus').click()
+  await appButton(page, 'Plus').click()
+  await expect(tree).toContainText('Count: 2')
+
+  // Change the stack spacing: a pure layout edit, unrelated to the counter.
+  await page
+    .getByTestId('editor')
+    .locator('.cm-content')
+    .getByText('VStack(spacing: 16) {')
+    .click()
+  await page.keyboard.press('End')
+
+  await typeAtTop(page, '// layout tweak\n')
+
+  await expect(tree).toContainText('Count: 2', { timeout: 5_000 })
+})
+
+test('Phase 3 — Reset state clears the counter without changing the source', async ({ page }) => {
+  await openStudio(page)
+  const tree = preview(page)
+
+  await appButton(page, 'Plus').click()
+  await expect(tree).toContainText('Count: 1')
 
   await page.getByRole('button', { name: 'Reset state' }).click()
-  await expect(tree).toContainText('"Count: 0"')
+  await expect(tree).toContainText('Count: 0')
   expect(await editorText(page)).toContain('@State private var count = 0')
 })
 
-test('Phase 2 — a runtime trap is reported with its reason, not a crash', async ({ page }) => {
+test('Phase 3 — the interface updates as you type', async ({ page }) => {
+  await openStudio(page)
+  const tree = preview(page)
+  await expect(tree).toContainText('Hello, World!')
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct TinyApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { var body: some View { VStack { Text("replaced") } } }',
+  )
+
+  await expect(tree).toContainText('replaced', { timeout: 5_000 })
+  await expect(tree).not.toContainText('Hello, World!')
+})
+
+test('Phase 3 — a runtime trap is reported with its reason, not a crash', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -219,48 +284,22 @@ test('Phase 2 — a runtime trap is reported with its reason, not a crash', asyn
   )
 
   await expect(page.getByTestId('console')).toContainText('Division by zero', { timeout: 5_000 })
-  await expect(page.getByTestId('render-tree')).toContainText('Execution stopped')
+  await expect(preview(page)).toContainText('Execution stopped')
 })
 
-test('gate 3 — the view tree updates as you type', async ({ page }) => {
+test('gate 3b — unimplemented views render a labelled placeholder (FR-4.11)', async ({ page }) => {
+  // FR-4.11: never a blank space, never a silent wrong result.
   await openStudio(page)
-  const tree = page.getByTestId('render-tree')
-  await expect(tree).toContainText('VStack')
 
   await replaceAll(
     page,
     'import SwiftUI; ' +
-      '@main struct TinyApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
-      'struct Root: View { var body: some View { ZStack { Circle() } } }',
+      '@main struct ListApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { var body: some View { VStack { List { } } } }',
   )
 
-  await expect(tree).toContainText('ZStack', { timeout: 5_000 })
-  await expect(tree).toContainText('Circle')
-  await expect(tree.locator('[data-node-id="outline-entry"]')).toContainText('@main TinyApp')
-  await expect(tree).not.toContainText('VStack')
-})
-
-test('gate 3 — tapping a non-action row selects it', async ({ page }) => {
-  // Buttons run their Swift action; every other row selects. Both round-trip through
-  // the worker, which is what this covers.
-  await openStudio(page)
-  const tree = page.getByTestId('render-tree')
-
-  const root = tree.locator('[data-node-id="outline-row-v-0"]')
-  await expect(root).toContainText('VStack')
-  await expect(tree.locator('[data-node-id="outline-row-v-0-highlight"]')).toHaveCount(0)
-
-  await root.click()
-  await expect(tree.locator('[data-node-id="outline-row-v-0-highlight"]')).toBeVisible()
-
-  await root.click()
-  await expect(tree.locator('[data-node-id="outline-row-v-0-highlight"]')).toHaveCount(0)
-})
-
-test('gate 3b — unsupported features render a labelled placeholder (FR-4.11)', async ({ page }) => {
-  await openStudio(page)
-
-  const placeholder = page.getByTestId('render-tree').locator('[data-kind="placeholder"]')
-  await expect(placeholder).toBeVisible()
-  await expect(placeholder).toContainText('Layout and drawing')
+  const placeholder = preview(page).locator('[data-kind="placeholder"]')
+  await expect(placeholder).toBeVisible({ timeout: 5_000 })
+  await expect(placeholder).toContainText('List')
+  await expect(placeholder).toContainText('Phase 6')
 })

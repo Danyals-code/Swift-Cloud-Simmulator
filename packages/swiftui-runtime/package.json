@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@studio/shared": "*",
+    "@studio/swift-runtime": "*",
     "@studio/swift-sema": "*",
-    "@studio/swift-syntax": "*"
+    "@studio/swift-syntax": "*",
+    "@studio/swiftui-layout": "*"
   }
 }

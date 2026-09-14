@@ -20,6 +20,18 @@ export interface CompileRequest {
   readonly files: readonly SourceFile[]
   /** logical point size of the target device, from sim-shell */
   readonly canvas: { readonly width: number; readonly height: number }
+  /**
+   * Device safe-area insets.
+   *
+   * This is the rect SwiftUI proposes to a `WindowGroup`'s content, so the layout
+   * engine needs it to produce the same frames a real device would.
+   */
+  readonly safeArea?: {
+    readonly top: number
+    readonly leading: number
+    readonly bottom: number
+    readonly trailing: number
+  }
   readonly colorScheme: 'light' | 'dark'
   /**
    * Bumped by the caller on every request; echoed back so a slow response for an
@@ -76,4 +88,22 @@ export interface CompilerApi {
   dispatch(event: UIEvent): Promise<CompileResult>
   /** Drop all `@State` boxes and re-evaluate from scratch. */
   reset(): Promise<CompileResult>
+  /**
+   * Supplies real font measurements.
+   *
+   * The worker has no fonts, so layout runs against built-in estimates until the
+   * main thread measures the actual faces and sends them over. Called once at
+   * startup, before the first compile.
+   */
+  setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void>
+}
+
+/** One measured font face. Mirrors `MeasuredFont` in `swiftui-layout`. */
+export interface MeasuredFontData {
+  readonly family: string
+  readonly weight: number
+  readonly advances: Readonly<Record<string, number>>
+  readonly fallback: number
+  readonly ascent: number
+  readonly descent: number
 }

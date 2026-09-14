@@ -1,24 +1,19 @@
 /**
- * The SwiftUI runtime: the host that turns evaluated Swift into views, and the
- * pipeline that drives parse -> check -> evaluate -> render.
+ * The SwiftUI runtime.
  *
- * Phase 2 runs the user's code for real: interpolations resolve, `@State` lives on a
- * persistent root instance that survives edits, and tapping a `Button` runs its
- * actual Swift closure.
+ * Three responsibilities, in order: a host that turns evaluated Swift into views,
+ * identity-keyed `@State` storage that outlives the view structs, and the pipeline
+ * that drives parse -> check -> evaluate -> lay out -> render.
  *
- * Phase 3 adds what is still missing — view identity, identity-keyed state boxes,
- * the proposal/response layout engine, and drawing.
+ * The layout itself belongs to `@studio/swiftui-layout`, which knows nothing about
+ * SwiftUI — this package translates between the two.
  */
 
-export { compile, rerender, applyEvent, resetPipelineState } from './pipeline'
+export { compile, rerender, applyEvent, resetPipelineState, setFontMetrics } from './pipeline'
 export { AppRuntime, actionId, type EvaluationResult, type RuntimeFailure } from './app-runtime'
 export { SwiftUIHost } from './swiftui-host'
+export { IdentityPath, StateStore, fingerprint } from './identity'
+export { viewsToLayout, type ConversionResult } from './to-layout'
+export { placedToRenderTree } from './to-render'
+export * from './style'
 export * from './view-value'
-export {
-  outlineExpression,
-  outlineStatements,
-  flattenOutline,
-  type OutlineNode,
-} from './outline'
-
-// TODO(phase 3): ViewIdentity, StateBox, the observation graph, subtree invalidation.

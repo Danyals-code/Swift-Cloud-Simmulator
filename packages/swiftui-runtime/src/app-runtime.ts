@@ -1,5 +1,5 @@
 import type { SourceSpan } from '@studio/shared'
-import type { SourceFileNode, VarDecl } from '@studio/swift-syntax'
+import type { SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   ExecutionBudgetExceeded,
   Interpreter,
@@ -9,8 +9,9 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import type { SemanticModel } from '@studio/swift-sema'
+import { fingerprint, IdentityPath, StateStore } from './identity'
 import { SwiftUIHost } from './swiftui-host'
-import { asView, flattenViews, type ViewValue } from './view-value'
+import { asView, type ViewValue } from './view-value'
 
 export interface RuntimeFailure {
   readonly message: string
@@ -27,83 +28,82 @@ export interface EvaluationResult {
 }
 
 /**
- * Owns one running app: its interpreter, its root view instance, and its state.
+ * Owns one running app.
  *
- * The reason this exists rather than the pipeline evaluating statelessly is `@State`.
- * A preview that resets every counter on each keystroke is not a preview, it is a
- * screenshot — so state has to outlive both re-renders and edits (FR-5.3).
- *
- * Phase 3 replaces the single root instance here with identity-keyed state boxes, at
- * which point state survives per-view rather than per-app. The carry-over rule below
- * is the crude ancestor of that.
+ * View structs are disposable here, exactly as in SwiftUI: every pass rebuilds them
+ * from their initialisers, and `@State` is restored from identity-keyed boxes that
+ * outlive them (see `identity.ts`). That is what makes a counter survive both a
+ * re-render and an edit (FR-5.3), without the single-root-instance shortcut Phase 2
+ * used.
  */
 export class AppRuntime {
   private interpreter = new Interpreter()
   private host = new SwiftUIHost()
-  private root: StructValue | null = null
+  private readonly state = new StateStore()
+
+  private entryTypeName: string | null = null
   private rootTypeName: string | null = null
-  /** Action closures from the last evaluation, addressed by handler id. */
+  private identity = new IdentityPath()
+
+  /** Instances built during the last pass, so an action's writes can be harvested. */
+  private live = new Map<string, StructValue>()
+  /** Action closures from the last pass, addressed by handler id. */
   private actions = new Map<string, SwiftValue>()
-  /** Identifies the loaded program, so a real edit rebuilds and a tap does not. */
+  /** Identifies the loaded program, so a real edit reloads and a tap does not. */
   private programKey = ''
 
-  /**
-   * Loads a program, preserving `@State` across edits where it still makes sense.
-   *
-   * A value is carried over when the property still exists *and its initialiser is
-   * unchanged*. Both halves of that rule follow from what the edit means:
-   *
-   *   change a colour            counter survives — you are not editing the counter
-   *   change `= 0` to `= 10`     counter resets   — you edited it precisely to see 10
-   *   rename or delete it        nothing to carry
-   *
-   * Matching on name alone would keep showing `0` after the user changed the
-   * initialiser to `10`, which reads as the preview being stuck.
-   */
   load(files: readonly SourceFileNode[], model: SemanticModel, programKey: string): void {
-    if (programKey === this.programKey && this.root) return
-
-    const carried = this.root ? this.statefulFields(this.root) : new Map<string, CarriedState>()
+    if (programKey === this.programKey && this.entryTypeName) return
 
     this.interpreter = new Interpreter({ host: this.host })
     this.host.expandStruct = (value) => this.expand(value)
     this.interpreter.load(files)
 
-    this.rootTypeName = this.findRootViewType(model)
-    this.root = null
+    this.entryTypeName = model.entryPoint?.name ?? null
+    this.rootTypeName = null
     this.programKey = programKey
 
-    if (!this.rootTypeName) return
-
-    const decl = this.interpreter.types.get(this.rootTypeName)
-    if (!decl) return
-
-    const instance = this.interpreter.instantiate(this.rootTypeName, [], decl.span)
-    for (const [name, previous] of carried) {
-      if (!instance.fields.has(name)) continue
-      const current = decl.members.find(
-        (m): m is VarDecl => m.kind === 'varDecl' && m.name === name,
-      )
-      if (fingerprint(current?.initializer ?? null) !== previous.initializer) continue
-      instance.fields.set(name, previous.value)
-    }
-    this.root = instance
+    // State boxes deliberately survive a reload. Whether each individual value
+    // survives is decided per-property by its initialiser fingerprint.
   }
 
-  /** Evaluates the root view's body into a view tree. */
+  /**
+   * Builds the view tree for this frame.
+   *
+   * Starts from the `@main` type and evaluates its scene, so `WindowGroup` and the
+   * root view are produced by running the user's code rather than by inferring the
+   * root from the AST.
+   */
   evaluate(): EvaluationResult {
     this.actions.clear()
+    this.live.clear()
+    this.identity = new IdentityPath()
     this.interpreter.resetSteps()
+    this.state.beginPass()
 
-    if (!this.root) {
-      return { views: [], logs: this.host.takeLogs(), failure: null, rootTypeName: this.rootTypeName }
+    const entry = this.entryTypeName ? this.interpreter.types.get(this.entryTypeName) : undefined
+    if (!entry) {
+      this.state.endPass()
+      return { views: [], logs: this.host.takeLogs(), failure: null, rootTypeName: null }
     }
 
     try {
-      const views = this.expand(this.root)
+      const app = this.interpreter.instantiate(entry.name, [], entry.span)
+      const scenes = this.expand(app)
+      // The scene wrapper is not content; the app is what it contains.
+      const views = scenes.flatMap((scene) => (isSceneWrapper(scene) ? scene.children : [scene]))
+
       this.indexActions(views)
-      return { views, logs: this.host.takeLogs(), failure: null, rootTypeName: this.rootTypeName }
+      this.state.endPass()
+
+      return {
+        views,
+        logs: this.host.takeLogs(),
+        failure: null,
+        rootTypeName: this.rootTypeName,
+      }
     } catch (error) {
+      this.state.endPass()
       return {
         views: [],
         logs: this.host.takeLogs(),
@@ -113,7 +113,7 @@ export class AppRuntime {
     }
   }
 
-  /** Runs a button's action. Returns false when the id is unknown. */
+  /** Runs a button's action, then writes any `@State` it changed back to its box. */
   dispatch(handlerId: string): boolean {
     const action = this.actions.get(handlerId)
     if (!action || action.kind !== 'closure') return false
@@ -122,19 +122,22 @@ export class AppRuntime {
     try {
       this.interpreter.callClosure(action, [], action.span)
     } catch (error) {
-      // A trap inside an action is reported on the next evaluation rather than
-      // thrown here, so one bad tap cannot tear down the preview.
+      // A trap inside an action is surfaced as a log rather than thrown, so one bad
+      // tap cannot tear down the preview.
       this.host.log(`Action failed: ${toFailure(error).message}`, action.span)
     }
+
+    this.harvest()
     return true
   }
 
-  /** Drops all state and rebuilds the root instance from its declared initialisers. */
+  /** Drops every state box. The next pass rebuilds from the declared initialisers. */
   reset(): void {
-    if (!this.rootTypeName) return
-    const decl = this.interpreter.types.get(this.rootTypeName)
-    if (!decl) return
-    this.root = this.interpreter.instantiate(this.rootTypeName, [], decl.span)
+    this.state.clear()
+  }
+
+  get stateSnapshot(): ReadonlyMap<string, { value: SwiftValue }> {
+    return this.state.snapshot()
   }
 
   // ------------------------------------------------------------------ private
@@ -142,89 +145,91 @@ export class AppRuntime {
   /**
    * Expands a user `View` struct into the views its `body` produces.
    *
-   * Uses the result-builder path rather than plain evaluation, so a multi-statement
-   * body contributes every view rather than only its last.
+   * Seeding runs *before* the body is evaluated: the instance's `@State` fields are
+   * replaced with their stored values, so the body sees current state rather than
+   * whatever its initialisers just produced.
    */
-  private expand(value: SwiftValue): ViewValue[] {
-    if (value.kind !== 'struct') return []
+  private expand(instance: SwiftValue): ViewValue[] {
+    if (instance.kind !== 'struct') return []
 
-    const decl = this.interpreter.types.get(value.typeName)
-    const body = decl?.members.find(
-      (m): m is VarDecl => m.kind === 'varDecl' && m.name === 'body' && m.accessor !== null,
-    )
-    if (!body?.accessor) return []
+    const decl = this.interpreter.types.get(instance.typeName)
+    if (!decl) return []
 
-    const env = this.interpreter.globals.child(value)
-    const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
+    const identity = this.identity.push(instance.typeName)
+    try {
+      this.seedState(instance, decl, identity)
+      this.live.set(identity, instance)
 
-    return produced.flatMap((v) => {
-      const view = asView(v)
-      if (view) return [view]
-      return v.kind === 'struct' ? this.expand(v) : []
-    })
+      if (this.rootTypeName === null && decl.inherits.some((t) => t.name === 'View')) {
+        this.rootTypeName = instance.typeName
+      }
+
+      const body = decl.members.find(
+        (m): m is VarDecl => m.kind === 'varDecl' && m.name === 'body' && m.accessor !== null,
+      )
+      if (!body?.accessor) return []
+
+      const env = this.interpreter.globals.child(instance)
+      const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
+
+      return produced.flatMap((value) => {
+        const view = asView(value)
+        if (view) return [view]
+        return value.kind === 'struct' ? this.expand(value) : []
+      })
+    } finally {
+      this.identity.pop()
+    }
   }
 
-  /** The root view is what the entry point's `WindowGroup` contains. */
-  private findRootViewType(model: SemanticModel): string | null {
-    const entry = model.entryPoint
-    if (entry) {
-      // Evaluating the scene would work, but reading it from the model avoids
-      // constructing the root view twice on every load.
-      const sceneBody = entry.properties.find((p) => p.name === 'body')
-      const inner = sceneBody?.decl.accessor
-      if (inner) {
-        for (const name of collectCalledTypeNames(inner)) {
-          if (model.types.get(name)?.isView) return name
-        }
+  private seedState(instance: StructValue, decl: StructDecl, identity: string): void {
+    for (const property of statefulProperties(decl)) {
+      const initial = instance.fields.get(property.name)
+      if (initial === undefined) continue
+
+      const stored = this.state.resolve(
+        identity,
+        property.name,
+        initial,
+        fingerprint(property.initializer),
+      )
+      instance.fields.set(property.name, stored)
+    }
+  }
+
+  /** Copies `@State` values out of the live instances and back into their boxes. */
+  private harvest(): void {
+    for (const [identity, instance] of this.live) {
+      const decl = this.interpreter.types.get(instance.typeName)
+      if (!decl) continue
+
+      for (const property of statefulProperties(decl)) {
+        const value = instance.fields.get(property.name)
+        if (value === undefined) continue
+        this.state.store(identity, property.name, value, fingerprint(property.initializer))
       }
     }
-    return [...model.types.values()].find((t) => t.isView)?.name ?? null
   }
 
-  private statefulFields(instance: StructValue): Map<string, CarriedState> {
-    const decl = this.interpreter.types.get(instance.typeName)
-    const out = new Map<string, CarriedState>()
-    if (!decl) return out
-
-    for (const member of decl.members) {
-      if (member.kind !== 'varDecl') continue
-      if (!member.attributes.some((a) => a.name === 'State')) continue
-      const value = instance.fields.get(member.name)
-      if (value === undefined) continue
-      out.set(member.name, { value, initializer: fingerprint(member.initializer) })
-    }
-    return out
-  }
-
-  private indexActions(views: readonly ViewValue[]): void {
-    for (const { view, path } of flattenViews(views)) {
-      if (view.action) this.actions.set(actionId(path), view.action)
-    }
+  private indexActions(views: readonly ViewValue[], prefix = 'v'): void {
+    views.forEach((view, index) => {
+      const path = `${prefix}-${index}`
+      if (view.action) this.actions.set(`action-${path}`, view.action)
+      this.indexActions(view.children, path)
+    })
   }
 }
 
-interface CarriedState {
-  readonly value: SwiftValue
-  /** Structure of the declared initialiser, so an edit to it can be detected. */
-  readonly initializer: string
+function statefulProperties(decl: StructDecl): VarDecl[] {
+  return decl.members.filter(
+    (m): m is VarDecl =>
+      m.kind === 'varDecl' && m.attributes.some((a) => a.name === 'State'),
+  )
 }
 
-/**
- * A span-free structural summary of an expression.
- *
- * Spans shift whenever anything above a declaration changes, so comparing them would
- * report every edit as an initialiser change. Comparing structure and literal values
- * detects the edit that actually matters.
- */
-function fingerprint(node: unknown): string {
-  if (node === null || node === undefined) return 'nil'
-  if (typeof node !== 'object') return String(node)
-  if (Array.isArray(node)) return `[${node.map(fingerprint).join(',')}]`
-
-  const entries = Object.entries(node as Record<string, unknown>)
-    .filter(([key]) => key !== 'span' && key !== 'memberSpan' && key !== 'nameSpan' && key !== 'labelSpan')
-    .map(([key, value]) => `${key}=${fingerprint(value)}`)
-  return `{${entries.join(',')}}`
+/** `WindowGroup` holds the app's content; it is a scene, not a view. */
+function isSceneWrapper(view: ViewValue): boolean {
+  return view.name === 'WindowGroup' && view.modifiers.length === 0
 }
 
 /** Handler id for the view at a given tree path. */
@@ -253,23 +258,4 @@ function toFailure(error: unknown): RuntimeFailure {
     return { message: error.message, span: error.span, frames: [], kind: 'unsupported' }
   }
   throw error
-}
-
-/** Type names that appear as calls inside a block — how `WindowGroup { ContentView() }` names its root. */
-function collectCalledTypeNames(block: { statements: readonly unknown[] }): string[] {
-  const names: string[] = []
-  const visit = (node: unknown): void => {
-    if (!node || typeof node !== 'object') return
-    const candidate = node as { kind?: string; callee?: unknown; name?: string }
-    if (candidate.kind === 'call') {
-      const callee = candidate.callee as { kind?: string; name?: string } | undefined
-      if (callee?.kind === 'identifier' && callee.name) names.push(callee.name)
-    }
-    for (const value of Object.values(node as Record<string, unknown>)) {
-      if (Array.isArray(value)) value.forEach(visit)
-      else visit(value)
-    }
-  }
-  visit(block)
-  return names
 }

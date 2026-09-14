@@ -5,10 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CompileResult,
   CompilerApi,
+  MeasuredFontData,
   SourceFile,
   UIEvent,
 } from '@studio/shared'
 import type { DeviceSpec } from '@studio/sim-shell'
+import { measureFontsWhenReady } from './fontMetrics'
 
 /** Edit-to-recompile debounce. Long enough to coalesce a fast typist's burst, short enough to feel live. */
 const DEBOUNCE_MS = 150
@@ -58,10 +60,23 @@ export function useCompiler(files: readonly SourceFile[], device: DeviceSpec, co
     workerError: null,
   })
 
+  /**
+   * Real font measurements, taken once and re-sent to every worker.
+   *
+   * A respawned worker starts with the built-in estimates, so it has to be told
+   * again — otherwise a crash would silently degrade layout for the rest of the
+   * session.
+   */
+  const fontsRef = useRef<Promise<MeasuredFontData[]> | null>(null)
+
   const ensureWorker = useCallback((): WorkerHandle => {
     if (handleRef.current) return handleRef.current
 
     const handle = spawnWorker()
+    fontsRef.current ??= measureFontsWhenReady()
+    void fontsRef.current.then((fonts) => {
+      if (fonts.length > 0) void handle.api.setFontMetrics(fonts)
+    })
     handle.worker.addEventListener('error', (event) => {
       setState((s) => ({
         ...s,
@@ -90,6 +105,7 @@ export function useCompiler(files: readonly SourceFile[], device: DeviceSpec, co
         await handle.api.compile({
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
+          safeArea: device.safeArea,
           colorScheme,
           revision,
         }),
@@ -102,7 +118,7 @@ export function useCompiler(files: readonly SourceFile[], device: DeviceSpec, co
       }))
       handleRef.current = null
     }
-  }, [accept, colorScheme, device.height, device.width, ensureWorker, files])
+  }, [accept, colorScheme, device, ensureWorker, files])
 
   // Debounced recompile whenever the sources or the device change.
   useEffect(() => {

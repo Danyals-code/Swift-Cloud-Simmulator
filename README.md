@@ -45,26 +45,26 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0, 1 and 2 complete.** The studio parses, checks and **runs** real Swift on every keystroke.
-String interpolations resolve, `@State` lives on a persistent instance that survives edits, and
-tapping a `Button` executes its actual Swift closure.
+**Phases 0-3 complete.** The studio parses, checks, runs and **renders** real Swift. Views are
+measured by a proposal/response layout engine and painted at absolute frames, so CSS never gets a
+chance to disagree with SwiftUI about sizing. Tapping a rendered `Button` runs its Swift closure and
+the interface repaints.
 
-There is **no layout engine yet** — Phase 3 adds the proposal/response engine and the renderer that
-turn the running app into an actual interface. Until then the running program is shown as a
-structural tree of evaluated views, which is the honest way to present code that is genuinely
-executing but not yet laid out.
+Still to come: multi-file projects and the inspector (Phase 4), `.xcodeproj` export (Phase 5), and
+the breadth of SwiftUI beyond the slice (Phase 6).
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 299 passing |
+| Unit tests | 351 passing |
 | End-to-end | 16 / 16 passing |
 | Reference app diagnostics | **zero** — the false-positive gate |
-| Parse + check, 500-line file | 1.0 ms (budget: 120 ms) |
-| Client JS | 342 KB gzipped / 450 KB budget |
+| Full pipeline, 500-line file | 1.6 ms (budget: 120 ms) |
+| Tap to repaint | 0.2 ms (budget: 32 ms) |
+| Client JS | 347 KB gzipped / 450 KB budget |
 
-Next: [Phase 3 — SwiftUI runtime, layout and live preview](docs/03-ROADMAP.md).
+Next: [Phase 4 — IDE experience](docs/03-ROADMAP.md).
 
 ## Getting started
 
@@ -100,8 +100,8 @@ packages/
   swift-syntax/        lexer, parser, AST                        (Phase 1)
   swift-sema/          name resolution, scopes, coverage checks   (Phase 1)
   swift-runtime/       the interpreter, value model, traps       (Phase 2)
-  swiftui-runtime/     SwiftUI host, app runtime, @State         (Phase 2)
-  swiftui-layout/      proposal/response layout engine           (Phase 3)
+  swiftui-runtime/     SwiftUI host, view identity, @State boxes (Phase 3)
+  swiftui-layout/      proposal/response layout engine, metrics  (Phase 3)
   swiftui-render-dom/  RenderTree → absolutely positioned DOM
   sim-shell/           device specs, safe areas
   project-model/       virtual file system, persistence, templates

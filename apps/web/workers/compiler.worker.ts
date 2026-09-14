@@ -1,6 +1,18 @@
 import * as Comlink from 'comlink'
-import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
-import type { CompileRequest, CompileResult, CompilerApi, UIEvent } from '@studio/shared'
+import {
+  applyEvent,
+  compile,
+  rerender,
+  resetPipelineState,
+  setFontMetrics,
+} from '@studio/swiftui-runtime'
+import type {
+  CompileRequest,
+  CompileResult,
+  CompilerApi,
+  MeasuredFontData,
+  UIEvent,
+} from '@studio/shared'
 
 /**
  * The compiler worker.
@@ -9,9 +21,9 @@ import type { CompileRequest, CompileResult, CompilerApi, UIEvent } from '@studi
  * thread must stay at 60 fps while typing, and user code must be terminable — a
  * runaway loop kills a worker we can respawn instead of freezing the tab.
  *
- * Phase 2 runs lex -> parse -> check -> evaluate. Phase 3 adds layout behind the
- * same `compile` call; nothing outside this file changes, which is the whole reason
- * the boundary was wired before the work existed.
+ * The full pipeline now lives behind one `compile` call: lex, parse, check,
+ * evaluate, lay out. Nothing outside this file has changed across three phases,
+ * which is what the Phase 0 boundary was for.
  */
 
 const api: CompilerApi = {
@@ -29,6 +41,10 @@ const api: CompilerApi = {
   async reset(): Promise<CompileResult> {
     resetPipelineState()
     return rerender()
+  },
+
+  async setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void> {
+    setFontMetrics(fonts)
   },
 }
 
