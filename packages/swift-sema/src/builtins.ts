@@ -37,6 +37,9 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule',
   // styles
   'LinearGradient', 'RadialGradient', 'AngularGradient', 'GridItem',
+  // gestures
+  'DragGesture', 'LongPressGesture', 'TapGesture', 'SpatialTapGesture',
+  'MagnificationGesture', 'MagnifyGesture', 'RotationGesture', 'RotateGesture',
   // structure
   'EmptyView', 'WindowGroup', 'ToolbarItem', 'ToolbarItemGroup',
 ])
@@ -62,6 +65,9 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'listStyle', 'listRowBackground',
   // interaction
   'onTapGesture', 'onLongPressGesture', 'disabled', 'buttonStyle', 'textFieldStyle',
+  'gesture', 'simultaneousGesture', 'highPriorityGesture',
+  // lifecycle
+  'onAppear', 'onDisappear', 'task', 'onChange',
   // Environment injection.
   'environment', 'environmentObject',
   // The deprecated spelling of `.tint`, and a `Color` property of the same name.
@@ -80,7 +86,6 @@ export const UNIMPLEMENTED_VIEWS: ReadonlyMap<string, number> = new Map([
 
 /** Real SwiftUI modifiers the preview ignores for now. */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
-  ['onAppear', 7], ['onDisappear', 7], ['task', 7], ['onChange', 7],
   ['allowsHitTesting', 7],
   ['toggleStyle', 7], ['pickerStyle', 7], ['labelStyle', 7],
   ['blur', 7], ['saturation', 7], ['brightness', 7], ['contrast', 7], ['mask', 7],
@@ -88,7 +93,6 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
   ['popover', 7], ['searchable', 7], ['refreshable', 7], ['onDelete', 7], ['onMove', 7],
   ['swipeActions', 7], ['contextMenu', 7], ['badge', 7],
   ['safeAreaInset', 7], ['ignoresSafeArea', 7], ['alignmentGuide', 7],
-  ['gesture', 7], ['simultaneousGesture', 7], ['highPriorityGesture', 7],
   ['accessibilityLabel', 7], ['accessibilityHint', 7], ['accessibilityValue', 7],
   ['id', 7], ['zIndex', 7],
   ['kerning', 7],
@@ -132,7 +136,7 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean; phase:
   ['AppStorage', { supported: false, phase: 7 }],
   ['SceneStorage', { supported: false, phase: 7 }],
   ['FocusState', { supported: false, phase: 7 }],
-  ['GestureState', { supported: false, phase: 7 }],
+  ['GestureState', { supported: true, phase: 7 }],
 ])
 
 /** Attributes that are meaningful rather than property wrappers. */

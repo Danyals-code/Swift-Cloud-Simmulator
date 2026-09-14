@@ -12,14 +12,22 @@ import {
   str,
   SwiftTrap,
   UnsupportedAtRuntime,
+  valuesEqual,
   type ClosureValue,
   type StructValue,
   type SwiftValue,
 } from '@studio/swift-runtime'
 import type { SemanticModel } from '@studio/swift-sema'
 import { fingerprint, IdentityPath, StateStore } from './identity'
-import { resolveUI, UIState, type ResolvedUI } from './presentation'
+import { resolveUI, UIState, type LifecycleHook, type ResolvedUI } from './presentation'
 import { DEFAULT_ENVIRONMENT, type EnvironmentInputs } from './view-environment'
+import {
+  asGesture,
+  flattenGesture,
+  gestureValue,
+  kindOfEvent,
+  phaseOfEvent,
+} from './gestures'
 import { SwiftUIHost } from './swiftui-host'
 import { asView, handlerIdFor, type AnimationPayload, type ViewIntent, type ViewValue } from './view-value'
 
@@ -65,6 +73,14 @@ export class AppRuntime {
 
   /** Instances built during the last pass, so an action's writes can be harvested. */
   private live = new Map<string, StructValue>()
+  /**
+   * The pass before that.
+   *
+   * Only `.onDisappear` needs it, and it needs it for a specific reason: the closure
+   * is remembered from the pass that still had the view, so it writes into *that*
+   * pass's instance. Harvesting only the current one would drop the write silently.
+   */
+  private previousLive = new Map<string, StructValue>()
   /** What each interactive element does, from the last resolved screen. */
   private handlers: ReadonlyMap<string, ViewIntent> = new Map()
   /** Identifies the loaded program, so a real edit reloads and a tap does not. */
@@ -77,6 +93,14 @@ export class AppRuntime {
 
   /** Sizes each `GeometryReader` was measured at, from the last layout pass. */
   private geometry = new Map<string, { width: number; height: number }>()
+
+  /** Paths whose `.onAppear` has already run, so it does not run every pass. */
+  private appeared = new Set<string>()
+  /** Values `.onChange(of:)` is watching, as of the last pass. */
+  private watched = new Map<string, SwiftValue>()
+  /** `.onDisappear` closures, kept from the pass that last saw each view. */
+  private disappearing = new Map<string, ClosureValue>()
+
 
   /**
    * Records what the layout pass actually measured, and says whether it moved.
@@ -145,7 +169,8 @@ export class AppRuntime {
    * root from the AST. The resolver then decides what of it is actually on screen.
    */
   evaluate(): EvaluationResult {
-    this.live.clear()
+    this.previousLive = this.live
+    this.live = new Map()
     this.handlers = new Map()
     this.identity = new IdentityPath()
     this.interpreter.resetSteps()
@@ -235,7 +260,89 @@ export class AppRuntime {
     this.ui.clear()
     this.geometry.clear()
     this.host.geometry = this.geometry
+    this.appeared.clear()
+    this.watched.clear()
+    this.disappearing.clear()
     this.animation = null
+  }
+
+  /**
+   * Runs the lifecycle callbacks a pass turned up, and says whether anything changed.
+   *
+   * A true answer means the caller should evaluate again: `.onAppear` very often sets
+   * the state the view is about to draw from, and rendering the pass that discovered
+   * it would show the screen as it was one instant before the app started.
+   *
+   * A callback runs at most once per appearance, tracked by path — so a re-render
+   * does not re-fire it, and a view that leaves the tree and comes back does fire
+   * again, which is what SwiftUI does too.
+   */
+  runLifecycle(hooks: readonly LifecycleHook[]): boolean {
+    const seen = new Set<string>()
+    let ran = false
+    let ranDisappear = false
+
+    for (const hook of hooks) {
+      if (hook.kind === 'appear') {
+        seen.add(hook.path)
+        if (this.appeared.has(hook.path)) continue
+        this.appeared.add(hook.path)
+        this.invokeHook(hook.closure, [])
+        ran = true
+        continue
+      }
+
+      if (hook.kind === 'change' && hook.watched !== undefined) {
+        seen.add(hook.path)
+        const previous = this.watched.get(hook.path)
+        this.watched.set(hook.path, hook.watched)
+        // First sight is not a change: SwiftUI does not fire `.onChange` on appear.
+        if (previous === undefined || valuesEqual(previous, hook.watched)) continue
+        this.invokeHook(hook.closure, [hook.watched])
+        ran = true
+      }
+    }
+
+    // `.onDisappear` has to be remembered rather than looked up: by the time a view
+    // has left the tree its modifiers have left with it, so the closure is not in
+    // this pass's hooks. It is kept from the pass that last saw the view.
+    for (const hook of hooks) {
+      if (hook.kind !== 'disappear') continue
+      seen.add(hook.path)
+      // Also counted as present: a view may have `.onDisappear` without `.onAppear`,
+      // and something has to record that it was here in order to notice it leaving.
+      this.appeared.add(hook.path)
+      this.disappearing.set(hook.path, hook.closure)
+    }
+
+    for (const path of [...this.appeared]) {
+      if (seen.has(path)) continue
+      this.appeared.delete(path)
+
+      const gone = this.disappearing.get(path)
+      if (gone) {
+        this.disappearing.delete(path)
+        this.invokeHook(gone, [])
+        ranDisappear = true
+        ran = true
+      }
+    }
+
+    if (ran) this.harvest(this.live)
+    // A disappear closure wrote into the previous pass's instance — the one that
+    // still had the view — so that pass is harvested second and therefore wins.
+    if (ranDisappear) this.harvest(this.previousLive)
+    return ran
+  }
+
+  private invokeHook(closure: ClosureValue, args: readonly SwiftValue[]): void {
+    try {
+      this.interpreter.callClosure(closure, args, closure.span)
+    } catch (error) {
+      // A failing lifecycle callback is reported, not fatal: the screen it was about
+      // to decorate is still worth showing.
+      this.host.log(`Lifecycle callback failed: ${toFailure(error).message}`, closure.span)
+    }
   }
 
   get stateSnapshot(): ReadonlyMap<string, { value: SwiftValue }> {
@@ -281,6 +388,10 @@ export class AppRuntime {
         return
       }
 
+      case 'gesture':
+        this.runGesture(intent.gesture, event)
+        return
+
       case 'adjust': {
         const binding = asProjection(intent.binding)
         if (!binding) return
@@ -289,6 +400,75 @@ export class AppRuntime {
         const next = base + intent.by
         binding.set(current.kind === 'int' ? int(Math.round(next)) : double(next))
         return
+      }
+    }
+  }
+
+  /**
+   * Runs the handlers a gesture event triggers.
+   *
+   * `.updating` is the interesting one. Its closure's second parameter is `inout`,
+   * which the interpreter has no notion of — but the projection that implements
+   * `@Binding` is exactly an `inout` by another name, so the parameter is bound to a
+   * projection onto the `@GestureState` box and `state = …` writes through it. On
+   * `ended` the box is restored, which is what makes gesture state transient.
+   */
+  private runGesture(value: SwiftValue, event: UIEvent): void {
+    const root = asGesture(value)
+    if (!root) return
+
+    const kind = kindOfEvent(event)
+    const phase = phaseOfEvent(event)
+    const payload = gestureValue(event)
+
+    for (const part of flattenGesture(root)) {
+      if (part.kind !== kind) continue
+
+      if (phase !== 'ended') {
+        for (const update of part.updates) {
+          if (!asProjection(update.binding)) continue
+          this.interpreter.callClosure(
+            update.closure,
+            [payload, update.binding, { kind: 'void' }],
+            update.closure.span,
+          )
+        }
+      }
+
+      for (const handler of part.handlers) {
+        const wanted = phase === 'ended' ? 'ended' : 'changed'
+        if (handler.phase !== wanted) continue
+        this.interpreter.callClosure(handler.closure, [payload], handler.closure.span)
+      }
+    }
+
+    if (phase === 'ended') this.resetGestureState()
+  }
+
+  /**
+   * Restores every `@GestureState` to its declared initial value.
+   *
+   * That reversion is the defining property of gesture state — ordinary `@State`
+   * keeps whatever it was last given. Re-evaluating the initialiser is what makes it
+   * work regardless of how the value was written: the projection a `.updating`
+   * closure wrote through is rebuilt on every pass, so remembering "the value before
+   * the gesture" against one of those would never match the one that comes back.
+   */
+  private resetGestureState(): void {
+    for (const [identity, instance] of this.live) {
+      const decl = this.interpreter.types.get(instance.typeName)
+      if (!decl) continue
+
+      for (const property of decl.members) {
+        if (property.kind !== 'varDecl') continue
+        if (!property.attributes.some((a) => a.name === 'GestureState')) continue
+
+        const initial = property.initializer
+          ? this.interpreter.evaluateInScope(property.initializer, instance)
+          : ({ kind: 'nil' } as SwiftValue)
+
+        instance.fields.set(property.name, initial)
+        this.state.store(identity, property.name, initial, fingerprint(property.initializer))
       }
     }
   }
@@ -406,9 +586,9 @@ export class AppRuntime {
     }
   }
 
-  /** Copies `@State` values out of the live instances and back into their boxes. */
-  private harvest(): void {
-    for (const [identity, instance] of this.live) {
+  /** Copies `@State` values out of a pass's instances and back into their boxes. */
+  private harvest(instances: ReadonlyMap<string, StructValue> = this.live): void {
+    for (const [identity, instance] of instances) {
       const decl = this.interpreter.types.get(instance.typeName)
       if (!decl) continue
 
@@ -432,7 +612,9 @@ function statefulProperties(decl: StructDecl): VarDecl[] {
   return decl.members.filter(
     (m): m is VarDecl =>
       m.kind === 'varDecl' &&
-      m.attributes.some((a) => a.name === 'State' || a.name === 'StateObject'),
+      m.attributes.some(
+        (a) => a.name === 'State' || a.name === 'StateObject' || a.name === 'GestureState',
+      ),
   )
 }
 

@@ -149,6 +149,17 @@ export class Interpreter {
     }
   }
 
+  /**
+   * Evaluates an expression as though it appeared inside a type's body.
+   *
+   * Needed by the SwiftUI runtime to re-run a property's declared initialiser — a
+   * `@GestureState` reverting, for instance. Exposed rather than reimplemented
+   * because "with `self` bound" is a detail of scoping that belongs here.
+   */
+  evaluateInScope(expr: Expr, self: StructValue): SwiftValue {
+    return this.evaluate(expr, this.globals.child(self))
+  }
+
   resetSteps(): void {
     this.steps = 0
     this.frames.length = 0

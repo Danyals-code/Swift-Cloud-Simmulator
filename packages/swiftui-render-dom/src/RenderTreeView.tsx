@@ -276,20 +276,24 @@ function RenderNodeView({
               e.preventDefault()
               const bounds = e.currentTarget.getBoundingClientRect()
               const scale = bounds.width / node.frame.width || 1
+              const at = (event: { clientX: number; clientY: number }) => ({
+                x: (event.clientX - bounds.left) / scale,
+                y: (event.clientY - bounds.top) / scale,
+              })
+
               // A toggle reports the value it is moving *to*, so the worker never has
               // to guess from a stale copy of the binding.
               if (role === 'toggle') {
                 onEvent({ kind: 'toggle', handlerId, value: node.hitTarget?.value !== 'on' })
                 return
               }
-              onEvent({
-                kind: 'tap',
-                handlerId,
-                location: {
-                  x: (e.clientX - bounds.left) / scale,
-                  y: (e.clientY - bounds.top) / scale,
-                },
-              })
+
+              if (role === 'drag') {
+                beginDrag(e, handlerId, at, onEvent)
+                return
+              }
+
+              onEvent({ kind: 'tap', handlerId, location: at(e) })
             }
           : undefined
       }
@@ -297,6 +301,61 @@ function RenderNodeView({
       {content}
     </div>
   )
+}
+
+/**
+ * Tracks a drag from pointer-down to pointer-up.
+ *
+ * Listeners go on the *window*, not the element: a drag that leaves the view it
+ * started in must keep reporting, which is what makes dragging something to the edge
+ * of the screen work rather than stopping at its original bounds. Pointer capture
+ * would do the same job, but only for the element that still exists — and a
+ * re-render during the drag replaces it.
+ *
+ * `translation` is cumulative from the start, as SwiftUI reports it.
+ */
+function beginDrag(
+  down: { clientX: number; clientY: number },
+  handlerId: string,
+  at: (event: { clientX: number; clientY: number }) => { x: number; y: number },
+  onEvent: (event: UIEvent) => void,
+): void {
+  const start = at(down)
+  let moved = false
+
+  const send = (
+    phase: 'began' | 'changed' | 'ended',
+    event: { clientX: number; clientY: number },
+  ) => {
+    const location = at(event)
+    onEvent({
+      kind: 'drag',
+      handlerId,
+      phase,
+      location,
+      startLocation: start,
+      translation: { x: location.x - start.x, y: location.y - start.y },
+    })
+  }
+
+  const move = (event: PointerEvent) => {
+    if (!moved) {
+      moved = true
+      send('began', event)
+    }
+    send('changed', event)
+  }
+
+  const up = (event: PointerEvent) => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', up)
+    send('ended', event)
+  }
+
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+  window.addEventListener('pointercancel', up)
 }
 
 /**

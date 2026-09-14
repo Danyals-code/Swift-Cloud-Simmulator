@@ -15,6 +15,17 @@ import {
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import { DISMISS_TYPE, EnvironmentStack } from './view-environment'
 import {
+  asGesture,
+  combined,
+  geometryMember,
+  gesture,
+  point,
+  size,
+  withHandler,
+  withUpdate,
+  type GestureKind,
+} from './gestures'
+import {
   asView,
   ANIMATION_TYPE,
   COLOR_TYPE,
@@ -61,6 +72,7 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'Color', 'Font', 'Alignment', 'Edge', 'Angle', 'UnitPoint', 'Axis',
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
+  'CGSize', 'CGPoint', 'CGFloat',
 ])
 
 /**
@@ -307,6 +319,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   resolveGlobal(name: string): SwiftValue | undefined {
+    if (GESTURE_CONSTRUCTORS[name]) return { kind: 'type', name }
     if (NAMESPACES.has(name)) return { kind: 'type', name }
     // A view referenced without a call, e.g. passed as a value.
     if (VIEW_NAMES.has(name)) return { kind: 'type', name }
@@ -324,6 +337,24 @@ export class SwiftUIHost implements InterpreterHost {
 
     if (DATA_DRIVEN_VIEWS.has(name) && call.trailingClosure && this.looksDataDriven(call)) {
       return this.makeDataDriven(name, args, call)
+    }
+
+    if (GESTURE_CONSTRUCTORS[name]) {
+      const minimum = numberOf(call.args.find((a) => a.label === 'minimumDistance')?.value)
+      return gesture(GESTURE_CONSTRUCTORS[name]!, minimum ?? 10)
+    }
+
+    if (name === 'CGSize') {
+      return size(
+        numberOf(call.args.find((a) => a.label === 'width')?.value) ?? 0,
+        numberOf(call.args.find((a) => a.label === 'height')?.value) ?? 0,
+      )
+    }
+    if (name === 'CGPoint') {
+      return point(
+        numberOf(call.args.find((a) => a.label === 'x')?.value) ?? 0,
+        numberOf(call.args.find((a) => a.label === 'y')?.value) ?? 0,
+      )
     }
 
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
@@ -385,6 +416,26 @@ export class SwiftUIHost implements InterpreterHost {
         closure: call.trailingClosure,
       }
       return view({ ...base, modifiers: [...base.modifiers, modifier] })
+    }
+
+    // Building a gesture by chaining: each link returns a new gesture with one more
+    // handler on it, which is value semantics, same as SwiftUI.
+    const chain = asGesture(target)
+    if (chain) {
+      const closure = call.trailingClosure ?? asClosure(call.args[call.args.length - 1]?.value)
+
+      if ((member === 'onChanged' || member === 'onEnded') && closure) {
+        return withHandler(chain, { phase: member === 'onChanged' ? 'changed' : 'ended', closure })
+      }
+      if (member === 'updating' && closure) {
+        const binding = call.args.find((a) => a.label === null)?.value
+        if (binding) return withUpdate(chain, { binding, closure })
+      }
+      if (member === 'simultaneously' || member === 'exclusively' || member === 'sequenced') {
+        const other = asGesture(call.args[0]?.value)
+        return other ? combined(chain, other) : target
+      }
+      return target
     }
 
     // A view modifier written on a colour: `Color.red.frame(width: 100)`. The colour
@@ -468,6 +519,17 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   getMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
+    // `value.translation.width`, `value.location.x`, `size.width` …
+    const geometry = geometryMember(target, member)
+    if (geometry !== undefined) return geometry
+
+    // `CGSize.zero`, `CGPoint.zero` — the initialiser almost every `@GestureState`
+    // is declared with.
+    if (target.kind === 'type' && member === 'zero') {
+      if (target.name === 'CGSize') return size(0, 0)
+      if (target.name === 'CGPoint') return point(0, 0)
+    }
+
     // `geo.size`, `geo.size.width`, `geo.size.height`.
     if (target.kind === 'opaque' && target.typeName === GEOMETRY_TYPE) {
       const size = target.payload as { width: number; height: number }
@@ -680,6 +742,18 @@ export class SwiftUIHost implements InterpreterHost {
 }
 
 // -------------------------------------------------------------------- helpers
+
+/** The gesture constructors, mapped to the kind of event each responds to. */
+const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {
+  DragGesture: 'drag',
+  LongPressGesture: 'longPress',
+  MagnificationGesture: 'magnify',
+  MagnifyGesture: 'magnify',
+  RotationGesture: 'rotate',
+  RotateGesture: 'rotate',
+  TapGesture: 'tap',
+  SpatialTapGesture: 'tap',
+}
 
 /** Members that belong to `Color` itself rather than to it as a view. */
 const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init'])

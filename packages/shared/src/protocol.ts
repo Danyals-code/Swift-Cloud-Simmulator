@@ -80,13 +80,50 @@ export interface CompileResult {
   readonly timings: CompileTimings
 }
 
-/** Interactions travelling main thread -> worker. */
+/**
+ * Interactions travelling main thread -> worker.
+ *
+ * Gesture events carry a *phase* rather than being three separate kinds, because a
+ * gesture is one interaction with a beginning, a middle and an end — and the handlers
+ * that run differ only by which phase arrived. `translation` is cumulative from the
+ * start of the drag, as SwiftUI reports it, not per-move.
+ */
 export type UIEvent =
   | { readonly kind: 'tap'; readonly handlerId: string; readonly location: Point }
   | { readonly kind: 'toggle'; readonly handlerId: string; readonly value: boolean }
   | { readonly kind: 'textChange'; readonly handlerId: string; readonly value: string }
   | { readonly kind: 'slide'; readonly handlerId: string; readonly value: number }
   | { readonly kind: 'scroll'; readonly handlerId: string; readonly offset: Point }
+  | {
+      readonly kind: 'drag'
+      readonly handlerId: string
+      readonly phase: GesturePhase
+      /** Where the pointer is now, in the view's own coordinates. */
+      readonly location: Point
+      readonly startLocation: Point
+      /** Cumulative movement since the drag began. */
+      readonly translation: Point
+    }
+  | {
+      readonly kind: 'magnify'
+      readonly handlerId: string
+      readonly phase: GesturePhase
+      readonly scale: number
+    }
+  | {
+      readonly kind: 'rotate'
+      readonly handlerId: string
+      readonly phase: GesturePhase
+      readonly degrees: number
+    }
+  | { readonly kind: 'longPress'; readonly handlerId: string; readonly phase: GesturePhase }
+
+export type GesturePhase = 'began' | 'changed' | 'ended'
+
+/** Every event carries the handler it is for. */
+export function handlerOf(event: UIEvent): string {
+  return event.handlerId
+}
 
 /** The interface exposed over Comlink. */
 export interface CompilerApi {

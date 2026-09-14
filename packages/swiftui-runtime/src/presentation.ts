@@ -82,6 +82,22 @@ export interface Overlay {
   readonly dismissId: string | null
 }
 
+/**
+ * A lifecycle callback found while resolving.
+ *
+ * Collected rather than run, because running it here would mutate state in the middle
+ * of building the screen that state describes. The runtime runs them after the pass
+ * and re-evaluates if anything changed.
+ */
+export interface LifecycleHook {
+  readonly kind: 'appear' | 'disappear' | 'change'
+  /** The view's path — how "has this appeared before?" is answered. */
+  readonly path: string
+  readonly closure: ClosureValue
+  /** For `.onChange(of:)`: the value being watched, compared against last pass. */
+  readonly watched?: SwiftValue
+}
+
 export interface ResolvedUI {
   readonly content: readonly ViewValue[]
   readonly navigationBar: NavigationBar | null
@@ -90,6 +106,7 @@ export interface ResolvedUI {
   readonly handlers: ReadonlyMap<string, ViewIntent>
   /** Set when the last state change happened inside `withAnimation`. */
   readonly animation: AnimationPayload | null
+  readonly lifecycle: readonly LifecycleHook[]
 }
 
 /** Framework-owned state: what the user's code does not hold but the screen needs. */
@@ -152,6 +169,7 @@ export function resolveUI(views: readonly ViewValue[], ctx: ResolveContext): Res
 
 class Resolver {
   private readonly handlers = new Map<string, ViewIntent>()
+  private readonly lifecycle: LifecycleHook[] = []
 
   constructor(private readonly ctx: ResolveContext) {}
 
@@ -173,6 +191,7 @@ class Resolver {
       overlay,
       handlers: this.handlers,
       animation: this.ctx.animation,
+      lifecycle: this.lifecycle,
     }
   }
 
@@ -198,7 +217,33 @@ class Resolver {
     const stamped: ViewValue = { ...view, path, children, ...(intent ? { intent } : {}) }
 
     if (intent) this.handlers.set(handlerIdFor(path), intent)
+    this.collectLifecycle(view, path)
     return stamped
+  }
+
+  /** Records `.onAppear`, `.onDisappear`, `.task` and `.onChange` for this view. */
+  private collectLifecycle(view: ViewValue, path: string): void {
+    for (const modifier of view.modifiers) {
+      if (!modifier.closure) continue
+
+      if (modifier.name === 'onAppear' || modifier.name === 'task') {
+        this.lifecycle.push({ kind: 'appear', path, closure: modifier.closure })
+        continue
+      }
+      if (modifier.name === 'onDisappear') {
+        this.lifecycle.push({ kind: 'disappear', path, closure: modifier.closure })
+        continue
+      }
+      if (modifier.name === 'onChange') {
+        const watched = modifier.args.find((a) => a.label === 'of')?.value ?? modifier.args[0]?.value
+        this.lifecycle.push({
+          kind: 'change',
+          path: `${path}/${modifier.name}`,
+          closure: modifier.closure,
+          ...(watched !== undefined ? { watched } : {}),
+        })
+      }
+    }
   }
 
   /**
@@ -227,10 +272,18 @@ class Resolver {
       }
     }
 
-    const gesture = view.modifiers.find(
+    // A real gesture wins over a tap handler on the same view: it is the more
+    // specific statement of intent, and SwiftUI resolves it the same way.
+    const attached = view.modifiers.find(
+      (m) => m.name === 'gesture' || m.name === 'simultaneousGesture' || m.name === 'highPriorityGesture',
+    )
+    const gestureValue = attached?.args.find((a) => a.label === null)?.value
+    if (gestureValue) return { kind: 'gesture', gesture: gestureValue }
+
+    const tap = view.modifiers.find(
       (m) => m.name === 'onTapGesture' || m.name === 'onLongPressGesture',
     )
-    if (gesture?.closure) return { kind: 'run', closure: gesture.closure }
+    if (tap?.closure) return { kind: 'run', closure: tap.closure }
 
     return null
   }

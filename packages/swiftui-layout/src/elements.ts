@@ -305,7 +305,7 @@ export type LayoutModifier =
   /** A modifier outside the coverage matrix: recorded, ignored for layout. */
   | { readonly kind: 'unsupported'; readonly name: string }
 
-export type HitRole = 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture'
+export type HitRole = 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture' | 'drag'
 
 export type TextAlign = 'leading' | 'center' | 'trailing'
 

@@ -65,6 +65,8 @@ export type ViewIntent =
   | { readonly kind: 'toggle'; readonly binding: SwiftValue }
   | { readonly kind: 'adjust'; readonly binding: SwiftValue; readonly by: number }
   | { readonly kind: 'run'; readonly closure: ClosureValue }
+  /** A gesture attached with `.gesture(…)`; the event decides which handlers run. */
+  | { readonly kind: 'gesture'; readonly gesture: SwiftValue }
 
 export interface ViewArg {
   readonly label: string | null

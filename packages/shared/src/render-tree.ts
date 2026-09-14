@@ -115,7 +115,7 @@ export interface PlaceholderPayload {
 export interface HitTarget {
   /** identifies which interactive element was hit when dispatching back to the worker */
   readonly handlerId: string
-  readonly role: 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture'
+  readonly role: 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture' | 'drag'
   readonly enabled: boolean
   /**
    * Control parameters, for the interactive elements the renderer builds for real.

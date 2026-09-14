@@ -385,7 +385,17 @@ export function compile(request: CompileRequest): CompileResult {
   runtime.load(analysis.files, analysis.model, programKeyOf(request))
   runtime.setEnvironment(environmentFor(request))
   runtime.setDefaultGeometry(contentSizeOf(request))
-  const evaluation = runtime.evaluate()
+
+  let evaluation = runtime.evaluate()
+
+  // `.onAppear` usually sets the state the view is about to draw from, so the pass
+  // that *discovered* the callback is not the pass worth showing. One more is enough:
+  // a second appearance of the same path is not an appearance.
+  if (evaluation.ui && runtime.runLifecycle(evaluation.ui.lifecycle)) {
+    const after = runtime.evaluate()
+    if (!after.failure) evaluation = after
+  }
+
   const evaluateMs = performance.now() - evaluateStart
 
   return finish(request, analysis, evaluation, startedAt, evaluateMs)
@@ -411,7 +421,13 @@ export function rerender(revision: number): CompileResult {
   }
 
   const evaluateStart = performance.now()
-  const evaluation = runtime.evaluate()
+  let evaluation = runtime.evaluate()
+
+  if (evaluation.ui && runtime.runLifecycle(evaluation.ui.lifecycle)) {
+    const after = runtime.evaluate()
+    if (!after.failure) evaluation = after
+  }
+
   return finish(next, analysis, evaluation, startedAt, performance.now() - evaluateStart)
 }
 

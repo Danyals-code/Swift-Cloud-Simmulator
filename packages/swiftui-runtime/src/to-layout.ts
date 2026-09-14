@@ -1707,6 +1707,13 @@ class Converter {
       case 'presentationDetents':
       case 'onTapGesture':
       case 'onLongPressGesture':
+      case 'gesture':
+      case 'simultaneousGesture':
+      case 'highPriorityGesture':
+      case 'onAppear':
+      case 'onDisappear':
+      case 'task':
+      case 'onChange':
       case 'disabled':
         return null
 
@@ -2037,6 +2044,7 @@ function roleOf(view: ViewValue): HitRole {
     case 'Slider':
       return 'slider'
     default:
+      if (view.intent?.kind === 'gesture') return 'drag'
       return view.intent?.kind === 'run' && view.action === null && view.name !== 'Button'
         ? 'tapGesture'
         : 'button'
