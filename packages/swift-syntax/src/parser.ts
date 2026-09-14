@@ -635,7 +635,8 @@ export class Parser {
 
     const params = this.parseParameterList()
 
-    if (this.checkKeyword('async')) this.advance()
+    const isAsync = this.checkKeyword('async')
+    if (isAsync) this.advance()
     const canThrow = this.checkKeyword('throws') || this.checkKeyword('rethrows')
     if (canThrow) this.advance()
 
@@ -657,6 +658,7 @@ export class Parser {
       returnType,
       body,
       canThrow,
+      isAsync,
     }
   }
 
@@ -1395,8 +1397,12 @@ export class Parser {
       }
     }
 
+    // `await` is transparent. The preview evaluates an `async` function the same way
+    // it evaluates any other, so the keyword marks a suspension point that never
+    // happens — and a node that is always see-through would add a case to every
+    // consumer for no behaviour. The limitation is recorded in the coverage matrix
+    // beside `.task`, which has worked this way since Phase 7.
     if (start.kind === 'keyword' && start.text === 'await') {
-      this.unsupported(start.span, start.text)
       this.advance()
       return this.parseUnary(allowTrailing)
     }

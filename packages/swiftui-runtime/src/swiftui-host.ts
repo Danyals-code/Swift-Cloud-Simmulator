@@ -83,7 +83,23 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
   'CGSize', 'CGPoint', 'CGRect', 'CGFloat',
+  'Task', 'MainActor',
 ])
+
+/**
+ * The concurrency surface, run synchronously.
+ *
+ * One rule covers all of it: **the preview has no concurrency, so everything async
+ * runs immediately and in order.** `.task` has worked this way since Phase 7, `await`
+ * is transparent, and `Task { … }` runs its body where it is written.
+ *
+ * That is a real limitation and it is stated rather than hidden. The alternative —
+ * deferring a `Task` body and re-rendering, or splitting one at a `Task.sleep` — needs
+ * suspension the interpreter does not have, and a half-built version of it would make
+ * ordering depend on which special case a program happened to hit. One rule that is
+ * always true beats several that are usually true.
+ */
+const TASK_TYPE = 'Task'
 
 /**
  * Views that take a data collection and a row builder.
@@ -486,6 +502,7 @@ export class SwiftUIHost implements InterpreterHost {
   callGlobal(name: string, call: HostCall): SwiftValue | undefined {
     // Values first: these are not views, so they have to be handled before the
     // "is this a view name?" guard below rejects them.
+    if (name === 'Task') return this.runTask(call)
     if (name === 'Color') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
@@ -563,6 +580,14 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
+    if (target.kind === 'type' && (target.name === 'Task' || target.name === 'MainActor')) {
+      if (member === 'detached' || member === 'run') return this.runTask(call)
+      // `Task.sleep` and `Task.yield` are the suspension points, and there is nothing
+      // here to suspend. Returning a value rather than reporting them unsupported is
+      // what keeps `try await Task.sleep(…)` from putting a warning on correct Swift.
+      if (member === 'sleep' || member === 'yield') return opaque(TASK_TYPE, { done: true })
+    }
+
     // `.environmentObject(store)` and `.environment(\.key, value)` must be in scope
     // *while* the view below them expands, so they are handled before anything else
     // touches the target — by which point a struct would already have been expanded.
@@ -776,6 +801,17 @@ export class SwiftUIHost implements InterpreterHost {
       }
     }
     return undefined
+  }
+
+  /**
+   * `Task { … }`, `Task.detached { … }` and `MainActor.run { … }`.
+   *
+   * The body runs now. See `TASK_TYPE` above for why that is the whole design rather
+   * than a shortcut, and the coverage matrix for the limitation stated plainly.
+   */
+  private runTask(call: HostCall): SwiftValue {
+    if (call.trailingClosure) call.invoke(call.trailingClosure)
+    return opaque(TASK_TYPE, { done: true })
   }
 
   /**

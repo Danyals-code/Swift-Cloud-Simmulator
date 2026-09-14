@@ -1402,10 +1402,16 @@ export class Interpreter {
         return this.callClosure(local.value, allArgs.map((a) => a.value), span)
       }
 
-      // The host claims view names before user types, so a project struct named
-      // `Text` would shadow SwiftUI's — matching Swift's own module resolution.
-      const fromHost = this.host.callGlobal?.(callee.name, this.hostCall(args, trailingClosure, span))
-      if (fromHost !== undefined) return fromHost
+      // A declaration in the project wins over anything the host offers, which is
+      // Swift's own rule: a local type shadows the module's. It matters more than it
+      // looks — `Task` is a perfectly ordinary name for a to-do app's model type, and
+      // so are `Image`, `Label` and `Menu`.
+      const declared = this.types.has(callee.name) || this.enums.has(callee.name)
+
+      if (!declared) {
+        const fromHost = this.host.callGlobal?.(callee.name, this.hostCall(args, trailingClosure, span))
+        if (fromHost !== undefined) return fromHost
+      }
 
       const instance = this.instantiateNamed(callee.name, allArgs, span)
       if (instance !== undefined) return instance

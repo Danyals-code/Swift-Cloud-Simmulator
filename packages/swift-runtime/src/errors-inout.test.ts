@@ -414,3 +414,61 @@ func main() {
     ).toThrow()
   })
 })
+
+describe('concurrency runs synchronously', () => {
+  it('runs an async function where it is called', () => {
+    // One rule, stated in the coverage matrix: the preview has no concurrency, so
+    // everything async runs immediately and in order. `await` is transparent.
+    expect(
+      run(`
+func load() async -> String {
+    return "data"
+}
+
+func main() {
+    print("before")
+    let result = await load()
+    print(result)
+    print("after")
+}`),
+    ).toEqual(['before', 'data', 'after'])
+  })
+
+  it('accepts try await on a throwing async function', () => {
+    expect(
+      run(`
+enum E: Error { case bad }
+
+func load(_ ok: Bool) async throws -> String {
+    if !ok { throw E.bad }
+    return "data"
+}
+
+func main() {
+    do {
+        print(try await load(true))
+        print(try await load(false))
+    } catch {
+        print("caught")
+    }
+}`),
+    ).toEqual(['data', 'caught'])
+  })
+})
+
+describe('a project declaration shadows the host', () => {
+  it('prefers a user type named after a SwiftUI one', () => {
+    // `Task` is an ordinary name for a to-do app's model type, and the host now
+    // claims it for concurrency. Swift's rule is that the local declaration wins.
+    expect(
+      run(`
+struct Task {
+    var title: String
+}
+
+func main() {
+    print(Task(title: "write tests").title)
+}`),
+    ).toEqual(['write tests'])
+  })
+})

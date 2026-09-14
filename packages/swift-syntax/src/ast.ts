@@ -228,6 +228,11 @@ export interface FuncDecl extends DeclBase {
   readonly body: Block | null
   /** `throws` or `rethrows`. Recorded; propagation is dynamic, so nothing enforces it. */
   readonly canThrow: boolean
+  /**
+   * `async`. Recorded and not acted on: the preview has no concurrency, so an async
+   * function runs exactly like any other and `await` never suspends.
+   */
+  readonly isAsync: boolean
 }
 
 export interface InitDecl extends DeclBase {

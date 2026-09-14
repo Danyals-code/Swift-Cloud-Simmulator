@@ -122,6 +122,8 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
   'ToolbarItemPlacement', 'Binding', 'UUID', 'Date',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
+  'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
+  'Codable', 'Decodable', 'Encodable', 'CaseIterable', 'CustomStringConvertible',
   'LayoutDirection', 'UserInterfaceSizeClass', 'Locale',
   'View', 'App', 'Scene', 'Identifiable', 'Equatable', 'Hashable', 'Comparable', 'Codable',
   'Void', 'Any', 'AnyObject', 'Never',
