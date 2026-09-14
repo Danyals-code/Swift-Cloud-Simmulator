@@ -375,3 +375,136 @@ func main() {
     ).toEqual(['made'])
   })
 })
+
+describe('generics (Phase 8b)', () => {
+  it('runs a generic function', () => {
+    // Erasure: the interpreter carries the real value regardless of what `T` said, so
+    // what has to work is the *parse* and the call, not a substitution.
+    expect(
+      run(`
+func firstOf<T>(_ items: [T]) -> T {
+    return items[0]
+}
+
+func main() {
+    print("\\(firstOf([3, 4, 5]))")
+    print(firstOf(["a", "b"]))
+}`),
+    ).toEqual(['3', 'a'])
+  })
+
+  it('runs a generic struct', () => {
+    expect(
+      run(`
+struct Box<Item> {
+    var value: Item
+    func get() -> Item { value }
+}
+
+func main() {
+    print("\\(Box(value: 7).get())")
+    print(Box(value: "hi").get())
+}`),
+    ).toEqual(['7', 'hi'])
+  })
+
+  it('accepts explicit generic arguments at a call site', () => {
+    expect(
+      run(`
+struct Box<Item> {
+    var value: Item
+}
+
+func main() {
+    let b = Box<Int>(value: 9)
+    print("\\(b.value)")
+}`),
+    ).toEqual(['9'])
+  })
+
+  it('does not mistake a comparison for a generic argument list', () => {
+    // The one real ambiguity generics introduce. `a < b` and `Stack<Int>` begin
+    // identically, and reading the first as the second eats the rest of the line.
+    expect(
+      run(`
+func main() {
+    let a = 1
+    let b = 5
+    let c = 9
+    print("\\(a < b)")
+    print("\\(a < b && c > b)")
+    if a < b { print("less") }
+}`),
+    ).toEqual(['true', 'true', 'less'])
+  })
+
+  it('accepts a constrained parameter and a where clause', () => {
+    expect(
+      run(`
+func biggest<T: Comparable>(_ items: [T]) -> T where T: Comparable {
+    var best = items[0]
+    for item in items {
+        if item > best { best = item }
+    }
+    return best
+}
+
+func main() {
+    print("\\(biggest([3, 9, 4]))")
+}`),
+    ).toEqual(['9'])
+  })
+
+  it('runs a generic enum', () => {
+    expect(
+      run(`
+enum Maybe<Wrapped> {
+    case none
+    case some(Wrapped)
+
+    func label() -> String {
+        switch self {
+        case .none: return "none"
+        case .some(let value): return "some"
+        }
+    }
+}
+
+func main() {
+    print(Maybe.some(3).label())
+    print(Maybe<Int>.none.label())
+}`),
+    ).toEqual(['some', 'none'])
+  })
+
+  it('runs a generic method on a non-generic type', () => {
+    expect(
+      run(`
+struct Wrapper {
+    func wrap<T>(_ value: T) -> [T] { [value] }
+}
+
+func main() {
+    print("\\(Wrapper().wrap(4))")
+}`),
+    ).toEqual(['[4]'])
+  })
+})
+
+describe('nested generic arguments', () => {
+  it('closes two levels with one >> token', () => {
+    // The lexer reads `>>` as the shift operator, because at that point it cannot
+    // know it is inside a type.
+    expect(
+      run(`
+struct Box<Item> {
+    var value: Item
+}
+
+func main() {
+    let b = Box<Box<Int>>(value: Box<Int>(value: 5))
+    print("VALUE \\(b.value.value)")
+}`),
+    ).toEqual(['VALUE 5'])
+  })
+})

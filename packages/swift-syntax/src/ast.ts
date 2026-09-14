@@ -100,7 +100,6 @@ export type Decl =
   | UnsupportedDecl
   | ErrorDecl
 
-
 export interface DeclBase extends NodeBase {
   readonly attributes: readonly Attribute[]
   readonly modifiers: readonly Modifier[]
@@ -123,6 +122,7 @@ export interface StructDecl extends DeclBase {
   readonly kind: 'structDecl'
   readonly name: string
   readonly nameSpan: SourceSpan
+  readonly generics: readonly GenericParam[]
   /** Protocol conformances and inherited types, e.g. `View`, `App`. */
   readonly inherits: readonly NamedType[]
   readonly members: readonly Decl[]
@@ -141,6 +141,7 @@ export interface EnumDecl extends DeclBase {
   readonly kind: 'enumDecl'
   readonly name: string
   readonly nameSpan: SourceSpan
+  readonly generics: readonly GenericParam[]
   readonly inherits: readonly NamedType[]
   readonly cases: readonly EnumCase[]
   /** Methods and computed properties declared in the body. */
@@ -185,6 +186,20 @@ export interface AssociatedType extends NodeBase {
 }
 
 /**
+ * One generic parameter: `T`, or `T: Comparable`.
+ *
+ * The constraint is recorded and never enforced. A dynamically typed interpreter has
+ * nothing to check it against at runtime, and checking it statically needs the real
+ * type checker — which the export hands the user's exact source to anyway. Recording
+ * it keeps the name resolvable and the tree faithful to what was written.
+ */
+export interface GenericParam extends NodeBase {
+  readonly name: string
+  readonly nameSpan: SourceSpan
+  readonly constraint: TypeRef | null
+}
+
+/**
  * An `extension`.
  *
  * Extends a named type with members, conformances, or both. Modelled as a separate
@@ -205,9 +220,9 @@ export interface ExtensionDecl extends DeclBase {
 
 export interface FuncDecl extends DeclBase {
   readonly kind: 'funcDecl'
-
   readonly name: string
   readonly nameSpan: SourceSpan
+  readonly generics: readonly GenericParam[]
   readonly params: readonly Param[]
   readonly returnType: TypeRef | null
   readonly body: Block | null
@@ -237,7 +252,6 @@ export interface VarDecl extends DeclBase {
    */
   readonly requirement: 'get' | 'get set' | null
 }
-
 
 /**
  * A construct the parser recognised but the subset does not support — `class`,

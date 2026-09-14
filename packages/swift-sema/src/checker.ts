@@ -53,14 +53,15 @@ export class Checker {
   private readonly enums = new Map<string, EnumDecl>()
   private readonly protocols = new Map<string, ProtocolDecl>()
   /**
-   * Every associated-type name declared anywhere.
+   * Every type-parameter name declared anywhere: generic parameters and associated
+   * types alike.
    *
-   * Not scoped to its own protocol, deliberately. Scoping it properly needs the
-   * protocol a use site belongs to, and getting that wrong reports "unknown type
-   * 'Item'" on correct code — a false positive, which costs more than the missed
-   * error of accepting `Item` in a type that never declared it.
+   * Not scoped to the declaration that introduced it, deliberately. Scoping it
+   * properly needs to know which declaration a use site belongs to, and getting that
+   * wrong reports "unknown type 'T'" on correct code — a false positive, which costs
+   * more than the missed error of accepting `T` in a function that never declared it.
    */
-  private readonly associatedTypeNames = new Set<string>()
+  private readonly typeParameterNames = new Set<string>()
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
   private conformance: ConformanceModel = collectConformance([])
   private readonly globalScope = new Scope()
@@ -96,6 +97,7 @@ export class Checker {
 
   private collectDeclarations(file: SourceFileNode): void {
     for (const decl of file.declarations) {
+      this.collectTypeParameters(decl)
       if (decl.kind === 'structDecl') {
         const info = this.describeStruct(decl)
         if (this.types.has(info.name)) {
@@ -126,13 +128,35 @@ export class Checker {
         // annotation naming `Item` may be checked before the protocol that declares
         // it is reached, and order must not decide whether a name resolves.
         for (const associated of decl.associatedTypes) {
-          this.associatedTypeNames.add(associated.name)
+          this.typeParameterNames.add(associated.name)
         }
       } else if (decl.kind === 'funcDecl') {
         this.globalScope.declare({ name: decl.name, kind: 'function', span: decl.nameSpan })
       } else if (decl.kind === 'varDecl') {
         this.globalScope.declare({ name: decl.name, kind: 'local', span: decl.nameSpan })
       }
+    }
+  }
+
+  /**
+   * Records `<T>` from a declaration and from every member of it.
+   *
+   * Walked rather than handled at each declaration site because a generic method on a
+   * non-generic type — `func map<U>(…)` inside `struct Box` — is the common case, and
+   * its `U` must resolve just as the type's own parameters do.
+   */
+  private collectTypeParameters(decl: Decl): void {
+    if (decl.kind === 'structDecl' || decl.kind === 'enumDecl' || decl.kind === 'funcDecl') {
+      for (const generic of decl.generics) this.typeParameterNames.add(generic.name)
+    }
+
+    if (
+      decl.kind === 'structDecl' ||
+      decl.kind === 'enumDecl' ||
+      decl.kind === 'protocolDecl' ||
+      decl.kind === 'extensionDecl'
+    ) {
+      for (const member of decl.members) this.collectTypeParameters(member)
     }
   }
 
@@ -369,7 +393,7 @@ export class Checker {
           !this.types.has(base) &&
           !this.enums.has(base) &&
           !this.protocols.has(base) &&
-          !this.associatedTypeNames.has(base) &&
+          !this.typeParameterNames.has(base) &&
           !isKnownGlobal(base)
         ) {
           this.report(

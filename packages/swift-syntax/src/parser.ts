@@ -20,6 +20,7 @@ import type {
   Decl,
   EnumCase,
   Expr,
+  GenericParam,
   IfStmt,
   Modifier,
   NamedType,
@@ -320,13 +321,10 @@ export class Parser {
     const keyword = isReference ? 'class' : 'struct'
     const start = this.advance() // 'struct' | 'class'
     const { name, span: nameSpan } = this.expectIdentifier(`a ${keyword} name`)
-
-    if (this.check('<')) {
-      this.unsupported(this.current.span, 'generic parameters')
-      this.skipBalanced('<', '>')
-    }
+    const generics = this.parseGenericParameterList()
 
     const inherits = this.parseInheritanceClause()
+    this.skipWhereClause()
     const members = this.parseTypeBody(keyword)
 
     return {
@@ -336,6 +334,7 @@ export class Parser {
       modifiers,
       name,
       nameSpan,
+      generics,
       inherits,
       members,
       isReference,
@@ -351,13 +350,10 @@ export class Parser {
   private parseEnum(attributes: Attribute[], modifiers: Modifier[]): Decl {
     const start = this.advance() // 'enum'
     const { name, span: nameSpan } = this.expectIdentifier('an enum name')
-
-    if (this.check('<')) {
-      this.unsupported(this.current.span, 'generic parameters')
-      this.skipBalanced('<', '>')
-    }
+    const generics = this.parseGenericParameterList()
 
     const inherits = this.parseInheritanceClause()
+    this.skipWhereClause()
     const cases: EnumCase[] = []
     const members: Decl[] = []
 
@@ -389,6 +385,7 @@ export class Parser {
       modifiers,
       name,
       nameSpan,
+      generics,
       inherits,
       cases,
       members,
@@ -397,7 +394,15 @@ export class Parser {
 
   private parseEnumCase(): EnumCase {
     const start = this.current
-    const { name, span: nameSpan } = this.expectIdentifier('an enum case name')
+    // A case name may be a keyword — `case none`, `case some(T)`, `case any`. Swift
+    // treats the position as contextual, and `Optional` itself is declared this way.
+    const { name, span: nameSpan } =
+      this.current.kind === 'keyword'
+        ? (() => {
+            const token = this.advance()
+            return { name: token.text, span: token.span }
+          })()
+        : this.expectIdentifier('an enum case name')
 
     const associated: Param[] = []
     if (this.check('(') ) {
@@ -545,6 +550,56 @@ export class Parser {
     }
   }
 
+  /**
+   * `<T>`, `<T: Comparable>`, `<Key: Hashable, Value>`.
+   *
+   * Generics are *erased*: the parameter names are recorded so they resolve as types
+   * inside the declaration, and nothing else happens. A dynamically typed interpreter
+   * carries the real value at runtime regardless of what the annotation said, so a
+   * substitution pass would compute something nothing reads. The constraint is kept
+   * on the node because the export writes the user's source back out unchanged and a
+   * reader of the tree should see what was written.
+   */
+  private parseGenericParameterList(): GenericParam[] {
+    const generics: GenericParam[] = []
+    if (!this.check('<')) return generics
+    this.advance()
+
+    while (!this.atEnd && !this.check('>')) {
+      const start = this.current
+      if (this.current.kind !== 'identifier') {
+        this.advance()
+        continue
+      }
+      const token = this.advance()
+      const constraint = this.match(':') ? this.parseType() : null
+      generics.push({
+        span: this.spanFrom(start),
+        name: token.text,
+        nameSpan: token.span,
+        constraint,
+      })
+      if (!this.match(',')) break
+    }
+
+    this.expect('>', 'to close the generic parameter list')
+    return generics
+  }
+
+  /**
+   * `where Element: Equatable`, dropped.
+   *
+   * A `where` clause narrows which instantiations a declaration applies to, which is
+   * a question only a type checker can answer. Applying the declaration
+   * unconditionally is the lenient reading, and lenient is the house rule: the export
+   * carries the clause to a real compiler unchanged.
+   */
+  private skipWhereClause(): void {
+    if (!this.checkKeyword('where') && !this.check('where')) return
+    this.advance()
+    while (!this.atEnd && !this.check('{') && !this.current.newlineBefore) this.advance()
+  }
+
   private parseInheritanceClause(): NamedType[] {
 
     const inherits: NamedType[] = []
@@ -576,11 +631,7 @@ export class Parser {
   private parseFunc(attributes: Attribute[], modifiers: Modifier[]): Decl {
     const start = this.advance() // 'func'
     const { name, span: nameSpan } = this.expectIdentifier('a function name')
-
-    if (this.check('<')) {
-      this.unsupported(this.current.span, 'generic parameters')
-      this.skipBalanced('<', '>')
-    }
+    const generics = this.parseGenericParameterList()
 
     const params = this.parseParameterList()
 
@@ -593,6 +644,7 @@ export class Parser {
     let returnType: TypeRef | null = null
     if (this.match('->')) returnType = this.parseType()
 
+    this.skipWhereClause()
     const body = this.check('{') ? this.parseBlock() : null
 
     return {
@@ -602,6 +654,7 @@ export class Parser {
       modifiers,
       name,
       nameSpan,
+      generics,
       params,
       returnType,
       body,
@@ -982,6 +1035,12 @@ export class Parser {
       this.skipSemicolons()
       if (this.check('}')) break
 
+      // Progress guard. Every other loop over declarations has one; this one did not,
+      // so a pattern the parser could neither consume nor recover from spun here
+      // forever. A hang is categorically worse than a mis-parse: a wrong tree still
+      // renders something and still exports, while a hang takes the worker with it.
+      const loopStart = this.index
+
       const caseStart = this.current
       const isDefault = this.checkKeyword('default')
       const patterns: Pattern[] = []
@@ -1020,7 +1079,12 @@ export class Parser {
       ) {
         this.skipSemicolons()
         if (this.atEnd || this.check('}') || this.checkKeyword('case') || this.checkKeyword('default')) break
+        // `parseBlock` guards its statement loop the same way. A statement the parser
+        // can neither consume nor recover from returns an error node without moving,
+        // and a loop that does not check for that never ends.
+        const before = this.index
         statements.push(this.parseStatement())
+        if (this.index === before) this.advance()
       }
 
       cases.push({
@@ -1030,6 +1094,8 @@ export class Parser {
         isDefault,
         body: { kind: 'block', span: this.spanFrom(bodyStart), statements },
       })
+
+      if (this.index === loopStart) this.advance()
     }
 
     this.expect('}', "Expected '}' to close the switch.")
@@ -1090,7 +1156,11 @@ export class Parser {
     outerBinding: boolean,
   ): Pattern {
     this.expect('.', "Expected '.' before an enum case name.")
-    const { name: caseName } = this.expectIdentifier('an enum case name')
+    // `parseMemberName`, not `expectIdentifier`: after a dot a case name may be a
+    // keyword, and `.some` — the one every `Optional` match is written with — is
+    // exactly that. `expectIdentifier` reports and does *not* advance, so the keyword
+    // was left in place and the enclosing switch loop spun on it forever.
+    const { name: caseName } = this.parseMemberName()
 
     const bindings: PatternBinding[] = []
     if (this.check('(')) {
@@ -1100,7 +1170,7 @@ export class Parser {
         if (this.checkKeyword('let') || this.checkKeyword('var')) this.advance()
 
         const token = this.current
-        if (token.kind === 'identifier') {
+        if (token.kind === 'identifier' || token.kind === 'keyword') {
           this.advance()
           bindings.push({
             span: token.span,
@@ -1367,6 +1437,71 @@ export class Parser {
   }
 
   /** Member names may be keywords (`.self`, `.default`, `.init`). */
+  /**
+   * `Stack<Int>()` — explicit generic arguments in *expression* position.
+   *
+   * `<` is otherwise the less-than operator, so this is the one genuine ambiguity
+   * generics introduce: `a < b` and `Stack<Int>` begin identically. Swift resolves it
+   * by looking ahead for a balanced `>` immediately followed by `(`, `.` or `{`, and
+   * so does this — with the index restored the moment the lookahead fails, so a
+   * comparison is never mistaken for a type.
+   *
+   * The arguments are dropped rather than recorded. Generics are erased, and the
+   * expression means the same thing without them.
+   */
+  private skipExplicitGenericArguments(): void {
+    if (!this.check('<')) return
+
+    const before = this.index
+    let depth = 0
+    while (!this.atEnd) {
+      if (this.check('<')) depth++
+      else if (this.check('>>')) {
+        // `Box<Box<Int>>` closes two levels with one token: the lexer reads `>>` as
+        // the shift operator, since it cannot know it is inside a type.
+        depth -= 2
+        if (depth <= 0) {
+          this.advance()
+          if (this.check('(') || this.check('.') || this.check('{')) return
+          this.index = before
+          return
+        }
+      } else if (this.check('>')) {
+        depth--
+        if (depth === 0) {
+          this.advance()
+          // Only a call, a member access or a trailing closure can follow a type here.
+          // Anything else means this was a comparison after all.
+          if (this.check('(') || this.check('.') || this.check('{')) return
+          this.index = before
+          return
+        }
+      } else if (
+        // A type argument list holds types and separators, nothing else. Meeting a
+        // token that cannot appear in one settles the ambiguity immediately, and
+        // cheaply — `a < b && c > d` never reaches the closing brace.
+        !(
+          this.current.kind === 'identifier' ||
+          this.check(',') ||
+          this.check('.') ||
+          this.check('?') ||
+          this.check('[') ||
+          this.check(']') ||
+          this.check(':') ||
+          this.check('->') ||
+          this.check('(') ||
+          this.check(')')
+        )
+      ) {
+        this.index = before
+        return
+      }
+      this.advance()
+    }
+
+    this.index = before
+  }
+
   private parseMemberName(): { name: string; span: SourceSpan } {
     if (this.current.kind === 'identifier' || this.current.kind === 'keyword') {
       const token = this.advance()
@@ -1453,6 +1588,7 @@ export class Parser {
         }
       case 'identifier':
         this.advance()
+        this.skipExplicitGenericArguments()
         return { kind: 'identifier', span: token.span, name: token.text }
       default:
         break

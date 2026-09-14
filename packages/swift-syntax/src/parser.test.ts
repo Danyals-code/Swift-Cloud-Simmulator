@@ -628,3 +628,38 @@ struct View%N%: View {
     expect(best).toBeLessThan(120)
   })
 })
+
+describe('a switch case name may be a keyword', () => {
+  // `some` and `any` are keywords (`some View`, `any Shape`) and also perfectly
+  // ordinary enum case names — `Optional` itself is declared with `case some(T)`.
+  // Before this, `expectIdentifier` reported and did not advance, so the keyword sat
+  // there and the switch loop span on it forever: not a wrong parse, a hang.
+  it.each(['some', 'any', 'none', 'default', 'class'])('accepts .%s as a case', (name) => {
+    const file = parseClean(`
+      enum M {
+          case ${name}(Int)
+          func f() -> String {
+              switch self {
+              case .${name}(let v): return "x"
+              }
+          }
+      }
+    `)
+    const decl = file.declarations[0]!
+    expect(decl.kind === 'enumDecl' && decl.cases.map((c) => c.name)).toEqual([name])
+  })
+
+  it('terminates on a case pattern it cannot parse', () => {
+    // The assertion is that this test finishes. Every other loop over declarations
+    // has a progress guard; the switch loop did not, and one unrecoverable pattern
+    // was enough to take the compiler worker down with it.
+    const { sourceFile } = parse(`
+      func f(x: Int) -> Int {
+          switch x {
+          case ???: return 1
+          }
+      }
+    `)
+    expect(sourceFile.declarations.length).toBe(1)
+  })
+})
