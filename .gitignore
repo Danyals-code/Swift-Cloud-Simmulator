@@ -1,0 +1,29 @@
+node_modules/
+.next/
+dist/
+.turbo/
+out/
+
+# test output
+coverage/
+playwright-report/
+test-results/
+
+# env
+.env
+.env.local
+.env*.local
+
+# vercel
+.vercel
+
+# os / editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# build info
+*.tsbuildinfo

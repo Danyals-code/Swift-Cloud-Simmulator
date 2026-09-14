@@ -1,0 +1,17 @@
+# Normalise to LF in the repository.
+#
+# This matters more here than in most projects: the product's central guarantee is
+# that exported .swift files are byte-identical to what the user typed (FR-7.8).
+# Letting git rewrite line endings per-checkout would make the committed Swift
+# templates differ between machines, and the byte-identity tests would pass or fail
+# depending on who ran them.
+* text=auto eol=lf
+
+# Swift sources and fixtures are content under test — never touch them.
+*.swift -text
+*.zip binary
+*.png binary
+*.jpg binary
+*.woff2 binary
+
+package-lock.json linguist-generated=true -diff
