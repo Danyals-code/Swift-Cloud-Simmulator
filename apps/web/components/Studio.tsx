@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { downloadProjectZip } from '@studio/exporter'
+import { downloadProjectZip, type ExportFormat } from '@studio/exporter'
 import { findFile } from '@studio/project-model'
 import { getDevice, type DeviceKey } from '@studio/sim-shell'
 import type { FileId, RenderNode, UIEvent } from '@studio/shared'
@@ -134,11 +134,14 @@ export function Studio() {
 
   const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
 
-  const handleExport = useCallback(() => {
-    if (!project) return
-    void flush()
-    downloadProjectZip(project)
-  }, [project, flush])
+  const handleExport = useCallback(
+    (format: ExportFormat) => {
+      if (!project) return
+      void flush()
+      downloadProjectZip(project, format)
+    },
+    [project, flush],
+  )
 
   if (!loaded || !project) {
     return (

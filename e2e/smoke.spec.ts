@@ -658,3 +658,46 @@ test('Phase 8 — a typo offers the name it probably meant, and applying it fixe
   await expect(problems).not.toContainText("Cannot find 'VStak'", { timeout: 8000 })
   expect(await editorText(page)).toContain('VStack')
 })
+
+test('Phase 9 — the Swift Playgrounds export carries the edited source', async ({ page }) => {
+  await openStudio(page)
+
+  const marker = `// swiftpm-${Date.now()}`
+  await typeAtTop(page, `${marker}
+`)
+  await expect(page.getByTestId('save-indicator')).toContainText('Saved', { timeout: 5_000 })
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByTestId('export-format').selectOption('swiftpm')
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toBe('CounterApp-swiftpm.zip')
+
+  const stream = await download.createReadStream()
+  const chunks: Buffer[] = []
+  for await (const chunk of stream) chunks.push(chunk as Buffer)
+  const listing = Buffer.concat(chunks).toString('latin1')
+
+  // The extension is on the *directory*: that is what makes iPadOS treat it as a
+  // document rather than a folder, and a zip that flattens it is a library.
+  expect(listing).toContain('CounterApp.swiftpm/Package.swift')
+  expect(listing).toContain('CounterApp.swiftpm/Sources/CounterApp/CounterApp.swift')
+})
+
+test('Phase 9 — every export format offers a distinct download', async ({ page }) => {
+  await openStudio(page)
+
+  for (const [format, filename] of [
+    ['spm', 'CounterApp-package.zip'],
+    ['xcodegen', 'CounterApp-xcodegen.zip'],
+  ] as const) {
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByTestId('export-format').selectOption(format)
+    expect((await downloadPromise).suggestedFilename()).toBe(filename)
+  }
+
+  // The default button is unchanged: the common case stays one click away.
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByTestId('export-button').click()
+  expect((await downloadPromise).suggestedFilename()).toBe('CounterApp.zip')
+})

@@ -1,8 +1,16 @@
 import { zipSync } from 'fflate'
 import type { Project } from '@studio/project-model'
 import { buildExportBundle, type ExportBundle } from './bundle'
+import {
+  buildPackageBundle,
+  buildSwiftPMAppBundle,
+  buildXcodeGenBundle,
+  EXPORT_FORMATS,
+  type ExportFormat,
+} from './formats'
 
 export * from './bundle'
+export * from './formats'
 export { generatePbxproj, IdAllocator, targetRelativePath, type XcodeProjectPlan } from './pbxproj'
 export { parsePlist, serializePlist, type PlistDict, type PlistValue } from './plist'
 export * from './xcode-files'
@@ -28,27 +36,42 @@ export function zipBundle(bundle: ExportBundle): Uint8Array {
   return zipSync(entries, { level: 6, mtime: FIXED_MTIME })
 }
 
-export function exportProjectZip(project: Project): Uint8Array {
-  return zipBundle(buildExportBundle(project))
+export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj'): Uint8Array {
+  return zipBundle(bundleFor(project, format))
 }
 
-export function zipFileName(project: Project): string {
-  const safe = project.manifest.name.replace(/[^A-Za-z0-9._-]/g, '-')
-  return `${safe || 'SwiftUIProject'}.zip`
+/** The file set for a format. One switch, so a new format cannot be half-wired. */
+export function bundleFor(project: Project, format: ExportFormat): ExportBundle {
+  switch (format) {
+    case 'swiftpm':
+      return buildSwiftPMAppBundle(project)
+    case 'spm':
+      return buildPackageBundle(project)
+    case 'xcodegen':
+      return buildXcodeGenBundle(project)
+    case 'xcodeproj':
+      return buildExportBundle(project)
+  }
+}
+
+export function zipFileName(project: Project, format: ExportFormat = 'xcodeproj'): string {
+  const safe = project.manifest.name.replace(/[^A-Za-z0-9._-]/g, '-') || 'SwiftUIProject'
+  const suffix = EXPORT_FORMATS.find((f) => f.id === format)?.suffix ?? '.zip'
+  return `${safe}${suffix}`
 }
 
 /**
  * Trigger a browser download. Kept here rather than in the UI so the export path is
  * one call from a button handler.
  */
-export function downloadProjectZip(project: Project): void {
-  const bytes = exportProjectZip(project)
+export function downloadProjectZip(project: Project, format: ExportFormat = 'xcodeproj'): void {
+  const bytes = exportProjectZip(project, format)
   // Copy into a fresh ArrayBuffer — the fflate output may be a view over a larger pooled buffer.
   const blob = new Blob([bytes.slice()], { type: 'application/zip' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = zipFileName(project)
+  anchor.download = zipFileName(project, format)
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()

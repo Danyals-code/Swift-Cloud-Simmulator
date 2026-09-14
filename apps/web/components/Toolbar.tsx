@@ -1,6 +1,7 @@
 'use client'
 
 import { DEVICE_LIST, type DeviceKey } from '@studio/sim-shell'
+import { EXPORT_FORMATS, type ExportFormat } from '@studio/exporter'
 import type { PreviewSettings } from '../lib/store'
 
 export interface ToolbarProps {
@@ -13,7 +14,7 @@ export interface ToolbarProps {
   onDeviceChange: (device: DeviceKey) => void
   onPreviewChange: (settings: Partial<PreviewSettings>) => void
   onToggleInspect: () => void
-  onExport: () => void
+  onExport: (format: ExportFormat) => void
   onResetState: () => void
 }
 
@@ -125,14 +126,44 @@ export function Toolbar({
           Reset state
         </button>
 
-        <button
-          type="button"
-          onClick={onExport}
-          className="rounded bg-sky-600 px-3 py-1 font-medium text-white transition-colors hover:bg-sky-500"
-          data-testid="export-button"
-        >
-          Export .zip
-        </button>
+        {/*
+          Four formats, and the default is the one almost everyone wants. A split
+          button keeps the common case one click away instead of making everybody
+          answer a question they do not have.
+        */}
+        <span className="flex overflow-hidden rounded bg-sky-600">
+          <button
+            type="button"
+            onClick={() => onExport('xcodeproj')}
+            className="px-3 py-1 font-medium text-white transition-colors hover:bg-sky-500"
+            data-testid="export-button"
+          >
+            Export .zip
+          </button>
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) onExport(e.target.value as ExportFormat)
+              e.currentTarget.value = ''
+            }}
+            aria-label="Export format"
+            title="Export in another format"
+            // A select is as wide as its widest option unless told otherwise, and
+            // "Swift Playgrounds — An app package that builds and runs on iPad."
+            // is wide enough to wrap the whole toolbar.
+            className="w-7 appearance-none border-l border-white/20 bg-sky-600 py-1 text-center text-white transition-colors hover:bg-sky-500"
+            data-testid="export-format"
+          >
+            <option value="" disabled>
+              ▾
+            </option>
+            {EXPORT_FORMATS.map((format) => (
+              <option key={format.id} value={format.id} className="bg-[#141418]">
+                {format.name} — {format.description}
+              </option>
+            ))}
+          </select>
+        </span>
       </span>
     </header>
   )
