@@ -443,6 +443,26 @@ describe('error recovery', () => {
     expect(() => parse('struct '.repeat(200))).not.toThrow()
   })
 
+  it('accepts semicolons as separators between declarations', () => {
+    // Swift allows a whole file on one line. Found by an end-to-end test that typed
+    // its fixture as a single line to dodge the editor's bracket auto-closing.
+    const file = parseClean('import SwiftUI; struct A {}; struct B {}')
+    expect(kindsOf(file)).toEqual(['importDecl', 'structDecl', 'structDecl'])
+  })
+
+  it('accepts semicolons between struct members', () => {
+    const file = parseClean('struct A { var x = 1; var y = 2; func f() {} }')
+    expect(structNamed(file, 'A').members.map((m) => m.kind)).toEqual([
+      'varDecl',
+      'varDecl',
+      'funcDecl',
+    ])
+  })
+
+  it('accepts stray trailing semicolons', () => {
+    expect(kindsOf(parseClean('struct A {};;;'))).toEqual(['structDecl'])
+  })
+
   it('always returns a source file, even for empty input', () => {
     expect(parse('').sourceFile.declarations).toEqual([])
     expect(parse('   \n\n  ').sourceFile.declarations).toEqual([])

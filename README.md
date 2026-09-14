@@ -45,24 +45,26 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0 and 1 complete.** The studio parses and checks real Swift on every keystroke, reports
-diagnostics in the editor, and shows a live structural outline of the parsed view tree.
+**Phases 0, 1 and 2 complete.** The studio parses, checks and **runs** real Swift on every keystroke.
+String interpolations resolve, `@State` lives on a persistent instance that survives edits, and
+tapping a `Button` executes its actual Swift closure.
 
-There is **no interpreter yet** — the preview cannot draw your views until Phase 2 evaluates them
-and Phase 3 lays them out. What it shows instead is honest: the structure the front end actually
-understood, updating as you type.
+There is **no layout engine yet** — Phase 3 adds the proposal/response engine and the renderer that
+turn the running app into an actual interface. Until then the running program is shown as a
+structural tree of evaluated views, which is the honest way to present code that is genuinely
+executing but not yet laid out.
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 191 passing |
-| End-to-end | 12 / 12 passing |
+| Unit tests | 299 passing |
+| End-to-end | 16 / 16 passing |
 | Reference app diagnostics | **zero** — the false-positive gate |
 | Parse + check, 500-line file | 1.0 ms (budget: 120 ms) |
-| Client JS | 334 KB gzipped / 450 KB budget |
+| Client JS | 342 KB gzipped / 450 KB budget |
 
-Next: [Phase 2 — Swift runtime](docs/03-ROADMAP.md#phase-2--swift-runtime-34-weeks).
+Next: [Phase 3 — SwiftUI runtime, layout and live preview](docs/03-ROADMAP.md).
 
 ## Getting started
 
@@ -97,8 +99,8 @@ packages/
   shared/              SourceSpan, Diagnostic, RenderTree, worker protocol
   swift-syntax/        lexer, parser, AST                        (Phase 1)
   swift-sema/          name resolution, scopes, coverage checks   (Phase 1)
-  swift-runtime/       the interpreter                           (Phase 2)
-  swiftui-runtime/     View graph, ViewBuilder, @State identity  (Phase 3)
+  swift-runtime/       the interpreter, value model, traps       (Phase 2)
+  swiftui-runtime/     SwiftUI host, app runtime, @State         (Phase 2)
   swiftui-layout/      proposal/response layout engine           (Phase 3)
   swiftui-render-dom/  RenderTree → absolutely positioned DOM
   sim-shell/           device specs, safe areas

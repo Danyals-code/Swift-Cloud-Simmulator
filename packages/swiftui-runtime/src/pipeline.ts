@@ -1,4 +1,5 @@
 import {
+  hasBlockingError,
   rgba,
   type CompileRequest,
   type CompileResult,
@@ -7,24 +8,26 @@ import {
   type RenderNode,
   type RenderTree,
   type ResolvedFont,
+  type RGBA,
   type SourceSpan,
   type UIEvent,
 } from '@studio/shared'
 import { Parser, type SourceFileNode } from '@studio/swift-syntax'
 import { Checker, type SemanticModel } from '@studio/swift-sema'
-import { flattenOutline, outlineStatements, type OutlineNode } from './outline'
+import { actionId, AppRuntime, type EvaluationResult } from './app-runtime'
+import { flattenViews, renderArg, type FlatView } from './view-value'
 
 /**
- * The Phase 1 pipeline: parse -> check -> outline.
+ * The Phase 2 pipeline: parse -> check -> **evaluate** -> report.
  *
- * The preview cannot draw the user's views yet — that needs the interpreter
- * (Phase 2) and the layout engine (Phase 3). What it *can* do honestly is show what
- * the front end actually understood: the declarations it found, the entry point it
- * resolved, and the shape of the view tree it parsed, updating on every keystroke.
+ * The preview now runs the user's code. Every value on screen is real: string
+ * interpolations resolved, ternaries taken, `@State` read from a live instance.
+ * Tapping a `Button` row runs its actual Swift closure and the tree re-evaluates.
  *
- * Showing a fixed demo instead would be a more impressive screenshot and a lie. The
- * outline is real output derived from real source, which is both more useful and the
- * thing that proves the phase works.
+ * What is still missing is *drawing* — the layout engine and renderer land in
+ * Phase 3. Until then the running app is presented as a structural tree rather than
+ * as pixels, which is the honest way to show a program that is genuinely executing
+ * but not yet laid out.
  */
 
 const SYSTEM_FONT = '"Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif'
@@ -43,6 +46,7 @@ const LABEL = rgba(17, 17, 20, 1)
 const SECONDARY = rgba(60, 60, 67, 0.62)
 const TERTIARY = rgba(60, 60, 67, 0.4)
 const ACCENT = rgba(0, 96, 200, 1)
+const ACTIONABLE = rgba(0, 122, 60, 1)
 const BACKGROUND = rgba(246, 246, 249, 1)
 const CARD = rgba(255, 255, 255, 1)
 const SELECTED = rgba(0, 122, 255, 0.12)
@@ -52,17 +56,25 @@ const WARNING = rgba(170, 90, 0, 1)
 const ROW_HEIGHT = 22
 const INDENT = 14
 
-/** Selection is the only mutable state this phase has; it proves the event round-trip. */
-let selectedNodeId: string | null = null
+const runtime = new AppRuntime()
+let selectedPath: string | null = null
 let revision = 0
+/** The most recent request, so `dispatch` and `reset` can re-render without it. */
+let lastAnalysis: { request: CompileRequest; analysis: Analysis } | null = null
 
 export function resetPipelineState(): void {
-  selectedNodeId = null
+  selectedPath = null
+  runtime.reset()
 }
 
-export function applyEvent(event: UIEvent): void {
-  if (event.kind !== 'tap') return
-  selectedNodeId = selectedNodeId === event.handlerId ? null : event.handlerId
+/** Returns true when the event changed something and a re-render is warranted. */
+export function applyEvent(event: UIEvent): boolean {
+  if (event.kind !== 'tap') return false
+
+  if (event.handlerId.startsWith('action-')) return runtime.dispatch(event.handlerId)
+
+  selectedPath = selectedPath === event.handlerId ? null : event.handlerId
+  return true
 }
 
 interface Analysis {
@@ -92,39 +104,13 @@ function analyse(request: CompileRequest): Analysis {
   return { files, model, diagnostics: [...diagnostics, ...model.diagnostics], parseMs, checkMs }
 }
 
-/**
- * Finds the view whose structure is worth showing: the entry point's `body` leads to
- * a `WindowGroup { ... }` containing the root view, so follow that one hop to land on
- * what the user actually composes.
- */
-function rootViewOutline(model: SemanticModel): { title: string; nodes: OutlineNode[] } {
-  const entry = model.entryPoint
-  if (!entry) {
-    const firstView = [...model.types.values()].find((t) => t.isView)
-    if (!firstView) return { title: 'No views found', nodes: [] }
-    return { title: firstView.name, nodes: bodyOutline(firstView.name, model) }
-  }
+// ------------------------------------------------------------------ rendering
 
-  // Entry `body` is a Scene; its trailing closure holds the root view.
-  const sceneNodes = bodyOutline(entry.name, model)
-  const windowGroup = sceneNodes.find((n) => n.name === 'WindowGroup') ?? sceneNodes[0]
-  const rootName = windowGroup?.children[0]?.name
-
-  if (rootName && model.types.has(rootName)) {
-    return { title: rootName, nodes: bodyOutline(rootName, model) }
-  }
-  return { title: entry.name, nodes: sceneNodes }
-}
-
-function bodyOutline(typeName: string, model: SemanticModel): OutlineNode[] {
-  const type = model.types.get(typeName)
-  const body = type?.properties.find((p) => p.name === 'body')
-  if (!body?.decl.accessor) return []
-  return outlineStatements(body.decl.accessor.statements)
-}
-
-function buildTree(request: CompileRequest, analysis: Analysis): RenderTree {
-  const { model, diagnostics } = analysis
+function buildTree(
+  request: CompileRequest,
+  analysis: Analysis,
+  evaluation: EvaluationResult | null,
+): RenderTree {
   const width = request.canvas.width
   const nodes: RenderNode[] = []
   const pad = 16
@@ -133,6 +119,24 @@ function buildTree(request: CompileRequest, analysis: Analysis): RenderTree {
   let z = 1
 
   const push = (node: RenderNode) => nodes.push(node)
+  const text = (
+    id: string,
+    value: string,
+    f: ResolvedFont,
+    color: RGBA,
+    x: number,
+    w: number,
+    origin?: SourceSpan,
+  ): RenderNode => ({
+    id,
+    kind: 'text',
+    frame: { x, y, width: w, height: f.lineHeight },
+    z: z++,
+    opacity: 1,
+    text: { runs: [{ text: value, font: f, color }], alignment: 'leading' },
+    a11y: { role: 'text', label: value },
+    ...(origin ? { origin } : {}),
+  })
 
   push({
     id: 'root',
@@ -143,56 +147,39 @@ function buildTree(request: CompileRequest, analysis: Analysis): RenderTree {
     background: { kind: 'solid', color: BACKGROUND },
   })
 
-  const text = (
-    id: string,
-    value: string,
-    f: ResolvedFont,
-    color: typeof LABEL,
-    x: number,
-    width: number,
-    origin?: SourceSpan,
-  ): RenderNode => ({
-    id,
-    kind: 'text',
-    frame: { x, y, width, height: f.lineHeight },
-    z: z++,
-    opacity: 1,
-    text: { runs: [{ text: value, font: f, color }], alignment: 'leading' },
-    a11y: { role: 'text', label: value },
-    ...(origin ? { origin } : {}),
-  })
+  const errorCount = analysis.diagnostics.filter((d) => d.severity === 'error').length
+  const warningCount = analysis.diagnostics.filter((d) => d.severity === 'warning').length
+  const failure = evaluation?.failure ?? null
+  const running = evaluation !== null && !failure
 
-  push(text('outline-title', 'Parsed structure', TITLE, LABEL, pad, contentW))
+  push(text('outline-title', running ? 'Running' : 'Not running', TITLE, LABEL, pad, contentW))
   y += TITLE.lineHeight + 2
 
-  const errorCount = diagnostics.filter((d) => d.severity === 'error').length
-  const warningCount = diagnostics.filter((d) => d.severity === 'warning').length
-  const summary =
-    errorCount > 0
-      ? `${errorCount} error${errorCount === 1 ? '' : 's'} — outline may be incomplete`
+  const summary = failure
+    ? failure.message
+    : errorCount > 0
+      ? `${errorCount} error${errorCount === 1 ? '' : 's'} — fix these to run`
       : warningCount > 0
-        ? `${model.types.size} type${model.types.size === 1 ? '' : 's'} · ${warningCount} coverage note${warningCount === 1 ? '' : 's'}`
-        : `${model.types.size} type${model.types.size === 1 ? '' : 's'} · no problems`
+        ? `${analysis.model.types.size} types · ${warningCount} coverage note${warningCount === 1 ? '' : 's'}`
+        : `${analysis.model.types.size} types · no problems`
 
   push(
     text(
       'outline-summary',
       summary,
       CAPTION,
-      errorCount > 0 ? ERROR : warningCount > 0 ? WARNING : SECONDARY,
+      failure || errorCount > 0 ? ERROR : warningCount > 0 ? WARNING : SECONDARY,
       pad,
       contentW,
     ),
   )
   y += CAPTION.lineHeight + 14
 
-  const { title, nodes: outline } = rootViewOutline(model)
-  const rows = flattenOutline(outline)
-
+  const entry = analysis.model.entryPoint
   push(
     text(
       'outline-entry',
-      model.entryPoint ? `@main ${model.entryPoint.name} → ${title}` : title,
+      entry ? `@main ${entry.name} → ${evaluation?.rootTypeName ?? '?'}` : 'No entry point',
       CAPTION,
       ACCENT,
       pad,
@@ -200,6 +187,8 @@ function buildTree(request: CompileRequest, analysis: Analysis): RenderTree {
     ),
   )
   y += CAPTION.lineHeight + 8
+
+  const rows: FlatView[] = evaluation ? flattenViews(evaluation.views) : []
 
   const cardTop = y
   const cardHeight = Math.max(ROW_HEIGHT, rows.length * ROW_HEIGHT) + 16
@@ -218,7 +207,11 @@ function buildTree(request: CompileRequest, analysis: Analysis): RenderTree {
     push(
       text(
         'outline-empty',
-        errorCount > 0 ? 'Fix the errors to see the structure.' : 'No view body found.',
+        failure
+          ? 'Execution stopped.'
+          : errorCount > 0
+            ? 'Fix the errors to run.'
+            : 'No views produced.',
         ROW_DETAIL,
         TERTIARY,
         pad + 10,
@@ -227,12 +220,13 @@ function buildTree(request: CompileRequest, analysis: Analysis): RenderTree {
     )
   }
 
-  rows.forEach(({ node, depth }, index) => {
-    const id = `outline-row-${index}`
+  for (const { view, depth, path } of rows) {
     const x = pad + 10 + depth * INDENT
     const rowWidth = contentW - 20 - depth * INDENT
+    const interactive = view.action !== null
+    const id = `outline-row-${path}`
 
-    if (selectedNodeId === id) {
+    if (selectedPath === path) {
       push({
         id: `${id}-highlight`,
         kind: 'layer',
@@ -245,69 +239,140 @@ function buildTree(request: CompileRequest, analysis: Analysis): RenderTree {
     }
 
     push({
-      ...text(id, node.name, ROW, LABEL, x, rowWidth, node.span),
-      hitTarget: { handlerId: id, role: 'button', enabled: true },
-      a11y: { role: 'button', label: `${node.name}${node.detail ? ` ${node.detail}` : ''}` },
+      ...text(id, view.name, ROW, interactive ? ACTIONABLE : LABEL, x, rowWidth, view.span),
+      // A button's row runs its actual Swift closure; every other row just selects.
+      hitTarget: {
+        handlerId: interactive ? actionId(path) : path,
+        role: 'button',
+        enabled: true,
+      },
+      a11y: {
+        role: 'button',
+        label: interactive ? `Run ${view.name} action` : `Select ${view.name}`,
+      },
     })
 
-    const suffix = [node.detail, ...node.modifiers.map((m) => `.${m}`)].filter(Boolean).join(' ')
-    if (suffix) {
-      const nameWidth = node.name.length * 7.6 + 8
-      push(text(`${id}-detail`, suffix, ROW_DETAIL, TERTIARY, x + nameWidth, rowWidth - nameWidth))
+    const detail = [
+      view.args.length > 0
+        ? `(${view.args.map((a) => (a.label ? `${a.label}: ${renderArg(a.value)}` : renderArg(a.value))).join(', ')})`
+        : '',
+      ...view.modifiers.map((m) => `.${m.name}`),
+    ]
+      .filter(Boolean)
+      .join(' ')
+
+    if (detail) {
+      const nameWidth = view.name.length * 7.6 + 8
+      push(text(`${id}-detail`, detail, ROW_DETAIL, TERTIARY, x + nameWidth, rowWidth - nameWidth))
     }
 
     y += ROW_HEIGHT
-  })
+  }
 
   y = cardTop + cardHeight + 16
 
   push({
-    id: 'phase-1-notice',
+    id: 'phase-2-notice',
     kind: 'placeholder',
     frame: { x: pad, y, width: contentW, height: 76 },
     z: z++,
     opacity: 1,
     placeholder: {
-      feature: 'View rendering',
-      reason:
-        'Phase 1 parses and checks your Swift. Evaluating it (Phase 2) and laying it out (Phase 3) ' +
-        'come next — then this panel becomes the real app. Tap a row to select it.',
+      feature: 'Layout and drawing',
+      reason: running
+        ? 'Your code is running — these are real evaluated values. Tap a Button row to run its action. ' +
+          'Phase 3 adds the layout engine and turns this into the actual interface.'
+        : 'Phase 3 adds the layout engine and renderer.',
     },
   })
 
   return { canvas: { width, height: request.canvas.height }, nodes, revision: ++revision }
 }
 
-export function compile(request: CompileRequest): CompileResult {
-  const started = performance.now()
-  const analysis = analyse(request)
+// -------------------------------------------------------------------- compile
 
+function programKeyOf(request: CompileRequest): string {
+  return request.files.map((f) => `${f.id} ${f.text}`).join('')
+}
+
+function toResult(
+  request: CompileRequest,
+  analysis: Analysis,
+  evaluation: EvaluationResult | null,
+  startedAt: number,
+  evaluateMs: number,
+): CompileResult {
   const layoutStart = performance.now()
-  const renderTree = buildTree(request, analysis)
+  const renderTree = buildTree(request, analysis, evaluation)
   const layoutMs = performance.now() - layoutStart
+  const total = performance.now() - startedAt
 
-  const total = performance.now() - started
-  const logs: LogEntry[] = [
-    {
-      level: 'log',
+  const logs: LogEntry[] = (evaluation?.logs ?? []).map((entry) => ({
+    level: 'log' as const,
+    message: entry.message,
+    origin: entry.span,
+    at: total,
+  }))
+
+  const diagnostics = [...analysis.diagnostics]
+  if (evaluation?.failure) {
+    diagnostics.push({
+      span: evaluation.failure.span,
+      severity: 'error',
+      code: evaluation.failure.kind === 'budget' ? 'execution_budget_exceeded' : 'runtime_trap',
       message:
-        `Parsed ${request.files.length} file(s): ${analysis.model.types.size} type(s), ` +
-        `${analysis.diagnostics.length} diagnostic(s) in ${total.toFixed(1)}ms`,
-      at: total,
-    },
-  ]
+        evaluation.failure.frames.length > 0
+          ? `${evaluation.failure.message} (in ${evaluation.failure.frames[0]})`
+          : evaluation.failure.message,
+    })
+  }
 
   return {
     revision: request.revision,
-    diagnostics: analysis.diagnostics,
+    diagnostics,
     renderTree,
     logs,
     timings: {
       parse: analysis.parseMs,
       check: analysis.checkMs,
-      evaluate: 0,
+      evaluate: evaluateMs,
       layout: layoutMs,
       total,
     },
   }
+}
+
+export function compile(request: CompileRequest): CompileResult {
+  const startedAt = performance.now()
+  const analysis = analyse(request)
+  lastAnalysis = { request, analysis }
+
+  // Evaluation needs a well-formed program. Running one with parse errors would
+  // produce failures that describe the broken parse rather than the user's code.
+  if (hasBlockingError(analysis.diagnostics)) {
+    return toResult(request, analysis, null, startedAt, 0)
+  }
+
+  const evaluateStart = performance.now()
+  runtime.load(analysis.files, analysis.model, programKeyOf(request))
+  const evaluation = runtime.evaluate()
+  const evaluateMs = performance.now() - evaluateStart
+
+  return toResult(request, analysis, evaluation, startedAt, evaluateMs)
+}
+
+/** Re-renders after an interaction, without re-parsing unchanged source. */
+export function rerender(revisionBump = 1): CompileResult {
+  if (!lastAnalysis) throw new Error('rerender called before any compile')
+
+  const { request, analysis } = lastAnalysis
+  const next = { ...request, revision: request.revision + revisionBump }
+  lastAnalysis = { request: next, analysis }
+
+  const startedAt = performance.now()
+  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, startedAt, 0)
+
+  const evaluateStart = performance.now()
+  const evaluation = runtime.evaluate()
+  return toResult(next, analysis, evaluation, startedAt, performance.now() - evaluateStart)
 }

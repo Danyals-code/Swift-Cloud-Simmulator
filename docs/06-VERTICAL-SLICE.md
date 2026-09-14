@@ -251,6 +251,65 @@ Verified: **11/11 packages typecheck**, **lint clean**, **191 unit tests**, **12
 | Full bidirectional type checker | Resolution and coverage only | Gate 4 makes a false positive worse than a missed error. Member and argument checking needs real type information, which arrives with the interpreter in Phase 2. Unknown types warn rather than error for the same reason. |
 | Errors on unrecognised constructs | Warnings naming the feature | `NavigationStack` is valid Swift; reporting "cannot find in scope" would be both wrong and unhelpful. |
 
+## 4.4 Phase 2 task list — **complete**
+
+Built and verified 2026-09-14. The preview now *runs* the user's code.
+
+### Interpreter (`swift-runtime`)
+- [x] Value model: struct/array/dictionary copied on assignment and argument passing; closures shared
+- [x] Structs: memberwise init (labelled and positional), stored and computed properties, methods
+- [x] `mutating` methods writing through to the caller's storage, refused on a `let`
+- [x] Closures capturing by reference — the mechanism behind `Button { count += 1 }`
+- [x] `$0` shorthand and named closure parameters
+- [x] Full operator set with Swift semantics: truncating Int division, short-circuit `&&`/`||`, `??`
+- [x] Traps rather than `NaN`: division by zero, index out of range, overflow, force-unwrap nil
+- [x] Swift-shaped call stacks on every trap, innermost frame first
+- [x] Step budget and call-depth cap, so runaway code is abandoned rather than hanging the worker
+- [x] `@ViewBuilder` semantics: `buildBlock`, `buildIf`/`buildEither`, `buildArray`
+- [x] Stdlib: String (grapheme-correct), Array, Dictionary, Range, numerics, `print`
+- [x] `InterpreterHost` seam — the interpreter has no SwiftUI knowledge at all
+
+### SwiftUI host and app runtime (`swiftui-runtime`)
+- [x] Views, modifiers, `Color`, contextual member tokens (`.largeTitle`, `.infinity`)
+- [x] User `View` structs expanded through their own `body`, recursively
+- [x] A live root instance holding `@State` across re-renders and edits
+- [x] Button actions dispatched by tree path, running the real Swift closure
+- [x] Runtime failures reported as diagnostics rather than thrown
+
+### Phase 2 gate — all passing
+
+| # | Gate | Result |
+| --- | --- | --- |
+| 1 | A struct assigned to a second variable and mutated does not affect the first | Covered, including nested structs and structs inside arrays |
+| 2 | `mutating` methods and closure capture behave per spec | Covered, plus the `let` refusal |
+| 3 | Unbounded execution aborts within budget, naming the source line | Covered for both loops and recursion |
+| 4 | A runtime trap points at the correct line and column | Covered for division by zero, range, overflow, force-unwrap |
+| 5 | `print()` output reaches the console | Covered end to end |
+
+Verified: **11/11 packages typecheck**, **lint clean**, **299 unit tests**, **16/16 e2e**.
+
+### 4.5 — Deviations and findings
+
+| Planned | Actual | Why |
+| --- | --- | --- |
+| Copy-on-write collections | **Eager copying** | Semantically identical — COW is purely an optimisation. Eager copying is far easier to get right, and the same rule that killed incremental reparse applies: build the optimisation when a measurement asks for it. |
+| Gate: "a class shares, a struct copies" | Struct half only | Classes are outside the slice; the parser reports them as unsupported. The reference-semantics half of that gate moves to the phase that adds classes. |
+| Gate: async chain with `Task.sleep` | Deferred | `async`/`await` is outside the slice. |
+| `@State` preserved by property name | Preserved by **name and initialiser** | Matching on name alone keeps showing `0` after the user edits `= 0` to `= 10`, which reads as the preview being stuck. Changing an initialiser is a deliberate request to see the new value; changing anything else is not. |
+| Call depth cap of 2,000 | **512** | Each Swift call costs roughly ten JS frames, so 2,000 exhausted the JS stack first and surfaced as a `RangeError` naming the interpreter's own frames instead of a diagnostic about the user's code. |
+
+**Found by testing, worth recording:**
+
+- `"👋🏽".count` is 1 in Swift. Spreading a JS string splits by *code point*, giving 2 —
+  the emoji and its skin-tone modifier. Fixed with `Intl.Segmenter`, which is what the
+  architecture doc specified for text all along.
+- Swift allows `;` as a separator between *declarations*, not only statements. Found by
+  an end-to-end test that typed its fixture on one line to dodge the editor's bracket
+  auto-closing.
+- A single-expression body must be evaluated exactly once. Running the block for effects
+  and then re-evaluating the expression for its implicit return doubles every side effect
+  in it.
+
 ## 5. Slice definition of done
 
 1. The reference app in §1 renders in the device frame.

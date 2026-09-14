@@ -191,6 +191,8 @@ export class Parser {
     const declarations: Decl[] = []
 
     while (!this.atEnd) {
+      this.skipSemicolons()
+      if (this.atEnd) break
       const before = this.index
       const decl = this.parseDeclaration()
       if (decl) declarations.push(decl)
@@ -309,6 +311,8 @@ export class Parser {
     const members: Decl[] = []
     if (this.expect('{', 'to begin the struct body')) {
       while (!this.atEnd && !this.check('}') && !this.atProbableTopLevelDeclaration()) {
+        this.skipSemicolons()
+        if (this.check('}') || this.atEnd) break
         const before = this.index
         const member = this.parseDeclaration()
         if (member) members.push(member)
@@ -524,7 +528,7 @@ export class Parser {
 
   // -------------------------------------------------------------- statements
 
-  /** Swift allows `;` between statements on one line. */
+  /** Swift allows `;` between statements *and* declarations written on one line. */
   private skipSemicolons(): void {
     while (this.check(';')) this.advance()
   }

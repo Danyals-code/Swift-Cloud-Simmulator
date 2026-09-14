@@ -1,18 +1,23 @@
 /**
  * The Swift interpreter.
  *
- * Phase 2. Tree-walking over the typed AST, with an explicit frame stack so traps
- * can print a Swift-shaped stack trace, and a step budget so runaway user code is
- * terminated rather than hanging the worker (requirement FR-6.5).
+ * Tree-walking over the parsed AST, with an explicit frame stack so traps print a
+ * Swift-shaped trace, and a step budget so runaway user code is terminated rather
+ * than left to hang the worker (FR-6.5).
  *
- * The value model is the part most JS-based Swift emulators get wrong: structs and
- * enums copy on assignment, classes share, arrays and dictionaries are
- * copy-on-write, and `inout` is copy-in/copy-out rather than aliasing. Getting
- * this wrong makes `@State` behave subtly incorrectly, which is very hard to debug
- * later. See docs/02-ARCHITECTURE.md §5.1.
+ * The value model is the part most JS-hosted Swift emulators get wrong: structs and
+ * enums copy on assignment, arrays and dictionaries copy on assignment, and closures
+ * are shared. Getting this wrong makes `@State` behave subtly incorrectly, which is
+ * very hard to debug later. See `values.ts`.
+ *
+ * The package knows nothing about SwiftUI — views arrive through the `InterpreterHost`
+ * seam in `host.ts`, which is what keeps the language implementation testable on its
+ * own and the ESLint boundary rule satisfied.
  */
 
-export const PHASE = 2 as const
-
-// TODO(phase 2): SwiftValue, Interpreter, stdlib shims, the async scheduler.
-export {}
+export * from './values'
+export * from './errors'
+export * from './environment'
+export * from './host'
+export { Interpreter, type InterpreterOptions } from './interpreter'
+export { getBuiltinProperty, callBuiltinMember } from './stdlib'

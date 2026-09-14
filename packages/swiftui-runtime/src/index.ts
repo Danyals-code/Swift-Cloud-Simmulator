@@ -1,16 +1,19 @@
 /**
- * The SwiftUI runtime: View protocol, @ViewBuilder, property wrappers, view
- * identity and the observation graph.
+ * The SwiftUI runtime: the host that turns evaluated Swift into views, and the
+ * pipeline that drives parse -> check -> evaluate -> render.
  *
- * Phase 3. The load-bearing idea is ViewIdentity (docs/02-ARCHITECTURE.md §6.2):
- * `@State` boxes are keyed by a view's structural path rather than by object
- * reference, which is what makes state survive both a re-render and a hot reload.
+ * Phase 2 runs the user's code for real: interpolations resolve, `@State` lives on a
+ * persistent root instance that survives edits, and tapping a `Button` runs its
+ * actual Swift closure.
  *
- * Phase 1 ships the parse-and-outline pipeline in its place — real output derived
- * from the user's real source, rather than a demo tree pretending to be a preview.
+ * Phase 3 adds what is still missing — view identity, identity-keyed state boxes,
+ * the proposal/response layout engine, and drawing.
  */
 
-export { compile, applyEvent, resetPipelineState } from './pipeline'
+export { compile, rerender, applyEvent, resetPipelineState } from './pipeline'
+export { AppRuntime, actionId, type EvaluationResult, type RuntimeFailure } from './app-runtime'
+export { SwiftUIHost } from './swiftui-host'
+export * from './view-value'
 export {
   outlineExpression,
   outlineStatements,
@@ -18,5 +21,4 @@ export {
   type OutlineNode,
 } from './outline'
 
-// TODO(phase 3): ViewNode, ViewIdentity, ViewBuilder, StateBox, the observation
-// graph and subtree invalidation.
+// TODO(phase 3): ViewIdentity, StateBox, the observation graph, subtree invalidation.

@@ -1,0 +1,58 @@
+import type { SourceSpan } from '@studio/shared'
+import type { ClosureValue, SwiftValue } from './values'
+
+export interface CallArgument {
+  readonly label: string | null
+  readonly value: SwiftValue
+  readonly span: SourceSpan
+}
+
+export interface HostCall {
+  readonly args: readonly CallArgument[]
+  readonly trailingClosure: ClosureValue | null
+  readonly span: SourceSpan
+  /** Runs a closure and returns its single result — an action, or a mapping function. */
+  invoke(closure: ClosureValue, args?: readonly SwiftValue[]): SwiftValue
+  /**
+   * Runs a closure as a result builder, returning every value it contributes.
+   *
+   * `VStack { Text("a"); Text("b") }` yields two views, not one, and an `if` inside
+   * contributes only the taken branch. This is what `@ViewBuilder` means.
+   */
+  invokeBuilder(closure: ClosureValue, args?: readonly SwiftValue[]): readonly SwiftValue[]
+}
+
+/**
+ * The seam between Swift semantics and everything built on top of them.
+ *
+ * `swift-runtime` implements the language and nothing else — it has no idea what a
+ * `VStack` is, and the ESLint boundary rule would reject the import if it tried. So
+ * when evaluation meets a name it did not declare, it asks the host.
+ *
+ * `swiftui-runtime` supplies the host that turns `VStack { … }` into a view value,
+ * `Color.red` into a colour, and `.padding()` into a modifier. Swapping that host
+ * would let the same interpreter drive something else entirely, which is also what
+ * makes the interpreter testable without dragging SwiftUI into the fixtures.
+ *
+ * Every method returns `undefined` to mean "not mine" — the interpreter then falls
+ * through to its own error reporting rather than the host having to guess.
+ */
+export interface InterpreterHost {
+  /** A bare name in value position: `Color`, `Font`, `EmptyView`. */
+  resolveGlobal?(name: string): SwiftValue | undefined
+
+  /** A call to a global that is not a user declaration: `VStack(spacing: 8) { … }`. */
+  callGlobal?(name: string, call: HostCall): SwiftValue | undefined
+
+  /** `target.member(args)` where the interpreter does not own `target`. */
+  callMember?(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined
+
+  /** `target.member` with no call: `Color.red`, `.largeTitle`. */
+  getMember?(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined
+
+  /** Implicit member syntax with no base: `.primary`, `.infinity`, `.largeTitle`. */
+  resolveImplicitMember?(member: string, span: SourceSpan): SwiftValue | undefined
+
+  /** `print(...)` and anything else that writes to the console. */
+  log?(message: string, span: SourceSpan): void
+}
