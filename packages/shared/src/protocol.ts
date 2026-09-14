@@ -146,6 +146,39 @@ export interface CompilerApi {
    * startup, before the first compile.
    */
   setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void>
+
+  /**
+   * Editor intelligence, all three asking the same question from a different angle:
+   * what is the name at this offset?
+   *
+   * They take the files rather than reading a cached parse, because the editor asks
+   * *between* compiles — that is what a debounce is for — and a cached tree would be
+   * one keystroke stale exactly when it is consulted.
+   */
+  complete(files: readonly SourceFile[], fileId: FileId, offset: number): Promise<CompletionResult>
+  definition(files: readonly SourceFile[], fileId: FileId, offset: number): Promise<SymbolInfo | null>
+  hover(files: readonly SourceFile[], fileId: FileId, offset: number): Promise<SymbolInfo | null>
+  references(
+    files: readonly SourceFile[],
+    fileId: FileId,
+    offset: number,
+  ): Promise<readonly SourceSpan[]>
+}
+
+/** One completion candidate. Mirrors `SymbolInfo` in `swift-sema`. */
+export interface SymbolInfo {
+  readonly name: string
+  readonly kind: string
+  readonly detail: string
+  readonly span?: SourceSpan
+  readonly insert?: string
+  readonly doc?: string
+}
+
+export interface CompletionResult {
+  /** Offset where the word being completed starts, so the editor can replace it. */
+  readonly from: number
+  readonly items: readonly SymbolInfo[]
 }
 
 /** One measured font face. Mirrors `MeasuredFont` in `swiftui-layout`. */

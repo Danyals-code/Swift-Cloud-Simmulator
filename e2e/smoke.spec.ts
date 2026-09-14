@@ -552,3 +552,84 @@ test('Phase 6 — the coverage panel ranks what the preview could not draw', asy
   await expect(panel).toContainText('Chart')
   await expect(panel).toContainText('never sent anywhere')
 })
+
+/**
+ * Phase 8 — the editor half.
+ *
+ * Unit tests cover what the symbol index answers. Only a browser can answer whether
+ * the list actually appears when you type, which is the part the user experiences.
+ */
+
+const completionList = (page: Page) => page.locator('.cm-tooltip-autocomplete')
+
+test('Phase 8 — completion offers modifiers after a dot', async ({ page }) => {
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+
+  // Put the caret at the end of a Text(...) and type the dot that triggers the list.
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('struct V: View { var body: some View { Text("hi")')
+  await page.keyboard.type('.pad')
+
+  await expect(completionList(page)).toBeVisible({ timeout: 5000 })
+  await expect(completionList(page).getByText('padding', { exact: true })).toBeVisible()
+})
+
+test('Phase 8 — completion offers the project’s own declarations', async ({ page }) => {
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('struct Sparkle: View { var body: some View { Text("x") } }')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Spar')
+
+  await expect(completionList(page)).toBeVisible({ timeout: 5000 })
+  await expect(completionList(page).getByText('Sparkle', { exact: true })).toBeVisible()
+})
+
+test('Phase 8 — completion offers a property of the enclosing view', async ({ page }) => {
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('struct V: View { @State private var headline = "hi"; var body: some View { Text(head')
+
+  await expect(completionList(page)).toBeVisible({ timeout: 5000 })
+  await expect(completionList(page).getByText('headline', { exact: true })).toBeVisible()
+})
+
+test('Phase 8 — hovering a view the preview cannot draw says so', async ({ page }) => {
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('struct V: View { var body: some View { Table { Text("x") } } }')
+
+  // The honest gap, surfaced where the user is already looking.
+  await page.getByTestId('editor').getByText('Table', { exact: true }).first().hover()
+  await expect(page.locator('.cm-tooltip-hover')).toContainText('not drawn by the preview yet', {
+    timeout: 5000,
+  })
+})
+
+test('Phase 8 — F12 jumps to where a name was declared', async ({ page }) => {
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('struct Badge: View { var body: some View { Text("b") } }')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('struct V: View { var body: some View { Badge() } }')
+  await page.keyboard.press('Escape')
+
+  // Click inside the *use* of Badge on the second line, then jump.
+  const uses = page.getByTestId('editor').getByText('Badge', { exact: true })
+  await uses.last().click()
+  await page.keyboard.press('F12')
+
+  // The selection lands on the declaration, which is the first occurrence. Polled
+  // because the jump is a worker round trip: reading the selection straight after the
+  // keypress races it, and a test that sometimes wins that race is worse than none.
+  await expect
+    .poll(async () => page.evaluate(() => window.getSelection()?.toString() ?? ''), {
+      timeout: 5000,
+    })
+    .toBe('Badge')
+})

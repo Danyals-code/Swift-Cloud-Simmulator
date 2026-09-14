@@ -2,6 +2,10 @@ import * as Comlink from 'comlink'
 import {
   applyEvent,
   compile,
+  completionsFor,
+  definitionFor,
+  hoverFor,
+  referencesFor,
   rerender,
   resetPipelineState,
   setFontMetrics,
@@ -10,7 +14,12 @@ import type {
   CompileRequest,
   CompileResult,
   CompilerApi,
+  CompletionResult,
+  FileId,
   MeasuredFontData,
+  SourceFile,
+  SourceSpan,
+  SymbolInfo,
   UIEvent,
 } from '@studio/shared'
 
@@ -45,6 +54,41 @@ const api: CompilerApi = {
 
   async setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void> {
     setFontMetrics(fonts)
+  },
+
+  // Editor intelligence. Here for the same reason as everything else Swift-shaped:
+  // the main thread must stay at 60 fps while typing, and re-parsing a project on
+  // every completion request is work that does not belong on it.
+  async complete(
+    files: readonly SourceFile[],
+    fileId: FileId,
+    offset: number,
+  ): Promise<CompletionResult> {
+    return completionsFor(files, fileId, offset)
+  },
+
+  async definition(
+    files: readonly SourceFile[],
+    fileId: FileId,
+    offset: number,
+  ): Promise<SymbolInfo | null> {
+    return definitionFor(files, fileId, offset)
+  },
+
+  async hover(
+    files: readonly SourceFile[],
+    fileId: FileId,
+    offset: number,
+  ): Promise<SymbolInfo | null> {
+    return hoverFor(files, fileId, offset)
+  },
+
+  async references(
+    files: readonly SourceFile[],
+    fileId: FileId,
+    offset: number,
+  ): Promise<readonly SourceSpan[]> {
+    return referencesFor(files, fileId, offset)
   },
 }
 

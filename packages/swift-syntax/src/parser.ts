@@ -1280,7 +1280,12 @@ export class Parser {
         pattern = this.parsePattern()
       }
 
-      catches.push({ span: this.spanFrom(clauseStart), pattern, binding, body: this.parseBlock() })
+      // The body is parsed into a variable first: object properties evaluate in the
+      // order written, so taking the span inline would end it before the body began —
+      // and a clause whose span stops at its own `{` contains nothing the editor asks
+      // about.
+      const clauseBody = this.parseBlock()
+      catches.push({ span: this.spanFrom(clauseStart), pattern, binding, body: clauseBody })
     }
 
     return { kind: 'doCatchStmt', span: this.spanFrom(start), body, catches }

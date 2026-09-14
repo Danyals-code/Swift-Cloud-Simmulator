@@ -62,7 +62,7 @@ export function Studio() {
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
   const files = project?.files ?? NO_FILES
 
-  const { result, stale, workerError, dispatch, reset } = useCompiler(
+  const { result, stale, workerError, dispatch, reset, language } = useCompiler(
     files,
     device,
     previewSettings.colorScheme,
@@ -199,6 +199,9 @@ export function Studio() {
                 onChange={handleChange}
                 onSave={() => void flush()}
                 reveal={reveal}
+                fileId={activeFile.id}
+                language={language}
+                onOpenFile={revealSpanIn}
               />
             ) : (
               <p className="p-4 text-sm text-zinc-600">No file selected.</p>

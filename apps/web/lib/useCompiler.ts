@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CompileResult,
   CompilerApi,
+  CompletionResult,
+  SymbolInfo,
   MeasuredFontData,
   SourceFile,
   UIEvent,
@@ -168,8 +170,49 @@ export function useCompiler(
     }
   }, [accept, ensureWorker, runCompile])
 
+  /**
+   * Editor intelligence, asked of the worker on demand.
+   *
+   * The current `files` are sent with every request rather than relying on whatever
+   * the worker last compiled: the editor asks *between* compiles, which is the whole
+   * point of the debounce, so the worker's copy is one keystroke stale exactly when
+   * completion is consulted.
+   *
+   * A dead worker returns the empty answer rather than respawning. Completion is not
+   * worth a restart on its own — the next compile will bring one back — and a
+   * half-second stall on a keystroke is more disruptive than a missing list.
+   */
+  const language = useMemo(
+    () => ({
+      complete: async (fileId: string, offset: number): Promise<CompletionResult> => {
+        try {
+          return await ensureWorker().api.complete(files, fileId, offset)
+        } catch {
+          return { from: offset, items: [] }
+        }
+      },
+      definition: async (fileId: string, offset: number): Promise<SymbolInfo | null> => {
+        try {
+          return await ensureWorker().api.definition(files, fileId, offset)
+        } catch {
+          return null
+        }
+      },
+      hover: async (fileId: string, offset: number): Promise<SymbolInfo | null> => {
+        try {
+          return await ensureWorker().api.hover(files, fileId, offset)
+        } catch {
+          return null
+        }
+      },
+    }),
+    [ensureWorker, files],
+  )
+
   return useMemo(
-    () => ({ ...state, dispatch, reset, recompile: runCompile }),
-    [state, dispatch, reset, runCompile],
+    () => ({ ...state, dispatch, reset, recompile: runCompile, language }),
+    [state, dispatch, reset, runCompile, language],
   )
 }
+
+export type LanguageService = ReturnType<typeof useCompiler>['language']
