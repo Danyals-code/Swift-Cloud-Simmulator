@@ -5,7 +5,7 @@ import type { SwiftValue } from '@studio/swift-runtime'
  *
  * SwiftUI view structs are values: they are recreated from scratch on every render,
  * and `@State` does *not* live in them. It lives in boxes the framework keys by the
- * view's identity — its structural position in the tree. That indirection is the
+ * view's identity - its structural position in the tree. That indirection is the
  * whole reason a counter survives a re-render.
  *
  * Phase 2 approximated this with one long-lived root instance, which worked only
@@ -18,7 +18,7 @@ import type { SwiftValue } from '@studio/swift-runtime'
  *
  * The identity of a view is its parent's identity plus its own type name and the
  * number of same-typed siblings already seen. That makes it stable across renders
- * whenever the tree shape is unchanged — which is exactly when state should survive —
+ * whenever the tree shape is unchanged - which is exactly when state should survive -
  * and different when it is not.
  */
 export class IdentityPath {
@@ -78,7 +78,7 @@ export interface StateBox {
  * `@State` storage, keyed by view identity and property name.
  *
  * Boxes for views that left the tree are dropped after each pass. That is not just
- * housekeeping — it is SwiftUI's actual semantics: a view removed by an `if` loses
+ * housekeeping - it is SwiftUI's actual semantics: a view removed by an `if` loses
  * its state, and gets fresh state if it comes back.
  */
 export class StateStore {
@@ -123,7 +123,7 @@ export class StateStore {
     this.touched = new Set()
   }
 
-  /** Drops boxes for views that were not reached — they left the tree. */
+  /** Drops boxes for views that were not reached - they left the tree. */
   endPass(): void {
     for (const key of [...this.boxes.keys()]) {
       if (!this.touched.has(key)) this.boxes.delete(key)

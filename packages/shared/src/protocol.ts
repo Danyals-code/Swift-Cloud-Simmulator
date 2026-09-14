@@ -72,7 +72,7 @@ export interface CompileResult {
   readonly diagnostics: readonly Diagnostic[]
   /**
    * `null` when evaluation could not produce a tree (blocking errors). The renderer
-   * keeps painting the last good tree, dimmed, rather than blanking — requirement
+   * keeps painting the last good tree, dimmed, rather than blanking - requirement
    * FR-6.3, because the user is mid-keystroke most of the time.
    */
   readonly renderTree: RenderTree | null
@@ -84,7 +84,7 @@ export interface CompileResult {
  * Interactions travelling main thread -> worker.
  *
  * Gesture events carry a *phase* rather than being three separate kinds, because a
- * gesture is one interaction with a beginning, a middle and an end — and the handlers
+ * gesture is one interaction with a beginning, a middle and an end - and the handlers
  * that run differ only by which phase arrived. `translation` is cumulative from the
  * start of the drag, as SwiftUI reports it, not per-move.
  */
@@ -152,7 +152,7 @@ export interface CompilerApi {
    * what is the name at this offset?
    *
    * They take the files rather than reading a cached parse, because the editor asks
-   * *between* compiles — that is what a debounce is for — and a cached tree would be
+   * *between* compiles - that is what a debounce is for - and a cached tree would be
    * one keystroke stale exactly when it is consulted.
    */
   complete(files: readonly SourceFile[], fileId: FileId, offset: number): Promise<CompletionResult>

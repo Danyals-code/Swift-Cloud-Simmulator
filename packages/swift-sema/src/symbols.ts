@@ -27,7 +27,7 @@ import {
  * One principle shapes all of it, and it is the editor's version of the rule the
  * checker already follows: **a wrong answer is worse than no answer.** A completion
  * list that omits something costs a keystroke; one that offers a name which does not
- * exist, or jumps to the wrong declaration, teaches the user not to trust the editor —
+ * exist, or jumps to the wrong declaration, teaches the user not to trust the editor -
  * and then the feature is worse than absent.
  *
  * So everything here is derived from declarations that were actually parsed, plus the
@@ -59,7 +59,7 @@ export interface SymbolInfo {
   readonly detail: string
   /** Where it was declared, when the project declared it. */
   readonly span?: SourceSpan
-  /** Text to insert, when it differs from the name — `frame(` and so on. */
+  /** Text to insert, when it differs from the name - `frame(` and so on. */
   readonly insert?: string
   /** One line, shown in the completion detail panel and on hover. */
   readonly doc?: string
@@ -91,7 +91,7 @@ function contains(span: SourceSpan, file: string, offset: number): boolean {
  * The word being typed at `offset`, and where it starts.
  *
  * Identifier characters only. `$` is included because `$binding` is one name, and a
- * leading `.` is not — the dot is the trigger, handled separately.
+ * leading `.` is not - the dot is the trigger, handled separately.
  */
 function wordAt(text: string, offset: number): { word: string; from: number } {
   let from = offset
@@ -103,7 +103,7 @@ function wordAt(text: string, offset: number): { word: string; from: number } {
  * The receiver expression immediately before a `.`, as written.
  *
  * Textual on purpose. Resolving it properly needs a type checker, and the honest
- * fallback — offer modifiers — is only reachable if this can say "I do not know".
+ * fallback - offer modifiers - is only reachable if this can say "I do not know".
  * Returns null when the dot has no receiver, which is contextual member syntax.
  */
 function receiverBefore(text: string, dotOffset: number): string | null {
@@ -261,7 +261,7 @@ function collectScope(
     decl.kind === 'extensionDecl'
   ) {
     // Every member of the enclosing type is visible to every other, regardless of
-    // order — and that includes members an extension or a protocol default supplied.
+    // order - and that includes members an extension or a protocol default supplied.
     const merged = conformance.types.get(decl.name)?.members ?? decl.members
     for (const member of merged) {
       const info = describeMember(member)
@@ -300,7 +300,7 @@ function collectStatements(
 ): void {
   for (const statement of statements) {
     // A `let` declared *after* the caret is not yet in scope, which is how Swift reads
-    // a function body — unlike a type body, where order does not matter.
+    // a function body - unlike a type body, where order does not matter.
     if (statement.span.start > offset) break
 
     if (statement.kind === 'declStmt') {
@@ -449,7 +449,7 @@ function membersOfType(
 /**
  * The declared type of a name in scope, when it has one.
  *
- * Only ever reads what was written — an annotation, or a constructor call on the
+ * Only ever reads what was written - an annotation, or a constructor call on the
  * right of `=`. Inferring further needs the type checker, and a wrong type here sends
  * the member list for the wrong thing, which is exactly the failure this file exists
  * to avoid.
@@ -566,7 +566,7 @@ function attributeItems(): SymbolInfo[] {
  * The trigger decides everything, and there are only three that matter: a `.`, an
  * `@`, and ordinary identifier position. Getting the trigger wrong is what makes a
  * completion list feel random, so it is read from the text rather than guessed from
- * the tree — the tree at a half-typed caret is full of error nodes by design.
+ * the tree - the tree at a half-typed caret is full of error nodes by design.
  */
 export function completionsAt(
   files: readonly SourceFileNode[],
@@ -585,7 +585,7 @@ export function completionsAt(
   if (before?.ch === '.') {
     const receiver = receiverBefore(text, before.at)
 
-    // `Tab.` or `store.` — a name we can resolve to a declared type.
+    // `Tab.` or `store.` - a name we can resolve to a declared type.
     if (receiver) {
       const direct = membersOfType(files, receiver)
       if (direct) return { from, items: direct }
@@ -595,7 +595,7 @@ export function completionsAt(
       if (members) return { from, items: [...members, ...modifierItems()] }
     }
 
-    // Either contextual member syntax — `.largeTitle`, `.home` — or a receiver whose
+    // Either contextual member syntax - `.largeTitle`, `.home` - or a receiver whose
     // type is not written down. Modifiers are the honest answer: they are valid after
     // any view, and inventing members for an unknown receiver is the one thing this
     // must not do.
@@ -603,7 +603,7 @@ export function completionsAt(
   }
 
   // Ordinary identifier position: everything in scope, then the project's own
-  // declarations, then the built-ins. Order matters — the editor filters but keeps
+  // declarations, then the built-ins. Order matters - the editor filters but keeps
   // the order it was given, and what the user just wrote is likelier than `Capsule`.
   const index = buildSymbolIndex(files)
   const items: SymbolInfo[] = [
@@ -634,7 +634,7 @@ function dedupe(items: readonly SymbolInfo[]): SymbolInfo[] {
 /**
  * The declaration the name at `offset` refers to.
  *
- * Resolved by name against the scope at that offset, innermost first — which is
+ * Resolved by name against the scope at that offset, innermost first - which is
  * shadowing, and the reason the scope list is ordered rather than a map.
  */
 export function definitionAt(
@@ -704,7 +704,7 @@ export function hoverAt(
  * Matched on **identifier tokens**, not on text. The lexer already knows what is a
  * name and what is the inside of a string or a comment, so `count` in
  * `// the count so far` and in `"count: 3"` is excluded exactly rather than
- * heuristically — and those are the two places a textual rename quietly corrupts
+ * heuristically - and those are the two places a textual rename quietly corrupts
  * something that does not show up as a compile error afterwards.
  *
  * What it still cannot do is tell two *different* symbols that share a spelling apart;
@@ -724,7 +724,7 @@ export function referencesOf(
   const scan = (text: string, file: string, baseOffset: number): void => {
     for (const token of Lexer.tokenize(text, file, baseOffset).tokens) {
       // A string interpolation is *code* inside a literal, and the lexer keeps the
-      // token stream flat — so the identifiers in `"total: \(count)"` are not in it.
+      // token stream flat - so the identifiers in `"total: \(count)"` are not in it.
       // Missing them leaves a rename half-applied and the file referring to a name
       // that no longer exists.
       if (token.kind === 'stringLiteral') {
@@ -735,7 +735,7 @@ export function referencesOf(
       }
 
       // `keyword` as well as `identifier`: a name may be one in some positions and the
-      // other elsewhere — `some`, `any`, and every enum case named after a keyword.
+      // other elsewhere - `some`, `any`, and every enum case named after a keyword.
       if (token.kind !== 'identifier' && token.kind !== 'keyword') continue
       if (token.text === name) spans.push(token.span)
     }

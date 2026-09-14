@@ -6,7 +6,7 @@ import type { Project } from './types'
  * Every template must render with **zero** unsupported placeholders (Phase 4 gate 2),
  * which constrains them to the views the slice actually draws. That is a real limit
  * and it shows: there is no List, no NavigationStack, no Image. Shipping a gorgeous
- * template gallery that renders half-drawn would be worse than a small honest one —
+ * template gallery that renders half-drawn would be worse than a small honest one -
  * a template is a promise that this is what the tool can do.
  *
  * The gallery grows with the coverage matrix, not ahead of it.
@@ -14,7 +14,7 @@ import type { Project } from './types'
  * Every template also has to survive dark mode, which means using the *adaptive*
  * semantic colours rather than fixed greys. `Color(white: 0.95)` does not adapt, so a
  * template using it shows white text on a light background the moment appearance
- * flips — the single most common dark-mode mistake, and not one to ship as an
+ * flips - the single most common dark-mode mistake, and not one to ship as an
  * example.
  */
 
@@ -644,7 +644,7 @@ struct BasketSummary: View {
         HStack {
             Text(basket.total == 0 ? "Nothing yet" : "\\(basket.total) item(s)")
             Spacer()
-            Text(basket.items.last ?? "—")
+            Text(basket.items.last ?? "-")
                 .foregroundStyle(Color.secondary)
         }
     }
@@ -958,7 +958,7 @@ export const TEMPLATES: readonly Template[] = [
   {
     id: 'counter',
     name: 'Counter',
-    description: 'State, a Spacer and modifier ordering — the reference app.',
+    description: 'State, a Spacer and modifier ordering - the reference app.',
     source: COUNTER_APP_SOURCE,
   },
   {
@@ -1036,7 +1036,7 @@ export const TEMPLATES: readonly Template[] = [
   {
     id: 'drawing',
     name: 'Vectors',
-    description: 'Path, arcs and trim — a progress ring drawn from scratch.',
+    description: 'Path, arcs and trim - a progress ring drawn from scratch.',
     source: DRAWING,
   },
   {

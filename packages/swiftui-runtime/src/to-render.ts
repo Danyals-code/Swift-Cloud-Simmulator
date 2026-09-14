@@ -40,7 +40,7 @@ export function placedToRenderTree(
   return { canvas, nodes, revision }
 }
 
-/** Appends a second layout pass — an overlay, a bar — above everything already there. */
+/** Appends a second layout pass - an overlay, a bar - above everything already there. */
 export function appendPlaced(
   tree: RenderTree,
   placed: readonly PlacedNode[],

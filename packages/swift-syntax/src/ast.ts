@@ -9,7 +9,7 @@ import type { SourceSpan } from '@studio/shared'
  *    and runtime traps all need to point at real text.
  * 2. **Error and unsupported nodes are first class.** A parse failure produces a node
  *    rather than an exception, so a half-typed file still yields a usable tree for the
- *    rest of the source. FR-6.3 — keep showing the last good render — depends on it.
+ *    rest of the source. FR-6.3 - keep showing the last good render - depends on it.
  */
 
 export interface NodeBase {
@@ -52,7 +52,7 @@ export interface DictionaryTypeRef extends NodeBase {
   readonly value: TypeRef
 }
 
-/** `some View` — an opaque result type. */
+/** `some View` - an opaque result type. */
 export interface SomeType extends NodeBase {
   readonly kind: 'someType'
   readonly constraint: TypeRef
@@ -114,7 +114,7 @@ export interface ImportDecl extends NodeBase {
 /**
  * A `struct` or a `class`.
  *
- * One node for both, because the *declaration* is identical — same members, same
+ * One node for both, because the *declaration* is identical - same members, same
  * conformances, same syntax. What differs is instantiation: a class is a reference,
  * so assigning it shares rather than copies. That is one flag here and one branch in
  * `copyValue`, rather than a parallel node type every consumer would have to learn.
@@ -134,8 +134,8 @@ export interface StructDecl extends DeclBase {
 /**
  * An `enum`, with raw values or associated values.
  *
- * Enums are what drive most `switch` statements in SwiftUI code — a tab selection, a
- * loading state, a filter — so they arrive together with pattern matching rather than
+ * Enums are what drive most `switch` statements in SwiftUI code - a tab selection, a
+ * loading state, a filter - so they arrive together with pattern matching rather than
  * separately.
  */
 export interface EnumDecl extends DeclBase {
@@ -152,7 +152,7 @@ export interface EnumDecl extends DeclBase {
 export interface EnumCase extends NodeBase {
   readonly name: string
   readonly nameSpan: SourceSpan
-  /** `case success(String, Int)` — the payload's types, positionally. */
+  /** `case success(String, Int)` - the payload's types, positionally. */
   readonly associated: readonly Param[]
   /** `case home = "home"` */
   readonly rawValue: Expr | null
@@ -168,7 +168,7 @@ export interface EnumCase extends NodeBase {
  * second member list to keep in step.
  *
  * `associatedtype` is recorded by name only. The interpreter is dynamically typed,
- * so an associated type has nothing to constrain at runtime — recording it keeps
+ * so an associated type has nothing to constrain at runtime - recording it keeps
  * the name resolvable inside the protocol body instead of reporting it unresolved.
  */
 export interface ProtocolDecl extends DeclBase {
@@ -191,7 +191,7 @@ export interface AssociatedType extends NodeBase {
  *
  * The constraint is recorded and never enforced. A dynamically typed interpreter has
  * nothing to check it against at runtime, and checking it statically needs the real
- * type checker — which the export hands the user's exact source to anyway. Recording
+ * type checker - which the export hands the user's exact source to anyway. Recording
  * it keeps the name resolvable and the tree faithful to what was written.
  */
 export interface GenericParam extends NodeBase {
@@ -205,7 +205,7 @@ export interface GenericParam extends NodeBase {
  *
  * Extends a named type with members, conformances, or both. Modelled as a separate
  * declaration rather than folded into the type it extends, because the two are
- * written apart — often in different files — and folding at parse time would make
+ * written apart - often in different files - and folding at parse time would make
  * the tree depend on file order. Merging happens once, downstream, where every file
  * is in hand.
  */
@@ -252,7 +252,7 @@ export interface VarDecl extends DeclBase {
   /** Present for computed properties: `var body: some View { … }`. */
   readonly accessor: Block | null
   /**
-   * `{ get }` or `{ get set }` — a protocol's property requirement.
+   * `{ get }` or `{ get set }` - a protocol's property requirement.
    *
    * Distinguished from a computed property because there is no body to run: it says
    * a conformer must have this property, not how to compute it. `accessor` is null
@@ -262,7 +262,7 @@ export interface VarDecl extends DeclBase {
 }
 
 /**
- * A construct the parser recognised but the subset does not support — `class`,
+ * A construct the parser recognised but the subset does not support - `class`,
  * `enum`, `protocol`, and friends.
  *
  * Parsed to a node rather than dropped so that the diagnostic can name the feature
@@ -272,7 +272,7 @@ export interface VarDecl extends DeclBase {
 /**
  * A macro at declaration position: `#Preview { … }`, `#if DEBUG`.
  *
- * Kept as a node rather than skipped because `#Preview` is not decoration — it names
+ * Kept as a node rather than skipped because `#Preview` is not decoration - it names
  * a view to show, and a file that has one and no `@main` is a perfectly ordinary
  * thing to paste in. Treating it as an entry point is what makes that file render
  * instead of reporting that the project has none.
@@ -301,7 +301,7 @@ export interface ErrorDecl extends NodeBase {
 /**
  * `do { … } catch { … }`.
  *
- * A `do` with no catches is a plain scope, which Swift also allows — the node is the
+ * A `do` with no catches is a plain scope, which Swift also allows - the node is the
  * same either way, and an empty `catches` list means nothing is caught here.
  */
 export interface DoCatchStmt extends NodeBase {
@@ -314,7 +314,7 @@ export interface DoCatchStmt extends NodeBase {
  * One `catch` clause.
  *
  * `pattern` is null for a bare `catch`, which matches anything. `binding` is the name
- * the error is bound to — Swift's implicit `error` when nothing is written, or the
+ * the error is bound to - Swift's implicit `error` when nothing is written, or the
  * name in `catch let problem`.
  */
 export interface CatchClause extends NodeBase {
@@ -376,7 +376,7 @@ export interface DeclStmt extends NodeBase {
  * One clause of an `if` / `guard` / `while` condition list.
  *
  * Swift's conditions are a comma-separated list that mixes booleans with optional
- * bindings — `if let user = user, user.isActive` — and the bindings scope into the
+ * bindings - `if let user = user, user.isActive` - and the bindings scope into the
  * body. Modelling the list rather than a single expression is what makes `if let`
  * expressible at all.
  */
@@ -390,7 +390,7 @@ export type Condition =
       /** `if let user` with no `=` rebinds the name to its own unwrapped value. */
       readonly value: Expr
     }
-  /** `case .success(let payload) = result` — an `if case` pattern match. */
+  /** `case .success(let payload) = result` - an `if case` pattern match. */
   | { readonly kind: 'caseMatch'; readonly pattern: Pattern; readonly value: Expr }
 
 export interface IfStmt extends NodeBase {
@@ -432,7 +432,7 @@ export interface SwitchCase extends NodeBase {
  *
  * Deliberately a small set: the patterns that appear in view code. Tuple and nested
  * patterns are reported as unsupported rather than half-matched, because a pattern
- * that silently fails to match sends execution down the wrong branch — the exact
+ * that silently fails to match sends execution down the wrong branch - the exact
  * class of silent wrongness this project refuses.
  */
 export type Pattern =
@@ -444,11 +444,11 @@ export type Pattern =
       readonly bindings: readonly PatternBinding[]
       readonly span: SourceSpan
     }
-  /** `case 1`, `case "a"` — matched by equality. */
+  /** `case 1`, `case "a"` - matched by equality. */
   | { readonly kind: 'value'; readonly value: Expr; readonly span: SourceSpan }
   /** `case 1...5` */
   | { readonly kind: 'range'; readonly value: Expr; readonly span: SourceSpan }
-  /** `case let x` — always matches, binding the subject. */
+  /** `case let x` - always matches, binding the subject. */
   | { readonly kind: 'binding'; readonly name: string; readonly isLet: boolean; readonly span: SourceSpan }
   /** `case _` */
   | { readonly kind: 'wildcard'; readonly span: SourceSpan }
@@ -546,7 +546,7 @@ export interface TryExpr extends NodeBase {
   readonly operand: Expr
 }
 
-/** `super` — the receiver, resolved against the superclass's members. */
+/** `super` - the receiver, resolved against the superclass's members. */
 export interface SuperExpr extends NodeBase {
   readonly kind: 'superExpr'
 }
@@ -608,8 +608,8 @@ export interface SelfExpr extends NodeBase {
 /**
  * `base.member`, or `.member` with a null base.
  *
- * The null-base form is implicit member syntax — `.largeTitle`, `.infinity`,
- * `.primary` — which is pervasive in SwiftUI and resolves against the expected
+ * The null-base form is implicit member syntax - `.largeTitle`, `.infinity`,
+ * `.primary` - which is pervasive in SwiftUI and resolves against the expected
  * type rather than against a value.
  */
 export interface MemberAccessExpr extends NodeBase {
@@ -630,7 +630,7 @@ export interface CallExpr extends NodeBase {
   readonly kind: 'call'
   readonly callee: Expr
   readonly args: readonly Argument[]
-  /** `Button("Plus") { … }` — kept separate from `args` so the shape is faithful. */
+  /** `Button("Plus") { … }` - kept separate from `args` so the shape is faithful. */
   readonly trailingClosure: ClosureExpr | null
 }
 
@@ -700,8 +700,8 @@ export interface OptionalChainExpr extends NodeBase {
  * `\.self`, `\.id`, `\.colorScheme`.
  *
  * Stored as plain component names rather than resolved properties. A key path is
- * only ever *applied* here — to pick an identity out of a `ForEach` element or to
- * name an environment value — and none of those uses need the type-level machinery
+ * only ever *applied* here - to pick an identity out of a `ForEach` element or to
+ * name an environment value - and none of those uses need the type-level machinery
  * real key paths carry.
  */
 export interface KeyPathExpr extends NodeBase {

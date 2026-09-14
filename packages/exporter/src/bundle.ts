@@ -95,7 +95,7 @@ open ${name}.xcodeproj
 Then press Cmd+R. The project builds and runs in the Simulator as-is.
 
 To run on a physical device, select the target, open **Signing & Capabilities**, and
-choose your team — the project ships with automatic signing and no team set, because
+choose your team - the project ships with automatic signing and no team set, because
 a team identifier is specific to your Apple developer account.
 
 ## Sources
@@ -114,7 +114,7 @@ SwiftUI. These differences are expected, and none of them affect the exported co
 - Scrolling uses native browser physics, not iOS rubber-band deceleration.
 - The interpreter is far slower than compiled Swift; do not judge frame rates by it.
 
-Your Swift source is exported exactly as written — byte for byte. Anything the
+Your Swift source is exported exactly as written - byte for byte. Anything the
 preview could not draw is still here, unchanged, and will build normally.
 `
 }

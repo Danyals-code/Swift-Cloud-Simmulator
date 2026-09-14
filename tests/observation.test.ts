@@ -4,7 +4,7 @@ import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swift
 import { DEVICES } from '@studio/sim-shell'
 
 /**
- * Observation — `ObservableObject`, `@StateObject`, `@EnvironmentObject`, and the
+ * Observation - `ObservableObject`, `@StateObject`, `@EnvironmentObject`, and the
  * `@Environment` values.
  *
  * The reason this needed classes: an observable object's whole job is to be *shared*.

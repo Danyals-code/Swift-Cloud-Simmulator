@@ -68,7 +68,7 @@ export interface EvaluationResult {
  * re-render and an edit (FR-5.3), without the single-root-instance shortcut Phase 2
  * used.
  *
- * Phase 6 adds a second kind of state beside `@State`: what the *framework* holds —
+ * Phase 6 adds a second kind of state beside `@State`: what the *framework* holds -
  * which screen a navigation stack is showing, which tab is selected. It lives in
  * `UIState` rather than in the interpreter, because the user's code never declared
  * it and nothing in their source can be asked what it should be.
@@ -152,7 +152,7 @@ export class AppRuntime {
   /**
    * Tells the runtime what the device looks like this frame.
    *
-   * Separate from `load` because it changes without the program changing — flipping
+   * Separate from `load` because it changes without the program changing - flipping
    * to dark mode must not reload the interpreter and discard every `@State`.
    */
   setEnvironment(inputs: EnvironmentInputs): void {
@@ -299,7 +299,7 @@ export class AppRuntime {
    * the state the view is about to draw from, and rendering the pass that discovered
    * it would show the screen as it was one instant before the app started.
    *
-   * A callback runs at most once per appearance, tracked by path — so a re-render
+   * A callback runs at most once per appearance, tracked by path - so a re-render
    * does not re-fire it, and a view that leaves the tree and comes back does fire
    * again, which is what SwiftUI does too.
    */
@@ -355,8 +355,8 @@ export class AppRuntime {
     }
 
     if (ran) this.harvest(this.live)
-    // A disappear closure wrote into the previous pass's instance — the one that
-    // still had the view — so that pass is harvested second and therefore wins.
+    // A disappear closure wrote into the previous pass's instance - the one that
+    // still had the view - so that pass is harvested second and therefore wins.
     if (ranDisappear) this.harvest(this.previousLive)
     return ran
   }
@@ -457,7 +457,7 @@ export class AppRuntime {
    * Runs the handlers a gesture event triggers.
    *
    * `.updating` is the interesting one. Its closure's second parameter is `inout`,
-   * which the interpreter has no notion of — but the projection that implements
+   * which the interpreter has no notion of - but the projection that implements
    * `@Binding` is exactly an `inout` by another name, so the parameter is bound to a
    * projection onto the `@GestureState` box and `state = …` writes through it. On
    * `ended` the box is restored, which is what makes gesture state transient.
@@ -497,7 +497,7 @@ export class AppRuntime {
   /**
    * Restores every `@GestureState` to its declared initial value.
    *
-   * That reversion is the defining property of gesture state — ordinary `@State`
+   * That reversion is the defining property of gesture state - ordinary `@State`
    * keeps whatever it was last given. Re-evaluating the initialiser is what makes it
    * work regardless of how the value was written: the projection a `.updating`
    * closure wrote through is rebuilt on every pass, so remembering "the value before
@@ -522,7 +522,7 @@ export class AppRuntime {
     }
   }
 
-  /** The stack ids a back button belongs to — derived from its own handler path. */
+  /** The stack ids a back button belongs to - derived from its own handler path. */
   private navigationStacksFor(handlerId: string): string[] {
     const path = handlerId.replace(/^action-/, '')
     const stack = path.replace(/\/back$/, '')
@@ -572,7 +572,7 @@ export class AppRuntime {
   }
 
   /**
-   * Runs a deferred view builder — a sheet's content, a toolbar, a destination.
+   * Runs a deferred view builder - a sheet's content, a toolbar, a destination.
    *
    * These closures are held unevaluated by the resolver and run only if the screen
    * they belong to is actually shown, which is both faster and, more importantly,
@@ -682,7 +682,7 @@ export class AppRuntime {
    * Runs a `#Preview` body as the root.
    *
    * A view builder like any other, evaluated in the global scope because a preview
-   * body has no enclosing type — `#Preview { ContentView() }` is written at file
+   * body has no enclosing type - `#Preview { ContentView() }` is written at file
    * level and sees exactly what a top-level function would.
    */
   private runPreviewBody(body: Block): ViewValue[] {
@@ -769,7 +769,7 @@ export class AppRuntime {
 /**
  * The properties whose value must outlive the view struct.
  *
- * `@StateObject` belongs here beside `@State` and `@ObservedObject` does not — that
+ * `@StateObject` belongs here beside `@State` and `@ObservedObject` does not - that
  * is the entire difference between them. A `@StateObject` is created once and kept;
  * an `@ObservedObject` is handed in from outside and owned by whoever made it.
  */
@@ -783,7 +783,7 @@ function statefulProperties(members: readonly Decl[]): VarDecl[] {
   )
 }
 
-/** `@Environment(\.colorScheme)` — the key path the attribute was given. */
+/** `@Environment(\.colorScheme)` - the key path the attribute was given. */
 function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): SwiftValue | undefined {
   const first = attribute.args[0]?.value as { kind?: string; components?: readonly string[] } | undefined
   if (first?.kind !== 'keyPath' || !first.components) return undefined
@@ -810,7 +810,7 @@ function truthyValue(value: SwiftValue): boolean {
 /**
  * The value an intent writes.
  *
- * A typed event carries one — a text field's new string, a slider's new number — and
+ * A typed event carries one - a text field's new string, a slider's new number - and
  * it takes precedence over the intent's own constant, which is what a tap-only
  * control (a dismiss button, a tab) supplies instead.
  */

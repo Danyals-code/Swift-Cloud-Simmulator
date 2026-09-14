@@ -139,7 +139,7 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
 }
 
 /**
- * The coverage ranking — what this browser has reached for and not found.
+ * The coverage ranking - what this browser has reached for and not found.
  *
  * Shown rather than shipped anywhere: there is no endpoint and no account, so the
  * only reader of these numbers is the person who generated them. That makes it both

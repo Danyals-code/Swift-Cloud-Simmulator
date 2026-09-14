@@ -32,7 +32,7 @@ export interface ProjectSummary {
  *
  * v0.1 is local-only (decision Q3): the sole implementation is IndexedDB, there is
  * no account and no server. The interface exists anyway so that Phase 7b can add a
- * cloud-backed store without touching a single call site — the alternative is
+ * cloud-backed store without touching a single call site - the alternative is
  * IndexedDB calls sprayed through the UI, which is exactly the rework we want to
  * avoid paying for later.
  */
@@ -70,7 +70,7 @@ export function withFileText(project: Project, fileId: FileId, text: string): Pr
  *
  * All non-mutating, and all validating their own preconditions, because the store
  * that calls them is driven by a text field the user can type anything into. A
- * rejected operation returns the project unchanged rather than throwing — there is
+ * rejected operation returns the project unchanged rather than throwing - there is
  * nothing useful for the UI to do with an exception here.
  */
 

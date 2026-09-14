@@ -31,12 +31,12 @@ import { screenToLayout, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
  *
  * Phase 6 adds the composition step. A screen is no longer just the user's content:
- * it is the content *plus* whatever the framework puts around and over it — a
+ * it is the content *plus* whatever the framework puts around and over it - a
  * navigation bar, a tab bar, a sheet. Each of those is positioned against the device
  * rather than against the content, so each gets its own layout pass against its own
  * rect, and the results are concatenated in paint order.
  *
- * When the program cannot run — parse errors, or a runtime trap — the last good tree
+ * When the program cannot run - parse errors, or a runtime trap - the last good tree
  * keeps being shown by the *renderer*, dimmed (FR-6.3). This module simply reports
  * `renderTree: null` and lets the UI decide, rather than blanking the screen.
  */
@@ -220,7 +220,7 @@ function presentOverlay(
   const nodes: PlacedNode[] = []
 
   // Everything behind a presentation dims, and tapping the dimmed area dismisses it
-  // — which is the only affordance a preview can offer in place of a swipe.
+  // - which is the only affordance a preview can offer in place of a swipe.
   nodes.push({
     id: 'overlay-dim',
     frame: { x: 0, y: 0, width: canvas.width, height: canvas.height },
@@ -278,7 +278,7 @@ function overlayRect(
   }
 
   // A sheet: a negative detent is an absolute height in points, a positive one a
-  // fraction of the screen — which is exactly how `PresentationDetent` is spelled.
+  // fraction of the screen - which is exactly how `PresentationDetent` is spelled.
   const height =
     overlay.detent < 0
       ? Math.min(-overlay.detent, canvas.height - safeArea.top)
@@ -491,9 +491,9 @@ function geometryFrom(tree: RenderTree): Map<string, { width: number; height: nu
  * What `@Environment` reports, from what the preview controls are set to.
  *
  * Read on every compile rather than at load, because appearance and Dynamic Type
- * change without the program changing — and reloading would discard every `@State`.
+ * change without the program changing - and reloading would discard every `@State`.
  */
-/** The rect a root view is proposed — what a geometry reader reports before layout. */
+/** The rect a root view is proposed - what a geometry reader reports before layout. */
 function contentSizeOf(request: CompileRequest): { width: number; height: number } {
   const safeArea = request.safeArea ?? { top: 0, leading: 0, bottom: 0, trailing: 0 }
   return {

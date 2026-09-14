@@ -3,7 +3,7 @@
  *
  * Built as a serialiser over a data structure rather than string templates. A
  * pbxproj is a few hundred cross-referencing objects, and this file is the one
- * deliverable that cannot be verified without a Mac — so well-formedness has to be
+ * deliverable that cannot be verified without a Mac - so well-formedness has to be
  * structural, not something template strings are trusted to get right.
  *
  * The parser exists for the same reason: round-tripping the generated file proves
@@ -22,7 +22,7 @@ export type PlistComments = ReadonlyMap<string, string>
 /**
  * What Xcode itself leaves unquoted: alphanumerics, underscore and dot.
  *
- * The old-style plist grammar permits more — hyphens and slashes are legal bare —
+ * The old-style plist grammar permits more - hyphens and slashes are legal bare -
  * but Xcode quotes them anyway, and matching Xcode is the conservative choice for a
  * file that cannot be verified without a Mac. `"-Onone"` and
  * `"com.apple.product-type.application"` are quoted for exactly this reason.

@@ -4,13 +4,13 @@ import { double, opaque, type ClosureValue, type SwiftValue } from '@studio/swif
 /**
  * Gestures.
  *
- * A gesture is built up by chaining — `DragGesture().onChanged { … }.onEnded { … }` —
+ * A gesture is built up by chaining - `DragGesture().onChanged { … }.onEnded { … }` -
  * so the value is accumulated rather than constructed in one go. Each link returns a
  * new gesture with one more handler, which is also why this is a value type here:
  * the chain is value-semantic in SwiftUI too.
  *
  * The one genuine subtlety is `.updating($state) { value, state, _ in … }`. Its
- * second parameter is `inout`, which the interpreter does not implement — but a
+ * second parameter is `inout`, which the interpreter does not implement - but a
  * property-wrapper *projection* is exactly an `inout` by another name, so the
  * parameter is bound to a projection onto the gesture-state box and `state = …`
  * writes through it. The mechanism that made `@Binding` work turns out to be the
@@ -40,7 +40,7 @@ export interface GesturePayload {
   readonly minimumDistance: number
   readonly handlers: readonly GestureHandler[]
   readonly updates: readonly GestureUpdate[]
-  /** `.simultaneously(with:)` — both run, which is the only composition modelled. */
+  /** `.simultaneously(with:)` - both run, which is the only composition modelled. */
   readonly also: readonly GesturePayload[]
 }
 
@@ -91,7 +91,7 @@ export function point(x: number, y: number): SwiftValue {
  * Reads a member of a `CGSize`, `CGPoint` or a gesture value.
  *
  * These are the only structural values the host hands to user code, and each is a
- * flat record — so one lookup covers all of them rather than three near-identical
+ * flat record - so one lookup covers all of them rather than three near-identical
  * member tables.
  */
 export function geometryMember(value: SwiftValue, member: string): SwiftValue | undefined {
@@ -116,7 +116,7 @@ export function geometryMember(value: SwiftValue, member: string): SwiftValue | 
  * The value a gesture hands its closures.
  *
  * Shaped to match `DragGesture.Value`: `translation` and the locations are the
- * members real code reads. `predictedEndTranslation` is the translation itself —
+ * members real code reads. `predictedEndTranslation` is the translation itself -
  * honest rather than invented, since a preview has no velocity to extrapolate from.
  */
 export function gestureValue(event: UIEvent): SwiftValue {

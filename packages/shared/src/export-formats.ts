@@ -1,8 +1,8 @@
 /**
  * The export formats, as data.
  *
- * In `shared` rather than in the exporter because the toolbar needs the *list* — four
- * names and four descriptions — while the code that builds a `.xcodeproj` is thirty
+ * In `shared` rather than in the exporter because the toolbar needs the *list* - four
+ * names and four descriptions - while the code that builds a `.xcodeproj` is thirty
  * kilobytes that only runs when someone clicks. Keeping the menu here is what lets the
  * generator load on demand instead of on first paint.
  */
@@ -40,7 +40,7 @@ export const EXPORT_FORMATS: readonly FormatInfo[] = [
   {
     id: 'xcodegen',
     name: 'XcodeGen spec',
-    description: 'project.yml — generate the .xcodeproj rather than commit it.',
+    description: 'project.yml - generate the .xcodeproj rather than commit it.',
     suffix: '-xcodegen.zip',
   },
 ]

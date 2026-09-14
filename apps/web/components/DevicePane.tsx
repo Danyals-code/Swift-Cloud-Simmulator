@@ -46,7 +46,7 @@ export function DevicePane({
   // the value, not something to synchronise after the fact.
   const highlighted = inspecting ? hovered : null
 
-  // Fit-to-pane. Never scales above 1:1 — an upscaled simulator looks convincing
+  // Fit-to-pane. Never scales above 1:1 - an upscaled simulator looks convincing
   // and is quietly misleading about how much fits on a real screen.
   useLayoutEffect(() => {
     const el = containerRef.current
@@ -70,8 +70,8 @@ export function DevicePane({
       ref={containerRef}
       className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[#0d0d10]"
       data-testid="device-pane"
-      // The pointer can leave the device without crossing any node's boundary —
-      // straight off the bezel — so the pane itself has to clear the highlight.
+      // The pointer can leave the device without crossing any node's boundary -
+      // straight off the bezel - so the pane itself has to clear the highlight.
       onPointerLeave={() => setHovered(null)}
     >
       <div

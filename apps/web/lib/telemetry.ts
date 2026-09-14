@@ -2,7 +2,7 @@ import type { CompileResult, Diagnostic } from '@studio/shared'
 import { UNIMPLEMENTED_MODIFIERS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 
 /**
- * Coverage telemetry — what people actually write that the preview cannot draw.
+ * Coverage telemetry - what people actually write that the preview cannot draw.
  *
  * The roadmap's Phase 6 rule is that breadth is driven by telemetry rather than by
  * guesswork, and this is the instrument. Every unsupported view, modifier and
@@ -10,7 +10,7 @@ import { UNIMPLEMENTED_MODIFIERS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema
  * coverage backlog should be ordered by.
  *
  * **It never leaves the browser.** There is no endpoint and no account (decision:
- * local-only storage), so this is telemetry in the literal sense — a measurement
+ * local-only storage), so this is telemetry in the literal sense - a measurement
  * surfaced to the person being measured. That is also why it is a visible panel
  * rather than a background collector: data gathered about someone should be data
  * they can read.

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * Phase 4 gates — the IDE experience.
+ * Phase 4 gates - the IDE experience.
  *
  * 1. Create a second file, define a type, use it from the first.
  * 2. Every template renders with zero unsupported placeholders.
@@ -30,7 +30,7 @@ async function editorText(page: Page): Promise<string> {
  * Replaces the document with a single line.
  *
  * CodeMirror auto-closes brackets, so typing a multi-line block leaves the
- * auto-inserted `}` in place as well as the one the test typed — silently producing
+ * auto-inserted `}` in place as well as the one the test typed - silently producing
  * unbalanced source and a failure that has nothing to do with the product.
  */
 async function replaceAll(page: Page, source: string) {
@@ -52,7 +52,7 @@ async function nodeHeight(page: Page, text: string): Promise<number> {
 
 // ---------------------------------------------------------------- gate 1
 
-test('gate 1 — a second file can define a type the first one uses', async ({ page }) => {
+test('gate 1 - a second file can define a type the first one uses', async ({ page }) => {
   await openStudio(page)
 
   await page.getByTestId('new-file').click()
@@ -83,7 +83,7 @@ test('gate 1 — a second file can define a type the first one uses', async ({ p
   await expect(page.getByTestId('console')).toContainText('No problems.')
 })
 
-test('gate 1 — an unresolved cross-file name is reported', async ({ page }) => {
+test('gate 1 - an unresolved cross-file name is reported', async ({ page }) => {
   await openStudio(page)
   await replaceAll(
     page,
@@ -127,14 +127,14 @@ test('a file can be deleted, and the last one cannot', async ({ page }) => {
   await page.getByRole('button', { name: 'Delete Temp.swift' }).click()
   await expect(page.getByTestId('file-rail')).not.toContainText('Temp.swift')
 
-  // With one file left there is no delete control at all — removing it would leave a
+  // With one file left there is no delete control at all - removing it would leave a
   // project with nothing to show and no way back.
   await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0)
 })
 
 // ---------------------------------------------------------------- gate 2
 
-test('gate 2 — a template from the gallery loads and renders cleanly', async ({ page }) => {
+test('gate 2 - a template from the gallery loads and renders cleanly', async ({ page }) => {
   await openStudio(page)
 
   await page.getByTestId('template-select').selectOption('tasks')
@@ -147,7 +147,7 @@ test('gate 2 — a template from the gallery loads and renders cleanly', async (
 
 // ---------------------------------------------------------------- gate 3
 
-test('gate 3 — the inspector names a view and reports its computed frame', async ({ page }) => {
+test('gate 3 - the inspector names a view and reports its computed frame', async ({ page }) => {
   await openStudio(page)
   await expect(preview(page)).toContainText('Hello, World!')
 
@@ -159,11 +159,11 @@ test('gate 3 — the inspector names a view and reports its computed frame', asy
 
   await expect(page.getByTestId('inspector-readout')).toContainText('Text')
   await expect(page.getByTestId('inspect-highlight')).toBeVisible()
-  // `.largeTitle` measures 41pt tall — the number a screenshot cannot tell you.
+  // `.largeTitle` measures 41pt tall - the number a screenshot cannot tell you.
   await expect(page.getByTestId('inspector-frame')).toContainText('41')
 })
 
-test('gate 3 — clicking an inspected view jumps the editor to its source', async ({ page }) => {
+test('gate 3 - clicking an inspected view jumps the editor to its source', async ({ page }) => {
   await openStudio(page)
   await expect(preview(page)).toContainText('Hello, World!')
 
@@ -174,7 +174,7 @@ test('gate 3 — clicking an inspected view jumps the editor to its source', asy
   await expect(page.getByTestId('editor').locator('.cm-activeLine').first()).toContainText('Text(')
 })
 
-test('gate 3 — leaving inspector mode restores tapping', async ({ page }) => {
+test('gate 3 - leaving inspector mode restores tapping', async ({ page }) => {
   await openStudio(page)
 
   await page.getByTestId('inspect-toggle').click()
@@ -189,7 +189,7 @@ test('gate 3 — leaving inspector mode restores tapping', async ({ page }) => {
 
 // ---------------------------------------------------------------- gate 4
 
-test('gate 4 — dark mode and Dynamic Type re-render without losing state', async ({ page }) => {
+test('gate 4 - dark mode and Dynamic Type re-render without losing state', async ({ page }) => {
   await openStudio(page)
 
   await appButton(page, 'Plus').click()
@@ -211,7 +211,7 @@ test('gate 4 — dark mode and Dynamic Type re-render without losing state', asy
   await expect(preview(page)).toContainText('Count: 2')
 })
 
-test('gate 4 — dark mode actually changes the rendered colours', async ({ page }) => {
+test('gate 4 - dark mode actually changes the rendered colours', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(

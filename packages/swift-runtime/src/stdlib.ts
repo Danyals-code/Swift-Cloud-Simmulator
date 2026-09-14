@@ -28,7 +28,7 @@ type Trap = (reason: string) => never
  *
  * Coverage is chosen by what the slice's code actually calls, not by mirroring the
  * real stdlib. Anything missing falls through to the interpreter's "has no member"
- * trap, which names the member — so a gap reports as a precise, actionable message
+ * trap, which names the member - so a gap reports as a precise, actionable message
  * rather than as a wrong answer.
  */
 
@@ -38,7 +38,7 @@ type Trap = (reason: string) => never
 export function getBuiltinProperty(target: SwiftValue, member: string): SwiftValue | undefined {
   switch (target.kind) {
     case 'string': {
-      // Grapheme clusters, not code points — see `graphemes` in values.ts.
+      // Grapheme clusters, not code points - see `graphemes` in values.ts.
       const chars = graphemes(target.value)
       switch (member) {
         case 'count':
@@ -288,7 +288,7 @@ function arrayMethod(
   trap: Trap,
 ): SwiftValue | undefined {
   switch (member) {
-    // `move(fromOffsets:toOffset:)` — what `.onMove` calls.
+    // `move(fromOffsets:toOffset:)` - what `.onMove` calls.
     case 'move': {
       const from = asIndexSet(args.find((a) => a.label === 'fromOffsets')?.value)
       const toValue = args.find((a) => a.label === 'toOffset')?.value
@@ -327,7 +327,7 @@ function arrayMethod(
     case 'remove': {
       // `remove(atOffsets:)` is what `.onDelete` calls. The indices are walked in
       // descending order so that each deletion cannot shift the position of one still
-      // to come — the classic way this goes wrong is deleting the wrong rows.
+      // to come - the classic way this goes wrong is deleting the wrong rows.
       const offsets = asIndexSet(labelled('atOffsets'))
       if (offsets) {
         for (const index of [...offsets].sort((a, b) => b - a)) {

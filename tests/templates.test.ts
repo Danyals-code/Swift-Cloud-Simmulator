@@ -14,7 +14,7 @@ import { DEVICES } from '@studio/sim-shell'
  * than one that does not ship. It is also the reason the gallery is small: it grows
  * with the coverage matrix, not ahead of it.
  *
- * The suite lives outside any one package because it deliberately spans all of them —
+ * The suite lives outside any one package because it deliberately spans all of them -
  * project model, parser, checker, interpreter, layout, render.
  */
 
@@ -100,7 +100,7 @@ describe.each(TEMPLATES)('template: $name', (template) => {
       expect(width).toBeGreaterThanOrEqual(0)
       expect(height).toBeGreaterThanOrEqual(0)
       // Generous bounds: content may legitimately overflow, but not by orders of
-      // magnitude — that would mean an unbounded proposal leaked into a frame.
+      // magnitude - that would mean an unbounded proposal leaked into a frame.
       expect(Math.abs(x)).toBeLessThan(device.width * 4)
       expect(Math.abs(y)).toBeLessThan(device.height * 4)
     }
@@ -109,7 +109,7 @@ describe.each(TEMPLATES)('template: $name', (template) => {
   it('adapts to dark mode instead of rendering fixed greys', () => {
     /**
      * A template using `Color(white: 0.95)` looks identical in both appearances while
-     * its `.primary` text flips to white — white on light grey, unreadable. That is
+     * its `.primary` text flips to white - white on light grey, unreadable. That is
      * the most common dark-mode mistake there is, and shipping it as an example would
      * be teaching it.
      */
@@ -119,7 +119,7 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     const dark = paintedColors(compile(requestFor(template.source, 'dark')).renderTree!.nodes)
 
     const shared = [...light].filter((c) => dark.has(c))
-    // Some colours legitimately match — a fixed brand tint, a white-on-tint label —
+    // Some colours legitimately match - a fixed brand tint, a white-on-tint label -
     // but the palettes must not be identical.
     expect([...dark].some((c) => !light.has(c))).toBe(true)
     expect(shared.length).toBeLessThan(light.size)
@@ -174,7 +174,7 @@ describe.each(TEMPLATES)('template: $name', (template) => {
  * Only nodes in the *same* coordinate space are considered. Since Phase 6, a node
  * inside a scroll view is positioned relative to that scroller, so comparing its
  * frame against an absolutely-positioned one would overlap rectangles that never
- * touch on screen — and the contrast check would then be measuring a pair of colours
+ * touch on screen - and the contrast check would then be measuring a pair of colours
  * that are never seen together.
  */
 function backgroundBehind(

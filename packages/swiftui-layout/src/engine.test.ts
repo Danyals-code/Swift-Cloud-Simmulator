@@ -18,7 +18,7 @@ import type { ProposedDimension } from './proposal'
  * The architecture doc calls these the load-bearing suite, and they are: every
  * layout bug found in the wild becomes a case here *before* it is fixed. They run
  * against the built-in metric estimates rather than browser-measured fonts, which
- * makes them deterministic — assertions are on geometry (this is centred, this fills
+ * makes them deterministic - assertions are on geometry (this is centred, this fills
  * the row, this sits below that), not on exact glyph widths.
  */
 
@@ -155,7 +155,7 @@ describe('stacks', () => {
       vstack([text('a')], 0, { horizontal: 'leading', vertical: 'top' }),
       { x: 0, y: 0, width: 300, height: 200 },
     )
-    // The stack hugs its content, so alignment inside it is a no-op — the meaningful
+    // The stack hugs its content, so alignment inside it is a no-op - the meaningful
     // case is a child narrower than a stack forced wide, below.
     expect(frames(leading)[0]!.x).toBe(0)
   })
@@ -173,7 +173,7 @@ describe('stacks', () => {
   })
 })
 
-describe('Spacer — the case that exposes a wrong engine', () => {
+describe('Spacer - the case that exposes a wrong engine', () => {
   it('pushes two texts to opposite ends of an HStack', () => {
     // Phase 3 gate 2. If children were measured in source order rather than by
     // flexibility, the Spacer would swallow the row and the second Text would be
@@ -297,7 +297,7 @@ describe('padding', () => {
 describe('modifier order (Phase 3 gate 3)', () => {
   /**
    * `.padding().background()` and `.background().padding()` must differ. This is the
-   * single clearest test that modifiers nest rather than merge — a flat modifier list
+   * single clearest test that modifiers nest rather than merge - a flat modifier list
    * cannot represent the difference at all.
    */
   const content = () => text('hi')

@@ -13,7 +13,7 @@ import {
 import type { Project } from './types'
 
 /**
- * Share links — Phase 9c.
+ * Share links - Phase 9c.
  *
  * Half of these are about malformed input, and that is the right proportion: the
  * payload arrives from a URL a stranger pasted, so truncation, a stale format and

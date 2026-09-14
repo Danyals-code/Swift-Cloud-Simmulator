@@ -11,7 +11,7 @@ export interface StackFrame {
  * overflow, division by zero.
  *
  * Carries the source span and a Swift-shaped call stack so the red overlay can name
- * the exact line (FR-6.4). Extends Error only so that stack unwinding is free —
+ * the exact line (FR-6.4). Extends Error only so that stack unwinding is free -
  * the JS stack itself is never shown to the user, since it describes the
  * interpreter's code rather than theirs.
  */
@@ -34,7 +34,7 @@ export class SwiftTrap extends Error {
 /**
  * Raised when execution exceeds its step budget.
  *
- * Distinct from `SwiftTrap` because it is not the user's program failing — it is us
+ * Distinct from `SwiftTrap` because it is not the user's program failing - it is us
  * refusing to keep running it. The message says so, and names the last source
  * position reached so an infinite loop is findable (FR-6.5).
  */
@@ -60,7 +60,7 @@ export class ExecutionBudgetExceeded extends Error {
  * Raised when the interpreter meets something it does not implement.
  *
  * Kept separate from `SwiftTrap` so the console can say "the preview cannot do this
- * yet" rather than implying the user's code is broken — the same distinction Phase 1
+ * yet" rather than implying the user's code is broken - the same distinction Phase 1
  * draws between unsupported and unresolved.
  */
 export class UnsupportedAtRuntime extends Error {
@@ -85,7 +85,7 @@ export class ReturnSignal {
  * to unwind through however many calls stand between the `throw` and the `catch`, and
  * a return code would need checking at every one of them.
  *
- * It carries the thrown *value* — usually an enum case conforming to `Error` — rather
+ * It carries the thrown *value* - usually an enum case conforming to `Error` - rather
  * than a message, because that value is what a `catch` pattern matches against and
  * what `catch { error }` binds.
  */
@@ -101,7 +101,7 @@ export class SwiftThrow {
  *
  * Same mechanism as `ReturnSignal` and for the same reason: `break` has to unwind
  * through however many nested blocks and `if`s stand between it and the loop, and a
- * return code would have to be checked and propagated at every one of them — which
+ * return code would have to be checked and propagated at every one of them - which
  * is exactly the kind of bookkeeping that gets missed in one branch.
  */
 export class BreakSignal {}

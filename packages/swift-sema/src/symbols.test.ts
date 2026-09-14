@@ -3,7 +3,7 @@ import { Parser } from '@studio/swift-syntax'
 import { completionsAt, definitionAt, hoverAt, nameAt, referencesAt } from './symbols'
 
 /**
- * The symbol index — Phase 8f.
+ * The symbol index - Phase 8f.
  *
  * Every test here is written from the caret's point of view, because that is the only
  * thing the feature is ever asked about. The fixtures put the caret at a marker
@@ -217,7 +217,7 @@ func go() {
 
   it('offers modifiers when the receiver cannot be resolved', () => {
     // The honest answer. Inventing members for an unknown receiver is the one thing
-    // this must never do — a name that does not exist is worse than a missing one.
+    // this must never do - a name that does not exist is worse than a missing one.
     const items = complete(`struct ContentView: View {
     var body: some View {
         Text("hi").|

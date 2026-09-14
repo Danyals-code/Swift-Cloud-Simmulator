@@ -40,7 +40,7 @@ export function measureFonts(family = UI_FONT_FAMILY): MeasuredFontData[] {
     }
 
     // `fontBoundingBox*` is the font's own declared ascent/descent, which is what
-    // line layout uses — not the ink bounds of whatever string we happened to pass.
+    // line layout uses - not the ink bounds of whatever string we happened to pass.
     const sample = context.measureText('Hxy')
     const ascent = (sample.fontBoundingBoxAscent || REFERENCE_SIZE * 0.78) / REFERENCE_SIZE
     const descent = (sample.fontBoundingBoxDescent || REFERENCE_SIZE * 0.22) / REFERENCE_SIZE
@@ -77,7 +77,7 @@ function averageOf(advances: Record<string, number>, sample: string): number {
  * Waits for webfonts before measuring.
  *
  * Measuring while a fallback face is still active would bake the wrong advances in
- * for the life of the session, and the error would be invisible — everything would
+ * for the life of the session, and the error would be invisible - everything would
  * simply be laid out slightly wrong.
  */
 export async function measureFontsWhenReady(family = UI_FONT_FAMILY): Promise<MeasuredFontData[]> {

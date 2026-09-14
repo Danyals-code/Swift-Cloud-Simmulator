@@ -15,12 +15,12 @@ import type {
 import type { SemanticModel } from './model'
 
 /**
- * The strictness pass — risk R5.
+ * The strictness pass - risk R5.
  *
  * The interpreter is deliberately forgiving: it has no full type system, so it will
  * happily run code that `swiftc` refuses to compile. That forgiveness is what makes
  * the preview responsive while you type, and it is also the product's single most
- * dangerous failure mode — code that works here and fails the moment it reaches
+ * dangerous failure mode - code that works here and fails the moment it reaches
  * Xcode makes the export worthless.
  *
  * This pass closes the gap from the other side: rather than making the interpreter
@@ -28,7 +28,7 @@ import type { SemanticModel } from './model'
  *
  * **The governing rule is the same one Phase 1's gate 4 set: a false positive is
  * worse than a missed error.** Every check here only fires when the type involved is
- * known with certainty — from a literal, or from an explicit annotation. Anything
+ * known with certainty - from a literal, or from an explicit annotation. Anything
  * inferred through a chain of assumptions is left alone, because a warning on
  * correct code teaches people to ignore the panel, and then the real ones go unread
  * too.
@@ -70,7 +70,7 @@ class StrictnessLinter {
   run(files: readonly SourceFileNode[]): Diagnostic[] {
     // Struct and class declarations are indexed first so that an extension can be
     // linted against the type it extends. Without the owner, an extension method on a
-    // *class* would be told to declare itself `mutating` — a warning on correct Swift,
+    // *class* would be told to declare itself `mutating` - a warning on correct Swift,
     // which is the one thing this pass must never do.
     for (const file of files) {
       for (const decl of file.declarations) {
@@ -382,7 +382,7 @@ class StrictnessLinter {
   // ------------------------------------------------------------------- checks
 
   /**
-   * Swift will not mix `Int` and `Double` in arithmetic — there is no implicit
+   * Swift will not mix `Int` and `Double` in arithmetic - there is no implicit
    * numeric conversion, in either direction.
    *
    * By far the most common "but it worked in the preview" report, because the
@@ -475,7 +475,7 @@ class StrictnessLinter {
    * Argument labels are part of a function's name in Swift.
    *
    * The interpreter matches positionally, so it accepts a call that omits them.
-   * Only user-declared functions are checked — the built-in surface has too many
+   * Only user-declared functions are checked - the built-in surface has too many
    * overloads to be confident about.
    */
   private argumentLabels(expr: Expr & { kind: 'call' }, name: string): void {
@@ -540,7 +540,7 @@ class StrictnessLinter {
   private mutatingSelf(decl: FuncDecl, owner: StructDecl | null): void {
     if (!owner || !decl.body) return
     // Only value types need `mutating`. A class method writing a property is
-    // ordinary, correct Swift — flagging it would be a warning on working code.
+    // ordinary, correct Swift - flagging it would be a warning on working code.
     if (owner.isReference) return
     if (decl.modifiers.some((m) => m.name === 'mutating' || m.name === 'static')) return
 
@@ -632,7 +632,7 @@ class StrictnessLinter {
    * The type of an expression, or `unknown`.
    *
    * Deliberately shallow. Everything it reports is derived from a literal or an
-   * explicit annotation, so a wrong answer needs a wrong annotation — which is the
+   * explicit annotation, so a wrong answer needs a wrong annotation - which is the
    * only way to keep the false-positive rate at the zero this pass needs.
    */
   private typeOf(expr: Expr | null): Known {

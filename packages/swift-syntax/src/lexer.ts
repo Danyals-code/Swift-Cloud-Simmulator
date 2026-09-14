@@ -29,7 +29,7 @@ const ESCAPES: Readonly<Record<string, string>> = {
  *
  * Trivia (whitespace and comments) is discarded rather than attached to tokens.
  * The architecture doc originally called for preserving it, but that exists to
- * support a source printer — and this system never prints Swift. The editor text
+ * support a source printer - and this system never prints Swift. The editor text
  * *is* the source of truth (decision D3), so the only facts the parser needs from
  * trivia are "was there a newline before this token" and "is there a space either
  * side", both of which are recorded as flags.
@@ -203,7 +203,7 @@ export class Lexer {
    * `#Preview`, `#if`, `#available`, `#selector`.
    *
    * Lexed like an attribute and for the same reason: without it, `#` is an unexpected
-   * character and the three errors that follow are blocking — so a file with a
+   * character and the three errors that follow are blocking - so a file with a
    * `#Preview` block, which is most modern SwiftUI, would not render at all.
    */
   private scanMacro(): Omit<Token, 'span' | 'newlineBefore' | 'spaceBefore' | 'spaceAfter' | 'column'> {
@@ -259,7 +259,7 @@ export class Lexer {
     while (this.pos < this.text.length && /[0-9_]/.test(this.text[this.pos]!)) this.pos++
 
     let isFloat = false
-    // A dot only starts a fraction when a digit follows — otherwise `1...5` would
+    // A dot only starts a fraction when a digit follows - otherwise `1...5` would
     // lex as `1.` followed by `..5`.
     if (this.text[this.pos] === '.' && /[0-9]/.test(this.text[this.pos + 1] ?? '')) {
       isFloat = true

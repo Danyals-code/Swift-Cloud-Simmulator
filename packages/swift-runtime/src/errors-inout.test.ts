@@ -3,7 +3,7 @@ import { Parser } from '@studio/swift-syntax'
 import { Interpreter } from './interpreter'
 
 /**
- * Error handling, `inout` and `super` — Phase 8c.
+ * Error handling, `inout` and `super` - Phase 8c.
  *
  * All three are about where a value goes rather than what it is, which is why they
  * are tested by running code and reading what came out: a `catch` that binds the
@@ -400,7 +400,7 @@ func main() {
 describe('an uncaught throw', () => {
   it('surfaces as a runtime failure rather than escaping', () => {
     // It has to become something the pipeline recognises. Anything it does not
-    // recognise is re-thrown, which takes the whole compile down with it — and the
+    // recognise is re-thrown, which takes the whole compile down with it - and the
     // preview would go blank instead of showing a diagnostic.
     expect(() =>
       run(`

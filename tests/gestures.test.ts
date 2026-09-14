@@ -7,7 +7,7 @@ import { DEVICES } from '@studio/sim-shell'
  * Gestures.
  *
  * Every test here drives the real dispatch path with real event phases, because a
- * gesture is a *sequence* — a drag that reports its translation correctly on
+ * gesture is a *sequence* - a drag that reports its translation correctly on
  * `changed` and forgets to revert its `@GestureState` on `ended` is broken in a way
  * no single-frame assertion can see.
  */

@@ -7,7 +7,7 @@ import { parsePlist, serializePlist, type PlistDict, type PlistValue } from './p
  * Validating the Xcode project without an Xcode.
  *
  * This is the one deliverable in the product that cannot be verified on the machine
- * that produces it — gate 1 needs a Mac. So these tests stand in for one, checking
+ * that produces it - gate 1 needs a Mac. So these tests stand in for one, checking
  * the two things that actually go wrong:
  *
  * 1. **Syntax.** The generated file is parsed back with an independent parser. A
@@ -16,7 +16,7 @@ import { parsePlist, serializePlist, type PlistDict, type PlistValue } from './p
  * 2. **Referential integrity.** Every id one object references must exist, and no
  *    two objects may share an id. A dangling reference fails the same silent way.
  *
- * What they cannot check is whether Xcode *likes* the settings — that still needs a
+ * What they cannot check is whether Xcode *likes* the settings - that still needs a
  * Mac, and is recorded as the outstanding gate.
  */
 
@@ -155,7 +155,7 @@ describe('referential integrity', () => {
 
   it('leaves no object unreachable from the root', () => {
     // An orphan is harmless to Xcode but means the generator built something it then
-    // forgot to attach — which is exactly how a missing source file happens.
+    // forgot to attach - which is exactly how a missing source file happens.
     const root = parsed()
     const objects = objectsOf(root)
     const reachable = new Set<string>()

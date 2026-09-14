@@ -2,7 +2,7 @@
  * Source positions.
  *
  * Spans carry raw character offsets, not line/column pairs. The parser produces
- * millions of these and converting to line/column eagerly is wasted work — only
+ * millions of these and converting to line/column eagerly is wasted work - only
  * diagnostics that actually reach the editor need it. `LineIndex` does the
  * conversion lazily, in O(log n).
  *

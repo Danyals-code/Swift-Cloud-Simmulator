@@ -4,8 +4,8 @@ import type { ResolvedFont } from '@studio/shared'
  * Text measurement.
  *
  * The layout engine runs in a Web Worker, which has no fonts and no DOM. Rather
- * than make layout asynchronous — which would infect every call site and introduce
- * a visible reflow on the first frame — measurement is synchronous against a table
+ * than make layout asynchronous - which would infect every call site and introduce
+ * a visible reflow on the first frame - measurement is synchronous against a table
  * of per-character advance widths.
  *
  * The table is built once on the main thread from the real font (see
@@ -96,7 +96,7 @@ export class FontMetricsTable {
   /**
    * Bolder faces are wider at the same size.
    *
-   * Applied only to the *estimated* table — a measured table already reflects the
+   * Applied only to the *estimated* table - a measured table already reflects the
    * weight it was measured at, so scaling it again would double-count.
    */
   private weightScale(weight: number): number {
@@ -169,7 +169,7 @@ function graphemes(text: string): string[] {
  *
  * Greedy line breaking at word boundaries, which is what CoreText does for the
  * left-aligned, unjustified text SwiftUI produces. A word longer than the available
- * width is broken mid-word rather than allowed to overflow — matching SwiftUI, and
+ * width is broken mid-word rather than allowed to overflow - matching SwiftUI, and
  * avoiding a layout that silently reports a size it does not occupy.
  */
 export function measureText(
@@ -191,7 +191,7 @@ export function measureText(
   }
 
   // `.lineLimit(n)` truncates rather than shrinking, and the last kept line takes an
-  // ellipsis — which also has to fit, so it replaces the tail rather than pushing the
+  // ellipsis - which also has to fit, so it replaces the tail rather than pushing the
   // line past its width.
   if (lineLimit !== null && lineLimit > 0 && lines.length > lineLimit) {
     const kept = lines.slice(0, lineLimit)
@@ -233,7 +233,7 @@ function truncate(
 /**
  * How far text may exceed its width before a line breaks.
  *
- * Not a fudge factor — a numerical one. A stack placed at exactly the size it
+ * Not a fudge factor - a numerical one. A stack placed at exactly the size it
  * measured divides that size back up by subtraction, so the last child is offered
  * its own ideal width minus a few units in the last place. Without a tolerance,
  * `HStack { Image(…); Text("Starred") }` wraps to two lines purely because

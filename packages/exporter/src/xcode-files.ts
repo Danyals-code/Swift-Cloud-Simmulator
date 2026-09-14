@@ -4,7 +4,7 @@ import type { Project } from '@studio/project-model'
  * The supporting files an Xcode project needs beyond `project.pbxproj`.
  *
  * All small, all fixed-format, and all required for "opens and builds with zero
- * edits" — the asset catalogue because the target's build settings name `AppIcon`
+ * edits" - the asset catalogue because the target's build settings name `AppIcon`
  * and `AccentColor`, the workspace because Xcode expects one inside every
  * `.xcodeproj`, and the scheme because without a shared one the user has to wait for
  * Xcode to generate it before Cmd+R does anything.
@@ -63,7 +63,7 @@ export function workspaceContents(): string {
  * A shared scheme, so Cmd+R works the moment the project opens.
  *
  * Xcode autocreates a scheme if none exists, but it does so asynchronously on first
- * open — which means the run button is briefly disabled and the "zero edits" promise
+ * open - which means the run button is briefly disabled and the "zero edits" promise
  * feels less true than it is.
  */
 export function schemeContents(project: Project, blueprintId: string): string {

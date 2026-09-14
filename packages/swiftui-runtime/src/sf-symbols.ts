@@ -8,7 +8,7 @@
  *
  * The honesty rule that makes this acceptable: a substituted glyph is flagged, the
  * inspector badges it as approximated, and the exported Swift still says
- * `Image(systemName: "star.fill")` — the real symbol appears the moment the project
+ * `Image(systemName: "star.fill")` - the real symbol appears the moment the project
  * is built in Xcode. What the preview must never do is silently draw something that
  * looks final and is not.
  *
@@ -168,7 +168,7 @@ export interface ResolvedSymbol {
    *
    * Kept as a field rather than implied because the inspector and the exported
    * README both read it, and because it should stay true if a licensed font ever
-   * makes some symbols exact — at which point only this flag needs to change.
+   * makes some symbols exact - at which point only this flag needs to change.
    */
   readonly approximated: boolean
   /** False when the name is not in the table at all, so telemetry can rank it. */
@@ -178,8 +178,8 @@ export interface ResolvedSymbol {
 /**
  * Resolves an SF Symbol name.
  *
- * Variant suffixes are stripped progressively — `star.circle.fill` tries the whole
- * name, then `star.circle`, then `star` — which is how the real symbol set is
+ * Variant suffixes are stripped progressively - `star.circle.fill` tries the whole
+ * name, then `star.circle`, then `star` - which is how the real symbol set is
  * organised and means a name we have never seen usually still lands on its base
  * shape rather than on the fallback box.
  */

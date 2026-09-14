@@ -85,7 +85,7 @@ describe('pipeline performance', () => {
 
 describe('interaction latency (NFR-1)', () => {
   /**
-   * Tap to repaint must stay under 32 ms — roughly two frames. Above that, a button
+   * Tap to repaint must stay under 32 ms - roughly two frames. Above that, a button
    * stops feeling like it responded to the press.
    */
   it('dispatches a tap and re-renders within 32 ms', () => {

@@ -36,7 +36,7 @@ export interface Token {
    * Whether a newline appears in the trivia immediately before this token.
    *
    * Swift is newline-sensitive for statement separation but *not* for member
-   * chains — `Text("x")\n  .font(.largeTitle)` is one expression. The parser needs
+   * chains - `Text("x")\n  .font(.largeTitle)` is one expression. The parser needs
    * both facts, so it needs this flag rather than newline tokens.
    */
   readonly newlineBefore: boolean
@@ -55,7 +55,7 @@ export interface Token {
 }
 
 /**
- * Full Swift keyword set — the lexer recognises all of them even though the slice
+ * Full Swift keyword set - the lexer recognises all of them even though the slice
  * only *parses* some. Recognising `class` as a keyword is what lets the parser emit
  * "classes are not supported yet" instead of a baffling "unexpected identifier".
  */
@@ -75,7 +75,7 @@ export const SWIFT_KEYWORDS: ReadonlySet<string> = new Set([
   'weak', 'unowned', 'indirect', 'final', 'dynamic', 'optional',
 ])
 
-/** Keywords that can begin a declaration — the parser's error-recovery resync points. */
+/** Keywords that can begin a declaration - the parser's error-recovery resync points. */
 export const DECLARATION_KEYWORDS: ReadonlySet<string> = new Set([
   'import', 'struct', 'class', 'enum', 'protocol', 'extension', 'func', 'var',
   'let', 'init', 'deinit', 'subscript', 'typealias', 'operator',
@@ -97,8 +97,8 @@ export function isOperatorChar(ch: string): boolean {
 
 /**
  * Swift identifiers allow a large slice of Unicode. Rather than transcribe the
- * grammar's code-point tables — long, easy to get subtly wrong, and impossible to
- * review — anything non-ASCII that is not whitespace is accepted. The lexer's job
+ * grammar's code-point tables - long, easy to get subtly wrong, and impossible to
+ * review - anything non-ASCII that is not whitespace is accepted. The lexer's job
  * is to tokenise real code, and an over-permissive identifier rule cannot
  * mis-tokenise valid Swift; it can only accept an exotic name Swift would reject,
  * which the exported build would catch anyway.

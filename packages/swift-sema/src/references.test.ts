@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { referencesAt, referencesOf } from './symbols'
 
 /**
- * Project-wide references — Phase 10a.
+ * Project-wide references - Phase 10a.
  *
  * These exist to pin down one decision: matching happens on **identifier tokens**, not
  * on text. Half the tests below are places where the two disagree, and every one of
- * them is a place a textual rename corrupts something quietly — a comment and a string
+ * them is a place a textual rename corrupts something quietly - a comment and a string
  * literal leave no compile error behind to notice the damage by.
  */
 
@@ -38,7 +38,7 @@ describe('what counts as a reference', () => {
   })
 
   it('finds the name inside a string interpolation', () => {
-    // Interpolation is code, not text — exactly the distinction the lexer draws and a
+    // Interpolation is code, not text - exactly the distinction the lexer draws and a
     // regex cannot. Missing it would leave a rename half-applied.
     const text = 'let count = 1\nlet label = "total: \\(count)"\n'
     expect(spansIn(text, 'count')).toHaveLength(2)

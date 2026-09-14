@@ -6,15 +6,15 @@ import { TOKEN_TYPE } from './view-value'
  *
  * Two different things share the name, and keeping them apart matters:
  *
- * - **Environment values** — `\.colorScheme`, `\.dynamicTypeSize`, `\.locale`. Keyed
+ * - **Environment values** - `\.colorScheme`, `\.dynamicTypeSize`, `\.locale`. Keyed
  *   by key-path name, supplied by the device and the preview controls.
- * - **Environment objects** — `@EnvironmentObject var store: Store`. Keyed by the
+ * - **Environment objects** - `@EnvironmentObject var store: Store`. Keyed by the
  *   *type* of the object, injected by an ancestor's `.environmentObject(store)`.
  *
  * **A known limitation, stated rather than hidden.** SwiftUI's environment flows to
  * every descendant. Ours flows to views expanded *while the modifier is in scope*,
- * which covers the idiom `Root().environmentObject(store)` — where the modifier is
- * applied to the view whose body has not run yet — and not the case where the
+ * which covers the idiom `Root().environmentObject(store)` - where the modifier is
+ * applied to the view whose body has not run yet - and not the case where the
  * modifier sits above children that were already built. Views expand eagerly here,
  * and making them lazy is a larger change than this phase takes on. The coverage
  * matrix records it as 🟡 for exactly this reason.

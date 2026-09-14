@@ -5,7 +5,7 @@ import type { SourceSpan } from './source'
  *
  * A RenderTree is fully laid out: every node already has an absolute frame in
  * device points. The renderer does no layout at all, it only paints. That is the
- * whole point of the two-pass layout engine (docs/02-ARCHITECTURE.md §7) — CSS
+ * whole point of the two-pass layout engine (docs/02-ARCHITECTURE.md §7) - CSS
  * never gets a chance to disagree with SwiftUI about sizing.
  *
  * Everything here must survive `structuredClone`: plain data only, no classes,
@@ -104,7 +104,7 @@ export interface ShapePayload {
  * A colour-manipulation filter, applied to a node and everything inside it.
  *
  * Mapped to CSS filters, which is exact for blur, saturation, brightness, contrast
- * and grayscale — these are the same operations with the same definitions, not
+ * and grayscale - these are the same operations with the same definitions, not
  * approximations of them.
  */
 export interface FilterSpec {
@@ -150,8 +150,8 @@ export interface HitTarget {
  * How the renderer should animate this node into its new frame.
  *
  * The engine produces one static frame per state; interpolating between consecutive
- * frames is the browser's job. Keeping the description here — rather than having the
- * renderer guess from what changed — is what makes `.animation(_:value:)` scope
+ * frames is the browser's job. Keeping the description here - rather than having the
+ * renderer guess from what changed - is what makes `.animation(_:value:)` scope
  * correctly: only nodes under that modifier carry a hint, so only they animate.
  */
 export interface AnimationSpec {
@@ -166,7 +166,7 @@ export interface AnimationSpec {
  * How a node animates *in* when it first appears.
  *
  * Only entry is modelled. Exit would mean keeping a node alive after the view that
- * produced it is gone, which needs the renderer to own a shadow copy of the tree —
+ * produced it is gone, which needs the renderer to own a shadow copy of the tree -
  * and a half-built version of that is worse than none, because a view that lingers
  * after its state says it should not is a preview telling a lie.
  */
@@ -213,7 +213,7 @@ export interface A11y {
   readonly role?: string
   readonly label?: string
   readonly value?: string
-  /** `.accessibilityHint` — the longer explanation, read after the label. */
+  /** `.accessibilityHint` - the longer explanation, read after the label. */
   readonly hint?: string
   readonly hidden?: boolean
 }
@@ -227,7 +227,7 @@ export interface A11y {
  * is what lets the DOM diff skip an unchanged drawing.
  */
 export interface PathPayload {
-  /** SVG path data — `M`, `L`, `C`, `Q`, `A`, `Z`. */
+  /** SVG path data - `M`, `L`, `C`, `Q`, `A`, `Z`. */
   readonly d: string
   readonly fill?: Fill
   readonly stroke?: { readonly color: RGBA; readonly width: number }
@@ -239,7 +239,7 @@ export type RenderNodeKind = 'layer' | 'text' | 'shape' | 'image' | 'path' | 'pl
 
 export interface RenderNode {
   /**
-   * ViewIdentity — stable across re-renders for the same logical view. Drives DOM
+   * ViewIdentity - stable across re-renders for the same logical view. Drives DOM
    * reuse, `@State` box lookup, and FLIP animation. See docs/02-ARCHITECTURE.md §6.2.
    */
   readonly id: string
@@ -264,7 +264,7 @@ export interface RenderNode {
   /**
    * The container this node is positioned inside.
    *
-   * Absent for all but scroll views, clip shapes and transforms — the three cases
+   * Absent for all but scroll views, clip shapes and transforms - the three cases
    * where the browser has to own a real box for the effect to work at all.
    */
   readonly parent?: string
@@ -281,7 +281,7 @@ export interface RenderNode {
   readonly filter?: FilterSpec
   /** `.regularMaterial` and friends: a translucent, blurred backdrop. */
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
-  /** where in the Swift source this came from — powers hover-to-source in the inspector */
+  /** where in the Swift source this came from - powers hover-to-source in the inspector */
   readonly origin?: SourceSpan
   /** Inspector readout: what this view is called and what was applied to it (FR-5.8). */
   readonly inspect?: {
@@ -341,7 +341,7 @@ export function rectContains(r: Rect, p: Point): boolean {
  *
  * Springs are the interesting case: CSS has no spring, so the bounce is approximated
  * with an overshooting cubic-bezier. Recognisably springy rather than physically
- * identical — and the README says so, because a motion curve that looks right but is
+ * identical - and the README says so, because a motion curve that looks right but is
  * not is exactly the kind of quiet inaccuracy this project refuses to ship silently.
  */
 export function cssEasing(spec: AnimationSpec): string {

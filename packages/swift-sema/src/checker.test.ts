@@ -163,7 +163,7 @@ struct Other: View {
 describe('coverage diagnostics are honest, not wrong', () => {
   it('names an unimplemented view rather than calling it unresolved', () => {
     // `Chart` is perfectly valid Swift. Saying "cannot find in scope" would be both
-    // wrong and unhelpful — it is the preview that cannot draw it. The name checked
+    // wrong and unhelpful - it is the preview that cannot draw it. The name checked
     // here moves as coverage grows; what must not change is that a real SwiftUI name
     // is never reported as unresolved.
     const [warning] = warnings(app('        Chart { }'))
@@ -215,7 +215,7 @@ struct V: View {
 
   it('knows a user enum as a type annotation', () => {
     // The checker warned "the preview does not know the type 'Step'" for an enum it
-    // had just collected — a false positive on a declaration in the same file.
+    // had just collected - a false positive on a declaration in the same file.
     const source = `@main struct M: App { var body: some Scene { WindowGroup { } } }
 
 enum Step: String {

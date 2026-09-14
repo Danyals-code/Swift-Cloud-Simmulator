@@ -65,7 +65,7 @@ export interface EditorPaneProps {
   onRename?: (name: string, spans: readonly SourceSpan[]) => void
   /**
    * Scroll to and select an offset. Carries a nonce so that clicking the same
-   * diagnostic twice reveals it twice — a bare offset would compare equal and the
+   * diagnostic twice reveals it twice - a bare offset would compare equal and the
    * effect would not re-run.
    */
   reveal?: { offset: number; nonce: number } | null
@@ -76,7 +76,7 @@ export interface EditorPaneProps {
  *
  * Phase 0 highlights with the legacy stream-mode Swift grammar, which is good
  * enough to look right but knows nothing about the code. Phase 1 replaces it with
- * semantic decorations driven by our own parser — at which point highlighting and
+ * semantic decorations driven by our own parser - at which point highlighting and
  * diagnostics come from one source of truth rather than two that can disagree.
  */
 export function EditorPane({
@@ -94,7 +94,7 @@ export function EditorPane({
   const viewRef = useRef<EditorView | null>(null)
   /**
    * Latest callbacks, so the CodeMirror extensions below never need rebuilding on
-   * re-render — tearing down the view would lose the cursor and the undo history.
+   * re-render - tearing down the view would lose the cursor and the undo history.
    * Synced in an effect rather than during render, which is the rule refs exist to
    * respect.
    */
@@ -154,7 +154,7 @@ export function EditorPane({
      *
      * A declaration in another file is handed to the host, because this component owns
      * one document and cannot open another. Nothing happens when the name resolves
-     * nowhere — a jump to the wrong place is worse than no jump.
+     * nowhere - a jump to the wrong place is worse than no jump.
      */
     const goToDefinition = async (view: EditorView, pos: number): Promise<void> => {
       const service = languageRef.current
@@ -183,7 +183,7 @@ export function EditorPane({
       oneDark,
       // `override` replaces basicSetup's word-based source entirely. Left alongside
       // it, the two merge and every identifier already in the file comes back as a
-      // suggestion — including the half-typed one being completed.
+      // suggestion - including the half-typed one being completed.
       autocompletion({ override: [completionSource], activateOnTyping: true }),
       hoverTooltip(async (view, pos) => {
         const service = languageRef.current

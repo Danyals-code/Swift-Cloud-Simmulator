@@ -12,7 +12,7 @@ import type { Block, ClosureParam, FuncDecl, Param } from '@studio/swift-syntax'
  *   class, closure                    shared
  *
  * Swift implements the copying side with copy-on-write. We copy eagerly instead.
- * The *semantics* are identical — COW is purely an optimisation — and eager copying
+ * The *semantics* are identical - COW is purely an optimisation - and eager copying
  * is far easier to get right. Following the same rule that killed incremental
  * reparse in Phase 1: don't build the optimisation until a measurement asks for it.
  * `values.bench.test.ts` is the measurement that would.
@@ -70,7 +70,7 @@ export interface DictionaryValue {
  * An instance of a user-declared `struct` or `class`.
  *
  * One shape for both; `reference` decides the semantics. A class is shared on
- * assignment and on argument passing, a struct is copied — that is the whole of the
+ * assignment and on argument passing, a struct is copied - that is the whole of the
  * difference, and expressing it as a flag keeps it to one branch in `copyValue`
  * rather than a parallel value kind every `switch` would have to learn.
  */
@@ -119,7 +119,7 @@ export interface FunctionValue {
    *
    * Only `super` reads it, and only `super` can be written without it: "start above
    * the type that declared the method now running" is a fact about where the code sits
-   * in the source, and the receiver's own type is a different thing entirely — in a
+   * in the source, and the receiver's own type is a different thing entirely - in a
    * three-level hierarchy they disagree, and resolving `super` against the receiver
    * calls the override again, forever.
    */
@@ -163,7 +163,7 @@ export interface NilValue {
 }
 
 /**
- * Splits a string the way Swift's `String` does — by grapheme cluster.
+ * Splits a string the way Swift's `String` does - by grapheme cluster.
  *
  * Spreading a string (`[...text]`) splits by *code point*, which gets "👋🏽" wrong: the
  * emoji and its skin-tone modifier are two code points but one character. Swift's
@@ -215,7 +215,7 @@ export function opaque(typeName: string, payload: unknown): OpaqueValue {
 // ------------------------------------------------------------------ index sets
 
 /**
- * `IndexSet` — a set of positions in a collection.
+ * `IndexSet` - a set of positions in a collection.
  *
  * Foundation rather than SwiftUI, which is why it lives here: `remove(atOffsets:)`
  * and `move(fromOffsets:toOffset:)` are `Array` methods, and the interpreter owns
@@ -239,7 +239,7 @@ export function asIndexSet(value: SwiftValue | undefined): readonly number[] | n
 
 // ------------------------------------------------------------------ key paths
 
-/** `\.self`, `\.id` — an unapplied property accessor. */
+/** `\.self`, `\.id` - an unapplied property accessor. */
 export const KEYPATH_TYPE = 'KeyPath'
 
 export interface KeyPathPayload {
@@ -275,7 +275,7 @@ export function applyKeyPath(path: KeyPathPayload, value: SwiftValue): SwiftValu
 // --------------------------------------------------------------- projections
 
 /**
- * The type name carried by a property-wrapper projection — `$count`.
+ * The type name carried by a property-wrapper projection - `$count`.
  *
  * Named `Binding` because that is what SwiftUI calls it and what the user writes,
  * but the mechanism is a *language* feature, not a SwiftUI one: a projection is a
@@ -306,8 +306,8 @@ export function asProjection(value: SwiftValue | undefined): ProjectionPayload |
 /**
  * Reads through a projection, so `@Binding var count` behaves like an `Int`.
  *
- * Applied on every field and variable read. Doing it here — rather than by looking
- * at the `@Binding` attribute on the declaration — means the transparency follows
+ * Applied on every field and variable read. Doing it here - rather than by looking
+ * at the `@Binding` attribute on the declaration - means the transparency follows
  * the *value*, so a binding passed through three views deep still reads and writes
  * the original storage without any of the intermediate declarations mattering.
  */
@@ -405,7 +405,7 @@ export function typeNameOf(value: SwiftValue): string {
  *
  * The details matter for fidelity: `1.0` prints as `1.0`, not `1`; `nil` prints as
  * `nil`; arrays use `[a, b]` with no quotes around interpolated strings but quotes
- * inside collections — which is Swift's actual, slightly inconsistent behaviour.
+ * inside collections - which is Swift's actual, slightly inconsistent behaviour.
  */
 export function describe(value: SwiftValue, insideCollection = false): string {
   switch (value.kind) {
@@ -515,7 +515,7 @@ export function valuesEqual(a: SwiftValue, b: SwiftValue): boolean {
     /**
      * Opaque values compare by *value* when their payload is plain data.
      *
-     * The host's design tokens — `.dark`, `.largeTitle`, a colour — are opaque
+     * The host's design tokens - `.dark`, `.largeTitle`, a colour - are opaque
      * because the interpreter has no idea what they mean, but they are values, and
      * `scheme == .dark` has to be true when both name the same thing. Comparing by
      * identity made every such test silently false.
@@ -545,7 +545,7 @@ export function dictionaryKey(value: SwiftValue): string {
 export type { Param }
 
 /**
- * Whether a payload is plain data — no functions, no cycles worth worrying about.
+ * Whether a payload is plain data - no functions, no cycles worth worrying about.
  *
  * The test that decides whether an opaque value compares by value or by identity.
  * Deliberately shallow-ish and total: an unfamiliar shape answers "no" and falls back

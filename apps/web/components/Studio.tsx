@@ -166,7 +166,7 @@ export function Studio() {
   /**
    * Loaded on click, not on first paint.
    *
-   * The project generator — pbxproj, plists, asset catalogues, four manifests — is
+   * The project generator - pbxproj, plists, asset catalogues, four manifests - is
    * about thirty kilobytes that runs once per session at most, and it was in the
    * initial bundle for the sake of one function reference. The menu itself is plain
    * data and stays static, so the button still knows its options before the code
@@ -310,7 +310,7 @@ export function Studio() {
  * It states the count and the file spread before anything changes, because that is the
  * one thing the analyser cannot decide for the user: matching is by name, so two
  * unrelated symbols spelled the same are indistinguishable to it. "12 occurrences in
- * 3 files" is how that ambiguity gets handed over — a number that looks wrong is a
+ * 3 files" is how that ambiguity gets handed over - a number that looks wrong is a
  * reason to press Escape.
  */
 function RenameBar({

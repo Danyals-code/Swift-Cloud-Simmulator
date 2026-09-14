@@ -11,7 +11,7 @@ export interface HostCall {
   readonly args: readonly CallArgument[]
   readonly trailingClosure: ClosureValue | null
   readonly span: SourceSpan
-  /** Runs a closure and returns its single result — an action, or a mapping function. */
+  /** Runs a closure and returns its single result - an action, or a mapping function. */
   invoke(closure: ClosureValue, args?: readonly SwiftValue[]): SwiftValue
   /**
    * Runs a closure as a result builder, returning every value it contributes.
@@ -25,7 +25,7 @@ export interface HostCall {
 /**
  * The seam between Swift semantics and everything built on top of them.
  *
- * `swift-runtime` implements the language and nothing else — it has no idea what a
+ * `swift-runtime` implements the language and nothing else - it has no idea what a
  * `VStack` is, and the ESLint boundary rule would reject the import if it tried. So
  * when evaluation meets a name it did not declare, it asks the host.
  *
@@ -34,7 +34,7 @@ export interface HostCall {
  * would let the same interpreter drive something else entirely, which is also what
  * makes the interpreter testable without dragging SwiftUI into the fixtures.
  *
- * Every method returns `undefined` to mean "not mine" — the interpreter then falls
+ * Every method returns `undefined` to mean "not mine" - the interpreter then falls
  * through to its own error reporting rather than the host having to guess.
  */
 export interface InterpreterHost {
@@ -67,8 +67,8 @@ export interface InterpreterHost {
    *
    * `@Environment(\.dismiss) var dismiss` puts something callable in a variable, and
    * `dismiss()` is then a call on a value that is neither a closure nor a function.
-   * Rather than invent a native-function value kind — which every `switch` over
-   * `SwiftValue` would have to learn — the host is asked.
+   * Rather than invent a native-function value kind - which every `switch` over
+   * `SwiftValue` would have to learn - the host is asked.
    */
   callValue?(target: SwiftValue, call: HostCall): SwiftValue | undefined
 
@@ -76,8 +76,8 @@ export interface InterpreterHost {
    * Resolves a contextual member against a type the host owns.
    *
    * `.blue` has no base, so it arrives as an opaque token carrying only a name. When a
-   * declaration says the expected type — `func card(_ tint: Color)`, `var tint: Color`
-   * — the token can become the thing it obviously meant. The interpreter does this
+   * declaration says the expected type - `func card(_ tint: Color)`, `var tint: Color`
+   * - the token can become the thing it obviously meant. The interpreter does this
    * itself for enums it declared; a `Color` belongs to the host, so it has to ask.
    *
    * Without it, `.blue` reaches a `Color` property as a token and the first modifier

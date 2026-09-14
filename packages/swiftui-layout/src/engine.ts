@@ -138,14 +138,14 @@ const TOP_LEADING: Alignment = { horizontal: 'leading', vertical: 'top' }
  * Two passes, exactly as SwiftUI describes them:
  *
  *   1. **Measure.** A parent *proposes* a size; each child *responds* with the size
- *      it wants. A proposal is not an instruction — `Spacer` responds greedily,
+ *      it wants. A proposal is not an instruction - `Spacer` responds greedily,
  *      `Text` responds with its ideal size unless squeezed, and
  *      `.frame(maxWidth: .infinity)` changes the proposal passed down rather than the
  *      response passed up.
  *   2. **Place.** The parent assigns each child an absolute rect.
  *
  * This is why the engine exists at all instead of mapping onto flexbox. CSS resolves
- * a different algorithm, and it diverges on exactly the cases people hit first — see
+ * a different algorithm, and it diverges on exactly the cases people hit first - see
  * decision D2 in docs/02-ARCHITECTURE.md.
  */
 export class LayoutEngine {
@@ -221,7 +221,7 @@ export class LayoutEngine {
       }
 
       // Shapes, colours and paths fill whatever they are offered. A path's own
-      // coordinates are absolute within its frame — it does not scale to fit, which
+      // coordinates are absolute within its frame - it does not scale to fit, which
       // is SwiftUI's behaviour too.
       case 'path':
       case 'shape':
@@ -247,7 +247,7 @@ export class LayoutEngine {
         const vertical = element.axis === 'vertical'
         const content = this.measure(element.content, scrollProposal(element, proposal), env)
         // A scroll view takes all the space offered along its axis and hugs its
-        // content across it — the opposite of what its content just reported.
+        // content across it - the opposite of what its content just reported.
         const along = vertical ? proposal.height : proposal.width
         const extent = along === null ? (vertical ? content.height : content.width) : resolve(along, 0, UNBOUNDED)
         const cross = vertical
@@ -357,7 +357,7 @@ export class LayoutEngine {
       return { index, flexibility, priority: layoutPriorityOf(child) }
     })
 
-    // Higher layout priority is served first, whatever its flexibility — that is what
+    // Higher layout priority is served first, whatever its flexibility - that is what
     // `.layoutPriority` means: take your ideal size before the others are considered.
     // Within equal priority the flexibility rule applies, and ties keep source order.
     return ranked
@@ -372,7 +372,7 @@ export class LayoutEngine {
    * The space offered to the next child in a stack's measure order.
    *
    * Divided among the children *of the same layout priority* that are still
-   * unmeasured — not among all of them. That is what `.layoutPriority` means: the
+   * unmeasured - not among all of them. That is what `.layoutPriority` means: the
    * highest-priority group gets first claim on everything, and the rest divide what
    * survives. Dividing equally regardless would make the modifier almost invisible,
    * changing only the order in which two children took the same half each.
@@ -436,7 +436,7 @@ export class LayoutEngine {
         }
       }
 
-      // A background never changes the size of what it sits behind — and neither
+      // A background never changes the size of what it sits behind - and neither
       // does an overlay, which is the whole reason both are modifiers rather than
       // stacks.
       case 'background':
@@ -460,7 +460,7 @@ export class LayoutEngine {
 
       case 'position':
         // `.position` takes the whole space offered and puts the child at a point
-        // inside it — which is why it collapses whatever was around it.
+        // inside it - which is why it collapses whatever was around it.
         return {
           width: resolve(proposal.width, 0, UNBOUNDED),
           height: resolve(proposal.height, 0, UNBOUNDED),
@@ -511,7 +511,7 @@ export class LayoutEngine {
       running += lane + element.trackSpacing
     }
 
-    // Measure every child first, then size each row to its tallest member — a grid
+    // Measure every child first, then size each row to its tallest member - a grid
     // row is uniform, so a cell cannot be laid out until its siblings are known.
     const sizes = element.children.map((child, index) => {
       const laneSize = lanes[index % columns] ?? crossAvailable
@@ -741,8 +741,8 @@ export class LayoutEngine {
    *
    * The content is laid out at its full natural extent and positioned from the
    * container's origin rather than the screen's, so the renderer can hand the whole
-   * thing to the browser and get native scrolling — momentum, rubber-banding,
-   * scrollbar — instead of us approximating all of it in the worker.
+   * thing to the browser and get native scrolling - momentum, rubber-banding,
+   * scrollbar - instead of us approximating all of it in the worker.
    */
   private placeScroll(
     element: ScrollElement,
@@ -791,7 +791,7 @@ export class LayoutEngine {
   /**
    * Sizes a `Grid`'s columns and rows.
    *
-   * A column is as wide as its widest cell in any row — that cross-row alignment is
+   * A column is as wide as its widest cell in any row - that cross-row alignment is
    * the whole reason `Grid` exists, and the reason every cell has to be measured
    * before any of them can be placed.
    */
@@ -1182,7 +1182,7 @@ export class LayoutEngine {
 
       case 'geometry': {
         // A real box, so the pipeline can read its size back and hand it to the next
-        // evaluation — and so its children are positioned in *its* space, which is
+        // evaluation - and so its children are positioned in *its* space, which is
         // the coordinate space `GeometryReader` promises.
         const id = `geo:${modifier.key}`
         out.push({
@@ -1207,7 +1207,7 @@ export class LayoutEngine {
       case 'filter':
       case 'material':
       case 'a11y': {
-        // Each decorates a *box* around the subtree, so the subtree goes inside it —
+        // Each decorates a *box* around the subtree, so the subtree goes inside it -
         // a filter applies to everything below, and an accessibility label replaces
         // what is read for the whole group.
         const id = `${element.id}-${modifier.kind}`
@@ -1345,7 +1345,7 @@ function decorations(
 /**
  * What a scroll view proposes to its content.
  *
- * Unbounded along the scroll axis — that is what scrolling *is*, and proposing the
+ * Unbounded along the scroll axis - that is what scrolling *is*, and proposing the
  * visible height instead is the mistake that makes a long list silently truncate
  * rather than scroll.
  */
@@ -1359,7 +1359,7 @@ function scrollProposal(element: ScrollElement, proposal: ProposedSize): Propose
  * Resolves grid tracks against the space available across the axis.
  *
  * `.adaptive` is the interesting one: it fits as many columns of at least its minimum
- * as will go, then shares the remainder between them — so the same grid shows two
+ * as will go, then shares the remainder between them - so the same grid shows two
  * columns on a phone and four on a tablet without the code changing.
  */
 function resolveTracks(
@@ -1486,7 +1486,7 @@ function centredRect(point: { x: number; y: number }, size: Size): Rect {
 }
 
 /**
- * The largest box of a given aspect ratio that fits the proposal — or the smallest
+ * The largest box of a given aspect ratio that fits the proposal - or the smallest
  * that covers it, for `.fill`.
  *
  * `.scaledToFit` and `.scaledToFill` are the two named forms of exactly this, which
@@ -1531,7 +1531,7 @@ function layoutPriorityOf(element: LayoutElement): number {
  * The environment with interactivity switched off.
  *
  * `.allowsHitTesting(false)` keeps a subtree visible but inert. Expressing it as an
- * environment flag rather than by pruning the tree means the subtree still paints —
+ * environment flag rather than by pruning the tree means the subtree still paints -
  * a pruned one would vanish, which is emphatically not what the modifier means.
  */
 function stripHitTargets(env: LayoutEnvironment): LayoutEnvironment {

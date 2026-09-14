@@ -2,12 +2,12 @@
 /**
  * Bundle-size budget gate (NFR-1).
  *
- * Enforced from Phase 0 on purpose. Bundle size is a ratchet — it only ever grows,
+ * Enforced from Phase 0 on purpose. Bundle size is a ratchet - it only ever grows,
  * and by the time anyone notices it is made of fifty individually reasonable
  * decisions that nobody wants to unpick. A build that fails today is a five-minute
  * conversation; a 3 MB bundle in Phase 6 is a week.
  *
- * Measures total gzipped client JavaScript that a *supported browser* can fetch —
+ * Measures total gzipped client JavaScript that a *supported browser* can fetch -
  * lazily-loaded chunks included, because they are still shipped and still cached.
  *
  * Two honesty notes about the metric, because it is easy to read more into it than
@@ -15,8 +15,8 @@
  *
  * 1. **Next's `nomodule` polyfill bundle is excluded**, read from the build manifest
  *    rather than matched by name. It is served behind `nomodule`, so any browser that
- *    supports ES modules — which is every browser that can run a Web Worker and
- *    CodeMirror 6, i.e. every browser this app works in — never downloads it.
+ *    supports ES modules - which is every browser that can run a Web Worker and
+ *    CodeMirror 6, i.e. every browser this app works in - never downloads it.
  *    Counting 38 KB nobody fetches made the gate wrong in the expensive direction:
  *    it consumed a tenth of the budget and would eventually have forced a real
  *    feature to be cut to pay for bytes that were never sent.
@@ -53,8 +53,8 @@ const KB = 1024
  * separately at 450 KB.
  *
  * History:
- *   Phase 0  — 324 KB actual (React, Next runtime, CodeMirror). Budget 450.
- *   Phase 10 — 367 KB actual, after excluding the nomodule polyfills (see note 1).
+ *   Phase 0  - 324 KB actual (React, Next runtime, CodeMirror). Budget 450.
+ *   Phase 10 - 367 KB actual, after excluding the nomodule polyfills (see note 1).
  *              The measured number fell by 38 KB without a byte changing hands.
  */
 const BUDGET_KB = 450
@@ -101,7 +101,7 @@ function main() {
 
   const all = walkJs(join(NEXT_DIR, 'static'))
   if (all.length === 0) {
-    console.error('Build contains no client chunks — something is wrong with the build output.')
+    console.error('Build contains no client chunks - something is wrong with the build output.')
     process.exit(2)
   }
 

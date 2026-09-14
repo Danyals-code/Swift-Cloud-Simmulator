@@ -23,7 +23,7 @@ import {
  * Everything in Phase 6 that is *not* in the user's code lives here: which screen a
  * navigation stack is showing, whether a sheet is up, which tab is selected, and what
  * a back button does when tapped. None of it can come from evaluating `body`, because
- * the user never wrote it — SwiftUI supplies that behaviour, so something has to.
+ * the user never wrote it - SwiftUI supplies that behaviour, so something has to.
  *
  * Three rules keep this from becoming a second, competing view system:
  *
@@ -91,7 +91,7 @@ export interface Overlay {
  */
 export interface LifecycleHook {
   readonly kind: 'appear' | 'disappear' | 'change'
-  /** The view's path — how "has this appeared before?" is answered. */
+  /** The view's path - how "has this appeared before?" is answered. */
   readonly path: string
   readonly closure: ClosureValue
   /** For `.onChange(of:)`: the value being watched, compared against last pass. */
@@ -143,7 +143,7 @@ export class UIState {
   /**
    * Drops entries the resolver could not resolve.
    *
-   * A pushed screen can disappear from under you — the row it came from was deleted,
+   * A pushed screen can disappear from under you - the row it came from was deleted,
    * or a filter changed. Truncating is the honest response; keeping a dangling entry
    * would leave the back button one tap short of working forever.
    */
@@ -213,7 +213,7 @@ class Resolver {
    * Custom button styles in scope, innermost last.
    *
    * `.buttonStyle` applies to every `Button` *below* it, not only the one it is
-   * written on — that is what makes one line at the top of a screen restyle all of
+   * written on - that is what makes one line at the top of a screen restyle all of
    * them. The resolver is the only traversal that sees the whole tree, so it is the
    * only place that can know what is above a given button.
    */
@@ -251,8 +251,8 @@ class Resolver {
    * Stamps every view in a list with its path, and registers its handler.
    *
    * The single traversal that assigns identity. `childKeys` from a `ForEach` are
-   * used in preference to the ordinal, so a row keeps its path — and therefore its
-   * `@State` and its DOM node — when the collection is reordered.
+   * used in preference to the ordinal, so a row keeps its path - and therefore its
+   * `@State` and its DOM node - when the collection is reordered.
    */
   private stampList(views: readonly ViewValue[], prefix: string): ViewValue[] {
     return views.map((view, index) => this.stamp(view, `${prefix}-${index}`))
@@ -297,7 +297,7 @@ class Resolver {
   /**
    * Replaces a button's label with what its style's `makeBody(configuration:)` drew.
    *
-   * The `Button` itself survives — its action, its path and its hit target are the
+   * The `Button` itself survives - its action, its path and its hit target are the
    * button's *behaviour*, and a style describes only its appearance. Replacing the
    * whole view would take the tap with it.
    */
@@ -316,7 +316,7 @@ class Resolver {
           : []
 
     // `isPressed` is always false. The tree is built between interactions, never
-    // during one, so there is no press to report — and a style that draws a pressed
+    // during one, so there is no press to report - and a style that draws a pressed
     // state simply draws its resting one, which is what the preview is showing.
     void path
     const body = this.ctx.styleButton(style, label, false)
@@ -354,7 +354,7 @@ class Resolver {
   /**
    * Stamps one row of a collection, wiring up its delete action if it has one.
    *
-   * `.onDelete` is written on the `ForEach`, not on the row — but it is the *row*
+   * `.onDelete` is written on the `ForEach`, not on the row - but it is the *row*
    * that gets swiped, and the closure needs to know which offset was deleted. Both
    * facts are only available here, where the parent and the index are in hand.
    */
@@ -375,8 +375,8 @@ class Resolver {
   /**
    * What this view does when tapped.
    *
-   * A `Button`'s own closure, a gesture modifier's closure, or — for controls the
-   * user wrote no closure for — a framework behaviour derived from the binding it
+   * A `Button`'s own closure, a gesture modifier's closure, or - for controls the
+   * user wrote no closure for - a framework behaviour derived from the binding it
    * was given. All three arrive at the same place so that the layout pass has exactly
    * one question to ask about interactivity.
    */
@@ -386,7 +386,7 @@ class Resolver {
 
     // Controls the user gave a binding need no closure of their own: writing the
     // binding *is* the behaviour, and it is the framework's job to do it. The value
-    // written comes from the event — the text typed, the slider's new position — so
+    // written comes from the event - the text typed, the slider's new position - so
     // the constant here is only the fallback for a control activated without one.
     const control = CONTROL_BINDINGS[view.name]
     if (control) {
@@ -418,7 +418,7 @@ class Resolver {
    * Gives every `NavigationLink` on a screen the intent to push its own destination.
    *
    * A second pass rather than part of stamping, because a link's behaviour depends on
-   * which stack encloses it — and the stack's identity is itself a stamped path. A
+   * which stack encloses it - and the stack's identity is itself a stamped path. A
    * link outside any stack is left inert, which is also what SwiftUI does with it.
    */
   private attachPushIntents(views: readonly ViewValue[], stackId: string): ViewValue[] {
@@ -446,7 +446,7 @@ class Resolver {
   /**
    * Resolves a navigation stack to the screen currently on top.
    *
-   * The whole tree is evaluated every pass, including the screens underneath — which
+   * The whole tree is evaluated every pass, including the screens underneath - which
    * is what keeps a pushed detail view live when the data behind it changes. What the
    * stack stores is a list of *link paths*, resolved against the freshly evaluated
    * tree each time. A link that has vanished truncates the stack rather than leaving
@@ -525,7 +525,7 @@ class Resolver {
    * Two shapes, both common: an eagerly built `destination:` view, and the
    * value-plus-`navigationDestination(for:)` pair introduced in iOS 16. The second is
    * resolved by finding the matching destination builder on the current screen and
-   * running it with the link's value — which is also why destination content is not
+   * running it with the link's value - which is also why destination content is not
    * built until a push actually happens.
    */
   private destinationFor(link: ViewValue, screen: readonly ViewValue[]): readonly ViewValue[] | null {
@@ -631,7 +631,7 @@ class Resolver {
   /**
    * The `.searchable` field, if the screen has one.
    *
-   * Registered as a control writing its binding, exactly like a `TextField` — because
+   * Registered as a control writing its binding, exactly like a `TextField` - because
    * that is all `.searchable` is. What it adds is placement: iOS puts the field above
    * the content rather than in it, which is why this is resolved here and not by the
    * layout pass.
@@ -676,7 +676,7 @@ class Resolver {
       const item = labelled(modifier.args, 'item')
 
       // Read *through* the binding. `isPresented:` is always a projection, and an
-      // opaque value is truthy by default — so testing it directly would present
+      // opaque value is truthy by default - so testing it directly would present
       // every sheet in the file, permanently.
       const presentedValue = presented ? (asProjection(presented)?.get() ?? presented) : undefined
       const itemValue = item ? (asProjection(item)?.get() ?? item) : undefined
@@ -784,7 +784,7 @@ function tokenName(value: SwiftValue | undefined): string | null {
  *
  * Tokens are unwrapped to their name first: `.tag(Tab.home)` and a selection holding
  * that same case must compare equal, and `describe` renders every opaque value as its
- * type name — so without this, every tag in a `TabView` would look identical.
+ * type name - so without this, every tag in a `TabView` would look identical.
  */
 function tokenOrValue(value: SwiftValue | undefined): string | null {
   if (value === undefined) return null

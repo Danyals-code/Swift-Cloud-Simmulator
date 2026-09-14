@@ -146,7 +146,7 @@ struct ContentView: View {
 describe('extension View', () => {
   it('names a reusable modifier chain', () => {
     // The dominant reuse pattern in real SwiftUI, and the receiver is a view rather
-    // than a declared type — so the lookup starts from the protocol, not the value.
+    // than a declared type - so the lookup starts from the protocol, not the value.
     const result = run(`import SwiftUI
 ${APP}
 extension View {
@@ -239,7 +239,7 @@ struct ContentView: View {
 describe('the fallback stays narrow', () => {
   it('still reports a name that resolves nowhere', () => {
     // Offering every unresolved call to the host would turn a mistyped function name
-    // into an unrecognised-but-harmless modifier — the code would look honoured and
+    // into an unrecognised-but-harmless modifier - the code would look honoured and
     // would not be. The fallback applies only inside an extension of a type the
     // project did not declare, which is the one place `self` is a view.
     const result = run(`import SwiftUI
@@ -259,7 +259,7 @@ struct ContentView: View {
 describe('a contextual member reaching a host type', () => {
   it('resolves .blue against a Color property', () => {
     // `.blue` has no base, so it arrives as a bare token. Only the declared type says
-    // what it meant — and a Color belongs to the host, so the interpreter has to ask.
+    // what it meant - and a Color belongs to the host, so the interpreter has to ask.
     // Without this the token reaches the property intact and the first modifier called
     // on it fails three layers from where the mistake actually is.
     const result = run(`import SwiftUI
@@ -356,7 +356,7 @@ struct ContentView: View {
   })
 
   it('applies to every button below it, not only the one it is written on', () => {
-    // One line at the top of a screen restyles all of them — the reason the resolver
+    // One line at the top of a screen restyles all of them - the reason the resolver
     // tracks this rather than the modifier being read where it sits.
     const result = run(`import SwiftUI
 ${APP}

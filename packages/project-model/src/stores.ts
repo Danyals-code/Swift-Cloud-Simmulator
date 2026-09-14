@@ -69,7 +69,7 @@ export class IndexedDbProjectStore implements ProjectStore {
 /**
  * IndexedDB is unavailable in private windows in some browsers, and in SSR. Falling
  * back to memory keeps the editor usable rather than showing an error the user can
- * do nothing about — they just lose persistence for that session.
+ * do nothing about - they just lose persistence for that session.
  */
 export function createProjectStore(): ProjectStore {
   try {

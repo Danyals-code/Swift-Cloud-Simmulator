@@ -4,11 +4,11 @@ import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swift
 import { DEVICES } from '@studio/sim-shell'
 
 /**
- * Phase 6 — coverage and fidelity.
+ * Phase 6 - coverage and fidelity.
  *
  * The gate this suite exists for is gate 3: *a three-screen navigation flow with a
  * sheet and animated transitions works end to end.* That is not a rendering
- * assertion — it is a statement about a sequence of taps producing the right
+ * assertion - it is a statement about a sequence of taps producing the right
  * screens, which is why these tests drive events through the real dispatch path
  * rather than inspecting one tree.
  *
@@ -95,7 +95,7 @@ beforeEach(() => {
 
 // ------------------------------------------------------------------ gate 3
 
-describe('gate 3 — a three-screen navigation flow with a sheet and animation', () => {
+describe('gate 3 - a three-screen navigation flow with a sheet and animation', () => {
   const SOURCE = `import SwiftUI
 
 struct Folder: Identifiable {

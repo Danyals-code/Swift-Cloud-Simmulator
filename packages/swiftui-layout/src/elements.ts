@@ -4,9 +4,9 @@ import type { FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, SourceSpan } from
  * The layout engine's input.
  *
  * Deliberately *not* the SwiftUI view tree: this package must stay free of any
- * SwiftUI knowledge (it may not even import `swiftui-runtime` — the dependency
- * points the other way). It describes only what layout needs — how a thing sizes
- * itself and what it paints — so the engine can be tested with hand-built trees and
+ * SwiftUI knowledge (it may not even import `swiftui-runtime` - the dependency
+ * points the other way). It describes only what layout needs - how a thing sizes
+ * itself and what it paints - so the engine can be tested with hand-built trees and
  * reused for anything with the same layout model.
  */
 
@@ -56,7 +56,7 @@ interface ElementBase {
    * What to call this in the inspector: `Text`, `VStack`, `Button`.
    *
    * Carried on the element rather than derived from `kind` because the layout kinds
-   * are coarser than the views that produced them — a Button and a Text are both
+   * are coarser than the views that produced them - a Button and a Text are both
    * `text` elements once styling is stripped away.
    */
   readonly debugName?: string
@@ -88,7 +88,7 @@ export interface TextElement extends ElementBase {
  *
  * Greedy along the axis of its containing stack and zero across it. The axis is
  * stamped on by the stack that contains it, because a Spacer's behaviour genuinely
- * depends on its parent — the same view expands vertically in a `VStack` and
+ * depends on its parent - the same view expands vertically in a `VStack` and
  * horizontally in an `HStack`.
  */
 export interface SpacerElement extends ElementBase {
@@ -166,7 +166,7 @@ export interface GridTrack {
 }
 
 /**
- * `Grid` — the two-dimensional form, where columns line up across rows.
+ * `Grid` - the two-dimensional form, where columns line up across rows.
  *
  * Distinct from `LazyVGrid`, which flows children into tracks in order. Here the
  * structure is declared: each row states its cells, and a column is as wide as its
@@ -182,7 +182,7 @@ export interface TableElement extends ElementBase {
 }
 
 /**
- * `ViewThatFits` — the first child that fits the proposal, else the last.
+ * `ViewThatFits` - the first child that fits the proposal, else the last.
  *
  * A genuine layout decision rather than sugar: which child is chosen depends on the
  * space offered, which is only known during the measure pass.
@@ -197,7 +197,7 @@ export interface FirstFitElement extends ElementBase {
  * A vector path.
  *
  * Greedy like a shape, because a `Path`'s own coordinates are absolute within
- * whatever frame it is given — it does not scale to fit, and a path drawn outside its
+ * whatever frame it is given - it does not scale to fit, and a path drawn outside its
  * frame is simply outside it, which is SwiftUI's behaviour too.
  */
 export interface PathElement extends ElementBase {
@@ -229,7 +229,7 @@ export interface ModifiedElement extends ElementBase {
  * Modifiers wrap outward in source order.
  *
  * `Text(…).padding().background(c)` becomes `background(padding(Text))`, so the
- * background covers the padded area — while `.background(c).padding()` becomes
+ * background covers the padded area - while `.background(c).padding()` becomes
  * `padding(background(Text))` and the background covers only the text. Getting
  * Phase 3 gate 3 right falls out of this structure rather than needing a special
  * case, which is exactly why modifiers are nesting rather than a flat list.
@@ -253,10 +253,10 @@ export type LayoutModifier =
       readonly kind: 'fontTrait'
       readonly weight?: number
       readonly italic?: boolean
-      /** `.fontDesign(.rounded)` — the face changes, the metrics with it. */
+      /** `.fontDesign(.rounded)` - the face changes, the metrics with it. */
       readonly family?: string
     }
-  /** `.lineLimit`, `.multilineTextAlignment`, `.textCase` — inherited text policy. */
+  /** `.lineLimit`, `.multilineTextAlignment`, `.textCase` - inherited text policy. */
   | {
       readonly kind: 'textStyle'
       readonly lineLimit?: number | null
@@ -281,7 +281,7 @@ export type LayoutModifier =
       readonly y: number
     }
   | { readonly kind: 'offset'; readonly x: number; readonly y: number }
-  /** `.position(x:y:)` — the child's *centre* goes here, in the parent's space. */
+  /** `.position(x:y:)` - the child's *centre* goes here, in the parent's space. */
   | { readonly kind: 'position'; readonly x: number; readonly y: number }
   /**
    * `.aspectRatio(_:contentMode:)`, and `.scaledToFit` / `.scaledToFill` which are
@@ -292,17 +292,17 @@ export type LayoutModifier =
       readonly ratio: number | null
       readonly mode: 'fit' | 'fill'
     }
-  /** `.layoutPriority` — read by the enclosing stack, not applied here. */
+  /** `.layoutPriority` - read by the enclosing stack, not applied here. */
   | { readonly kind: 'layoutPriority'; readonly value: number }
   /**
    * A container that reports its resolved geometry.
    *
    * How `GeometryReader` works: the element emits a real box, its children are
-   * positioned inside it — which is also `GeometryReader`'s coordinate space — and
+   * positioned inside it - which is also `GeometryReader`'s coordinate space - and
    * the pipeline reads the box's size back out to feed the next evaluation.
    */
   | { readonly kind: 'geometry'; readonly key: string }
-  /** `.fixedSize()` — take the ideal size and ignore the proposal on that axis. */
+  /** `.fixedSize()` - take the ideal size and ignore the proposal on that axis. */
   | { readonly kind: 'fixedSize'; readonly horizontal: boolean; readonly vertical: boolean }
   | { readonly kind: 'clip'; readonly shape: ShapeKind; readonly cornerRadius: number }
   | { readonly kind: 'scale'; readonly x: number; readonly y: number }
@@ -310,14 +310,14 @@ export type LayoutModifier =
   | { readonly kind: 'zIndex'; readonly value: number }
   /** `.blur`, `.saturation`, `.brightness`, `.contrast`, `.grayscale`. */
   | { readonly kind: 'filter'; readonly filter: FilterSpec }
-  /** `.background(.regularMaterial)` — a translucent, blurred backdrop. */
+  /** `.background(.regularMaterial)` - a translucent, blurred backdrop. */
   | {
       readonly kind: 'material'
       readonly opacity: number
       readonly blur: number
       readonly light: boolean
     }
-  /** `.allowsHitTesting(false)` — the subtree stops receiving events. */
+  /** `.allowsHitTesting(false)` - the subtree stops receiving events. */
   | { readonly kind: 'hitTestable'; readonly enabled: boolean }
   /** `.accessibilityLabel` and friends, which change what assistive tech reads. */
   | {
@@ -329,7 +329,7 @@ export type LayoutModifier =
     }
   /** Carried through to the renderer, which animates the change with CSS. */
   | { readonly kind: 'animate'; readonly hint: AnimationHint }
-  /** `.transition(…)` — how this subtree animates in when it first appears. */
+  /** `.transition(…)` - how this subtree animates in when it first appears. */
   | { readonly kind: 'transition'; readonly spec: TransitionHint }
   | {
       readonly kind: 'hitTarget'
@@ -360,7 +360,7 @@ export type TextAlign = 'leading' | 'center' | 'trailing'
  * What the renderer should animate, and how.
  *
  * Produced by `.animation(_:value:)` and by `withAnimation`. The engine does not
- * animate anything itself — it computes one static frame per state — so this travels
+ * animate anything itself - it computes one static frame per state - so this travels
  * to the DOM, where a CSS transition interpolates between consecutive frames. That
  * is the honest division: we are exact about where things end up and approximate
  * about how they get there.
@@ -381,7 +381,7 @@ export interface TransitionHint {
 /**
  * Values inherited down the tree.
  *
- * `.font()` and `.foregroundStyle()` are not layout operations — they set an
+ * `.font()` and `.foregroundStyle()` are not layout operations - they set an
  * environment that `Text` reads when it measures and paints itself. Modelling them
  * as inherited state rather than as wrappers is what makes
  * `VStack { Text(…) }.font(.largeTitle)` size its text correctly.
@@ -394,7 +394,7 @@ export interface LayoutEnvironment {
    * Inherited corner radius.
    *
    * `.background(Color.red).cornerRadius(8)` puts the radius *outside* the
-   * background, so it has to travel inward to reach the fill it rounds — the same
+   * background, so it has to travel inward to reach the fill it rounds - the same
    * direction as font and colour, and for the same reason.
    */
   readonly cornerRadius: number
@@ -402,7 +402,7 @@ export interface LayoutEnvironment {
    * The animation in force for this subtree.
    *
    * Inherited like font and colour, because `.animation(_:value:)` applies to
-   * everything below the view it is written on — including views the modifier's own
+   * everything below the view it is written on - including views the modifier's own
    * frame does not contain, such as a background's fill.
    */
   readonly animation?: AnimationHint
@@ -423,7 +423,7 @@ export interface LayoutEnvironment {
    * Text policy, inherited like the font.
    *
    * `.lineLimit(2)` on a `VStack` applies to every `Text` inside it, which is only
-   * expressible as environment — a wrapper would apply to the stack's own frame and
+   * expressible as environment - a wrapper would apply to the stack's own frame and
    * nothing would read it.
    */
   readonly lineLimit?: number | null
@@ -440,7 +440,7 @@ export function childEnvironment(
   switch (modifier.kind) {
     // `.font` replaces the face; `.fontWeight` and `.italic` adjust whichever face
     // is in force. Because modifiers are applied outward-in, the two can arrive in
-    // either order — so the adjustment is remembered separately and re-applied when
+    // either order - so the adjustment is remembered separately and re-applied when
     // a new face is set. Without that, `.font(.title).fontWeight(.semibold)` would
     // silently lose the weight, which is the order most SwiftUI is written in.
     case 'font':

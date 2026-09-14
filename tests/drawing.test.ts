@@ -7,7 +7,7 @@ import { DEVICES } from '@studio/sim-shell'
  * Vector drawing, filters and materials.
  *
  * The assertions are on *path data* rather than on pixels, because that is what the
- * worker actually produces — and because a path that renders is not necessarily a
+ * worker actually produces - and because a path that renders is not necessarily a
  * path with the right geometry. A `Path` whose commands were dropped still draws an
  * empty `<svg>` and looks like a blank area rather than an error.
  */

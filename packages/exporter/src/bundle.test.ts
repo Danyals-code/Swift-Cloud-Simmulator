@@ -6,7 +6,7 @@ import { buildExportBundle, exportProjectZip, targetRelativePath, zipFileName } 
 /**
  * `ignoreBOM: true` is load-bearing: TextDecoder's *default* is to silently strip a
  * leading U+FEFF, which would make this suite report a BOM-preserving exporter as
- * broken — and, worse, would hide a real BOM-eating bug if one ever appeared
+ * broken - and, worse, would hide a real BOM-eating bug if one ever appeared
  * upstream. The name reads backwards; it means "treat the BOM as ordinary content".
  */
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
@@ -38,7 +38,7 @@ describe('export byte-identity (FR-7.8)', () => {
     { name: 'CRLF line endings', text: 'struct A {\r\n    var x = 1\r\n}\r\n' },
     { name: 'mixed tabs and spaces', text: 'struct A {\n\tvar x = 1\n    var y = 2\n}\n' },
     { name: 'trailing whitespace', text: 'let a = 1   \nlet b = 2\t\n' },
-    { name: 'non-ASCII identifiers and strings', text: 'let café = "naïve — résumé"\n' },
+    { name: 'non-ASCII identifiers and strings', text: 'let café = "naïve - résumé"\n' },
     { name: 'emoji with surrogate pairs', text: 'let wave = "👋🏽 Hello"\n' },
     { name: 'combining marks', text: 'let e = "e\u0301"\n' },
     { name: 'string interpolation and escapes', text: 'Text("a \\(b) \\"c\\" \\\\ \\n")\n' },

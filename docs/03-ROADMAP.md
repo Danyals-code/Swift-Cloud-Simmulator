@@ -1,14 +1,14 @@
-# 03 — Roadmap and phases
+# 03 - Roadmap and phases
 
 ## How to read this
 
 Each phase has a **goal**, a **scope**, **deliverables**, and an **acceptance gate**. The gate is a
-demonstrable, testable statement — if it does not pass, the phase is not done and the next phase
+demonstrable, testable statement - if it does not pass, the phase is not done and the next phase
 does not start. Sizing is given as focused-developer weeks; treat it as relative weight rather than
 a promise, and expect it to compress substantially when the implementation is AI-assisted.
 
 The sequencing principle: **prove the riskiest thing earliest.** The two things most likely to sink
-this project are the layout engine (R1) and export correctness (G3). Both are forced to the front —
+this project are the layout engine (R1) and export correctness (G3). Both are forced to the front -
 export ships as a walking skeleton in Phase 0, and layout lands in Phase 3 rather than being
 deferred to a polish pass.
 
@@ -22,7 +22,7 @@ P0 Skeleton ─▶ P1 Parser ─▶ P2 Runtime ─▶ P3 SwiftUI + Layout ─▶
 
 ---
 
-## Phase 0 — Skeleton and deployment (≈1 week)
+## Phase 0 - Skeleton and deployment (≈1 week)
 
 **Goal:** A URL on Vercel that loads an editor, round-trips text through a Web Worker, and downloads
 a zip. Nothing Swift-aware. This de-risks the whole toolchain before any hard work begins.
@@ -34,7 +34,7 @@ a zip. Nothing Swift-aware. This de-risks the whole toolchain before any hard wo
 - Comlink worker wired end-to-end: send text, receive a fake diagnostic, render it as a squiggle.
 - Split-pane layout: file tree | editor | device frame (empty).
 - IndexedDB persistence of a single hard-coded file.
-- `fflate` export of the raw files as a `.zip` — the walking skeleton of Phase 5.
+- `fflate` export of the raw files as a `.zip` - the walking skeleton of Phase 5.
 - CI: typecheck, lint, unit tests, Playwright smoke, bundle-size budget check.
 
 **Deliverables:** deployed URL, green CI, `ARCHITECTURE.md` links resolving to real packages.
@@ -49,7 +49,7 @@ a zip. Nothing Swift-aware. This de-risks the whole toolchain before any hard wo
 
 ---
 
-## Phase 1 — Swift front end (≈3–4 weeks)
+## Phase 1 - Swift front end (≈3-4 weeks)
 
 **Goal:** Real Swift parsing with real diagnostics. No execution yet.
 
@@ -72,13 +72,13 @@ diagnostics in the editor.
 1. The 40-project conformance corpus parses with zero unexpected errors.
 2. Deleting a closing brace mid-file still yields a usable AST for the rest of the file.
 3. Keystroke-to-diagnostics p95 under 120 ms on a 500-line file (measured in CI).
-4. Zero false-positive errors on the corpus — a false error is worse than a missed one.
+4. Zero false-positive errors on the corpus - a false error is worse than a missed one.
 
 ---
 
-## Phase 2 — Swift runtime (≈3–4 weeks)
+## Phase 2 - Swift runtime (≈3-4 weeks)
 
-**Goal:** Execute Swift. Still no UI — verified through a REPL-style console and `print()`.
+**Goal:** Execute Swift. Still no UI - verified through a REPL-style console and `print()`.
 
 **Scope**
 - `swift-runtime`: tree-walking interpreter over the TypedAST.
@@ -105,20 +105,20 @@ diagnostics in the editor.
 
 ---
 
-## Phase 3 — SwiftUI runtime, layout, and live preview (≈5–7 weeks) ★ the hard one
+## Phase 3 - SwiftUI runtime, layout, and live preview (≈5-7 weeks) ★ the hard one
 
 **Goal:** The core promise. Type SwiftUI, see an interactive iPhone.
 
 **Scope**
 
-*3a — view graph*
+*3a - view graph*
 - `@ViewBuilder` result builder support, `some View`, view value trees.
 - `ViewIdentity` computation; state boxes keyed by identity.
 - Property wrappers: `@State`, `@Binding`, `@StateObject`, `@ObservedObject`, `@EnvironmentObject`,
   `@Environment`; `ObservableObject` + `@Published`; the `@Observable` macro shape.
 - Dependency tracking and subtree invalidation.
 
-*3b — layout engine*
+*3b - layout engine*
 - `ProposedSize` / `sizeThatFits` / `place` protocol.
 - `VStack HStack ZStack Spacer Divider Group ForEach ScrollView GeometryReader`.
 - Modifier list semantics with correct ordering: `frame padding background overlay fixedSize
@@ -127,7 +127,7 @@ diagnostics in the editor.
   the metric-compatible font stack.
 - Flat `RenderTree` output with absolute frames.
 
-*3c — renderer and shell*
+*3c - renderer and shell*
 - Absolutely positioned DOM renderer, diffed by identity.
 - Core views: `Text Image Button Toggle TextField Slider Stepper ProgressView Label`, shapes,
   `Color` (including semantic colours and dark mode), gradients.
@@ -140,7 +140,7 @@ diagnostics in the editor.
 **Deliverables:** layout golden-test suite, visual baselines, working interactive preview.
 
 **Gate**
-1. A counter app — `@State`, a `Button`, a `Text` — increments in the preview on tap.
+1. A counter app - `@State`, a `Button`, a `Text` - increments in the preview on tap.
 2. `HStack { Text("a"); Spacer(); Text("b") }` places both texts exactly as SwiftUI does, verified
    against a hand-authored golden frame set.
 3. `.padding().background()` and `.background().padding()` render differently and correctly.
@@ -150,14 +150,14 @@ diagnostics in the editor.
 6. An `ObservableObject` shared by two sibling views updates both on mutation.
 7. All NFR-1 interaction budgets met.
 
-**Why this is the hard one:** every decision in [02-ARCHITECTURE.md](02-ARCHITECTURE.md) §6–§8 gets
+**Why this is the hard one:** every decision in [02-ARCHITECTURE.md](02-ARCHITECTURE.md) §6-§8 gets
 tested for real here. If the layout engine is going to be wrong, it will be wrong in this phase, and
 the two-pass design exists specifically so the wrongness is localised and fixable rather than
 structural.
 
 ---
 
-## Phase 4 — IDE experience (≈3 weeks)
+## Phase 4 - IDE experience (≈3 weeks)
 
 **Goal:** Make it feel like a tool rather than a demo.
 
@@ -174,7 +174,7 @@ structural.
 - Onboarding: first-run tour, keyboard shortcut sheet.
 
 **Gate**
-1. Create a second file, define a type, use it from the first — completions and diagnostics work
+1. Create a second file, define a type, use it from the first - completions and diagnostics work
    across the boundary.
 2. Every template loads and renders with zero unsupported placeholders.
 3. Clicking a rendered element in the inspector jumps the editor to the right line.
@@ -182,7 +182,7 @@ structural.
 
 ---
 
-## Phase 5 — Export (≈2–3 weeks)
+## Phase 5 - Export (≈2-3 weeks)
 
 **Goal:** The output is real. This is the phase that makes the product worth using rather than
 worth playing with.
@@ -201,18 +201,18 @@ worth playing with.
 - Byte-identity test across the whole corpus.
 
 **Gate**
-1. Export the List + Detail template, open on a Mac, build and run — **zero** edits required.
+1. Export the List + Detail template, open on a Mac, build and run - **zero** edits required.
 2. Re-exporting an unchanged project produces a byte-identical zip.
 3. `.swiftpm` opens and runs in Swift Playgrounds on iPad.
 4. Every `.swift` file in the export is byte-identical to the editor buffer (automated).
 5. A share URL round-trips a project into a fresh browser profile.
 
 **Note:** gate 1 and 3 need a Mac and an iPad to verify. Plan for that access before the phase
-starts — it is the one external dependency in the whole roadmap.
+starts - it is the one external dependency in the whole roadmap.
 
 ---
 
-## Phase 6 — Coverage and fidelity (≈4–6 weeks, continuous thereafter)
+## Phase 6 - Coverage and fidelity (≈4-6 weeks, continuous thereafter)
 
 **Goal:** Handle the SwiftUI people actually write. Driven by telemetry, not guesswork.
 
@@ -240,7 +240,7 @@ starts — it is the one external dependency in the whole roadmap.
 3. A three-screen navigation flow with a sheet and animated transitions works end to end.
 4. The strictness linter catches a curated set of "works here, fails in Xcode" cases.
 
-**Status (first pass complete):** gates 3 and 4 pass. Gate 1 stands at 11 corpus projects, not 100 —
+**Status (first pass complete):** gates 3 and 4 pass. Gate 1 stands at 11 corpus projects, not 100 -
 see [06-VERTICAL-SLICE.md](06-VERTICAL-SLICE.md) §4.15 for why a hundred authored in one pass would
 be padding rather than coverage. Gate 2 cannot be met until the tool is used by someone: the
 telemetry instrument is built and visible in the studio, and its ranking is empty by construction
@@ -250,29 +250,29 @@ and the strictness pass all landed; gestures beyond tap, `matchedGeometryEffect`
 
 ---
 
-## Phase 7 — Optional extensions (scoped individually)
+## Phase 7 - Optional extensions (scoped individually)
 
 These are independent; pick per the answers to the open questions in
 [01-REQUIREMENTS.md](01-REQUIREMENTS.md) §9.
 
 | Item | Size | Notes |
 | --- | --- | --- |
-| **7a — Real swiftc verification service** | ≈2 weeks | A container (Fly.io / Railway — *not* Vercel, which cannot host the Swift toolchain) running `swiftc -typecheck` against SwiftUI interface stubs. Gives a "verified compiles" badge and settles R5 permanently. Roughly $20–40/mo. |
-| **7b — Accounts and cloud projects** | ≈2 weeks | GitHub OAuth, Vercel Postgres + Blob, short links, forking, project gallery. |
-| **7c — AI codegen** | ≈2 weeks | Claude API via a Node route handler; describe-a-screen, explain-this-error, fix-it. Always presented as an approvable diff (FR-9.3). |
-| **7d — GitHub export** | ≈1 week | Push the project to a new or existing repo via OAuth. |
-| **7e — Embeddable previews** | ≈1 week | `/embed/[id]` read-only iframe for docs and blog posts. |
-| **7f — Collaboration** | ≈3 weeks | CRDT (Yjs) multiplayer editing with shared preview. Substantial; only if there is real demand. |
-| **7g — macOS / visionOS targets** | ≈3 weeks | Different device chrome, different default styles, `WindowGroup` semantics. |
+| **7a - Real swiftc verification service** | ≈2 weeks | A container (Fly.io / Railway - *not* Vercel, which cannot host the Swift toolchain) running `swiftc -typecheck` against SwiftUI interface stubs. Gives a "verified compiles" badge and settles R5 permanently. Roughly $20-40/mo. |
+| **7b - Accounts and cloud projects** | ≈2 weeks | GitHub OAuth, Vercel Postgres + Blob, short links, forking, project gallery. |
+| **7c - Model-assisted codegen** | ≈2 weeks | A hosted model API via a Node route handler; describe-a-screen, explain-this-error, fix-it. Always presented as an approvable diff (FR-9.3). |
+| **7d - GitHub export** | ≈1 week | Push the project to a new or existing repo via OAuth. |
+| **7e - Embeddable previews** | ≈1 week | `/embed/[id]` read-only iframe for docs and blog posts. |
+| **7f - Collaboration** | ≈3 weeks | CRDT (Yjs) multiplayer editing with shared preview. Substantial; only if there is real demand. |
+| **7g - macOS / visionOS targets** | ≈3 weeks | Different device chrome, different default styles, `WindowGroup` semantics. |
 
-### 7h — SwiftUI breadth — **done (2026-09-14)**
+### 7h - SwiftUI breadth - **done (2026-09-14)**
 
 Not in the original list, because the original plan assumed Phase 6 would finish the coverage
 matrix. It did not: Phase 6 built the navigation and list spine and moved the rest here. This is
 that rest, and it is what was chosen when Phase 7 opened.
 
 **Language first, because the views needed it.** `ObservableObject` requires reference semantics,
-and the parser rejected `class`, `enum`, `switch`, `guard`, `while` and optional binding outright —
+and the parser rejected `class`, `enum`, `switch`, `guard`, `while` and optional binding outright -
 a bigger fidelity gap than any single view. Classes, enums with raw and associated values, pattern
 matching, condition lists, loops and `static` members all landed, along with the observation
 wrappers built on them.
@@ -281,19 +281,19 @@ wrappers built on them.
 `@GestureState`, the lifecycle modifiers, `Path` and `Canvas`, filters, materials, transitions,
 `.searchable`, `.onDelete` with a real swipe, and the accessibility modifiers.
 
-The matrix moved from 51 ✅ to 89 ✅. What remains ⬜ is now mostly marked "—" rather than a phase:
+The matrix moved from 51 ✅ to 89 ✅. What remains ⬜ is now mostly marked "-" rather than a phase:
 each is either genuinely out of scope for a browser preview (`.refreshable`, `TimelineView`,
 `.onReceive`) or a larger piece of work that should be chosen deliberately rather than swept up
 (generics, `async`/`await`, `matchedGeometryEffect`, real lazy virtualisation).
 
 ---
 
-## Phase 8 — Language depth and IDE depth — **done (2026-09-14)**
+## Phase 8 - Language depth and IDE depth - **done (2026-09-14)**
 
 Not in the original plan either. Phase 7 closed with the coverage matrix at 89 ✅, and what
 remained split cleanly in two: constructs the *language* could not express, and an editor that
 had syntax colouring and diagnostics and nothing else. Both were chosen together, and the order
-was forced — the editor features need a symbol index, and the language decides what symbols
+was forced - the editor features need a symbol index, and the language decides what symbols
 exist.
 
 ### The language half
@@ -307,7 +307,7 @@ exist.
 | **8e** | custom `ViewModifier`, `extension View` |
 
 **One merge, shared.** Once `extension` exists a declaration no longer knows all of its own
-members — they may be written in the type, in any number of extensions, in a protocol it conforms
+members - they may be written in the type, in any number of extensions, in a protocol it conforms
 to, or in a superclass. `collectConformance` does that merge once, in `swift-syntax`, because the
 checker and the interpreter are sibling packages and anything either derived privately would
 drift. Precedence and emission order turned out to be separate questions: own beats extension
@@ -330,19 +330,19 @@ Three decisions worth keeping:
 | | |
 | --- | --- |
 | **8f** | the symbol index: completion, go to definition, hover, references |
-| **8g** | quick fixes — "did you mean", "add a body", "mark as mutating" |
+| **8g** | quick fixes - "did you mean", "add a body", "mark as mutating" |
 
 This is Phase 4's shortfall. `@codemirror/autocomplete` was not installed.
 
 The governing rule is the editor's version of gate 4: **a wrong answer is worse than no answer.**
 A list that omits something costs a keystroke; one that offers a name which does not exist, or
-jumps to the wrong declaration, teaches the user not to trust the editor — and then the feature is
+jumps to the wrong declaration, teaches the user not to trust the editor - and then the feature is
 worse than absent. So a `.` whose receiver cannot be resolved offers modifiers and nothing else, a
 contextual `.home` matching two enums offers no jump at all, and a typo suggests a replacement only
 when the edit distance is small relative to the name's length.
 
 The index is stateless. Completion could reuse the parse from the last compile, but the editor asks
-*between* compiles — that is what the debounce is for — so the cached tree is one keystroke stale
+*between* compiles - that is what the debounce is for - so the cached tree is one keystroke stale
 exactly when it is consulted.
 
 **What Phase 8 found by accident**, each shipped in an earlier phase and each fixed here: a parser
@@ -359,7 +359,7 @@ structured concurrency.
 
 ---
 
-## Phase 9 — The deferred items that need no one else's servers — **done (2026-09-14)**
+## Phase 9 - The deferred items that need no one else's servers - **done (2026-09-14)**
 
 Phase 8 closed with a short list of things marked "still unbuilt", and a separate list
 of Phase 7's à-la-carte items that each need a container host, an API key or an OAuth
@@ -372,21 +372,21 @@ anything in the second.
 | **9b** | `.swiftpm`, `Package.swift` and `project.yml` exports |
 | **9c** | share links, carried in the URL |
 
-**9a — the resolver is the only traversal that sees the whole tree.** A style is not a
+**9a - the resolver is the only traversal that sees the whole tree.** A style is not a
 modifier on the view it is written on: it applies to every `Button` *below* it, which
 is what makes one line at the top of a screen restyle all of them. So the resolver
 carries a stack of styles in scope rather than each button reading a modifier where it
-sits. The `Button` itself survives and only its label changes — its action, path and
+sits. The `Button` itself survives and only its label changes - its action, path and
 hit target are the button's *behaviour*, and a style describes appearance.
 
-**9b — three formats, three different questions.** `.swiftpm` is the only route from
+**9b - three formats, three different questions.** `.swiftpm` is the only route from
 the browser to a real device that does not involve a Mac. `Package.swift` is for
 depending on the code. `project.yml` is for teams who would rather generate the Xcode
 project than commit it. Phase 5's gate 2 now applies across the format list rather
 than per format, so a format added later cannot opt out of "the bytes arrive
 unchanged" quietly.
 
-**9c — the local-only decision made share links easier, not harder.** Phase 0 recorded
+**9c - the local-only decision made share links easier, not harder.** Phase 0 recorded
 "no `/api/share`, no database, no accounts", which reads like a reason links could not
 exist. A link that needs a server needs an owner, a retention policy and a bill, and
 rots when any lapses; a link that carries its own payload needs none of them. The cost
@@ -399,7 +399,7 @@ Each of these was looked at and left, with the reason:
 | | Why |
 | --- | --- |
 | Custom `ToggleStyle` / `LabelStyle` | The same mechanism as `ButtonStyle`, except a Toggle's configuration carries a **binding** the style writes through. Half of that is worse than none. |
-| `Layout` protocol / `AnyLayout` | Needs a `Subviews` proxy and callbacks from `swiftui-layout` back into the interpreter — a real seam, and custom layout conformances are rare in app code. |
+| `Layout` protocol / `AnyLayout` | Needs a `Subviews` proxy and callbacks from `swiftui-layout` back into the interpreter - a real seam, and custom layout conformances are rare in app code. |
 | `PreferenceKey` | A value travelling *up* the tree needs a second pass and a re-render when a handler writes state. `GeometryReader` already covers most of what people reach for it for. |
 | `Animatable` | Interpolating an arbitrary value needs an animation system that owns the frames. Ours is CSS keyframes, deliberately. |
 
@@ -407,7 +407,7 @@ The matrix moved to **96 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
 
 ---
 
-## Phase 10 — Loose ends, and measuring the right thing — **done (2026-09-14)**
+## Phase 10 - Loose ends, and measuring the right thing - **done (2026-09-14)**
 
 No new pillar. Three things that had been carried for several phases, each because it
 looked smaller than the next feature.
@@ -421,7 +421,7 @@ looked smaller than the next feature.
 **10a.** Phase 8 built a `references` worker API and never called it; Phase 4 listed
 find/replace as not built. Writing the tests changed the implementation: references
 are matched on **lexer tokens**, not text, because the lexer already knows what a
-comment and a string literal are — and those are the two places a textual rename
+comment and a string literal are - and those are the two places a textual rename
 corrupts something that leaves no compile error behind. The opposite case needed work
 too: a string interpolation is code inside a literal and is not in the flat token
 stream, so a rename would have stopped at the quote.
@@ -432,8 +432,8 @@ in 3 files" is how ambiguity the analyser cannot resolve gets handed to the pers
 can.
 
 **10b.** The budget had read WARN for four phases while the README said "worth
-watching". Watching it properly found that Next's polyfill bundle — served behind
-`nomodule`, so no browser that can run a Web Worker ever fetches it — was counted in
+watching". Watching it properly found that Next's polyfill bundle - served behind
+`nomodule`, so no browser that can run a Web Worker ever fetches it - was counted in
 full. That is 38 KB, a tenth of the budget, and it would eventually have forced a real
 feature to be cut to pay for bytes that were never sent. Excluding it took the
 measured number from 405.8 KB to **367.2 KB** without a byte changing hands, which is
@@ -442,13 +442,13 @@ than a change in the payload has to say so.
 
 The second half of that correction matters more than the first. The gate claimed to
 measure "everything the browser downloads to open the editor". It measures total
-shipped bytes — a legitimate ratchet, but a poor proxy for load time, and the two
+shipped bytes - a legitimate ratchet, but a poor proxy for load time, and the two
 *disagree*: moving code behind a dynamic import makes the first paint smaller and the
 total very slightly larger. A gate that punishes making the app faster will eventually
 be obeyed.
 
 **10c.** `#` was an unexpected character, so a file with a `#Preview` block produced
-three blocking errors — and modern SwiftUI almost always has one. Pasting real code in
+three blocking errors - and modern SwiftUI almost always has one. Pasting real code in
 gave a blank screen and a complaint about a character. The most expensive gap left in
 the product, and three lines of lexer. A `#Preview` now also serves as the entry point
 when nothing is `@main`, because a view plus its preview is an ordinary thing to paste
@@ -483,12 +483,12 @@ Running through every phase, not bolted on at the end:
 
 | Path | Weeks (focused solo) |
 | --- | --- |
-| P0 → P1 → P2 → P3 | 12–16 — first genuinely impressive demo |
-| + P4 → P5 | 17–22 — **usable v1.0**, meets the Definition of Done |
-| + P6 | 21–28 — credible for real work |
+| P0 → P1 → P2 → P3 | 12-16 - first genuinely impressive demo |
+| + P4 → P5 | 17-22 - **usable v1.0**, meets the Definition of Done |
+| + P6 | 21-28 - credible for real work |
 | + P7 items | à la carte |
 
-**Earliest meaningful milestone:** end of Phase 3 — a counter app and a styled layout, typed in
+**Earliest meaningful milestone:** end of Phase 3 - a counter app and a styled layout, typed in
 Chrome, running interactively. That is the moment the concept is proven or disproven, and it is
 worth optimising the first three phases purely for reaching it.
 
@@ -502,25 +502,25 @@ Concretely, that means phases run in order but each is *depth-limited* to what t
 
 | Phase | Full scope | Slice scope |
 | --- | --- | --- |
-| 0 | As written | **Unchanged** — the skeleton is the skeleton |
+| 0 | As written | **Unchanged** - the skeleton is the skeleton |
 | 1 | Full Tier 1 grammar | Structs, functions, closures, literals, `if` / `for`, `@State` attribute parsing |
-| 2 | Protocols, generics, async, full stdlib | Only what the above needs — no protocols, no generics, no async, minimal stdlib |
+| 2 | Protocols, generics, async, full stdlib | Only what the above needs - no protocols, no generics, no async, minimal stdlib |
 | 3 | All of 3a/3b/3c | `VStack` `HStack` `ZStack` `Text` `Button` `Color` `Spacer`, plus `frame` `padding` `background` `font` `foregroundStyle`, with `@State` |
-| 4 | Full IDE | Deferred — single file is enough for the slice |
+| 4 | Full IDE | Deferred - single file is enough for the slice |
 | 5 | Four export formats | `.xcodeproj` only |
-| 6 | Breadth | **Reopened and largely built** — navigation, lists, presentation, grids, controls, bindings, animation, strictness lint, telemetry |
+| 6 | Breadth | **Reopened and largely built** - navigation, lists, presentation, grids, controls, bindings, animation, strictness lint, telemetry |
 | 7 | Optional | 7a/7b/7c all deferred |
 
-Roughly 5–7 weeks to something that types real Swift, renders a real interactive iPhone, and exports
+Roughly 5-7 weeks to something that types real Swift, renders a real interactive iPhone, and exports
 a project Xcode opens. The exact slice contents and the Phase 0 task list are in
 [06-VERTICAL-SLICE.md](06-VERTICAL-SLICE.md).
 
-After the slice lands, the phases reopen in order to their full scope — the slice deliberately
+After the slice lands, the phases reopen in order to their full scope - the slice deliberately
 builds the *spine* of every package, so widening each one is additive.
 
 ## Decisions recorded against this roadmap
 
-- **Local-only storage.** No `/api/share`, no Postgres, no Blob, no auth in v1 — but
+- **Local-only storage.** No `/api/share`, no Postgres, no Blob, no auth in v1 - but
   `project-model` keeps persistence behind an interface so Phase 7b can add cloud without rework.
 - **No AI features in v1.** Phase 7c only.
 - **`.xcodeproj` is the one export format for v1.** `.swiftpm` / `Package.swift` / `project.yml`

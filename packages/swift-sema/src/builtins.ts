@@ -3,16 +3,16 @@
  *
  * Split three ways, and the split is the whole point:
  *
- * - **Supported** — implemented, no diagnostic.
- * - **Known but unimplemented** — real SwiftUI, not built yet. Produces a precise
+ * - **Supported** - implemented, no diagnostic.
+ * - **Known but unimplemented** - real SwiftUI, not built yet. Produces a precise
  *   "not implemented in the preview yet" warning naming the feature, which is both
  *   what FR-4.11 requires and what feeds the coverage telemetry that decides the
  *   build order.
- * - **Unknown** — not a symbol we recognise at all, and not declared in the project.
+ * - **Unknown** - not a symbol we recognise at all, and not declared in the project.
  *   Only this case is an error.
  *
  * The middle bucket is what stops the product lying. Without it, `Chart` would report
- * as "unresolved identifier", which is both wrong and unhelpful — the name is
+ * as "unresolved identifier", which is both wrong and unhelpful - the name is
  * perfectly valid Swift, it is *this preview* that cannot draw it.
  *
  * Kept in sync with docs/05-SWIFTUI-COVERAGE.md, which is the public version of this
@@ -115,7 +115,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
   ['symbolRenderingMode', 7], ['imageScale', 7], ['interpolation', 7],
 ])
 
-/** Types nameable in the preview — as a value (`Color.red`) or an annotation (`: Int`). */
+/** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */
 export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'String', 'Bool', 'Character',
   'Array', 'Dictionary', 'Set', 'Optional', 'Range', 'ClosedRange',
@@ -147,7 +147,7 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean; phase:
   ['ObservedObject', { supported: true, phase: 7 }],
   ['EnvironmentObject', { supported: true, phase: 7 }],
   ['Environment', { supported: true, phase: 7 }],
-  // A stored property on a class, which is a reference — so a change is visible
+  // A stored property on a class, which is a reference - so a change is visible
   // everywhere holding it, with or without the wrapper.
   ['Published', { supported: true, phase: 7 }],
   ['AppStorage', { supported: false, phase: 7 }],

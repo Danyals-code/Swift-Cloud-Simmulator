@@ -58,7 +58,7 @@ import {
   type ViewValue,
 } from './view-value'
 
-/** Every name the host will build a view for — implemented or not. */
+/** Every name the host will build a view for - implemented or not. */
 const VIEW_NAMES: ReadonlySet<string> = new Set([
   ...SUPPORTED_VIEWS,
   ...UNIMPLEMENTED_VIEWS.keys(),
@@ -74,7 +74,7 @@ const VIEW_NAMES: ReadonlySet<string> = new Set([
  * without, it is the view's own label content.
  *
  * `NavigationLink` is deliberately *not* here. Its trailing closure is never an
- * action — with a title argument it is the destination (`NavigationLink("More") {
+ * action - with a title argument it is the destination (`NavigationLink("More") {
  * Detail() }`, the form most code still uses), and without one it is the label. That
  * ambiguity is resolved in `callGlobal`.
  */
@@ -96,8 +96,8 @@ const NAMESPACES: ReadonlySet<string> = new Set([
  * runs immediately and in order.** `.task` has worked this way since Phase 7, `await`
  * is transparent, and `Task { … }` runs its body where it is written.
  *
- * That is a real limitation and it is stated rather than hidden. The alternative —
- * deferring a `Task` body and re-rendering, or splitting one at a `Task.sleep` — needs
+ * That is a real limitation and it is stated rather than hidden. The alternative -
+ * deferring a `Task` body and re-rendering, or splitting one at a `Task.sleep` - needs
  * suspension the interpreter does not have, and a half-built version of it would make
  * ordering depend on which special case a program happened to hit. One rule that is
  * always true beats several that are usually true.
@@ -141,7 +141,7 @@ function tokenNameOf(value: SwiftValue | undefined): string | null {
 /**
  * Turns evaluated Swift into a view tree.
  *
- * This is the whole of `swift-runtime`'s SwiftUI knowledge — the interpreter itself
+ * This is the whole of `swift-runtime`'s SwiftUI knowledge - the interpreter itself
  * has none, and the ESLint boundary rule would reject the import if it tried. Every
  * view, colour and modifier the preview understands is defined here, which also
  * means the coverage matrix has exactly one place to be wrong.
@@ -153,7 +153,7 @@ export class SwiftUIHost implements InterpreterHost {
    * Expands a user-declared `View` struct into its evaluated body.
    *
    * Supplied by the pipeline, because expansion needs the interpreter and this class
-   * must not hold one — it is the interpreter's *host*, not its owner. Without it,
+   * must not hold one - it is the interpreter's *host*, not its owner. Without it,
    * `WindowGroup { ContentView() }` collects a struct the host cannot recognise and
    * silently drops the entire app.
    */
@@ -187,8 +187,8 @@ export class SwiftUIHost implements InterpreterHost {
    * Calls a method the project declared in `extension View`.
    *
    * `extension View { func cardStyle() -> some View { … } }` is how nearly every real
-   * SwiftUI codebase names a reusable modifier chain, and the receiver is a *view* —
-   * `Text("x").cardStyle()` — not a struct whose own type declares the method. So the
+   * SwiftUI codebase names a reusable modifier chain, and the receiver is a *view* -
+   * `Text("x").cardStyle()` - not a struct whose own type declares the method. So the
    * lookup has to start from the protocol rather than from the value.
    */
   callViewExtension:
@@ -246,7 +246,7 @@ export class SwiftUIHost implements InterpreterHost {
    * problem this whole feature is. The size used is the one the same reader was
    * measured at last time; the pipeline compares that against what it actually got
    * and runs one more pass if they differ. Two passes converge because a reader is
-   * greedy — its size is its proposal, and the proposal does not depend on what the
+   * greedy - its size is its proposal, and the proposal does not depend on what the
    * closure built.
    */
   private makeGeometryReader(call: HostCall): SwiftValue {
@@ -358,7 +358,7 @@ export class SwiftUIHost implements InterpreterHost {
    * `Canvas { context, size in … }`.
    *
    * The closure is run once, now, with a context that records what it was asked to
-   * draw. That makes a canvas a list of vector paths rather than a bitmap — which
+   * draw. That makes a canvas a list of vector paths rather than a bitmap - which
    * reuses the path renderer exactly, and means a canvas is inspectable and
    * diffable like everything else.
    *
@@ -430,7 +430,7 @@ export class SwiftUIHost implements InterpreterHost {
    *
    * The target is expanded *inside* the scope, which is what gets the value to the
    * view's `body`. A view value that is already built keeps the modifier recorded so
-   * the inspector still shows it, even though nothing below it can read it — see the
+   * the inspector still shows it, even though nothing below it can read it - see the
    * limitation in `view-environment.ts`.
    */
   private withInjectedEnvironment(
@@ -467,7 +467,7 @@ export class SwiftUIHost implements InterpreterHost {
   /**
    * Collected builder results, with user views expanded and non-views dropped.
    *
-   * A `Color` is a `View` in SwiftUI — `VStack { Color.red }` paints a red panel —
+   * A `Color` is a `View` in SwiftUI - `VStack { Color.red }` paints a red panel -
    * so a colour reaching a builder is wrapped rather than discarded. Dropping it was
    * silent, which is the failure mode this project refuses: the code looked honoured
    * and drew nothing.
@@ -579,7 +579,7 @@ export class SwiftUIHost implements InterpreterHost {
 
     const isAction = ACTION_VIEWS.has(name) && call.args.some((a) => a.label === null)
 
-    // `NavigationLink("Title") { Destination() }` — a title plus a trailing closure
+    // `NavigationLink("Title") { Destination() }` - a title plus a trailing closure
     // means the closure is the destination, not the label.
     if (name === 'NavigationLink' && call.trailingClosure && this.hasPlainTitle(call)) {
       const destination = this.toViews(call.invokeBuilder(call.trailingClosure))
@@ -609,7 +609,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
-    // `.modifier(Shadowed())` — a custom `ViewModifier`. Its `body(content:)` takes
+    // `.modifier(Shadowed())` - a custom `ViewModifier`. Its `body(content:)` takes
     // the view it is applied to and returns a new one, so the content is handed over
     // as a value: inside the modifier, `content.padding()` is then an ordinary
     // modifier on an ordinary view, with nothing special about it at all.
@@ -628,7 +628,7 @@ export class SwiftUIHost implements InterpreterHost {
 
     // `.environmentObject(store)` and `.environment(\.key, value)` must be in scope
     // *while* the view below them expands, so they are handled before anything else
-    // touches the target — by which point a struct would already have been expanded.
+    // touches the target - by which point a struct would already have been expanded.
     if (member === 'environmentObject' || member === 'environment') {
       return this.withInjectedEnvironment(target, member, call)
     }
@@ -642,12 +642,12 @@ export class SwiftUIHost implements InterpreterHost {
     }
 
     // A modifier on a view returns a *new* view with the modifier appended, so the
-    // original is untouched — SwiftUI modifiers are value-semantic too.
+    // original is untouched - SwiftUI modifiers are value-semantic too.
     //
     // A user-declared view arrives here as a plain struct, because the interpreter
     // has no idea it is a view. `TodayView().tabItem { … }` is entirely ordinary
     // SwiftUI, so the struct is expanded into the views its `body` produces and the
-    // modifier applied to those — a struct with no `body` expands to nothing and
+    // modifier applied to those - a struct with no `body` expands to nothing and
     // falls through to the interpreter's own "no such member" reporting.
     const base = asView(target) ?? this.expandForModifier(target, call.span)
     if (base) {
@@ -681,7 +681,7 @@ export class SwiftUIHost implements InterpreterHost {
       return this.pathAsStyledView(target, member, call)
     }
 
-    // `context.fill(path, with: .color(.red))` — the Canvas drawing API. The context
+    // `context.fill(path, with: .color(.red))` - the Canvas drawing API. The context
     // collects drawings rather than rasterising, so a canvas ends up as the same
     // vector nodes a `Path` produces and needs no second renderer.
     const canvas = asCanvasContext(target)
@@ -783,7 +783,7 @@ export class SwiftUIHost implements InterpreterHost {
     return undefined
   }
 
-  /** `dismiss()` — the one callable the environment hands out. */
+  /** `dismiss()` - the one callable the environment hands out. */
   callValue(target: SwiftValue): SwiftValue | undefined {
     if (target.kind !== 'opaque' || target.typeName !== DISMISS_TYPE) return undefined
     this.dismissAction?.()
@@ -793,7 +793,7 @@ export class SwiftUIHost implements InterpreterHost {
   /**
    * Implicit member syntax *with* arguments: `.easeInOut(duration: 0.3)`.
    *
-   * Separate from `resolveImplicitMember` because that one never sees the call —
+   * Separate from `resolveImplicitMember` because that one never sees the call -
    * without this hook, every animation collapses to its default duration and the
    * number the user typed is silently discarded.
    */
@@ -820,7 +820,7 @@ export class SwiftUIHost implements InterpreterHost {
     const geometry = geometryMember(target, member)
     if (geometry !== undefined) return geometry
 
-    // `CGSize.zero`, `CGPoint.zero` — the initialiser almost every `@GestureState`
+    // `CGSize.zero`, `CGPoint.zero` - the initialiser almost every `@GestureState`
     // is declared with.
     if (target.kind === 'type' && member === 'zero') {
       if (target.name === 'CGSize') return size(0, 0)
@@ -859,7 +859,7 @@ export class SwiftUIHost implements InterpreterHost {
   /**
    * Turns a contextual token into the host value its declared type calls for.
    *
-   * Only named types the host actually owns, and only from a token — anything else is
+   * Only named types the host actually owns, and only from a token - anything else is
    * declined, because guessing here would replace a value the user built with one the
    * host invented.
    */
@@ -876,7 +876,7 @@ export class SwiftUIHost implements InterpreterHost {
   /**
    * `.modifier(SomeModifier())`.
    *
-   * Returns undefined — "not a custom modifier" — unless the argument is a struct
+   * Returns undefined - "not a custom modifier" - unless the argument is a struct
    * that conforms to `ViewModifier` and has a `body`. SwiftUI's own `.modifier` never
    * reaches here, so declining is the safe answer and the built-in path still runs.
    */
@@ -907,7 +907,7 @@ export class SwiftUIHost implements InterpreterHost {
    *
    * `.largeTitle`, `.primary` and `.infinity` all resolve against an expected type
    * the interpreter does not track. Rather than guess, they become tokens carrying
-   * only their name, and whoever consumes them decides what they mean — a font
+   * only their name, and whoever consumes them decides what they mean - a font
    * token inside `.font()`, a colour inside `.foregroundStyle()`. `.infinity` is the
    * one exception: it is genuinely a number wherever it appears.
    */
@@ -935,7 +935,7 @@ export class SwiftUIHost implements InterpreterHost {
    * Expands `ForEach` (and the collection forms of `List` and `Picker`).
    *
    * Each element's rows are built inside an identity scope keyed by the element's
-   * `id` — so `@State` inside a row follows the row's data when the collection is
+   * `id` - so `@State` inside a row follows the row's data when the collection is
    * reordered, which is the whole observable difference between identifying by
    * identity and identifying by position.
    */
@@ -969,7 +969,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   /**
-   * `withAnimation { … }` — runs the closure, and marks what it changed as animated.
+   * `withAnimation { … }` - runs the closure, and marks what it changed as animated.
    *
    * The animation is recorded rather than applied: the change happens now, but what
    * animates is the *next* render, which is the only place a from-and-to pair exists.
@@ -1038,7 +1038,7 @@ export class SwiftUIHost implements InterpreterHost {
    * The size argument is itself a contextual member call, which resolves to a
    * finished `GridItem` before the enclosing initialiser ever runs. Passing it
    * straight back through is what stops the outer call flattening an adaptive track
-   * into a flexible one — a silent difference that shows up only as the wrong number
+   * into a flexible one - a silent difference that shows up only as the wrong number
    * of columns.
    */
   private makeGridItem(call: HostCall, kind?: string): SwiftValue {
@@ -1082,7 +1082,7 @@ export class SwiftUIHost implements InterpreterHost {
     const first = call.args[0]?.value
     if (first?.kind === 'string') return color({ name: first.value })
 
-    // `Color(.systemGroupedBackground)` — the UIKit bridge, where the argument is a
+    // `Color(.systemGroupedBackground)` - the UIKit bridge, where the argument is a
     // contextual member rather than a string. This is how idiomatic SwiftUI reaches
     // the adaptive backgrounds, so it has to work for dark mode to be usable at all.
     const named = tokenNameOf(first)

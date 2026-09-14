@@ -73,7 +73,7 @@ export function useCompiler(
    * Real font measurements, taken once and re-sent to every worker.
    *
    * A respawned worker starts with the built-in estimates, so it has to be told
-   * again — otherwise a crash would silently degrade layout for the rest of the
+   * again - otherwise a crash would silently degrade layout for the rest of the
    * session.
    */
   const fontsRef = useRef<Promise<MeasuredFontData[]> | null>(null)
@@ -180,7 +180,7 @@ export function useCompiler(
    * completion is consulted.
    *
    * A dead worker returns the empty answer rather than respawning. Completion is not
-   * worth a restart on its own — the next compile will bring one back — and a
+   * worth a restart on its own - the next compile will bring one back - and a
    * half-second stall on a keystroke is more disruptive than a missing list.
    */
   const language = useMemo(

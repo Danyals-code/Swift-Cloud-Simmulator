@@ -21,7 +21,7 @@
  * `Spacer` responds `'infinity'`-greedily, `Text` responds with its ideal size
  * unless squeezed, and `.frame(maxWidth: .infinity)` changes the *proposal* passed
  * down rather than the response passed up. CSS flexbox resolves a different
- * algorithm and diverges on exactly these cases — see decision D2 in
+ * algorithm and diverges on exactly these cases - see decision D2 in
  * docs/02-ARCHITECTURE.md §12.
  */
 

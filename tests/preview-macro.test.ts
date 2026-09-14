@@ -4,7 +4,7 @@ import { compile, resetPipelineState } from '@studio/swiftui-runtime'
 import { DEVICES } from '@studio/sim-shell'
 
 /**
- * `#Preview` — Phase 10c.
+ * `#Preview` - Phase 10c.
  *
  * The reason this matters more than it looks: before it, `#` was an unexpected
  * character, and the three *blocking* errors that followed meant a file containing a
@@ -203,7 +203,7 @@ struct ContentView: View {
 
   it('survives a .font below it', () => {
     // In SwiftUI the design is inherited separately from the size, so setting one must
-    // not reset the other — which is what a naive implementation does.
+    // not reset the other - which is what a naive implementation does.
     const result = run(`import SwiftUI
 ${APP}
 struct ContentView: View {

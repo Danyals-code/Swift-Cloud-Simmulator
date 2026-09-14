@@ -20,7 +20,7 @@ export * from './xcode-files'
  * A fixed timestamp for every entry, so the archive is reproducible.
  *
  * `fflate` stamps each file with `Date.now()` by default, which makes two exports of
- * the same project differ — quietly, and only when the calls happen to straddle a
+ * the same project differ - quietly, and only when the calls happen to straddle a
  * second. That breaks Phase 5's gate 2 and, more to the point, makes a committed
  * export show a diff every time it is regenerated.
  *
@@ -66,7 +66,7 @@ export function zipFileName(project: Project, format: ExportFormat = 'xcodeproj'
  */
 export function downloadProjectZip(project: Project, format: ExportFormat = 'xcodeproj'): void {
   const bytes = exportProjectZip(project, format)
-  // Copy into a fresh ArrayBuffer — the fflate output may be a view over a larger pooled buffer.
+  // Copy into a fresh ArrayBuffer - the fflate output may be a view over a larger pooled buffer.
   const blob = new Blob([bytes.slice()], { type: 'application/zip' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')

@@ -33,7 +33,7 @@ import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './m
  *
  * Scoped by one rule above all others, from Phase 1 gate 4: **a false positive is
  * worse than a missed error.** A spurious red squiggle on correct code destroys
- * trust in every other diagnostic, while a missed one costs nothing here — the
+ * trust in every other diagnostic, while a missed one costs nothing here - the
  * export still carries the user's exact source to a real compiler that will catch it.
  *
  * In practice that means this checker reports only what it is certain about:
@@ -44,7 +44,7 @@ import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './m
  * - entry-point problems (error)
  *
  * It deliberately does *not* check member existence, argument types, or arity.
- * Those need the real type checker, which arrives with the interpreter in Phase 2 —
+ * Those need the real type checker, which arrives with the interpreter in Phase 2 -
  * guessing at them now would produce exactly the false positives the gate forbids.
  */
 export class Checker {
@@ -59,7 +59,7 @@ export class Checker {
    *
    * Not scoped to the declaration that introduced it, deliberately. Scoping it
    * properly needs to know which declaration a use site belongs to, and getting that
-   * wrong reports "unknown type 'T'" on correct code — a false positive, which costs
+   * wrong reports "unknown type 'T'" on correct code - a false positive, which costs
    * more than the missed error of accepting `T` in a function that never declared it.
    */
   private readonly typeParameterNames = new Set<string>()
@@ -77,7 +77,7 @@ export class Checker {
 
   private run(files: readonly SourceFileNode[]): SemanticModel {
     // Pass 1: collect every module-level type before checking any body, so that
-    // declaration order does not matter — `ContentView()` may appear above its own
+    // declaration order does not matter - `ContentView()` may appear above its own
     // declaration, as it does in the reference app.
     //
     // The conformance merge runs first because `describeStruct` needs it: after
@@ -145,7 +145,7 @@ export class Checker {
    * Records `<T>` from a declaration and from every member of it.
    *
    * Walked rather than handled at each declaration site because a generic method on a
-   * non-generic type — `func map<U>(…)` inside `struct Box` — is the common case, and
+   * non-generic type - `func map<U>(…)` inside `struct Box` - is the common case, and
    * its `U` must resolve just as the type's own parameters do.
    */
   private collectTypeParameters(decl: Decl): void {
@@ -351,7 +351,7 @@ export class Checker {
    * Checks the members of a type, protocol or extension body.
    *
    * The scope is seeded from the *merged* member list, so a method written in one
-   * extension can call one written in another — which is the whole reason people
+   * extension can call one written in another - which is the whole reason people
    * split a type across extensions. Falling back to the body's own members keeps a
    * protocol body working, since a protocol contributes to conformers rather than
    * having merged members of its own.
@@ -448,7 +448,7 @@ export class Checker {
         const base = type.name.split('.')[0]!
         // Unknown types are reported as *warnings*, never errors. The known-type
         // list is necessarily incomplete, so an error here would eventually fire on
-        // valid code — precisely the false positive gate 4 forbids.
+        // valid code - precisely the false positive gate 4 forbids.
         if (
           !KNOWN_TYPES.has(base) &&
           !this.types.has(base) &&
@@ -533,7 +533,7 @@ export class Checker {
       }
 
       case 'guardStmt':
-        // A guard's bindings escape into the enclosing scope — that is its purpose —
+        // A guard's bindings escape into the enclosing scope - that is its purpose -
         // so they are declared in `scope` rather than in a child of it.
         this.checkConditions(statement.conditions, scope)
         this.checkBlock(statement.else, scope.child())
@@ -606,7 +606,7 @@ export class Checker {
    * Declares the names a pattern binds.
    *
    * Case *names* are deliberately not resolved: doing so needs the subject's type,
-   * and guessing would report a false "no such case" on correct code — the one thing
+   * and guessing would report a false "no such case" on correct code - the one thing
    * this checker must never do.
    */
   private checkPattern(pattern: Pattern, scope: Scope): void {
@@ -642,7 +642,7 @@ export class Checker {
         this.checkCallee(expr.callee, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
         // than on every member access. Doing it there flagged `Color.accentColor` as
-        // the `.accentColor` modifier — a warning on correct code, which is the one
+        // the `.accentColor` modifier - a warning on correct code, which is the one
         // thing this checker must never produce.
         if (expr.callee.kind === 'memberAccess') {
           this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan)
@@ -654,7 +654,7 @@ export class Checker {
 
       case 'memberAccess':
         // Only the base is resolved. Member existence needs real type information,
-        // and guessing produces false positives — see the class comment.
+        // and guessing produces false positives - see the class comment.
         if (expr.base) this.checkExpression(expr.base, scope)
         return
 
@@ -756,7 +756,7 @@ export class Checker {
     if (this.types.has(name)) return
 
     // Inside `extension View`, `self` is a view, so an unqualified `modifier(…)` or
-    // `padding(…)` is a call on it — the idiom the whole extension exists for. The
+    // `padding(…)` is a call on it - the idiom the whole extension exists for. The
     // checker has no receiver type to confirm that with, and reporting it would put a
     // red error on the most common way to write a reusable modifier.
     if (this.inViewExtension > 0 && isKnownModifier(name)) return
@@ -855,7 +855,7 @@ export class Checker {
     feature?: string,
     fixIts?: readonly FixIt[],
   ): void {
-    // Coverage warnings repeat constantly — `.padding()` appears six times in the
+    // Coverage warnings repeat constantly - `.padding()` appears six times in the
     // reference app. Report each feature once per span so the panel stays readable.
     const duplicate = this.diagnostics.some(
       (d) => d.span.start === span.start && d.span.end === span.end && d.code === code,

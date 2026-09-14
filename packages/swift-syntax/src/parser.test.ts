@@ -324,7 +324,7 @@ describe('SwiftUI shapes', () => {
   it('tells a ternary from optional chaining by the whitespace', () => {
     // `a ? .two : c` and `a?.two` differ only in spacing, and Swift reads them that
     // way too. Without the check, the ternary's then-branch is swallowed as a chain
-    // and the `:` has nowhere to go — which broke every `flag ? .one : .two`.
+    // and the `:` has nowhere to go - which broke every `flag ? .one : .two`.
     const ternary = parse('func f() { let x = a ? .two : .one }')
     expect(ternary.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
 
@@ -613,7 +613,7 @@ struct View%N%: View {
     const source = Array.from({ length: 36 }, (_, i) => unit.replace(/%N%/g, String(i))).join('\n')
     expect(source.split('\n').length).toBeGreaterThan(500)
 
-    // Warm up, then take the best of five — this asserts a ceiling, and CI machines
+    // Warm up, then take the best of five - this asserts a ceiling, and CI machines
     // are noisy enough that a single cold sample would make the test flaky.
     for (let i = 0; i < 3; i++) Parser.parse(source, FILE)
 
@@ -630,7 +630,7 @@ struct View%N%: View {
 
 describe('a switch case name may be a keyword', () => {
   // `some` and `any` are keywords (`some View`, `any Shape`) and also perfectly
-  // ordinary enum case names — `Optional` itself is declared with `case some(T)`.
+  // ordinary enum case names - `Optional` itself is declared with `case some(T)`.
   // Before this, `expectIdentifier` reported and did not advance, so the keyword sat
   // there and the switch loop span on it forever: not a wrong parse, a hang.
   it.each(['some', 'any', 'none', 'default', 'class'])('accepts .%s as a case', (name) => {

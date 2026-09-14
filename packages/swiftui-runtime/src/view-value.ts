@@ -7,7 +7,7 @@ import { describe, type ClosureValue, type SwiftValue } from '@studio/swift-runt
  * The product of actually running the user's `body`, so every value here is real:
  * interpolations resolved, ternaries taken, numbers computed.
  *
- * Phase 6 adds two things to it, and both exist for the same reason — the framework
+ * Phase 6 adds two things to it, and both exist for the same reason - the framework
  * has behaviour of its own that is not in the user's code. `path` is the identity
  * every downstream stage addresses a view by, stamped once by the resolver so the
  * layout pass and the event table cannot disagree about which view is which.
@@ -37,7 +37,7 @@ export interface ViewValue {
    * Per-child identity keys, set by `ForEach`.
    *
    * With `id:` or `Identifiable`, state follows the *element* rather than its
-   * position — so reordering a list carries each row's `@State` with it, which is
+   * position - so reordering a list carries each row's `@State` with it, which is
    * the observable difference between keying by identity and keying by index.
    */
   readonly childKeys?: readonly string[]
@@ -45,7 +45,7 @@ export interface ViewValue {
    * The key a `GeometryReader` reports its resolved size under.
    *
    * Assigned by the host at the moment the reader's content is built, and used again
-   * by the layout pass — so the size the proxy reported and the size the box actually
+   * by the layout pass - so the size the proxy reported and the size the box actually
    * got are provably about the same reader.
    */
   readonly geometryKey?: string
@@ -76,7 +76,7 @@ export type ViewIntent =
   | { readonly kind: 'gesture'; readonly gesture: SwiftValue }
   /** Dragging a list row sideways to reveal its actions. */
   | { readonly kind: 'swipe'; readonly row: string }
-  /** `.onDelete` — remove the row at this offset from the collection. */
+  /** `.onDelete` - remove the row at this offset from the collection. */
   | { readonly kind: 'delete'; readonly closure: ClosureValue; readonly offset: number; readonly row: string }
 
 export interface ViewArg {
@@ -92,7 +92,7 @@ export interface ModifierValue {
    * The modifier's trailing closure, unevaluated.
    *
    * `.sheet(isPresented:) { Detail(item: selected!) }` must not run its content while
-   * the sheet is down — SwiftUI does not, and evaluating it eagerly would trap on
+   * the sheet is down - SwiftUI does not, and evaluating it eagerly would trap on
    * the force-unwrap for a screen nobody asked to see. So the closure travels here
    * and the resolver runs it only if and when the sheet is actually presented.
    */
@@ -200,7 +200,7 @@ export function viewArgs(args: readonly ViewArg[]): string {
 /**
  * Renders an argument for display.
  *
- * Strings keep their quotes so `Text("5")` is visibly distinct from `Text(5)` —
+ * Strings keep their quotes so `Text("5")` is visibly distinct from `Text(5)` -
  * which is the kind of confusion a preview should remove rather than create.
  */
 export function renderArg(value: SwiftValue): string {
@@ -235,7 +235,7 @@ export interface FlatView {
  * identity.
  *
  * The renderer and the action index both use this one traversal, so a row's id and
- * its button's handler id cannot drift apart — which they would if each computed
+ * its button's handler id cannot drift apart - which they would if each computed
  * paths its own way.
  */
 export function flattenViews(views: readonly ViewValue[], depth = 0, prefix = 'v'): FlatView[] {

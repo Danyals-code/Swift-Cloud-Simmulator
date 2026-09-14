@@ -30,7 +30,7 @@ async function typeAtTop(page: Page, text: string) {
  *
  * Takes a single line deliberately. CodeMirror auto-closes brackets, so typing a
  * multi-line block leaves the auto-inserted `}` in place *and* adds the one the test
- * typed on its own line — silently producing unbalanced source, and a failure that
+ * typed on its own line - silently producing unbalanced source, and a failure that
  * has nothing to do with the product.
  */
 async function replaceAll(page: Page, source: string) {
@@ -74,7 +74,7 @@ test('loads the studio with the starter project', async ({ page }) => {
   expect(await editorText(page)).toContain('struct ContentView: View')
 })
 
-test('gate 1 — edits persist across a reload', async ({ page }) => {
+test('gate 1 - edits persist across a reload', async ({ page }) => {
   await openStudio(page)
 
   const marker = `// persisted-${Date.now()}`
@@ -86,7 +86,7 @@ test('gate 1 — edits persist across a reload', async ({ page }) => {
   expect(await editorText(page)).toContain(marker)
 })
 
-test('gate 4 — the exported zip contains the edited source, byte-identical', async ({ page }) => {
+test('gate 4 - the exported zip contains the edited source, byte-identical', async ({ page }) => {
   await openStudio(page)
 
   const marker = `// exported-${Date.now()}`
@@ -125,7 +125,7 @@ test('the preview pane toggles with Ctrl+B', async ({ page }) => {
 
 // ---------------------------------------------------------------- Phase 1
 
-test('Phase 1 gate 4 — the reference app produces no diagnostics at all', async ({ page }) => {
+test('Phase 1 gate 4 - the reference app produces no diagnostics at all', async ({ page }) => {
   // The most important assertion in the suite. Anything reported on the starter
   // template is a false positive on unambiguously correct code, and a spurious
   // squiggle destroys trust in every other diagnostic.
@@ -135,7 +135,7 @@ test('Phase 1 gate 4 — the reference app produces no diagnostics at all', asyn
   await expect(page.getByTestId('editor').locator('.cm-lintRange')).toHaveCount(0)
 })
 
-test('gate 2 — a real parse error reaches the editor and the problems panel', async ({ page }) => {
+test('gate 2 - a real parse error reaches the editor and the problems panel', async ({ page }) => {
   await openStudio(page)
   await typeAtTop(page, 'let broken = \n')
 
@@ -147,7 +147,7 @@ test('gate 2 — a real parse error reaches the editor and the problems panel', 
 
 test('reports unimplemented SwiftUI by name rather than calling it unresolved', async ({ page }) => {
   // `Chart` is perfectly valid Swift. Saying "cannot find in scope" would be both
-  // wrong and unhelpful — it is this preview that cannot draw it, not Swift that
+  // wrong and unhelpful - it is this preview that cannot draw it, not Swift that
   // does not have it. The name checked here moves as coverage grows; what must not
   // change is that a real SwiftUI name is never reported as unresolved.
   await openStudio(page)
@@ -160,7 +160,7 @@ test('reports unimplemented SwiftUI by name rather than calling it unresolved', 
 
 // ---------------------------------------------------------------- Phase 3
 
-test('Phase 3 — the app renders as a real interface', async ({ page }) => {
+test('Phase 3 - the app renders as a real interface', async ({ page }) => {
   await openStudio(page)
 
   await expect(page.getByTestId('device-frame')).toBeVisible()
@@ -173,7 +173,7 @@ test('Phase 3 — the app renders as a real interface', async ({ page }) => {
   await expect(appButton(page, 'Plus')).toBeVisible()
 })
 
-test('Phase 3 gate 1 — tapping a rendered Button runs its Swift closure', async ({ page }) => {
+test('Phase 3 gate 1 - tapping a rendered Button runs its Swift closure', async ({ page }) => {
   // The counter app, working as an interface: DOM tap -> worker -> interpreter runs
   // `count += 1` -> body re-evaluates -> layout -> repaint.
   await openStudio(page)
@@ -191,7 +191,7 @@ test('Phase 3 gate 1 — tapping a rendered Button runs its Swift closure', asyn
   await expect(tree).toContainText('Count: 1')
 })
 
-test('Phase 3 gate 2 — Spacer pushes the buttons to opposite edges', async ({ page }) => {
+test('Phase 3 gate 2 - Spacer pushes the buttons to opposite edges', async ({ page }) => {
   // The case that exposes a wrong layout engine. The row is inset by the VStack's
   // 16pt padding plus the HStack's own 24pt, so the buttons sit at 40 and end at 353
   // on a 393pt screen.
@@ -213,7 +213,7 @@ test('Phase 3 gate 2 — Spacer pushes the buttons to opposite edges', async ({ 
   expect(first.y).toBe(last.y)
 })
 
-test('Phase 3 — text is centred by the VStack and sized by its font', async ({ page }) => {
+test('Phase 3 - text is centred by the VStack and sized by its font', async ({ page }) => {
   await openStudio(page)
   await expect(preview(page)).toContainText('Count: 0')
 
@@ -233,7 +233,7 @@ test('Phase 3 — text is centred by the VStack and sized by its font', async ({
   expect(count.y).toBeGreaterThan(title.y)
 })
 
-test('Phase 3 gate 5 — an edit repaints without resetting unrelated @State', async ({ page }) => {
+test('Phase 3 gate 5 - an edit repaints without resetting unrelated @State', async ({ page }) => {
   await openStudio(page)
   const tree = preview(page)
 
@@ -254,7 +254,7 @@ test('Phase 3 gate 5 — an edit repaints without resetting unrelated @State', a
   await expect(tree).toContainText('Count: 2', { timeout: 5_000 })
 })
 
-test('Phase 3 — Reset state clears the counter without changing the source', async ({ page }) => {
+test('Phase 3 - Reset state clears the counter without changing the source', async ({ page }) => {
   await openStudio(page)
   const tree = preview(page)
 
@@ -266,7 +266,7 @@ test('Phase 3 — Reset state clears the counter without changing the source', a
   expect(await editorText(page)).toContain('@State private var count = 0')
 })
 
-test('Phase 3 — the interface updates as you type', async ({ page }) => {
+test('Phase 3 - the interface updates as you type', async ({ page }) => {
   await openStudio(page)
   const tree = preview(page)
   await expect(tree).toContainText('Hello, World!')
@@ -282,7 +282,7 @@ test('Phase 3 — the interface updates as you type', async ({ page }) => {
   await expect(tree).not.toContainText('Hello, World!')
 })
 
-test('Phase 3 — a runtime trap is reported with its reason, not a crash', async ({ page }) => {
+test('Phase 3 - a runtime trap is reported with its reason, not a crash', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -296,7 +296,7 @@ test('Phase 3 — a runtime trap is reported with its reason, not a crash', asyn
   await expect(preview(page)).toContainText('Execution stopped')
 })
 
-test('gate 3b — unimplemented views render a labelled placeholder (FR-4.11)', async ({ page }) => {
+test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', async ({ page }) => {
   // FR-4.11: never a blank space, never a silent wrong result.
   await openStudio(page)
 
@@ -315,7 +315,7 @@ test('gate 3b — unimplemented views render a labelled placeholder (FR-4.11)', 
 
 // ---------------------------------------------------------------- Phase 6
 
-test('Phase 6 — a navigation flow pushes and pops in the browser', async ({ page }) => {
+test('Phase 6 - a navigation flow pushes and pops in the browser', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -339,7 +339,7 @@ test('Phase 6 — a navigation flow pushes and pops in the browser', async ({ pa
   await expect(tree).not.toContainText('the detail screen')
 })
 
-test('Phase 6 — a sheet presents over the content and dismisses', async ({ page }) => {
+test('Phase 6 - a sheet presents over the content and dismisses', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -362,7 +362,7 @@ test('Phase 6 — a sheet presents over the content and dismisses', async ({ pag
   await expect(tree).not.toContainText('Dismiss')
 })
 
-test('Phase 6 — a Toggle flips through its binding', async ({ page }) => {
+test('Phase 6 - a Toggle flips through its binding', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -380,8 +380,8 @@ test('Phase 6 — a Toggle flips through its binding', async ({ page }) => {
   await expect(tree).toContainText('connected')
 })
 
-test('Phase 6 — the strictness linter warns about code Xcode would reject', async ({ page }) => {
-  // Gate 4: the class of bug this whole product is most at risk from — something
+test('Phase 6 - the strictness linter warns about code Xcode would reject', async ({ page }) => {
+  // Gate 4: the class of bug this whole product is most at risk from - something
   // that runs happily in the preview and fails the moment it reaches Xcode.
   await openStudio(page)
 
@@ -400,7 +400,7 @@ test('Phase 6 — the strictness linter warns about code Xcode would reject', as
 
 // ---------------------------------------------------------------- Phase 7
 
-test('Phase 7 — a class shared between two views updates both', async ({ page }) => {
+test('Phase 7 - a class shared between two views updates both', async ({ page }) => {
   // The whole reason reference semantics were added: an ObservableObject is only
   // useful because both views see the same instance.
   await openStudio(page)
@@ -426,7 +426,7 @@ test('Phase 7 — a class shared between two views updates both', async ({ page 
   await expect(tree).toContainText('badge 1')
 })
 
-test('Phase 7 — an enum and a switch drive the screen', async ({ page }) => {
+test('Phase 7 - an enum and a switch drive the screen', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -448,7 +448,7 @@ test('Phase 7 — an enum and a switch drive the screen', async ({ page }) => {
   await expect(tree).not.toContainText('the first step')
 })
 
-test('Phase 7 — onAppear runs once, not on every render', async ({ page }) => {
+test('Phase 7 - onAppear runs once, not on every render', async ({ page }) => {
   // The runaway-counter case: without tracking what has already appeared, this
   // number climbs with every tap.
   await openStudio(page)
@@ -472,7 +472,7 @@ test('Phase 7 — onAppear runs once, not on every render', async ({ page }) => 
   await expect(tree).toContainText('appeared 1 tapped 2')
 })
 
-test('Phase 7 — GeometryReader reports the size it was actually given', async ({ page }) => {
+test('Phase 7 - GeometryReader reports the size it was actually given', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -487,7 +487,7 @@ test('Phase 7 — GeometryReader reports the size it was actually given', async 
   await expect(preview(page)).toContainText('wide 240', { timeout: 5_000 })
 })
 
-test('Phase 7 — a Path draws as a real vector', async ({ page }) => {
+test('Phase 7 - a Path draws as a real vector', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -504,7 +504,7 @@ test('Phase 7 — a Path draws as a real vector', async ({ page }) => {
   await expect(drawn).toHaveAttribute('d', 'M 0 0 L 80 40')
 })
 
-test('Phase 7 — a drag moves the view it is attached to', async ({ page }) => {
+test('Phase 7 - a drag moves the view it is attached to', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -534,7 +534,7 @@ test('Phase 7 — a drag moves the view it is attached to', async ({ page }) => 
   await expect(tree).not.toContainText('at 0')
 })
 
-test('Phase 6 — the coverage panel ranks what the preview could not draw', async ({ page }) => {
+test('Phase 6 - the coverage panel ranks what the preview could not draw', async ({ page }) => {
   await openStudio(page)
 
   await replaceAll(
@@ -554,7 +554,7 @@ test('Phase 6 — the coverage panel ranks what the preview could not draw', asy
 })
 
 /**
- * Phase 8 — the editor half.
+ * Phase 8 - the editor half.
  *
  * Unit tests cover what the symbol index answers. Only a browser can answer whether
  * the list actually appears when you type, which is the part the user experiences.
@@ -562,7 +562,7 @@ test('Phase 6 — the coverage panel ranks what the preview could not draw', asy
 
 const completionList = (page: Page) => page.locator('.cm-tooltip-autocomplete')
 
-test('Phase 8 — completion offers modifiers after a dot', async ({ page }) => {
+test('Phase 8 - completion offers modifiers after a dot', async ({ page }) => {
   await openStudio(page)
   await page.getByTestId('editor').locator('.cm-content').click()
 
@@ -575,7 +575,7 @@ test('Phase 8 — completion offers modifiers after a dot', async ({ page }) => 
   await expect(completionList(page).getByText('padding', { exact: true })).toBeVisible()
 })
 
-test('Phase 8 — completion offers the project’s own declarations', async ({ page }) => {
+test('Phase 8 - completion offers the project’s own declarations', async ({ page }) => {
   await openStudio(page)
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+a')
@@ -587,7 +587,7 @@ test('Phase 8 — completion offers the project’s own declarations', async ({ 
   await expect(completionList(page).getByText('Sparkle', { exact: true })).toBeVisible()
 })
 
-test('Phase 8 — completion offers a property of the enclosing view', async ({ page }) => {
+test('Phase 8 - completion offers a property of the enclosing view', async ({ page }) => {
   await openStudio(page)
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+a')
@@ -597,7 +597,7 @@ test('Phase 8 — completion offers a property of the enclosing view', async ({ 
   await expect(completionList(page).getByText('headline', { exact: true })).toBeVisible()
 })
 
-test('Phase 8 — hovering a view the preview cannot draw says so', async ({ page }) => {
+test('Phase 8 - hovering a view the preview cannot draw says so', async ({ page }) => {
   await openStudio(page)
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+a')
@@ -610,7 +610,7 @@ test('Phase 8 — hovering a view the preview cannot draw says so', async ({ pag
   })
 })
 
-test('Phase 8 — F12 jumps to where a name was declared', async ({ page }) => {
+test('Phase 8 - F12 jumps to where a name was declared', async ({ page }) => {
   await openStudio(page)
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+a')
@@ -634,7 +634,7 @@ test('Phase 8 — F12 jumps to where a name was declared', async ({ page }) => {
     .toBe('Badge')
 })
 
-test('Phase 8 — a typo offers the name it probably meant, and applying it fixes the code', async ({
+test('Phase 8 - a typo offers the name it probably meant, and applying it fixes the code', async ({
   page,
 }) => {
   await openStudio(page)
@@ -654,12 +654,12 @@ test('Phase 8 — a typo offers the name it probably meant, and applying it fixe
   await fix.click()
 
   // The fixture never had an `@main`, so that diagnostic stays. What must go is the
-  // one the fix addressed — and the corrected name must be in the document.
+  // one the fix addressed - and the corrected name must be in the document.
   await expect(problems).not.toContainText("Cannot find 'VStak'", { timeout: 8000 })
   expect(await editorText(page)).toContain('VStack')
 })
 
-test('Phase 9 — the Swift Playgrounds export carries the edited source', async ({ page }) => {
+test('Phase 9 - the Swift Playgrounds export carries the edited source', async ({ page }) => {
   await openStudio(page)
 
   const marker = `// swiftpm-${Date.now()}`
@@ -684,7 +684,7 @@ test('Phase 9 — the Swift Playgrounds export carries the edited source', async
   expect(listing).toContain('CounterApp.swiftpm/Sources/CounterApp/CounterApp.swift')
 })
 
-test('Phase 9 — every export format offers a distinct download', async ({ page }) => {
+test('Phase 9 - every export format offers a distinct download', async ({ page }) => {
   await openStudio(page)
 
   for (const [format, filename] of [
@@ -702,7 +702,7 @@ test('Phase 9 — every export format offers a distinct download', async ({ page
   expect((await downloadPromise).suggestedFilename()).toBe('CounterApp.zip')
 })
 
-test('Phase 9 — a share link carries the project to a fresh session', async ({ page, context }) => {
+test('Phase 9 - a share link carries the project to a fresh session', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await openStudio(page)
 
@@ -730,7 +730,7 @@ test('Phase 9 — a share link carries the project to a fresh session', async ({
   await fresh.close()
 })
 
-test('Phase 9 — a corrupt share link falls back instead of failing', async ({ page }) => {
+test('Phase 9 - a corrupt share link falls back instead of failing', async ({ page }) => {
   // The payload comes from a URL a stranger pasted. Truncation is ordinary.
   await page.goto('/#p=not-a-real-payload')
   await expect(page.getByTestId('editor')).toBeVisible()
@@ -738,7 +738,7 @@ test('Phase 9 — a corrupt share link falls back instead of failing', async ({ 
   await expect(page.locator('.cm-content')).toContainText('import SwiftUI', { timeout: 8_000 })
 })
 
-test('Phase 10 — F2 renames every occurrence and says how many first', async ({ page }) => {
+test('Phase 10 - F2 renames every occurrence and says how many first', async ({ page }) => {
   await openStudio(page)
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+a')
@@ -768,7 +768,7 @@ test('Phase 10 — F2 renames every occurrence and says how many first', async (
   expect(text).not.toContain('title')
 })
 
-test('Phase 10 — rename leaves a same-spelled string alone', async ({ page }) => {
+test('Phase 10 - rename leaves a same-spelled string alone', async ({ page }) => {
   // The reason references are matched on lexer tokens rather than on text: an edit
   // inside a string leaves no compile error behind to notice it by.
   await openStudio(page)
@@ -791,7 +791,7 @@ test('Phase 10 — rename leaves a same-spelled string alone', async ({ page }) 
   expect(text).toContain('Text("count")')
 })
 
-test('Phase 10 — Escape cancels a rename without changing anything', async ({ page }) => {
+test('Phase 10 - Escape cancels a rename without changing anything', async ({ page }) => {
   await openStudio(page)
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+a')
@@ -808,7 +808,7 @@ test('Phase 10 — Escape cancels a rename without changing anything', async ({ 
   expect(await editorText(page)).toBe(before)
 })
 
-test('Phase 10 — a view with only a #Preview renders instead of erroring', async ({ page }) => {
+test('Phase 10 - a view with only a #Preview renders instead of erroring', async ({ page }) => {
   // Before this, `#` was an unexpected character and the blocking errors that followed
   // meant pasting modern SwiftUI produced a blank screen and a complaint about a
   // character rather than about anything the user wrote.

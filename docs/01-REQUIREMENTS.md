@@ -1,4 +1,4 @@
-# 01 — Requirements
+# 01 - Requirements
 
 ## 1. Product summary
 
@@ -10,7 +10,7 @@ A web application, deployed on Vercel and used in Chrome, that lets a developer:
    Swift state mutate.
 4. Export the project as something Xcode (or Swift Playgrounds) opens and builds unchanged.
 
-The target user has an idea and a browser — possibly on Windows or a Chromebook — and wants to get
+The target user has an idea and a browser - possibly on Windows or a Chromebook - and wants to get
 to a working SwiftUI codebase without first buying a Mac.
 
 ## 2. Goals
@@ -37,18 +37,18 @@ to a working SwiftUI codebase without first buying a Mac.
 
 ## 4. Personas
 
-- **P1 — Windows/Linux developer.** Wants to learn SwiftUI and produce a real project to hand to a
+- **P1 - Windows/Linux developer.** Wants to learn SwiftUI and produce a real project to hand to a
   Mac later. Cares most about export correctness and honest diagnostics.
-- **P2 — Designer/PM prototyping a screen.** Cares about speed to a shareable interactive link and
+- **P2 - Designer/PM prototyping a screen.** Cares about speed to a shareable interactive link and
   a good template library. Rarely exports.
-- **P3 — Educator/student.** Cares about zero install, shareable snippets, embeddable previews, and
+- **P3 - Educator/student.** Cares about zero install, shareable snippets, embeddable previews, and
   error messages that match Xcode's.
-- **P4 — iOS developer on the wrong machine.** Wants to sketch a view, check layout behaviour, and
+- **P4 - iOS developer on the wrong machine.** Wants to sketch a view, check layout behaviour, and
   paste the result into a real project.
 
 ## 5. Functional requirements
 
-### FR-1 — Code editor
+### FR-1 - Code editor
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
@@ -62,7 +62,7 @@ to a working SwiftUI codebase without first buying a Mac.
 | FR-1.8 | Keyboard-first: Ctrl+S save, Ctrl+P file switcher, Ctrl+/ comment, Ctrl+B toggle preview | Should |
 | FR-1.9 | Edits persist across reload without explicit save | Must |
 
-### FR-2 — Project model
+### FR-2 - Project model
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ to a working SwiftUI codebase without first buying a Mac.
 | FR-2.5 | Template gallery: Blank, List + Detail, Tab app, Form/Settings, Onboarding flow, Grid gallery, Timer, Networking demo | Should |
 | FR-2.6 | Import an existing project by dropping a `.zip` or a folder of `.swift` files | Could |
 
-### FR-3 — Swift language support
+### FR-3 - Swift language support
 
 Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SUBSET.md). Summary:
 
@@ -84,12 +84,12 @@ Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SUBSET.md). Summary:
 | FR-3.3 | Result builders sufficient for `@ViewBuilder` (including `buildIf` / `buildEither` / `buildArray`) | Must |
 | FR-3.4 | Property wrappers: `@State @Binding @StateObject @ObservedObject @EnvironmentObject @Environment @AppStorage @SceneStorage @FocusState @Published`, plus user-defined wrappers | Must |
 | FR-3.5 | `ObservableObject` plus `objectWillChange`, and the `@Observable` macro shape | Must |
-| FR-3.6 | `async` / `await`, `Task`, `MainActor`, `Task.sleep`, `async let` — cooperatively scheduled on the worker's microtask queue | Should |
+| FR-3.6 | `async` / `await`, `Task`, `MainActor`, `Task.sleep`, `async let` - cooperatively scheduled on the worker's microtask queue | Should |
 | FR-3.7 | Standard library shims: `String`, `Array`, `Dictionary`, `Set`, `Optional`, `Result`, `Date`, `UUID`, `Int`/`Double` maths, `Codable` via JSON | Must |
 | FR-3.8 | `URLSession` shim backed by `fetch` (with a per-project allowlist and a mock mode) | Could |
-| FR-3.9 | Unsupported syntax must produce a clear "not supported in preview" diagnostic that names the feature — never a silent wrong result | Must |
+| FR-3.9 | Unsupported syntax must produce a clear "not supported in preview" diagnostic that names the feature - never a silent wrong result | Must |
 
-### FR-4 — SwiftUI runtime
+### FR-4 - SwiftUI runtime
 
 Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 
@@ -104,10 +104,10 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 | FR-4.7 | Animation: `withAnimation`, `.animation(_:value:)`, `.transition`, spring and easing curves, `matchedGeometryEffect` | Should |
 | FR-4.8 | Lifecycle: `onAppear onDisappear task onChange onReceive refreshable searchable` | Should |
 | FR-4.9 | Environment: colour scheme, dynamic type size, locale, size classes, safe-area insets | Should |
-| FR-4.10 | `PreviewProvider` / `#Preview` macro — pick which preview to display | Could |
-| FR-4.11 | Any unimplemented view or modifier renders a visible, labelled placeholder and logs a diagnostic — never fails silently | Must |
+| FR-4.10 | `PreviewProvider` / `#Preview` macro - pick which preview to display | Could |
+| FR-4.11 | Any unimplemented view or modifier renders a visible, labelled placeholder and logs a diagnostic - never fails silently | Must |
 
-### FR-5 — Simulator / preview surface
+### FR-5 - Simulator / preview surface
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
@@ -121,17 +121,17 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 | FR-5.8 | View-tree inspector: hover a rendered element to highlight it, show the view path, computed frame, applied modifiers, and jump to source | Should |
 | FR-5.9 | Record an interaction as an animated GIF or MP4 for sharing | Could |
 
-### FR-6 — Diagnostics and errors
+### FR-6 - Diagnostics and errors
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
 | FR-6.1 | Every diagnostic carries file, line, column, length, severity, message, and optional fix-it | Must |
 | FR-6.2 | Messages mirror real Swift wording where an equivalent exists (for example "Cannot convert value of type 'Int' to expected argument type 'String'") | Should |
-| FR-6.3 | Parse errors must not blank the preview — keep showing the last good render, dimmed, with an error banner | Must |
+| FR-6.3 | Parse errors must not blank the preview - keep showing the last good render, dimmed, with an error banner | Must |
 | FR-6.4 | Runtime traps (force-unwrap nil, index out of range, arithmetic overflow) surface as a red overlay naming the Swift source line | Must |
 | FR-6.5 | Infinite loop and runaway recursion guard: execution budget per render pass, then abort with a diagnostic | Must |
 
-### FR-7 — Export
+### FR-7 - Export
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
@@ -144,28 +144,28 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 | FR-7.7 | Exported bundle includes assets catalogue, Info.plist values, deployment target, and a README with build instructions | Must |
 | FR-7.8 | Export must be byte-identical to editor content for all `.swift` files (verified by test) | Must |
 
-### FR-8 — Persistence and sharing
+### FR-8 - Persistence and sharing
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
 | FR-8.1 | Local-first: projects live in IndexedDB, survive reload and offline | Must |
-| FR-8.2 | Share by URL — small projects compressed into the URL fragment (no server round-trip, no account) | Should |
+| FR-8.2 | Share by URL - small projects compressed into the URL fragment (no server round-trip, no account) | Should |
 | FR-8.3 | Optional account (GitHub OAuth) with cloud projects, fork, and a stable short link | Could |
 | FR-8.4 | Embeddable read-only preview iframe for blogs and docs | Could |
 | FR-8.5 | Export and import a project as a single `.json` or `.zip` for manual backup | Should |
 
-### FR-9 — AI assistance (optional, gated)
+### FR-9 - AI assistance (optional, gated)
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
-| FR-9.1 | "Describe a screen, generate SwiftUI" using the Claude API via a Vercel route handler | Could |
+| FR-9.1 | "Describe a screen, generate SwiftUI" using a hosted model API via a Vercel route handler | Could |
 | FR-9.2 | "Explain this error" / "fix it" acting on a selected diagnostic | Could |
-| FR-9.3 | Generated code is inserted as an editable diff the user approves — never applied silently | Must (if FR-9 ships) |
+| FR-9.3 | Generated code is inserted as an editable diff the user approves - never applied silently | Must (if FR-9 ships) |
 | FR-9.4 | API key held server-side only; per-IP rate limiting | Must (if FR-9 ships) |
 
 ## 6. Non-functional requirements
 
-### NFR-1 — Performance budgets
+### NFR-1 - Performance budgets
 
 | Metric | Budget |
 | --- | --- |
@@ -179,15 +179,15 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 | Export zip, 50 files | 2 s or less |
 | Main-thread long tasks while typing | none over 50 ms |
 
-### NFR-2 — Platform support
+### NFR-2 - Platform support
 
 - **Primary:** Chrome/Edge 111+ on desktop (the explicit target).
 - **Secondary:** Safari 16.4+, Firefox 115+.
-- **Tolerated:** iPad Safari — editor usable, preview read-only.
+- **Tolerated:** iPad Safari - editor usable, preview read-only.
 - Requires: Web Workers, `structuredClone`, `Intl.Segmenter`, `OffscreenCanvas` (with fallback),
   IndexedDB, CSS container queries.
 
-### NFR-3 — Reliability
+### NFR-3 - Reliability
 
 - A worker crash must not take down the editor; the worker is restartable and the document is the
   durable state.
@@ -195,9 +195,9 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
   left to hang the tab.
 - Autosave debounced at 500 ms, plus save on blur and `visibilitychange`.
 
-### NFR-4 — Security
+### NFR-4 - Security
 
-- Interpreted user code never reaches `eval` or `new Function` — it runs on our own AST interpreter,
+- Interpreted user code never reaches `eval` or `new Function` - it runs on our own AST interpreter,
   so it cannot touch the DOM, `window`, cookies, or the network except through shims we provide.
 - Network shims (`URLSession`) are opt-in per project and route through a Vercel proxy with an
   allowlist, preventing the app from being used as an open CORS relay.
@@ -205,7 +205,7 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
   interpreter sandbox.
 - No secrets in client bundles; any AI key stays in a server route handler.
 
-### NFR-5 — Accessibility
+### NFR-5 - Accessibility
 
 - Editor and chrome meet WCAG 2.2 AA: keyboard-navigable, visible focus, 4.5:1 contrast.
 - The *simulated app* renders SwiftUI `accessibilityLabel` and friends into ARIA attributes, so the
@@ -213,7 +213,7 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 - Respect `prefers-reduced-motion` in the studio UI. The simulated app still animates, since that is
   the thing under test.
 
-### NFR-6 — Observability
+### NFR-6 - Observability
 
 - Client error reporting with source maps.
 - Anonymous, opt-out telemetry recording which SwiftUI views and modifiers hit the "unsupported"
@@ -250,10 +250,10 @@ Settled 2026-09-14. See [06-VERTICAL-SLICE.md](06-VERTICAL-SLICE.md) for the res
 
 | # | Question | Decision | Consequence |
 | --- | --- | --- | --- |
-| Q1 | Build scope for the first pass | **Vertical slice first** — a narrow language and view subset carried all the way through to a working `.xcodeproj` export | Roughly 5–7 weeks to a demonstrable end-to-end product. Everything built is on the path to the full roadmap; nothing is throwaway. Breadth comes after the spine works. |
+| Q1 | Build scope for the first pass | **Vertical slice first** - a narrow language and view subset carried all the way through to a working `.xcodeproj` export | Roughly 5-7 weeks to a demonstrable end-to-end product. Everything built is on the path to the full roadmap; nothing is throwaway. Breadth comes after the spine works. |
 | Q2 | Export target priority | **`.xcodeproj` first** | Phase 5 builds the `project.pbxproj` generator. `.swiftpm`, `Package.swift` and `project.yml` follow once the VFS and asset pipeline exist. Gate verification needs Mac access. |
-| Q3 | Accounts and storage | **Local-only** — IndexedDB plus share-by-URL-fragment | No database, no auth, no backend cost. The app is effectively a static site and works offline as a PWA. FR-8.3 (accounts) and `/api/share` move to Phase 7b; the project-model package must keep storage behind an interface so cloud can be added later without rework. |
-| Q4 | AI code generation | **Deferred to Phase 7c** | No Claude API route, no key management, no rate limiting in v1. The product's headline is "browser IDE with a real preview", not "AI builder". |
+| Q3 | Accounts and storage | **Local-only** - IndexedDB plus share-by-URL-fragment | No database, no auth, no backend cost. The app is effectively a static site and works offline as a PWA. FR-8.3 (accounts) and `/api/share` move to Phase 7b; the project-model package must keep storage behind an interface so cloud can be added later without rework. |
+| Q4 | Model-assisted code generation | **Deferred to Phase 7c** | No model API route, no key management, no rate limiting in v1. The product's headline is "browser IDE with a real preview", not "prompt to app". |
 | Q5 | Fidelity ceiling | Client-side interpretation is the answer for v1; the real-swiftc verifier stays **optional (Phase 7a)** | R5 (interpreter drift) is managed by the golden corpus and the Phase 6 strictness linter rather than by a build service. |
 
 Still open, not blocking: licence and business model (open source vs freemium vs private), which

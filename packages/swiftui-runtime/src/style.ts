@@ -69,7 +69,7 @@ export const BUTTON_FONT: ResolvedFont = { ...BODY_FONT }
  * Resolves a text style, scaled for Dynamic Type.
  *
  * Line height scales with the size rather than being recomputed, which keeps the
- * ratio Apple designed for each style — a `.caption` at 200% must not end up with
+ * ratio Apple designed for each style - a `.caption` at 200% must not end up with
  * body-text leading.
  */
 export function fontForToken(name: string, scale = 1): ResolvedFont | null {
@@ -89,7 +89,7 @@ export function monospacedFont(scale = 1): ResolvedFont {
   return { ...bodyFont(scale), family: MONO_FAMILY }
 }
 
-/** The body font at a given Dynamic Type scale — the root environment's font. */
+/** The body font at a given Dynamic Type scale - the root environment's font. */
 export function bodyFont(scale = 1): ResolvedFont {
   return fontForToken('body', scale)!
 }
@@ -99,7 +99,7 @@ export type ColorScheme = 'light' | 'dark'
 /**
  * iOS system colours, both appearances.
  *
- * Dark mode is not "the light palette inverted" — Apple brightens and desaturates
+ * Dark mode is not "the light palette inverted" - Apple brightens and desaturates
  * each hue so it stays legible on black, and the semantic label colours change
  * opacity rather than simply flipping. Two tables is the only honest way to express
  * that, and using one would make every dark preview subtly wrong.
@@ -126,7 +126,7 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
   accentColor: rgba(0, 122, 255),
   accent: rgba(0, 122, 255),
 
-  // Semantic colours. These adapt, which is the entire reason for two tables —
+  // Semantic colours. These adapt, which is the entire reason for two tables -
   // `Color(white: 0.95)` does not adapt, and a preview that treats them alike would
   // hide the most common dark-mode mistake there is.
   label: rgba(0, 0, 0, 0.85),
@@ -190,7 +190,7 @@ export function colorForName(name: string, scheme: ColorScheme = 'light'): RGBA 
   return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[name] ?? null
 }
 
-/** Turns a `Color` payload — named, or built from components — into an RGBA. */
+/** Turns a `Color` payload - named, or built from components - into an RGBA. */
 export function resolveColorPayload(payload: ColorPayload, scheme: ColorScheme = 'light'): RGBA {
   const base =
     payload.name !== null
@@ -210,7 +210,7 @@ export function resolveColorPayload(payload: ColorPayload, scheme: ColorScheme =
  * Resolves anything usable as a `ShapeStyle`: a colour, a token, or a gradient.
  *
  * `.background`, `.foregroundStyle` and `.fill` all take the same protocol in
- * SwiftUI, so they take the same thing here — which is why a gradient works in every
+ * SwiftUI, so they take the same thing here - which is why a gradient works in every
  * one of them without three separate code paths.
  */
 export function resolveFillArg(
@@ -311,7 +311,7 @@ export const FONT_WEIGHTS: Readonly<Record<string, number>> = {
  * Two shapes: a text style token like `.largeTitle`, and the encoded form the host
  * produces for `Font.system(size:weight:design:)`. The second carries its arguments
  * in the token name because a contextual member has no type information to hang them
- * on — see `callImplicitMember` in the host.
+ * on - see `callImplicitMember` in the host.
  */
 export function resolveFontArg(value: SwiftValue | undefined, scale = 1): ResolvedFont | null {
   if (!value || value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return null

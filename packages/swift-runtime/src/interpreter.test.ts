@@ -172,7 +172,7 @@ describe('value semantics (Phase 2 gate 1)', () => {
     ).toEqual(['3', '2'])
   })
 
-  it('does not copy closures — they are reference types', () => {
+  it('does not copy closures - they are reference types', () => {
     expect(
       output(`var total = 0
               let bump = { total += 1 }

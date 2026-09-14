@@ -13,13 +13,13 @@ export interface FileSwitcherProps {
 /**
  * Ctrl+P file switcher.
  *
- * Subsequence matching rather than substring, so `cv` finds `ContentView.swift` —
+ * Subsequence matching rather than substring, so `cv` finds `ContentView.swift` -
  * the behaviour every editor's quick-open has trained people to expect, and the
  * reason the feature is worth having over the file list.
  *
  * Rendered only while open, so each invocation is a fresh mount. Keeping it mounted
  * and clearing the query in an effect is a state reset masquerading as a side effect,
- * which React now flags — and mounting is what "this dialog is open" actually means.
+ * which React now flags - and mounting is what "this dialog is open" actually means.
  */
 export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
   const [query, setQuery] = useState('')
@@ -111,7 +111,7 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
  * Scores a subsequence match. Lower is better; null means no match.
  *
  * The score is the span the match occupies, so a tight run of characters beats one
- * scattered across the name — `cv` should rank `CView.swift` above
+ * scattered across the name - `cv` should rank `CView.swift` above
  * `ContentViewModel.swift`.
  */
 function subsequenceScore(candidate: string, query: string): number | null {

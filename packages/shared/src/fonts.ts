@@ -2,7 +2,7 @@
  * The font stacks, in `shared` because both sides of the worker boundary need them.
  *
  * The main thread measures these faces and sends the metrics to the worker; the worker
- * lays out against them. Importing them from `swiftui-runtime` would work and did —
+ * lays out against them. Importing them from `swiftui-runtime` would work and did -
  * and it pulled the entire SwiftUI runtime, interpreter included, into the main
  * thread's bundle for the sake of three string constants. An eighty-kilobyte import of
  * something the main thread never runs is the kind of cost that is invisible until

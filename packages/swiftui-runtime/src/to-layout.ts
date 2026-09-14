@@ -70,7 +70,7 @@ import {
  * Turns the evaluated view tree into layout elements.
  *
  * The two trees look similar but answer different questions. `ViewValue` records
- * *what the user wrote* — names, arguments, modifiers in source order.
+ * *what the user wrote* - names, arguments, modifiers in source order.
  * `LayoutElement` records *how it sizes and paints*. Keeping them separate is what
  * lets the layout engine stay free of SwiftUI knowledge, and what makes modifier
  * nesting (rather than a flat list) expressible at all.
@@ -493,12 +493,12 @@ class Converter {
     const out: LayoutElement[] = []
     views.forEach((view, index) => {
       const path = view.path ?? `${prefix}-${index}`
-      // A `Group` is not a container — it exists so a builder can exceed its child
+      // A `Group` is not a container - it exists so a builder can exceed its child
       // limit, and its children belong to the enclosing stack. `ForEach` is the same:
       // its rows are siblings of whatever surrounds it, never a nested stack.
       //
       // A `ForEach` stays transparent even when it carries modifiers, because the
-      // modifiers it carries — `.onDelete`, `.onMove` — describe the *collection*
+      // modifiers it carries - `.onDelete`, `.onMove` - describe the *collection*
       // rather than a box around it. Treating it as opaque made an entire list
       // collapse into one unrecognised view.
       if (isTransparent(view)) {
@@ -523,7 +523,7 @@ class Converter {
     }
 
     // The tap area covers everything the modifiers added, so the hit target goes
-    // outermost — tapping a button's padding must count, exactly as on iOS.
+    // outermost - tapping a button's padding must count, exactly as on iOS.
     if (view.intent) {
       element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
     }
@@ -637,7 +637,7 @@ class Converter {
         return {
           kind: 'spacer',
           id: path,
-          // A Spacer's axis is its *parent's* — the same view expands down in a
+          // A Spacer's axis is its *parent's* - the same view expands down in a
           // VStack and across in an HStack.
           axis: parentAxis,
           minLength: numberArg(labelled(view.args, 'minLength')) ?? 0,
@@ -681,7 +681,7 @@ class Converter {
           return { kind: 'empty', id: path, ...origin }
         }
 
-        // Each drawing is its own path node, stacked in the order they were made —
+        // Each drawing is its own path node, stacked in the order they were made -
         // which is what a graphics context's painter's-algorithm ordering means.
         return {
           kind: 'zstack',
@@ -875,7 +875,7 @@ class Converter {
       id: path,
       feature: view.name,
       reason: phase
-        ? `Not drawn by the preview yet — arriving in Phase ${phase}.`
+        ? `Not drawn by the preview yet - arriving in Phase ${phase}.`
         : 'Not recognised by the preview.',
       ...origin,
     }
@@ -927,7 +927,7 @@ class Converter {
    * A `List` or a `Form`.
    *
    * Both are a scroll view of rows with system chrome: hairline separators inset from
-   * the leading edge, a 44pt minimum row height, and — in the grouped styles — each
+   * the leading edge, a 44pt minimum row height, and - in the grouped styles - each
    * section as a rounded card on a tinted background. Building it from the same
    * primitives as everything else means a list row obeys the same layout rules as any
    * other view, which is the behaviour people actually rely on.
@@ -1096,7 +1096,7 @@ class Converter {
       : sized
   }
 
-  /** `Grid { GridRow { … } }` — the two-dimensional form, aligned across rows. */
+  /** `Grid { GridRow { … } }` - the two-dimensional form, aligned across rows. */
   private table(view: ViewValue, path: string, origin: object): LayoutElement {
     const flattened = view.children.flatMap((child) =>
       child.name === 'ForEach' ? child.children : [child],
@@ -1464,8 +1464,8 @@ class Converter {
     const style = tokenName(modifierArg(view, 'textFieldStyle', 0))
     const bordered = style === 'roundedBorder'
 
-    // The text itself is drawn by a real `<input>` in the renderer — a caret and an
-    // IME cannot be faked — so the layout reserves the box and paints only the frame.
+    // The text itself is drawn by a real `<input>` in the renderer - a caret and an
+    // IME cannot be faked - so the layout reserves the box and paints only the frame.
     const box: LayoutElement = {
       kind: 'modified',
       id: `${path}frame`,
@@ -1679,7 +1679,7 @@ class Converter {
   }
 
   /**
-   * `AsyncImage` — the placeholder, always.
+   * `AsyncImage` - the placeholder, always.
    *
    * A preview cannot fetch the image: there is no network in the worker, and adding
    * one would make the preview's output depend on something outside the project. What
@@ -1721,7 +1721,7 @@ class Converter {
     }
   }
 
-  /** `DisclosureGroup` — the label row with a chevron, and its content beneath. */
+  /** `DisclosureGroup` - the label row with a chevron, and its content beneath. */
   private disclosureGroup(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0)) ?? ''
     const chevron = resolveSymbol('chevron.down')
@@ -1762,7 +1762,7 @@ class Converter {
     }
   }
 
-  /** `Gauge` — a labelled bar, which is the accessible form of every gauge style. */
+  /** `Gauge` - a labelled bar, which is the accessible form of every gauge style. */
   private gauge(view: ViewValue, path: string, origin: object): LayoutElement {
     const value = numberArg(bindingValue(labelled(view.args, 'value')) ?? undefined) ?? 0
     const range = labelled(view.args, 'in')
@@ -2039,7 +2039,7 @@ class Converter {
       case 'contextMenu':
       case 'badge':
         // Recognised, and either read elsewhere or deliberately inert. Recorded as
-        // applied rather than as a coverage gap, because the code *is* honoured —
+        // applied rather than as a coverage gap, because the code *is* honoured -
         // just not by a wrapper around this view.
         return null
 
@@ -2291,7 +2291,7 @@ function trimOf(view: ViewValue): { from: number; to: number } | null {
  *
  * Apple's materials differ in how much of the backdrop survives; these are the
  * translucencies that read closest at the blur radius used, rather than published
- * values — Apple does not publish them.
+ * values - Apple does not publish them.
  */
 const MATERIALS: Readonly<Record<string, number>> = {
   ultraThinMaterial: 0.55,
@@ -2347,7 +2347,7 @@ function fitAxes(value: SwiftValue | undefined): Axis[] {
  * The key a `GeometryReader` reports its resolved size under.
  *
  * Its stamped path: stable across passes for the same reader, and distinct for two
- * readers produced by the same source line inside a `ForEach` — which a source span
+ * readers produced by the same source line inside a `ForEach` - which a source span
  * alone would not be.
  */
 function geometryKeyOf(view: ViewValue): string {
@@ -2421,11 +2421,11 @@ function paddingInsets(args: readonly ViewArg[]): EdgeInsets {
   // `.padding()` with no arguments is the system default of 16.
   if (args.length === 0) return uniformInsets(16)
 
-  // `.padding(24)` — a bare number on all edges.
+  // `.padding(24)` - a bare number on all edges.
   const bare = numberArg(positional(args, 0))
   if (bare !== null && args.length === 1) return uniformInsets(bare)
 
-  // `.padding(.horizontal, 24)` — an edge set plus a length.
+  // `.padding(.horizontal, 24)` - an edge set plus a length.
   const edgeToken = positional(args, 0)
   const length = numberArg(positional(args, 1)) ?? numberArg(labelled(args, 'length')) ?? 16
 
@@ -2546,7 +2546,7 @@ function roleOf(view: ViewValue): HitRole {
  *
  * Both `.disabled(true)` and `.allowsHitTesting(false)` are checked here rather than
  * left to the environment, because a view's hit target is applied *outside* its
- * modifiers — so by the time the environment flag reaches the subtree, the target has
+ * modifiers - so by the time the environment flag reaches the subtree, the target has
  * already been emitted. The environment still carries the flag, for the case where
  * the modifier is written on a container and the buttons are inside it.
  */

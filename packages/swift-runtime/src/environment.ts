@@ -13,7 +13,7 @@ export interface Binding {
 /**
  * A lexical scope at runtime.
  *
- * Closures capture the `Environment` they were created in, by reference — which is
+ * Closures capture the `Environment` they were created in, by reference - which is
  * what makes `Button("Plus") { count += 1 }` mutate the enclosing `@State` rather
  * than a copy of it. Swift captures variables by reference too (unless a capture
  * list says otherwise), so sharing the scope object is the faithful behaviour, not
@@ -29,8 +29,8 @@ export class Environment {
      *
      * An enum case is a receiver too: `var title: String { rawValue }` inside an enum
      * reads a member of `self` exactly as a struct's computed property does, and
-     * restricting this to structs is what used to make that particular — and very
-     * ordinary — line fail to resolve.
+     * restricting this to structs is what used to make that particular - and very
+     * ordinary - line fail to resolve.
      */
     readonly self: SelfValue | null = null,
   ) {}

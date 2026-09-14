@@ -6,7 +6,7 @@ import { buildExportBundle, exportProjectZip, parsePlist, type PlistDict } from 
 /**
  * Whole-bundle export conformance.
  *
- * Phase 5 gate 1 — "opens in Xcode and builds with zero edits" — cannot be run here;
+ * Phase 5 gate 1 - "opens in Xcode and builds with zero edits" - cannot be run here;
  * it needs a Mac. These tests check everything that *can* be checked without one:
  * that the bundle is structurally complete, that the pbxproj parses and its object
  * graph resolves, and that the user's bytes arrive unchanged.
@@ -33,7 +33,7 @@ describe.each(TEMPLATES)('exporting template: $name', (template) => {
     const paths = [...entries(project).keys()]
 
     // Anything missing here means Xcode either refuses to open the project or opens
-    // it in a state that needs manual repair — both of which fail "zero edits".
+    // it in a state that needs manual repair - both of which fail "zero edits".
     for (const required of [
       `${name}/${name}.xcodeproj/project.pbxproj`,
       `${name}/${name}.xcodeproj/project.xcworkspace/contents.xcworkspacedata`,
@@ -105,7 +105,7 @@ describe.each(TEMPLATES)('exporting template: $name', (template) => {
     const targetId = Object.entries(objects).find(([, o]) => o.isa === 'PBXNativeTarget')![0]
 
     // A scheme pointing at a blueprint id the project does not define leaves Xcode
-    // with a scheme it cannot run — and the failure is silent until you press Run.
+    // with a scheme it cannot run - and the failure is silent until you press Run.
     expect(scheme).toContain(`BlueprintIdentifier = "${targetId}"`)
     expect(scheme).toContain(`BuildableName = "${name}.app"`)
     expect(scheme).toContain(`ReferencedContainer = "container:${name}.xcodeproj"`)
@@ -124,7 +124,7 @@ describe.each(TEMPLATES)('exporting template: $name', (template) => {
     //
     // The clock is moved between the two exports on purpose. `fflate` stamps each
     // entry with `Date.now()` unless told otherwise, so without a fixed timestamp
-    // these differ — but only when the two calls happen to straddle a second, which
+    // these differ - but only when the two calls happen to straddle a second, which
     // made the failure look like a flake rather than the gate-2 violation it was.
     const first = exportProjectZip(project)
 

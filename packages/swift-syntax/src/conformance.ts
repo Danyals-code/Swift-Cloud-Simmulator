@@ -13,14 +13,14 @@ import type {
  * Merging extensions, protocol defaults and superclasses into the members a type
  * actually has.
  *
- * Swift lets a type's members be written in four places — the declaration itself, any
- * number of `extension`s, the `protocol`s it conforms to, and its superclass — and
+ * Swift lets a type's members be written in four places - the declaration itself, any
+ * number of `extension`s, the `protocol`s it conforms to, and its superclass - and
  * every consumer downstream wants one list. Doing the merge once, here, is what stops
  * the checker and the interpreter from disagreeing about what `Card` has; they are
  * sibling packages, so anything either derived privately would drift.
  *
  * This is a *syntactic* merge and nothing more. It does not verify that a conformer
- * satisfies its requirements and it does not resolve overloads — both need a real type
+ * satisfies its requirements and it does not resolve overloads - both need a real type
  * checker, and the house rule is that a false positive is worse than a missed error.
  * The user's exact source reaches a real compiler on export, which is where those
  * checks belong.
@@ -71,7 +71,7 @@ function memberKey(decl: Decl): MemberKey | null {
   return null
 }
 
-/** A protocol member with no body is a requirement — it says what, not how. */
+/** A protocol member with no body is a requirement - it says what, not how. */
 function isRequirement(decl: Decl): boolean {
   if (decl.kind === 'funcDecl') return decl.body === null
   if (decl.kind === 'varDecl') return decl.requirement !== null
@@ -98,7 +98,7 @@ export function collectConformance(files: readonly SourceFileNode[]): Conformanc
   }
 
   const types = new Map<string, TypeMembers>()
-  // Names currently being built, so a cycle — `class A: B` with `class B: A` — stops
+  // Names currently being built, so a cycle - `class A: B` with `class B: A` - stops
   // rather than recursing forever. Swift rejects that outright; we simply stop
   // climbing and keep whatever was resolved.
   const building = new Set<string>()
@@ -152,8 +152,8 @@ export function collectConformance(files: readonly SourceFileNode[]): Conformanc
     for (const inheritedProtocol of base?.conformances ?? []) conformances.add(inheritedProtocol)
 
     // A protocol's defaults live in two places: a member with a body inside the
-    // `protocol` block, and — far more commonly, because it is the only place Swift
-    // allows a body for a requirement — a member of `extension P`.
+    // `protocol` block, and - far more commonly, because it is the only place Swift
+    // allows a body for a requirement - a member of `extension P`.
     const protocolDefaults: Decl[] = []
     const origin = new Map<Decl, string>(base?.origin ?? [])
 
@@ -178,7 +178,7 @@ export function collectConformance(files: readonly SourceFileNode[]): Conformanc
     for (const member of [...extensionMembers, ...ownMembers]) origin.set(member, name)
 
     // Precedence: least specific first, so the last layer to claim a key wins. That is
-    // Swift's rule exactly — own beats extension, extension beats protocol default,
+    // Swift's rule exactly - own beats extension, extension beats protocol default,
     // protocol default beats inherited.
     const precedence: Decl[][] = [baseMembers, protocolDefaults, extensionMembers, ownMembers]
 
@@ -218,8 +218,8 @@ export function collectConformance(files: readonly SourceFileNode[]): Conformanc
   }
 
   for (const name of declarations.keys()) build(name)
-  // An extension of a type that was never declared here — `extension Int`, `extension
-  // String` — still contributes members, and users write those constantly.
+  // An extension of a type that was never declared here - `extension Int`, `extension
+  // String` - still contributes members, and users write those constantly.
   for (const name of extensions.keys()) {
     if (!types.has(name) && !protocols.has(name)) build(name)
   }
@@ -234,7 +234,7 @@ export function storedProperties(members: readonly Decl[]): readonly VarDecl[] {
   )
 }
 
-/** Methods with bodies — a bare requirement is not callable. */
+/** Methods with bodies - a bare requirement is not callable. */
 export function methodsOf(members: readonly Decl[]): readonly FuncDecl[] {
   return members.filter((m): m is FuncDecl => m.kind === 'funcDecl' && m.body !== null)
 }

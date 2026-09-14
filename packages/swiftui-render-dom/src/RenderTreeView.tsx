@@ -14,7 +14,7 @@ export interface RenderTreeViewProps {
   /** Raised when an interactive node is activated. */
   onEvent?: (event: UIEvent) => void
   /**
-   * Dim the tree when it is stale — a parse error means we keep painting the last
+   * Dim the tree when it is stale - a parse error means we keep painting the last
    * good render rather than blanking the preview (requirement FR-6.3), and the user
    * needs to be able to tell the difference at a glance.
    */
@@ -25,7 +25,7 @@ export interface RenderTreeViewProps {
    * Inspector mode (FR-5.8).
    *
    * While active, every node accepts pointer events, so hovering reports the
-   * innermost view under the cursor — which is what the DOM's own hit testing
+   * innermost view under the cursor - which is what the DOM's own hit testing
    * already gives us, since children paint above their parents.
    */
   inspect?: {
@@ -42,13 +42,13 @@ export interface RenderTreeViewProps {
  * computed by the layout engine, so each becomes an absolutely positioned div and
  * CSS never gets a chance to disagree with SwiftUI about sizing. That is the point
  * of decision D2 (docs/02-ARCHITECTURE.md §12) and the reason this file is as dull
- * as it is — all the difficulty lives upstream.
+ * as it is - all the difficulty lives upstream.
  *
  * Phase 6 adds the two things that genuinely cannot be flat:
  *
  * - **Containers.** A node naming another as its `parent` is rendered *inside* it, in
- *   its coordinate space. That is what makes scrolling native — the browser's own
- *   momentum and rubber-banding rather than an approximation of them in the worker —
+ *   its coordinate space. That is what makes scrolling native - the browser's own
+ *   momentum and rubber-banding rather than an approximation of them in the worker -
  *   and what makes `.clipShape` and `.scaleEffect` affect a whole subtree.
  * - **Real controls.** A text field is an `<input>` and a slider is a range input.
  *   A caret, an IME and keyboard control cannot be faked by catching clicks on a
@@ -117,7 +117,7 @@ export const RenderTreeView = memo(function RenderTreeView({
  * Expressed as CSS rather than driven from JavaScript, and that is the whole design:
  * a CSS animation plays when an element is *mounted* and never again, which is
  * exactly `.transition`'s semantics. React keys nodes by their stable id, so an
- * element only remounts when the view it represents genuinely appeared — no hooks, no
+ * element only remounts when the view it represents genuinely appeared - no hooks, no
  * per-node bookkeeping, and nothing to get out of step with the tree.
  */
 function TransitionKeyframes() {
@@ -153,7 +153,7 @@ function transitionAnimation(node: RenderNode): string | undefined {
  * The highlight rect. Drawn above everything and never itself hit-testable.
  *
  * A node inside a scroll view is positioned in the scroller's space, so the highlight
- * has to walk back up to the screen to find where it actually appears — otherwise
+ * has to walk back up to the screen to find where it actually appears - otherwise
  * hovering row 40 of a list outlines something near the top of the screen.
  */
 function InspectHighlight({ node, tree }: { node: RenderNode; tree: RenderTree }) {
@@ -253,7 +253,7 @@ function RenderNodeView({
     ...(node.material
       ? {
           // A material is a translucent panel over a blurred backdrop, which is
-          // exactly what `backdrop-filter` does — the one Apple effect CSS has a
+          // exactly what `backdrop-filter` does - the one Apple effect CSS has a
           // direct equivalent for.
           backdropFilter: `blur(${node.material.blur}px) saturate(1.8)`,
           WebkitBackdropFilter: `blur(${node.material.blur}px) saturate(1.8)`,
@@ -367,7 +367,7 @@ function RenderNodeView({
  * Listeners go on the *window*, not the element: a drag that leaves the view it
  * started in must keep reporting, which is what makes dragging something to the edge
  * of the screen work rather than stopping at its original bounds. Pointer capture
- * would do the same job, but only for the element that still exists — and a
+ * would do the same job, but only for the element that still exists - and a
  * re-render during the drag replaces it.
  *
  * `translation` is cumulative from the start, as SwiftUI reports it.
@@ -503,7 +503,7 @@ function renderControl(
  *
  * When the layout engine resolved line boxes, each line is positioned absolutely at
  * the offset the engine computed. Letting CSS re-wrap instead would mean two
- * different algorithms deciding where the breaks go — and the frame the engine
+ * different algorithms deciding where the breaks go - and the frame the engine
  * reported would no longer match the text actually drawn in it.
  */
 function TextContent({ node }: { node: RenderNode }) {
@@ -585,7 +585,7 @@ function TextContent({ node }: { node: RenderNode }) {
 /**
  * Paints a symbol.
  *
- * The glyph is an open substitute, never Apple's — SF Symbols cannot be redistributed
+ * The glyph is an open substitute, never Apple's - SF Symbols cannot be redistributed
  * to a browser (risk R2). `title` says so on hover, so the difference is discoverable
  * rather than a surprise when the project is first built in Xcode.
  */
@@ -594,7 +594,7 @@ function ImageContent({ node }: { node: RenderNode }) {
 
   return (
     <div
-      title={image.approximated && image.symbol ? `${image.symbol} — approximated` : undefined}
+      title={image.approximated && image.symbol ? `${image.symbol} - approximated` : undefined}
       style={{
         width: '100%',
         height: '100%',
@@ -616,7 +616,7 @@ function ImageContent({ node }: { node: RenderNode }) {
  * Paints a vector path.
  *
  * One `<svg>` with one `<path>`. The geometry was resolved in the worker and
- * serialised to path data, so there is nothing to compute here — and `overflow:
+ * serialised to path data, so there is nothing to compute here - and `overflow:
  * visible` matters: a `Path`'s coordinates are absolute within its frame, and one
  * that strays outside should be visible rather than quietly clipped.
  */
@@ -670,7 +670,7 @@ function ShapeContent({ node }: { node: RenderNode }) {
 /**
  * Requirement FR-4.11: anything outside the coverage matrix renders as a visible,
  * labelled box naming the missing feature. Never a blank space, never a silent
- * wrong result — a preview that quietly lies is worse than one that admits a gap.
+ * wrong result - a preview that quietly lies is worse than one that admits a gap.
  */
 function PlaceholderContent({ node }: { node: RenderNode }) {
   const { feature, reason } = node.placeholder!

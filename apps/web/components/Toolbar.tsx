@@ -155,7 +155,7 @@ export function Toolbar({
             aria-label="Export format"
             title="Export in another format"
             // A select is as wide as its widest option unless told otherwise, and
-            // "Swift Playgrounds — An app package that builds and runs on iPad."
+            // "Swift Playgrounds - An app package that builds and runs on iPad."
             // is wide enough to wrap the whole toolbar.
             className="w-7 appearance-none border-l border-white/20 bg-sky-600 py-1 text-center text-white transition-colors hover:bg-sky-500"
             data-testid="export-format"
@@ -165,7 +165,7 @@ export function Toolbar({
             </option>
             {EXPORT_FORMATS.map((format) => (
               <option key={format.id} value={format.id} className="bg-[#141418]">
-                {format.name} — {format.description}
+                {format.name} - {format.description}
               </option>
             ))}
           </select>
@@ -233,8 +233,8 @@ function SaveIndicator({ savedAt, busy }: { savedAt: number | null; busy: boolea
  * Copies a share link and says what happened, in place.
  *
  * The result has to be visible: a button that silently did nothing is
- * indistinguishable from one that worked, and the failure that matters — a project too
- * big for a URL — is invisible until someone pastes a truncated link. The label
+ * indistinguishable from one that worked, and the failure that matters - a project too
+ * big for a URL - is invisible until someone pastes a truncated link. The label
  * reverts on its own, because a permanent "Copied" is a lie after the first second.
  */
 function ShareButton({ onShare }: { onShare: ToolbarProps['onShare'] }) {
@@ -260,7 +260,7 @@ function ShareButton({ onShare }: { onShare: ToolbarProps['onShare'] }) {
       type="button"
       onClick={() => void onShare().then(setResult)}
       className="rounded border border-white/10 px-2.5 py-1 text-zinc-300 transition-colors hover:bg-white/5"
-      title="Copy a link that carries this project — no account, no server"
+      title="Copy a link that carries this project - no account, no server"
       data-testid="share-button"
     >
       {label}

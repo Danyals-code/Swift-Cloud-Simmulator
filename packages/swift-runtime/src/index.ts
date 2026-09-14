@@ -10,7 +10,7 @@
  * are shared. Getting this wrong makes `@State` behave subtly incorrectly, which is
  * very hard to debug later. See `values.ts`.
  *
- * The package knows nothing about SwiftUI — views arrive through the `InterpreterHost`
+ * The package knows nothing about SwiftUI - views arrive through the `InterpreterHost`
  * seam in `host.ts`, which is what keeps the language implementation testable on its
  * own and the ESLint boundary rule satisfied.
  */

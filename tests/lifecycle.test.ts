@@ -4,7 +4,7 @@ import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swift
 import { DEVICES } from '@studio/sim-shell'
 
 /**
- * Lifecycle — `.onAppear`, `.onDisappear`, `.task` and `.onChange(of:)`.
+ * Lifecycle - `.onAppear`, `.onDisappear`, `.task` and `.onChange(of:)`.
  *
  * The hard part is not running the callback; it is running it *once*. A preview
  * re-evaluates the whole tree on every keystroke and every tap, so a naive
@@ -159,7 +159,7 @@ describe('.onAppear', () => {
 describe('.onDisappear', () => {
   it('runs when the view leaves the tree', () => {
     const source = app(`    @State private var showing = true
-    @State private var log = "—"
+    @State private var log = "-"
 
     var body: some View {
         VStack {
@@ -177,7 +177,7 @@ describe('.onDisappear', () => {
     }`)
 
     let result = run(source)
-    expect(texts(result.renderTree)).toContain('—')
+    expect(texts(result.renderTree)).toContain('-')
 
     result = tap(result.renderTree, 'Hide')
     expect(texts(result.renderTree)).toContain('gone')

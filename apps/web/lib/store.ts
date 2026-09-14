@@ -69,7 +69,7 @@ export const useStudio = create<StudioState>((set, get) => {
   /**
    * Debounced write-behind. The editor stays responsive and IndexedDB sees one write
    * per pause rather than one per keystroke. `flush` exists so `visibilitychange` and
-   * `pagehide` can force the pending write before the tab goes away — the case where
+   * `pagehide` can force the pending write before the tab goes away - the case where
    * a naive debounce quietly loses the last few seconds of work.
    */
   function scheduleSave(): void {
@@ -265,7 +265,7 @@ export const useStudio = create<StudioState>((set, get) => {
 /**
  * The project a share link carries, if the page was opened with one.
  *
- * Returns null for anything that is not a project — a truncated link, a stale format,
+ * Returns null for anything that is not a project - a truncated link, a stale format,
  * a fragment that belongs to something else. Falling back to the stored project is
  * the right response to all of them, and it is what a stranger's URL deserves.
  */
@@ -279,7 +279,7 @@ function sharedProjectFromLocation(): Project | null {
  * Removes the payload from the address bar once it has been read.
  *
  * Without this, a reload re-applies the link and silently discards whatever the user
- * has typed since following it — which is the kind of data loss that is only noticed
+ * has typed since following it - which is the kind of data loss that is only noticed
  * after it matters. `replaceState` rather than assignment, so the back button still
  * goes back to wherever they came from.
  */

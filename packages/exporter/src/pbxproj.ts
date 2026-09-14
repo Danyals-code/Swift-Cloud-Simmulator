@@ -23,7 +23,7 @@ const ID_LENGTH = 24
  *
  * Ids come from a hash of a stable description ("source:Sources/App.swift"), so the
  * same project always yields the same file. Collisions would produce a silently
- * broken project — two objects sharing an id — so a collision re-hashes with a
+ * broken project - two objects sharing an id - so a collision re-hashes with a
  * suffix rather than being left to chance.
  */
 export class IdAllocator {
@@ -51,7 +51,7 @@ export class IdAllocator {
 /**
  * A 96-bit hash rendered as 24 hex characters.
  *
- * Three FNV-1a passes with different offset bases. Not cryptographic — it does not
+ * Three FNV-1a passes with different offset bases. Not cryptographic - it does not
  * need to be. It needs to be stable across runs and platforms, which rules out
  * anything involving `Math.random`, object iteration order, or `crypto.subtle`
  * (async, and unavailable in some of the environments this runs in).
@@ -81,7 +81,7 @@ export interface XcodeProjectPlan {
    *
    * Reported rather than recomputed by the caller: the scheme has to name the same
    * id the project defines, and an id-collision fallback would silently make a
-   * separately-derived one disagree — leaving a scheme Xcode cannot run, with no
+   * separately-derived one disagree - leaving a scheme Xcode cannot run, with no
    * sign of trouble until you press Run.
    */
   readonly targetId: string
@@ -92,7 +92,7 @@ interface Built {
   readonly comments: Map<string, string>
 }
 
-/** Swift files only — the target compiles nothing else. */
+/** Swift files only - the target compiles nothing else. */
 function swiftSources(project: Project): string[] {
   return project.files
     .filter((f) => f.id.endsWith('.swift'))
@@ -103,8 +103,8 @@ function swiftSources(project: Project): string[] {
 /**
  * Path inside the target group.
  *
- * Drops the workspace's `Sources/` prefix — the exported target folder plays that
- * role — but keeps everything below it. Flattening `Models/Item.swift` to
+ * Drops the workspace's `Sources/` prefix - the exported target folder plays that
+ * role - but keeps everything below it. Flattening `Models/Item.swift` to
  * `Item.swift` would collide the moment two folders held a file of the same name,
  * and a file reference whose `path` contains a slash is perfectly valid: it resolves
  * relative to the enclosing group.

@@ -6,7 +6,7 @@
  * that drives parse -> check -> evaluate -> lay out -> render.
  *
  * The layout itself belongs to `@studio/swiftui-layout`, which knows nothing about
- * SwiftUI — this package translates between the two.
+ * SwiftUI - this package translates between the two.
  */
 
 export { compile, rerender, applyEvent, resetPipelineState, setFontMetrics } from './pipeline'

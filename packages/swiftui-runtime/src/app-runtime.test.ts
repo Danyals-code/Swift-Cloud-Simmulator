@@ -12,7 +12,7 @@ function load(runtime: AppRuntime, source: string, key = source): void {
   runtime.load([sourceFile], Checker.check([sourceFile]), key)
 }
 
-/** `depth:Name(args) .mod` per row — the same information the preview shows. */
+/** `depth:Name(args) .mod` per row - the same information the preview shows. */
 function rows(views: readonly ViewValue[]): string[] {
   return flattenViews(views).map(({ view, depth }) => {
     const args =

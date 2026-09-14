@@ -1,9 +1,9 @@
-# 06 — Vertical slice (v0.1)
+# 06 - Vertical slice (v0.1)
 
 The decided first build. A narrow subset of Swift and SwiftUI, carried end to end: **type it in
 Chrome → see it run in an iPhone → download an Xcode project that builds.**
 
-Target: ~5–7 focused-developer weeks. Every package in the final architecture gets its spine built
+Target: ~5-7 focused-developer weeks. Every package in the final architecture gets its spine built
 here; nothing is throwaway.
 
 ## 1. The reference app
@@ -98,7 +98,7 @@ Everything else produces a "not yet supported in the preview" diagnostic naming 
 optionals beyond `??`, `switch`, `guard`, `while`, error handling, async, `ObservableObject`,
 `@Binding`, subscripts, property wrappers other than `@State`.
 
-`@Binding` is the first thing to add after the slice — it is the most-missed omission on the list.
+`@Binding` is the first thing to add after the slice - it is the most-missed omission on the list.
 
 ## 3. SwiftUI surface for the slice
 
@@ -116,32 +116,32 @@ optionals beyond `??`, `switch`, `guard`, `while`, error handling, async, `Obser
 One device: **iPhone 15** (393×852 pt), light mode only. Dark mode, device picker and Dynamic Type
 arrive with Phase 4.
 
-## 4. Phase 0 task list — **complete**
+## 4. Phase 0 task list - **complete**
 
 Built and verified 2026-09-14. Every gate passes; see §4.1 for what deviated from the plan.
 
-### 0.1 — Monorepo and tooling
+### 0.1 - Monorepo and tooling
 - [x] npm workspaces + Turborepo; TypeScript strict; shared tsconfig base in `tooling/`
 - [x] Package stubs: `shared`, `swift-syntax`, `swift-sema`, `swift-runtime`, `swiftui-runtime`, `swiftui-layout`, `swiftui-render-dom`, `sim-shell`, `project-model`, `exporter`
 - [x] ESLint boundary rule: the pure packages may not import React/Next, nor reference `window`, `document`, `fetch` and friends
 - [x] Vitest at the root, running per-package
 - [x] `.gitignore`, `git init`, initial commit
 
-### 0.2 — Next.js app shell
+### 0.2 - Next.js app shell
 - [x] `apps/web` on Next.js 16 App Router, React 19, Tailwind v4
 - [x] Three-pane layout: file rail | editor + console | device frame
 - [x] Dark studio chrome (the *studio* is dark; the *simulated app* renders light)
 - [x] `vercel.json` with build/install commands and security headers
-- [ ] **Deploy to Vercel** — needs the account connection; config is ready, `vercel --prod` is the only remaining step
+- [ ] **Deploy to Vercel** - needs the account connection; config is ready, `vercel --prod` is the only remaining step
 
-### 0.3 — Editor
+### 0.3 - Editor
 - [x] CodeMirror 6 mounted, controlled by a Zustand store
 - [x] Swift syntax highlighting
 - [x] Diagnostic gutter + squiggle decorations fed from `Diagnostic[]`
 - [x] Keybindings: Ctrl+S (flush save), Ctrl+/ (comment), Ctrl+B (toggle preview), Tab (indent)
 - [x] Click a diagnostic in the Problems panel to reveal it in the editor
 
-### 0.4 — Worker plumbing
+### 0.4 - Worker plumbing
 - [x] Comlink worker at `apps/web/workers/compiler.worker.ts`
 - [x] RPC surface: `compile` / `dispatch` / `reset`, returning a hand-built demo `RenderTree`
 - [x] Debounced 150 ms pipeline from editor changes to worker
@@ -150,22 +150,22 @@ Built and verified 2026-09-14. Every gate passes; see §4.1 for what deviated fr
 - [x] `RenderTree` defined in `shared` and painted by `swiftui-render-dom` as absolutely positioned DOM
 - [x] Placeholder nodes for unsupported features (FR-4.11), wired from day one
 
-### 0.5 — Device frame
+### 0.5 - Device frame
 - [x] `sim-shell` with four device definitions; iPhone 15 (393×852, 59/34 safe area) is the default
-- [x] CSS-drawn bezel, Dynamic Island, status bar with live clock, home indicator — no Apple artwork (R2)
+- [x] CSS-drawn bezel, Dynamic Island, status bar with live clock, home indicator - no Apple artwork (R2)
 - [x] Fit-to-pane scaling via `ResizeObserver`, never above 1:1
 
-### 0.6 — Persistence and export skeleton
+### 0.6 - Persistence and export skeleton
 - [x] `project-model` VFS behind a `ProjectStore` interface, with IndexedDB and in-memory implementations
 - [x] Autosave debounced 500 ms, plus forced flush on `visibilitychange` and `pagehide`
 - [x] `exporter`: `fflate` zip with a README, and the byte-identity guarantee under test
 
-### 0.7 — CI
+### 0.7 - CI
 - [x] GitHub Actions: typecheck, lint, unit tests, build, bundle budget, Playwright e2e
 - [x] Bundle-size gate that fails the build (verified by forcing a violation)
 - [x] Playwright suite covering all five Phase 0 gates
 
-### Phase 0 gate — all passing
+### Phase 0 gate - all passing
 
 | # | Gate | Evidence |
 | --- | --- | --- |
@@ -178,7 +178,7 @@ Built and verified 2026-09-14. Every gate passes; see §4.1 for what deviated fr
 Verified numbers: **11/11 packages typecheck**, **lint clean**, **50 unit tests pass**,
 **7/7 e2e pass**, **client JS 324 KB gzipped against a 450 KB budget**.
 
-### 4.1 — Deviations from the plan
+### 4.1 - Deviations from the plan
 
 | Planned | Built | Why |
 | --- | --- | --- |
@@ -188,14 +188,14 @@ Verified numbers: **11/11 packages typecheck**, **lint clean**, **50 unit tests 
 | Budget split shell/worker | One total-client-JS budget | Turbopack emits no per-route chunk manifest and hashed chunks cannot be reliably attributed to a route. Reporting a number we cannot compute is worse than reporting one we can. |
 | `.js` extensions on relative imports | Extensionless | The `.js`-pointing-at-`.ts` convention is for NodeNext resolution; bundlers resolve it literally and fail. |
 
-## 4.2 Phase 1 task list — **complete**
+## 4.2 Phase 1 task list - **complete**
 
 Built and verified 2026-09-14. Slice-scoped per the "Decided path" section in
 [03-ROADMAP.md](03-ROADMAP.md).
 
 ### Lexer (`swift-syntax`)
 - [x] Identifiers: `$0` shorthand, `$name` projections, backtick escapes, non-ASCII
-- [x] Full keyword set — recognised even when unparsed, so diagnostics can name the feature
+- [x] Full keyword set - recognised even when unparsed, so diagnostics can name the feature
 - [x] Numbers: decimal, hex, binary, octal, underscores, floats, exponents
 - [x] Strings: escapes, `\u{...}`, interpolation, multiline with indentation stripping, raw `#"..."#`
 - [x] Nested interpolation, and string literals nested inside interpolation
@@ -207,13 +207,13 @@ Built and verified 2026-09-14. Slice-scoped per the "Decided path" section in
 - [x] Declarations: `import`, `struct`, `func`, `var`/`let`, `init`, attributes, modifiers
 - [x] Statements: `if`/`else if`/`else`, `for-in`, `return`, expression and declaration statements
 - [x] Expressions: full Swift precedence table, ternary, assignment, ranges, closures, literals
-- [x] Member chains that continue across newlines — what makes SwiftUI modifier chains work
+- [x] Member chains that continue across newlines - what makes SwiftUI modifier chains work
 - [x] Trailing closures, suppressed in condition position so `if x { }` is not read as a call
 - [x] Closure parameter detection that is not fooled by `for i in xs` inside the body
 - [x] Types: named, generic, optional, array, dictionary, tuple, function, `some View`
 - [x] Error recovery: error nodes, resync points, one diagnostic per mistake
 - [x] Missing-brace recovery keyed on column-1 type declarations
-- [x] Guaranteed progress — unbalanced input terminates rather than hanging the worker
+- [x] Guaranteed progress - unbalanced input terminates rather than hanging the worker
 
 ### Checker (`swift-sema`)
 - [x] Two-pass collection, so declaration order does not matter
@@ -226,11 +226,11 @@ Built and verified 2026-09-14. Slice-scoped per the "Decided path" section in
 
 ### Preview
 - [x] Live structural outline of the parsed view tree, replacing the Phase 0 demo tree
-- [x] Tap a row to select it — keeps the event round-trip under test, and is the
+- [x] Tap a row to select it - keeps the event round-trip under test, and is the
       precursor to the Phase 4 inspector
 - [x] Real diagnostics in the editor gutter and the problems panel
 
-### Phase 1 gate — all passing
+### Phase 1 gate - all passing
 
 | # | Gate | Result |
 | --- | --- | --- |
@@ -242,16 +242,16 @@ Built and verified 2026-09-14. Slice-scoped per the "Decided path" section in
 Verified: **11/11 packages typecheck**, **lint clean**, **191 unit tests**, **12/12 e2e**,
 **334 KB gzipped** against a 450 KB budget.
 
-### 4.3 — Deviations and findings
+### 4.3 - Deviations and findings
 
 | Planned | Actual | Why |
 | --- | --- | --- |
 | Incremental reparse | **Not built** | Measured: a *full* reparse of 2,000 lines takes 2.9 ms against a 120 ms budget. The assumption that made it necessary was wrong. See [02-ARCHITECTURE.md](02-ARCHITECTURE.md) section 4.2. |
-| Trivia attached to tokens | Discarded, with flags kept | Trivia exists to support a source printer, and this system never prints Swift — the editor text is the source of truth. |
+| Trivia attached to tokens | Discarded, with flags kept | Trivia exists to support a source printer, and this system never prints Swift - the editor text is the source of truth. |
 | Full bidirectional type checker | Resolution and coverage only | Gate 4 makes a false positive worse than a missed error. Member and argument checking needs real type information, which arrives with the interpreter in Phase 2. Unknown types warn rather than error for the same reason. |
 | Errors on unrecognised constructs | Warnings naming the feature | `NavigationStack` is valid Swift; reporting "cannot find in scope" would be both wrong and unhelpful. |
 
-## 4.4 Phase 2 task list — **complete**
+## 4.4 Phase 2 task list - **complete**
 
 Built and verified 2026-09-14. The preview now *runs* the user's code.
 
@@ -259,7 +259,7 @@ Built and verified 2026-09-14. The preview now *runs* the user's code.
 - [x] Value model: struct/array/dictionary copied on assignment and argument passing; closures shared
 - [x] Structs: memberwise init (labelled and positional), stored and computed properties, methods
 - [x] `mutating` methods writing through to the caller's storage, refused on a `let`
-- [x] Closures capturing by reference — the mechanism behind `Button { count += 1 }`
+- [x] Closures capturing by reference - the mechanism behind `Button { count += 1 }`
 - [x] `$0` shorthand and named closure parameters
 - [x] Full operator set with Swift semantics: truncating Int division, short-circuit `&&`/`||`, `??`
 - [x] Traps rather than `NaN`: division by zero, index out of range, overflow, force-unwrap nil
@@ -267,7 +267,7 @@ Built and verified 2026-09-14. The preview now *runs* the user's code.
 - [x] Step budget and call-depth cap, so runaway code is abandoned rather than hanging the worker
 - [x] `@ViewBuilder` semantics: `buildBlock`, `buildIf`/`buildEither`, `buildArray`
 - [x] Stdlib: String (grapheme-correct), Array, Dictionary, Range, numerics, `print`
-- [x] `InterpreterHost` seam — the interpreter has no SwiftUI knowledge at all
+- [x] `InterpreterHost` seam - the interpreter has no SwiftUI knowledge at all
 
 ### SwiftUI host and app runtime (`swiftui-runtime`)
 - [x] Views, modifiers, `Color`, contextual member tokens (`.largeTitle`, `.infinity`)
@@ -276,7 +276,7 @@ Built and verified 2026-09-14. The preview now *runs* the user's code.
 - [x] Button actions dispatched by tree path, running the real Swift closure
 - [x] Runtime failures reported as diagnostics rather than thrown
 
-### Phase 2 gate — all passing
+### Phase 2 gate - all passing
 
 | # | Gate | Result |
 | --- | --- | --- |
@@ -288,11 +288,11 @@ Built and verified 2026-09-14. The preview now *runs* the user's code.
 
 Verified: **11/11 packages typecheck**, **lint clean**, **299 unit tests**, **16/16 e2e**.
 
-### 4.5 — Deviations and findings
+### 4.5 - Deviations and findings
 
 | Planned | Actual | Why |
 | --- | --- | --- |
-| Copy-on-write collections | **Eager copying** | Semantically identical — COW is purely an optimisation. Eager copying is far easier to get right, and the same rule that killed incremental reparse applies: build the optimisation when a measurement asks for it. |
+| Copy-on-write collections | **Eager copying** | Semantically identical - COW is purely an optimisation. Eager copying is far easier to get right, and the same rule that killed incremental reparse applies: build the optimisation when a measurement asks for it. |
 | Gate: "a class shares, a struct copies" | Struct half only | Classes are outside the slice; the parser reports them as unsupported. The reference-semantics half of that gate moves to the phase that adds classes. |
 | Gate: async chain with `Task.sleep` | Deferred | `async`/`await` is outside the slice. |
 | `@State` preserved by property name | Preserved by **name and initialiser** | Matching on name alone keeps showing `0` after the user edits `= 0` to `= 10`, which reads as the preview being stuck. Changing an initialiser is a deliberate request to see the new value; changing anything else is not. |
@@ -300,7 +300,7 @@ Verified: **11/11 packages typecheck**, **lint clean**, **299 unit tests**, **16
 
 **Found by testing, worth recording:**
 
-- `"👋🏽".count` is 1 in Swift. Spreading a JS string splits by *code point*, giving 2 —
+- `"👋🏽".count` is 1 in Swift. Spreading a JS string splits by *code point*, giving 2 -
   the emoji and its skin-tone modifier. Fixed with `Intl.Segmenter`, which is what the
   architecture doc specified for text all along.
 - Swift allows `;` as a separator between *declarations*, not only statements. Found by
@@ -310,13 +310,13 @@ Verified: **11/11 packages typecheck**, **lint clean**, **299 unit tests**, **16
   and then re-evaluating the expression for its implicit return doubles every side effect
   in it.
 
-## 4.6 Phase 3 task list — **complete**
+## 4.6 Phase 3 task list - **complete**
 
 Built and verified 2026-09-14. The preview is now the app.
 
 ### Layout engine (`swiftui-layout`)
 - [x] Proposal/response protocol: `ProposedSize` -> `sizeThatFits` -> `place`
-- [x] Stack algorithm measuring children **least-flexible-first** — the reason `Spacer` works
+- [x] Stack algorithm measuring children **least-flexible-first** - the reason `Spacer` works
 - [x] `VStack` `HStack` `ZStack` `Spacer`, with spacing and alignment
 - [x] Modifiers as *nesting* rather than a flat list: `frame` `padding` `background`
       `font` `foregroundStyle` `opacity` `cornerRadius`
@@ -349,13 +349,13 @@ Built and verified 2026-09-14. The preview is now the app.
 
 | # | Gate | Result |
 | --- | --- | --- |
-| 1 | A counter app increments in the preview on tap | **Passing** — verified in the browser and in e2e |
-| 2 | `HStack { Text; Spacer; Text }` places exactly as SwiftUI does | **Passing** — buttons land at x=40 and end at x=353 on a 393pt screen |
-| 3 | `.padding().background()` differs from `.background().padding()` | **Passing** — falls out of modifier nesting |
-| 4 | `GeometryReader` reports the correct size | Deferred — outside the slice |
+| 1 | A counter app increments in the preview on tap | **Passing** - verified in the browser and in e2e |
+| 2 | `HStack { Text; Spacer; Text }` places exactly as SwiftUI does | **Passing** - buttons land at x=40 and end at x=353 on a 393pt screen |
+| 3 | `.padding().background()` differs from `.background().padding()` | **Passing** - falls out of modifier nesting |
+| 4 | `GeometryReader` reports the correct size | Deferred - outside the slice |
 | 5 | An edit repaints under 250 ms without resetting unrelated `@State` | **Passing** |
-| 6 | An `ObservableObject` shared by two siblings updates both | Deferred — outside the slice |
-| 7 | NFR-1 interaction budgets met | **Passing** — see below |
+| 6 | An `ObservableObject` shared by two siblings updates both | Deferred - outside the slice |
+| 7 | NFR-1 interaction budgets met | **Passing** - see below |
 
 Measured, full pipeline (parse, check, evaluate, lay out, render):
 
@@ -369,20 +369,20 @@ Measured, full pipeline (parse, check, evaluate, lay out, render):
 Verified: **11/11 packages typecheck**, **lint clean**, **351 unit tests**, **16/16 e2e**,
 **347 KB gzipped** against a 450 KB budget.
 
-### 4.7 — Deviations and findings
+### 4.7 - Deviations and findings
 
 | Planned | Actual | Why |
 | --- | --- | --- |
 | Async text measurement via a main-thread port | **Synchronous, against a measured table** | An async port infects every layout call site and causes a visible reflow on the first frame. Measuring the real font once at startup and shipping the advance table to the worker keeps layout synchronous *and* accurate. |
 | Root always placed at the bounds origin | **Alignment is a parameter** | SwiftUI centres root content in its window, but that is a *window* policy, not a layout one. Making it a parameter keeps the engine neutral and the 40 golden tests readable. |
 | Modifiers as an ordered list on a view | **Nested wrappers** | A flat list cannot represent the difference between `.padding().background()` and `.background().padding()` at all. Nesting makes gate 3 fall out for free. |
-| `@State` on one long-lived root instance (Phase 2) | **Identity-keyed boxes** | The Phase 2 model could not give two sibling `Counter()` views independent state — they shared one struct and moved together. |
+| `@State` on one long-lived root instance (Phase 2) | **Identity-keyed boxes** | The Phase 2 model could not give two sibling `Counter()` views independent state - they shared one struct and moved together. |
 
 **Found by building it:**
 
 - The `Spacer` case is not about `Spacer` at all: it is about *measurement order*.
   Measuring children in source order lets the first greedy child swallow the stack.
-  Ordering by flexibility — least flexible first — is what makes the whole thing work,
+  Ordering by flexibility - least flexible first - is what makes the whole thing work,
   and it is a four-line sort.
 - `Infinity` cannot be used as the unbounded proposal. The moment a greedy child
   consumes it, `remaining / childrenLeft` becomes `NaN`, and one `NaN` silently
@@ -391,7 +391,7 @@ Verified: **11/11 packages typecheck**, **lint clean**, **351 unit tests**, **16
   under 1% of line width and never accumulates across lines, because each line
   re-measures from its own characters.
 
-## 4.8 Phase 4 task list — **complete**
+## 4.8 Phase 4 task list - **complete**
 
 Built and verified 2026-09-14. The slice doc had deferred Phase 4 ("single file is
 enough for the slice"); it was brought forward on request.
@@ -426,44 +426,44 @@ enough for the slice"); it was brought forward on request.
 | # | Gate | Result |
 | --- | --- | --- |
 | 1 | A second file defines a type the first uses; completions and diagnostics cross the boundary | **Passing as of Phase 8.** Diagnostics crossed the boundary in Phase 4; completion arrived in 8f |
-| 2 | Every template renders with zero unsupported placeholders | **Passing** — 33 conformance assertions across 5 templates |
+| 2 | Every template renders with zero unsupported placeholders | **Passing** - 33 conformance assertions across 5 templates |
 | 3 | Clicking a rendered element jumps the editor to the right line | **Passing** |
 | 4 | Dark mode and Dynamic Type re-render without losing state | **Passing** |
 
 Verified: **11/11 packages typecheck**, **lint clean**, **384 unit tests**, **26/26 e2e**,
 **352 KB gzipped** against a 450 KB budget.
 
-### 4.9 — Not built, and why
+### 4.9 - Not built, and why
 
 | Planned | Status | Reasoning |
 | --- | --- | --- |
-| **Code completion** | **Built in Phase 8f** | It was the only gate-1 shortfall, and it did need its own pass: a `complete(files, file, offset)` worker RPC, a symbol index that walks scopes the way Swift does — a type body order-independent, a function body top-to-bottom — and a CodeMirror source that replaces the built-in word-based one rather than joining it. Go to definition, hover and quick fixes came with it. |
+| **Code completion** | **Built in Phase 8f** | It was the only gate-1 shortfall, and it did need its own pass: a `complete(files, file, offset)` worker RPC, a symbol index that walks scopes the way Swift does - a type body order-independent, a function body top-to-bottom - and a CodeMirror source that replaces the built-in word-based one rather than joining it. Go to definition, hover and quick fixes came with it. |
 | Find/replace across the project | Not built | Lower value than the gates while projects are a handful of files. |
 | Asset import and `Image("name")` | Not built | `Image` is not in the slice's view set, so an asset pipeline would have nothing to draw. |
 | Onboarding tour | Not built | Premature while the product is still gaining capabilities each phase. |
 | 8 templates | **5 templates** | A template is a promise that the tool can draw what it shows. The gallery is constrained by the coverage matrix, and padding it with half-rendered examples would be worse than a small honest one. It grows as Phase 6 lands. |
 
-### 4.10 — Findings
+### 4.10 - Findings
 
 **A real bug, found by an end-to-end test.** The worker's `rerender` was inventing its
 own revision numbers while the hook incremented its own. After any interaction the
 worker's counter ran ahead, and the hook's stale-response guard then discarded the
-*next* legitimate compile — so changing a setting or editing code right after tapping
+*next* legitimate compile - so changing a setting or editing code right after tapping
 a button silently did nothing. Revisions are now owned by the caller alone. This was
 invisible in manual testing because a second edit always got through.
 
 **Hover-only controls are unreachable.** The delete and close buttons were
 `display: none` until hover, which hides them from keyboard users, touch devices, and
-the accessibility tree — Playwright could not find them either, which is how it
+the accessibility tree - Playwright could not find them either, which is how it
 surfaced. They are now always present and dimmed.
 
 **Dark mode reveals that the reference app is genuinely broken in dark mode.** Its
 `Color(white: 0.95)` background is a fixed grey that does not adapt, while
-`.foregroundStyle(.primary)` becomes white — so the preview shows white text on a
+`.foregroundStyle(.primary)` becomes white - so the preview shows white text on a
 light background. That is exactly what a real device does, and exactly the kind of
 thing a preview exists to catch.
 
-## 4.11 Phase 5 task list — **complete, with one gate outstanding**
+## 4.11 Phase 5 task list - **complete, with one gate outstanding**
 
 Built and verified 2026-09-14.
 
@@ -486,12 +486,12 @@ MyApp/
 ```
 
 - [x] `project.pbxproj` built as a **serialiser over a data structure**, not string
-      templates — well-formedness is structural
+      templates - well-formedness is structural
 - [x] Deterministic 24-hex object ids, hashed from what each object *is*, with a
       collision fallback
 - [x] Asset catalogue with the app-icon and accent-colour slots the build settings name
 - [x] Shared scheme, so Cmd+R works the moment the project opens
-- [x] `GENERATE_INFOPLIST_FILE` with `INFOPLIST_KEY_*` — the Xcode 13+ way, rather
+- [x] `GENERATE_INFOPLIST_FILE` with `INFOPLIST_KEY_*` - the Xcode 13+ way, rather
       than a physical plist that immediately drifts from the settings beside it
 - [x] README naming the one thing that *does* need manual setup (a signing team) and
       listing every preview approximation
@@ -500,16 +500,16 @@ MyApp/
 
 | # | Gate | Result |
 | --- | --- | --- |
-| 1 | Opens in Xcode and builds with zero edits | **Not verified — needs a Mac.** See 4.12 |
+| 1 | Opens in Xcode and builds with zero edits | **Not verified - needs a Mac.** See 4.12 |
 | 2 | Re-exporting an unchanged project is byte-identical | **Passing** |
 | 3 | `.swiftpm` opens in Swift Playgrounds | **Built in Phase 9b.** Generated and tested; whether Swift Playgrounds accepts the manifest needs an iPad, like gate 1 needs a Mac |
-| 4 | Every `.swift` file is byte-identical to the editor buffer | **Passing** — 28 hostile-content cases |
-| 5 | A share URL round-trips a project | Deferred — outside the slice |
+| 4 | Every `.swift` file is byte-identical to the editor buffer | **Passing** - 28 hostile-content cases |
+| 5 | A share URL round-trips a project | Deferred - outside the slice |
 
 Verified: **11/11 packages typecheck**, **lint clean**, **468 unit tests**, **26/26 e2e**,
 **355 KB gzipped** against a 450 KB budget.
 
-### 4.12 — Verifying an Xcode project without an Xcode
+### 4.12 - Verifying an Xcode project without an Xcode
 
 Gate 1 is the one thing in this product that cannot be checked on the machine that
 produces it. Rather than ship it untested, the two failure modes that actually occur
@@ -521,7 +521,7 @@ are checked directly:
 - **Referential integrity.** Every id referenced anywhere must resolve to a defined
   object; no two objects may share an id; nothing may be unreachable from the root.
   An orphan is harmless to Xcode but means the generator built something and forgot
-  to attach it — which is exactly how a source file goes missing from a build.
+  to attach it - which is exactly how a source file goes missing from a build.
 
 Plus: exactly the project's Swift files are compiled, non-Swift files are excluded,
 the scheme names the same target id the project defines, every `Contents.json` is
@@ -531,11 +531,11 @@ valid JSON, and the whole bundle round-trips through the zip unchanged.
 Nothing short of Xcode answers that. The settings were kept to a deliberately small,
 conventional set for the same reason.
 
-### 4.13 — Findings
+### 4.13 - Findings
 
 **Quoting is the risk, so match Xcode exactly.** The old-style plist grammar allows
 hyphens and slashes in bare words, but Xcode quotes them anyway. Following the
-grammar rather than Xcode would probably have worked — and "probably" is the wrong
+grammar rather than Xcode would probably have worked - and "probably" is the wrong
 confidence level for a file that cannot be tested here. The writer now leaves bare
 only what Xcode does; the parser stays permissive so it can read real project files.
 
@@ -549,10 +549,10 @@ id it assigned.
 until two folders hold a file of the same name. A file reference whose path contains
 a slash is valid and resolves against its group.
 
-## 4.14 Phase 6 task list — **breadth landed; the corpus gate is not met**
+## 4.14 Phase 6 task list - **breadth landed; the corpus gate is not met**
 
-Phase 6 is open-ended by design ("4–6 weeks, continuous thereafter"). What follows is what was
-actually built, and — just as important — what was not.
+Phase 6 is open-ended by design ("4-6 weeks, continuous thereafter"). What follows is what was
+actually built, and - just as important - what was not.
 
 ### The screen compositor (`swiftui-runtime/presentation.ts`)
 
@@ -560,7 +560,7 @@ actually built, and — just as important — what was not.
       navigation screen is on top, which tab is selected, what is presented over it.
 - [x] One traversal stamps every view with its path, so element ids, handler ids and DOM identity
       cannot drift apart.
-- [x] Framework chrome — navigation bar, tab bar, back button, tab items — emitted as real view
+- [x] Framework chrome - navigation bar, tab bar, back button, tab items - emitted as real view
       values with reserved names, so it appears in the inspector and in tests like anything else.
 
 ### Navigation
@@ -589,11 +589,11 @@ actually built, and — just as important — what was not.
 
 ### Controls and bindings
 
-- [x] Property-wrapper projections (`$value`) as real read/write bindings, in the *interpreter* —
+- [x] Property-wrapper projections (`$value`) as real read/write bindings, in the *interpreter* -
       a language feature, not a SwiftUI one, so the boundary rule holds.
 - [x] `@Binding` by value transparency: a binding passed three views deep still writes the original.
 - [x] `Toggle`, `TextField`, `Slider`, `Stepper`, `ProgressView`, `Picker`.
-- [x] Text fields and sliders rendered as real DOM inputs — a caret and an IME cannot be faked.
+- [x] Text fields and sliders rendered as real DOM inputs - a caret and an IME cannot be faked.
 
 ### Appearance and motion
 
@@ -603,7 +603,7 @@ actually built, and — just as important — what was not.
 
 ### Language
 
-- [x] Key paths (`\.self`, `\.id`, `\Type.member`) — parsed, evaluated, applied.
+- [x] Key paths (`\.self`, `\.id`, `\Type.member`) - parsed, evaluated, applied.
 - [x] Metatypes (`Item.self`) far enough to pass to `navigationDestination(for:)`.
 - [x] Modifiers applied to user-declared views (`MyView().padding()`), which previously trapped.
 
@@ -623,11 +623,11 @@ actually built, and — just as important — what was not.
 | 3 | A three-screen navigation flow with a sheet and animated transitions works end to end | ✅ |
 | 4 | The strictness linter catches a curated set of "works here, fails in Xcode" cases | ✅ |
 
-### 4.15 — What was not built, and why
+### 4.15 - What was not built, and why
 
 **Gate 1 is not met and was not going to be.** The corpus is 11 templates, not 100. Authoring
-eighty-nine more in one pass would produce padding — files written to satisfy a count rather than to
-exercise a construct — and every one of them would then have to be maintained. The eleven that exist
+eighty-nine more in one pass would produce padding - files written to satisfy a count rather than to
+exercise a construct - and every one of them would then have to be maintained. The eleven that exist
 each cover a distinct area, and the honest statement is that the corpus grows as real projects
 arrive, which is the same thing the telemetry is for.
 
@@ -643,12 +643,12 @@ prevent.
 `.refreshable`. Each is recorded in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md) with ⬜ and a
 phase, which means it is reported by name rather than failing silently.
 
-### 4.16 — Findings
+### 4.16 - Findings
 
 **The most expensive bug of the phase was arithmetic, not architecture.** An `HStack` containing an
 `Image` and a `Text` wrapped the text to two lines. The cause: a stack placed at exactly the size it
 measured divides that size back up by subtraction, so the last child is offered its own ideal width
-minus a few units in the last place — and the line breaker, comparing exactly, broke. It had been
+minus a few units in the last place - and the line breaker, comparing exactly, broke. It had been
 latent since Phase 3 and only surfaced when images made the boundary case common. The fix is a
 twentieth of a point of tolerance in the line breaker, which is four orders of magnitude above the
 error it absorbs and invisible to the eye.
@@ -660,7 +660,7 @@ like a value until you ask it a question.
 **A modifier is always called; a property is not.** The checker flagged `Color.accentColor` as the
 unimplemented `.accentColor` *modifier*, because it was checking every member access rather than
 only members that were called. A warning on correct code is the one thing that checker must never
-produce, and the fix — check at the call, not the access — is both narrower and more correct.
+produce, and the fix - check at the call, not the access - is both narrower and more correct.
 
 **Chrome has to be told to fill.** A navigation bar laid out in an exact rect hugged its title,
 leaving a 22pt strip where a 103pt bar belonged. Content positioned against the *device* rather than
@@ -672,14 +672,14 @@ the browser to own a real box. Rather than three mechanisms, nodes gained a `par
 the container it is positioned inside, and everything else stays absolutely positioned and flat.
 Native scroll physics came free with it.
 
-## 4.17 Phase 7 — SwiftUI breadth
+## 4.17 Phase 7 - SwiftUI breadth
 
 Phase 7 is a menu, not a sequence. The item chosen was **breadth**: the ⬜ rows the Phase 6 pass
 left behind. What follows is what was built and what it cost.
 
 ### The language came first
 
-Not a detour. `ObservableObject` — explicitly in the chosen scope — needs reference semantics, and
+Not a detour. `ObservableObject` - explicitly in the chosen scope - needs reference semantics, and
 the parser rejected `class`, `enum`, `switch`, `guard`, `while` and optional binding outright. Half
 of real view-model code would not have parsed.
 
@@ -687,7 +687,7 @@ of real view-model code would not have parsed.
 - [x] `enum` with implicit and explicit raw values, associated values, methods, computed properties,
       and `Type(rawValue:)`.
 - [x] `switch` over values, ranges, multiple patterns, `case let`, `where` and enum cases; `if case`.
-- [x] Condition *lists* — `if let a = a, a > 5` — with short-circuiting, and `guard` whose bindings
+- [x] Condition *lists* - `if let a = a, a > 5` - with short-circuiting, and `guard` whose bindings
       escape into the enclosing scope.
 - [x] `while`, `repeat-while`, `break`, `continue`, `for … where`.
 - [x] Contextual member syntax resolved against a declared type.
@@ -695,7 +695,7 @@ of real view-model code would not have parsed.
 ### Observation
 
 - [x] `ObservableObject`, `@Published`, `@StateObject`, `@ObservedObject`, `@EnvironmentObject`.
-- [x] `@Environment(\.colorScheme)` and the rest, which required parsing attribute *arguments* —
+- [x] `@Environment(\.colorScheme)` and the rest, which required parsing attribute *arguments* -
       previously skipped wholesale.
 - [x] `@Environment(\.dismiss)`, callable through a host hook rather than a new value kind.
 
@@ -711,9 +711,9 @@ of real view-model code would not have parsed.
 
 The coverage matrix moved from 51 ✅ to 89 ✅.
 
-### 4.18 — What is still not there, and why
+### 4.18 - What is still not there, and why
 
-Every remaining ⬜ row is now marked "—" rather than a phase number, because a phase number is a
+Every remaining ⬜ row is now marked "-" rather than a phase number, because a phase number is a
 promise and these are not promised. They fall into two groups:
 
 **Out of scope for a browser preview.** `.refreshable` (pull-to-refresh has nothing to pull),
@@ -725,33 +725,33 @@ promise and these are not promised. They fall into two groups:
 work worth choosing on purpose. Two are worth a note:
 
 - **`inout` would be nearly free.** The projection that implements `@Binding` already *is* an
-  `inout` — it is how `@GestureState`'s `.updating` closure writes to its second parameter. What is
+  `inout` - it is how `@GestureState`'s `.updating` closure writes to its second parameter. What is
   missing is the parser and the call-site plumbing, not the mechanism.
 - **Lazy virtualisation needs a scroll offset the worker does not have.** Scrolling is the browser's,
   which is what makes it feel right; the price is that the worker does not know what is visible.
   `LazyVStack` is therefore correct but not lazy, and `ForEach` caps at 1,000 rows so one typo
   cannot spend the whole step budget.
 
-### 4.19 — Findings
+### 4.19 - Findings
 
 **A class is a flag, not a parallel value kind.** `struct` and `class` declare identically; only
 instantiation differs. One `isReference` flag and one branch in `copyValue` covers it, where a
 second value kind would have meant teaching every `switch` over `SwiftValue` about it.
 
 **`inout` was already built.** `.updating($state) { value, state, _ in state = … }` needs an `inout`
-second parameter, which the interpreter does not have — but a property-wrapper projection is
+second parameter, which the interpreter does not have - but a property-wrapper projection is
 precisely a read/write reference to storage elsewhere. Binding the parameter to a projection made
 it work with no new machinery. The mechanism that shipped for `@Binding` in Phase 6 turned out to
 be the one `inout` needs.
 
 **Opaque values were comparing by identity.** `scheme == .dark` was always false, because every
 design token is a distinct object. They now compare by *value* when the payload is plain data and by
-identity when it holds functions — which is the right answer for a `Binding`, where two onto the
+identity when it holds functions - which is the right answer for a `Binding`, where two onto the
 same storage are the same binding. The bug was invisible until `@Environment` made such comparisons
 ordinary.
 
 **`.onDisappear` writes into a view that is gone.** The closure is remembered from the pass that
-still had the view, so it mutates *that* pass's instance — which the current harvest never looks at.
+still had the view, so it mutates *that* pass's instance - which the current harvest never looks at.
 Both passes are harvested now, previous last. The general lesson is the one Phase 3 already taught:
 when view structs are disposable, anything that outlives a pass has to say which pass it belongs to.
 
@@ -760,7 +760,7 @@ a view name?" guard and so every one of them trapped; a `ForEach` stopped being 
 moment `.onDelete` gave it a modifier and collapsed an entire list into one unrecognised view. Both
 were a predicate asked at the wrong moment.
 
-**Writing the templates found two false positives in code written hours earlier** — the strictness
+**Writing the templates found two false positives in code written hours earlier** - the strictness
 pass telling a *class* method to be `mutating`, and the checker not knowing an enum it had itself
 collected. Both were warnings on correct Swift, which is the one thing those passes must never
 produce. The corpus earning its keep exactly as intended.
@@ -770,7 +770,7 @@ produce. The corpus earning its keep exactly as intended.
 1. The reference app in §1 renders in the device frame.
 2. Tapping Plus and Minus updates the count; the colour flips at negative values.
 3. `Spacer` pushes the buttons apart correctly, and `.padding().background()` renders differently
-   from `.background().padding()` — both verified against hand-authored golden frames.
+   from `.background().padding()` - both verified against hand-authored golden frames.
 4. Editing `spacing: 16` to `spacing: 40` updates the preview in under 250 ms **without** resetting
    `count`.
 5. An unsupported construct (say, a `class`) produces a diagnostic naming the feature, and the

@@ -6,7 +6,7 @@ import { opaque, type SwiftValue } from '@studio/swift-runtime'
  * The payload is *mutable*, which is unusual here and deliberate: `Path { p in
  * p.move(to: …); p.addLine(to: …) }` hands the closure a path and expects it to be
  * built up in place. Because an opaque payload is passed by reference and `copyValue`
- * leaves it alone, the mutations the closure makes are the path that comes back —
+ * leaves it alone, the mutations the closure makes are the path that comes back -
  * which is exactly the `inout` semantics the real initialiser has.
  *
  * Coordinates stay in the path's own space and are serialised to SVG at the end. The
@@ -43,7 +43,7 @@ export type PathCommand =
   | { readonly kind: 'close' }
 
 export interface PathPayload {
-  /** Mutable on purpose — see the file comment. */
+  /** Mutable on purpose - see the file comment. */
   commands: PathCommand[]
   /** `.trim(from:to:)`, applied when the path is serialised. */
   trim: { from: number; to: number } | null
@@ -78,7 +78,7 @@ function onCircle(centre: PathPoint, radius: number, degrees: number): PathPoint
  *
  * Arcs are the fiddly part: SVG describes an arc by its *endpoint* plus flags, while
  * `addArc` describes it by centre and angles. A sweep of a full turn or more cannot
- * be expressed as one SVG arc at all — the start and end points coincide — so it is
+ * be expressed as one SVG arc at all - the start and end points coincide - so it is
  * emitted as two half sweeps.
  */
 export function toSVGPath(payload: PathPayload): string {
@@ -161,8 +161,8 @@ export function toSVGPath(payload: PathPayload): string {
  * A `.trim(from:to:)` of a *stroked* path.
  *
  * Real trimming needs arc-length parameterisation of every segment. What is done
- * instead is exact for the shapes trimming is actually used on — a circle, for
- * progress rings — and approximate elsewhere: the arc's sweep is scaled. Anything
+ * instead is exact for the shapes trimming is actually used on - a circle, for
+ * progress rings - and approximate elsewhere: the arc's sweep is scaled. Anything
  * else is left whole rather than silently cut in the wrong place.
  */
 export function applyTrim(payload: PathPayload): PathPayload {

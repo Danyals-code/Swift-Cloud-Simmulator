@@ -15,7 +15,7 @@ import {
  * The editor-facing half of the compiler worker.
  *
  * Stateless on purpose. Completion could reuse the parse from the last compile, but
- * the editor asks between compiles — that is the whole point of a debounce — so the
+ * the editor asks between compiles - that is the whole point of a debounce - so the
  * cached tree would be one keystroke stale exactly when it is consulted. Re-parsing
  * the project costs about a millisecond for a project this size, and a cache that is
  * right only between keystrokes is worse than no cache at all.

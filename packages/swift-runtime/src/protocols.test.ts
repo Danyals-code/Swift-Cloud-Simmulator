@@ -3,7 +3,7 @@ import { collectConformance, Parser } from '@studio/swift-syntax'
 import { Interpreter } from './interpreter'
 
 /**
- * Protocols and extensions — Phase 8a.
+ * Protocols and extensions - Phase 8a.
  *
  * The unit under test is really one function, `collectConformance`, which decides what
  * members a type has once they may be written in four places. So these run the merged
@@ -80,7 +80,7 @@ func main() {
 
   it('extends a built-in type the project never declared', () => {
     // `extension Int` has no declaration to merge into, which is a different path
-    // through the merge than `extension Card` — and it is the one users reach for.
+    // through the merge than `extension Card` - and it is the one users reach for.
     expect(
       run(`
 extension Int {

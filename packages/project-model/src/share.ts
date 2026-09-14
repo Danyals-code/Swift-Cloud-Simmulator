@@ -15,7 +15,7 @@ import type { Project, ProjectManifest } from './types'
  * returns null when a project will not fit, and the caller says so.
  *
  * The payload is *not* the `Project` object. Ids and timestamps belong to whoever
- * opens the link, not to whoever made it — carrying them would mean a shared project
+ * opens the link, not to whoever made it - carrying them would mean a shared project
  * claiming to have been created on someone else's clock, and two people opening the
  * same link would collide on the same id.
  */

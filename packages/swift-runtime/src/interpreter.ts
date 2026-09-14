@@ -74,7 +74,7 @@ export interface InterpreterOptions {
    * Evaluation steps before execution is abandoned.
    *
    * FR-6.5. A runaway loop in a Web Worker is a preview that never updates, so the
-   * budget is not optional. 5 million steps is roughly 100 ms of interpretation —
+   * budget is not optional. 5 million steps is roughly 100 ms of interpretation -
    * far beyond any legitimate `body` evaluation, far below anything the user waits on.
    */
   readonly stepBudget?: number
@@ -191,7 +191,7 @@ export class Interpreter {
   /**
    * Evaluates an expression as though it appeared inside a type's body.
    *
-   * Needed by the SwiftUI runtime to re-run a property's declared initialiser — a
+   * Needed by the SwiftUI runtime to re-run a property's declared initialiser - a
    * `@GestureState` reverting, for instance. Exposed rather than reimplemented
    * because "with `self` bound" is a detail of scoping that belongs here.
    */
@@ -227,7 +227,7 @@ export class Interpreter {
    *
    * Stored properties initialise in declaration order with `self` already bound, so
    * a later property may reference an earlier one. Computed properties are not
-   * stored at all — they re-evaluate on every read, which is what makes `body`
+   * stored at all - they re-evaluate on every read, which is what makes `body`
    * reflect current state rather than the state at construction time.
    */
   instantiate(typeName: string, args: readonly CallArgument[], span: SourceSpan): StructValue {
@@ -308,7 +308,7 @@ export class Interpreter {
     const enumDecl = this.enums.get(name)
     if (!enumDecl) return undefined
 
-    // `Tab(rawValue: "home")` — the failable initialiser every raw-valued enum has.
+    // `Tab(rawValue: "home")` - the failable initialiser every raw-valued enum has.
     const raw = args.find((a) => a.label === 'rawValue')?.value
     if (raw) {
       const match = enumDecl.cases.find((c) => {
@@ -327,7 +327,7 @@ export class Interpreter {
    * Reads a member from an enum value: `.rawValue`, a computed property, or a method.
    *
    * `self` inside such a member is the case itself, which is how an enum's computed
-   * property — `var title: String { switch self { … } }` — is written.
+   * property - `var title: String { switch self { … } }` - is written.
    */
   private memberOfEnum(target: EnumValue, member: string, span: SourceSpan): SwiftValue | undefined {
     if (member === 'rawValue') return target.rawValue ?? NIL
@@ -363,7 +363,7 @@ export class Interpreter {
     member: string,
     span: SourceSpan,
     /**
-     * Where to begin looking, for `super`. The receiver is still the same instance —
+     * Where to begin looking, for `super`. The receiver is still the same instance -
      * only the member list changes, which is the whole of what `super` means.
      */
     lookupIn: string = target.typeName,
@@ -410,13 +410,13 @@ export class Interpreter {
   /**
    * Runs a block as a function body, translating `return` into a value.
    *
-   * Swift's implicit return applies to single-expression bodies — which is how every
+   * Swift's implicit return applies to single-expression bodies - which is how every
    * `var body: some View` works. That expression is evaluated exactly once: running
    * the block for effects and *then* re-evaluating the expression for its value would
    * double every side effect in it.
    *
    * `expected` is the declared result type, and it is the only context a bare `.case`
-   * in a `return` has to resolve against — `func next() -> Step { return .two }` says
+   * in a `return` has to resolve against - `func next() -> Step { return .two }` says
    * what `.two` means nowhere else. Pushed as a stack rather than passed down because
    * the `return` may be nested arbitrarily deep inside the body.
    */
@@ -461,7 +461,7 @@ export class Interpreter {
   /**
    * Evaluates a block the way `@ViewBuilder` does: as a *list* of results.
    *
-   * A result builder does not return the last statement — it collects every
+   * A result builder does not return the last statement - it collects every
    * expression in the block (`buildBlock`), picks a branch (`buildIf`/`buildEither`),
    * and flattens loops (`buildArray`). Modelling that here rather than in the host
    * keeps the control-flow semantics with the interpreter that owns scoping, while
@@ -596,7 +596,7 @@ export class Interpreter {
       // An `inout` parameter is bound to the caller's storage rather than to a copy,
       // so writes reach back out. The projection `&x` produced is the same thing
       // `$x` produces for `@Binding`, and every read and write already goes through
-      // one — so there is nothing further to do here but decline to copy.
+      // one - so there is nothing further to do here but decline to copy.
       if (param.isInout && value !== undefined && asProjection(value)) {
         env.define(param.internalName, value, false, param.span ?? span)
         continue
@@ -665,8 +665,8 @@ export class Interpreter {
       }
 
       case 'guardStmt': {
-        // A `guard`'s bindings escape into the *enclosing* scope — that is the whole
-        // point of it — so they are bound into `env` rather than into a child.
+        // A `guard`'s bindings escape into the *enclosing* scope - that is the whole
+        // point of it - so they are bound into `env` rather than into a child.
         if (this.bindConditions(statement.conditions, env)) return
         this.executeBlock(statement.else, env.child())
         // Swift requires the else block to leave scope. If it did not, falling through
@@ -748,7 +748,7 @@ export class Interpreter {
   /**
    * Evaluates a condition list, binding anything it unwraps into `scope`.
    *
-   * Returns false as soon as a clause fails, *without* evaluating the rest — which is
+   * Returns false as soon as a clause fails, *without* evaluating the rest - which is
    * not an optimisation but a requirement: `if let user = user, user.isActive` reads
    * `user` in the second clause only because the first one succeeded.
    */
@@ -776,7 +776,7 @@ export class Interpreter {
    * Runs one iteration of a loop body.
    *
    * Returns true when the loop should stop. `continue` is absorbed here, `break`
-   * reported upward — which keeps every loop's `for` in `execute` identical.
+   * reported upward - which keeps every loop's `for` in `execute` identical.
    */
   private runLoopBody(body: Block, scope: Environment): boolean {
     try {
@@ -793,7 +793,7 @@ export class Interpreter {
    *
    * Bindings land in a scope of their own, so `case .success(let value)` can name a
    * payload without leaking it into the sibling cases. Returns null when nothing
-   * matched — Swift requires exhaustiveness and we do not check it, so the honest
+   * matched - Swift requires exhaustiveness and we do not check it, so the honest
    * behaviour for an unmatched subject is to run nothing rather than to guess.
    */
   private matchSwitch(
@@ -862,7 +862,7 @@ export class Interpreter {
    * A `static` member of a type, read without an instance.
    *
    * Evaluated on each access rather than cached. Swift's statics are lazy and stored,
-   * so a cache would be more faithful — but it would also outlive an edit to the
+   * so a cache would be more faithful - but it would also outlive an edit to the
    * initialiser, which is the one behaviour a live preview must not have.
    */
   private staticMember(typeName: string, member: string, span: SourceSpan): SwiftValue | undefined {
@@ -902,14 +902,14 @@ export class Interpreter {
    * `var tab: Tab = .home` has no base to resolve `.home` against, so the host hands
    * back a bare token. When the declaration says what type is expected, the token can
    * be turned into the case it obviously means. Without this, contextual member
-   * syntax — which is how almost every enum is written in view code — would produce a
+   * syntax - which is how almost every enum is written in view code - would produce a
    * value that compares equal to nothing.
    */
   coerceToEnum(value: SwiftValue, typeName: string | null): SwiftValue {
     if (!typeName) return value
 
     // `var width: Double` given the literal `3`. Swift converts at the literal, since
-    // `3` there is a `Double` literal and never an `Int` — so `Rect(width: 3).width`
+    // `3` there is a `Double` literal and never an `Int` - so `Rect(width: 3).width`
     // is 3.0 and prints as such. Without this the value stays an Int and every
     // arithmetic result downstream loses its fractional formatting.
     if (typeName === 'Double' && value.kind === 'int') return double(value.value)
@@ -935,7 +935,7 @@ export class Interpreter {
   /**
    * `do { … } catch … { … }`.
    *
-   * Clauses are tried in order and the first that matches wins — Swift's rule, and the
+   * Clauses are tried in order and the first that matches wins - Swift's rule, and the
    * reason a bare `catch` has to be written last. A throw with no matching clause keeps
    * travelling, because swallowing it here would turn a real failure into silence.
    */
@@ -963,7 +963,7 @@ export class Interpreter {
    *
    * Bare `try` is a marker and nothing more: it makes the call visibly fallible at the
    * call site, and the throw propagates on its own. The other two are where the work
-   * is — `try?` turns a throw into nil, `try!` into a trap that names what was thrown.
+   * is - `try?` turns a throw into nil, `try!` into a trap that names what was thrown.
    */
   private runTry(expr: TryExpr, env: Environment): SwiftValue {
     if (expr.mode === 'propagate') return this.evaluate(expr.operand, env)
@@ -1009,7 +1009,7 @@ export class Interpreter {
    *
    * The one thing this buys is contextual member syntax: `.settings` has no base to
    * resolve against, so `let tab: Tab = .settings` can only be understood by knowing
-   * what `Tab` is. Deliberately not general type inference — it applies exactly where
+   * what `Tab` is. Deliberately not general type inference - it applies exactly where
    * a declaration or a parameter already stated the type, and falls straight through
    * to ordinary evaluation everywhere else.
    */
@@ -1179,7 +1179,7 @@ export class Interpreter {
       case 'inout': {
         // `&count` hands the callee the *storage*, not the value. That is exactly what
         // `$count` already produces for `@Binding`, so `inout` needs no mechanism of
-        // its own — the two are the same idea written differently.
+        // its own - the two are the same idea written differently.
         const lvalue = this.tryResolveLValue(expr.operand, env)
         if (!lvalue) this.trap('Cannot pass this expression as an inout argument', expr.span)
         if (!lvalue.mutable) {
@@ -1228,7 +1228,7 @@ export class Interpreter {
     // `$count` is a property wrapper's *projection*: a read/write reference to the
     // storage behind `count`, which is what lets `.sheet(isPresented: $showing)`
     // dismiss itself and `Toggle(isOn: $flag)` write back. Projecting something that
-    // is already a projection yields the same one — passing `$count` down two views
+    // is already a projection yields the same one - passing `$count` down two views
     // still addresses the original `@State`.
     if (name.startsWith('$')) {
       const projected = this.projectionFor(name.slice(1), env)
@@ -1282,11 +1282,11 @@ export class Interpreter {
       if (value !== undefined) return unwrapProjection(value)
     }
 
-    // `Item.self` is a metatype. The slice only ever passes one along — to
-    // `navigationDestination(for:)` — so the type value itself is the whole answer.
+    // `Item.self` is a metatype. The slice only ever passes one along - to
+    // `navigationDestination(for:)` - so the type value itself is the whole answer.
     if (target.kind === 'type' && member === 'self') return target
 
-    // `Tab.home` — an enum case with no payload.
+    // `Tab.home` - an enum case with no payload.
     if (target.kind === 'type') {
       const enumDecl = this.enums.get(target.name)
       if (enumDecl?.cases.some((c) => c.name === member)) {
@@ -1320,7 +1320,7 @@ export class Interpreter {
 
   /**
    * A member a user `extension` added to a value the interpreter otherwise handles
-   * entirely through its built-in table — `extension Int`, `extension String`,
+   * entirely through its built-in table - `extension Int`, `extension String`,
    * `extension Array`.
    *
    * Checked *after* the built-in table, so an extension can never shadow a stdlib
@@ -1379,7 +1379,7 @@ export class Interpreter {
 
     /**
      * For everything except the host, a trailing closure is just a final unlabelled
-     * argument — `items.map { … }` and `items.map({ … })` mean the same thing. The
+     * argument - `items.map { … }` and `items.map({ … })` mean the same thing. The
      * host gets it separately, because a view needs to distinguish content
      * (`VStack { … }`) from an action (`Button("x") { … }`).
      */
@@ -1408,7 +1408,7 @@ export class Interpreter {
 
       // A declaration in the project wins over anything the host offers, which is
       // Swift's own rule: a local type shadows the module's. It matters more than it
-      // looks — `Task` is a perfectly ordinary name for a to-do app's model type, and
+      // looks - `Task` is a perfectly ordinary name for a to-do app's model type, and
       // so are `Image`, `Label` and `Menu`.
       const declared = this.types.has(callee.name) || this.enums.has(callee.name)
 
@@ -1425,13 +1425,13 @@ export class Interpreter {
       if (builtin !== undefined) return builtin
 
       // An unqualified call inside a member body means `self.name(…)`. It matters for
-      // any receiver the environment cannot hold — `extension Int`, and a method
+      // any receiver the environment cannot hold - `extension Int`, and a method
       // written in `extension View`, where `self` is a view value rather than a
       // struct. `evaluateIdentifier` already resolves bare *names* this way; a call
       // had no equivalent, so `modifier(Boxed())` inside such a method resolved
       // nowhere.
-      // `self` may be a binding — `extension Int`, or a method on `extension View`
-      // called on a view value — or the environment's receiver, which is how a view
+      // `self` may be a binding - `extension Int`, or a method on `extension View`
+      // called on a view value - or the environment's receiver, which is how a view
       // written as a struct reaches its `extension View` methods: the merge hands
       // them to every conformer as protocol defaults.
       //
@@ -1480,9 +1480,9 @@ export class Interpreter {
     baseExpr: Expr | null,
     member: string,
     memberSpan: SourceSpan,
-    /** Explicit arguments only — what the host sees. */
+    /** Explicit arguments only - what the host sees. */
     args: readonly CallArgument[],
-    /** Explicit arguments plus the trailing closure — what everything else sees. */
+    /** Explicit arguments plus the trailing closure - what everything else sees. */
     allArgs: readonly CallArgument[],
     trailingClosure: ClosureValue | null,
     span: SourceSpan,
@@ -1504,7 +1504,7 @@ export class Interpreter {
     const lvalue = this.tryResolveLValue(baseExpr, env)
     const target = lvalue ? lvalue.get() : this.evaluate(baseExpr, env)
 
-    // `super.speak()` — same receiver, lookup starting one level up, so an override
+    // `super.speak()` - same receiver, lookup starting one level up, so an override
     // can call the thing it overrode instead of itself.
     if (baseExpr.kind === 'superExpr' && target.kind === 'struct') {
       const above = this.superclassOf(this.owners[this.owners.length - 1] ?? target.typeName)
@@ -1512,7 +1512,7 @@ export class Interpreter {
       if (bound?.kind === 'function') return this.callFunction(bound, allArgs, span)
     }
 
-    // `Status.loaded("x")` — an enum case with a payload.
+    // `Status.loaded("x")` - an enum case with a payload.
     if (target.kind === 'type') {
       const enumDecl = this.enums.get(target.name)
       if (enumDecl?.cases.some((c) => c.name === member)) {
@@ -1617,7 +1617,7 @@ export class Interpreter {
   // ---------------------------------------------------------------- lvalues
 
   /**
-   * Builds `$name` — a projection onto the storage `name` refers to.
+   * Builds `$name` - a projection onto the storage `name` refers to.
    *
    * Returns null when there is no such storage, so the caller can fall through to
    * its normal "cannot find in scope" reporting rather than handing back a binding
@@ -1744,7 +1744,7 @@ export class Interpreter {
       this.trap(`Cannot assign to value: '${lvalue.description}' is a 'let' constant`, span)
     }
 
-    // `tab = .settings` — the target's current value says which enum `.settings`
+    // `tab = .settings` - the target's current value says which enum `.settings`
     // belongs to, which is the only context available at an assignment.
     const current = lvalue.get()
     const rhs = this.coerceToEnum(
@@ -1794,7 +1794,7 @@ export class Interpreter {
     switch (operator) {
       case '==':
       case '!=': {
-        // `step == .one` — the other operand is the context a contextual member
+        // `step == .one` - the other operand is the context a contextual member
         // resolves against, and a comparison is the only place that context exists.
         // Without this the token and the enum case never compare equal, so every
         // `if tab == .home` is silently false.
@@ -1873,7 +1873,7 @@ export class Interpreter {
   private numeric(result: number, isInt: boolean, span: SourceSpan): SwiftValue {
     if (isInt && !Number.isSafeInteger(result)) {
       // Real Swift traps at 2^63; JS numbers are exact only to 2^53. Trapping at the
-      // lower bound reports slightly early, but never returns a silently wrong value —
+      // lower bound reports slightly early, but never returns a silently wrong value -
       // which is the failure mode that actually costs the user time.
       this.trap(`${TRAP_MESSAGES.overflow} (values beyond ${MAX_SAFE_INT} are not representable)`, span)
     }
@@ -1897,7 +1897,7 @@ export class Interpreter {
 }
 
 /**
- * `static` — or `class`, which means static-and-overridable on a class.
+ * `static` - or `class`, which means static-and-overridable on a class.
  *
  * Matters more than it looks: a `static let` is not a stored property, so counting it
  * as one would shift every memberwise-initialiser argument by a position.

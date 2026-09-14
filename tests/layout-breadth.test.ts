@@ -233,7 +233,7 @@ describe('layout priority', () => {
     }`),
     )
     // The prioritised label takes its ideal width and stays on one line; the other
-    // gets what is left and wraps. Comparing painted *widths* would prove nothing —
+    // gets what is left and wraps. Comparing painted *widths* would prove nothing -
     // a wrapped label's width is its longest line, which can be anything.
     const first = textNode(result.renderTree, 'the first label here')
     const second = textNode(result.renderTree, 'the second label here')
@@ -252,7 +252,7 @@ describe('position', () => {
     }`),
     )
     // `.position` is relative to the frame it sits in, and that frame is itself
-    // centred on the screen — so the absolute x is the frame's origin plus 100.
+    // centred on the screen - so the absolute x is the frame's origin plus 100.
     const pinned = textNode(result.renderTree, 'pinned')
     const frameOrigin = (device.width - 300) / 2
     const centre = pinned.frame.x + pinned.frame.width / 2

@@ -13,12 +13,12 @@ import { gitignoreContents } from './xcode-files'
  *
  * Each format answers a different question, which is why one is not enough:
  *
- * - **`.xcodeproj`** — "open this on a Mac and press Run."
- * - **`.swiftpm`** — "open this on an iPad." Swift Playgrounds builds and runs an app
+ * - **`.xcodeproj`** - "open this on a Mac and press Run."
+ * - **`.swiftpm`** - "open this on an iPad." Swift Playgrounds builds and runs an app
  *   package with no Xcode at all, which is the only route from a browser to a device
  *   that does not involve a Mac.
- * - **`Package.swift`** — "build this from the command line, or depend on it."
- * - **`project.yml`** — "generate the Xcode project rather than committing it." A
+ * - **`Package.swift`** - "build this from the command line, or depend on it."
+ * - **`project.yml`** - "generate the Xcode project rather than committing it." A
  *   generated `.xcodeproj` is a merge conflict waiting to happen, and teams that have
  *   been bitten by one reach for XcodeGen.
  */
@@ -44,7 +44,7 @@ function sourcesOf(project: Project): { path: string; text: string }[] {
  * A `.swiftpm` app package, as Swift Playgrounds expects it.
  *
  * The `.swiftpm` extension is on the *directory*, which is what makes iPadOS treat it
- * as a document rather than a folder — so the zip has to carry it too, and the sources
+ * as a document rather than a folder - so the zip has to carry it too, and the sources
  * live under `Sources/<name>/` rather than beside the manifest.
  */
 export function buildSwiftPMAppBundle(project: Project): ExportBundle {
@@ -113,7 +113,7 @@ let package = Package(
  * A library target, not an app: SPM alone cannot build an iOS application bundle, and
  * saying otherwise in a generated manifest would produce a build failure the user has
  * to diagnose. What this format is good for is depending on the code, or building and
- * testing it from the command line — and the README says exactly that rather than
+ * testing it from the command line - and the README says exactly that rather than
  * leaving it to be discovered.
  */
 export function buildPackageBundle(project: Project): ExportBundle {
@@ -203,15 +203,15 @@ targets:
 
 const APPROXIMATIONS = `## What the preview approximated
 
-The Swift is exactly what you wrote — byte for byte. The *preview* made some
+The Swift is exactly what you wrote - byte for byte. The *preview* made some
 substitutions that this build will not:
 
-- **Fonts** — an open metric-compatible stack stood in for SF Pro.
-- **SF Symbols** — Unicode substitutes stood in for Apple's symbol font. \`Image(systemName:)\`
+- **Fonts** - an open metric-compatible stack stood in for SF Pro.
+- **SF Symbols** - Unicode substitutes stood in for Apple's symbol font. \`Image(systemName:)\`
   is unchanged, so the real symbols appear here.
-- **Blur and springs** — approximated in CSS; this build uses the real ones.
-- **Scrolling** — browser scrolling, not iOS deceleration.
-- **Concurrency** — the preview ran everything async synchronously. This build does not.
+- **Blur and springs** - approximated in CSS; this build uses the real ones.
+- **Scrolling** - browser scrolling, not iOS deceleration.
+- **Concurrency** - the preview ran everything async synchronously. This build does not.
 `
 
 function swiftpmReadme(project: Project): string {
@@ -226,7 +226,7 @@ Exported from SwiftUI Web Studio as a **Swift Playgrounds app package**.
 2. Open it in **Swift Playgrounds**.
 3. Press Run.
 
-No Mac and no Xcode needed — this is the one route from the browser to a real device
+No Mac and no Xcode needed - this is the one route from the browser to a real device
 that does not involve one.
 
 ## On a Mac
@@ -255,7 +255,7 @@ swift build
 ## What this format is and is not
 
 This is a **library** target. SPM on its own cannot build an iOS application bundle,
-so this will not produce a runnable app — saying otherwise in the manifest would give
+so this will not produce a runnable app - saying otherwise in the manifest would give
 you a build failure to diagnose rather than a working project.
 
 Use this format to depend on the code, or to build and test it from the command line.

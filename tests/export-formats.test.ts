@@ -10,7 +10,7 @@ import {
 } from '@studio/exporter'
 
 /**
- * The export formats beyond `.xcodeproj` — Phase 9b.
+ * The export formats beyond `.xcodeproj` - Phase 9b.
  *
  * Phase 5's gate 2 applies to every one of them: the user's bytes arrive unchanged and
  * the archive is reproducible. Those two are asserted for all four formats by
@@ -100,7 +100,7 @@ describe('the Swift Playgrounds package', () => {
 
   it('puts the .swiftpm extension on the directory', () => {
     // iPadOS treats the *folder* as a document because of the extension, so the zip
-    // has to carry it — a `Package.swift` at the root of a plain folder is a library.
+    // has to carry it - a `Package.swift` at the root of a plain folder is a library.
     for (const path of files.keys()) {
       expect(path.startsWith(`${project.manifest.name}.swiftpm/`)).toBe(true)
     }

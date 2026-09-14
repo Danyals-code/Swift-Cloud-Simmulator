@@ -7,7 +7,7 @@
 # depending on who ran them.
 * text=auto eol=lf
 
-# Swift sources and fixtures are content under test — never touch them.
+# Swift sources and fixtures are content under test - never touch them.
 *.swift -text
 *.zip binary
 *.png binary

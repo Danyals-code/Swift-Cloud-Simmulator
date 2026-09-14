@@ -7,7 +7,7 @@ import { DEVICES } from '@studio/sim-shell'
  * List actions and search.
  *
  * `.onDelete` is written on the `ForEach` but the thing that gets swiped is the
- * *row*, and the closure needs to know which offset went — so most of what is tested
+ * *row*, and the closure needs to know which offset went - so most of what is tested
  * here is that those three facts stay connected through a drag.
  */
 

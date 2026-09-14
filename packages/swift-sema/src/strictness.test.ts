@@ -8,7 +8,7 @@ import { lintStrictness } from './strictness'
  * in Xcode" cases.
  *
  * This file is that curated set, and it is written in two halves on purpose. The
- * second half — the code that must produce *nothing* — is the more important one.
+ * second half - the code that must produce *nothing* - is the more important one.
  * A strictness pass that cries wolf is worse than no pass at all: people stop
  * reading the panel, and then the genuine warnings go unread too. Every check here
  * was added with its silence case written first.
@@ -103,7 +103,7 @@ describe('numeric strictness', () => {
   })
 
   it('says nothing when a type cannot be determined', () => {
-    // No annotation, no literal — the pass must not guess.
+    // No annotation, no literal - the pass must not guess.
     expect(
       messages(
         app(`    let values = compute()
@@ -220,7 +220,7 @@ describe('mutability', () => {
 
   it('says nothing about a class method that writes a property', () => {
     // Only value types need `mutating`. Flagging a class method would be a warning
-    // on ordinary, correct Swift — and this pass fired on exactly that until the
+    // on ordinary, correct Swift - and this pass fired on exactly that until the
     // reference-type check was added.
     expect(
       messages(`class Store {
@@ -394,7 +394,7 @@ describe('returns', () => {
 describe('the silence case', () => {
   it('reports nothing at all on an idiomatic app', () => {
     // The most important assertion in the file. Everything here is correct Swift
-    // that Xcode compiles, so any warning is a false positive — and one false
+    // that Xcode compiles, so any warning is a false positive - and one false
     // positive is enough to make the whole panel ignorable.
     const source = `import SwiftUI
 

@@ -1,7 +1,7 @@
 /**
  * Device definitions.
  *
- * Pure data — no rendering. The bezel is drawn in CSS by the app shell because
+ * Pure data - no rendering. The bezel is drawn in CSS by the app shell because
  * Apple's device artwork is not licensed for redistribution (risk R2 in
  * docs/01-REQUIREMENTS.md).
  *
@@ -22,7 +22,7 @@ export interface DeviceSpec {
   /** logical points, portrait */
   readonly width: number
   readonly height: number
-  /** physical pixels per point — affects nothing in layout, informational */
+  /** physical pixels per point - affects nothing in layout, informational */
   readonly scale: number
   readonly safeArea: EdgeInsets
   /** screen corner radius in points; 0 for square-cornered devices */

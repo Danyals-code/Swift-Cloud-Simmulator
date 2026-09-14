@@ -75,7 +75,7 @@ const DECLARATION_MODIFIERS = new Set([
  *
  * Error recovery is a requirement here, not a nicety: the user is mid-keystroke most
  * of the time, so a missing brace must not invalidate the file. Two mechanisms do the
- * work — `ErrorNode`s stand in for unparseable fragments, and `synchronize()`
+ * work - `ErrorNode`s stand in for unparseable fragments, and `synchronize()`
  * skips to the next declaration or statement boundary. Between them, a broken
  * region costs one diagnostic and the rest of the file still yields a usable tree.
  */
@@ -308,8 +308,8 @@ export class Parser {
   /**
    * A `struct` or a `class`.
    *
-   * One function for both: the syntax is identical, and the only difference —
-   * reference versus value semantics — is a flag the interpreter reads at
+   * One function for both: the syntax is identical, and the only difference -
+   * reference versus value semantics - is a flag the interpreter reads at
    * instantiation. Splitting them would duplicate the member loop and the recovery
    * logic for no gain.
    */
@@ -394,7 +394,7 @@ export class Parser {
 
   private parseEnumCase(): EnumCase {
     const start = this.current
-    // A case name may be a keyword — `case none`, `case some(T)`, `case any`. Swift
+    // A case name may be a keyword - `case none`, `case some(T)`, `case any`. Swift
     // treats the position as contextual, and `Optional` itself is declared this way.
     const { name, span: nameSpan } =
       this.current.kind === 'keyword'
@@ -409,7 +409,7 @@ export class Parser {
       this.advance()
       while (!this.atEnd && !this.check(')')) {
         const paramStart = this.current
-        // `case success(value: Int)` — a labelled payload. The label is recorded so
+        // `case success(value: Int)` - a labelled payload. The label is recorded so
         // the case can be constructed either way.
         let label: string | null = null
         if (this.current.kind === 'identifier' && this.peek().text === ':') {
@@ -438,7 +438,7 @@ export class Parser {
    * A `protocol`.
    *
    * The body is an ordinary type body, so a requirement and a default implementation
-   * parse through exactly the same path — the difference is a missing body, which the
+   * parse through exactly the same path - the difference is a missing body, which the
    * existing `parseFunc` and `parseVar` already represent. `associatedtype` is the one
    * member that has no equivalent elsewhere, so it is lifted out here.
    */
@@ -478,7 +478,7 @@ export class Parser {
             name: associated.name,
             nameSpan: associated.span,
           })
-          // `associatedtype Item: Equatable = Int` — constraint and default are both
+          // `associatedtype Item: Equatable = Int` - constraint and default are both
           // type-level, and nothing at runtime can act on either.
           if (this.match(':')) this.parseType()
           if (this.match('=')) this.parseType()
@@ -510,7 +510,7 @@ export class Parser {
    *
    * The extended type is parsed as a type rather than an identifier so that
    * `extension Array where Element == Int` and `extension Optional<String>` reach the
-   * same place as `extension Card` — the generic arguments and the `where` clause are
+   * same place as `extension Card` - the generic arguments and the `where` clause are
    * dropped, because the interpreter dispatches on the base name alone.
    */
   private parseExtension(attributes: Attribute[], modifiers: Modifier[]): Decl {
@@ -734,7 +734,7 @@ export class Parser {
     if (this.match('=')) initializer = this.parseExpression(true)
 
     // A computed property: `var body: some View { … }`. Distinguished from a
-    // trailing closure by the absence of an initialiser — `var x = Foo { }` is an
+    // trailing closure by the absence of an initialiser - `var x = Foo { }` is an
     // initialiser with a trailing closure, `var x: T { }` is a getter.
     //
     // `{ get }` and `{ get set }` look like getters but are protocol requirements:
@@ -747,7 +747,7 @@ export class Parser {
       if (!requirement) accessor = this.parseBlock()
     } else if (initializer && this.check('{') && !this.current.newlineBefore) {
 
-      // `var x = 1 { didSet { … } }` — property observers are out of scope.
+      // `var x = 1 { didSet { … } }` - property observers are out of scope.
       this.unsupported(this.current.span, 'property observers (willSet/didSet)')
       this.skipBalanced('{', '}')
     }
@@ -770,8 +770,8 @@ export class Parser {
   /**
    * `{ get }` / `{ get set }`, consumed only when that is the entire brace body.
    *
-   * Anything else — including `{ get { … } set { … } }`, which is a real computed
-   * property with explicit accessors — is left for `parseBlock`, so the index is
+   * Anything else - including `{ get { … } set { … } }`, which is a real computed
+   * property with explicit accessors - is left for `parseBlock`, so the index is
    * restored before returning null.
    */
   private tryParseAccessorRequirement(): 'get' | 'get set' | null {
@@ -803,7 +803,7 @@ export class Parser {
    *
    * The arguments and body are parsed rather than skipped, because `#Preview`'s body
    * is the one thing in the file that says what to show when nothing else does.
-   * Macros the preview does not act on still parse cleanly and export unchanged —
+   * Macros the preview does not act on still parse cleanly and export unchanged -
    * which is the point: `#` used to be an unexpected character, and the three
    * blocking errors that followed meant a file with a preview block did not render.
    */
@@ -850,7 +850,7 @@ export class Parser {
   /**
    * Skips to the next plausible declaration start.
    *
-   * Stops at a declaration keyword, at an attribute, or at a closing brace — the
+   * Stops at a declaration keyword, at an attribute, or at a closing brace - the
    * last of which matters because it lets an enclosing `parseStruct` finish its own
    * member loop rather than consuming the rest of the file.
    */
@@ -867,7 +867,7 @@ export class Parser {
    * Detects the most common broken state in a live editor: a missing closing brace.
    *
    * Without this, `struct Later` following an unterminated body parses as a *nested*
-   * type — which is what swiftc does too, and is defensible. But it means sema never
+   * type - which is what swiftc does too, and is defensible. But it means sema never
    * registers `Later` as a module-level type, so every use of it reports
    * "unresolved identifier". One missing brace becomes a screenful of red, exactly
    * while the user is still typing. Phase 1 gate 4 says a false positive is worse
@@ -875,7 +875,7 @@ export class Parser {
    *
    * The trigger is deliberately narrow: only a *type* declaration or `import`, and
    * only at column 1. Nobody indents a genuinely nested type to column zero, so this
-   * cannot misfire on well-formed code. `func`, `var` and attributes are excluded —
+   * cannot misfire on well-formed code. `func`, `var` and attributes are excluded -
    * those do appear at column 1 in badly formatted but valid source.
    */
   private atProbableTopLevelDeclaration(): boolean {
@@ -1165,12 +1165,12 @@ export class Parser {
       return { kind: 'wildcard', span: this.spanFrom(start) }
     }
 
-    // `case let x` / `case var x` — binds the whole subject.
+    // `case let x` / `case var x` - binds the whole subject.
     if (this.checkKeyword('let') || this.checkKeyword('var')) {
       const isLet = this.current.text === 'let'
       this.advance()
 
-      // `case let .success(value)` — the binding applies inside the payload.
+      // `case let .success(value)` - the binding applies inside the payload.
       if (this.check('.')) return this.parseEnumCasePattern(start, null, true)
 
       const { name } = this.expectIdentifier('a binding name')
@@ -1200,7 +1200,7 @@ export class Parser {
   ): Pattern {
     this.expect('.', "Expected '.' before an enum case name.")
     // `parseMemberName`, not `expectIdentifier`: after a dot a case name may be a
-    // keyword, and `.some` — the one every `Optional` match is written with — is
+    // keyword, and `.some` - the one every `Optional` match is written with - is
     // exactly that. `expectIdentifier` reports and does *not* advance, so the keyword
     // was left in place and the enclosing switch loop spun on it forever.
     const { name: caseName } = this.parseMemberName()
@@ -1301,7 +1301,7 @@ export class Parser {
         this.advance()
         const named = this.expectIdentifier('a name for the caught error')
         binding = named.name
-        // `catch let problem as MyError` — the cast narrows, which needs types we do
+        // `catch let problem as MyError` - the cast narrows, which needs types we do
         // not have. Binding without narrowing is the lenient reading.
         if (this.checkKeyword('as')) {
           this.advance()
@@ -1312,7 +1312,7 @@ export class Parser {
       }
 
       // The body is parsed into a variable first: object properties evaluate in the
-      // order written, so taking the span inline would end it before the body began —
+      // order written, so taking the span inline would end it before the body began -
       // and a clause whose span stops at its own `{` contains nothing the editor asks
       // about.
       const clauseBody = this.parseBlock()
@@ -1435,7 +1435,7 @@ export class Parser {
 
     // `await` is transparent. The preview evaluates an `async` function the same way
     // it evaluates any other, so the keyword marks a suspension point that never
-    // happens — and a node that is always see-through would add a case to every
+    // happens - and a node that is always see-through would add a case to every
     // consumer for no behaviour. The limitation is recorded in the coverage matrix
     // beside `.task`, which has worked this way since Phase 7.
     if (start.kind === 'keyword' && start.text === 'await') {
@@ -1469,7 +1469,7 @@ export class Parser {
     let expr = this.parsePrimary(allowTrailing)
 
     for (;;) {
-      // Member access continues across newlines — this is what makes SwiftUI's
+      // Member access continues across newlines - this is what makes SwiftUI's
       // modifier chains work:
       //     Text("x")
       //         .font(.largeTitle)
@@ -1491,7 +1491,7 @@ export class Parser {
        *
        * The whitespace is what tells `a?.b` from `a ? .b : c`, and Swift reads it the
        * same way. Without the check, the ternary's then-branch is swallowed as a
-       * chain and the `:` that follows has nowhere to go — which is exactly what
+       * chain and the `:` that follows has nowhere to go - which is exactly what
        * `step == .one ? .two : .one` did.
        */
       if (
@@ -1506,7 +1506,7 @@ export class Parser {
         continue
       }
 
-      // Postfix `!` — force unwrap. No space before, or it is an infix/prefix operator.
+      // Postfix `!` - force unwrap. No space before, or it is an infix/prefix operator.
       if (this.current.kind === 'operator' && this.current.text === '!' && !this.current.spaceBefore) {
         this.advance()
         expr = { kind: 'forceUnwrap', span: this.spanFrom(start), operand: expr }
@@ -1548,12 +1548,12 @@ export class Parser {
 
   /** Member names may be keywords (`.self`, `.default`, `.init`). */
   /**
-   * `Stack<Int>()` — explicit generic arguments in *expression* position.
+   * `Stack<Int>()` - explicit generic arguments in *expression* position.
    *
    * `<` is otherwise the less-than operator, so this is the one genuine ambiguity
    * generics introduce: `a < b` and `Stack<Int>` begin identically. Swift resolves it
    * by looking ahead for a balanced `>` immediately followed by `(`, `.` or `{`, and
-   * so does this — with the index restored the moment the lookahead fails, so a
+   * so does this - with the index restored the moment the lookahead fails, so a
    * comparison is never mistaken for a type.
    *
    * The arguments are dropped rather than recorded. Generics are erased, and the
@@ -1589,7 +1589,7 @@ export class Parser {
       } else if (
         // A type argument list holds types and separators, nothing else. Meeting a
         // token that cannot appear in one settles the ambiguity immediately, and
-        // cheaply — `a < b && c > d` never reaches the closing brace.
+        // cheaply - `a < b && c > d` never reaches the closing brace.
         !(
           this.current.kind === 'identifier' ||
           this.check(',') ||
@@ -1633,7 +1633,7 @@ export class Parser {
   /**
    * Parses an argument list, or gives up without reporting anything.
    *
-   * For attributes, where an unparseable argument must not produce a diagnostic — the
+   * For attributes, where an unparseable argument must not produce a diagnostic - the
    * attribute is still perfectly good Swift, it is only this parser that cannot read
    * its argument, and brace matching skips it silently instead.
    */
@@ -1657,7 +1657,7 @@ export class Parser {
       let label: string | null = null
       let labelSpan: SourceSpan | null = null
 
-      // `label: value` — but not `a ? b : c` and not a type annotation.
+      // `label: value` - but not `a ? b : c` and not a type annotation.
       if (
         (this.current.kind === 'identifier' || this.current.kind === 'keyword') &&
         this.peek().text === ':' &&
@@ -1753,7 +1753,7 @@ export class Parser {
 
       const components: string[] = []
       // An optional root type, as in `\Item.title`. It carries no information the
-      // slice uses — the key path is applied to a value whose type is already known.
+      // slice uses - the key path is applied to a value whose type is already known.
       if (this.current.kind === 'identifier' && !this.check('.')) this.advance()
 
       while (this.check('.')) {
@@ -1916,7 +1916,7 @@ export class Parser {
   /**
    * Decides whether a closure opens with a parameter list.
    *
-   * The naive test — "is there an `in` before the closing brace" — is wrong, because
+   * The naive test - "is there an `in` before the closing brace" - is wrong, because
    * `{ for i in items { … } }` contains one. So the scan additionally requires that
    * everything before the `in` could actually *be* a parameter list: names, commas,
    * type annotations, an optional capture list and arrow. A `for` keyword, a literal,
