@@ -1,6 +1,7 @@
 import type { SourceSpan, UIEvent } from '@studio/shared'
 import type { SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
+  asKeyPath,
   asProjection,
   bool,
   describe,
@@ -18,6 +19,7 @@ import {
 import type { SemanticModel } from '@studio/swift-sema'
 import { fingerprint, IdentityPath, StateStore } from './identity'
 import { resolveUI, UIState, type ResolvedUI } from './presentation'
+import { DEFAULT_ENVIRONMENT, type EnvironmentInputs } from './view-environment'
 import { SwiftUIHost } from './swiftui-host'
 import { asView, handlerIdFor, type AnimationPayload, type ViewIntent, type ViewValue } from './view-value'
 
@@ -70,6 +72,19 @@ export class AppRuntime {
   /** Set when the change being rendered happened inside `withAnimation`. */
   private animation: AnimationPayload | null = null
 
+  /** Device and preview state the SwiftUI environment exposes to user code. */
+  private environmentInputs: EnvironmentInputs = DEFAULT_ENVIRONMENT
+
+  /**
+   * Tells the runtime what the device looks like this frame.
+   *
+   * Separate from `load` because it changes without the program changing — flipping
+   * to dark mode must not reload the interpreter and discard every `@State`.
+   */
+  setEnvironment(inputs: EnvironmentInputs): void {
+    this.environmentInputs = inputs
+  }
+
   load(files: readonly SourceFileNode[], model: SemanticModel, programKey: string): void {
     if (programKey === this.programKey && this.entryTypeName) return
 
@@ -98,6 +113,7 @@ export class AppRuntime {
     this.handlers = new Map()
     this.identity = new IdentityPath()
     this.interpreter.resetSteps()
+    this.host.environment.reset(this.environmentInputs)
     this.state.beginPass()
 
     const entry = this.entryTypeName ? this.interpreter.types.get(this.entryTypeName) : undefined
@@ -118,6 +134,14 @@ export class AppRuntime {
         animation: this.animation,
       })
       this.handlers = ui.handlers
+      // `@Environment(\.dismiss)` is callable at any depth, so it has to resolve to
+      // whatever is presented *now* rather than to whatever was when it was read.
+      const dismiss = ui.overlay?.dismiss ?? null
+      this.host.dismissAction = dismiss
+        ? () => {
+            this.perform(dismiss, { kind: 'tap', handlerId: '', location: { x: 0, y: 0 } })
+          }
+        : null
       this.state.endPass()
 
       return { views, ui, logs: this.host.takeLogs(), failure: null, rootTypeName: this.rootTypeName }
@@ -307,6 +331,40 @@ export class AppRuntime {
       )
       instance.fields.set(property.name, stored)
     }
+
+    this.seedEnvironment(instance, decl)
+  }
+
+  /**
+   * Fills in properties whose value comes from the environment rather than the view.
+   *
+   * `@Environment(\.colorScheme)` names its key in the attribute's argument;
+   * `@EnvironmentObject` names its type in the annotation. Both are seeded before the
+   * body runs, for the same reason `@State` is: the body must see the value, not the
+   * placeholder the initialiser left behind.
+   */
+  private seedEnvironment(instance: StructValue, decl: StructDecl): void {
+    for (const member of decl.members) {
+      if (member.kind !== 'varDecl') continue
+
+      const environment = member.attributes.find((a) => a.name === 'Environment')
+      if (environment) {
+        const key = asKeyPath(keyPathArgument(environment))?.components[0]
+        const value = key ? this.host.environment.value(key) : undefined
+        if (value !== undefined) instance.fields.set(member.name, value)
+        continue
+      }
+
+      if (!member.attributes.some((a) => a.name === 'EnvironmentObject')) continue
+
+      const typeName =
+        member.typeAnnotation?.kind === 'namedType' ? member.typeAnnotation.name : null
+      const object =
+        (typeName ? this.host.environment.object(typeName) : undefined) ??
+        this.host.environment.soleObject()
+
+      if (object !== undefined) instance.fields.set(member.name, object)
+    }
   }
 
   /** Copies `@State` values out of the live instances and back into their boxes. */
@@ -324,11 +382,26 @@ export class AppRuntime {
   }
 }
 
+/**
+ * The properties whose value must outlive the view struct.
+ *
+ * `@StateObject` belongs here beside `@State` and `@ObservedObject` does not — that
+ * is the entire difference between them. A `@StateObject` is created once and kept;
+ * an `@ObservedObject` is handed in from outside and owned by whoever made it.
+ */
 function statefulProperties(decl: StructDecl): VarDecl[] {
   return decl.members.filter(
     (m): m is VarDecl =>
-      m.kind === 'varDecl' && m.attributes.some((a) => a.name === 'State'),
+      m.kind === 'varDecl' &&
+      m.attributes.some((a) => a.name === 'State' || a.name === 'StateObject'),
   )
+}
+
+/** `@Environment(\.colorScheme)` — the key path the attribute was given. */
+function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): SwiftValue | undefined {
+  const first = attribute.args[0]?.value as { kind?: string; components?: readonly string[] } | undefined
+  if (first?.kind !== 'keyPath' || !first.components) return undefined
+  return { kind: 'opaque', typeName: 'KeyPath', payload: { components: first.components } }
 }
 
 /** `WindowGroup` holds the app's content; it is a scene, not a view. */

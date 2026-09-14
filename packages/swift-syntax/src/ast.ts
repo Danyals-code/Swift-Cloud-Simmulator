@@ -91,6 +91,7 @@ export interface Modifier extends NodeBase {
 export type Decl =
   | ImportDecl
   | StructDecl
+  | EnumDecl
   | FuncDecl
   | VarDecl
   | InitDecl
@@ -107,6 +108,14 @@ export interface ImportDecl extends NodeBase {
   readonly module: string
 }
 
+/**
+ * A `struct` or a `class`.
+ *
+ * One node for both, because the *declaration* is identical — same members, same
+ * conformances, same syntax. What differs is instantiation: a class is a reference,
+ * so assigning it shares rather than copies. That is one flag here and one branch in
+ * `copyValue`, rather than a parallel node type every consumer would have to learn.
+ */
 export interface StructDecl extends DeclBase {
   readonly kind: 'structDecl'
   readonly name: string
@@ -114,6 +123,34 @@ export interface StructDecl extends DeclBase {
   /** Protocol conformances and inherited types, e.g. `View`, `App`. */
   readonly inherits: readonly NamedType[]
   readonly members: readonly Decl[]
+  /** True for `class`: instances are shared, not copied. */
+  readonly isReference: boolean
+}
+
+/**
+ * An `enum`, with raw values or associated values.
+ *
+ * Enums are what drive most `switch` statements in SwiftUI code — a tab selection, a
+ * loading state, a filter — so they arrive together with pattern matching rather than
+ * separately.
+ */
+export interface EnumDecl extends DeclBase {
+  readonly kind: 'enumDecl'
+  readonly name: string
+  readonly nameSpan: SourceSpan
+  readonly inherits: readonly NamedType[]
+  readonly cases: readonly EnumCase[]
+  /** Methods and computed properties declared in the body. */
+  readonly members: readonly Decl[]
+}
+
+export interface EnumCase extends NodeBase {
+  readonly name: string
+  readonly nameSpan: SourceSpan
+  /** `case success(String, Int)` — the payload's types, positionally. */
+  readonly associated: readonly Param[]
+  /** `case home = "home"` */
+  readonly rawValue: Expr | null
 }
 
 export interface FuncDecl extends DeclBase {
@@ -175,7 +212,13 @@ export type Stmt =
   | ExprStmt
   | DeclStmt
   | IfStmt
+  | GuardStmt
+  | SwitchStmt
   | ForInStmt
+  | WhileStmt
+  | RepeatStmt
+  | BreakStmt
+  | ContinueStmt
   | ReturnStmt
   | UnsupportedStmt
   | ErrorStmt
@@ -195,12 +238,111 @@ export interface DeclStmt extends NodeBase {
   readonly declaration: Decl
 }
 
+/**
+ * One clause of an `if` / `guard` / `while` condition list.
+ *
+ * Swift's conditions are a comma-separated list that mixes booleans with optional
+ * bindings — `if let user = user, user.isActive` — and the bindings scope into the
+ * body. Modelling the list rather than a single expression is what makes `if let`
+ * expressible at all.
+ */
+export type Condition =
+  | { readonly kind: 'expr'; readonly expr: Expr }
+  | {
+      readonly kind: 'optionalBinding'
+      readonly name: string
+      readonly nameSpan: SourceSpan
+      readonly isLet: boolean
+      /** `if let user` with no `=` rebinds the name to its own unwrapped value. */
+      readonly value: Expr
+    }
+  /** `case .success(let payload) = result` — an `if case` pattern match. */
+  | { readonly kind: 'caseMatch'; readonly pattern: Pattern; readonly value: Expr }
+
 export interface IfStmt extends NodeBase {
   readonly kind: 'ifStmt'
-  readonly condition: Expr
+  readonly conditions: readonly Condition[]
   readonly then: Block
   /** Either a `Block` or a nested `IfStmt` for `else if`. */
   readonly else: Block | IfStmt | null
+}
+
+/**
+ * `guard … else { … }`.
+ *
+ * The else block must leave the enclosing scope, which Swift enforces and we do not:
+ * the strictness pass reports a `guard` body that falls through instead.
+ */
+export interface GuardStmt extends NodeBase {
+  readonly kind: 'guardStmt'
+  readonly conditions: readonly Condition[]
+  readonly else: Block
+}
+
+export interface SwitchStmt extends NodeBase {
+  readonly kind: 'switchStmt'
+  readonly subject: Expr
+  readonly cases: readonly SwitchCase[]
+}
+
+export interface SwitchCase extends NodeBase {
+  /** Empty for `default`. */
+  readonly patterns: readonly Pattern[]
+  readonly where: Expr | null
+  readonly body: Block
+  readonly isDefault: boolean
+}
+
+/**
+ * A `switch` / `if case` pattern.
+ *
+ * Deliberately a small set: the patterns that appear in view code. Tuple and nested
+ * patterns are reported as unsupported rather than half-matched, because a pattern
+ * that silently fails to match sends execution down the wrong branch — the exact
+ * class of silent wrongness this project refuses.
+ */
+export type Pattern =
+  /** `case .home` or `case Tab.home`, with optional bindings for associated values. */
+  | {
+      readonly kind: 'enumCase'
+      readonly typeName: string | null
+      readonly caseName: string
+      readonly bindings: readonly PatternBinding[]
+      readonly span: SourceSpan
+    }
+  /** `case 1`, `case "a"` — matched by equality. */
+  | { readonly kind: 'value'; readonly value: Expr; readonly span: SourceSpan }
+  /** `case 1...5` */
+  | { readonly kind: 'range'; readonly value: Expr; readonly span: SourceSpan }
+  /** `case let x` — always matches, binding the subject. */
+  | { readonly kind: 'binding'; readonly name: string; readonly isLet: boolean; readonly span: SourceSpan }
+  /** `case _` */
+  | { readonly kind: 'wildcard'; readonly span: SourceSpan }
+
+export interface PatternBinding extends NodeBase {
+  readonly name: string
+  /** `_` in a payload position binds nothing. */
+  readonly isWildcard: boolean
+}
+
+export interface WhileStmt extends NodeBase {
+  readonly kind: 'whileStmt'
+  readonly conditions: readonly Condition[]
+  readonly body: Block
+}
+
+export interface RepeatStmt extends NodeBase {
+  readonly kind: 'repeatStmt'
+  readonly body: Block
+  readonly condition: Expr
+}
+
+export interface BreakStmt extends NodeBase {
+  readonly kind: 'breakStmt'
+}
+
+export interface ContinueStmt extends NodeBase {
+  readonly kind: 'continueStmt'
 }
 
 export interface ForInStmt extends NodeBase {
@@ -209,6 +351,8 @@ export interface ForInStmt extends NodeBase {
   readonly variableSpan: SourceSpan
   readonly sequence: Expr
   readonly body: Block
+  /** `for x in xs where x.isReady` */
+  readonly where: Expr | null
 }
 
 export interface ReturnStmt extends NodeBase {
@@ -429,6 +573,24 @@ export type Node = SourceFileNode | Decl | Stmt | Expr | Block | TypeRef
  * node type without teaching the walker about it is a type error rather than a
  * silently skipped subtree.
  */
+function visitConditions(
+  conditions: readonly Condition[],
+  visit: (child: Node) => void,
+): void {
+  for (const condition of conditions) {
+    if (condition.kind === 'expr') visit(condition.expr)
+    else if (condition.kind === 'optionalBinding') visit(condition.value)
+    else {
+      visitPattern(condition.pattern, visit)
+      visit(condition.value)
+    }
+  }
+}
+
+function visitPattern(pattern: Pattern, visit: (child: Node) => void): void {
+  if (pattern.kind === 'value' || pattern.kind === 'range') visit(pattern.value)
+}
+
 export function forEachChild(node: Node, visit: (child: Node) => void): void {
   switch (node.kind) {
     case 'sourceFile':
@@ -466,13 +628,43 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
     case 'declStmt':
       visit(node.declaration)
       return
+    case 'enumDecl':
+      node.cases.forEach((c) => {
+        if (c.rawValue) visit(c.rawValue)
+      })
+      node.members.forEach(visit)
+      return
     case 'ifStmt':
-      visit(node.condition)
+      visitConditions(node.conditions, visit)
       visit(node.then)
       if (node.else) visit(node.else)
       return
+    case 'guardStmt':
+      visitConditions(node.conditions, visit)
+      visit(node.else)
+      return
+    case 'whileStmt':
+      visitConditions(node.conditions, visit)
+      visit(node.body)
+      return
+    case 'repeatStmt':
+      visit(node.body)
+      visit(node.condition)
+      return
+    case 'switchStmt':
+      visit(node.subject)
+      node.cases.forEach((c) => {
+        c.patterns.forEach((pattern) => visitPattern(pattern, visit))
+        if (c.where) visit(c.where)
+        visit(c.body)
+      })
+      return
+    case 'breakStmt':
+    case 'continueStmt':
+      return
     case 'forInStmt':
       visit(node.sequence)
+      if (node.where) visit(node.where)
       visit(node.body)
       return
     case 'returnStmt':

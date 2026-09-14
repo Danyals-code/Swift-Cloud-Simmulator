@@ -22,6 +22,7 @@ import {
   type PlacedNode,
 } from '@studio/swiftui-layout'
 import { AppRuntime, type EvaluationResult } from './app-runtime'
+import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
@@ -382,6 +383,7 @@ export function compile(request: CompileRequest): CompileResult {
 
   const evaluateStart = performance.now()
   runtime.load(analysis.files, analysis.model, programKeyOf(request))
+  runtime.setEnvironment(environmentFor(request))
   const evaluation = runtime.evaluate()
   const evaluateMs = performance.now() - evaluateStart
 
@@ -436,6 +438,26 @@ function finish(
   const layoutMs = performance.now() - layoutStart
 
   return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, layoutMs)
+}
+
+/**
+ * What `@Environment` reports, from what the preview controls are set to.
+ *
+ * Read on every compile rather than at load, because appearance and Dynamic Type
+ * change without the program changing — and reloading would discard every `@State`.
+ */
+function environmentFor(request: CompileRequest): EnvironmentInputs {
+  const scale = request.typeScale ?? 1
+  return {
+    colorScheme: request.colorScheme,
+    typeScale: scale,
+    locale: 'en_US',
+    layoutDirection: 'leftToRight',
+    // A phone is compact across and regular down; a landscape phone and an iPad are
+    // not, but the device model does not report that yet.
+    horizontalSizeClass: request.canvas.width >= 700 ? 'regular' : 'compact',
+    verticalSizeClass: request.canvas.height >= 700 ? 'regular' : 'compact',
+  }
 }
 
 function programKeyOf(request: CompileRequest): string {

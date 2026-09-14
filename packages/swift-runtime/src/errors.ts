@@ -78,6 +78,18 @@ export class ReturnSignal {
   constructor(readonly value: unknown) {}
 }
 
+/**
+ * Loop control, carried as a throw.
+ *
+ * Same mechanism as `ReturnSignal` and for the same reason: `break` has to unwind
+ * through however many nested blocks and `if`s stand between it and the loop, and a
+ * return code would have to be checked and propagated at every one of them — which
+ * is exactly the kind of bookkeeping that gets missed in one branch.
+ */
+export class BreakSignal {}
+
+export class ContinueSignal {}
+
 export const TRAP_MESSAGES = {
   forceUnwrapNil: 'Unexpectedly found nil while unwrapping an Optional value',
   indexOutOfRange: 'Index out of range',

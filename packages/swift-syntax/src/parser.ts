@@ -14,15 +14,20 @@ import type {
   Block,
   ClosureExpr,
   ClosureParam,
+  Condition,
   Decl,
+  EnumCase,
   Expr,
   IfStmt,
   Modifier,
   NamedType,
   Param,
+  Pattern,
+  PatternBinding,
   SourceFileNode,
   Stmt,
   StringExprSegment,
+  SwitchCase,
   TypeRef,
 } from './ast'
 
@@ -33,8 +38,6 @@ export interface ParseResult {
 
 /** Declarations outside the subset, mapped to the name the diagnostic should use. */
 const UNSUPPORTED_DECLARATIONS: Readonly<Record<string, string>> = {
-  class: 'class',
-  enum: 'enum',
   protocol: 'protocol',
   extension: 'extension',
   typealias: 'typealias',
@@ -46,15 +49,9 @@ const UNSUPPORTED_DECLARATIONS: Readonly<Record<string, string>> = {
 
 /** Statements outside the subset. */
 const UNSUPPORTED_STATEMENTS: Readonly<Record<string, string>> = {
-  switch: 'switch',
-  guard: 'guard',
-  while: 'while',
-  repeat: 'repeat-while',
   do: 'do-catch',
   defer: 'defer',
   throw: 'throw',
-  break: 'break',
-  continue: 'continue',
   fallthrough: 'fallthrough',
 }
 
@@ -217,7 +214,9 @@ export class Parser {
     const modifiers = this.parseModifiers()
 
     if (this.checkKeyword('import')) return this.parseImport()
-    if (this.checkKeyword('struct')) return this.parseStruct(attributes, modifiers)
+    if (this.checkKeyword('struct')) return this.parseStruct(attributes, modifiers, false)
+    if (this.checkKeyword('class')) return this.parseStruct(attributes, modifiers, true)
+    if (this.checkKeyword('enum')) return this.parseEnum(attributes, modifiers)
     if (this.checkKeyword('func')) return this.parseFunc(attributes, modifiers)
     if (this.checkKeyword('var') || this.checkKeyword('let')) {
       return this.parseVar(attributes, modifiers)
@@ -252,11 +251,21 @@ export class Parser {
     const attributes: Attribute[] = []
     while (this.current.kind === 'attribute') {
       const token = this.advance()
-      // Attribute arguments (`@Environment(\.colorScheme)`) are skipped rather than
-      // parsed: nothing in the subset reads them, and key-path syntax would need
-      // expression support that does not exist yet.
-      const args: Argument[] = []
-      if (this.check('(')) this.skipBalanced('(', ')')
+
+      // `@Environment(\.colorScheme)` names the value it wants in its argument, so
+      // the arguments are parsed rather than skipped. A malformed argument list falls
+      // back to brace matching so one bad attribute cannot eat the declaration.
+      let args: Argument[] = []
+      if (this.check('(')) {
+        const before = this.index
+        const parsed = this.tryParseArgumentList()
+        if (parsed) args = parsed
+        else {
+          this.index = before
+          this.skipBalanced('(', ')')
+        }
+      }
+
       attributes.push({
         span: this.spanFrom(token),
         name: token.text.slice(1),
@@ -291,35 +300,30 @@ export class Parser {
     return { kind: 'importDecl', span: this.spanFrom(start), module: parts.join('.') }
   }
 
-  private parseStruct(attributes: Attribute[], modifiers: Modifier[]): Decl {
-    const start = this.advance() // 'struct'
-    const { name, span: nameSpan } = this.expectIdentifier('a struct name')
+  /**
+   * A `struct` or a `class`.
+   *
+   * One function for both: the syntax is identical, and the only difference —
+   * reference versus value semantics — is a flag the interpreter reads at
+   * instantiation. Splitting them would duplicate the member loop and the recovery
+   * logic for no gain.
+   */
+  private parseStruct(
+    attributes: Attribute[],
+    modifiers: Modifier[],
+    isReference: boolean,
+  ): Decl {
+    const keyword = isReference ? 'class' : 'struct'
+    const start = this.advance() // 'struct' | 'class'
+    const { name, span: nameSpan } = this.expectIdentifier(`a ${keyword} name`)
 
     if (this.check('<')) {
       this.unsupported(this.current.span, 'generic parameters')
       this.skipBalanced('<', '>')
     }
 
-    const inherits: NamedType[] = []
-    if (this.match(':')) {
-      do {
-        const type = this.parseType()
-        if (type.kind === 'namedType') inherits.push(type)
-      } while (this.match(','))
-    }
-
-    const members: Decl[] = []
-    if (this.expect('{', 'to begin the struct body')) {
-      while (!this.atEnd && !this.check('}') && !this.atProbableTopLevelDeclaration()) {
-        this.skipSemicolons()
-        if (this.check('}') || this.atEnd) break
-        const before = this.index
-        const member = this.parseDeclaration()
-        if (member) members.push(member)
-        if (this.index === before) this.advance()
-      }
-      this.expect('}', 'to close the struct body')
-    }
+    const inherits = this.parseInheritanceClause()
+    const members = this.parseTypeBody(keyword)
 
     return {
       kind: 'structDecl',
@@ -330,7 +334,121 @@ export class Parser {
       nameSpan,
       inherits,
       members,
+      isReference,
     }
+  }
+
+  /**
+   * An `enum` with raw or associated values.
+   *
+   * `case a, b` declares two cases on one line, which is how most enums in view code
+   * are written, so the comma form is handled rather than reported.
+   */
+  private parseEnum(attributes: Attribute[], modifiers: Modifier[]): Decl {
+    const start = this.advance() // 'enum'
+    const { name, span: nameSpan } = this.expectIdentifier('an enum name')
+
+    if (this.check('<')) {
+      this.unsupported(this.current.span, 'generic parameters')
+      this.skipBalanced('<', '>')
+    }
+
+    const inherits = this.parseInheritanceClause()
+    const cases: EnumCase[] = []
+    const members: Decl[] = []
+
+    if (this.expect('{', 'to begin the enum body')) {
+      while (!this.atEnd && !this.check('}') && !this.atProbableTopLevelDeclaration()) {
+        this.skipSemicolons()
+        if (this.check('}') || this.atEnd) break
+        const before = this.index
+
+        if (this.checkKeyword('case')) {
+          this.advance()
+          do {
+            cases.push(this.parseEnumCase())
+          } while (this.match(','))
+        } else {
+          const member = this.parseDeclaration()
+          if (member) members.push(member)
+        }
+
+        if (this.index === before) this.advance()
+      }
+      this.expect('}', 'to close the enum body')
+    }
+
+    return {
+      kind: 'enumDecl',
+      span: this.spanFrom(start),
+      attributes,
+      modifiers,
+      name,
+      nameSpan,
+      inherits,
+      cases,
+      members,
+    }
+  }
+
+  private parseEnumCase(): EnumCase {
+    const start = this.current
+    const { name, span: nameSpan } = this.expectIdentifier('an enum case name')
+
+    const associated: Param[] = []
+    if (this.check('(') ) {
+      this.advance()
+      while (!this.atEnd && !this.check(')')) {
+        const paramStart = this.current
+        // `case success(value: Int)` — a labelled payload. The label is recorded so
+        // the case can be constructed either way.
+        let label: string | null = null
+        if (this.current.kind === 'identifier' && this.peek().text === ':') {
+          label = this.advance().text
+          this.advance()
+        }
+        const type = this.parseType()
+        associated.push({
+          span: this.spanFrom(paramStart),
+          externalName: label,
+          internalName: label ?? `_${associated.length}`,
+          type,
+          defaultValue: null,
+        })
+        if (!this.match(',')) break
+      }
+      this.expect(')', 'to close the associated values')
+    }
+
+    const rawValue = this.match('=') ? this.parseExpression(false) : null
+    return { span: this.spanFrom(start), name, nameSpan, associated, rawValue }
+  }
+
+  private parseInheritanceClause(): NamedType[] {
+    const inherits: NamedType[] = []
+    if (this.match(':')) {
+      do {
+        const type = this.parseType()
+        if (type.kind === 'namedType') inherits.push(type)
+      } while (this.match(','))
+    }
+    return inherits
+  }
+
+  private parseTypeBody(keyword: string): Decl[] {
+    const members: Decl[] = []
+    if (this.expect('{', `to begin the ${keyword} body`)) {
+      while (!this.atEnd && !this.check('}') && !this.atProbableTopLevelDeclaration()) {
+        this.skipSemicolons()
+        if (this.check('}') || this.atEnd) break
+        const before = this.index
+        const member = this.parseDeclaration()
+        if (member) members.push(member)
+        if (this.index === before) this.advance()
+      }
+      this.expect('}', `to close the ${keyword} body`)
+    }
+    return members
   }
 
   private parseFunc(attributes: Attribute[], modifiers: Modifier[]): Decl {
@@ -556,13 +674,26 @@ export class Parser {
     const start = this.current
 
     if (this.checkKeyword('if')) return this.parseIf()
+    if (this.checkKeyword('guard')) return this.parseGuard()
+    if (this.checkKeyword('switch')) return this.parseSwitch()
     if (this.checkKeyword('for')) return this.parseForIn()
+    if (this.checkKeyword('while')) return this.parseWhile()
+    if (this.checkKeyword('repeat')) return this.parseRepeat()
     if (this.checkKeyword('return')) return this.parseReturn()
+
+    if (this.checkKeyword('break')) {
+      const token = this.advance()
+      return { kind: 'breakStmt', span: token.span }
+    }
+    if (this.checkKeyword('continue')) {
+      const token = this.advance()
+      return { kind: 'continueStmt', span: token.span }
+    }
 
     if (
       this.current.kind === 'keyword' &&
       (this.checkKeyword('var') || this.checkKeyword('let') || this.checkKeyword('func') ||
-        this.checkKeyword('struct'))
+        this.checkKeyword('struct') || this.checkKeyword('class') || this.checkKeyword('enum'))
     ) {
       const declaration = this.parseDeclaration()
       return declaration
@@ -589,14 +720,7 @@ export class Parser {
 
   private parseIf(): IfStmt {
     const start = this.advance() // 'if'
-
-    if (this.checkKeyword('let') || this.checkKeyword('var')) {
-      this.unsupported(this.current.span, 'optional binding (if let)')
-    }
-
-    // Trailing closures are disallowed in the condition, otherwise the body's `{`
-    // would be parsed as a closure argument to the condition expression.
-    const condition = this.parseExpression(false)
+    const conditions = this.parseConditionList()
     const then = this.parseBlock()
 
     let elseBranch: Block | IfStmt | null = null
@@ -605,7 +729,232 @@ export class Parser {
       elseBranch = this.checkKeyword('if') ? this.parseIf() : this.parseBlock()
     }
 
-    return { kind: 'ifStmt', span: this.spanFrom(start), condition, then, else: elseBranch }
+    return { kind: 'ifStmt', span: this.spanFrom(start), conditions, then, else: elseBranch }
+  }
+
+  private parseGuard(): Stmt {
+    const start = this.advance() // 'guard'
+    const conditions = this.parseConditionList()
+
+    if (this.checkKeyword('else')) {
+      this.advance()
+    } else {
+      this.error(this.current.span, 'expected_token', "Expected 'else' after a 'guard' condition.")
+    }
+
+    return { kind: 'guardStmt', span: this.spanFrom(start), conditions, else: this.parseBlock() }
+  }
+
+  private parseWhile(): Stmt {
+    const start = this.advance() // 'while'
+    const conditions = this.parseConditionList()
+    return { kind: 'whileStmt', span: this.spanFrom(start), conditions, body: this.parseBlock() }
+  }
+
+  private parseRepeat(): Stmt {
+    const start = this.advance() // 'repeat'
+    const body = this.parseBlock()
+
+    if (this.checkKeyword('while')) {
+      this.advance()
+    } else {
+      this.error(this.current.span, 'expected_token', "Expected 'while' after a 'repeat' body.")
+    }
+
+    return { kind: 'repeatStmt', span: this.spanFrom(start), body, condition: this.parseExpression(false) }
+  }
+
+  /**
+   * A comma-separated condition list, as `if` / `guard` / `while` all take.
+   *
+   * Trailing closures are disallowed throughout, otherwise the body's `{` would be
+   * parsed as a closure argument to the last condition.
+   */
+  private parseConditionList(): Condition[] {
+    const conditions: Condition[] = []
+
+    do {
+      if (this.checkKeyword('let') || this.checkKeyword('var')) {
+        const isLet = this.current.text === 'let'
+        this.advance()
+        const { name, span: nameSpan } = this.expectIdentifier('a binding name')
+
+        // `if let user` with no `=` is Swift 5.7 shorthand for `if let user = user`.
+        const value: Expr = this.match('=')
+          ? this.parseExpression(false)
+          : { kind: 'identifier', span: nameSpan, name }
+
+        conditions.push({ kind: 'optionalBinding', name, nameSpan, isLet, value })
+        continue
+      }
+
+      if (this.checkKeyword('case')) {
+        this.advance()
+        const pattern = this.parsePattern()
+        if (!this.match('=')) {
+          this.error(this.current.span, 'expected_token', "Expected '=' after a 'case' pattern.")
+        }
+        conditions.push({ kind: 'caseMatch', pattern, value: this.parseExpression(false) })
+        continue
+      }
+
+      conditions.push({ kind: 'expr', expr: this.parseExpression(false) })
+    } while (this.match(','))
+
+    return conditions
+  }
+
+  // ------------------------------------------------------------------ switch
+
+  private parseSwitch(): Stmt {
+    const start = this.advance() // 'switch'
+    const subject = this.parseExpression(false)
+    const cases: SwitchCase[] = []
+
+    if (!this.match('{')) {
+      this.error(this.current.span, 'expected_token', "Expected '{' after a 'switch' subject.")
+      return { kind: 'switchStmt', span: this.spanFrom(start), subject, cases }
+    }
+
+    while (!this.atEnd && !this.check('}')) {
+      this.skipSemicolons()
+      if (this.check('}')) break
+
+      const caseStart = this.current
+      const isDefault = this.checkKeyword('default')
+      const patterns: Pattern[] = []
+
+      if (isDefault) {
+        this.advance()
+      } else if (this.checkKeyword('case')) {
+        this.advance()
+        do {
+          patterns.push(this.parsePattern())
+        } while (this.match(','))
+      } else {
+        this.error(
+          this.current.span,
+          'unexpected_token',
+          `Expected 'case' or 'default' in a switch, found ${tokenDescription(this.current)}.`,
+        )
+        this.advance()
+        continue
+      }
+
+      const where = this.checkKeyword('where') ? (this.advance(), this.parseExpression(false)) : null
+      if (!this.match(':')) {
+        this.error(this.current.span, 'expected_token', "Expected ':' after a switch case.")
+      }
+
+      // A case body runs to the next `case`, `default` or the closing brace. Swift
+      // has no implicit fallthrough, so there is no terminator to consume.
+      const statements: Stmt[] = []
+      const bodyStart = this.current
+      while (
+        !this.atEnd &&
+        !this.check('}') &&
+        !this.checkKeyword('case') &&
+        !this.checkKeyword('default')
+      ) {
+        this.skipSemicolons()
+        if (this.atEnd || this.check('}') || this.checkKeyword('case') || this.checkKeyword('default')) break
+        statements.push(this.parseStatement())
+      }
+
+      cases.push({
+        span: this.spanFrom(caseStart),
+        patterns,
+        where,
+        isDefault,
+        body: { kind: 'block', span: this.spanFrom(bodyStart), statements },
+      })
+    }
+
+    this.expect('}', "Expected '}' to close the switch.")
+    return { kind: 'switchStmt', span: this.spanFrom(start), subject, cases }
+  }
+
+  /**
+   * One `case` pattern.
+   *
+   * The supported set is small and deliberately so: an unsupported pattern is
+   * reported by name rather than half-matched, because a pattern that silently fails
+   * sends execution down the wrong branch.
+   */
+  private parsePattern(): Pattern {
+    const start = this.current
+
+    if (this.check('_')) {
+      this.advance()
+      return { kind: 'wildcard', span: this.spanFrom(start) }
+    }
+
+    if (this.current.kind === 'identifier' && this.current.text === '_') {
+      this.advance()
+      return { kind: 'wildcard', span: this.spanFrom(start) }
+    }
+
+    // `case let x` / `case var x` — binds the whole subject.
+    if (this.checkKeyword('let') || this.checkKeyword('var')) {
+      const isLet = this.current.text === 'let'
+      this.advance()
+
+      // `case let .success(value)` — the binding applies inside the payload.
+      if (this.check('.')) return this.parseEnumCasePattern(start, null, true)
+
+      const { name } = this.expectIdentifier('a binding name')
+      return { kind: 'binding', name, isLet, span: this.spanFrom(start) }
+    }
+
+    // `.home` or `Tab.home`, with or without a payload.
+    if (this.check('.')) return this.parseEnumCasePattern(start, null, false)
+
+    if (this.current.kind === 'identifier' && this.peek().text === '.') {
+      const typeName = this.advance().text
+      return this.parseEnumCasePattern(start, typeName, false)
+    }
+
+    const value = this.parseExpression(false)
+    const isRange =
+      value.kind === 'binary' && (value.operator === '...' || value.operator === '..<')
+    return isRange
+      ? { kind: 'range', value, span: this.spanFrom(start) }
+      : { kind: 'value', value, span: this.spanFrom(start) }
+  }
+
+  private parseEnumCasePattern(
+    start: Token,
+    typeName: string | null,
+    outerBinding: boolean,
+  ): Pattern {
+    this.expect('.', "Expected '.' before an enum case name.")
+    const { name: caseName } = this.expectIdentifier('an enum case name')
+
+    const bindings: PatternBinding[] = []
+    if (this.check('(')) {
+      this.advance()
+      while (!this.atEnd && !this.check(')')) {
+        // `let` may appear per-binding (`case .x(let a)`) or once outside it.
+        if (this.checkKeyword('let') || this.checkKeyword('var')) this.advance()
+
+        const token = this.current
+        if (token.kind === 'identifier') {
+          this.advance()
+          bindings.push({
+            span: token.span,
+            name: token.text,
+            isWildcard: token.text === '_',
+          })
+        } else {
+          this.advance()
+        }
+        if (!this.match(',')) break
+      }
+      this.expect(')', "Expected ')' to close an enum case pattern.")
+    }
+
+    void outerBinding
+    return { kind: 'enumCase', typeName, caseName, bindings, span: this.spanFrom(start) }
   }
 
   private parseForIn(): Stmt {
@@ -631,12 +980,7 @@ export class Parser {
     }
 
     const sequence = this.parseExpression(false)
-
-    if (this.checkKeyword('where')) {
-      this.unsupported(this.current.span, 'for-in where clause')
-      while (!this.atEnd && !this.check('{')) this.advance()
-    }
-
+    const where = this.checkKeyword('where') ? (this.advance(), this.parseExpression(false)) : null
     const body = this.parseBlock()
 
     return {
@@ -646,6 +990,7 @@ export class Parser {
       variableSpan: variable?.span ?? start.span,
       sequence,
       body,
+      where,
     }
   }
 
@@ -863,6 +1208,24 @@ export class Parser {
       `Expected a member name after '.', found ${tokenDescription(this.current)}.`,
     )
     return { name: '', span: this.current.span }
+  }
+
+  /**
+   * Parses an argument list, or gives up without reporting anything.
+   *
+   * For attributes, where an unparseable argument must not produce a diagnostic — the
+   * attribute is still perfectly good Swift, it is only this parser that cannot read
+   * its argument, and brace matching skips it silently instead.
+   */
+  private tryParseArgumentList(): Argument[] | null {
+    const diagnosticsBefore = this.diagnostics.length
+    const args = this.parseArgumentList('(', ')')
+
+    if (this.diagnostics.length > diagnosticsBefore) {
+      this.diagnostics.length = diagnosticsBefore
+      return null
+    }
+    return args
   }
 
   private parseArgumentList(open: string, close: string): Argument[] {

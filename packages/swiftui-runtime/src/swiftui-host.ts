@@ -13,6 +13,7 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
+import { DISMISS_TYPE, EnvironmentStack } from './view-environment'
 import {
   asView,
   ANIMATION_TYPE,
@@ -127,6 +128,24 @@ export class SwiftUIHost implements InterpreterHost {
   scopeIdentity: (<T>(key: string, fn: () => T) => T) | null = null
 
   /**
+   * The SwiftUI environment, as a dynamic scope.
+   *
+   * Owned by the host because it is the host that expands views, and the environment
+   * has to be in scope at exactly that moment. See `view-environment.ts` for the
+   * limitation this implies and why it is the honest approximation.
+   */
+  readonly environment = new EnvironmentStack()
+
+  /**
+   * What `@Environment(\.dismiss)` should do when called.
+   *
+   * Supplied by the runtime, which is the only thing that knows what is presented.
+   * Null when nothing is: `dismiss()` outside a presentation does nothing in SwiftUI
+   * too, rather than failing.
+   */
+  dismissAction: (() => void) | null = null
+
+  /**
    * The animation `withAnimation` was called with, if any.
    *
    * Read and cleared by the runtime after dispatching an event: a state change made
@@ -156,6 +175,45 @@ export class SwiftUIHost implements InterpreterHost {
       action: null,
       span,
     }
+  }
+
+  /**
+   * Applies `.environmentObject` / `.environment`, with the injection in scope.
+   *
+   * The target is expanded *inside* the scope, which is what gets the value to the
+   * view's `body`. A view value that is already built keeps the modifier recorded so
+   * the inspector still shows it, even though nothing below it can read it — see the
+   * limitation in `view-environment.ts`.
+   */
+  private withInjectedEnvironment(
+    target: SwiftValue,
+    member: string,
+    call: HostCall,
+  ): SwiftValue | undefined {
+    const values: [string, SwiftValue][] = []
+    const objects: [string, SwiftValue][] = []
+
+    if (member === 'environmentObject') {
+      const object = call.args[0]?.value
+      if (object?.kind === 'struct') objects.push([object.typeName, object])
+    } else {
+      const key = asKeyPath(call.args[0]?.value)?.components[0]
+      const value = call.args[1]?.value
+      if (key && value) values.push([key, value])
+    }
+
+    const modifier: ModifierValue = {
+      name: member,
+      args: toArgs(call),
+      span: call.span,
+      closure: call.trailingClosure,
+    }
+
+    return this.environment.scoped(values, objects, () => {
+      const base = asView(target) ?? this.expandForModifier(target, call.span)
+      if (!base) return undefined
+      return view({ ...base, modifiers: [...base.modifiers, modifier] })
+    })
   }
 
   /** Collected builder results, with user views expanded and non-views dropped. */
@@ -228,6 +286,13 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
+    // `.environmentObject(store)` and `.environment(\.key, value)` must be in scope
+    // *while* the view below them expands, so they are handled before anything else
+    // touches the target — by which point a struct would already have been expanded.
+    if (member === 'environmentObject' || member === 'environment') {
+      return this.withInjectedEnvironment(target, member, call)
+    }
+
     // A modifier on a view returns a *new* view with the modifier appended, so the
     // original is untouched — SwiftUI modifiers are value-semantic too.
     //
@@ -278,6 +343,13 @@ export class SwiftUIHost implements InterpreterHost {
     }
 
     return undefined
+  }
+
+  /** `dismiss()` — the one callable the environment hands out. */
+  callValue(target: SwiftValue): SwiftValue | undefined {
+    if (target.kind !== 'opaque' || target.typeName !== DISMISS_TYPE) return undefined
+    this.dismissAction?.()
+    return { kind: 'void' }
   }
 
   /**

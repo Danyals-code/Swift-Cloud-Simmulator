@@ -1,9 +1,11 @@
 import type { Diagnostic, FixIt, SourceSpan } from '@studio/shared'
 import type {
   Block,
+  Condition,
   Decl,
   Expr,
   FuncDecl,
+  Pattern,
   SourceFileNode,
   Stmt,
   StructDecl,
@@ -161,10 +163,39 @@ class StrictnessLinter {
         if (statement.value) this.expression(statement.value)
         return
       case 'ifStmt':
-        this.expression(statement.condition)
+        this.conditions(statement.conditions)
         this.block(statement.then)
         if (statement.else?.kind === 'block') this.block(statement.else)
         else if (statement.else) this.statement(statement.else)
+        return
+
+      case 'guardStmt':
+        this.conditions(statement.conditions)
+        this.block(statement.else)
+        return
+
+      case 'whileStmt':
+        this.conditions(statement.conditions)
+        this.block(statement.body)
+        return
+
+      case 'repeatStmt':
+        this.block(statement.body)
+        this.expression(statement.condition)
+        return
+
+      case 'switchStmt':
+        this.expression(statement.subject)
+        for (const branch of statement.cases) {
+          this.push()
+          try {
+            for (const pattern of branch.patterns) this.bindPattern(pattern)
+            if (branch.where) this.expression(branch.where)
+            for (const inner of branch.body.statements) this.statement(inner)
+          } finally {
+            this.pop()
+          }
+        }
         return
       case 'forInStmt': {
         this.expression(statement.sequence)
@@ -185,6 +216,59 @@ class StrictnessLinter {
       default:
         return
     }
+  }
+
+  /**
+   * Walks a condition list, declaring anything it binds.
+   *
+   * The bound type is left unknown: an optional binding unwraps something whose type
+   * this pass cannot see through, and claiming one would be a guess. Every check here
+   * stays silent on `unknown`, so that is the correct answer rather than a gap.
+   */
+  private conditions(conditions: readonly Condition[]): void {
+    for (const condition of conditions) {
+      if (condition.kind === 'expr') {
+        this.expression(condition.expr)
+        continue
+      }
+      if (condition.kind === 'optionalBinding') {
+        this.expression(condition.value)
+        this.declare(condition.name, {
+          type: 'unknown',
+          isLet: condition.isLet,
+          span: condition.nameSpan,
+          elementType: null,
+        })
+        continue
+      }
+      this.expression(condition.value)
+      this.bindPattern(condition.pattern)
+    }
+  }
+
+  private bindPattern(pattern: Pattern): void {
+    if (pattern.kind === 'binding') {
+      this.declare(pattern.name, {
+        type: 'unknown',
+        isLet: pattern.isLet,
+        span: pattern.span,
+        elementType: null,
+      })
+      return
+    }
+    if (pattern.kind === 'enumCase') {
+      for (const binding of pattern.bindings) {
+        if (binding.isWildcard) continue
+        this.declare(binding.name, {
+          type: 'unknown',
+          isLet: true,
+          span: binding.span,
+          elementType: null,
+        })
+      }
+      return
+    }
+    if (pattern.kind === 'value' || pattern.kind === 'range') this.expression(pattern.value)
   }
 
   // -------------------------------------------------------------- expressions

@@ -203,12 +203,28 @@ describe('coverage diagnostics are honest, not wrong', () => {
   it('flags an unsupported property wrapper by name', () => {
     const source = `@main struct M: App { var body: some Scene { WindowGroup { } } }
 struct V: View {
-    @ObservedObject var store = Store()
+    @AppStorage("seen") var seen = false
     var body: some View { Text("x") }
 }`
-    const wrapper = warnings(source).find((d) => d.feature === '@ObservedObject')
+    const wrapper = warnings(source).find((d) => d.feature === '@AppStorage')
     expect(wrapper).toBeDefined()
     expect(wrapper!.message).toContain('Phase 7')
+  })
+
+  it('says nothing about the observation wrappers Phase 7 added', () => {
+    const source = `@main struct M: App { var body: some Scene { WindowGroup { } } }
+
+class Store: ObservableObject {
+    @Published var count = 0
+}
+
+struct V: View {
+    @StateObject private var store = Store()
+    @Environment(\\.colorScheme) private var scheme
+    var body: some View { Text("\\(store.count)") }
+}`
+    expect(warnings(source)).toEqual([])
+    expect(errors(source)).toEqual([])
   })
 
   it('accepts @State without comment', () => {

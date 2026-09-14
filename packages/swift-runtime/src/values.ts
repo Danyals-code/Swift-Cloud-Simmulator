@@ -26,6 +26,7 @@ export type SwiftValue =
   | ArrayValue
   | DictionaryValue
   | StructValue
+  | EnumValue
   | ClosureValue
   | FunctionValue
   | RangeValue
@@ -65,11 +66,35 @@ export interface DictionaryValue {
   entries: Map<string, SwiftValue>
 }
 
-/** An instance of a user-declared `struct`. Value semantics. */
+/**
+ * An instance of a user-declared `struct` or `class`.
+ *
+ * One shape for both; `reference` decides the semantics. A class is shared on
+ * assignment and on argument passing, a struct is copied — that is the whole of the
+ * difference, and expressing it as a flag keeps it to one branch in `copyValue`
+ * rather than a parallel value kind every `switch` would have to learn.
+ */
 export interface StructValue {
   readonly kind: 'struct'
   readonly typeName: string
   fields: Map<string, SwiftValue>
+  /** True for a `class` instance: never copied. */
+  readonly reference?: boolean
+}
+
+/**
+ * A case of a user-declared `enum`.
+ *
+ * Value semantics, like a struct. `associated` holds the payload positionally;
+ * `rawValue` is present only for enums with a raw type, which is what makes
+ * `Tab(rawValue:)` and `.rawValue` work.
+ */
+export interface EnumValue {
+  readonly kind: 'enum'
+  readonly typeName: string
+  readonly caseName: string
+  readonly associated: readonly SwiftValue[]
+  readonly rawValue: SwiftValue | null
 }
 
 /** Closures are reference types in Swift, so these are shared, never copied. */
@@ -164,6 +189,15 @@ export function str(value: string): StringValue {
 export function array(elements: SwiftValue[]): ArrayValue {
   return { kind: 'array', elements }
 }
+export function enumCase(
+  typeName: string,
+  caseName: string,
+  associated: readonly SwiftValue[] = [],
+  rawValue: SwiftValue | null = null,
+): EnumValue {
+  return { kind: 'enum', typeName, caseName, associated, rawValue }
+}
+
 export function opaque(typeName: string, payload: unknown): OpaqueValue {
   return { kind: 'opaque', typeName, payload }
 }
@@ -265,10 +299,16 @@ export function copyValue(value: SwiftValue): SwiftValue {
       return { kind: 'dictionary', entries }
     }
     case 'struct': {
+      // A class instance is a reference: sharing it *is* the semantics.
+      if (value.reference) return value
       const fields = new Map<string, SwiftValue>()
       for (const [k, v] of value.fields) fields.set(k, copyValue(v))
       return { kind: 'struct', typeName: value.typeName, fields }
     }
+    case 'enum':
+      return value.associated.length === 0
+        ? value
+        : { ...value, associated: value.associated.map(copyValue) }
     // Scalars are immutable, and closures/functions are reference types. Both are
     // safe to share.
     default:
@@ -306,6 +346,8 @@ export function typeNameOf(value: SwiftValue): string {
     case 'dictionary':
       return 'Dictionary'
     case 'struct':
+      return value.typeName
+    case 'enum':
       return value.typeName
     case 'closure':
     case 'function':
@@ -351,6 +393,11 @@ export function describe(value: SwiftValue, insideCollection = false): string {
       const fields = [...value.fields].map(([k, v]) => `${k}: ${describe(v, true)}`)
       return `${value.typeName}(${fields.join(', ')})`
     }
+    case 'enum':
+      // Swift prints an enum case by its name alone, payload in parentheses.
+      return value.associated.length === 0
+        ? value.caseName
+        : `${value.caseName}(${value.associated.map((v) => describe(v, true)).join(', ')})`
     case 'closure':
     case 'function':
       return '(Function)'
@@ -401,12 +448,24 @@ export function valuesEqual(a: SwiftValue, b: SwiftValue): boolean {
     }
     case 'struct': {
       const other = b as StructValue
+      // Two class references are equal when they are the same object; Swift's `==`
+      // for a class needs `Equatable`, and identity is the honest default.
+      if (a.reference || other.reference) return a === other
       if (a.typeName !== other.typeName || a.fields.size !== other.fields.size) return false
       for (const [k, v] of a.fields) {
         const rhs = other.fields.get(k)
         if (!rhs || !valuesEqual(v, rhs)) return false
       }
       return true
+    }
+    case 'enum': {
+      const other = b as EnumValue
+      return (
+        a.typeName === other.typeName &&
+        a.caseName === other.caseName &&
+        a.associated.length === other.associated.length &&
+        a.associated.every((v, i) => valuesEqual(v, other.associated[i]!))
+      )
     }
     case 'range': {
       const other = b as RangeValue
@@ -417,8 +476,27 @@ export function valuesEqual(a: SwiftValue, b: SwiftValue): boolean {
       return true
     case 'type':
       return a.name === (b as TypeValue).name
-    case 'opaque':
-      return a === b
+
+    /**
+     * Opaque values compare by *value* when their payload is plain data.
+     *
+     * The host's design tokens — `.dark`, `.largeTitle`, a colour — are opaque
+     * because the interpreter has no idea what they mean, but they are values, and
+     * `scheme == .dark` has to be true when both name the same thing. Comparing by
+     * identity made every such test silently false.
+     *
+     * A payload holding functions (a `Binding` is a pair of them) falls back to
+     * identity, which is correct: two bindings onto the same storage are the same
+     * binding, and two onto different storage are not equal whatever they contain.
+     */
+    case 'opaque': {
+      const other = b as OpaqueValue
+      if (a === other) return true
+      if (a.typeName !== other.typeName) return false
+      return isPlainData(a.payload) && isPlainData(other.payload)
+        ? plainDataEqual(a.payload, other.payload)
+        : false
+    }
     default:
       return false
   }
@@ -430,3 +508,43 @@ export function dictionaryKey(value: SwiftValue): string {
 }
 
 export type { Param }
+
+/**
+ * Whether a payload is plain data — no functions, no cycles worth worrying about.
+ *
+ * The test that decides whether an opaque value compares by value or by identity.
+ * Deliberately shallow-ish and total: an unfamiliar shape answers "no" and falls back
+ * to identity, which is never *wrong*, only stricter.
+ */
+function isPlainData(value: unknown, depth = 0): boolean {
+  if (depth > 4) return false
+  if (value === null || value === undefined) return true
+
+  switch (typeof value) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+      return true
+    case 'object':
+      if (Array.isArray(value)) return value.every((v) => isPlainData(v, depth + 1))
+      return Object.values(value as Record<string, unknown>).every((v) => isPlainData(v, depth + 1))
+    default:
+      return false
+  }
+}
+
+function plainDataEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((v, i) => plainDataEqual(v, b[i]))
+  }
+
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+  return keys.every((key) => plainDataEqual(left[key], right[key]))
+}

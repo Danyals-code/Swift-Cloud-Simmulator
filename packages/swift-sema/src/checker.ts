@@ -1,8 +1,11 @@
 import type { Diagnostic, DiagnosticCode, SourceSpan } from '@studio/shared'
 import type {
   Block,
+  Condition,
   Decl,
+  EnumDecl,
   Expr,
+  Pattern,
   SourceFileNode,
   Stmt,
   StructDecl,
@@ -42,6 +45,8 @@ import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './m
 export class Checker {
   private readonly diagnostics: Diagnostic[] = []
   private readonly types = new Map<string, TypeInfo>()
+  /** Enum declarations, kept apart from types because they have cases rather than properties. */
+  private readonly enums = new Map<string, EnumDecl>()
   private readonly globalScope = new Scope()
   /** Non-zero inside a closure, where `$0` shorthand is legal. */
   private closureDepth = 0
@@ -82,6 +87,17 @@ export class Checker {
         }
         this.types.set(info.name, info)
         this.globalScope.declare({ name: info.name, kind: 'type', span: decl.nameSpan })
+      } else if (decl.kind === 'enumDecl') {
+        if (this.types.has(decl.name) || this.enums.has(decl.name)) {
+          this.report(
+            decl.nameSpan,
+            'error',
+            'unresolved_identifier',
+            `Invalid redeclaration of '${decl.name}'.`,
+          )
+        }
+        this.enums.set(decl.name, decl)
+        this.globalScope.declare({ name: decl.name, kind: 'type', span: decl.nameSpan })
       } else if (decl.kind === 'funcDecl') {
         this.globalScope.declare({ name: decl.name, kind: 'function', span: decl.nameSpan })
       } else if (decl.kind === 'varDecl') {
@@ -338,20 +354,54 @@ export class Checker {
           scope.declare({ name: decl.name, kind: 'local', span: decl.nameSpan })
         } else if (decl.kind === 'funcDecl') {
           scope.declare({ name: decl.name, kind: 'function', span: decl.nameSpan })
-        } else if (decl.kind === 'structDecl') {
+        } else if (decl.kind === 'structDecl' || decl.kind === 'enumDecl') {
           scope.declare({ name: decl.name, kind: 'type', span: decl.nameSpan })
         }
         return
       }
 
-      case 'ifStmt':
-        this.checkExpression(statement.condition, scope)
-        this.checkBlock(statement.then, scope.child())
+      case 'ifStmt': {
+        // Bindings introduced by the conditions are visible in the body and nowhere
+        // else, which is exactly what a child scope expresses.
+        const taken = scope.child()
+        this.checkConditions(statement.conditions, taken)
+        this.checkBlock(statement.then, taken)
         if (statement.else) {
           if (statement.else.kind === 'block') this.checkBlock(statement.else, scope.child())
           else this.checkStatement(statement.else, scope)
         }
         return
+      }
+
+      case 'guardStmt':
+        // A guard's bindings escape into the enclosing scope — that is its purpose —
+        // so they are declared in `scope` rather than in a child of it.
+        this.checkConditions(statement.conditions, scope)
+        this.checkBlock(statement.else, scope.child())
+        return
+
+      case 'whileStmt': {
+        const inner = scope.child()
+        this.checkConditions(statement.conditions, inner)
+        this.checkBlock(statement.body, inner)
+        return
+      }
+
+      case 'repeatStmt':
+        this.checkBlock(statement.body, scope.child())
+        this.checkExpression(statement.condition, scope)
+        return
+
+      case 'switchStmt': {
+        this.checkExpression(statement.subject, scope)
+        for (const branch of statement.cases) {
+          const inner = scope.child()
+          for (const pattern of branch.patterns) this.checkPattern(pattern, inner)
+          if (branch.where) this.checkExpression(branch.where, inner)
+          this.checkBlock(branch.body, inner)
+        }
+        return
+      }
 
       case 'forInStmt': {
         this.checkExpression(statement.sequence, scope)
@@ -359,6 +409,7 @@ export class Checker {
         if (statement.variable) {
           inner.declare({ name: statement.variable, kind: 'local', span: statement.variableSpan })
         }
+        if (statement.where) this.checkExpression(statement.where, inner)
         this.checkBlock(statement.body, inner)
         return
       }
@@ -367,8 +418,55 @@ export class Checker {
         if (statement.value) this.checkExpression(statement.value, scope)
         return
 
+      case 'breakStmt':
+      case 'continueStmt':
       case 'unsupportedStmt':
       case 'errorStmt':
+        return
+    }
+  }
+
+  /** Checks a condition list, declaring whatever it binds into `scope`. */
+  private checkConditions(conditions: readonly Condition[], scope: Scope): void {
+    for (const condition of conditions) {
+      if (condition.kind === 'expr') {
+        this.checkExpression(condition.expr, scope)
+        continue
+      }
+      if (condition.kind === 'optionalBinding') {
+        this.checkExpression(condition.value, scope)
+        scope.declare({ name: condition.name, kind: 'local', span: condition.nameSpan })
+        continue
+      }
+      this.checkExpression(condition.value, scope)
+      this.checkPattern(condition.pattern, scope)
+    }
+  }
+
+  /**
+   * Declares the names a pattern binds.
+   *
+   * Case *names* are deliberately not resolved: doing so needs the subject's type,
+   * and guessing would report a false "no such case" on correct code — the one thing
+   * this checker must never do.
+   */
+  private checkPattern(pattern: Pattern, scope: Scope): void {
+    switch (pattern.kind) {
+      case 'binding':
+        scope.declare({ name: pattern.name, kind: 'local', span: pattern.span })
+        return
+      case 'enumCase':
+        for (const binding of pattern.bindings) {
+          if (!binding.isWildcard) {
+            scope.declare({ name: binding.name, kind: 'local', span: binding.span })
+          }
+        }
+        return
+      case 'value':
+      case 'range':
+        this.checkExpression(pattern.value, scope)
+        return
+      case 'wildcard':
         return
     }
   }

@@ -124,8 +124,6 @@ describe('declarations', () => {
 
 describe('unsupported constructs are named, not mangled', () => {
   it.each([
-    ['class Foo {}', 'class'],
-    ['enum E { case a }', 'enum'],
     ['protocol P {}', 'protocol'],
     ['extension Int {}', 'extension'],
     ['typealias X = Int', 'typealias'],
@@ -138,10 +136,9 @@ describe('unsupported constructs are named, not mangled', () => {
   })
 
   it.each([
-    ['switch x { case 1: break }', 'switch'],
-    ['while x { }', 'while'],
-    ['guard x else { }', 'guard'],
     ['do { } catch { }', 'do-catch'],
+    ['defer { }', 'defer'],
+    ['throw MyError.bad', 'throw'],
   ])('reports the statement %s as %s', (statement, feature) => {
     const { diagnostics } = parse(`func f() { ${statement} }`)
     expect(diagnostics.find((d) => d.code === 'unsupported_language_feature')?.feature).toBe(feature)
@@ -149,7 +146,7 @@ describe('unsupported constructs are named, not mangled', () => {
 
   it('keeps parsing declarations after an unsupported one', () => {
     const file = parseClean(`
-      class Ignored { func inner() {} }
+      protocol Ignored { func inner() }
       struct Kept: View { var body: some View { Text("x") } }
     `)
     expect(kindsOf(file)).toEqual(['unsupportedDecl', 'structDecl'])
@@ -158,7 +155,7 @@ describe('unsupported constructs are named, not mangled', () => {
   it('keeps parsing statements after an unsupported one', () => {
     const file = parseClean(`
       func f() {
-          while true { }
+          defer { cleanup() }
           let after = 1
       }
     `)
@@ -333,7 +330,7 @@ describe('SwiftUI shapes', () => {
     const stmt = fn.kind === 'funcDecl' ? fn.body?.statements[0] : undefined
     expect(stmt).toMatchObject({
       kind: 'ifStmt',
-      condition: { kind: 'identifier', name: 'ready' },
+      conditions: [{ kind: 'expr', expr: { kind: 'identifier', name: 'ready' } }],
     })
     expect(stmt?.kind === 'ifStmt' && stmt.then.statements).toHaveLength(1)
   })

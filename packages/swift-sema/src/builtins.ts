@@ -59,6 +59,8 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'listStyle', 'listRowBackground',
   // interaction
   'onTapGesture', 'onLongPressGesture', 'disabled', 'buttonStyle', 'textFieldStyle',
+  // Environment injection.
+  'environment', 'environmentObject',
   // The deprecated spelling of `.tint`, and a `Color` property of the same name.
   'accentColor',
 ])
@@ -88,7 +90,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
   ['safeAreaInset', 7], ['ignoresSafeArea', 7], ['alignmentGuide', 7],
   ['gesture', 7], ['simultaneousGesture', 7], ['highPriorityGesture', 7],
   ['accessibilityLabel', 7], ['accessibilityHint', 7], ['accessibilityValue', 7],
-  ['environment', 7], ['environmentObject', 7], ['id', 7], ['zIndex', 7],
+  ['id', 7], ['zIndex', 7],
   ['lineLimit', 7], ['multilineTextAlignment', 7], ['textCase', 7], ['kerning', 7],
   ['monospaced', 7], ['fontDesign', 7], ['minimumScaleFactor', 7],
   ['listRowSeparator', 7], ['listRowInsets', 7], ['scrollIndicators', 7],
@@ -105,6 +107,8 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
   'ToolbarItemPlacement', 'Binding', 'UUID', 'Date',
+  'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
+  'LayoutDirection', 'UserInterfaceSizeClass', 'Locale',
   'View', 'App', 'Scene', 'Identifiable', 'Equatable', 'Hashable', 'Comparable', 'Codable',
   'Void', 'Any', 'AnyObject', 'Never',
 ])
@@ -118,11 +122,13 @@ export const KNOWN_FUNCTIONS: ReadonlySet<string> = new Set([
 export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean; phase: number }> = new Map([
   ['State', { supported: true, phase: 3 }],
   ['Binding', { supported: true, phase: 6 }],
-  ['StateObject', { supported: false, phase: 7 }],
-  ['ObservedObject', { supported: false, phase: 7 }],
-  ['EnvironmentObject', { supported: false, phase: 7 }],
-  ['Environment', { supported: false, phase: 7 }],
-  ['Published', { supported: false, phase: 7 }],
+  ['StateObject', { supported: true, phase: 7 }],
+  ['ObservedObject', { supported: true, phase: 7 }],
+  ['EnvironmentObject', { supported: true, phase: 7 }],
+  ['Environment', { supported: true, phase: 7 }],
+  // A stored property on a class, which is a reference — so a change is visible
+  // everywhere holding it, with or without the wrapper.
+  ['Published', { supported: true, phase: 7 }],
   ['AppStorage', { supported: false, phase: 7 }],
   ['SceneStorage', { supported: false, phase: 7 }],
   ['FocusState', { supported: false, phase: 7 }],

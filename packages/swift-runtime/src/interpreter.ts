@@ -3,12 +3,18 @@ import type {
   Argument,
   Block,
   ClosureExpr,
+  Condition,
   Decl,
+  EnumDecl,
   Expr,
   FuncDecl,
+  InitDecl,
+  Pattern,
   SourceFileNode,
   Stmt,
   StructDecl,
+  SwitchStmt,
+  TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
 import {
@@ -18,6 +24,8 @@ import {
   type LValue,
 } from './environment'
 import {
+  BreakSignal,
+  ContinueSignal,
   ExecutionBudgetExceeded,
   ReturnSignal,
   SwiftTrap,
@@ -32,6 +40,7 @@ import {
   asProjection,
   bool,
   copyValue,
+  enumCase,
   describe,
   dictionaryKey,
   double,
@@ -49,6 +58,7 @@ import {
   type ArrayValue,
   type ClosureValue,
   type DictionaryValue,
+  type EnumValue,
   type FunctionValue,
   type StructValue,
   type SwiftValue,
@@ -103,6 +113,7 @@ export class Interpreter {
 
   readonly globals = new Environment()
   readonly types = new Map<string, StructDecl>()
+  readonly enums = new Map<string, EnumDecl>()
 
   constructor(options: InterpreterOptions = {}) {
     this.host = options.host ?? {}
@@ -116,6 +127,7 @@ export class Interpreter {
     for (const file of files) {
       for (const decl of file.declarations) {
         if (decl.kind === 'structDecl') this.types.set(decl.name, decl)
+        else if (decl.kind === 'enumDecl') this.enums.set(decl.name, decl)
         else if (decl.kind === 'funcDecl') {
           this.globals.define(
             decl.name,
@@ -172,26 +184,122 @@ export class Interpreter {
     const decl = this.types.get(typeName)
     if (!decl) throw new UnsupportedAtRuntime(typeName, span)
 
-    const instance: StructValue = { kind: 'struct', typeName, fields: new Map() }
+    const instance: StructValue = {
+      kind: 'struct',
+      typeName,
+      fields: new Map(),
+      ...(decl.isReference ? { reference: true } : {}),
+    }
     const env = this.globals.child(instance)
 
-    // Memberwise initialiser: labelled arguments win over declared defaults.
-    const supplied = new Map<string, SwiftValue>()
     const stored = decl.members.filter(
       (m): m is VarDecl => m.kind === 'varDecl' && m.accessor === null,
     )
+
+    // Declared initialiser wins over the memberwise one, which is also Swift's rule:
+    // writing an `init` suppresses the synthesised member-wise initialiser for a class
+    // entirely, and for a struct once it is in the same file.
+    const initialiser = decl.members.find(
+      (m): m is InitDecl => m.kind === 'initDecl' && m.body !== null,
+    )
+
+    if (initialiser) {
+      // Stored properties take their declared defaults first, so the initialiser body
+      // can read a property it has not assigned yet without seeing `nil`.
+      for (const property of stored) {
+        instance.fields.set(
+          property.name,
+          property.initializer
+            ? copyValue(
+                this.evaluateExpecting(property.initializer, env, namedTypeOf(property.typeAnnotation)),
+              )
+            : NIL,
+        )
+      }
+
+      const scope = this.globals.child(instance)
+      this.bindParameters(initialiser.params, args, scope, span)
+      this.runBody(`${typeName}.init`, initialiser.body!, scope, span)
+      return instance
+    }
+
+    // Memberwise initialiser: labelled arguments win over declared defaults.
+    const supplied = new Map<string, SwiftValue>()
     args.forEach((arg, index) => {
       const name = arg.label ?? stored[index]?.name
       if (name) supplied.set(name, arg.value)
     })
 
     for (const property of stored) {
+      const expected = namedTypeOf(property.typeAnnotation)
       const provided = supplied.get(property.name)
-      const value = provided ?? (property.initializer ? this.evaluate(property.initializer, env) : NIL)
+      const value =
+        provided !== undefined
+          ? this.coerceToEnum(provided, expected)
+          : property.initializer
+            ? this.evaluateExpecting(property.initializer, env, expected)
+            : NIL
       instance.fields.set(property.name, copyValue(value))
     }
 
     return instance
+  }
+
+  /** Instantiates a user type by name, whether it is a struct, a class or an enum. */
+  private instantiateNamed(
+    name: string,
+    args: readonly CallArgument[],
+    span: SourceSpan,
+  ): SwiftValue | undefined {
+    if (this.types.has(name)) return this.instantiate(name, args, span)
+
+    const enumDecl = this.enums.get(name)
+    if (!enumDecl) return undefined
+
+    // `Tab(rawValue: "home")` — the failable initialiser every raw-valued enum has.
+    const raw = args.find((a) => a.label === 'rawValue')?.value
+    if (raw) {
+      const match = enumDecl.cases.find((c) => {
+        const value = c.rawValue
+          ? this.evaluate(c.rawValue, this.globals)
+          : rawValueFor(enumDecl, c.name)
+        return value !== null && valuesEqual(value, raw)
+      })
+      return match ? this.makeEnumCase(enumDecl, match.name, [], span) : NIL
+    }
+
+    return undefined
+  }
+
+  /**
+   * Reads a member from an enum value: `.rawValue`, a computed property, or a method.
+   *
+   * `self` inside such a member is the case itself, which is how an enum's computed
+   * property — `var title: String { switch self { … } }` — is written.
+   */
+  private memberOfEnum(target: EnumValue, member: string, span: SourceSpan): SwiftValue | undefined {
+    if (member === 'rawValue') return target.rawValue ?? NIL
+
+    const decl = this.enums.get(target.typeName)
+    if (!decl) return undefined
+
+    const computed = decl.members.find(
+      (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && m.accessor !== null,
+    )
+    if (computed?.accessor) {
+      const scope = this.globals.child(null)
+      scope.define('self', target, true, span)
+      return this.runBody(`${target.typeName}.${member}`, computed.accessor, scope, span)
+    }
+
+    const method = decl.members.find((m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member)
+    if (method) {
+      const scope = this.globals.child(null)
+      scope.define('self', target, true, span)
+      return { kind: 'function', decl: method, self: null, env: scope }
+    }
+
+    return undefined
   }
 
   /** Reads a member from a struct: stored field, computed property, or bound method. */
@@ -309,8 +417,9 @@ export class Interpreter {
 
         // buildIf / buildEither: only the taken branch contributes content.
         case 'ifStmt': {
-          if (truthy(this.evaluate(statement.condition, env))) {
-            this.collectBuilderValues(statement.then, env.child(), out)
+          const taken = env.child()
+          if (this.bindConditions(statement.conditions, taken)) {
+            this.collectBuilderValues(statement.then, taken, out)
           } else if (statement.else?.kind === 'block') {
             this.collectBuilderValues(statement.else, env.child(), out)
           } else if (statement.else) {
@@ -320,12 +429,21 @@ export class Interpreter {
           break
         }
 
+        // A `switch` in a view builder contributes only the matched case, which is
+        // how enum-driven views are written.
+        case 'switchStmt': {
+          const matched = this.matchSwitch(statement, env)
+          if (matched) this.collectBuilderValues(matched.body, matched.scope, out)
+          break
+        }
+
         // buildArray: a loop contributes one entry per iteration.
         case 'forInStmt': {
           const sequence = this.evaluate(statement.sequence, env)
           for (const element of this.iterate(sequence, statement.sequence.span)) {
             const inner = env.child()
             inner.define(statement.variable, element, true, statement.variableSpan)
+            if (statement.where && !truthy(this.evaluate(statement.where, inner))) continue
             this.collectBuilderValues(statement.body, inner, out)
           }
           break
@@ -350,7 +468,13 @@ export class Interpreter {
   }
 
   private bindParameters(
-    params: readonly { externalName: string | null; internalName: string; defaultValue: Expr | null; span: SourceSpan }[],
+    params: readonly {
+      externalName: string | null
+      internalName: string
+      defaultValue: Expr | null
+      type?: TypeRef | null
+      span: SourceSpan
+    }[],
     args: readonly CallArgument[],
     env: Environment,
     span: SourceSpan,
@@ -371,7 +495,10 @@ export class Interpreter {
       if (value === undefined) value = positional[positionalIndex++]?.value
 
       // Arguments are passed by value, so the callee cannot mutate the caller's copy.
-      env.define(param.internalName, copyValue(value ?? NIL), true, param.span ?? span)
+      // A declared parameter type is also the context a contextual member resolves
+      // against, which is what makes `select(.home)` mean anything.
+      const coerced = this.coerceToEnum(value ?? NIL, namedTypeOf(param.type ?? null))
+      env.define(param.internalName, copyValue(coerced), true, param.span ?? span)
     }
   }
 
@@ -419,8 +546,9 @@ export class Interpreter {
         return
 
       case 'ifStmt': {
-        if (truthy(this.evaluate(statement.condition, env))) {
-          this.executeBlock(statement.then, env.child())
+        const taken = env.child()
+        if (this.bindConditions(statement.conditions, taken)) {
+          this.executeBlock(statement.then, taken)
         } else if (statement.else) {
           if (statement.else.kind === 'block') this.executeBlock(statement.else, env.child())
           else this.execute(statement.else, env)
@@ -428,13 +556,61 @@ export class Interpreter {
         return
       }
 
+      case 'guardStmt': {
+        // A `guard`'s bindings escape into the *enclosing* scope — that is the whole
+        // point of it — so they are bound into `env` rather than into a child.
+        if (this.bindConditions(statement.conditions, env)) return
+        this.executeBlock(statement.else, env.child())
+        // Swift requires the else block to leave scope. If it did not, falling through
+        // would run the rest of the body with the bindings absent, so the guard is
+        // honoured by returning here rather than pretending it matched.
+        throw new ReturnSignal(VOID)
+      }
+
+      case 'switchStmt': {
+        const matched = this.matchSwitch(statement, env)
+        if (matched) {
+          try {
+            this.executeBlock(matched.body, matched.scope)
+          } catch (error) {
+            // `break` inside a switch case leaves the switch, not an enclosing loop.
+            if (!(error instanceof BreakSignal)) throw error
+          }
+        }
+        return
+      }
+
+      case 'whileStmt': {
+        for (;;) {
+          this.tick(statement.span)
+          const scope = env.child()
+          if (!this.bindConditions(statement.conditions, scope)) return
+          if (this.runLoopBody(statement.body, scope)) return
+        }
+      }
+
+      case 'repeatStmt': {
+        for (;;) {
+          this.tick(statement.span)
+          if (this.runLoopBody(statement.body, env.child())) return
+          if (!truthy(this.evaluate(statement.condition, env))) return
+        }
+      }
+
+      case 'breakStmt':
+        throw new BreakSignal()
+
+      case 'continueStmt':
+        throw new ContinueSignal()
+
       case 'forInStmt': {
         const sequence = this.evaluate(statement.sequence, env)
         for (const element of this.iterate(sequence, statement.sequence.span)) {
           this.tick(statement.span)
           const inner = env.child()
           inner.define(statement.variable, element, true, statement.variableSpan)
-          this.executeBlock(statement.body, inner)
+          if (statement.where && !truthy(this.evaluate(statement.where, inner))) continue
+          if (this.runLoopBody(statement.body, inner)) return
         }
         return
       }
@@ -450,10 +626,224 @@ export class Interpreter {
     }
   }
 
+  /**
+   * Evaluates a condition list, binding anything it unwraps into `scope`.
+   *
+   * Returns false as soon as a clause fails, *without* evaluating the rest — which is
+   * not an optimisation but a requirement: `if let user = user, user.isActive` reads
+   * `user` in the second clause only because the first one succeeded.
+   */
+  private bindConditions(conditions: readonly Condition[], scope: Environment): boolean {
+    for (const condition of conditions) {
+      if (condition.kind === 'expr') {
+        if (!truthy(this.evaluate(condition.expr, scope))) return false
+        continue
+      }
+
+      if (condition.kind === 'optionalBinding') {
+        const value = this.evaluate(condition.value, scope)
+        if (value.kind === 'nil') return false
+        scope.define(condition.name, copyValue(value), condition.isLet, condition.nameSpan)
+        continue
+      }
+
+      const subject = this.evaluate(condition.value, scope)
+      if (!this.matchPattern(condition.pattern, subject, scope)) return false
+    }
+    return true
+  }
+
+  /**
+   * Runs one iteration of a loop body.
+   *
+   * Returns true when the loop should stop. `continue` is absorbed here, `break`
+   * reported upward — which keeps every loop's `for` in `execute` identical.
+   */
+  private runLoopBody(body: Block, scope: Environment): boolean {
+    try {
+      this.executeBlock(body, scope)
+    } catch (error) {
+      if (error instanceof BreakSignal) return true
+      if (!(error instanceof ContinueSignal)) throw error
+    }
+    return false
+  }
+
+  /**
+   * Finds the case a `switch` takes.
+   *
+   * Bindings land in a scope of their own, so `case .success(let value)` can name a
+   * payload without leaking it into the sibling cases. Returns null when nothing
+   * matched — Swift requires exhaustiveness and we do not check it, so the honest
+   * behaviour for an unmatched subject is to run nothing rather than to guess.
+   */
+  private matchSwitch(
+    statement: SwitchStmt,
+    env: Environment,
+  ): { body: Block; scope: Environment } | null {
+    const subject = this.evaluate(statement.subject, env)
+
+    for (const branch of statement.cases) {
+      const scope = env.child()
+
+      if (branch.isDefault) {
+        if (branch.where && !truthy(this.evaluate(branch.where, scope))) continue
+        return { body: branch.body, scope }
+      }
+
+      for (const pattern of branch.patterns) {
+        const attempt = env.child()
+        if (!this.matchPattern(pattern, subject, attempt)) continue
+        if (branch.where && !truthy(this.evaluate(branch.where, attempt))) continue
+        return { body: branch.body, scope: attempt }
+      }
+    }
+
+    return null
+  }
+
+  /** Tests one pattern against a value, binding any names it introduces. */
+  private matchPattern(pattern: Pattern, subject: SwiftValue, scope: Environment): boolean {
+    switch (pattern.kind) {
+      case 'wildcard':
+        return true
+
+      case 'binding':
+        scope.define(pattern.name, copyValue(subject), pattern.isLet, pattern.span)
+        return true
+
+      case 'value':
+        return valuesEqual(this.evaluate(pattern.value, scope), subject)
+
+      case 'range': {
+        const range = this.evaluate(pattern.value, scope)
+        if (range.kind !== 'range' || !isNumericValue(subject)) return false
+        const n = subject.value
+        return n >= range.lower && (range.closed ? n <= range.upper : n < range.upper)
+      }
+
+      case 'enumCase': {
+        if (subject.kind !== 'enum') return false
+        if (pattern.typeName && pattern.typeName !== subject.typeName) return false
+        if (pattern.caseName !== subject.caseName) return false
+
+        pattern.bindings.forEach((binding, index) => {
+          if (binding.isWildcard) return
+          const payload = subject.associated[index]
+          if (payload !== undefined) {
+            scope.define(binding.name, copyValue(payload), true, binding.span)
+          }
+        })
+        return true
+      }
+    }
+  }
+
+  /**
+   * A `static` member of a type, read without an instance.
+   *
+   * Evaluated on each access rather than cached. Swift's statics are lazy and stored,
+   * so a cache would be more faithful — but it would also outlive an edit to the
+   * initialiser, which is the one behaviour a live preview must not have.
+   */
+  private staticMember(typeName: string, member: string, span: SourceSpan): SwiftValue | undefined {
+    const members =
+      this.types.get(typeName)?.members ?? this.enums.get(typeName)?.members ?? null
+    if (!members) return undefined
+
+    const isStatic = (decl: { modifiers: readonly { name: string }[] }): boolean =>
+      decl.modifiers.some((m) => m.name === 'static' || m.name === 'class')
+
+    const property = members.find(
+      (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && isStatic(m),
+    )
+    if (property) {
+      if (property.accessor) {
+        return this.runBody(`${typeName}.${member}`, property.accessor, this.globals.child(null), span)
+      }
+      return property.initializer ? this.evaluate(property.initializer, this.globals) : NIL
+    }
+
+    const method = members.find(
+      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && isStatic(m),
+    )
+    return method ? { kind: 'function', decl: method, self: null, env: this.globals } : undefined
+  }
+
+  // ------------------------------------------------------------------- enums
+
+  /**
+   * Resolves a contextual enum member against an expected type.
+   *
+   * `var tab: Tab = .home` has no base to resolve `.home` against, so the host hands
+   * back a bare token. When the declaration says what type is expected, the token can
+   * be turned into the case it obviously means. Without this, contextual member
+   * syntax — which is how almost every enum is written in view code — would produce a
+   * value that compares equal to nothing.
+   */
+  coerceToEnum(value: SwiftValue, typeName: string | null): SwiftValue {
+    if (!typeName || value.kind !== 'opaque') return value
+
+    const decl = this.enums.get(typeName)
+    if (!decl) return value
+
+    const name = (value.payload as { name?: string } | null)?.name
+    if (typeof name !== 'string') return value
+    if (!decl.cases.some((c) => c.name === name)) return value
+
+    return this.makeEnumCase(decl, name, [], { file: '', start: 0, end: 0 })
+  }
+
+  /** Builds an enum case value, resolving its raw value if the enum declares one. */
+  private makeEnumCase(
+    decl: EnumDecl,
+    caseName: string,
+    args: readonly CallArgument[],
+    span: SourceSpan,
+  ): SwiftValue {
+    const declared = decl.cases.find((c) => c.name === caseName)
+    if (!declared) {
+      this.trap(`Type '${decl.name}' has no member '${caseName}'`, span)
+    }
+
+    const raw = declared.rawValue
+      ? this.evaluate(declared.rawValue, this.globals)
+      : rawValueFor(decl, declared.name)
+
+    return enumCase(
+      decl.name,
+      caseName,
+      args.map((a) => copyValue(a.value)),
+      raw,
+    )
+  }
+
+  /**
+   * Evaluates an expression that is known to be of a particular type.
+   *
+   * The one thing this buys is contextual member syntax: `.settings` has no base to
+   * resolve against, so `let tab: Tab = .settings` can only be understood by knowing
+   * what `Tab` is. Deliberately not general type inference — it applies exactly where
+   * a declaration or a parameter already stated the type, and falls straight through
+   * to ordinary evaluation everywhere else.
+   */
+  private evaluateExpecting(expr: Expr, env: Environment, expected: string | null): SwiftValue {
+    if (expected && expr.kind === 'memberAccess' && expr.base === null) {
+      const decl = this.enums.get(expected)
+      if (decl?.cases.some((c) => c.name === expr.member)) {
+        return this.makeEnumCase(decl, expr.member, [], expr.span)
+      }
+    }
+    return this.coerceToEnum(this.evaluate(expr, env), expected)
+  }
+
   private executeDeclaration(decl: Decl, env: Environment): void {
     switch (decl.kind) {
       case 'varDecl': {
-        const value = decl.initializer ? this.evaluate(decl.initializer, env) : NIL
+        const expected = namedTypeOf(decl.typeAnnotation)
+        const value = decl.initializer
+          ? this.evaluateExpecting(decl.initializer, env, expected)
+          : NIL
         env.define(decl.name, copyValue(value), decl.isLet, decl.nameSpan)
         return
       }
@@ -462,6 +852,9 @@ export class Interpreter {
         return
       case 'structDecl':
         this.types.set(decl.name, decl)
+        return
+      case 'enumDecl':
+        this.enums.set(decl.name, decl)
         return
       case 'unsupportedDecl':
         throw new UnsupportedAtRuntime(decl.feature, decl.span)
@@ -536,6 +929,12 @@ export class Interpreter {
         return this.evaluateIdentifier(expr.name, expr.span, env)
 
       case 'selfExpr': {
+        // An enum case is `self` inside its own members, but it is not a struct, so
+        // it cannot live in the environment's receiver slot. It is bound by name
+        // instead, and looked up first.
+        const bound = env.lookup('self')
+        if (bound) return bound.value
+
         const self = env.resolveSelf()
         if (!self) this.trap("Use of 'self' outside a type", expr.span)
         return self
@@ -625,7 +1024,7 @@ export class Interpreter {
       if (member !== undefined) return unwrapProjection(member)
     }
 
-    if (this.types.has(name)) return { kind: 'type', name }
+    if (this.types.has(name) || this.enums.has(name)) return { kind: 'type', name }
 
     const fromHost = this.host.resolveGlobal?.(name)
     if (fromHost !== undefined) return fromHost
@@ -651,6 +1050,21 @@ export class Interpreter {
     // `Item.self` is a metatype. The slice only ever passes one along — to
     // `navigationDestination(for:)` — so the type value itself is the whole answer.
     if (target.kind === 'type' && member === 'self') return target
+
+    // `Tab.home` — an enum case with no payload.
+    if (target.kind === 'type') {
+      const enumDecl = this.enums.get(target.name)
+      if (enumDecl?.cases.some((c) => c.name === member)) {
+        return this.makeEnumCase(enumDecl, member, [], span)
+      }
+      const statik = this.staticMember(target.name, member, span)
+      if (statik !== undefined) return statik
+    }
+
+    if (target.kind === 'enum') {
+      const value = this.memberOfEnum(target, member, span)
+      if (value !== undefined) return unwrapProjection(value)
+    }
 
     if (target.kind === 'struct') {
       const value = this.memberOfStruct(target, member, span)
@@ -714,7 +1128,8 @@ export class Interpreter {
       const fromHost = this.host.callGlobal?.(callee.name, this.hostCall(args, trailingClosure, span))
       if (fromHost !== undefined) return fromHost
 
-      if (this.types.has(callee.name)) return this.instantiate(callee.name, allArgs, span)
+      const instance = this.instantiateNamed(callee.name, allArgs, span)
+      if (instance !== undefined) return instance
 
       // `print` and friends.
       const builtin = this.callGlobalBuiltin(callee.name, allArgs, span)
@@ -729,7 +1144,14 @@ export class Interpreter {
     const value = this.evaluate(callee, env)
     if (value.kind === 'function') return this.callFunction(value, allArgs, span)
     if (value.kind === 'closure') return this.callClosure(value, allArgs.map((a) => a.value), span)
-    if (value.kind === 'type') return this.instantiate(value.name, allArgs, span)
+
+    const fromHost = this.host.callValue?.(value, this.hostCall(args, trailingClosure, span))
+    if (fromHost !== undefined) return fromHost
+    if (value.kind === 'type') {
+      const instance = this.instantiateNamed(value.name, allArgs, span)
+      if (instance !== undefined) return instance
+      this.trap(`Cannot construct a value of type '${value.name}'`, span)
+    }
 
     this.trap(`Cannot call value of type '${typeNameOf(value)}'`, span)
   }
@@ -761,6 +1183,22 @@ export class Interpreter {
     // A mutating method needs the *storage*, not a copy, or its writes are lost.
     const lvalue = this.tryResolveLValue(baseExpr, env)
     const target = lvalue ? lvalue.get() : this.evaluate(baseExpr, env)
+
+    // `Status.loaded("x")` — an enum case with a payload.
+    if (target.kind === 'type') {
+      const enumDecl = this.enums.get(target.name)
+      if (enumDecl?.cases.some((c) => c.name === member)) {
+        return this.makeEnumCase(enumDecl, member, allArgs, span)
+      }
+      const statik = this.staticMember(target.name, member, memberSpan)
+      if (statik?.kind === 'function') return this.callFunction(statik, allArgs, span)
+    }
+
+    if (target.kind === 'enum') {
+      const bound = this.memberOfEnum(target, member, memberSpan)
+      if (bound?.kind === 'function') return this.callFunction(bound, allArgs, span)
+      if (bound?.kind === 'closure') return this.callClosure(bound, allArgs.map((a) => a.value), span)
+    }
 
     if (target.kind === 'struct') {
       const bound = this.memberOfStruct(target, member, memberSpan)
@@ -972,7 +1410,13 @@ export class Interpreter {
       this.trap(`Cannot assign to value: '${lvalue.description}' is a 'let' constant`, span)
     }
 
-    const rhs = this.evaluate(valueExpr, env)
+    // `tab = .settings` — the target's current value says which enum `.settings`
+    // belongs to, which is the only context available at an assignment.
+    const current = lvalue.get()
+    const rhs = this.coerceToEnum(
+      this.evaluateExpecting(valueExpr, env, current.kind === 'enum' ? current.typeName : null),
+      current.kind === 'enum' ? current.typeName : null,
+    )
 
     if (operator === '=') {
       lvalue.set(copyValue(rhs))
@@ -1132,3 +1576,31 @@ function throughProjection(lvalue: LValue): LValue {
 }
 
 export type { ArrayValue, DictionaryValue, StructValue, SwiftValue }
+
+/**
+ * A `String`-raw-valued enum's implicit raw value is the case name; an `Int`-raw
+ * one's is its position. Anything else has no implicit raw value.
+ */
+function rawValueFor(decl: EnumDecl, caseName: string): SwiftValue | null {
+  const raw = decl.inherits[0]?.name
+  if (raw === 'String') return str(caseName)
+  if (raw === 'Int') {
+    const index = decl.cases.findIndex((c) => c.name === caseName)
+    return index === -1 ? null : int(index)
+  }
+  return null
+}
+
+function isNumericValue(value: SwiftValue): value is SwiftValue & { value: number } {
+  return value.kind === 'int' || value.kind === 'double'
+}
+
+/** The plain name of a type annotation, or null for anything structural. */
+function namedTypeOf(type: { kind: string; name?: string } | null): string | null {
+  if (!type) return null
+  if (type.kind === 'namedType') return type.name ?? null
+  if (type.kind === 'optionalType') {
+    return namedTypeOf((type as unknown as { wrapped: { kind: string; name?: string } }).wrapped)
+  }
+  return null
+}

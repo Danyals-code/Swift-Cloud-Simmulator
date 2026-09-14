@@ -62,6 +62,16 @@ export interface InterpreterHost {
    */
   callImplicitMember?(member: string, call: HostCall): SwiftValue | undefined
 
+  /**
+   * Calling a value the interpreter cannot call itself.
+   *
+   * `@Environment(\.dismiss) var dismiss` puts something callable in a variable, and
+   * `dismiss()` is then a call on a value that is neither a closure nor a function.
+   * Rather than invent a native-function value kind — which every `switch` over
+   * `SwiftValue` would have to learn — the host is asked.
+   */
+  callValue?(target: SwiftValue, call: HostCall): SwiftValue | undefined
+
   /** `print(...)` and anything else that writes to the console. */
   log?(message: string, span: SourceSpan): void
 }
