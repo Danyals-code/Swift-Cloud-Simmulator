@@ -52,26 +52,41 @@ export const BODY_FONT: ResolvedFont = {
 /** The font a `Button` label uses by default. */
 export const BUTTON_FONT: ResolvedFont = { ...BODY_FONT }
 
-export function fontForToken(name: string): ResolvedFont | null {
+/**
+ * Resolves a text style, scaled for Dynamic Type.
+ *
+ * Line height scales with the size rather than being recomputed, which keeps the
+ * ratio Apple designed for each style — a `.caption` at 200% must not end up with
+ * body-text leading.
+ */
+export function fontForToken(name: string, scale = 1): ResolvedFont | null {
   const style = TEXT_STYLES[name]
   if (!style) return null
   return {
     family: UI_FONT_FAMILY,
-    size: style.size,
+    size: style.size * scale,
     weight: style.weight,
     italic: false,
-    lineHeight: style.lineHeight,
+    lineHeight: style.lineHeight * scale,
   }
 }
 
+/** The body font at a given Dynamic Type scale — the root environment's font. */
+export function bodyFont(scale = 1): ResolvedFont {
+  return fontForToken('body', scale)!
+}
+
+export type ColorScheme = 'light' | 'dark'
+
 /**
- * iOS system colours, light appearance.
+ * iOS system colours, both appearances.
  *
- * `primary` and `secondary` are the semantic label colours rather than pure black —
- * SwiftUI's default text is 85% black, and using pure black makes every preview look
- * subtly harsher than the real thing.
+ * Dark mode is not "the light palette inverted" — Apple brightens and desaturates
+ * each hue so it stays legible on black, and the semantic label colours change
+ * opacity rather than simply flipping. Two tables is the only honest way to express
+ * that, and using one would make every dark preview subtly wrong.
  */
-const SYSTEM_COLORS: Readonly<Record<string, RGBA>> = {
+const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
   red: rgba(255, 59, 48),
   orange: rgba(255, 149, 0),
   yellow: rgba(255, 204, 0),
@@ -94,19 +109,47 @@ const SYSTEM_COLORS: Readonly<Record<string, RGBA>> = {
   accent: rgba(0, 122, 255),
 }
 
-export const LABEL_COLOR = SYSTEM_COLORS.primary!
-export const ACCENT_COLOR = SYSTEM_COLORS.accentColor!
-export const SYSTEM_BACKGROUND = rgba(255, 255, 255)
+const DARK_COLORS: Readonly<Record<string, RGBA>> = {
+  ...LIGHT_COLORS,
+  red: rgba(255, 69, 58),
+  orange: rgba(255, 159, 10),
+  yellow: rgba(255, 214, 10),
+  green: rgba(48, 209, 88),
+  mint: rgba(99, 230, 226),
+  teal: rgba(64, 200, 224),
+  cyan: rgba(100, 210, 255),
+  blue: rgba(10, 132, 255),
+  indigo: rgba(94, 92, 230),
+  purple: rgba(191, 90, 242),
+  pink: rgba(255, 55, 95),
+  brown: rgba(172, 142, 104),
+  primary: rgba(255, 255, 255, 0.9),
+  secondary: rgba(235, 235, 245, 0.6),
+  accentColor: rgba(10, 132, 255),
+  accent: rgba(10, 132, 255),
+}
 
-export function colorForName(name: string): RGBA | null {
-  return SYSTEM_COLORS[name] ?? null
+export function labelColor(scheme: ColorScheme): RGBA {
+  return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS).primary!
+}
+
+export function systemBackground(scheme: ColorScheme): RGBA {
+  return scheme === 'dark' ? rgba(0, 0, 0) : rgba(255, 255, 255)
+}
+
+export const LABEL_COLOR = labelColor('light')
+export const SYSTEM_BACKGROUND = systemBackground('light')
+export const ACCENT_COLOR = LIGHT_COLORS.accentColor!
+
+export function colorForName(name: string, scheme: ColorScheme = 'light'): RGBA | null {
+  return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[name] ?? null
 }
 
 /** Turns a `Color` payload — named, or built from components — into an RGBA. */
-export function resolveColorPayload(payload: ColorPayload): RGBA {
+export function resolveColorPayload(payload: ColorPayload, scheme: ColorScheme = 'light'): RGBA {
   const base =
     payload.name !== null
-      ? (colorForName(payload.name) ?? rgba(0, 0, 0, 0))
+      ? (colorForName(payload.name, scheme) ?? rgba(0, 0, 0, 0))
       : grayscale(payload.white ?? 0)
 
   return payload.opacity === undefined ? base : { ...base, a: base.a * payload.opacity }
@@ -125,18 +168,25 @@ function grayscale(white: number): RGBA {
  * thing. Returns null for anything else so the caller can fall back rather than
  * inventing a colour.
  */
-export function resolveColorArg(value: SwiftValue | undefined): RGBA | null {
+export function resolveColorArg(
+  value: SwiftValue | undefined,
+  scheme: ColorScheme = 'light',
+): RGBA | null {
   if (!value || value.kind !== 'opaque') return null
 
-  if (value.typeName === COLOR_TYPE) return resolveColorPayload(value.payload as ColorPayload)
-  if (value.typeName === TOKEN_TYPE) return colorForName((value.payload as TokenPayload).name)
+  if (value.typeName === COLOR_TYPE) {
+    return resolveColorPayload(value.payload as ColorPayload, scheme)
+  }
+  if (value.typeName === TOKEN_TYPE) {
+    return colorForName((value.payload as TokenPayload).name, scheme)
+  }
   return null
 }
 
 /** Resolves an argument that should be a font: a token like `.largeTitle`. */
-export function resolveFontArg(value: SwiftValue | undefined): ResolvedFont | null {
+export function resolveFontArg(value: SwiftValue | undefined, scale = 1): ResolvedFont | null {
   if (!value || value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return null
-  return fontForToken((value.payload as TokenPayload).name)
+  return fontForToken((value.payload as TokenPayload).name, scale)
 }
 
 /** Numeric argument, accepting both `Int` and `Double`. */

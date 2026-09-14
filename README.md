@@ -45,26 +45,24 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0-3 complete.** The studio parses, checks, runs and **renders** real Swift. Views are
-measured by a proposal/response layout engine and painted at absolute frames, so CSS never gets a
-chance to disagree with SwiftUI about sizing. Tapping a rendered `Button` runs its Swift closure and
-the interface repaints.
+**Phases 0-4 complete.** The studio parses, checks, runs and renders real Swift, across
+multiple files, with a view inspector and light/dark + Dynamic Type previews.
 
-Still to come: multi-file projects and the inspector (Phase 4), `.xcodeproj` export (Phase 5), and
-the breadth of SwiftUI beyond the slice (Phase 6).
+Not yet built: code completion (the one Phase 4 gate shortfall), `.xcodeproj` export
+(Phase 5), and the breadth of SwiftUI beyond the slice (Phase 6).
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 351 passing |
-| End-to-end | 16 / 16 passing |
-| Reference app diagnostics | **zero** — the false-positive gate |
+| Unit tests | 384 passing |
+| End-to-end | 26 / 26 passing |
+| Templates rendering with zero placeholders | 5 / 5 |
 | Full pipeline, 500-line file | 1.6 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 347 KB gzipped / 450 KB budget |
+| Client JS | 352 KB gzipped / 450 KB budget |
 
-Next: [Phase 4 — IDE experience](docs/03-ROADMAP.md).
+Next: [Phase 5 — Export](docs/03-ROADMAP.md).
 
 ## Getting started
 
@@ -104,7 +102,7 @@ packages/
   swiftui-layout/      proposal/response layout engine, metrics  (Phase 3)
   swiftui-render-dom/  RenderTree → absolutely positioned DOM
   sim-shell/           device specs, safe areas
-  project-model/       virtual file system, persistence, templates
+  project-model/       virtual file system, persistence, template gallery
   exporter/            zip today, .xcodeproj in Phase 5
 ```
 

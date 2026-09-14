@@ -4,7 +4,7 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after Phase 3. 🟡 entries: `.background` takes colours and views but not materials;
+Last updated after Phase 4. 🟡 entries: `.background` takes colours and views but not materials;
 `.font` takes text styles but not `.bold`/`.italic`/custom weights; `.cornerRadius` rounds fills but
 does not yet clip arbitrary content.
 
@@ -129,7 +129,7 @@ Those telemetry counts are what decide what gets built next.
 | `Path` (custom) | ⬜ | 6 |
 | `.fill` / `.stroke` / `.strokeBorder` / `trim` | ⬜ | 3/6 |
 | `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 |
-| Dark-mode colour resolution | ⬜ | 3 |
+| Dark-mode colour resolution | ✅ | 4 |
 | `LinearGradient` / `RadialGradient` / `AngularGradient` | ⬜ | 3 |
 | `Material` (`.ultraThinMaterial` etc.) | 🟡 | 6 | CSS `backdrop-filter` approximation |
 | `ShapeStyle` conformances generally | ⬜ | 6 |
@@ -168,7 +168,8 @@ Those telemetry counts are what decide what gets built next.
 | `App` / `@main` / `WindowGroup` | ✅ | 3 |
 | `Scene` phases | ⬜ | 6 |
 | `.environment` / `.environmentObject` | ⬜ | 4 |
-| `colorScheme`, `dynamicTypeSize`, `locale`, `layoutDirection` | ⬜ | 4 |
+| `colorScheme`, `dynamicTypeSize` | ✅ | 4 |
+| `locale`, `layoutDirection` | ⬜ | 6 |
 | `horizontalSizeClass` / `verticalSizeClass` | ⬜ | 6 |
 | `dismiss`, `openURL` | ⬜ | 6 |
 | `PreferenceKey` | ⬜ | 6 |

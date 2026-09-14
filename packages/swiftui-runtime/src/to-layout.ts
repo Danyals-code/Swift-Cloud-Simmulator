@@ -14,11 +14,13 @@ import {
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
 import {
-  BUTTON_FONT,
+  bodyFont,
   numberArg,
   resolveColorArg,
+  resolveColorPayload,
   resolveFontArg,
   stringArg,
+  type ColorScheme,
 } from './style'
 import {
   COLOR_TYPE,
@@ -29,7 +31,6 @@ import {
   type ViewArg,
   type ViewValue,
 } from './view-value'
-import { resolveColorPayload } from './style'
 
 /**
  * Turns the evaluated view tree into layout elements.
@@ -58,12 +59,20 @@ const SHAPES: Readonly<Record<string, ShapeKind>> = {
 /** Views that contribute their children to the enclosing stack rather than nesting. */
 const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set(['Group', 'WindowGroup'])
 
+export interface ConversionOptions {
+  readonly colorScheme?: ColorScheme
+  /** Dynamic Type multiplier applied to every resolved text style. */
+  readonly typeScale?: number
+  readonly rootAxis?: Axis
+}
+
 export function viewsToLayout(
   views: readonly ViewValue[],
-  rootAxis: Axis = 'vertical',
+  options: ConversionOptions = {},
 ): ConversionResult {
+  const rootAxis = options.rootAxis ?? 'vertical'
   const hitTargets = new Map<string, string>()
-  const converter = new Converter(hitTargets)
+  const converter = new Converter(hitTargets, options.colorScheme ?? 'light', options.typeScale ?? 1)
   const children = converter.convertList(views, 'v', rootAxis)
 
   const element: LayoutElement =
@@ -82,7 +91,11 @@ export function viewsToLayout(
 }
 
 class Converter {
-  constructor(private readonly hitTargets: Map<string, string>) {}
+  constructor(
+    private readonly hitTargets: Map<string, string>,
+    private readonly scheme: ColorScheme,
+    private readonly typeScale: number,
+  ) {}
 
   convertList(views: readonly ViewValue[], prefix: string, axis: Axis): LayoutElement[] {
     const out: LayoutElement[] = []
@@ -128,7 +141,13 @@ class Converter {
   }
 
   private baseElement(view: ViewValue, path: string, parentAxis: Axis): LayoutElement {
-    const origin = view.span ? { origin: view.span } : {}
+    const origin = {
+      ...(view.span ? { origin: view.span } : {}),
+      debugName: view.name,
+      ...(view.modifiers.length > 0
+        ? { debugModifiers: view.modifiers.map((m) => `.${m.name}`) }
+        : {}),
+    }
 
     switch (view.name) {
       case 'Text':
@@ -196,7 +215,7 @@ class Converter {
         return {
           kind: 'modified',
           id: `${path}style`,
-          modifier: { kind: 'font', font: BUTTON_FONT },
+          modifier: { kind: 'font', font: bodyFont(this.typeScale) },
           child: label,
           ...origin,
         }
@@ -249,14 +268,14 @@ class Converter {
       }
 
       case 'font': {
-        const font = resolveFontArg(args[0]?.value)
+        const font = resolveFontArg(args[0]?.value, this.typeScale)
         return font ? { kind: 'font', font } : null
       }
 
       case 'foregroundStyle':
       case 'foregroundColor':
       case 'tint': {
-        const color = resolveColorArg(args[0]?.value)
+        const color = resolveColorArg(args[0]?.value, this.scheme)
         return color ? { kind: 'foregroundStyle', color } : null
       }
 
@@ -287,7 +306,7 @@ class Converter {
     const value = args[0]?.value
     if (!value) return null
 
-    const fill = fillFromValue(value)
+    const fill = fillFromValue(value, this.scheme)
     if (fill) return { kind: 'fill', id, fill }
 
     if (value.kind === 'opaque' && value.typeName === 'View') {
@@ -312,13 +331,13 @@ function defaultSpacing(): number {
   return 8
 }
 
-function fillFromValue(value: SwiftValue): Fill | null {
+function fillFromValue(value: SwiftValue, scheme: ColorScheme): Fill | null {
   if (value.kind !== 'opaque') return null
   if (value.typeName === COLOR_TYPE) {
-    return { kind: 'solid', color: resolveColorPayload(value.payload as ColorPayload) }
+    return { kind: 'solid', color: resolveColorPayload(value.payload as ColorPayload, scheme) }
   }
   if (value.typeName === TOKEN_TYPE) {
-    const color = resolveColorArg(value)
+    const color = resolveColorArg(value, scheme)
     return color ? { kind: 'solid', color } : null
   }
   return null

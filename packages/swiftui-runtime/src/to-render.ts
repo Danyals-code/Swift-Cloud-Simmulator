@@ -49,6 +49,14 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
     opacity: node.opacity,
     ...(node.cornerRadius > 0 ? { cornerRadius: node.cornerRadius } : {}),
     ...(node.origin ? { origin: node.origin } : {}),
+    ...(node.debugName
+      ? {
+          inspect: {
+            name: node.debugName,
+            ...(node.debugModifiers?.length ? { modifiers: node.debugModifiers } : {}),
+          },
+        }
+      : {}),
   }
 
   switch (node.paint.kind) {

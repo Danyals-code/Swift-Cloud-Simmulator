@@ -115,9 +115,10 @@ struct Root: View {
       .map((n) => n.hitTarget!.handlerId)
     expect(handlers.length).toBe(2)
 
+    let revision = 100
     const tap = () => {
       applyEvent({ kind: 'tap', handlerId: handlers[1]!, location: { x: 0, y: 0 } })
-      return rerender()
+      return rerender(++revision)
     }
 
     for (let i = 0; i < 5; i++) tap() // warm up

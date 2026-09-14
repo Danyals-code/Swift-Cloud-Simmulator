@@ -2,14 +2,19 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
-import { EMPTY_RENDER_TREE, type RenderTree, type UIEvent } from '@studio/shared'
+import { EMPTY_RENDER_TREE, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
 import type { DeviceSpec } from '@studio/sim-shell'
+import { InspectorReadout } from './InspectorReadout'
 
 export interface DevicePaneProps {
   device: DeviceSpec
   tree: RenderTree | null
   stale: boolean
   onEvent: (event: UIEvent) => void
+  inspecting: boolean
+  /** Reveal a view's source. Null origin means the node has no source position. */
+  onRevealSource: (node: RenderNode) => void
+  colorScheme: 'light' | 'dark'
 }
 
 /** Chrome around the screen: bezel thickness plus breathing room in the pane. */
@@ -23,9 +28,23 @@ const PANE_PADDING = 32
  * Apple's device artwork is not licensed for redistribution (risk R2), and a CSS
  * frame has the side benefit of scaling cleanly to any zoom level.
  */
-export function DevicePane({ device, tree, stale, onEvent }: DevicePaneProps) {
+export function DevicePane({
+  device,
+  tree,
+  stale,
+  onEvent,
+  inspecting,
+  onRevealSource,
+  colorScheme,
+}: DevicePaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [scale, setScale] = useState(1)
+  const [hovered, setHovered] = useState<RenderNode | null>(null)
+
+  // Derived rather than cleared in an effect: a stale highlight must not survive
+  // leaving inspector mode, and "only meaningful while inspecting" is a property of
+  // the value, not something to synchronise after the fact.
+  const highlighted = inspecting ? hovered : null
 
   // Fit-to-pane. Never scales above 1:1 — an upscaled simulator looks convincing
   // and is quietly misleading about how much fits on a real screen.
@@ -49,8 +68,11 @@ export function DevicePane({ device, tree, stale, onEvent }: DevicePaneProps) {
   return (
     <div
       ref={containerRef}
-      className="flex h-full w-full items-center justify-center overflow-hidden bg-[#0d0d10]"
+      className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[#0d0d10]"
       data-testid="device-pane"
+      // The pointer can leave the device without crossing any node's boundary —
+      // straight off the bezel — so the pane itself has to clear the highlight.
+      onPointerLeave={() => setHovered(null)}
     >
       <div
         style={{
@@ -82,18 +104,33 @@ export function DevicePane({ device, tree, stale, onEvent }: DevicePaneProps) {
               background: '#ffffff',
             }}
           >
-            <RenderTreeView tree={tree ?? EMPTY_RENDER_TREE} onEvent={onEvent} stale={stale} />
-            <StatusBar device={device} />
+            <RenderTreeView
+              tree={tree ?? EMPTY_RENDER_TREE}
+              onEvent={onEvent}
+              stale={stale}
+              {...(inspecting
+                ? {
+                    inspect: {
+                      hovered: highlighted?.id ?? null,
+                      onHover: setHovered,
+                      onSelect: onRevealSource,
+                    },
+                  }
+                : {})}
+            />
+            <StatusBar device={device} colorScheme={colorScheme} />
             {device.hasDynamicIsland ? <DynamicIsland device={device} /> : null}
             {device.homeIndicator ? <HomeIndicator device={device} /> : null}
           </div>
         </div>
       </div>
+
+      <InspectorReadout node={highlighted} active={inspecting} />
     </div>
   )
 }
 
-function StatusBar({ device }: { device: DeviceSpec }) {
+function StatusBar({ device, colorScheme }: { device: DeviceSpec; colorScheme: 'light' | 'dark' }) {
   const [now, setNow] = useState<string>('')
 
   // Rendering the real clock makes screenshots look alive; guarded to client-only
@@ -120,7 +157,7 @@ function StatusBar({ device }: { device: DeviceSpec }) {
         fontSize: 15,
         fontWeight: 600,
         fontFamily: '"Inter", -apple-system, system-ui, sans-serif',
-        color: '#000',
+        color: colorScheme === 'dark' ? '#fff' : '#000',
         pointerEvents: 'none',
         zIndex: 10_000,
       }}

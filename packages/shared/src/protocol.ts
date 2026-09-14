@@ -34,6 +34,13 @@ export interface CompileRequest {
   }
   readonly colorScheme: 'light' | 'dark'
   /**
+   * Dynamic Type multiplier, 1 = the Large default.
+   *
+   * A layout input, not a styling one: text grows, so every frame above it changes.
+   * That is exactly what makes it worth previewing.
+   */
+  readonly typeScale?: number
+  /**
    * Bumped by the caller on every request; echoed back so a slow response for an
    * older revision can be discarded rather than flashing stale output.
    */
@@ -84,10 +91,16 @@ export type UIEvent =
 /** The interface exposed over Comlink. */
 export interface CompilerApi {
   compile(request: CompileRequest): Promise<CompileResult>
-  /** Dispatch an interaction, then re-evaluate. Returns the new tree. */
-  dispatch(event: UIEvent): Promise<CompileResult>
+  /**
+   * Dispatch an interaction, then re-evaluate.
+   *
+   * Takes a `revision` because the caller owns the sequence: the worker inventing
+   * its own would let the two counters drift, and the caller's stale-response guard
+   * would then discard current results.
+   */
+  dispatch(event: UIEvent, revision: number): Promise<CompileResult>
   /** Drop all `@State` boxes and re-evaluate from scratch. */
-  reset(): Promise<CompileResult>
+  reset(revision: number): Promise<CompileResult>
   /**
    * Supplies real font measurements.
    *

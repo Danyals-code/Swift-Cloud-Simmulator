@@ -17,8 +17,20 @@ export interface RenderTreeViewProps {
    * needs to be able to tell the difference at a glance.
    */
   stale?: boolean
-  /** Outline every node. Precursor to the Phase 4 view inspector. */
+  /** Outline every node. */
   debugOutlines?: boolean
+  /**
+   * Inspector mode (FR-5.8).
+   *
+   * While active, every node accepts pointer events, so hovering reports the
+   * innermost view under the cursor — which is what the DOM's own hit testing
+   * already gives us, since children paint above their parents.
+   */
+  inspect?: {
+    readonly hovered: string | null
+    onHover(node: RenderNode | null): void
+    onSelect(node: RenderNode): void
+  }
 }
 
 /**
@@ -35,7 +47,11 @@ export const RenderTreeView = memo(function RenderTreeView({
   onEvent,
   stale = false,
   debugOutlines = false,
+  inspect,
 }: RenderTreeViewProps) {
+  const hoveredNode = inspect?.hovered
+    ? tree.nodes.find((n) => n.id === inspect.hovered)
+    : undefined
   return (
     <div
       data-testid="render-tree"
@@ -57,22 +73,48 @@ export const RenderTreeView = memo(function RenderTreeView({
           node={node}
           onEvent={onEvent}
           debugOutlines={debugOutlines}
+          inspect={inspect}
         />
       ))}
+
+      {hoveredNode ? <InspectHighlight node={hoveredNode} /> : null}
     </div>
   )
 })
+
+/** The highlight rect. Drawn above everything and never itself hit-testable. */
+function InspectHighlight({ node }: { node: RenderNode }) {
+  return (
+    <div
+      data-testid="inspect-highlight"
+      style={{
+        position: 'absolute',
+        left: node.frame.x,
+        top: node.frame.y,
+        width: node.frame.width,
+        height: node.frame.height,
+        outline: '1.5px solid rgb(0 122 255)',
+        background: 'rgb(0 122 255 / 0.12)',
+        pointerEvents: 'none',
+        zIndex: 2_000_000,
+      }}
+    />
+  )
+}
 
 function RenderNodeView({
   node,
   onEvent,
   debugOutlines,
+  inspect,
 }: {
   node: RenderNode
   onEvent?: (event: UIEvent) => void
   debugOutlines: boolean
+  inspect?: RenderTreeViewProps['inspect']
 }) {
   const interactive = node.hitTarget?.enabled === true
+  const inspecting = inspect !== undefined && node.id !== 'screen'
 
   const style: CSSProperties = {
     position: 'absolute',
@@ -83,9 +125,10 @@ function RenderNodeView({
     zIndex: node.z,
     opacity: node.opacity,
     // Only hit targets receive pointer events, so a text label painted on top of a
-    // button does not swallow the tap meant for the button underneath it.
-    pointerEvents: interactive ? 'auto' : 'none',
-    cursor: interactive ? 'pointer' : 'default',
+    // button does not swallow the tap meant for the button underneath it. In
+    // inspector mode every node is hittable, which is the whole point.
+    pointerEvents: inspecting || interactive ? 'auto' : 'none',
+    cursor: inspecting ? 'crosshair' : interactive ? 'pointer' : 'default',
     ...(node.background ? { background: cssFill(node.background) } : {}),
     ...(node.cornerRadius ? { borderRadius: node.cornerRadius } : {}),
     ...(node.clip ? { overflow: 'hidden' } : {}),
@@ -102,8 +145,18 @@ function RenderNodeView({
       role={node.a11y?.role}
       aria-label={node.a11y?.label}
       aria-hidden={node.a11y?.hidden}
+      onPointerEnter={inspecting ? () => inspect.onHover(node) : undefined}
+      onPointerLeave={inspecting ? () => inspect.onHover(null) : undefined}
+      onClick={
+        inspecting
+          ? (e) => {
+              e.stopPropagation()
+              inspect.onSelect(node)
+            }
+          : undefined
+      }
       onPointerDown={
-        interactive && handlerId && onEvent
+        !inspecting && interactive && handlerId && onEvent
           ? (e) => {
               e.preventDefault()
               const bounds = e.currentTarget.getBoundingClientRect()

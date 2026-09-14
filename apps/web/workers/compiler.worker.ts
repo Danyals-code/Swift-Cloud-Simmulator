@@ -31,16 +31,16 @@ const api: CompilerApi = {
     return compile(request)
   },
 
-  async dispatch(event: UIEvent): Promise<CompileResult> {
+  async dispatch(event: UIEvent, revision: number): Promise<CompileResult> {
     // Interactions re-evaluate but never re-parse: the source has not changed, and
     // re-parsing would discard the live `@State` the tap just mutated.
     applyEvent(event)
-    return rerender()
+    return rerender(revision)
   },
 
-  async reset(): Promise<CompileResult> {
+  async reset(revision: number): Promise<CompileResult> {
     resetPipelineState()
-    return rerender()
+    return rerender(revision)
   },
 
   async setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void> {

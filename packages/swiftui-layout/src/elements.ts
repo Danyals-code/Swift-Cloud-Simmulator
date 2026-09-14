@@ -46,6 +46,16 @@ interface ElementBase {
   /** Stable across re-renders; becomes the RenderNode id and drives DOM reuse. */
   readonly id: string
   readonly origin?: SourceSpan
+  /**
+   * What to call this in the inspector: `Text`, `VStack`, `Button`.
+   *
+   * Carried on the element rather than derived from `kind` because the layout kinds
+   * are coarser than the views that produced them — a Button and a Text are both
+   * `text` elements once styling is stripped away.
+   */
+  readonly debugName?: string
+  /** Modifier names in source order, for the inspector readout. */
+  readonly debugModifiers?: readonly string[]
 }
 
 export interface StackElement extends ElementBase {

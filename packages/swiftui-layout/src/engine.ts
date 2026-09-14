@@ -33,6 +33,8 @@ export interface PlacedNode {
   readonly paint: PaintSpec
   readonly origin?: SourceSpan
   readonly hitTarget?: { readonly handlerId: string; readonly label: string }
+  readonly debugName?: string
+  readonly debugModifiers?: readonly string[]
 }
 
 /**
@@ -322,6 +324,7 @@ export class LayoutEngine {
             font: env.font,
             color: env.foregroundColor,
           },
+          ...debugInfo(element),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
@@ -339,6 +342,7 @@ export class LayoutEngine {
             shape: element.shape,
             fill: { kind: 'solid', color: env.foregroundColor },
           },
+          ...debugInfo(element),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
@@ -351,6 +355,7 @@ export class LayoutEngine {
           opacity: env.opacity,
           cornerRadius: env.cornerRadius,
           paint: { kind: 'fill', fill: element.fill },
+          ...debugInfo(element),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
@@ -363,6 +368,7 @@ export class LayoutEngine {
           opacity: env.opacity,
           cornerRadius: 8,
           paint: { kind: 'placeholder', feature: element.feature, reason: element.reason },
+          ...debugInfo(element),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
@@ -524,6 +530,17 @@ export class LayoutEngine {
 }
 
 // -------------------------------------------------------------------- helpers
+
+/** Inspector metadata, omitted entirely when an element carries none. */
+function debugInfo(element: LayoutElement): {
+  debugName?: string
+  debugModifiers?: readonly string[]
+} {
+  return {
+    ...(element.debugName ? { debugName: element.debugName } : {}),
+    ...(element.debugModifiers?.length ? { debugModifiers: element.debugModifiers } : {}),
+  }
+}
 
 function describeDimension(d: ProposedDimension): string {
   return d === null ? 'i' : d === 'infinity' ? 'inf' : d.toFixed(2)

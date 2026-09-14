@@ -47,7 +47,12 @@ function spawnWorker(): WorkerHandle {
  *    dead worker is recoverable: respawn and recompile. The editor never goes down
  *    with it (requirement NFR-3).
  */
-export function useCompiler(files: readonly SourceFile[], device: DeviceSpec, colorScheme: 'light' | 'dark') {
+export function useCompiler(
+  files: readonly SourceFile[],
+  device: DeviceSpec,
+  colorScheme: 'light' | 'dark',
+  typeScale = 1,
+) {
   const handleRef = useRef<WorkerHandle | null>(null)
   const revisionRef = useRef(0)
   /** highest revision actually painted, so stale responses can be dropped */
@@ -107,6 +112,7 @@ export function useCompiler(files: readonly SourceFile[], device: DeviceSpec, co
           canvas: { width: device.width, height: device.height },
           safeArea: device.safeArea,
           colorScheme,
+          typeScale,
           revision,
         }),
       )
@@ -118,7 +124,7 @@ export function useCompiler(files: readonly SourceFile[], device: DeviceSpec, co
       }))
       handleRef.current = null
     }
-  }, [accept, colorScheme, device, ensureWorker, files])
+  }, [accept, colorScheme, device, ensureWorker, files, typeScale])
 
   // Debounced recompile whenever the sources or the device change.
   useEffect(() => {
@@ -139,7 +145,7 @@ export function useCompiler(files: readonly SourceFile[], device: DeviceSpec, co
   const dispatch = useCallback(
     async (event: UIEvent) => {
       try {
-        accept(await ensureWorker().api.dispatch(event))
+        accept(await ensureWorker().api.dispatch(event, ++revisionRef.current))
       } catch {
         // A dead worker during interaction: respawn and recompile from source.
         handleRef.current = null
@@ -151,7 +157,7 @@ export function useCompiler(files: readonly SourceFile[], device: DeviceSpec, co
 
   const reset = useCallback(async () => {
     try {
-      accept(await ensureWorker().api.reset())
+      accept(await ensureWorker().api.reset(++revisionRef.current))
     } catch {
       handleRef.current = null
       void runCompile()

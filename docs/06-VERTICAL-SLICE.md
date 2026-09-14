@@ -391,6 +391,78 @@ Verified: **11/11 packages typecheck**, **lint clean**, **351 unit tests**, **16
   under 1% of line width and never accumulates across lines, because each line
   re-measures from its own characters.
 
+## 4.8 Phase 4 task list — **complete**
+
+Built and verified 2026-09-14. The slice doc had deferred Phase 4 ("single file is
+enough for the slice"); it was brought forward on request.
+
+### Multi-file projects
+- [x] File rail: create, rename (double-click), delete, with the last file protected
+- [x] Tab bar with close buttons, focusing the neighbour when the active tab closes
+- [x] Ctrl+P switcher with subsequence matching, so `cv` finds `ContentView.swift`
+- [x] Cross-file name resolution and diagnostics (the checker already took `files[]`)
+- [x] Error markers on both the rail and the tabs, so a problem in a closed file is visible
+- [x] Per-file undo history, via remounting the editor on file change
+
+### Template gallery
+- [x] Five templates, each rendering with **zero** unsupported placeholders
+- [x] A conformance suite (`tests/templates.test.ts`) asserting that, per template:
+      no diagnostics, no placeholders, something actually drawn, every frame finite
+      and on-screen, and the whole pipeline inside budget
+
+### View inspector (FR-5.8)
+- [x] Ctrl+I toggle; every node becomes hit-testable while active
+- [x] Hover highlights the innermost view under the cursor
+- [x] Readout: view name, the frame the layout engine computed, applied modifiers
+- [x] Click jumps the editor to the Swift that produced the view
+
+### Preview controls
+- [x] Light/dark appearance, with separate iOS system palettes for each
+- [x] Dynamic Type across six steps, treated as a layout input rather than styling
+- [x] Both preserve `@State`
+
+### Phase 4 gate
+
+| # | Gate | Result |
+| --- | --- | --- |
+| 1 | A second file defines a type the first uses; completions and diagnostics cross the boundary | **Diagnostics: passing.** Completions: not built — see 4.9 |
+| 2 | Every template renders with zero unsupported placeholders | **Passing** — 33 conformance assertions across 5 templates |
+| 3 | Clicking a rendered element jumps the editor to the right line | **Passing** |
+| 4 | Dark mode and Dynamic Type re-render without losing state | **Passing** |
+
+Verified: **11/11 packages typecheck**, **lint clean**, **384 unit tests**, **26/26 e2e**,
+**352 KB gzipped** against a 450 KB budget.
+
+### 4.9 — Not built, and why
+
+| Planned | Status | Reasoning |
+| --- | --- | --- |
+| **Code completion** | **Not built** | The largest single item in Phase 4 and the only gate-1 shortfall. It needs a `complete(file, offset)` worker RPC and a CodeMirror source fed from the symbol table — real work, not a stub, and worth its own pass rather than a rushed one. Cross-file *diagnostics* work, which is the half of gate 1 that proves the multi-file model. |
+| Find/replace across the project | Not built | Lower value than the gates while projects are a handful of files. |
+| Asset import and `Image("name")` | Not built | `Image` is not in the slice's view set, so an asset pipeline would have nothing to draw. |
+| Onboarding tour | Not built | Premature while the product is still gaining capabilities each phase. |
+| 8 templates | **5 templates** | A template is a promise that the tool can draw what it shows. The gallery is constrained by the coverage matrix, and padding it with half-rendered examples would be worse than a small honest one. It grows as Phase 6 lands. |
+
+### 4.10 — Findings
+
+**A real bug, found by an end-to-end test.** The worker's `rerender` was inventing its
+own revision numbers while the hook incremented its own. After any interaction the
+worker's counter ran ahead, and the hook's stale-response guard then discarded the
+*next* legitimate compile — so changing a setting or editing code right after tapping
+a button silently did nothing. Revisions are now owned by the caller alone. This was
+invisible in manual testing because a second edit always got through.
+
+**Hover-only controls are unreachable.** The delete and close buttons were
+`display: none` until hover, which hides them from keyboard users, touch devices, and
+the accessibility tree — Playwright could not find them either, which is how it
+surfaced. They are now always present and dimmed.
+
+**Dark mode reveals that the reference app is genuinely broken in dark mode.** Its
+`Color(white: 0.95)` background is a fixed grey that does not adapt, while
+`.foregroundStyle(.primary)` becomes white — so the preview shows white text on a
+light background. That is exactly what a real device does, and exactly the kind of
+thing a preview exists to catch.
+
 ## 5. Slice definition of done
 
 1. The reference app in §1 renders in the device frame.

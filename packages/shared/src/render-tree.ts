@@ -151,6 +151,11 @@ export interface RenderNode {
   readonly a11y?: A11y
   /** where in the Swift source this came from — powers hover-to-source in the inspector */
   readonly origin?: SourceSpan
+  /** Inspector readout: what this view is called and what was applied to it (FR-5.8). */
+  readonly inspect?: {
+    readonly name: string
+    readonly modifiers?: readonly string[]
+  }
 }
 
 export interface RenderTree {

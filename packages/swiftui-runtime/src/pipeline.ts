@@ -19,7 +19,7 @@ import {
   type MeasuredFont,
 } from '@studio/swiftui-layout'
 import { AppRuntime, type EvaluationResult } from './app-runtime'
-import { BODY_FONT, LABEL_COLOR, SYSTEM_BACKGROUND } from './style'
+import { bodyFont, labelColor, systemBackground } from './style'
 import { placedToRenderTree } from './to-render'
 import { viewsToLayout } from './to-layout'
 
@@ -83,8 +83,13 @@ function analyse(request: CompileRequest): Analysis {
   return { files, model, diagnostics: [...diagnostics, ...model.diagnostics], parseMs, checkMs }
 }
 
-function rootEnvironment(): LayoutEnvironment {
-  return { font: BODY_FONT, foregroundColor: LABEL_COLOR, opacity: 1, cornerRadius: 0 }
+function rootEnvironment(request: CompileRequest): LayoutEnvironment {
+  return {
+    font: bodyFont(request.typeScale ?? 1),
+    foregroundColor: labelColor(request.colorScheme),
+    opacity: 1,
+    cornerRadius: 0,
+  }
 }
 
 /**
@@ -94,7 +99,10 @@ function rootEnvironment(): LayoutEnvironment {
  * a `WindowGroup`'s content.
  */
 function render(request: CompileRequest, evaluation: EvaluationResult): RenderTree {
-  const { element } = viewsToLayout(evaluation.views)
+  const { element } = viewsToLayout(evaluation.views, {
+    colorScheme: request.colorScheme,
+    typeScale: request.typeScale ?? 1,
+  })
   const engine = new LayoutEngine(metrics)
 
   const safeArea = request.safeArea ?? { top: 0, leading: 0, bottom: 0, trailing: 0 }
@@ -107,8 +115,13 @@ function render(request: CompileRequest, evaluation: EvaluationResult): RenderTr
 
   // SwiftUI centres root content in its window: a VStack hugging its content sits in
   // the middle of the screen rather than pinned to the top.
-  const placed = engine.layout(element, bounds, rootEnvironment(), CENTER)
-  return placedToRenderTree(placed, request.canvas, ++revision, SYSTEM_BACKGROUND)
+  const placed = engine.layout(element, bounds, rootEnvironment(request), CENTER)
+  return placedToRenderTree(
+    placed,
+    request.canvas,
+    ++revision,
+    systemBackground(request.colorScheme),
+  )
 }
 
 /** A tree carrying only a message, for states where there is nothing to draw. */
@@ -214,12 +227,18 @@ export function compile(request: CompileRequest): CompileResult {
   return finish(request, analysis, evaluation, startedAt, evaluateMs)
 }
 
-/** Re-renders after an interaction, without re-parsing unchanged source. */
-export function rerender(revisionBump = 1): CompileResult {
+/**
+ * Re-renders after an interaction, without re-parsing unchanged source.
+ *
+ * `revision` comes from the caller, never from here. The worker keeping its own
+ * counter would let it run ahead of the caller's, after which every genuinely newer
+ * compile looks stale and is dropped.
+ */
+export function rerender(revision: number): CompileResult {
   if (!lastAnalysis) throw new Error('rerender called before any compile')
 
   const { request, analysis } = lastAnalysis
-  const next = { ...request, revision: request.revision + revisionBump }
+  const next = { ...request, revision }
   lastAnalysis = { request: next, analysis }
 
   const startedAt = performance.now()
