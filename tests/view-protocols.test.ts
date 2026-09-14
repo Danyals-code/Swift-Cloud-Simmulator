@@ -301,3 +301,122 @@ struct ContentView: View {
     expect((result.renderTree?.nodes ?? []).some((n) => n.background)).toBe(true)
   })
 })
+
+describe('custom ButtonStyle (Phase 9)', () => {
+  it('draws the button with the style’s body', () => {
+    const result = run(`import SwiftUI
+${APP}
+struct Pill: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(Color.blue)
+            .foregroundStyle(Color.white)
+            .cornerRadius(22)
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        Button("Continue") { }
+            .buttonStyle(Pill())
+    }
+}
+`)
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect(texts(result.renderTree)).toEqual(['Continue'])
+    // The style's background has to reach the tree, or it drew the bare label.
+    expect((result.renderTree?.nodes ?? []).some((n) => n.background)).toBe(true)
+  })
+
+  it('keeps the button tappable', () => {
+    // A style describes appearance. Replacing the whole view with what it drew would
+    // take the action with it, which is the failure this guards.
+    const result = run(`import SwiftUI
+${APP}
+struct Pill: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.padding(12).background(Color.blue)
+    }
+}
+
+struct ContentView: View {
+    @State private var count = 0
+
+    var body: some View {
+        Button("Tap \\(count)") { count += 1 }
+            .buttonStyle(Pill())
+    }
+}
+`)
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect(texts(result.renderTree)).toEqual(['Tap 0'])
+    expect((result.renderTree?.nodes ?? []).some((n) => n.hitTarget)).toBe(true)
+  })
+
+  it('applies to every button below it, not only the one it is written on', () => {
+    // One line at the top of a screen restyles all of them — the reason the resolver
+    // tracks this rather than the modifier being read where it sits.
+    const result = run(`import SwiftUI
+${APP}
+struct Pill: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.padding(8).background(Color.blue)
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Button("One") { }
+            Button("Two") { }
+        }
+        .buttonStyle(Pill())
+    }
+}
+`)
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect(texts(result.renderTree)).toEqual(['One', 'Two'])
+    expect((result.renderTree?.nodes ?? []).filter((n) => n.background).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('reads the style’s own stored properties', () => {
+    const result = run(`import SwiftUI
+${APP}
+struct Tinted: ButtonStyle {
+    var tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.padding(8).background(tint)
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        Button("Go") { }
+            .buttonStyle(Tinted(tint: .green))
+    }
+}
+`)
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect(texts(result.renderTree)).toEqual(['Go'])
+  })
+
+  it('leaves the built-in styles on the built-in path', () => {
+    // `.bordered` is a token, not a struct. Intercepting it would replace working
+    // chrome with nothing.
+    const result = run(`import SwiftUI
+${APP}
+struct ContentView: View {
+    var body: some View {
+        Button("Go") { }
+            .buttonStyle(.borderedProminent)
+    }
+}
+`)
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect(texts(result.renderTree)).toEqual(['Go'])
+    expect((result.renderTree?.nodes ?? []).some((n) => n.background)).toBe(true)
+  })
+})

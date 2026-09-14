@@ -108,6 +108,22 @@ export interface TokenPayload {
   readonly name: string
 }
 
+/**
+ * `ButtonStyleConfiguration`, as handed to a custom `ButtonStyle`.
+ *
+ * Opaque rather than a synthesised struct: it has exactly two members a preview can
+ * supply, and declaring a type nothing else refers to would be more machinery than
+ * the thing it models.
+ */
+export const BUTTON_CONFIGURATION_TYPE = 'ButtonStyleConfiguration'
+
+export interface ButtonConfigurationPayload {
+  /** Whatever the button was going to draw, as a view value. */
+  readonly label: SwiftValue
+  /** Always false here: the tree is built between interactions, never during one. */
+  readonly isPressed: boolean
+}
+
 export const COLOR_TYPE = 'Color'
 
 export interface ColorPayload {
@@ -155,6 +171,11 @@ export const TRANSITION_TYPE = 'Transition'
 export interface TransitionPayload {
   readonly kind: 'opacity' | 'slide' | 'scale' | 'move' | 'identity'
   readonly edge?: string
+}
+
+/** Wraps an evaluated view as a Swift value, so it can be passed to user code. */
+export function asSwiftValue(v: ViewValue): SwiftValue {
+  return { kind: 'opaque', typeName: VIEW_TYPE, payload: v }
 }
 
 export function isView(value: SwiftValue): value is SwiftValue & { payload: ViewValue } {

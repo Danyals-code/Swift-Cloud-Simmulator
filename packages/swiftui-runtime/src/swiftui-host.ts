@@ -2,6 +2,7 @@ import type { SourceSpan } from '@studio/shared'
 import {
   applyKeyPath,
   asKeyPath,
+  bool,
   describe,
   double,
   int,
@@ -38,6 +39,7 @@ import {
 import {
   asView,
   ANIMATION_TYPE,
+  BUTTON_CONFIGURATION_TYPE,
   COLOR_TYPE,
   GEOMETRY_TYPE,
   isView,
@@ -46,6 +48,7 @@ import {
   TRANSITION_TYPE,
   VIEW_TYPE,
   type AnimationPayload,
+  type ButtonConfigurationPayload,
   type ColorPayload,
   type GradientPayload,
   type ModifierValue,
@@ -831,6 +834,13 @@ export class SwiftUIHost implements InterpreterHost {
       if (member === 'width') return double(size.width)
       if (member === 'height') return double(size.height)
       if (member === 'safeAreaInsets') return opaque(GEOMETRY_TYPE, { width: 0, height: 0 })
+    }
+
+    // `configuration.label` and `configuration.isPressed` inside a custom ButtonStyle.
+    if (target.kind === 'opaque' && target.typeName === BUTTON_CONFIGURATION_TYPE) {
+      const payload = target.payload as ButtonConfigurationPayload
+      if (member === 'label') return payload.label
+      if (member === 'isPressed') return bool(payload.isPressed)
     }
 
     if (target.kind === 'type') {

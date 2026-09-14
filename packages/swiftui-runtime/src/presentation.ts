@@ -187,6 +187,18 @@ export interface ResolveContext {
   readonly state: UIState
   /** Runs a view-builder closure, returning the views it produced. */
   build(closure: ClosureValue, args?: readonly SwiftValue[]): readonly ViewValue[]
+  /**
+   * Runs a custom `ButtonStyle`'s `makeBody(configuration:)`.
+   *
+   * Supplied by the runtime because it needs the interpreter, which this module must
+   * not hold. Returns null when the value is not a style the project declared, so the
+   * built-in `.bordered` path still runs.
+   */
+  styleButton?(
+    style: SwiftValue,
+    label: readonly ViewValue[],
+    isPressed: boolean,
+  ): readonly ViewValue[] | null
   readonly animation: AnimationPayload | null
 }
 
@@ -197,6 +209,15 @@ export function resolveUI(views: readonly ViewValue[], ctx: ResolveContext): Res
 class Resolver {
   private readonly handlers = new Map<string, ViewIntent>()
   private readonly lifecycle: LifecycleHook[] = []
+  /**
+   * Custom button styles in scope, innermost last.
+   *
+   * `.buttonStyle` applies to every `Button` *below* it, not only the one it is
+   * written on — that is what makes one line at the top of a screen restyle all of
+   * them. The resolver is the only traversal that sees the whole tree, so it is the
+   * only place that can know what is above a given button.
+   */
+  private readonly buttonStyles: SwiftValue[] = []
 
   constructor(private readonly ctx: ResolveContext) {}
 
@@ -240,18 +261,69 @@ class Resolver {
   private stamp(view: ViewValue, path: string): ViewValue {
     const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.closure ?? null
 
-    const children = view.childKeys
-      ? view.children.map((child, i) =>
-          this.stampRow(child, `${path}-${keySegment(view.childKeys![i], i)}`, onDelete, i),
-        )
-      : this.stampList(view.children, path)
+    // A custom style written on this view is in scope for its whole subtree, and for
+    // this view itself when it is the button.
+    const style = this.customButtonStyle(view)
+    if (style) this.buttonStyles.push(style)
 
-    const intent = this.intentFor(view)
-    const stamped: ViewValue = { ...view, path, children, ...(intent ? { intent } : {}) }
+    try {
+      const restyled = view.name === 'Button' ? this.applyButtonStyle(view, path) : view
 
-    if (intent) this.handlers.set(handlerIdFor(path), intent)
-    this.collectLifecycle(view, path)
-    return stamped
+      const children = restyled.childKeys
+        ? restyled.children.map((child, i) =>
+            this.stampRow(child, `${path}-${keySegment(restyled.childKeys![i], i)}`, onDelete, i),
+          )
+        : this.stampList(restyled.children, path)
+
+      const intent = this.intentFor(restyled)
+      const stamped: ViewValue = { ...restyled, path, children, ...(intent ? { intent } : {}) }
+
+      if (intent) this.handlers.set(handlerIdFor(path), intent)
+      this.collectLifecycle(restyled, path)
+      return stamped
+    } finally {
+      if (style) this.buttonStyles.pop()
+    }
+  }
+
+  /** The argument of a `.buttonStyle` that names a type the project declared. */
+  private customButtonStyle(view: ViewValue): SwiftValue | null {
+    const modifier = view.modifiers.find((m) => m.name === 'buttonStyle')
+    const argument = modifier?.args[0]?.value
+    // A struct, not a token: `.bordered` is a built-in and stays on the built-in path.
+    return argument && argument.kind === 'struct' ? argument : null
+  }
+
+  /**
+   * Replaces a button's label with what its style's `makeBody(configuration:)` drew.
+   *
+   * The `Button` itself survives — its action, its path and its hit target are the
+   * button's *behaviour*, and a style describes only its appearance. Replacing the
+   * whole view would take the tap with it.
+   */
+  private applyButtonStyle(view: ViewValue, path: string): ViewValue {
+    const style = this.buttonStyles[this.buttonStyles.length - 1]
+    if (!style || !this.ctx.styleButton) return view
+
+    // `configuration.label` is whatever the button was going to draw: its title when
+    // it was given one, otherwise its content views.
+    const title = view.args.find((a) => a.label === null)?.value
+    const label: readonly ViewValue[] =
+      view.children.length > 0
+        ? view.children
+        : title !== undefined && title.kind === 'string'
+          ? [{ name: 'Text', args: [{ label: null, value: title }], children: [], modifiers: [], action: null, span: view.span }]
+          : []
+
+    // `isPressed` is always false. The tree is built between interactions, never
+    // during one, so there is no press to report — and a style that draws a pressed
+    // state simply draws its resting one, which is what the preview is showing.
+    void path
+    const body = this.ctx.styleButton(style, label, false)
+    if (!body || body.length === 0) return view
+
+    // The title is dropped along with it: leaving it would draw the label twice.
+    return { ...view, args: [], children: body }
   }
 
   /** Records `.onAppear`, `.onDisappear`, `.task` and `.onChange` for this view. */

@@ -10,6 +10,7 @@ import {
   int,
   Interpreter,
   indexSet,
+  opaque,
   str,
   SwiftThrow,
   SwiftTrap,
@@ -32,7 +33,15 @@ import {
   phaseOfEvent,
 } from './gestures'
 import { SwiftUIHost } from './swiftui-host'
-import { asView, handlerIdFor, type AnimationPayload, type ViewIntent, type ViewValue } from './view-value'
+import {
+  asSwiftValue,
+  asView,
+  BUTTON_CONFIGURATION_TYPE,
+  handlerIdFor,
+  type AnimationPayload,
+  type ViewIntent,
+  type ViewValue,
+} from './view-value'
 
 export interface RuntimeFailure {
   readonly message: string
@@ -200,6 +209,7 @@ export class AppRuntime {
       const ui = resolveUI(views, {
         state: this.ui,
         build: (closure, args) => this.buildViews(closure, args),
+        styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
         animation: this.animation,
       })
       this.handlers = ui.handlers
@@ -620,6 +630,43 @@ export class AppRuntime {
       args,
       call.span,
     )
+  }
+
+  /**
+   * Runs a custom `ButtonStyle`'s `makeBody(configuration:)`.
+   *
+   * The configuration is an opaque value with two members, because that is all
+   * `ButtonStyleConfiguration` has that a preview can supply: `label`, which is
+   * whatever the button was going to draw, and `isPressed`. Building it as a real
+   * struct would mean synthesising a declaration nothing else needs.
+   */
+  private styleButton(
+    style: SwiftValue,
+    label: readonly ViewValue[],
+    isPressed: boolean,
+  ): readonly ViewValue[] | null {
+    if (style.kind !== 'struct') return null
+    if (!this.interpreter.conformsTo(style.typeName, 'ButtonStyle')) return null
+
+    const content =
+      label.length === 1
+        ? asSwiftValue(label[0]!)
+        : asSwiftValue({
+            name: 'Group',
+            args: [],
+            children: [...label],
+            modifiers: [],
+            action: null,
+            span: { file: '', start: 0, end: 0 },
+          })
+
+    const configuration = opaque(BUTTON_CONFIGURATION_TYPE, { label: content, isPressed })
+    const produced = this.callMethod(style, 'makeBody', [configuration])
+    if (produced === undefined) return null
+
+    const drawn = asView(produced)
+    if (drawn) return [drawn]
+    return produced.kind === 'struct' ? this.expand(produced) : null
   }
 
   private buildViews(closure: ClosureValue, args: readonly SwiftValue[] = []): readonly ViewValue[] {
