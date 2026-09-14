@@ -114,6 +114,16 @@ export interface FunctionValue {
   /** Bound receiver for a method call, else null. */
   readonly self: StructValue | null
   readonly env: unknown
+  /**
+   * The type that *declared* this method, when it is a method.
+   *
+   * Only `super` reads it, and only `super` can be written without it: "start above
+   * the type that declared the method now running" is a fact about where the code sits
+   * in the source, and the receiver's own type is a different thing entirely — in a
+   * three-level hierarchy they disagree, and resolving `super` against the receiver
+   * calls the override again, forever.
+   */
+  readonly owner?: string | null
 }
 
 export interface RangeValue {

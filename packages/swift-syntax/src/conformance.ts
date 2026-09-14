@@ -41,6 +41,16 @@ export interface TypeMembers {
    * must appear before an extension's computed property that reads it.
    */
   readonly members: readonly Decl[]
+  /**
+   * Which type each member was written in.
+   *
+   * `super` needs this and nothing else can supply it: `super.speak()` means "start
+   * above the type that *declared* the method now running", which is a fact about
+   * where the code was written, not about what the instance turned out to be. Keying
+   * on the declaration node rather than the name keeps it exact when a name is
+   * overridden at several levels.
+   */
+  readonly origin: ReadonlyMap<Decl, string>
   /** Protocols named directly, through another protocol, or through a superclass. */
   readonly conformances: ReadonlySet<string>
   /** The superclass name, for a `class` that names one. */
@@ -101,7 +111,14 @@ export function collectConformance(files: readonly SourceFileNode[]): Conformanc
     const own = extensions.get(name) ?? []
 
     if (building.has(name)) {
-      return { name, decl, members: [], conformances: new Set(), superclass: null }
+      return {
+        name,
+        decl,
+        members: [],
+        origin: new Map(),
+        conformances: new Set(),
+        superclass: null,
+      }
     }
     building.add(name)
 
@@ -138,13 +155,19 @@ export function collectConformance(files: readonly SourceFileNode[]): Conformanc
     // `protocol` block, and — far more commonly, because it is the only place Swift
     // allows a body for a requirement — a member of `extension P`.
     const protocolDefaults: Decl[] = []
+    const origin = new Map<Decl, string>(base?.origin ?? [])
+
     for (const protocolName of conformances) {
       for (const member of protocols.get(protocolName)?.members ?? []) {
-        if (!isRequirement(member)) protocolDefaults.push(member)
+        if (isRequirement(member)) continue
+        protocolDefaults.push(member)
+        origin.set(member, protocolName)
       }
       for (const ext of extensions.get(protocolName) ?? []) {
         for (const member of ext.members) {
-          if (!isRequirement(member)) protocolDefaults.push(member)
+          if (isRequirement(member)) continue
+          protocolDefaults.push(member)
+          origin.set(member, protocolName)
         }
       }
     }
@@ -152,6 +175,7 @@ export function collectConformance(files: readonly SourceFileNode[]): Conformanc
     const baseMembers = [...(base?.members ?? [])]
     const extensionMembers = own.flatMap((e) => [...e.members])
     const ownMembers = [...(decl?.members ?? [])]
+    for (const member of [...extensionMembers, ...ownMembers]) origin.set(member, name)
 
     // Precedence: least specific first, so the last layer to claim a key wins. That is
     // Swift's rule exactly — own beats extension, extension beats protocol default,
@@ -187,7 +211,7 @@ export function collectConformance(files: readonly SourceFileNode[]): Conformanc
       }
     }
 
-    const result: TypeMembers = { name, decl, members, conformances, superclass }
+    const result: TypeMembers = { name, decl, members, origin, conformances, superclass }
     building.delete(name)
     types.set(name, result)
     return result

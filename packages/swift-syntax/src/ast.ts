@@ -226,6 +226,8 @@ export interface FuncDecl extends DeclBase {
   readonly params: readonly Param[]
   readonly returnType: TypeRef | null
   readonly body: Block | null
+  /** `throws` or `rethrows`. Recorded; propagation is dynamic, so nothing enforces it. */
+  readonly canThrow: boolean
 }
 
 export interface InitDecl extends DeclBase {
@@ -272,12 +274,44 @@ export interface ErrorDecl extends NodeBase {
   readonly message: string
 }
 
+/**
+ * `do { … } catch { … }`.
+ *
+ * A `do` with no catches is a plain scope, which Swift also allows — the node is the
+ * same either way, and an empty `catches` list means nothing is caught here.
+ */
+export interface DoCatchStmt extends NodeBase {
+  readonly kind: 'doCatchStmt'
+  readonly body: Block
+  readonly catches: readonly CatchClause[]
+}
+
+/**
+ * One `catch` clause.
+ *
+ * `pattern` is null for a bare `catch`, which matches anything. `binding` is the name
+ * the error is bound to — Swift's implicit `error` when nothing is written, or the
+ * name in `catch let problem`.
+ */
+export interface CatchClause extends NodeBase {
+  readonly pattern: Pattern | null
+  readonly binding: string
+  readonly body: Block
+}
+
+export interface ThrowStmt extends NodeBase {
+  readonly kind: 'throwStmt'
+  readonly value: Expr
+}
+
 export interface Param extends NodeBase {
   /** `_` for an omitted label; null when only one name was written. */
   readonly externalName: string | null
   readonly internalName: string
   readonly type: TypeRef | null
   readonly defaultValue: Expr | null
+  /** `inout`: the argument is written back to the caller's storage. */
+  readonly isInout: boolean
 }
 
 // -------------------------------------------------------------- statements
@@ -286,6 +320,8 @@ export type Stmt =
   | ExprStmt
   | DeclStmt
   | IfStmt
+  | DoCatchStmt
+  | ThrowStmt
   | GuardStmt
   | SwitchStmt
   | ForInStmt
@@ -468,7 +504,34 @@ export type Expr =
   | ForceUnwrapExpr
   | OptionalChainExpr
   | KeyPathExpr
+  | TryExpr
+  | SuperExpr
+  | InOutExpr
   | ErrorExpr
+
+/**
+ * `try`, `try?` and `try!`.
+ *
+ * The three differ only in what happens when the operand throws: propagate, become
+ * nil, or trap. Modelling them as one node with a mode keeps that difference in one
+ * place instead of three near-identical ones.
+ */
+export interface TryExpr extends NodeBase {
+  readonly kind: 'try'
+  readonly mode: 'propagate' | 'optional' | 'force'
+  readonly operand: Expr
+}
+
+/** `super` — the receiver, resolved against the superclass's members. */
+export interface SuperExpr extends NodeBase {
+  readonly kind: 'superExpr'
+}
+
+/** `&value` at a call site, supplying an `inout` argument. */
+export interface InOutExpr extends NodeBase {
+  readonly kind: 'inout'
+  readonly operand: Expr
+}
 
 export interface IntegerLiteralExpr extends NodeBase {
   readonly kind: 'integerLiteral'
@@ -700,6 +763,18 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
       return
     case 'block':
       node.statements.forEach(visit)
+      return
+    case 'doCatchStmt':
+      visit(node.body)
+      node.catches.forEach((clause) => {
+        if (clause.pattern) visitPattern(clause.pattern, visit)
+        visit(clause.body)
+      })
+      return
+    case 'throwStmt':
+    case 'try':
+    case 'inout':
+      visit(node.kind === 'throwStmt' ? node.value : node.operand)
       return
     case 'exprStmt':
       visit(node.expression)

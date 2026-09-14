@@ -11,6 +11,7 @@ import {
   Interpreter,
   indexSet,
   str,
+  SwiftThrow,
   SwiftTrap,
   UnsupportedAtRuntime,
   valuesEqual,
@@ -715,6 +716,17 @@ function toFailure(error: unknown): RuntimeFailure {
   }
   if (error instanceof UnsupportedAtRuntime) {
     return { message: error.message, span: error.span, frames: [], kind: 'unsupported' }
+  }
+  if (error instanceof SwiftThrow) {
+    // An error that reached the top of the tree was never caught. In a real app that
+    // is a fatal error; here it has to become a diagnostic, because anything this
+    // function does not recognise is re-thrown and takes the whole compile with it.
+    return {
+      message: `An error was thrown and never caught: ${describe(error.value as SwiftValue, false)}`,
+      span: error.span,
+      frames: [],
+      kind: 'trap',
+    }
   }
   throw error
 }

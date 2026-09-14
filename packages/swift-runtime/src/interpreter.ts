@@ -5,6 +5,7 @@ import type {
   ClosureExpr,
   Condition,
   Decl,
+  DoCatchStmt,
   EnumDecl,
   Expr,
   FuncDecl,
@@ -14,6 +15,7 @@ import type {
   Stmt,
   StructDecl,
   SwitchStmt,
+  TryExpr,
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
@@ -29,6 +31,7 @@ import {
   ContinueSignal,
   ExecutionBudgetExceeded,
   ReturnSignal,
+  SwiftThrow,
   SwiftTrap,
   TRAP_MESSAGES,
   UnsupportedAtRuntime,
@@ -111,6 +114,8 @@ export class Interpreter {
   private readonly frames: StackFrame[] = []
   /** Declared result types, innermost last, so `return .case` knows its own type. */
   private readonly returnTypes: (string | null)[] = []
+  /** Declaring types, innermost last, so `super` steps above the right one. */
+  private readonly owners: (string | null)[] = []
   private readonly host: InterpreterHost
   private readonly stepBudget: number
 
@@ -171,6 +176,16 @@ export class Interpreter {
   /** Whether a type conforms to a protocol, directly or through another protocol. */
   conformsTo(typeName: string, protocolName: string): boolean {
     return this.conformance.types.get(typeName)?.conformances.has(protocolName) ?? false
+  }
+
+  /** The superclass of a class, for `super`. */
+  superclassOf(typeName: string): string | null {
+    return this.conformance.types.get(typeName)?.superclass ?? null
+  }
+
+  /** The type a member was written in, which is what `super` steps above. */
+  private declaringTypeOf(lookupIn: string, member: Decl): string {
+    return this.conformance.types.get(lookupIn)?.origin.get(member) ?? lookupIn
   }
 
   /**
@@ -343,11 +358,22 @@ export class Interpreter {
   }
 
   /** Reads a member from a struct: stored field, computed property, or bound method. */
-  private memberOfStruct(target: StructValue, member: string, span: SourceSpan): SwiftValue | undefined {
-    const field = target.fields.get(member)
-    if (field !== undefined) return field
+  private memberOfStruct(
+    target: StructValue,
+    member: string,
+    span: SourceSpan,
+    /**
+     * Where to begin looking, for `super`. The receiver is still the same instance —
+     * only the member list changes, which is the whole of what `super` means.
+     */
+    lookupIn: string = target.typeName,
+  ): SwiftValue | undefined {
+    if (lookupIn === target.typeName) {
+      const field = target.fields.get(member)
+      if (field !== undefined) return field
+    }
 
-    const members = this.membersOf(target.typeName)
+    const members = this.membersOf(lookupIn)
     if (members.length === 0) return undefined
 
     const computed = members.find(
@@ -366,7 +392,15 @@ export class Interpreter {
     const method = members.find(
       (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null,
     )
-    if (method) return { kind: 'function', decl: method, self: target, env: this.globals }
+    if (method) {
+      return {
+        kind: 'function',
+        decl: method,
+        self: target,
+        env: this.globals,
+        owner: this.declaringTypeOf(lookupIn, method),
+      }
+    }
 
     return undefined
   }
@@ -523,7 +557,12 @@ export class Interpreter {
 
     if (!decl.body) return VOID
     const label = fn.self ? `${fn.self.typeName}.${decl.name}` : decl.name
-    return this.runBody(label, decl.body, env, span, namedTypeOf(decl.returnType))
+    this.owners.push(fn.owner ?? null)
+    try {
+      return this.runBody(label, decl.body, env, span, namedTypeOf(decl.returnType))
+    } finally {
+      this.owners.pop()
+    }
   }
 
   private bindParameters(
@@ -532,6 +571,7 @@ export class Interpreter {
       internalName: string
       defaultValue: Expr | null
       type?: TypeRef | null
+      isInout?: boolean
       span: SourceSpan
     }[],
     args: readonly CallArgument[],
@@ -553,9 +593,18 @@ export class Interpreter {
       }
       if (value === undefined) value = positional[positionalIndex++]?.value
 
-      // Arguments are passed by value, so the callee cannot mutate the caller's copy.
-      // A declared parameter type is also the context a contextual member resolves
-      // against, which is what makes `select(.home)` mean anything.
+      // An `inout` parameter is bound to the caller's storage rather than to a copy,
+      // so writes reach back out. The projection `&x` produced is the same thing
+      // `$x` produces for `@Binding`, and every read and write already goes through
+      // one — so there is nothing further to do here but decline to copy.
+      if (param.isInout && value !== undefined && asProjection(value)) {
+        env.define(param.internalName, value, false, param.span ?? span)
+        continue
+      }
+
+      // Otherwise arguments are passed by value, so the callee cannot mutate the
+      // caller's copy. A declared parameter type is also the context a contextual
+      // member resolves against, which is what makes `select(.home)` mean anything.
       const coerced = this.coerceToEnum(value ?? NIL, namedTypeOf(param.type ?? null))
       env.define(param.internalName, copyValue(coerced), true, param.span ?? span)
     }
@@ -673,6 +722,13 @@ export class Interpreter {
         }
         return
       }
+
+      case 'throwStmt':
+        throw new SwiftThrow(this.evaluate(statement.value, env), statement.span)
+
+      case 'doCatchStmt':
+        this.runDoCatch(statement, env)
+        return
 
       case 'returnStmt':
         throw new ReturnSignal(
@@ -870,6 +926,56 @@ export class Interpreter {
     return this.makeEnumCase(decl, name, [], { file: '', start: 0, end: 0 })
   }
 
+  // ------------------------------------------------------------------ errors
+
+  /**
+   * `do { … } catch … { … }`.
+   *
+   * Clauses are tried in order and the first that matches wins — Swift's rule, and the
+   * reason a bare `catch` has to be written last. A throw with no matching clause keeps
+   * travelling, because swallowing it here would turn a real failure into silence.
+   */
+  private runDoCatch(statement: DoCatchStmt, env: Environment): void {
+    try {
+      this.executeBlock(statement.body, env.child())
+    } catch (error) {
+      if (!(error instanceof SwiftThrow)) throw error
+
+      const thrown = error.value as SwiftValue
+      for (const clause of statement.catches) {
+        const scope = env.child()
+        if (clause.pattern && !this.matchPattern(clause.pattern, thrown, scope)) continue
+        scope.define(clause.binding, thrown, true, clause.span)
+        this.executeBlock(clause.body, scope)
+        return
+      }
+
+      throw error
+    }
+  }
+
+  /**
+   * `try`, `try?` and `try!`.
+   *
+   * Bare `try` is a marker and nothing more: it makes the call visibly fallible at the
+   * call site, and the throw propagates on its own. The other two are where the work
+   * is — `try?` turns a throw into nil, `try!` into a trap that names what was thrown.
+   */
+  private runTry(expr: TryExpr, env: Environment): SwiftValue {
+    if (expr.mode === 'propagate') return this.evaluate(expr.operand, env)
+
+    try {
+      return this.evaluate(expr.operand, env)
+    } catch (error) {
+      if (!(error instanceof SwiftThrow)) throw error
+      if (expr.mode === 'optional') return NIL
+      this.trap(
+        `Unexpectedly found an error: ${describe(error.value as SwiftValue, false)}`,
+        expr.span,
+      )
+    }
+  }
+
   /** Builds an enum case value, resolving its raw value if the enum declares one. */
   private makeEnumCase(
     decl: EnumDecl,
@@ -1063,6 +1169,30 @@ export class Interpreter {
         return value
       }
 
+      case 'try':
+        return this.runTry(expr, env)
+
+      case 'inout': {
+        // `&count` hands the callee the *storage*, not the value. That is exactly what
+        // `$count` already produces for `@Binding`, so `inout` needs no mechanism of
+        // its own — the two are the same idea written differently.
+        const lvalue = this.tryResolveLValue(expr.operand, env)
+        if (!lvalue) this.trap('Cannot pass this expression as an inout argument', expr.span)
+        if (!lvalue.mutable) {
+          this.trap(`Cannot pass immutable value '${lvalue.description}' as an inout argument`, expr.span)
+        }
+        return projection(lvalue)
+      }
+
+      case 'superExpr': {
+        // `super` is the same instance; what differs is where member lookup starts.
+        // The marker is read by `evaluateMemberAccess` and `evaluateMemberCall`, which
+        // are the only places the distinction can matter.
+        const self = env.resolveSelf()
+        if (!self || self.kind !== 'struct') this.trap("'super' is only available inside a class", expr.span)
+        return self
+      }
+
       case 'keyPath':
         return keyPath(expr.components)
 
@@ -1141,6 +1271,12 @@ export class Interpreter {
     }
 
     const target = this.evaluate(base, env)
+
+    if (base.kind === 'superExpr' && target.kind === 'struct') {
+      const above = this.superclassOf(this.owners[this.owners.length - 1] ?? target.typeName)
+      const value = above ? this.memberOfStruct(target, member, span, above) : undefined
+      if (value !== undefined) return unwrapProjection(value)
+    }
 
     // `Item.self` is a metatype. The slice only ever passes one along — to
     // `navigationDestination(for:)` — so the type value itself is the whole answer.
@@ -1326,6 +1462,14 @@ export class Interpreter {
     // A mutating method needs the *storage*, not a copy, or its writes are lost.
     const lvalue = this.tryResolveLValue(baseExpr, env)
     const target = lvalue ? lvalue.get() : this.evaluate(baseExpr, env)
+
+    // `super.speak()` — same receiver, lookup starting one level up, so an override
+    // can call the thing it overrode instead of itself.
+    if (baseExpr.kind === 'superExpr' && target.kind === 'struct') {
+      const above = this.superclassOf(this.owners[this.owners.length - 1] ?? target.typeName)
+      const bound = above ? this.memberOfStruct(target, member, memberSpan, above) : undefined
+      if (bound?.kind === 'function') return this.callFunction(bound, allArgs, span)
+    }
 
     // `Status.loaded("x")` — an enum case with a payload.
     if (target.kind === 'type') {

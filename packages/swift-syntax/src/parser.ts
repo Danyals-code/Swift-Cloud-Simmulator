@@ -19,6 +19,7 @@ import type {
   Condition,
   Decl,
   EnumCase,
+  CatchClause,
   Expr,
   GenericParam,
   IfStmt,
@@ -51,9 +52,7 @@ const UNSUPPORTED_DECLARATIONS: Readonly<Record<string, string>> = {
 
 /** Statements outside the subset. */
 const UNSUPPORTED_STATEMENTS: Readonly<Record<string, string>> = {
-  do: 'do-catch',
   defer: 'defer',
-  throw: 'throw',
   fallthrough: 'fallthrough',
 }
 
@@ -423,6 +422,7 @@ export class Parser {
           internalName: label ?? `_${associated.length}`,
           type,
           defaultValue: null,
+          isInout: false,
         })
         if (!this.match(',')) break
       }
@@ -636,10 +636,8 @@ export class Parser {
     const params = this.parseParameterList()
 
     if (this.checkKeyword('async')) this.advance()
-    if (this.checkKeyword('throws') || this.checkKeyword('rethrows')) {
-      this.unsupported(this.current.span, 'throws')
-      this.advance()
-    }
+    const canThrow = this.checkKeyword('throws') || this.checkKeyword('rethrows')
+    if (canThrow) this.advance()
 
     let returnType: TypeRef | null = null
     if (this.match('->')) returnType = this.parseType()
@@ -658,6 +656,7 @@ export class Parser {
       params,
       returnType,
       body,
+      canThrow,
     }
   }
 
@@ -694,8 +693,10 @@ export class Parser {
       }
 
       let type: TypeRef | null = null
+      let isInout = false
       if (this.match(':')) {
-        if (this.checkKeyword('inout')) this.advance()
+        isInout = this.checkKeyword('inout')
+        if (isInout) this.advance()
         type = this.parseType()
       }
 
@@ -708,6 +709,7 @@ export class Parser {
         internalName,
         type,
         defaultValue,
+        isInout,
       })
 
       if (!this.match(',')) break
@@ -903,6 +905,14 @@ export class Parser {
     if (this.checkKeyword('continue')) {
       const token = this.advance()
       return { kind: 'continueStmt', span: token.span }
+    }
+
+    if (this.checkKeyword('do')) return this.parseDoCatch()
+
+    if (this.checkKeyword('throw')) {
+      this.advance()
+      const value = this.parseExpression(true)
+      return { kind: 'throwStmt', span: this.spanFrom(start), value }
     }
 
     if (
@@ -1234,6 +1244,46 @@ export class Parser {
     return { kind: 'returnStmt', span: this.spanFrom(start), value }
   }
 
+  /**
+   * `do { … } catch … { … }`.
+   *
+   * `repeat { } while` is the loop; `do` here is only ever a scope with handlers, so
+   * there is no trailing clause to disambiguate.
+   */
+  private parseDoCatch(): Stmt {
+    const start = this.advance() // 'do'
+    const body = this.parseBlock()
+    const catches: CatchClause[] = []
+
+    while (this.checkKeyword('catch')) {
+      const clauseStart = this.advance()
+
+      // `catch let problem { }` names the error; `catch MyError.bad { }` matches a
+      // pattern and binds the implicit `error`; a bare `catch { }` does both by
+      // default. Swift binds `error` in every clause that does not name its own.
+      let pattern: Pattern | null = null
+      let binding = 'error'
+
+      if (this.checkKeyword('let') || this.checkKeyword('var')) {
+        this.advance()
+        const named = this.expectIdentifier('a name for the caught error')
+        binding = named.name
+        // `catch let problem as MyError` — the cast narrows, which needs types we do
+        // not have. Binding without narrowing is the lenient reading.
+        if (this.checkKeyword('as')) {
+          this.advance()
+          this.parseType()
+        }
+      } else if (!this.check('{')) {
+        pattern = this.parsePattern()
+      }
+
+      catches.push({ span: this.spanFrom(clauseStart), pattern, binding, body: this.parseBlock() })
+    }
+
+    return { kind: 'doCatchStmt', span: this.spanFrom(start), body, catches }
+  }
+
   private parseUnsupportedStatement(feature: string): Stmt {
     const start = this.current
     this.unsupported(start.span, feature)
@@ -1334,10 +1384,28 @@ export class Parser {
   private parseUnary(allowTrailing: boolean): Expr {
     const start = this.current
 
-    if (start.kind === 'keyword' && (start.text === 'try' || start.text === 'await')) {
+    if (start.kind === 'keyword' && start.text === 'try') {
+      this.advance()
+      const mode = this.match('?') ? 'optional' : this.match('!') ? 'force' : 'propagate'
+      return {
+        kind: 'try',
+        span: this.spanFrom(start),
+        mode,
+        operand: this.parseUnary(allowTrailing),
+      }
+    }
+
+    if (start.kind === 'keyword' && start.text === 'await') {
       this.unsupported(start.span, start.text)
       this.advance()
       return this.parseUnary(allowTrailing)
+    }
+
+    // `&value` supplying an `inout` argument. Only meaningful in a call, and the
+    // prefix form is what tells it from the bitwise-and operator.
+    if (start.kind === 'operator' && start.text === '&' && !start.spaceAfter) {
+      this.advance()
+      return { kind: 'inout', span: this.spanFrom(start), operand: this.parseUnary(allowTrailing) }
     }
 
     if (
@@ -1608,8 +1676,7 @@ export class Parser {
           return { kind: 'selfExpr', span: token.span }
         case 'super':
           this.advance()
-          this.unsupported(token.span, 'super')
-          return { kind: 'errorExpr', span: token.span, message: 'super is not supported.' }
+          return { kind: 'superExpr', span: token.span }
         default:
           break
       }

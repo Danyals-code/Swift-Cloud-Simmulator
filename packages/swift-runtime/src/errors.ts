@@ -79,6 +79,24 @@ export class ReturnSignal {
 }
 
 /**
+ * A Swift `throw`, travelling as a JS throw.
+ *
+ * The same mechanism as `ReturnSignal`, and for the same reason: a thrown error has
+ * to unwind through however many calls stand between the `throw` and the `catch`, and
+ * a return code would need checking at every one of them.
+ *
+ * It carries the thrown *value* — usually an enum case conforming to `Error` — rather
+ * than a message, because that value is what a `catch` pattern matches against and
+ * what `catch { error }` binds.
+ */
+export class SwiftThrow {
+  constructor(
+    readonly value: unknown,
+    readonly span: SourceSpan,
+  ) {}
+}
+
+/**
  * Loop control, carried as a throw.
  *
  * Same mechanism as `ReturnSignal` and for the same reason: `break` has to unwind

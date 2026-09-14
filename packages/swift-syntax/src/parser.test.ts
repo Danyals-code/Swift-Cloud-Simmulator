@@ -136,9 +136,9 @@ describe('unsupported constructs are named, not mangled', () => {
   })
 
   it.each([
-    ['do { } catch { }', 'do-catch'],
     ['defer { }', 'defer'],
-    ['throw MyError.bad', 'throw'],
+    ['fallthrough', 'fallthrough'],
+    ['await load()', 'await'],
   ])('reports the statement %s as %s', (statement, feature) => {
     const { diagnostics } = parse(`func f() { ${statement} }`)
     expect(diagnostics.find((d) => d.code === 'unsupported_language_feature')?.feature).toBe(feature)
