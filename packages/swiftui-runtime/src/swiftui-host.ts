@@ -18,6 +18,7 @@ import {
   asView,
   ANIMATION_TYPE,
   COLOR_TYPE,
+  GEOMETRY_TYPE,
   isView,
   STYLE_TYPE,
   TOKEN_TYPE,
@@ -146,6 +147,23 @@ export class SwiftUIHost implements InterpreterHost {
   dismissAction: (() => void) | null = null
 
   /**
+   * Sizes measured for each `GeometryReader` on the previous layout pass.
+   *
+   * Empty on the first pass of a new screen, which is why `defaultGeometry` exists:
+   * a reader has to report *something* the first time, and the content rect is the
+   * closest guess available before anything has been laid out.
+   */
+  geometry: ReadonlyMap<string, { width: number; height: number }> = new Map()
+  defaultGeometry = { width: 393, height: 759 }
+
+  /** Per-pass counter, so two readers on one source line get distinct keys. */
+  private geometryOrdinals = new Map<string, number>()
+
+  beginPass(): void {
+    this.geometryOrdinals.clear()
+  }
+
+  /**
    * The animation `withAnimation` was called with, if any.
    *
    * Read and cleared by the runtime after dispatching an event: a state change made
@@ -153,6 +171,36 @@ export class SwiftUIHost implements InterpreterHost {
    * thing that distinguishes them is that this was set while the closure ran.
    */
   pendingAnimation: AnimationPayload | null = null
+
+  /**
+   * `GeometryReader { geo in … }`.
+   *
+   * The proxy has to carry a size *before* layout has run, which is the ordering
+   * problem this whole feature is. The size used is the one the same reader was
+   * measured at last time; the pipeline compares that against what it actually got
+   * and runs one more pass if they differ. Two passes converge because a reader is
+   * greedy — its size is its proposal, and the proposal does not depend on what the
+   * closure built.
+   */
+  private makeGeometryReader(call: HostCall): SwiftValue {
+    const site = `g${call.span.start}`
+    const ordinal = this.geometryOrdinals.get(site) ?? 0
+    this.geometryOrdinals.set(site, ordinal + 1)
+    const key = ordinal === 0 ? site : `${site}#${ordinal}`
+
+    const size = this.geometry.get(key) ?? this.defaultGeometry
+    const proxy = opaque(GEOMETRY_TYPE, { width: size.width, height: size.height })
+
+    return view({
+      name: 'GeometryReader',
+      args: toArgs(call),
+      children: this.toViews(call.invokeBuilder(call.trailingClosure!, [proxy])),
+      modifiers: [],
+      action: null,
+      span: call.span,
+      geometryKey: key,
+    })
+  }
 
   /**
    * Expands a user view so a modifier can be applied to it.
@@ -216,14 +264,38 @@ export class SwiftUIHost implements InterpreterHost {
     })
   }
 
-  /** Collected builder results, with user views expanded and non-views dropped. */
+  /**
+   * Collected builder results, with user views expanded and non-views dropped.
+   *
+   * A `Color` is a `View` in SwiftUI — `VStack { Color.red }` paints a red panel —
+   * so a colour reaching a builder is wrapped rather than discarded. Dropping it was
+   * silent, which is the failure mode this project refuses: the code looked honoured
+   * and drew nothing.
+   */
   private toViews(values: readonly SwiftValue[]): ViewValue[] {
     return values.flatMap((value) => {
       const view = asView(value)
       if (view) return [view]
       if (value.kind === 'struct' && this.expandStruct) return [...this.expandStruct(value)]
-      return []
+
+      const asColour = this.colorAsView(value)
+      return asColour ? [asColour] : []
     })
+  }
+
+  /** Wraps a `Color` (or a gradient) as the view it is. */
+  private colorAsView(value: SwiftValue, span?: SourceSpan): ViewValue | null {
+    if (value.kind !== 'opaque') return null
+    if (value.typeName !== COLOR_TYPE && value.typeName !== STYLE_TYPE) return null
+
+    return {
+      name: 'Color',
+      args: [{ label: null, value }],
+      children: [],
+      modifiers: [],
+      action: null,
+      span: span ?? { file: '', start: 0, end: 0 },
+    }
   }
 
   takeLogs(): { message: string; span: SourceSpan }[] {
@@ -253,6 +325,8 @@ export class SwiftUIHost implements InterpreterHost {
     if (DATA_DRIVEN_VIEWS.has(name) && call.trailingClosure && this.looksDataDriven(call)) {
       return this.makeDataDriven(name, args, call)
     }
+
+    if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
 
     const isAction = ACTION_VIEWS.has(name) && call.args.some((a) => a.label === null)
 
@@ -311,6 +385,25 @@ export class SwiftUIHost implements InterpreterHost {
         closure: call.trailingClosure,
       }
       return view({ ...base, modifiers: [...base.modifiers, modifier] })
+    }
+
+    // A view modifier written on a colour: `Color.red.frame(width: 100)`. The colour
+    // becomes the view it already is, and the modifier applies to that.
+    if (
+      target.kind === 'opaque' &&
+      (target.typeName === COLOR_TYPE || target.typeName === STYLE_TYPE) &&
+      !COLOR_MEMBERS.has(member)
+    ) {
+      const wrapped = this.colorAsView(target, call.span)
+      if (wrapped) {
+        const modifier: ModifierValue = {
+          name: member,
+          args: toArgs(call),
+          span: call.span,
+          closure: call.trailingClosure,
+        }
+        return view({ ...wrapped, modifiers: [modifier] })
+      }
     }
 
     if (target.kind === 'opaque' && target.typeName === COLOR_TYPE) {
@@ -375,6 +468,15 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   getMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
+    // `geo.size`, `geo.size.width`, `geo.size.height`.
+    if (target.kind === 'opaque' && target.typeName === GEOMETRY_TYPE) {
+      const size = target.payload as { width: number; height: number }
+      if (member === 'size') return target
+      if (member === 'width') return double(size.width)
+      if (member === 'height') return double(size.height)
+      if (member === 'safeAreaInsets') return opaque(GEOMETRY_TYPE, { width: 0, height: 0 })
+    }
+
     if (target.kind === 'type') {
       if (target.name === 'Color') return color({ name: member })
       if (target.name === 'Animation') return this.animationToken(member)
@@ -578,6 +680,9 @@ export class SwiftUIHost implements InterpreterHost {
 }
 
 // -------------------------------------------------------------------- helpers
+
+/** Members that belong to `Color` itself rather than to it as a view. */
+const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init'])
 
 const GRADIENTS: Readonly<Record<string, GradientPayload['kind']>> = {
   LinearGradient: 'linear',

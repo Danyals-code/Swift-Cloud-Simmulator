@@ -2,6 +2,7 @@ import type { Fill, Rect, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from
 import {
   childEnvironment,
   type Alignment,
+  type Axis,
   type AnimationHint,
   type GridElement,
   type GridTrack,
@@ -12,6 +13,8 @@ import {
   type ModifiedElement,
   type ScrollElement,
   type StackElement,
+  type TableElement,
+  type TextAlign,
 } from './elements'
 import { FontMetricsTable, measureText, type TextLineBox } from './metrics'
 import type { ProposedDimension, ProposedSize } from './proposal'
@@ -23,6 +26,7 @@ export type PaintSpec =
       readonly lines: readonly TextLineBox[]
       readonly font: ResolvedFont
       readonly color: RGBA
+      readonly align?: TextAlign
     }
   | { readonly kind: 'fill'; readonly fill: Fill }
   | { readonly kind: 'shape'; readonly shape: ShapeKind; readonly fill: Fill }
@@ -172,7 +176,7 @@ export class LayoutEngine {
 
       case 'text': {
         const maxWidth = resolve(proposal.width, Number.POSITIVE_INFINITY, UNBOUNDED)
-        const measured = measureText(element.text, env.font, maxWidth, this.metrics)
+        const measured = measureText(displayText(element.text, env), env.font, maxWidth, this.metrics, env.lineLimit)
         return { width: measured.width, height: measured.height }
       }
 
@@ -220,6 +224,14 @@ export class LayoutEngine {
 
       case 'grid':
         return this.measureGrid(element, proposal, env).size
+
+      case 'table':
+        return this.measureTable(element, proposal, env).size
+
+      case 'firstFit': {
+        const chosen = this.firstThatFits(element, proposal, env)
+        return this.measure(chosen, proposal, env)
+      }
 
       case 'placeholder':
         return { width: resolve(proposal.width, 200, UNBOUNDED), height: 64 }
@@ -270,14 +282,13 @@ export class LayoutEngine {
       }
     } else {
       let remaining = resolve(main, 0, UNBOUNDED) - spacingTotal
-      let left = children.length
+      const order = this.flexibilityOrder(children, vertical, cross, env)
 
-      for (const index of this.flexibilityOrder(children, vertical, cross, env)) {
-        const share = left > 0 ? Math.max(0, remaining / left) : 0
+      for (const [position, index] of order.entries()) {
+        const share = this.shareFor(children, order, position, remaining)
         const size = this.measure(children[index]!, axisProposal(vertical, cross, share), env)
         sizes[index] = size
         remaining -= vertical ? size.height : size.width
-        left--
       }
     }
 
@@ -309,13 +320,43 @@ export class LayoutEngine {
       const tight = this.measure(child, axisProposal(vertical, cross, 0), env)
       const loose = this.measure(child, axisProposal(vertical, cross, UNBOUNDED), env)
       const flexibility = vertical ? loose.height - tight.height : loose.width - tight.width
-      return { index, flexibility }
+      return { index, flexibility, priority: layoutPriorityOf(child) }
     })
 
-    // Stable within equal flexibility, so source order still decides ties.
+    // Higher layout priority is served first, whatever its flexibility — that is what
+    // `.layoutPriority` means: take your ideal size before the others are considered.
+    // Within equal priority the flexibility rule applies, and ties keep source order.
     return ranked
-      .sort((a, b) => a.flexibility - b.flexibility || a.index - b.index)
+      .sort(
+        (a, b) =>
+          b.priority - a.priority || a.flexibility - b.flexibility || a.index - b.index,
+      )
       .map((entry) => entry.index)
+  }
+
+  /**
+   * The space offered to the next child in a stack's measure order.
+   *
+   * Divided among the children *of the same layout priority* that are still
+   * unmeasured — not among all of them. That is what `.layoutPriority` means: the
+   * highest-priority group gets first claim on everything, and the rest divide what
+   * survives. Dividing equally regardless would make the modifier almost invisible,
+   * changing only the order in which two children took the same half each.
+   */
+  private shareFor(
+    children: readonly LayoutElement[],
+    order: readonly number[],
+    position: number,
+    remaining: number,
+  ): number {
+    const priority = layoutPriorityOf(children[order[position]!]!)
+
+    let peers = 0
+    for (let i = position; i < order.length; i++) {
+      if (layoutPriorityOf(children[order[i]!]!) === priority) peers++
+    }
+
+    return peers > 0 ? Math.max(0, remaining / peers) : 0
   }
 
   private measureModified(
@@ -378,12 +419,32 @@ export class LayoutEngine {
         return this.measure(element.child, ideal, inner)
       }
 
-      case 'scale': {
-        const size = this.measure(element.child, proposal, inner)
+      case 'scale':
         // `.scaleEffect` is a paint-time transform: layout still reserves the
         // untransformed size, which is why a scaled view overlaps its neighbours.
-        return size
+        return this.measure(element.child, proposal, inner)
+
+      case 'position':
+        // `.position` takes the whole space offered and puts the child at a point
+        // inside it — which is why it collapses whatever was around it.
+        return {
+          width: resolve(proposal.width, 0, UNBOUNDED),
+          height: resolve(proposal.height, 0, UNBOUNDED),
+        }
+
+      case 'aspectRatio': {
+        const size = this.measure(element.child, { width: null, height: null }, inner)
+        const ratio = modifier.ratio ?? (size.height === 0 ? 1 : size.width / size.height)
+        return fitToRatio(ratio, modifier.mode, proposal)
       }
+
+      case 'geometry':
+        // A geometry reader is greedy: it reports the whole proposal, which is also
+        // the size it hands to its content.
+        return {
+          width: resolve(proposal.width, 0, UNBOUNDED),
+          height: resolve(proposal.height, 0, UNBOUNDED),
+        }
 
       default:
         return this.measure(element.child, proposal, inner)
@@ -482,7 +543,8 @@ export class LayoutEngine {
         return z
 
       case 'text': {
-        const measured = measureText(element.text, env.font, bounds.width, this.metrics)
+        const text = displayText(element.text, env)
+        const measured = measureText(text, env.font, bounds.width, this.metrics, env.lineLimit)
         out.push({
           id: element.id,
           frame: bounds,
@@ -491,10 +553,11 @@ export class LayoutEngine {
           cornerRadius: 0,
           paint: {
             kind: 'text',
-            text: element.text,
+            text,
             lines: measured.lines,
             font: env.font,
             color: env.foregroundColor,
+            ...(env.textAlign ? { align: env.textAlign } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -529,6 +592,19 @@ export class LayoutEngine {
 
       case 'grid':
         return this.placeGrid(element, bounds, env, out, z, parent)
+
+      case 'table':
+        return this.placeTable(element, bounds, env, out, z, parent)
+
+      case 'firstFit':
+        return this.place(
+          this.firstThatFits(element, { width: bounds.width, height: bounds.height }, env),
+          bounds,
+          env,
+          out,
+          z,
+          parent,
+        )
 
       case 'shape':
         out.push({
@@ -645,6 +721,109 @@ export class LayoutEngine {
     )
   }
 
+  /**
+   * Sizes a `Grid`'s columns and rows.
+   *
+   * A column is as wide as its widest cell in any row — that cross-row alignment is
+   * the whole reason `Grid` exists, and the reason every cell has to be measured
+   * before any of them can be placed.
+   */
+  private measureTable(
+    element: TableElement,
+    proposal: ProposedSize,
+    env: LayoutEnvironment,
+  ): { size: Size; columns: number[]; rows: number[] } {
+    const columnCount = element.rows.reduce((max, row) => Math.max(max, row.length), 0)
+    const columns = new Array<number>(columnCount).fill(0)
+    const rows: number[] = []
+
+    for (const row of element.rows) {
+      let height = 0
+      row.forEach((cell, index) => {
+        const size = this.measure(cell, { width: null, height: null }, env)
+        columns[index] = Math.max(columns[index] ?? 0, size.width)
+        height = Math.max(height, size.height)
+      })
+      rows.push(height)
+    }
+
+    void proposal
+    const width = columns.reduce((a, b) => a + b, 0) + element.spacing * Math.max(0, columnCount - 1)
+    const height =
+      rows.reduce((a, b) => a + b, 0) + element.rowSpacing * Math.max(0, rows.length - 1)
+
+    return { size: { width, height }, columns, rows }
+  }
+
+  private placeTable(
+    element: TableElement,
+    bounds: Rect,
+    env: LayoutEnvironment,
+    out: PlacedNode[],
+    z: number,
+    parent: string | null,
+  ): number {
+    const { columns, rows } = this.measureTable(
+      element,
+      { width: bounds.width, height: bounds.height },
+      env,
+    )
+
+    let next = z
+    let y = bounds.y
+
+    element.rows.forEach((row, rowIndex) => {
+      let x = bounds.x
+      row.forEach((cell, columnIndex) => {
+        const width = columns[columnIndex] ?? 0
+        const height = rows[rowIndex] ?? 0
+        const size = this.measure(cell, { width, height }, env)
+        next = this.place(
+          cell,
+          alignedRect({ x, y, width, height }, size, element.alignment),
+          env,
+          out,
+          next,
+          parent,
+        )
+        x += width + element.spacing
+      })
+      y += (rows[rowIndex] ?? 0) + element.rowSpacing
+    })
+
+    return next
+  }
+
+  /**
+   * The first child of a `ViewThatFits` that fits, or the last as a fallback.
+   *
+   * Matching SwiftUI: when nothing fits, the *last* child is used, on the grounds
+   * that it is the one the author wrote as the compact form.
+   */
+  private firstThatFits(
+    element: { axes: readonly Axis[]; children: readonly LayoutElement[] },
+    proposal: ProposedSize,
+    env: LayoutEnvironment,
+  ): LayoutElement {
+    const children = element.children
+    if (children.length === 0) return { kind: 'empty', id: 'fit-empty' }
+
+    const checkWidth = element.axes.includes('horizontal')
+    const checkHeight = element.axes.includes('vertical')
+
+    for (const child of children) {
+      const ideal = this.measure(child, { width: null, height: null }, env)
+      const availableWidth = resolve(proposal.width, Number.POSITIVE_INFINITY, UNBOUNDED)
+      const availableHeight = resolve(proposal.height, Number.POSITIVE_INFINITY, UNBOUNDED)
+
+      const fitsWidth = !checkWidth || ideal.width <= availableWidth + 0.5
+      const fitsHeight = !checkHeight || ideal.height <= availableHeight + 0.5
+      if (fitsWidth && fitsHeight) return child
+    }
+
+    return children[children.length - 1]!
+  }
+
   private placeGrid(
     element: GridElement,
     bounds: Rect,
@@ -731,14 +910,13 @@ export class LayoutEngine {
     }
 
     let remaining = resolve(main, 0, UNBOUNDED) - element.spacing * (element.children.length - 1)
-    let left = element.children.length
+    const order = this.flexibilityOrder(element.children, vertical, cross, env)
 
-    for (const index of this.flexibilityOrder(element.children, vertical, cross, env)) {
-      const share = left > 0 ? Math.max(0, remaining / left) : 0
+    for (const [position, index] of order.entries()) {
+      const share = this.shareFor(element.children, order, position, remaining)
       const size = this.measure(element.children[index]!, axisProposal(vertical, cross, share), env)
       sizes[index] = size
       remaining -= vertical ? size.height : size.width
-      left--
     }
 
     return sizes
@@ -908,6 +1086,54 @@ export class LayoutEngine {
           out,
           z + 1,
           clipId,
+        )
+      }
+
+      case 'position':
+        // The child is centred on the point, in the parent's coordinate space.
+        return this.place(
+          element.child,
+          centredRect(
+            { x: bounds.x + modifier.x, y: bounds.y + modifier.y },
+            this.measure(element.child, { width: null, height: null }, inner),
+          ),
+          inner,
+          out,
+          z,
+          parent,
+        )
+
+      case 'aspectRatio': {
+        const natural = this.measure(element.child, { width: null, height: null }, inner)
+        const ratio = modifier.ratio ?? (natural.height === 0 ? 1 : natural.width / natural.height)
+        const size = fitToRatio(ratio, modifier.mode, {
+          width: bounds.width,
+          height: bounds.height,
+        })
+        return this.place(element.child, alignedRect(bounds, size, CENTRE), inner, out, z, parent)
+      }
+
+      case 'geometry': {
+        // A real box, so the pipeline can read its size back and hand it to the next
+        // evaluation — and so its children are positioned in *its* space, which is
+        // the coordinate space `GeometryReader` promises.
+        const id = `geo:${modifier.key}`
+        out.push({
+          id,
+          frame: bounds,
+          z,
+          opacity: env.opacity,
+          cornerRadius: 0,
+          paint: { kind: 'hit' },
+          ...(parent ? { parent } : {}),
+        })
+        return this.place(
+          element.child,
+          { x: 0, y: 0, width: bounds.width, height: bounds.height },
+          inner,
+          out,
+          z + 1,
+          id,
         )
       }
 
@@ -1114,3 +1340,68 @@ function alignedRect(bounds: Rect, size: Size, alignment: Alignment): Rect {
 }
 
 export type { LayoutModifier }
+
+/** Alignment for things that centre on a point rather than within a box. */
+const CENTRE: Alignment = { horizontal: 'center', vertical: 'center' }
+
+/**
+ * Applies `.textCase`, which is the one text policy that changes the string itself
+ * rather than how it is laid out.
+ */
+function displayText(text: string, env: LayoutEnvironment): string {
+  if (env.textCase === 'upper') return text.toUpperCase()
+  if (env.textCase === 'lower') return text.toLowerCase()
+  return text
+}
+
+/** A rect of `size` centred on `point`. */
+function centredRect(point: { x: number; y: number }, size: Size): Rect {
+  return {
+    x: point.x - size.width / 2,
+    y: point.y - size.height / 2,
+    width: size.width,
+    height: size.height,
+  }
+}
+
+/**
+ * The largest box of a given aspect ratio that fits the proposal — or the smallest
+ * that covers it, for `.fill`.
+ *
+ * `.scaledToFit` and `.scaledToFill` are the two named forms of exactly this, which
+ * is why they are one modifier rather than three.
+ */
+function fitToRatio(
+  ratio: number,
+  mode: 'fit' | 'fill',
+  proposal: ProposedSize,
+): Size {
+  const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1
+  const width = resolve(proposal.width, 0, UNBOUNDED)
+  const height = resolve(proposal.height, 0, UNBOUNDED)
+
+  if (width === 0 || height === 0) {
+    return width === 0 ? { width: height * safeRatio, height } : { width, height: width / safeRatio }
+  }
+
+  const fromWidth: Size = { width, height: width / safeRatio }
+  const fromHeight: Size = { width: height * safeRatio, height }
+
+  if (mode === 'fit') return fromWidth.height <= height ? fromWidth : fromHeight
+  return fromWidth.height >= height ? fromWidth : fromHeight
+}
+
+/**
+ * A child's `.layoutPriority`, read through whatever modifiers wrap it.
+ *
+ * The priority is declared on the child but consumed by its *parent* stack, so the
+ * stack has to look inward past the modifier chain to find it.
+ */
+function layoutPriorityOf(element: LayoutElement): number {
+  let current = element
+  for (let depth = 0; current.kind === 'modified' && depth < 32; depth++) {
+    if (current.modifier.kind === 'layoutPriority') return current.modifier.value
+    current = current.child
+  }
+  return 0
+}

@@ -612,6 +612,14 @@ class Converter {
       case 'EmptyView':
         return { kind: 'empty', id: path, ...origin }
 
+      case 'Color': {
+        // A colour used as a view fills whatever it is offered, like a shape.
+        const fill = resolveFillArg(positional(view.args, 0), this.scheme)
+        return fill
+          ? { kind: 'fill', id: path, fill, ...origin }
+          : { kind: 'empty', id: path, ...origin }
+      }
+
       case 'ScrollView':
         return this.scrollView(view, path, origin)
 
@@ -637,6 +645,44 @@ class Converter {
       case 'LazyVGrid':
       case 'LazyHGrid':
         return this.grid(view, path, origin)
+
+      case 'Grid':
+        return this.table(view, path, origin)
+
+      case 'GridRow':
+        // A row outside a `Grid` is an ordinary row, which is also what SwiftUI does.
+        return {
+          kind: 'stack',
+          id: path,
+          axis: 'horizontal',
+          spacing: defaultSpacing(),
+          alignment: CENTER,
+          children: this.convertList(view.children, path, 'horizontal'),
+          ...origin,
+        }
+
+      case 'ViewThatFits':
+        return {
+          kind: 'firstFit',
+          id: path,
+          axes: fitAxes(positional(view.args, 0)),
+          children: this.convertList(view.children, path, parentAxis),
+          ...origin,
+        }
+
+      case 'GeometryReader':
+        return {
+          kind: 'modified',
+          id: `${path}geo`,
+          modifier: { kind: 'geometry', key: geometryKeyOf(view) },
+          child: {
+            kind: 'zstack',
+            id: path,
+            alignment: { horizontal: 'leading', vertical: 'top' },
+            children: this.convertList(view.children, path, 'vertical'),
+            ...origin,
+          },
+        }
 
       case 'Image':
         return this.image(view, path, origin)
@@ -919,6 +965,29 @@ class Converter {
           child: sized,
         }
       : sized
+  }
+
+  /** `Grid { GridRow { … } }` — the two-dimensional form, aligned across rows. */
+  private table(view: ViewValue, path: string, origin: object): LayoutElement {
+    const flattened = view.children.flatMap((child) =>
+      child.name === 'ForEach' && child.modifiers.length === 0 ? child.children : [child],
+    )
+
+    const rows = flattened.map((row, index) =>
+      row.name === 'GridRow'
+        ? this.convertList(row.children, row.path ?? `${path}-${index}`, 'horizontal')
+        : [this.convert(row, row.path ?? `${path}-${index}`, 'horizontal')],
+    )
+
+    return {
+      kind: 'table',
+      id: path,
+      rows,
+      spacing: numberArg(labelled(view.args, 'horizontalSpacing')) ?? defaultSpacing(),
+      rowSpacing: numberArg(labelled(view.args, 'verticalSpacing')) ?? defaultSpacing(),
+      alignment: stackAlignment(view.args, 'vertical'),
+      ...origin,
+    }
   }
 
   private grid(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -1567,6 +1636,51 @@ class Converter {
       case 'zIndex':
         return { kind: 'unsupported', name: 'zIndex' }
 
+      case 'position':
+        return {
+          kind: 'position',
+          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? numberArg(positional(args, 1)) ?? 0,
+        }
+
+      case 'layoutPriority': {
+        const value = numberArg(positional(args, 0))
+        return value === null ? null : { kind: 'layoutPriority', value }
+      }
+
+      case 'aspectRatio': {
+        const ratio = numberArg(positional(args, 0))
+        const mode = tokenName(labelled(args, 'contentMode')) ?? tokenName(positional(args, 1))
+        return { kind: 'aspectRatio', ratio, mode: mode === 'fill' ? 'fill' : 'fit' }
+      }
+
+      case 'scaledToFit':
+        return { kind: 'aspectRatio', ratio: null, mode: 'fit' }
+
+      case 'scaledToFill':
+        return { kind: 'aspectRatio', ratio: null, mode: 'fill' }
+
+      case 'lineLimit': {
+        const limit = numberArg(positional(args, 0))
+        return { kind: 'textStyle', lineLimit: limit === null ? null : Math.max(0, limit) }
+      }
+
+      case 'multilineTextAlignment': {
+        const name = tokenName(positional(args, 0))
+        return {
+          kind: 'textStyle',
+          alignment: name === 'center' ? 'center' : name === 'trailing' ? 'trailing' : 'leading',
+        }
+      }
+
+      case 'textCase': {
+        const name = tokenName(positional(args, 0))
+        return {
+          kind: 'textStyle',
+          textCase: name === 'uppercase' ? 'upper' : name === 'lowercase' ? 'lower' : null,
+        }
+      }
+
       case 'animation': {
         const hint = animationHint(args[0]?.value)
         return hint ? { kind: 'animate', hint } : null
@@ -1718,6 +1832,29 @@ function displayValue(value: SwiftValue): string {
     default:
       return ''
   }
+}
+
+/**
+ * The axes a `ViewThatFits` checks.
+ *
+ * Both when unspecified, which is SwiftUI's default and the only form most code uses.
+ */
+function fitAxes(value: SwiftValue | undefined): Axis[] {
+  const name = tokenName(value)
+  if (name === 'horizontal') return ['horizontal']
+  if (name === 'vertical') return ['vertical']
+  return ['horizontal', 'vertical']
+}
+
+/**
+ * The key a `GeometryReader` reports its resolved size under.
+ *
+ * Its stamped path: stable across passes for the same reader, and distinct for two
+ * readers produced by the same source line inside a `ForEach` — which a source span
+ * alone would not be.
+ */
+function geometryKeyOf(view: ViewValue): string {
+  return view.geometryKey ?? view.path ?? `geo-${view.span.start}`
 }
 
 function boolArg(value: SwiftValue | undefined): boolean {

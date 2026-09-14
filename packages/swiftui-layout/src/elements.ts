@@ -41,6 +41,8 @@ export type LayoutElement =
   | ImageElement
   | ScrollElement
   | GridElement
+  | TableElement
+  | FirstFitElement
   | PlaceholderElement
   | ModifiedElement
   | EmptyElement
@@ -159,6 +161,34 @@ export interface GridTrack {
   readonly size: number | null
 }
 
+/**
+ * `Grid` — the two-dimensional form, where columns line up across rows.
+ *
+ * Distinct from `LazyVGrid`, which flows children into tracks in order. Here the
+ * structure is declared: each row states its cells, and a column is as wide as its
+ * widest cell in any row. That alignment across rows is the whole reason `Grid`
+ * exists and the reason it cannot be expressed as nested stacks.
+ */
+export interface TableElement extends ElementBase {
+  readonly kind: 'table'
+  readonly rows: readonly (readonly LayoutElement[])[]
+  readonly spacing: number
+  readonly rowSpacing: number
+  readonly alignment: Alignment
+}
+
+/**
+ * `ViewThatFits` — the first child that fits the proposal, else the last.
+ *
+ * A genuine layout decision rather than sugar: which child is chosen depends on the
+ * space offered, which is only known during the measure pass.
+ */
+export interface FirstFitElement extends ElementBase {
+  readonly kind: 'firstFit'
+  readonly axes: readonly Axis[]
+  readonly children: readonly LayoutElement[]
+}
+
 export interface PlaceholderElement extends ElementBase {
   readonly kind: 'placeholder'
   readonly feature: string
@@ -200,6 +230,13 @@ export type LayoutModifier =
   | { readonly kind: 'font'; readonly font: ResolvedFont }
   /** `.fontWeight` / `.bold` / `.italic`: adjust the inherited face, keep its size. */
   | { readonly kind: 'fontTrait'; readonly weight?: number; readonly italic?: boolean }
+  /** `.lineLimit`, `.multilineTextAlignment`, `.textCase` — inherited text policy. */
+  | {
+      readonly kind: 'textStyle'
+      readonly lineLimit?: number | null
+      readonly alignment?: TextAlign
+      readonly textCase?: 'upper' | 'lower' | null
+    }
   | { readonly kind: 'foregroundStyle'; readonly color: RGBA }
   | { readonly kind: 'opacity'; readonly value: number }
   | { readonly kind: 'cornerRadius'; readonly radius: number }
@@ -218,6 +255,27 @@ export type LayoutModifier =
       readonly y: number
     }
   | { readonly kind: 'offset'; readonly x: number; readonly y: number }
+  /** `.position(x:y:)` — the child's *centre* goes here, in the parent's space. */
+  | { readonly kind: 'position'; readonly x: number; readonly y: number }
+  /**
+   * `.aspectRatio(_:contentMode:)`, and `.scaledToFit` / `.scaledToFill` which are
+   * its two named forms. `ratio` null means "keep the child's own ratio".
+   */
+  | {
+      readonly kind: 'aspectRatio'
+      readonly ratio: number | null
+      readonly mode: 'fit' | 'fill'
+    }
+  /** `.layoutPriority` — read by the enclosing stack, not applied here. */
+  | { readonly kind: 'layoutPriority'; readonly value: number }
+  /**
+   * A container that reports its resolved geometry.
+   *
+   * How `GeometryReader` works: the element emits a real box, its children are
+   * positioned inside it — which is also `GeometryReader`'s coordinate space — and
+   * the pipeline reads the box's size back out to feed the next evaluation.
+   */
+  | { readonly kind: 'geometry'; readonly key: string }
   /** `.fixedSize()` — take the ideal size and ignore the proposal on that axis. */
   | { readonly kind: 'fixedSize'; readonly horizontal: boolean; readonly vertical: boolean }
   | { readonly kind: 'clip'; readonly shape: ShapeKind; readonly cornerRadius: number }
@@ -248,6 +306,8 @@ export type LayoutModifier =
   | { readonly kind: 'unsupported'; readonly name: string }
 
 export type HitRole = 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture'
+
+export type TextAlign = 'leading' | 'center' | 'trailing'
 
 /**
  * What the renderer should animate, and how.
@@ -302,6 +362,16 @@ export interface LayoutEnvironment {
    */
   readonly fontWeight?: number
   readonly fontItalic?: boolean
+  /**
+   * Text policy, inherited like the font.
+   *
+   * `.lineLimit(2)` on a `VStack` applies to every `Text` inside it, which is only
+   * expressible as environment — a wrapper would apply to the stack's own frame and
+   * nothing would read it.
+   */
+  readonly lineLimit?: number | null
+  readonly textAlign?: TextAlign
+  readonly textCase?: 'upper' | 'lower' | null
 }
 
 export function childEnvironment(
@@ -344,6 +414,13 @@ export function childEnvironment(
       return { ...env, cornerRadius: modifier.cornerRadius }
     case 'animate':
       return { ...env, animation: modifier.hint }
+    case 'textStyle':
+      return {
+        ...env,
+        ...(modifier.lineLimit !== undefined ? { lineLimit: modifier.lineLimit } : {}),
+        ...(modifier.alignment !== undefined ? { textAlign: modifier.alignment } : {}),
+        ...(modifier.textCase !== undefined ? { textCase: modifier.textCase } : {}),
+      }
     default:
       return env
   }

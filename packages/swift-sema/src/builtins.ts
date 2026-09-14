@@ -24,6 +24,7 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   // layout
   'VStack', 'HStack', 'ZStack', 'Spacer', 'Group', 'Divider',
   'LazyVStack', 'LazyHStack', 'LazyVGrid', 'LazyHGrid',
+  'Grid', 'GridRow', 'ViewThatFits', 'GeometryReader',
   'ScrollView', 'ForEach',
   // content
   'Text', 'Image', 'Label', 'Link',
@@ -43,12 +44,14 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
 /** Modifiers the preview applies. */
 export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // layout
-  'frame', 'padding', 'offset', 'fixedSize', 'clipShape', 'clipped',
+  'frame', 'padding', 'offset', 'position', 'fixedSize', 'clipShape', 'clipped',
+  'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill',
   // appearance
   'background', 'overlay', 'border', 'shadow', 'cornerRadius', 'opacity',
   'foregroundStyle', 'foregroundColor', 'tint', 'resizable',
   // typography
   'font', 'bold', 'italic', 'fontWeight',
+  'lineLimit', 'multilineTextAlignment', 'textCase',
   // transforms and motion
   'scaleEffect', 'rotationEffect', 'animation',
   // navigation and presentation
@@ -67,8 +70,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
 
 /** Real SwiftUI views that the preview does not draw yet, with the phase that adds them. */
 export const UNIMPLEMENTED_VIEWS: ReadonlyMap<string, number> = new Map([
-  ['GeometryReader', 7], ['ViewThatFits', 7], ['AnyView', 7],
-  ['Grid', 7], ['GridRow', 7],
+  ['AnyView', 7],
   ['NavigationSplitView', 7],
   ['DatePicker', 7], ['ColorPicker', 7], ['TextEditor', 7],
   ['Menu', 7], ['ShareLink', 7], ['Gauge', 7],
@@ -78,8 +80,6 @@ export const UNIMPLEMENTED_VIEWS: ReadonlyMap<string, number> = new Map([
 
 /** Real SwiftUI modifiers the preview ignores for now. */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
-  ['position', 7], ['layoutPriority', 7],
-  ['aspectRatio', 7], ['scaledToFit', 7], ['scaledToFill', 7],
   ['onAppear', 7], ['onDisappear', 7], ['task', 7], ['onChange', 7],
   ['allowsHitTesting', 7],
   ['toggleStyle', 7], ['pickerStyle', 7], ['labelStyle', 7],
@@ -91,7 +91,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
   ['gesture', 7], ['simultaneousGesture', 7], ['highPriorityGesture', 7],
   ['accessibilityLabel', 7], ['accessibilityHint', 7], ['accessibilityValue', 7],
   ['id', 7], ['zIndex', 7],
-  ['lineLimit', 7], ['multilineTextAlignment', 7], ['textCase', 7], ['kerning', 7],
+  ['kerning', 7],
   ['monospaced', 7], ['fontDesign', 7], ['minimumScaleFactor', 7],
   ['listRowSeparator', 7], ['listRowInsets', 7], ['scrollIndicators', 7],
   ['scrollDismissesKeyboard', 7], ['scrollTargetBehavior', 7],

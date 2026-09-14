@@ -177,9 +177,10 @@ export function measureText(
   font: ResolvedFont,
   maxWidth: number,
   table: FontMetricsTable,
+  lineLimit: number | null = null,
 ): TextMeasurement {
   const paragraphs = text.split('\n')
-  const lines: TextLineBox[] = []
+  let lines: TextLineBox[] = []
 
   for (const paragraph of paragraphs) {
     if (paragraph.length === 0) {
@@ -189,11 +190,44 @@ export function measureText(
     lines.push(...wrapParagraph(paragraph, font, maxWidth, table))
   }
 
+  // `.lineLimit(n)` truncates rather than shrinking, and the last kept line takes an
+  // ellipsis — which also has to fit, so it replaces the tail rather than pushing the
+  // line past its width.
+  if (lineLimit !== null && lineLimit > 0 && lines.length > lineLimit) {
+    const kept = lines.slice(0, lineLimit)
+    const last = kept[kept.length - 1]
+    if (last) kept[kept.length - 1] = truncate(last, font, maxWidth, table)
+    lines = kept
+  }
+
   return {
     width: lines.reduce((max, line) => Math.max(max, line.width), 0),
     height: lines.length * table.lineHeight(font),
     lines,
   }
+}
+
+/** Replaces the tail of a line with an ellipsis, keeping it inside `maxWidth`. */
+function truncate(
+  line: TextLineBox,
+  font: ResolvedFont,
+  maxWidth: number,
+  table: FontMetricsTable,
+): TextLineBox {
+  const ellipsis = '…'
+  const ellipsisWidth = table.advance(ellipsis, font)
+  const clusters = graphemes(line.text.trimEnd())
+
+  let width = 0
+  const kept: string[] = []
+  for (const cluster of clusters) {
+    const advance = table.advance(cluster, font)
+    if (Number.isFinite(maxWidth) && width + advance + ellipsisWidth > maxWidth) break
+    kept.push(cluster)
+    width += advance
+  }
+
+  return { text: kept.join('').trimEnd() + ellipsis, width: width + ellipsisWidth }
 }
 
 /**

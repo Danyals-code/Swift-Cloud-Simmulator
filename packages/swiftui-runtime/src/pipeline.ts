@@ -384,6 +384,7 @@ export function compile(request: CompileRequest): CompileResult {
   const evaluateStart = performance.now()
   runtime.load(analysis.files, analysis.model, programKeyOf(request))
   runtime.setEnvironment(environmentFor(request))
+  runtime.setDefaultGeometry(contentSizeOf(request))
   const evaluation = runtime.evaluate()
   const evaluateMs = performance.now() - evaluateStart
 
@@ -434,10 +435,34 @@ function finish(
   }
 
   const layoutStart = performance.now()
-  const renderTree = render(request, evaluation)
+  let renderTree = render(request, evaluation)
+
+  // A `GeometryReader` has to report a size before layout has decided one, so the
+  // first pass uses the size it had last time. If that was wrong, the sizes are now
+  // known and one more pass fixes it. Bounded at one retry: a reader is greedy, so
+  // its size does not depend on what its closure produced and the second pass is
+  // always right.
+  if (runtime.updateGeometry(geometryFrom(renderTree))) {
+    const corrected = runtime.evaluate()
+    if (!corrected.failure) {
+      evaluation = corrected
+      renderTree = render(request, corrected)
+    }
+  }
+
   const layoutMs = performance.now() - layoutStart
 
   return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, layoutMs)
+}
+
+/** The measured size of every geometry reader in a tree, keyed as it reported. */
+function geometryFrom(tree: RenderTree): Map<string, { width: number; height: number }> {
+  const sizes = new Map<string, { width: number; height: number }>()
+  for (const node of tree.nodes) {
+    if (!node.id.startsWith('geo:')) continue
+    sizes.set(node.id.slice(4), { width: node.frame.width, height: node.frame.height })
+  }
+  return sizes
 }
 
 /**
@@ -446,6 +471,15 @@ function finish(
  * Read on every compile rather than at load, because appearance and Dynamic Type
  * change without the program changing — and reloading would discard every `@State`.
  */
+/** The rect a root view is proposed — what a geometry reader reports before layout. */
+function contentSizeOf(request: CompileRequest): { width: number; height: number } {
+  const safeArea = request.safeArea ?? { top: 0, leading: 0, bottom: 0, trailing: 0 }
+  return {
+    width: request.canvas.width - safeArea.leading - safeArea.trailing,
+    height: request.canvas.height - safeArea.top - safeArea.bottom,
+  }
+}
+
 function environmentFor(request: CompileRequest): EnvironmentInputs {
   const scale = request.typeScale ?? 1
   return {

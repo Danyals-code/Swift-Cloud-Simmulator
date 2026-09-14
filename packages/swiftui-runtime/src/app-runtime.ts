@@ -75,6 +75,42 @@ export class AppRuntime {
   /** Device and preview state the SwiftUI environment exposes to user code. */
   private environmentInputs: EnvironmentInputs = DEFAULT_ENVIRONMENT
 
+  /** Sizes each `GeometryReader` was measured at, from the last layout pass. */
+  private geometry = new Map<string, { width: number; height: number }>()
+
+  /**
+   * Records what the layout pass actually measured, and says whether it moved.
+   *
+   * A true answer means the sizes a `GeometryReader` reported to its closure were
+   * wrong, so the caller runs one more pass with the corrected ones. Two passes are
+   * enough because a reader is greedy: its size is whatever it was proposed, and the
+   * proposal does not depend on what its closure produced. The half-point tolerance
+   * stops sub-pixel jitter from looping forever.
+   */
+  updateGeometry(measured: ReadonlyMap<string, { width: number; height: number }>): boolean {
+    let changed = false
+
+    for (const [key, size] of measured) {
+      const previous = this.geometry.get(key)
+      if (
+        !previous ||
+        Math.abs(previous.width - size.width) > 0.5 ||
+        Math.abs(previous.height - size.height) > 0.5
+      ) {
+        changed = true
+      }
+      this.geometry.set(key, size)
+    }
+
+    this.host.geometry = this.geometry
+    return changed
+  }
+
+  /** The size a reader reports before anything has been laid out. */
+  setDefaultGeometry(size: { width: number; height: number }): void {
+    this.host.defaultGeometry = size
+  }
+
   /**
    * Tells the runtime what the device looks like this frame.
    *
@@ -114,6 +150,7 @@ export class AppRuntime {
     this.identity = new IdentityPath()
     this.interpreter.resetSteps()
     this.host.environment.reset(this.environmentInputs)
+    this.host.beginPass()
     this.state.beginPass()
 
     const entry = this.entryTypeName ? this.interpreter.types.get(this.entryTypeName) : undefined
@@ -196,6 +233,8 @@ export class AppRuntime {
   reset(): void {
     this.state.clear()
     this.ui.clear()
+    this.geometry.clear()
+    this.host.geometry = this.geometry
     this.animation = null
   }
 

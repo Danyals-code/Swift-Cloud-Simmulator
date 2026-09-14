@@ -95,7 +95,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
         kind: 'text',
         text: {
           runs: [{ text: paint.text, font: paint.font, color: paint.color }],
-          alignment: 'leading',
+          alignment: paint.align ?? 'leading',
           lines,
         },
         a11y: { role: 'text', label: paint.text },

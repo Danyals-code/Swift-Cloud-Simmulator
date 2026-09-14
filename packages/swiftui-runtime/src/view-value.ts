@@ -41,6 +41,14 @@ export interface ViewValue {
    * the observable difference between keying by identity and keying by index.
    */
   readonly childKeys?: readonly string[]
+  /**
+   * The key a `GeometryReader` reports its resolved size under.
+   *
+   * Assigned by the host at the moment the reader's content is built, and used again
+   * by the layout pass — so the size the proxy reported and the size the box actually
+   * got are provably about the same reader.
+   */
+  readonly geometryKey?: string
 }
 
 /**
@@ -107,6 +115,14 @@ export interface GradientPayload {
   readonly colors: readonly SwiftValue[]
   readonly startPoint: string | null
   readonly endPoint: string | null
+}
+
+/** A `GeometryProxy`, as `GeometryReader`'s closure receives it. */
+export const GEOMETRY_TYPE = 'GeometryProxy'
+
+export interface GeometryPayload {
+  readonly width: number
+  readonly height: number
 }
 
 /** An animation curve, as `.animation()` and `withAnimation` take it. */
