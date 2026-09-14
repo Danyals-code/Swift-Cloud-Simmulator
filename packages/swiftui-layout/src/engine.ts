@@ -1,4 +1,13 @@
-import type { Fill, Rect, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type {
+  FilterSpec,
+  Fill,
+  Rect,
+  ResolvedFont,
+  RGBA,
+  ShapeKind,
+  Size,
+  SourceSpan,
+} from '@studio/shared'
 import {
   childEnvironment,
   type Alignment,
@@ -29,7 +38,19 @@ export type PaintSpec =
       readonly align?: TextAlign
     }
   | { readonly kind: 'fill'; readonly fill: Fill }
-  | { readonly kind: 'shape'; readonly shape: ShapeKind; readonly fill: Fill }
+  | {
+      readonly kind: 'shape'
+      readonly shape: ShapeKind
+      readonly fill?: Fill
+      readonly stroke?: { readonly color: RGBA; readonly width: number }
+    }
+  | {
+      readonly kind: 'path'
+      readonly d: string
+      readonly fill?: Fill
+      readonly stroke?: { readonly color: RGBA; readonly width: number }
+      readonly fillRule: 'nonzero' | 'evenodd'
+    }
   | {
       readonly kind: 'image'
       readonly glyph: string
@@ -87,6 +108,14 @@ export interface PlacedNode {
   }
   readonly transform?: { readonly scaleX: number; readonly scaleY: number; readonly rotate: number }
   readonly animation?: AnimationHint
+  readonly filter?: FilterSpec
+  readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
+  readonly a11y?: {
+    readonly label?: string
+    readonly value?: string
+    readonly hint?: string
+    readonly hidden?: boolean
+  }
 }
 
 /**
@@ -189,7 +218,10 @@ export class LayoutEngine {
           : { width: length, height: 0 }
       }
 
-      // Shapes and colours fill whatever they are offered.
+      // Shapes, colours and paths fill whatever they are offered. A path's own
+      // coordinates are absolute within its frame — it does not scale to fit, which
+      // is SwiftUI's behaviour too.
+      case 'path':
       case 'shape':
       case 'fill':
         return {
@@ -606,6 +638,32 @@ export class LayoutEngine {
           parent,
         )
 
+      case 'path':
+        out.push({
+          id: element.id,
+          frame: bounds,
+          z,
+          opacity: env.opacity,
+          cornerRadius: 0,
+          paint: {
+            kind: 'path',
+            d: element.d,
+            fillRule: element.fillRule,
+            // An unfilled, unstroked path takes the inherited foreground colour,
+            // which is what `Path { … }` with no styling draws as.
+            ...(element.fill
+              ? { fill: element.fill }
+              : element.stroke
+                ? {}
+                : { fill: { kind: 'solid' as const, color: env.foregroundColor } }),
+            ...(element.stroke ? { stroke: element.stroke } : {}),
+          },
+          ...debugInfo(element),
+          ...decorations(env, parent),
+          ...(element.origin ? { origin: element.origin } : {}),
+        })
+        return z + 1
+
       case 'shape':
         out.push({
           id: element.id,
@@ -616,7 +674,14 @@ export class LayoutEngine {
           paint: {
             kind: 'shape',
             shape: element.shape,
-            fill: { kind: 'solid', color: env.foregroundColor },
+            // A stroked shape with no fill is an outline, which is what
+            // `.stroke(…)` alone means.
+            ...(element.fill
+              ? { fill: element.fill }
+              : element.stroke
+                ? {}
+                : { fill: { kind: 'solid' as const, color: env.foregroundColor } }),
+            ...(element.stroke ? { stroke: element.stroke } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -1137,6 +1202,59 @@ export class LayoutEngine {
         )
       }
 
+      case 'filter':
+      case 'material':
+      case 'a11y': {
+        // Each decorates a *box* around the subtree, so the subtree goes inside it —
+        // a filter applies to everything below, and an accessibility label replaces
+        // what is read for the whole group.
+        const id = `${element.id}-${modifier.kind}`
+        out.push({
+          id,
+          frame: bounds,
+          z,
+          opacity: env.opacity,
+          cornerRadius: env.cornerRadius,
+          paint: { kind: 'hit' },
+          ...(modifier.kind === 'filter' ? { filter: modifier.filter } : {}),
+          ...(modifier.kind === 'material'
+            ? {
+                material: {
+                  opacity: modifier.opacity,
+                  blur: modifier.blur,
+                  light: modifier.light,
+                },
+              }
+            : {}),
+          ...(modifier.kind === 'a11y'
+            ? {
+                a11y: {
+                  ...(modifier.label !== undefined ? { label: modifier.label } : {}),
+                  ...(modifier.value !== undefined ? { value: modifier.value } : {}),
+                  ...(modifier.hint !== undefined ? { hint: modifier.hint } : {}),
+                  ...(modifier.hidden !== undefined ? { hidden: modifier.hidden } : {}),
+                },
+              }
+            : {}),
+          ...(parent ? { parent } : {}),
+        })
+        return this.place(
+          element.child,
+          { x: 0, y: 0, width: bounds.width, height: bounds.height },
+          inner,
+          out,
+          z + 1,
+          id,
+        )
+      }
+
+      case 'hitTestable':
+        return modifier.enabled
+          ? this.place(element.child, bounds, inner, out, z, parent)
+          : // Disabled subtrees are still painted; they just stop receiving events,
+            // which is what dropping the hit targets achieves.
+            this.place(element.child, bounds, stripHitTargets(inner), out, z, parent)
+
       case 'scale':
       case 'rotate': {
         const transformId = `${element.id}-xform`
@@ -1177,7 +1295,7 @@ export class LayoutEngine {
             handlerId: modifier.handlerId,
             label: modifier.label,
             role: modifier.role,
-            enabled: modifier.enabled,
+            enabled: modifier.enabled && !inner.hitTestingDisabled,
             font: inner.font,
             color: inner.foregroundColor,
             ...(modifier.value !== undefined ? { value: modifier.value } : {}),
@@ -1404,4 +1522,15 @@ function layoutPriorityOf(element: LayoutElement): number {
     current = current.child
   }
   return 0
+}
+
+/**
+ * The environment with interactivity switched off.
+ *
+ * `.allowsHitTesting(false)` keeps a subtree visible but inert. Expressing it as an
+ * environment flag rather than by pruning the tree means the subtree still paints —
+ * a pruned one would vanish, which is emphatically not what the modifier means.
+ */
+function stripHitTargets(env: LayoutEnvironment): LayoutEnvironment {
+  return { ...env, hitTestingDisabled: true }
 }

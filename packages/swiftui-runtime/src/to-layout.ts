@@ -26,6 +26,7 @@ import {
   type Overlay,
   type ResolvedUI,
 } from './presentation'
+import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
 import { resolveSymbol } from './sf-symbols'
 import {
   bodyFont,
@@ -612,6 +613,59 @@ class Converter {
       case 'EmptyView':
         return { kind: 'empty', id: path, ...origin }
 
+      case 'Path': {
+        const payload = asPath(positional(view.args, 0))
+        if (!payload) return { kind: 'empty', id: path, ...origin }
+
+        const fill = resolveFillArg(modifierArg(view, 'fill', 0), this.scheme)
+        const strokeColor = resolveColorArg(modifierArg(view, 'stroke', 0), this.scheme)
+        const strokeWidth =
+          numberArg(modifierNamedArg(view, 'stroke', 'lineWidth')) ??
+          numberArg(modifierArg(view, 'stroke', 1)) ??
+          1
+
+        const trimmed = trimOf(view) ?? payload.trim
+        return {
+          kind: 'path',
+          id: path,
+          d: toSVGPath(applyTrim({ commands: payload.commands, trim: trimmed })),
+          fill: fill ?? null,
+          stroke: strokeColor ? { color: strokeColor, width: strokeWidth } : null,
+          fillRule: tokenName(modifierNamedArg(view, 'fill', 'style')) === 'evenOdd'
+            ? 'evenodd'
+            : 'nonzero',
+          ...origin,
+        }
+      }
+
+      case 'Canvas': {
+        const context = asCanvasContext(positional(view.args, 0))
+        if (!context || context.drawings.length === 0) {
+          return { kind: 'empty', id: path, ...origin }
+        }
+
+        // Each drawing is its own path node, stacked in the order they were made —
+        // which is what a graphics context's painter's-algorithm ordering means.
+        return {
+          kind: 'zstack',
+          id: path,
+          alignment: { horizontal: 'leading', vertical: 'top' },
+          children: context.drawings.map((drawing, index) => {
+            const fill = resolveFillArg(drawing.fill ?? undefined, this.scheme)
+            const stroke = resolveColorArg(drawing.stroke ?? undefined, this.scheme)
+            return {
+              kind: 'path' as const,
+              id: `${path}d${index}`,
+              d: drawing.d,
+              fill: fill ?? null,
+              stroke: stroke ? { color: stroke, width: drawing.lineWidth } : null,
+              fillRule: 'nonzero' as const,
+            }
+          }),
+          ...origin,
+        }
+      }
+
       case 'Color': {
         // A colour used as a view fills whatever it is offered, like a shape.
         const fill = resolveFillArg(positional(view.args, 0), this.scheme)
@@ -729,11 +783,20 @@ class Converter {
     const shape = SHAPES[view.name]
     if (shape) {
       const radius = numberArg(labelled(view.args, 'cornerRadius'))
+      const fill = resolveFillArg(modifierArg(view, 'fill', 0), this.scheme)
+      const strokeColor = resolveColorArg(modifierArg(view, 'stroke', 0), this.scheme)
+      const strokeWidth =
+        numberArg(modifierNamedArg(view, 'stroke', 'lineWidth')) ??
+        numberArg(modifierArg(view, 'stroke', 1)) ??
+        1
+
       return {
         kind: 'shape',
         id: path,
         shape,
         ...(radius !== null ? { cornerRadius: radius } : {}),
+        ...(fill ? { fill } : {}),
+        ...(strokeColor ? { stroke: { color: strokeColor, width: strokeWidth } } : {}),
         ...origin,
       }
     }
@@ -1636,6 +1699,42 @@ class Converter {
       case 'zIndex':
         return { kind: 'unsupported', name: 'zIndex' }
 
+      case 'blur':
+        return { kind: 'filter', filter: { blur: numberArg(labelled(args, 'radius')) ?? numberArg(positional(args, 0)) ?? 0 } }
+
+      case 'saturation':
+        return { kind: 'filter', filter: { saturation: numberArg(positional(args, 0)) ?? 1 } }
+
+      case 'brightness':
+        return { kind: 'filter', filter: { brightness: numberArg(positional(args, 0)) ?? 0 } }
+
+      case 'contrast':
+        return { kind: 'filter', filter: { contrast: numberArg(positional(args, 0)) ?? 1 } }
+
+      case 'grayscale':
+        return { kind: 'filter', filter: { grayscale: numberArg(positional(args, 0)) ?? 0 } }
+
+      case 'allowsHitTesting':
+        return { kind: 'hitTestable', enabled: boolArg(positional(args, 0)) }
+
+      case 'accessibilityLabel':
+        return { kind: 'a11y', label: stringArg(positional(args, 0)) ?? '' }
+
+      case 'accessibilityValue':
+        return { kind: 'a11y', value: stringArg(positional(args, 0)) ?? '' }
+
+      case 'accessibilityHint':
+        return { kind: 'a11y', hint: stringArg(positional(args, 0)) ?? '' }
+
+      case 'accessibilityHidden':
+        return { kind: 'a11y', hidden: boolArg(positional(args, 0)) }
+
+      case 'fill':
+      case 'stroke':
+      case 'trim':
+        // Read directly off the shape or path they style, not applied as wrappers.
+        return null
+
       case 'position':
         return {
           kind: 'position',
@@ -1734,6 +1833,23 @@ class Converter {
     const value = args.find((a) => a.label === null)?.value
 
     if (value) {
+      // A material is not a colour: it is a translucent panel over a blurred
+      // backdrop, and drawing it as flat grey is the approximation this refuses.
+      const material = MATERIALS[tokenName(value) ?? '']
+      if (material) {
+        return {
+          kind: 'modified',
+          id: `${id}mat`,
+          modifier: {
+            kind: 'material',
+            opacity: material,
+            blur: 20,
+            light: this.scheme === 'light',
+          },
+          child: { kind: 'empty', id: `${id}matbox` },
+        }
+      }
+
       const fill = resolveFillArg(value, this.scheme)
       if (fill) return { kind: 'fill', id, fill }
 
@@ -1810,6 +1926,37 @@ function positional(args: readonly ViewArg[], index: number): SwiftValue | undef
 function modifierArg(view: ViewValue, name: string, index: number): SwiftValue | undefined {
   const modifier = view.modifiers.find((m) => m.name === name)
   return modifier ? positional(modifier.args, index) : undefined
+}
+
+function modifierNamedArg(view: ViewValue, name: string, label: string): SwiftValue | undefined {
+  const modifier = view.modifiers.find((m) => m.name === name)
+  return modifier ? labelled(modifier.args, label) : undefined
+}
+
+/** `.trim(from:to:)` written on a shape or path, rather than on the path value. */
+function trimOf(view: ViewValue): { from: number; to: number } | null {
+  const modifier = view.modifiers.find((m) => m.name === 'trim')
+  if (!modifier) return null
+  return {
+    from: numberArg(labelled(modifier.args, 'from')) ?? 0,
+    to: numberArg(labelled(modifier.args, 'to')) ?? 1,
+  }
+}
+
+/**
+ * Material opacities.
+ *
+ * Apple's materials differ in how much of the backdrop survives; these are the
+ * translucencies that read closest at the blur radius used, rather than published
+ * values — Apple does not publish them.
+ */
+const MATERIALS: Readonly<Record<string, number>> = {
+  ultraThinMaterial: 0.55,
+  thinMaterial: 0.65,
+  regularMaterial: 0.76,
+  thickMaterial: 0.85,
+  ultraThickMaterial: 0.92,
+  bar: 0.8,
 }
 
 /** SwiftUI's default stack spacing is 8 points, not zero. */
@@ -2051,11 +2198,29 @@ function roleOf(view: ViewValue): HitRole {
   }
 }
 
+/**
+ * Whether this view's own hit target is inert.
+ *
+ * Both `.disabled(true)` and `.allowsHitTesting(false)` are checked here rather than
+ * left to the environment, because a view's hit target is applied *outside* its
+ * modifiers — so by the time the environment flag reaches the subtree, the target has
+ * already been emitted. The environment still carries the flag, for the case where
+ * the modifier is written on a container and the buttons are inside it.
+ */
 function disabledBy(view: ViewValue): boolean {
-  const modifier = view.modifiers.find((m) => m.name === 'disabled')
-  if (!modifier) return false
-  const value = positional(modifier.args, 0)
-  return value === undefined ? true : truthy(value)
+  const disabled = view.modifiers.find((m) => m.name === 'disabled')
+  if (disabled) {
+    const value = positional(disabled.args, 0)
+    if (value === undefined || truthy(value)) return true
+  }
+
+  const hitTestable = view.modifiers.find((m) => m.name === 'allowsHitTesting')
+  if (hitTestable) {
+    const value = positional(hitTestable.args, 0)
+    if (value !== undefined && !truthy(value)) return true
+  }
+
+  return false
 }
 
 export type { RGBA }

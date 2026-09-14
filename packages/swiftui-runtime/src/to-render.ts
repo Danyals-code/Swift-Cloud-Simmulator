@@ -69,6 +69,8 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
     ...(node.shadow ? { shadow: node.shadow } : {}),
     ...(node.transform ? { transform: node.transform } : {}),
     ...(node.animation ? { animation: node.animation } : {}),
+    ...(node.filter ? { filter: node.filter } : {}),
+    ...(node.material ? { material: node.material } : {}),
     ...(node.debugName
       ? {
           inspect: {
@@ -139,8 +141,21 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
         kind: 'shape',
         shape: {
           shape: node.paint.shape,
-          fill: node.paint.fill,
+          ...(node.paint.fill ? { fill: node.paint.fill } : {}),
+          ...(node.paint.stroke ? { stroke: node.paint.stroke } : {}),
           ...(node.cornerRadius > 0 ? { cornerRadius: node.cornerRadius } : {}),
+        },
+      }
+
+    case 'path':
+      return {
+        ...base,
+        kind: 'path',
+        path: {
+          d: node.paint.d,
+          fillRule: node.paint.fillRule,
+          ...(node.paint.fill ? { fill: node.paint.fill } : {}),
+          ...(node.paint.stroke ? { stroke: node.paint.stroke } : {}),
         },
       }
 
@@ -176,7 +191,9 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
               },
               a11y: { role: a11yRole(node.hitTarget.role), label: node.hitTarget.label },
             }
-          : {}),
+          : node.a11y
+            ? { a11y: node.a11y }
+            : {}),
       }
   }
 }

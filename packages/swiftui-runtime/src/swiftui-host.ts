@@ -15,6 +15,16 @@ import {
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import { DISMISS_TYPE, EnvironmentStack } from './view-environment'
 import {
+  asCanvasContext,
+  asPath,
+  newCanvasContext,
+  newPath,
+  PATH_TYPE,
+  toSVGPath,
+  type PathCommand,
+  type PathPoint,
+} from './paths'
+import {
   asGesture,
   combined,
   geometryMember,
@@ -72,7 +82,7 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'Color', 'Font', 'Alignment', 'Edge', 'Angle', 'UnitPoint', 'Axis',
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
-  'CGSize', 'CGPoint', 'CGFloat',
+  'CGSize', 'CGPoint', 'CGRect', 'CGFloat',
 ])
 
 /**
@@ -215,6 +225,139 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   /**
+   * `Path()`, `Path { p in … }`, `Path(roundedRect:cornerRadius:)`.
+   *
+   * The closure form hands the closure a live path and returns the same one, which is
+   * how the builder can fill it in place.
+   */
+  private makePath(call: HostCall): SwiftValue {
+    const value = newPath()
+
+
+    if (call.trailingClosure) {
+      call.invoke(call.trailingClosure, [value])
+      return value
+    }
+
+    // `Path(CGRect(…))` and `Path(roundedRect:cornerRadius:)`.
+    const rect = call.args.find((a) => a.label === null || a.label === 'roundedRect')?.value
+    const radius = numberOf(call.args.find((a) => a.label === 'cornerRadius')?.value) ?? 0
+    const bounds = rectOf(rect)
+    if (bounds) {
+      asPath(value)!.commands.push({ kind: 'rect', ...bounds, radius })
+    }
+    return value
+  }
+
+  /** One drawing command, or null when the member is not a drawing command. */
+  private pathCommand(member: string, call: HostCall): PathCommand | null {
+    const first = call.args.find((a) => a.label === 'to' || a.label === null)?.value
+
+    switch (member) {
+      case 'move':
+        return { kind: 'move', to: pointOf(first) ?? { x: 0, y: 0 } }
+      case 'addLine':
+        return { kind: 'line', to: pointOf(first) ?? { x: 0, y: 0 } }
+      case 'closeSubpath':
+        return { kind: 'close' }
+
+      case 'addCurve':
+        return {
+          kind: 'curve',
+          to: pointOf(first) ?? { x: 0, y: 0 },
+          control1: pointOf(call.args.find((a) => a.label === 'control1')?.value) ?? { x: 0, y: 0 },
+          control2: pointOf(call.args.find((a) => a.label === 'control2')?.value) ?? { x: 0, y: 0 },
+        }
+
+      case 'addQuadCurve':
+        return {
+          kind: 'quad',
+          to: pointOf(first) ?? { x: 0, y: 0 },
+          control: pointOf(call.args.find((a) => a.label === 'control')?.value) ?? { x: 0, y: 0 },
+        }
+
+      case 'addArc':
+        return {
+          kind: 'arc',
+          centre: pointOf(call.args.find((a) => a.label === 'center')?.value) ?? { x: 0, y: 0 },
+          radius: numberOf(call.args.find((a) => a.label === 'radius')?.value) ?? 0,
+          startDegrees: angleOf(call.args.find((a) => a.label === 'startAngle')?.value),
+          endDegrees: angleOf(call.args.find((a) => a.label === 'endAngle')?.value),
+          clockwise: call.args.find((a) => a.label === 'clockwise')?.value.kind === 'bool'
+            ? (call.args.find((a) => a.label === 'clockwise')!.value as { value: boolean }).value
+            : true,
+        }
+
+      case 'addRect': {
+        const bounds = rectOf(first)
+        return bounds ? { kind: 'rect', ...bounds, radius: 0 } : null
+      }
+
+      case 'addRoundedRect': {
+        const bounds = rectOf(first)
+        const radius = numberOf(call.args.find((a) => a.label === 'cornerRadius')?.value) ?? 0
+        return bounds ? { kind: 'rect', ...bounds, radius } : null
+      }
+
+      case 'addEllipse': {
+        const bounds = rectOf(first)
+        return bounds ? { kind: 'ellipse', ...bounds } : null
+      }
+
+      default:
+        return null
+    }
+  }
+
+  /**
+   * `Canvas { context, size in … }`.
+   *
+   * The closure is run once, now, with a context that records what it was asked to
+   * draw. That makes a canvas a list of vector paths rather than a bitmap — which
+   * reuses the path renderer exactly, and means a canvas is inspectable and
+   * diffable like everything else.
+   *
+   * The honest limitation: the closure runs at evaluation time, so it sees the size
+   * from the last layout pass rather than the one it is about to get. The same
+   * two-pass loop that serves `GeometryReader` corrects it on the next pass.
+   */
+  private makeCanvas(call: HostCall): SwiftValue {
+    const context = newCanvasContext()
+    const size = this.defaultGeometry
+    const proxy = opaque('CGSize', { width: size.width, height: size.height })
+
+    call.invoke(call.trailingClosure!, [context, proxy])
+
+    return view({
+      name: 'Canvas',
+      args: [{ label: null, value: context }],
+      children: [],
+      modifiers: [],
+      action: null,
+      span: call.span,
+    })
+  }
+
+  /** A path with a view modifier on it becomes the view it already is. */
+  private pathAsStyledView(target: SwiftValue, member: string, call: HostCall): SwiftValue {
+    const modifier: ModifierValue = {
+      name: member,
+      args: toArgs(call),
+      span: call.span,
+      closure: call.trailingClosure,
+    }
+
+    return view({
+      name: 'Path',
+      args: [{ label: null, value: target }],
+      children: [],
+      modifiers: [modifier],
+      action: null,
+      span: call.span,
+    })
+  }
+
+  /**
    * Expands a user view so a modifier can be applied to it.
    *
    * Several views become an implicit `Group`, which is what SwiftUI does with a
@@ -291,7 +434,21 @@ export class SwiftUIHost implements InterpreterHost {
       if (value.kind === 'struct' && this.expandStruct) return [...this.expandStruct(value)]
 
       const asColour = this.colorAsView(value)
-      return asColour ? [asColour] : []
+      if (asColour) return [asColour]
+
+      if (value.kind === 'opaque' && value.typeName === PATH_TYPE) {
+        return [
+          {
+            name: 'Path',
+            args: [{ label: null, value }],
+            children: [],
+            modifiers: [],
+            action: null,
+            span: { file: '', start: 0, end: 0 },
+          },
+        ]
+      }
+      return []
     })
   }
 
@@ -327,10 +484,41 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callGlobal(name: string, call: HostCall): SwiftValue | undefined {
+    // Values first: these are not views, so they have to be handled before the
+    // "is this a view name?" guard below rejects them.
     if (name === 'Color') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
     if (name === 'GridItem') return this.makeGridItem(call)
+
+    if (name === 'CGSize') {
+      return size(
+        numberOf(call.args.find((a) => a.label === 'width')?.value) ?? 0,
+        numberOf(call.args.find((a) => a.label === 'height')?.value) ?? 0,
+      )
+    }
+
+    if (name === 'CGPoint') {
+      return point(
+        numberOf(call.args.find((a) => a.label === 'x')?.value) ?? 0,
+        numberOf(call.args.find((a) => a.label === 'y')?.value) ?? 0,
+      )
+    }
+
+    if (name === 'CGRect') {
+      return opaque('CGRect', {
+        x: numberOf(call.args.find((a) => a.label === 'x')?.value) ?? 0,
+        y: numberOf(call.args.find((a) => a.label === 'y')?.value) ?? 0,
+        width: numberOf(call.args.find((a) => a.label === 'width')?.value) ?? 0,
+        height: numberOf(call.args.find((a) => a.label === 'height')?.value) ?? 0,
+      })
+    }
+
+    if (GESTURE_CONSTRUCTORS[name]) {
+      const minimum = numberOf(call.args.find((a) => a.label === 'minimumDistance')?.value)
+      return gesture(GESTURE_CONSTRUCTORS[name]!, minimum ?? 10)
+    }
+
     if (!VIEW_NAMES.has(name)) return undefined
 
     const args = toArgs(call)
@@ -339,24 +527,8 @@ export class SwiftUIHost implements InterpreterHost {
       return this.makeDataDriven(name, args, call)
     }
 
-    if (GESTURE_CONSTRUCTORS[name]) {
-      const minimum = numberOf(call.args.find((a) => a.label === 'minimumDistance')?.value)
-      return gesture(GESTURE_CONSTRUCTORS[name]!, minimum ?? 10)
-    }
-
-    if (name === 'CGSize') {
-      return size(
-        numberOf(call.args.find((a) => a.label === 'width')?.value) ?? 0,
-        numberOf(call.args.find((a) => a.label === 'height')?.value) ?? 0,
-      )
-    }
-    if (name === 'CGPoint') {
-      return point(
-        numberOf(call.args.find((a) => a.label === 'x')?.value) ?? 0,
-        numberOf(call.args.find((a) => a.label === 'y')?.value) ?? 0,
-      )
-    }
-
+    if (name === 'Path') return this.makePath(call)
+    if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
 
     const isAction = ACTION_VIEWS.has(name) && call.args.some((a) => a.label === null)
@@ -416,6 +588,47 @@ export class SwiftUIHost implements InterpreterHost {
         closure: call.trailingClosure,
       }
       return view({ ...base, modifiers: [...base.modifiers, modifier] })
+    }
+
+    // Path building. The payload is mutated in place, which is what the closure form
+    // needs: `Path { p in p.move(to: …) }` expects `p` to be the path it is filling.
+    const path = asPath(target)
+    if (path) {
+      const command = this.pathCommand(member, call)
+      if (command) {
+        path.commands.push(command)
+        return target
+      }
+      if (member === 'trim') {
+        path.trim = {
+          from: numberOf(call.args.find((a) => a.label === 'from')?.value) ?? 0,
+          to: numberOf(call.args.find((a) => a.label === 'to')?.value) ?? 1,
+        }
+        return target
+      }
+      // Anything else on a path is a view modifier: `.fill`, `.stroke`, `.frame`.
+      return this.pathAsStyledView(target, member, call)
+    }
+
+    // `context.fill(path, with: .color(.red))` — the Canvas drawing API. The context
+    // collects drawings rather than rasterising, so a canvas ends up as the same
+    // vector nodes a `Path` produces and needs no second renderer.
+    const canvas = asCanvasContext(target)
+    if (canvas && (member === 'fill' || member === 'stroke')) {
+      const drawn = asPath(call.args.find((a) => a.label === null)?.value)
+      const style = call.args.find((a) => a.label === 'with')?.value ?? null
+      if (drawn) {
+        canvas.drawings.push({
+          d: toSVGPath(drawn),
+          fill: member === 'fill' ? style : null,
+          stroke: member === 'stroke' ? style : null,
+          lineWidth:
+            numberOf(call.args.find((a) => a.label === 'lineWidth')?.value) ??
+            numberOf(call.args.find((a) => a.label === 'style')?.value) ??
+            1,
+        })
+      }
+      return { kind: 'void' }
     }
 
     // Building a gesture by chaining: each link returns a new gesture with one more
@@ -478,6 +691,16 @@ export class SwiftUIHost implements InterpreterHost {
       return this.makeColor(call)
     }
 
+    if (target.kind === 'type' && target.name === 'Angle') {
+      if (member === 'color') {
+      const inner = call.args.find((a) => a.label === null)?.value
+      if (inner) return inner.kind === 'opaque' ? inner : color({ name: 'primary' })
+    }
+    if (member === 'degrees' || member === 'radians') {
+        return token(`${member}:${numberOf(call.args[0]?.value) ?? 0}`)
+      }
+    }
+
     if (target.kind === 'type' && target.name === 'Animation') {
       return this.makeAnimation(member, call)
     }
@@ -511,6 +734,9 @@ export class SwiftUIHost implements InterpreterHost {
     if (member === 'system') return this.makeSystemFont(call)
     if (member === 'fixed' || member === 'flexible' || member === 'adaptive') {
       return this.makeGridItem(call, member)
+    }
+    if (member === 'degrees' || member === 'radians') {
+      return token(`${member}:${numberOf(call.args[0]?.value) ?? 0}`)
     }
     if (member === 'height' || member === 'fraction') {
       return token(`detent:${member}:${numberOf(call.args[0]?.value) ?? 0}`)
@@ -846,6 +1072,36 @@ function identityKey(
     return describe(element, true)
   }
   return `#${index}`
+}
+
+function pointOf(value: SwiftValue | undefined): PathPoint | null {
+  if (!value || value.kind !== 'opaque') return null
+  const payload = value.payload as { x?: number; y?: number }
+  return typeof payload.x === 'number' && typeof payload.y === 'number'
+    ? { x: payload.x, y: payload.y }
+    : null
+}
+
+function rectOf(
+  value: SwiftValue | undefined,
+): { x: number; y: number; width: number; height: number } | null {
+  if (!value || value.kind !== 'opaque') return null
+  const payload = value.payload as Record<string, number>
+  if (typeof payload.width !== 'number' || typeof payload.height !== 'number') return null
+  return {
+    x: payload.x ?? 0,
+    y: payload.y ?? 0,
+    width: payload.width,
+    height: payload.height,
+  }
+}
+
+/** `.degrees(90)` / `.radians(…)`, as `addArc`'s angles are written. */
+function angleOf(value: SwiftValue | undefined): number {
+  const name = tokenNameOf(value)
+  if (name?.startsWith('degrees:')) return Number(name.split(':')[1])
+  if (name?.startsWith('radians:')) return (Number(name.split(':')[1]) * 180) / Math.PI
+  return numberOf(value) ?? 0
 }
 
 function asClosure(value: SwiftValue | undefined): ClosureValue | null {

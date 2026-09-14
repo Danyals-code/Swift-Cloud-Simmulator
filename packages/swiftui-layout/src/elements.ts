@@ -1,4 +1,4 @@
-import type { Fill, ResolvedFont, RGBA, ShapeKind, SourceSpan } from '@studio/shared'
+import type { FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -43,6 +43,7 @@ export type LayoutElement =
   | GridElement
   | TableElement
   | FirstFitElement
+  | PathElement
   | PlaceholderElement
   | ModifiedElement
   | EmptyElement
@@ -101,6 +102,9 @@ export interface ShapeElement extends ElementBase {
   readonly kind: 'shape'
   readonly shape: ShapeKind
   readonly cornerRadius?: number
+  /** `.fill(…)`; without one the shape takes the inherited foreground colour. */
+  readonly fill?: Fill
+  readonly stroke?: { readonly color: RGBA; readonly width: number }
 }
 
 /** A bare `Color` used as a view. Greedy in both axes, like a shape. */
@@ -187,6 +191,22 @@ export interface FirstFitElement extends ElementBase {
   readonly kind: 'firstFit'
   readonly axes: readonly Axis[]
   readonly children: readonly LayoutElement[]
+}
+
+/**
+ * A vector path.
+ *
+ * Greedy like a shape, because a `Path`'s own coordinates are absolute within
+ * whatever frame it is given — it does not scale to fit, and a path drawn outside its
+ * frame is simply outside it, which is SwiftUI's behaviour too.
+ */
+export interface PathElement extends ElementBase {
+  readonly kind: 'path'
+  /** SVG path data, in the element's own coordinate space. */
+  readonly d: string
+  readonly fill: Fill | null
+  readonly stroke: { readonly color: RGBA; readonly width: number } | null
+  readonly fillRule: 'nonzero' | 'evenodd'
 }
 
 export interface PlaceholderElement extends ElementBase {
@@ -282,6 +302,25 @@ export type LayoutModifier =
   | { readonly kind: 'scale'; readonly x: number; readonly y: number }
   | { readonly kind: 'rotate'; readonly degrees: number }
   | { readonly kind: 'zIndex'; readonly value: number }
+  /** `.blur`, `.saturation`, `.brightness`, `.contrast`, `.grayscale`. */
+  | { readonly kind: 'filter'; readonly filter: FilterSpec }
+  /** `.background(.regularMaterial)` — a translucent, blurred backdrop. */
+  | {
+      readonly kind: 'material'
+      readonly opacity: number
+      readonly blur: number
+      readonly light: boolean
+    }
+  /** `.allowsHitTesting(false)` — the subtree stops receiving events. */
+  | { readonly kind: 'hitTestable'; readonly enabled: boolean }
+  /** `.accessibilityLabel` and friends, which change what assistive tech reads. */
+  | {
+      readonly kind: 'a11y'
+      readonly label?: string
+      readonly value?: string
+      readonly hint?: string
+      readonly hidden?: boolean
+    }
   /** Carried through to the renderer, which animates the change with CSS. */
   | { readonly kind: 'animate'; readonly hint: AnimationHint }
   | {
@@ -372,6 +411,8 @@ export interface LayoutEnvironment {
   readonly lineLimit?: number | null
   readonly textAlign?: TextAlign
   readonly textCase?: 'upper' | 'lower' | null
+  /** Set by `.allowsHitTesting(false)`: the subtree paints but does not respond. */
+  readonly hitTestingDisabled?: boolean
 }
 
 export function childEnvironment(

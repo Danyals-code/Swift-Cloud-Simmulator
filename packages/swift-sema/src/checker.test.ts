@@ -162,19 +162,21 @@ struct Other: View {
 
 describe('coverage diagnostics are honest, not wrong', () => {
   it('names an unimplemented view rather than calling it unresolved', () => {
-    // `Canvas` is perfectly valid Swift. Saying "cannot find in scope" would be both
-    // wrong and unhelpful — it is the preview that cannot draw it.
-    const [warning] = warnings(app('        Canvas { context, size in }'))
+    // `Chart` is perfectly valid Swift. Saying "cannot find in scope" would be both
+    // wrong and unhelpful — it is the preview that cannot draw it. The name checked
+    // here moves as coverage grows; what must not change is that a real SwiftUI name
+    // is never reported as unresolved.
+    const [warning] = warnings(app('        Chart { }'))
     expect(warning?.code).toBe('unsupported_swiftui_view')
-    expect(warning?.feature).toBe('Canvas')
+    expect(warning?.feature).toBe('Chart')
     expect(warning?.message).toContain('Phase 7')
-    expect(errors(app('        Canvas { context, size in }'))).toEqual([])
+    expect(errors(app('        Chart { }'))).toEqual([])
   })
 
   it('names an unimplemented modifier', () => {
-    const [warning] = warnings(app('        Text("x").blur(radius: 4)'))
+    const [warning] = warnings(app('        Text("x").mask(Circle())'))
     expect(warning?.code).toBe('unsupported_swiftui_modifier')
-    expect(warning?.feature).toBe('.blur')
+    expect(warning?.feature).toBe('.mask')
   })
 
   it('says nothing about the views Phase 6 added', () => {
@@ -252,10 +254,10 @@ struct V: View {
     // `.padding()` appears repeatedly in real code; a warning per occurrence would
     // bury everything else in the problems panel.
     const source = app(`        VStack {
-            Text("a").blur(radius: 1)
-            Text("b").blur(radius: 1)
+            Text("a").mask(Circle())
+            Text("b").mask(Circle())
         }`)
-    expect(warnings(source).filter((d) => d.feature === '.blur')).toHaveLength(2)
+    expect(warnings(source).filter((d) => d.feature === '.mask')).toHaveLength(2)
   })
 })
 

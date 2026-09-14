@@ -33,8 +33,8 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   // collections and navigation
   'List', 'Section', 'Form',
   'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView',
-  // shapes
-  'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule',
+  // shapes and drawing
+  'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path', 'Canvas',
   // styles
   'LinearGradient', 'RadialGradient', 'AngularGradient', 'GridItem',
   // gestures
@@ -55,8 +55,14 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // typography
   'font', 'bold', 'italic', 'fontWeight',
   'lineLimit', 'multilineTextAlignment', 'textCase',
-  // transforms and motion
+  // transforms, filters and motion
   'scaleEffect', 'rotationEffect', 'animation',
+  'blur', 'saturation', 'brightness', 'contrast', 'grayscale',
+  // drawing styles
+  'fill', 'stroke', 'trim',
+  // accessibility
+  'accessibilityLabel', 'accessibilityValue', 'accessibilityHint', 'accessibilityHidden',
+  'allowsHitTesting',
   // navigation and presentation
   'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar',
   'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
@@ -80,20 +86,18 @@ export const UNIMPLEMENTED_VIEWS: ReadonlyMap<string, number> = new Map([
   ['NavigationSplitView', 7],
   ['DatePicker', 7], ['ColorPicker', 7], ['TextEditor', 7],
   ['Menu', 7], ['ShareLink', 7], ['Gauge', 7],
-  ['AsyncImage', 7], ['Canvas', 7], ['TimelineView', 7], ['Chart', 7], ['Path', 7],
+  ['AsyncImage', 7], ['TimelineView', 7], ['Chart', 7],
   ['Table', 7], ['OutlineGroup', 7], ['DisclosureGroup', 7],
 ])
 
 /** Real SwiftUI modifiers the preview ignores for now. */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
-  ['allowsHitTesting', 7],
+  ['mask', 7],
   ['toggleStyle', 7], ['pickerStyle', 7], ['labelStyle', 7],
-  ['blur', 7], ['saturation', 7], ['brightness', 7], ['contrast', 7], ['mask', 7],
   ['transition', 7], ['matchedGeometryEffect', 7], ['phaseAnimator', 7],
   ['popover', 7], ['searchable', 7], ['refreshable', 7], ['onDelete', 7], ['onMove', 7],
   ['swipeActions', 7], ['contextMenu', 7], ['badge', 7],
   ['safeAreaInset', 7], ['ignoresSafeArea', 7], ['alignmentGuide', 7],
-  ['accessibilityLabel', 7], ['accessibilityHint', 7], ['accessibilityValue', 7],
   ['id', 7], ['zIndex', 7],
   ['kerning', 7],
   ['monospaced', 7], ['fontDesign', 7], ['minimumScaleFactor', 7],

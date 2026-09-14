@@ -101,6 +101,21 @@ export interface ShapePayload {
 }
 
 /**
+ * A colour-manipulation filter, applied to a node and everything inside it.
+ *
+ * Mapped to CSS filters, which is exact for blur, saturation, brightness, contrast
+ * and grayscale — these are the same operations with the same definitions, not
+ * approximations of them.
+ */
+export interface FilterSpec {
+  readonly blur?: number
+  readonly saturation?: number
+  readonly brightness?: number
+  readonly contrast?: number
+  readonly grayscale?: number
+}
+
+/**
  * Rendered when a view or modifier is outside the coverage matrix.
  *
  * Requirement FR-4.11: never fail silently. The user sees a labelled box saying
@@ -183,10 +198,29 @@ export interface A11y {
   readonly role?: string
   readonly label?: string
   readonly value?: string
+  /** `.accessibilityHint` — the longer explanation, read after the label. */
+  readonly hint?: string
   readonly hidden?: boolean
 }
 
-export type RenderNodeKind = 'layer' | 'text' | 'shape' | 'image' | 'placeholder'
+/**
+ * A vector path, already resolved to the node's own coordinate space.
+ *
+ * Carried as an SVG path string rather than a command list: the worker is where the
+ * geometry is known, and serialising there means the renderer is a single `<path>`
+ * element with nothing to interpret. It also makes a path trivially comparable, which
+ * is what lets the DOM diff skip an unchanged drawing.
+ */
+export interface PathPayload {
+  /** SVG path data — `M`, `L`, `C`, `Q`, `A`, `Z`. */
+  readonly d: string
+  readonly fill?: Fill
+  readonly stroke?: { readonly color: RGBA; readonly width: number }
+  /** `evenodd` for a path with holes, as `.fill(style:)` selects. */
+  readonly fillRule?: 'nonzero' | 'evenodd'
+}
+
+export type RenderNodeKind = 'layer' | 'text' | 'shape' | 'image' | 'path' | 'placeholder'
 
 export interface RenderNode {
   /**
@@ -207,6 +241,7 @@ export interface RenderNode {
   readonly text?: TextPayload
   readonly shape?: ShapePayload
   readonly image?: ImagePayload
+  readonly path?: PathPayload
   readonly scroll?: ScrollPayload
   readonly placeholder?: PlaceholderPayload
   readonly hitTarget?: HitTarget
@@ -227,6 +262,9 @@ export interface RenderNode {
   }
   readonly transform?: TransformSpec
   readonly animation?: AnimationSpec
+  readonly filter?: FilterSpec
+  /** `.regularMaterial` and friends: a translucent, blurred backdrop. */
+  readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
   /** where in the Swift source this came from — powers hover-to-source in the inspector */
   readonly origin?: SourceSpan
   /** Inspector readout: what this view is called and what was applied to it (FR-5.8). */
@@ -265,6 +303,17 @@ export function cssFill(f: Fill): string {
   // SwiftUI unit space has y pointing down, which matches CSS gradient angle maths here.
   const angle = (Math.atan2(f.end.x - f.start.x, f.start.y - f.end.y) * 180) / Math.PI
   return `linear-gradient(${angle.toFixed(2)}deg, ${stops})`
+}
+
+/** The CSS `filter` value for a node's filter spec, or undefined when it has none. */
+export function cssFilter(filter: FilterSpec): string | undefined {
+  const parts: string[] = []
+  if (filter.blur) parts.push(`blur(${filter.blur}px)`)
+  if (filter.saturation !== undefined) parts.push(`saturate(${filter.saturation})`)
+  if (filter.brightness !== undefined) parts.push(`brightness(${1 + filter.brightness})`)
+  if (filter.contrast !== undefined) parts.push(`contrast(${filter.contrast})`)
+  if (filter.grayscale) parts.push(`grayscale(${filter.grayscale})`)
+  return parts.length > 0 ? parts.join(' ') : undefined
 }
 
 export function rectContains(r: Rect, p: Point): boolean {

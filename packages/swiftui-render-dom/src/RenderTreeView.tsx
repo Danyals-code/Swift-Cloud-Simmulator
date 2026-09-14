@@ -2,6 +2,7 @@ import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
   cssColor,
   cssFill,
+  cssFilter,
   cssTransition,
   type RenderNode,
   type RenderTree,
@@ -207,6 +208,19 @@ function RenderNodeView({
           transform: `scale(${node.transform.scaleX}, ${node.transform.scaleY}) rotate(${node.transform.rotate}deg)`,
         }
       : {}),
+    ...(node.filter ? { filter: cssFilter(node.filter) } : {}),
+    ...(node.material
+      ? {
+          // A material is a translucent panel over a blurred backdrop, which is
+          // exactly what `backdrop-filter` does — the one Apple effect CSS has a
+          // direct equivalent for.
+          backdropFilter: `blur(${node.material.blur}px) saturate(1.8)`,
+          WebkitBackdropFilter: `blur(${node.material.blur}px) saturate(1.8)`,
+          background: node.material.light
+            ? `rgb(255 255 255 / ${node.material.opacity})`
+            : `rgb(30 30 32 / ${node.material.opacity})`,
+        }
+      : {}),
     ...(node.animation
       ? {
           transition: cssTransition(
@@ -233,6 +247,7 @@ function RenderNodeView({
       {node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
       {node.kind === 'image' && node.image ? <ImageContent node={node} /> : null}
       {node.kind === 'shape' && node.shape ? <ShapeContent node={node} /> : null}
+      {node.kind === 'path' && node.path ? <PathContent node={node} /> : null}
       {node.kind === 'placeholder' && node.placeholder ? <PlaceholderContent node={node} /> : null}
       {nativeControl}
       {children?.length ? (
@@ -259,6 +274,8 @@ function RenderNodeView({
       style={style}
       role={node.a11y?.role}
       aria-label={node.a11y?.label}
+      aria-valuetext={node.a11y?.value}
+      aria-description={node.a11y?.hint}
       aria-hidden={node.a11y?.hidden}
       onPointerEnter={inspecting ? () => inspect.onHover(node) : undefined}
       onPointerLeave={inspecting ? () => inspect.onHover(null) : undefined}
@@ -554,6 +571,38 @@ function ImageContent({ node }: { node: RenderNode }) {
   )
 }
 
+/**
+ * Paints a vector path.
+ *
+ * One `<svg>` with one `<path>`. The geometry was resolved in the worker and
+ * serialised to path data, so there is nothing to compute here — and `overflow:
+ * visible` matters: a `Path`'s coordinates are absolute within its frame, and one
+ * that strays outside should be visible rather than quietly clipped.
+ */
+function PathContent({ node }: { node: RenderNode }) {
+  const path = node.path!
+
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox={`0 0 ${node.frame.width} ${node.frame.height}`}
+      style={{ overflow: 'visible', display: 'block' }}
+      aria-hidden
+    >
+      <path
+        d={path.d}
+        fill={path.fill ? cssFill(path.fill) : 'none'}
+        fillRule={path.fillRule ?? 'nonzero'}
+        stroke={path.stroke ? cssColor(path.stroke.color) : 'none'}
+        strokeWidth={path.stroke?.width ?? 0}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 function ShapeContent({ node }: { node: RenderNode }) {
   const shape = node.shape!
   const radius =
@@ -566,6 +615,7 @@ function ShapeContent({ node }: { node: RenderNode }) {
       style={{
         width: '100%',
         height: '100%',
+        boxSizing: 'border-box',
         borderRadius: radius,
         background: shape.fill ? cssFill(shape.fill) : undefined,
         border: shape.stroke
