@@ -1,5 +1,5 @@
 import type { SourceSpan, UIEvent } from '@studio/shared'
-import type { Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
+import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
   asProjection,
@@ -80,6 +80,8 @@ export class AppRuntime {
   private readonly ui = new UIState()
 
   private entryTypeName: string | null = null
+  /** `#Preview { … }`'s body, used as the root when nothing is marked `@main`. */
+  private previewBody: Block | null = null
   private rootTypeName: string | null = null
   private identity = new IdentityPath()
 
@@ -170,6 +172,11 @@ export class AppRuntime {
     this.interpreter.load(files)
 
     this.entryTypeName = model.entryPoint?.name ?? null
+    // A file with a view and a `#Preview` and no `@main` is an ordinary thing to
+    // paste in, and it is what Xcode itself renders. Falling back to the preview's
+    // body is the difference between that file showing something and reporting that
+    // the project has no entry point.
+    this.previewBody = this.entryTypeName ? null : findPreviewBody(files)
     this.rootTypeName = null
     this.programKey = programKey
 
@@ -195,16 +202,18 @@ export class AppRuntime {
     this.state.beginPass()
 
     const entry = this.entryTypeName ? this.interpreter.types.get(this.entryTypeName) : undefined
-    if (!entry) {
+    if (!entry && !this.previewBody) {
       this.state.endPass()
       return { views: [], ui: null, logs: this.host.takeLogs(), failure: null, rootTypeName: null }
     }
 
     try {
-      const app = this.interpreter.instantiate(entry.name, [], entry.span)
-      const scenes = this.expand(app)
+      const produced = entry
+        ? this.expand(this.interpreter.instantiate(entry.name, [], entry.span))
+        : this.runPreviewBody(this.previewBody!)
+
       // The scene wrapper is not content; the app is what it contains.
-      const views = scenes.flatMap((scene) => (isSceneWrapper(scene) ? scene.children : [scene]))
+      const views = produced.flatMap((scene) => (isSceneWrapper(scene) ? scene.children : [scene]))
 
       const ui = resolveUI(views, {
         state: this.ui,
@@ -669,6 +678,22 @@ export class AppRuntime {
     return produced.kind === 'struct' ? this.expand(produced) : null
   }
 
+  /**
+   * Runs a `#Preview` body as the root.
+   *
+   * A view builder like any other, evaluated in the global scope because a preview
+   * body has no enclosing type — `#Preview { ContentView() }` is written at file
+   * level and sees exactly what a top-level function would.
+   */
+  private runPreviewBody(body: Block): ViewValue[] {
+    const produced = this.interpreter.runViewBuilderBlock(body, this.interpreter.globals.child(null))
+    return produced.flatMap((value) => {
+      const view = asView(value)
+      if (view) return [view]
+      return value.kind === 'struct' ? this.expand(value) : []
+    })
+  }
+
   private buildViews(closure: ClosureValue, args: readonly SwiftValue[] = []): readonly ViewValue[] {
     const produced = this.interpreter.runViewBuilder(closure, args)
     return produced.flatMap((value) => {
@@ -846,3 +871,19 @@ function toFailure(error: unknown): RuntimeFailure {
 }
 
 export { describe }
+
+/**
+ * The body of the first `#Preview` in the project, if there is one.
+ *
+ * First rather than all: Xcode shows several previews side by side, and a simulated
+ * phone has one screen. Picking the first is the choice that needs no interface, and a
+ * second preview is still parsed and still exported.
+ */
+function findPreviewBody(files: readonly SourceFileNode[]): Block | null {
+  for (const file of files) {
+    for (const decl of file.declarations) {
+      if (decl.kind === 'macroDecl' && decl.name === 'Preview' && decl.body) return decl.body
+    }
+  }
+  return null
+}

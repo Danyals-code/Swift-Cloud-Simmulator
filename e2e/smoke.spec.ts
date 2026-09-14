@@ -807,3 +807,20 @@ test('Phase 10 — Escape cancels a rename without changing anything', async ({ 
   await expect(page.getByTestId('rename-bar')).toBeHidden()
   expect(await editorText(page)).toBe(before)
 })
+
+test('Phase 10 — a view with only a #Preview renders instead of erroring', async ({ page }) => {
+  // Before this, `#` was an unexpected character and the blocking errors that followed
+  // meant pasting modern SwiftUI produced a blank screen and a complaint about a
+  // character rather than about anything the user wrote.
+  await openStudio(page)
+  await replaceAll(
+    page,
+    'struct ContentView: View { var body: some View { Text("pasted") } }',
+  )
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('#Preview { ContentView() }')
+  await page.keyboard.press('Escape')
+
+  await expect(preview(page)).toContainText('pasted', { timeout: 8_000 })
+  await expect(page.getByTestId('console')).toContainText('No problems', { timeout: 8_000 })
+})

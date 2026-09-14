@@ -249,7 +249,13 @@ export type LayoutModifier =
   | { readonly kind: 'background'; readonly content: LayoutElement }
   | { readonly kind: 'font'; readonly font: ResolvedFont }
   /** `.fontWeight` / `.bold` / `.italic`: adjust the inherited face, keep its size. */
-  | { readonly kind: 'fontTrait'; readonly weight?: number; readonly italic?: boolean }
+  | {
+      readonly kind: 'fontTrait'
+      readonly weight?: number
+      readonly italic?: boolean
+      /** `.fontDesign(.rounded)` — the face changes, the metrics with it. */
+      readonly family?: string
+    }
   /** `.lineLimit`, `.multilineTextAlignment`, `.textCase` — inherited text policy. */
   | {
       readonly kind: 'textStyle'
@@ -411,6 +417,8 @@ export interface LayoutEnvironment {
    */
   readonly fontWeight?: number
   readonly fontItalic?: boolean
+  /** An inherited `.fontDesign`, kept apart from the font so `.font` does not reset it. */
+  readonly fontFamily?: string
   /**
    * Text policy, inherited like the font.
    *
@@ -442,6 +450,9 @@ export function childEnvironment(
           ...modifier.font,
           ...(env.fontWeight !== undefined ? { weight: env.fontWeight } : {}),
           ...(env.fontItalic !== undefined ? { italic: env.fontItalic } : {}),
+          // A `.fontDesign` above this `.font` still applies: in SwiftUI the design is
+          // inherited separately from the size, so setting one must not reset the other.
+          ...(env.fontFamily !== undefined ? { family: env.fontFamily } : {}),
         },
       }
     case 'fontTrait':
@@ -449,10 +460,12 @@ export function childEnvironment(
         ...env,
         ...(modifier.weight !== undefined ? { fontWeight: modifier.weight } : {}),
         ...(modifier.italic !== undefined ? { fontItalic: modifier.italic } : {}),
+        ...(modifier.family !== undefined ? { fontFamily: modifier.family } : {}),
         font: {
           ...env.font,
           ...(modifier.weight !== undefined ? { weight: modifier.weight } : {}),
           ...(modifier.italic !== undefined ? { italic: modifier.italic } : {}),
+          ...(modifier.family !== undefined ? { family: modifier.family } : {}),
         },
       }
     case 'foregroundStyle':

@@ -4,7 +4,7 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after Phase 9: **96 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
+Last updated after Phase 10: **98 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
 
 Anything not listed renders a labelled placeholder box and is counted by the coverage telemetry
 (FR-4.11, NFR-6). Those counts are visible in the studio's **Coverage** panel and never leave the
@@ -142,7 +142,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.listStyle` / `.textFieldStyle` | ✅ | 6 |
 | `.lineLimit` / `.multilineTextAlignment` / `.textCase` | ✅ | 7 | inherited, so a stack can set them for its text |
 | `.monospaced` | ✅ | 7 |
-| `.kerning` / `.minimumScaleFactor` / `.fontDesign` | ⬜ | — |
+| `.fontDesign` | ✅ | 10 | inherited separately from size, as in SwiftUI |
+| `.kerning` / `.minimumScaleFactor` | ⬜ | — | both change *measured* width, so neither is a paint-only change |
 | `.symbolRenderingMode` / `.symbolVariant` | ⬜ | — | the substitute glyphs have no multicolour variants |
 
 ## Shapes and styles
@@ -214,7 +215,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `dismiss` | ✅ | 7 |
 | `openURL` | ⬜ | — |
 | `PreferenceKey` | ⬜ | — | needs a value to travel *up* the tree |
-| `#Preview` macro / `PreviewProvider` | ⬜ | — |
+| `#Preview` macro | ✅ | 10 | parsed, and used as the root when nothing is `@main` |
+| `PreviewProvider` (the older form) | ⬜ | — | |
 
 ## Accessibility
 

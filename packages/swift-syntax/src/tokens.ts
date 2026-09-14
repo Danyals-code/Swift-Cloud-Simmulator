@@ -4,6 +4,7 @@ export type TokenKind =
   | 'identifier'
   | 'keyword'
   | 'attribute' // @main, @State, @ViewBuilder
+  | 'macro' // #Preview, #if, #available
   | 'integerLiteral'
   | 'floatLiteral'
   | 'stringLiteral'

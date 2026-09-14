@@ -58,7 +58,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'background', 'overlay', 'border', 'shadow', 'cornerRadius', 'opacity',
   'foregroundStyle', 'foregroundColor', 'tint', 'resizable',
   // typography
-  'font', 'bold', 'italic', 'fontWeight',
+  'font', 'bold', 'italic', 'fontWeight', 'fontDesign',
   'lineLimit', 'multilineTextAlignment', 'textCase',
   // transforms, filters and motion
   'scaleEffect', 'rotationEffect', 'animation', 'transition',
@@ -105,12 +105,12 @@ export const UNIMPLEMENTED_VIEWS: ReadonlyMap<string, number> = new Map([
 /** Real SwiftUI modifiers the preview ignores for now. */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
   ['mask', 7], ['popover', 7], ['refreshable', 7], ['alignmentGuide', 7],
-  ['kerning', 7], ['minimumScaleFactor', 7], ['fontDesign', 7],
+  ['kerning', 7], ['minimumScaleFactor', 7],
   ['scrollDismissesKeyboard', 7], ['scrollTargetBehavior', 7],
   ['symbolRenderingMode', 7], ['imageScale', 7], ['interpolation', 7],
   ['matchedGeometryEffect', 7], ['phaseAnimator', 7], ['keyframeAnimator', 7],
   ['kerning', 7],
-  ['monospaced', 7], ['fontDesign', 7], ['minimumScaleFactor', 7],
+  ['monospaced', 7], ['minimumScaleFactor', 7],
   ['scrollDismissesKeyboard', 7], ['scrollTargetBehavior', 7],
   ['symbolRenderingMode', 7], ['imageScale', 7], ['interpolation', 7],
 ])

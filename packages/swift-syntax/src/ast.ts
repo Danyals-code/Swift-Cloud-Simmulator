@@ -97,6 +97,7 @@ export type Decl =
   | FuncDecl
   | VarDecl
   | InitDecl
+  | MacroDecl
   | UnsupportedDecl
   | ErrorDecl
 
@@ -268,6 +269,24 @@ export interface VarDecl extends DeclBase {
  * precisely (FR-3.9) and so the rest of the file still parses. The body is skipped
  * by brace matching.
  */
+/**
+ * A macro at declaration position: `#Preview { … }`, `#if DEBUG`.
+ *
+ * Kept as a node rather than skipped because `#Preview` is not decoration — it names
+ * a view to show, and a file that has one and no `@main` is a perfectly ordinary
+ * thing to paste in. Treating it as an entry point is what makes that file render
+ * instead of reporting that the project has none.
+ */
+export interface MacroDecl extends DeclBase {
+  readonly kind: 'macroDecl'
+  /** Without the leading `#`. */
+  readonly name: string
+  readonly nameSpan: SourceSpan
+  readonly args: readonly Argument[]
+  /** The trailing closure body, for the macros that take one. */
+  readonly body: Block | null
+}
+
 export interface UnsupportedDecl extends NodeBase {
   readonly kind: 'unsupportedDecl'
   readonly feature: string
@@ -744,6 +763,10 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
     case 'protocolDecl':
     case 'extensionDecl':
       node.members.forEach(visit)
+      return
+    case 'macroDecl':
+      node.args.forEach((a) => visit(a.value))
+      if (node.body) visit(node.body)
       return
 
     case 'funcDecl':

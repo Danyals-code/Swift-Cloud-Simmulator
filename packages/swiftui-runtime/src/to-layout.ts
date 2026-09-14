@@ -1,4 +1,12 @@
-import { rgba, type Fill, type RGBA, type ShapeKind } from '@studio/shared'
+import {
+  MONO_FAMILY,
+  rgba,
+  ROUNDED_FAMILY,
+  UI_FONT_FAMILY,
+  type Fill,
+  type RGBA,
+  type ShapeKind,
+} from '@studio/shared'
 import { asProjection, truthy, type SwiftValue } from '@studio/swift-runtime'
 import { UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import {
@@ -1878,6 +1886,16 @@ class Converter {
       case 'fontWeight':
         return { kind: 'fontTrait', weight: resolveWeightArg(args[0]?.value) ?? 700 }
 
+      case 'fontDesign': {
+        // `.default` is the one that has to reset rather than be ignored, or a design
+        // set higher up would be impossible to turn off.
+        const design = tokenName(args[0]?.value)
+        const family =
+          design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : UI_FONT_FAMILY
+        return { kind: 'fontTrait', family }
+      }
+
+
       case 'bold':
         return { kind: 'fontTrait', weight: 700 }
 
@@ -2030,7 +2048,6 @@ class Converter {
 
       case 'kerning':
       case 'minimumScaleFactor':
-      case 'fontDesign':
         return { kind: 'unsupported', name: modifier.name }
 
       case 'position':

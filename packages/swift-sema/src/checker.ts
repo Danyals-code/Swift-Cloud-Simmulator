@@ -208,6 +208,14 @@ export class Checker {
     }
 
     if (mains.length === 0) {
+      // A `#Preview` is an entry point for our purposes: it names a view to show, and
+      // a file with one and no `@main` is exactly what Xcode itself renders. Reporting
+      // "no entry point" for it would block evaluation of a file that is complete.
+      const preview = files.some((file) =>
+        file.declarations.some((d) => d.kind === 'macroDecl' && d.name === 'Preview' && d.body),
+      )
+      if (preview) return null
+
       const anchor = files[0]
       if (anchor) {
         this.report(
@@ -289,6 +297,15 @@ export class Checker {
         if (decl.typeAnnotation) this.checkType(decl.typeAnnotation)
         if (decl.initializer) this.checkExpression(decl.initializer, scope)
         if (decl.accessor) this.checkBlock(decl.accessor, scope.child())
+        return
+
+      case 'macroDecl':
+        // `#Preview { … }`'s body is ordinary view code and gets the ordinary checks;
+        // a macro the preview does not act on still has its arguments resolved, so a
+        // typo inside one is still reported.
+        this.checkAttributes(decl.attributes)
+        for (const arg of decl.args) this.checkExpression(arg.value, scope)
+        if (decl.body) this.checkBlock(decl.body, scope.child())
         return
 
       case 'importDecl':

@@ -157,6 +157,7 @@ export class Lexer {
     if (ch === '@') return this.scanAttribute()
     if (ch === '"') return this.scanString(0)
     if (ch === '#' && this.isRawStringStart()) return this.scanRawString()
+    if (ch === '#' && isIdentifierStart(this.text[this.pos + 1] ?? '')) return this.scanMacro()
     if (ch >= '0' && ch <= '9') return this.scanNumber()
     if (isIdentifierStart(ch)) return this.scanIdentifier()
     if (ch === '`') return this.scanBacktickIdentifier()
@@ -196,6 +197,20 @@ export class Lexer {
     const text = this.text.slice(start + 1, this.pos)
     if (this.text[this.pos] === '`') this.pos++
     return { kind: 'identifier', text }
+  }
+
+  /**
+   * `#Preview`, `#if`, `#available`, `#selector`.
+   *
+   * Lexed like an attribute and for the same reason: without it, `#` is an unexpected
+   * character and the three errors that follow are blocking — so a file with a
+   * `#Preview` block, which is most modern SwiftUI, would not render at all.
+   */
+  private scanMacro(): Omit<Token, 'span' | 'newlineBefore' | 'spaceBefore' | 'spaceAfter' | 'column'> {
+    const start = this.pos
+    this.pos++ // '#'
+    while (this.pos < this.text.length && isIdentifierContinue(this.text[this.pos]!)) this.pos++
+    return { kind: 'macro', text: this.text.slice(start + 1, this.pos) }
   }
 
   private scanAttribute(): Omit<Token, 'span' | 'newlineBefore' | 'spaceBefore' | 'spaceAfter' | 'column'> {

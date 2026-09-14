@@ -226,6 +226,7 @@ export class Parser {
       return this.parseVar(attributes, modifiers)
     }
     if (this.checkKeyword('init')) return this.parseInit(attributes, modifiers)
+    if (this.current.kind === 'macro') return this.parseMacro(attributes, modifiers)
 
     const unsupportedFeature = UNSUPPORTED_DECLARATIONS[this.current.text]
     if (this.current.kind === 'keyword' && unsupportedFeature) {
@@ -794,6 +795,36 @@ export class Parser {
 
     this.index = before
     return null
+  }
+
+  /**
+   * `#Preview { … }`, `#Preview("Dark") { … }`, and any other macro written where a
+   * declaration goes.
+   *
+   * The arguments and body are parsed rather than skipped, because `#Preview`'s body
+   * is the one thing in the file that says what to show when nothing else does.
+   * Macros the preview does not act on still parse cleanly and export unchanged —
+   * which is the point: `#` used to be an unexpected character, and the three
+   * blocking errors that followed meant a file with a preview block did not render.
+   */
+  private parseMacro(attributes: Attribute[], modifiers: Modifier[]): Decl {
+    const start = this.advance()
+
+    const args = this.check('(') ? (this.tryParseArgumentList() ?? []) : []
+    if (this.check('(')) this.skipBalanced('(', ')')
+
+    const body = this.check('{') ? this.parseBlock() : null
+
+    return {
+      kind: 'macroDecl',
+      span: this.spanFrom(start),
+      attributes,
+      modifiers,
+      name: start.text,
+      nameSpan: start.span,
+      args,
+      body,
+    }
   }
 
   private parseUnsupportedDecl(feature: string): Decl {
