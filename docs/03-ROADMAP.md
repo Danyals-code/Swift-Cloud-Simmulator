@@ -407,6 +407,65 @@ The matrix moved to **96 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
 
 ---
 
+## Phase 10 — Loose ends, and measuring the right thing — **done (2026-09-14)**
+
+No new pillar. Three things that had been carried for several phases, each because it
+looked smaller than the next feature.
+
+| | |
+| --- | --- |
+| **10a** | project-wide rename, and in-file find/replace |
+| **10b** | the bundle gate was measuring bytes nobody downloads |
+| **10c** | `#Preview`, which was a parse error |
+
+**10a.** Phase 8 built a `references` worker API and never called it; Phase 4 listed
+find/replace as not built. Writing the tests changed the implementation: references
+are matched on **lexer tokens**, not text, because the lexer already knows what a
+comment and a string literal are — and those are the two places a textual rename
+corrupts something that leaves no compile error behind. The opposite case needed work
+too: a string interpolation is code inside a literal and is not in the flat token
+stream, so a rename would have stopped at the quote.
+
+What it still cannot do is tell two different symbols sharing a spelling apart. So the
+rename bar states the count and the spread *before* anything changes: "12 occurrences
+in 3 files" is how ambiguity the analyser cannot resolve gets handed to the person who
+can.
+
+**10b.** The budget had read WARN for four phases while the README said "worth
+watching". Watching it properly found that Next's polyfill bundle — served behind
+`nomodule`, so no browser that can run a Web Worker ever fetches it — was counted in
+full. That is 38 KB, a tenth of the budget, and it would eventually have forced a real
+feature to be cut to pay for bytes that were never sent. Excluding it took the
+measured number from 405.8 KB to **367.2 KB** without a byte changing hands, which is
+recorded in the script's history note, because a number that falls for a reason other
+than a change in the payload has to say so.
+
+The second half of that correction matters more than the first. The gate claimed to
+measure "everything the browser downloads to open the editor". It measures total
+shipped bytes — a legitimate ratchet, but a poor proxy for load time, and the two
+*disagree*: moving code behind a dynamic import makes the first paint smaller and the
+total very slightly larger. A gate that punishes making the app faster will eventually
+be obeyed.
+
+**10c.** `#` was an unexpected character, so a file with a `#Preview` block produced
+three blocking errors — and modern SwiftUI almost always has one. Pasting real code in
+gave a blank screen and a complaint about a character. The most expensive gap left in
+the product, and three lines of lexer. A `#Preview` now also serves as the entry point
+when nothing is `@main`, because a view plus its preview is an ordinary thing to paste
+and is what Xcode itself renders.
+
+### The shape of this phase
+
+Every item was found by looking at something already shipped rather than by adding to
+it: an API with no callers, a gate with a wrong metric, an error message about a
+character. Each had been visible for phases. That is worth a note, because the reason
+they survived is that a new feature is always more interesting than a number that has
+said WARN four times.
+
+Coverage: **98 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
+
+---
+
 ## Cross-cutting workstreams
 
 Running through every phase, not bolted on at the end:
