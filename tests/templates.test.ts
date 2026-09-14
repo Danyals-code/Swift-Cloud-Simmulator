@@ -20,14 +20,29 @@ import { DEVICES } from '@studio/sim-shell'
 
 const device = DEVICES['iphone-15']
 
-function requestFor(source: string): CompileRequest {
+function requestFor(source: string, colorScheme: 'light' | 'dark' = 'light'): CompileRequest {
   return {
     files: [{ id: 'Sources/App.swift', text: source }],
     canvas: { width: device.width, height: device.height },
     safeArea: device.safeArea,
-    colorScheme: 'light',
+    colorScheme,
     revision: 1,
   }
+}
+
+/** Every distinct colour painted by a tree, as `r,g,b,a` strings. */
+function paintedColors(nodes: readonly RenderNode[]): Set<string> {
+  const out = new Set<string>()
+  for (const node of nodes) {
+    if (node.background?.kind === 'solid') {
+      const c = node.background.color
+      out.add(`${c.r},${c.g},${c.b},${c.a}`)
+    }
+    for (const run of node.text?.runs ?? []) {
+      out.add(`${run.color.r},${run.color.g},${run.color.b},${run.color.a}`)
+    }
+  }
+  return out
 }
 
 function describeDiagnostic(d: Diagnostic): string {
@@ -91,6 +106,45 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     }
   })
 
+  it('adapts to dark mode instead of rendering fixed greys', () => {
+    /**
+     * A template using `Color(white: 0.95)` looks identical in both appearances while
+     * its `.primary` text flips to white — white on light grey, unreadable. That is
+     * the most common dark-mode mistake there is, and shipping it as an example would
+     * be teaching it.
+     */
+    resetPipelineState()
+    const light = paintedColors(compile(requestFor(template.source, 'light')).renderTree!.nodes)
+    resetPipelineState()
+    const dark = paintedColors(compile(requestFor(template.source, 'dark')).renderTree!.nodes)
+
+    const shared = [...light].filter((c) => dark.has(c))
+    // Some colours legitimately match — a fixed brand tint, a white-on-tint label —
+    // but the palettes must not be identical.
+    expect([...dark].some((c) => !light.has(c))).toBe(true)
+    expect(shared.length).toBeLessThan(light.size)
+  })
+
+  it('stays legible in dark mode: text never matches its own backdrop', () => {
+    resetPipelineState()
+    const tree = compile(requestFor(template.source, 'dark')).renderTree!
+
+    const backdrop = tree.nodes.find((n) => n.id === 'screen')?.background
+    expect(backdrop?.kind).toBe('solid')
+
+    for (const node of tree.nodes) {
+      for (const run of node.text?.runs ?? []) {
+        if (run.color.a < 0.1) continue
+        const behind = backgroundBehind(tree.nodes, node)
+        if (!behind) continue
+        expect(
+          contrastRatio(run.color, behind),
+          `"${run.text}" is unreadable on its background`,
+        ).toBeGreaterThan(1.8)
+      }
+    }
+  })
+
   it('creates a project whose app name matches its source', () => {
     const project = createProjectFromTemplate(template, 0)
     expect(project.files).toHaveLength(1)
@@ -113,6 +167,43 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     expect(best).toBeLessThan(120)
   })
 })
+
+/** The nearest solid fill painted beneath a node's frame. */
+function backgroundBehind(
+  nodes: readonly RenderNode[],
+  target: RenderNode,
+): { r: number; g: number; b: number; a: number } | null {
+  let found: { r: number; g: number; b: number; a: number } | null = null
+  for (const node of nodes) {
+    if (node.z >= target.z) continue
+    if (node.background?.kind !== 'solid' || node.background.color.a < 0.9) continue
+
+    const f = node.frame
+    const t = target.frame
+    const covers =
+      f.x <= t.x + 1 && f.y <= t.y + 1 && f.x + f.width >= t.x + t.width - 1 && f.y + f.height >= t.y + t.height - 1
+    if (covers) found = node.background.color
+  }
+  return found
+}
+
+/** WCAG relative-luminance contrast ratio. */
+function contrastRatio(
+  a: { r: number; g: number; b: number },
+  b: { r: number; g: number; b: number },
+): number {
+  const l1 = luminance(a)
+  const l2 = luminance(b)
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)
+}
+
+function luminance(c: { r: number; g: number; b: number }): number {
+  const channel = (v: number) => {
+    const s = v / 255
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+}
 
 describe('the gallery', () => {
   it('has unique ids and names', () => {

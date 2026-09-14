@@ -107,6 +107,21 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
   secondary: rgba(60, 60, 67, 0.6),
   accentColor: rgba(0, 122, 255),
   accent: rgba(0, 122, 255),
+
+  // Semantic colours. These adapt, which is the entire reason for two tables —
+  // `Color(white: 0.95)` does not adapt, and a preview that treats them alike would
+  // hide the most common dark-mode mistake there is.
+  label: rgba(0, 0, 0, 0.85),
+  secondaryLabel: rgba(60, 60, 67, 0.6),
+  tertiaryLabel: rgba(60, 60, 67, 0.3),
+  separator: rgba(60, 60, 67, 0.29),
+  systemBackground: rgba(255, 255, 255),
+  secondarySystemBackground: rgba(242, 242, 247),
+  tertiarySystemBackground: rgba(255, 255, 255),
+  systemGroupedBackground: rgba(242, 242, 247),
+  secondarySystemGroupedBackground: rgba(255, 255, 255),
+  systemFill: rgba(120, 120, 128, 0.2),
+  secondarySystemFill: rgba(120, 120, 128, 0.16),
 }
 
 const DARK_COLORS: Readonly<Record<string, RGBA>> = {
@@ -127,6 +142,18 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   secondary: rgba(235, 235, 245, 0.6),
   accentColor: rgba(10, 132, 255),
   accent: rgba(10, 132, 255),
+
+  label: rgba(255, 255, 255, 0.9),
+  secondaryLabel: rgba(235, 235, 245, 0.6),
+  tertiaryLabel: rgba(235, 235, 245, 0.3),
+  separator: rgba(84, 84, 88, 0.6),
+  systemBackground: rgba(0, 0, 0),
+  secondarySystemBackground: rgba(28, 28, 30),
+  tertiarySystemBackground: rgba(44, 44, 46),
+  systemGroupedBackground: rgba(0, 0, 0),
+  secondarySystemGroupedBackground: rgba(28, 28, 30),
+  systemFill: rgba(120, 120, 128, 0.36),
+  secondarySystemFill: rgba(120, 120, 128, 0.32),
 }
 
 export function labelColor(scheme: ColorScheme): RGBA {

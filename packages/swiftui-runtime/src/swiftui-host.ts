@@ -16,6 +16,7 @@ import {
   VIEW_TYPE,
   type ColorPayload,
   type ModifierValue,
+  type TokenPayload,
   type ViewArg,
   type ViewValue,
 } from './view-value'
@@ -177,10 +178,19 @@ export class SwiftUIHost implements InterpreterHost {
 
   private makeColor(call: HostCall): SwiftValue {
     const white = call.args.find((a) => a.label === 'white')?.value
-    if (white?.kind === 'double' || white?.kind === 'int') return color({ name: null, white: white.value })
+    if (white?.kind === 'double' || white?.kind === 'int') {
+      return color({ name: null, white: white.value })
+    }
 
     const first = call.args[0]?.value
     if (first?.kind === 'string') return color({ name: first.value })
+
+    // `Color(.systemGroupedBackground)` — the UIKit bridge, where the argument is a
+    // contextual member rather than a string. This is how idiomatic SwiftUI reaches
+    // the adaptive backgrounds, so it has to work for dark mode to be usable at all.
+    if (first?.kind === 'opaque' && first.typeName === TOKEN_TYPE) {
+      return color({ name: (first.payload as TokenPayload).name })
+    }
     return color({ name: 'clear' })
   }
 }

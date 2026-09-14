@@ -56,7 +56,7 @@ struct ContentView: View {
             .padding(.horizontal, 24)
         }
         .padding()
-        .background(Color(white: 0.95))
+        .background(Color(.systemGroupedBackground))
     }
 }
 ```

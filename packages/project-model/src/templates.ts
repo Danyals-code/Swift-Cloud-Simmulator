@@ -10,6 +10,12 @@ import type { Project } from './types'
  * a template is a promise that this is what the tool can do.
  *
  * The gallery grows with the coverage matrix, not ahead of it.
+ *
+ * Every template also has to survive dark mode, which means using the *adaptive*
+ * semantic colours rather than fixed greys. `Color(white: 0.95)` does not adapt, so a
+ * template using it shows white text on a light background the moment appearance
+ * flips — the single most common dark-mode mistake, and not one to ship as an
+ * example.
  */
 
 export interface Template {
@@ -70,7 +76,7 @@ export const COUNTER_APP_SOURCE = app(
             .padding(.horizontal, 24)
         }
         .padding()
-        .background(Color(white: 0.95))
+        .background(Color(.systemGroupedBackground))
     }
 }
 `,
@@ -186,7 +192,7 @@ struct Row: View {
             Spacer()
         }
         .padding(10)
-        .background(Color(white: 0.96))
+        .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(10)
     }
 }
@@ -224,14 +230,14 @@ const PROFILE_CARD = app(
                 .cornerRadius(10)
             }
             .padding(24)
-            .background(Color.white)
+            .background(Color(.secondarySystemGroupedBackground))
             .cornerRadius(16)
 
             Spacer()
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(white: 0.94))
+        .background(Color(.systemGroupedBackground))
     }
 }
 `,
