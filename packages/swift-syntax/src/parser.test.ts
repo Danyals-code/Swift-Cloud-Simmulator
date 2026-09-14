@@ -322,6 +322,23 @@ describe('SwiftUI shapes', () => {
     })
   })
 
+  it('tells a ternary from optional chaining by the whitespace', () => {
+    // `a ? .two : c` and `a?.two` differ only in spacing, and Swift reads them that
+    // way too. Without the check, the ternary's then-branch is swallowed as a chain
+    // and the `:` has nowhere to go — which broke every `flag ? .one : .two`.
+    const ternary = parse('func f() { let x = a ? .two : .one }')
+    expect(ternary.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+
+    const chained = parseClean('func f() { let x = a?.two }')
+    const fn = chained.declarations[0]!
+    const statement = fn.kind === 'funcDecl' ? fn.body?.statements[0] : undefined
+    const declaration = statement?.kind === 'declStmt' ? statement.declaration : undefined
+    const initializer = declaration?.kind === 'varDecl' ? declaration.initializer : undefined
+
+    expect(initializer?.kind).toBe('memberAccess')
+    expect(initializer?.kind === 'memberAccess' && initializer.base?.kind).toBe('optionalChain')
+  })
+
   it('does not read an if-body brace as a trailing closure', () => {
     // Without the condition-position suppression, `if x { … }` parses as a call to
     // `x` with a trailing closure and the body disappears.

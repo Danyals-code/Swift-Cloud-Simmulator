@@ -5,6 +5,13 @@ names the feature — never a silent wrong answer (FR-3.9).
 
 Legend: **T1** = Phase 1–2 must-have · **T2** = Phase 3–4 · **T3** = Phase 6 · **✗** = out of scope.
 
+**Status after Phase 7.** The vertical slice deliberately shipped a narrow language — structs,
+functions, closures, `if` and `for`. Phase 7 reopened it, because `ObservableObject` needs reference
+semantics and half of real view-model code will not parse without `guard` and `switch`. What now
+runs, and what still does not, is listed in the
+[coverage matrix's language section](05-SWIFTUI-COVERAGE.md#swift-language) — that table is the
+current truth; the tiers below are the original plan.
+
 ## Declarations
 
 | Feature | Tier | Notes |

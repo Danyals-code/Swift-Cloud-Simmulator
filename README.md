@@ -45,40 +45,59 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0-5 complete; Phase 6's first pass landed.** The studio parses, checks, runs
-and renders real Swift across multiple files, and exports a complete Xcode project.
+**Phases 0-6 complete, plus Phase 7's breadth pass.** The studio parses, checks,
+runs and renders real Swift across multiple files, and exports a complete Xcode
+project.
 
-Since Phase 6 it also handles the SwiftUI people actually write: navigation stacks
-and links, lists and forms, sheets and alerts, tabs, grids, scroll views, `ForEach`,
-SF Symbols, bindings (`$value`), the form controls, and `withAnimation`.
+What it handles now is most of the SwiftUI people actually write:
 
-Two things are honestly outstanding:
+- **Language** — structs and classes, enums with raw and associated values,
+  `switch` with pattern matching, `if let` and `guard let`, loops, closures, key
+  paths.
+- **Structure** — navigation stacks and links, tabs, lists, forms, sheets,
+  alerts, scroll views, grids, `ForEach`.
+- **State** — `@State`, `@Binding`, `ObservableObject` with `@StateObject` and
+  `@ObservedObject`, `@EnvironmentObject`, `@Environment`.
+- **Interaction** — the form controls, drag and magnify gestures with
+  `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`.
+- **Drawing** — `Path`, `Canvas`, shapes with `.fill` and `.stroke`, gradients,
+  materials, colour filters, `withAnimation` and transitions.
 
-- **"Opens in Xcode and builds with zero edits" needs a Mac.** Everything checkable
-  without one is checked — the pbxproj parses, its object graph resolves, and the
-  bundle is structurally complete. See
+The [coverage matrix](docs/05-SWIFTUI-COVERAGE.md) is the exact contract, and it
+is honest about the 🟡 rows as well as the ✅ ones.
+
+Three things are outstanding, and none of them is hidden:
+
+- **"Opens in Xcode and builds with zero edits" needs a Mac.** Everything
+  checkable without one is checked — the pbxproj parses, its object graph
+  resolves, and the bundle is structurally complete. See
   [docs/06-VERTICAL-SLICE.md](docs/06-VERTICAL-SLICE.md) section 4.12.
-- **The conformance corpus is 11 projects, not the 100 Phase 6's first gate asks
-  for.** Eighty-nine more authored in a single pass would be padding; the corpus
+- **The conformance corpus is 15 projects, not the 100 Phase 6's first gate asks
+  for.** Eighty-five more authored in a single pass would be padding; the corpus
   grows as real projects arrive. See section 4.15.
+- **Coverage telemetry has no data**, because nothing has shipped and nothing is
+  transmitted. The instrument is built and visible in the studio's Coverage
+  panel; its ranking is empty by construction until someone uses it.
 
 Not built: code completion (the Phase 4 gate shortfall), `.swiftpm` export, share
-links, gestures beyond tap, and the Phase 7 rows in the
-[coverage matrix](docs/05-SWIFTUI-COVERAGE.md).
+links, generics, `async`/`await`, and the remaining ⬜ rows in the coverage
+matrix — each marked "—" rather than a phase, because a phase number is a promise.
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 624 passing |
+| Unit tests | 786 passing |
 | End-to-end | 31 / 31 passing |
-| Templates rendering with zero placeholders | 11 / 11 |
-| Full pipeline, 500-line file | 1.9 ms (budget: 120 ms) |
+| Templates rendering with zero placeholders | 15 / 15 |
+| Coverage matrix | 89 ✅ · 35 🟡 · 32 ⬜ |
+| Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 375 KB gzipped / 450 KB budget |
+| Client JS | 388 KB gzipped / 450 KB budget (86% — worth watching) |
 
-Next: [Phase 7 - optional extensions](docs/03-ROADMAP.md), and whatever the coverage
-telemetry says people reached for.
+Next: the rest of [Phase 7](docs/03-ROADMAP.md) is à la carte — a real `swiftc`
+verification service, accounts, AI codegen, GitHub export — and whatever the
+coverage telemetry says people reached for.
 
 ## Getting started
 

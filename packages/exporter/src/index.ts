@@ -8,11 +8,24 @@ export { parsePlist, serializePlist, type PlistDict, type PlistValue } from './p
 export * from './xcode-files'
 
 /** Zip an already-built bundle. Separated from `buildExportBundle` so tests can assert on file contents without unzipping. */
+/**
+ * A fixed timestamp for every entry, so the archive is reproducible.
+ *
+ * `fflate` stamps each file with `Date.now()` by default, which makes two exports of
+ * the same project differ — quietly, and only when the calls happen to straddle a
+ * second. That breaks Phase 5's gate 2 and, more to the point, makes a committed
+ * export show a diff every time it is regenerated.
+ *
+ * 1980-01-01 is the earliest instant the ZIP format can represent, and the
+ * conventional choice for reproducible archives.
+ */
+const FIXED_MTIME = Date.UTC(1980, 0, 1)
+
 export function zipBundle(bundle: ExportBundle): Uint8Array {
-  const entries: Record<string, Uint8Array> = {}
-  for (const [path, bytes] of bundle) entries[path] = bytes
+  const entries: Record<string, [Uint8Array, { mtime: number }]> = {}
+  for (const [path, bytes] of bundle) entries[path] = [bytes, { mtime: FIXED_MTIME }]
   // Level 6 keeps a 50-file project comfortably inside the 2s budget (NFR-1).
-  return zipSync(entries, { level: 6 })
+  return zipSync(entries, { level: 6, mtime: FIXED_MTIME })
 }
 
 export function exportProjectZip(project: Project): Uint8Array {

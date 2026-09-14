@@ -1470,9 +1470,16 @@ export class Interpreter {
   private applyBinary(operator: string, left: SwiftValue, right: SwiftValue, span: SourceSpan): SwiftValue {
     switch (operator) {
       case '==':
-        return bool(valuesEqual(left, right))
-      case '!=':
-        return bool(!valuesEqual(left, right))
+      case '!=': {
+        // `step == .one` — the other operand is the context a contextual member
+        // resolves against, and a comparison is the only place that context exists.
+        // Without this the token and the enum case never compare equal, so every
+        // `if tab == .home` is silently false.
+        const lhs = left.kind === 'enum' ? left : this.coerceToEnum(left, enumTypeOf(right))
+        const rhs = right.kind === 'enum' ? right : this.coerceToEnum(right, enumTypeOf(left))
+        const equal = valuesEqual(lhs, rhs)
+        return bool(operator === '==' ? equal : !equal)
+      }
       case '..<':
       case '...':
         return {
@@ -1614,4 +1621,9 @@ function namedTypeOf(type: { kind: string; name?: string } | null): string | nul
     return namedTypeOf((type as unknown as { wrapped: { kind: string; name?: string } }).wrapped)
   }
   return null
+}
+
+/** The enum a value belongs to, or null when it is not an enum case. */
+function enumTypeOf(value: SwiftValue): string | null {
+  return value.kind === 'enum' ? value.typeName : null
 }

@@ -265,6 +265,27 @@ These are independent; pick per the answers to the open questions in
 | **7f — Collaboration** | ≈3 weeks | CRDT (Yjs) multiplayer editing with shared preview. Substantial; only if there is real demand. |
 | **7g — macOS / visionOS targets** | ≈3 weeks | Different device chrome, different default styles, `WindowGroup` semantics. |
 
+### 7h — SwiftUI breadth — **done (2026-09-14)**
+
+Not in the original list, because the original plan assumed Phase 6 would finish the coverage
+matrix. It did not: Phase 6 built the navigation and list spine and moved the rest here. This is
+that rest, and it is what was chosen when Phase 7 opened.
+
+**Language first, because the views needed it.** `ObservableObject` requires reference semantics,
+and the parser rejected `class`, `enum`, `switch`, `guard`, `while` and optional binding outright —
+a bigger fidelity gap than any single view. Classes, enums with raw and associated values, pattern
+matching, condition lists, loops and `static` members all landed, along with the observation
+wrappers built on them.
+
+**Then the views:** `GeometryReader` (two-pass), `Grid`, `ViewThatFits`, gestures with
+`@GestureState`, the lifecycle modifiers, `Path` and `Canvas`, filters, materials, transitions,
+`.searchable`, `.onDelete` with a real swipe, and the accessibility modifiers.
+
+The matrix moved from 51 ✅ to 89 ✅. What remains ⬜ is now mostly marked "—" rather than a phase:
+each is either genuinely out of scope for a browser preview (`.refreshable`, `TimelineView`,
+`.onReceive`) or a larger piece of work that should be chosen deliberately rather than swept up
+(generics, `async`/`await`, `matchedGeometryEffect`, real lazy virtualisation).
+
 ---
 
 ## Cross-cutting workstreams

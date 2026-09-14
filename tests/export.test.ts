@@ -118,10 +118,23 @@ describe.each(TEMPLATES)('exporting template: $name', (template) => {
     }
   })
 
-  it('re-exports byte-identically', () => {
+  it('re-exports byte-identically, whenever it is run', () => {
     // Reproducibility is what makes an export diffable, and what makes every
     // assertion above a property of the generator rather than of one run.
-    expect(exportProjectZip(project)).toEqual(exportProjectZip(project))
+    //
+    // The clock is moved between the two exports on purpose. `fflate` stamps each
+    // entry with `Date.now()` unless told otherwise, so without a fixed timestamp
+    // these differ — but only when the two calls happen to straddle a second, which
+    // made the failure look like a flake rather than the gate-2 violation it was.
+    const first = exportProjectZip(project)
+
+    const realNow = Date.now
+    Date.now = () => realNow() + 5 * 60 * 1000
+    try {
+      expect(exportProjectZip(project)).toEqual(first)
+    } finally {
+      Date.now = realNow
+    }
   })
 
   it('round-trips through the zip', () => {

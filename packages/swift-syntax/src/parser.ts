@@ -1144,8 +1144,21 @@ export class Parser {
         continue
       }
 
-      // Optional chaining: `?` immediately followed by `.`.
-      if (this.current.kind === 'operator' && this.current.text === '?' && this.peek().text === '.') {
+      /**
+       * Optional chaining: `?` immediately followed by `.`, with no space between.
+       *
+       * The whitespace is what tells `a?.b` from `a ? .b : c`, and Swift reads it the
+       * same way. Without the check, the ternary's then-branch is swallowed as a
+       * chain and the `:` that follows has nowhere to go — which is exactly what
+       * `step == .one ? .two : .one` did.
+       */
+      if (
+        this.current.kind === 'operator' &&
+        this.current.text === '?' &&
+        !this.current.spaceBefore &&
+        !this.current.spaceAfter &&
+        this.peek().text === '.'
+      ) {
         this.advance()
         expr = { kind: 'optionalChain', span: this.spanFrom(start), operand: expr }
         continue

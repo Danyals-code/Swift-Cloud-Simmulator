@@ -672,6 +672,99 @@ the browser to own a real box. Rather than three mechanisms, nodes gained a `par
 the container it is positioned inside, and everything else stays absolutely positioned and flat.
 Native scroll physics came free with it.
 
+## 4.17 Phase 7 — SwiftUI breadth
+
+Phase 7 is a menu, not a sequence. The item chosen was **breadth**: the ⬜ rows the Phase 6 pass
+left behind. What follows is what was built and what it cost.
+
+### The language came first
+
+Not a detour. `ObservableObject` — explicitly in the chosen scope — needs reference semantics, and
+the parser rejected `class`, `enum`, `switch`, `guard`, `while` and optional binding outright. Half
+of real view-model code would not have parsed.
+
+- [x] `class` with reference semantics, declared initialisers, `static` members.
+- [x] `enum` with implicit and explicit raw values, associated values, methods, computed properties,
+      and `Type(rawValue:)`.
+- [x] `switch` over values, ranges, multiple patterns, `case let`, `where` and enum cases; `if case`.
+- [x] Condition *lists* — `if let a = a, a > 5` — with short-circuiting, and `guard` whose bindings
+      escape into the enclosing scope.
+- [x] `while`, `repeat-while`, `break`, `continue`, `for … where`.
+- [x] Contextual member syntax resolved against a declared type.
+
+### Observation
+
+- [x] `ObservableObject`, `@Published`, `@StateObject`, `@ObservedObject`, `@EnvironmentObject`.
+- [x] `@Environment(\.colorScheme)` and the rest, which required parsing attribute *arguments* —
+      previously skipped wholesale.
+- [x] `@Environment(\.dismiss)`, callable through a host hook rather than a new value kind.
+
+### Views and modifiers
+
+- [x] `GeometryReader`, `Grid`/`GridRow`, `ViewThatFits`, `.layoutPriority`, `.aspectRatio`,
+      `.position`, `.ignoresSafeArea`.
+- [x] Gestures: drag, long press, magnify, rotate, `@GestureState`, `.simultaneously`.
+- [x] Lifecycle: `.onAppear`, `.onDisappear`, `.task`, `.onChange(of:)`.
+- [x] `Path`, `Canvas`, shape `.fill`/`.stroke`/`.trim`.
+- [x] Filters, materials, `.transition`, `.searchable`, `.onDelete` with a real swipe.
+- [x] The accessibility modifiers, `.allowsHitTesting`, and the text policy modifiers.
+
+The coverage matrix moved from 51 ✅ to 89 ✅.
+
+### 4.18 — What is still not there, and why
+
+Every remaining ⬜ row is now marked "—" rather than a phase number, because a phase number is a
+promise and these are not promised. They fall into two groups:
+
+**Out of scope for a browser preview.** `.refreshable` (pull-to-refresh has nothing to pull),
+`TimelineView` (needs a clock the preview does not run), `.onReceive` (needs Combine), `openURL`,
+`NavigationSplitView` (iPad).
+
+**Deliberately not swept up.** Generics, `async`/`await`, `throws`, `protocol` conformance checking,
+`inout` parameters, `matchedGeometryEffect`, real lazy virtualisation, `Chart`. Each is a piece of
+work worth choosing on purpose. Two are worth a note:
+
+- **`inout` would be nearly free.** The projection that implements `@Binding` already *is* an
+  `inout` — it is how `@GestureState`'s `.updating` closure writes to its second parameter. What is
+  missing is the parser and the call-site plumbing, not the mechanism.
+- **Lazy virtualisation needs a scroll offset the worker does not have.** Scrolling is the browser's,
+  which is what makes it feel right; the price is that the worker does not know what is visible.
+  `LazyVStack` is therefore correct but not lazy, and `ForEach` caps at 1,000 rows so one typo
+  cannot spend the whole step budget.
+
+### 4.19 — Findings
+
+**A class is a flag, not a parallel value kind.** `struct` and `class` declare identically; only
+instantiation differs. One `isReference` flag and one branch in `copyValue` covers it, where a
+second value kind would have meant teaching every `switch` over `SwiftValue` about it.
+
+**`inout` was already built.** `.updating($state) { value, state, _ in state = … }` needs an `inout`
+second parameter, which the interpreter does not have — but a property-wrapper projection is
+precisely a read/write reference to storage elsewhere. Binding the parameter to a projection made
+it work with no new machinery. The mechanism that shipped for `@Binding` in Phase 6 turned out to
+be the one `inout` needs.
+
+**Opaque values were comparing by identity.** `scheme == .dark` was always false, because every
+design token is a distinct object. They now compare by *value* when the payload is plain data and by
+identity when it holds functions — which is the right answer for a `Binding`, where two onto the
+same storage are the same binding. The bug was invisible until `@Environment` made such comparisons
+ordinary.
+
+**`.onDisappear` writes into a view that is gone.** The closure is remembered from the pass that
+still had the view, so it mutates *that* pass's instance — which the current harvest never looks at.
+Both passes are harvested now, previous last. The general lesson is the one Phase 3 already taught:
+when view structs are disposable, anything that outlives a pass has to say which pass it belongs to.
+
+**Two ordering bugs, same shape.** `CGPoint`/`CGSize`/`CGRect` were handled below the host's "is this
+a view name?" guard and so every one of them trapped; a `ForEach` stopped being transparent the
+moment `.onDelete` gave it a modifier and collapsed an entire list into one unrecognised view. Both
+were a predicate asked at the wrong moment.
+
+**Writing the templates found two false positives in code written hours earlier** — the strictness
+pass telling a *class* method to be `mutating`, and the checker not knowing an enum it had itself
+collected. Both were warnings on correct Swift, which is the one thing those passes must never
+produce. The corpus earning its keep exactly as intended.
+
 ## 5. Slice definition of done
 
 1. The reference app in §1 renders in the device frame.
@@ -691,8 +784,8 @@ Listed so it is a choice rather than an oversight: multi-file projects, dark mod
 navigation, lists, sheets, animation, gestures beyond tap, images and SF Symbols, `@Binding` and
 `ObservableObject`, completions, the view inspector, templates, share links, `.swiftpm` export.
 
-*As of Phase 6, everything in that list has landed except gestures beyond tap, `ObservableObject`,
-completions, share links and `.swiftpm` export.*
+*As of Phase 7, everything in that list has landed except completions, share links and `.swiftpm`
+export.*
 
 Each is a phase in [03-ROADMAP.md](03-ROADMAP.md) and each is additive on top of the spine the slice
 builds.

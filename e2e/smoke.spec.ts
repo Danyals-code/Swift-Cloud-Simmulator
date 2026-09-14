@@ -398,6 +398,142 @@ test('Phase 6 — the strictness linter warns about code Xcode would reject', as
   await expect(console_).toContainText('may_not_compile_in_xcode')
 })
 
+// ---------------------------------------------------------------- Phase 7
+
+test('Phase 7 — a class shared between two views updates both', async ({ page }) => {
+  // The whole reason reference semantics were added: an ObservableObject is only
+  // useful because both views see the same instance.
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      'class Store: ObservableObject { @Published var count = 0; func bump() { count += 1 } } ' +
+      '@main struct ObsApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { @StateObject private var store = Store(); ' +
+      'var body: some View { VStack { Badge(store: store); Text("root \\(store.count)"); ' +
+      'Button("Bump") { store.bump() } } } } ' +
+      'struct Badge: View { @ObservedObject var store: Store; ' +
+      'var body: some View { Text("badge \\(store.count)") } }',
+  )
+
+  const tree = preview(page)
+  await expect(tree).toContainText('root 0', { timeout: 5_000 })
+  await expect(tree).toContainText('badge 0')
+
+  await appButton(page, 'Bump').click()
+  await expect(tree).toContainText('root 1')
+  await expect(tree).toContainText('badge 1')
+})
+
+test('Phase 7 — an enum and a switch drive the screen', async ({ page }) => {
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      'enum Step: String { case one, two } ' +
+      '@main struct StepApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { @State private var step: Step = .one; ' +
+      'var body: some View { VStack { switch step { case .one: Text("the first step") ' +
+      'case .two: Text("the second step") }; ' +
+      'Button("Next") { step = step == .one ? .two : .one } } } }',
+  )
+
+  const tree = preview(page)
+  await expect(tree).toContainText('the first step', { timeout: 5_000 })
+
+  await appButton(page, 'Next').click()
+  await expect(tree).toContainText('the second step')
+  await expect(tree).not.toContainText('the first step')
+})
+
+test('Phase 7 — onAppear runs once, not on every render', async ({ page }) => {
+  // The runaway-counter case: without tracking what has already appeared, this
+  // number climbs with every tap.
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct AppearApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { @State private var appears = 0; @State private var taps = 0; ' +
+      'var body: some View { VStack { Text("appeared \\(appears) tapped \\(taps)"); ' +
+      'Button("Tap") { taps += 1 } } .onAppear { appears += 1 } } }',
+  )
+
+  const tree = preview(page)
+  await expect(tree).toContainText('appeared 1 tapped 0', { timeout: 5_000 })
+
+  await appButton(page, 'Tap').click()
+  await expect(tree).toContainText('appeared 1 tapped 1')
+
+  await appButton(page, 'Tap').click()
+  await expect(tree).toContainText('appeared 1 tapped 2')
+})
+
+test('Phase 7 — GeometryReader reports the size it was actually given', async ({ page }) => {
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct GeoApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { var body: some View { ' +
+      'GeometryReader { geo in Text("wide \\(Int(geo.size.width))") } ' +
+      '.frame(width: 240, height: 80) } }',
+  )
+
+  await expect(preview(page)).toContainText('wide 240', { timeout: 5_000 })
+})
+
+test('Phase 7 — a Path draws as a real vector', async ({ page }) => {
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct PathApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { var body: some View { ' +
+      'Path { p in p.move(to: CGPoint(x: 0, y: 0)); p.addLine(to: CGPoint(x: 80, y: 40)) } ' +
+      '.stroke(Color.blue, lineWidth: 3) .frame(width: 100, height: 60) } }',
+  )
+
+  const drawn = preview(page).locator('svg path')
+  await expect(drawn).toHaveCount(1, { timeout: 5_000 })
+  await expect(drawn).toHaveAttribute('d', 'M 0 0 L 80 40')
+})
+
+test('Phase 7 — a drag moves the view it is attached to', async ({ page }) => {
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct DragApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { @State private var moved = CGSize.zero; ' +
+      'var body: some View { VStack { Text("at \\(Int(moved.width))"); ' +
+      'Rectangle() .frame(width: 80, height: 80) ' +
+      '.gesture(DragGesture().onChanged { v in moved = v.translation }) } } }',
+  )
+
+  const tree = preview(page)
+  await expect(tree).toContainText('at 0', { timeout: 5_000 })
+
+  const card = tree.locator('[data-node-id]').filter({ hasNotText: 'at ' }).last()
+  const box = await card.boundingBox()
+  expect(box).not.toBeNull()
+
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box!.x + box!.width / 2 + 60, box!.y + box!.height / 2, { steps: 4 })
+  await page.mouse.up()
+
+  // The exact number depends on the device frame's scale; what matters is that the
+  // drag reached the interpreter and moved the state at all.
+  await expect(tree).not.toContainText('at 0')
+})
+
 test('Phase 6 — the coverage panel ranks what the preview could not draw', async ({ page }) => {
   await openStudio(page)
 

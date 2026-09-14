@@ -246,7 +246,31 @@ comparing frames (the inspector's highlight, the test suite's contrast check) ha
 the screen; the gain is that scrolling is the browser's, with its own momentum and rubber-banding,
 rather than an approximation of it reimplemented in a worker.
 
-### 7.4 Screen composition (Phase 6)
+### 7.4 Two-pass geometry (Phase 7)
+
+`GeometryReader` inverts the pipeline: its closure needs a size before layout has decided one. The
+resolution is two passes — the first reports the size that reader had last time, the pipeline
+compares it against what the reader actually got, and runs once more if they differ.
+
+Bounded at one retry, and that is sound rather than lucky. A geometry reader is *greedy*: its size
+is whatever it was proposed, and the proposal does not depend on what its closure produced. So the
+second pass is always right, and there is no third.
+
+The reader's content is placed inside it rather than beside it, which also gives it the coordinate
+space `GeometryReader` promises — reusing the `parent` mechanism that scrolling introduced.
+
+### 7.5 Vector drawing (Phase 7)
+
+`Path` and `Canvas` resolve their geometry in the worker and serialise it to SVG path data. The
+renderer is then one `<path>` element with nothing to interpret, and a path becomes trivially
+comparable — which lets the DOM diff skip an unchanged drawing.
+
+`Canvas` reuses that pipeline rather than rasterising: the graphics context records what it was
+asked to draw, so a canvas ends up as the same vector nodes a `Path` produces. It is therefore
+inspectable and diffable like everything else, rather than an opaque bitmap the inspector cannot
+see into.
+
+### 7.6 Screen composition (Phase 6)
 
 Between evaluation and layout sits a *resolver* (`swiftui-runtime/presentation.ts`). A screen is not
 just the user's content: it is the content plus whatever the framework puts around and over it — a
