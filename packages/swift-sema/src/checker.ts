@@ -297,7 +297,12 @@ export class Checker {
         // Unknown types are reported as *warnings*, never errors. The known-type
         // list is necessarily incomplete, so an error here would eventually fire on
         // valid code — precisely the false positive gate 4 forbids.
-        if (!KNOWN_TYPES.has(base) && !this.types.has(base) && !isKnownGlobal(base)) {
+        if (
+          !KNOWN_TYPES.has(base) &&
+          !this.types.has(base) &&
+          !this.enums.has(base) &&
+          !isKnownGlobal(base)
+        ) {
           this.report(
             type.span,
             'warning',

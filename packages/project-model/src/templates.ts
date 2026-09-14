@@ -590,6 +590,237 @@ struct ContentView: View {
 }`,
 )
 
+const OBSERVABLE = app(
+  'StoreApp',
+  'ContentView',
+  `class Basket: ObservableObject {
+    @Published var items: [String] = []
+
+    var total: Int {
+        return items.count
+    }
+
+    func add(_ item: String) {
+        items.append(item)
+    }
+
+    func clear() {
+        items = []
+    }
+}
+
+struct ContentView: View {
+    @StateObject private var basket = Basket()
+    let menu = ["Espresso", "Cortado", "Flat white"]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Menu") {
+                    ForEach(menu, id: \\.self) { item in
+                        Button(item) {
+                            basket.add(item)
+                        }
+                    }
+                }
+
+                Section("Basket") {
+                    BasketSummary(basket: basket)
+                    Button("Clear") {
+                        basket.clear()
+                    }
+                    .foregroundStyle(Color.red)
+                }
+            }
+            .navigationTitle("Order")
+        }
+    }
+}
+
+struct BasketSummary: View {
+    @ObservedObject var basket: Basket
+
+    var body: some View {
+        HStack {
+            Text(basket.total == 0 ? "Nothing yet" : "\\(basket.total) item(s)")
+            Spacer()
+            Text(basket.items.last ?? "—")
+                .foregroundStyle(Color.secondary)
+        }
+    }
+}`,
+)
+
+const STATE_MACHINE = app(
+  'FlowApp',
+  'ContentView',
+  `enum Step: String {
+    case welcome, details, done
+
+    var title: String {
+        switch self {
+        case .welcome:
+            return "Welcome"
+        case .details:
+            return "Your details"
+        case .done:
+            return "All set"
+        }
+    }
+
+    var next: Step {
+        switch self {
+        case .welcome:
+            return .details
+        case .details:
+            return .done
+        case .done:
+            return .welcome
+        }
+    }
+}
+
+struct ContentView: View {
+    @State private var step: Step = .welcome
+    @State private var name = ""
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text(step.title)
+                .font(.largeTitle)
+                .fontWeight(.bold)
+
+            switch step {
+            case .welcome:
+                Text("Three short steps.")
+                    .foregroundStyle(Color.secondary)
+            case .details:
+                TextField("Name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal)
+            case .done:
+                Text(name.isEmpty ? "Thanks!" : "Thanks, \\(name)!")
+                    .foregroundStyle(Color.secondary)
+            }
+
+            Button(step == .done ? "Start again" : "Continue") {
+                withAnimation(.easeInOut) {
+                    step = step.next
+                }
+            }
+            .buttonStyle(.borderedProminent)
+
+            Spacer()
+        }
+        .padding(.top, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+    }
+}`,
+)
+
+const DRAWING = app(
+  'DrawingApp',
+  'ContentView',
+  `struct ContentView: View {
+    @State private var progress = 0.65
+
+    var body: some View {
+        VStack(spacing: 32) {
+            Text("Vectors")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+
+            ZStack {
+                Circle()
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 14)
+
+                Path { path in
+                    path.addArc(
+                        center: CGPoint(x: 70, y: 70),
+                        radius: 63,
+                        startAngle: .degrees(-90),
+                        endAngle: .degrees(270),
+                        clockwise: true
+                    )
+                }
+                .trim(from: 0, to: progress)
+                .stroke(Color.accentColor, lineWidth: 14)
+
+                Text("\\(Int(progress * 100))%")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+            }
+            .frame(width: 140, height: 140)
+
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: 60))
+                path.addLine(to: CGPoint(x: 60, y: 20))
+                path.addLine(to: CGPoint(x: 120, y: 45))
+                path.addLine(to: CGPoint(x: 180, y: 0))
+            }
+            .stroke(Color.green, lineWidth: 3)
+            .frame(width: 180, height: 60)
+
+            Slider(value: $progress, in: 0...1)
+                .padding(.horizontal, 32)
+
+            Spacer()
+        }
+        .padding(.top, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+    }
+}`,
+)
+
+const DRAGGABLE = app(
+  'DragApp',
+  'ContentView',
+  `struct ContentView: View {
+    @State private var position = CGSize.zero
+    @GestureState private var active = CGSize.zero
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Drag the card")
+                .font(.headline)
+                .foregroundStyle(Color.secondary)
+
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color.accentColor)
+                .frame(width: 160, height: 110)
+                .offset(
+                    x: position.width + active.width,
+                    y: position.height + active.height
+                )
+                .shadow(radius: 12, y: 6)
+                .gesture(
+                    DragGesture()
+                        .updating($active) { value, state, transaction in
+                            state = value.translation
+                        }
+                        .onEnded { value in
+                            position = value.translation
+                        }
+                )
+
+            Button("Reset") {
+                withAnimation(.spring()) {
+                    position = CGSize.zero
+                }
+            }
+            .buttonStyle(.bordered)
+
+            Spacer()
+        }
+        .padding(.top, 48)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+    }
+}`,
+)
+
 export const TEMPLATES: readonly Template[] = [
   {
     id: 'counter',
@@ -656,6 +887,30 @@ export const TEMPLATES: readonly Template[] = [
     name: 'Inbox',
     description: 'A list, a toolbar button and a sheet that composes a message.',
     source: SHEET_LIST,
+  },
+  {
+    id: 'store',
+    name: 'Order',
+    description: 'An ObservableObject shared between two views, with @StateObject.',
+    source: OBSERVABLE,
+  },
+  {
+    id: 'flow',
+    name: 'Steps',
+    description: 'An enum driving the screen, switched on in the body.',
+    source: STATE_MACHINE,
+  },
+  {
+    id: 'drawing',
+    name: 'Vectors',
+    description: 'Path, arcs and trim — a progress ring drawn from scratch.',
+    source: DRAWING,
+  },
+  {
+    id: 'drag',
+    name: 'Drag',
+    description: 'A drag gesture with @GestureState, and a spring on release.',
+    source: DRAGGABLE,
   },
 ]
 

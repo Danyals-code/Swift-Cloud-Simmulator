@@ -217,6 +217,25 @@ describe('mutability', () => {
 }`),
     ).toEqual([])
   })
+
+  it('says nothing about a class method that writes a property', () => {
+    // Only value types need `mutating`. Flagging a class method would be a warning
+    // on ordinary, correct Swift — and this pass fired on exactly that until the
+    // reference-type check was added.
+    expect(
+      messages(`class Store {
+    var items: [String] = []
+
+    func add(_ item: String) {
+        items.append(item)
+    }
+
+    func clear() {
+        items = []
+    }
+}`),
+    ).toEqual([])
+  })
 })
 
 describe('ForEach identity', () => {

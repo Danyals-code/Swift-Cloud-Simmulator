@@ -512,6 +512,9 @@ class StrictnessLinter {
   /** A method that writes to `self` must be declared `mutating`. */
   private mutatingSelf(decl: FuncDecl, owner: StructDecl | null): void {
     if (!owner || !decl.body) return
+    // Only value types need `mutating`. A class method writing a property is
+    // ordinary, correct Swift — flagging it would be a warning on working code.
+    if (owner.isReference) return
     if (decl.modifiers.some((m) => m.name === 'mutating' || m.name === 'static')) return
 
     const stored = new Set(

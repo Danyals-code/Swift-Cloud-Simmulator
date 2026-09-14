@@ -213,6 +213,23 @@ struct V: View {
     expect(wrapper!.message).toContain('Phase 7')
   })
 
+  it('knows a user enum as a type annotation', () => {
+    // The checker warned "the preview does not know the type 'Step'" for an enum it
+    // had just collected — a false positive on a declaration in the same file.
+    const source = `@main struct M: App { var body: some Scene { WindowGroup { } } }
+
+enum Step: String {
+    case first, second
+}
+
+struct V: View {
+    @State private var step: Step = .first
+    var body: some View { Text(step.rawValue) }
+}`
+    expect(warnings(source)).toEqual([])
+    expect(errors(source)).toEqual([])
+  })
+
   it('says nothing about the observation wrappers Phase 7 added', () => {
     const source = `@main struct M: App { var body: some Scene { WindowGroup { } } }
 
