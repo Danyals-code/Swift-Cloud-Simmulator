@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { downloadProjectZip, type ExportFormat } from '@studio/exporter'
+import { encodeProject, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice, type DeviceKey } from '@studio/sim-shell'
 import type { FileId, RenderNode, UIEvent } from '@studio/shared'
@@ -134,6 +135,30 @@ export function Studio() {
 
   const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
 
+  /**
+   * Copies a link that carries the whole project.
+   *
+   * Three outcomes, and the caller shows all three: the clipboard can be refused (it
+   * needs a user gesture and a secure context) and the project can be too big for a
+   * URL. Reporting only success would leave a user pasting nothing and wondering.
+   */
+  const handleShare = useCallback(async (): Promise<'copied' | 'too-large' | 'failed'> => {
+    if (!project) return 'failed'
+    void flush()
+
+    const encoded = encodeProject(project)
+    if (!encoded) return 'too-large'
+
+    try {
+      await navigator.clipboard.writeText(
+        shareLink(window.location.origin, window.location.pathname, encoded),
+      )
+      return 'copied'
+    } catch {
+      return 'failed'
+    }
+  }, [project, flush])
+
   const handleExport = useCallback(
     (format: ExportFormat) => {
       if (!project) return
@@ -164,6 +189,7 @@ export function Studio() {
         onPreviewChange={(settings: Partial<PreviewSettings>) => setPreview(settings)}
         onToggleInspect={() => setInspecting((v) => !v)}
         onExport={handleExport}
+        onShare={handleShare}
         onResetState={() => void reset()}
       />
 

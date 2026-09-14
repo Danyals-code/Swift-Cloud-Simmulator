@@ -701,3 +701,39 @@ test('Phase 9 — every export format offers a distinct download', async ({ page
   await page.getByTestId('export-button').click()
   expect((await downloadPromise).suggestedFilename()).toBe('CounterApp.zip')
 })
+
+test('Phase 9 — a share link carries the project to a fresh session', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await openStudio(page)
+
+  const marker = `// shared-${Date.now()}`
+  await typeAtTop(page, `${marker}
+`)
+  await expect(page.getByTestId('save-indicator')).toContainText('Saved', { timeout: 5_000 })
+
+  await page.getByTestId('share-button').click()
+  await expect(page.getByTestId('share-button')).toHaveText('Link copied', { timeout: 5_000 })
+
+  const link = await page.evaluate(() => navigator.clipboard.readText())
+  expect(link).toContain('#p=')
+
+  // A different browser context is a genuinely fresh session: no IndexedDB, no
+  // localStorage. If the marker survives, it travelled in the URL and nowhere else.
+  const fresh = await context.browser()!.newContext()
+  const other = await fresh.newPage()
+  await other.goto(link)
+  await expect(other.getByTestId('editor')).toBeVisible()
+  await expect(other.locator('.cm-content')).toContainText(marker, { timeout: 8_000 })
+
+  // The payload is cleared once read, so a reload cannot silently discard later edits.
+  expect(other.url()).not.toContain('#p=')
+  await fresh.close()
+})
+
+test('Phase 9 — a corrupt share link falls back instead of failing', async ({ page }) => {
+  // The payload comes from a URL a stranger pasted. Truncation is ordinary.
+  await page.goto('/#p=not-a-real-payload')
+  await expect(page.getByTestId('editor')).toBeVisible()
+  await expect(page.getByTestId('render-tree')).toBeVisible()
+  await expect(page.locator('.cm-content')).toContainText('import SwiftUI', { timeout: 8_000 })
+})

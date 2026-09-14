@@ -1,12 +1,15 @@
 'use client'
 
 import { create } from 'zustand'
+
 import {
   addFile,
   createDefaultProject,
   createProjectFromTemplate,
   createProjectStore,
+  decodeProject,
   DEFAULT_PROJECT_ID,
+  payloadFromFragment,
   normalizeFileName,
   removeFile,
   renameFile,
@@ -95,6 +98,23 @@ export const useStudio = create<StudioState>((set, get) => {
     preview: { colorScheme: 'light', typeScale: 1 },
 
     async load() {
+      // A share link wins over whatever is stored, because following one is an
+      // explicit request to see *that* project. The fragment is then cleared, so a
+      // later reload does not silently discard whatever the user has since typed.
+      const shared = sharedProjectFromLocation()
+      if (shared) {
+        clearShareFragment()
+        const first = shared.files[0]?.id ?? null
+        set({
+          project: shared,
+          activeFileId: first,
+          openFileIds: first ? [first] : [],
+          loaded: true,
+        })
+        await persistence().save(shared)
+        return
+      }
+
       const existing = await persistence().load(DEFAULT_PROJECT_ID)
       const project = existing ?? createDefaultProject()
       const first = project.files[0]?.id ?? null
@@ -208,3 +228,29 @@ export const useStudio = create<StudioState>((set, get) => {
     },
   }
 })
+
+/**
+ * The project a share link carries, if the page was opened with one.
+ *
+ * Returns null for anything that is not a project — a truncated link, a stale format,
+ * a fragment that belongs to something else. Falling back to the stored project is
+ * the right response to all of them, and it is what a stranger's URL deserves.
+ */
+function sharedProjectFromLocation(): Project | null {
+  if (typeof window === 'undefined') return null
+  const payload = payloadFromFragment(window.location.hash)
+  return payload ? decodeProject(payload, Date.now()) : null
+}
+
+/**
+ * Removes the payload from the address bar once it has been read.
+ *
+ * Without this, a reload re-applies the link and silently discards whatever the user
+ * has typed since following it — which is the kind of data loss that is only noticed
+ * after it matters. `replaceState` rather than assignment, so the back button still
+ * goes back to wherever they came from.
+ */
+function clearShareFragment(): void {
+  if (typeof window === 'undefined') return
+  window.history.replaceState(null, '', window.location.pathname + window.location.search)
+}

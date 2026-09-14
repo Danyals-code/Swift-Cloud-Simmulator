@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { DEVICE_LIST, type DeviceKey } from '@studio/sim-shell'
 import { EXPORT_FORMATS, type ExportFormat } from '@studio/exporter'
 import type { PreviewSettings } from '../lib/store'
@@ -15,6 +16,8 @@ export interface ToolbarProps {
   onPreviewChange: (settings: Partial<PreviewSettings>) => void
   onToggleInspect: () => void
   onExport: (format: ExportFormat) => void
+  /** Copies a share link, and reports what happened so the button can say it. */
+  onShare: () => Promise<'copied' | 'too-large' | 'failed'>
   onResetState: () => void
 }
 
@@ -39,6 +42,7 @@ export function Toolbar({
   onPreviewChange,
   onToggleInspect,
   onExport,
+  onShare,
   onResetState,
 }: ToolbarProps) {
   return (
@@ -116,6 +120,8 @@ export function Toolbar({
         >
           Inspect
         </button>
+
+        <ShareButton onShare={onShare} />
 
         <button
           type="button"
@@ -220,5 +226,44 @@ function SaveIndicator({ savedAt, busy }: { savedAt: number | null; busy: boolea
       />
       {label}
     </span>
+  )
+}
+
+/**
+ * Copies a share link and says what happened, in place.
+ *
+ * The result has to be visible: a button that silently did nothing is
+ * indistinguishable from one that worked, and the failure that matters — a project too
+ * big for a URL — is invisible until someone pastes a truncated link. The label
+ * reverts on its own, because a permanent "Copied" is a lie after the first second.
+ */
+function ShareButton({ onShare }: { onShare: ToolbarProps['onShare'] }) {
+  const [result, setResult] = useState<'copied' | 'too-large' | 'failed' | null>(null)
+
+  useEffect(() => {
+    if (!result) return
+    const timer = setTimeout(() => setResult(null), 2600)
+    return () => clearTimeout(timer)
+  }, [result])
+
+  const label =
+    result === 'copied'
+      ? 'Link copied'
+      : result === 'too-large'
+        ? 'Too big to link'
+        : result === 'failed'
+          ? 'Copy failed'
+          : 'Share'
+
+  return (
+    <button
+      type="button"
+      onClick={() => void onShare().then(setResult)}
+      className="rounded border border-white/10 px-2.5 py-1 text-zinc-300 transition-colors hover:bg-white/5"
+      title="Copy a link that carries this project — no account, no server"
+      data-testid="share-button"
+    >
+      {label}
+    </button>
   )
 }
