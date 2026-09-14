@@ -105,7 +105,12 @@ test('gate 4 — the exported zip contains the edited source, byte-identical', a
   const zip = Buffer.concat(chunks)
 
   expect(zip.subarray(0, 2).toString('latin1')).toBe('PK')
-  expect(zip.toString('latin1')).toContain('CounterApp/Sources/CounterApp.swift')
+
+  // The Xcode layout: sources live inside the target folder, beside the project.
+  const listing = zip.toString('latin1')
+  expect(listing).toContain('CounterApp/CounterApp/CounterApp.swift')
+  expect(listing).toContain('CounterApp/CounterApp.xcodeproj/project.pbxproj')
+  expect(listing).toContain('CounterApp/CounterApp/Assets.xcassets/Contents.json')
 })
 
 test('the preview pane toggles with Ctrl+B', async ({ page }) => {

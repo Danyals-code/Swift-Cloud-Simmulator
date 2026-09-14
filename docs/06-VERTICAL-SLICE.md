@@ -463,6 +463,92 @@ surfaced. They are now always present and dimmed.
 light background. That is exactly what a real device does, and exactly the kind of
 thing a preview exists to catch.
 
+## 4.11 Phase 5 task list — **complete, with one gate outstanding**
+
+Built and verified 2026-09-14.
+
+### The exported project
+
+```
+MyApp/
+  MyApp.xcodeproj/
+    project.pbxproj
+    project.xcworkspace/contents.xcworkspacedata
+    xcshareddata/xcschemes/MyApp.xcscheme
+  MyApp/
+    MyApp.swift                     <- the user's sources, byte for byte
+    Assets.xcassets/
+      Contents.json
+      AppIcon.appiconset/Contents.json
+      AccentColor.colorset/Contents.json
+  README.md
+  .gitignore
+```
+
+- [x] `project.pbxproj` built as a **serialiser over a data structure**, not string
+      templates — well-formedness is structural
+- [x] Deterministic 24-hex object ids, hashed from what each object *is*, with a
+      collision fallback
+- [x] Asset catalogue with the app-icon and accent-colour slots the build settings name
+- [x] Shared scheme, so Cmd+R works the moment the project opens
+- [x] `GENERATE_INFOPLIST_FILE` with `INFOPLIST_KEY_*` — the Xcode 13+ way, rather
+      than a physical plist that immediately drifts from the settings beside it
+- [x] README naming the one thing that *does* need manual setup (a signing team) and
+      listing every preview approximation
+
+### Phase 5 gate
+
+| # | Gate | Result |
+| --- | --- | --- |
+| 1 | Opens in Xcode and builds with zero edits | **Not verified — needs a Mac.** See 4.12 |
+| 2 | Re-exporting an unchanged project is byte-identical | **Passing** |
+| 3 | `.swiftpm` opens in Swift Playgrounds | Deferred — outside the slice |
+| 4 | Every `.swift` file is byte-identical to the editor buffer | **Passing** — 28 hostile-content cases |
+| 5 | A share URL round-trips a project | Deferred — outside the slice |
+
+Verified: **11/11 packages typecheck**, **lint clean**, **468 unit tests**, **26/26 e2e**,
+**355 KB gzipped** against a 450 KB budget.
+
+### 4.12 — Verifying an Xcode project without an Xcode
+
+Gate 1 is the one thing in this product that cannot be checked on the machine that
+produces it. Rather than ship it untested, the two failure modes that actually occur
+are checked directly:
+
+- **Syntax.** An independent plist parser reads the generated file back. A pbxproj
+  that does not parse makes Xcode refuse the project with an error naming nothing
+  useful, and that is by far the likeliest way this breaks.
+- **Referential integrity.** Every id referenced anywhere must resolve to a defined
+  object; no two objects may share an id; nothing may be unreachable from the root.
+  An orphan is harmless to Xcode but means the generator built something and forgot
+  to attach it — which is exactly how a source file goes missing from a build.
+
+Plus: exactly the project's Swift files are compiled, non-Swift files are excluded,
+the scheme names the same target id the project defines, every `Contents.json` is
+valid JSON, and the whole bundle round-trips through the zip unchanged.
+
+**What remains unverified is whether Xcode accepts these particular build settings.**
+Nothing short of Xcode answers that. The settings were kept to a deliberately small,
+conventional set for the same reason.
+
+### 4.13 — Findings
+
+**Quoting is the risk, so match Xcode exactly.** The old-style plist grammar allows
+hyphens and slashes in bare words, but Xcode quotes them anyway. Following the
+grammar rather than Xcode would probably have worked — and "probably" is the wrong
+confidence level for a file that cannot be tested here. The writer now leaves bare
+only what Xcode does; the parser stays permissive so it can read real project files.
+
+**Derive an id once, then pass it around.** The scheme originally recomputed the
+target's id from a fresh allocator. That is correct right up until a hash collision
+makes the project's id differ from the separately-derived one, leaving a scheme Xcode
+cannot run with no sign of trouble until you press Run. The generator now reports the
+id it assigned.
+
+**Keep nested paths.** Flattening `Models/Item.swift` to `Item.swift` reads tidier
+until two folders hold a file of the same name. A file reference whose path contains
+a slash is valid and resolves against its group.
+
 ## 5. Slice definition of done
 
 1. The reference app in §1 renders in the device frame.

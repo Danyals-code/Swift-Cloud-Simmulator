@@ -45,24 +45,29 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0-4 complete.** The studio parses, checks, runs and renders real Swift, across
-multiple files, with a view inspector and light/dark + Dynamic Type previews.
+**Phases 0-5 complete.** The studio parses, checks, runs and renders real Swift across
+multiple files, and exports a complete Xcode project.
 
-Not yet built: code completion (the one Phase 4 gate shortfall), `.xcodeproj` export
-(Phase 5), and the breadth of SwiftUI beyond the slice (Phase 6).
+One gate is outstanding and cannot be closed here: **"opens in Xcode and builds with
+zero edits" needs a Mac.** Everything checkable without one is checked — the pbxproj
+parses, its object graph resolves, and the bundle is structurally complete. See
+[docs/06-VERTICAL-SLICE.md](docs/06-VERTICAL-SLICE.md) section 4.12.
+
+Not built: code completion (the Phase 4 gate shortfall), `.swiftpm` export, share
+links, and the breadth of SwiftUI beyond the slice (Phase 6).
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 384 passing |
+| Unit tests | 468 passing |
 | End-to-end | 26 / 26 passing |
 | Templates rendering with zero placeholders | 5 / 5 |
 | Full pipeline, 500-line file | 1.6 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 352 KB gzipped / 450 KB budget |
+| Client JS | 355 KB gzipped / 450 KB budget |
 
-Next: [Phase 5 — Export](docs/03-ROADMAP.md).
+Next: [Phase 6 - Coverage and fidelity](docs/03-ROADMAP.md).
 
 ## Getting started
 
@@ -103,7 +108,7 @@ packages/
   swiftui-render-dom/  RenderTree → absolutely positioned DOM
   sim-shell/           device specs, safe areas
   project-model/       virtual file system, persistence, template gallery
-  exporter/            zip today, .xcodeproj in Phase 5
+  exporter/            .xcodeproj generation, asset catalogue, zip
 ```
 
 The `swift-*`, `swiftui-runtime`, `swiftui-layout`, `sim-shell` and `shared` packages are forbidden

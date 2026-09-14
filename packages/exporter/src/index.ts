@@ -3,6 +3,9 @@ import type { Project } from '@studio/project-model'
 import { buildExportBundle, type ExportBundle } from './bundle'
 
 export * from './bundle'
+export { generatePbxproj, IdAllocator, targetRelativePath, type XcodeProjectPlan } from './pbxproj'
+export { parsePlist, serializePlist, type PlistDict, type PlistValue } from './plist'
+export * from './xcode-files'
 
 /** Zip an already-built bundle. Separated from `buildExportBundle` so tests can assert on file contents without unzipping. */
 export function zipBundle(bundle: ExportBundle): Uint8Array {

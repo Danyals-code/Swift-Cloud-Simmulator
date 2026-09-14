@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { unzipSync } from 'fflate'
 import { createDefaultProject, type Project } from '@studio/project-model'
-import { buildExportBundle, exportProjectZip, zipFileName } from './index'
+import { buildExportBundle, exportProjectZip, targetRelativePath, zipFileName } from './index'
 
 /**
  * `ignoreBOM: true` is load-bearing: TextDecoder's *default* is to silently strip a
@@ -14,6 +14,16 @@ const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 function projectWith(files: { id: string; text: string }[]): Project {
   const base = createDefaultProject(0)
   return { ...base, files }
+}
+
+/**
+ * Where a source lands in the export.
+ *
+ * The Xcode layout nests the target folder inside the project folder, so
+ * `Sources/A.swift` becomes `MyApp/MyApp/A.swift`.
+ */
+function sourcePath(project: Project, relative: string): string {
+  return `${project.manifest.name}/${project.manifest.name}/${relative}`
 }
 
 describe('export byte-identity (FR-7.8)', () => {
@@ -43,7 +53,7 @@ describe('export byte-identity (FR-7.8)', () => {
     const project = projectWith([{ id: 'Sources/A.swift', text }])
     const bundle = buildExportBundle(project)
 
-    const bytes = bundle.get(`${project.manifest.name}/Sources/A.swift`)
+    const bytes = bundle.get(sourcePath(project, 'A.swift'))
     expect(bytes, 'source file must be present in the bundle').toBeDefined()
     expect(decoder.decode(bytes!)).toBe(text)
   })
@@ -52,7 +62,7 @@ describe('export byte-identity (FR-7.8)', () => {
     const project = projectWith([{ id: 'Sources/A.swift', text }])
     const unzipped = unzipSync(exportProjectZip(project))
 
-    expect(decoder.decode(unzipped[`${project.manifest.name}/Sources/A.swift`])).toBe(text)
+    expect(decoder.decode(unzipped[sourcePath(project, 'A.swift')])).toBe(text)
   })
 
   it('exports every file in the project', () => {
@@ -62,10 +72,8 @@ describe('export byte-identity (FR-7.8)', () => {
       { id: 'Sources/Models/Item.swift', text: '// model\n' },
     ])
     const unzipped = unzipSync(exportProjectZip(project))
-    const root = project.manifest.name
-
     for (const file of project.files) {
-      expect(unzipped[`${root}/${file.id}`], `${file.id} missing from zip`).toBeDefined()
+      expect(unzipped[sourcePath(project, targetRelativePath(file.id))], `${file.id} missing from zip`).toBeDefined()
     }
   })
 
