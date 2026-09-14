@@ -1,24 +1,29 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * Phase 0 gate (docs/06-VERTICAL-SLICE.md §"Phase 0 gate").
+ * Phase 0 gates (plumbing) plus Phase 1 gates (the real front end).
  *
- * These five tests are the contract for "the skeleton works". They are deliberately
- * about plumbing rather than about Swift — there is no compiler yet — because the
- * integration seams between editor, worker, renderer and storage are where this kind
- * of project actually breaks, and they are much cheaper to keep working than to fix
- * three phases later.
+ * Phase 0's tests proved the seams: editor -> worker -> render tree -> DOM -> event
+ * -> repaint. Those still matter and still run. Phase 1 adds the assertions that
+ * only mean something once real Swift is being parsed — in particular, that the
+ * reference app produces *no* diagnostics at all, which is the gate that a false
+ * positive is worse than a missed error.
  */
 
 async function openStudio(page: Page) {
   await page.goto('/')
   await expect(page.getByTestId('editor')).toBeVisible()
-  // First compile has to land before the tree exists.
   await expect(page.getByTestId('render-tree')).toBeVisible()
 }
 
 async function editorText(page: Page): Promise<string> {
   return page.getByTestId('editor').locator('.cm-content').innerText()
+}
+
+async function typeAtTop(page: Page, text: string) {
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+Home')
+  await page.keyboard.type(text)
 }
 
 test('loads the studio with the starter project', async ({ page }) => {
@@ -33,10 +38,7 @@ test('gate 1 — edits persist across a reload', async ({ page }) => {
   await openStudio(page)
 
   const marker = `// persisted-${Date.now()}`
-  await page.getByTestId('editor').locator('.cm-content').click()
-  await page.keyboard.press('ControlOrMeta+Home')
-  await page.keyboard.type(`${marker}\n`)
-
+  await typeAtTop(page, `${marker}\n`)
   await expect(page.getByTestId('save-indicator')).toContainText('Saved', { timeout: 5_000 })
 
   await page.reload()
@@ -44,35 +46,123 @@ test('gate 1 — edits persist across a reload', async ({ page }) => {
   expect(await editorText(page)).toContain(marker)
 })
 
-test('gate 2 — a worker diagnostic reaches the editor and the problems panel', async ({ page }) => {
+test('Phase 1 gate 4 — the reference app produces no diagnostics at all', async ({ page }) => {
+  // The most important assertion in the suite. Anything reported on the starter
+  // template is a false positive on unambiguously correct code, and a spurious
+  // squiggle destroys trust in every other diagnostic.
   await openStudio(page)
 
-  // The stub pipeline pins one info diagnostic to the `import SwiftUI` line.
-  await expect(page.getByTestId('console')).toContainText('not yet parsed')
+  await expect(page.getByTestId('console')).toContainText('No problems.')
+  await expect(page.getByTestId('editor').locator('.cm-lintRange')).toHaveCount(0)
+})
+
+test('gate 2 — a real parse error reaches the editor and the problems panel', async ({ page }) => {
+  await openStudio(page)
+  await typeAtTop(page, 'let broken = \n')
+
+  const console_ = page.getByTestId('console')
+  await expect(console_).toContainText('Expected an expression', { timeout: 5_000 })
   await expect(page.getByTestId('editor').locator('.cm-lintRange').first()).toBeVisible()
 })
 
-test('gate 3 — the render tree paints inside the device frame, and taps round-trip', async ({
+test('Phase 1 gate 2 — a missing brace does not invalidate the rest of the file', async ({
   page,
 }) => {
   await openStudio(page)
 
+  // Delete the final closing brace, which is the most common mid-typing state.
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.press('Backspace')
+  await page.keyboard.press('Backspace')
+
+  // An error is expected, but the outline must still resolve the app and its views
+  // rather than collapsing.
+  await expect(page.getByTestId('render-tree')).toContainText('CounterApp', { timeout: 5_000 })
+})
+
+test('reports unimplemented SwiftUI by name rather than calling it unresolved', async ({ page }) => {
+  // FR-4.11. `NavigationStack` is valid Swift; saying "cannot find in scope" would be
+  // both wrong and unhelpful.
+  await openStudio(page)
+  await typeAtTop(page, 'let placeholder = NavigationStack { }\n')
+
+  const console_ = page.getByTestId('console')
+  await expect(console_).toContainText('NavigationStack', { timeout: 5_000 })
+  await expect(console_).toContainText('not drawn by the preview yet')
+  await expect(console_).toContainText('unsupported_swiftui_view')
+})
+
+test('gate 3 — the parsed outline renders in the device frame', async ({ page }) => {
+  await openStudio(page)
+
   await expect(page.getByTestId('device-frame')).toBeVisible()
   const tree = page.getByTestId('render-tree')
-  await expect(tree.locator('[data-node-id="title"]')).toContainText('Hello, World!')
-  await expect(tree.locator('[data-node-id="count"]')).toContainText('Count: 0')
 
+  await expect(tree.locator('[data-node-id="outline-title"]')).toContainText('Parsed structure')
+  await expect(tree.locator('[data-node-id="outline-entry"]')).toContainText('@main CounterApp')
+  await expect(tree.locator('[data-node-id="outline-entry"]')).toContainText('ContentView')
+
+  // The structure is read from the user's real source, so it must match it.
+  const rows = tree.locator('[data-node-id^="outline-row-"]')
+  await expect(rows.first()).toContainText('VStack')
+  await expect(tree).toContainText('HStack')
+  await expect(tree).toContainText('Button')
+  await expect(tree).toContainText('Spacer')
+})
+
+test('gate 3 — the outline updates as you type', async ({ page }) => {
+  await openStudio(page)
+  const tree = page.getByTestId('render-tree')
+  await expect(tree).toContainText('VStack')
+
+  // Replace the whole document with a different view, and watch the outline follow.
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type(
+    [
+      'import SwiftUI',
+      '@main',
+      'struct TinyApp: App {',
+      '    var body: some Scene { WindowGroup { Root() } }',
+      '}',
+      'struct Root: View {',
+      '    var body: some View {',
+      '        ZStack {',
+      '            Circle()',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n'),
+  )
+
+  await expect(tree).toContainText('ZStack', { timeout: 5_000 })
+  await expect(tree).toContainText('Circle')
+  await expect(tree.locator('[data-node-id="outline-entry"]')).toContainText('@main TinyApp')
+  await expect(tree).not.toContainText('VStack')
+})
+
+test('gate 3 — tapping an outline row round-trips through the worker', async ({ page }) => {
   // The full loop: DOM hit test -> worker -> state mutation -> new tree -> repaint.
-  await tree.locator('[data-node-id="btn-plus"]').click()
-  await expect(tree.locator('[data-node-id="count"]')).toContainText('Count: 1')
+  await openStudio(page)
+  const tree = page.getByTestId('render-tree')
 
-  await tree.locator('[data-node-id="btn-plus"]').click()
-  await tree.locator('[data-node-id="btn-minus"]').click()
-  await expect(tree.locator('[data-node-id="count"]')).toContainText('Count: 1')
+  const firstRow = tree.locator('[data-node-id="outline-row-0"]')
+  await expect(firstRow).toBeVisible()
+  await expect(tree.locator('[data-node-id="outline-row-0-highlight"]')).toHaveCount(0)
 
-  // Reset drops the stub's state without touching the source.
+  await firstRow.click()
+  await expect(tree.locator('[data-node-id="outline-row-0-highlight"]')).toBeVisible()
+
+  // Tapping again clears it.
+  await firstRow.click()
+  await expect(tree.locator('[data-node-id="outline-row-0-highlight"]')).toHaveCount(0)
+
+  // Reset clears selection without touching the source.
+  await firstRow.click()
+  await expect(tree.locator('[data-node-id="outline-row-0-highlight"]')).toBeVisible()
   await page.getByRole('button', { name: 'Reset state' }).click()
-  await expect(tree.locator('[data-node-id="count"]')).toContainText('Count: 0')
+  await expect(tree.locator('[data-node-id="outline-row-0-highlight"]')).toHaveCount(0)
 })
 
 test('gate 3b — unsupported features render a labelled placeholder (FR-4.11)', async ({ page }) => {
@@ -80,16 +170,14 @@ test('gate 3b — unsupported features render a labelled placeholder (FR-4.11)',
 
   const placeholder = page.getByTestId('render-tree').locator('[data-kind="placeholder"]')
   await expect(placeholder).toBeVisible()
-  await expect(placeholder).toContainText('Swift compiler')
+  await expect(placeholder).toContainText('View rendering')
 })
 
 test('gate 4 — the exported zip contains the edited source, byte-identical', async ({ page }) => {
   await openStudio(page)
 
   const marker = `// exported-${Date.now()}`
-  await page.getByTestId('editor').locator('.cm-content').click()
-  await page.keyboard.press('ControlOrMeta+Home')
-  await page.keyboard.type(`${marker}\n`)
+  await typeAtTop(page, `${marker}\n`)
   await expect(page.getByTestId('save-indicator')).toContainText('Saved', { timeout: 5_000 })
 
   const downloadPromise = page.waitForEvent('download')
@@ -104,9 +192,7 @@ test('gate 4 — the exported zip contains the edited source, byte-identical', a
   const zip = Buffer.concat(chunks)
 
   expect(zip.length).toBeGreaterThan(0)
-  // Zip local file header magic — proves we produced a real archive, not an error page.
   expect(zip.subarray(0, 2).toString('latin1')).toBe('PK')
-  // Stored paths are visible in the (uncompressed) local file headers.
   expect(zip.toString('latin1')).toContain('CounterApp/Sources/CounterApp.swift')
 })
 

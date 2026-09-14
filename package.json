@@ -2,6 +2,7 @@
   "name": "swiftui-web-studio",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "description": "Browser-based IDE for writing real Swift/SwiftUI, previewing it live, and exporting an Xcode project.",
   "workspaces": [
     "apps/*",

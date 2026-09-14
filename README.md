@@ -32,7 +32,7 @@ construction and keeps the product honest: the preview can be imperfect, the out
 | [03 — Roadmap & Phases](docs/03-ROADMAP.md) | Phase 0–7 breakdown with deliverables, acceptance gates and sizing |
 | [04 — Swift language subset](docs/04-SWIFT-SUBSET.md) | Exactly which Swift features are in/out, by tier |
 | [05 — SwiftUI coverage matrix](docs/05-SWIFTUI-COVERAGE.md) | Views, modifiers, styles — the living checklist |
-| [06 — Vertical slice (v0.1)](docs/06-VERTICAL-SLICE.md) | **The decided first build** — reference app, subset, Phase 0 task list |
+| [06 — Vertical slice (v0.1)](docs/06-VERTICAL-SLICE.md) | **The decided first build** — reference app, subset, per-phase task lists and findings |
 
 ## Decided scope for v0.1
 
@@ -45,22 +45,24 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phase 0 complete.** The skeleton runs end to end: editor → worker → render tree → device frame →
-tap → state → repaint, plus IndexedDB persistence and zip export with a byte-identity guarantee.
+**Phases 0 and 1 complete.** The studio parses and checks real Swift on every keystroke, reports
+diagnostics in the editor, and shows a live structural outline of the parsed view tree.
 
-There is **no Swift compiler yet** — the worker returns a hand-built demo tree and the editor's
-contents are stored and exported verbatim without being parsed. Phases 1–3 replace the body of one
-function (`stubCompile`) with the real pipeline; nothing outside the worker changes.
+There is **no interpreter yet** — the preview cannot draw your views until Phase 2 evaluates them
+and Phase 3 lays them out. What it shows instead is honest: the structure the front end actually
+understood, updating as you type.
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 50 passing |
-| End-to-end (Phase 0 gates) | 7 / 7 passing |
-| Client JS | 324 KB gzipped / 450 KB budget |
+| Unit tests | 191 passing |
+| End-to-end | 12 / 12 passing |
+| Reference app diagnostics | **zero** — the false-positive gate |
+| Parse + check, 500-line file | 1.0 ms (budget: 120 ms) |
+| Client JS | 334 KB gzipped / 450 KB budget |
 
-Next: [Phase 1 — Swift front end](docs/03-ROADMAP.md#phase-1--swift-front-end-34-weeks).
+Next: [Phase 2 — Swift runtime](docs/03-ROADMAP.md#phase-2--swift-runtime-34-weeks).
 
 ## Getting started
 
@@ -94,7 +96,7 @@ apps/web/              Next.js app — editor, device frame, console, worker hos
 packages/
   shared/              SourceSpan, Diagnostic, RenderTree, worker protocol
   swift-syntax/        lexer, parser, AST                        (Phase 1)
-  swift-sema/          name resolution, type checking            (Phase 1)
+  swift-sema/          name resolution, scopes, coverage checks   (Phase 1)
   swift-runtime/       the interpreter                           (Phase 2)
   swiftui-runtime/     View graph, ViewBuilder, @State identity  (Phase 3)
   swiftui-layout/      proposal/response layout engine           (Phase 3)

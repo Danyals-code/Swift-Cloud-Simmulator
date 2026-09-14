@@ -188,6 +188,69 @@ Verified numbers: **11/11 packages typecheck**, **lint clean**, **50 unit tests 
 | Budget split shell/worker | One total-client-JS budget | Turbopack emits no per-route chunk manifest and hashed chunks cannot be reliably attributed to a route. Reporting a number we cannot compute is worse than reporting one we can. |
 | `.js` extensions on relative imports | Extensionless | The `.js`-pointing-at-`.ts` convention is for NodeNext resolution; bundlers resolve it literally and fail. |
 
+## 4.2 Phase 1 task list — **complete**
+
+Built and verified 2026-09-14. Slice-scoped per the "Decided path" section in
+[03-ROADMAP.md](03-ROADMAP.md).
+
+### Lexer (`swift-syntax`)
+- [x] Identifiers: `$0` shorthand, `$name` projections, backtick escapes, non-ASCII
+- [x] Full keyword set — recognised even when unparsed, so diagnostics can name the feature
+- [x] Numbers: decimal, hex, binary, octal, underscores, floats, exponents
+- [x] Strings: escapes, `\u{...}`, interpolation, multiline with indentation stripping, raw `#"..."#`
+- [x] Nested interpolation, and string literals nested inside interpolation
+- [x] Operators lexed greedily, with `?.` split so member chains survive
+- [x] Nested block comments
+- [x] Trivia flags: `newlineBefore`, `spaceBefore`/`spaceAfter`, `column`
+
+### Parser (`swift-syntax`)
+- [x] Declarations: `import`, `struct`, `func`, `var`/`let`, `init`, attributes, modifiers
+- [x] Statements: `if`/`else if`/`else`, `for-in`, `return`, expression and declaration statements
+- [x] Expressions: full Swift precedence table, ternary, assignment, ranges, closures, literals
+- [x] Member chains that continue across newlines — what makes SwiftUI modifier chains work
+- [x] Trailing closures, suppressed in condition position so `if x { }` is not read as a call
+- [x] Closure parameter detection that is not fooled by `for i in xs` inside the body
+- [x] Types: named, generic, optional, array, dictionary, tuple, function, `some View`
+- [x] Error recovery: error nodes, resync points, one diagnostic per mistake
+- [x] Missing-brace recovery keyed on column-1 type declarations
+- [x] Guaranteed progress — unbalanced input terminates rather than hanging the worker
+
+### Checker (`swift-sema`)
+- [x] Two-pass collection, so declaration order does not matter
+- [x] Lexical scopes with shadowing: properties, parameters, locals, loop variables, closures
+- [x] Entry-point validation: missing, duplicated, or not conforming to `App`
+- [x] `View` conformance requires a `body`
+- [x] Coverage diagnostics naming both the feature and the phase that adds it
+- [x] Property-wrapper support split by phase
+- [x] A semantic model (types, properties, methods, wrappers) for Phases 2-3 to consume
+
+### Preview
+- [x] Live structural outline of the parsed view tree, replacing the Phase 0 demo tree
+- [x] Tap a row to select it — keeps the event round-trip under test, and is the
+      precursor to the Phase 4 inspector
+- [x] Real diagnostics in the editor gutter and the problems panel
+
+### Phase 1 gate — all passing
+
+| # | Gate | Result |
+| --- | --- | --- |
+| 1 | Corpus parses with zero unexpected errors | Reference app: **zero diagnostics of any severity** |
+| 2 | A missing closing brace still yields a usable AST | Column-1 recovery, covered by unit and e2e tests |
+| 3 | Keystroke to diagnostics p95 under 120 ms on 500 lines | **1.0 ms** (2,000 lines: 2.9 ms) |
+| 4 | Zero false positives on the corpus | Enforced by a dedicated test group; unknown types warn rather than error |
+
+Verified: **11/11 packages typecheck**, **lint clean**, **191 unit tests**, **12/12 e2e**,
+**334 KB gzipped** against a 450 KB budget.
+
+### 4.3 — Deviations and findings
+
+| Planned | Actual | Why |
+| --- | --- | --- |
+| Incremental reparse | **Not built** | Measured: a *full* reparse of 2,000 lines takes 2.9 ms against a 120 ms budget. The assumption that made it necessary was wrong. See [02-ARCHITECTURE.md](02-ARCHITECTURE.md) section 4.2. |
+| Trivia attached to tokens | Discarded, with flags kept | Trivia exists to support a source printer, and this system never prints Swift — the editor text is the source of truth. |
+| Full bidirectional type checker | Resolution and coverage only | Gate 4 makes a false positive worse than a missed error. Member and argument checking needs real type information, which arrives with the interpreter in Phase 2. Unknown types warn rather than error for the same reason. |
+| Errors on unrecognised constructs | Warnings naming the feature | `NavigationStack` is valid Swift; reporting "cannot find in scope" would be both wrong and unhelpful. |
+
 ## 5. Slice definition of done
 
 1. The reference app in §1 renders in the device frame.

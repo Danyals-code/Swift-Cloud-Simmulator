@@ -9,5 +9,10 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@studio/shared": "*",
+    "@studio/swift-sema": "*",
+    "@studio/swift-syntax": "*"
   }
 }

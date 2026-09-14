@@ -88,16 +88,31 @@ parser inserts `ErrorNode`s and resynchronises at statement and declaration boun
 unbalanced brace does not invalidate the whole file. FR-6.3 (keep showing the last good render)
 depends on this.
 
-### 4.2 Incremental reparse
+### 4.2 Incremental reparse — deferred, and here is why
 
-CodeMirror gives us a precise changed-range on every edit. We:
+This section originally specified incremental reparse as a Phase 1 requirement, on the assumption
+that *"without this, a 2,000-line project blows the 120 ms diagnostics budget"*.
 
-1. Map the change to the smallest enclosing declaration.
-2. Re-lex and re-parse only that declaration, splicing the new subtree in and shifting sibling
-   source ranges.
-3. Invalidate only the type-check results whose dependency set includes the changed symbol.
+**Measured after Phase 1 landed, that assumption is simply wrong:**
 
-Without this, a 2,000-line project blows the 120 ms diagnostics budget.
+| Project size | Full lex + parse + check + outline |
+| --- | --- |
+| 500 lines | **1.0 ms** |
+| 2,000 lines | **2.9 ms** |
+
+Against a 120 ms budget. A full reparse is roughly 40x under budget at the size where the incremental
+path was supposed to become necessary, and the benchmark (`packages/swiftui-runtime/src/bench.test.ts`)
+runs in CI so the claim stays honest.
+
+Incremental reparse is therefore **not built**. It would add a splice-and-shift path through the most
+correctness-critical code in the system — source ranges that drift by one character produce
+diagnostics pointing at the wrong text — in exchange for saving single-digit milliseconds nobody can
+perceive.
+
+The design that made this possible is worth keeping in mind rather than the optimisation that turned
+out to be unnecessary: a hand-written lexer and recursive-descent parser over a plain token array,
+with no backtracking and no regex-driven scanning in the hot path. Revisit only if the benchmark
+crosses ~40 ms, which on this trend means somewhere north of 25,000 lines.
 
 ### 4.3 Type checker scope
 
