@@ -1,4 +1,4 @@
-import type { Diagnostic, DiagnosticCode, SourceSpan } from '@studio/shared'
+import type { Diagnostic, DiagnosticCode, FixIt, SourceSpan } from '@studio/shared'
 import type {
   Block,
   ConformanceModel,
@@ -302,11 +302,28 @@ export class Checker {
     const info = this.types.get(decl.name)
 
     if (info?.isView && !info.properties.some((p) => p.name === 'body')) {
+      // Inserted just before the type's closing brace. Anchoring to the *end* of the
+      // span needs no source text and cannot land inside another declaration, which
+      // anchoring to the first `{` would risk when the body is written on one line.
+      const close = decl.span.end - 1
       this.report(
         decl.nameSpan,
         'error',
         'not_conformant',
         `Type '${decl.name}' does not conform to protocol 'View'. Add a 'body' property.`,
+        undefined,
+        [
+          {
+            title: "Add a 'body' property",
+            edits: [
+              {
+                span: { file: decl.span.file, start: close, end: close },
+                newText:
+                  '\n    var body: some View {\n        Text("Hello")\n    }\n',
+              },
+            ],
+          },
+        ],
       )
     }
 
@@ -738,7 +755,45 @@ export class Checker {
       return
     }
 
-    this.report(span, 'error', 'unresolved_identifier', `Cannot find '${name}' in scope.`)
+    const suggestion = this.closestName(name, scope)
+    this.report(
+      span,
+      'error',
+      'unresolved_identifier',
+      suggestion ? `Cannot find '${name}' in scope. Did you mean '${suggestion}'?` : `Cannot find '${name}' in scope.`,
+      undefined,
+      suggestion ? [{ title: `Replace with '${suggestion}'`, edits: [{ span, newText: suggestion }] }] : undefined,
+    )
+  }
+
+  /**
+   * The nearest name that is actually in scope, or null.
+   *
+   * Offered only when the edit distance is small relative to the name's length, so a
+   * three-letter typo does not suggest an unrelated three-letter name. A fix the user
+   * has to undo costs more than no fix, which is the same rule the rest of this file
+   * follows.
+   */
+  private closestName(name: string, scope: Scope): string | null {
+    const budget = name.length <= 4 ? 1 : 2
+    let best: string | null = null
+    let bestDistance = budget + 1
+
+    const consider = (candidate: string): void => {
+      if (candidate === name || Math.abs(candidate.length - name.length) > budget) return
+      const distance = editDistance(name.toLowerCase(), candidate.toLowerCase())
+      if (distance < bestDistance) {
+        bestDistance = distance
+        best = candidate
+      }
+    }
+
+    for (const candidate of scope.allNames()) consider(candidate)
+    for (const candidate of this.types.keys()) consider(candidate)
+    for (const candidate of this.enums.keys()) consider(candidate)
+    for (const candidate of SUPPORTED_VIEWS) consider(candidate)
+
+    return bestDistance <= budget ? best : null
   }
 
   /**
@@ -771,6 +826,7 @@ export class Checker {
     code: DiagnosticCode,
     message: string,
     feature?: string,
+    fixIts?: readonly FixIt[],
   ): void {
     // Coverage warnings repeat constantly — `.padding()` appears six times in the
     // reference app. Report each feature once per span so the panel stays readable.
@@ -778,8 +834,41 @@ export class Checker {
       (d) => d.span.start === span.start && d.span.end === span.end && d.code === code,
     )
     if (duplicate) return
-    this.diagnostics.push(feature ? { span, severity, code, message, feature } : { span, severity, code, message })
+    this.diagnostics.push({
+      span,
+      severity,
+      code,
+      message,
+      ...(feature ? { feature } : {}),
+      ...(fixIts && fixIts.length > 0 ? { fixIts } : {}),
+    })
   }
+}
+
+/**
+ * Levenshtein distance, bounded by the lengths involved.
+ *
+ * Used only to decide whether a typo is close enough to suggest a replacement, so the
+ * classic two-row implementation is more than fast enough: the candidate list is a
+ * scope, not a dictionary.
+ */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i)
+
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i]
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(
+        previous[j]! + 1,
+        current[j - 1]! + 1,
+        previous[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      )
+    }
+    previous = current
+  }
+
+  return previous[b.length]!
 }
 
 function propertyWrapperOf(decl: VarDecl): string | null {

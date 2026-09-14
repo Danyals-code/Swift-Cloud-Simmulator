@@ -331,5 +331,21 @@ function toCodeMirror(diagnostics: readonly Diagnostic[], doc: string): CmDiagno
     severity: d.severity === 'info' ? 'info' : d.severity,
     message: d.message,
     source: d.code,
+    // A diagnostic that knows how to fix itself offers a button. Only fixes the
+    // analyser is certain about arrive here: a wrong fix costs an undo and a little
+    // trust, which is more than the fix was worth.
+    actions: (d.fixIts ?? []).map((fix) => ({
+      name: fix.title,
+      apply: (view: EditorView) => {
+        const length = view.state.doc.length
+        view.dispatch({
+          changes: fix.edits.map((edit) => ({
+            from: Math.max(0, Math.min(edit.span.start, length)),
+            to: Math.max(0, Math.min(edit.span.end, length)),
+            insert: edit.newText,
+          })),
+        })
+      },
+    })),
   }))
 }

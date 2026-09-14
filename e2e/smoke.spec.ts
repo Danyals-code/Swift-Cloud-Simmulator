@@ -633,3 +633,28 @@ test('Phase 8 — F12 jumps to where a name was declared', async ({ page }) => {
     })
     .toBe('Badge')
 })
+
+test('Phase 8 — a typo offers the name it probably meant, and applying it fixes the code', async ({
+  page,
+}) => {
+  await openStudio(page)
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('struct V: View { var body: some View { VStak { Text("x") } } }')
+  await page.keyboard.press('Escape')
+
+  // The diagnostic names the fix before any of the UI does.
+  const problems = page.getByTestId('console')
+  await expect(problems).toContainText("Did you mean 'VStack'?", { timeout: 8000 })
+
+  // Hovering the underlined name brings up the fix button.
+  await page.getByTestId('editor').getByText('VStak', { exact: true }).first().hover()
+  const fix = page.locator('.cm-tooltip-lint').getByText("Replace with 'VStack'")
+  await expect(fix).toBeVisible({ timeout: 5000 })
+  await fix.click()
+
+  // The fixture never had an `@main`, so that diagnostic stays. What must go is the
+  // one the fix addressed — and the corrected name must be in the document.
+  await expect(problems).not.toContainText("Cannot find 'VStak'", { timeout: 8000 })
+  expect(await editorText(page)).toContain('VStack')
+})

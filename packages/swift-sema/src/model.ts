@@ -63,6 +63,12 @@ export class Scope {
     return this.lookup(name) !== undefined
   }
 
+  /** Every name visible here, innermost first — the candidate list for "did you mean". */
+  allNames(): string[] {
+    const names = [...this.symbols.keys()]
+    return this.parent ? [...names, ...this.parent.allNames()] : names
+  }
+
   child(): Scope {
     return new Scope(this)
   }

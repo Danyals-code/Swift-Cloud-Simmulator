@@ -470,3 +470,47 @@ struct Impl: Refined {}`,
     expect([...info.conformances].sort()).toEqual(['Base', 'Refined'])
   })
 })
+
+describe('quick fixes (Phase 8g)', () => {
+  it('suggests the name the user probably meant', () => {
+    const found = analyse(app('Text(titel)', 'let title = "x"')).find(
+      (d) => d.code === 'unresolved_identifier',
+    )
+    expect(found?.message).toContain("Did you mean 'title'?")
+    expect(found?.fixIts?.[0]?.edits[0]?.newText).toBe('title')
+  })
+
+  it('suggests a SwiftUI view for a near miss', () => {
+    const found = analyse(app('VStak { Text("x") }')).find(
+      (d) => d.code === 'unresolved_identifier',
+    )
+    expect(found?.fixIts?.[0]?.edits[0]?.newText).toBe('VStack')
+  })
+
+  it('does not suggest anything for a name that resembles nothing', () => {
+    // A fix the user has to undo costs more than no fix. A three-letter typo must not
+    // reach for an unrelated three-letter name.
+    const found = analyse(app('Text(zqx)')).find((d) => d.code === 'unresolved_identifier')
+    expect(found?.message).toBe("Cannot find 'zqx' in scope.")
+    expect(found?.fixIts).toBeUndefined()
+  })
+
+  it('offers to add a missing body', () => {
+    const found = analyse(app('Text("x")', 'struct Empty: View {}')).find(
+      (d) => d.code === 'not_conformant',
+    )
+    expect(found?.fixIts?.[0]?.title).toBe("Add a 'body' property")
+    expect(found?.fixIts?.[0]?.edits[0]?.newText).toContain('var body: some View')
+  })
+
+  it('inserts the body inside the type it belongs to', () => {
+    const source = app('Text("x")', 'struct Empty: View {}')
+    const found = analyse(source).find((d) => d.code === 'not_conformant')!
+    const edit = found.fixIts![0]!.edits[0]!
+
+    // Applying the edit has to produce something that parses, or the fix is a trap.
+    const fixed = source.slice(0, edit.span.start) + edit.newText + source.slice(edit.span.end)
+    expect(fixed).toContain('struct Empty: View {\n    var body: some View')
+    expect(errors(fixed)).toEqual([])
+  })
+})
