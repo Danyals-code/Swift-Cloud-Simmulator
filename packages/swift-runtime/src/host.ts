@@ -53,6 +53,15 @@ export interface InterpreterHost {
   /** Implicit member syntax with no base: `.primary`, `.infinity`, `.largeTitle`. */
   resolveImplicitMember?(member: string, span: SourceSpan): SwiftValue | undefined
 
+  /**
+   * Implicit member syntax *called*: `.easeInOut(duration: 0.3)`, `.adaptive(minimum: 80)`.
+   *
+   * Separate from `resolveImplicitMember` because that hook never sees the argument
+   * list. Without this one every such call silently discards its arguments, which is
+   * the worst kind of wrong: the code looks honoured and is not.
+   */
+  callImplicitMember?(member: string, call: HostCall): SwiftValue | undefined
+
   /** `print(...)` and anything else that writes to the console. */
   log?(message: string, span: SourceSpan): void
 }

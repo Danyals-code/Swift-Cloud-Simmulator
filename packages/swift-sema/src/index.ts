@@ -8,3 +8,4 @@
 export * from './model'
 export * from './builtins'
 export { Checker, checkSourceFiles } from './checker'
+export { lintStrictness } from './strictness'

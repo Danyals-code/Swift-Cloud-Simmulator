@@ -29,6 +29,7 @@ import type { CallArgument, HostCall, InterpreterHost } from './host'
 import { callBuiltinMember, getBuiltinProperty } from './stdlib'
 import {
   array,
+  asProjection,
   bool,
   copyValue,
   describe,
@@ -36,10 +37,13 @@ import {
   double,
   graphemes,
   int,
+  keyPath,
   NIL,
+  projection,
   str,
   truthy,
   typeNameOf,
+  unwrapProjection,
   valuesEqual,
   VOID,
   type ArrayValue,
@@ -577,6 +581,9 @@ export class Interpreter {
         return value
       }
 
+      case 'keyPath':
+        return keyPath(expr.components)
+
       case 'optionalChain':
         return this.evaluate(expr.operand, env)
 
@@ -600,19 +607,22 @@ export class Interpreter {
 
   private evaluateIdentifier(name: string, span: SourceSpan, env: Environment): SwiftValue {
     const binding = env.lookup(name)
-    if (binding) return binding.value
+    if (binding) return unwrapProjection(binding.value)
 
-    // `$count` is the projection of a property wrapper; the slice treats it as the
-    // wrapped value, which is enough for `@State` until Phase 3 adds real bindings.
+    // `$count` is a property wrapper's *projection*: a read/write reference to the
+    // storage behind `count`, which is what lets `.sheet(isPresented: $showing)`
+    // dismiss itself and `Toggle(isOn: $flag)` write back. Projecting something that
+    // is already a projection yields the same one — passing `$count` down two views
+    // still addresses the original `@State`.
     if (name.startsWith('$')) {
-      const backing = env.lookup(name.slice(1))
-      if (backing) return backing.value
+      const projected = this.projectionFor(name.slice(1), env)
+      if (projected) return projected
     }
 
     const self = env.resolveSelf()
     if (self) {
       const member = this.memberOfStruct(self, name.startsWith('$') ? name.slice(1) : name, span)
-      if (member !== undefined) return member
+      if (member !== undefined) return unwrapProjection(member)
     }
 
     if (this.types.has(name)) return { kind: 'type', name }
@@ -638,9 +648,13 @@ export class Interpreter {
 
     const target = this.evaluate(base, env)
 
+    // `Item.self` is a metatype. The slice only ever passes one along — to
+    // `navigationDestination(for:)` — so the type value itself is the whole answer.
+    if (target.kind === 'type' && member === 'self') return target
+
     if (target.kind === 'struct') {
       const value = this.memberOfStruct(target, member, span)
-      if (value !== undefined) return value
+      if (value !== undefined) return unwrapProjection(value)
     }
 
     const builtin = getBuiltinProperty(target, member)
@@ -733,6 +747,12 @@ export class Interpreter {
     env: Environment,
   ): SwiftValue {
     if (!baseExpr) {
+      const called = this.host.callImplicitMember?.(
+        member,
+        this.hostCall(args, trailingClosure, span),
+      )
+      if (called !== undefined) return called
+
       const resolved = this.host.resolveImplicitMember?.(member, memberSpan)
       if (resolved !== undefined) return resolved
       this.trap(`Cannot infer contextual base for '.${member}'`, memberSpan)
@@ -824,15 +844,41 @@ export class Interpreter {
 
   // ---------------------------------------------------------------- lvalues
 
+  /**
+   * Builds `$name` — a projection onto the storage `name` refers to.
+   *
+   * Returns null when there is no such storage, so the caller can fall through to
+   * its normal "cannot find in scope" reporting rather than handing back a binding
+   * onto nothing.
+   */
+  private projectionFor(name: string, env: Environment): SwiftValue | null {
+    const binding = env.lookup(name)
+    if (binding) {
+      // Re-projecting a binding gives back the same binding, not one wrapping it.
+      return asProjection(binding.value) ? binding.value : projection(bindingLValue(binding, name))
+    }
+
+    const self = env.resolveSelf()
+    if (self?.fields.has(name)) {
+      const current = self.fields.get(name)
+      if (asProjection(current)) return current!
+      return projection(fieldLValue(self, name, `self.${name}`))
+    }
+
+    return null
+  }
+
   /** Resolves an assignable location, or null when the expression is not one. */
   private tryResolveLValue(expr: Expr, env: Environment): LValue | null {
     switch (expr.kind) {
       case 'identifier': {
         const binding = env.lookup(expr.name)
-        if (binding) return bindingLValue(binding, expr.name)
+        if (binding) return throughProjection(bindingLValue(binding, expr.name))
 
         const self = env.resolveSelf()
-        if (self?.fields.has(expr.name)) return fieldLValue(self, expr.name, expr.name)
+        if (self?.fields.has(expr.name)) {
+          return throughProjection(fieldLValue(self, expr.name, expr.name))
+        }
         return null
       }
 
@@ -841,7 +887,9 @@ export class Interpreter {
         const owner = this.tryResolveLValue(expr.base, env)
         const target = owner ? owner.get() : this.evaluate(expr.base, env)
         if (target.kind !== 'struct') return null
-        return fieldLValue(target, expr.member, `${describe(target, true)}.${expr.member}`)
+        return throughProjection(
+          fieldLValue(target, expr.member, `${describe(target, true)}.${expr.member}`),
+        )
       }
 
       case 'selfExpr': {
@@ -1060,6 +1108,26 @@ export class Interpreter {
       default:
         this.trap(`Unary operator '${operator}' is not supported`, span)
     }
+  }
+}
+
+/**
+ * Redirects an lvalue through a projection when the storage holds one.
+ *
+ * `@Binding var count` stores a projection, so assigning to `count` must write to
+ * whatever `$count` was made from rather than replacing the binding itself. Wrapping
+ * every lvalue means assignment, compound assignment and `mutating` methods all get
+ * this for free instead of each needing to know about bindings.
+ */
+function throughProjection(lvalue: LValue): LValue {
+  const projected = asProjection(lvalue.get())
+  if (!projected) return lvalue
+
+  return {
+    get: () => projected.get(),
+    set: (value) => projected.set(value),
+    description: projected.description,
+    mutable: true,
   }
 }
 

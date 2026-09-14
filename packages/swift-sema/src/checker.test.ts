@@ -162,19 +162,32 @@ struct Other: View {
 
 describe('coverage diagnostics are honest, not wrong', () => {
   it('names an unimplemented view rather than calling it unresolved', () => {
-    // `NavigationStack` is perfectly valid Swift. Saying "cannot find in scope" would
-    // be both wrong and unhelpful — it is the preview that cannot draw it.
-    const [warning] = warnings(app('        NavigationStack { Text("x") }'))
+    // `Canvas` is perfectly valid Swift. Saying "cannot find in scope" would be both
+    // wrong and unhelpful — it is the preview that cannot draw it.
+    const [warning] = warnings(app('        Canvas { context, size in }'))
     expect(warning?.code).toBe('unsupported_swiftui_view')
-    expect(warning?.feature).toBe('NavigationStack')
-    expect(warning?.message).toContain('Phase 6')
-    expect(errors(app('        NavigationStack { Text("x") }'))).toEqual([])
+    expect(warning?.feature).toBe('Canvas')
+    expect(warning?.message).toContain('Phase 7')
+    expect(errors(app('        Canvas { context, size in }'))).toEqual([])
   })
 
   it('names an unimplemented modifier', () => {
-    const [warning] = warnings(app('        Text("x").shadow(radius: 4)'))
+    const [warning] = warnings(app('        Text("x").blur(radius: 4)'))
     expect(warning?.code).toBe('unsupported_swiftui_modifier')
-    expect(warning?.feature).toBe('.shadow')
+    expect(warning?.feature).toBe('.blur')
+  })
+
+  it('says nothing about the views Phase 6 added', () => {
+    // The guard against the coverage matrix and the checker drifting apart: every
+    // name here renders, so warning about any of them would be a false positive.
+    const source = app(`        NavigationStack {
+            List {
+                NavigationLink("Detail") { Text("there") }
+            }
+            .navigationTitle("Home")
+        }`)
+    expect(warnings(source)).toEqual([])
+    expect(errors(source)).toEqual([])
   })
 
   it('says nothing about supported modifiers', () => {
@@ -195,7 +208,7 @@ struct V: View {
 }`
     const wrapper = warnings(source).find((d) => d.feature === '@ObservedObject')
     expect(wrapper).toBeDefined()
-    expect(wrapper!.message).toContain('Phase 4')
+    expect(wrapper!.message).toContain('Phase 7')
   })
 
   it('accepts @State without comment', () => {
@@ -223,10 +236,10 @@ struct V: View {
     // `.padding()` appears repeatedly in real code; a warning per occurrence would
     // bury everything else in the problems panel.
     const source = app(`        VStack {
-            Text("a").shadow(radius: 1)
-            Text("b").shadow(radius: 1)
+            Text("a").blur(radius: 1)
+            Text("b").blur(radius: 1)
         }`)
-    expect(warnings(source).filter((d) => d.feature === '.shadow')).toHaveLength(2)
+    expect(warnings(source).filter((d) => d.feature === '.blur')).toHaveLength(2)
   })
 })
 

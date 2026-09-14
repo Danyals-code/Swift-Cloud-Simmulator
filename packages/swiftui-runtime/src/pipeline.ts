@@ -5,30 +5,35 @@ import {
   type CompileResult,
   type Diagnostic,
   type LogEntry,
+  type Rect,
   type RenderNode,
   type RenderTree,
   type UIEvent,
 } from '@studio/shared'
 import { Parser, type SourceFileNode } from '@studio/swift-syntax'
-import { Checker, type SemanticModel } from '@studio/swift-sema'
+import { Checker, lintStrictness, type SemanticModel } from '@studio/swift-sema'
 import {
   CENTER,
   FontMetricsTable,
   LayoutEngine,
+  type LayoutElement,
   type LayoutEnvironment,
   type MeasuredFont,
+  type PlacedNode,
 } from '@studio/swiftui-layout'
 import { AppRuntime, type EvaluationResult } from './app-runtime'
-import { bodyFont, labelColor, systemBackground } from './style'
-import { placedToRenderTree } from './to-render'
-import { viewsToLayout } from './to-layout'
+import { bodyFont, colorForName, labelColor, systemBackground } from './style'
+import { appendPlaced, placedToRenderTree } from './to-render'
+import { screenToLayout, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 
 /**
- * The Phase 3 pipeline: parse -> check -> evaluate -> **lay out** -> render.
+ * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
  *
- * The preview is now the app. Views are measured by the proposal/response engine and
- * painted at absolute frames, so CSS never gets a chance to disagree with SwiftUI
- * about sizing.
+ * Phase 6 adds the composition step. A screen is no longer just the user's content:
+ * it is the content *plus* whatever the framework puts around and over it — a
+ * navigation bar, a tab bar, a sheet. Each of those is positioned against the device
+ * rather than against the content, so each gets its own layout pass against its own
+ * rect, and the results are concatenated in paint order.
  *
  * When the program cannot run — parse errors, or a runtime trap — the last good tree
  * keeps being shown by the *renderer*, dimmed (FR-6.3). This module simply reports
@@ -42,6 +47,10 @@ let metrics = new FontMetricsTable()
 let revision = 0
 let lastAnalysis: { request: CompileRequest; analysis: Analysis } | null = null
 
+/** z ranges, so bars always paint over content and presentations over everything. */
+const BAR_Z = 100_000
+const OVERLAY_Z = 200_000
+
 export function setFontMetrics(fonts: readonly MeasuredFont[]): void {
   metrics = new FontMetricsTable(fonts)
 }
@@ -52,8 +61,7 @@ export function resetPipelineState(): void {
 
 /** Returns true when the event changed something and a re-render is warranted. */
 export function applyEvent(event: UIEvent): boolean {
-  if (event.kind !== 'tap') return false
-  return runtime.dispatch(event.handlerId)
+  return runtime.dispatch(event)
 }
 
 interface Analysis {
@@ -78,9 +86,20 @@ function analyse(request: CompileRequest): Analysis {
 
   const checkStart = performance.now()
   const model = Checker.check(files)
+
+  // The strictness pass runs only on code that parsed cleanly. On a half-typed file
+  // its inference would be working from a broken tree, and a warning derived from
+  // that is exactly the false positive the pass exists to avoid.
+  const strict = diagnostics.some((d) => d.severity === 'error') ? [] : lintStrictness(files, model)
   const checkMs = performance.now() - checkStart
 
-  return { files, model, diagnostics: [...diagnostics, ...model.diagnostics], parseMs, checkMs }
+  return {
+    files,
+    model,
+    diagnostics: [...diagnostics, ...model.diagnostics, ...strict],
+    parseMs,
+    checkMs,
+  }
 }
 
 function rootEnvironment(request: CompileRequest): LayoutEnvironment {
@@ -93,35 +112,171 @@ function rootEnvironment(request: CompileRequest): LayoutEnvironment {
 }
 
 /**
- * Lays out the evaluated views into a render tree.
+ * Lays out the composed screen.
  *
- * The root proposal is the device's safe-area rect, which is what SwiftUI proposes to
- * a `WindowGroup`'s content.
+ * Each region is laid out against the rect it actually occupies on the device, which
+ * is why they are separate passes rather than one tree: a tab bar is glued to the
+ * bottom edge no matter what the content does, and a sheet deliberately covers the
+ * status bar. Expressing that inside a single layout tree would need absolute
+ * positioning, which is precisely the concept a proposal-based engine does not have.
  */
 function render(request: CompileRequest, evaluation: EvaluationResult): RenderTree {
-  const { element } = viewsToLayout(evaluation.views, {
-    colorScheme: request.colorScheme,
-    typeScale: request.typeScale ?? 1,
-  })
   const engine = new LayoutEngine(metrics)
-
+  // `withAnimation { … }` animates every change in its transaction, so the hint goes
+  // on the root environment and every node below inherits it for exactly one frame.
+  const env = withAnimation(rootEnvironment(request), evaluation)
+  const scheme = request.colorScheme
+  const canvas = request.canvas
   const safeArea = request.safeArea ?? { top: 0, leading: 0, bottom: 0, trailing: 0 }
-  const bounds = {
+
+  const ui = evaluation.ui
+  const screen = ui
+    ? screenToLayout(ui, { colorScheme: scheme, typeScale: request.typeScale ?? 1, safeArea })
+    : {
+        content: viewsToLayout(evaluation.views, {
+          colorScheme: scheme,
+          typeScale: request.typeScale ?? 1,
+        }).element,
+        navigationBar: null,
+        tabBar: null,
+        overlay: null,
+      }
+
+  const barHeight = screen.navigationBar?.height ?? 0
+  const tabHeight = screen.tabBar ? TAB_BAR_HEIGHT : 0
+
+  const contentBounds: Rect = {
     x: safeArea.leading,
-    y: safeArea.top,
-    width: request.canvas.width - safeArea.leading - safeArea.trailing,
-    height: request.canvas.height - safeArea.top - safeArea.bottom,
+    y: safeArea.top + barHeight,
+    width: canvas.width - safeArea.leading - safeArea.trailing,
+    height: canvas.height - safeArea.top - safeArea.bottom - barHeight - tabHeight,
   }
 
   // SwiftUI centres root content in its window: a VStack hugging its content sits in
   // the middle of the screen rather than pinned to the top.
-  const placed = engine.layout(element, bounds, rootEnvironment(request), CENTER)
-  return placedToRenderTree(
-    placed,
-    request.canvas,
-    ++revision,
-    systemBackground(request.colorScheme),
+  const placed = engine.layout(screen.content, contentBounds, env, CENTER)
+  let tree = placedToRenderTree(placed, canvas, ++revision, systemBackground(scheme))
+
+  if (screen.navigationBar) {
+    // The bar extends up behind the status bar, as it does on a real device.
+    const bar = engine.layout(
+      screen.navigationBar.element,
+      { x: 0, y: 0, width: canvas.width, height: safeArea.top + barHeight },
+      env,
+      CENTER,
+    )
+    tree = appendPlaced(tree, bar, BAR_Z)
+  }
+
+  if (screen.tabBar) {
+    const bar = engine.layout(
+      screen.tabBar,
+      {
+        x: 0,
+        y: canvas.height - safeArea.bottom - tabHeight,
+        width: canvas.width,
+        height: tabHeight + safeArea.bottom,
+      },
+      env,
+      CENTER,
+    )
+    tree = appendPlaced(tree, bar, BAR_Z)
+  }
+
+  if (screen.overlay) {
+    tree = appendPlaced(
+      tree,
+      presentOverlay(engine, screen.overlay, canvas, safeArea, env),
+      OVERLAY_Z,
+    )
+  }
+
+  return tree
+}
+
+function withAnimation(
+  env: LayoutEnvironment,
+  evaluation: EvaluationResult,
+): LayoutEnvironment {
+  const animation = evaluation.ui?.animation
+  return animation ? { ...env, animation } : env
+}
+
+/** Places a presentation: a dimming layer, then the presented surface over it. */
+function presentOverlay(
+  engine: LayoutEngine,
+  overlay: NonNullable<ReturnType<typeof screenToLayout>['overlay']>,
+  canvas: { width: number; height: number },
+  safeArea: { top: number; leading: number; bottom: number; trailing: number },
+  env: LayoutEnvironment,
+): PlacedNode[] {
+  const nodes: PlacedNode[] = []
+
+  // Everything behind a presentation dims, and tapping the dimmed area dismisses it
+  // — which is the only affordance a preview can offer in place of a swipe.
+  nodes.push({
+    id: 'overlay-dim',
+    frame: { x: 0, y: 0, width: canvas.width, height: canvas.height },
+    z: 0,
+    opacity: 1,
+    cornerRadius: 0,
+    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, 0.32) } },
+    ...(overlay.dismissId
+      ? {
+          hitTarget: {
+            handlerId: overlay.dismissId,
+            label: 'Dismiss',
+            role: 'button' as const,
+            enabled: true,
+          },
+        }
+      : {}),
+  })
+
+  const rect = overlayRect(overlay, canvas, safeArea)
+  const surface = engine.layout(
+    overlay.element,
+    rect,
+    { ...env, cornerRadius: overlay.kind === 'sheet' ? 12 : overlay.kind === 'cover' ? 0 : 14 },
+    overlay.kind === 'alert'
+      ? CENTER
+      : overlay.kind === 'dialog'
+        ? { horizontal: 'center', vertical: 'bottom' }
+        : { horizontal: 'leading', vertical: 'top' },
   )
+
+  // The dim layer is z 0 here; the surface must sit above it.
+  for (const node of surface) nodes.push({ ...node, z: node.z + 1 })
+
+  return nodes
+}
+
+function overlayRect(
+  overlay: NonNullable<ReturnType<typeof screenToLayout>['overlay']>,
+  canvas: { width: number; height: number },
+  safeArea: { top: number; leading: number; bottom: number; trailing: number },
+): Rect {
+  if (overlay.kind === 'cover') {
+    return { x: 0, y: 0, width: canvas.width, height: canvas.height }
+  }
+
+  if (overlay.kind === 'alert') {
+    const width = Math.min(270, canvas.width - 80)
+    return { x: (canvas.width - width) / 2, y: 0, width, height: canvas.height }
+  }
+
+  if (overlay.kind === 'dialog') {
+    const width = canvas.width - 16
+    return { x: 8, y: 0, width, height: canvas.height - safeArea.bottom - 8 }
+  }
+
+  // A sheet: a negative detent is an absolute height in points, a positive one a
+  // fraction of the screen — which is exactly how `PresentationDetent` is spelled.
+  const height =
+    overlay.detent < 0
+      ? Math.min(-overlay.detent, canvas.height - safeArea.top)
+      : canvas.height * overlay.detent
+  return { x: 0, y: canvas.height - height, width: canvas.width, height }
 }
 
 /** A tree carrying only a message, for states where there is nothing to draw. */
@@ -135,7 +290,13 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
       frame: { x: 0, y: 0, width: request.canvas.width, height: request.canvas.height },
       z: 0,
       opacity: 1,
-      background: { kind: 'solid', color: rgba(248, 248, 250) },
+      background: {
+        kind: 'solid',
+        color:
+          request.colorScheme === 'dark'
+            ? (colorForName('secondarySystemBackground', 'dark') ?? rgba(28, 28, 30))
+            : rgba(248, 248, 250),
+      },
     },
     {
       id: 'notice',
@@ -278,5 +439,7 @@ function finish(
 }
 
 function programKeyOf(request: CompileRequest): string {
-  return request.files.map((f) => `${f.id} ${f.text}`).join('')
+  return request.files.map((f) => `${f.id} ${f.text}`).join('')
 }
+
+export type { LayoutElement }

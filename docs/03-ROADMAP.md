@@ -240,6 +240,14 @@ starts — it is the one external dependency in the whole roadmap.
 3. A three-screen navigation flow with a sheet and animated transitions works end to end.
 4. The strictness linter catches a curated set of "works here, fails in Xcode" cases.
 
+**Status (first pass complete):** gates 3 and 4 pass. Gate 1 stands at 11 corpus projects, not 100 —
+see [06-VERTICAL-SLICE.md](06-VERTICAL-SLICE.md) §4.15 for why a hundred authored in one pass would
+be padding rather than coverage. Gate 2 cannot be met until the tool is used by someone: the
+telemetry instrument is built and visible in the studio, and its ranking is empty by construction
+until there is usage to rank. Navigation, lists, presentation, grids, controls, bindings, animation
+and the strictness pass all landed; gestures beyond tap, `matchedGeometryEffect`, virtualisation,
+`Canvas`/`Chart`, networking and environment breadth moved to Phase 7.
+
 ---
 
 ## Phase 7 — Optional extensions (scoped individually)
@@ -301,7 +309,7 @@ Concretely, that means phases run in order but each is *depth-limited* to what t
 | 3 | All of 3a/3b/3c | `VStack` `HStack` `ZStack` `Text` `Button` `Color` `Spacer`, plus `frame` `padding` `background` `font` `foregroundStyle`, with `@State` |
 | 4 | Full IDE | Deferred — single file is enough for the slice |
 | 5 | Four export formats | `.xcodeproj` only |
-| 6 | Breadth | Deferred |
+| 6 | Breadth | **Reopened and largely built** — navigation, lists, presentation, grids, controls, bindings, animation, strictness lint, telemetry |
 | 7 | Optional | 7a/7b/7c all deferred |
 
 Roughly 5–7 weeks to something that types real Swift, renders a real interactive iPhone, and exports

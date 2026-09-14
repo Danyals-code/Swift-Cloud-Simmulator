@@ -117,6 +117,66 @@ export interface HitTarget {
   readonly handlerId: string
   readonly role: 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture'
   readonly enabled: boolean
+  /**
+   * Control parameters, for the interactive elements the renderer builds for real.
+   *
+   * A text field is an `<input>` and a slider is a range input, because a caret, an
+   * IME and keyboard control cannot be faked by catching clicks on a picture.
+   */
+  readonly value?: string
+  readonly placeholder?: string
+  readonly min?: number
+  readonly max?: number
+  readonly font?: ResolvedFont
+  readonly color?: RGBA
+}
+
+/**
+ * How the renderer should animate this node into its new frame.
+ *
+ * The engine produces one static frame per state; interpolating between consecutive
+ * frames is the browser's job. Keeping the description here — rather than having the
+ * renderer guess from what changed — is what makes `.animation(_:value:)` scope
+ * correctly: only nodes under that modifier carry a hint, so only they animate.
+ */
+export interface AnimationSpec {
+  readonly curve: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'spring'
+  /** seconds */
+  readonly duration: number
+  readonly delay?: number
+  readonly bounce?: number
+}
+
+/** A paint-time transform. Does not affect layout, exactly as in SwiftUI. */
+export interface TransformSpec {
+  readonly scaleX: number
+  readonly scaleY: number
+  /** degrees, clockwise */
+  readonly rotate: number
+}
+
+export interface ImagePayload {
+  /** The substitute glyph drawn in place of the real symbol. */
+  readonly glyph: string
+  readonly font: ResolvedFont
+  readonly color: RGBA
+  /** Always true for SF Symbols: the shipped glyph is not Apple's (R2). */
+  readonly approximated: boolean
+  /** The name the user wrote, for the inspector and for telemetry. */
+  readonly symbol?: string
+}
+
+/**
+ * A scrolling container.
+ *
+ * The one place the render tree stops being flat: nodes naming this node as their
+ * `parent` are positioned inside it, in its coordinate space, so the browser scrolls
+ * them with its own physics rather than us reimplementing momentum in the worker.
+ */
+export interface ScrollPayload {
+  readonly axis: 'vertical' | 'horizontal'
+  readonly content: Size
+  readonly showsIndicators: boolean
 }
 
 export interface A11y {
@@ -146,9 +206,27 @@ export interface RenderNode {
   readonly clip?: boolean
   readonly text?: TextPayload
   readonly shape?: ShapePayload
+  readonly image?: ImagePayload
+  readonly scroll?: ScrollPayload
   readonly placeholder?: PlaceholderPayload
   readonly hitTarget?: HitTarget
   readonly a11y?: A11y
+  /**
+   * The container this node is positioned inside.
+   *
+   * Absent for all but scroll views, clip shapes and transforms — the three cases
+   * where the browser has to own a real box for the effect to work at all.
+   */
+  readonly parent?: string
+  readonly border?: { readonly color: RGBA; readonly width: number; readonly cornerRadius: number }
+  readonly shadow?: {
+    readonly color: RGBA
+    readonly radius: number
+    readonly x: number
+    readonly y: number
+  }
+  readonly transform?: TransformSpec
+  readonly animation?: AnimationSpec
   /** where in the Swift source this came from — powers hover-to-source in the inspector */
   readonly origin?: SourceSpan
   /** Inspector readout: what this view is called and what was applied to it (FR-5.8). */
@@ -191,4 +269,37 @@ export function cssFill(f: Fill): string {
 
 export function rectContains(r: Rect, p: Point): boolean {
   return p.x >= r.x && p.x < r.x + r.width && p.y >= r.y && p.y < r.y + r.height
+}
+
+/**
+ * The CSS timing function for an animation curve.
+ *
+ * Springs are the interesting case: CSS has no spring, so the bounce is approximated
+ * with an overshooting cubic-bezier. Recognisably springy rather than physically
+ * identical — and the README says so, because a motion curve that looks right but is
+ * not is exactly the kind of quiet inaccuracy this project refuses to ship silently.
+ */
+export function cssEasing(spec: AnimationSpec): string {
+  switch (spec.curve) {
+    case 'linear':
+      return 'linear'
+    case 'easeIn':
+      return 'cubic-bezier(0.42, 0, 1, 1)'
+    case 'easeOut':
+      return 'cubic-bezier(0, 0, 0.58, 1)'
+    case 'easeInOut':
+      return 'cubic-bezier(0.42, 0, 0.58, 1)'
+    case 'spring': {
+      const bounce = spec.bounce ?? 0.25
+      return `cubic-bezier(0.34, ${(1.2 + bounce * 1.6).toFixed(2)}, 0.42, 1)`
+    }
+  }
+}
+
+export function cssTransition(spec: AnimationSpec, properties: string): string {
+  const delay = spec.delay ? ` ${spec.delay * 1000}ms` : ''
+  return properties
+    .split(',')
+    .map((p) => `${p.trim()} ${Math.round(spec.duration * 1000)}ms ${cssEasing(spec)}${delay}`)
+    .join(', ')
 }

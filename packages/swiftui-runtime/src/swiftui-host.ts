@@ -1,7 +1,12 @@
 import type { SourceSpan } from '@studio/shared'
 import {
+  applyKeyPath,
+  asKeyPath,
+  describe,
   double,
+  int,
   opaque,
+  str,
   type ClosureValue,
   type HostCall,
   type InterpreterHost,
@@ -10,13 +15,19 @@ import {
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import {
   asView,
+  ANIMATION_TYPE,
   COLOR_TYPE,
   isView,
+  STYLE_TYPE,
   TOKEN_TYPE,
+  TRANSITION_TYPE,
   VIEW_TYPE,
+  type AnimationPayload,
   type ColorPayload,
+  type GradientPayload,
   type ModifierValue,
   type TokenPayload,
+  type TransitionPayload,
   type ViewArg,
   type ViewValue,
 } from './view-value'
@@ -35,11 +46,28 @@ const VIEW_NAMES: ReadonlySet<string> = new Set([
  * `Button("Save") { save() }` has the same shape as `VStack { Text(…) }`, so the
  * label argument is what distinguishes them: with one, the closure is behaviour;
  * without, it is the view's own label content.
+ *
+ * `NavigationLink` is deliberately *not* here. Its trailing closure is never an
+ * action — with a title argument it is the destination (`NavigationLink("More") {
+ * Detail() }`, the form most code still uses), and without one it is the label. That
+ * ambiguity is resolved in `callGlobal`.
  */
-const ACTION_VIEWS: ReadonlySet<string> = new Set(['Button', 'Link', 'NavigationLink'])
+const ACTION_VIEWS: ReadonlySet<string> = new Set(['Button'])
 
 /** Names that are types rather than views: `Color.red`, `Font.title`. */
-const NAMESPACES: ReadonlySet<string> = new Set(['Color', 'Font', 'Alignment', 'Edge', 'Angle'])
+const NAMESPACES: ReadonlySet<string> = new Set([
+  'Color', 'Font', 'Alignment', 'Edge', 'Angle', 'UnitPoint', 'Axis',
+  'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
+  'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
+])
+
+/**
+ * Views that take a data collection and a row builder.
+ *
+ * `List(items) { item in … }` is sugar for `List { ForEach(items) { … } }`, and
+ * expanding it here means the rest of the pipeline only ever sees the explicit form.
+ */
+const DATA_DRIVEN_VIEWS: ReadonlySet<string> = new Set(['ForEach', 'List', 'Picker'])
 
 function view(v: ViewValue): SwiftValue {
   return opaque(VIEW_TYPE, v)
@@ -55,6 +83,16 @@ function color(payload: ColorPayload): SwiftValue {
 
 function toArgs(call: HostCall): ViewArg[] {
   return call.args.map((a) => ({ label: a.label, value: a.value }))
+}
+
+function numberOf(value: SwiftValue | undefined): number | null {
+  if (!value) return null
+  return value.kind === 'int' || value.kind === 'double' ? value.value : null
+}
+
+function tokenNameOf(value: SwiftValue | undefined): string | null {
+  if (!value || value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return null
+  return (value.payload as TokenPayload).name
 }
 
 /**
@@ -77,6 +115,48 @@ export class SwiftUIHost implements InterpreterHost {
    * silently drops the entire app.
    */
   expandStruct: ((value: SwiftValue) => readonly ViewValue[]) | null = null
+
+  /**
+   * Runs a function inside a named identity scope.
+   *
+   * `ForEach` needs this: without it, every row of a list expands `RowView` in the
+   * same scope, so all rows share one `@State` box. Scoping each iteration by the
+   * element's identity is also what makes state follow a row when the list is
+   * reordered, rather than staying with the position.
+   */
+  scopeIdentity: (<T>(key: string, fn: () => T) => T) | null = null
+
+  /**
+   * The animation `withAnimation` was called with, if any.
+   *
+   * Read and cleared by the runtime after dispatching an event: a state change made
+   * inside `withAnimation { }` animates, one made outside it does not, and the only
+   * thing that distinguishes them is that this was set while the closure ran.
+   */
+  pendingAnimation: AnimationPayload | null = null
+
+  /**
+   * Expands a user view so a modifier can be applied to it.
+   *
+   * Several views become an implicit `Group`, which is what SwiftUI does with a
+   * multi-statement body: the modifier applies to all of them together.
+   */
+  private expandForModifier(target: SwiftValue, span: SourceSpan): ViewValue | null {
+    if (target.kind !== 'struct' || !this.expandStruct) return null
+
+    const produced = this.expandStruct(target)
+    if (produced.length === 0) return null
+    if (produced.length === 1) return produced[0]!
+
+    return {
+      name: 'Group',
+      args: [],
+      children: [...produced],
+      modifiers: [],
+      action: null,
+      span,
+    }
+  }
 
   /** Collected builder results, with user views expanded and non-views dropped. */
   private toViews(values: readonly SwiftValue[]): ViewValue[] {
@@ -105,10 +185,32 @@ export class SwiftUIHost implements InterpreterHost {
 
   callGlobal(name: string, call: HostCall): SwiftValue | undefined {
     if (name === 'Color') return this.makeColor(call)
+    if (name === 'withAnimation') return this.runWithAnimation(call)
+    if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
+    if (name === 'GridItem') return this.makeGridItem(call)
     if (!VIEW_NAMES.has(name)) return undefined
 
     const args = toArgs(call)
+
+    if (DATA_DRIVEN_VIEWS.has(name) && call.trailingClosure && this.looksDataDriven(call)) {
+      return this.makeDataDriven(name, args, call)
+    }
+
     const isAction = ACTION_VIEWS.has(name) && call.args.some((a) => a.label === null)
+
+    // `NavigationLink("Title") { Destination() }` — a title plus a trailing closure
+    // means the closure is the destination, not the label.
+    if (name === 'NavigationLink' && call.trailingClosure && this.hasPlainTitle(call)) {
+      const destination = this.toViews(call.invokeBuilder(call.trailingClosure))
+      return view({
+        name,
+        args: [...args, ...destination.map((d) => ({ label: 'destination', value: view(d) }))],
+        children: [],
+        modifiers: [],
+        action: null,
+        span: call.span,
+      })
+    }
 
     // Content closures are result builders: `VStack { a; b }` yields two children,
     // and an `if` inside contributes only the taken branch.
@@ -128,17 +230,37 @@ export class SwiftUIHost implements InterpreterHost {
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
     // A modifier on a view returns a *new* view with the modifier appended, so the
     // original is untouched — SwiftUI modifiers are value-semantic too.
-    const base = asView(target)
+    //
+    // A user-declared view arrives here as a plain struct, because the interpreter
+    // has no idea it is a view. `TodayView().tabItem { … }` is entirely ordinary
+    // SwiftUI, so the struct is expanded into the views its `body` produces and the
+    // modifier applied to those — a struct with no `body` expands to nothing and
+    // falls through to the interpreter's own "no such member" reporting.
+    const base = asView(target) ?? this.expandForModifier(target, call.span)
     if (base) {
-      const modifier: ModifierValue = { name: member, args: toArgs(call), span: call.span }
+      const modifier: ModifierValue = {
+        name: member,
+        args: toArgs(call),
+        span: call.span,
+        // Unevaluated on purpose: a sheet's content must not run while it is down.
+        closure: call.trailingClosure,
+      }
       return view({ ...base, modifiers: [...base.modifiers, modifier] })
     }
 
     if (target.kind === 'opaque' && target.typeName === COLOR_TYPE) {
       const payload = target.payload as ColorPayload
       if (member === 'opacity') {
-        const amount = call.args[0]?.value
-        return color({ ...payload, opacity: amount?.kind === 'double' || amount?.kind === 'int' ? amount.value : 1 })
+        const amount = numberOf(call.args[0]?.value)
+        return color({ ...payload, opacity: amount ?? 1 })
+      }
+      if (member === 'gradient') {
+        return opaque(STYLE_TYPE, {
+          kind: 'linear',
+          colors: [target, color({ ...payload, opacity: (payload.opacity ?? 1) * 0.55 })],
+          startPoint: 'top',
+          endPoint: 'bottom',
+        } satisfies GradientPayload)
       }
     }
 
@@ -147,12 +269,44 @@ export class SwiftUIHost implements InterpreterHost {
       return this.makeColor(call)
     }
 
+    if (target.kind === 'type' && target.name === 'Animation') {
+      return this.makeAnimation(member, call)
+    }
+
+    if (target.kind === 'type' && target.name === 'Font' && member === 'system') {
+      return this.makeSystemFont(call)
+    }
+
+    return undefined
+  }
+
+  /**
+   * Implicit member syntax *with* arguments: `.easeInOut(duration: 0.3)`.
+   *
+   * Separate from `resolveImplicitMember` because that one never sees the call —
+   * without this hook, every animation collapses to its default duration and the
+   * number the user typed is silently discarded.
+   */
+  callImplicitMember(member: string, call: HostCall): SwiftValue | undefined {
+    if (ANIMATION_CURVES[member] || member === 'spring' || member === 'interpolatingSpring') {
+      return this.makeAnimation(member, call)
+    }
+    if (TRANSITIONS.has(member)) return this.makeTransition(member, call)
+    if (member === 'system') return this.makeSystemFont(call)
+    if (member === 'fixed' || member === 'flexible' || member === 'adaptive') {
+      return this.makeGridItem(call, member)
+    }
+    if (member === 'height' || member === 'fraction') {
+      return token(`detent:${member}:${numberOf(call.args[0]?.value) ?? 0}`)
+    }
     return undefined
   }
 
   getMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
     if (target.kind === 'type') {
       if (target.name === 'Color') return color({ name: member })
+      if (target.name === 'Animation') return this.animationToken(member)
+      if (target.name === 'AnyTransition') return this.transitionToken(member)
       if (NAMESPACES.has(target.name)) return token(member)
       // A view type referenced without arguments: `Spacer` used as `Spacer`.
       if (VIEW_NAMES.has(target.name)) {
@@ -173,13 +327,170 @@ export class SwiftUIHost implements InterpreterHost {
    */
   resolveImplicitMember(member: string): SwiftValue | undefined {
     if (member === 'infinity') return double(Number.POSITIVE_INFINITY)
+    if (ANIMATION_CURVES[member]) return this.animationToken(member)
+    if (TRANSITIONS.has(member)) return this.transitionToken(member)
     return token(member)
   }
 
+  // ------------------------------------------------------------------ private
+
+  /** True when the first argument is a collection rather than a label or a style. */
+  private looksDataDriven(call: HostCall): boolean {
+    const first = call.args.find((a) => a.label === null)?.value
+    return first?.kind === 'array' || first?.kind === 'range'
+  }
+
+  private hasPlainTitle(call: HostCall): boolean {
+    const first = call.args.find((a) => a.label === null)?.value
+    return first?.kind === 'string'
+  }
+
+  /**
+   * Expands `ForEach` (and the collection forms of `List` and `Picker`).
+   *
+   * Each element's rows are built inside an identity scope keyed by the element's
+   * `id` — so `@State` inside a row follows the row's data when the collection is
+   * reordered, which is the whole observable difference between identifying by
+   * identity and identifying by position.
+   */
+  private makeDataDriven(name: string, args: readonly ViewArg[], call: HostCall): SwiftValue {
+    const data = call.args.find((a) => a.label === null)?.value
+    const idPath = asKeyPath(call.args.find((a) => a.label === 'id')?.value)
+    const builder = call.trailingClosure!
+
+    const elements: SwiftValue[] =
+      data?.kind === 'array'
+        ? [...data.elements]
+        : data?.kind === 'range'
+          ? rangeElements(data.lower, data.upper, data.closed)
+          : []
+
+    const children: ViewValue[] = []
+    const childKeys: string[] = []
+
+    elements.forEach((element, index) => {
+      const key = identityKey(element, idPath?.components ?? null, index)
+      const build = () => this.toViews(call.invokeBuilder(builder, [element]))
+      const rows = this.scopeIdentity ? this.scopeIdentity(key, build) : build()
+
+      for (const row of rows) {
+        children.push(row)
+        childKeys.push(key)
+      }
+    })
+
+    return view({ name, args, children, modifiers: [], action: null, span: call.span, childKeys })
+  }
+
+  /**
+   * `withAnimation { … }` — runs the closure, and marks what it changed as animated.
+   *
+   * The animation is recorded rather than applied: the change happens now, but what
+   * animates is the *next* render, which is the only place a from-and-to pair exists.
+   */
+  private runWithAnimation(call: HostCall): SwiftValue {
+    const explicit = call.args.find((a) => a.label === null)?.value
+    const fromToken = tokenNameOf(explicit)
+
+    this.pendingAnimation =
+      (explicit?.kind === 'opaque' && explicit.typeName === ANIMATION_TYPE
+        ? (explicit.payload as AnimationPayload)
+        : null) ??
+      (fromToken ? curveFor(fromToken, null) : null) ??
+      DEFAULT_ANIMATION
+
+    const body = call.trailingClosure ?? asClosure(call.args[call.args.length - 1]?.value)
+    if (body) call.invoke(body)
+    return { kind: 'void' }
+  }
+
+  private makeAnimation(member: string, call: HostCall): SwiftValue {
+    const duration = numberOf(call.args.find((a) => a.label === 'duration')?.value)
+    const payload = curveFor(member, duration) ?? DEFAULT_ANIMATION
+    const delay = numberOf(call.args.find((a) => a.label === 'delay')?.value)
+    return opaque(ANIMATION_TYPE, delay === null ? payload : { ...payload, delay })
+  }
+
+  private animationToken(member: string): SwiftValue {
+    const payload = curveFor(member, null)
+    return payload ? opaque(ANIMATION_TYPE, payload) : token(member)
+  }
+
+  private makeTransition(member: string, call: HostCall): SwiftValue {
+    const edge = tokenNameOf(call.args.find((a) => a.label === 'edge')?.value)
+    return opaque(TRANSITION_TYPE, {
+      kind: transitionKind(member),
+      ...(edge ? { edge } : {}),
+    } satisfies TransitionPayload)
+  }
+
+  private transitionToken(member: string): SwiftValue {
+    return opaque(TRANSITION_TYPE, { kind: transitionKind(member) } satisfies TransitionPayload)
+  }
+
+  private makeGradient(kind: GradientPayload['kind'], call: HostCall): SwiftValue {
+    const colors = call.args.find((a) => a.label === 'colors')?.value
+    const stops = call.args.find((a) => a.label === 'stops')?.value
+    const list =
+      colors?.kind === 'array'
+        ? colors.elements
+        : stops?.kind === 'array'
+          ? stops.elements
+          : call.args.filter((a) => a.label === null).map((a) => a.value)
+
+    return opaque(STYLE_TYPE, {
+      kind,
+      colors: list,
+      startPoint: tokenNameOf(call.args.find((a) => a.label === 'startPoint')?.value),
+      endPoint: tokenNameOf(call.args.find((a) => a.label === 'endPoint')?.value),
+    } satisfies GradientPayload)
+  }
+
+  /**
+   * `GridItem(.adaptive(minimum: 100))` and the bare `.adaptive(minimum: 100)`.
+   *
+   * The size argument is itself a contextual member call, which resolves to a
+   * finished `GridItem` before the enclosing initialiser ever runs. Passing it
+   * straight back through is what stops the outer call flattening an adaptive track
+   * into a flexible one — a silent difference that shows up only as the wrong number
+   * of columns.
+   */
+  private makeGridItem(call: HostCall, kind?: string): SwiftValue {
+    const inner = call.args.find((a) => a.label === null)?.value
+    if (kind === undefined && inner?.kind === 'opaque' && inner.typeName === 'GridItem') {
+      return inner
+    }
+
+    const size = numberOf(inner)
+    const minimum = numberOf(call.args.find((a) => a.label === 'minimum')?.value)
+    const spacing = numberOf(call.args.find((a) => a.label === 'spacing')?.value)
+
+    return opaque('GridItem', {
+      kind: kind ?? tokenNameOf(inner) ?? 'flexible',
+      size: size ?? minimum ?? null,
+      spacing,
+    })
+  }
+
+  private makeSystemFont(call: HostCall): SwiftValue {
+    const size =
+      numberOf(call.args.find((a) => a.label === 'size')?.value) ??
+      numberOf(call.args.find((a) => a.label === null)?.value)
+    const weight = tokenNameOf(call.args.find((a) => a.label === 'weight')?.value)
+    const design = tokenNameOf(call.args.find((a) => a.label === 'design')?.value)
+    return token(`system:${size ?? 17}:${weight ?? 'regular'}:${design ?? 'default'}`)
+  }
+
   private makeColor(call: HostCall): SwiftValue {
-    const white = call.args.find((a) => a.label === 'white')?.value
-    if (white?.kind === 'double' || white?.kind === 'int') {
-      return color({ name: null, white: white.value })
+    const white = numberOf(call.args.find((a) => a.label === 'white')?.value)
+    if (white !== null) return color({ name: null, white })
+
+    const red = numberOf(call.args.find((a) => a.label === 'red')?.value)
+    const green = numberOf(call.args.find((a) => a.label === 'green')?.value)
+    const blue = numberOf(call.args.find((a) => a.label === 'blue')?.value)
+    if (red !== null && green !== null && blue !== null) {
+      const opacity = numberOf(call.args.find((a) => a.label === 'opacity')?.value)
+      return color({ name: null, red, green, blue, ...(opacity !== null ? { opacity } : {}) })
     }
 
     const first = call.args[0]?.value
@@ -188,12 +499,107 @@ export class SwiftUIHost implements InterpreterHost {
     // `Color(.systemGroupedBackground)` — the UIKit bridge, where the argument is a
     // contextual member rather than a string. This is how idiomatic SwiftUI reaches
     // the adaptive backgrounds, so it has to work for dark mode to be usable at all.
-    if (first?.kind === 'opaque' && first.typeName === TOKEN_TYPE) {
-      return color({ name: (first.payload as TokenPayload).name })
-    }
+    const named = tokenNameOf(first)
+    if (named) return color({ name: named })
     return color({ name: 'clear' })
   }
 }
 
-export { isView, asView }
+// -------------------------------------------------------------------- helpers
+
+const GRADIENTS: Readonly<Record<string, GradientPayload['kind']>> = {
+  LinearGradient: 'linear',
+  RadialGradient: 'radial',
+  AngularGradient: 'angular',
+}
+
+const ANIMATION_CURVES: Readonly<Record<string, AnimationPayload['curve']>> = {
+  linear: 'linear',
+  easeIn: 'easeIn',
+  easeOut: 'easeOut',
+  easeInOut: 'easeInOut',
+  default: 'easeInOut',
+  spring: 'spring',
+  bouncy: 'spring',
+  snappy: 'spring',
+  smooth: 'spring',
+  interpolatingSpring: 'spring',
+  interactiveSpring: 'spring',
+}
+
+const TRANSITIONS: ReadonlySet<string> = new Set([
+  'opacity', 'slide', 'scale', 'move', 'identity', 'blurReplace', 'push',
+])
+
+const DEFAULT_ANIMATION: AnimationPayload = { curve: 'easeInOut', duration: 0.35 }
+
+function transitionKind(member: string): TransitionPayload['kind'] {
+  switch (member) {
+    case 'slide':
+      return 'slide'
+    case 'scale':
+      return 'scale'
+    case 'move':
+    case 'push':
+      return 'move'
+    case 'identity':
+      return 'identity'
+    default:
+      return 'opacity'
+  }
+}
+
+function curveFor(member: string, duration: number | null): AnimationPayload | null {
+  const curve = ANIMATION_CURVES[member]
+  if (!curve) return null
+
+  // Apple's spring presets differ mostly in how much they overshoot; approximating
+  // them with a duration and a bounce keeps the preview's motion recognisable
+  // without pretending to reimplement the solver.
+  if (curve === 'spring') {
+    const bounce = member === 'bouncy' ? 0.4 : member === 'snappy' ? 0.15 : 0.25
+    return { curve, duration: duration ?? (member === 'snappy' ? 0.3 : 0.55), bounce }
+  }
+  return { curve, duration: duration ?? 0.35 }
+}
+
+function rangeElements(lower: number, upper: number, closed: boolean): SwiftValue[] {
+  const out: SwiftValue[] = []
+  const end = closed ? upper : upper - 1
+  // A range this long is a mistake rather than a list; capping stops one typo from
+  // spending the whole step budget building views nobody will see.
+  for (let i = lower; i <= end && out.length < 1_000; i++) out.push(int(i))
+  return out
+}
+
+/**
+ * The identity of one `ForEach` element.
+ *
+ * Explicit `id:` wins; then a stored `id` property, which is what `Identifiable`
+ * means in practice; then the index, which is what `ForEach(0..<n)` needs and what
+ * SwiftUI itself falls back to.
+ */
+function identityKey(
+  element: SwiftValue,
+  idComponents: readonly string[] | null,
+  index: number,
+): string {
+  if (idComponents) {
+    return describe(applyKeyPath({ components: idComponents }, element), true)
+  }
+  if (element.kind === 'struct') {
+    const id = element.fields.get('id')
+    if (id !== undefined) return describe(id, true)
+  }
+  if (element.kind === 'string' || element.kind === 'int' || element.kind === 'double') {
+    return describe(element, true)
+  }
+  return `#${index}`
+}
+
+function asClosure(value: SwiftValue | undefined): ClosureValue | null {
+  return value?.kind === 'closure' ? value : null
+}
+
+export { isView, asView, str }
 export type { ClosureValue }

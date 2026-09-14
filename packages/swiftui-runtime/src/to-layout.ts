@@ -1,30 +1,52 @@
 import { rgba, type Fill, type RGBA, type ShapeKind } from '@studio/shared'
-import type { SwiftValue } from '@studio/swift-runtime'
-import { UNIMPLEMENTED_MODIFIERS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
+import { asProjection, truthy, type SwiftValue } from '@studio/swift-runtime'
+import { UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import {
   CENTER,
   insets,
   uniformInsets,
+  ZERO_INSETS,
   type Alignment,
   type Axis,
   type EdgeInsets,
+  type GridTrack,
+  type HitRole,
   type HorizontalAlignment,
   type LayoutElement,
   type LayoutModifier,
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
 import {
+  ALERT,
+  BACK_BUTTON,
+  DIALOG,
+  NAV_BAR,
+  TAB_BAR,
+  TAB_ITEM,
+  type Overlay,
+  type ResolvedUI,
+} from './presentation'
+import { resolveSymbol } from './sf-symbols'
+import {
   bodyFont,
+  colorForName,
+  fontForToken,
   numberArg,
   resolveColorArg,
   resolveColorPayload,
+  resolveFillArg,
   resolveFontArg,
+  resolveWeightArg,
   stringArg,
   type ColorScheme,
 } from './style'
 import {
+  ANIMATION_TYPE,
   COLOR_TYPE,
   TOKEN_TYPE,
+  handlerIdFor,
+  payloadOf,
+  type AnimationPayload,
   type ColorPayload,
   type ModifierValue,
   type TokenPayload,
@@ -44,7 +66,21 @@ import {
 
 export interface ConversionResult {
   readonly element: LayoutElement
-  /** Handler id -> the view path it belongs to, for dispatching taps. */
+  /** Handler id -> the view path it belongs to, for the inspector. */
+  readonly hitTargets: ReadonlyMap<string, string>
+}
+
+/** A whole screen: content, the bars around it, and anything presented over it. */
+export interface ScreenLayout {
+  readonly content: LayoutElement
+  readonly navigationBar: { readonly element: LayoutElement; readonly height: number } | null
+  readonly tabBar: LayoutElement | null
+  readonly overlay: {
+    readonly element: LayoutElement
+    readonly kind: Overlay['kind']
+    readonly detent: number
+    readonly dismissId: string | null
+  } | null
   readonly hitTargets: ReadonlyMap<string, string>
 }
 
@@ -57,13 +93,43 @@ const SHAPES: Readonly<Record<string, ShapeKind>> = {
 }
 
 /** Views that contribute their children to the enclosing stack rather than nesting. */
-const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set(['Group', 'WindowGroup'])
+const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
+  'Group',
+  'WindowGroup',
+  'ForEach',
+  'NavigationStack',
+  'NavigationView',
+  'TabView',
+  'AnyView',
+])
+
+/** iOS metrics the chrome is built from. Points, at the default Dynamic Type size. */
+export const NAV_BAR_HEIGHT = 44
+export const LARGE_TITLE_HEIGHT = 52
+export const TAB_BAR_HEIGHT = 49
+const ROW_MIN_HEIGHT = 44
+const ROW_INSET = 16
+const SEPARATOR_HEIGHT = 0.5
+const SWITCH = { width: 51, height: 31, knob: 27 }
 
 export interface ConversionOptions {
   readonly colorScheme?: ColorScheme
   /** Dynamic Type multiplier applied to every resolved text style. */
   readonly typeScale?: number
   readonly rootAxis?: Axis
+  /**
+   * Device safe-area insets.
+   *
+   * The bars need them, and only the bars: a navigation bar's *background* runs to
+   * the very top of the screen while its content sits below the status bar, which is
+   * one element with internal padding rather than two rects.
+   */
+  readonly safeArea?: {
+    readonly top: number
+    readonly leading: number
+    readonly bottom: number
+    readonly trailing: number
+  }
 }
 
 export function viewsToLayout(
@@ -75,19 +141,57 @@ export function viewsToLayout(
   const converter = new Converter(hitTargets, options.colorScheme ?? 'light', options.typeScale ?? 1)
   const children = converter.convertList(views, 'v', rootAxis)
 
-  const element: LayoutElement =
-    children.length === 1
-      ? children[0]!
-      : {
-          kind: 'stack',
-          id: 'root-stack',
-          axis: rootAxis,
-          spacing: 0,
-          alignment: CENTER,
-          children,
-        }
+  return { element: joinRoot(children, rootAxis), hitTargets }
+}
 
-  return { element, hitTargets }
+/**
+ * Lays out a composed screen.
+ *
+ * Bars and presentations are returned separately rather than wrapped around the
+ * content, because each is positioned against the *device*, not against the content:
+ * a tab bar sits on the bottom edge whatever the content does, and a sheet covers
+ * the status bar. The pipeline places them geometrically, which keeps the layout
+ * engine free of any idea that screens have edges.
+ */
+export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}): ScreenLayout {
+  const hitTargets = new Map<string, string>()
+  const scheme = options.colorScheme ?? 'light'
+  const safeArea = options.safeArea ?? ZERO_INSETS
+  const converter = new Converter(hitTargets, scheme, options.typeScale ?? 1, safeArea)
+
+  const content = joinRoot(converter.convertList(ui.content, 'v', 'vertical'), 'vertical')
+
+  const navigationBar = ui.navigationBar
+    ? {
+        element: converter.navigationBar(ui.navigationBar),
+        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? LARGE_TITLE_HEIGHT : 0),
+      }
+    : null
+
+  const tabBar = ui.tabBar ? converter.tabBar(ui.tabBar) : null
+
+  const overlay = ui.overlay
+    ? {
+        element: converter.overlay(ui.overlay),
+        kind: ui.overlay.kind,
+        detent: ui.overlay.detent,
+        dismissId: ui.overlay.dismissId,
+      }
+    : null
+
+  return { content, navigationBar, tabBar, overlay, hitTargets }
+}
+
+function joinRoot(children: LayoutElement[], axis: Axis): LayoutElement {
+  if (children.length === 1) return children[0]!
+  return {
+    kind: 'stack',
+    id: 'root-stack',
+    axis,
+    spacing: 0,
+    alignment: CENTER,
+    children,
+  }
 }
 
 class Converter {
@@ -95,14 +199,271 @@ class Converter {
     private readonly hitTargets: Map<string, string>,
     private readonly scheme: ColorScheme,
     private readonly typeScale: number,
+    private readonly safeArea: EdgeInsets = ZERO_INSETS,
   ) {}
+
+  /**
+   * Makes an element fill the rect it is laid out in.
+   *
+   * Chrome and presentations are positioned against the device, so each is given an
+   * exact rect and must occupy all of it. Without this they would hug their content
+   * and a navigation bar's background would be exactly as tall as its title.
+   */
+  private fill(
+    element: LayoutElement,
+    id: string,
+    alignment: Alignment = CENTER,
+    vertical = true,
+  ): LayoutElement {
+    return {
+      kind: 'modified',
+      id,
+      modifier: {
+        kind: 'frame',
+        maxWidth: Number.POSITIVE_INFINITY,
+        ...(vertical ? { maxHeight: Number.POSITIVE_INFINITY } : {}),
+        alignment,
+      },
+      child: element,
+    }
+  }
+
+  // ------------------------------------------------------------------ chrome
+
+  /** The navigation bar: a translucent strip with a title and its bar buttons. */
+  navigationBar(bar: ResolvedUI['navigationBar'] & object): LayoutElement {
+    const inline: LayoutElement = {
+      kind: 'zstack',
+      id: 'navbar-inline',
+      alignment: CENTER,
+      children: [
+        {
+          kind: 'stack',
+          id: 'navbar-row',
+          axis: 'horizontal',
+          spacing: 8,
+          alignment: CENTER,
+          children: [
+            ...bar.leading.map((item, i) => this.convert(item, `navbar-l${i}`, 'horizontal')),
+            { kind: 'spacer', id: 'navbar-gap-l', axis: 'horizontal', minLength: 0 },
+            ...bar.trailing.map((item, i) => this.convert(item, `navbar-t${i}`, 'horizontal')),
+          ],
+        },
+        // A large-title bar has no inline title; emitting an empty text node would
+        // put an invisible, un-hoverable row in the inspector for no reason.
+        ...(bar.large
+          ? []
+          : [this.styledText('navbar-title', bar.title, 'headline', 'label')]),
+      ],
+    }
+
+    const strip: LayoutElement = {
+      kind: 'modified',
+      id: 'navbar-pad',
+      modifier: { kind: 'padding', insets: insets(0, ROW_INSET, 0, ROW_INSET) },
+      child: inline,
+      debugName: NAV_BAR,
+    }
+
+    const column: LayoutElement = bar.large
+      ? {
+          // The large-title bar is the inline row with the title below it.
+          kind: 'stack',
+          id: 'navbar-large',
+          axis: 'vertical',
+          spacing: 0,
+          alignment: { horizontal: 'leading', vertical: 'center' },
+          children: [
+            {
+              kind: 'modified',
+              id: 'navbar-strip',
+              modifier: { kind: 'frame', height: NAV_BAR_HEIGHT, alignment: CENTER },
+              child: strip,
+            },
+            {
+              kind: 'modified',
+              id: 'navbar-large-pad',
+              modifier: { kind: 'padding', insets: insets(0, ROW_INSET, 8, ROW_INSET) },
+              child: this.styledText('navbar-large-title', bar.title, 'largeTitle', 'label', 700),
+            },
+          ],
+        }
+      : {
+          kind: 'modified',
+          id: 'navbar-strip',
+          modifier: { kind: 'frame', height: NAV_BAR_HEIGHT, alignment: CENTER },
+          child: strip,
+        }
+
+    // The background runs all the way to the top of the screen; the content starts
+    // below the status bar. One element with a top inset, not two stacked rects.
+    const inset: LayoutElement = {
+      kind: 'modified',
+      id: 'navbar-safe',
+      modifier: { kind: 'padding', insets: insets(this.safeArea.top, 0, 0, 0) },
+      child: column,
+    }
+
+    return this.background(
+      this.fill(inset, 'navbar-fill', { horizontal: 'center', vertical: 'top' }),
+      'navbar-bg',
+      this.color('systemBackground'),
+    )
+  }
+
+  /** The tab bar: evenly divided items, the selected one tinted. */
+  tabBar(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
+    const items = bar.items.map((item, index) => {
+      const selected = boolArg(labelled(item.args, 'selected'))
+      const tint = selected ? this.color('accentColor') : this.color('secondaryLabel')
+
+      const content: LayoutElement = {
+        kind: 'stack',
+        id: `tab-${index}`,
+        axis: 'vertical',
+        spacing: 2,
+        alignment: CENTER,
+        children: item.children.map((child, i) => this.convert(child, `tab-${index}-${i}`, 'vertical')),
+        debugName: TAB_ITEM,
+      }
+
+      const tinted: LayoutElement = {
+        kind: 'modified',
+        id: `tab-${index}-tint`,
+        modifier: { kind: 'foregroundStyle', color: tint },
+        child: {
+          kind: 'modified',
+          id: `tab-${index}-font`,
+          modifier: { kind: 'font', font: fontForToken('caption2', this.typeScale)! },
+          child: content,
+        },
+      }
+
+      const expanded: LayoutElement = {
+        kind: 'modified',
+        id: `tab-${index}-frame`,
+        modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER },
+        child: tinted,
+      }
+
+      return item.path ? this.withHitTarget(expanded, item.path, 'button', labelOf(item)) : expanded
+    })
+
+    const row: LayoutElement = {
+      kind: 'modified',
+      id: 'tabbar-height',
+      modifier: { kind: 'frame', height: TAB_BAR_HEIGHT, alignment: CENTER },
+      child: {
+        kind: 'stack',
+        id: 'tabbar-row',
+        axis: 'horizontal',
+        spacing: 0,
+        alignment: { horizontal: 'center', vertical: 'top' },
+        children: items,
+        debugName: TAB_BAR,
+      },
+    }
+
+    // The bar's background covers the home-indicator area; its items do not.
+    return this.background(
+      this.fill(row, 'tabbar-fill', { horizontal: 'center', vertical: 'top' }),
+      'tabbar-bg',
+      this.color('systemBackground'),
+    )
+  }
+
+  /** A sheet, cover, alert or dialog, laid out as its own little screen. */
+  overlay(overlay: Overlay): LayoutElement {
+    const body = overlay.views.map((v, i) => this.convert(v, `ov-${i}`, 'vertical'))
+
+    if (overlay.kind === 'alert' || overlay.kind === 'dialog') {
+      const title = this.styledText('ov-title', overlay.title, 'headline', 'label', 600)
+      const message = overlay.message
+        ? [this.styledText('ov-message', overlay.message, 'footnote', 'secondaryLabel')]
+        : []
+
+      // An alert hugs its content vertically and fills the width it is given, which
+      // is why only the horizontal axis is filled here.
+      return this.background(
+        this.fill(
+          {
+            kind: 'modified',
+            id: 'ov-pad',
+            modifier: { kind: 'padding', insets: uniformInsets(16) },
+            child: {
+              kind: 'stack',
+              id: 'ov-stack',
+              axis: 'vertical',
+              spacing: 10,
+              alignment: CENTER,
+              children: [
+                ...(overlay.title ? [title] : []),
+                ...message,
+                ...body,
+              ],
+              debugName: overlay.kind === 'alert' ? ALERT : DIALOG,
+            },
+          },
+          'ov-fill',
+          CENTER,
+          false,
+        ),
+        'ov-bg',
+        this.color('secondarySystemGroupedBackground'),
+        14,
+      )
+    }
+
+    const grabber: LayoutElement = {
+      kind: 'modified',
+      id: 'ov-grabber-frame',
+      modifier: { kind: 'frame', width: 36, height: 5, alignment: CENTER },
+      child: {
+        kind: 'fill',
+        id: 'ov-grabber',
+        fill: { kind: 'solid', color: this.color('tertiaryLabel') },
+      },
+    }
+
+    const stack: LayoutElement = {
+      kind: 'stack',
+      id: 'ov-stack',
+      axis: 'vertical',
+      spacing: 0,
+      alignment: CENTER,
+      children: [
+        ...(overlay.kind === 'sheet'
+          ? [
+              {
+                kind: 'modified' as const,
+                id: 'ov-grabber-pad',
+                modifier: { kind: 'padding' as const, insets: insets(8, 0, 8, 0) },
+                child: { kind: 'modified' as const, id: 'ov-grabber-round', modifier: { kind: 'cornerRadius' as const, radius: 2.5 }, child: grabber },
+              },
+            ]
+          : []),
+        ...body,
+      ],
+    }
+
+    // A sheet or cover fills the rect the pipeline gave it, content at the top.
+    return this.background(
+      this.fill(stack, 'ov-fill', { horizontal: 'center', vertical: 'top' }),
+      'ov-bg',
+      this.color('systemBackground'),
+      overlay.kind === 'sheet' ? 12 : 0,
+    )
+  }
+
+  // ----------------------------------------------------------------- content
 
   convertList(views: readonly ViewValue[], prefix: string, axis: Axis): LayoutElement[] {
     const out: LayoutElement[] = []
     views.forEach((view, index) => {
-      const path = `${prefix}-${index}`
+      const path = view.path ?? `${prefix}-${index}`
       // A `Group` is not a container — it exists so a builder can exceed its child
-      // limit, and its children belong to the enclosing stack.
+      // limit, and its children belong to the enclosing stack. `ForEach` is the same:
+      // its rows are siblings of whatever surrounds it, never a nested stack.
       if (TRANSPARENT_VIEWS.has(view.name) && view.modifiers.length === 0) {
         out.push(...this.convertList(view.children, path, axis))
         return
@@ -112,32 +473,88 @@ class Converter {
     return out
   }
 
-  convert(view: ViewValue, path: string, parentAxis: Axis): LayoutElement {
+  convert(view: ViewValue, fallbackPath: string, parentAxis: Axis): LayoutElement {
+    const path = view.path ?? fallbackPath
     let element = this.baseElement(view, path, parentAxis)
 
     // Modifiers wrap outward in source order, so `.padding().background()` nests as
     // background(padding(view)) and therefore covers the padding.
     for (const [index, modifier] of view.modifiers.entries()) {
-      const converted = this.convertModifier(modifier, `${path}m${index}`)
+      const converted = this.convertModifier(modifier, `${path}m${index}`, view)
       if (!converted) continue
       element = { kind: 'modified', id: `${path}m${index}`, modifier: converted, child: element }
     }
 
-    // A Button's tap area covers everything its modifiers added, so the hit target
-    // goes outermost — tapping the padding must count, exactly as on iOS.
-    if (view.action) {
-      const handlerId = `action-${path}`
-      this.hitTargets.set(handlerId, path)
-      element = {
-        kind: 'modified',
-        id: `${path}hit`,
-        modifier: { kind: 'hitTarget', handlerId, label: labelOf(view) },
-        child: element,
-        ...(view.span ? { origin: view.span } : {}),
-      }
+    // The tap area covers everything the modifiers added, so the hit target goes
+    // outermost — tapping a button's padding must count, exactly as on iOS.
+    if (view.intent) {
+      element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
     }
 
     return element
+  }
+
+  private withHitTarget(
+    element: LayoutElement,
+    path: string,
+    role: HitRole,
+    label: string,
+    view?: ViewValue,
+    disabled = false,
+  ): LayoutElement {
+    const handlerId = handlerIdFor(path)
+    this.hitTargets.set(handlerId, path)
+
+    const control = view ? this.controlState(view) : {}
+
+    return {
+      kind: 'modified',
+      id: `${path}hit`,
+      modifier: {
+        kind: 'hitTarget',
+        handlerId,
+        label,
+        role,
+        enabled: !disabled,
+        ...control,
+      },
+      child: element,
+      ...(view?.span ? { origin: view.span } : {}),
+    }
+  }
+
+  /** Values a real DOM control needs: a text field's contents, a slider's range. */
+  private controlState(view: ViewValue): {
+    value?: string
+    placeholder?: string
+    min?: number
+    max?: number
+  } {
+    switch (view.name) {
+      case 'TextField':
+      case 'SecureField': {
+        const bound = bindingValue(labelled(view.args, 'text'))
+        return {
+          value: bound?.kind === 'string' ? bound.value : '',
+          placeholder: stringArg(positional(view.args, 0)) ?? '',
+        }
+      }
+      case 'Slider': {
+        const bound = bindingValue(labelled(view.args, 'value'))
+        const range = labelled(view.args, 'in')
+        return {
+          value: String(numberArg(bound ?? undefined) ?? 0),
+          min: range?.kind === 'range' ? range.lower : 0,
+          max: range?.kind === 'range' ? range.upper : 1,
+        }
+      }
+      case 'Toggle': {
+        const bound = bindingValue(labelled(view.args, 'isOn'))
+        return { value: bound && truthy(bound) ? 'on' : 'off' }
+      }
+      default:
+        return {}
+    }
   }
 
   private baseElement(view: ViewValue, path: string, parentAxis: Axis): LayoutElement {
@@ -151,11 +568,13 @@ class Converter {
 
     switch (view.name) {
       case 'Text':
-        return { kind: 'text', id: path, text: stringArg(view.args[0]?.value) ?? '', ...origin }
+        return { kind: 'text', id: path, text: textOf(view), ...origin }
 
       case 'VStack':
-      case 'HStack': {
-        const axis: Axis = view.name === 'VStack' ? 'vertical' : 'horizontal'
+      case 'HStack':
+      case 'LazyVStack':
+      case 'LazyHStack': {
+        const axis: Axis = view.name.endsWith('VStack') ? 'vertical' : 'horizontal'
         return {
           kind: 'stack',
           id: path,
@@ -188,38 +607,74 @@ class Converter {
         }
 
       case 'Divider':
-        return { kind: 'fill', id: path, fill: { kind: 'solid', color: rgba(60, 60, 67, 0.29) }, ...origin }
+        return this.divider(path, parentAxis, origin)
 
       case 'EmptyView':
         return { kind: 'empty', id: path, ...origin }
 
-      case 'Button': {
-        // The label is the first string argument; a label-closure Button renders its
-        // children instead.
-        const title = stringArg(view.args[0]?.value)
-        const label: LayoutElement =
-          title !== null
-            ? { kind: 'text', id: `${path}label`, text: title, ...origin }
-            : {
-                kind: 'stack',
-                id: `${path}label`,
-                axis: 'horizontal',
-                spacing: 4,
-                alignment: CENTER,
-                children: this.convertList(view.children, `${path}label`, 'horizontal'),
-                ...origin,
-              }
+      case 'ScrollView':
+        return this.scrollView(view, path, origin)
 
-        // Buttons are tinted with the accent colour and use the body font unless the
-        // surrounding environment says otherwise.
+      case 'List':
+        return this.list(view, path, origin)
+
+      case 'Section':
+        // A bare `Section` outside a `List` is just its content, which is what
+        // SwiftUI does with one too.
         return {
-          kind: 'modified',
-          id: `${path}style`,
-          modifier: { kind: 'font', font: bodyFont(this.typeScale) },
-          child: label,
+          kind: 'stack',
+          id: path,
+          axis: 'vertical',
+          spacing: 0,
+          alignment: { horizontal: 'leading', vertical: 'center' },
+          children: this.convertList(view.children, path, 'vertical'),
           ...origin,
         }
-      }
+
+      case 'Form':
+        return this.list({ ...view, name: 'Form' }, path, origin)
+
+      case 'LazyVGrid':
+      case 'LazyHGrid':
+        return this.grid(view, path, origin)
+
+      case 'Image':
+        return this.image(view, path, origin)
+
+      case 'Label':
+        return this.label(view, path, origin)
+
+      case 'Button':
+        return this.button(view, path, origin)
+
+      case 'NavigationLink':
+        return this.navigationLink(view, path, origin)
+
+      case 'Toggle':
+        return this.toggle(view, path, origin)
+
+      case 'TextField':
+      case 'SecureField':
+        return this.textField(view, path, origin)
+
+      case 'Slider':
+        return this.slider(view, path, origin)
+
+      case 'Stepper':
+        return this.stepper(view, path, origin)
+
+      case 'ProgressView':
+        return this.progressView(view, path, origin)
+
+      case 'Picker':
+      case 'Menu':
+        return this.picker(view, path, origin)
+
+      case 'Link':
+        return this.link(view, path, origin)
+
+      case BACK_BUTTON:
+        return this.backButton(view, path, origin)
 
       default:
         break
@@ -227,13 +682,12 @@ class Converter {
 
     const shape = SHAPES[view.name]
     if (shape) {
+      const radius = numberArg(labelled(view.args, 'cornerRadius'))
       return {
         kind: 'shape',
         id: path,
         shape,
-        ...(numberArg(labelled(view.args, 'cornerRadius')) !== null
-          ? { cornerRadius: numberArg(labelled(view.args, 'cornerRadius'))! }
-          : {}),
+        ...(radius !== null ? { cornerRadius: radius } : {}),
         ...origin,
       }
     }
@@ -252,7 +706,745 @@ class Converter {
     }
   }
 
-  private convertModifier(modifier: ModifierValue, id: string): LayoutModifier | null {
+  // ------------------------------------------------------------- containers
+
+  private divider(path: string, parentAxis: Axis, origin: object): LayoutElement {
+    const line: LayoutElement = {
+      kind: 'fill',
+      id: path,
+      fill: { kind: 'solid', color: this.color('separator') },
+      ...origin,
+    }
+    // A divider is a hairline *across* its stack's axis and greedy along it.
+    return {
+      kind: 'modified',
+      id: `${path}line`,
+      modifier:
+        parentAxis === 'vertical'
+          ? { kind: 'frame', height: SEPARATOR_HEIGHT, alignment: CENTER }
+          : { kind: 'frame', width: SEPARATOR_HEIGHT, alignment: CENTER },
+      child: line,
+    }
+  }
+
+  private scrollView(view: ViewValue, path: string, origin: object): LayoutElement {
+    const axisToken = tokenName(positional(view.args, 0))
+    const axis: Axis = axisToken === 'horizontal' ? 'horizontal' : 'vertical'
+    const indicators = boolArg(labelled(view.args, 'showsIndicators')) ?? true
+
+    const children = this.convertList(view.children, path, axis)
+    const content: LayoutElement =
+      children.length === 1
+        ? children[0]!
+        : {
+            kind: 'stack',
+            id: `${path}content`,
+            axis,
+            spacing: 0,
+            alignment: axis === 'vertical' ? { horizontal: 'center', vertical: 'top' } : CENTER,
+            children,
+          }
+
+    return { kind: 'scroll', id: path, axis, showsIndicators: indicators, content, ...origin }
+  }
+
+  /**
+   * A `List` or a `Form`.
+   *
+   * Both are a scroll view of rows with system chrome: hairline separators inset from
+   * the leading edge, a 44pt minimum row height, and — in the grouped styles — each
+   * section as a rounded card on a tinted background. Building it from the same
+   * primitives as everything else means a list row obeys the same layout rules as any
+   * other view, which is the behaviour people actually rely on.
+   */
+  private list(view: ViewValue, path: string, origin: object): LayoutElement {
+    const style = tokenName(modifierArg(view, 'listStyle', 0)) ?? (view.name === 'Form' ? 'insetGrouped' : 'insetGrouped')
+    const grouped = style !== 'plain' && style !== 'sidebar'
+
+    const sections = this.listSections(view, path)
+    const blocks: LayoutElement[] = []
+
+    sections.forEach((section, index) => {
+      if (section.header) {
+        blocks.push({
+          kind: 'modified',
+          id: `${path}s${index}h`,
+          modifier: {
+            kind: 'padding',
+            insets: insets(index === 0 ? 8 : 24, grouped ? ROW_INSET + 16 : ROW_INSET, 6, ROW_INSET),
+          },
+          child: {
+            kind: 'modified',
+            id: `${path}s${index}hf`,
+            modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: { horizontal: 'leading', vertical: 'center' } },
+            child: section.header,
+          },
+        })
+      }
+
+      const rows: LayoutElement[] = []
+      section.rows.forEach((row, rowIndex) => {
+        rows.push(row)
+        if (rowIndex < section.rows.length - 1) {
+          rows.push({
+            kind: 'modified',
+            id: `${path}s${index}r${rowIndex}sep`,
+            modifier: { kind: 'padding', insets: insets(0, ROW_INSET, 0, 0) },
+            child: {
+              kind: 'modified',
+              id: `${path}s${index}r${rowIndex}sepf`,
+              modifier: { kind: 'frame', height: SEPARATOR_HEIGHT, alignment: CENTER },
+              child: {
+                kind: 'fill',
+                id: `${path}s${index}r${rowIndex}sepl`,
+                fill: { kind: 'solid', color: this.color('separator') },
+              },
+            },
+          })
+        }
+      })
+
+      const group: LayoutElement = {
+        kind: 'stack',
+        id: `${path}s${index}`,
+        axis: 'vertical',
+        spacing: 0,
+        alignment: CENTER,
+        children: rows,
+      }
+
+      const card = this.background(
+        group,
+        `${path}s${index}bg`,
+        this.color(grouped ? 'secondarySystemGroupedBackground' : 'systemBackground'),
+        grouped ? 10 : 0,
+      )
+
+      blocks.push(
+        grouped
+          ? {
+              kind: 'modified',
+              id: `${path}s${index}inset`,
+              modifier: { kind: 'padding', insets: insets(0, ROW_INSET, 0, ROW_INSET) },
+              child: card,
+            }
+          : card,
+      )
+    })
+
+    const column: LayoutElement = {
+      kind: 'stack',
+      id: `${path}rows`,
+      axis: 'vertical',
+      spacing: 0,
+      alignment: CENTER,
+      children: [
+        ...blocks,
+        { kind: 'modified', id: `${path}tail`, modifier: { kind: 'frame', height: 24, alignment: CENTER }, child: { kind: 'empty', id: `${path}tailx` } },
+      ],
+      ...origin,
+    }
+
+    return this.background(
+      { kind: 'scroll', id: path, axis: 'vertical', showsIndicators: true, content: column, ...origin },
+      `${path}bg`,
+      this.color(grouped ? 'systemGroupedBackground' : 'systemBackground'),
+    )
+  }
+
+  /** Splits a list's children into sections, wrapping each child as a row. */
+  private listSections(
+    view: ViewValue,
+    path: string,
+  ): { header: LayoutElement | null; rows: LayoutElement[] }[] {
+    const sections: { header: LayoutElement | null; rows: LayoutElement[] }[] = []
+    let current: { header: LayoutElement | null; rows: LayoutElement[] } = { header: null, rows: [] }
+
+    const flatten = (views: readonly ViewValue[]): ViewValue[] =>
+      views.flatMap((v) =>
+        v.name === 'ForEach' && v.modifiers.length === 0 ? flatten(v.children) : [v],
+      )
+
+    for (const child of flatten(view.children)) {
+      if (child.name === 'Section') {
+        if (current.rows.length > 0 || current.header) sections.push(current)
+        const title = stringArg(positional(child.args, 0)) ?? stringArg(labelled(child.args, 'header'))
+        current = {
+          header: title
+            ? this.styledText(`${child.path ?? path}hdr`, title.toUpperCase(), 'caption', 'secondaryLabel')
+            : null,
+          rows: flatten(child.children).map((row) => this.listRow(row, path)),
+        }
+        sections.push(current)
+        current = { header: null, rows: [] }
+        continue
+      }
+      current.rows.push(this.listRow(child, path))
+    }
+
+    if (current.rows.length > 0 || current.header) sections.push(current)
+    return sections
+  }
+
+  /** One list row: system insets, a 44pt floor, and any row background applied. */
+  private listRow(view: ViewValue, fallback: string): LayoutElement {
+    const path = view.path ?? fallback
+    const content = this.convert(view, path, 'horizontal')
+
+    const padded: LayoutElement = {
+      kind: 'modified',
+      id: `${path}rowpad`,
+      modifier: { kind: 'padding', insets: insets(11, ROW_INSET, 11, ROW_INSET) },
+      child: content,
+    }
+
+    const sized: LayoutElement = {
+      kind: 'modified',
+      id: `${path}rowsize`,
+      modifier: {
+        kind: 'frame',
+        maxWidth: Number.POSITIVE_INFINITY,
+        minHeight: ROW_MIN_HEIGHT,
+        alignment: { horizontal: 'leading', vertical: 'center' },
+      },
+      child: padded,
+    }
+
+    const rowBackground = resolveFillArg(modifierArg(view, 'listRowBackground', 0), this.scheme)
+    return rowBackground
+      ? {
+          kind: 'modified',
+          id: `${path}rowbg`,
+          modifier: { kind: 'background', content: { kind: 'fill', id: `${path}rowbgf`, fill: rowBackground } },
+          child: sized,
+        }
+      : sized
+  }
+
+  private grid(view: ViewValue, path: string, origin: object): LayoutElement {
+    const vertical = view.name === 'LazyVGrid'
+    const tracks = gridTracks(labelled(view.args, vertical ? 'columns' : 'rows'))
+    const spacing = numberArg(labelled(view.args, 'spacing')) ?? 8
+
+    return {
+      kind: 'grid',
+      id: path,
+      axis: vertical ? 'vertical' : 'horizontal',
+      tracks,
+      spacing,
+      trackSpacing: tracks[0]?.kind === 'adaptive' ? spacing : spacing,
+      alignment: CENTER,
+      children: this.convertList(view.children, path, vertical ? 'vertical' : 'horizontal'),
+      ...origin,
+    }
+  }
+
+  // --------------------------------------------------------------- controls
+
+  private image(view: ViewValue, path: string, origin: object): LayoutElement {
+    const systemName = stringArg(labelled(view.args, 'systemName'))
+    const assetName = stringArg(positional(view.args, 0))
+    const resizable = view.modifiers.some((m) => m.name === 'resizable')
+
+    if (systemName === null && assetName !== null) {
+      // An asset image: we have no bitmap for it, so a labelled box is the honest
+      // answer rather than a grey rectangle pretending to be the artwork.
+      return {
+        kind: 'placeholder',
+        id: path,
+        feature: `Image("${assetName}")`,
+        reason: 'Asset images are not bundled with the preview.',
+        ...origin,
+      }
+    }
+
+    const symbol = resolveSymbol(systemName ?? '')
+    return {
+      kind: 'image',
+      id: path,
+      glyph: symbol.glyph,
+      resizable,
+      approximated: symbol.approximated,
+      ...origin,
+      ...(systemName ? { debugName: `Image(systemName: "${systemName}")` } : {}),
+    }
+  }
+
+  private label(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0))
+    const systemImage = stringArg(labelled(view.args, 'systemImage'))
+    const symbol = systemImage ? resolveSymbol(systemImage) : null
+
+    const children: LayoutElement[] = []
+    if (symbol) {
+      children.push({
+        kind: 'image',
+        id: `${path}icon`,
+        glyph: symbol.glyph,
+        resizable: false,
+        approximated: symbol.approximated,
+      })
+    }
+    if (title !== null) children.push({ kind: 'text', id: `${path}title`, text: title })
+    children.push(...this.convertList(view.children, path, 'horizontal'))
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 6,
+      alignment: CENTER,
+      children,
+      ...origin,
+    }
+  }
+
+  private button(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0))
+    const label: LayoutElement =
+      title !== null
+        ? { kind: 'text', id: `${path}label`, text: title, ...origin }
+        : {
+            kind: 'stack',
+            id: `${path}label`,
+            axis: 'horizontal',
+            spacing: 4,
+            alignment: CENTER,
+            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+            ...origin,
+          }
+
+    const styled: LayoutElement = {
+      kind: 'modified',
+      id: `${path}style`,
+      modifier: { kind: 'font', font: bodyFont(this.typeScale) },
+      child: label,
+      ...origin,
+    }
+
+    return this.applyButtonStyle(view, styled, path)
+  }
+
+  /** `.bordered` and `.borderedProminent` are shape-and-fill, not just a tint. */
+  private applyButtonStyle(view: ViewValue, label: LayoutElement, path: string): LayoutElement {
+    const style = tokenName(modifierArg(view, 'buttonStyle', 0))
+    if (style !== 'bordered' && style !== 'borderedProminent') return label
+
+    const prominent = style === 'borderedProminent'
+    const tint = resolveColorArg(modifierArg(view, 'tint', 0), this.scheme) ?? this.color('accentColor')
+
+    const tinted: LayoutElement = {
+      kind: 'modified',
+      id: `${path}btncolor`,
+      modifier: {
+        kind: 'foregroundStyle',
+        color: prominent ? rgba(255, 255, 255) : tint,
+      },
+      child: label,
+    }
+
+    return {
+      kind: 'modified',
+      id: `${path}btnbg`,
+      modifier: {
+        kind: 'background',
+        content: {
+          kind: 'fill',
+          id: `${path}btnfill`,
+          fill: { kind: 'solid', color: prominent ? tint : { ...tint, a: tint.a * 0.15 } },
+        },
+      },
+      child: {
+        kind: 'modified',
+        id: `${path}btnradius`,
+        modifier: { kind: 'cornerRadius', radius: 8 },
+        child: {
+          kind: 'modified',
+          id: `${path}btnpad`,
+          modifier: { kind: 'padding', insets: insets(7, 14, 7, 14) },
+          child: tinted,
+        },
+      },
+    }
+  }
+
+  private navigationLink(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0))
+    const label: LayoutElement =
+      title !== null
+        ? { kind: 'text', id: `${path}label`, text: title }
+        : {
+            kind: 'stack',
+            id: `${path}label`,
+            axis: 'horizontal',
+            spacing: 6,
+            alignment: CENTER,
+            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+          }
+
+    // The disclosure chevron is what makes a link legible as one, and iOS draws it
+    // on every link inside a list.
+    const chevron = resolveSymbol('chevron.right')
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [
+        label,
+        { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
+        {
+          kind: 'modified',
+          id: `${path}chevcolor`,
+          modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
+          child: {
+            kind: 'modified',
+            id: `${path}chevfont`,
+            modifier: { kind: 'font', font: fontForToken('footnote', this.typeScale)! },
+            child: {
+              kind: 'image',
+              id: `${path}chev`,
+              glyph: chevron.glyph,
+              resizable: false,
+              approximated: true,
+            },
+          },
+        },
+      ],
+      ...origin,
+    }
+  }
+
+  private backButton(view: ViewValue, path: string, origin: object): LayoutElement {
+    const chevron = resolveSymbol('chevron.left')
+    const title = stringArg(labelled(view.args, 'title')) ?? 'Back'
+
+    return {
+      kind: 'modified',
+      id: `${path}tint`,
+      modifier: { kind: 'foregroundStyle', color: this.color('accentColor') },
+      child: {
+        kind: 'stack',
+        id: path,
+        axis: 'horizontal',
+        spacing: 4,
+        alignment: CENTER,
+        children: [
+          { kind: 'image', id: `${path}chev`, glyph: chevron.glyph, resizable: false, approximated: true },
+          { kind: 'text', id: `${path}title`, text: title },
+        ],
+        ...origin,
+      },
+    }
+  }
+
+  private toggle(view: ViewValue, path: string, origin: object): LayoutElement {
+    const on = truthyBinding(labelled(view.args, 'isOn'))
+    const title = stringArg(positional(view.args, 0))
+
+    const label: LayoutElement =
+      title !== null
+        ? { kind: 'text', id: `${path}label`, text: title }
+        : {
+            kind: 'stack',
+            id: `${path}label`,
+            axis: 'horizontal',
+            spacing: 6,
+            alignment: CENTER,
+            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+          }
+
+    const knob: LayoutElement = {
+      kind: 'modified',
+      id: `${path}knobframe`,
+      modifier: { kind: 'frame', width: SWITCH.knob, height: SWITCH.knob, alignment: CENTER },
+      child: { kind: 'shape', id: `${path}knob`, shape: 'circle' },
+    }
+
+    const track: LayoutElement = {
+      kind: 'modified',
+      id: `${path}switchframe`,
+      modifier: { kind: 'frame', width: SWITCH.width, height: SWITCH.height, alignment: CENTER },
+      child: {
+        kind: 'zstack',
+        id: `${path}switch`,
+        alignment: { horizontal: on ? 'trailing' : 'leading', vertical: 'center' },
+        children: [
+          {
+            kind: 'modified',
+            id: `${path}trackround`,
+            modifier: { kind: 'cornerRadius', radius: SWITCH.height / 2 },
+            child: {
+              kind: 'fill',
+              id: `${path}track`,
+              fill: {
+                kind: 'solid',
+                color: on ? this.color('green') : this.color('systemFill'),
+              },
+            },
+          },
+          {
+            kind: 'modified',
+            id: `${path}knobpad`,
+            modifier: { kind: 'padding', insets: insets(0, 2, 0, 2) },
+            child: {
+              kind: 'modified',
+              id: `${path}knobcolor`,
+              modifier: { kind: 'foregroundStyle', color: rgba(255, 255, 255) },
+              child: knob,
+            },
+          },
+        ],
+      },
+    }
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [label, { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 }, track],
+      ...origin,
+    }
+  }
+
+  private textField(view: ViewValue, path: string, origin: object): LayoutElement {
+    const style = tokenName(modifierArg(view, 'textFieldStyle', 0))
+    const bordered = style === 'roundedBorder'
+
+    // The text itself is drawn by a real `<input>` in the renderer — a caret and an
+    // IME cannot be faked — so the layout reserves the box and paints only the frame.
+    const box: LayoutElement = {
+      kind: 'modified',
+      id: `${path}frame`,
+      modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, height: 36, alignment: CENTER },
+      child: { kind: 'empty', id: `${path}inner` },
+      ...origin,
+    }
+
+    if (!bordered) return box
+
+    return {
+      kind: 'modified',
+      id: `${path}border`,
+      modifier: {
+        kind: 'border',
+        color: this.color('separator'),
+        width: 1,
+        cornerRadius: 6,
+      },
+      child: box,
+    }
+  }
+
+  private slider(view: ViewValue, path: string, origin: object): LayoutElement {
+    void view
+    return {
+      kind: 'modified',
+      id: `${path}frame`,
+      modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, height: 30, alignment: CENTER },
+      child: { kind: 'empty', id: `${path}inner` },
+      ...origin,
+    }
+  }
+
+  private stepper(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0))
+    const label: LayoutElement =
+      title !== null
+        ? { kind: 'text', id: `${path}label`, text: title }
+        : {
+            kind: 'stack',
+            id: `${path}label`,
+            axis: 'horizontal',
+            spacing: 6,
+            alignment: CENTER,
+            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+          }
+
+    const control = this.background(
+      {
+        kind: 'modified',
+        id: `${path}ctrlframe`,
+        modifier: { kind: 'frame', width: 94, height: 32, alignment: CENTER },
+        child: {
+          kind: 'stack',
+          id: `${path}ctrl`,
+          axis: 'horizontal',
+          spacing: 0,
+          alignment: CENTER,
+          children: [
+            this.glyphButton(`${path}minus`, 'minus'),
+            {
+              kind: 'modified',
+              id: `${path}divframe`,
+              modifier: { kind: 'frame', width: SEPARATOR_HEIGHT, height: 20, alignment: CENTER },
+              child: { kind: 'fill', id: `${path}div`, fill: { kind: 'solid', color: this.color('separator') } },
+            },
+            this.glyphButton(`${path}plus`, 'plus'),
+          ],
+        },
+      },
+      `${path}ctrlbg`,
+      this.color('systemFill'),
+      8,
+    )
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [label, { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 }, control],
+      ...origin,
+    }
+  }
+
+  private glyphButton(id: string, symbol: string): LayoutElement {
+    const glyph = resolveSymbol(symbol)
+    return {
+      kind: 'modified',
+      id: `${id}frame`,
+      modifier: { kind: 'frame', width: 46, height: 32, alignment: CENTER },
+      child: {
+        kind: 'image',
+        id,
+        glyph: glyph.glyph,
+        resizable: false,
+        approximated: true,
+      },
+    }
+  }
+
+  private progressView(view: ViewValue, path: string, origin: object): LayoutElement {
+    const value = numberArg(labelled(view.args, 'value'))
+    const total = numberArg(labelled(view.args, 'total')) ?? 1
+    const title = stringArg(positional(view.args, 0))
+
+    if (value === null) {
+      // Indeterminate: iOS draws a spinner. A dotted ring is the closest honest
+      // static approximation, and the renderer spins it.
+      return {
+        kind: 'modified',
+        id: `${path}frame`,
+        modifier: { kind: 'frame', width: 20, height: 20, alignment: CENTER },
+        child: {
+          kind: 'modified',
+          id: `${path}color`,
+          modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
+          child: { kind: 'shape', id: path, shape: 'circle', ...origin },
+        },
+      }
+    }
+
+    const fraction = total === 0 ? 0 : Math.max(0, Math.min(1, value / total))
+    const bar: LayoutElement = {
+      kind: 'modified',
+      id: `${path}barframe`,
+      modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, height: 4, alignment: CENTER },
+      child: {
+        kind: 'zstack',
+        id: `${path}bar`,
+        alignment: { horizontal: 'leading', vertical: 'center' },
+        children: [
+          {
+            kind: 'modified',
+            id: `${path}trackround`,
+            modifier: { kind: 'cornerRadius', radius: 2 },
+            child: { kind: 'fill', id: `${path}track`, fill: { kind: 'solid', color: this.color('systemFill') } },
+          },
+          {
+            kind: 'modified',
+            id: `${path}fillframe`,
+            modifier: {
+              kind: 'frame',
+              maxWidth: fraction <= 0 ? 0 : Number.POSITIVE_INFINITY,
+              alignment: { horizontal: 'leading', vertical: 'center' },
+            },
+            child: {
+              kind: 'modified',
+              id: `${path}fillscale`,
+              modifier: { kind: 'scale', x: fraction, y: 1 },
+              child: {
+                kind: 'modified',
+                id: `${path}fillround`,
+                modifier: { kind: 'cornerRadius', radius: 2 },
+                child: { kind: 'fill', id: `${path}fill`, fill: { kind: 'solid', color: this.color('accentColor') } },
+              },
+            },
+          },
+        ],
+      },
+      ...origin,
+    }
+
+    if (title === null) return bar
+    return {
+      kind: 'stack',
+      id: `${path}stack`,
+      axis: 'vertical',
+      spacing: 6,
+      alignment: { horizontal: 'leading', vertical: 'center' },
+      children: [this.styledText(`${path}title`, title, 'footnote', 'secondaryLabel'), bar],
+    }
+  }
+
+  private picker(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0)) ?? stringArg(labelled(view.args, 'label')) ?? ''
+    const selection = bindingValue(labelled(view.args, 'selection'))
+    const value = selection ? displayValue(selection) : ''
+    const chevron = resolveSymbol('chevron.up.chevron.down')
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [
+        { kind: 'text', id: `${path}label`, text: title },
+        { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
+        {
+          kind: 'modified',
+          id: `${path}valuecolor`,
+          modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
+          child: {
+            kind: 'stack',
+            id: `${path}value`,
+            axis: 'horizontal',
+            spacing: 4,
+            alignment: CENTER,
+            children: [
+              { kind: 'text', id: `${path}valuetext`, text: value },
+              { kind: 'image', id: `${path}chev`, glyph: chevron.glyph, resizable: false, approximated: true },
+            ],
+          },
+        },
+      ],
+      ...origin,
+    }
+  }
+
+  private link(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0)) ?? ''
+    return {
+      kind: 'modified',
+      id: `${path}tint`,
+      modifier: { kind: 'foregroundStyle', color: this.color('accentColor') },
+      child: { kind: 'text', id: path, text: title, ...origin },
+    }
+  }
+
+  // --------------------------------------------------------------- modifiers
+
+  private convertModifier(
+    modifier: ModifierValue,
+    id: string,
+    view: ViewValue,
+  ): LayoutModifier | null {
     const args = modifier.args
 
     switch (modifier.name) {
@@ -263,8 +1455,19 @@ class Converter {
         return frameModifier(args)
 
       case 'background': {
-        const content = this.backgroundContent(args, `${id}bg`)
+        const content = this.backgroundContent(args, modifier, `${id}bg`)
         return content ? { kind: 'background', content } : null
+      }
+
+      case 'overlay': {
+        const content = this.backgroundContent(args, modifier, `${id}ov`)
+        return content
+          ? {
+              kind: 'overlay',
+              content,
+              alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER,
+            }
+          : null
       }
 
       case 'font': {
@@ -272,15 +1475,25 @@ class Converter {
         return font ? { kind: 'font', font } : null
       }
 
+      case 'fontWeight':
+        return { kind: 'fontTrait', weight: resolveWeightArg(args[0]?.value) ?? 700 }
+
+      case 'bold':
+        return { kind: 'fontTrait', weight: 700 }
+
+      case 'italic':
+        return { kind: 'fontTrait', italic: true }
+
+      case 'fontDesign':
+      case 'monospaced':
+        return { kind: 'unsupported', name: modifier.name }
+
       case 'foregroundStyle':
       case 'foregroundColor':
       case 'tint': {
         const color = resolveColorArg(args[0]?.value, this.scheme)
         return color ? { kind: 'foregroundStyle', color } : null
       }
-
-      case 'bold':
-        return { kind: 'unsupported', name: 'bold' }
 
       case 'opacity': {
         const value = numberArg(args[0]?.value)
@@ -292,27 +1505,173 @@ class Converter {
         return radius === null ? null : { kind: 'cornerRadius', radius }
       }
 
+      case 'clipShape': {
+        const shape = shapeOf(args[0]?.value)
+        return {
+          kind: 'clip',
+          shape: shape.kind,
+          cornerRadius: shape.cornerRadius,
+        }
+      }
+
+      case 'clipped':
+        return { kind: 'clip', shape: 'rectangle', cornerRadius: 0 }
+
+      case 'border': {
+        const color = resolveColorArg(args[0]?.value, this.scheme)
+        const width = numberArg(positional(args, 1)) ?? numberArg(labelled(args, 'width')) ?? 1
+        return color ? { kind: 'border', color, width } : null
+      }
+
+      case 'shadow': {
+        const radius = numberArg(labelled(args, 'radius')) ?? numberArg(positional(args, 0)) ?? 4
+        const color = resolveColorArg(labelled(args, 'color'), this.scheme) ?? rgba(0, 0, 0, 0.18)
+        return {
+          kind: 'shadow',
+          color,
+          radius,
+          x: numberArg(labelled(args, 'x')) ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? 0,
+        }
+      }
+
+      case 'offset':
+        return {
+          kind: 'offset',
+          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? 0,
+        }
+
+      case 'fixedSize': {
+        const horizontal = boolArg(labelled(args, 'horizontal'))
+        const vertical = boolArg(labelled(args, 'vertical'))
+        return args.length === 0
+          ? { kind: 'fixedSize', horizontal: true, vertical: true }
+          : { kind: 'fixedSize', horizontal: horizontal ?? false, vertical: vertical ?? false }
+      }
+
+      case 'scaleEffect': {
+        const uniform = numberArg(positional(args, 0))
+        return {
+          kind: 'scale',
+          x: uniform ?? numberArg(labelled(args, 'x')) ?? 1,
+          y: uniform ?? numberArg(labelled(args, 'y')) ?? 1,
+        }
+      }
+
+      case 'rotationEffect': {
+        const degrees = angleDegrees(positional(args, 0) ?? labelled(args, 'angle'))
+        return degrees === null ? null : { kind: 'rotate', degrees }
+      }
+
+      case 'zIndex':
+        return { kind: 'unsupported', name: 'zIndex' }
+
+      case 'animation': {
+        const hint = animationHint(args[0]?.value)
+        return hint ? { kind: 'animate', hint } : null
+      }
+
+      // Recognised and deliberately inert: these change behaviour the preview does
+      // not model, and recording them keeps the inspector honest about what was
+      // written rather than dropping it silently.
+      case 'resizable':
+      case 'listStyle':
+      case 'listRowBackground':
+      case 'buttonStyle':
+      case 'textFieldStyle':
+      case 'tabItem':
+      case 'tag':
+      case 'navigationTitle':
+      case 'navigationBarTitleDisplayMode':
+      case 'navigationDestination':
+      case 'toolbar':
+      case 'sheet':
+      case 'fullScreenCover':
+      case 'alert':
+      case 'confirmationDialog':
+      case 'presentationDetents':
+      case 'onTapGesture':
+      case 'onLongPressGesture':
+      case 'disabled':
+        return null
+
       default:
+        void view
         // Recorded so the coverage warning and the layout agree about what was
         // ignored, rather than the modifier vanishing silently.
-        return UNIMPLEMENTED_MODIFIERS.has(modifier.name)
-          ? { kind: 'unsupported', name: modifier.name }
-          : { kind: 'unsupported', name: modifier.name }
+        return { kind: 'unsupported', name: modifier.name }
     }
   }
 
-  /** `.background(Color.red)` or `.background(RoundedRectangle(...))`. */
-  private backgroundContent(args: readonly ViewArg[], id: string): LayoutElement | null {
-    const value = args[0]?.value
-    if (!value) return null
+  /** `.background(Color.red)`, `.background(.regularMaterial)`, `.background { … }`. */
+  private backgroundContent(
+    args: readonly ViewArg[],
+    modifier: ModifierValue,
+    id: string,
+  ): LayoutElement | null {
+    const value = args.find((a) => a.label === null)?.value
 
-    const fill = fillFromValue(value, this.scheme)
-    if (fill) return { kind: 'fill', id, fill }
+    if (value) {
+      const fill = resolveFillArg(value, this.scheme)
+      if (fill) return { kind: 'fill', id, fill }
 
-    if (value.kind === 'opaque' && value.typeName === 'View') {
-      return this.convert(value.payload as ViewValue, id, 'vertical')
+      if (value.kind === 'opaque' && value.typeName === 'View') {
+        return this.convert(value.payload as ViewValue, id, 'vertical')
+      }
     }
+
+    // A trailing-closure background: `.background { RoundedRectangle(…) }`. The
+    // resolver leaves it unevaluated, so there is nothing to draw unless it did.
+    void modifier
     return null
+  }
+
+  // ----------------------------------------------------------------- helpers
+
+  private color(name: string): RGBA {
+    return colorForName(name, this.scheme) ?? rgba(0, 0, 0)
+  }
+
+  private styledText(
+    id: string,
+    text: string,
+    style: string,
+    color: string,
+    weight?: number,
+  ): LayoutElement {
+    const base: LayoutElement = { kind: 'text', id, text }
+    const coloured: LayoutElement = {
+      kind: 'modified',
+      id: `${id}c`,
+      modifier: { kind: 'foregroundStyle', color: this.color(color) },
+      child: base,
+    }
+    const font = fontForToken(style, this.typeScale)!
+    return {
+      kind: 'modified',
+      id: `${id}f`,
+      modifier: { kind: 'font', font: weight ? { ...font, weight } : font },
+      child: coloured,
+    }
+  }
+
+  private background(
+    child: LayoutElement,
+    id: string,
+    color: RGBA,
+    radius = 0,
+  ): LayoutElement {
+    const fill: LayoutElement = { kind: 'fill', id: `${id}f`, fill: { kind: 'solid', color } }
+    const backed: LayoutElement = {
+      kind: 'modified',
+      id,
+      modifier: { kind: 'background', content: fill },
+      child,
+    }
+    return radius > 0
+      ? { kind: 'modified', id: `${id}r`, modifier: { kind: 'cornerRadius', radius }, child: backed }
+      : backed
   }
 }
 
@@ -326,21 +1685,102 @@ function positional(args: readonly ViewArg[], index: number): SwiftValue | undef
   return args.filter((a) => a.label === null)[index]?.value
 }
 
+/** An argument of a named modifier on a view, for style modifiers read out of band. */
+function modifierArg(view: ViewValue, name: string, index: number): SwiftValue | undefined {
+  const modifier = view.modifiers.find((m) => m.name === name)
+  return modifier ? positional(modifier.args, index) : undefined
+}
+
 /** SwiftUI's default stack spacing is 8 points, not zero. */
 function defaultSpacing(): number {
   return 8
 }
 
-function fillFromValue(value: SwiftValue, scheme: ColorScheme): Fill | null {
-  if (value.kind !== 'opaque') return null
-  if (value.typeName === COLOR_TYPE) {
-    return { kind: 'solid', color: resolveColorPayload(value.payload as ColorPayload, scheme) }
+/** `Text("a") + Text("b")` is not supported yet; the first argument is the content. */
+function textOf(view: ViewValue): string {
+  const first = positional(view.args, 0)
+  if (first?.kind === 'string') return first.value
+  return first ? displayValue(first) : ''
+}
+
+function displayValue(value: SwiftValue): string {
+  switch (value.kind) {
+    case 'string':
+      return value.value
+    case 'int':
+      return String(value.value)
+    case 'double':
+      return Number.isInteger(value.value) ? `${value.value}.0` : String(value.value)
+    case 'bool':
+      return value.value ? 'true' : 'false'
+    case 'opaque':
+      return payloadOf<TokenPayload>(value, TOKEN_TYPE)?.name ?? ''
+    default:
+      return ''
   }
-  if (value.typeName === TOKEN_TYPE) {
-    const color = resolveColorArg(value, scheme)
-    return color ? { kind: 'solid', color } : null
+}
+
+function boolArg(value: SwiftValue | undefined): boolean {
+  return value?.kind === 'bool' ? value.value : false
+}
+
+/** Reads through a binding, so a control shows the value it is bound to. */
+function bindingValue(value: SwiftValue | undefined): SwiftValue | null {
+  const projected = asProjection(value)
+  if (projected) return projected.get()
+  return value ?? null
+}
+
+function truthyBinding(value: SwiftValue | undefined): boolean {
+  const resolved = bindingValue(value)
+  return resolved !== null && truthy(resolved)
+}
+
+function tokenName(value: SwiftValue | undefined): string | null {
+  return payloadOf<TokenPayload>(value, TOKEN_TYPE)?.name ?? null
+}
+
+function animationHint(value: SwiftValue | undefined): AnimationPayload | null {
+  return payloadOf<AnimationPayload>(value, ANIMATION_TYPE)
+}
+
+/** `.degrees(30)` / `.radians(…)`, as `.rotationEffect` takes them. */
+function angleDegrees(value: SwiftValue | undefined): number | null {
+  const name = tokenName(value)
+  if (name?.startsWith('degrees:')) return Number(name.split(':')[1])
+  if (name?.startsWith('radians:')) return (Number(name.split(':')[1]) * 180) / Math.PI
+  return numberArg(value)
+}
+
+function shapeOf(value: SwiftValue | undefined): { kind: ShapeKind; cornerRadius: number } {
+  if (value?.kind === 'opaque' && value.typeName === 'View') {
+    const view = value.payload as ViewValue
+    const shape = SHAPES[view.name]
+    if (shape) {
+      return {
+        kind: shape,
+        cornerRadius: numberArg(labelled(view.args, 'cornerRadius')) ?? 0,
+      }
+    }
   }
-  return null
+  return { kind: 'rectangle', cornerRadius: 0 }
+}
+
+/** `GridItem` values, as `LazyVGrid(columns:)` takes them. */
+function gridTracks(value: SwiftValue | undefined): GridTrack[] {
+  if (value?.kind !== 'array') return [{ kind: 'flexible', size: null }]
+
+  const tracks = value.elements.map((element): GridTrack => {
+    if (element.kind === 'opaque' && element.typeName === 'GridItem') {
+      const payload = element.payload as { kind: string; size: number | null }
+      const kind =
+        payload.kind === 'fixed' ? 'fixed' : payload.kind === 'adaptive' ? 'adaptive' : 'flexible'
+      return { kind, size: payload.size }
+    }
+    return { kind: 'flexible', size: null }
+  })
+
+  return tracks.length > 0 ? tracks : [{ kind: 'flexible', size: null }]
 }
 
 function paddingInsets(args: readonly ViewArg[]): EdgeInsets {
@@ -398,11 +1838,6 @@ function frameModifier(args: readonly ViewArg[]): LayoutModifier {
   }
 }
 
-function tokenName(value: SwiftValue | undefined): string | null {
-  if (!value || value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return null
-  return (value.payload as TokenPayload).name
-}
-
 function alignmentFromToken(value: SwiftValue | undefined): Alignment | null {
   const name = tokenName(value)
   if (!name) return null
@@ -442,7 +1877,41 @@ function zstackAlignment(args: readonly ViewArg[]): Alignment {
 }
 
 function labelOf(view: ViewValue): string {
-  return stringArg(view.args[0]?.value) ?? view.name
+  const first = positional(view.args, 0)
+  if (first?.kind === 'string') return first.value
+
+  // Framework chrome carries its label as a named argument, since it has no source
+  // the user wrote to take a positional one from.
+  const titled = labelled(view.args, 'title')
+  if (titled?.kind === 'string') return titled.value
+
+  const fromChild = view.children.map(labelOf).find((t) => t.length > 0)
+  return fromChild ?? view.name
+}
+
+/** The hit-test role, which decides what the renderer builds for this control. */
+function roleOf(view: ViewValue): HitRole {
+  switch (view.name) {
+    case 'Toggle':
+      return 'toggle'
+    case 'TextField':
+    case 'SecureField':
+      return 'textField'
+    case 'Slider':
+      return 'slider'
+    default:
+      return view.intent?.kind === 'run' && view.action === null && view.name !== 'Button'
+        ? 'tapGesture'
+        : 'button'
+  }
+}
+
+function disabledBy(view: ViewValue): boolean {
+  const modifier = view.modifiers.find((m) => m.name === 'disabled')
+  if (!modifier) return false
+  const value = positional(modifier.args, 0)
+  return value === undefined ? true : truthy(value)
 }
 
 export type { RGBA }
+export { ZERO_INSETS, resolveColorPayload, COLOR_TYPE, type ColorPayload, type Fill }

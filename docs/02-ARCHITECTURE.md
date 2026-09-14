@@ -237,6 +237,36 @@ type ProposedSize = { width: number | null | 'infinity', height: ... }  // null 
 This makes `GeometryReader` trivially correct (it just reads its own placed rect) and gives the
 inspector (FR-5.8) exact frames for free.
 
+**The one exception to flatness, added in Phase 6.** Scrolling, `.clipShape` and `.scaleEffect` all
+need the browser to own a real box: native scroll physics, real overflow clipping and a transform
+that applies to a whole subtree cannot be expressed by absolutely positioning siblings. Rather than
+three mechanisms, a node may name a `parent` — the container it is positioned *inside*, in that
+container's coordinate space. Everything else stays flat and absolute. The cost is that anything
+comparing frames (the inspector's highlight, the test suite's contrast check) has to walk back up to
+the screen; the gain is that scrolling is the browser's, with its own momentum and rubber-banding,
+rather than an approximation of it reimplemented in a worker.
+
+### 7.4 Screen composition (Phase 6)
+
+Between evaluation and layout sits a *resolver* (`swiftui-runtime/presentation.ts`). A screen is not
+just the user's content: it is the content plus whatever the framework puts around and over it — a
+navigation bar, a tab bar, a sheet. None of that comes from evaluating `body`, because the user never
+wrote it.
+
+Three rules keep it from becoming a second, competing view system:
+
+1. **Nothing there invents content.** Every view it shows came out of the user's `body`; the resolver
+   only chooses which of them is on screen.
+2. **One traversal owns identity.** Paths are stamped there and nowhere else, so the hit target a tap
+   arrives at is provably the view that was drawn.
+3. **Framework chrome is explicit.** Bars and back buttons are real view values with reserved names,
+   so they appear in the inspector and in tests like everything else.
+
+Each region is then laid out against the rect it actually occupies on the device, and the results are
+concatenated in paint order. A tab bar is glued to the bottom edge whatever the content does, and a
+sheet deliberately covers the status bar — neither is expressible inside a single layout tree,
+because a proposal-based engine has no notion of an edge to stick to.
+
 ### 7.3 Text measurement
 
 The one thing the worker cannot do alone. A `TextMetrics` service on the main thread wraps a shared

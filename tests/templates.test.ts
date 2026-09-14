@@ -168,7 +168,15 @@ describe.each(TEMPLATES)('template: $name', (template) => {
   })
 })
 
-/** The nearest solid fill painted beneath a node's frame. */
+/**
+ * The nearest solid fill painted beneath a node's frame.
+ *
+ * Only nodes in the *same* coordinate space are considered. Since Phase 6, a node
+ * inside a scroll view is positioned relative to that scroller, so comparing its
+ * frame against an absolutely-positioned one would overlap rectangles that never
+ * touch on screen — and the contrast check would then be measuring a pair of colours
+ * that are never seen together.
+ */
 function backgroundBehind(
   nodes: readonly RenderNode[],
   target: RenderNode,
@@ -176,6 +184,7 @@ function backgroundBehind(
   let found: { r: number; g: number; b: number; a: number } | null = null
   for (const node of nodes) {
     if (node.z >= target.z) continue
+    if (node.parent !== target.parent && node.id !== 'screen') continue
     if (node.background?.kind !== 'solid' || node.background.color.a < 0.9) continue
 
     const f = node.frame

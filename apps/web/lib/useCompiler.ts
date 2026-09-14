@@ -11,6 +11,7 @@ import type {
 } from '@studio/shared'
 import type { DeviceSpec } from '@studio/sim-shell'
 import { measureFontsWhenReady } from './fontMetrics'
+import { recordCoverage } from './telemetry'
 
 /** Edit-to-recompile debounce. Long enough to coalesce a fast typist's burst, short enough to feel live. */
 const DEBOUNCE_MS = 150
@@ -97,6 +98,9 @@ export function useCompiler(
   const accept = useCallback((result: CompileResult) => {
     if (result.revision < paintedRef.current) return
     paintedRef.current = result.revision
+    // Recorded before the paint, so what the Coverage panel shows always describes
+    // the tree on screen rather than the one before it.
+    recordCoverage(result)
     setState({ result, stale: false, workerError: null })
   }, [])
 

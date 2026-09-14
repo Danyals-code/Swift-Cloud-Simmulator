@@ -249,6 +249,7 @@ export type Expr =
   | TupleExpr
   | ForceUnwrapExpr
   | OptionalChainExpr
+  | KeyPathExpr
   | ErrorExpr
 
 export interface IntegerLiteralExpr extends NodeBase {
@@ -388,6 +389,20 @@ export interface ForceUnwrapExpr extends NodeBase {
 export interface OptionalChainExpr extends NodeBase {
   readonly kind: 'optionalChain'
   readonly operand: Expr
+}
+
+/**
+ * `\.self`, `\.id`, `\.colorScheme`.
+ *
+ * Stored as plain component names rather than resolved properties. A key path is
+ * only ever *applied* here — to pick an identity out of a `ForEach` element or to
+ * name an environment value — and none of those uses need the type-level machinery
+ * real key paths carry.
+ */
+export interface KeyPathExpr extends NodeBase {
+  readonly kind: 'keyPath'
+  /** `["self"]` for `\.self`, `["author", "name"]` for `\.author.name`. */
+  readonly components: readonly string[]
 }
 
 export interface ErrorExpr extends NodeBase {

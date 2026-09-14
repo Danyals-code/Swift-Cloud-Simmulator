@@ -1,5 +1,5 @@
 /**
- * The symbols the slice knows about.
+ * The symbols the preview knows about.
  *
  * Split three ways, and the split is the whole point:
  *
@@ -7,95 +7,126 @@
  * - **Known but unimplemented** — real SwiftUI, not built yet. Produces a precise
  *   "not implemented in the preview yet" warning naming the feature, which is both
  *   what FR-4.11 requires and what feeds the coverage telemetry that decides the
- *   Phase 6 build order.
+ *   build order.
  * - **Unknown** — not a symbol we recognise at all, and not declared in the project.
  *   Only this case is an error.
  *
- * The middle bucket is what stops the product lying. Without it, `NavigationStack`
- * would report as "unresolved identifier", which is both wrong and unhelpful — the
- * name is perfectly valid Swift, it is *this preview* that cannot draw it.
+ * The middle bucket is what stops the product lying. Without it, `Chart` would report
+ * as "unresolved identifier", which is both wrong and unhelpful — the name is
+ * perfectly valid Swift, it is *this preview* that cannot draw it.
+ *
+ * Kept in sync with docs/05-SWIFTUI-COVERAGE.md, which is the public version of this
+ * same table. A name may only move up a bucket in the same change that makes it true.
  */
 
-/** Views the slice renders. Kept in sync with docs/06-VERTICAL-SLICE.md §3. */
+/** Views the preview renders. */
 export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
-  'VStack', 'HStack', 'ZStack', 'Spacer', 'Group',
-  'Text', 'Button',
+  // layout
+  'VStack', 'HStack', 'ZStack', 'Spacer', 'Group', 'Divider',
+  'LazyVStack', 'LazyHStack', 'LazyVGrid', 'LazyHGrid',
+  'ScrollView', 'ForEach',
+  // content
+  'Text', 'Image', 'Label', 'Link',
+  // controls
+  'Button', 'Toggle', 'TextField', 'SecureField', 'Slider', 'Stepper', 'ProgressView', 'Picker',
+  // collections and navigation
+  'List', 'Section', 'Form',
+  'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView',
+  // shapes
   'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule',
-  'EmptyView',
-  'WindowGroup',
+  // styles
+  'LinearGradient', 'RadialGradient', 'AngularGradient', 'GridItem',
+  // structure
+  'EmptyView', 'WindowGroup', 'ToolbarItem', 'ToolbarItemGroup',
 ])
 
-/** Modifiers the slice applies. */
+/** Modifiers the preview applies. */
 export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
-  'frame', 'padding',
-  'background', 'foregroundStyle', 'foregroundColor',
+  // layout
+  'frame', 'padding', 'offset', 'fixedSize', 'clipShape', 'clipped',
+  // appearance
+  'background', 'overlay', 'border', 'shadow', 'cornerRadius', 'opacity',
+  'foregroundStyle', 'foregroundColor', 'tint', 'resizable',
+  // typography
   'font', 'bold', 'italic', 'fontWeight',
-  'opacity', 'cornerRadius',
-  'onTapGesture',
+  // transforms and motion
+  'scaleEffect', 'rotationEffect', 'animation',
+  // navigation and presentation
+  'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar',
+  'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
+  'tabItem', 'tag',
+  // lists
+  'listStyle', 'listRowBackground',
+  // interaction
+  'onTapGesture', 'onLongPressGesture', 'disabled', 'buttonStyle', 'textFieldStyle',
+  // The deprecated spelling of `.tint`, and a `Color` property of the same name.
+  'accentColor',
 ])
 
 /** Real SwiftUI views that the preview does not draw yet, with the phase that adds them. */
 export const UNIMPLEMENTED_VIEWS: ReadonlyMap<string, number> = new Map([
-  ['Image', 3], ['Label', 3], ['ProgressView', 3], ['Divider', 3],
-  ['Toggle', 3], ['Slider', 3], ['Stepper', 3], ['TextField', 3], ['SecureField', 3],
-  ['ScrollView', 3], ['ForEach', 3], ['GeometryReader', 3],
-  ['LazyVStack', 6], ['LazyHStack', 6], ['LazyVGrid', 6], ['LazyHGrid', 6], ['Grid', 6],
-  ['List', 6], ['Section', 6], ['Form', 6],
-  ['NavigationStack', 6], ['NavigationLink', 6], ['NavigationSplitView', 6], ['TabView', 6],
-  ['Picker', 6], ['DatePicker', 6], ['ColorPicker', 6], ['TextEditor', 4],
-  ['Menu', 6], ['Link', 4], ['ShareLink', 6], ['Gauge', 6],
-  ['AsyncImage', 6], ['Canvas', 6], ['TimelineView', 6], ['Chart', 6],
-  ['ViewThatFits', 6], ['AnyView', 6], ['Path', 6],
+  ['GeometryReader', 7], ['ViewThatFits', 7], ['AnyView', 7],
+  ['Grid', 7], ['GridRow', 7],
+  ['NavigationSplitView', 7],
+  ['DatePicker', 7], ['ColorPicker', 7], ['TextEditor', 7],
+  ['Menu', 7], ['ShareLink', 7], ['Gauge', 7],
+  ['AsyncImage', 7], ['Canvas', 7], ['TimelineView', 7], ['Chart', 7], ['Path', 7],
+  ['Table', 7], ['OutlineGroup', 7], ['DisclosureGroup', 7],
 ])
 
 /** Real SwiftUI modifiers the preview ignores for now. */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
-  ['overlay', 3], ['shadow', 3], ['border', 3], ['clipShape', 3], ['clipped', 3],
-  ['offset', 3], ['position', 3], ['fixedSize', 3], ['layoutPriority', 3],
-  ['aspectRatio', 3], ['scaledToFit', 3], ['scaledToFill', 3],
-  ['rotationEffect', 3], ['scaleEffect', 3],
-  ['onAppear', 3], ['onDisappear', 3], ['disabled', 3], ['allowsHitTesting', 3],
-  ['tint', 4], ['accentColor', 4], ['task', 4], ['onChange', 4],
-  ['buttonStyle', 4], ['toggleStyle', 4], ['textFieldStyle', 4], ['listStyle', 6],
-  ['blur', 6], ['saturation', 6], ['brightness', 6], ['contrast', 6], ['mask', 6],
-  ['animation', 6], ['transition', 6], ['matchedGeometryEffect', 6],
-  ['sheet', 6], ['fullScreenCover', 6], ['alert', 6], ['confirmationDialog', 6], ['popover', 6],
-  ['navigationTitle', 6], ['navigationDestination', 6], ['toolbar', 6],
-  ['searchable', 6], ['refreshable', 6], ['onDelete', 6], ['onMove', 6],
-  ['safeAreaInset', 6], ['ignoresSafeArea', 6], ['alignmentGuide', 6],
-  ['onLongPressGesture', 6], ['gesture', 6], ['simultaneousGesture', 6],
-  ['accessibilityLabel', 4], ['accessibilityHint', 4], ['accessibilityValue', 4],
-  ['environment', 3], ['environmentObject', 3], ['id', 3], ['tag', 6], ['zIndex', 6],
+  ['position', 7], ['layoutPriority', 7],
+  ['aspectRatio', 7], ['scaledToFit', 7], ['scaledToFill', 7],
+  ['onAppear', 7], ['onDisappear', 7], ['task', 7], ['onChange', 7],
+  ['allowsHitTesting', 7],
+  ['toggleStyle', 7], ['pickerStyle', 7], ['labelStyle', 7],
+  ['blur', 7], ['saturation', 7], ['brightness', 7], ['contrast', 7], ['mask', 7],
+  ['transition', 7], ['matchedGeometryEffect', 7], ['phaseAnimator', 7],
+  ['popover', 7], ['searchable', 7], ['refreshable', 7], ['onDelete', 7], ['onMove', 7],
+  ['swipeActions', 7], ['contextMenu', 7], ['badge', 7],
+  ['safeAreaInset', 7], ['ignoresSafeArea', 7], ['alignmentGuide', 7],
+  ['gesture', 7], ['simultaneousGesture', 7], ['highPriorityGesture', 7],
+  ['accessibilityLabel', 7], ['accessibilityHint', 7], ['accessibilityValue', 7],
+  ['environment', 7], ['environmentObject', 7], ['id', 7], ['zIndex', 7],
+  ['lineLimit', 7], ['multilineTextAlignment', 7], ['textCase', 7], ['kerning', 7],
+  ['monospaced', 7], ['fontDesign', 7], ['minimumScaleFactor', 7],
+  ['listRowSeparator', 7], ['listRowInsets', 7], ['scrollIndicators', 7],
+  ['scrollDismissesKeyboard', 7], ['scrollTargetBehavior', 7],
+  ['keyboardType', 7], ['submitLabel', 7], ['onSubmit', 7], ['focused', 7],
+  ['symbolRenderingMode', 7], ['imageScale', 7], ['interpolation', 7],
 ])
 
-/** Types nameable in the slice — as a value (`Color.red`) or an annotation (`: Int`). */
+/** Types nameable in the preview — as a value (`Color.red`) or an annotation (`: Int`). */
 export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'String', 'Bool', 'Character',
   'Array', 'Dictionary', 'Set', 'Optional', 'Range', 'ClosedRange',
   'Color', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
+  'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
+  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date',
   'View', 'App', 'Scene', 'Identifiable', 'Equatable', 'Hashable', 'Comparable', 'Codable',
   'Void', 'Any', 'AnyObject', 'Never',
 ])
 
-/** Free functions available in the slice. */
+/** Free functions available in the preview. */
 export const KNOWN_FUNCTIONS: ReadonlySet<string> = new Set([
-  'print', 'min', 'max', 'abs', 'zip', 'stride',
+  'print', 'min', 'max', 'abs', 'zip', 'stride', 'withAnimation',
 ])
 
-/** Property wrappers, mapped to whether the slice implements them. */
+/** Property wrappers, mapped to whether the preview implements them. */
 export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean; phase: number }> = new Map([
   ['State', { supported: true, phase: 3 }],
-  ['Binding', { supported: false, phase: 4 }],
-  ['StateObject', { supported: false, phase: 4 }],
-  ['ObservedObject', { supported: false, phase: 4 }],
-  ['EnvironmentObject', { supported: false, phase: 4 }],
-  ['Environment', { supported: false, phase: 4 }],
-  ['Published', { supported: false, phase: 4 }],
-  ['AppStorage', { supported: false, phase: 6 }],
-  ['SceneStorage', { supported: false, phase: 6 }],
-  ['FocusState', { supported: false, phase: 6 }],
-  ['GestureState', { supported: false, phase: 6 }],
+  ['Binding', { supported: true, phase: 6 }],
+  ['StateObject', { supported: false, phase: 7 }],
+  ['ObservedObject', { supported: false, phase: 7 }],
+  ['EnvironmentObject', { supported: false, phase: 7 }],
+  ['Environment', { supported: false, phase: 7 }],
+  ['Published', { supported: false, phase: 7 }],
+  ['AppStorage', { supported: false, phase: 7 }],
+  ['SceneStorage', { supported: false, phase: 7 }],
+  ['FocusState', { supported: false, phase: 7 }],
+  ['GestureState', { supported: false, phase: 7 }],
 ])
 
 /** Attributes that are meaningful rather than property wrappers. */

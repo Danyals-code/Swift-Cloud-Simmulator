@@ -2,10 +2,15 @@ import type { Fill, Rect, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from
 import {
   childEnvironment,
   type Alignment,
+  type AnimationHint,
+  type GridElement,
+  type GridTrack,
+  type HitRole,
   type LayoutElement,
   type LayoutEnvironment,
   type LayoutModifier,
   type ModifiedElement,
+  type ScrollElement,
   type StackElement,
 } from './elements'
 import { FontMetricsTable, measureText, type TextLineBox } from './metrics'
@@ -21,6 +26,19 @@ export type PaintSpec =
     }
   | { readonly kind: 'fill'; readonly fill: Fill }
   | { readonly kind: 'shape'; readonly shape: ShapeKind; readonly fill: Fill }
+  | {
+      readonly kind: 'image'
+      readonly glyph: string
+      readonly font: ResolvedFont
+      readonly color: RGBA
+      readonly approximated: boolean
+    }
+  | {
+      readonly kind: 'scroll'
+      readonly axis: 'vertical' | 'horizontal'
+      readonly content: Size
+      readonly showsIndicators: boolean
+    }
   | { readonly kind: 'placeholder'; readonly feature: string; readonly reason: string }
   | { readonly kind: 'hit' }
 
@@ -32,9 +50,39 @@ export interface PlacedNode {
   readonly cornerRadius: number
   readonly paint: PaintSpec
   readonly origin?: SourceSpan
-  readonly hitTarget?: { readonly handlerId: string; readonly label: string }
+  readonly hitTarget?: {
+    readonly handlerId: string
+    readonly label: string
+    readonly role: HitRole
+    readonly enabled: boolean
+    readonly value?: string
+    readonly placeholder?: string
+    readonly min?: number
+    readonly max?: number
+    /** Resolved from the environment, so a DOM control matches the text around it. */
+    readonly font?: ResolvedFont
+    readonly color?: RGBA
+  }
   readonly debugName?: string
   readonly debugModifiers?: readonly string[]
+  /**
+   * The scroll container this node lives inside, if any.
+   *
+   * The single exception to the flat, absolutely-positioned output: nodes inside a
+   * scroll view are positioned in *its* coordinate space, so the browser can scroll
+   * them with native physics instead of us reimplementing momentum in the worker.
+   */
+  readonly parent?: string
+  readonly clip?: boolean
+  readonly border?: { readonly color: RGBA; readonly width: number; readonly cornerRadius: number }
+  readonly shadow?: {
+    readonly color: RGBA
+    readonly radius: number
+    readonly x: number
+    readonly y: number
+  }
+  readonly transform?: { readonly scaleX: number; readonly scaleY: number; readonly rotate: number }
+  readonly animation?: AnimationHint
 }
 
 /**
@@ -90,7 +138,7 @@ export class LayoutEngine {
     const nodes: PlacedNode[] = []
     const size = this.measure(root, { width: bounds.width, height: bounds.height }, env)
 
-    this.place(root, alignedRect(bounds, size, alignment), env, nodes, 0)
+    this.place(root, alignedRect(bounds, size, alignment), env, nodes, 0, null)
     return nodes
   }
 
@@ -144,6 +192,34 @@ export class LayoutEngine {
           width: resolve(proposal.width, 10, UNBOUNDED),
           height: resolve(proposal.height, 10, UNBOUNDED),
         }
+
+      case 'image': {
+        // A symbol is a glyph: its box comes from the font, exactly as in SwiftUI,
+        // until `.resizable()` makes it fill what it is offered instead.
+        if (element.resizable) {
+          return {
+            width: resolve(proposal.width, 24, UNBOUNDED),
+            height: resolve(proposal.height, 24, UNBOUNDED),
+          }
+        }
+        return { width: env.font.size * 1.18, height: env.font.lineHeight }
+      }
+
+      case 'scroll': {
+        const vertical = element.axis === 'vertical'
+        const content = this.measure(element.content, scrollProposal(element, proposal), env)
+        // A scroll view takes all the space offered along its axis and hugs its
+        // content across it — the opposite of what its content just reported.
+        const along = vertical ? proposal.height : proposal.width
+        const extent = along === null ? (vertical ? content.height : content.width) : resolve(along, 0, UNBOUNDED)
+        const cross = vertical
+          ? resolve(proposal.width, content.width, content.width)
+          : resolve(proposal.height, content.height, content.height)
+        return vertical ? { width: cross, height: extent } : { width: extent, height: cross }
+      }
+
+      case 'grid':
+        return this.measureGrid(element, proposal, env).size
 
       case 'placeholder':
         return { width: resolve(proposal.width, 200, UNBOUNDED), height: 64 }
@@ -285,12 +361,107 @@ export class LayoutEngine {
         }
       }
 
-      // A background never changes the size of what it sits behind.
+      // A background never changes the size of what it sits behind — and neither
+      // does an overlay, which is the whole reason both are modifiers rather than
+      // stacks.
       case 'background':
+      case 'overlay':
         return this.measure(element.child, proposal, inner)
+
+      case 'fixedSize': {
+        // Proposing nil asks for the ideal size, which is exactly what `.fixedSize()`
+        // means: stop compressing me, I would rather overflow than wrap.
+        const ideal: ProposedSize = {
+          width: modifier.horizontal ? null : proposal.width,
+          height: modifier.vertical ? null : proposal.height,
+        }
+        return this.measure(element.child, ideal, inner)
+      }
+
+      case 'scale': {
+        const size = this.measure(element.child, proposal, inner)
+        // `.scaleEffect` is a paint-time transform: layout still reserves the
+        // untransformed size, which is why a scaled view overlaps its neighbours.
+        return size
+      }
 
       default:
         return this.measure(element.child, proposal, inner)
+    }
+  }
+
+  /**
+   * Resolves a grid's tracks and the position of every child within them.
+   *
+   * Tracks are sized against the cross-axis extent first, then children flow into
+   * them in order. Adaptive tracks decide their own count from the available width,
+   * which is the one grid behaviour that cannot be expressed as nested stacks and
+   * therefore the reason this is a layout element at all.
+   */
+  private measureGrid(
+    element: GridElement,
+    proposal: ProposedSize,
+    env: LayoutEnvironment,
+  ): { size: Size; cells: Rect[] } {
+    const vertical = element.axis === 'vertical'
+    const crossAvailable = resolve(vertical ? proposal.width : proposal.height, 320, 320)
+
+    const lanes = resolveTracks(element.tracks, crossAvailable, element.trackSpacing)
+    const columns = Math.max(1, lanes.length)
+
+    const laneOffsets: number[] = []
+    let running = 0
+    for (const lane of lanes) {
+      laneOffsets.push(running)
+      running += lane + element.trackSpacing
+    }
+
+    // Measure every child first, then size each row to its tallest member — a grid
+    // row is uniform, so a cell cannot be laid out until its siblings are known.
+    const sizes = element.children.map((child, index) => {
+      const laneSize = lanes[index % columns] ?? crossAvailable
+      return this.measure(
+        child,
+        vertical ? { width: laneSize, height: null } : { width: null, height: laneSize },
+        env,
+      )
+    })
+
+    const rows = Math.ceil(sizes.length / columns)
+    const rowExtents: number[] = []
+    for (let row = 0; row < rows; row++) {
+      let extent = 0
+      for (let column = 0; column < columns; column++) {
+        const size = sizes[row * columns + column]
+        if (size) extent = Math.max(extent, vertical ? size.height : size.width)
+      }
+      rowExtents.push(extent)
+    }
+
+    const rowOffsets: number[] = []
+    let mainRunning = 0
+    for (const extent of rowExtents) {
+      rowOffsets.push(mainRunning)
+      mainRunning += extent + element.spacing
+    }
+    const mainExtent = Math.max(0, mainRunning - element.spacing)
+
+    const cells: Rect[] = sizes.map((_, index) => {
+      const row = Math.floor(index / columns)
+      const column = index % columns
+      const lane = lanes[column] ?? crossAvailable
+      const extent = rowExtents[row] ?? 0
+      return vertical
+        ? { x: laneOffsets[column] ?? 0, y: rowOffsets[row] ?? 0, width: lane, height: extent }
+        : { x: rowOffsets[row] ?? 0, y: laneOffsets[column] ?? 0, width: extent, height: lane }
+    })
+
+    const crossExtent = lanes.reduce((a, b) => a + b, 0) + element.trackSpacing * (columns - 1)
+    return {
+      size: vertical
+        ? { width: Math.max(0, crossExtent), height: mainExtent }
+        : { width: mainExtent, height: Math.max(0, crossExtent) },
+      cells,
     }
   }
 
@@ -302,6 +473,7 @@ export class LayoutEngine {
     env: LayoutEnvironment,
     out: PlacedNode[],
     z: number,
+    parent: string | null,
   ): number {
     switch (element.kind) {
       // A spacer occupies space but paints nothing; an empty view does neither.
@@ -325,10 +497,38 @@ export class LayoutEngine {
             color: env.foregroundColor,
           },
           ...debugInfo(element),
+          ...decorations(env, parent),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
       }
+
+      case 'image': {
+        out.push({
+          id: element.id,
+          frame: bounds,
+          z,
+          opacity: env.opacity,
+          cornerRadius: 0,
+          paint: {
+            kind: 'image',
+            glyph: element.glyph,
+            font: env.font,
+            color: env.foregroundColor,
+            approximated: element.approximated,
+          },
+          ...debugInfo(element),
+          ...decorations(env, parent),
+          ...(element.origin ? { origin: element.origin } : {}),
+        })
+        return z + 1
+      }
+
+      case 'scroll':
+        return this.placeScroll(element, bounds, env, out, z, parent)
+
+      case 'grid':
+        return this.placeGrid(element, bounds, env, out, z, parent)
 
       case 'shape':
         out.push({
@@ -343,6 +543,7 @@ export class LayoutEngine {
             fill: { kind: 'solid', color: env.foregroundColor },
           },
           ...debugInfo(element),
+          ...decorations(env, parent),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
@@ -356,6 +557,7 @@ export class LayoutEngine {
           cornerRadius: env.cornerRadius,
           paint: { kind: 'fill', fill: element.fill },
           ...debugInfo(element),
+          ...decorations(env, parent),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
@@ -369,25 +571,104 @@ export class LayoutEngine {
           cornerRadius: 8,
           paint: { kind: 'placeholder', feature: element.feature, reason: element.reason },
           ...debugInfo(element),
+          ...decorations(env, parent),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return z + 1
 
       case 'stack':
-        return this.placeStack(element, bounds, env, out, z)
+        return this.placeStack(element, bounds, env, out, z, parent)
 
       case 'zstack': {
         let next = z
         for (const child of element.children) {
           const size = this.measure(child, { width: bounds.width, height: bounds.height }, env)
-          next = this.place(child, alignedRect(bounds, size, element.alignment), env, out, next)
+          next = this.place(child, alignedRect(bounds, size, element.alignment), env, out, next, parent)
         }
         return next
       }
 
       case 'modified':
-        return this.placeModified(element, bounds, env, out, z)
+        return this.placeModified(element, bounds, env, out, z, parent)
     }
+  }
+
+  /**
+   * Places a scroll view: a clipping container plus its content, in its coordinates.
+   *
+   * The content is laid out at its full natural extent and positioned from the
+   * container's origin rather than the screen's, so the renderer can hand the whole
+   * thing to the browser and get native scrolling — momentum, rubber-banding,
+   * scrollbar — instead of us approximating all of it in the worker.
+   */
+  private placeScroll(
+    element: ScrollElement,
+    bounds: Rect,
+    env: LayoutEnvironment,
+    out: PlacedNode[],
+    z: number,
+    parent: string | null,
+  ): number {
+    const vertical = element.axis === 'vertical'
+    const proposal: ProposedSize = { width: bounds.width, height: bounds.height }
+    const content = this.measure(element.content, scrollProposal(element, proposal), env)
+
+    const contentSize: Size = vertical
+      ? { width: bounds.width, height: Math.max(content.height, bounds.height) }
+      : { width: Math.max(content.width, bounds.width), height: bounds.height }
+
+    out.push({
+      id: element.id,
+      frame: bounds,
+      z,
+      opacity: env.opacity,
+      cornerRadius: env.cornerRadius,
+      clip: true,
+      paint: {
+        kind: 'scroll',
+        axis: element.axis,
+        content: contentSize,
+        showsIndicators: element.showsIndicators,
+      },
+      ...debugInfo(element),
+      ...decorations(env, parent),
+      ...(element.origin ? { origin: element.origin } : {}),
+    })
+
+    return this.place(
+      element.content,
+      { x: 0, y: 0, width: contentSize.width, height: contentSize.height },
+      env,
+      out,
+      z + 1,
+      element.id,
+    )
+  }
+
+  private placeGrid(
+    element: GridElement,
+    bounds: Rect,
+    env: LayoutEnvironment,
+    out: PlacedNode[],
+    z: number,
+    parent: string | null,
+  ): number {
+    const { cells } = this.measureGrid(element, { width: bounds.width, height: bounds.height }, env)
+
+    let next = z
+    element.children.forEach((child, index) => {
+      const cell = cells[index]
+      if (!cell) return
+
+      const size = this.measure(child, { width: cell.width, height: cell.height }, env)
+      const rect = alignedRect(
+        { x: bounds.x + cell.x, y: bounds.y + cell.y, width: cell.width, height: cell.height },
+        size,
+        element.alignment,
+      )
+      next = this.place(child, rect, env, out, next, parent)
+    })
+    return next
   }
 
   private placeStack(
@@ -396,6 +677,7 @@ export class LayoutEngine {
     env: LayoutEnvironment,
     out: PlacedNode[],
     z: number,
+    parent: string | null,
   ): number {
     const vertical = element.axis === 'vertical'
     const proposal: ProposedSize = { width: bounds.width, height: bounds.height }
@@ -423,7 +705,7 @@ export class LayoutEngine {
         ? { x: bounds.x + crossOffset, y: bounds.y + offset, width: size.width, height: size.height }
         : { x: bounds.x + offset, y: bounds.y + crossOffset, width: size.width, height: size.height }
 
-      next = this.place(child, childBounds, env, out, next)
+      next = this.place(child, childBounds, env, out, next, parent)
       offset += (vertical ? size.height : size.width) + element.spacing
     }
 
@@ -468,6 +750,7 @@ export class LayoutEngine {
     env: LayoutEnvironment,
     out: PlacedNode[],
     z: number,
+    parent: string | null,
   ): number {
     const modifier = element.modifier
     const inner = childEnvironment(env, modifier)
@@ -486,6 +769,7 @@ export class LayoutEngine {
           inner,
           out,
           z,
+          parent,
         )
       }
 
@@ -496,7 +780,14 @@ export class LayoutEngine {
             modifier.height ?? clampProposal(bounds.height, modifier.minHeight, modifier.maxHeight),
         }
         const size = this.measure(element.child, childProposal, inner)
-        return this.place(element.child, alignedRect(bounds, size, modifier.alignment), inner, out, z)
+        return this.place(
+          element.child,
+          alignedRect(bounds, size, modifier.alignment),
+          inner,
+          out,
+          z,
+          parent,
+        )
       }
 
       case 'background': {
@@ -504,12 +795,151 @@ export class LayoutEngine {
         // in z-order. It occupies exactly the frame of what it backs, which is what
         // makes `.padding().background()` cover the padding and
         // `.background().padding()` not.
-        const next = this.place(modifier.content, bounds, inner, out, z)
-        return this.place(element.child, bounds, inner, out, next)
+        const next = this.place(modifier.content, bounds, inner, out, z, parent)
+        return this.place(element.child, bounds, inner, out, next, parent)
+      }
+
+      case 'overlay': {
+        // The mirror image of a background: the same frame, painted afterwards.
+        const next = this.place(element.child, bounds, inner, out, z, parent)
+        const size = this.measure(
+          modifier.content,
+          { width: bounds.width, height: bounds.height },
+          inner,
+        )
+        return this.place(
+          modifier.content,
+          alignedRect(bounds, size, modifier.alignment),
+          inner,
+          out,
+          next,
+          parent,
+        )
+      }
+
+      case 'offset':
+        // Paint-time only: layout still reserves the original position, which is what
+        // makes an offset view overlap its neighbours instead of pushing them aside.
+        return this.place(
+          element.child,
+          { ...bounds, x: bounds.x + modifier.x, y: bounds.y + modifier.y },
+          inner,
+          out,
+          z,
+          parent,
+        )
+
+      case 'fixedSize': {
+        const size = this.measure(
+          element.child,
+          {
+            width: modifier.horizontal ? null : bounds.width,
+            height: modifier.vertical ? null : bounds.height,
+          },
+          inner,
+        )
+        return this.place(
+          element.child,
+          { x: bounds.x, y: bounds.y, width: size.width, height: size.height },
+          inner,
+          out,
+          z,
+          parent,
+        )
+      }
+
+      case 'border': {
+        const next = this.place(element.child, bounds, inner, out, z, parent)
+        out.push({
+          id: `${element.id}-border`,
+          frame: bounds,
+          z: next,
+          opacity: env.opacity,
+          cornerRadius: modifier.cornerRadius ?? env.cornerRadius,
+          paint: { kind: 'hit' },
+          border: {
+            color: modifier.color,
+            width: modifier.width,
+            cornerRadius: modifier.cornerRadius ?? env.cornerRadius,
+          },
+          ...(parent ? { parent } : {}),
+          ...(element.origin ? { origin: element.origin } : {}),
+        })
+        return next + 1
+      }
+
+      case 'shadow': {
+        // Emitted before the child so it sits underneath. A transparent box still
+        // casts a CSS box-shadow, which is what lets this be one flat node instead of
+        // a duplicate of the whole subtree beneath it.
+        out.push({
+          id: `${element.id}-shadow`,
+          frame: bounds,
+          z,
+          opacity: env.opacity,
+          cornerRadius: env.cornerRadius,
+          paint: { kind: 'hit' },
+          shadow: modifier,
+          ...(parent ? { parent } : {}),
+        })
+        return this.place(element.child, bounds, inner, out, z + 1, parent)
+      }
+
+      case 'clip': {
+        // Real clipping needs a container, for the same reason scrolling does.
+        const clipId = `${element.id}-clip`
+        out.push({
+          id: clipId,
+          frame: bounds,
+          z,
+          opacity: env.opacity,
+          cornerRadius:
+            modifier.shape === 'circle' || modifier.shape === 'capsule'
+              ? Math.min(bounds.width, bounds.height) / 2
+              : modifier.cornerRadius,
+          clip: true,
+          paint: { kind: 'hit' },
+          ...(parent ? { parent } : {}),
+        })
+        return this.place(
+          element.child,
+          { x: 0, y: 0, width: bounds.width, height: bounds.height },
+          inner,
+          out,
+          z + 1,
+          clipId,
+        )
+      }
+
+      case 'scale':
+      case 'rotate': {
+        const transformId = `${element.id}-xform`
+        out.push({
+          id: transformId,
+          frame: bounds,
+          z,
+          opacity: env.opacity,
+          cornerRadius: 0,
+          paint: { kind: 'hit' },
+          transform:
+            modifier.kind === 'scale'
+              ? { scaleX: modifier.x, scaleY: modifier.y, rotate: 0 }
+              : { scaleX: 1, scaleY: 1, rotate: modifier.degrees },
+          ...(parent ? { parent } : {}),
+          ...(env.animation ? { animation: env.animation } : {}),
+        })
+        return this.place(
+          element.child,
+          { x: 0, y: 0, width: bounds.width, height: bounds.height },
+          inner,
+          out,
+          z + 1,
+          transformId,
+        )
       }
 
       case 'hitTarget': {
-        const next = this.place(element.child, bounds, inner, out, z)
+        const next = this.place(element.child, bounds, inner, out, z, parent)
         out.push({
           id: `${element.id}-hit`,
           frame: bounds,
@@ -517,14 +947,26 @@ export class LayoutEngine {
           opacity: 1,
           cornerRadius: 0,
           paint: { kind: 'hit' },
-          hitTarget: { handlerId: modifier.handlerId, label: modifier.label },
+          hitTarget: {
+            handlerId: modifier.handlerId,
+            label: modifier.label,
+            role: modifier.role,
+            enabled: modifier.enabled,
+            font: inner.font,
+            color: inner.foregroundColor,
+            ...(modifier.value !== undefined ? { value: modifier.value } : {}),
+            ...(modifier.placeholder !== undefined ? { placeholder: modifier.placeholder } : {}),
+            ...(modifier.min !== undefined ? { min: modifier.min } : {}),
+            ...(modifier.max !== undefined ? { max: modifier.max } : {}),
+          },
+          ...(parent ? { parent } : {}),
           ...(element.origin ? { origin: element.origin } : {}),
         })
         return next + 1
       }
 
       default:
-        return this.place(element.child, bounds, inner, out, z)
+        return this.place(element.child, bounds, inner, out, z, parent)
     }
   }
 }
@@ -540,6 +982,61 @@ function debugInfo(element: LayoutElement): {
     ...(element.debugName ? { debugName: element.debugName } : {}),
     ...(element.debugModifiers?.length ? { debugModifiers: element.debugModifiers } : {}),
   }
+}
+
+/** Fields every painted node inherits from where it sits, rather than from itself. */
+function decorations(
+  env: LayoutEnvironment,
+  parent: string | null,
+): { parent?: string; animation?: AnimationHint } {
+  return {
+    ...(parent ? { parent } : {}),
+    ...(env.animation ? { animation: env.animation } : {}),
+  }
+}
+
+/**
+ * What a scroll view proposes to its content.
+ *
+ * Unbounded along the scroll axis — that is what scrolling *is*, and proposing the
+ * visible height instead is the mistake that makes a long list silently truncate
+ * rather than scroll.
+ */
+function scrollProposal(element: ScrollElement, proposal: ProposedSize): ProposedSize {
+  return element.axis === 'vertical'
+    ? { width: proposal.width, height: null }
+    : { width: null, height: proposal.height }
+}
+
+/**
+ * Resolves grid tracks against the space available across the axis.
+ *
+ * `.adaptive` is the interesting one: it fits as many columns of at least its minimum
+ * as will go, then shares the remainder between them — so the same grid shows two
+ * columns on a phone and four on a tablet without the code changing.
+ */
+function resolveTracks(
+  tracks: readonly GridTrack[],
+  available: number,
+  spacing: number,
+): number[] {
+  if (tracks.length === 0) return [available]
+
+  const adaptive = tracks.find((t) => t.kind === 'adaptive')
+  if (adaptive && tracks.length === 1) {
+    const minimum = Math.max(1, adaptive.size ?? 80)
+    const count = Math.max(1, Math.floor((available + spacing) / (minimum + spacing)))
+    const each = (available - spacing * (count - 1)) / count
+    return new Array(count).fill(Math.max(0, each))
+  }
+
+  const fixed = tracks.filter((t) => t.kind === 'fixed')
+  const fixedTotal = fixed.reduce((sum, t) => sum + (t.size ?? 0), 0)
+  const flexibleCount = tracks.length - fixed.length
+  const remaining = available - fixedTotal - spacing * (tracks.length - 1)
+  const share = flexibleCount > 0 ? Math.max(0, remaining / flexibleCount) : 0
+
+  return tracks.map((track) => (track.kind === 'fixed' ? (track.size ?? 0) : share))
 }
 
 function describeDimension(d: ProposedDimension): string {

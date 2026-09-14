@@ -38,6 +38,9 @@ export type LayoutElement =
   | SpacerElement
   | ShapeElement
   | FillElement
+  | ImageElement
+  | ScrollElement
+  | GridElement
   | PlaceholderElement
   | ModifiedElement
   | EmptyElement
@@ -104,6 +107,58 @@ export interface FillElement extends ElementBase {
   readonly fill: Fill
 }
 
+/**
+ * A symbol or asset image.
+ *
+ * Sized from the environment font unless `.resizable()` made it greedy, which is
+ * exactly SwiftUI's rule: an `Image(systemName:)` is laid out as a glyph, and the
+ * same image with `.resizable()` fills whatever it is offered.
+ */
+export interface ImageElement extends ElementBase {
+  readonly kind: 'image'
+  readonly glyph: string
+  readonly resizable: boolean
+  /** True when the glyph is a substitute for an SF Symbol we cannot ship (R2). */
+  readonly approximated: boolean
+}
+
+/**
+ * A scrolling container.
+ *
+ * The one element whose children are *not* siblings in the output: they are placed
+ * inside it, in its coordinate space, so the browser can scroll them natively with
+ * its own physics. Everything else in the render tree stays flat and absolute.
+ */
+export interface ScrollElement extends ElementBase {
+  readonly kind: 'scroll'
+  readonly axis: Axis
+  readonly showsIndicators: boolean
+  readonly content: LayoutElement
+}
+
+/**
+ * `LazyVGrid` / `LazyHGrid`.
+ *
+ * Tracks are resolved against the available cross-axis extent, then children flow
+ * into them in order. Adaptive tracks decide their own count from the width, which
+ * is why this is a layout element rather than sugar over nested stacks.
+ */
+export interface GridElement extends ElementBase {
+  readonly kind: 'grid'
+  readonly axis: Axis
+  readonly tracks: readonly GridTrack[]
+  readonly spacing: number
+  readonly trackSpacing: number
+  readonly alignment: Alignment
+  readonly children: readonly LayoutElement[]
+}
+
+export interface GridTrack {
+  readonly kind: 'fixed' | 'flexible' | 'adaptive'
+  /** Fixed size, or the minimum for flexible and adaptive tracks. */
+  readonly size: number | null
+}
+
 export interface PlaceholderElement extends ElementBase {
   readonly kind: 'placeholder'
   readonly feature: string
@@ -143,12 +198,72 @@ export type LayoutModifier =
     }
   | { readonly kind: 'background'; readonly content: LayoutElement }
   | { readonly kind: 'font'; readonly font: ResolvedFont }
+  /** `.fontWeight` / `.bold` / `.italic`: adjust the inherited face, keep its size. */
+  | { readonly kind: 'fontTrait'; readonly weight?: number; readonly italic?: boolean }
   | { readonly kind: 'foregroundStyle'; readonly color: RGBA }
   | { readonly kind: 'opacity'; readonly value: number }
   | { readonly kind: 'cornerRadius'; readonly radius: number }
-  | { readonly kind: 'hitTarget'; readonly handlerId: string; readonly label: string }
+  | { readonly kind: 'overlay'; readonly content: LayoutElement; readonly alignment: Alignment }
+  | {
+      readonly kind: 'border'
+      readonly color: RGBA
+      readonly width: number
+      readonly cornerRadius?: number
+    }
+  | {
+      readonly kind: 'shadow'
+      readonly color: RGBA
+      readonly radius: number
+      readonly x: number
+      readonly y: number
+    }
+  | { readonly kind: 'offset'; readonly x: number; readonly y: number }
+  /** `.fixedSize()` — take the ideal size and ignore the proposal on that axis. */
+  | { readonly kind: 'fixedSize'; readonly horizontal: boolean; readonly vertical: boolean }
+  | { readonly kind: 'clip'; readonly shape: ShapeKind; readonly cornerRadius: number }
+  | { readonly kind: 'scale'; readonly x: number; readonly y: number }
+  | { readonly kind: 'rotate'; readonly degrees: number }
+  | { readonly kind: 'zIndex'; readonly value: number }
+  /** Carried through to the renderer, which animates the change with CSS. */
+  | { readonly kind: 'animate'; readonly hint: AnimationHint }
+  | {
+      readonly kind: 'hitTarget'
+      readonly handlerId: string
+      readonly label: string
+      readonly role: HitRole
+      readonly enabled: boolean
+      /**
+       * Control parameters the renderer needs to build a real DOM control.
+       *
+       * A text field has to be an `<input>` for a caret and an IME to work at all,
+       * and a slider has to be a range input for drag and keyboard control. Painting
+       * a picture of one and catching clicks would look right and behave wrong.
+       */
+      readonly value?: string
+      readonly placeholder?: string
+      readonly min?: number
+      readonly max?: number
+    }
   /** A modifier outside the coverage matrix: recorded, ignored for layout. */
   | { readonly kind: 'unsupported'; readonly name: string }
+
+export type HitRole = 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture'
+
+/**
+ * What the renderer should animate, and how.
+ *
+ * Produced by `.animation(_:value:)` and by `withAnimation`. The engine does not
+ * animate anything itself — it computes one static frame per state — so this travels
+ * to the DOM, where a CSS transition interpolates between consecutive frames. That
+ * is the honest division: we are exact about where things end up and approximate
+ * about how they get there.
+ */
+export interface AnimationHint {
+  readonly curve: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'spring'
+  readonly duration: number
+  readonly delay?: number
+  readonly bounce?: number
+}
 
 /**
  * Values inherited down the tree.
@@ -170,6 +285,23 @@ export interface LayoutEnvironment {
    * direction as font and colour, and for the same reason.
    */
   readonly cornerRadius: number
+  /**
+   * The animation in force for this subtree.
+   *
+   * Inherited like font and colour, because `.animation(_:value:)` applies to
+   * everything below the view it is written on — including views the modifier's own
+   * frame does not contain, such as a background's fill.
+   */
+  readonly animation?: AnimationHint
+  /**
+   * A weight or slant set independently of the face.
+   *
+   * Remembered apart from `font` so it survives a later `.font()`, which replaces the
+   * face wholesale. These are the only two font properties SwiftUI lets you set on
+   * their own, which is why there are two fields rather than a general mechanism.
+   */
+  readonly fontWeight?: number
+  readonly fontItalic?: boolean
 }
 
 export function childEnvironment(
@@ -177,14 +309,41 @@ export function childEnvironment(
   modifier: LayoutModifier,
 ): LayoutEnvironment {
   switch (modifier.kind) {
+    // `.font` replaces the face; `.fontWeight` and `.italic` adjust whichever face
+    // is in force. Because modifiers are applied outward-in, the two can arrive in
+    // either order — so the adjustment is remembered separately and re-applied when
+    // a new face is set. Without that, `.font(.title).fontWeight(.semibold)` would
+    // silently lose the weight, which is the order most SwiftUI is written in.
     case 'font':
-      return { ...env, font: modifier.font }
+      return {
+        ...env,
+        font: {
+          ...modifier.font,
+          ...(env.fontWeight !== undefined ? { weight: env.fontWeight } : {}),
+          ...(env.fontItalic !== undefined ? { italic: env.fontItalic } : {}),
+        },
+      }
+    case 'fontTrait':
+      return {
+        ...env,
+        ...(modifier.weight !== undefined ? { fontWeight: modifier.weight } : {}),
+        ...(modifier.italic !== undefined ? { fontItalic: modifier.italic } : {}),
+        font: {
+          ...env.font,
+          ...(modifier.weight !== undefined ? { weight: modifier.weight } : {}),
+          ...(modifier.italic !== undefined ? { italic: modifier.italic } : {}),
+        },
+      }
     case 'foregroundStyle':
       return { ...env, foregroundColor: modifier.color }
     case 'opacity':
       return { ...env, opacity: env.opacity * modifier.value }
     case 'cornerRadius':
       return { ...env, cornerRadius: modifier.radius }
+    case 'clip':
+      return { ...env, cornerRadius: modifier.cornerRadius }
+    case 'animate':
+      return { ...env, animation: modifier.hint }
     default:
       return env
   }

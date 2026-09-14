@@ -1,7 +1,8 @@
-import { memo, type CSSProperties } from 'react'
+import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
   cssColor,
   cssFill,
+  cssTransition,
   type RenderNode,
   type RenderTree,
   type UIEvent,
@@ -41,6 +42,16 @@ export interface RenderTreeViewProps {
  * CSS never gets a chance to disagree with SwiftUI about sizing. That is the point
  * of decision D2 (docs/02-ARCHITECTURE.md §12) and the reason this file is as dull
  * as it is — all the difficulty lives upstream.
+ *
+ * Phase 6 adds the two things that genuinely cannot be flat:
+ *
+ * - **Containers.** A node naming another as its `parent` is rendered *inside* it, in
+ *   its coordinate space. That is what makes scrolling native — the browser's own
+ *   momentum and rubber-banding rather than an approximation of them in the worker —
+ *   and what makes `.clipShape` and `.scaleEffect` affect a whole subtree.
+ * - **Real controls.** A text field is an `<input>` and a slider is a range input.
+ *   A caret, an IME and keyboard control cannot be faked by catching clicks on a
+ *   picture of one.
  */
 export const RenderTreeView = memo(function RenderTreeView({
   tree,
@@ -52,6 +63,20 @@ export const RenderTreeView = memo(function RenderTreeView({
   const hoveredNode = inspect?.hovered
     ? tree.nodes.find((n) => n.id === inspect.hovered)
     : undefined
+
+  // Nodes grouped by the container they live in. Built once per tree rather than
+  // searched per node, so a thousand-row list stays linear.
+  const byParent = useMemo(() => {
+    const groups = new Map<string, RenderNode[]>()
+    for (const node of tree.nodes) {
+      const key = node.parent ?? ''
+      const bucket = groups.get(key)
+      if (bucket) bucket.push(node)
+      else groups.set(key, [node])
+    }
+    return groups
+  }, [tree])
+
   return (
     <div
       data-testid="render-tree"
@@ -67,30 +92,49 @@ export const RenderTreeView = memo(function RenderTreeView({
         textRendering: 'optimizeLegibility',
       }}
     >
-      {tree.nodes.map((node) => (
+      {(byParent.get('') ?? []).map((node) => (
         <RenderNodeView
           key={node.id}
           node={node}
+          byParent={byParent}
           onEvent={onEvent}
           debugOutlines={debugOutlines}
           inspect={inspect}
         />
       ))}
 
-      {hoveredNode ? <InspectHighlight node={hoveredNode} /> : null}
+      {hoveredNode ? <InspectHighlight node={hoveredNode} tree={tree} /> : null}
     </div>
   )
 })
 
-/** The highlight rect. Drawn above everything and never itself hit-testable. */
-function InspectHighlight({ node }: { node: RenderNode }) {
+/**
+ * The highlight rect. Drawn above everything and never itself hit-testable.
+ *
+ * A node inside a scroll view is positioned in the scroller's space, so the highlight
+ * has to walk back up to the screen to find where it actually appears — otherwise
+ * hovering row 40 of a list outlines something near the top of the screen.
+ */
+function InspectHighlight({ node, tree }: { node: RenderNode; tree: RenderTree }) {
+  let x = node.frame.x
+  let y = node.frame.y
+  let current = node
+
+  for (let depth = 0; current.parent && depth < 32; depth++) {
+    const parent = tree.nodes.find((n) => n.id === current.parent)
+    if (!parent) break
+    x += parent.frame.x
+    y += parent.frame.y
+    current = parent
+  }
+
   return (
     <div
       data-testid="inspect-highlight"
       style={{
         position: 'absolute',
-        left: node.frame.x,
-        top: node.frame.y,
+        left: x,
+        top: y,
         width: node.frame.width,
         height: node.frame.height,
         outline: '1.5px solid rgb(0 122 255)',
@@ -104,17 +148,21 @@ function InspectHighlight({ node }: { node: RenderNode }) {
 
 function RenderNodeView({
   node,
+  byParent,
   onEvent,
   debugOutlines,
   inspect,
 }: {
   node: RenderNode
+  byParent: ReadonlyMap<string, RenderNode[]>
   onEvent?: (event: UIEvent) => void
   debugOutlines: boolean
   inspect?: RenderTreeViewProps['inspect']
 }) {
   const interactive = node.hitTarget?.enabled === true
   const inspecting = inspect !== undefined && node.id !== 'screen'
+  const children = byParent.get(node.id)
+  const scroll = node.scroll
 
   const style: CSSProperties = {
     position: 'absolute',
@@ -125,17 +173,84 @@ function RenderNodeView({
     zIndex: node.z,
     opacity: node.opacity,
     // Only hit targets receive pointer events, so a text label painted on top of a
-    // button does not swallow the tap meant for the button underneath it. In
-    // inspector mode every node is hittable, which is the whole point.
-    pointerEvents: inspecting || interactive ? 'auto' : 'none',
+    // button does not swallow the tap meant for the button underneath it. A scroller
+    // needs them too, or the wheel does nothing. In inspector mode every node is
+    // hittable, which is the whole point.
+    pointerEvents: inspecting || interactive || scroll ? 'auto' : 'none',
     cursor: inspecting ? 'crosshair' : interactive ? 'pointer' : 'default',
     ...(node.background ? { background: cssFill(node.background) } : {}),
     ...(node.cornerRadius ? { borderRadius: node.cornerRadius } : {}),
-    ...(node.clip ? { overflow: 'hidden' } : {}),
+    ...(node.clip ? { overflow: scroll ? 'auto' : 'hidden' } : {}),
+    ...(scroll
+      ? {
+          overflowX: scroll.axis === 'horizontal' ? 'auto' : 'hidden',
+          overflowY: scroll.axis === 'vertical' ? 'auto' : 'hidden',
+          scrollbarWidth: scroll.showsIndicators ? 'thin' : 'none',
+          // iOS scrollers do not capture a page scroll once they hit their end.
+          overscrollBehavior: 'contain',
+        }
+      : {}),
+    ...(node.border
+      ? {
+          boxSizing: 'border-box',
+          border: `${node.border.width}px solid ${cssColor(node.border.color)}`,
+          borderRadius: node.border.cornerRadius || undefined,
+        }
+      : {}),
+    ...(node.shadow
+      ? {
+          boxShadow: `${node.shadow.x}px ${node.shadow.y}px ${node.shadow.radius * 2}px ${cssColor(node.shadow.color)}`,
+        }
+      : {}),
+    ...(node.transform
+      ? {
+          transform: `scale(${node.transform.scaleX}, ${node.transform.scaleY}) rotate(${node.transform.rotate}deg)`,
+        }
+      : {}),
+    ...(node.animation
+      ? {
+          transition: cssTransition(
+            node.animation,
+            'left, top, width, height, opacity, transform, background-color, border-radius',
+          ),
+        }
+      : {}),
     ...(debugOutlines ? { outline: '1px solid rgb(0 122 255 / 0.35)', outlineOffset: -1 } : {}),
   }
 
   const handlerId = node.hitTarget?.handlerId
+  const role = node.hitTarget?.role
+
+  // A control the browser owns. Its frame was still decided by the layout engine;
+  // what the DOM supplies is the interaction the engine has no way to model.
+  const nativeControl =
+    interactive && handlerId && onEvent && (role === 'textField' || role === 'slider')
+      ? renderControl(node, handlerId, onEvent)
+      : null
+
+  const content: ReactNode = (
+    <>
+      {node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
+      {node.kind === 'image' && node.image ? <ImageContent node={node} /> : null}
+      {node.kind === 'shape' && node.shape ? <ShapeContent node={node} /> : null}
+      {node.kind === 'placeholder' && node.placeholder ? <PlaceholderContent node={node} /> : null}
+      {nativeControl}
+      {children?.length ? (
+        <ScrollContent node={node}>
+          {children.map((child) => (
+            <RenderNodeView
+              key={child.id}
+              node={child}
+              byParent={byParent}
+              onEvent={onEvent}
+              debugOutlines={debugOutlines}
+              inspect={inspect}
+            />
+          ))}
+        </ScrollContent>
+      ) : null}
+    </>
+  )
 
   return (
     <div
@@ -156,11 +271,17 @@ function RenderNodeView({
           : undefined
       }
       onPointerDown={
-        !inspecting && interactive && handlerId && onEvent
+        !inspecting && interactive && handlerId && onEvent && !nativeControl
           ? (e) => {
               e.preventDefault()
               const bounds = e.currentTarget.getBoundingClientRect()
               const scale = bounds.width / node.frame.width || 1
+              // A toggle reports the value it is moving *to*, so the worker never has
+              // to guess from a stale copy of the binding.
+              if (role === 'toggle') {
+                onEvent({ kind: 'toggle', handlerId, value: node.hitTarget?.value !== 'on' })
+                return
+              }
               onEvent({
                 kind: 'tap',
                 handlerId,
@@ -173,10 +294,90 @@ function RenderNodeView({
           : undefined
       }
     >
-      {node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
-      {node.kind === 'shape' && node.shape ? <ShapeContent node={node} /> : null}
-      {node.kind === 'placeholder' && node.placeholder ? <PlaceholderContent node={node} /> : null}
+      {content}
     </div>
+  )
+}
+
+/**
+ * The sized content box inside a scroller.
+ *
+ * A scroll view's children are laid out at the content's full extent, which is what
+ * gives the browser something to scroll. Anything else just wraps its children
+ * without adding a box.
+ */
+function ScrollContent({ node, children }: { node: RenderNode; children: ReactNode }) {
+  if (!node.scroll) return <>{children}</>
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: node.scroll.content.width,
+        height: node.scroll.content.height,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function renderControl(
+  node: RenderNode,
+  handlerId: string,
+  onEvent: (event: UIEvent) => void,
+): ReactNode {
+  const hit = node.hitTarget!
+  const font = hit.font
+
+  if (hit.role === 'textField') {
+    return (
+      <input
+        value={hit.value ?? ''}
+        placeholder={hit.placeholder ?? ''}
+        aria-label={node.a11y?.label}
+        onChange={(e) => onEvent({ kind: 'textChange', handlerId, value: e.target.value })}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          border: 'none',
+          outline: 'none',
+          background: 'transparent',
+          padding: '0 8px',
+          boxSizing: 'border-box',
+          ...(font
+            ? {
+                fontFamily: font.family,
+                fontSize: font.size,
+                fontWeight: font.weight,
+                lineHeight: `${font.lineHeight}px`,
+              }
+            : {}),
+          ...(hit.color ? { color: cssColor(hit.color) } : {}),
+        }}
+      />
+    )
+  }
+
+  return (
+    <input
+      type="range"
+      value={hit.value ?? '0'}
+      min={hit.min ?? 0}
+      max={hit.max ?? 1}
+      step={(((hit.max ?? 1) - (hit.min ?? 0)) / 100).toString()}
+      aria-label={node.a11y?.label}
+      onChange={(e) => onEvent({ kind: 'slide', handlerId, value: Number(e.target.value) })}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        margin: 0,
+        accentColor: 'rgb(0 122 255)',
+      }}
+    />
   )
 }
 
@@ -260,6 +461,36 @@ function TextContent({ node }: { node: RenderNode }) {
           {run.text}
         </span>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Paints a symbol.
+ *
+ * The glyph is an open substitute, never Apple's — SF Symbols cannot be redistributed
+ * to a browser (risk R2). `title` says so on hover, so the difference is discoverable
+ * rather than a surprise when the project is first built in Xcode.
+ */
+function ImageContent({ node }: { node: RenderNode }) {
+  const image = node.image!
+
+  return (
+    <div
+      title={image.approximated && image.symbol ? `${image.symbol} — approximated` : undefined}
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: image.font.size,
+        lineHeight: `${image.font.lineHeight}px`,
+        color: cssColor(image.color),
+        userSelect: 'none',
+      }}
+    >
+      {image.glyph}
     </div>
   )
 }

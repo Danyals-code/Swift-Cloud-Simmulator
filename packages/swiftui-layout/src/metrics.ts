@@ -196,6 +196,19 @@ export function measureText(
   }
 }
 
+/**
+ * How far text may exceed its width before a line breaks.
+ *
+ * Not a fudge factor — a numerical one. A stack placed at exactly the size it
+ * measured divides that size back up by subtraction, so the last child is offered
+ * its own ideal width minus a few units in the last place. Without a tolerance,
+ * `HStack { Image(…); Text("Starred") }` wraps to two lines purely because
+ * `83.18 - 6 - 20.06` is a hair under `57.12`. At a twentieth of a point the
+ * tolerance is invisible, and it is four orders of magnitude above the error it
+ * absorbs.
+ */
+const BREAK_TOLERANCE = 0.05
+
 function wrapParagraph(
   paragraph: string,
   font: ResolvedFont,
@@ -205,8 +218,9 @@ function wrapParagraph(
   const clusters = graphemes(paragraph)
   const widths = clusters.map((c) => table.advance(c, font))
 
+  const limit = maxWidth + BREAK_TOLERANCE
   const total = widths.reduce((sum, w) => sum + w, 0)
-  if (!Number.isFinite(maxWidth) || total <= maxWidth) {
+  if (!Number.isFinite(maxWidth) || total <= limit) {
     return [{ text: paragraph, width: total }]
   }
 
@@ -219,7 +233,7 @@ function wrapParagraph(
   for (let i = 0; i < clusters.length; i++) {
     const width = widths[i]!
 
-    if (lineWidth + width > maxWidth && i > lineStart) {
+    if (lineWidth + width > limit && i > lineStart) {
       // Break at the last word boundary; if the word itself is too long, break here.
       const breakAt = lastBreak > lineStart ? lastBreak : i
       const slice = clusters.slice(lineStart, breakAt).join('')

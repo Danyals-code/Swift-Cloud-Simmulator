@@ -288,6 +288,308 @@ const GRID = app(
 `,
 )
 
+const NAVIGATION = app(
+  'ExplorerApp',
+  'ContentView',
+  `struct Destination: Identifiable {
+    let id: Int
+    let name: String
+    let region: String
+    let symbol: String
+}
+
+struct ContentView: View {
+    let destinations = [
+        Destination(id: 1, name: "Kyoto", region: "Kansai", symbol: "leaf"),
+        Destination(id: 2, name: "Reykjavik", region: "Capital Region", symbol: "snowflake"),
+        Destination(id: 3, name: "Lisbon", region: "Estremadura", symbol: "sun.max")
+    ]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Destinations") {
+                    ForEach(destinations) { destination in
+                        NavigationLink(destination.name) {
+                            DetailView(destination: destination)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Explore")
+        }
+    }
+}
+
+struct DetailView: View {
+    let destination: Destination
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: destination.symbol)
+                .font(.largeTitle)
+                .foregroundStyle(Color.accentColor)
+
+            Text(destination.name)
+                .font(.largeTitle)
+                .fontWeight(.bold)
+
+            Text(destination.region)
+                .font(.headline)
+                .foregroundStyle(Color.secondary)
+
+            Spacer()
+        }
+        .padding()
+        .navigationTitle(destination.name)
+    }
+}`,
+)
+
+const SETTINGS_FORM = app(
+  'SettingsApp',
+  'ContentView',
+  `struct ContentView: View {
+    @State private var notifications = true
+    @State private var sounds = false
+    @State private var volume = 0.6
+    @State private var displayName = "Ada"
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Profile") {
+                    TextField("Display name", text: $displayName)
+                    Label("Signed in", systemImage: "person.circle")
+                }
+
+                Section("Alerts") {
+                    Toggle("Notifications", isOn: $notifications)
+                    Toggle("Sounds", isOn: $sounds)
+                    Slider(value: $volume, in: 0...1)
+                }
+
+                Section("About") {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text("1.0")
+                            .foregroundStyle(Color.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+        }
+    }
+}`,
+)
+
+const PHOTO_GRID = app(
+  'GalleryApp',
+  'ContentView',
+  `struct ContentView: View {
+    let columns = [GridItem(.adaptive(minimum: 100))]
+    let symbols = [
+        "sun.max", "moon", "cloud", "bolt",
+        "leaf", "drop", "flame", "sparkles"
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(symbols, id: \\.self) { symbol in
+                        VStack(spacing: 8) {
+                            Image(systemName: symbol)
+                                .font(.title)
+                            Text(symbol)
+                                .font(.caption)
+                                .foregroundStyle(Color.secondary)
+                        }
+                        .padding(.vertical, 16)
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .cornerRadius(12)
+                    }
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Gallery")
+        }
+    }
+}`,
+)
+
+const TABS = app(
+  'TabsApp',
+  'ContentView',
+  `struct ContentView: View {
+    var body: some View {
+        TabView {
+            TodayView()
+                .tabItem {
+                    Label("Today", systemImage: "sun.max")
+                }
+
+            LibraryView()
+                .tabItem {
+                    Label("Library", systemImage: "folder")
+                }
+
+            ProfileView()
+                .tabItem {
+                    Label("Profile", systemImage: "person.circle")
+                }
+        }
+    }
+}
+
+struct TodayView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Today")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+            Text("Three things worth doing.")
+                .foregroundStyle(Color.secondary)
+        }
+        .padding()
+    }
+}
+
+struct LibraryView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "folder")
+                .font(.largeTitle)
+                .foregroundStyle(Color.accentColor)
+            Text("Nothing saved yet.")
+                .foregroundStyle(Color.secondary)
+        }
+        .padding()
+    }
+}
+
+struct ProfileView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Ada Lovelace")
+                .font(.title)
+            Text("Member since 1843")
+                .font(.footnote)
+                .foregroundStyle(Color.secondary)
+        }
+        .padding()
+    }
+}`,
+)
+
+const ANIMATION = app(
+  'MotionApp',
+  'ContentView',
+  `struct ContentView: View {
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text(expanded ? "Expanded" : "Collapsed")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            RoundedRectangle(cornerRadius: expanded ? 32 : 12)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: expanded ? 260 : 120, height: expanded ? 160 : 120)
+                .shadow(radius: expanded ? 24 : 6, y: 8)
+
+            Button(expanded ? "Collapse" : "Expand") {
+                withAnimation(.spring()) {
+                    expanded = !expanded
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 10)
+            .background(Color.accentColor.opacity(0.15))
+            .cornerRadius(10)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+    }
+}`,
+)
+
+const SHEET_LIST = app(
+  'InboxApp',
+  'ContentView',
+  `struct Message: Identifiable {
+    let id: Int
+    var subject: String
+    var read: Bool
+}
+
+struct ContentView: View {
+    @State private var messages = [
+        Message(id: 1, subject: "Welcome aboard", read: true),
+        Message(id: 2, subject: "Your export is ready", read: false),
+        Message(id: 3, subject: "Weekly digest", read: false)
+    ]
+    @State private var composing = false
+    @State private var draft = ""
+
+    var unread: Int {
+        var count = 0
+        for message in messages {
+            if !message.read {
+                count += 1
+            }
+        }
+        return count
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Inbox") {
+                    ForEach(messages) { message in
+                        HStack(spacing: 10) {
+                            Image(systemName: message.read ? "envelope.open" : "envelope")
+                                .foregroundStyle(message.read ? Color.secondary : Color.accentColor)
+                            Text(message.subject)
+                            Spacer()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("\\(unread) unread")
+            .toolbar {
+                Button("Compose") {
+                    composing = true
+                }
+            }
+            .sheet(isPresented: $composing) {
+                VStack(spacing: 16) {
+                    Text("New message")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    TextField("Subject", text: $draft)
+                        .padding(.horizontal)
+
+                    Button("Cancel") {
+                        composing = false
+                    }
+                    .foregroundStyle(Color.accentColor)
+
+                    Spacer()
+                }
+                .padding(.top, 24)
+            }
+        }
+    }
+}`,
+)
+
 export const TEMPLATES: readonly Template[] = [
   {
     id: 'counter',
@@ -318,6 +620,42 @@ export const TEMPLATES: readonly Template[] = [
     name: 'Palette',
     description: 'A nested loop grid, and a function returning a Color.',
     source: GRID,
+  },
+  {
+    id: 'navigation',
+    name: 'Explore',
+    description: 'A navigation stack over a list, pushing a detail screen.',
+    source: NAVIGATION,
+  },
+  {
+    id: 'settings',
+    name: 'Settings',
+    description: 'A form of grouped sections: toggles, a slider and a text field.',
+    source: SETTINGS_FORM,
+  },
+  {
+    id: 'gallery',
+    name: 'Gallery',
+    description: 'An adaptive grid of symbol tiles inside a scroll view.',
+    source: PHOTO_GRID,
+  },
+  {
+    id: 'tabs',
+    name: 'Tabs',
+    description: 'Three tabs, each its own view, with a real tab bar.',
+    source: TABS,
+  },
+  {
+    id: 'motion',
+    name: 'Motion',
+    description: 'withAnimation driving size, corner radius and shadow together.',
+    source: ANIMATION,
+  },
+  {
+    id: 'inbox',
+    name: 'Inbox',
+    description: 'A list, a toolbar button and a sheet that composes a message.',
+    source: SHEET_LIST,
   },
 ]
 

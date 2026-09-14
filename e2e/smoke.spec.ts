@@ -146,11 +146,15 @@ test('gate 2 — a real parse error reaches the editor and the problems panel', 
 })
 
 test('reports unimplemented SwiftUI by name rather than calling it unresolved', async ({ page }) => {
+  // `Chart` is perfectly valid Swift. Saying "cannot find in scope" would be both
+  // wrong and unhelpful — it is this preview that cannot draw it, not Swift that
+  // does not have it. The name checked here moves as coverage grows; what must not
+  // change is that a real SwiftUI name is never reported as unresolved.
   await openStudio(page)
-  await typeAtTop(page, 'let placeholder = NavigationStack { }\n')
+  await typeAtTop(page, 'let placeholder = Chart { }\n')
 
   const console_ = page.getByTestId('console')
-  await expect(console_).toContainText('NavigationStack', { timeout: 5_000 })
+  await expect(console_).toContainText('Chart', { timeout: 5_000 })
   await expect(console_).toContainText('not drawn by the preview yet')
 })
 
@@ -299,12 +303,116 @@ test('gate 3b — unimplemented views render a labelled placeholder (FR-4.11)', 
   await replaceAll(
     page,
     'import SwiftUI; ' +
-      '@main struct ListApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
-      'struct Root: View { var body: some View { VStack { List { } } } }',
+      '@main struct ChartApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { var body: some View { VStack { Chart { } } } }',
   )
 
   const placeholder = preview(page).locator('[data-kind="placeholder"]')
   await expect(placeholder).toBeVisible({ timeout: 5_000 })
-  await expect(placeholder).toContainText('List')
-  await expect(placeholder).toContainText('Phase 6')
+  await expect(placeholder).toContainText('Chart')
+  await expect(placeholder).toContainText('Phase 7')
+})
+
+// ---------------------------------------------------------------- Phase 6
+
+test('Phase 6 — a navigation flow pushes and pops in the browser', async ({ page }) => {
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct NavApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { var body: some View { NavigationStack { List { NavigationLink("Open detail") { Detail() } } .navigationTitle("Home") } } } ' +
+      'struct Detail: View { var body: some View { Text("the detail screen") } }',
+  )
+
+  const tree = preview(page)
+  await expect(tree).toContainText('Home', { timeout: 5_000 })
+  await expect(tree).toContainText('Open detail')
+
+  await tree.getByRole('button', { name: 'Open detail' }).click()
+  await expect(tree).toContainText('the detail screen')
+
+  // The back button is labelled with the screen it returns to, as iOS does.
+  await tree.getByRole('button', { name: 'Home' }).click()
+  await expect(tree).toContainText('Open detail')
+  await expect(tree).not.toContainText('the detail screen')
+})
+
+test('Phase 6 — a sheet presents over the content and dismisses', async ({ page }) => {
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct SheetApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { @State private var up = false; ' +
+      'var body: some View { VStack { Button("Present") { up = true } } ' +
+      '.sheet(isPresented: $up) { Button("Dismiss") { up = false } } } }',
+  )
+
+  const tree = preview(page)
+  await expect(appButton(page, 'Present')).toBeVisible({ timeout: 5_000 })
+  await expect(tree).not.toContainText('Dismiss')
+
+  await appButton(page, 'Present').click()
+  await expect(tree).toContainText('Dismiss')
+
+  await appButton(page, 'Dismiss').click()
+  await expect(tree).not.toContainText('Dismiss')
+})
+
+test('Phase 6 — a Toggle flips through its binding', async ({ page }) => {
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct ToggleApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { @State private var on = false; ' +
+      'var body: some View { VStack { Toggle("Wi-Fi", isOn: $on); Text(on ? "connected" : "off") } } }',
+  )
+
+  const tree = preview(page)
+  await expect(tree).toContainText('off', { timeout: 5_000 })
+
+  await tree.getByRole('switch', { name: 'Wi-Fi' }).click()
+  await expect(tree).toContainText('connected')
+})
+
+test('Phase 6 — the strictness linter warns about code Xcode would reject', async ({ page }) => {
+  // Gate 4: the class of bug this whole product is most at risk from — something
+  // that runs happily in the preview and fails the moment it reaches Xcode.
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct StrictApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { let width: Int = 10; let scale: Double = 1.5; ' +
+      'var body: some View { Text("\\(width * scale)") } }',
+  )
+
+  const console_ = page.getByTestId('console')
+  await expect(console_).toContainText('cannot be applied to operands', { timeout: 5_000 })
+  await expect(console_).toContainText('may_not_compile_in_xcode')
+})
+
+test('Phase 6 — the coverage panel ranks what the preview could not draw', async ({ page }) => {
+  await openStudio(page)
+
+  await replaceAll(
+    page,
+    'import SwiftUI; ' +
+      '@main struct GapApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+      'struct Root: View { var body: some View { VStack { Chart { } } } }',
+  )
+
+  await expect(preview(page).locator('[data-kind="placeholder"]')).toBeVisible({ timeout: 5_000 })
+
+  await page.getByRole('button', { name: 'Coverage' }).click()
+  const panel = page.getByTestId('coverage-panel')
+  await expect(panel).toBeVisible()
+  await expect(panel).toContainText('Chart')
+  await expect(panel).toContainText('never sent anywhere')
 })

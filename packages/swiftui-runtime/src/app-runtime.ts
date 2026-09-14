@@ -1,17 +1,25 @@
-import type { SourceSpan } from '@studio/shared'
+import type { SourceSpan, UIEvent } from '@studio/shared'
 import type { SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
+  asProjection,
+  bool,
+  describe,
+  double,
   ExecutionBudgetExceeded,
+  int,
   Interpreter,
+  str,
   SwiftTrap,
   UnsupportedAtRuntime,
+  type ClosureValue,
   type StructValue,
   type SwiftValue,
 } from '@studio/swift-runtime'
 import type { SemanticModel } from '@studio/swift-sema'
 import { fingerprint, IdentityPath, StateStore } from './identity'
+import { resolveUI, UIState, type ResolvedUI } from './presentation'
 import { SwiftUIHost } from './swiftui-host'
-import { asView, type ViewValue } from './view-value'
+import { asView, handlerIdFor, type AnimationPayload, type ViewIntent, type ViewValue } from './view-value'
 
 export interface RuntimeFailure {
   readonly message: string
@@ -22,6 +30,8 @@ export interface RuntimeFailure {
 
 export interface EvaluationResult {
   readonly views: readonly ViewValue[]
+  /** The composed screen: navigation, tabs and presentation applied. */
+  readonly ui: ResolvedUI | null
   readonly logs: readonly { message: string; span: SourceSpan }[]
   readonly failure: RuntimeFailure | null
   readonly rootTypeName: string | null
@@ -35,11 +45,17 @@ export interface EvaluationResult {
  * outlive them (see `identity.ts`). That is what makes a counter survive both a
  * re-render and an edit (FR-5.3), without the single-root-instance shortcut Phase 2
  * used.
+ *
+ * Phase 6 adds a second kind of state beside `@State`: what the *framework* holds —
+ * which screen a navigation stack is showing, which tab is selected. It lives in
+ * `UIState` rather than in the interpreter, because the user's code never declared
+ * it and nothing in their source can be asked what it should be.
  */
 export class AppRuntime {
   private interpreter = new Interpreter()
   private host = new SwiftUIHost()
   private readonly state = new StateStore()
+  private readonly ui = new UIState()
 
   private entryTypeName: string | null = null
   private rootTypeName: string | null = null
@@ -47,16 +63,19 @@ export class AppRuntime {
 
   /** Instances built during the last pass, so an action's writes can be harvested. */
   private live = new Map<string, StructValue>()
-  /** Action closures from the last pass, addressed by handler id. */
-  private actions = new Map<string, SwiftValue>()
+  /** What each interactive element does, from the last resolved screen. */
+  private handlers: ReadonlyMap<string, ViewIntent> = new Map()
   /** Identifies the loaded program, so a real edit reloads and a tap does not. */
   private programKey = ''
+  /** Set when the change being rendered happened inside `withAnimation`. */
+  private animation: AnimationPayload | null = null
 
   load(files: readonly SourceFileNode[], model: SemanticModel, programKey: string): void {
     if (programKey === this.programKey && this.entryTypeName) return
 
     this.interpreter = new Interpreter({ host: this.host })
     this.host.expandStruct = (value) => this.expand(value)
+    this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
     this.interpreter.load(files)
 
     this.entryTypeName = model.entryPoint?.name ?? null
@@ -72,11 +91,11 @@ export class AppRuntime {
    *
    * Starts from the `@main` type and evaluates its scene, so `WindowGroup` and the
    * root view are produced by running the user's code rather than by inferring the
-   * root from the AST.
+   * root from the AST. The resolver then decides what of it is actually on screen.
    */
   evaluate(): EvaluationResult {
-    this.actions.clear()
     this.live.clear()
+    this.handlers = new Map()
     this.identity = new IdentityPath()
     this.interpreter.resetSteps()
     this.state.beginPass()
@@ -84,7 +103,7 @@ export class AppRuntime {
     const entry = this.entryTypeName ? this.interpreter.types.get(this.entryTypeName) : undefined
     if (!entry) {
       this.state.endPass()
-      return { views: [], logs: this.host.takeLogs(), failure: null, rootTypeName: null }
+      return { views: [], ui: null, logs: this.host.takeLogs(), failure: null, rootTypeName: null }
     }
 
     try {
@@ -93,19 +112,20 @@ export class AppRuntime {
       // The scene wrapper is not content; the app is what it contains.
       const views = scenes.flatMap((scene) => (isSceneWrapper(scene) ? scene.children : [scene]))
 
-      this.indexActions(views)
+      const ui = resolveUI(views, {
+        state: this.ui,
+        build: (closure, args) => this.buildViews(closure, args),
+        animation: this.animation,
+      })
+      this.handlers = ui.handlers
       this.state.endPass()
 
-      return {
-        views,
-        logs: this.host.takeLogs(),
-        failure: null,
-        rootTypeName: this.rootTypeName,
-      }
+      return { views, ui, logs: this.host.takeLogs(), failure: null, rootTypeName: this.rootTypeName }
     } catch (error) {
       this.state.endPass()
       return {
         views: [],
+        ui: null,
         logs: this.host.takeLogs(),
         failure: toFailure(error),
         rootTypeName: this.rootTypeName,
@@ -113,27 +133,46 @@ export class AppRuntime {
     }
   }
 
-  /** Runs a button's action, then writes any `@State` it changed back to its box. */
-  dispatch(handlerId: string): boolean {
-    const action = this.actions.get(handlerId)
-    if (!action || action.kind !== 'closure') return false
+  /**
+   * Applies an interaction, then writes back any `@State` it changed.
+   *
+   * Returns false when nothing matched, so the caller can skip a re-render entirely
+   * rather than repainting an unchanged screen.
+   */
+  dispatch(incoming: UIEvent | string): boolean {
+    // A bare handler id is taken as a tap, which is what every caller that does not
+    // carry a value means by it.
+    const event: UIEvent =
+      typeof incoming === 'string'
+        ? { kind: 'tap', handlerId: incoming, location: { x: 0, y: 0 } }
+        : incoming
+
+    const intent = this.handlers.get(event.handlerId)
+    if (!intent) return false
 
     this.interpreter.resetSteps()
+    this.animation = null
+    this.host.pendingAnimation = null
+
     try {
-      this.interpreter.callClosure(action, [], action.span)
+      this.perform(intent, event)
     } catch (error) {
       // A trap inside an action is surfaced as a log rather than thrown, so one bad
       // tap cannot tear down the preview.
-      this.host.log(`Action failed: ${toFailure(error).message}`, action.span)
+      this.host.log(`Action failed: ${toFailure(error).message}`, spanOf(intent))
     }
 
+    this.animation = this.host.pendingAnimation
+    this.host.pendingAnimation = null
     this.harvest()
     return true
   }
 
-  /** Drops every state box. The next pass rebuilds from the declared initialisers. */
+  /** Drops every state box, framework state included. */
   reset(): void {
     this.state.clear()
+    this.ui.clear()
+    this.animation = null
   }
 
   get stateSnapshot(): ReadonlyMap<string, { value: SwiftValue }> {
@@ -141,6 +180,62 @@ export class AppRuntime {
   }
 
   // ------------------------------------------------------------------ private
+
+  private perform(intent: ViewIntent, event: UIEvent): void {
+    switch (intent.kind) {
+      case 'run':
+        this.interpreter.callClosure(intent.closure, [], intent.closure.span)
+        return
+
+      case 'push': {
+        const [stack, link] = splitLink(intent.link)
+        this.ui.push(stack, link)
+        return
+      }
+
+      case 'pop':
+        for (const stack of this.navigationStacksFor(event.handlerId)) this.ui.pop(stack)
+        return
+
+      case 'selectTab':
+        this.ui.selectTab(intent.tab, intent.index)
+        return
+
+      case 'toggle': {
+        const binding = asProjection(intent.binding)
+        if (!binding) return
+        const current = binding.get()
+        // A typed event wins over flipping, so dragging a switch to a known position
+        // lands there rather than inverting whatever it was.
+        binding.set(event.kind === 'toggle' ? bool(event.value) : bool(!truthyValue(current)))
+        return
+      }
+
+      case 'write': {
+        const binding = asProjection(intent.binding)
+        if (!binding) return
+        binding.set(valueForEvent(intent.value, event))
+        return
+      }
+
+      case 'adjust': {
+        const binding = asProjection(intent.binding)
+        if (!binding) return
+        const current = binding.get()
+        const base = current.kind === 'int' || current.kind === 'double' ? current.value : 0
+        const next = base + intent.by
+        binding.set(current.kind === 'int' ? int(Math.round(next)) : double(next))
+        return
+      }
+    }
+  }
+
+  /** The stack ids a back button belongs to — derived from its own handler path. */
+  private navigationStacksFor(handlerId: string): string[] {
+    const path = handlerId.replace(/^action-/, '')
+    const stack = path.replace(/\/back$/, '')
+    return stack === path ? [] : [stack]
+  }
 
   /**
    * Expands a user `View` struct into the views its `body` produces.
@@ -182,6 +277,23 @@ export class AppRuntime {
     }
   }
 
+  /**
+   * Runs a deferred view builder — a sheet's content, a toolbar, a destination.
+   *
+   * These closures are held unevaluated by the resolver and run only if the screen
+   * they belong to is actually shown, which is both faster and, more importantly,
+   * correct: a sheet body that force-unwraps its selection must not run while there
+   * is no selection.
+   */
+  private buildViews(closure: ClosureValue, args: readonly SwiftValue[] = []): readonly ViewValue[] {
+    const produced = this.interpreter.runViewBuilder(closure, args)
+    return produced.flatMap((value) => {
+      const view = asView(value)
+      if (view) return [view]
+      return value.kind === 'struct' ? this.expand(value) : []
+    })
+  }
+
   private seedState(instance: StructValue, decl: StructDecl, identity: string): void {
     for (const property of statefulProperties(decl)) {
       const initial = instance.fields.get(property.name)
@@ -210,14 +322,6 @@ export class AppRuntime {
       }
     }
   }
-
-  private indexActions(views: readonly ViewValue[], prefix = 'v'): void {
-    views.forEach((view, index) => {
-      const path = `${prefix}-${index}`
-      if (view.action) this.actions.set(`action-${path}`, view.action)
-      this.indexActions(view.children, path)
-    })
-  }
 }
 
 function statefulProperties(decl: StructDecl): VarDecl[] {
@@ -232,9 +336,42 @@ function isSceneWrapper(view: ViewValue): boolean {
   return view.name === 'WindowGroup' && view.modifiers.length === 0
 }
 
+function splitLink(link: string): [string, string] {
+  const index = link.indexOf('|')
+  return index === -1 ? ['nav', link] : [link.slice(0, index), link.slice(index + 1)]
+}
+
+function truthyValue(value: SwiftValue): boolean {
+  return value.kind === 'bool' ? value.value : value.kind !== 'nil' && value.kind !== 'void'
+}
+
+/**
+ * The value an intent writes.
+ *
+ * A typed event carries one — a text field's new string, a slider's new number — and
+ * it takes precedence over the intent's own constant, which is what a tap-only
+ * control (a dismiss button, a tab) supplies instead.
+ */
+function valueForEvent(fallback: SwiftValue, event: UIEvent): SwiftValue {
+  switch (event.kind) {
+    case 'textChange':
+      return str(event.value)
+    case 'slide':
+      return fallback.kind === 'int' ? int(Math.round(event.value)) : double(event.value)
+    case 'toggle':
+      return bool(event.value)
+    default:
+      return fallback
+  }
+}
+
+function spanOf(intent: ViewIntent): SourceSpan {
+  return intent.kind === 'run' ? intent.closure.span : { file: '', start: 0, end: 0 }
+}
+
 /** Handler id for the view at a given tree path. */
 export function actionId(path: string): string {
-  return `action-${path}`
+  return handlerIdFor(path)
 }
 
 function toFailure(error: unknown): RuntimeFailure {
@@ -259,3 +396,5 @@ function toFailure(error: unknown): RuntimeFailure {
   }
   throw error
 }
+
+export { describe }

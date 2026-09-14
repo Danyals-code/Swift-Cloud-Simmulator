@@ -46,6 +46,26 @@ export class IdentityPath {
       this.counters.pop()
     }
   }
+
+  /**
+   * Runs `fn` inside an explicitly keyed scope.
+   *
+   * `ForEach` uses this so each row's identity is derived from its element's `id`
+   * rather than from its position. The difference shows the moment a list is
+   * reordered or an item is deleted: keyed by identity, each row's `@State` travels
+   * with its data; keyed by position, the second row's expansion state stays on the
+   * second row no matter what is now in it.
+   */
+  scope<T>(key: string, fn: () => T): T {
+    const identity = `${this.current}/#${key}`
+    this.stack.push(identity)
+    this.counters.push(new Map())
+    try {
+      return fn()
+    } finally {
+      this.pop()
+    }
+  }
 }
 
 export interface StateBox {

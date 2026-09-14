@@ -549,6 +549,129 @@ id it assigned.
 until two folders hold a file of the same name. A file reference whose path contains
 a slash is valid and resolves against its group.
 
+## 4.14 Phase 6 task list — **breadth landed; the corpus gate is not met**
+
+Phase 6 is open-ended by design ("4–6 weeks, continuous thereafter"). What follows is what was
+actually built, and — just as important — what was not.
+
+### The screen compositor (`swiftui-runtime/presentation.ts`)
+
+- [x] A resolver that turns an evaluated view tree plus framework state into a *screen*: which
+      navigation screen is on top, which tab is selected, what is presented over it.
+- [x] One traversal stamps every view with its path, so element ids, handler ids and DOM identity
+      cannot drift apart.
+- [x] Framework chrome — navigation bar, tab bar, back button, tab items — emitted as real view
+      values with reserved names, so it appears in the inspector and in tests like anything else.
+
+### Navigation
+
+- [x] `NavigationStack` / `NavigationView`, `NavigationLink` in both the `destination:` and
+      `value:` forms, `navigationDestination(for:)`, `navigationTitle`, `navigationBarTitleDisplayMode`.
+- [x] `toolbar` with leading and trailing bar buttons.
+- [x] A back button labelled with the screen it returns to, as iOS does.
+- [x] `TabView` with `.tabItem`, bound (`selection:`) or unbound.
+
+### Presentation
+
+- [x] `.sheet` with `presentationDetents`, `.fullScreenCover`, `.alert`, `.confirmationDialog`.
+- [x] Content built lazily, so a sheet body that force-unwraps its selection does not run while
+      there is no selection.
+- [x] A dimming layer that dismisses on tap, since a preview has no swipe-down.
+
+### Collections and content
+
+- [x] `ForEach` over ranges, arrays, `Identifiable` elements and `id:` key paths, with per-element
+      identity so `@State` follows the row rather than the position.
+- [x] `List`, `Section`, `Form`: grouped cards, hairline separators, the 44pt row floor.
+- [x] `ScrollView` with real clipping and native scrolling.
+- [x] `LazyVGrid` / `LazyHGrid` with fixed, flexible and adaptive tracks.
+- [x] `Image(systemName:)` and `Label`, against an open substitute symbol set.
+
+### Controls and bindings
+
+- [x] Property-wrapper projections (`$value`) as real read/write bindings, in the *interpreter* —
+      a language feature, not a SwiftUI one, so the boundary rule holds.
+- [x] `@Binding` by value transparency: a binding passed three views deep still writes the original.
+- [x] `Toggle`, `TextField`, `Slider`, `Stepper`, `ProgressView`, `Picker`.
+- [x] Text fields and sliders rendered as real DOM inputs — a caret and an IME cannot be faked.
+
+### Appearance and motion
+
+- [x] `.overlay`, `.border`, `.shadow`, `.clipShape`, `.clipped`, `.offset`, `.fixedSize`,
+      `.scaleEffect`, `.rotationEffect`, gradients, `.font(.system(size:weight:))`, `.fontWeight`.
+- [x] `withAnimation` and `.animation`, carried to the renderer as a CSS transition.
+
+### Language
+
+- [x] Key paths (`\.self`, `\.id`, `\Type.member`) — parsed, evaluated, applied.
+- [x] Metatypes (`Item.self`) far enough to pass to `navigationDestination(for:)`.
+- [x] Modifiers applied to user-declared views (`MyView().padding()`), which previously trapped.
+
+### Strictness and telemetry
+
+- [x] The R5 strictness pass: eight checks for code that runs here and fails in Xcode, each with a
+      fix-it where the correction is unambiguous.
+- [x] A coverage panel ranking what the preview could not draw, counted locally and never sent
+      anywhere.
+
+### Phase 6 gate
+
+| # | Gate | Status |
+| --- | --- | --- |
+| 1 | Corpus grows to 100 projects, all rendering without placeholders | ✗ **11 of 100** |
+| 2 | Top 20 telemetry-reported unsupported features implemented or declined | 🟡 instrument built; no usage data yet |
+| 3 | A three-screen navigation flow with a sheet and animated transitions works end to end | ✅ |
+| 4 | The strictness linter catches a curated set of "works here, fails in Xcode" cases | ✅ |
+
+### 4.15 — What was not built, and why
+
+**Gate 1 is not met and was not going to be.** The corpus is 11 templates, not 100. Authoring
+eighty-nine more in one pass would produce padding — files written to satisfy a count rather than to
+exercise a construct — and every one of them would then have to be maintained. The eleven that exist
+each cover a distinct area, and the honest statement is that the corpus grows as real projects
+arrive, which is the same thing the telemetry is for.
+
+**Gate 2 cannot be met yet by construction.** There is no usage data because nothing has shipped and
+nothing is transmitted. The instrument is built and visible; the ranking is empty until someone uses
+it. Ordering the backlog by guesswork now would be exactly the guesswork the gate was written to
+prevent.
+
+**Deliberately deferred to Phase 7:** gestures beyond tap (drag, magnify, rotate, composition,
+`@GestureState`), `matchedGeometryEffect` and transitions, real lazy-stack virtualisation,
+`Canvas` / `Path` / `TimelineView` / `Chart`, `URLSession` and `AsyncImage`, environment breadth
+(locale, RTL, size classes), `ObservableObject`, and `.onDelete` / `.onMove` / `.searchable` /
+`.refreshable`. Each is recorded in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md) with ⬜ and a
+phase, which means it is reported by name rather than failing silently.
+
+### 4.16 — Findings
+
+**The most expensive bug of the phase was arithmetic, not architecture.** An `HStack` containing an
+`Image` and a `Text` wrapped the text to two lines. The cause: a stack placed at exactly the size it
+measured divides that size back up by subtraction, so the last child is offered its own ideal width
+minus a few units in the last place — and the line breaker, comparing exactly, broke. It had been
+latent since Phase 3 and only surfaced when images made the boundary case common. The fix is a
+twentieth of a point of tolerance in the line breaker, which is four orders of magnitude above the
+error it absorbs and invisible to the eye.
+
+**`isPresented:` is a binding, and an opaque value is truthy.** Testing it without reading through
+presented every sheet in the file, permanently. The class of bug is worth naming: a projection looks
+like a value until you ask it a question.
+
+**A modifier is always called; a property is not.** The checker flagged `Color.accentColor` as the
+unimplemented `.accentColor` *modifier*, because it was checking every member access rather than
+only members that were called. A warning on correct code is the one thing that checker must never
+produce, and the fix — check at the call, not the access — is both narrower and more correct.
+
+**Chrome has to be told to fill.** A navigation bar laid out in an exact rect hugged its title,
+leaving a 22pt strip where a 103pt bar belonged. Content positioned against the *device* rather than
+against its parent needs an explicit fill, because a proposal-based engine has no notion of an edge
+to stick to.
+
+**The flat render tree needed exactly one exception.** Scrolling, clipping and transforms all need
+the browser to own a real box. Rather than three mechanisms, nodes gained a `parent`: a node names
+the container it is positioned inside, and everything else stays absolutely positioned and flat.
+Native scroll physics came free with it.
+
 ## 5. Slice definition of done
 
 1. The reference app in §1 renders in the device frame.
@@ -567,6 +690,9 @@ a slash is valid and resolves against its group.
 Listed so it is a choice rather than an oversight: multi-file projects, dark mode, device picker,
 navigation, lists, sheets, animation, gestures beyond tap, images and SF Symbols, `@Binding` and
 `ObservableObject`, completions, the view inspector, templates, share links, `.swiftpm` export.
+
+*As of Phase 6, everything in that list has landed except gestures beyond tap, `ObservableObject`,
+completions, share links and `.swiftpm` export.*
 
 Each is a phase in [03-ROADMAP.md](03-ROADMAP.md) and each is additive on top of the spine the slice
 builds.

@@ -383,6 +383,13 @@ export class Checker {
 
       case 'call': {
         this.checkCallee(expr.callee, scope)
+        // A modifier is always *called*, so the coverage check belongs here rather
+        // than on every member access. Doing it there flagged `Color.accentColor` as
+        // the `.accentColor` modifier — a warning on correct code, which is the one
+        // thing this checker must never produce.
+        if (expr.callee.kind === 'memberAccess') {
+          this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan)
+        }
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
         return
@@ -392,7 +399,6 @@ export class Checker {
         // Only the base is resolved. Member existence needs real type information,
         // and guessing produces false positives — see the class comment.
         if (expr.base) this.checkExpression(expr.base, scope)
-        this.checkModifierCoverage(expr.member, expr.memberSpan)
         return
 
       case 'closure': {
@@ -519,9 +525,10 @@ export class Checker {
   /**
    * Warns when a chain uses a real SwiftUI modifier the preview does not apply.
    *
-   * Only names in the unimplemented map produce a warning. An unrecognised member is
-   * passed over in silence, because `Color.red` and `.largeTitle` are member accesses
-   * too and there is no type information yet to tell them apart from a modifier.
+   * Only names in the unimplemented map produce a warning, and only where the member
+   * was called. An unrecognised member is passed over in silence, because `Color.red`
+   * and `.largeTitle` are member accesses too and there is no type information yet to
+   * tell them apart from a modifier.
    */
   private checkModifierCoverage(member: string, span: SourceSpan): void {
     const phase = UNIMPLEMENTED_MODIFIERS.get(member)

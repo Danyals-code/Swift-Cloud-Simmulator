@@ -1,7 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CompileResult, Diagnostic } from '@studio/shared'
+import {
+  clearCoverage,
+  coverageRanking,
+  subscribeCoverage,
+  type CoverageEntry,
+} from '../lib/telemetry'
 
 export interface ConsolePaneProps {
   result: CompileResult | null
@@ -10,7 +16,7 @@ export interface ConsolePaneProps {
   onRevealSpan: (start: number) => void
 }
 
-type Tab = 'problems' | 'console' | 'timings'
+type Tab = 'problems' | 'console' | 'timings' | 'coverage'
 
 const SEVERITY_STYLE: Record<Diagnostic['severity'], string> = {
   error: 'text-red-400',
@@ -44,6 +50,9 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
         </TabButton>
         <TabButton active={tab === 'timings'} onClick={() => setTab('timings')}>
           Timings
+        </TabButton>
+        <TabButton active={tab === 'coverage'} onClick={() => setTab('coverage')}>
+          Coverage
         </TabButton>
       </header>
 
@@ -98,6 +107,8 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
           )
         ) : null}
 
+        {tab === 'coverage' ? <CoveragePanel /> : null}
+
         {tab === 'timings' ? (
           !result ? (
             <Empty>No compile yet.</Empty>
@@ -124,6 +135,68 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
         ) : null}
       </div>
     </section>
+  )
+}
+
+/**
+ * The coverage ranking — what this browser has reached for and not found.
+ *
+ * Shown rather than shipped anywhere: there is no endpoint and no account, so the
+ * only reader of these numbers is the person who generated them. That makes it both
+ * the Phase 6 prioritisation instrument and an honest statement of what the tool
+ * cannot yet do, in the user's own terms rather than a generic feature list.
+ */
+function CoveragePanel() {
+  const [entries, setEntries] = useState<CoverageEntry[]>([])
+
+  useEffect(() => {
+    const refresh = () => setEntries(coverageRanking())
+    refresh()
+    return subscribeCoverage(refresh)
+  }, [])
+
+  if (entries.length === 0) {
+    return (
+      <Empty>
+        Nothing missing so far. Anything the preview cannot draw is counted here, and
+        the counts never leave this browser.
+      </Empty>
+    )
+  }
+
+  const total = entries.reduce((sum, entry) => sum + entry.count, 0)
+
+  return (
+    <div data-testid="coverage-panel">
+      <p className="px-1.5 py-1 text-zinc-500">
+        {entries.length} feature{entries.length === 1 ? '' : 's'} the preview could not
+        draw, {total} time{total === 1 ? '' : 's'}. Counted locally; never sent anywhere.
+      </p>
+
+      <ul className="space-y-0.5">
+        {entries.map((entry) => (
+          <li
+            key={entry.feature}
+            className="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-white/5"
+          >
+            <span className="w-8 shrink-0 text-right text-amber-400">{entry.count}</span>
+            <span className="min-w-0 flex-1 truncate text-zinc-200">{entry.feature}</span>
+            <span className="shrink-0 text-zinc-600">{entry.kind}</span>
+            <span className="w-16 shrink-0 text-right text-zinc-500">
+              {entry.phase === null ? 'unplanned' : `phase ${entry.phase}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <button
+        type="button"
+        onClick={clearCoverage}
+        className="mt-2 rounded px-1.5 py-1 text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
+      >
+        Clear counts
+      </button>
+    </div>
   )
 }
 

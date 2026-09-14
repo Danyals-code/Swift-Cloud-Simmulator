@@ -45,29 +45,40 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0-5 complete.** The studio parses, checks, runs and renders real Swift across
-multiple files, and exports a complete Xcode project.
+**Phases 0-5 complete; Phase 6's first pass landed.** The studio parses, checks, runs
+and renders real Swift across multiple files, and exports a complete Xcode project.
 
-One gate is outstanding and cannot be closed here: **"opens in Xcode and builds with
-zero edits" needs a Mac.** Everything checkable without one is checked — the pbxproj
-parses, its object graph resolves, and the bundle is structurally complete. See
-[docs/06-VERTICAL-SLICE.md](docs/06-VERTICAL-SLICE.md) section 4.12.
+Since Phase 6 it also handles the SwiftUI people actually write: navigation stacks
+and links, lists and forms, sheets and alerts, tabs, grids, scroll views, `ForEach`,
+SF Symbols, bindings (`$value`), the form controls, and `withAnimation`.
+
+Two things are honestly outstanding:
+
+- **"Opens in Xcode and builds with zero edits" needs a Mac.** Everything checkable
+  without one is checked — the pbxproj parses, its object graph resolves, and the
+  bundle is structurally complete. See
+  [docs/06-VERTICAL-SLICE.md](docs/06-VERTICAL-SLICE.md) section 4.12.
+- **The conformance corpus is 11 projects, not the 100 Phase 6's first gate asks
+  for.** Eighty-nine more authored in a single pass would be padding; the corpus
+  grows as real projects arrive. See section 4.15.
 
 Not built: code completion (the Phase 4 gate shortfall), `.swiftpm` export, share
-links, and the breadth of SwiftUI beyond the slice (Phase 6).
+links, gestures beyond tap, and the Phase 7 rows in the
+[coverage matrix](docs/05-SWIFTUI-COVERAGE.md).
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 468 passing |
-| End-to-end | 26 / 26 passing |
-| Templates rendering with zero placeholders | 5 / 5 |
-| Full pipeline, 500-line file | 1.6 ms (budget: 120 ms) |
+| Unit tests | 624 passing |
+| End-to-end | 31 / 31 passing |
+| Templates rendering with zero placeholders | 11 / 11 |
+| Full pipeline, 500-line file | 1.9 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 355 KB gzipped / 450 KB budget |
+| Client JS | 375 KB gzipped / 450 KB budget |
 
-Next: [Phase 6 - Coverage and fidelity](docs/03-ROADMAP.md).
+Next: [Phase 7 - optional extensions](docs/03-ROADMAP.md), and whatever the coverage
+telemetry says people reached for.
 
 ## Getting started
 

@@ -1,6 +1,13 @@
-import { rgba, type ResolvedFont, type RGBA } from '@studio/shared'
+import { rgba, type Fill, type ResolvedFont, type RGBA } from '@studio/shared'
 import type { SwiftValue } from '@studio/swift-runtime'
-import { COLOR_TYPE, TOKEN_TYPE, type ColorPayload, type TokenPayload } from './view-value'
+import {
+  COLOR_TYPE,
+  STYLE_TYPE,
+  TOKEN_TYPE,
+  type ColorPayload,
+  type GradientPayload,
+  type TokenPayload,
+} from './view-value'
 
 /**
  * Resolving SwiftUI's design tokens to concrete fonts and colours.
@@ -177,13 +184,75 @@ export function resolveColorPayload(payload: ColorPayload, scheme: ColorScheme =
   const base =
     payload.name !== null
       ? (colorForName(payload.name, scheme) ?? rgba(0, 0, 0, 0))
-      : grayscale(payload.white ?? 0)
+      : payload.red !== undefined
+        ? rgba(
+            Math.round(clamp01(payload.red) * 255),
+            Math.round(clamp01(payload.green ?? 0) * 255),
+            Math.round(clamp01(payload.blue ?? 0) * 255),
+          )
+        : grayscale(payload.white ?? 0)
 
   return payload.opacity === undefined ? base : { ...base, a: base.a * payload.opacity }
 }
 
+/**
+ * Resolves anything usable as a `ShapeStyle`: a colour, a token, or a gradient.
+ *
+ * `.background`, `.foregroundStyle` and `.fill` all take the same protocol in
+ * SwiftUI, so they take the same thing here — which is why a gradient works in every
+ * one of them without three separate code paths.
+ */
+export function resolveFillArg(
+  value: SwiftValue | undefined,
+  scheme: ColorScheme = 'light',
+): Fill | null {
+  if (!value || value.kind !== 'opaque') return null
+
+  if (value.typeName === STYLE_TYPE) {
+    const gradient = value.payload as GradientPayload
+    const colors = gradient.colors
+      .map((c) => resolveColorArg(c, scheme))
+      .filter((c): c is RGBA => c !== null)
+    if (colors.length === 0) return null
+
+    const stops = colors.map((color, index) => ({
+      color,
+      location: colors.length === 1 ? 0 : index / (colors.length - 1),
+    }))
+    return {
+      kind: 'linearGradient',
+      stops,
+      start: unitPoint(gradient.startPoint ?? 'top'),
+      end: unitPoint(gradient.endPoint ?? 'bottom'),
+    }
+  }
+
+  const color = resolveColorArg(value, scheme)
+  return color ? { kind: 'solid', color } : null
+}
+
+/** SwiftUI's named unit points, in the (0,0) top-leading space the render tree uses. */
+export function unitPoint(name: string): { x: number; y: number } {
+  const points: Readonly<Record<string, { x: number; y: number }>> = {
+    topLeading: { x: 0, y: 0 },
+    top: { x: 0.5, y: 0 },
+    topTrailing: { x: 1, y: 0 },
+    leading: { x: 0, y: 0.5 },
+    center: { x: 0.5, y: 0.5 },
+    trailing: { x: 1, y: 0.5 },
+    bottomLeading: { x: 0, y: 1 },
+    bottom: { x: 0.5, y: 1 },
+    bottomTrailing: { x: 1, y: 1 },
+  }
+  return points[name] ?? { x: 0.5, y: 0 }
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
 function grayscale(white: number): RGBA {
-  const channel = Math.round(Math.max(0, Math.min(1, white)) * 255)
+  const channel = Math.round(clamp01(white) * 255)
   return rgba(channel, channel, channel)
 }
 
@@ -210,10 +279,52 @@ export function resolveColorArg(
   return null
 }
 
-/** Resolves an argument that should be a font: a token like `.largeTitle`. */
+/**
+ * Named font weights, as `.fontWeight(.semibold)` and `Font.system(weight:)` take them.
+ */
+export const FONT_WEIGHTS: Readonly<Record<string, number>> = {
+  ultraLight: 100,
+  thin: 200,
+  light: 300,
+  regular: 400,
+  medium: 500,
+  semibold: 600,
+  bold: 700,
+  heavy: 800,
+  black: 900,
+}
+
+/**
+ * Resolves an argument that should be a font.
+ *
+ * Two shapes: a text style token like `.largeTitle`, and the encoded form the host
+ * produces for `Font.system(size:weight:design:)`. The second carries its arguments
+ * in the token name because a contextual member has no type information to hang them
+ * on — see `callImplicitMember` in the host.
+ */
 export function resolveFontArg(value: SwiftValue | undefined, scale = 1): ResolvedFont | null {
   if (!value || value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return null
-  return fontForToken((value.payload as TokenPayload).name, scale)
+  const name = (value.payload as TokenPayload).name
+
+  if (name.startsWith('system:')) {
+    const [, size, weight, design] = name.split(':')
+    const points = Number(size) || 17
+    return {
+      family: design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : UI_FONT_FAMILY,
+      size: points * scale,
+      weight: FONT_WEIGHTS[weight ?? 'regular'] ?? 400,
+      italic: false,
+      lineHeight: Math.round(points * 1.29) * scale,
+    }
+  }
+
+  return fontForToken(name, scale)
+}
+
+/** `.fontWeight(.bold)` and `.bold()` change weight without changing size. */
+export function resolveWeightArg(value: SwiftValue | undefined): number | null {
+  if (!value || value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return null
+  return FONT_WEIGHTS[(value.payload as TokenPayload).name] ?? null
 }
 
 /** Numeric argument, accepting both `Int` and `Double`. */

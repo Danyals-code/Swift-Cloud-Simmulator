@@ -964,14 +964,24 @@ export class Parser {
     if (this.check('[')) return this.parseCollectionLiteral()
     if (this.check('{')) return this.parseClosure()
 
+    // Key paths: `\.self`, `\.id`, `\.author.name`, `\Item.title`.
     if (this.check('\\')) {
       this.advance()
-      this.unsupported(token.span, 'key paths')
-      if (this.check('.')) {
+
+      const components: string[] = []
+      // An optional root type, as in `\Item.title`. It carries no information the
+      // slice uses — the key path is applied to a value whose type is already known.
+      if (this.current.kind === 'identifier' && !this.check('.')) this.advance()
+
+      while (this.check('.')) {
         this.advance()
-        this.parseMemberName()
+        components.push(this.parseMemberName().name)
       }
-      return { kind: 'errorExpr', span: this.spanFrom(token), message: 'Key paths are not supported.' }
+
+      if (components.length === 0) {
+        this.error(token.span, 'unexpected_token', 'Expected a key path component after \\.')
+      }
+      return { kind: 'keyPath', span: this.spanFrom(token), components }
     }
 
     this.error(

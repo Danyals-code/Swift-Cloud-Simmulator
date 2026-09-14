@@ -168,6 +168,85 @@ export function opaque(typeName: string, payload: unknown): OpaqueValue {
   return { kind: 'opaque', typeName, payload }
 }
 
+// ------------------------------------------------------------------ key paths
+
+/** `\.self`, `\.id` — an unapplied property accessor. */
+export const KEYPATH_TYPE = 'KeyPath'
+
+export interface KeyPathPayload {
+  readonly components: readonly string[]
+}
+
+export function keyPath(components: readonly string[]): OpaqueValue {
+  return { kind: 'opaque', typeName: KEYPATH_TYPE, payload: { components } }
+}
+
+export function asKeyPath(value: SwiftValue | undefined): KeyPathPayload | null {
+  return value !== undefined && value.kind === 'opaque' && value.typeName === KEYPATH_TYPE
+    ? (value.payload as KeyPathPayload)
+    : null
+}
+
+/**
+ * Applies a key path to a value.
+ *
+ * `\.self` is the identity path, which is why it is the idiomatic `ForEach(_:id:)`
+ * argument for an array of plain strings. Anything else walks stored fields.
+ */
+export function applyKeyPath(path: KeyPathPayload, value: SwiftValue): SwiftValue {
+  let current = value
+  for (const component of path.components) {
+    if (component === 'self') continue
+    if (current.kind !== 'struct') return NIL
+    current = current.fields.get(component) ?? NIL
+  }
+  return current
+}
+
+// --------------------------------------------------------------- projections
+
+/**
+ * The type name carried by a property-wrapper projection — `$count`.
+ *
+ * Named `Binding` because that is what SwiftUI calls it and what the user writes,
+ * but the mechanism is a *language* feature, not a SwiftUI one: a projection is a
+ * read/write reference to storage somewhere else. The interpreter creates them and
+ * passes them around without knowing anything about SwiftUI, which is what keeps the
+ * boundary rule intact.
+ */
+export const PROJECTION_TYPE = 'Binding'
+
+/** A read/write reference to storage owned by someone else. */
+export interface ProjectionPayload {
+  get(): SwiftValue
+  set(value: SwiftValue): void
+  /** For diagnostics: `count`, `self.isOn`. */
+  readonly description: string
+}
+
+export function projection(payload: ProjectionPayload): OpaqueValue {
+  return { kind: 'opaque', typeName: PROJECTION_TYPE, payload }
+}
+
+export function asProjection(value: SwiftValue | undefined): ProjectionPayload | null {
+  return value !== undefined && value.kind === 'opaque' && value.typeName === PROJECTION_TYPE
+    ? (value.payload as ProjectionPayload)
+    : null
+}
+
+/**
+ * Reads through a projection, so `@Binding var count` behaves like an `Int`.
+ *
+ * Applied on every field and variable read. Doing it here — rather than by looking
+ * at the `@Binding` attribute on the declaration — means the transparency follows
+ * the *value*, so a binding passed through three views deep still reads and writes
+ * the original storage without any of the intermediate declarations mattering.
+ */
+export function unwrapProjection(value: SwiftValue): SwiftValue {
+  const p = asProjection(value)
+  return p ? p.get() : value
+}
+
 // ------------------------------------------------------------------ copying
 
 /**
