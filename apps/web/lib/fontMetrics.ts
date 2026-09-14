@@ -1,7 +1,7 @@
 'use client'
 
 import type { MeasuredFontData } from '@studio/shared'
-import { UI_FONT_FAMILY } from '@studio/swiftui-runtime'
+import { UI_FONT_FAMILY } from '@studio/shared'
 
 /**
  * Measures the real font once, on the main thread, for the worker to lay out with.

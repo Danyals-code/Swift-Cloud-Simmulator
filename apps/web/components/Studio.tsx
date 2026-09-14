@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { downloadProjectZip, type ExportFormat } from '@studio/exporter'
+import type { ExportFormat } from '@studio/shared'
 import { encodeProject, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice, type DeviceKey } from '@studio/sim-shell'
@@ -163,11 +163,22 @@ export function Studio() {
     }
   }, [project, flush])
 
+  /**
+   * Loaded on click, not on first paint.
+   *
+   * The project generator — pbxproj, plists, asset catalogues, four manifests — is
+   * about thirty kilobytes that runs once per session at most, and it was in the
+   * initial bundle for the sake of one function reference. The menu itself is plain
+   * data and stays static, so the button still knows its options before the code
+   * behind them exists.
+   */
   const handleExport = useCallback(
     (format: ExportFormat) => {
       if (!project) return
       void flush()
-      downloadProjectZip(project, format)
+      void import('@studio/exporter').then(({ downloadProjectZip }) => {
+        downloadProjectZip(project, format)
+      })
     },
     [project, flush],
   )

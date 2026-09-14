@@ -1,4 +1,12 @@
-import { rgba, type Fill, type ResolvedFont, type RGBA } from '@studio/shared'
+import {
+  MONO_FAMILY,
+  rgba,
+  ROUNDED_FAMILY,
+  UI_FONT_FAMILY,
+  type Fill,
+  type ResolvedFont,
+  type RGBA,
+} from '@studio/shared'
 import type { SwiftValue } from '@studio/swift-runtime'
 import {
   COLOR_TYPE,
@@ -21,11 +29,9 @@ import {
  * licensed for web redistribution (risk R2).
  */
 
-export const UI_FONT_FAMILY =
-  '"Inter", -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif'
-
-export const ROUNDED_FAMILY = '"Inter", ui-rounded, system-ui, sans-serif'
-export const MONO_FAMILY = 'ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace'
+// Defined in `shared` so the main thread can name a font face without importing the
+// interpreter to do it. Re-exported here because this is where the layout code looks.
+export { MONO_FAMILY, ROUNDED_FAMILY, UI_FONT_FAMILY } from '@studio/shared'
 
 interface TextStyle {
   readonly size: number

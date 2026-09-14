@@ -7,21 +7,37 @@
  * decisions that nobody wants to unpick. A build that fails today is a five-minute
  * conversation; a 3 MB bundle in Phase 6 is a week.
  *
- * Measures total gzipped client JavaScript: everything the browser downloads to
- * open the editor, lazily-loaded chunks included.
+ * Measures total gzipped client JavaScript that a *supported browser* can fetch —
+ * lazily-loaded chunks included, because they are still shipped and still cached.
  *
- * Note on the metric: NFR-1 splits its budget into shell and worker, but Turbopack
- * does not emit a per-route chunk manifest, and there is no stable way to attribute
- * a hashed chunk to a route. Rather than report a number we cannot actually compute,
- * this gates the sum and prints the per-chunk breakdown so a regression has an
- * obvious first suspect.
+ * Two honesty notes about the metric, because it is easy to read more into it than
+ * it says:
+ *
+ * 1. **Next's `nomodule` polyfill bundle is excluded**, read from the build manifest
+ *    rather than matched by name. It is served behind `nomodule`, so any browser that
+ *    supports ES modules — which is every browser that can run a Web Worker and
+ *    CodeMirror 6, i.e. every browser this app works in — never downloads it.
+ *    Counting 38 KB nobody fetches made the gate wrong in the expensive direction:
+ *    it consumed a tenth of the budget and would eventually have forced a real
+ *    feature to be cut to pay for bytes that were never sent.
+ *
+ * 2. **This is a ratchet on total shipped bytes, not a proxy for load time.** Moving
+ *    code behind a dynamic import makes the first paint smaller and this number very
+ *    slightly *larger*, because the split costs a little overhead. That is a good
+ *    trade the gate cannot see, so the per-chunk breakdown below is printed with the
+ *    largest first: that one is the better load-time signal.
+ *
+ * NFR-1 splits its budget into shell and worker, but Turbopack does not emit a
+ * per-route chunk manifest and there is no stable way to attribute a hashed chunk to
+ * a route. Rather than report a number that cannot actually be computed, this gates
+ * the sum.
  *
  * Usage: node tooling/check-bundle-budget.mjs [--json]
  */
 
 import { gzipSync } from 'node:zlib'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -37,7 +53,9 @@ const KB = 1024
  * separately at 450 KB.
  *
  * History:
- *   Phase 0 — 324 KB actual (React, Next runtime, CodeMirror). Budget 450.
+ *   Phase 0  — 324 KB actual (React, Next runtime, CodeMirror). Budget 450.
+ *   Phase 10 — 367 KB actual, after excluding the nomodule polyfills (see note 1).
+ *              The measured number fell by 38 KB without a byte changing hands.
  */
 const BUDGET_KB = 450
 
@@ -62,6 +80,15 @@ function gzipKB(file) {
   return gzipSync(readFileSync(file), { level: 9 }).length / KB
 }
 
+/** Next's client build manifest, or null when the build predates it. */
+function readManifest() {
+  try {
+    return JSON.parse(readFileSync(join(NEXT_DIR, 'build-manifest.json'), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
 function main() {
   const asJson = process.argv.includes('--json')
 
@@ -72,11 +99,18 @@ function main() {
     process.exit(2)
   }
 
-  const chunks = walkJs(join(NEXT_DIR, 'static'))
-  if (chunks.length === 0) {
+  const all = walkJs(join(NEXT_DIR, 'static'))
+  if (all.length === 0) {
     console.error('Build contains no client chunks — something is wrong with the build output.')
     process.exit(2)
   }
+
+  // `nomodule`, so no supported browser fetches it. Read from the manifest rather
+  // than matched by filename, which is a content hash and changes every build.
+  const polyfills = new Set(
+    (readManifest()?.polyfillFiles ?? []).map((f) => join(NEXT_DIR, f.split('/').join(sep))),
+  )
+  const chunks = all.filter((file) => !polyfills.has(file))
 
   const sizes = chunks
     .map((file) => ({ file: relative(NEXT_DIR, file), kb: gzipKB(file) }))

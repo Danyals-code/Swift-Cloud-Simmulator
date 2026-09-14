@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { DEVICE_LIST, type DeviceKey } from '@studio/sim-shell'
-import { EXPORT_FORMATS, type ExportFormat } from '@studio/exporter'
+import { EXPORT_FORMATS, type ExportFormat } from '@studio/shared'
 import type { PreviewSettings } from '../lib/store'
 
 export interface ToolbarProps {
