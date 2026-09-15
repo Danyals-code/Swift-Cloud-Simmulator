@@ -135,17 +135,20 @@ Then open http://localhost:3000.
 
 ### Deploying
 
-The app deploys to Vercel as a standard npm-workspace monorepo. Set the project's
-**Root Directory** to `apps/web`; Vercel then detects the workspace, installs from
-the repo root and builds in the subdirectory with no custom commands.
-
-`apps/web/vercel.json` carries the framework marker and the security headers.
-Nothing overrides the install or build steps, which is deliberate: an override is a
-second place for the build to be wrong, and the defaults are correct here.
+`vercel.json` at the repo root configures the monorepo build: the project's root
+directory stays the repository root, and the build command targets the web
+workspace. Node is pinned to 22.x in `package.json` so the deployed build does not
+drift with whatever the platform defaults to.
 
 ```bash
 npx vercel --prod
 ```
+
+If a build fails on the platform but succeeds locally, the first thing to check is
+which bundler ran. `next build` uses Turbopack, a native binary; `next build
+--webpack` is the fallback. Webpack produces a larger bundle here (464 KB against
+Turbopack's 367 KB, over the 450 KB budget), so it is a diagnostic rather than a
+default.
 
 ## Repository layout
 
