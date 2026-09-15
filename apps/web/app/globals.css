@@ -50,7 +50,7 @@ body {
   margin: 0;
   background: var(--color-xc-editor);
   color: var(--color-xc-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter var', 'Inter', 'Segoe UI', system-ui,
+  font-family: -apple-system, BlinkMacSystemFont, var(--font-ui), 'Segoe UI', system-ui,
     sans-serif;
   font-size: 12px;
   -webkit-font-smoothing: antialiased;
@@ -71,11 +71,16 @@ body {
  * A visible ring on keyboard focus and nothing on a mouse click, which is what
  * `:focus-visible` is for and what every native control on both platforms does.
  * Set once here so no component has to remember it.
+ *
+ * `tabindex="-1"` is excluded. Those are containers a dialog or a menu focuses
+ * programmatically so the keyboard has somewhere to land; they are not reachable
+ * by tabbing, so a ring around them marks nothing - it just draws a blue border
+ * around the whole sheet.
  */
 :focus {
   outline: none;
 }
-:focus-visible {
+:focus-visible:not([tabindex='-1']) {
   outline: 2px solid var(--color-xc-accent);
   outline-offset: -1px;
   border-radius: 4px;

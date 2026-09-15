@@ -167,8 +167,10 @@ export function SegmentedControl({
 
 export interface PaneTogglesProps {
   options: readonly { key: string; icon: IconName; label: string; title: string }[]
-  /** The keys currently showing. */
+  /** The keys switched on. */
   shown: ReadonlySet<string>
+  /** Switched on, but with no room in the current window. */
+  suppressed?: ReadonlySet<string>
   onToggle: (key: string) => void
 }
 
@@ -179,7 +181,7 @@ export interface PaneTogglesProps {
  * modelling it as an exclusive choice would make hiding the navigator also show
  * the debug area.
  */
-export function PaneToggles({ options, shown, onToggle }: PaneTogglesProps) {
+export function PaneToggles({ options, shown, suppressed, onToggle }: PaneTogglesProps) {
   return (
     <div
       role="group"
@@ -189,6 +191,10 @@ export function PaneToggles({ options, shown, onToggle }: PaneTogglesProps) {
     >
       {options.map((option) => {
         const on = shown.has(option.key)
+        // On but with nowhere to go. Drawn as a pressed-and-dimmed switch rather
+        // than as off, because "off" would be a lie about a setting the user made.
+        const cramped = on && suppressed?.has(option.key) === true
+
         return (
           <button
             key={option.key}
@@ -196,10 +202,15 @@ export function PaneToggles({ options, shown, onToggle }: PaneTogglesProps) {
             onClick={() => onToggle(option.key)}
             aria-pressed={on}
             aria-label={option.label}
-            title={option.title}
+            aria-disabled={cramped}
+            title={cramped ? `${option.title} - no room in this window` : option.title}
             data-testid={`pane-toggle-${option.key}`}
             className={`inline-flex h-[18px] w-[26px] items-center justify-center rounded-[4px] transition-colors ${
-              on ? 'bg-white/[0.18] text-xc-text' : 'text-xc-text-3 hover:text-xc-text-2'
+              cramped
+                ? 'bg-white/[0.07] text-xc-text-3'
+                : on
+                  ? 'bg-white/[0.18] text-xc-text'
+                  : 'text-xc-text-3 hover:text-xc-text-2'
             }`}
           >
             <Icon name={option.icon} size={14} />

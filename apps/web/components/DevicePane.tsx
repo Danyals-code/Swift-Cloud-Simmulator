@@ -26,6 +26,17 @@ export interface DevicePaneProps {
 const BEZEL = 10
 const PANE_PADDING = 28
 
+/**
+ * The device's own chrome sits above everything the app can draw.
+ *
+ * The app's layers run up to 200,000 - a navigation bar is placed at 100,000 and a
+ * sheet at 200,000, so that bars paint over content and presentations over bars.
+ * The status bar and the Dynamic Island are not layers in the app at all; they are
+ * the hardware, and they were previously at 10,000 - underneath every navigation
+ * bar, which is why a screen with one showed no clock and no island.
+ */
+const DEVICE_Z = 1_000_000
+
 /** Dynamic Type steps, matching the iOS accessibility slider's usable range. */
 const TYPE_SCALES: readonly MenuItem[] = [
   { value: '0.82', label: 'Text XS' },
@@ -267,7 +278,7 @@ function StatusBar({ device, colorScheme }: { device: DeviceSpec; colorScheme: '
         fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif',
         color: tint,
         pointerEvents: 'none',
-        zIndex: 10_000,
+        zIndex: DEVICE_Z,
       }}
     >
       <span>9:41</span>
@@ -349,7 +360,7 @@ function DynamicIsland({ device }: { device: DeviceSpec }) {
         borderRadius: height / 2,
         background: '#000',
         pointerEvents: 'none',
-        zIndex: 10_002,
+        zIndex: DEVICE_Z + 2,
       }}
     />
   )
@@ -380,7 +391,7 @@ function HomeIndicator({
         borderRadius: 2.5,
         background: colorScheme === 'dark' ? 'rgb(255 255 255 / 0.65)' : 'rgb(0 0 0 / 0.75)',
         pointerEvents: 'none',
-        zIndex: 10_001,
+        zIndex: DEVICE_Z + 1,
       }}
     />
   )

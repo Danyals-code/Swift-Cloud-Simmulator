@@ -58,6 +58,8 @@ export type PaintSpec =
       readonly font: ResolvedFont
       readonly color: RGBA
       readonly approximated: boolean
+      readonly resizable: boolean
+      readonly symbol?: string
     }
   | {
       readonly kind: 'scroll'
@@ -613,6 +615,8 @@ export class LayoutEngine {
             font: env.font,
             color: env.foregroundColor,
             approximated: element.approximated,
+            resizable: element.resizable,
+            ...(element.symbol ? { symbol: element.symbol } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),

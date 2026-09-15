@@ -48,6 +48,7 @@ import {
   resolveFontArg,
   resolveWeightArg,
   stringArg,
+  systemBackground,
   type ColorScheme,
 } from './style'
 import {
@@ -85,6 +86,15 @@ export interface ConversionResult {
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
   readonly content: LayoutElement
+  /**
+   * What colour the screen itself is.
+   *
+   * A grouped `List` or `Form` sits on `systemGroupedBackground`, and on iOS the
+   * whole screen behind it is that colour - including behind the navigation bar.
+   * Painting the screen white and the list grey is what produced a visible seam
+   * under the bar on every navigation-plus-list screen.
+   */
+  readonly background: RGBA
   /** True when the content extends under the device's edges. */
   readonly ignoresSafeArea: boolean
   readonly navigationBar: { readonly element: LayoutElement; readonly height: number } | null
@@ -173,7 +183,14 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const hitTargets = new Map<string, string>()
   const scheme = options.colorScheme ?? 'light'
   const safeArea = options.safeArea ?? ZERO_INSETS
-  const converter = new Converter(hitTargets, scheme, options.typeScale ?? 1, safeArea)
+  const backgroundToken = screenBackgroundToken(ui.content)
+  const converter = new Converter(
+    hitTargets,
+    scheme,
+    options.typeScale ?? 1,
+    safeArea,
+    backgroundToken,
+  )
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
@@ -211,7 +228,39 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
       }
     : null
 
-  return { content, ignoresSafeArea: ui.ignoresSafeArea, navigationBar, tabBar, overlay, hitTargets }
+  return {
+    content,
+    background: colorForName(backgroundToken, scheme) ?? systemBackground(scheme),
+    ignoresSafeArea: ui.ignoresSafeArea,
+    navigationBar,
+    tabBar,
+    overlay,
+    hitTargets,
+  }
+}
+
+/**
+ * The colour the screen is, decided by what the content is.
+ *
+ * Only two answers, because iOS only really has two: a grouped list or form sits on
+ * `systemGroupedBackground`, and everything else on `systemBackground`. The walk
+ * skips the wrappers that contribute nothing of their own - a `NavigationStack`
+ * around a `List` is still a list screen.
+ */
+function screenBackgroundToken(views: readonly ViewValue[]): string {
+  for (const view of views) {
+    if (TRANSPARENT_VIEWS.has(view.name)) {
+      const inner = screenBackgroundToken(view.children)
+      if (inner !== 'systemBackground') return inner
+      continue
+    }
+
+    if (view.name === 'List' || view.name === 'Form') {
+      const style = tokenName(modifierArg(view, 'listStyle', 0)) ?? 'insetGrouped'
+      if (style !== 'plain' && style !== 'sidebar') return 'systemGroupedBackground'
+    }
+  }
+  return 'systemBackground'
 }
 
 function joinRoot(children: LayoutElement[], axis: Axis): LayoutElement {
@@ -232,6 +281,8 @@ class Converter {
     private readonly scheme: ColorScheme,
     private readonly typeScale: number,
     private readonly safeArea: EdgeInsets = ZERO_INSETS,
+    /** The screen's own background, which the navigation bar has to match. */
+    private readonly backgroundToken: string = 'systemBackground',
   ) {}
 
   /**
@@ -261,6 +312,27 @@ class Converter {
   }
 
   // ------------------------------------------------------------------ chrome
+
+  /**
+   * A framework-drawn symbol.
+   *
+   * The chevrons on a navigation row, a back button, a picker and a disclosure
+   * group are supplied by SwiftUI rather than written by the user, and each used to
+   * be built inline from a resolved glyph with no record of *which* symbol it was.
+   * The renderer needs the name to draw the right shape, and four inline copies is
+   * four chances for the name and the glyph to disagree.
+   */
+  private symbolImage(id: string, name: string): LayoutElement {
+    const symbol = resolveSymbol(name)
+    return {
+      kind: 'image',
+      id,
+      glyph: symbol.glyph,
+      resizable: false,
+      approximated: symbol.approximated,
+      symbol: name,
+    }
+  }
 
   /** The navigation bar: a translucent strip with a title and its bar buttons. */
   navigationBar(bar: ResolvedUI['navigationBar'] & object): LayoutElement {
@@ -336,10 +408,20 @@ class Converter {
       child: column,
     }
 
+    /*
+      The bar takes the *screen's* background, not `systemBackground`.
+
+      It used to be white unconditionally, so a navigation stack over a grouped list
+      drew a white strip above a #F2F2F7 list and left a visible horizontal seam
+      across every such screen. On iOS 15 and later a bar at the top of its content
+      is transparent and the content's own background runs behind it, which is why
+      no seam exists there; matching the background is the same result without
+      having to let the content scroll under the bar.
+    */
     return this.background(
       this.fill(inset, 'navbar-fill', { horizontal: 'center', vertical: 'top' }),
       'navbar-bg',
-      this.color('systemBackground'),
+      this.color(this.backgroundToken),
     )
   }
 
@@ -396,9 +478,33 @@ class Converter {
       },
     }
 
+    // The hairline iOS draws where the bar meets the content. Unlike a navigation
+    // bar's, this one is always present: content scrolls underneath a tab bar, so
+    // there is no "at the top" state in which it disappears.
+    const withSeparator: LayoutElement = {
+      kind: 'stack',
+      id: 'tabbar-sep-stack',
+      axis: 'vertical',
+      spacing: 0,
+      alignment: CENTER,
+      children: [
+        {
+          kind: 'modified',
+          id: 'tabbar-sep',
+          modifier: { kind: 'frame', height: SEPARATOR_HEIGHT, alignment: CENTER },
+          child: {
+            kind: 'fill',
+            id: 'tabbar-sepl',
+            fill: { kind: 'solid', color: this.color('separator') },
+          },
+        },
+        row,
+      ],
+    }
+
     // The bar's background covers the home-indicator area; its items do not.
     return this.background(
-      this.fill(row, 'tabbar-fill', { horizontal: 'center', vertical: 'top' }),
+      this.fill(withSeparator, 'tabbar-fill', { horizontal: 'center', vertical: 'top' }),
       'tabbar-bg',
       this.color('systemBackground'),
     )
@@ -1059,13 +1165,37 @@ class Converter {
     return sections
   }
 
+  /**
+   * Hoists a hit target out so it wraps the whole row rather than the row's label.
+   *
+   * A `NavigationLink` arrives already wrapped in its own hit target, sized to the
+   * text inside it - about 22pt of a 44pt row. Everything below the words was
+   * therefore dead: tapping the lower half of a list row did nothing, which is not
+   * how any list on iOS behaves. Re-applying the same target around the padded,
+   * 44pt-tall row makes the whole row the control, as it should be.
+   */
+  private hoistHitTarget(
+    content: LayoutElement,
+    wrap: (inner: LayoutElement) => LayoutElement,
+  ): LayoutElement {
+    if (content.kind === 'modified' && content.modifier.kind === 'hitTarget') {
+      return { ...content, child: wrap(content.child) }
+    }
+    return wrap(content)
+  }
+
   /** One list row: system insets, a 44pt floor, and any row background applied. */
   private listRow(view: ViewValue, fallback: string): LayoutElement {
     const path = view.path ?? fallback
-    const content = view.swipe
+    const raw = view.swipe
       ? this.swipeableRow(view, this.convert(view, path, 'horizontal'), path)
       : this.convert(view, path, 'horizontal')
 
+    return this.hoistHitTarget(raw, (content) => this.sizedRow(view, path, content))
+  }
+
+  /** The row box: insets, a 44pt floor, and any `.listRowBackground`. */
+  private sizedRow(view: ViewValue, path: string, content: LayoutElement): LayoutElement {
     const padded: LayoutElement = {
       kind: 'modified',
       id: `${path}rowpad`,
@@ -1215,6 +1345,7 @@ class Converter {
       glyph: symbol.glyph,
       resizable,
       approximated: symbol.approximated,
+      ...(systemName ? { symbol: systemName } : {}),
       ...origin,
       ...(systemName ? { debugName: `Image(systemName: "${systemName}")` } : {}),
     }
@@ -1233,6 +1364,7 @@ class Converter {
         glyph: symbol.glyph,
         resizable: false,
         approximated: symbol.approximated,
+        ...(systemImage ? { symbol: systemImage } : {}),
       })
     }
     if (title !== null) children.push({ kind: 'text', id: `${path}title`, text: title })
@@ -1334,7 +1466,6 @@ class Converter {
 
     // The disclosure chevron is what makes a link legible as one, and iOS draws it
     // on every link inside a list.
-    const chevron = resolveSymbol('chevron.right')
     return {
       kind: 'stack',
       id: path,
@@ -1352,13 +1483,7 @@ class Converter {
             kind: 'modified',
             id: `${path}chevfont`,
             modifier: { kind: 'font', font: fontForToken('footnote', this.typeScale)! },
-            child: {
-              kind: 'image',
-              id: `${path}chev`,
-              glyph: chevron.glyph,
-              resizable: false,
-              approximated: true,
-            },
+            child: this.symbolImage(`${path}chev`, 'chevron.right'),
           },
         },
       ],
@@ -1367,7 +1492,6 @@ class Converter {
   }
 
   private backButton(view: ViewValue, path: string, origin: object): LayoutElement {
-    const chevron = resolveSymbol('chevron.left')
     const title = stringArg(labelled(view.args, 'title')) ?? 'Back'
 
     return {
@@ -1381,7 +1505,7 @@ class Converter {
         spacing: 4,
         alignment: CENTER,
         children: [
-          { kind: 'image', id: `${path}chev`, glyph: chevron.glyph, resizable: false, approximated: true },
+          this.symbolImage(`${path}chev`, 'chevron.left'),
           { kind: 'text', id: `${path}title`, text: title },
         ],
         ...origin,
@@ -1646,7 +1770,6 @@ class Converter {
     const title = stringArg(positional(view.args, 0)) ?? stringArg(labelled(view.args, 'label')) ?? ''
     const selection = bindingValue(labelled(view.args, 'selection'))
     const value = selection ? displayValue(selection) : ''
-    const chevron = resolveSymbol('chevron.up.chevron.down')
 
     return {
       kind: 'stack',
@@ -1669,7 +1792,7 @@ class Converter {
             alignment: CENTER,
             children: [
               { kind: 'text', id: `${path}valuetext`, text: value },
-              { kind: 'image', id: `${path}chev`, glyph: chevron.glyph, resizable: false, approximated: true },
+              this.symbolImage(`${path}chev`, 'chevron.up.chevron.down'),
             ],
           },
         },
@@ -1724,7 +1847,6 @@ class Converter {
   /** `DisclosureGroup` - the label row with a chevron, and its content beneath. */
   private disclosureGroup(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0)) ?? ''
-    const chevron = resolveSymbol('chevron.down')
 
     return {
       kind: 'stack',
@@ -1746,13 +1868,7 @@ class Converter {
               kind: 'modified',
               id: `${path}chevcolor`,
               modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
-              child: {
-                kind: 'image',
-                id: `${path}chev`,
-                glyph: chevron.glyph,
-                resizable: false,
-                approximated: true,
-              },
+              child: this.symbolImage(`${path}chev`, 'chevron.down'),
             },
           ],
         },

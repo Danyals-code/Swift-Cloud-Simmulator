@@ -24,6 +24,8 @@ export interface ToolbarProps {
   workerError: string | null
   inspecting: boolean
   panes: ReadonlySet<PaneKey>
+  /** Panes that are switched on but have no room in the current window. */
+  suppressed: ReadonlySet<PaneKey>
   onTogglePane: (pane: PaneKey) => void
   onDeviceChange: (device: DeviceKey) => void
   /** Re-run the preview from scratch: drop every `@State` box and re-evaluate. */
@@ -67,6 +69,7 @@ export function Toolbar({
   workerError,
   inspecting,
   panes,
+  suppressed,
   onTogglePane,
   onDeviceChange,
   onRun,
@@ -196,7 +199,12 @@ export function Toolbar({
 
         <span className="mx-0.5 h-[18px] w-px shrink-0 bg-white/10" />
 
-        <PaneToggles options={PANES} shown={panes} onToggle={(key) => onTogglePane(key as PaneKey)} />
+        <PaneToggles
+          options={PANES}
+          shown={panes}
+          suppressed={suppressed}
+          onToggle={(key) => onTogglePane(key as PaneKey)}
+        />
       </span>
     </header>
   )

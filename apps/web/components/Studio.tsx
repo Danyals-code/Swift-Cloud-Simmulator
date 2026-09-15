@@ -149,17 +149,18 @@ export function Studio() {
     const navMin = PANE_LIMITS.navigator.min
     const previewMin = PANE_LIMITS.preview.min
 
-    let showPreview = shown.preview
-    let showNavigator = shown.navigator
-
-    if (Number.isFinite(available)) {
-      if (showPreview && available < (showNavigator ? navMin : 0) + previewMin + EDITOR_MIN) {
-        showPreview = false
-      }
-      if (showNavigator && available < navMin + (showPreview ? previewMin : 0) + EDITOR_MIN) {
-        showNavigator = false
-      }
-    }
+    // Only the *combination* is refused. A single side pane the user asked for is
+    // always shown, even if the editor then has to go under its comfortable
+    // minimum: hiding the one thing somebody just switched on is worse than a
+    // narrow editor, and they can close it again in one keystroke.
+    const showNavigator = shown.navigator
+    const showPreview =
+      shown.preview &&
+      !(
+        showNavigator &&
+        Number.isFinite(available) &&
+        available < navMin + previewMin + EDITOR_MIN
+      )
 
     const nav = showNavigator ? navigatorWidth : 0
     const prev = showPreview ? previewWidth : 0
@@ -180,30 +181,18 @@ export function Studio() {
   }, [available, navigatorWidth, previewWidth, shown.navigator, shown.preview])
 
   /**
-   * Toggling a pane, including when there is no room for it.
+   * Toggling a pane.
    *
-   * Turning one on in a window too narrow for both makes room by turning the other
-   * off, rather than flipping a switch that visibly does nothing. "Show me the
-   * preview" in a cramped window means "instead of that", which is what this does.
+   * Flips the stored preference and nothing else. An earlier version also turned
+   * the *other* pane off to make room, which looked helpful and quietly wrote a
+   * preference the user never expressed - so widening the window afterwards did not
+   * bring the pane back, because as far as the store was concerned it had been
+   * switched off on purpose. Space is a display concern and is settled in `layout`
+   * above, where it can be reversed by resizing the window.
    */
   const togglePane = useCallback(
-    (pane: PaneKey) => {
-      const on = pane === 'navigator' ? layout.showNavigator : pane === 'preview' ? layout.showPreview : shown.debug
-      if (on) {
-        setPane(pane, false)
-        return
-      }
-
-      const roomForBoth =
-        available >= PANE_LIMITS.navigator.min + PANE_LIMITS.preview.min + EDITOR_MIN
-
-      if (!roomForBoth) {
-        if (pane === 'preview' && shown.navigator) setPane('navigator', false)
-        if (pane === 'navigator' && shown.preview) setPane('preview', false)
-      }
-      setPane(pane, true)
-    },
-    [available, layout.showNavigator, layout.showPreview, shown.debug, shown.navigator, shown.preview, setPane],
+    (pane: PaneKey) => setPane(pane, !shown[pane]),
+    [setPane, shown],
   )
 
   const revealSpanIn = useCallback(
@@ -250,15 +239,12 @@ export function Studio() {
       } else if (key === 'enter' && e.altKey) {
         e.preventDefault()
         togglePane('preview')
-      } else if (key === 'o' && e.shiftKey) {
-        e.preventDefault()
-        setSwitcherOpen(true)
-      } else if (key === 'p') {
-        e.preventDefault()
-        setSwitcherOpen(true)
       } else if (key === 'b') {
         e.preventDefault()
         togglePane('preview')
+      } else if ((key === 'o' && e.shiftKey) || key === 'p') {
+        e.preventDefault()
+        setSwitcherOpen(true)
       } else if (key === 'i') {
         e.preventDefault()
         setInspecting((v) => !v)
@@ -351,12 +337,11 @@ export function Studio() {
         lastCompileMs={result?.timings.total ?? null}
         workerError={workerError}
         inspecting={inspecting}
-        panes={
-          new Set<PaneKey>([
-            ...(layout.showNavigator ? (['navigator'] as const) : []),
-            ...(shown.debug ? (['debug'] as const) : []),
-            ...(layout.showPreview ? (['preview'] as const) : []),
-          ])
+        // The toggles report the preference, so each is a switch that always
+        // responds; `suppressed` is how a pane that is on but has no room says so.
+        panes={new Set((Object.keys(shown) as PaneKey[]).filter((key) => shown[key]))}
+        suppressed={
+          new Set<PaneKey>(shown.preview && !layout.showPreview ? (['preview'] as const) : [])
         }
         onTogglePane={togglePane}
         onDeviceChange={(d: DeviceKey) => setDevice(d)}

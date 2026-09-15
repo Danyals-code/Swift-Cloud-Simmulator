@@ -8,13 +8,40 @@
  * something the main thread never runs is the kind of cost that is invisible until
  * something measures it.
  *
- * A metric-compatible open stack rather than SF Pro, which is not licensed for web
- * redistribution (risk R2).
+ * `-apple-system` leads every stack deliberately. A Mac or an iPad then renders the
+ * *real* SF Pro, SF Pro Rounded and SF Mono, which is as faithful as a browser can
+ * be; everyone else gets the substitute behind it. That the two differ is fine and
+ * is not hidden: layout is computed against whichever face actually resolved, because
+ * the main thread measures the resolved font rather than reading a transcribed table.
+ *
+ * SF Pro itself is not licensed for web redistribution (risk R2), which is why there
+ * is a substitute at all.
+ *
+ * `--font-ui` is supplied by `next/font` in the root layout, which self-hosts Inter.
+ * A stack naming a face nothing loads is what this file used to contain, and the
+ * result was every simulated screen drawn in Segoe UI.
  */
 
 export const UI_FONT_FAMILY =
-  '"Inter", -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif'
+  '-apple-system, BlinkMacSystemFont, var(--font-ui), "Segoe UI", system-ui, sans-serif'
 
-export const ROUNDED_FAMILY = '"Inter", ui-rounded, system-ui, sans-serif'
+/**
+ * `.rounded`, as `Font.system(design: .rounded)` selects.
+ *
+ * `ui-rounded` resolves to SF Pro Rounded on Apple platforms and to nothing
+ * anywhere else, so the stack falls through to the same face as the default
+ * design. A genuinely rounded substitute would mean a second webfont for a design
+ * axis that appears in a minority of code; the coverage matrix records the gap.
+ */
+export const ROUNDED_FAMILY =
+  'ui-rounded, -apple-system, BlinkMacSystemFont, var(--font-ui), "Segoe UI", system-ui, sans-serif'
 
-export const MONO_FAMILY = 'ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace'
+export const MONO_FAMILY =
+  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, "JetBrains Mono", "Cascadia Mono", Consolas, monospace'
+
+/** Every stack the layout engine can be asked to measure. */
+export const MEASURED_FAMILIES: readonly string[] = [
+  UI_FONT_FAMILY,
+  ROUNDED_FAMILY,
+  MONO_FAMILY,
+]
