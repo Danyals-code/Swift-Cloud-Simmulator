@@ -2,21 +2,29 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ExportFormat } from '@studio/shared'
-import { encodeProject, shareLink } from '@studio/project-model'
+import { buildFileTree, encodeProject, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice, type DeviceKey } from '@studio/sim-shell'
 import type { FileId, RenderNode, SourceSpan, UIEvent } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
+import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { useCompiler } from '../lib/useCompiler'
 import { ConsolePane } from './ConsolePane'
 import { DevicePane } from './DevicePane'
 import { EditorPane } from './EditorPane'
-import { FileRail } from './FileRail'
 import { FileSwitcher } from './FileSwitcher'
+import { JumpBar } from './JumpBar'
+import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
+import { TemplateGallery } from './TemplateGallery'
 import { Toolbar } from './Toolbar'
+import { Splitter } from './ui/Splitter'
+import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
+
+/** The narrowest the editor is allowed to get before the side panes start yielding. */
+const EDITOR_MIN = 300
 
 export function Studio() {
   const project = useStudio((s) => s.project)
@@ -32,16 +40,32 @@ export function Studio() {
   const setActiveFile = useStudio((s) => s.setActiveFile)
   const closeFile = useStudio((s) => s.closeFile)
   const createFile = useStudio((s) => s.createFile)
-  const renameActiveFile = useStudio((s) => s.renameActiveFile)
+  const renameFile = useStudio((s) => s.renameFile)
   const deleteFile = useStudio((s) => s.deleteFile)
+  const duplicateFile = useStudio((s) => s.duplicateFile)
+  const createFolder = useStudio((s) => s.createFolder)
+  const renameFolder = useStudio((s) => s.renameFolder)
+  const deleteFolder = useStudio((s) => s.deleteFolder)
+  const moveFile = useStudio((s) => s.moveFile)
   const setDevice = useStudio((s) => s.setDevice)
   const setPreview = useStudio((s) => s.setPreview)
   const renameSymbol = useStudio((s) => s.renameSymbol)
   const applyTemplate = useStudio((s) => s.applyTemplate)
 
-  const [showPreview, setShowPreview] = useState(true)
+  const shown = useLayout((s) => s.shown)
+  const navigatorWidth = useLayout((s) => s.navigatorWidth)
+  const previewWidth = useLayout((s) => s.previewWidth)
+  const debugHeight = useLayout((s) => s.debugHeight)
+  const setSize = useLayout((s) => s.setSize)
+  const setPane = useLayout((s) => s.setPane)
+
   const [inspecting, setInspecting] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const [caret, setCaret] = useState(0)
+  const splitRef = useRef<HTMLDivElement | null>(null)
+  const [available, setAvailable] = useState(Number.POSITIVE_INFINITY)
   const [reveal, setReveal] = useState<{ offset: number; nonce: number } | null>(null)
   const revealNonce = useRef(0)
 
@@ -64,12 +88,13 @@ export function Studio() {
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
   const files = project?.files ?? NO_FILES
 
-  const { result, stale, workerError, dispatch, reset, language } = useCompiler(
+  const { result, stale, workerError, dispatch, reset, language } = useCompiler({
     files,
     device,
-    previewSettings.colorScheme,
-    previewSettings.typeScale,
-  )
+    colorScheme: previewSettings.colorScheme,
+    typeScale: previewSettings.typeScale,
+    paused,
+  })
 
   const activeFile = useMemo(
     () => (project && activeFileId ? findFile(project, activeFileId) : undefined),
@@ -81,7 +106,9 @@ export function Studio() {
     [result, activeFileId],
   )
 
-  /** Files carrying an error, so the rail and tabs can mark them without opening each. */
+  const allDiagnostics = result?.diagnostics ?? NO_FILES
+
+  /** Files carrying an error, so the navigator and tabs can mark them unopened. */
   const filesWithErrors = useMemo(() => {
     const out = new Set<FileId>()
     for (const d of result?.diagnostics ?? []) {
@@ -89,6 +116,84 @@ export function Studio() {
     }
     return out
   }, [result])
+
+  const fileTree = useMemo(() => (project ? buildFileTree(project) : NO_FILES), [project])
+
+  // The split row's width, so the side panes can give way rather than pushing the
+  // editor to nothing. Measured rather than read from `window`, because the app is
+  // embedded in a pane as often as it fills a window.
+  useEffect(() => {
+    const el = splitRef.current
+    if (!el) return
+    const measure = () => setAvailable(el.clientWidth)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [loaded])
+
+  /**
+   * What the side panes actually get.
+   *
+   * Their stored widths and even their visibility are a preference, not a promise.
+   * Below about 780px there is no arrangement in which a navigator, an editor and a
+   * phone all have a usable width, so one of them has to go - and a preview squeezed
+   * to 300px beside a 104px editor serves nobody. The preview yields first: a
+   * narrower phone is still a phone, while an editor that fits eight characters is
+   * not an editor.
+   *
+   * The preference is kept rather than written back, so widening the window brings
+   * the pane back exactly as it was.
+   */
+  const layout = useMemo(() => {
+    const navMin = PANE_LIMITS.navigator.min
+    const previewMin = PANE_LIMITS.preview.min
+
+    // Only the *combination* is refused. A single side pane the user asked for is
+    // always shown, even if the editor then has to go under its comfortable
+    // minimum: hiding the one thing somebody just switched on is worse than a
+    // narrow editor, and they can close it again in one keystroke.
+    const showNavigator = shown.navigator
+    const showPreview =
+      shown.preview &&
+      !(
+        showNavigator &&
+        Number.isFinite(available) &&
+        available < navMin + previewMin + EDITOR_MIN
+      )
+
+    const nav = showNavigator ? navigatorWidth : 0
+    const prev = showPreview ? previewWidth : 0
+    const overflow = nav + prev + EDITOR_MIN - available
+
+    if (!Number.isFinite(overflow) || overflow <= 0) {
+      return { nav, preview: prev, showNavigator, showPreview }
+    }
+
+    const fromPreview = Math.min(overflow, Math.max(0, prev - previewMin))
+    const rest = overflow - fromPreview
+    return {
+      nav: Math.max(navMin, nav - Math.max(0, rest)),
+      preview: prev - fromPreview,
+      showNavigator,
+      showPreview,
+    }
+  }, [available, navigatorWidth, previewWidth, shown.navigator, shown.preview])
+
+  /**
+   * Toggling a pane.
+   *
+   * Flips the stored preference and nothing else. An earlier version also turned
+   * the *other* pane off to make room, which looked helpful and quietly wrote a
+   * preference the user never expressed - so widening the window afterwards did not
+   * bring the pane back, because as far as the store was concerned it had been
+   * switched off on purpose. Space is a display concern and is settled in `layout`
+   * above, where it can be reversed by resizing the window.
+   */
+  const togglePane = useCallback(
+    (pane: PaneKey) => setPane(pane, !shown[pane]),
+    [setPane, shown],
+  )
 
   const revealSpanIn = useCallback(
     (file: FileId, offset: number) => {
@@ -107,25 +212,50 @@ export function Studio() {
     [revealSpanIn],
   )
 
+  /**
+   * Run: drop the preview's state and evaluate from scratch.
+   *
+   * Also resumes, because pressing Run while paused can only mean one thing - and
+   * a Run that left the preview frozen would look broken.
+   */
+  const run = useCallback(() => {
+    setPaused(false)
+    void reset()
+  }, [reset])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       const key = e.key.toLowerCase()
 
-      if (key === 'b') {
+      // Xcode's own bindings, which is the point: muscle memory is most of what
+      // "feels like Xcode" means once the pixels are right.
+      if (key === '0') {
         e.preventDefault()
-        setShowPreview((v) => !v)
-      } else if (key === 'p') {
+        togglePane('navigator')
+      } else if (key === 'y' && e.shiftKey) {
+        e.preventDefault()
+        togglePane('debug')
+      } else if (key === 'enter' && e.altKey) {
+        e.preventDefault()
+        togglePane('preview')
+      } else if (key === 'b') {
+        e.preventDefault()
+        togglePane('preview')
+      } else if ((key === 'o' && e.shiftKey) || key === 'p') {
         e.preventDefault()
         setSwitcherOpen(true)
       } else if (key === 'i') {
         e.preventDefault()
         setInspecting((v) => !v)
+      } else if (key === 'r') {
+        e.preventDefault()
+        run()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [togglePane, run])
 
   const handleChange = useCallback(
     (text: string) => {
@@ -185,43 +315,78 @@ export function Studio() {
 
   if (!loaded || !project) {
     return (
-      <main className="grid h-dvh place-items-center bg-[#0d0d10] text-sm text-zinc-500">
+      <main className="grid h-dvh place-items-center bg-xc-editor text-[12px] text-xc-text-3">
         Loading project…
       </main>
     )
   }
 
+  const errors = allDiagnostics.filter((d) => d.severity === 'error').length
+  const warnings = allDiagnostics.filter((d) => d.severity === 'warning').length
+
   return (
-    <main className="flex h-dvh flex-col overflow-hidden bg-[#0d0d10] text-zinc-200">
+    <main className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
       <Toolbar
         projectName={project.manifest.name}
         device={project.manifest.device}
-        preview={previewSettings}
         savedAt={lastSavedAt}
         busy={stale}
+        paused={paused}
+        errors={errors}
+        warnings={warnings}
+        lastCompileMs={result?.timings.total ?? null}
+        workerError={workerError}
         inspecting={inspecting}
+        // The toggles report the preference, so each is a switch that always
+        // responds; `suppressed` is how a pane that is on but has no room says so.
+        panes={new Set((Object.keys(shown) as PaneKey[]).filter((key) => shown[key]))}
+        suppressed={
+          new Set<PaneKey>(shown.preview && !layout.showPreview ? (['preview'] as const) : [])
+        }
+        onTogglePane={togglePane}
         onDeviceChange={(d: DeviceKey) => setDevice(d)}
-        onPreviewChange={(settings: Partial<PreviewSettings>) => setPreview(settings)}
+        onRun={run}
+        onTogglePaused={() => setPaused((v) => !v)}
         onToggleInspect={() => setInspecting((v) => !v)}
         onExport={handleExport}
         onShare={handleShare}
-        onResetState={() => void reset()}
       />
 
-      <div className="flex min-h-0 flex-1">
-        <FileRail
-          files={files}
-          activeFileId={activeFileId}
-          filesWithErrors={filesWithErrors}
-          onSelect={setActiveFile}
-          onCreate={createFile}
-          onRename={(fileId, name) => {
-            setActiveFile(fileId)
-            renameActiveFile(name)
-          }}
-          onDelete={deleteFile}
-          onApplyTemplate={applyTemplate}
-        />
+      <div ref={splitRef} className="flex min-h-0 flex-1">
+        {layout.showNavigator ? (
+          <>
+            <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
+              <Navigator
+                tree={fileTree}
+                activeFileId={activeFileId}
+                filesWithErrors={filesWithErrors}
+                diagnostics={allDiagnostics}
+                canDelete={files.length > 1}
+                onSelect={setActiveFile}
+                onCreateFile={createFile}
+                onCreateFolder={createFolder}
+                onRenameFile={renameFile}
+                onRenameFolder={renameFolder}
+                onDeleteFile={deleteFile}
+                onDeleteFolder={deleteFolder}
+                onDuplicateFile={duplicateFile}
+                onMoveFile={moveFile}
+                onRevealDiagnostic={revealSpanIn}
+                onOpenTemplates={() => setGalleryOpen(true)}
+              />
+            </div>
+            <Splitter
+              orientation="col"
+              size={layout.nav}
+              onResize={(size) => setSize('navigator', size)}
+              min={PANE_LIMITS.navigator.min}
+              max={PANE_LIMITS.navigator.max}
+              direction={1}
+              label="Navigator width"
+              onToggle={() => togglePane('navigator')}
+            />
+          </>
+        ) : null}
 
         <div className="flex min-w-0 flex-1 flex-col">
           <TabBar
@@ -231,6 +396,15 @@ export function Studio() {
             onSelect={setActiveFile}
             onClose={closeFile}
           />
+
+          {activeFile ? (
+            <JumpBar
+              fileId={activeFile.id}
+              text={activeFile.text}
+              caret={caret}
+              onJump={(offset) => revealSpanIn(activeFile.id, offset)}
+            />
+          ) : null}
 
           {rename ? (
             <RenameBar
@@ -258,35 +432,62 @@ export function Studio() {
                 language={language}
                 onOpenFile={revealSpanIn}
                 onRename={(name, spans) => setRename({ name, spans })}
+                onCaret={setCaret}
               />
             ) : (
-              <p className="p-4 text-sm text-zinc-600">No file selected.</p>
+              <p className="p-4 text-[12px] text-xc-text-3">No file selected.</p>
             )}
           </div>
 
-          <div className="h-48 shrink-0 border-t border-white/5">
-            <ConsolePane
-              result={result}
-              workerError={workerError}
-              onRevealSpan={(offset) => {
-                if (activeFileId) revealSpanIn(activeFileId, offset)
-              }}
-            />
-          </div>
+          {shown.debug ? (
+            <>
+              <Splitter
+                orientation="row"
+                size={debugHeight}
+                onResize={(size) => setSize('debug', size)}
+                min={PANE_LIMITS.debug.min}
+                max={PANE_LIMITS.debug.max}
+                direction={-1}
+                label="Debug area height"
+                onToggle={() => togglePane('debug')}
+              />
+              <div style={{ height: debugHeight, maxHeight: '65%' }} className="shrink-0">
+                <ConsolePane
+                  result={result}
+                  workerError={workerError}
+                  onRevealSpan={revealSpanIn}
+                />
+              </div>
+            </>
+          ) : null}
         </div>
 
-        {showPreview ? (
-          <div className="w-[clamp(360px,34vw,560px)] shrink-0 border-l border-white/5">
-            <DevicePane
-              device={device}
-              tree={result?.renderTree ?? null}
-              stale={stale}
-              onEvent={handleEvent}
-              inspecting={inspecting}
-              onRevealSource={revealSource}
-              colorScheme={previewSettings.colorScheme}
+        {layout.showPreview ? (
+          <>
+            <Splitter
+              orientation="col"
+              size={layout.preview}
+              onResize={(size) => setSize('preview', size)}
+              min={PANE_LIMITS.preview.min}
+              max={PANE_LIMITS.preview.max}
+              direction={-1}
+              label="Preview width"
+              onToggle={() => togglePane('preview')}
             />
-          </div>
+            <div style={{ width: layout.preview }} className="shrink-0 overflow-hidden">
+              <DevicePane
+                device={device}
+                tree={result?.renderTree ?? null}
+                stale={stale}
+                paused={paused}
+                onEvent={handleEvent}
+                inspecting={inspecting}
+                onRevealSource={revealSource}
+                preview={previewSettings}
+                onPreviewChange={(settings: Partial<PreviewSettings>) => setPreview(settings)}
+              />
+            </div>
+          </>
         ) : null}
       </div>
 
@@ -298,6 +499,16 @@ export function Studio() {
             setActiveFile(fileId)
           }}
           onClose={() => setSwitcherOpen(false)}
+        />
+      ) : null}
+
+      {galleryOpen ? (
+        <TemplateGallery
+          onClose={() => setGalleryOpen(false)}
+          onChoose={(templateId) => {
+            setGalleryOpen(false)
+            applyTemplate(templateId)
+          }}
         />
       ) : null}
     </main>
@@ -327,7 +538,7 @@ function RenameBar({
 
   return (
     <form
-      className="flex items-center gap-3 border-b border-white/5 bg-[#141418] px-3 py-2 text-xs"
+      className="flex h-[30px] shrink-0 items-center gap-2.5 border-b border-xc-line bg-xc-bar px-2.5 text-[11.5px]"
       data-testid="rename-bar"
       onSubmit={(e) => {
         e.preventDefault()
@@ -335,8 +546,9 @@ function RenameBar({
         else onCancel()
       }}
     >
-      <span className="text-zinc-400">
-        Rename <span className="font-mono text-zinc-200">{rename.name}</span>
+      <Icon name="new-file" size={13} className="text-xc-text-3" />
+      <span className="text-xc-text-2">
+        Rename <span className="font-mono text-xc-text">{rename.name}</span>
       </span>
       <input
         autoFocus
@@ -348,13 +560,13 @@ function RenameBar({
         spellCheck={false}
         aria-label="New name"
         data-testid="rename-input"
-        className="w-48 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-zinc-100 outline-none focus:border-sky-500"
+        className="h-[20px] w-48 rounded-[5px] border border-xc-accent bg-black/40 px-2 font-mono text-xc-text outline-none"
       />
-      <span className="text-zinc-500" data-testid="rename-count">
+      <span className="text-xc-text-3" data-testid="rename-count">
         {rename.spans.length} {rename.spans.length === 1 ? 'occurrence' : 'occurrences'} in{' '}
         {files} {files === 1 ? 'file' : 'files'}
       </span>
-      <span className="ml-auto text-zinc-600">Enter to rename · Esc to cancel</span>
+      <span className="ml-auto text-xc-text-3">Enter to rename · Esc to cancel</span>
     </form>
   )
 }

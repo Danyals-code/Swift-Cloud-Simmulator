@@ -126,6 +126,15 @@ export interface ImageElement extends ElementBase {
   readonly resizable: boolean
   /** True when the glyph is a substitute for an SF Symbol we cannot ship (R2). */
   readonly approximated: boolean
+  /**
+   * The SF Symbol name, when there is one.
+   *
+   * Carried rather than parsed back out of `debugName`, which is a display string
+   * (`Image(systemName: "star.fill")`) and would have to be unquoted by whoever
+   * needed the name. The renderer needs it to pick a drawn shape, and the
+   * framework's own chevrons have no `debugName` at all.
+   */
+  readonly symbol?: string
 }
 
 /**

@@ -48,6 +48,7 @@ import {
   resolveFontArg,
   resolveWeightArg,
   stringArg,
+  systemBackground,
   type ColorScheme,
 } from './style'
 import {
@@ -85,6 +86,15 @@ export interface ConversionResult {
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
   readonly content: LayoutElement
+  /**
+   * What colour the screen itself is.
+   *
+   * A grouped `List` or `Form` sits on `systemGroupedBackground`, and on iOS the
+   * whole screen behind it is that colour - including behind the navigation bar.
+   * Painting the screen white and the list grey is what produced a visible seam
+   * under the bar on every navigation-plus-list screen.
+   */
+  readonly background: RGBA
   /** True when the content extends under the device's edges. */
   readonly ignoresSafeArea: boolean
   readonly navigationBar: { readonly element: LayoutElement; readonly height: number } | null
@@ -173,7 +183,8 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const hitTargets = new Map<string, string>()
   const scheme = options.colorScheme ?? 'light'
   const safeArea = options.safeArea ?? ZERO_INSETS
-  const converter = new Converter(hitTargets, scheme, options.typeScale ?? 1, safeArea)
+  const background = screenBackground(ui.content, scheme) ?? systemBackground(scheme)
+  const converter = new Converter(hitTargets, scheme, options.typeScale ?? 1, safeArea, background)
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
@@ -211,7 +222,51 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
       }
     : null
 
-  return { content, ignoresSafeArea: ui.ignoresSafeArea, navigationBar, tabBar, overlay, hitTargets }
+  return {
+    content,
+    background,
+    ignoresSafeArea: ui.ignoresSafeArea,
+    navigationBar,
+    tabBar,
+    overlay,
+    hitTargets,
+  }
+}
+
+/**
+ * The colour the screen is, decided by what the content is.
+ *
+ * Two rules, in order. A root view with its own `.background(…)` means it: writing
+ * `.background(Color(.systemGroupedBackground))` on the outermost view is how most
+ * people set a screen colour, and until now that painted the content's frame and
+ * left the navigation bar above it a different colour. Otherwise a grouped `List`
+ * or `Form` implies `systemGroupedBackground`, which is what iOS puts behind one.
+ *
+ * The walk skips wrappers that contribute nothing of their own - a
+ * `NavigationStack` around a `List` is still a list screen. Returns null when
+ * nothing says otherwise, so the caller can apply the plain system background.
+ */
+function screenBackground(views: readonly ViewValue[], scheme: ColorScheme): RGBA | null {
+  for (const view of views) {
+    if (TRANSPARENT_VIEWS.has(view.name)) {
+      const inner = screenBackground(view.children, scheme)
+      if (inner) return inner
+      continue
+    }
+
+    const explicit = resolveFillArg(modifierArg(view, 'background', 0), scheme)
+    // Only a flat colour. A gradient or a material behind the content does not
+    // extend under the bar on iOS either, so matching it would be inventing.
+    if (explicit?.kind === 'solid' && explicit.color.a > 0.95) return explicit.color
+
+    if (view.name === 'List' || view.name === 'Form') {
+      const style = tokenName(modifierArg(view, 'listStyle', 0)) ?? 'insetGrouped'
+      if (style !== 'plain' && style !== 'sidebar') {
+        return colorForName('systemGroupedBackground', scheme)
+      }
+    }
+  }
+  return null
 }
 
 function joinRoot(children: LayoutElement[], axis: Axis): LayoutElement {
@@ -232,7 +287,19 @@ class Converter {
     private readonly scheme: ColorScheme,
     private readonly typeScale: number,
     private readonly safeArea: EdgeInsets = ZERO_INSETS,
+    /** The screen's own background, which the navigation bar has to match. */
+    private readonly screenBackground: RGBA = { r: 255, g: 255, b: 255, a: 1 },
   ) {}
+
+  /**
+   * How deep inside a `List` or `Form` the conversion currently is.
+   *
+   * One thing depends on it: a `NavigationLink` draws a disclosure chevron in a
+   * list row and nothing at all anywhere else. A link in a grid of cards was
+   * getting one, which is not what iOS draws and which also ate the width the card
+   * needed - so the card's title wrapped and its statistics stacked.
+   */
+  private listDepth = 0
 
   /**
    * Makes an element fill the rect it is laid out in.
@@ -261,6 +328,27 @@ class Converter {
   }
 
   // ------------------------------------------------------------------ chrome
+
+  /**
+   * A framework-drawn symbol.
+   *
+   * The chevrons on a navigation row, a back button, a picker and a disclosure
+   * group are supplied by SwiftUI rather than written by the user, and each used to
+   * be built inline from a resolved glyph with no record of *which* symbol it was.
+   * The renderer needs the name to draw the right shape, and four inline copies is
+   * four chances for the name and the glyph to disagree.
+   */
+  private symbolImage(id: string, name: string): LayoutElement {
+    const symbol = resolveSymbol(name)
+    return {
+      kind: 'image',
+      id,
+      glyph: symbol.glyph,
+      resizable: false,
+      approximated: symbol.approximated,
+      symbol: name,
+    }
+  }
 
   /** The navigation bar: a translucent strip with a title and its bar buttons. */
   navigationBar(bar: ResolvedUI['navigationBar'] & object): LayoutElement {
@@ -336,11 +424,55 @@ class Converter {
       child: column,
     }
 
+    /*
+      The bar takes the *screen's* background, not `systemBackground`.
+
+      It used to be white unconditionally, so a navigation stack over a grouped list
+      drew a white strip above a #F2F2F7 list and left a visible horizontal seam
+      across every such screen. On iOS 15 and later a bar at the top of its content
+      is transparent and the content's own background runs behind it, which is why
+      no seam exists there; matching the background is the same result without
+      having to let the content scroll under the bar.
+    */
     return this.background(
       this.fill(inset, 'navbar-fill', { horizontal: 'center', vertical: 'top' }),
       'navbar-bg',
-      this.color('systemBackground'),
+      this.screenBackground,
     )
+  }
+
+  /**
+   * A `Label` inside a tab item.
+   *
+   * `Label` is an icon beside its title everywhere else, and in a tab bar it is an
+   * icon *above* a much smaller one - a 25pt symbol over a 10pt caption. Converting
+   * it like any other label produced a tiny symbol sitting next to the word at the
+   * same size, which is the one piece of chrome on screen at all times and so the
+   * one worth getting right.
+   */
+  private tabLabel(view: ViewValue, path: string): LayoutElement {
+    const title = stringArg(positional(view.args, 0))
+    const systemImage = stringArg(labelled(view.args, 'systemImage'))
+
+    const children: LayoutElement[] = []
+    if (systemImage) {
+      children.push({
+        kind: 'modified',
+        id: `${path}iconfont`,
+        modifier: { kind: 'font', font: fontForToken('title3', this.typeScale)! },
+        child: this.symbolImage(`${path}icon`, systemImage),
+      })
+    }
+    if (title !== null) children.push({ kind: 'text', id: `${path}title`, text: title })
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'vertical',
+      spacing: 2,
+      alignment: CENTER,
+      children,
+    }
   }
 
   /** The tab bar: evenly divided items, the selected one tinted. */
@@ -355,7 +487,11 @@ class Converter {
         axis: 'vertical',
         spacing: 2,
         alignment: CENTER,
-        children: item.children.map((child, i) => this.convert(child, `tab-${index}-${i}`, 'vertical')),
+        children: item.children.map((child, i) =>
+          child.name === 'Label'
+            ? this.tabLabel(child, `tab-${index}-${i}`)
+            : this.convert(child, `tab-${index}-${i}`, 'vertical'),
+        ),
         debugName: TAB_ITEM,
       }
 
@@ -396,9 +532,33 @@ class Converter {
       },
     }
 
+    // The hairline iOS draws where the bar meets the content. Unlike a navigation
+    // bar's, this one is always present: content scrolls underneath a tab bar, so
+    // there is no "at the top" state in which it disappears.
+    const withSeparator: LayoutElement = {
+      kind: 'stack',
+      id: 'tabbar-sep-stack',
+      axis: 'vertical',
+      spacing: 0,
+      alignment: CENTER,
+      children: [
+        {
+          kind: 'modified',
+          id: 'tabbar-sep',
+          modifier: { kind: 'frame', height: SEPARATOR_HEIGHT, alignment: CENTER },
+          child: {
+            kind: 'fill',
+            id: 'tabbar-sepl',
+            fill: { kind: 'solid', color: this.color('separator') },
+          },
+        },
+        row,
+      ],
+    }
+
     // The bar's background covers the home-indicator area; its items do not.
     return this.background(
-      this.fill(row, 'tabbar-fill', { horizontal: 'center', vertical: 'top' }),
+      this.fill(withSeparator, 'tabbar-fill', { horizontal: 'center', vertical: 'top' }),
       'tabbar-bg',
       this.color('systemBackground'),
     )
@@ -933,6 +1093,15 @@ class Converter {
    * other view, which is the behaviour people actually rely on.
    */
   private list(view: ViewValue, path: string, origin: object): LayoutElement {
+    this.listDepth++
+    try {
+      return this.listBody(view, path, origin)
+    } finally {
+      this.listDepth--
+    }
+  }
+
+  private listBody(view: ViewValue, path: string, origin: object): LayoutElement {
     const style = tokenName(modifierArg(view, 'listStyle', 0)) ?? (view.name === 'Form' ? 'insetGrouped' : 'insetGrouped')
     const grouped = style !== 'plain' && style !== 'sidebar'
 
@@ -1059,13 +1228,37 @@ class Converter {
     return sections
   }
 
+  /**
+   * Hoists a hit target out so it wraps the whole row rather than the row's label.
+   *
+   * A `NavigationLink` arrives already wrapped in its own hit target, sized to the
+   * text inside it - about 22pt of a 44pt row. Everything below the words was
+   * therefore dead: tapping the lower half of a list row did nothing, which is not
+   * how any list on iOS behaves. Re-applying the same target around the padded,
+   * 44pt-tall row makes the whole row the control, as it should be.
+   */
+  private hoistHitTarget(
+    content: LayoutElement,
+    wrap: (inner: LayoutElement) => LayoutElement,
+  ): LayoutElement {
+    if (content.kind === 'modified' && content.modifier.kind === 'hitTarget') {
+      return { ...content, child: wrap(content.child) }
+    }
+    return wrap(content)
+  }
+
   /** One list row: system insets, a 44pt floor, and any row background applied. */
   private listRow(view: ViewValue, fallback: string): LayoutElement {
     const path = view.path ?? fallback
-    const content = view.swipe
+    const raw = view.swipe
       ? this.swipeableRow(view, this.convert(view, path, 'horizontal'), path)
       : this.convert(view, path, 'horizontal')
 
+    return this.hoistHitTarget(raw, (content) => this.sizedRow(view, path, content))
+  }
+
+  /** The row box: insets, a 44pt floor, and any `.listRowBackground`. */
+  private sizedRow(view: ViewValue, path: string, content: LayoutElement): LayoutElement {
     const padded: LayoutElement = {
       kind: 'modified',
       id: `${path}rowpad`,
@@ -1215,6 +1408,7 @@ class Converter {
       glyph: symbol.glyph,
       resizable,
       approximated: symbol.approximated,
+      ...(systemName ? { symbol: systemName } : {}),
       ...origin,
       ...(systemName ? { debugName: `Image(systemName: "${systemName}")` } : {}),
     }
@@ -1233,6 +1427,7 @@ class Converter {
         glyph: symbol.glyph,
         resizable: false,
         approximated: symbol.approximated,
+        ...(systemImage ? { symbol: systemImage } : {}),
       })
     }
     if (title !== null) children.push({ kind: 'text', id: `${path}title`, text: title })
@@ -1332,9 +1527,21 @@ class Converter {
             children: this.convertList(view.children, `${path}label`, 'horizontal'),
           }
 
-    // The disclosure chevron is what makes a link legible as one, and iOS draws it
-    // on every link inside a list.
-    const chevron = resolveSymbol('chevron.right')
+    // The disclosure chevron is what makes a link legible as one - inside a list.
+    // Outside one, a `NavigationLink` is however its label looks and nothing more,
+    // which is the whole reason people wrap cards in them.
+    if (this.listDepth === 0) {
+      return {
+        kind: 'stack',
+        id: path,
+        axis: 'horizontal',
+        spacing: 0,
+        alignment: CENTER,
+        children: [label],
+        ...origin,
+      }
+    }
+
     return {
       kind: 'stack',
       id: path,
@@ -1352,13 +1559,7 @@ class Converter {
             kind: 'modified',
             id: `${path}chevfont`,
             modifier: { kind: 'font', font: fontForToken('footnote', this.typeScale)! },
-            child: {
-              kind: 'image',
-              id: `${path}chev`,
-              glyph: chevron.glyph,
-              resizable: false,
-              approximated: true,
-            },
+            child: this.symbolImage(`${path}chev`, 'chevron.right'),
           },
         },
       ],
@@ -1367,7 +1568,6 @@ class Converter {
   }
 
   private backButton(view: ViewValue, path: string, origin: object): LayoutElement {
-    const chevron = resolveSymbol('chevron.left')
     const title = stringArg(labelled(view.args, 'title')) ?? 'Back'
 
     return {
@@ -1381,7 +1581,7 @@ class Converter {
         spacing: 4,
         alignment: CENTER,
         children: [
-          { kind: 'image', id: `${path}chev`, glyph: chevron.glyph, resizable: false, approximated: true },
+          this.symbolImage(`${path}chev`, 'chevron.left'),
           { kind: 'text', id: `${path}title`, text: title },
         ],
         ...origin,
@@ -1646,7 +1846,6 @@ class Converter {
     const title = stringArg(positional(view.args, 0)) ?? stringArg(labelled(view.args, 'label')) ?? ''
     const selection = bindingValue(labelled(view.args, 'selection'))
     const value = selection ? displayValue(selection) : ''
-    const chevron = resolveSymbol('chevron.up.chevron.down')
 
     return {
       kind: 'stack',
@@ -1669,7 +1868,7 @@ class Converter {
             alignment: CENTER,
             children: [
               { kind: 'text', id: `${path}valuetext`, text: value },
-              { kind: 'image', id: `${path}chev`, glyph: chevron.glyph, resizable: false, approximated: true },
+              this.symbolImage(`${path}chev`, 'chevron.up.chevron.down'),
             ],
           },
         },
@@ -1724,7 +1923,6 @@ class Converter {
   /** `DisclosureGroup` - the label row with a chevron, and its content beneath. */
   private disclosureGroup(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0)) ?? ''
-    const chevron = resolveSymbol('chevron.down')
 
     return {
       kind: 'stack',
@@ -1746,13 +1944,7 @@ class Converter {
               kind: 'modified',
               id: `${path}chevcolor`,
               modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
-              child: {
-                kind: 'image',
-                id: `${path}chev`,
-                glyph: chevron.glyph,
-                resizable: false,
-                approximated: true,
-              },
+              child: this.symbolImage(`${path}chev`, 'chevron.down'),
             },
           ],
         },
@@ -2519,8 +2711,37 @@ function labelOf(view: ViewValue): string {
   const titled = labelled(view.args, 'title')
   if (titled?.kind === 'string') return titled.value
 
-  const fromChild = view.children.map(labelOf).find((t) => t.length > 0)
-  return fromChild ?? view.name
+  /*
+    The words inside it, which is what a screen reader reads out.
+
+    This used to take the first child that produced *any* label, and a child with
+    no text of its own falls back to its own type name - so a `NavigationLink`
+    wrapping a card whose first subview is an `Image` was announced as "Image".
+    Reading the text instead gives "Cascade Ridge, North Cascades, 8.4 mi", which
+    is both the useful answer and the one iOS gives for the same view.
+  */
+  const words = textIn(view)
+  if (words.length > 0) return words.slice(0, 4).join(', ')
+
+  return view.name
+}
+
+/**
+ * Every string a view's subtree draws, in order.
+ *
+ * `Label` as well as `Text`: its title is an argument rather than a child, so a
+ * subtree made only of labels would otherwise look wordless.
+ */
+function textIn(view: ViewValue): string[] {
+  const out: string[] = []
+
+  if (view.name === 'Text' || view.name === 'Label') {
+    const value = stringArg(positional(view.args, 0))
+    if (value) out.push(value)
+  }
+  for (const child of view.children) out.push(...textIn(child))
+
+  return out
 }
 
 /** The hit-test role, which decides what the renderer builds for this control. */

@@ -4,15 +4,23 @@ import { create } from 'zustand'
 
 import {
   addFile,
+  addFolder,
   createDefaultProject,
   createProjectFromTemplate,
   createProjectStore,
   decodeProject,
   DEFAULT_PROJECT_ID,
+  dirname,
+  duplicateFile,
+  isInFolder,
+  moveFile,
   payloadFromFragment,
   normalizeFileName,
+  normalizeFolderPath,
   removeFile,
+  removeFolder,
   renameFile,
+  renameFolder,
   templateById,
   withFileText,
   type Project,
@@ -36,6 +44,8 @@ export interface PreviewSettings {
   readonly colorScheme: 'light' | 'dark'
   /** Dynamic Type multiplier, 1 = the Large default. */
   readonly typeScale: number
+  /** `'fit'`, or a numeric scale as a string. Not a number, so `'fit'` stays a value. */
+  readonly zoom: string
 }
 
 export interface StudioState {
@@ -54,9 +64,17 @@ export interface StudioState {
   setActiveFile: (fileId: FileId) => void
   closeFile: (fileId: FileId) => void
 
-  createFile: (name: string) => FileId | null
-  renameActiveFile: (name: string) => void
+  /** Creates a source file, inside `parentFolder` when one is given. */
+  createFile: (name: string, parentFolder?: string) => FileId | null
+  renameFile: (fileId: FileId, name: string) => void
   deleteFile: (fileId: FileId) => void
+  duplicateFile: (fileId: FileId) => void
+
+  createFolder: (name: string, parentFolder?: string) => string | null
+  renameFolder: (path: string, name: string) => void
+  deleteFolder: (path: string) => void
+  /** Drag-and-drop in the navigator. Renames around a collision rather than failing. */
+  moveFile: (fileId: FileId, folder: string) => void
 
   setDevice: (device: DeviceKey) => void
   setPreview: (settings: Partial<PreviewSettings>) => void
@@ -97,7 +115,7 @@ export const useStudio = create<StudioState>((set, get) => {
     openFileIds: [],
     loaded: false,
     lastSavedAt: null,
-    preview: { colorScheme: 'light', typeScale: 1 },
+    preview: { colorScheme: 'light', typeScale: 1, zoom: 'fit' },
 
     async load() {
       // A share link wins over whatever is stored, because following one is an
@@ -172,11 +190,11 @@ export const useStudio = create<StudioState>((set, get) => {
       set({ openFileIds: remaining, activeFileId: fallback })
     },
 
-    createFile(name) {
+    createFile(name, parentFolder) {
       const { project } = get()
       if (!project) return null
 
-      const fileId = normalizeFileName(name)
+      const fileId = normalizeFileName(name, parentFolder)
       if (!fileId) return null
       if (project.files.some((f) => f.id === fileId)) return null
 
@@ -184,18 +202,24 @@ export const useStudio = create<StudioState>((set, get) => {
       return fileId
     },
 
-    renameActiveFile(name) {
-      const { project, activeFileId } = get()
-      if (!project || !activeFileId) return
+    /**
+     * Renames a file, keeping it in its own group.
+     *
+     * A typed name with no slash means "call it this", not "move it to the root",
+     * so the file's current folder is the parent unless the name names another.
+     */
+    renameFile(fileId, name) {
+      const { project } = get()
+      if (!project) return
 
-      const target = normalizeFileName(name)
-      if (!target || target === activeFileId) return
+      const target = normalizeFileName(name, dirname(fileId))
+      if (!target || target === fileId) return
 
-      const renamed = renameFile(project, activeFileId, target)
+      const renamed = renameFile(project, fileId, target)
       if (renamed === project) return
 
-      set({ openFileIds: get().openFileIds.map((id) => (id === activeFileId ? target : id)) })
-      commit(renamed, target)
+      set({ openFileIds: get().openFileIds.map((id) => (id === fileId ? target : id)) })
+      commit(renamed, get().activeFileId === fileId ? target : undefined)
     },
 
     deleteFile(fileId) {
@@ -207,6 +231,74 @@ export const useStudio = create<StudioState>((set, get) => {
 
       set({ openFileIds: get().openFileIds.filter((id) => id !== fileId) })
       commit(next)
+    },
+
+    duplicateFile(fileId) {
+      const { project } = get()
+      if (!project) return
+
+      const next = duplicateFile(project, fileId)
+      if (next === project) return
+
+      // Focus the copy: duplicating is almost always the first step of editing it.
+      const created = next.files.find((f) => !project.files.some((old) => old.id === f.id))
+      commit(next, created?.id)
+    },
+
+    createFolder(name, parentFolder) {
+      const { project } = get()
+      if (!project) return null
+
+      const path = normalizeFolderPath(name, parentFolder)
+      if (!path) return null
+
+      const next = addFolder(project, path)
+      if (next === project) return null
+
+      commit(next)
+      return path
+    },
+
+    renameFolder(path, name) {
+      const { project } = get()
+      if (!project) return
+
+      const target = normalizeFolderPath(name, dirname(path))
+      if (!target || target === path) return
+
+      const next = renameFolder(project, path, target)
+      if (next === project) return
+
+      // Open tabs name files by path, so every one inside the group has moved.
+      const rewrite = (id: FileId) => (isInFolder(id, path) ? target + id.slice(path.length) : id)
+      const active = get().activeFileId
+      set({ openFileIds: get().openFileIds.map(rewrite) })
+      commit(next, active ? rewrite(active) : undefined)
+    },
+
+    deleteFolder(path) {
+      const { project } = get()
+      if (!project) return
+
+      const next = removeFolder(project, path)
+      if (next === project) return
+
+      set({ openFileIds: get().openFileIds.filter((id) => !isInFolder(id, path)) })
+      commit(next)
+    },
+
+    moveFile(fileId, folder) {
+      const { project } = get()
+      if (!project) return
+
+      const next = moveFile(project, fileId, folder)
+      if (next === project) return
+
+      const moved = next.files.find((f) => !project.files.some((old) => old.id === f.id))
+      if (!moved) return
+
+      set({ openFileIds: get().openFileIds.map((id) => (id === fileId ? moved.id : id)) })
+      commit(next, get().activeFileId === fileId ? moved.id : undefined)
     },
 
     setDevice(device) {

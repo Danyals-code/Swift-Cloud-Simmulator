@@ -51,12 +51,29 @@ function spawnWorker(): WorkerHandle {
  *    dead worker is recoverable: respawn and recompile. The editor never goes down
  *    with it (requirement NFR-3).
  */
-export function useCompiler(
-  files: readonly SourceFile[],
-  device: DeviceSpec,
-  colorScheme: 'light' | 'dark',
+export interface CompilerOptions {
+  files: readonly SourceFile[]
+  device: DeviceSpec
+  colorScheme: 'light' | 'dark'
+  /** Dynamic Type multiplier, 1 = the Large default. */
+  typeScale?: number
+  /**
+   * Suspends the recompile-on-edit loop.
+   *
+   * The preview keeps whatever it last drew and stays interactive; edits simply do
+   * not run. `recompile()` still works, which is what Run does - so pausing is a
+   * pause, not a disconnection.
+   */
+  paused?: boolean
+}
+
+export function useCompiler({
+  files,
+  device,
+  colorScheme,
   typeScale = 1,
-) {
+  paused = false,
+}: CompilerOptions) {
   const handleRef = useRef<WorkerHandle | null>(null)
   const revisionRef = useRef(0)
   /** highest revision actually painted, so stale responses can be dropped */
@@ -133,14 +150,27 @@ export function useCompiler(
     }
   }, [accept, colorScheme, device, ensureWorker, files, typeScale])
 
-  // Debounced recompile whenever the sources or the device change.
+  /**
+   * Debounced recompile whenever the sources or the device change.
+   *
+   * Skipped entirely while paused rather than compiled-and-discarded: the point of
+   * pausing is to stop the work, and on a project whose `body` is expensive that is
+   * the difference between a responsive editor and a stuttering one. The first
+   * compile after resuming is immediate, because the edits are already made and
+   * there is nothing left to coalesce.
+   */
+  const first = useRef(true)
   useEffect(() => {
+    if (paused) return
+    const immediate = first.current
+    first.current = false
+
     if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => void runCompile(), DEBOUNCE_MS)
+    timerRef.current = setTimeout(() => void runCompile(), immediate ? 0 : DEBOUNCE_MS)
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [runCompile])
+  }, [runCompile, paused])
 
   useEffect(() => {
     return () => {

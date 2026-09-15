@@ -115,7 +115,8 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
           font: paint.font,
           color: paint.color,
           approximated: paint.approximated,
-          ...(node.debugName && node.debugName !== 'Image' ? { symbol: node.debugName } : {}),
+          resizable: paint.resizable,
+          ...(paint.symbol ? { symbol: paint.symbol } : {}),
         },
         a11y: { role: 'img', label: node.debugName ?? 'Image' },
       }

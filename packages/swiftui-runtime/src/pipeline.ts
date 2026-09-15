@@ -138,6 +138,7 @@ function render(request: CompileRequest, evaluation: EvaluationResult): RenderTr
           colorScheme: scheme,
           typeScale: request.typeScale ?? 1,
         }).element,
+        background: systemBackground(scheme),
         ignoresSafeArea: false,
         navigationBar: null,
         tabBar: null,
@@ -162,7 +163,7 @@ function render(request: CompileRequest, evaluation: EvaluationResult): RenderTr
   // SwiftUI centres root content in its window: a VStack hugging its content sits in
   // the middle of the screen rather than pinned to the top.
   const placed = engine.layout(screen.content, contentBounds, env, CENTER)
-  let tree = placedToRenderTree(placed, canvas, ++revision, systemBackground(scheme))
+  let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
 
   if (screen.navigationBar) {
     // The bar extends up behind the status bar, as it does on a real device.

@@ -8,6 +8,7 @@ import {
   type RenderTree,
   type UIEvent,
 } from '@studio/shared'
+import { symbolShapes, symbolStrokeScale } from './symbols'
 
 export interface RenderTreeViewProps {
   tree: RenderTree
@@ -585,26 +586,78 @@ function TextContent({ node }: { node: RenderNode }) {
 /**
  * Paints a symbol.
  *
- * The glyph is an open substitute, never Apple's - SF Symbols cannot be redistributed
- * to a browser (risk R2). `title` says so on hover, so the difference is discoverable
- * rather than a surprise when the project is first built in Xcode.
+ * Drawn from the shape table when the name is in it, and from the Unicode fallback
+ * glyph when it is not. Either way it is an *approximation*, never Apple's: SF
+ * Symbols cannot be redistributed to a browser (risk R2). `title` says so on hover,
+ * so the difference is discoverable rather than a surprise when the project is
+ * first built in Xcode.
+ *
+ * The box was already decided by the layout engine - `font.size * 1.18` wide, one
+ * line tall, exactly as SwiftUI sizes a non-resizable symbol - so this only has to
+ * fill it. The drawing is centred and slightly narrower than the box, which is how
+ * a real symbol sits beside text of the same size.
  */
 function ImageContent({ node }: { node: RenderNode }) {
   const image = node.image!
+  const shapes = image.symbol ? symbolShapes(image.symbol) : null
+  const title =
+    image.approximated && image.symbol ? `${image.symbol} - approximated` : undefined
+
+  const box: CSSProperties = {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: cssColor(image.color),
+    userSelect: 'none',
+  }
+
+  if (shapes) {
+    // `.resizable()` gives the node a frame of its own; anything else is sized from
+    // the font, and 1.28x the point size is about where a symbol's optical height
+    // lands next to text at the same size.
+    const side = node.image!.resizable
+      ? Math.min(node.frame.width, node.frame.height)
+      : image.font.size * 1.28
+    const scale = symbolStrokeScale(image.font.weight)
+
+    return (
+      <div title={title} style={box}>
+        <svg
+          width={side}
+          height={side}
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden
+          style={{ display: 'block', overflow: 'visible' }}
+        >
+          {shapes.map((shape, i) =>
+            shape.stroke ? (
+              <path
+                key={i}
+                d={shape.d}
+                stroke="currentColor"
+                strokeWidth={shape.stroke * scale}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : (
+              <path key={i} d={shape.d} fill="currentColor" />
+            ),
+          )}
+        </svg>
+      </div>
+    )
+  }
 
   return (
     <div
-      title={image.approximated && image.symbol ? `${image.symbol} - approximated` : undefined}
+      title={title}
       style={{
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        ...box,
         fontSize: image.font.size,
         lineHeight: `${image.font.lineHeight}px`,
-        color: cssColor(image.color),
-        userSelect: 'none',
       }}
     >
       {image.glyph}

@@ -41,6 +41,12 @@ async function replaceAll(page: Page, source: string) {
 
 const preview = (page: Page) => page.getByTestId('render-tree')
 
+/** Picks a non-default export format from the split button's menu. */
+async function exportAs(page: Page, format: string) {
+  await page.getByTestId('export-format').click()
+  await page.getByTestId(`export-format-menu-${format}`).click()
+}
+
 /** A rendered button in the simulated app, by its label. */
 const appButton = (page: Page, name: string) => preview(page).getByRole('button', { name })
 
@@ -254,14 +260,16 @@ test('Phase 3 gate 5 - an edit repaints without resetting unrelated @State', asy
   await expect(tree).toContainText('Count: 2', { timeout: 5_000 })
 })
 
-test('Phase 3 - Reset state clears the counter without changing the source', async ({ page }) => {
+test('Phase 3 - Run clears the preview state without changing the source', async ({ page }) => {
   await openStudio(page)
   const tree = preview(page)
 
   await appButton(page, 'Plus').click()
   await expect(tree).toContainText('Count: 1')
 
-  await page.getByRole('button', { name: 'Reset state' }).click()
+  // Run is Xcode's verb for it, and it is the same operation the old "Reset state"
+  // button performed: drop every @State box and evaluate from scratch.
+  await page.getByTestId('run-button').click()
   await expect(tree).toContainText('Count: 0')
   expect(await editorText(page)).toContain('@State private var count = 0')
 })
@@ -668,7 +676,7 @@ test('Phase 9 - the Swift Playgrounds export carries the edited source', async (
   await expect(page.getByTestId('save-indicator')).toContainText('Saved', { timeout: 5_000 })
 
   const downloadPromise = page.waitForEvent('download')
-  await page.getByTestId('export-format').selectOption('swiftpm')
+  await exportAs(page, 'swiftpm')
   const download = await downloadPromise
 
   expect(download.suggestedFilename()).toBe('CounterApp-swiftpm.zip')
@@ -692,7 +700,7 @@ test('Phase 9 - every export format offers a distinct download', async ({ page }
     ['xcodegen', 'CounterApp-xcodegen.zip'],
   ] as const) {
     const downloadPromise = page.waitForEvent('download')
-    await page.getByTestId('export-format').selectOption(format)
+    await exportAs(page, format)
     expect((await downloadPromise).suggestedFilename()).toBe(filename)
   }
 

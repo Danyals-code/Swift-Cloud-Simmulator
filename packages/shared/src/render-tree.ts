@@ -186,14 +186,21 @@ export interface TransformSpec {
 }
 
 export interface ImagePayload {
-  /** The substitute glyph drawn in place of the real symbol. */
+  /**
+   * The Unicode substitute.
+   *
+   * Drawn only when `symbol` names nothing the renderer has a shape for - it is the
+   * floor, not the plan. See `symbols.ts` in `swiftui-render-dom`.
+   */
   readonly glyph: string
   readonly font: ResolvedFont
   readonly color: RGBA
-  /** Always true for SF Symbols: the shipped glyph is not Apple's (R2). */
+  /** Always true for SF Symbols: what is drawn is not Apple's artwork (R2). */
   readonly approximated: boolean
-  /** The name the user wrote, for the inspector and for telemetry. */
+  /** The symbol name, for drawing it, for the inspector and for telemetry. */
   readonly symbol?: string
+  /** `.resizable()` - the image fills its frame rather than being sized by the font. */
+  readonly resizable?: boolean
 }
 
 /**

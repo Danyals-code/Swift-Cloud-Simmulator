@@ -27,3 +27,7 @@ Thumbs.db
 
 # build info
 *.tsbuildinfo
+
+# agent rules - `next dev` rewrites these on every run, so ignore rather than delete
+AGENTS.md
+CLAUDE.md

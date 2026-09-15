@@ -20,6 +20,39 @@ async function openStudio(page: Page) {
 }
 
 const preview = (page: Page) => page.getByTestId('render-tree')
+
+/**
+ * Creates a source file through the navigator's New menu.
+ *
+ * The `+` used to be a button that opened an input directly. It is a menu now,
+ * because there is more than one thing to create - a file, a group, or a whole
+ * project from a template.
+ */
+async function newFile(page: Page, name: string) {
+  await page.getByTestId('new-file').click()
+  await page.getByTestId('new-file-menu-file').click()
+  await page.getByTestId('new-file-input').fill(name)
+  await page.getByTestId('new-file-input').press('Enter')
+}
+
+/** Creates a group through the same menu. */
+async function newGroup(page: Page, name: string) {
+  await page.getByTestId('new-file').click()
+  await page.getByTestId('new-file-menu-folder').click()
+  await page.getByTestId('new-file-input').fill(name)
+  await page.getByTestId('new-file-input').press('Enter')
+}
+
+/** Picks a Dynamic Type step from the preview bar's popup. */
+async function setTypeScale(page: Page, value: string) {
+  await page.getByTestId('type-scale-select').click()
+  await page.getByTestId(`type-scale-select-menu-${value}`).click()
+}
+
+/** Opens the navigator's context menu on a row. */
+async function contextMenuOn(page: Page, label: string) {
+  await page.getByTestId('file-rail').getByText(label, { exact: true }).click({ button: 'right' })
+}
 const appButton = (page: Page, name: string) => preview(page).getByRole('button', { name })
 
 async function editorText(page: Page): Promise<string> {
@@ -55,9 +88,7 @@ async function nodeHeight(page: Page, text: string): Promise<number> {
 test('gate 1 - a second file can define a type the first one uses', async ({ page }) => {
   await openStudio(page)
 
-  await page.getByTestId('new-file').click()
-  await page.getByTestId('new-file-input').fill('Badge')
-  await page.getByTestId('new-file-input').press('Enter')
+  await newFile(page, 'Badge')
 
   await expect(page.getByTestId('file-rail')).toContainText('Badge.swift')
   await expect(page.getByTestId('tab-bar')).toContainText('Badge.swift')
@@ -100,9 +131,7 @@ test('gate 1 - an unresolved cross-file name is reported', async ({ page }) => {
 test('files can be switched with Ctrl+P', async ({ page }) => {
   await openStudio(page)
 
-  await page.getByTestId('new-file').click()
-  await page.getByTestId('new-file-input').fill('Sidebar')
-  await page.getByTestId('new-file-input').press('Enter')
+  await newFile(page, 'Sidebar')
   await expect(page.getByTestId('editor')).toContainText('struct Sidebar')
 
   await page.keyboard.press('ControlOrMeta+p')
@@ -119,17 +148,33 @@ test('files can be switched with Ctrl+P', async ({ page }) => {
 test('a file can be deleted, and the last one cannot', async ({ page }) => {
   await openStudio(page)
 
-  await page.getByTestId('new-file').click()
-  await page.getByTestId('new-file-input').fill('Temp')
-  await page.getByTestId('new-file-input').press('Enter')
+  await newFile(page, 'Temp')
   await expect(page.getByTestId('file-rail')).toContainText('Temp.swift')
 
-  await page.getByRole('button', { name: 'Delete Temp.swift' }).click()
+  await contextMenuOn(page, 'Temp.swift')
+  await page.getByTestId('navigator-menu-delete').click()
   await expect(page.getByTestId('file-rail')).not.toContainText('Temp.swift')
 
-  // With one file left there is no delete control at all - removing it would leave a
+  // With one file left the delete item is disabled - removing it would leave a
   // project with nothing to show and no way back.
-  await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0)
+  await contextMenuOn(page, 'CounterApp.swift')
+  await expect(page.getByTestId('navigator-menu-delete')).toBeDisabled()
+  await page.keyboard.press('Escape')
+})
+
+test('a group can be created and a file moved into it', async ({ page }) => {
+  await openStudio(page)
+
+  await newGroup(page, 'Models')
+  await expect(page.getByTestId('group-Sources/Models')).toBeVisible()
+
+  // A file created while a group is selected lands inside it, which is the rule
+  // Xcode uses and the only one that is never surprising.
+  await page.getByTestId('group-Sources/Models').click()
+  await newFile(page, 'Trail')
+
+  await expect(page.getByTestId('file-rail')).toContainText('Trail.swift')
+  await expect(page.getByTestId('jump-bar')).toContainText('Models')
 })
 
 // ---------------------------------------------------------------- gate 2
@@ -137,7 +182,10 @@ test('a file can be deleted, and the last one cannot', async ({ page }) => {
 test('gate 2 - a template from the gallery loads and renders cleanly', async ({ page }) => {
   await openStudio(page)
 
-  await page.getByTestId('template-select').selectOption('tasks')
+  await page.getByTestId('new-file').click()
+  await page.getByTestId('new-file-menu-template').click()
+  await page.getByTestId('template-tasks').click()
+  await page.getByTestId('template-confirm').click()
 
   await expect(preview(page)).toContainText('Tasks', { timeout: 5_000 })
   await expect(preview(page)).toContainText('of 4 complete')
@@ -199,14 +247,14 @@ test('gate 4 - dark mode and Dynamic Type re-render without losing state', async
   expect(await nodeHeight(page, 'Hello, World!')).toBe(41)
 
   // Dynamic Type is a layout input: text grows, and every frame above it with it.
-  await page.getByTestId('type-scale-select').selectOption('1.6')
+  await setTypeScale(page, '1.6')
   await expect.poll(() => nodeHeight(page, 'Hello, World!'), { timeout: 5_000 }).toBeGreaterThan(41)
   await expect(preview(page)).toContainText('Count: 2')
 
   await page.getByRole('button', { name: 'Dark', exact: true }).click()
   await expect(preview(page)).toContainText('Count: 2', { timeout: 5_000 })
 
-  await page.getByTestId('type-scale-select').selectOption('1')
+  await setTypeScale(page, '1')
   await expect.poll(() => nodeHeight(page, 'Hello, World!'), { timeout: 5_000 }).toBe(41)
   await expect(preview(page)).toContainText('Count: 2')
 })

@@ -2,6 +2,7 @@
 
 import { fileBasename } from '@studio/project-model'
 import type { FileId } from '@studio/shared'
+import { Icon } from './ui/Icon'
 
 export interface TabBarProps {
   openFileIds: readonly FileId[]
@@ -11,6 +12,14 @@ export interface TabBarProps {
   onClose: (fileId: FileId) => void
 }
 
+/**
+ * The editor's tabs.
+ *
+ * Xcode's are full-height and share a single hairline between neighbours rather
+ * than each carrying a border, which is why a row of them reads as one strip
+ * instead of a row of chips. The close control only appears under the pointer, so
+ * a wide row of tabs is a row of filenames rather than a row of ✕.
+ */
 export function TabBar({
   openFileIds,
   activeFileId,
@@ -24,15 +33,19 @@ export function TabBar({
     <div
       role="tablist"
       data-testid="tab-bar"
-      className="flex shrink-0 items-stretch overflow-x-auto border-b border-white/5 bg-[#141418]"
+      className="flex h-[28px] shrink-0 items-stretch overflow-x-auto border-b border-xc-line bg-xc-bar"
     >
       {openFileIds.map((fileId) => {
         const active = fileId === activeFileId
+        const hasError = filesWithErrors.has(fileId)
+
         return (
           <div
             key={fileId}
-            className={`group flex items-center gap-1.5 border-r border-white/5 pl-3 pr-1.5 text-[12px] transition-colors ${
-              active ? 'bg-[#1c1c22] text-zinc-100' : 'text-zinc-500 hover:bg-white/5'
+            className={`group relative flex min-w-[112px] max-w-[220px] shrink-0 items-center transition-colors ${
+              active
+                ? 'bg-xc-editor text-xc-text'
+                : 'bg-transparent text-xc-text-2 hover:bg-white/[0.04]'
             }`}
           >
             <button
@@ -40,22 +53,36 @@ export function TabBar({
               role="tab"
               aria-selected={active}
               onClick={() => onSelect(fileId)}
-              className="flex items-center gap-1.5 py-1.5"
+              // Middle-click closes, as it does in every editor and browser.
+              onAuxClick={(event) => {
+                if (event.button === 1) {
+                  event.preventDefault()
+                  onClose(fileId)
+                }
+              }}
+              title={fileId}
+              className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 text-[12px]"
             >
-              {filesWithErrors.has(fileId) ? (
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden />
+              {hasError ? (
+                <Icon name="error" size={11} weight={2} className="shrink-0 text-xc-error" />
               ) : null}
-              {fileBasename(fileId)}
+              <span className="truncate">{fileBasename(fileId)}</span>
             </button>
 
             <button
               type="button"
               onClick={() => onClose(fileId)}
               aria-label={`Close ${fileBasename(fileId)}`}
-              className="rounded px-1 text-zinc-600 opacity-40 transition-opacity hover:bg-white/10 hover:text-zinc-200 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
+              className="mr-1 grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[4px] text-xc-text-3 opacity-0 transition hover:bg-white/15 hover:text-xc-text focus-visible:opacity-100 group-hover:opacity-100"
             >
-              ×
+              <Icon name="xmark" size={9} weight={1.8} />
             </button>
+
+            {/* One hairline between neighbours, drawn by the tab on the right. */}
+            <span aria-hidden className="absolute inset-y-0 right-0 w-px bg-black/30" />
+            {active ? (
+              <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-xc-accent/70" />
+            ) : null}
           </div>
         )
       })}

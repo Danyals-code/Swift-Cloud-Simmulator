@@ -17,6 +17,8 @@
  * approximation.
  */
 
+import { symbolCandidates } from '@studio/shared'
+
 const TEXT = '︎'
 
 /**
@@ -176,25 +178,23 @@ export interface ResolvedSymbol {
 }
 
 /**
- * Resolves an SF Symbol name.
+ * Resolves an SF Symbol name to its fallback glyph.
  *
- * Variant suffixes are stripped progressively - `star.circle.fill` tries the whole
- * name, then `star.circle`, then `star` - which is how the real symbol set is
- * organised and means a name we have never seen usually still lands on its base
- * shape rather than on the fallback box.
+ * Variant suffixes are stripped progressively by `symbolCandidates` - the same
+ * walk the renderer uses to find a drawn shape, shared so that the two cannot
+ * disagree about which base a name falls back to.
+ *
+ * Since the renderer gained a table of drawn shapes this is the *second* thing
+ * tried, not the first: it answers for names nothing has been drawn for, and it
+ * decides `known`, which is what the coverage panel ranks. A name that is known
+ * here and undrawn there still renders - as the character below - which is exactly
+ * what every symbol used to get.
  */
 export function resolveSymbol(name: string): ResolvedSymbol {
-  const normalised = name.trim()
-  const exact = SYMBOLS[normalised] ?? SYMBOLS[normalised.replace(/\./g, '_')]
-  if (exact) return { glyph: exact, approximated: true, known: true }
-
-  const parts = normalised.split('.')
-  for (let end = parts.length - 1; end > 0; end--) {
-    const candidate = parts.slice(0, end).join('.')
-    const match = SYMBOLS[candidate] ?? SYMBOLS[candidate.replace(/\./g, '_')]
+  for (const candidate of symbolCandidates(name)) {
+    const match = SYMBOLS[candidate]
     if (match) return { glyph: match, approximated: true, known: true }
   }
-
   return { glyph: FALLBACK, approximated: true, known: false }
 }
 

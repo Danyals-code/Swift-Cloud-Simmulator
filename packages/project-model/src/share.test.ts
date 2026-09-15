@@ -81,8 +81,40 @@ describe('round trip', () => {
 })
 
 describe('the length limit', () => {
-  it('keeps every template comfortably inside it', () => {
+  /**
+   * Every template has to be shareable, with room left to edit it.
+   *
+   * The threshold used to be half the budget, which was the right number while
+   * every template was one small file. `Trailhead` is eight files and uses about
+   * three quarters of it - legitimately, because showing a project with structure
+   * is the entire point of it - so the rule is stated as headroom rather than as a
+   * fraction that happened to fit.
+   *
+   * 20% of 8 KB is roughly 1,600 characters of encoded payload, which is a few
+   * hundred lines of Swift once deflated: enough to work on a shared copy before
+   * the studio starts declining to make a link. Past that the failure is reported
+   * rather than silent - `encodeProject` returns null and the Share button says so -
+   * so this gate is about the experience being decent, not about avoiding a
+   * broken link.
+   */
+  const HEADROOM = 0.2
+
+  it('keeps every template shareable, with room left to edit it', () => {
     for (const template of TEMPLATES) {
+      const encoded = encodeProject(createProjectFromTemplate(template, 0))!
+      const used = Math.round((encoded.length / MAX_SHARE_LENGTH) * 100)
+
+      expect(
+        encoded.length,
+        `${template.name} uses ${used}% of the share budget (${encoded.length} chars)`,
+      ).toBeLessThan(MAX_SHARE_LENGTH * (1 - HEADROOM))
+    }
+  })
+
+  it('keeps a single-file template well inside it', () => {
+    // The original rule, kept for the templates it was written for: one file
+    // teaching one idea has no business using half a share link.
+    for (const template of TEMPLATES.filter((t) => t.files.length === 1)) {
       const encoded = encodeProject(createProjectFromTemplate(template, 0))!
       expect(encoded.length, `${template.name} is ${encoded.length} chars`).toBeLessThan(
         MAX_SHARE_LENGTH / 2,
