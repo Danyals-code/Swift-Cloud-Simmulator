@@ -135,10 +135,11 @@ Then open http://localhost:3000.
 
 ### Deploying
 
-`vercel.json` at the repo root configures the monorepo build: the project's root
-directory stays the repository root, and the build command targets the web
-workspace. Node is pinned to 22.x in `package.json` so the deployed build does not
-drift with whatever the platform defaults to.
+The project's root directory is `apps/web`, which is what makes the platform read
+`apps/web/vercel.json` and install from the workspace root on its own. That file
+carries the framework marker and the security headers and overrides nothing else:
+the detected defaults are already right, and every override is a second place for
+the build to be wrong.
 
 ```bash
 npx vercel --prod

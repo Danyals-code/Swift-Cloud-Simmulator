@@ -131,7 +131,7 @@ Built and verified 2026-09-14. Every gate passes; see §4.1 for what deviated fr
 - [x] `apps/web` on Next.js 16 App Router, React 19, Tailwind v4
 - [x] Three-pane layout: file rail | editor + console | device frame
 - [x] Dark studio chrome (the *studio* is dark; the *simulated app* renders light)
-- [x] `vercel.json` with build/install commands and security headers
+- [x] `apps/web/vercel.json` with the framework marker and security headers
 - [ ] **Deploy to Vercel** - needs the account connection; config is ready, `vercel --prod` is the only remaining step
 
 ### 0.3 - Editor
