@@ -1,3 +1,4 @@
+import type { SourceFile } from '@studio/shared'
 import type { Project } from './types'
 
 /**
@@ -22,7 +23,30 @@ export interface Template {
   readonly id: string
   readonly name: string
   readonly description: string
-  readonly source: string
+  /**
+   * The files the template lays down, in navigator order.
+   *
+   * Was a single `source` string, which made every template a one-file project by
+   * construction - and so made it impossible to ship an example of the thing
+   * people actually build, which is several screens across several files. A
+   * template that cannot show structure cannot teach it.
+   */
+  readonly files: readonly SourceFile[]
+}
+
+/** A one-file template, named after the `App` struct it declares. */
+function single(source: string): readonly SourceFile[] {
+  const appName = /struct (\w+): App/.exec(source)?.[1] ?? 'MyApp'
+  return [{ id: `Sources/${appName}.swift`, text: source }]
+}
+
+/** The `@main` type's name, which becomes the project and target name. */
+export function appNameOf(template: Template): string {
+  for (const file of template.files) {
+    const match = /struct (\w+): App/.exec(file.text)
+    if (match?.[1]) return match[1]
+  }
+  return 'MyApp'
 }
 
 function app(name: string, root: string, body: string): string {
@@ -959,103 +983,103 @@ export const TEMPLATES: readonly Template[] = [
     id: 'counter',
     name: 'Counter',
     description: 'State, a Spacer and modifier ordering - the reference app.',
-    source: COUNTER_APP_SOURCE,
+    files: single(COUNTER_APP_SOURCE),
   },
   {
     id: 'stacks',
     name: 'Stacks',
     description: 'VStack, HStack and ZStack, plus a reusable sub-view.',
-    source: STACKS,
+    files: single(STACKS),
   },
   {
     id: 'tasks',
     name: 'Task list',
     description: 'A loop building rows, with state driving their appearance.',
-    source: TOGGLE_LIST,
+    files: single(TOGGLE_LIST),
   },
   {
     id: 'card',
     name: 'Profile card',
     description: 'A centred card with a button that toggles its own label.',
-    source: PROFILE_CARD,
+    files: single(PROFILE_CARD),
   },
   {
     id: 'palette',
     name: 'Palette',
     description: 'A nested loop grid, and a function returning a Color.',
-    source: GRID,
+    files: single(GRID),
   },
   {
     id: 'navigation',
     name: 'Explore',
     description: 'A navigation stack over a list, pushing a detail screen.',
-    source: NAVIGATION,
+    files: single(NAVIGATION),
   },
   {
     id: 'settings',
     name: 'Settings',
     description: 'A form of grouped sections: toggles, a slider and a text field.',
-    source: SETTINGS_FORM,
+    files: single(SETTINGS_FORM),
   },
   {
     id: 'gallery',
     name: 'Gallery',
     description: 'An adaptive grid of symbol tiles inside a scroll view.',
-    source: PHOTO_GRID,
+    files: single(PHOTO_GRID),
   },
   {
     id: 'tabs',
     name: 'Tabs',
     description: 'Three tabs, each its own view, with a real tab bar.',
-    source: TABS,
+    files: single(TABS),
   },
   {
     id: 'motion',
     name: 'Motion',
     description: 'withAnimation driving size, corner radius and shadow together.',
-    source: ANIMATION,
+    files: single(ANIMATION),
   },
   {
     id: 'inbox',
     name: 'Inbox',
     description: 'A list, a toolbar button and a sheet that composes a message.',
-    source: SHEET_LIST,
+    files: single(SHEET_LIST),
   },
   {
     id: 'store',
     name: 'Order',
     description: 'An ObservableObject shared between two views, with @StateObject.',
-    source: OBSERVABLE,
+    files: single(OBSERVABLE),
   },
   {
     id: 'flow',
     name: 'Steps',
     description: 'An enum driving the screen, switched on in the body.',
-    source: STATE_MACHINE,
+    files: single(STATE_MACHINE),
   },
   {
     id: 'drawing',
     name: 'Vectors',
     description: 'Path, arcs and trim - a progress ring drawn from scratch.',
-    source: DRAWING,
+    files: single(DRAWING),
   },
   {
     id: 'drag',
     name: 'Drag',
     description: 'A drag gesture with @GestureState, and a spring on release.',
-    source: DRAGGABLE,
+    files: single(DRAGGABLE),
   },
   {
     id: 'styled',
     name: 'Styled',
     description: 'A custom ViewModifier, and extension View naming a modifier chain.',
-    source: STYLED,
+    files: single(STYLED),
   },
   {
     id: 'loader',
     name: 'Loader',
     description: 'A protocol with a default, and do/catch handling a thrown error.',
-    source: LOADER,
+    files: single(LOADER),
   },
 ]
 
@@ -1070,7 +1094,7 @@ export function createDefaultProject(now: number = Date.now()): Project {
 }
 
 export function createProjectFromTemplate(template: Template, now: number = Date.now()): Project {
-  const appName = /struct (\w+): App/.exec(template.source)?.[1] ?? 'MyApp'
+  const appName = appNameOf(template)
 
   return {
     id: DEFAULT_PROJECT_ID,
@@ -1081,7 +1105,7 @@ export function createProjectFromTemplate(template: Template, now: number = Date
       device: 'iphone-15',
       colorScheme: 'light',
     },
-    files: [{ id: `Sources/${appName}.swift`, text: template.source }],
+    files: template.files.map((file) => ({ id: file.id, text: file.text })),
     createdAt: now,
     updatedAt: now,
   }

@@ -1,5 +1,46 @@
 @import 'tailwindcss';
 
+/**
+ * The studio's design tokens.
+ *
+ * One vocabulary, named after what a surface *is* rather than what colour it
+ * happens to be, so a palette change is one edit here instead of a hunt through
+ * nine components for `#141418`. The values are Xcode's Default (Dark)
+ * appearance: the editor canvas is the theme's own `#1F1F24`, and the chrome
+ * around it follows macOS's window materials at the same remove Xcode keeps.
+ *
+ * Only dark is filled in. The names carry no appearance in them, so adding light
+ * later is this block plus a `prefers-color-scheme` override - not a second pass
+ * over every component.
+ */
+@theme {
+  /* Surfaces, lightest chrome to darkest canvas. */
+  --color-xc-bar: #323236;
+  --color-xc-bar-raised: #3c3c42;
+  --color-xc-sidebar: #2a2a2e;
+  --color-xc-editor: #1f1f24;
+  --color-xc-canvas: #17171a;
+  --color-xc-panel: #2e2e33;
+
+  /* Separators. `line` divides panes, `line-soft` divides rows inside one. */
+  --color-xc-line: #17171a;
+  --color-xc-line-soft: #3e3e43;
+
+  --color-xc-text: #dfdfe0;
+  --color-xc-text-2: #9a9aa2;
+  --color-xc-text-3: #6c7986;
+
+  --color-xc-accent: #0a84ff;
+  --color-xc-select: #0b5fd5;
+  --color-xc-select-off: #48484c;
+
+  --color-xc-error: #ff5f56;
+  --color-xc-warn: #f5b21e;
+  --color-xc-ok: #32d74b;
+  /* Swift's own orange, for the source-file glyph. */
+  --color-xc-swift: #f05138;
+}
+
 html,
 body {
   height: 100%;
@@ -7,9 +48,11 @@ body {
 
 body {
   margin: 0;
-  background: #0d0d10;
-  color: #e4e4e7;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', sans-serif;
+  background: var(--color-xc-editor);
+  color: var(--color-xc-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter var', 'Inter', 'Segoe UI', system-ui,
+    sans-serif;
+  font-size: 12px;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
@@ -19,19 +62,64 @@ body {
 [data-testid='render-tree'] {
   color: initial;
   font-family: initial;
+  font-size: initial;
 }
 
+/**
+ * Focus.
+ *
+ * A visible ring on keyboard focus and nothing on a mouse click, which is what
+ * `:focus-visible` is for and what every native control on both platforms does.
+ * Set once here so no component has to remember it.
+ */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--color-xc-accent);
+  outline-offset: -1px;
+  border-radius: 4px;
+}
+
+/**
+ * Overlay scrollbars, as macOS draws them: no track, no arrows, and a thumb that
+ * only reads as one on hover. The default Windows scrollbar is 17px of grey chrome
+ * and it is the loudest thing in any pane it appears in.
+ */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.12);
-  border-radius: 5px;
+  background: rgb(255 255 255 / 0.16);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 0.2);
+  background: rgb(255 255 255 / 0.3);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/**
+ * Cursors for the pane splitters.
+ *
+ * Applied to `body` while a drag is live, because the pointer leaves the 6px
+ * handle the moment the drag starts moving and the cursor would otherwise flicker
+ * back to whatever is underneath.
+ */
+body[data-resizing='col'],
+body[data-resizing='col'] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+body[data-resizing='row'],
+body[data-resizing='row'] * {
+  cursor: row-resize !important;
+  user-select: none !important;
 }

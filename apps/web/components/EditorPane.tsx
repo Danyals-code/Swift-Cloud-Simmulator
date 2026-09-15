@@ -7,7 +7,6 @@ import { EditorView, keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { StreamLanguage } from '@codemirror/language'
 import { swift } from '@codemirror/legacy-modes/mode/swift'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { setDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint'
 import {
   autocompletion,
@@ -18,6 +17,7 @@ import {
 import { hoverTooltip } from '@codemirror/view'
 import { search, searchKeymap } from '@codemirror/search'
 import type { Diagnostic, SourceSpan, SymbolInfo } from '@studio/shared'
+import { xcodeDark } from '../lib/xcodeTheme'
 
 /**
  * What the editor may ask the compiler worker about a caret position.
@@ -63,6 +63,8 @@ export interface EditorPaneProps {
   onOpenFile?: (fileId: string, offset: number) => void
   /** F2: the host asks the user for a new name and applies the spans. */
   onRename?: (name: string, spans: readonly SourceSpan[]) => void
+  /** Caret moved. Drives the jump bar, which names the declaration you are inside. */
+  onCaret?: (offset: number) => void
   /**
    * Scroll to and select an offset. Carries a nonce so that clicking the same
    * diagnostic twice reveals it twice - a bare offset would compare equal and the
@@ -89,6 +91,7 @@ export function EditorPane({
   language,
   onOpenFile,
   onRename,
+  onCaret,
 }: EditorPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -104,6 +107,7 @@ export function EditorPane({
   const fileIdRef = useRef(fileId)
   const onOpenFileRef = useRef(onOpenFile)
   const onRenameRef = useRef(onRename)
+  const onCaretRef = useRef(onCaret)
   useEffect(() => {
     onChangeRef.current = onChange
     onSaveRef.current = onSave
@@ -111,6 +115,7 @@ export function EditorPane({
     fileIdRef.current = fileId
     onOpenFileRef.current = onOpenFile
     onRenameRef.current = onRename
+    onCaretRef.current = onCaret
   })
 
   useEffect(() => {
@@ -180,7 +185,7 @@ export function EditorPane({
     const extensions: Extension[] = [
       basicSetup,
       StreamLanguage.define(swift),
-      oneDark,
+      xcodeDark,
       // `override` replaces basicSetup's word-based source entirely. Left alongside
       // it, the two merge and every identifier already in the file comes back as a
       // suggestion - including the half-typed one being completed.
@@ -255,14 +260,11 @@ export function EditorPane({
       ]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) onChangeRef.current(update.state.doc.toString())
-      }),
-      EditorView.theme({
-        '&': { height: '100%', fontSize: '13px' },
-        '.cm-scroller': {
-          fontFamily: 'ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace',
-          lineHeight: '1.6',
-        },
-        '&.cm-focused': { outline: 'none' },
+        // Reported on document changes too: typing moves the caret without
+        // producing a selection event of its own.
+        if (update.docChanged || update.selectionSet) {
+          onCaretRef.current?.(update.state.selection.main.head)
+        }
       }),
     ]
 

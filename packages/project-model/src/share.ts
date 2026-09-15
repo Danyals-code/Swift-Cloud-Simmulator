@@ -40,6 +40,15 @@ interface SharePayload {
   readonly d: string
   readonly t: string
   readonly f: readonly { readonly i: string; readonly t: string }[]
+  /**
+   * Groups that hold nothing, which no file's path can imply.
+   *
+   * Optional, and absent whenever there are none - which is almost always, so the
+   * common link does not grow by a byte. An older reader ignores the key and loses
+   * only the empty groups; that is a smaller loss than a version bump, which would
+   * make every existing link stop opening.
+   */
+  readonly g?: readonly string[]
 }
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -74,6 +83,7 @@ export function encodeProject(project: Project): string | null {
     d: project.manifest.deploymentTarget,
     t: project.manifest.device,
     f: project.files.map((file) => ({ i: file.id, t: file.text })),
+    ...(project.folders?.length ? { g: [...project.folders] } : {}),
   }
 
   const json = new TextEncoder().encode(JSON.stringify(payload))
@@ -110,6 +120,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
   }
 
   const files: SourceFile[] = payload.f.map((file) => ({ id: file.i, text: file.t }))
+  const folders = (payload.g ?? []).filter((folder) => typeof folder === 'string')
 
   return {
     // The id and the timestamps are the opener's, not the sharer's: two people opening
@@ -118,6 +129,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
     id: 'shared-project',
     manifest,
     files,
+    ...(folders.length > 0 ? { folders } : {}),
     createdAt: now,
     updatedAt: now,
   }
@@ -134,7 +146,8 @@ function isSharePayload(value: unknown): value is SharePayload {
     typeof p.t === 'string' &&
     Array.isArray(p.f) &&
     p.f.length > 0 &&
-    p.f.every((f) => typeof f?.i === 'string' && typeof f?.t === 'string')
+    p.f.every((f) => typeof f?.i === 'string' && typeof f?.t === 'string') &&
+    (p.g === undefined || Array.isArray(p.g))
   )
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CompileRequest, Diagnostic, RenderNode } from '@studio/shared'
-import { TEMPLATES, createProjectFromTemplate } from '@studio/project-model'
+import { TEMPLATES, appNameOf, createProjectFromTemplate } from '@studio/project-model'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
 import { DEVICES } from '@studio/sim-shell'
 
@@ -20,9 +20,12 @@ import { DEVICES } from '@studio/sim-shell'
 
 const device = DEVICES['iphone-15']
 
-function requestFor(source: string, colorScheme: 'light' | 'dark' = 'light'): CompileRequest {
+function requestFor(
+  files: readonly { id: string; text: string }[],
+  colorScheme: 'light' | 'dark' = 'light',
+): CompileRequest {
   return {
-    files: [{ id: 'Sources/App.swift', text: source }],
+    files: files.map((file) => ({ id: file.id, text: file.text })),
     canvas: { width: device.width, height: device.height },
     safeArea: device.safeArea,
     colorScheme,
@@ -58,7 +61,7 @@ describe.each(TEMPLATES)('template: $name', (template) => {
   // the next and mask a failure.
   function run() {
     resetPipelineState()
-    return compile(requestFor(template.source))
+    return compile(requestFor(template.files))
   }
 
   it('produces no diagnostics of any severity', () => {
@@ -114,9 +117,9 @@ describe.each(TEMPLATES)('template: $name', (template) => {
      * be teaching it.
      */
     resetPipelineState()
-    const light = paintedColors(compile(requestFor(template.source, 'light')).renderTree!.nodes)
+    const light = paintedColors(compile(requestFor(template.files, 'light')).renderTree!.nodes)
     resetPipelineState()
-    const dark = paintedColors(compile(requestFor(template.source, 'dark')).renderTree!.nodes)
+    const dark = paintedColors(compile(requestFor(template.files, 'dark')).renderTree!.nodes)
 
     const shared = [...light].filter((c) => dark.has(c))
     // Some colours legitimately match - a fixed brand tint, a white-on-tint label -
@@ -127,7 +130,7 @@ describe.each(TEMPLATES)('template: $name', (template) => {
 
   it('stays legible in dark mode: text never matches its own backdrop', () => {
     resetPipelineState()
-    const tree = compile(requestFor(template.source, 'dark')).renderTree!
+    const tree = compile(requestFor(template.files, 'dark')).renderTree!
 
     const backdrop = tree.nodes.find((n) => n.id === 'screen')?.background
     expect(backdrop?.kind).toBe('solid')
@@ -145,16 +148,37 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     }
   })
 
-  it('creates a project whose app name matches its source', () => {
+  it('creates a project carrying every file unchanged', () => {
     const project = createProjectFromTemplate(template, 0)
-    expect(project.files).toHaveLength(1)
-    expect(project.files[0]!.text).toBe(template.source)
-    expect(project.files[0]!.id).toContain(project.manifest.name)
-    expect(template.source).toContain(`struct ${project.manifest.name}: App`)
+
+    expect(project.files).toHaveLength(template.files.length)
+    expect(project.files.map((f) => f.id)).toEqual(template.files.map((f) => f.id))
+    expect(project.files.map((f) => f.text)).toEqual(template.files.map((f) => f.text))
+  })
+
+  it('names the project after the @main type it declares', () => {
+    const project = createProjectFromTemplate(template, 0)
+
+    expect(project.manifest.name).toBe(appNameOf(template))
+    expect(template.files.some((f) => f.text.includes(`struct ${project.manifest.name}: App`))).toBe(
+      true,
+    )
+  })
+
+  it('puts every file under Sources with a unique path', () => {
+    const ids = template.files.map((f) => f.id)
+
+    expect(ids.every((id) => id.startsWith('Sources/') && id.endsWith('.swift'))).toBe(true)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('declares exactly one entry point across all its files', () => {
+    const entries = template.files.filter((f) => /struct \w+: App/.test(f.text))
+    expect(entries).toHaveLength(1)
   })
 
   it('stays inside the interaction budget', () => {
-    const request = requestFor(template.source)
+    const request = requestFor(template.files)
     resetPipelineState()
     for (let i = 0; i < 3; i++) compile(request)
 
