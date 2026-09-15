@@ -292,6 +292,16 @@ class Converter {
   ) {}
 
   /**
+   * How deep inside a `List` or `Form` the conversion currently is.
+   *
+   * One thing depends on it: a `NavigationLink` draws a disclosure chevron in a
+   * list row and nothing at all anywhere else. A link in a grid of cards was
+   * getting one, which is not what iOS draws and which also ate the width the card
+   * needed - so the card's title wrapped and its statistics stacked.
+   */
+  private listDepth = 0
+
+  /**
    * Makes an element fill the rect it is laid out in.
    *
    * Chrome and presentations are positioned against the device, so each is given an
@@ -431,6 +441,40 @@ class Converter {
     )
   }
 
+  /**
+   * A `Label` inside a tab item.
+   *
+   * `Label` is an icon beside its title everywhere else, and in a tab bar it is an
+   * icon *above* a much smaller one - a 25pt symbol over a 10pt caption. Converting
+   * it like any other label produced a tiny symbol sitting next to the word at the
+   * same size, which is the one piece of chrome on screen at all times and so the
+   * one worth getting right.
+   */
+  private tabLabel(view: ViewValue, path: string): LayoutElement {
+    const title = stringArg(positional(view.args, 0))
+    const systemImage = stringArg(labelled(view.args, 'systemImage'))
+
+    const children: LayoutElement[] = []
+    if (systemImage) {
+      children.push({
+        kind: 'modified',
+        id: `${path}iconfont`,
+        modifier: { kind: 'font', font: fontForToken('title3', this.typeScale)! },
+        child: this.symbolImage(`${path}icon`, systemImage),
+      })
+    }
+    if (title !== null) children.push({ kind: 'text', id: `${path}title`, text: title })
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'vertical',
+      spacing: 2,
+      alignment: CENTER,
+      children,
+    }
+  }
+
   /** The tab bar: evenly divided items, the selected one tinted. */
   tabBar(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
     const items = bar.items.map((item, index) => {
@@ -443,7 +487,11 @@ class Converter {
         axis: 'vertical',
         spacing: 2,
         alignment: CENTER,
-        children: item.children.map((child, i) => this.convert(child, `tab-${index}-${i}`, 'vertical')),
+        children: item.children.map((child, i) =>
+          child.name === 'Label'
+            ? this.tabLabel(child, `tab-${index}-${i}`)
+            : this.convert(child, `tab-${index}-${i}`, 'vertical'),
+        ),
         debugName: TAB_ITEM,
       }
 
@@ -1045,6 +1093,15 @@ class Converter {
    * other view, which is the behaviour people actually rely on.
    */
   private list(view: ViewValue, path: string, origin: object): LayoutElement {
+    this.listDepth++
+    try {
+      return this.listBody(view, path, origin)
+    } finally {
+      this.listDepth--
+    }
+  }
+
+  private listBody(view: ViewValue, path: string, origin: object): LayoutElement {
     const style = tokenName(modifierArg(view, 'listStyle', 0)) ?? (view.name === 'Form' ? 'insetGrouped' : 'insetGrouped')
     const grouped = style !== 'plain' && style !== 'sidebar'
 
@@ -1470,8 +1527,21 @@ class Converter {
             children: this.convertList(view.children, `${path}label`, 'horizontal'),
           }
 
-    // The disclosure chevron is what makes a link legible as one, and iOS draws it
-    // on every link inside a list.
+    // The disclosure chevron is what makes a link legible as one - inside a list.
+    // Outside one, a `NavigationLink` is however its label looks and nothing more,
+    // which is the whole reason people wrap cards in them.
+    if (this.listDepth === 0) {
+      return {
+        kind: 'stack',
+        id: path,
+        axis: 'horizontal',
+        spacing: 0,
+        alignment: CENTER,
+        children: [label],
+        ...origin,
+      }
+    }
+
     return {
       kind: 'stack',
       id: path,

@@ -129,8 +129,13 @@ export function Toolbar({
       {/*
         The scheme, as Xcode states it: what is being built, on what. One control
         rather than two naked dropdowns, because the two halves are read together.
+
+        Hidden outright in a window too narrow for it rather than allowed to shrink
+        to nothing: a flex item at zero width still *paints* its children, so the
+        project name and the destination were drawing on top of the buttons to
+        their right.
       */}
-      <span className="flex min-w-0 shrink items-center gap-1.5 text-[12px]">
+      <span className="hidden min-w-0 shrink items-center gap-1.5 overflow-hidden text-[12px] @[620px]/toolbar:flex">
         <span className="truncate font-medium text-xc-text" data-testid="project-name">
           {projectName}
         </span>
