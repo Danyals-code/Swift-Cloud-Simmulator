@@ -19,6 +19,64 @@ export function encodeText(text: string): Uint8Array {
 }
 
 /**
+ * An entry map that refuses any path leaving the archive root.
+ *
+ * Shared by all four export formats. The values these paths are built from are
+ * validated where they enter the project - a typed name through `normalizeFileName`,
+ * a shared one through `decodeProject` - so nothing should ever fail here. It is
+ * checked anyway because this is where the invariant lives: *every entry in the
+ * archive is inside its own root*. Phase 9 added three formats after the first, each
+ * repeating the same path arithmetic; one of them forgetting is exactly the shape of
+ * mistake this removes.
+ */
+export function newBundle(root: string): {
+  readonly files: Map<string, Uint8Array>
+  put(path: string, bytes: Uint8Array): void
+} {
+  const files = new Map<string, Uint8Array>()
+  return {
+    files,
+    put(path, bytes) {
+      const resolved = resolveInside(path, root)
+      if (resolved === null) {
+        throw new Error(`Refusing to export an entry outside the project: ${path}`)
+      }
+      files.set(resolved, bytes)
+    },
+  }
+}
+
+/**
+ * An entry's path once `.` and `..` are applied, or null if it leaves `root`.
+ *
+ * Resolved rather than pattern-matched, because the presence of `..` is not the
+ * question: `MyApp/x/../y` is fine, and how many are too many depends on how deep the
+ * prefix is. The `.swiftpm` layout nests three deep where `.xcodeproj` nests two, so
+ * the same three `..` escape one archive and land at the top of the other - which is
+ * why the test is "still inside its own root" rather than "still inside the archive".
+ *
+ * An absolute path or a Windows drive letter is refused outright: an extractor
+ * resolves those against something other than the archive.
+ */
+function resolveInside(path: string, root: string): string | null {
+  if (path.startsWith('/') || /^[A-Za-z]:/.test(path) || path.includes('\\')) return null
+
+  const out: string[] = []
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment !== '..') {
+      out.push(segment)
+      continue
+    }
+    if (out.length === 0) return null
+    out.pop()
+  }
+
+  const resolved = out.join('/')
+  return resolved.startsWith(`${root}/`) ? resolved : null
+}
+
+/**
  * Builds the file set for export: a complete, openable Xcode project.
  *
  * ```
@@ -41,15 +99,15 @@ export function encodeText(text: string): Uint8Array {
  * holds by construction rather than by vigilance.
  */
 export function buildExportBundle(project: Project): ExportBundle {
-  const files = new Map<string, Uint8Array>()
   const name = project.manifest.name
   const root = name
+  const { files, put } = newBundle(root)
 
-  const add = (path: string, text: string) => files.set(`${root}/${path}`, encodeText(text))
+  const add = (path: string, text: string) => put(`${root}/${path}`, encodeText(text))
 
   // The user's sources, untouched.
   for (const file of project.files) {
-    files.set(`${root}/${name}/${targetRelativePath(file.id)}`, encodeText(file.text))
+    put(`${root}/${name}/${targetRelativePath(file.id)}`, encodeText(file.text))
   }
 
   const plan = generatePbxproj(project)

@@ -23,7 +23,7 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 5 | Fill in the standard library | 19 | ✅ |
 | 6 | Fix the strictness pass where it is wrong | 4 | ✅ |
 | 7 | Finish the editor intelligence | 3 | ✅ |
-| 8 | Validate what a share link carries | 4 | ⬜ |
+| 8 | Validate what a share link carries | 4 | ✅ |
 | 9 | Draw what is honestly not drawn yet | 9 | ⬜ |
 | 10 | Make the documentation match the code | 7 | 🟡 4 of 7 |
 
@@ -267,17 +267,56 @@ Character as a String, so `someCharacter.hasPrefix(…)` runs here and does not 
 there. The Set has its own list now and the Character has none, which costs a
 completion and avoids a false one.
 
-## Phase 8 - Validate what a share link carries ⬜
+## Phase 8 - Validate what a share link carries ✅
 
-A share link is a stranger's bytes. Decoding validates types and not values, and two of
-those values reach file paths in the exported archive.
+A share link is a stranger's bytes: anyone can write one and the studio opens it on
+sight. Decoding validated types and not values, and two of those values reached file
+paths in the exported archive.
 
-| # | Sev | Item |
+Closed; covered by `packages/project-model/src/share.test.ts` and
+`packages/exporter/src/bundle.test.ts`.
+
+| # | Was | Now |
 | --- | --- | --- |
-| 8.1 | high | A file id containing `..` becomes a zip entry above the project folder: `MyApp/MyApp/../../../evil.swift`. `packages/exporter/src/pbxproj.ts` |
-| 8.2 | high | The project name is used unsanitised as both the root and the target folder, so it escapes twice. A 207-byte share link is enough to set it. `packages/exporter/src/bundle.ts` |
-| 8.3 | medium | `decodeProject` casts the payload's device string to `DeviceKey` without checking it. Phase 3.7 made the crash survivable; the value is still not validated |
-| 8.4 | medium | File ids are not checked at all. `normalizeFileName` and `normalizeFolderPath` already reject traversal, so the fix is to run decoded ids through the same gate |
+| 8.1 | A file id containing `..` became a zip entry above the project folder: `MyApp/MyApp/../../../evil.swift`, from a link 142 bytes long | Refused at the boundary, and refused again by the exporter |
+| 8.2 | The project name was used unsanitised as both the root and the target folder, so it escaped twice - `../../evil/../../evil.xcodeproj/…` - and every entry in the archive carried it. A 136-byte link set it | `normalizeProjectName` rejects a separator, a `..`, a control character, a name that is only dots, and anything past 64 characters. Its own function rather than a reuse of the path cleaner, because a project name is one directory name and `Models/Item` is a fine file name and a terrible project name |
+| 8.3 | `decodeProject` cast the payload's device string to `DeviceKey` without checking it | Checked against `DEVICES`, and **falls back rather than rejecting**. The device is a preview setting: getting it wrong costs a frame size, and Phase 3.7 already decided such a link opens on the default. Throwing away someone's code over the size of the phone it is drawn in would be the wrong trade |
+| 8.4 | File ids were not checked at all | Every id and folder must be *idempotent* under the normaliser the rest of the app already uses - safe exactly when normalising it changes nothing. Stricter than a second set of rules written at the boundary, and it cannot drift from the first set, which is what a second set would eventually do |
+
+### What the probe found that the register had not listed
+
+- **Folders escape too.** The payload carries empty groups in `g`, and `['../../evil']`
+  survived decoding untouched. Same gate, same fix.
+- **An absolute id, a Windows path and a doubled separator** all passed through:
+  `/etc/passwd`, `C:\Windows\evil.swift`, `..\..\evil.swift`, `Sources/a//b.swift`.
+  The `..` case was the one written down; it was not the only one.
+- **A link may claim any number of files.** The length limit bounds the payload
+  *compressed*, and repeated names compress to almost nothing - four thousand entries
+  fit comfortably inside it, and each becomes a file in the export. Capped at 256,
+  against a largest template of eight.
+- **`bundleId` and `deploymentTarget` cannot inject anything**, and that is worth
+  recording as a thing that came out right: the pbxproj writer quotes and escapes what
+  it writes, so `com.a";\n\t\tEVIL = "yes` lands inside a quoted string rather than as
+  a second build setting. They are validated anyway, because a link that opens into a
+  project Xcode will not build is still a broken link.
+
+### Two places, on purpose
+
+The boundary is the fix; the exporter is the invariant. `decodeProject` is where
+untrusted bytes become a project, so that is where they are refused - and it was the
+only untrusted route in. But `buildExportBundle` is the function whose guarantee this
+*is*: every entry in the archive is inside its own root. It now resolves each path and
+refuses anything that leaves, so the guarantee survives the next input route someone
+adds - a file import, the GitHub export in the roadmap's Phase 7.
+
+Writing that guard taught something the register had not anticipated. All four export
+formats build paths the same way, and they do not nest to the same depth: three `..`
+escape the two-deep `.xcodeproj` layout and land at the *top* of the three-deep
+`.swiftpm` one. A guard that counted `..` would have been right for two formats and
+wrong for the other two, so it resolves the path and asks whether the result is still
+inside the root. All four formats now write through one guarded map rather than four
+copies of the same path arithmetic, which is what let the difference hide in the first
+place.
 
 ## Phase 9 - Draw what is honestly not drawn yet ⬜
 

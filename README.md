@@ -82,6 +82,9 @@ What it handles now is most of the SwiftUI people actually write:
   recompiling while you type.
 - **Paste and go** - `#Preview` blocks parse, and a view with only a preview
   renders rather than reporting that the project has no entry point.
+- **A share link is treated as a stranger's bytes** - every value it carries is
+  validated before it becomes a project, and the exporter refuses to write an
+  entry outside the archive's own root whatever it is handed.
 - **Somewhere to start** - eighteen templates, one of which (`Trailhead`) is a
   whole eight-file project rather than a snippet: tabs, two levels of
   navigation, scrolling in both directions, a shared store and a sheet.
@@ -117,7 +120,7 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1385 passing |
+| Unit tests | 1424 passing |
 | End-to-end | 52 / 52 passing |
 | Templates rendering with zero placeholders | 18 / 18 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
@@ -127,9 +130,9 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | Client JS | 394 KB gzipped / 450 KB budget (88%) |
 
 Next is the [defect register](docs/07-DEFECT-REGISTER.md), which is the working
-backlog: its phases 1 to 7 are closed, and what follows is share-link validation -
-a file id containing `..` becomes a zip entry above the project folder - and then
-the drawing work.
+backlog: its phases 1 to 8 are closed, and what remains is the drawing work -
+controls that are drawn but cannot open, the text attributes with no field in the
+render tree, and the views still standing in as placeholders.
 
 After that, the [roadmap's à-la-carte Phase 7](docs/03-ROADMAP.md) - a real
 `swiftc` verification service, accounts, AI codegen, GitHub export - each of which

@@ -157,6 +157,75 @@ describe('malformed payloads', () => {
   })
 })
 
+/**
+ * A share link is a stranger's bytes: anyone can write one and the studio opens it
+ * on sight. Two of its fields became paths inside the exported archive, so the
+ * fixtures below are written the way an attacker would rather than the way a bug
+ * would - and every one of them was a working escape before Phase 8.
+ */
+describe('a payload that would escape the archive', () => {
+  const payload = (over: Record<string, unknown>): string =>
+    encodeJson({
+      v: 1,
+      n: 'MyApp',
+      b: 'com.example.myapp',
+      d: '17.0',
+      t: 'iphone-15',
+      f: [{ i: 'Sources/App.swift', t: 'import SwiftUI\n' }],
+      ...over,
+    })
+
+  it.each([
+    ['a file id climbing out', { f: [{ i: 'Sources/../../../evil.swift', t: 'x' }] }],
+    ['a file id with a bare ..', { f: [{ i: '../evil.swift', t: 'x' }] }],
+    ['an absolute file id', { f: [{ i: '/etc/passwd', t: 'x' }] }],
+    ['a Windows file id', { f: [{ i: 'C:\\Windows\\evil.swift', t: 'x' }] }],
+    ['a backslash traversal', { f: [{ i: '..\\..\\evil.swift', t: 'x' }] }],
+    ['a doubled separator', { f: [{ i: 'Sources/a//b.swift', t: 'x' }] }],
+    ['an empty file id', { f: [{ i: '', t: 'x' }] }],
+    ['a file id outside Sources', { f: [{ i: 'elsewhere/App.swift', t: 'x' }] }],
+    ['a project name climbing out', { n: '../../evil' }],
+    ['a project name with a separator', { n: 'a/b' }],
+    ['a project name that is only dots', { n: '..' }],
+    ['an empty project name', { n: '' }],
+    ['a project name with a control character', { n: 'My\u0000App' }],
+    ['a folder climbing out', { g: ['../../evil'] }],
+    ['a folder outside Sources', { g: ['elsewhere'] }],
+  ])('returns null for %s', (_name, over) => {
+    expect(decodeProject(payload(over), 0)).toBeNull()
+  })
+
+  it('still opens the ordinary payload those are variations of', () => {
+    const decoded = decodeProject(payload({}), 0)
+    expect(decoded?.files.map((f) => f.id)).toEqual(['Sources/App.swift'])
+    expect(decoded?.manifest.name).toBe('MyApp')
+  })
+
+  it('refuses a payload that would build an unbuildable project', () => {
+    // Neither can escape the archive - the pbxproj writer quotes and escapes what it
+    // writes - but a link that opens into a project Xcode refuses is still broken,
+    // and the export being right is the promise the whole product rests on.
+    expect(decodeProject(payload({ b: 'com.a";\n\t\tEVIL = "yes' }), 0)).toBeNull()
+    expect(decodeProject(payload({ d: '17.0"; EVIL' }), 0)).toBeNull()
+  })
+
+  it('caps how many files a link may claim to carry', () => {
+    // The length limit bounds the payload *compressed*, and repeated names compress
+    // to almost nothing: 4000 of them fit in a link well under the limit.
+    const many = Array.from({ length: 4000 }, (_, i) => ({ i: `Sources/F${i}.swift`, t: '' }))
+    expect(decodeProject(payload({ f: many }), 0)).toBeNull()
+  })
+
+  it('opens a link whose device this build does not have, on the default', () => {
+    // Phase 3.7's promise, kept deliberately: a device is a preview setting, and
+    // throwing away someone's code over the size of the phone would be the wrong
+    // trade. Everything that reaches a *path* is refused instead.
+    const decoded = decodeProject(payload({ t: 'nope' }), 0)
+    expect(decoded).not.toBeNull()
+    expect(decoded?.manifest.device).toBe('iphone-15')
+  })
+})
+
 describe('fragments', () => {
   it('round-trips through a fragment', () => {
     const encoded = encodeProject(project)!
