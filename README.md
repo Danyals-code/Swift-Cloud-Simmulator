@@ -144,6 +144,11 @@ drift with whatever the platform defaults to.
 npx vercel --prod
 ```
 
+A failed deployment is redeployed by pushing, not by pressing Redeploy: that button
+replays the commit the deployment was built from, so a fix that has since been
+committed will not be in it. Check the commit hash on the deployment against the
+branch before concluding that a change had no effect.
+
 If a build fails on the platform but succeeds locally, the first thing to check is
 which bundler ran. `next build` uses Turbopack, a native binary; `next build
 --webpack` is the fallback. Webpack produces a larger bundle here (464 KB against
