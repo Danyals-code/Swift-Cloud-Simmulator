@@ -236,6 +236,153 @@ func go() {
     expect(items.length).toBeGreaterThan(0)
   })
 
+  /**
+   * After a value that is not a view, the list used to be 159 view modifiers: none
+   * of them valid, and the members that are burying nowhere. These are the cases
+   * where the type is written down plainly enough to do better.
+   */
+  it('offers a String’s members, not view modifiers', () => {
+    const items = complete(`struct ContentView: View {
+    let title: String = "hi"
+    var body: some View {
+        Text(title.|)
+    }
+}`)
+    expect(items).toContain('uppercased')
+    expect(items).toContain('hasPrefix')
+    expect(items).toContain('count')
+    expect(items).not.toContain('frame')
+    expect(items).not.toContain('foregroundStyle')
+    // `padding` is deliberately not asserted against: String really has one, which
+    // is a good reminder that the old list was not merely long but wrong.
+    expect(items.length).toBeLessThan(40)
+  })
+
+  it('offers an array’s members', () => {
+    const items = complete(`struct ContentView: View {
+    let items: [Int] = []
+    var body: some View {
+        Text("\\(items.|)")
+    }
+}`)
+    expect(items).toContain('map')
+    expect(items).toContain('filter')
+    expect(items).toContain('append')
+    expect(items).not.toContain('padding')
+  })
+
+  it('offers a dictionary’s members, told apart from an array by the colon', () => {
+    const items = complete(`struct ContentView: View {
+    let scores: [String: Int] = [:]
+    var body: some View {
+        Text("\\(scores.|)")
+    }
+}`)
+    expect(items).toContain('mapValues')
+    expect(items).toContain('keys')
+    expect(items).not.toContain('append')
+  })
+
+  it('reads the type from a literal initialiser, which is as written as an annotation', () => {
+    const items = complete(`struct ContentView: View {
+    let title = "hi"
+    var body: some View {
+        Text(title.|)
+    }
+}`)
+    expect(items).toContain('uppercased')
+    expect(items).not.toContain('frame')
+  })
+
+  it('offers a literal receiver’s members', () => {
+    expect(
+      complete(`struct ContentView: View {
+    var body: some View {
+        Text("hi".|)
+    }
+}`),
+    ).toContain('uppercased')
+
+    expect(
+      complete(`struct ContentView: View {
+    var body: some View {
+        Text("\\([1, 2].|)")
+    }
+}`),
+    ).toContain('map')
+  })
+
+  it('does not treat a subscript as an array literal', () => {
+    // `items[0].` is an element, whose type is not written anywhere. The honest
+    // answer is the modifier fallback, not Array's own members.
+    const items = complete(`struct ContentView: View {
+    let items: [Int] = []
+    var body: some View {
+        Text("\\(items[0].|)")
+    }
+}`)
+    expect(items).not.toContain('map')
+  })
+
+  it('offers a model struct’s members without modifiers', () => {
+    const items = complete(`struct Item {
+    let title: String
+    func summary() -> String { title }
+}
+
+struct ContentView: View {
+    let item = Item(title: "a")
+    var body: some View {
+        Text(item.|)
+    }
+}`)
+    expect(items).toEqual(['title', 'summary'])
+  })
+
+  it('still offers modifiers after a struct that is a view', () => {
+    // A view's own members *and* the modifiers, because both are valid on it.
+    const items = complete(`struct Row: View {
+    let title: String
+    var body: some View { Text(title) }
+}
+
+struct ContentView: View {
+    let row = Row(title: "a")
+    var body: some View {
+        row.|
+    }
+}`)
+    expect(items).toContain('title')
+    expect(items).toContain('padding')
+  })
+
+  it('lets the project’s own type win over a built-in of the same name', () => {
+    const items = complete(`struct Date {
+    let label: String
+}
+
+struct ContentView: View {
+    let day = Date(label: "today")
+    var body: some View {
+        Text(day.|)
+    }
+}`)
+    expect(items).toEqual(['label'])
+  })
+
+  it('completes a no-argument method with both parentheses', () => {
+    const result = completeDetailed(`struct ContentView: View {
+    let title: String = "hi"
+    var body: some View {
+        Text(title.|)
+    }
+}`)
+    const uppercased = result.items.find((i) => i.name === 'uppercased')
+    expect(uppercased?.insert).toBe('uppercased()')
+    expect(result.items.find((i) => i.name === 'hasPrefix')?.insert).toBe('hasPrefix(')
+    expect(result.items.find((i) => i.name === 'count')?.insert).toBeUndefined()
+  })
+
   it('replaces from after the dot, not from the receiver', () => {
     const result = completeDetailed(`struct ContentView: View {
     var body: some View {
@@ -340,6 +487,82 @@ func go(tab: Tab) {
   it('returns nothing for a name that resolves nowhere', () => {
     expect(define('func go() { print(mys|tery) }')).toBeNull()
   })
+
+  /**
+   * A member written after a dot. This did nothing at all - the commonest thing to
+   * want a definition for in a project of any size, since almost every name in a
+   * view body is reached through a receiver.
+   */
+  const model = `struct Item {
+    var title: String
+    func summary() -> String { title }
+}
+
+`
+
+  it('finds a property through the value it is read from', () => {
+    const found = define(`${model}struct ContentView: View {
+    let item = Item(title: "a")
+    var body: some View { Text(item.ti|tle) }
+}`)
+    expect(found?.kind).toBe('property')
+    expect(found?.span?.start).toBe(model.indexOf('title'))
+  })
+
+  it('finds a method through the value it is called on', () => {
+    const found = define(`${model}struct ContentView: View {
+    let item = Item(title: "a")
+    var body: some View { Text(item.sum|mary()) }
+}`)
+    expect(found?.kind).toBe('method')
+    expect(found?.detail).toBe('() -> String')
+  })
+
+  it('finds a member through an annotated parameter', () => {
+    const found = define(`${model}struct ContentView: View {
+    func label(for item: Item) -> String { item.ti|tle }
+    var body: some View { Text("x") }
+}`)
+    expect(found?.span?.start).toBe(model.indexOf('title'))
+  })
+
+  it('finds a member no receiver can be typed for, when only one type declares it', () => {
+    const found = define(`${model}struct ContentView: View {
+    var body: some View { Text(anything().ti|tle) }
+}`)
+    expect(found?.span?.start).toBe(model.indexOf('title'))
+  })
+
+  it('declines a member two types declare, for the same reason an enum case is declined', () => {
+    const found = define(`struct Item {
+    var title: String
+}
+
+struct Chapter {
+    var title: String
+}
+
+struct ContentView: View {
+    var body: some View { Text(anything().ti|tle) }
+}`)
+    expect(found).toBeNull()
+  })
+
+  it('prefers the member to a local that shares its name', () => {
+    // `item.count` is the property, even with a `count` in scope. Resolving by name
+    // alone would jump to the local, which is a confident wrong answer.
+    const found = define(`struct Item {
+    var count: Int
+}
+
+func go() {
+    let count = 0
+    let item = Item(count: 1)
+    print(item.cou|nt, count)
+}`)
+    expect(found?.kind).toBe('property')
+    expect(found?.detail).toBe('Int')
+  })
 })
 
 describe('hover', () => {
@@ -372,6 +595,67 @@ func go() { print(gre|et(name: "a")) }`)
     var body: some View { Text("\\(cou|nt)") }
 }`)
     expect(found?.doc).toBe('@State')
+  })
+
+  /**
+   * The framework half. Only project declarations were described, so the caret could
+   * rest on `map`, `sqrt` or `@State` itself and be told nothing - which is most of
+   * the names in a SwiftUI file.
+   */
+  it('describes the property wrapper itself', () => {
+    const found = hover(`struct ContentView: View {
+    @Sta|te private var count = 0
+    var body: some View { Text("x") }
+}`)
+    expect(found).toMatchObject({ name: 'State', kind: 'attribute' })
+    expect(found?.doc).toMatch(/nonmutating/)
+  })
+
+  it('does not mistake a project name for a wrapper', () => {
+    // `State` without its `@` is an ordinary name, and here it is the project's own
+    // type. The attribute reading is only correct after an `@`.
+    const found = hover(`struct State {
+    var label: String
+}
+
+func go(s: Sta|te) { print(s) }`)
+    expect(found).toMatchObject({ kind: 'type', detail: 'struct' })
+  })
+
+  it('describes a free function', () => {
+    const found = hover(`func go() { print(sq|rt(4.0)) }`)
+    expect(found).toMatchObject({ name: 'sqrt', kind: 'function' })
+    expect(found?.detail).toBe('(Double) -> Double')
+  })
+
+  it('describes a standard library member through its receiver', () => {
+    const found = hover(`struct ContentView: View {
+    let title: String = "hi"
+    var body: some View { Text(title.upperc|ased()) }
+}`)
+    expect(found).toMatchObject({ name: 'uppercased', kind: 'method' })
+    expect(found?.detail).toBe('() -> String')
+  })
+
+  it('describes a member whose meaning is the same on every type that has it', () => {
+    // `count` is the number of elements wherever it appears, so it can be described
+    // without knowing the receiver.
+    const found = hover(`func go(values: Unknown) { print(values.co|unt) }`)
+    expect(found?.detail).toBe('Int')
+  })
+
+  it('declines a member that means different things on different types', () => {
+    // `first` is an element on an Array and a Character on a String. With no receiver
+    // to tell them apart, saying either would be a guess.
+    expect(hover(`func go(values: Unknown) { print(values.fi|rst) }`)).toBeNull()
+  })
+
+  it('prefers the receiver’s own type over the agreed description', () => {
+    const found = hover(`struct ContentView: View {
+    let items: [Int] = []
+    var body: some View { Text("\\(items.fi|rst ?? 0)") }
+}`)
+    expect(found?.detail).toBe('Element?')
   })
 })
 

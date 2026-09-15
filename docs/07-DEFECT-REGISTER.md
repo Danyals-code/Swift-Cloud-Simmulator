@@ -22,7 +22,7 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 4 | Close the parser gaps | 12 | ✅ |
 | 5 | Fill in the standard library | 19 | ✅ |
 | 6 | Fix the strictness pass where it is wrong | 4 | ✅ |
-| 7 | Finish the editor intelligence | 3 | ⬜ |
+| 7 | Finish the editor intelligence | 3 | ✅ |
 | 8 | Validate what a share link carries | 4 | ⬜ |
 | 9 | Draw what is honestly not drawn yet | 9 | ⬜ |
 | 10 | Make the documentation match the code | 7 | 🟡 4 of 7 |
@@ -230,16 +230,42 @@ diagnostic of any severity on any template, and it has teeth here precisely beca
 cancelling, which is the general case: a corpus tests the constructs it happens to
 contain, in the combinations it happens to put them in.
 
-## Phase 7 - Finish the editor intelligence ⬜
+## Phase 7 - Finish the editor intelligence ✅
 
-Completion, hover and the quick fixes are good. Three holes remain now that rename is
-safe.
+Completion, hover and the quick fixes were good. Three holes remained once rename was
+safe, and all three came down to the same missing step: the editor could name what a
+*declaration* was and could not say what a *value* was.
 
-| # | Sev | Item |
+Closed; covered by `packages/swift-sema/src/symbols.test.ts` and
+`tests/editor.test.ts`.
+
+| # | Was | Now |
 | --- | --- | --- |
-| 7.1 | medium | Go to definition does nothing on a struct member (`item.title`) |
-| 7.2 | medium | No hover or definition for framework symbols; only project declarations are covered |
-| 7.3 | low | Completion offers every view modifier after a dot on a value that is not a view |
+| 7.1 | Go to definition did nothing on a struct member. In a project of any size that is most of the names worth jumping to, since almost everything in a view body is reached through a receiver | Resolved through the receiver where its type is written down, and otherwise by the member name alone - but only when exactly one type declares it, which is the rule the enum-case fallback already used. A member beats a local of the same name: `item.count` is the property even with a `count` in scope |
+| 7.2 | No hover for framework symbols. Views and modifiers were described; the standard library, the free functions and the property wrappers were not, and between them that is most of the words in a SwiftUI file | `text.uppercased()`, `sqrt` and `@State` all answer, with a signature and a line of quick help. A member is described through its receiver where the type is known, and otherwise only when every built-in that has the name describes it identically - `count` means the same everywhere and is described, `first` does not and is left alone |
+| 7.3 | Completion offered all 159 view modifiers after a dot on anything at all. After a String that is 159 wrong answers and none of the right ones | The receiver's type decides: a built-in gets its own members, a model struct gets its members and no modifiers, a view gets both. Where the type is not written down the modifier fallback stands, because that is the honest answer rather than a guess |
+
+### The table that describes the library, and the test that keeps it true
+
+7.2 and 7.3 are the same question asked twice - what does this value have? - so they
+share one answer: `packages/swift-sema/src/stdlib-symbols.ts`, which names every
+standard library member with its signature and a line of help.
+
+That file is a *description*, and the implementation is in `swift-runtime`, which
+`swift-sema` cannot import. Two tables describing one thing drift, and the drift that
+matters is one-way: a member the editor offers and the runtime does not have is a
+name suggested to the user that does nothing when they use it. So `tests/editor.test.ts`
+runs every entry through the real pipeline as real Swift, and asserts the two lists
+cover each other in both directions - a member described but not exercised fails as
+loudly as one that does not resolve.
+
+Writing it caught two claims that were wrong before anyone could rely on them. A `Set`
+was listed with `Array`'s members, because the runtime represents one as an array that
+refuses duplicates - so `set.append(…)` would have been offered, and Xcode rejects it.
+And `Character` was listed with `String`'s, for the same reason: the runtime carries a
+Character as a String, so `someCharacter.hasPrefix(…)` runs here and does not compile
+there. The Set has its own list now and the Character has none, which costs a
+completion and avoids a false one.
 
 ## Phase 8 - Validate what a share link carries ⬜
 
@@ -294,3 +320,19 @@ every closed item is covered by a test that fails against the old behaviour. The
 suites themselves were deliberately not kept: they were a net, and a net that stays in
 the repo becomes a second, worse test suite. What survives is the regression coverage
 named under each phase, plus this document.
+
+Where a new test asserts that something is *not* wrong any more, it was run against a
+deliberately broken version first. A test that cannot fail is not evidence, and two of
+the ones written for these phases only looked like evidence until that was checked.
+
+### One flaky gate, stated rather than re-run until green
+
+`e2e/smoke.spec.ts` - "the Swift Playgrounds export carries the edited source" - failed
+once during Phase 7 in a full run, and passed on its own and on the next full run. No
+error text was captured, so there is nothing to diagnose from and nothing is claimed
+about the cause; it is the slowest test in the suite at around ten seconds against
+under two for most, and it waits on a download.
+
+Written down because a gate that fails one run in three teaches people to re-run it,
+and after that it is not a gate. It needs a run with the report kept before anything is
+concluded, which is work this phase did not do.

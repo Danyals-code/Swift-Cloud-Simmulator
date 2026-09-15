@@ -71,9 +71,11 @@ What it handles now is most of the SwiftUI people actually write:
 - **Reuse** - custom `ViewModifier`, `extension View { func … }` and custom
   `ButtonStyle`: the three ways a real codebase names a look and applies it.
 - **The editor** - Xcode's Default (Dark) palette, a jump bar over every file,
-  completion from the project's own declarations as well as SwiftUI's, go to
-  definition, hover, quick fixes that apply themselves, and rename across every
-  file.
+  quick fixes that apply themselves, and rename across every file. Completion
+  knows what a value *is*: a String offers `uppercased` rather than 159 view
+  modifiers, a model struct offers its own members, and a view offers both. Go to
+  definition follows a member through its receiver, and hover describes the
+  standard library and the property wrappers as well as the project's own names.
 - **The studio around it** - a project navigator with real groups you can make,
   rename and drag files between; draggable pane dividers; Xcode's own keyboard
   shortcuts for showing and hiding them; and a Pause that stops the preview
@@ -115,7 +117,7 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1347 passing |
+| Unit tests | 1385 passing |
 | End-to-end | 52 / 52 passing |
 | Templates rendering with zero placeholders | 18 / 18 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
@@ -125,9 +127,9 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | Client JS | 394 KB gzipped / 450 KB budget (88%) |
 
 Next is the [defect register](docs/07-DEFECT-REGISTER.md), which is the working
-backlog: its phases 1 to 6 are closed, and what follows is the editor intelligence
-(go to definition does nothing on a struct member, and framework symbols have no
-hover), then share-link validation, then the drawing work.
+backlog: its phases 1 to 7 are closed, and what follows is share-link validation -
+a file id containing `..` becomes a zip entry above the project folder - and then
+the drawing work.
 
 After that, the [roadmap's à-la-carte Phase 7](docs/03-ROADMAP.md) - a real
 `swiftc` verification service, accounts, AI codegen, GitHub export - each of which
