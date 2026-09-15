@@ -17,11 +17,6 @@ test-results/
 # vercel
 .vercel
 
-# editor and tool scratch
-.claude/
-.cursor/
-.aider*
-
 # os / editor
 .DS_Store
 Thumbs.db
