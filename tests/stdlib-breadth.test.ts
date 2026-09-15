@@ -345,6 +345,26 @@ describe('the mutating collection methods', () => {
     expect(constant('items.removeAll()')).toContain("'items' is a 'let' constant")
   })
 
+  it('refuses to mutate a collection held inside a let struct', () => {
+    // The constancy has to travel through the member access: the constant holds the
+    // struct, so writing one of its fields is writing to the constant.
+    expect(
+      failure(app('    var body: some View { Text(demo()) }\n    func demo() -> String {\n      let bag = Bag()\n      bag.items.append(1)\n      return "x"\n    }', 'struct Bag { var items: [Int] = [] }')),
+    ).toContain("'bag.items' is a 'let' constant")
+  })
+
+  it('still mutates a collection held inside a let class', () => {
+    // The opposite case, and the reason the rule cannot simply follow the binding: a
+    // `let` on a class holds a *reference*, so the object's own properties stay
+    // writable. `let store = Store()` in a view is the commonest shape there is.
+    expect(
+      runStatements(
+        '      let store = Store()\n      store.items.append(1)\n      store.items.append(2)\n      return "\\(store.items.count)"',
+        'class Store { var items: [Int] = [] }',
+      ),
+    ).toBe('2')
+  })
+
   it('refuses to write through a let collection’s subscript', () => {
     expect(
       failure(app('    var body: some View { Text(demo()) }\n    func demo() -> String {\n      let scores = ["a": 1]\n      scores["b"] = 2\n      return "x"\n    }')),

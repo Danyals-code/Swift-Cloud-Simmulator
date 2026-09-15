@@ -2235,14 +2235,34 @@ export class Interpreter {
         // to it runs the setter with `newValue` bound, and whatever that writes is
         // the real change. Without this the assignment landed on a field of the same
         // name that nothing reads.
+        //
+        // Left mutable even on a constant, deliberately: a setter may be declared
+        // `nonmutating`, which the parser does not record, so refusing here would
+        // stop the preview running code Xcode accepts.
         const accessors = this.accessorsFor(target, expr.member)
         if (accessors?.setter) {
           return this.accessorLValue(target, expr.member, accessors, expr.span)
         }
 
-        return throughProjection(
-          fieldLValue(target, expr.member, `${describe(target, true)}.${expr.member}`),
-        )
+        // Named by the path the user wrote - `bag.items` - rather than by the
+        // receiver's value, which rendered a whole struct literal into the middle of
+        // a sentence about a constant.
+        const base = owner ? owner.description : describe(target, true)
+        const field = fieldLValue(target, expr.member, `${base}.${expr.member}`)
+        const projected = throughProjection(field)
+
+        // A projection is storage somewhere else reached through a nonmutating
+        // setter - that is what `@Binding` is - so it stays writable through a
+        // constant, exactly as it does in Swift.
+        if (projected !== field) return projected
+
+        // A member of a `let` *struct* is itself constant: the constant holds the
+        // value, so writing a field of it is writing to the constant. A `let`
+        // holding a class instance is the opposite - the constant holds a
+        // reference, and the object's own properties stay writable, which is why
+        // `let store = Store()` can still `store.items.append(…)`.
+        const constant = owner !== null && !owner.mutable && !target.reference
+        return constant ? { ...field, mutable: false } : field
       }
 
       case 'selfExpr': {

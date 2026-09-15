@@ -115,7 +115,7 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1331 passing |
+| Unit tests | 1347 passing |
 | End-to-end | 52 / 52 passing |
 | Templates rendering with zero placeholders | 18 / 18 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
@@ -124,13 +124,15 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
 | Client JS | 394 KB gzipped / 450 KB budget (88%) |
 
-Next: the [defect register](docs/07-DEFECT-REGISTER.md), which is the working
-backlog - phases 1 to 5 are closed, and phase 6 is the strictness pass, where one
-rule fires on the most standard pattern in SwiftUI and offers a fix that breaks
-the code it lands on. After that: [Phase 7's à-la-carte items](docs/03-ROADMAP.md)
-- a real `swiftc` verification service, accounts, AI codegen, GitHub export - each
-of which needs hosting, a key or an OAuth app; and whatever the coverage telemetry
-says people reached for.
+Next is the [defect register](docs/07-DEFECT-REGISTER.md), which is the working
+backlog: its phases 1 to 6 are closed, and what follows is the editor intelligence
+(go to definition does nothing on a struct member, and framework symbols have no
+hover), then share-link validation, then the drawing work.
+
+After that, the [roadmap's à-la-carte Phase 7](docs/03-ROADMAP.md) - a real
+`swiftc` verification service, accounts, AI codegen, GitHub export - each of which
+needs hosting, a key or an OAuth app; and whatever the coverage telemetry says
+people reached for.
 
 ## Getting started
 

@@ -21,7 +21,7 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 3 | Report failures where the user can see them | 8 | ✅ |
 | 4 | Close the parser gaps | 12 | ✅ |
 | 5 | Fill in the standard library | 19 | ✅ |
-| 6 | Fix the strictness pass where it is wrong | 4 | ⬜ |
+| 6 | Fix the strictness pass where it is wrong | 4 | ✅ |
 | 7 | Finish the editor intelligence | 3 | ⬜ |
 | 8 | Validate what a share link carries | 4 | ⬜ |
 | 9 | Draw what is honestly not drawn yet | 9 | ⬜ |
@@ -189,18 +189,46 @@ the same suite.
 | 5.18 | A `let` collection could be mutated: `let items = [1]` then `items.append(2)` ran, changed the array and reported nothing, while Xcode refuses to build it. The same held for `scores["b"] = 2` on a `let` dictionary | Both refused, with the message the struct path already used. Found while adding 5.5's seven methods, each of which would have been another way to do it. One case of the same shape is still open and is Phase 6's: a collection *inside* a `let` struct - `let bag = Bag(); bag.items.append(1)` - is still allowed, because the constancy has to travel through a member access rather than sit on the binding |
 | 5.19 | `Text(verbatim:)` drew an empty string, and once 5.1 landed so did `Text(someDate)` - a blank where the app shows a date | Both draw their content. `Text(date, style:)` takes `.time`, `.date`, `.relative`, `.offset` and `.timer` |
 
-## Phase 6 - Fix the strictness pass where it is wrong ⬜
+## Phase 6 - Fix the strictness pass where it is wrong ✅
 
-This pass exists to say "this runs here and will not build in Xcode". Where it is wrong
-it says the opposite of the truth, and one of its quick fixes causes the failure it
+This pass exists to say "this runs here and will not build in Xcode". Where it was wrong
+it said the opposite of the truth, and one of its quick fixes caused the failure it
 warned about.
 
-| # | Sev | Item |
+Closed; covered by `packages/swift-sema/src/strictness.test.ts`, whose own preamble says
+the half that must produce *nothing* is the more important one. Every fix here went in
+that half.
+
+Two of the four items read differently once reproduced, and the corrected description is
+what is written below: the register said what the symptom looked like, and the fix has to
+answer to what the code actually did.
+
+| # | Was | Now |
 | --- | --- | --- |
-| 6.1 | critical | A non-mutating method writing a `@State`, `@Binding` or `@Published` property is flagged as needing `mutating`. All of those have a nonmutating setter, so this fires on the most standard pattern in SwiftUI - and the offered fix inserts `mutating`, after which `body` cannot call the method and Xcode rejects it. `packages/swift-sema/src/strictness.ts` |
-| 6.2 | medium | Passing `&n` for an `inout` parameter where `n` is a `var` reports it as a `let` constant |
-| 6.3 | medium | A `switch` over an Optional with `.some` and `.none` arms trips the missing-return check |
-| 6.4 | medium | A collection inside a `let` struct can still be mutated: `let bag = Bag()` then `bag.items.append(1)` runs. 5.18 closed the direct case; this one needs the constancy to travel through a member access, which is a change to how an lvalue is resolved rather than a check on the receiver |
+| 6.1 | A non-mutating method writing a `@State`, `@Binding` or `@Published` property was flagged as needing `mutating`. All of those have a nonmutating setter - which is precisely what lets `body`, itself non-mutating, write to them - so this fired on the most standard shape in SwiftUI, and the offered fix inserted `mutating`, after which `body` cannot call the method and Xcode rejects the file | A property carrying any attribute is excluded from the check. The test is "any attribute" rather than a list of SwiftUI's wrappers, because a wrapper the project declared is on no list and its setter cannot be judged from here; the cost is a missed warning on `@available var n = 0` |
+| 6.2 | Reported as being about the *call site* - `&n` where `n` is a `var`. It is not: the call site is fine, and the warning lands inside the function, on `func bump(_ x: inout Int) { x += 1 }`. An `inout` parameter was declared as a `let` binding, so writing it - the whole point of the feature - reported that `x` is a constant | A parameter is a constant unless it is `inout`, in which case it is a reference to the caller's storage |
+| 6.3 | Reported as being about a `switch` over an Optional. The cause is broader and duller: the statement walk behind the check followed only `if` and `for`, so a `return` inside a `switch`, a `while`, a `repeat`, a `do`/`catch` or below the first rung of an `else if` chain was invisible | The walk visits every statement that has a body. One incomplete walk was behind a false positive *and* a false negative: the same function feeds `findAssignedNames`, so a struct method assigning a property inside a `switch` was never told it needed `mutating`. Both are now right |
+| 6.4 | A collection inside a `let` struct could be mutated: `let bag = Bag()` then `bag.items.append(1)` ran. 5.18 closed the direct case; this one needed the constancy to travel through a member access | A member of a `let` *struct* is constant, because the constant holds the value. A member of a `let` *class* stays writable, because the constant holds a reference - which is what `let store = Store()` depends on. A projection stays writable through either, which is what `@Binding` is. A computed property is left alone: its setter may be `nonmutating` and the parser does not record that, so refusing would stop the preview running code Xcode accepts |
+
+### Two bugs cancelling, which is why the corpus stayed green
+
+The eighteen templates produced **zero** strictness warnings before this phase, and that
+number was not evidence of anything. The `Loader` template carries 6.1 exactly: a
+`@State private var status` written by `func load()`. It never warned, because the
+assignments sit inside a `do` / `catch` - and 6.3's incomplete walk could not see into
+one. The wrong rule and the blind walk cancelled.
+
+Measured rather than reasoned about, by putting the old file back and running the corpus
+through it: with the walk fixed and the rule left alone, the templates produce one
+warning, on `Loader`. With both fixed, none. So the two had to land together - fixing
+6.3 alone would have *introduced* a false positive into a shipped template, along with a
+fix-it that breaks it.
+
+The gate that would have caught that is `tests/templates.test.ts`, which asserts no
+diagnostic of any severity on any template, and it has teeth here precisely because
+`Loader` carries the shape. What it could not do was catch the two bugs while they were
+cancelling, which is the general case: a corpus tests the constructs it happens to
+contain, in the combinations it happens to put them in.
 
 ## Phase 7 - Finish the editor intelligence ⬜
 

@@ -381,13 +381,18 @@ Separate from coverage, and pointed the other way: the interpreter is *more* per
 there. It only fires where the type involved is certain - from a literal or an explicit annotation -
 because a false positive would teach people to ignore the panel.
 
-| Check | Example that is flagged |
-| --- | --- |
-| Mixed numeric arithmetic | `let w: Int = 10; let s: Double = 1.5; w * s` |
-| `Text` given a non-string | `Text(count)` |
-| Property wrapper on a `let` | `@State private let count = 0` |
-| Assignment to a `let` | `let total = 0; total = 1` |
-| Non-`mutating` method writing a property | `func bump() { count += 1 }` |
-| `ForEach` without identity | `ForEach(items)` where the element is not `Identifiable` |
-| Omitted argument labels | `greet("Ada")` for `func greet(name:)` |
-| Missing `return` | a multi-statement `func` body with a return type and no `return` |
+| Check | Example that is flagged | And deliberately not |
+| --- | --- | --- |
+| Mixed numeric arithmetic | `let w: Int = 10; let s: Double = 1.5; w * s` | `scale * 2` - an integer literal takes its type from context |
+| `Text` given a non-string | `Text(count)` | `Text("\(count)")` |
+| Property wrapper on a `let` | `@State private let count = 0` | the same wrapper on a `var` |
+| Assignment to a `let` | `let total = 0; total = 1` | writing an `inout` parameter, which is the caller's storage |
+| Non-`mutating` method writing a property | `func bump() { count += 1 }` on a plain stored `var` | the same method writing a `@State`, `@Binding` or any other wrapped property: their setters are **nonmutating**, which is what lets `body` write them |
+| `ForEach` without identity | `ForEach(items)` where the element is not `Identifiable` | a range, or an explicit `id:` |
+| Omitted argument labels | `greet("Ada")` for `func greet(name:)` | a parameter declared `_` |
+| Missing `return` | a multi-statement `func` body with a return type and no `return` anywhere | a body whose returns are inside a `switch`, `while`, `repeat`, `do`/`catch`, `guard`'s `else` or an `else if` chain |
+
+The right-hand column is the half that matters. A pass that cries wolf is worse than no
+pass, because people stop reading the panel and then the true warnings go unread too -
+and the `mutating` row was exactly that until the defect register's Phase 6: it fired on
+the commonest shape in SwiftUI and offered a fix-it that broke the file it was applied to.
