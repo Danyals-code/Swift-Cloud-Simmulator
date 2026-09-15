@@ -21,7 +21,7 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 3 | Report failures where the user can see them | 8 | ✅ |
 | 4 | Close the parser gaps | 12 | ✅ |
 | 5 | Fill in the standard library | 19 | ✅ |
-| 6 | Fix the strictness pass where it is wrong | 3 | ⬜ |
+| 6 | Fix the strictness pass where it is wrong | 4 | ⬜ |
 | 7 | Finish the editor intelligence | 3 | ⬜ |
 | 8 | Validate what a share link carries | 4 | ⬜ |
 | 9 | Draw what is honestly not drawn yet | 9 | ⬜ |
@@ -186,7 +186,7 @@ the same suite.
 | # | Was | Now |
 | --- | --- | --- |
 | 5.17 | `_ = items.popLast()` reported "cannot assign to this expression". The discard is how Swift is told a result is deliberately unused, so it appears wherever a mutating method answers something the caller does not want | Evaluates the right-hand side for its effects and throws the answer away |
-| 5.18 | A `let` collection could be mutated: `let items = [1]` then `items.append(2)` ran, changed the array and reported nothing, while Xcode refuses to build it. The same held for `scores["b"] = 2` on a `let` dictionary | Both refused, with the message the struct path already used. Found while adding 5.5's seven methods, each of which would have been another way to do it |
+| 5.18 | A `let` collection could be mutated: `let items = [1]` then `items.append(2)` ran, changed the array and reported nothing, while Xcode refuses to build it. The same held for `scores["b"] = 2` on a `let` dictionary | Both refused, with the message the struct path already used. Found while adding 5.5's seven methods, each of which would have been another way to do it. One case of the same shape is still open and is Phase 6's: a collection *inside* a `let` struct - `let bag = Bag(); bag.items.append(1)` - is still allowed, because the constancy has to travel through a member access rather than sit on the binding |
 | 5.19 | `Text(verbatim:)` drew an empty string, and once 5.1 landed so did `Text(someDate)` - a blank where the app shows a date | Both draw their content. `Text(date, style:)` takes `.time`, `.date`, `.relative`, `.offset` and `.timer` |
 
 ## Phase 6 - Fix the strictness pass where it is wrong ⬜
@@ -200,6 +200,7 @@ warned about.
 | 6.1 | critical | A non-mutating method writing a `@State`, `@Binding` or `@Published` property is flagged as needing `mutating`. All of those have a nonmutating setter, so this fires on the most standard pattern in SwiftUI - and the offered fix inserts `mutating`, after which `body` cannot call the method and Xcode rejects it. `packages/swift-sema/src/strictness.ts` |
 | 6.2 | medium | Passing `&n` for an `inout` parameter where `n` is a `var` reports it as a `let` constant |
 | 6.3 | medium | A `switch` over an Optional with `.some` and `.none` arms trips the missing-return check |
+| 6.4 | medium | A collection inside a `let` struct can still be mutated: `let bag = Bag()` then `bag.items.append(1)` runs. 5.18 closed the direct case; this one needs the constancy to travel through a member access, which is a change to how an lvalue is resolved rather than a check on the receiver |
 
 ## Phase 7 - Finish the editor intelligence ⬜
 
