@@ -65,11 +65,19 @@ What it handles now is most of the SwiftUI people actually write:
   materials, colour filters, `withAnimation` and transitions.
 - **Reuse** - custom `ViewModifier`, `extension View { func … }` and custom
   `ButtonStyle`: the three ways a real codebase names a look and applies it.
-- **The editor** - completion from the project's own declarations as well as
-  SwiftUI's, go to definition, hover, quick fixes that apply themselves, and
-  rename across every file.
+- **The editor** - Xcode's Default (Dark) palette, a jump bar over every file,
+  completion from the project's own declarations as well as SwiftUI's, go to
+  definition, hover, quick fixes that apply themselves, and rename across every
+  file.
+- **The studio around it** - a project navigator with real groups you can make,
+  rename and drag files between; draggable pane dividers; Xcode's own keyboard
+  shortcuts for showing and hiding them; and a Pause that stops the preview
+  recompiling while you type.
 - **Paste and go** - `#Preview` blocks parse, and a view with only a preview
   renders rather than reporting that the project has no entry point.
+- **Somewhere to start** - eighteen templates, one of which (`Trailhead`) is a
+  whole eight-file project rather than a snippet: tabs, two levels of
+  navigation, scrolling in both directions, a shared store and a sheet.
 
 The [coverage matrix](docs/05-SWIFTUI-COVERAGE.md) is the exact contract, and it
 is honest about the 🟡 rows as well as the ✅ ones.
@@ -102,14 +110,14 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1043 passing |
-| End-to-end | 51 / 51 passing |
-| Templates rendering with zero placeholders | 17 / 17 |
+| Unit tests | 1170 passing |
+| End-to-end | 52 / 52 passing |
+| Templates rendering with zero placeholders | 18 / 18 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
 | Coverage matrix | 98 ✅ · 39 🟡 · 29 ⬜ · 3 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 367 KB gzipped / 450 KB budget (82%) |
+| Client JS | 390 KB gzipped / 450 KB budget (87%) |
 
 Next: [Phase 7's à-la-carte items](docs/03-ROADMAP.md) - a real `swiftc`
 verification service, accounts, AI codegen, GitHub export - each of which needs

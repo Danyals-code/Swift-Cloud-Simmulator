@@ -43,7 +43,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- | --- |
 | `Text` | ✅ | 3 | interpolation, concatenation, `Date`/number formatting in 6 |
 | `Label` | ✅ | 6 | icon then title |
-| `Image(systemName:)` | 🟡 | 6 | SF Symbol names map to open substitutes (R2) - see approximations |
+| `Image(systemName:)` | 🟡 | 6 | ~80 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
 | `Image("asset")` | ⬜ | - | reported as unavailable rather than drawn as a grey box |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`; there is no network in the worker |
 | `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet |
@@ -258,12 +258,18 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 
 Listed in the exported README so nothing is a surprise on the Mac:
 
-1. **Fonts** - an open metric-compatible stack stands in for SF Pro. Line breaking is very close but
-   not identical to CoreText.
-2. **SF Symbols** - Apple's symbol font cannot be redistributed to a browser (R2), so each name maps
-   to a Unicode substitute that carries the same *meaning* at a similar weight. Shapes differ, and
-   the inspector marks every symbol as approximated. The exported Swift still says
-   `Image(systemName:)`, so the real symbol appears the moment the project is built in Xcode.
+1. **Fonts** - `-apple-system` leads the stack, so a Mac or an iPad previews in the *real* SF Pro,
+   SF Pro Rounded and SF Mono. Everywhere else a self-hosted Inter stands in for SF Pro, and
+   `ui-rounded` resolves to nothing outside Apple platforms, so `.rounded` falls back to the default
+   design. Layout is correct either way - the main thread measures whichever face actually resolved
+   rather than reading a transcribed table - but two machines will break lines in different places,
+   and neither is CoreText.
+2. **SF Symbols** - Apple's symbol artwork cannot be redistributed to a browser (R2). About eighty
+   names are *drawn*, as shapes on a 24-unit monoline grid at the proportions SF Symbols uses;
+   everything else falls back to a Unicode character carrying the same meaning. Both are
+   approximations, the shapes differ from Apple's, and the inspector marks every symbol as
+   approximated. The exported Swift still says `Image(systemName:)`, so the real symbol appears the
+   moment the project is built in Xcode.
 3. **Springs** - `.spring()` and friends are approximated with an overshooting cubic bezier. The
    motion is recognisably springy; it is not the same solver, and it will not match frame for frame.
 4. **Scrolling physics** - native browser scrolling, not iOS rubber-band deceleration.

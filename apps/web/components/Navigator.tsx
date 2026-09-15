@@ -77,6 +77,8 @@ export function Navigator({
     null,
   )
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  /** A group the user clicked. Cleared when a file is selected instead. */
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
 
   const errors = diagnostics.filter((d) => d.severity === 'error').length
   const warnings = diagnostics.filter((d) => d.severity === 'warning').length
@@ -87,10 +89,11 @@ export function Navigator({
    * The folder a new item lands in.
    *
    * Xcode's rule, and the only one that is never surprising: whatever is selected.
-   * A selected file means its own group, not the root - "New File" while looking at
-   * `Models/Trail.swift` almost always means another model.
+   * A selected group means that group; a selected file means *its* group, not the
+   * root - "New File" while looking at `Models/Trail.swift` almost always means
+   * another model.
    */
-  const targetFolder = activeFileId ? dirname(activeFileId) : 'Sources'
+  const targetFolder = selectedFolder ?? (activeFileId ? dirname(activeFileId) : 'Sources')
 
   const newItems: readonly MenuItem[] = [
     { value: 'file', label: 'New File…', icon: 'new-file' },
@@ -180,7 +183,12 @@ export function Navigator({
               // A filter is a temporary flat view of what matched; honouring the
               // collapsed set while one is active would hide the results.
               forceOpen={filter.trim().length > 0}
-              onSelect={onSelect}
+              selectedFolder={selectedFolder}
+              onSelect={(fileId) => {
+                setSelectedFolder(null)
+                onSelect(fileId)
+              }}
+              onSelectFolder={setSelectedFolder}
               onToggleFolder={(path) =>
                 setCollapsed((current) => {
                   const next = new Set(current)
@@ -296,8 +304,10 @@ function Tree({
   collapsed,
   editing,
   dropTarget,
+  selectedFolder,
   forceOpen,
   onSelect,
+  onSelectFolder,
   onToggleFolder,
   onCommitEdit,
   onCancelEdit,
@@ -314,8 +324,10 @@ function Tree({
   collapsed: ReadonlySet<string>
   editing: Editing | null
   dropTarget: string | null
+  selectedFolder: string | null
   forceOpen: boolean
   onSelect: (fileId: FileId) => void
+  onSelectFolder: (path: string) => void
   onToggleFolder: (path: string) => void
   onCommitEdit: (name: string) => void
   onCancelEdit: () => void
@@ -332,8 +344,10 @@ function Tree({
     collapsed,
     editing,
     dropTarget,
+    selectedFolder,
     forceOpen,
     onSelect,
+    onSelectFolder,
     onToggleFolder,
     onCommitEdit,
     onCancelEdit,
@@ -397,8 +411,8 @@ function Tree({
             ) : (
               <button
                 type="button"
-                onClick={() => onToggleFolder(node.path)}
-                onDoubleClick={() => onStartRename(node.path, true)}
+                onClick={() => onSelectFolder(node.path)}
+                onDoubleClick={() => onToggleFolder(node.path)}
                 onContextMenu={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
@@ -417,16 +431,41 @@ function Tree({
                 }}
                 style={{ paddingLeft: depth * INDENT + 4 }}
                 data-testid={`group-${node.path}`}
-                className={`${ROW} text-xc-text transition-colors ${
-                  isDropTarget ? 'bg-xc-accent/30' : 'hover:bg-white/[0.06]'
+                className={`${ROW} transition-colors ${
+                  isDropTarget
+                    ? 'bg-xc-accent/30 text-xc-text'
+                    : selectedFolder === node.path
+                      ? 'bg-xc-select text-white'
+                      : 'text-xc-text hover:bg-white/[0.06]'
                 }`}
               >
+                {/*
+                  The triangle is its own control, as it is in every file tree:
+                  clicking the row selects the group - which is what decides where
+                  "New File" puts things - and only the triangle opens it.
+                */}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`}
+                  data-testid={`disclosure-${node.path}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onToggleFolder(node.path)
+                  }}
+                  className="-my-1 grid h-[22px] w-[12px] shrink-0 place-items-center"
+                >
+                  <Icon
+                    name={open ? 'disclosure-open' : 'disclosure-closed'}
+                    size={10}
+                    className={selectedFolder === node.path ? 'text-white/80' : 'text-xc-text-3'}
+                  />
+                </span>
                 <Icon
-                  name={open ? 'disclosure-open' : 'disclosure-closed'}
-                  size={10}
-                  className="text-xc-text-3"
+                  name="folder"
+                  size={14}
+                  className={selectedFolder === node.path ? 'text-white' : 'text-[#8ab4f8]'}
                 />
-                <Icon name="folder" size={14} className="text-[#8ab4f8]" />
                 <span className="truncate">{node.name}</span>
               </button>
             )}
