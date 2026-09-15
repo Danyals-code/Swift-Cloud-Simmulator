@@ -70,12 +70,24 @@ export type ViewIntent =
   | { readonly kind: 'selectTab'; readonly tab: string; readonly index: number }
   | { readonly kind: 'write'; readonly binding: SwiftValue; readonly value: SwiftValue }
   | { readonly kind: 'toggle'; readonly binding: SwiftValue }
-  | { readonly kind: 'adjust'; readonly binding: SwiftValue; readonly by: number }
+  /** A `Stepper` press. `bounds` is its `in:` range, which the press may not leave. */
+  | {
+      readonly kind: 'adjust'
+      readonly binding: SwiftValue
+      readonly by: number
+      readonly bounds?: { readonly min: number; readonly max: number }
+    }
   | { readonly kind: 'run'; readonly closure: ClosureValue }
   /** A gesture attached with `.gesture(…)`; the event decides which handlers run. */
   | { readonly kind: 'gesture'; readonly gesture: SwiftValue }
   /** Dragging a list row sideways to reveal its actions. */
   | { readonly kind: 'swipe'; readonly row: string }
+  /** Opening or closing a `DisclosureGroup`, which nothing in the user's code holds. */
+  | { readonly kind: 'expand'; readonly group: string }
+  /** Showing a `Picker`'s or `Menu`'s options. Null closes whatever is open. */
+  | { readonly kind: 'openMenu'; readonly menu: string | null }
+  /** Choosing one of them: writes the selection and closes in one press. */
+  | { readonly kind: 'choose'; readonly binding: SwiftValue; readonly value: SwiftValue }
   /** `.onDelete` - remove the row at this offset from the collection. */
   | { readonly kind: 'delete'; readonly closure: ClosureValue; readonly offset: number; readonly row: string }
 

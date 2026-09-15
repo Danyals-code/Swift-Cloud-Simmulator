@@ -65,7 +65,9 @@ What it handles now is most of the SwiftUI people actually write:
 - **State** - `@State`, `@Binding`, `ObservableObject` with `@StateObject` and
   `@ObservedObject`, `@EnvironmentObject`, `@Environment`.
 - **Interaction** - the form controls, drag and magnify gestures with
-  `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`.
+  `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`. A
+  `Stepper` counts by its step and stops at its bounds, a `DisclosureGroup` opens
+  and closes, and a `Picker` or `Menu` opens onto the options the user wrote.
 - **Drawing** - `Path`, `Canvas`, shapes with `.fill` and `.stroke`, gradients,
   materials, colour filters, `withAnimation` and transitions.
 - **Reuse** - custom `ViewModifier`, `extension View { func … }` and custom
@@ -120,19 +122,20 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1424 passing |
+| Unit tests | 1441 passing |
 | End-to-end | 52 / 52 passing |
 | Templates rendering with zero placeholders | 18 / 18 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
-| Coverage matrix | 123 ✅ · 48 🟡 · 30 ⬜ · 3 ✗ |
+| Coverage matrix | 125 ✅ · 46 🟡 · 30 ⬜ · 3 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
 | Client JS | 394 KB gzipped / 450 KB budget (88%) |
 
 Next is the [defect register](docs/07-DEFECT-REGISTER.md), which is the working
-backlog: its phases 1 to 8 are closed, and what remains is the drawing work -
-controls that are drawn but cannot open, the text attributes with no field in the
-render tree, and the views still standing in as placeholders.
+backlog: its phases 1 to 8 are closed and phase 9 is a third done. What remains
+there is the drawing work - the text attributes, which start with a render-tree
+change, the control styles that all draw alike, and the views still standing in as
+placeholders.
 
 After that, the [roadmap's à-la-carte Phase 7](docs/03-ROADMAP.md) - a real
 `swiftc` verification service, accounts, AI codegen, GitHub export - each of which

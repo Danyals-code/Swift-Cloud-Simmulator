@@ -4,12 +4,11 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the standard library pass (defect register phase 5), which added the
-**Standard library and Foundation** section - the part of the library SwiftUI code actually
-calls had no section here at all, which is part of why fifty-five of its calls could be
-missing without anything saying so.
+Last updated after the controls pass (defect register phase 9), which made four of the
+controls that were drawn answer to a press. Before it, a `Stepper` had two halves and no
+way to press either, and a `DisclosureGroup` was permanently open.
 
-**123 ✅ · 48 🟡 · 30 ⬜ · 3 ✗**, over 204 rows, counted from this file rather than carried
+**125 ✅ · 46 🟡 · 30 ⬜ · 3 ✗**, over 204 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -65,17 +64,17 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 ## Controls
 
-| View | Status | Phase |
-| --- | --- | --- |
-| `Button` | ✅ | 3 |
-| `Toggle` | ✅ | 6 |
-| `Slider` | ✅ | 6 |
-| `Stepper` | 🟡 | 6 | drawn and laid out; the two halves are not separately tappable yet |
+| View | Status | Phase | Notes |
+| --- | --- | --- | --- |
+| `Button` | ✅ | 3 | |
+| `Toggle` | ✅ | 6 | |
+| `Slider` | ✅ | 6 | |
+| `Stepper` | ✅ | 6 | each half is its own target; `step:` and `in:` are both honoured |
 | `TextField` / `SecureField` | 🟡 | 6 | a real input with a caret; `SecureField` does not mask yet |
 | `TextEditor` | 🟡 | 7 | a single-line field; no multi-line editing |
-| `Picker` | 🟡 | 6 | drawn in the menu style, showing its selection; not yet openable |
-| `DatePicker` / `ColorPicker` | 🟡 | 7 | drawn as a labelled row; not yet openable |
-| `Menu` | 🟡 | 7 | drawn as its label; not yet openable |
+| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. The panel is drawn at the bottom rather than anchored to the control |
+| `DatePicker` / `ColorPicker` | 🟡 | 7 | drawn as a labelled row; not yet openable. Each needs an editor of its own rather than a list of options |
+| `Menu` | 🟡 | 7 | opens onto its buttons; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
 
 ## Collections and navigation
 
@@ -89,7 +88,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.swipeActions` | 🟡 | 7 | recognised; the revealed action is the standard Delete |
 | `.searchable` | ✅ | 7 | a field above the content, writing its binding |
 | `.refreshable` | ⬜ | - | pull-to-refresh has no meaning in a static preview |
-| `DisclosureGroup` | 🟡 | 7 | label and content; the chevron does not collapse it |
+| `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |
 | `Table` / `OutlineGroup` | ⬜ | - | |
 | `NavigationStack` + `NavigationLink` | ✅ | 6 | both the `destination:` and `value:` forms |
 | `.navigationDestination` | ✅ | 6 | `for:` with a metatype, resolved on push |
@@ -367,7 +366,13 @@ Listed in the exported README so nothing is a surprise on the Mac:
     `Text(_, format:)` go through `Intl`, so the separators, the order and the currency symbols
     are the platform's real ones rather than a transcription - and two machines in different
     regions will legitimately show different text.
-15. **Renaming is scoped, which means it can rename too little.** A local is renamed within
+15. **A menu is drawn at the bottom of the screen, not beside its control.** A `Picker`
+    or `Menu` opens onto a panel across the foot of the device, which is where iOS puts the
+    same list when it is presented from a form - and is not where iOS puts it when the
+    control sits mid-screen. The compositor decides what the options are before the layout
+    engine decides where the control ended up, so anchoring would mean resolving the menu
+    after layout. An approximation of position; the options and the tick are exact.
+16. **Renaming is scoped, which means it can rename too little.** A local is renamed within
     its own body; a member is followed across the project only when no other type declares
     the same member name, and otherwise stays inside the type that declared it. The
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses

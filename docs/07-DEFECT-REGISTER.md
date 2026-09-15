@@ -24,7 +24,7 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 6 | Fix the strictness pass where it is wrong | 4 | ✅ |
 | 7 | Finish the editor intelligence | 3 | ✅ |
 | 8 | Validate what a share link carries | 4 | ✅ |
-| 9 | Draw what is honestly not drawn yet | 9 | ⬜ |
+| 9 | Draw what is honestly not drawn yet | 9 | 🟡 3 of 9 |
 | 10 | Make the documentation match the code | 7 | 🟡 4 of 7 |
 
 ## What was swept
@@ -318,22 +318,93 @@ inside the root. All four formats now write through one guarded map rather than 
 copies of the same path arithmetic, which is what let the difference hide in the first
 place.
 
-## Phase 9 - Draw what is honestly not drawn yet ⬜
+## Phase 9 - Draw what is honestly not drawn yet 🟡
 
 Real feature work, and the right place for it is after the preview reports these
-accurately - which Phase 2 did. Each line is a body of work rather than a bug.
+accurately - which Phase 2 did. Each line is a body of work rather than a bug, and
+this pass took the two that are not: the controls that were drawn and answered to
+nothing, and the symbol alias. **9.2 to 9.7 are untouched**, and the sizes below say
+what each still needs.
+
+| # | State | |
+| --- | --- | --- |
+| 9.1 | 🟡 4 of 6 | `Stepper`, `DisclosureGroup`, `Picker` and `Menu` are operable. `DatePicker` and `ColorPicker` still draw and do not open |
+| 9.2 | ⬜ | Text attributes. Starts with a render-tree change, and the measurement half (`minimumScaleFactor`, `allowsTightening`, `truncationMode`) needs the line breaker |
+| 9.3 | ⬜ | Control styles that all draw the same |
+| 9.4 | ⬜ | Layout: `safeAreaInset`, `alignmentGuide`, the `Layout` protocol, lazy-stack virtualisation |
+| 9.5 | ⬜ | Effects and animation, including exit transitions |
+| 9.6 | ⬜ | The remaining views. `GroupBox` is the one still failing the fourteen-snippet measure |
+| 9.7 | ⬜ | Data flow: `@AppStorage`, `@FocusState`, `PreferenceKey`, Combine |
+| 9.8 | ✅ | **Not reproducible.** See below |
+| 9.9 | ✅ | `gear` is drawn |
+
+### 9.1 - controls that were drawn and answered to nothing
+
+A preview that looks interactive and is not is a worse lie than one that looks
+static, because the user blames their own code. These four now work, and are covered
+by `tests/controls.test.ts`.
+
+| | Was | Now |
+| --- | --- | --- |
+| `Stepper` | Drawn with both halves and no hit target at all | Each half is its own target. `step:` is honoured, and `in:` is a bound the press may not leave - a control that counts past its own range shows a number the app could never show |
+| `DisclosureGroup` | Rendered permanently expanded, with no way to collapse it | Starts closed, opens and closes, and the chevron turns. Where the user wrote `isExpanded:` that binding is the truth; where they did not, the framework keeps the state, exactly as it does for a navigation stack |
+| `Picker` | Had a hit target whose intent was to write its own selection back over itself | Opens onto the options the user wrote, ticks the one currently chosen, and choosing writes the binding and closes in one press |
+| `Menu` | No hit target | Opens onto its buttons; pressing one runs its action and closes |
+
+The menu is drawn as a panel at the bottom of the screen. iOS anchors it to the
+control it came from, and the resolver does not know where that ended up on screen -
+so this is an approximation of *position*, never of content, and it is recorded as
+one in the coverage matrix.
+
+### The dimmed area behind a sheet never worked
+
+Found while giving the menu a way to dismiss itself. The coverage matrix offers
+"tap outside it" as *the* way to close a sheet in a preview, and the pipeline builds
+a dim layer with a hit target on it for exactly that - but the render conversion
+attached hit targets only to the invisible `hit` boxes, and the dim layer is a
+*fill*. Every tap outside a sheet, alert or dialog has been landing on nothing.
+
+The mapping now happens once, for every node, rather than in one branch of a switch
+over paint kinds - which is the shape of the fix that stops the next paint kind
+losing it too.
+
+### 9.8 was already closed
+
+The register says the back button carries no accessible label and cannot be found by
+name. It can: it is labelled with the title of the screen it returns to, which is
+what iOS does, and `tests/phase6.test.ts` has been finding it that way since Phase 6.
+Measured by putting the pre-Phase-9 file back and asking for the label rather than by
+reading the code.
+
+Left as a finding rather than quietly dropped: the sweep produced this item, later
+work closed it, and nothing noticed. It is the one entry in 84 that did not
+reproduce.
+
+### Found while working here, not fixed
+
+- **A property named `open` cannot be read at the start of an expression.**
+  `var n: Int { open }` reports "Expected an expression, found 'open'", while
+  `"\(open)"` and `$open` are both fine, and `some`, `any` and `each` work
+  everywhere. Phase 4.11 made contextual keywords work as *declaration* names; this
+  is the same word in statement-start expression position, where the parser is still
+  looking for a declaration modifier. Narrow, real, and not Phase 9's.
+
+---
+
+### What remains, in full
+
+The list the sweep produced, minus what this pass closed. Each is a body of work
+rather than a bug, and the phase stays open until they are done or declined.
 
 | # | Item |
 | --- | --- |
-| 9.1 | Controls drawn but not operable: `Picker`, `Menu`, `DatePicker`, `ColorPicker` cannot open; `Stepper`'s halves are not separately tappable; `DisclosureGroup` renders expanded and cannot collapse |
-| 9.2 | Text rendering beyond size, weight and colour: `underline`, `strikethrough`, `lineSpacing`, `kerning`, `tracking`, `baselineOffset`, `minimumScaleFactor`, `truncationMode`, `lineLimit(_: Range)`, `monospacedDigit`, `allowsTightening`. `TextRun` has no field for any of them, so this starts with a render-tree change |
+| 9.1 | `DatePicker` and `ColorPicker` are drawn and cannot open. Both need an editor of their own - a calendar and a colour surface - rather than a list of the options the user wrote, which is what made the other four cheap |
+| 9.2 | Text rendering beyond size, weight and colour: `underline`, `strikethrough`, `lineSpacing`, `kerning`, `tracking`, `baselineOffset`, `minimumScaleFactor`, `truncationMode`, `lineLimit(_: Range)`, `monospacedDigit`, `allowsTightening`. `TextRun` has no field for any of them, so this starts with a render-tree change. The first six are whole-Text attributes and need no line-breaker work; the rest need measurement to answer back |
 | 9.3 | Control styles that all draw the same: `toggleStyle`, `pickerStyle`, `labelStyle`, `progressViewStyle`, `gaugeStyle`, `controlSize`, `buttonBorderShape`, and custom `ToggleStyle` / `LabelStyle` |
 | 9.4 | Layout: `safeAreaInset`, `alignmentGuide`, `containerRelativeFrame`, the `Layout` protocol, `AnyLayout`, virtualisation for the lazy stacks |
 | 9.5 | Effects and animation: `mask`, `blendMode`, `hueRotation`, `colorMultiply`, `rotation3DEffect`, `redacted`, `visualEffect`, `matchedGeometryEffect`, `phaseAnimator`, `keyframeAnimator`, `Animatable`, the `value:` gate on `.animation`, and exit transitions |
-| 9.6 | Views: `GroupBox`, `LabeledContent`, `ControlGroup`, `ScrollViewReader`, `NavigationSplitView`, `Table`, `OutlineGroup`, `TimelineView`, `Chart`, `.popover`, `Image("asset")`, `tabViewStyle(.page)`, `ToolbarItemGroup` placements, `Section` footers, the sidebar list style, and `Text` + `Text` |
+| 9.6 | Views: `GroupBox`, `LabeledContent`, `ControlGroup`, `ScrollViewReader`, `NavigationSplitView`, `Table`, `OutlineGroup`, `TimelineView`, `Chart`, `.popover`, `Image("asset")`, `tabViewStyle(.page)`, `ToolbarItemGroup` placements, `Section` footers, the sidebar list style, and `Text` + `Text` - which is a *runtime error* today rather than a placeholder, and so the worst-behaved row in the table |
 | 9.7 | Data flow: `@AppStorage`, `@SceneStorage`, `@FocusState`, `PreferenceKey`, `onReceive` and Combine, `openURL`, `scenePhase`, `PreviewProvider`, `Binding(get:set:)`, and `.navigationDestination(for:)` with a built-in type |
-| 9.8 | The back button carries no accessible label, so it cannot be found by name |
-| 9.9 | `gear` falls back to Unicode while `gearshape` is drawn. One alias short of 68 of 68 |
 
 ## Phase 10 - Make the documentation match the code 🟡
 

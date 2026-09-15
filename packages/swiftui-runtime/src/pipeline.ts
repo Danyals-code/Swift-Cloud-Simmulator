@@ -248,7 +248,7 @@ function presentOverlay(
     { ...env, cornerRadius: overlay.kind === 'sheet' ? 12 : overlay.kind === 'cover' ? 0 : 14 },
     overlay.kind === 'alert'
       ? CENTER
-      : overlay.kind === 'dialog'
+      : overlay.kind === 'dialog' || overlay.kind === 'menu'
         ? { horizontal: 'center', vertical: 'bottom' }
         : { horizontal: 'leading', vertical: 'top' },
   )
@@ -273,7 +273,7 @@ function overlayRect(
     return { x: (canvas.width - width) / 2, y: 0, width, height: canvas.height }
   }
 
-  if (overlay.kind === 'dialog') {
+  if (overlay.kind === 'dialog' || overlay.kind === 'menu') {
     const width = canvas.width - 16
     return { x: 8, y: 0, width, height: canvas.height - safeArea.bottom - 8 }
   }

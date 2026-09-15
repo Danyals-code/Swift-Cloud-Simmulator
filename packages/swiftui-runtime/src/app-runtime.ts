@@ -296,8 +296,18 @@ export class AppRuntime {
     this.animation = null
     this.host.pendingAnimation = null
 
+    // Any press made while a menu is up closes it, which is what the real one does:
+    // while it is open it is the only thing on screen that can be pressed, so the
+    // press is either a choice, one of its buttons, or the dim layer dismissing it.
+    // Recorded before the intent runs, so an intent that opens a *different* menu
+    // still leaves its own open.
+    const wasOpen = this.ui.openMenu()
+
     try {
       this.perform(intent, event)
+      if (wasOpen !== null && this.ui.openMenu() === wasOpen && intent.kind !== 'openMenu') {
+        this.ui.setOpenMenu(null)
+      }
     } catch (error) {
       // A trap inside an action is surfaced as a log rather than thrown, so one bad
       // tap cannot tear down the preview.
@@ -471,12 +481,37 @@ export class AppRuntime {
         return
       }
 
+      case 'expand': {
+        this.ui.toggleExpanded(intent.group)
+        return
+      }
+
+      case 'openMenu': {
+        this.ui.setOpenMenu(intent.menu)
+        return
+      }
+
+      case 'choose': {
+        const binding = asProjection(intent.binding)
+        if (binding) binding.set(intent.value)
+        this.ui.setOpenMenu(null)
+        return
+      }
+
       case 'adjust': {
         const binding = asProjection(intent.binding)
         if (!binding) return
         const current = binding.get()
         const base = current.kind === 'int' || current.kind === 'double' ? current.value : 0
-        const next = base + intent.by
+
+        // `Stepper(value:in:)` stops at its bounds rather than running past them, and
+        // a control that counts past the range it was given is a confident wrong
+        // answer: the number on screen is one the app could never show.
+        const raw = base + intent.by
+        const next = intent.bounds
+          ? Math.min(intent.bounds.max, Math.max(intent.bounds.min, raw))
+          : raw
+
         binding.set(current.kind === 'int' ? int(Math.round(next)) : double(next))
         return
       }

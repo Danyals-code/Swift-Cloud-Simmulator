@@ -50,6 +50,7 @@ export const BACK_BUTTON = '_BackButton'
 export const TAB_ITEM = '_TabItem'
 export const ALERT = '_Alert'
 export const DIALOG = '_ConfirmationDialog'
+export const MENU = '_Menu'
 
 export interface NavigationBar {
   readonly title: string
@@ -67,7 +68,7 @@ export interface TabBar {
   readonly view: ViewValue
 }
 
-export type OverlayKind = 'sheet' | 'cover' | 'alert' | 'dialog' | 'popover'
+export type OverlayKind = 'sheet' | 'cover' | 'alert' | 'dialog' | 'popover' | 'menu'
 
 export interface Overlay {
   readonly kind: OverlayKind
@@ -152,6 +153,40 @@ export class UIState {
     if (current.length > depth) this.navigation.set(id, current.slice(0, depth))
   }
 
+  /**
+   * `DisclosureGroup`s that are open.
+   *
+   * Framework state in the same sense the navigation stack is: SwiftUI's
+   * `DisclosureGroup(_:content:)` has no binding to write, so the only place the
+   * open-ness can live is here. The `isExpanded:` form does have one, and that form
+   * reads its binding instead - the user's storage wins wherever they provided it.
+   */
+  private expanded = new Set<string>()
+
+  isExpanded(id: string): boolean {
+    return this.expanded.has(id)
+  }
+
+  toggleExpanded(id: string): void {
+    if (!this.expanded.delete(id)) this.expanded.add(id)
+  }
+
+  /**
+   * The `Picker` or `Menu` whose options are showing, by path.
+   *
+   * One at a time, like the real thing: opening a second closes the first, and there
+   * is no state to reconcile because a menu that is not on screen has none.
+   */
+  private menu: string | null = null
+
+  openMenu(): string | null {
+    return this.menu
+  }
+
+  setOpenMenu(id: string | null): void {
+    this.menu = id
+  }
+
   /** How far a list row has been swiped open, in points. */
   private swipes = new Map<string, number>()
 
@@ -180,6 +215,8 @@ export class UIState {
     this.navigation.clear()
     this.tabs.clear()
     this.swipes.clear()
+    this.expanded.clear()
+    this.menu = null
   }
 }
 
@@ -230,7 +267,9 @@ class Resolver {
     const nav = findView(withTabs.content, 'NavigationStack') ?? findView(withTabs.content, 'NavigationView')
     const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
 
-    const overlay = this.findOverlay(screen.content)
+    // A menu sits above everything, including a sheet: it is the thing the user just
+    // opened, and it is the only one they can interact with while it is up.
+    const overlay = this.menuOverlay(screen.content) ?? this.findOverlay(screen.content)
 
     return {
       content: screen.content,
@@ -280,7 +319,7 @@ class Resolver {
 
       if (intent) this.handlers.set(handlerIdFor(path), intent)
       this.collectLifecycle(restyled, path)
-      return stamped
+      return this.operable(stamped, path)
     } finally {
       if (style) this.buttonStyles.pop()
     }
@@ -439,6 +478,135 @@ class Resolver {
     const id = handlerIdFor(path)
     this.handlers.set(id, intent)
     return id
+  }
+
+  /**
+   * Controls whose parts are pressed separately, rather than the view as a whole.
+   *
+   * A `Button` is one tap on one view, which `intentFor` covers. A `Stepper` is two
+   * taps on two halves of one view, and a `DisclosureGroup` is a tap on its row that
+   * shows or hides everything below it - neither fits "one intent per view", which is
+   * why both were drawn correctly and did nothing at all.
+   *
+   * The sub-paths registered here are the ones `to-layout` builds hit targets at, and
+   * the two agree because both derive the id from the same path.
+   */
+  private operable(view: ViewValue, path: string): ViewValue {
+    if (view.name === 'Stepper') {
+      const binding = labelled(view.args, 'value')
+      if (!binding || !asProjection(binding)) return view
+
+      // `step:` is how much each press is worth; SwiftUI's default is 1.
+      const step = numberOf(labelled(view.args, 'step')) ?? 1
+      const range = labelled(view.args, 'in')
+      const bounds =
+        range?.kind === 'range'
+          ? { min: range.lower, max: range.closed ? range.upper : range.upper - 1 }
+          : undefined
+
+      this.register(`${path}/minus`, { kind: 'adjust', binding, by: -step, ...(bounds ? { bounds } : {}) })
+      this.register(`${path}/plus`, { kind: 'adjust', binding, by: step, ...(bounds ? { bounds } : {}) })
+      return view
+    }
+
+    if (view.name === 'Picker' || view.name === 'Menu') {
+      // Pressing the control shows its options. This replaces the intent
+      // `CONTROL_BINDINGS` gives a Picker - writing the selection back over itself,
+      // which is what "drawn but does not open" looked like from the inside.
+      const intent: ViewIntent = { kind: 'openMenu', menu: path }
+      this.handlers.set(handlerIdFor(path), intent)
+      return { ...view, intent }
+    }
+
+    if (view.name === 'DisclosureGroup') {
+      // `isExpanded:` is the form with a binding. Where the user wrote one it is the
+      // truth and the framework's own record is not consulted at all.
+      const binding = labelled(view.args, 'isExpanded')
+      const projection = asProjection(binding)
+      const open = projection ? truthy(projection.get()) : this.ctx.state.isExpanded(path)
+
+      this.register(
+        `${path}/row`,
+        projection ? { kind: 'toggle', binding: binding! } : { kind: 'expand', group: path },
+      )
+
+      return {
+        ...view,
+        args: [...view.args, { label: 'isExpanded', value: { kind: 'bool', value: open } }],
+        // A closed group's content is not drawn. Dropping it here rather than in the
+        // layout keeps the decision next to the state that makes it.
+        children: open ? view.children : [],
+      }
+    }
+
+    return view
+  }
+
+  /**
+   * The open `Picker` or `Menu`, as an overlay of its options.
+   *
+   * Built from the control's own children rather than invented: a Picker's options
+   * are the views the user wrote inside it, each carrying the `.tag` that says what
+   * choosing it means. The selected one is ticked, which is the only thing on screen
+   * that reports the current value once the list is up.
+   *
+   * iOS anchors this popup to the control it came from. This draws it as a panel at
+   * the bottom, which is where the same list appears when a Picker is presented from
+   * a form - an approximation of position, never of content, and recorded as one in
+   * the coverage matrix.
+   */
+  private menuOverlay(views: readonly ViewValue[]): Overlay | null {
+    const open = this.ctx.state.openMenu()
+    if (!open) return null
+
+    const control = findByPath(views, open)
+    if (!control) {
+      // The control is gone - a filter changed, a row was deleted. Closing is the
+      // honest response; leaving it open would dim the screen over nothing.
+      this.ctx.state.setOpenMenu(null)
+      return null
+    }
+
+    const dismiss: ViewIntent = { kind: 'openMenu', menu: null }
+    const dismissId = this.register(`${open}/dismiss`, dismiss)
+
+    const selection = labelled(control.args, 'selection')
+    const binding = asProjection(selection)
+    const current = binding ? describe(binding.get(), true) : null
+
+    const rows = control.children.map((child, index) => {
+      const path = `${open}/opt-${index}`
+      const tag = tokenOrValue(collectModifier([child], 'tag')?.args[0]?.value)
+
+      // A Picker's row selects; a Menu's row is already a Button and keeps its own
+      // action. Either way the menu closes, which the runtime does for any press
+      // made while one is open.
+      if (selection && tag !== null) {
+        this.register(path, { kind: 'choose', binding: selection, value: tagValue(child) })
+      }
+
+      const stamped = this.stamp(child, path)
+      return {
+        ...stamped,
+        args: [
+          ...stamped.args,
+          { label: 'selected', value: { kind: 'bool' as const, value: tag !== null && tag === current } },
+        ],
+        ...(selection && tag !== null
+          ? { intent: { kind: 'choose' as const, binding: selection, value: tagValue(child) } }
+          : {}),
+      } satisfies ViewValue
+    })
+
+    return {
+      kind: 'menu',
+      views: rows,
+      detent: 0,
+      title: stringArg(control.args.find((a) => a.label === null)?.value) ?? '',
+      message: '',
+      dismiss,
+      dismissId,
+    }
   }
 
   // ----------------------------------------------------------- navigation
@@ -812,6 +980,10 @@ function labelled(args: readonly ViewArg[], label: string): SwiftValue | undefin
 
 function stringArg(value: SwiftValue | undefined): string | null {
   return value?.kind === 'string' ? value.value : null
+}
+
+function numberOf(value: SwiftValue | undefined): number | null {
+  return value?.kind === 'int' || value?.kind === 'double' ? value.value : null
 }
 
 function tokenName(value: SwiftValue | undefined): string | null {

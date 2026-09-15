@@ -28,6 +28,7 @@ import {
   ALERT,
   BACK_BUTTON,
   DIALOG,
+  MENU,
   NAV_BAR,
   TAB_BAR,
   TAB_ITEM,
@@ -569,9 +570,11 @@ class Converter {
     )
   }
 
-  /** A sheet, cover, alert or dialog, laid out as its own little screen. */
+  /** A sheet, cover, alert, dialog or menu, laid out as its own little screen. */
   overlay(overlay: Overlay): LayoutElement {
     const body = overlay.views.map((v, i) => this.convert(v, `ov-${i}`, 'vertical'))
+
+    if (overlay.kind === 'menu') return this.menuSurface(overlay)
 
     if (overlay.kind === 'alert' || overlay.kind === 'dialog') {
       const title = this.styledText('ov-title', overlay.title, 'headline', 'label', 600)
@@ -1735,14 +1738,28 @@ class Converter {
           spacing: 0,
           alignment: CENTER,
           children: [
-            this.glyphButton(`${path}minus`, 'minus'),
+            // Each half is its own target. A Stepper is one view with two presses,
+            // so a single hit target over the whole control could only ever guess
+            // which one the user meant - it was drawn with both halves and answered
+            // to neither. The paths match the ones the resolver registered.
+            this.withHitTarget(
+              this.glyphButton(`${path}minus`, 'minus'),
+              `${path}/minus`,
+              'button',
+              'Decrement',
+            ),
             {
               kind: 'modified',
               id: `${path}divframe`,
               modifier: { kind: 'frame', width: SEPARATOR_HEIGHT, height: 20, alignment: CENTER },
               child: { kind: 'fill', id: `${path}div`, fill: { kind: 'solid', color: this.color('separator') } },
             },
-            this.glyphButton(`${path}plus`, 'plus'),
+            this.withHitTarget(
+              this.glyphButton(`${path}plus`, 'plus'),
+              `${path}/plus`,
+              'button',
+              'Increment',
+            ),
           ],
         },
       },
@@ -1930,8 +1947,117 @@ class Converter {
   }
 
   /** `DisclosureGroup` - the label row with a chevron, and its content beneath. */
+  /**
+   * The panel a `Picker` or `Menu` shows when it is opened.
+   *
+   * One row per option, each pressable, with a tick beside the one currently chosen
+   * - which is the only thing on screen reporting the value once the control itself
+   * is covered. The rows are the views the user wrote inside the control; nothing
+   * here is invented, which is the same rule the rest of the compositor follows.
+   */
+  private menuSurface(overlay: Overlay): LayoutElement {
+    const rows = overlay.views.map((option, index) => {
+      const selected = boolArg(labelled(option.args, 'selected'))
+
+      // The hit target goes around the whole row rather than around the label, so
+      // pressing anywhere on the row counts - including the empty space beside it.
+      const content = this.convert({ ...option, intent: undefined }, `ov-${index}`, 'horizontal')
+
+      const row: LayoutElement = {
+        kind: 'modified',
+        id: `ov-${index}-pad`,
+        modifier: { kind: 'padding', insets: insets(11, 16, 11, 16) },
+        child: {
+          kind: 'stack',
+          id: `ov-${index}-row`,
+          axis: 'horizontal',
+          spacing: 8,
+          alignment: CENTER,
+          children: [
+            content,
+            { kind: 'spacer', id: `ov-${index}-gap`, axis: 'horizontal', minLength: 8 },
+            ...(selected
+              ? [
+                  {
+                    kind: 'modified' as const,
+                    id: `ov-${index}-tickcolor`,
+                    modifier: { kind: 'foregroundStyle' as const, color: this.color('accentColor') },
+                    child: this.symbolImage(`ov-${index}-tick`, 'checkmark'),
+                  },
+                ]
+              : []),
+          ],
+        },
+      }
+
+      return option.path && option.intent
+        ? this.withHitTarget(row, option.path, 'button', labelOf(option))
+        : row
+    })
+
+    const separated: LayoutElement[] = []
+    rows.forEach((row, index) => {
+      if (index > 0) {
+        separated.push({
+          kind: 'modified',
+          id: `ov-sep-${index}`,
+          modifier: { kind: 'frame', height: SEPARATOR_HEIGHT, alignment: CENTER },
+          child: {
+            kind: 'fill',
+            id: `ov-sepfill-${index}`,
+            fill: { kind: 'solid', color: this.color('separator') },
+          },
+        })
+      }
+      separated.push(row)
+    })
+
+    return this.background(
+      this.fill(
+        {
+          kind: 'stack',
+          id: 'ov-stack',
+          axis: 'vertical',
+          spacing: 0,
+          alignment: { horizontal: 'leading', vertical: 'center' },
+          children: separated,
+          debugName: MENU,
+        },
+        'ov-fill',
+        CENTER,
+        false,
+      ),
+      'ov-bg',
+      this.color('secondarySystemGroupedBackground'),
+      14,
+    )
+  }
+
   private disclosureGroup(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0)) ?? ''
+    // Stamped by the resolver, which owns the open/closed state. A group drawn
+    // without one has not been through it, so it draws closed rather than guessing.
+    const expanded = boolArg(labelled(view.args, 'isExpanded'))
+
+    const row: LayoutElement = {
+      kind: 'stack',
+      id: `${path}row`,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [
+        { kind: 'text', id: `${path}title`, text: title },
+        { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
+        {
+          kind: 'modified',
+          id: `${path}chevcolor`,
+          modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
+          // The chevron is the state: down when open, trailing when closed, which is
+          // what iOS draws and the only thing on screen that says which it is.
+          child: this.symbolImage(`${path}chev`, expanded ? 'chevron.down' : 'chevron.right'),
+        },
+      ],
+    }
 
     return {
       kind: 'stack',
@@ -1940,23 +2066,7 @@ class Converter {
       spacing: 8,
       alignment: { horizontal: 'leading', vertical: 'center' },
       children: [
-        {
-          kind: 'stack',
-          id: `${path}row`,
-          axis: 'horizontal',
-          spacing: 8,
-          alignment: CENTER,
-          children: [
-            { kind: 'text', id: `${path}title`, text: title },
-            { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
-            {
-              kind: 'modified',
-              id: `${path}chevcolor`,
-              modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
-              child: this.symbolImage(`${path}chev`, 'chevron.down'),
-            },
-          ],
-        },
+        this.withHitTarget(row, `${path}/row`, 'button', title),
         ...this.convertList(view.children, path, 'vertical'),
       ],
       ...origin,
