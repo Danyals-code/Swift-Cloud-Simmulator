@@ -291,6 +291,115 @@ export function asIndexSet(value: SwiftValue | undefined): readonly number[] | n
     : null
 }
 
+// ----------------------------------------------------------------- foundation
+
+/**
+ * `UUID`, `Date` and `URL`.
+ *
+ * Foundation rather than the standard library, and here for the same reason
+ * `IndexSet` is: the interpreter owns them. All three were *named* in the checker's
+ * known types long before any of them existed at runtime, so `let id = UUID()` - the
+ * standard `Identifiable` idiom - passed every check and then failed with "cannot
+ * find UUID in scope" the moment the preview ran it. A name the product claims to
+ * know has to resolve to something.
+ *
+ * Opaque rather than a struct, so the payload stays private: a `Date` with a public
+ * `epochSeconds` *field* would answer `date.epochSeconds` in the preview and fail in
+ * Xcode, which is the direction of error this project cares most about. The members
+ * these types really have are in `stdlib.ts`, alongside `String`'s and `Array`'s.
+ */
+export const UUID_TYPE = 'UUID'
+export const DATE_TYPE = 'Date'
+export const URL_TYPE = 'URL'
+
+export interface UUIDPayload {
+  readonly uuidString: string
+}
+
+export interface DatePayload {
+  /** Seconds since 1970, as Foundation's `timeIntervalSince1970` reports it. */
+  readonly epochSeconds: number
+}
+
+export interface URLPayload {
+  readonly absoluteString: string
+}
+
+export function uuidValue(uuidString: string): OpaqueValue {
+  return { kind: 'opaque', typeName: UUID_TYPE, payload: { uuidString } }
+}
+
+export function dateValue(epochSeconds: number): OpaqueValue {
+  return { kind: 'opaque', typeName: DATE_TYPE, payload: { epochSeconds } }
+}
+
+export function urlValue(absoluteString: string): OpaqueValue {
+  return { kind: 'opaque', typeName: URL_TYPE, payload: { absoluteString } }
+}
+
+export function asUUID(value: SwiftValue | undefined): UUIDPayload | null {
+  return foundationPayload<UUIDPayload>(value, UUID_TYPE)
+}
+
+export function asDate(value: SwiftValue | undefined): DatePayload | null {
+  return foundationPayload<DatePayload>(value, DATE_TYPE)
+}
+
+export function asURL(value: SwiftValue | undefined): URLPayload | null {
+  return foundationPayload<URLPayload>(value, URL_TYPE)
+}
+
+function foundationPayload<T>(value: SwiftValue | undefined, typeName: string): T | null {
+  return value !== undefined && value.kind === 'opaque' && value.typeName === typeName
+    ? (value.payload as T)
+    : null
+}
+
+/**
+ * A random UUID, in Foundation's uppercase 8-4-4-4-12 form.
+ *
+ * `crypto.randomUUID` where the host has it - a Web Worker does - and `Math.random`
+ * where it does not, so a plain Node test run still gets a well-formed one.
+ */
+export function randomUUIDString(): string {
+  const crypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+  if (crypto?.randomUUID) return crypto.randomUUID().toUpperCase()
+
+  const hex = (n: number): string =>
+    Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16))
+      .join('')
+      .toUpperCase()
+  // Version 4, variant 1 - the bits Foundation sets.
+  const variant = '89AB'[Math.floor(Math.random() * 4)]!
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-${variant}${hex(3)}-${hex(12)}`
+}
+
+/**
+ * How Foundation prints a `Date`: UTC, to the second, with the offset spelled out.
+ *
+ * Deliberately not the locale-formatted form. `description` is the one Swift shows in
+ * a `print` and in string interpolation, and it is the same in every locale - which
+ * is what makes it safe to assert on.
+ */
+export function dateDescription(epochSeconds: number): string {
+  const iso = new Date(epochSeconds * 1000).toISOString()
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} +0000`
+}
+
+/** The text these types interpolate to, or null for anything else. */
+export function foundationDescription(value: OpaqueValue): string | null {
+  switch (value.typeName) {
+    case UUID_TYPE:
+      return (value.payload as UUIDPayload).uuidString
+    case DATE_TYPE:
+      return dateDescription((value.payload as DatePayload).epochSeconds)
+    case URL_TYPE:
+      return (value.payload as URLPayload).absoluteString
+    default:
+      return null
+  }
+}
+
 // ------------------------------------------------------------------ key paths
 
 /** `\.self`, `\.id` - an unapplied property accessor. */
@@ -509,7 +618,9 @@ export function describe(value: SwiftValue, insideCollection = false): string {
     case 'type':
       return value.name
     case 'opaque':
-      return value.typeName
+      // A `UUID` interpolates as its string, not as the word "UUID". Every other
+      // opaque value is something the host owns and the interpreter cannot describe.
+      return foundationDescription(value) ?? value.typeName
     case 'void':
       return '()'
     case 'nil':

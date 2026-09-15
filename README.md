@@ -53,9 +53,13 @@ through a link that needs no server.
 What it handles now is most of the SwiftUI people actually write:
 
 - **Language** - structs and classes with inheritance and `super`, protocols and
-  extensions, enums with raw and associated values, `switch` with pattern
-  matching, `if let` and `guard let`, loops, closures, key paths, generics,
-  `throws` / `do-catch`, `inout`.
+  extensions, enums with raw and associated values, nested types, `switch` with
+  pattern matching, `if let` and `guard let`, loops, closures, key paths,
+  generics, `throws` / `do-catch`, `inout`.
+- **The standard library** - the `String`, `Array`, `Dictionary` and `Set`
+  members real code calls, the maths functions, `zip` and `stride`, and the
+  Foundation corner SwiftUI leans on: `UUID` for an `Identifiable` id, `Date`
+  with intervals and comparison, and a `URL` for `Link` and `AsyncImage`.
 - **Structure** - navigation stacks and links, tabs, lists, forms, sheets,
   alerts, scroll views, grids, `ForEach`.
 - **State** - `@State`, `@Binding`, `ObservableObject` with `@StateObject` and
@@ -111,19 +115,22 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1170 passing |
+| Unit tests | 1331 passing |
 | End-to-end | 52 / 52 passing |
 | Templates rendering with zero placeholders | 18 / 18 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
-| Coverage matrix | 98 ✅ · 39 🟡 · 29 ⬜ · 3 ✗ |
+| Coverage matrix | 123 ✅ · 48 🟡 · 30 ⬜ · 3 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 390 KB gzipped / 450 KB budget (87%) |
+| Client JS | 394 KB gzipped / 450 KB budget (88%) |
 
-Next: [Phase 7's à-la-carte items](docs/03-ROADMAP.md) - a real `swiftc`
-verification service, accounts, AI codegen, GitHub export - each of which needs
-hosting, a key or an OAuth app; and whatever the coverage telemetry says people
-reached for.
+Next: the [defect register](docs/07-DEFECT-REGISTER.md), which is the working
+backlog - phases 1 to 5 are closed, and phase 6 is the strictness pass, where one
+rule fires on the most standard pattern in SwiftUI and offers a fix that breaks
+the code it lands on. After that: [Phase 7's à-la-carte items](docs/03-ROADMAP.md)
+- a real `swiftc` verification service, accounts, AI codegen, GitHub export - each
+of which needs hosting, a key or an OAuth app; and whatever the coverage telemetry
+says people reached for.
 
 ## Getting started
 

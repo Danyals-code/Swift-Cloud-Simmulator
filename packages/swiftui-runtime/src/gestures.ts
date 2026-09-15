@@ -21,6 +21,7 @@ export const GESTURE_TYPE = 'Gesture'
 export const GESTURE_VALUE_TYPE = 'GestureValue'
 export const SIZE_TYPE = 'CGSize'
 export const POINT_TYPE = 'CGPoint'
+export const RECT_TYPE = 'CGRect'
 
 export type GestureKind = 'drag' | 'longPress' | 'magnify' | 'rotate' | 'tap'
 
@@ -88,10 +89,10 @@ export function point(x: number, y: number): SwiftValue {
 }
 
 /**
- * Reads a member of a `CGSize`, `CGPoint` or a gesture value.
+ * Reads a member of a `CGSize`, `CGPoint`, `CGRect` or a gesture value.
  *
  * These are the only structural values the host hands to user code, and each is a
- * flat record - so one lookup covers all of them rather than three near-identical
+ * flat record - so one lookup covers all of them rather than four near-identical
  * member tables.
  */
 export function geometryMember(value: SwiftValue, member: string): SwiftValue | undefined {
@@ -99,6 +100,7 @@ export function geometryMember(value: SwiftValue, member: string): SwiftValue | 
   if (
     value.typeName !== SIZE_TYPE &&
     value.typeName !== POINT_TYPE &&
+    value.typeName !== RECT_TYPE &&
     value.typeName !== GESTURE_VALUE_TYPE
   ) {
     return undefined

@@ -20,7 +20,7 @@ import type {
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
-import { collectConformance, type ConformanceModel } from '@studio/swift-syntax'
+import { collectConformance, hoistNestedTypes, type ConformanceModel } from '@studio/swift-syntax'
 import {
   bindingLValue,
   Environment,
@@ -40,12 +40,21 @@ import {
   type StackFrame,
 } from './errors'
 import type { CallArgument, HostCall, InterpreterHost } from './host'
-import { callBuiltinMember, getBuiltinProperty } from './stdlib'
+import {
+  BUILTIN_TYPE_NAMES,
+  callBuiltinMember,
+  callStaticBuiltin,
+  getBuiltinProperty,
+  isMutatingMember,
+  staticBuiltinProperty,
+} from './stdlib'
 import {
   array,
+  asDate,
   asProjection,
   bool,
   copyValue,
+  dateValue,
   enumCase,
   describe,
   dictionaryKey,
@@ -56,6 +65,7 @@ import {
   keyPath,
   NIL,
   projection,
+  randomUUIDString,
   str,
   truthy,
   tuple,
@@ -63,6 +73,8 @@ import {
   typeNameOf,
   uniqueArray,
   unwrapProjection,
+  urlValue,
+  uuidValue,
   valuesEqual,
   VOID,
   type ArrayValue,
@@ -151,9 +163,13 @@ export class Interpreter {
 
   /** Registers top-level declarations. Types and functions first, so order is irrelevant. */
   load(files: readonly SourceFileNode[]): void {
-    this.conformance = collectConformance(files)
+    // A type declared inside another one is lifted to the top level under a
+    // qualified name before anything else looks at the program, so the conformance
+    // model, the member tables and instantiation all see it the same way.
+    const expanded = hoistNestedTypes(files)
+    this.conformance = collectConformance(expanded)
 
-    for (const file of files) {
+    for (const file of expanded) {
       for (const decl of file.declarations) {
         if (decl.kind === 'structDecl') this.types.set(decl.name, decl)
         else if (decl.kind === 'enumDecl') this.enums.set(decl.name, decl)
@@ -975,6 +991,41 @@ export class Interpreter {
     return method ? { kind: 'function', decl: method, self: null, env: this.globals } : undefined
   }
 
+  /**
+   * `CaseIterable`'s synthesised `allCases`.
+   *
+   * `ForEach(Tab.allCases, id: \.self)` is the commonest enum-driven pattern there
+   * is, and the conformance is what makes it legal: an enum that does not declare
+   * `CaseIterable` has no `allCases` in Xcode either, so answering one here would be
+   * the preview accepting code the compiler rejects.
+   *
+   * Swift synthesises it only when no case has associated values, for the obvious
+   * reason that it could not know what to put in them.
+   */
+  private synthesizedAllCases(typeName: string, span: SourceSpan): SwiftValue | undefined {
+    const decl = this.enums.get(typeName)
+    if (!decl || !this.conformsTo(typeName, 'CaseIterable')) return undefined
+    if (decl.cases.some((c) => c.associated.length > 0)) return undefined
+
+    return array(decl.cases.map((c) => this.makeEnumCase(decl, c.name, [], span)))
+  }
+
+  /**
+   * The registered name of a type declared inside another one.
+   *
+   * Nested types are stored under their qualified name - `S.Inner` - so that two
+   * outer types may each declare an `Inner` without colliding. They are *also*
+   * registered under the bare name when nothing else claims it, which is what makes
+   * an unqualified `Inner()` work inside `S`. That second registration is wider than
+   * Swift's scoping: a sibling type can reach `Inner` unqualified here and could not
+   * in Xcode. It errs towards accepting code rather than rejecting it, which is the
+   * direction this checker has taken since Phase 1.
+   */
+  private nestedTypeName(outer: string, member: string): string | null {
+    const qualified = `${outer}.${member}`
+    return this.types.has(qualified) || this.enums.has(qualified) ? qualified : null
+  }
+
   // ------------------------------------------------------------------- enums
 
   /**
@@ -1407,6 +1458,13 @@ export class Interpreter {
     // a sibling extension method has to find its way back through it.
     const selfBinding = env.lookup('self')?.value
     if (selfBinding) {
+      // `extension String { var shout: String { uppercased() } }` - the receiver's
+      // own members are in scope unqualified, and the built-in ones are members too.
+      // Checked before the user's, which is the same order `evaluateMemberAccess`
+      // uses: an extension may add to a built-in type and may not redefine it.
+      const builtin = getBuiltinProperty(selfBinding, name)
+      if (builtin !== undefined) return builtin
+
       const extended = this.userMember(selfBinding, name, span)
       if (extended !== undefined) return unwrapProjection(extended)
     }
@@ -1415,6 +1473,10 @@ export class Interpreter {
 
     const fromHost = this.host.resolveGlobal?.(name)
     if (fromHost !== undefined) return fromHost
+
+    // `Int.max`, `Date.now` - a built-in type used as a value. Asked after the host,
+    // so a type the host owns (`CGFloat`, `Color`) keeps its own answer.
+    if (BUILTIN_TYPE_NAMES.has(name)) return { kind: 'type', name }
 
     this.trap(`Cannot find '${name}' in scope`, span)
   }
@@ -1459,6 +1521,21 @@ export class Interpreter {
       }
       const statik = this.staticMember(target.name, member, span)
       if (statik !== undefined) return statik
+
+      // `S.Inner` - a type declared inside another one.
+      const nested = this.nestedTypeName(target.name, member)
+      if (nested) return { kind: 'type', name: nested }
+
+      // `Tab.allCases`, after a hand-written `static let allCases` has had its
+      // chance: a manual `CaseIterable` conformance is ordinary Swift and the
+      // synthesised one must not shadow it.
+      if (member === 'allCases') {
+        const cases = this.synthesizedAllCases(target.name, span)
+        if (cases) return cases
+      }
+
+      const builtinStatic = staticBuiltinProperty(target.name, member)
+      if (builtinStatic !== undefined) return builtinStatic
     }
 
     if (target.kind === 'enum') {
@@ -1663,6 +1740,23 @@ export class Interpreter {
       const receiver =
         env.lookup('self')?.value ?? (inForeignExtension ? (env.resolveSelf() ?? undefined) : undefined)
       if (receiver) {
+        // `uppercased()` inside `extension String` is `self.uppercased()`, and the
+        // receiver is a plain String the standard library owns rather than anything
+        // the host knows about.
+        const onBuiltin = callBuiltinMember(
+          receiver,
+          callee.name,
+          allArgs,
+          (closure, closureArgs) => this.callClosure(closure, closureArgs, span),
+          (reason) => this.trap(reason, span),
+          () =>
+            this.trap(
+              `Cannot use mutating member on immutable value: 'self' is a 'let' constant`,
+              span,
+            ),
+        )
+        if (onBuiltin !== undefined) return onBuiltin
+
         const onSelf = this.host.callMember?.(
           receiver,
           callee.name,
@@ -1736,6 +1830,19 @@ export class Interpreter {
       }
       const statik = this.staticMember(target.name, member, memberSpan)
       if (statik?.kind === 'function') return this.callFunction(statik, allArgs, span)
+
+      // `S.Inner()` - constructing a type declared inside another one.
+      const nested = this.nestedTypeName(target.name, member)
+      if (nested) {
+        const instance = this.instantiateNamed(nested, allArgs, span)
+        if (instance !== undefined) return instance
+      }
+
+      // `Int.random(in: 1...6)`, `Bool.random()`.
+      const builtinStatic = callStaticBuiltin(target.name, member, allArgs, (reason) =>
+        this.trap(reason, span),
+      )
+      if (builtinStatic !== undefined) return builtinStatic
     }
 
     if (target.kind === 'enum') {
@@ -1759,15 +1866,52 @@ export class Interpreter {
       if (bound?.kind === 'closure') return this.callClosure(bound, allArgs.map((a) => a.value), span)
     }
 
+    // A built-in mutating method on a `let` is a compile error in Swift, and the
+    // preview used to run it: `let items = [1]` then `items.append(2)` changed the
+    // array and said nothing. Checked before dispatch, where the storage is still in
+    // hand - and only when there *is* storage, so a method on a temporary is left to
+    // the reporting it already had.
+    const isBuiltinReceiver =
+      target.kind === 'array' ||
+      target.kind === 'dictionary' ||
+      target.kind === 'string' ||
+      target.kind === 'bool'
+
+    if (isBuiltinReceiver && lvalue && !lvalue.mutable && isMutatingMember(member)) {
+      this.trap(
+        `Cannot use mutating member on immutable value: '${lvalue.description}' is a 'let' constant`,
+        span,
+      )
+    }
+
+    // `flag.toggle()` and `text.append("x")` *replace* the receiver rather than
+    // mutating it in place, so they hand back what the storage should now hold.
+    // Recorded rather than written immediately, because the write-back below would
+    // otherwise put the original value straight back over the top of it.
+    let replacement: SwiftValue | null = null
+
     const builtin = callBuiltinMember(
       target,
       member,
       allArgs,
       (closure, closureArgs) => this.callClosure(closure, closureArgs, span),
       (reason) => this.trap(reason, span),
+      (value) => {
+        // Refusing where there is no assignable storage is the same rule a
+        // `mutating` method on a struct already follows.
+        if (!lvalue?.mutable) {
+          this.trap(
+            lvalue
+              ? `Cannot use mutating member on immutable value: '${lvalue.description}' is a 'let' constant`
+              : 'Cannot use mutating member on immutable value',
+            span,
+          )
+        }
+        replacement = value
+      },
     )
     if (builtin !== undefined) {
-      if (lvalue?.mutable) lvalue.set(target)
+      if (lvalue?.mutable) lvalue.set(replacement ?? target)
       return builtin
     }
 
@@ -1806,15 +1950,34 @@ export class Interpreter {
         const magnitude = Math.abs(this.requireNumber(first, span))
         return first.kind === 'int' ? int(magnitude) : double(magnitude)
       }
-      case 'Int': {
-        const first = args[0]?.value
-        if (!first) return undefined
-        return int(Math.trunc(this.requireNumber(first, span)))
-      }
+      case 'Int':
       case 'Double': {
         const first = args[0]?.value
         if (!first) return undefined
-        return double(this.requireNumber(first, span))
+
+        // `Int("42")` is *failable* - it answers `Int?`, and nil for anything that is
+        // not a whole number written out. Trapping instead made the ordinary way of
+        // reading a text field ("how many?") stop the preview, and the `??` the code
+        // already had for the nil case never ran.
+        if (first.kind === 'string') {
+          // Matched against what Swift accepts rather than what `Number` accepts:
+          // `Int(" 42")`, `Int("4_2")` and `Int("0x10")` are all nil in Swift, and
+          // JavaScript answers 42, NaN and 16. A preview that is *more* permissive
+          // than the compiler is the dishonest direction - the value shows here and
+          // the app gets nil.
+          const text = first.value
+          const grammar = name === 'Int' ? /^[+-]?\d+$/ : /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/
+          if (!grammar.test(text)) return NIL
+          const parsed = Number(text)
+          if (!Number.isFinite(parsed)) return NIL
+          if (name === 'Double') return double(parsed)
+          return Number.isSafeInteger(parsed) ? int(parsed) : NIL
+        }
+
+        // A `Character` is a String here, so `Int(someCharacter)` lands above. A
+        // Bool does not convert in Swift either; requireNumber reports it.
+        const n = this.requireNumber(first, span)
+        return name === 'Int' ? int(Math.trunc(n)) : double(n)
       }
       case 'String': {
         // `String` has several initialisers and they read different arguments.
@@ -1836,7 +1999,181 @@ export class Interpreter {
         }
 
         const first = args[0]?.value
-        return first ? str(describe(first, false)) : str('')
+        if (!first) return str('')
+
+        // `String(text.reversed())` - a collection of Characters put back together.
+        // Describing it instead renders `[c, b, a]`, brackets and all.
+        if (first.kind === 'array' && first.elements.every((e) => e.kind === 'string')) {
+          return str(first.elements.map((e) => (e.kind === 'string' ? e.value : '')).join(''))
+        }
+
+        const describing = args.find((a) => a.label === 'describing')?.value
+        return str(describe(describing ?? first, false))
+      }
+
+      // -------------------------------------------------------- constructors
+
+      case 'UUID':
+        return uuidValue(randomUUIDString())
+      case 'Date': {
+        // `Date()` is now; `Date(timeIntervalSince1970:)` and
+        // `Date(timeIntervalSinceNow:)` are the two forms that need no calendar.
+        const since1970 = args.find((a) => a.label === 'timeIntervalSince1970')?.value
+        if (since1970) return dateValue(this.requireNumber(since1970, span))
+
+        const sinceNow = args.find((a) => a.label === 'timeIntervalSinceNow')?.value
+        if (sinceNow) return dateValue(Date.now() / 1000 + this.requireNumber(sinceNow, span))
+
+        return dateValue(Date.now() / 1000)
+      }
+      case 'URL': {
+        // Failable, and the failure is the point: `URL(string: "not a url")` is nil,
+        // which is why every example writes `URL(string:)!`.
+        const string = args.find((a) => a.label === 'string')?.value ?? args[0]?.value
+        if (string?.kind !== 'string') return undefined
+        try {
+          // Parsed only to decide whether it is a URL at all. The string is kept
+          // exactly as written, because the browser's parser normalises - it makes
+          // "https://a.co" into "https://a.co/" - and `absoluteString` answering
+          // something the user did not type is the kind of small lie that is
+          // hardest to track down.
+          new URL(string.value)
+          return urlValue(string.value)
+        } catch {
+          return NIL
+        }
+      }
+      case 'Set': {
+        const first = args[0]?.value
+        if (first === undefined) return uniqueArray([])
+        if (first.kind === 'array') return uniqueArray(first.elements.map(copyValue))
+        if (first.kind === 'string') return uniqueArray(graphemes(first.value).map(str))
+        if (first.kind === 'range') return uniqueArray([...this.iterate(first, span)])
+        return undefined
+      }
+      case 'Array': {
+        // `Array(repeating:count:)` builds one; `Array(_:)` copies a sequence into
+        // one, which is how a range, a string or `dictionary.keys` becomes indexable.
+        const repeating = args.find((a) => a.label === 'repeating')?.value
+        if (repeating !== undefined) {
+          const count = args.find((a) => a.label === 'count')?.value
+          const times = count ? Math.max(0, Math.trunc(this.requireNumber(count, span))) : 0
+          return array(Array.from({ length: times }, () => copyValue(repeating)))
+        }
+
+        const first = args[0]?.value
+        if (first === undefined) return array([])
+        if (first.kind === 'array') return array(first.elements.map(copyValue))
+        return array([...this.iterate(first, span)].map(copyValue))
+      }
+
+      // ------------------------------------------------------ free functions
+
+      case 'sqrt':
+      case 'floor':
+      case 'ceil':
+      case 'round': {
+        const first = args[0]?.value
+        if (!first) return undefined
+        const n = this.requireNumber(first, span)
+        switch (name) {
+          case 'sqrt':
+            return double(Math.sqrt(n))
+          case 'floor':
+            return double(Math.floor(n))
+          case 'ceil':
+            return double(Math.ceil(n))
+          // Swift rounds halves away from zero; `Math.round` rounds them up, so it
+          // answers -1 for -1.5 where Swift answers -2.
+          default:
+            return double(n < 0 ? -Math.round(-n) : Math.round(n))
+        }
+      }
+      case 'pow': {
+        const base = args[0]?.value
+        const exponent = args[1]?.value
+        if (!base || !exponent) return undefined
+        return double(
+          Math.pow(this.requireNumber(base, span), this.requireNumber(exponent, span)),
+        )
+      }
+      case 'zip': {
+        const first = args[0]?.value
+        const second = args[1]?.value
+        if (!first || !second) return undefined
+        const left = [...this.iterate(first, span)]
+        const right = [...this.iterate(second, span)]
+        // Stops at the shorter one, as Swift's does.
+        const pairs = left.slice(0, Math.min(left.length, right.length))
+        return array(pairs.map((value, i) => tuple([copyValue(value), copyValue(right[i]!)])))
+      }
+      case 'stride': {
+        const from = args.find((a) => a.label === 'from')?.value
+        const to = args.find((a) => a.label === 'to')?.value
+        const through = args.find((a) => a.label === 'through')?.value
+        const by = args.find((a) => a.label === 'by')?.value
+        if (!from || !by || (!to && !through)) return undefined
+
+        const start = this.requireNumber(from, span)
+        const step = this.requireNumber(by, span)
+        const limit = this.requireNumber((to ?? through)!, span)
+        if (step === 0) this.trap('Stride size must not be zero', span)
+
+        // An array rather than a lazy sequence, for the same reason `indices` is one:
+        // everything downstream iterates, and a sequence with no elements to show is
+        // harder to print than a list.
+        const isInt = from.kind === 'int' && by.kind === 'int'
+        const values: SwiftValue[] = []
+        const done = (value: number): boolean =>
+          through ? (step > 0 ? value > limit : value < limit) : step > 0 ? value >= limit : value <= limit
+        for (let value = start; !done(value); value += step) {
+          values.push(isInt ? int(value) : double(value))
+          if (values.length > 100_000) this.trap('Stride produced too many values', span)
+        }
+        return array(values)
+      }
+      case 'type': {
+        // `type(of: value)`, whose only use here is printing it.
+        const of = args.find((a) => a.label === 'of')?.value ?? args[0]?.value
+        return of ? { kind: 'type', name: typeNameOf(of) } : undefined
+      }
+      case 'fatalError': {
+        const message = args[0]?.value
+        return this.trap(
+          message?.kind === 'string' && message.value !== ''
+            ? `Fatal error: ${message.value}`
+            : 'Fatal error',
+          span,
+        )
+      }
+      case 'assert':
+      case 'precondition': {
+        // A passing assertion is the whole point of these: they have to be callable
+        // and silent, or the code that guards an invariant cannot run at all.
+        const condition = args[0]?.value
+        if (condition === undefined || truthy(condition)) return VOID
+        const message = args[1]?.value
+        const label = name === 'assert' ? 'Assertion failed' : 'Precondition failed'
+        return this.trap(
+          message?.kind === 'string' && message.value !== '' ? `${label}: ${message.value}` : label,
+          span,
+        )
+      }
+      case 'assertionFailure':
+      case 'preconditionFailure': {
+        const message = args[0]?.value
+        const label = name === 'assertionFailure' ? 'Assertion failed' : 'Precondition failed'
+        return this.trap(
+          message?.kind === 'string' && message.value !== '' ? `${label}: ${message.value}` : label,
+          span,
+        )
+      }
+      case 'Optional': {
+        // The value model has no wrapper: `nil` is its own kind and everything else
+        // is itself, so `Optional(x)` is x. Stated here rather than left to fail,
+        // because the erasure is deliberate - see the coverage matrix.
+        const first = args[0]?.value
+        return first ?? NIL
       }
       default:
         return undefined
@@ -1919,7 +2256,17 @@ export class Interpreter {
         const indexExpr = expr.args[0]
         if (!indexExpr) return null
         const index = this.evaluate(indexExpr.value, env)
-        return this.subscriptLValue(base, index, expr.span)
+        const element = this.subscriptLValue(base, index, expr.span)
+        if (!element) return null
+
+        // `let scores = ["a": 1]` then `scores["b"] = 2` is a compile error in Swift,
+        // and the element of a constant collection has to inherit the constancy: the
+        // storage is the collection, and writing through a position is still writing
+        // to it.
+        const container = this.tryResolveLValue(expr.base, env)
+        return container && !container.mutable
+          ? { ...element, mutable: false, description: `${container.description}${element.description}` }
+          : element
       }
 
       default:
@@ -2003,6 +2350,15 @@ export class Interpreter {
     span: SourceSpan,
     env: Environment,
   ): SwiftValue {
+    // `_ = items.popLast()` - the discard. It is how Swift is told that a result is
+    // deliberately unused, so it appears wherever a method returns something the
+    // caller does not want, and it has to evaluate the right-hand side for its
+    // effects before throwing the answer away.
+    if (targetExpr.kind === 'identifier' && targetExpr.name === '_' && operator === '=') {
+      this.evaluate(valueExpr, env)
+      return VOID
+    }
+
     const lvalue = this.tryResolveLValue(targetExpr, env)
     if (!lvalue) this.trap('Cannot assign to this expression', span)
     if (!lvalue.mutable) {
@@ -2207,6 +2563,29 @@ export class Interpreter {
       return array([...left.elements, ...right.elements].map(copyValue))
     }
 
+    // `Date` is `Comparable`, which is how a list of anything dated gets sorted.
+    // Equality is already structural, so only the orderings are needed here.
+    const leftDate = asDate(left)
+    const rightDate = asDate(right)
+    if (leftDate && rightDate) {
+      switch (operator) {
+        case '<':
+          return bool(leftDate.epochSeconds < rightDate.epochSeconds)
+        case '<=':
+          return bool(leftDate.epochSeconds <= rightDate.epochSeconds)
+        case '>':
+          return bool(leftDate.epochSeconds > rightDate.epochSeconds)
+        case '>=':
+          return bool(leftDate.epochSeconds >= rightDate.epochSeconds)
+        default:
+          this.trap(`Binary operator '${operator}' cannot be applied to two Date operands`, span)
+      }
+    }
+
+    if (BITWISE_OPERATORS.has(operator)) {
+      return this.applyBitwise(operator, left, right, span)
+    }
+
     const a = this.requireNumber(left, span)
     const b = this.requireNumber(right, span)
     // Int arithmetic only stays Int when both operands are.
@@ -2236,6 +2615,55 @@ export class Interpreter {
         return isInt ? int(a % b) : double(a % b)
       default:
         this.trap(`Binary operator '${operator}' is not supported`, span)
+    }
+  }
+
+  /**
+   * `&`, `|`, `^`, `<<` and `>>`.
+   *
+   * Computed in `BigInt` rather than with JavaScript's own bitwise operators, which
+   * truncate to 32 bits: `1 << 40` answers 256 there and 1099511627776 in Swift,
+   * and a wrong number that looks like a number is the failure mode this whole pass
+   * exists to remove. The result then goes through `numeric`, so anything past the
+   * precision the interpreter can represent traps instead of rounding.
+   *
+   * Swift's shifts are "smart": a shift wider than the type gives zero and a negative
+   * shift goes the other way, rather than being undefined.
+   */
+  private applyBitwise(
+    operator: string,
+    left: SwiftValue,
+    right: SwiftValue,
+    span: SourceSpan,
+  ): SwiftValue {
+    if (left.kind !== 'int' || right.kind !== 'int') {
+      this.trap(
+        `Binary operator '${operator}' requires two Int operands, ` +
+          `found '${typeNameOf(left)}' and '${typeNameOf(right)}'`,
+        span,
+      )
+    }
+
+    const a = BigInt(left.value)
+    const b = BigInt(right.value)
+
+    const shift = (value: bigint, by: bigint, leftwards: boolean): bigint => {
+      if (by < 0n) return shift(value, -by, !leftwards)
+      if (by >= 64n) return leftwards ? 0n : value < 0n ? -1n : 0n
+      return leftwards ? value << by : value >> by
+    }
+
+    switch (operator) {
+      case '&':
+        return this.numeric(Number(a & b), true, span)
+      case '|':
+        return this.numeric(Number(a | b), true, span)
+      case '^':
+        return this.numeric(Number(a ^ b), true, span)
+      case '<<':
+        return this.numeric(Number(shift(a, b, true)), true, span)
+      default:
+        return this.numeric(Number(shift(a, b, false)), true, span)
     }
   }
 
@@ -2352,6 +2780,9 @@ function operatorClosure(operator: string, span: SourceSpan, env: Environment): 
 }
 
 /** The operators `applyBinary` implements, and which a project may not redefine. */
+/** The five Swift spells with the same characters and integer meaning. */
+const BITWISE_OPERATORS: ReadonlySet<string> = new Set(['&', '|', '^', '<<', '>>'])
+
 const BUILTIN_OPERATORS: ReadonlySet<string> = new Set([
   '+', '-', '*', '/', '%', '==', '!=', '<', '<=', '>', '>=', '..<', '...',
 ])

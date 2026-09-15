@@ -7,7 +7,7 @@ import {
   type RGBA,
   type ShapeKind,
 } from '@studio/shared'
-import { asProjection, truthy, type SwiftValue } from '@studio/swift-runtime'
+import { asDate, asProjection, foundationDescription, truthy, type SwiftValue } from '@studio/swift-runtime'
 import { UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import {
   CENTER,
@@ -54,6 +54,8 @@ import {
 import {
   ANIMATION_TYPE,
   COLOR_TYPE,
+  EDGE_INSETS_TYPE,
+  STROKE_STYLE_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
   asView,
@@ -61,7 +63,9 @@ import {
   payloadOf,
   type AnimationPayload,
   type ColorPayload,
+  type EdgeInsetsPayload,
   type ModifierValue,
+  type StrokeStylePayload,
   type TokenPayload,
   type TransitionPayload,
   type ViewArg,
@@ -820,6 +824,7 @@ class Converter {
         const strokeWidth =
           numberArg(modifierNamedArg(view, 'stroke', 'lineWidth')) ??
           numberArg(modifierArg(view, 'stroke', 1)) ??
+          strokeStyleWidth(view) ??
           1
 
         const trimmed = trimOf(view) ?? payload.trim
@@ -1015,6 +1020,7 @@ class Converter {
       const strokeWidth =
         numberArg(modifierNamedArg(view, 'stroke', 'lineWidth')) ??
         numberArg(modifierArg(view, 'stroke', 1)) ??
+        strokeStyleWidth(view) ??
         1
 
       return {
@@ -2506,7 +2512,19 @@ function defaultSpacing(): number {
 function textOf(view: ViewValue): string {
   const first = positional(view.args, 0)
   if (first?.kind === 'string') return first.value
-  if (!first) return ''
+
+  // `Text(verbatim: "1 + 1")` - the initialiser that takes a string and promises not
+  // to treat it as a localisation key. The content is the same string either way.
+  if (!first) {
+    const verbatim = labelled(view.args, 'verbatim')
+    return verbatim?.kind === 'string' ? verbatim.value : ''
+  }
+
+  // `Text(date, style: .time)`. A Date reaching here as an unrecognised value drew an
+  // empty string - a blank where the app shows a date, which is the failure mode this
+  // whole pass exists to remove.
+  const date = asDate(first)
+  if (date) return dateText(date.epochSeconds, tokenName(labelled(view.args, 'style')))
 
   // `Text(total, format: .currency(code: "USD"))`. Dropping the format and describing
   // the number renders `1234.5` where the app shows `$1,234.50` - a plausible-looking
@@ -2558,9 +2576,56 @@ function displayValue(value: SwiftValue): string {
     case 'bool':
       return value.value ? 'true' : 'false'
     case 'opaque':
-      return payloadOf<TokenPayload>(value, TOKEN_TYPE)?.name ?? ''
+      // A `UUID` or a `URL` reads as its own text. Everything else opaque belongs to
+      // the host and has no printable form.
+      return (
+        payloadOf<TokenPayload>(value, TOKEN_TYPE)?.name ?? foundationDescription(value) ?? ''
+      )
     default:
       return ''
+  }
+}
+
+/**
+ * `Text(date, style:)`.
+ *
+ * The relative styles are computed once, at render, because the preview has no clock
+ * to tick them with - stated in the coverage matrix rather than left to be noticed.
+ * The absolute ones are the browser's locale formatting, so the separators and the
+ * order are the platform's real ones.
+ */
+function dateText(epochSeconds: number, style: string | null): string {
+  const date = new Date(epochSeconds * 1000)
+
+  switch (style) {
+    case 'time':
+      return new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(date)
+    case 'date':
+      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
+    case 'relative':
+    case 'offset': {
+      const seconds = epochSeconds - Date.now() / 1000
+      const [amount, unit] =
+        Math.abs(seconds) < 3600
+          ? [seconds / 60, 'minute' as const]
+          : Math.abs(seconds) < 86_400
+            ? [seconds / 3600, 'hour' as const]
+            : [seconds / 86_400, 'day' as const]
+      return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(
+        Math.round(amount),
+        unit,
+      )
+    }
+    case 'timer': {
+      const total = Math.max(0, Math.round(Math.abs(epochSeconds - Date.now() / 1000)))
+      const minutes = Math.floor(total / 60)
+      return `${minutes}:${String(total % 60).padStart(2, '0')}`
+    }
+    default:
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(date)
   }
 }
 
@@ -2650,9 +2715,30 @@ function gridTracks(value: SwiftValue | undefined): GridTrack[] {
   return tracks.length > 0 ? tracks : [{ kind: 'flexible', size: null }]
 }
 
+/**
+ * The width of a `.stroke(style: StrokeStyle(lineWidth:))`.
+ *
+ * The dash pattern the same value may carry is not drawn: the render tree has no
+ * field for it, and adding one is a render change rather than a value one. Recorded
+ * in the coverage matrix rather than dropped silently.
+ */
+function strokeStyleWidth(view: ViewValue): number | null {
+  const style = payloadOf<StrokeStylePayload>(
+    modifierNamedArg(view, 'stroke', 'style') ?? modifierArg(view, 'stroke', 0),
+    STROKE_STYLE_TYPE,
+  )
+
+  return style ? style.lineWidth : null
+}
+
 function paddingInsets(args: readonly ViewArg[]): EdgeInsets {
   // `.padding()` with no arguments is the system default of 16.
   if (args.length === 0) return uniformInsets(16)
+
+  // `.padding(EdgeInsets(top:leading:bottom:trailing:))` - four different lengths,
+  // which is the one shape none of the shorthands can express.
+  const explicit = payloadOf<EdgeInsetsPayload>(positional(args, 0), EDGE_INSETS_TYPE)
+  if (explicit) return insets(explicit.top, explicit.leading, explicit.bottom, explicit.trailing)
 
   // `.padding(24)` - a bare number on all edges.
   const bare = numberArg(positional(args, 0))

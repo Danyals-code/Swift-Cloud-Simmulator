@@ -15,11 +15,12 @@ import type {
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
-import { collectConformance } from '@studio/swift-syntax'
+import { collectConformance, hoistNestedTypes } from '@studio/swift-syntax'
 import {
   isKnownGlobal,
   isKnownModifier,
   isViewRoot,
+  EXTENSIBLE_BUILTIN_TYPES,
   KNOWN_ATTRIBUTES,
   KNOWN_TYPES,
   MODIFIER_LABELS,
@@ -69,6 +70,8 @@ export class Checker {
   private readonly typeParameterNames = new Set<string>()
   /** Non-zero while checking the body of an extension on a type the preview owns. */
   private inViewExtension = 0
+  /** Non-zero inside an extension on a built-in type, whose members are not listed here. */
+  private inBuiltinExtension = 0
 
   /** Method names the project adds in an extension - its own modifiers. */
   private readonly declaredModifiers = new Set<string>()
@@ -92,8 +95,14 @@ export class Checker {
     // The conformance merge runs first because `describeStruct` needs it: after
     // `extension` exists, a declaration no longer knows all of its own members, and
     // the "does this View have a body?" check reads that merged list.
-    this.conformance = collectConformance(files)
-    for (const file of files) this.collectDeclarations(file)
+    // A type declared inside another is collected under both names it can be
+    // written by - `Item.Status` from outside and `Status` from within - so that
+    // neither spelling reads as an unknown. Collection only: pass 2 walks the
+    // original files, or a nested body would be checked once per name it was
+    // registered under and report everything in it twice.
+    const expanded = hoistNestedTypes(files)
+    this.conformance = collectConformance(expanded)
+    for (const file of expanded) this.collectDeclarations(file)
 
     const entryPoint = this.resolveEntryPoint(files)
 
@@ -417,11 +426,18 @@ export class Checker {
       !this.types.has(decl.name) &&
       !this.enums.has(decl.name) &&
       !this.protocols.has(decl.name)
+    // `extension String` extends something whose members the checker has no list of,
+    // so an unqualified `uppercased()` inside it is a call on the receiver that
+    // nothing here can confirm or deny.
+    const extendsABuiltin = decl.kind === 'extensionDecl' && EXTENSIBLE_BUILTIN_TYPES.has(decl.name)
+
     if (extendsAView) this.inViewExtension++
+    if (extendsABuiltin) this.inBuiltinExtension++
     try {
       this.checkTypeMembers(decl)
     } finally {
       if (extendsAView) this.inViewExtension--
+      if (extendsABuiltin) this.inBuiltinExtension--
     }
   }
 
@@ -821,6 +837,12 @@ export class Checker {
     // checker has no receiver type to confirm that with, and reporting it would put a
     // red error on the most common way to write a reusable modifier.
     if (this.inViewExtension > 0 && isKnownModifier(name)) return
+
+    // Inside `extension String`, `uppercased()` is `self.uppercased()`. The standard
+    // library's member list is not something this checker holds, so the honest answer
+    // is that it does not know - and a missed error costs less than a red squiggle on
+    // correct code. The interpreter resolves it against the real receiver.
+    if (this.inBuiltinExtension > 0) return
 
     // `$0`-style closure shorthand.
     if (this.closureDepth > 0 && /^\$\d+$/.test(name)) return

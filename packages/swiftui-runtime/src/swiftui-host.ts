@@ -31,6 +31,7 @@ import {
   geometryMember,
   gesture,
   point,
+  RECT_TYPE,
   size,
   withHandler,
   withUpdate,
@@ -41,8 +42,10 @@ import {
   ANIMATION_TYPE,
   BUTTON_CONFIGURATION_TYPE,
   COLOR_TYPE,
+  EDGE_INSETS_TYPE,
   GEOMETRY_TYPE,
   isView,
+  STROKE_STYLE_TYPE,
   STYLE_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
@@ -50,8 +53,11 @@ import {
   type AnimationPayload,
   type ButtonConfigurationPayload,
   type ColorPayload,
+  type EdgeInsetsPayload,
+  type GeometryPayload,
   type GradientPayload,
   type ModifierValue,
+  type StrokeStylePayload,
   type TokenPayload,
   type TransitionPayload,
   type ViewArg,
@@ -106,9 +112,25 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'Color', 'Font', 'Alignment', 'Edge', 'Angle', 'UnitPoint', 'Axis',
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
-  'CGSize', 'CGPoint', 'CGRect', 'CGFloat',
+  'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material',
   'Task', 'MainActor',
 ])
+
+/**
+ * `Material.ultraThin` and `.ultraThinMaterial` are the same value.
+ *
+ * The type's members drop the suffix the contextual spelling carries, and the
+ * renderer knows only the contextual one - so the spelling is normalised here rather
+ * than teaching the material table two names for each.
+ */
+const MATERIAL_MEMBERS: Readonly<Record<string, string>> = {
+  ultraThin: 'ultraThinMaterial',
+  thin: 'thinMaterial',
+  regular: 'regularMaterial',
+  thick: 'thickMaterial',
+  ultraThick: 'ultraThickMaterial',
+  bar: 'bar',
+}
 
 /**
  * The concurrency surface, run synchronously.
@@ -152,6 +174,11 @@ function toArgs(call: HostCall): ViewArg[] {
 function numberOf(value: SwiftValue | undefined): number | null {
   if (!value) return null
   return value.kind === 'int' || value.kind === 'double' ? value.value : null
+}
+
+/** The darker stop of a `.gradient`, at roughly the contrast SwiftUI's own uses. */
+function dimmed(payload: ColorPayload): SwiftValue {
+  return color({ ...payload, shade: (payload.shade ?? 1) * 0.7 })
 }
 
 function tokenNameOf(value: SwiftValue | undefined): string | null {
@@ -580,8 +607,34 @@ export class SwiftUIHost implements InterpreterHost {
       )
     }
 
+    // `.padding(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))` - the form
+    // that sets all four edges to different lengths, and the only one `.padding` has
+    // no shorthand for.
+    if (name === 'EdgeInsets') {
+      const edge = (label: string): number =>
+        numberOf(call.args.find((a) => a.label === label)?.value) ?? 0
+      return opaque(EDGE_INSETS_TYPE, {
+        top: edge('top'),
+        leading: edge('leading'),
+        bottom: edge('bottom'),
+        trailing: edge('trailing'),
+      } satisfies EdgeInsetsPayload)
+    }
+
+    if (name === 'StrokeStyle') {
+      const dash = call.args.find((a) => a.label === 'dash')?.value
+      return opaque(STROKE_STYLE_TYPE, {
+        lineWidth: numberOf(call.args.find((a) => a.label === 'lineWidth')?.value) ?? 1,
+        lineCap: tokenNameOf(call.args.find((a) => a.label === 'lineCap')?.value),
+        dash:
+          dash?.kind === 'array'
+            ? dash.elements.map((e) => numberOf(e) ?? 0).filter((n) => n > 0)
+            : [],
+      } satisfies StrokeStylePayload)
+    }
+
     if (name === 'CGRect') {
-      return opaque('CGRect', {
+      return opaque(RECT_TYPE, {
         x: numberOf(call.args.find((a) => a.label === 'x')?.value) ?? 0,
         y: numberOf(call.args.find((a) => a.label === 'y')?.value) ?? 0,
         width: numberOf(call.args.find((a) => a.label === 'width')?.value) ?? 0,
@@ -702,6 +755,41 @@ export class SwiftUIHost implements InterpreterHost {
     if (member === 'modifier') {
       const applied = this.applyViewModifier(target, call)
       if (applied !== undefined) return applied
+    }
+
+    // `geo.frame(in: .local)` - the proxy's own rectangle. `.local` is the only
+    // coordinate space the preview can answer honestly: `.global` would need the
+    // reader's position on the screen, which layout knows and the proxy does not
+    // carry, so it reports the same rect rather than inventing an offset.
+    if (target.kind === 'opaque' && target.typeName === GEOMETRY_TYPE && member === 'frame') {
+      const { width, height } = target.payload as GeometryPayload
+      return opaque(RECT_TYPE, {
+        x: 0,
+        y: 0,
+        width,
+        height,
+        minX: 0,
+        minY: 0,
+        midX: width / 2,
+        midY: height / 2,
+        maxX: width,
+        maxY: height,
+        origin: point(0, 0),
+        size: size(width, height),
+      })
+    }
+
+    // `.opacity.combined(with: .slide)`.
+    if (target.kind === 'opaque' && target.typeName === TRANSITION_TYPE && member === 'combined') {
+      const other = call.args.find((a) => a.label === 'with')?.value
+      const payload = target.payload as TransitionPayload
+      const added = other?.kind === 'opaque' && other.typeName === TRANSITION_TYPE
+        ? (other.payload as TransitionPayload).kind
+        : null
+      return opaque(TRANSITION_TYPE, {
+        ...payload,
+        ...(added ? { combinedWith: [...(payload.combinedWith ?? []), added] } : {}),
+      } satisfies TransitionPayload)
     }
 
     if (target.kind === 'type' && (target.name === 'Task' || target.name === 'MainActor')) {
@@ -947,10 +1035,24 @@ export class SwiftUIHost implements InterpreterHost {
       if (member === 'isPressed') return bool(payload.isPressed)
     }
 
+    // `insets.top` - the four edges, by name.
+    if (target.kind === 'opaque' && target.typeName === EDGE_INSETS_TYPE) {
+      const payload = target.payload as unknown as Record<string, number>
+      if (member in payload) return double(payload[member]!)
+    }
+
+    // `Color.red.gradient` - SwiftUI's one-line shade of a flat colour.
+    if (target.kind === 'opaque' && target.typeName === COLOR_TYPE && member === 'gradient') {
+      return this.colorGradient(target, target.payload as ColorPayload)
+    }
+
     if (target.kind === 'type') {
       if (target.name === 'Color') return color({ name: member })
       if (target.name === 'Animation') return this.animationToken(member)
       if (target.name === 'AnyTransition') return this.transitionToken(member)
+      // `Material.ultraThin` is the same value as the `.ultraThinMaterial` everyone
+      // writes; only the spelling differs.
+      if (target.name === 'Material') return token(MATERIAL_MEMBERS[member] ?? member)
       if (NAMESPACES.has(target.name)) return token(member)
       // A view type referenced without arguments: `Spacer` used as `Spacer`.
       if (VIEW_NAMES.has(target.name)) {
@@ -1116,6 +1218,22 @@ export class SwiftUIHost implements InterpreterHost {
 
   private transitionToken(member: string): SwiftValue {
     return opaque(TRANSITION_TYPE, { kind: transitionKind(member) } satisfies TransitionPayload)
+  }
+
+  /**
+   * `Color.red.gradient` - the shade SwiftUI makes from a flat colour.
+   *
+   * A linear gradient from the colour to a dimmer version of itself, top to bottom,
+   * which is what the real one is: the exact curve is private to SwiftUI, and a
+   * two-stop approximation reads correctly at the sizes a preview draws.
+   */
+  private colorGradient(value: SwiftValue, payload: ColorPayload): SwiftValue {
+    return opaque(STYLE_TYPE, {
+      kind: 'linear',
+      colors: [value, dimmed(payload)],
+      startPoint: 'top',
+      endPoint: 'bottom',
+    } satisfies GradientPayload)
   }
 
   private makeGradient(kind: GradientPayload['kind'], call: HostCall): SwiftValue {

@@ -134,6 +134,15 @@ export interface ColorPayload {
   readonly green?: number
   readonly blue?: number
   readonly opacity?: number
+  /**
+   * A brightness multiplier applied after the colour resolves.
+   *
+   * `Color.red.gradient` needs a darker red, and the name `red` does not become an
+   * RGB triple until the style layer resolves it against the colour scheme - so the
+   * shade travels with the colour rather than being computed where the name is still
+   * a name.
+   */
+  readonly shade?: number
 }
 
 /** A gradient or material, carried as a value so it can be used as a style. */
@@ -171,6 +180,34 @@ export const TRANSITION_TYPE = 'Transition'
 export interface TransitionPayload {
   readonly kind: 'opacity' | 'slide' | 'scale' | 'move' | 'identity'
   readonly edge?: string
+  /**
+   * What `.combined(with:)` added.
+   *
+   * Recorded rather than merged: `TransitionSpec` in the render tree carries one
+   * kind, and giving it a list means the renderer animating several properties at
+   * once - which belongs with the rest of the animation work, not with making the
+   * value constructible. The preview draws `kind` and the coverage matrix says so.
+   */
+  readonly combinedWith?: readonly string[]
+}
+
+/** `EdgeInsets(top:leading:bottom:trailing:)`, as `.padding` takes it. */
+export const EDGE_INSETS_TYPE = 'EdgeInsets'
+
+export interface EdgeInsetsPayload {
+  readonly top: number
+  readonly leading: number
+  readonly bottom: number
+  readonly trailing: number
+}
+
+/** `StrokeStyle(lineWidth:lineCap:dash:)`, as `.stroke(style:)` takes it. */
+export const STROKE_STYLE_TYPE = 'StrokeStyle'
+
+export interface StrokeStylePayload {
+  readonly lineWidth: number
+  readonly lineCap: string | null
+  readonly dash: readonly number[]
 }
 
 /** Wraps an evaluated view as a Swift value, so it can be passed to user code. */

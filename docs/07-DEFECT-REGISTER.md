@@ -20,7 +20,7 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 2 | Make the preview stop lying | 14 | ✅ |
 | 3 | Report failures where the user can see them | 8 | ✅ |
 | 4 | Close the parser gaps | 12 | ✅ |
-| 5 | Fill in the standard library | 16 | 🟡 1 of 16 |
+| 5 | Fill in the standard library | 19 | ✅ |
 | 6 | Fix the strictness pass where it is wrong | 3 | ⬜ |
 | 7 | Finish the editor intelligence | 3 | ⬜ |
 | 8 | Validate what a share link carries | 4 | ⬜ |
@@ -59,9 +59,16 @@ whether any of this reaches real code.
 | --- | --- |
 | Before Phase 1 | 2 of 14 |
 | After Phase 4 | 9 of 14 |
+| After Phase 5 | 13 of 14 |
 
-The five that remain are 5.1, 5.2, 5.7 and 5.10, plus `GroupBox`, which is now an
-honest placeholder rather than a hard error.
+The one that remains is `GroupBox`, which is an honest placeholder rather than a hard
+error, and is Phase 9's to draw.
+
+The measure itself is now a test rather than a note: `tests/stdlib-breadth.test.ts`
+ends with a file written the way a first file gets written - a `UUID` id, a
+`CaseIterable` filter, a computed and sorted list, `Int(_:)` on a text field - and
+asserts the exact strings it draws. Every one of those five pieces failed on its own
+before this phase, and a file containing all of them failed at the first.
 
 ---
 
@@ -141,30 +148,46 @@ Phase 5 could be reached. Closed; covered by `tests/swift-syntax-breadth.test.ts
 
 ---
 
-## Phase 5 - Fill in the standard library 🟡
+## Phase 5 - Fill in the standard library ✅
 
 Fifty-five of 125 library checks failed. These are not exotic calls; the first four
-appear in almost every SwiftUI project's first file, and they are what stands between
+appear in almost every SwiftUI project's first file, and they are what stood between
 the realistic sample and 13 of 14.
 
-| # | Sev | Item | State |
-| --- | --- | --- | --- |
-| 5.1 | high | `UUID`, `Date` and `URL` do not exist at runtime. All three are in the checker's known types, so nothing warns and then the interpreter cannot find them. `let id = UUID()` is the standard `Identifiable` idiom; no `URL` means `Link` and `AsyncImage` cannot be constructed | ⬜ |
-| 5.2 | high | `CaseIterable.allCases`. `ForEach(Tab.allCases)` is the commonest enum-driven pattern in SwiftUI | ⬜ |
-| 5.3 | high | `Int("42")` and `Double("1.5")` trap instead of returning an optional, so text-field input cannot be parsed | ⬜ |
-| 5.4 | high | `Bool.toggle()` | ⬜ |
-| 5.5 | high | Missing mutating array methods: `removeFirst`, `popLast`, `sort(by:)`, `reverse`, `swapAt`, `replaceSubrange`, `removeSubrange` | ⬜ |
-| 5.6 | medium | Maths: `sqrt`, `pow`, `round`, `floor`, `ceil`, `truncatingRemainder` | ⬜ |
-| 5.7 | medium | Free functions and statics: `Set(_:)`, `Array(_:)`, `Optional`, `zip`, `stride`, `type(of:)`, `fatalError`, `assert`, `precondition`, `Int.max`, `Int.min`, `Int.random(in:)`. The global builtin table has seven entries in total | ⬜ |
-| 5.8 | medium | String members: `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `unicodeScalars`, `append` | ⬜ |
-| 5.9 | medium | Array members: `allSatisfy`, `flatMap`, `dropFirst`, `randomElement`, `shuffled`, `first(where:)` | ⬜ |
-| 5.10 | medium | Dictionary members: `sorted`, `mapValues`, `filter` | ⬜ |
-| 5.11 | medium | A key path where a closure is expected: `map(\.name)` is rejected | ⬜ |
-| 5.12 | medium | Nested types: `S.Inner()` cannot be reached through its parent | ⬜ |
-| 5.13 | medium | Implicit `self` inside an extension on a built-in type: `extension String { var shout: String { uppercased() } }` cannot see its own receiver | ⬜ |
-| 5.14 | low | Small framework values: `GeometryProxy.frame(in:)`, `AnyTransition.combined(with:)`, `.red.gradient`, `EdgeInsets`, `StrokeStyle`, `Material.ultraThin` | ⬜ |
-| 5.15 | low | Bitwise operators `&`, `\|`, `^`, `<<`, `>>` | ⬜ |
-| 5.16 | low | `_` in a tuple pattern | ✅ closed by 4.5 |
+Closed; covered by `tests/stdlib-breadth.test.ts`. The assertions there are on the
+*answer* rather than on the absence of an error, because a member that exists and
+returns the wrong thing is the failure this phase was written to remove, and a test
+that only checks for a clean compile would pass on one.
+
+| # | Was | Now |
+| --- | --- | --- |
+| 5.1 | `UUID`, `Date` and `URL` did not exist at runtime. All three were in the checker's known types, so nothing warned and then the interpreter could not find them. `let id = UUID()` is the standard `Identifiable` idiom; no `URL` meant `Link` and `AsyncImage` could not be constructed | All three are values the interpreter owns, alongside `IndexSet`. A `UUID` is random and prints as itself, a `Date` does intervals and comparison, a `URL` parses, keeps the string as written and reads apart. `Text(date, style:)` draws a date rather than nothing |
+| 5.2 | `CaseIterable.allCases`. `ForEach(Tab.allCases)` is the commonest enum-driven pattern in SwiftUI | Synthesised from the cases, in declaration order, only where the enum declares the conformance and no case has a payload - which is exactly when Swift synthesises it. A hand-written `allCases` still wins |
+| 5.3 | `Int("42")` and `Double("1.5")` trapped instead of returning an optional, so text-field input could not be parsed | Parsed against the grammar Swift accepts rather than the one `Number` accepts: `" 42"`, `"4_2"` and `"0x10"` are nil here as they are there. A preview more permissive than the compiler is the dishonest direction |
+| 5.4 | `Bool.toggle()` | Flips through the storage the receiver came from. A scalar has nothing to mutate in place, so the built-in table can now replace its receiver - which is what `String.append` needed too |
+| 5.5 | Missing mutating array methods: `removeFirst`, `popLast`, `sort(by:)`, `reverse`, `swapAt`, `replaceSubrange`, `removeSubrange` | All present, with the bounds checks Swift has: `removeFirst` traps on empty where `popLast` answers nil, and an index outside the collection traps rather than answering quietly |
+| 5.6 | Maths: `sqrt`, `pow`, `round`, `floor`, `ceil`, `truncatingRemainder` | Present, and rounding halves away from zero as Swift does. `Math.round(-1.5)` is -1 and Swift's answer is -2; `Double.rounded()` had the same error and now takes a rounding rule as well |
+| 5.7 | Free functions and statics: `Set(_:)`, `Array(_:)`, `Optional`, `zip`, `stride`, `type(of:)`, `fatalError`, `assert`, `precondition`, `Int.max`, `Int.min`, `Int.random(in:)`. The global builtin table had seven entries in total | All present. `Int.max` is 2^53 - 1 rather than Swift's 2^63 - 1, because that is the largest the interpreter can do arithmetic on without losing precision, and a number that prints plausibly and traps on first use is worse than a smaller true one. Stated in the coverage matrix |
+| 5.8 | String members: `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `unicodeScalars`, `append` | All present, counting by grapheme so `"a👋🏽b".reversed()` keeps the emoji whole - except `unicodeScalars`, which counts code points, that being the whole difference between it and `count` |
+| 5.9 | Array members: `allSatisfy`, `flatMap`, `dropFirst`, `randomElement`, `shuffled`, `first(where:)` | All present, plus `last(where:)`, `lastIndex` and `dropLast`. `shuffled` is Fisher-Yates: the one-line `sort` shuffle is biased, and a preview that keeps starting with the same element looks broken |
+| 5.10 | Dictionary members: `sorted`, `mapValues`, `filter` | Present, over `(key: , value: )` pairs. `filter` answers a dictionary and `sorted` an array, which is what each of them does in Swift |
+| 5.11 | A key path where a closure is expected: `map(\.name)` was rejected | A key path is a one-argument function wherever one is wanted: `map`, `filter`, `compactMap`, `flatMap`, `forEach`, `allSatisfy`, `contains(where:)` and `first(where:)` |
+| 5.12 | Nested types: `S.Inner()` could not be reached through its parent | Lifted to the top level under a qualified name before anything looks at the program, so the checker, the conformance merge and instantiation all agree. Registered under the bare name too when nothing else claims it, which is how it is written from inside |
+| 5.13 | Implicit `self` inside an extension on a built-in type: `extension String { var shout: String { uppercased() } }` could not see its own receiver | The receiver's own members are in scope unqualified, built-in ones included. The checker stops reporting unresolved names inside such an extension, because the standard library's member list is not something it holds |
+| 5.14 | Small framework values: `GeometryProxy.frame(in:)`, `AnyTransition.combined(with:)`, `.red.gradient`, `EdgeInsets`, `StrokeStyle`, `Material.ultraThin` | All constructible. `EdgeInsets` reaches `.padding`, `StrokeStyle`'s line width reaches the stroke, `.gradient` shades the colour it came from, `Material.ultraThin` is the same value as `.ultraThinMaterial`. Two are partial and say so in the matrix: a stroke's dash pattern and the second half of a combined transition both need a render-tree field that does not exist |
+| 5.15 | Bitwise operators `&`, `\|`, `^`, `<<`, `>>` | Computed in `BigInt`, so `1 << 40` is 1099511627776 rather than JavaScript's 256. Two Doubles are refused, as Swift refuses them |
+| 5.16 | `_` in a tuple pattern | ✅ closed by 4.5 |
+
+### Found while closing this phase
+
+Each was reproduced against the pipeline before it was fixed, and each is covered by
+the same suite.
+
+| # | Was | Now |
+| --- | --- | --- |
+| 5.17 | `_ = items.popLast()` reported "cannot assign to this expression". The discard is how Swift is told a result is deliberately unused, so it appears wherever a mutating method answers something the caller does not want | Evaluates the right-hand side for its effects and throws the answer away |
+| 5.18 | A `let` collection could be mutated: `let items = [1]` then `items.append(2)` ran, changed the array and reported nothing, while Xcode refuses to build it. The same held for `scores["b"] = 2` on a `let` dictionary | Both refused, with the message the struct path already used. Found while adding 5.5's seven methods, each of which would have been another way to do it |
+| 5.19 | `Text(verbatim:)` drew an empty string, and once 5.1 landed so did `Text(someDate)` - a blank where the app shows a date | Both draw their content. `Text(date, style:)` takes `.time`, `.date`, `.relative`, `.offset` and `.timer` |
 
 ## Phase 6 - Fix the strictness pass where it is wrong ⬜
 

@@ -238,3 +238,55 @@ export function storedProperties(members: readonly Decl[]): readonly VarDecl[] {
 export function methodsOf(members: readonly Decl[]): readonly FuncDecl[] {
   return members.filter((m): m is FuncDecl => m.kind === 'funcDecl' && m.body !== null)
 }
+
+/**
+ * Lifts every nested `struct`, `class` and `enum` to the top level.
+ *
+ * `struct Item { enum Status { … } }` is ordinary Swift and the declaration was
+ * simply unreachable: the parser kept it as a member of `Item`, and nothing looked
+ * for a *type* there, so `Item.Status` reported that `Item` has no such member.
+ *
+ * Each one is registered twice - as `Item.Status`, which is how it is written from
+ * outside, and as `Status` when no other type has claimed that name, which is how it
+ * is written from inside. Rewriting the name rather than teaching every lookup about
+ * nesting keeps instantiation, conformance and `membersOf` on one code path.
+ */
+export function hoistNestedTypes(files: readonly SourceFileNode[]): readonly SourceFileNode[] {
+  const claimed = new Set<string>()
+  for (const file of files) {
+    for (const decl of file.declarations) {
+      if (decl.kind === 'structDecl' || decl.kind === 'enumDecl') claimed.add(decl.name)
+    }
+  }
+
+  const hoisted: Decl[] = []
+  const visit = (owner: string, members: readonly Decl[]): void => {
+    for (const member of members) {
+      if (member.kind !== 'structDecl' && member.kind !== 'enumDecl') continue
+
+      const qualified = `${owner}.${member.name}`
+      hoisted.push({ ...member, name: qualified })
+      if (!claimed.has(member.name)) {
+        claimed.add(member.name)
+        hoisted.push(member)
+      }
+      visit(qualified, member.members)
+    }
+  }
+
+  for (const file of files) {
+    for (const decl of file.declarations) {
+      if (decl.kind === 'structDecl' || decl.kind === 'enumDecl') visit(decl.name, decl.members)
+    }
+  }
+
+  // Nothing nested: hand back the original array rather than an equal copy, so the
+  // overwhelmingly common case allocates nothing.
+  if (hoisted.length === 0) return files
+
+  // A span is required and every hoisted declaration already carries its real one;
+  // the synthetic file borrows the first file's so that nothing reports a position
+  // inside a file that does not exist.
+  const first = files[0]!
+  return [...files, { ...first, declarations: hoisted }]
+}
