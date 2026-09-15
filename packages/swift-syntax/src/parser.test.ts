@@ -124,9 +124,7 @@ describe('declarations', () => {
 
 describe('unsupported constructs are named, not mangled', () => {
   it.each([
-    ['typealias X = Int', 'typealias'],
-    ['subscript(i: Int) -> Int { 0 }', 'subscript'],
-    ['deinit { }', 'deinit'],
+    ['associatedtype T', 'associatedtype'],
   ])('reports %s as %s', (source, feature) => {
     const { diagnostics } = parse(source)
     const warning = diagnostics.find((d) => d.code === 'unsupported_language_feature')
@@ -136,16 +134,25 @@ describe('unsupported constructs are named, not mangled', () => {
   })
 
   it.each([
-    ['defer { }', 'defer'],
-    ['fallthrough', 'fallthrough'],
-  ])('reports the statement %s as %s', (statement, feature) => {
-    const { diagnostics } = parse(`func f() { ${statement} }`)
-    expect(diagnostics.find((d) => d.code === 'unsupported_language_feature')?.feature).toBe(feature)
+    'typealias Celsius = Double',
+    'subscript(i: Int) -> Int { 0 }',
+    'deinit { }',
+    'infix operator **: MultiplicationPrecedence',
+  ])('parses %s without a diagnostic', (source) => {
+    // These were reported as out of scope and each stopped the file. Parsing them is
+    // the whole of what they need: an alias is a name, a subscript is a method, a
+    // deinit never runs in a preview, and an operator declaration only picks a
+    // precedence group the parser already has one table for.
+    expect(parse(source).diagnostics).toEqual([])
+  })
+
+  it.each(['defer { cleanup() }', 'fallthrough'])('parses the statement %s', (statement) => {
+    expect(parse(`func f() { ${statement} }`).diagnostics).toEqual([])
   })
 
   it('keeps parsing declarations after an unsupported one', () => {
     const file = parseClean(`
-      typealias Ignored = Int
+      associatedtype Ignored
       struct Kept: View { var body: some View { Text("x") } }
     `)
     expect(kindsOf(file)).toEqual(['unsupportedDecl', 'structDecl'])
@@ -160,7 +167,7 @@ describe('unsupported constructs are named, not mangled', () => {
     `)
     const fn = file.declarations[0]!
     expect(fn.kind === 'funcDecl' && fn.body?.statements.map((s) => s.kind)).toEqual([
-      'unsupportedStmt',
+      'deferStmt',
       'declStmt',
     ])
   })

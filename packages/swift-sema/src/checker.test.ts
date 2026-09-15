@@ -169,7 +169,7 @@ describe('coverage diagnostics are honest, not wrong', () => {
     const [warning] = warnings(app('        Chart { }'))
     expect(warning?.code).toBe('unsupported_swiftui_view')
     expect(warning?.feature).toBe('Chart')
-    expect(warning?.message).toContain('Phase 7')
+    expect(warning?.message).toContain('does not draw')
     expect(errors(app('        Chart { }'))).toEqual([])
   })
 

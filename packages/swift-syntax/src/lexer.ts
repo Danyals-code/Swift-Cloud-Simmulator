@@ -111,6 +111,15 @@ export class Lexer {
         this.pos++
         continue
       }
+      // A byte-order mark, and the invisible spaces that come with text pasted out of
+      // a document. Swift's own lexer skips these; treating one as an unexpected
+      // character fails a whole file on character one, for a byte the user cannot see.
+      if (ch === '﻿' || ch === '​' || ch === ' ' || ch === ' ' || ch === ' ') {
+        sawSpace = true
+        if (ch === ' ' || ch === ' ') sawNewline = true
+        this.pos++
+        continue
+      }
       if (this.text.startsWith('//', this.pos)) {
         sawSpace = true
         while (this.pos < this.text.length && this.text[this.pos] !== '\n') this.pos++

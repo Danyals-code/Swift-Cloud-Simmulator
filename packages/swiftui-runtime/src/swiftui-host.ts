@@ -1,4 +1,4 @@
-import type { SourceSpan } from '@studio/shared'
+import type { LogLevel, SourceSpan } from '@studio/shared'
 import {
   applyKeyPath,
   asKeyPath,
@@ -61,7 +61,7 @@ import {
 /** Every name the host will build a view for - implemented or not. */
 const VIEW_NAMES: ReadonlySet<string> = new Set([
   ...SUPPORTED_VIEWS,
-  ...UNIMPLEMENTED_VIEWS.keys(),
+  ...UNIMPLEMENTED_VIEWS,
   'Spacer',
   'Divider',
 ])
@@ -79,6 +79,27 @@ const VIEW_NAMES: ReadonlySet<string> = new Set([
  * ambiguity is resolved in `callGlobal`.
  */
 const ACTION_VIEWS: ReadonlySet<string> = new Set(['Button'])
+
+/**
+ * Labelled trailing closures that carry content rather than behaviour.
+ *
+ * `Button { save() } label: { Text("Save") }` and `Section { rows } header: { … }`
+ * are the Swift 5.3 spelling, and the label is the only thing that says which part
+ * of the view each closure is.
+ */
+const CONTENT_CLOSURE_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['Button', new Set(['label'])],
+  ['Menu', new Set(['label'])],
+  ['Label', new Set(['icon'])],
+  ['Section', new Set(['header', 'footer'])],
+  ['Toggle', new Set(['label'])],
+  ['Picker', new Set(['label'])],
+  ['Stepper', new Set(['label'])],
+  ['NavigationLink', new Set(['label'])],
+  ['DisclosureGroup', new Set(['label'])],
+  ['GroupBox', new Set(['label'])],
+  ['LabeledContent', new Set(['label'])],
+])
 
 /** Names that are types rather than views: `Color.red`, `Font.title`. */
 const NAMESPACES: ReadonlySet<string> = new Set([
@@ -147,7 +168,7 @@ function tokenNameOf(value: SwiftValue | undefined): string | null {
  * means the coverage matrix has exactly one place to be wrong.
  */
 export class SwiftUIHost implements InterpreterHost {
-  private readonly logs: { message: string; span: SourceSpan }[] = []
+  private readonly logs: { message: string; span: SourceSpan; level: LogLevel }[] = []
 
   /**
    * Expands a user-declared `View` struct into its evaluated body.
@@ -512,12 +533,20 @@ export class SwiftUIHost implements InterpreterHost {
     }
   }
 
-  takeLogs(): { message: string; span: SourceSpan }[] {
+  takeLogs(): { message: string; span: SourceSpan; level: LogLevel }[] {
     return this.logs.splice(0, this.logs.length)
   }
 
-  log(message: string, span: SourceSpan): void {
-    this.logs.push({ message, span })
+  /**
+   * A line for the console.
+   *
+   * The level matters more than it looks. Everything used to arrive as `log`, which
+   * meant "Action failed: Index out of range" was painted in the same grey as a
+   * `print` - so a tap that crashed looked exactly like a tap that worked and said
+   * something. The console already styles errors; it had nothing to style.
+   */
+  log(message: string, span: SourceSpan, level: LogLevel = 'log'): void {
+    this.logs.push({ message, span, level })
   }
 
   resolveGlobal(name: string): SwiftValue | undefined {
@@ -577,7 +606,27 @@ export class SwiftUIHost implements InterpreterHost {
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
 
-    const isAction = ACTION_VIEWS.has(name) && call.args.some((a) => a.label === null)
+    // A labelled closure argument that names content: `Button { … } label: { … }`,
+    // `Menu { … } label: { … }`, `Section { … } header: { … } footer: { … }`. Swift
+    // 5.3 spells these as trailing closures, and the parser hands them over as
+    // ordinary labelled arguments - so the view is built from them the same way it
+    // would be from a content closure.
+    const contentClosures = CONTENT_CLOSURE_LABELS.get(name)
+    if (contentClosures) {
+      const named = call.args.filter(
+        (a) => a.label !== null && contentClosures.has(a.label) && a.value.kind === 'closure',
+      )
+      if (named.length > 0) {
+        return this.viewWithNamedContent(name, call, args, named)
+      }
+    }
+
+    const isAction =
+      ACTION_VIEWS.has(name) &&
+      (call.args.some((a) => a.label === null) ||
+        // `Button { save() } label: { Text("Save") }` - the label is elsewhere, so the
+        // trailing closure is the action even though no plain title was given.
+        call.args.some((a) => a.label === 'label'))
 
     // `NavigationLink("Title") { Destination() }` - a title plus a trailing closure
     // means the closure is the destination, not the label.
@@ -601,6 +650,43 @@ export class SwiftUIHost implements InterpreterHost {
     return view({
       name,
       args,
+      children,
+      modifiers: [],
+      action: isAction ? call.trailingClosure : null,
+      span: call.span,
+    })
+  }
+
+  /**
+   * A view whose content arrived as labelled trailing closures.
+   *
+   * Each labelled closure is expanded where it stands and its views become children,
+   * carrying the label so the layout can tell a `header:` from a `footer:`. The
+   * unlabelled trailing closure keeps its usual meaning: content for a `Section`, the
+   * action for a `Button`.
+   */
+  private viewWithNamedContent(
+    name: string,
+    call: HostCall,
+    args: ViewArg[],
+    named: readonly { label: string | null; value: SwiftValue }[],
+  ): SwiftValue {
+    const isAction = ACTION_VIEWS.has(name)
+    const children = [
+      ...(call.trailingClosure && !isAction
+        ? this.toViews(call.invokeBuilder(call.trailingClosure))
+        : []),
+    ]
+
+    const labelled: ViewArg[] = []
+    for (const argument of named) {
+      const produced = this.toViews(call.invokeBuilder(argument.value as ClosureValue))
+      for (const item of produced) labelled.push({ label: argument.label, value: view(item) })
+    }
+
+    return view({
+      name,
+      args: [...args.filter((a) => !named.some((n) => n.label === a.label)), ...labelled],
       children,
       modifiers: [],
       action: isAction ? call.trailingClosure : null,
@@ -803,6 +889,24 @@ export class SwiftUIHost implements InterpreterHost {
     }
     if (TRANSITIONS.has(member)) return this.makeTransition(member, call)
     if (member === 'system') return this.makeSystemFont(call)
+
+    // `.custom("Avenir", size: 24)`. The face itself cannot be honoured - a browser
+    // has no access to a project's bundled fonts - but the *size* is a layout input,
+    // and dropping it left every custom-font view previewing at the 17-point body
+    // size with nothing said about it.
+    if (member === 'custom') {
+      const size = numberOf(call.args.find((a) => a.label === 'size')?.value)
+      const fixed = numberOf(call.args.find((a) => a.label === 'fixedSize')?.value)
+      return token(`system:${size ?? fixed ?? 17}:regular:default`)
+    }
+
+    // `.currency(code:)` carries the code, and a format style that loses it renders
+    // every amount in dollars.
+    if (member === 'currency') {
+      const code = call.args.find((a) => a.label === 'code')?.value
+      return token(`currency:${code?.kind === 'string' ? code.value : 'USD'}`)
+    }
+
     if (member === 'fixed' || member === 'flexible' || member === 'adaptive') {
       return this.makeGridItem(call, member)
     }

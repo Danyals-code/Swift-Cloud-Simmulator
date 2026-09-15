@@ -3,7 +3,7 @@ import type { CompileResult } from '@studio/shared'
 import {
   clearCoverage,
   coverageRanking,
-  plannedPhase,
+  isRecognised,
   recordCoverage,
   resetCoverageCache,
 } from '../apps/web/lib/telemetry'
@@ -110,10 +110,14 @@ describe('coverage telemetry', () => {
     expect(coverageRanking().map((e) => e.feature)).toEqual(['TimelineView'])
   })
 
-  it('reports the phase a feature is planned for', () => {
+  it('separates a known gap from a name nobody wrote down', () => {
+    // The ranking's job is to surface what people reached for. A name already in the
+    // coverage tables is a gap someone chose not to build; a name that is not in them
+    // at all is the discovery, and the two must not read the same.
     recordCoverage(result([{ name: 'Chart', kind: 'view' }]))
-    expect(coverageRanking()[0]!.phase).toBe(7)
-    expect(plannedPhase('NavigationStack', 'view')).toBeNull()
+    expect(coverageRanking()[0]!.recognised).toBe(true)
+    expect(isRecognised('Chart', 'view')).toBe(true)
+    expect(isRecognised('SomeoneElsesView', 'view')).toBe(false)
   })
 
   it('can be cleared by the user', () => {

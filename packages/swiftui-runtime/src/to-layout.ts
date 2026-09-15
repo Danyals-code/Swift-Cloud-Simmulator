@@ -56,6 +56,7 @@ import {
   COLOR_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
+  asView,
   handlerIdFor,
   payloadOf,
   type AnimationPayload,
@@ -1029,13 +1030,12 @@ class Converter {
 
     // A real SwiftUI view the preview cannot draw yet renders as a labelled box
     // naming the feature, never as a blank space (FR-4.11).
-    const phase = UNIMPLEMENTED_VIEWS.get(view.name)
     return {
       kind: 'placeholder',
       id: path,
       feature: view.name,
-      reason: phase
-        ? `Not drawn by the preview yet - arriving in Phase ${phase}.`
+      reason: UNIMPLEMENTED_VIEWS.has(view.name)
+        ? 'Real SwiftUI that the preview does not draw. It exports to Xcode unchanged.'
         : 'Not recognised by the preview.',
       ...origin,
     }
@@ -1210,7 +1210,7 @@ class Converter {
     for (const child of flatten(view.children)) {
       if (child.name === 'Section') {
         if (current.rows.length > 0 || current.header) sections.push(current)
-        const title = stringArg(positional(child.args, 0)) ?? stringArg(labelled(child.args, 'header'))
+        const title = stringArg(positional(child.args, 0)) ?? argText(child, 'header')
         current = {
           header: title
             ? this.styledText(`${child.path ?? path}hdr`, title.toUpperCase(), 'caption', 'secondaryLabel')
@@ -1446,6 +1446,9 @@ class Converter {
 
   private button(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0))
+    // `Button { save() } label: { … }` puts the content in a labelled argument,
+    // because the unlabelled trailing closure is already the action.
+    const content = view.children.length > 0 ? view.children : argViews(view, 'label')
     const label: LayoutElement =
       title !== null
         ? { kind: 'text', id: `${path}label`, text: title, ...origin }
@@ -1455,7 +1458,7 @@ class Converter {
             axis: 'horizontal',
             spacing: 4,
             alignment: CENTER,
-            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+            children: this.convertList(content, `${path}label`, 'horizontal'),
             ...origin,
           }
 
@@ -1843,7 +1846,7 @@ class Converter {
   }
 
   private picker(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0)) ?? stringArg(labelled(view.args, 'label')) ?? ''
+    const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label') ?? ''
     const selection = bindingValue(labelled(view.args, 'selection'))
     const value = selection ? displayValue(selection) : ''
 
@@ -2503,7 +2506,45 @@ function defaultSpacing(): number {
 function textOf(view: ViewValue): string {
   const first = positional(view.args, 0)
   if (first?.kind === 'string') return first.value
-  return first ? displayValue(first) : ''
+  if (!first) return ''
+
+  // `Text(total, format: .currency(code: "USD"))`. Dropping the format and describing
+  // the number renders `1234.5` where the app shows `$1,234.50` - a plausible-looking
+  // figure that is not the one the code asks for, which is worse than a placeholder.
+  const format = labelled(view.args, 'format')
+  if (format) return formatted(first, format)
+
+  return displayValue(first)
+}
+
+/**
+ * A value rendered through a `FormatStyle`.
+ *
+ * `Intl` does the work, so the grouping separators and currency symbols are the
+ * platform's real ones rather than a transcription. An unrecognised style falls back
+ * to the plain description: the number is still right, only its dressing is missing.
+ */
+function formatted(value: SwiftValue, format: SwiftValue): string {
+  const name = tokenName(format) ?? ''
+  const n = value.kind === 'int' || value.kind === 'double' ? value.value : Number.NaN
+  if (Number.isNaN(n)) return displayValue(value)
+
+  // `.currency(code:)` arrives as `currency:USD`, the same way `.system(size:)` does.
+  const [style, detail] = name.split(':')
+
+  switch (style) {
+    case 'currency':
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: detail || 'USD',
+      }).format(n)
+    case 'percent':
+      return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(n)
+    case 'number':
+      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(n)
+    default:
+      return displayValue(value)
+  }
 }
 
 function displayValue(value: SwiftValue): string {
@@ -2702,6 +2743,28 @@ function zstackAlignment(args: readonly ViewArg[]): Alignment {
   return alignmentFromToken(labelled(args, 'alignment')) ?? CENTER
 }
 
+/**
+ * The views a labelled argument produced.
+ *
+ * `Button { … } label: { Text("Save") }` hands its label over as an argument rather
+ * than as a child, because the unlabelled trailing closure is already the action.
+ */
+function argViews(view: ViewValue, label: string): ViewValue[] {
+  return view.args
+    .filter((a) => a.label === label)
+    .map((a) => asView(a.value))
+    .filter((v): v is ViewValue => v !== null)
+}
+
+/** The words a labelled argument draws, from a string argument or from its views. */
+function argText(view: ViewValue, label: string): string | null {
+  const direct = stringArg(labelled(view.args, label))
+  if (direct !== null) return direct
+
+  const words = argViews(view, label).flatMap((v) => textIn(v))
+  return words.length > 0 ? words.join(' ') : null
+}
+
 function labelOf(view: ViewValue): string {
   const first = positional(view.args, 0)
   if (first?.kind === 'string') return first.value
@@ -2710,6 +2773,9 @@ function labelOf(view: ViewValue): string {
   // the user wrote to take a positional one from.
   const titled = labelled(view.args, 'title')
   if (titled?.kind === 'string') return titled.value
+
+  const named = argText(view, 'label')
+  if (named !== null) return named
 
   /*
     The words inside it, which is what a screen reader reads out.

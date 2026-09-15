@@ -33,6 +33,7 @@ construction and keeps the product honest: the preview can be imperfect, the out
 | [04 - Swift language subset](docs/04-SWIFT-SUBSET.md) | Exactly which Swift features are in/out, by tier |
 | [05 - SwiftUI coverage matrix](docs/05-SWIFTUI-COVERAGE.md) | Views, modifiers, styles - the living checklist |
 | [06 - Vertical slice (v0.1)](docs/06-VERTICAL-SLICE.md) | **The decided first build** - reference app, subset, per-phase task lists and findings |
+| [07 - Defect register](docs/07-DEFECT-REGISTER.md) | **The working backlog** - what an 870-check sweep found, in ten phases, with what is closed and what is not |
 
 ## Decided scope for v0.1
 

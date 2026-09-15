@@ -159,8 +159,26 @@ export const ASSIGNMENT_OPERATORS: ReadonlySet<string> = new Set([
   '=', '+=', '-=', '*=', '/=', '%=',
 ])
 
+/**
+ * Binding power for a binary operator.
+ *
+ * An operator the table does not name is one the project declared - `infix operator
+ * **` - and it gets multiplication's precedence, which is Swift's own default for a
+ * new operator that declares no group. Returning undefined for it instead left the
+ * parser stopping mid-expression and quietly answering with the left operand.
+ */
 export function precedenceOf(op: string): number | undefined {
-  return PRECEDENCE[op]
+  return PRECEDENCE[op] ?? (isCustomOperator(op) ? DEFAULT_OPERATOR_PRECEDENCE : undefined)
+}
+
+/** Multiplication's group - `MultiplicationPrecedence`, Swift's default. */
+const DEFAULT_OPERATOR_PRECEDENCE = PRECEDENCE['*'] ?? 10
+
+function isCustomOperator(op: string): boolean {
+  // Two or more operator characters, none of which the table claims. A single `?` or
+  // `!` is punctuation the parser handles elsewhere and must not be given a
+  // precedence here.
+  return op.length >= 2 && [...op].every((ch) => OPERATOR_CHARS.has(ch))
 }
 
 export function tokenDescription(token: Token): string {

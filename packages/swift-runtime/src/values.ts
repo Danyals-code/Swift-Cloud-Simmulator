@@ -24,6 +24,7 @@ export type SwiftValue =
   | BoolValue
   | StringValue
   | ArrayValue
+  | TupleValue
   | DictionaryValue
   | StructValue
   | EnumValue
@@ -59,6 +60,34 @@ export interface StringValue {
 export interface ArrayValue {
   readonly kind: 'array'
   elements: SwiftValue[]
+  /**
+   * `true` when the declared type was `Set`.
+   *
+   * A `Set` is an array that refuses duplicates, and that refusal is the only part
+   * of it the subset can observe - there is no separate value kind because every
+   * other operation a set supports here (`count`, `contains`, `for … in`) is already
+   * the array's. Without the flag `let s: Set<Int> = [1, 2, 2]` silently has three
+   * elements, and uniqueness is the entire reason the annotation was written.
+   *
+   * Ordering is insertion order rather than Swift's unspecified hash order. That is
+   * an approximation, and a stable one is more useful in a preview than a wrong one.
+   */
+  unique?: boolean
+}
+
+/**
+ * `(1, "a")`, or `(x: 1, y: 2)`.
+ *
+ * Its own kind rather than an array, which is what it used to be. The difference is
+ * that a tuple is reached by position *name* - `.0`, `.1`, `.x` - and an array is
+ * not, so `pair.0` answered "Array has no member '0'" on ordinary Swift. Dictionary
+ * iteration and `enumerated()` both hand one of these to their loop variable.
+ */
+export interface TupleValue {
+  readonly kind: 'tuple'
+  elements: SwiftValue[]
+  /** One per element, null where the source wrote none. */
+  readonly labels: readonly (string | null)[]
 }
 
 export interface DictionaryValue {
@@ -199,6 +228,31 @@ export function str(value: string): StringValue {
 export function array(elements: SwiftValue[]): ArrayValue {
   return { kind: 'array', elements }
 }
+
+/**
+ * One element of a tuple, by the name written after the dot.
+ *
+ * `.0` and `.1` are positions; anything else is a label. Returns undefined when the
+ * name matches neither, so the caller can report it rather than answer nil.
+ */
+export function tupleElement(value: TupleValue, member: string): SwiftValue | undefined {
+  if (/^\d+$/.test(member)) return value.elements[Number(member)]
+  const index = value.labels.indexOf(member)
+  return index >= 0 ? value.elements[index] : undefined
+}
+
+export function tuple(elements: SwiftValue[], labels: readonly (string | null)[] = []): TupleValue {
+  return { kind: 'tuple', elements, labels: labels.length > 0 ? labels : elements.map(() => null) }
+}
+
+/** The `Set` form of an array value: the same elements with the duplicates dropped. */
+export function uniqueArray(elements: readonly SwiftValue[]): ArrayValue {
+  const kept: SwiftValue[] = []
+  for (const element of elements) {
+    if (!kept.some((existing) => valuesEqual(existing, element))) kept.push(element)
+  }
+  return { kind: 'array', elements: kept, unique: true }
+}
 export function enumCase(
   typeName: string,
   caseName: string,
@@ -326,8 +380,12 @@ export function unwrapProjection(value: SwiftValue): SwiftValue {
  */
 export function copyValue(value: SwiftValue): SwiftValue {
   switch (value.kind) {
+    case 'tuple':
+      return { kind: 'tuple', elements: value.elements.map(copyValue), labels: value.labels }
     case 'array':
-      return { kind: 'array', elements: value.elements.map(copyValue) }
+      return value.unique
+        ? { kind: 'array', elements: value.elements.map(copyValue), unique: true }
+        : { kind: 'array', elements: value.elements.map(copyValue) }
     case 'dictionary': {
       const entries = new Map<string, SwiftValue>()
       for (const [k, v] of value.entries) entries.set(k, copyValue(v))
@@ -378,6 +436,8 @@ export function typeNameOf(value: SwiftValue): string {
       return 'String'
     case 'array':
       return 'Array'
+    case 'tuple':
+      return 'Tuple'
     case 'dictionary':
       return 'Dictionary'
     case 'struct':
@@ -419,6 +479,14 @@ export function describe(value: SwiftValue, insideCollection = false): string {
       return insideCollection ? `"${value.value}"` : value.value
     case 'array':
       return `[${value.elements.map((e) => describe(e, true)).join(', ')}]`
+    case 'tuple': {
+      // Swift prints a tuple with its labels: `(x: 1, y: 2)`.
+      const parts = value.elements.map((e, i) => {
+        const label = value.labels[i]
+        return label ? `${label}: ${describe(e, true)}` : describe(e, true)
+      })
+      return `(${parts.join(', ')})`
+    }
     case 'dictionary': {
       if (value.entries.size === 0) return '[:]'
       const parts = [...value.entries].map(([k, v]) => `"${k}": ${describe(v, true)}`)
@@ -455,6 +523,78 @@ export function formatDouble(n: number): string {
   return Number.isInteger(n) ? `${n}.0` : String(n)
 }
 
+/**
+ * `String(format:)` and the `specifier:` form of string interpolation.
+ *
+ * A C format string, which is what Foundation hands to `vsnprintf`. The subset here
+ * is the one people write in a SwiftUI view - a width, a precision and the numeric
+ * and string conversions. An unrecognised conversion is emitted verbatim rather than
+ * swallowed, so an unsupported specifier shows up as itself instead of as a blank.
+ */
+export function formatString(format: string, values: readonly SwiftValue[]): string {
+  let next = 0
+  return format.replace(
+    /%(-)?(0)?(\d+)?(?:\.(\d+))?(?:ll|l|h)?([diufFeEgGxXos@%])/g,
+    (whole, left: string | undefined, zero: string | undefined, widthText: string | undefined, precisionText: string | undefined, conversion: string) => {
+      if (conversion === '%') return '%'
+
+      const value = values[next++]
+      if (value === undefined) return whole
+
+      const width = widthText ? Number(widthText) : 0
+      const precision = precisionText === undefined ? undefined : Number(precisionText)
+      const n = numericValue(value)
+      let body: string
+
+      switch (conversion) {
+        case 'd':
+        case 'i':
+          body = String(Math.trunc(n))
+          break
+        case 'u':
+          body = String(Math.abs(Math.trunc(n)))
+          break
+        case 'f':
+        case 'F':
+          body = n.toFixed(precision ?? 6)
+          break
+        case 'e':
+        case 'E': {
+          const exponential = n.toExponential(precision ?? 6)
+          body = conversion === 'E' ? exponential.toUpperCase() : exponential
+          break
+        }
+        case 'g':
+        case 'G': {
+          const general = String(Number(n.toPrecision(precision ?? 6)))
+          body = conversion === 'G' ? general.toUpperCase() : general
+          break
+        }
+        case 'x':
+          body = (Math.trunc(n) >>> 0).toString(16)
+          break
+        case 'X':
+          body = (Math.trunc(n) >>> 0).toString(16).toUpperCase()
+          break
+        case 'o':
+          body = (Math.trunc(n) >>> 0).toString(8)
+          break
+        default:
+          // `%s` and `%@` - anything printable, described the way `print` would.
+          body = describe(value, false)
+          if (precision !== undefined) body = body.slice(0, precision)
+          break
+      }
+
+      if (body.length >= width) return body
+      if (left) return body.padEnd(width)
+      // Zero padding goes *after* a sign, or `-1` pads to `00-1`.
+      if (zero && /^[-+]/.test(body)) return body[0]! + body.slice(1).padStart(width - 1, '0')
+      return body.padStart(width, zero ? '0' : ' ')
+    },
+  )
+}
+
 /** Structural equality, matching Swift's synthesised `==` for the supported kinds. */
 export function valuesEqual(a: SwiftValue, b: SwiftValue): boolean {
   if (isNumeric(a) && isNumeric(b)) return a.value === b.value
@@ -465,6 +605,13 @@ export function valuesEqual(a: SwiftValue, b: SwiftValue): boolean {
       return a.value === (b as BoolValue).value
     case 'string':
       return a.value === (b as StringValue).value
+    case 'tuple': {
+      const other = b as TupleValue
+      return (
+        a.elements.length === other.elements.length &&
+        a.elements.every((e, i) => valuesEqual(e, other.elements[i]!))
+      )
+    }
     case 'array': {
       const other = b as ArrayValue
       return (

@@ -161,7 +161,7 @@ test('reports unimplemented SwiftUI by name rather than calling it unresolved', 
 
   const console_ = page.getByTestId('console')
   await expect(console_).toContainText('Chart', { timeout: 5_000 })
-  await expect(console_).toContainText('not drawn by the preview yet')
+  await expect(console_).toContainText('the preview does not draw')
 })
 
 // ---------------------------------------------------------------- Phase 3
@@ -318,7 +318,7 @@ test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', as
   const placeholder = preview(page).locator('[data-kind="placeholder"]')
   await expect(placeholder).toBeVisible({ timeout: 5_000 })
   await expect(placeholder).toContainText('Chart')
-  await expect(placeholder).toContainText('Phase 7')
+  await expect(placeholder).toContainText('does not draw')
 })
 
 // ---------------------------------------------------------------- Phase 6
@@ -613,7 +613,7 @@ test('Phase 8 - hovering a view the preview cannot draw says so', async ({ page 
 
   // The honest gap, surfaced where the user is already looking.
   await page.getByTestId('editor').getByText('Table', { exact: true }).first().hover()
-  await expect(page.locator('.cm-tooltip-hover')).toContainText('not drawn by the preview yet', {
+  await expect(page.locator('.cm-tooltip-hover')).toContainText('does not draw', {
     timeout: 5000,
   })
 })

@@ -12,7 +12,10 @@ import type {
   Argument,
   AssociatedType,
   Attribute,
+  AccessorBody,
   Block,
+  PropertyObservers,
+  PropertySetter,
 
   ClosureExpr,
   ClosureParam,
@@ -51,10 +54,7 @@ const UNSUPPORTED_DECLARATIONS: Readonly<Record<string, string>> = {
 }
 
 /** Statements outside the subset. */
-const UNSUPPORTED_STATEMENTS: Readonly<Record<string, string>> = {
-  defer: 'defer',
-  fallthrough: 'fallthrough',
-}
+const UNSUPPORTED_STATEMENTS: Readonly<Record<string, string>> = {}
 
 /**
  * Keywords that, at column 1, mean "a new top-level declaration started" rather than
@@ -67,8 +67,36 @@ const TOP_LEVEL_RECOVERY_KEYWORDS = new Set([
 const DECLARATION_MODIFIERS = new Set([
   'public', 'private', 'fileprivate', 'internal', 'open', 'static', 'final',
   'mutating', 'nonmutating', 'override', 'convenience', 'required', 'lazy',
-  'weak', 'unowned', 'class',
+  'weak', 'unowned', 'class', 'prefix', 'postfix', 'infix',
 ])
+
+/**
+ * Keywords Swift lets you use as an ordinary name.
+ *
+ * They are keywords only where a keyword is expected. `var open = false` and `let any
+ * = 1` are legal Swift, and the lexer cannot tell the two uses apart - so the
+ * decision belongs at each position that asks for a name.
+ */
+const CONTEXTUAL_KEYWORDS: ReadonlySet<string> = new Set([
+  'open', 'some', 'any', 'indirect', 'optional', 'dynamic', 'final', 'lazy',
+  'weak', 'unowned', 'mutating', 'nonmutating', 'override', 'convenience',
+  'required', 'where', 'get', 'set', 'willSet', 'didSet', 'prefix', 'postfix',
+  'infix', 'async',
+])
+
+/** Statements a label may precede: `outer: for …`. */
+const LABELLABLE_STATEMENTS: ReadonlySet<string> = new Set(['for', 'while', 'repeat', 'switch', 'do'])
+
+/** What may follow a modifier: another one, an attribute, or the declaration itself. */
+function continuesDeclaration(token: Token): boolean {
+  if (token.kind === 'attribute') return true
+  if (token.kind !== 'keyword' && token.kind !== 'identifier') return false
+  return (
+    DECLARATION_MODIFIERS.has(token.text) ||
+    DECLARATION_KEYWORDS.has(token.text) ||
+    token.text === 'operator'
+  )
+}
 
 /**
  * Recursive-descent parser for the supported Swift subset.
@@ -145,7 +173,7 @@ export class Parser {
   }
 
   private expectIdentifier(context: string): { name: string; span: SourceSpan } {
-    if (this.current.kind === 'identifier') {
+    if (this.current.kind === 'identifier' || CONTEXTUAL_KEYWORDS.has(this.current.text)) {
       const token = this.advance()
       return { name: token.text, span: token.span }
     }
@@ -217,6 +245,22 @@ export class Parser {
     if (this.checkKeyword('import')) return this.parseImport()
     if (this.checkKeyword('struct')) return this.parseStruct(attributes, modifiers, false)
     if (this.checkKeyword('class')) return this.parseStruct(attributes, modifiers, true)
+
+    // `actor` is a reference type whose isolation the preview cannot enforce - there
+    // is nothing to isolate from, since everything runs on one thread and in order.
+    // Parsed as a class so its members are reachable; the limitation is the same one
+    // the coverage matrix already states about concurrency.
+    if (this.current.kind === 'identifier' && this.current.text === 'actor' && this.peek().kind === 'identifier') {
+      return this.parseStruct(attributes, modifiers, true)
+    }
+
+    // `indirect enum E { case node(E) }` - the keyword is a storage hint for a
+    // recursive case, and a tree-walking interpreter boxes everything anyway.
+    if (this.checkKeyword('indirect') && this.peek().text === 'enum') {
+      this.advance()
+      return this.parseEnum(attributes, modifiers)
+    }
+
     if (this.checkKeyword('enum')) return this.parseEnum(attributes, modifiers)
     if (this.checkKeyword('protocol')) return this.parseProtocol(attributes, modifiers)
     if (this.checkKeyword('extension')) return this.parseExtension(attributes, modifiers)
@@ -227,6 +271,16 @@ export class Parser {
     }
     if (this.checkKeyword('init')) return this.parseInit(attributes, modifiers)
     if (this.current.kind === 'macro') return this.parseMacro(attributes, modifiers)
+
+    // `infix operator **: MultiplicationPrecedence`. The declaration only assigns a
+    // precedence group, and the parser has one fixed precedence table, so there is
+    // nothing to record - but it has to parse, or the operator function below it is
+    // never reached.
+    if (this.checkKeyword('operator')) return this.parseOperatorDecl(start)
+
+    if (this.checkKeyword('typealias')) return this.parseTypealias(attributes, modifiers)
+    if (this.checkKeyword('subscript')) return this.parseSubscript(attributes, modifiers)
+    if (this.checkKeyword('deinit')) return this.parseDeinit(attributes, modifiers)
 
     const unsupportedFeature = UNSUPPORTED_DECLARATIONS[this.current.text]
     if (this.current.kind === 'keyword' && unsupportedFeature) {
@@ -260,8 +314,12 @@ export class Parser {
       // `@Environment(\.colorScheme)` names the value it wants in its argument, so
       // the arguments are parsed rather than skipped. A malformed argument list falls
       // back to brace matching so one bad attribute cannot eat the declaration.
+      // An attribute's arguments touch its name: `@available(iOS 16, *)`. A space
+      // means the parenthesis belongs to whatever follows, which is how
+      // `@escaping () -> Void` reads - and taking `()` as the attribute's arguments
+      // left the parser at `->` with no type to build.
       let args: Argument[] = []
-      if (this.check('(')) {
+      if (this.check('(') && !this.current.spaceBefore) {
         const before = this.index
         const parsed = this.tryParseArgumentList()
         if (parsed) args = parsed
@@ -283,10 +341,14 @@ export class Parser {
   private parseModifiers(): Modifier[] {
     const modifiers: Modifier[] = []
     while (
-      this.current.kind === 'keyword' &&
+      (this.current.kind === 'keyword' || this.current.kind === 'identifier') &&
       DECLARATION_MODIFIERS.has(this.current.text) &&
       // `class` is a modifier only in `class func`; standalone it is a declaration.
-      !(this.current.text === 'class' && this.peek().text !== 'func')
+      !(this.current.text === 'class' && this.peek().text !== 'func') &&
+      // `private var open = 1` declares a property called `open`. Reading it as a
+      // second access modifier leaves the parser at `=` with nothing to declare, so a
+      // modifier only counts when something that can follow one actually does.
+      continuesDeclaration(this.peek())
     ) {
       const token = this.advance()
       if (this.check('(')) this.skipBalanced('(', ')') // private(set)
@@ -424,6 +486,8 @@ export class Parser {
           type,
           defaultValue: null,
           isInout: false,
+          attributes: [],
+          isVariadic: false,
         })
         if (!this.match(',')) break
       }
@@ -631,7 +695,14 @@ export class Parser {
 
   private parseFunc(attributes: Attribute[], modifiers: Modifier[]): Decl {
     const start = this.advance() // 'func'
-    const { name, span: nameSpan } = this.expectIdentifier('a function name')
+
+    // `static func == (a: S, b: S) -> Bool` - an operator is a function whose name is
+    // punctuation. Insisting on an identifier here is what made a hand-written
+    // `Equatable` or `Comparable` conformance unparseable.
+    const operatorToken = this.current.kind === 'operator' ? this.advance() : null
+    const { name, span: nameSpan } = operatorToken
+      ? { name: operatorToken.text, span: operatorToken.span }
+      : this.expectIdentifier('a function name')
     const generics = this.parseGenericParameterList()
 
     const params = this.parseParameterList()
@@ -663,6 +734,93 @@ export class Parser {
     }
   }
 
+  private parseOperatorDecl(start: Token): Decl {
+    this.advance() // 'operator'
+    const token = this.current.kind === 'operator' ? this.advance() : this.current
+    // `: MultiplicationPrecedence`, or a `{ }` body in the older spelling.
+    if (this.match(':')) this.parseType()
+    else if (this.check('{')) this.skipBalanced('{', '}')
+
+    const fixity = start.text === 'prefix' || start.text === 'postfix' ? start.text : 'infix'
+    return {
+      kind: 'operatorDecl',
+      span: this.spanFrom(start),
+      attributes: [],
+      modifiers: [],
+      name: token.text,
+      nameSpan: token.span,
+      fixity,
+    }
+  }
+
+  private parseTypealias(attributes: Attribute[], modifiers: Modifier[]): Decl {
+    const start = this.advance() // 'typealias'
+    const { name, span: nameSpan } = this.expectIdentifier('a type name')
+    this.parseGenericParameterList()
+    this.expect('=', 'after a typealias name')
+    const target = this.parseType()
+    return { kind: 'typealiasDecl', span: this.spanFrom(start), attributes, modifiers, name, nameSpan, target }
+  }
+
+  /**
+   * `subscript(index: Int) -> Element { … }`.
+   *
+   * Parsed as a method called `subscript`, because that is exactly what it is: the
+   * only difference is the syntax at the call site, and the interpreter resolves
+   * `value[i]` by looking for a member of that name.
+   */
+  private parseSubscript(attributes: Attribute[], modifiers: Modifier[]): Decl {
+    const start = this.advance() // 'subscript'
+    const nameSpan = start.span
+    const generics = this.parseGenericParameterList()
+    const params = this.parseParameterList()
+    let returnType: TypeRef | null = null
+    if (this.match('->')) returnType = this.parseType()
+
+    const body = this.check('{') ? this.parseAccessorBody() : null
+
+    return {
+      kind: 'funcDecl',
+      span: this.spanFrom(start),
+      attributes,
+      modifiers,
+      name: 'subscript',
+      nameSpan,
+      generics,
+      params,
+      returnType,
+      body: body?.getter ?? null,
+      canThrow: false,
+      isAsync: false,
+    }
+  }
+
+  /**
+   * `deinit { … }`.
+   *
+   * Parsed and never run. A preview has no deterministic point at which an object
+   * dies, so calling it would be inventing a moment; leaving it unparsed stopped the
+   * file for a declaration that changes nothing on screen.
+   */
+  private parseDeinit(attributes: Attribute[], modifiers: Modifier[]): Decl {
+    const start = this.advance() // 'deinit'
+    const body = this.check('{') ? this.parseBlock() : null
+    return {
+      kind: 'funcDecl',
+      span: this.spanFrom(start),
+      attributes,
+      modifiers,
+      name: 'deinit',
+      nameSpan: start.span,
+      generics: [],
+      params: [],
+      returnType: null,
+      body,
+      canThrow: false,
+      isAsync: false,
+    }
+  }
+
   private parseInit(attributes: Attribute[], modifiers: Modifier[]): Decl {
     const start = this.advance() // 'init'
     if (this.check('?') || this.check('!')) this.advance() // failable init
@@ -678,6 +836,7 @@ export class Parser {
 
     while (!this.atEnd && !this.check(')')) {
       const start = this.current
+      const attributes = this.parseAttributes()
       let externalName: string | null = null
       let internalName = ''
 
@@ -697,10 +856,16 @@ export class Parser {
 
       let type: TypeRef | null = null
       let isInout = false
+      let isVariadic = false
       if (this.match(':')) {
         isInout = this.checkKeyword('inout')
         if (isInout) this.advance()
         type = this.parseType()
+        // `Int...` - the ellipsis belongs to the parameter, not to the type.
+        if (this.check('...')) {
+          this.advance()
+          isVariadic = true
+        }
       }
 
       let defaultValue: Expr | null = null
@@ -708,11 +873,13 @@ export class Parser {
 
       params.push({
         span: this.spanFrom(start),
+        attributes,
         externalName,
         internalName,
         type,
         defaultValue,
         isInout,
+        isVariadic,
       })
 
       if (!this.match(',')) break
@@ -725,13 +892,22 @@ export class Parser {
   private parseVar(attributes: Attribute[], modifiers: Modifier[]): Decl {
     const start = this.advance() // 'var' | 'let'
     const isLet = start.text === 'let'
-    const { name, span: nameSpan } = this.expectIdentifier('a variable name')
+
+    // `let (a, b) = pair`. The names are bound together from one tuple.
+    const destructured = this.check('(') ? this.parseNameList() : null
+    const { name, span: nameSpan } = destructured
+      ? { name: destructured[0]?.name ?? '', span: destructured[0]?.span ?? start.span }
+      : this.expectIdentifier('a variable name')
 
     let typeAnnotation: TypeRef | null = null
     if (this.match(':')) typeAnnotation = this.parseType()
 
     let initializer: Expr | null = null
-    if (this.match('=')) initializer = this.parseExpression(true)
+    // `var x = 1 { didSet { … } }` - the observers belong to the property, not to the
+    // initialiser, so the initialiser is parsed without letting it claim a trailing
+    // closure. Letting it was why the observer block was swallowed as `1 { … }` and
+    // reported as "cannot find 'didSet' in scope".
+    if (this.match('=')) initializer = this.parseExpression(!this.startsAccessorBlock())
 
     // A computed property: `var body: some View { … }`. Distinguished from a
     // trailing closure by the absence of an initialiser - `var x = Foo { }` is an
@@ -741,15 +917,18 @@ export class Parser {
     // they say a conformer must have the property, without saying how. Parsing them
     // as bodies would produce a getter that evaluates the identifier `get`.
     let accessor: Block | null = null
+    let setter: PropertySetter | null = null
+    let observers: PropertyObservers | null = null
     let requirement: 'get' | 'get set' | null = null
-    if (!initializer && this.check('{')) {
-      requirement = this.tryParseAccessorRequirement()
-      if (!requirement) accessor = this.parseBlock()
-    } else if (initializer && this.check('{') && !this.current.newlineBefore) {
 
-      // `var x = 1 { didSet { … } }` - property observers are out of scope.
-      this.unsupported(this.current.span, 'property observers (willSet/didSet)')
-      this.skipBalanced('{', '}')
+    if (this.check('{') && (!initializer || !this.current.newlineBefore)) {
+      requirement = initializer ? null : this.tryParseAccessorRequirement()
+      if (!requirement) {
+        const parsed = this.parseAccessorBody()
+        accessor = parsed.getter
+        setter = parsed.setter
+        observers = parsed.observers
+      }
     }
 
     return {
@@ -761,6 +940,9 @@ export class Parser {
       name,
       nameSpan,
       typeAnnotation,
+      setter,
+      observers,
+      destructured,
       initializer,
       accessor,
       requirement,
@@ -774,6 +956,84 @@ export class Parser {
    * property with explicit accessors - is left for `parseBlock`, so the index is
    * restored before returning null.
    */
+  /** Whether the block ahead opens with an accessor or observer keyword. */
+  private startsAccessorBlock(): boolean {
+    if (!this.check('{')) return false
+    const word = this.peek().text
+    return word === 'get' || word === 'set' || word === 'willSet' || word === 'didSet'
+  }
+
+  /**
+   * The body of a computed property, a subscript, or a stored property's observers.
+   *
+   * Four shapes share one pair of braces, and telling them apart is the whole job:
+   *
+   * ```swift
+   * var v: Int { n }                          // implicit getter
+   * var v: Int { get { n } set { n = newValue } }
+   * var n = 0 { didSet { … } }                // observers on stored storage
+   * subscript(i: Int) -> T { get { … } }
+   * ```
+   *
+   * The explicit forms used to be parsed as an ordinary block, which produced a
+   * getter whose first statement was the bare identifier `get` - and made a custom
+   * `EnvironmentValues` key, which must be written with get and set, impossible.
+   */
+  private parseAccessorBody(): AccessorBody {
+    if (!this.startsAccessorBlock()) {
+      return { getter: this.parseBlock(), setter: null, observers: null }
+    }
+
+    const open = this.advance() // '{'
+    let getter: Block | null = null
+    let setter: Block | null = null
+    let willSet: Block | null = null
+    let didSet: Block | null = null
+    let setterParameter: string | null = null
+    let observerParameter: string | null = null
+
+    while (!this.atEnd && !this.check('}')) {
+      const word = this.current.text
+      if (word !== 'get' && word !== 'set' && word !== 'willSet' && word !== 'didSet') break
+      this.advance()
+
+      // `set(value)` and `didSet(old)` rename the implicit `newValue` / `oldValue`.
+      let parameter: string | null = null
+      if (this.check('(')) {
+        this.advance()
+        if (this.current.kind === 'identifier') parameter = this.advance().text
+        this.expect(')', 'to close the accessor parameter')
+      }
+
+      const body = this.check('{') ? this.parseBlock() : null
+      if (!body) break
+
+      if (word === 'get') getter = body
+      else if (word === 'set') {
+        setter = body
+        setterParameter = parameter
+      } else if (word === 'willSet') {
+        willSet = body
+        observerParameter = parameter ?? observerParameter
+      } else {
+        didSet = body
+        observerParameter = parameter ?? observerParameter
+      }
+    }
+
+    this.expect('}', 'to close the accessor block')
+    void open
+
+    return {
+      getter,
+      setter: setter ? { body: setter, parameter: setterParameter ?? 'newValue' } : null,
+      observers:
+        willSet || didSet
+          ? { willSet, didSet, parameter: observerParameter ?? null }
+          : null,
+    }
+  }
+
   private tryParseAccessorRequirement(): 'get' | 'get set' | null {
     const before = this.index
     this.advance() // '{'
@@ -923,6 +1183,27 @@ export class Parser {
   private parseStatement(): Stmt {
     const start = this.current
 
+    // `outer: for … { break outer }`. The label names a loop to break out of; the
+    // subset has no nested-loop control beyond `break`, so the name is consumed and
+    // the loop parses as itself. Leaving it unparsed made an ordinary labelled loop a
+    // syntax error.
+    if (
+      this.current.kind === 'identifier' &&
+      this.peek().text === ':' &&
+      LABELLABLE_STATEMENTS.has(this.peek(2).text)
+    ) {
+      this.advance()
+      this.advance()
+      return this.parseStatement()
+    }
+
+    // `async let value = await fetch()`. The preview runs everything synchronously,
+    // so it is an ordinary `let` whose initialiser has already finished.
+    if (this.checkKeyword('async') && this.peek().text === 'let') {
+      this.advance()
+      return this.parseStatement()
+    }
+
     if (this.checkKeyword('if')) return this.parseIf()
     if (this.checkKeyword('guard')) return this.parseGuard()
     if (this.checkKeyword('switch')) return this.parseSwitch()
@@ -933,14 +1214,26 @@ export class Parser {
 
     if (this.checkKeyword('break')) {
       const token = this.advance()
+      // `break outer` - the label is consumed; see the labelled-statement note above.
+      if (this.current.kind === 'identifier' && !this.current.newlineBefore) this.advance()
       return { kind: 'breakStmt', span: token.span }
     }
     if (this.checkKeyword('continue')) {
       const token = this.advance()
+      if (this.current.kind === 'identifier' && !this.current.newlineBefore) this.advance()
       return { kind: 'continueStmt', span: token.span }
     }
 
     if (this.checkKeyword('do')) return this.parseDoCatch()
+
+    if (this.checkKeyword('defer')) {
+      this.advance()
+      return { kind: 'deferStmt', span: this.spanFrom(start), body: this.parseBlock() }
+    }
+    if (this.checkKeyword('fallthrough')) {
+      const token = this.advance()
+      return { kind: 'fallthroughStmt', span: token.span }
+    }
 
     if (this.checkKeyword('throw')) {
       this.advance()
@@ -1177,6 +1470,22 @@ export class Parser {
       return { kind: 'binding', name, isLet, span: this.spanFrom(start) }
     }
 
+    // `case (1, _)` - a tuple pattern, matched element by element. Parsing it as an
+    // expression instead made the `_` an identifier lookup, which is why an ordinary
+    // two-value switch reported "cannot find '_' in scope".
+    if (this.check('(')) {
+      this.advance()
+      const elements: Pattern[] = []
+      while (!this.atEnd && !this.check(')')) {
+        elements.push(this.parsePattern())
+        if (!this.match(',')) break
+      }
+      this.expect(')', 'to close a tuple pattern')
+      return elements.length === 1
+        ? elements[0]!
+        : { kind: 'tuplePattern', elements, span: this.spanFrom(start) }
+    }
+
     // `.home` or `Tab.home`, with or without a payload.
     if (this.check('.')) return this.parseEnumCasePattern(start, null, false)
 
@@ -1232,6 +1541,19 @@ export class Parser {
     return { kind: 'enumCase', typeName, caseName, bindings, span: this.spanFrom(start) }
   }
 
+  /** `(a, b)` in a binding position: a list of names, `_` included. */
+  private parseNameList(): { name: string; span: SourceSpan }[] {
+    const names: { name: string; span: SourceSpan }[] = []
+    this.advance() // '('
+    while (!this.atEnd && !this.check(')')) {
+      const token = this.advance()
+      names.push({ name: token.text, span: token.span })
+      if (!this.match(',')) break
+    }
+    this.expect(')', 'to close the name list')
+    return names
+  }
+
   private parseForIn(): Stmt {
     const start = this.advance() // 'for'
 
@@ -1239,8 +1561,16 @@ export class Parser {
       this.unsupported(this.current.span, 'for-case pattern matching')
     }
 
-    const variable = this.current.kind === 'identifier' ? this.advance() : null
-    if (!variable) {
+    // `for (key, value) in dictionary` and `for (i, item) in xs.enumerated()` are
+    // how a tuple sequence is read, and they were both syntax errors - which is what
+    // made dictionary iteration unavailable altogether.
+    const destructured = this.check('(') ? this.parseNameList() : null
+    const variable = destructured
+      ? null
+      : this.current.kind === 'identifier' || this.check('_')
+        ? this.advance()
+        : null
+    if (!variable && !destructured) {
       this.error(this.current.span, 'expected_token', 'Expected a loop variable name.')
     }
 
@@ -1261,8 +1591,9 @@ export class Parser {
     return {
       kind: 'forInStmt',
       span: this.spanFrom(start),
-      variable: variable?.text ?? '',
-      variableSpan: variable?.span ?? start.span,
+      variable: variable?.text ?? destructured?.[0]?.name ?? '',
+      variableSpan: variable?.span ?? destructured?.[0]?.span ?? start.span,
+      destructured,
       sequence,
       body,
       where,
@@ -1392,12 +1723,18 @@ export class Parser {
       if (token.kind === 'keyword' && (token.text === 'is' || token.text === 'as')) {
         if (7 < minPrecedence) break
         this.advance()
-        if (this.check('?') || this.check('!')) this.advance()
+
+        // The three `as` forms differ only in what a failed cast does - nil, a trap,
+        // or nothing because it cannot fail - so the mark has to survive into the
+        // operator rather than being consumed and forgotten.
+        let operator = token.text
+        if (this.check('?') || this.check('!')) operator += this.advance().text
+
         const type = this.parseType()
         left = {
           kind: 'binary',
           span: this.spanFrom(start),
-          operator: token.text,
+          operator,
           left,
           right: { kind: 'identifier', span: type.span, name: typeName(type) },
         }
@@ -1526,24 +1863,66 @@ export class Parser {
         continue
       }
 
-      // Trailing closure. Suppressed in condition position, where `{` opens a body.
-      if (allowTrailing && this.check('{')) {
+      // Trailing closure. Suppressed in condition position, where `{` opens a body,
+      // and where the block is a property's accessors - `var n = 0 { didSet { … } }`
+      // reads as a call on `0` otherwise, which is what turned the observer into
+      // "cannot find 'didSet' in scope".
+      if (allowTrailing && this.check('{') && !this.startsAccessorBlock()) {
         const closure = this.parseClosure()
-        expr =
+        const call =
           expr.kind === 'call' && expr.trailingClosure === null
             ? { ...expr, span: this.spanFrom(start), trailingClosure: closure }
-            : {
+            : ({
                 kind: 'call',
                 span: this.spanFrom(start),
                 callee: expr,
                 args: [],
                 trailingClosure: closure,
-              }
+              } as const)
+
+        // Swift 5.3's multiple trailing closures: every closure after the first
+        // carries its own label. They are ordinary labelled arguments - the syntax is
+        // the only thing that differs - so they join `args`, which is where the rest
+        // of the toolchain already looks for `label:` and `content:`.
+        //
+        // Without this one gap, `Button { … } label: { … }`, `Section { … } header:
+        // { … } footer: { … }`, `Menu`, `Label`, `AsyncImage`, `Stepper`, `.alert`
+        // and `.confirmationDialog` are all syntax errors.
+        const labelled = [...call.args]
+        while (this.isTrailingClosureLabel()) {
+          const name = this.advance()
+          this.advance() // ':'
+          const value = this.parseClosure()
+          labelled.push({
+            label: name.text,
+            labelSpan: name.span,
+            value,
+            span: { file: name.span.file, start: name.span.start, end: value.span.end },
+          })
+        }
+
+        expr = { ...call, span: this.spanFrom(start), args: labelled }
         continue
       }
 
       return expr
     }
+  }
+
+  /**
+   * Whether the next three tokens are `label: {` - another trailing closure.
+   *
+   * The label has to be on the same line as what came before, or a statement that
+   * happens to start with `name:` - a `switch` case body, a loop label - would be
+   * swallowed into the call above it.
+   */
+  private isTrailingClosureLabel(): boolean {
+    return (
+      (this.current.kind === 'identifier' || this.current.kind === 'keyword') &&
+      !this.current.newlineBefore &&
+      this.peek().text === ':' &&
+      this.peek(2).text === '{'
+    )
   }
 
   /** Member names may be keywords (`.self`, `.default`, `.init`). */
@@ -1648,6 +2027,12 @@ export class Parser {
     return args
   }
 
+  /** An operator standing in for a function: the `+` of `reduce(0, +)`. */
+  private operatorReference(): Expr {
+    const token = this.advance()
+    return { kind: 'identifier', span: token.span, name: token.text }
+  }
+
   private parseArgumentList(open: string, close: string): Argument[] {
     const args: Argument[] = []
     this.expect(open, 'to begin an argument list')
@@ -1669,7 +2054,15 @@ export class Parser {
         this.advance() // ':'
       }
 
-      const value = this.parseExpression(true)
+      // `reduce(0, +)` and `sorted(by: >)` - an operator used as a function value.
+      // It is only an operator where two operands surround it; standing alone in an
+      // argument it is a name like any other, and treating it as one is what makes
+      // the shortest spelling of the commonest reduction parse.
+      const value =
+        this.current.kind === 'operator' && (this.peek().text === ',' || this.peek().text === close)
+          ? this.operatorReference()
+          : this.parseExpression(true)
+
       args.push({ label, labelSpan, value, span: this.spanFrom(start) })
 
       if (!this.match(',')) break
@@ -1802,28 +2195,32 @@ export class Parser {
 
     if (this.check(')')) {
       this.advance()
-      return { kind: 'tuple', span: this.spanFrom(start), elements: [] }
+      return { kind: 'tuple', span: this.spanFrom(start), elements: [], labels: [] }
     }
 
     const elements: Expr[] = []
+    const labels: (string | null)[] = []
     do {
       // Tuple element labels: `(x: 1, y: 2)`.
+      let label: string | null = null
       if (
         (this.current.kind === 'identifier' || this.current.kind === 'keyword') &&
         this.peek().text === ':' &&
         this.peek().kind === 'punctuation'
       ) {
-        this.advance()
+        label = this.advance().text
         this.advance()
       }
+      labels.push(label)
       elements.push(this.parseExpression(allowTrailing))
     } while (this.match(','))
 
     this.expect(')', 'to close a parenthesised expression')
 
-    return elements.length === 1
+    // One element and no label is a parenthesised expression, not a tuple.
+    return elements.length === 1 && labels[0] === null
       ? elements[0]!
-      : { kind: 'tuple', span: this.spanFrom(start), elements }
+      : { kind: 'tuple', span: this.spanFrom(start), elements, labels }
   }
 
   private parseCollectionLiteral(): Expr {
@@ -1953,6 +2350,11 @@ export class Parser {
 
   private parseType(): TypeRef {
     const start = this.current
+    // `@escaping () -> Void`, `@Sendable () -> Void`. The attribute belongs to the
+    // type and tells the interpreter nothing - closures are already reference values
+    // that outlive the call - but it appears in every stored-closure parameter, so it
+    // has to get past here.
+    this.parseAttributes()
     let type = this.parseBaseType()
 
     for (;;) {

@@ -287,6 +287,22 @@ function arrayMethod(
   invoke: Invoke,
   trap: Trap,
 ): SwiftValue | undefined {
+  /**
+   * The predicate of a `(where:)` overload.
+   *
+   * A trailing closure carries no label, and `items.contains { $0.isDone }` is how
+   * the overload is almost always written - so looking only for `where` misses it,
+   * and the closure then falls through to the value branch where it compares
+   * unequal to every element. That returns a confident wrong answer rather than an
+   * error, which is the one failure mode worth going out of the way to prevent.
+   */
+  const predicateArg = (label: string): ClosureValue | null => {
+    const named = args.find((a) => a.label === label)?.value
+    if (named?.kind === 'closure') return named
+    const last = args[args.length - 1]
+    return last && !last.label && last.value.kind === 'closure' ? last.value : null
+  }
+
   switch (member) {
     // `move(fromOffsets:toOffset:)` - what `.onMove` calls.
     case 'move': {
@@ -310,6 +326,17 @@ function arrayMethod(
     }
 
     case 'append': {
+      // `append(contentsOf:)` concatenates a sequence; `append(_:)` adds one element.
+      // Treating the first as the second produces an array with an array inside it,
+      // which is wrong quietly - every later index is off by however many were meant
+      // to be spliced in.
+      const contents = labelled('contentsOf')
+      if (contents) {
+        if (contents.kind !== 'array') trap("'append(contentsOf:)' expects a sequence")
+        target.elements.push(...contents.elements.map(copyValue))
+        return VOID
+      }
+
       const value = arg(0)
       if (!value) return undefined
       target.elements.push(copyValue(value))
@@ -317,8 +344,18 @@ function arrayMethod(
     }
     case 'insert': {
       const value = arg(0)
+      if (!value) return undefined
+
+      // `Set.insert(_:)` has no position and refuses a duplicate, returning whether
+      // it took. `Array.insert(_:at:)` always takes and returns nothing.
       const at = labelled('at')
-      if (!value || !at) return undefined
+      if (!at) {
+        if (!target.unique) return undefined
+        const present = target.elements.some((e) => valuesEqual(e, value))
+        if (!present) target.elements.push(copyValue(value))
+        return bool(!present)
+      }
+
       const index = numericValue(at)
       if (index < 0 || index > target.elements.length) trap('Index out of range')
       target.elements.splice(index, 0, copyValue(value))
@@ -342,22 +379,39 @@ function arrayMethod(
       if (index < 0 || index >= target.elements.length) trap('Index out of range')
       return target.elements.splice(index, 1)[0] ?? NIL
     }
-    case 'removeAll':
+    case 'removeAll': {
+      // `removeAll(where:)` keeps everything the predicate rejects. Ignoring the
+      // predicate and truncating is the most destructive thing in the library: the
+      // call looks like it worked and the data is gone.
+      const predicate = predicateArg('where')
+      if (predicate) {
+        const kept = target.elements.filter((e) => !truthyOf(invoke(predicate, [e])))
+        target.elements.length = 0
+        target.elements.push(...kept)
+        return VOID
+      }
+
       target.elements.length = 0
       return VOID
+    }
     case 'removeLast':
       if (target.elements.length === 0) trap("Can't remove last element from an empty collection")
       return target.elements.pop() ?? NIL
     case 'contains': {
       // `contains(where:)` takes a predicate; `contains(_:)` takes a value.
-      const predicate = labelled('where')
-      if (predicate?.kind === 'closure') {
-        return bool(target.elements.some((e) => truthyOf(invoke(predicate, [e]))))
-      }
+      const predicate = predicateArg('where')
+      if (predicate) return bool(target.elements.some((e) => truthyOf(invoke(predicate, [e]))))
+
       const value = arg(0)
       return value ? bool(target.elements.some((e) => valuesEqual(e, value))) : undefined
     }
     case 'firstIndex': {
+      const predicate = predicateArg('where')
+      if (predicate) {
+        const found = target.elements.findIndex((e) => truthyOf(invoke(predicate, [e])))
+        return found >= 0 ? int(found) : NIL
+      }
+
       const of = labelled('of') ?? arg(0)
       if (!of) return undefined
       const index = target.elements.findIndex((e) => valuesEqual(e, of))
@@ -396,6 +450,21 @@ function arrayMethod(
       return array([...target.elements].reverse().map(copyValue))
     case 'joined': {
       const separator = labelled('separator')
+
+      // `joined` on a collection *of collections* flattens and stays a collection;
+      // only on strings does it produce a string. Stringifying both means
+      // `[[1], [2]].joined().count` answers 6 - the character count of "[1][2]" -
+      // where Swift answers 2.
+      if (target.elements.length > 0 && target.elements.every((e) => e.kind === 'array')) {
+        const glue = separator?.kind === 'array' ? separator.elements : []
+        const flattened: SwiftValue[] = []
+        for (const [i, element] of target.elements.entries()) {
+          if (i > 0) flattened.push(...glue.map(copyValue))
+          flattened.push(...(element as Extract<SwiftValue, { kind: 'array' }>).elements.map(copyValue))
+        }
+        return array(flattened)
+      }
+
       const glue = separator?.kind === 'string' ? separator.value : ''
       return str(target.elements.map((e) => describe(e, false)).join(glue))
     }

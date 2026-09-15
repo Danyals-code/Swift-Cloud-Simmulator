@@ -98,6 +98,8 @@ export type Decl =
   | VarDecl
   | InitDecl
   | MacroDecl
+  | TypealiasDecl
+  | OperatorDecl
   | UnsupportedDecl
   | ErrorDecl
 
@@ -109,6 +111,34 @@ export interface DeclBase extends NodeBase {
 export interface ImportDecl extends NodeBase {
   readonly kind: 'importDecl'
   readonly module: string
+}
+
+/**
+ * `typealias Celsius = Double`.
+ *
+ * Carried as a name and the type it stands for. The interpreter resolves the alias to
+ * its target wherever a type is named, which is all a preview needs - there are no
+ * generic aliases in the subset to substitute into.
+ */
+export interface TypealiasDecl extends DeclBase {
+  readonly kind: 'typealiasDecl'
+  readonly name: string
+  readonly nameSpan: SourceSpan
+  readonly target: TypeRef
+}
+
+/**
+ * `infix operator **: MultiplicationPrecedence`.
+ *
+ * Parsed and then deliberately inert: the declaration assigns a precedence group, and
+ * the parser has one fixed precedence table. What matters is that it no longer stops
+ * the file, so the `func **` beneath it is reached.
+ */
+export interface OperatorDecl extends DeclBase {
+  readonly kind: 'operatorDecl'
+  readonly name: string
+  readonly nameSpan: SourceSpan
+  readonly fixity: 'prefix' | 'infix' | 'postfix'
 }
 
 /**
@@ -242,6 +272,32 @@ export interface InitDecl extends DeclBase {
   readonly body: Block | null
 }
 
+/** `set { … }`, and the name it gives the incoming value. */
+export interface PropertySetter {
+  readonly body: Block
+  /** `newValue`, unless the source wrote `set(other)`. */
+  readonly parameter: string
+}
+
+/**
+ * `willSet` and `didSet` on a stored property.
+ *
+ * Both are optional; at least one is present whenever this exists. The parameter is
+ * whatever the source named it, or null for Swift's implicit `newValue` / `oldValue`.
+ */
+export interface PropertyObservers {
+  readonly willSet: Block | null
+  readonly didSet: Block | null
+  readonly parameter: string | null
+}
+
+/** What one pair of braces after a property or subscript turned out to hold. */
+export interface AccessorBody {
+  readonly getter: Block | null
+  readonly setter: PropertySetter | null
+  readonly observers: PropertyObservers | null
+}
+
 export interface VarDecl extends DeclBase {
   readonly kind: 'varDecl'
   readonly isLet: boolean
@@ -251,6 +307,18 @@ export interface VarDecl extends DeclBase {
   readonly initializer: Expr | null
   /** Present for computed properties: `var body: some View { … }`. */
   readonly accessor: Block | null
+  /** Present when the property was written with an explicit `set { … }`. */
+  readonly setter: PropertySetter | null
+  /** Present when the stored property carries `willSet` or `didSet`. */
+  readonly observers: PropertyObservers | null
+  /**
+   * `let (quotient, remainder) = divide(7, 2)` - the names the tuple spreads into.
+   *
+   * Null for the ordinary single-name form, in which case `name` is the binding.
+   * Present, `name` holds the first of them so that anything reading it alone still
+   * has something meaningful.
+   */
+  readonly destructured: readonly { readonly name: string; readonly span: SourceSpan }[] | null
   /**
    * `{ get }` or `{ get set }` - a protocol's property requirement.
    *
@@ -336,6 +404,17 @@ export interface Param extends NodeBase {
   readonly defaultValue: Expr | null
   /** `inout`: the argument is written back to the caller's storage. */
   readonly isInout: boolean
+  /**
+   * `@ViewBuilder`, `@escaping` and friends, written on the parameter itself.
+   *
+   * Carried rather than acted on: the interpreter builds views from whatever a
+   * closure returns regardless, so the attribute changes nothing at runtime. It has
+   * to *parse*, though - `init(@ViewBuilder content: …)` is how every custom
+   * container view is declared, and rejecting it made them unwritable.
+   */
+  readonly attributes: readonly Attribute[]
+  /** `Int...` - the call site's remaining arguments arrive as one array. */
+  readonly isVariadic: boolean
 }
 
 // -------------------------------------------------------------- statements
@@ -354,6 +433,8 @@ export type Stmt =
   | BreakStmt
   | ContinueStmt
   | ReturnStmt
+  | DeferStmt
+  | FallthroughStmt
   | UnsupportedStmt
   | ErrorStmt
 
@@ -446,6 +527,8 @@ export type Pattern =
     }
   /** `case 1`, `case "a"` - matched by equality. */
   | { readonly kind: 'value'; readonly value: Expr; readonly span: SourceSpan }
+  /** `case (1, _)` - each element matched by its own pattern. */
+  | { readonly kind: 'tuplePattern'; readonly elements: readonly Pattern[]; readonly span: SourceSpan }
   /** `case 1...5` */
   | { readonly kind: 'range'; readonly value: Expr; readonly span: SourceSpan }
   /** `case let x` - always matches, binding the subject. */
@@ -483,10 +566,35 @@ export interface ForInStmt extends NodeBase {
   readonly kind: 'forInStmt'
   readonly variable: string
   readonly variableSpan: SourceSpan
+  /**
+   * `for (key, value) in dictionary` - the names a tuple element goes into.
+   *
+   * Null for the ordinary single-name form. Present, this is what the loop binds and
+   * `variable` holds the first name only, so anything reading `variable` alone still
+   * sees something sensible.
+   */
+  readonly destructured: readonly { readonly name: string; readonly span: SourceSpan }[] | null
   readonly sequence: Expr
   readonly body: Block
   /** `for x in xs where x.isReady` */
   readonly where: Expr | null
+}
+
+/**
+ * `defer { … }` - runs when the enclosing scope exits, however it exits.
+ *
+ * Registered rather than run where it is written, which is the whole point: a
+ * `defer` above a `return` still runs, and it runs *after* the return value has been
+ * computed. That ordering is the reason it exists.
+ */
+export interface DeferStmt extends NodeBase {
+  readonly kind: 'deferStmt'
+  readonly body: Block
+}
+
+/** `fallthrough` - continue into the next `switch` case's body. */
+export interface FallthroughStmt extends NodeBase {
+  readonly kind: 'fallthroughStmt'
 }
 
 export interface ReturnStmt extends NodeBase {
@@ -684,6 +792,13 @@ export interface TernaryExpr extends NodeBase {
 export interface TupleExpr extends NodeBase {
   readonly kind: 'tuple'
   readonly elements: readonly Expr[]
+  /**
+   * `(x: 1, y: 2)` - one entry per element, null where none was written.
+   *
+   * Kept because a labelled tuple is reached by name: `point.x` is the whole reason
+   * to write one, and discarding the labels left `.x` with nothing to resolve.
+   */
+  readonly labels: readonly (string | null)[]
 }
 
 export interface ForceUnwrapExpr extends NodeBase {

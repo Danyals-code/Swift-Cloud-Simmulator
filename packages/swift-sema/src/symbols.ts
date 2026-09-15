@@ -509,13 +509,13 @@ function viewItems(): SymbolInfo[] {
   for (const name of SUPPORTED_VIEWS) {
     out.push({ name, kind: 'view', detail: 'View', insert: `${name}(` })
   }
-  for (const [name, phase] of UNIMPLEMENTED_VIEWS) {
+  for (const name of UNIMPLEMENTED_VIEWS) {
     out.push({
       name,
       kind: 'view',
       detail: 'View',
       insert: `${name}(`,
-      doc: `Not drawn by the preview yet (Phase ${phase}). Exports unchanged.`,
+      doc: 'Real SwiftUI the preview does not draw. Exports unchanged.',
     })
   }
   return out
@@ -526,13 +526,13 @@ function modifierItems(): SymbolInfo[] {
   for (const name of SUPPORTED_MODIFIERS) {
     out.push({ name, kind: 'modifier', detail: 'modifier', insert: `${name}(` })
   }
-  for (const [name, phase] of UNIMPLEMENTED_MODIFIERS) {
+  for (const name of UNIMPLEMENTED_MODIFIERS) {
     out.push({
       name,
       kind: 'modifier',
       detail: 'modifier',
       insert: `${name}(`,
-      doc: `Not applied by the preview yet (Phase ${phase}). Exports unchanged.`,
+      doc: 'Recognised but not applied by the preview. Exports unchanged.',
     })
   }
   return out
@@ -675,23 +675,21 @@ export function hoverAt(
   if (!name) return null
 
   if (SUPPORTED_VIEWS.has(name)) return { name, kind: 'view', detail: 'View' }
-  const viewPhase = UNIMPLEMENTED_VIEWS.get(name)
-  if (viewPhase !== undefined) {
+  if (UNIMPLEMENTED_VIEWS.has(name)) {
     return {
       name,
       kind: 'view',
       detail: 'View',
-      doc: `Not drawn by the preview yet (Phase ${viewPhase}). Exports to Xcode unchanged.`,
+      doc: 'Real SwiftUI the preview does not draw. Exports to Xcode unchanged.',
     }
   }
   if (SUPPORTED_MODIFIERS.has(name)) return { name, kind: 'modifier', detail: 'modifier' }
-  const modifierPhase = UNIMPLEMENTED_MODIFIERS.get(name)
-  if (modifierPhase !== undefined) {
+  if (UNIMPLEMENTED_MODIFIERS.has(name)) {
     return {
       name,
       kind: 'modifier',
       detail: 'modifier',
-      doc: `Not applied by the preview yet (Phase ${modifierPhase}). Exports to Xcode unchanged.`,
+      doc: 'Recognised but not applied by the preview. Exports to Xcode unchanged.',
     }
   }
   if (KNOWN_TYPES.has(name)) return { name, kind: 'type', detail: 'type' }
@@ -749,6 +747,258 @@ export function referencesOf(
 export function referencesAt(text: string, offset: number, file: string): SourceSpan[] {
   const name = nameAt(text, offset)
   return name ? referencesOf([{ id: file, text }], name) : []
+}
+
+// ------------------------------------------------------------------- rename
+
+/** The region a rename may touch, and the nested regions where the name means something else. */
+interface RenameScope {
+  /** Null for "the whole project" - a type, a global, a uniquely named member. */
+  readonly within: SourceSpan | null
+  /** Sub-scopes that redeclare the name, so the same text is a different symbol there. */
+  readonly shadows: readonly SourceSpan[]
+  /** True when the declaration is wrapped, so `$name` refers to it too. */
+  readonly hasProjection: boolean
+}
+
+/** Every scope-bearing declaration containing `offset`, outermost first. */
+function enclosingDeclarations(
+  files: readonly SourceFileNode[],
+  file: string,
+  offset: number,
+): Decl[] {
+  const chain: Decl[] = []
+
+  const walk = (decls: readonly Decl[]): void => {
+    for (const decl of decls) {
+      if (!contains(decl.span, file, offset)) continue
+      chain.push(decl)
+      if (
+        decl.kind === 'structDecl' ||
+        decl.kind === 'enumDecl' ||
+        decl.kind === 'protocolDecl' ||
+        decl.kind === 'extensionDecl'
+      ) {
+        walk(decl.members)
+      }
+      return
+    }
+  }
+
+  for (const source of files) {
+    if (source.file === file) walk(source.declarations)
+  }
+  return chain
+}
+
+/** The names a function, initialiser or accessor body introduces. Bodies, not blocks. */
+function bodyDeclares(decl: Decl, name: string): boolean {
+  if (decl.kind === 'funcDecl' || decl.kind === 'initDecl') {
+    if (decl.params.some((p) => p.internalName === name || p.externalName === name)) return true
+    return decl.body ? blockDeclares(decl.body.statements, name) : false
+  }
+  if (decl.kind === 'varDecl' && decl.accessor) return blockDeclares(decl.accessor.statements, name)
+  return false
+}
+
+/**
+ * Whether a name is bound anywhere inside a body.
+ *
+ * Deliberately coarse - the whole body, not the sub-block the binding sits in. Swift
+ * scopes a `let` to the block that holds it, but a rename that treats the body as one
+ * scope can only ever rename too much *within a single function the user is looking
+ * at*, which is recoverable. Splitting hairs here risks the opposite error.
+ */
+function blockDeclares(statements: readonly Stmt[], name: string): boolean {
+  for (const statement of statements) {
+    switch (statement.kind) {
+      case 'declStmt':
+        if (statement.declaration.kind === 'varDecl' && statement.declaration.name === name) {
+          return true
+        }
+        if (statement.declaration.kind === 'funcDecl' && statement.declaration.name === name) {
+          return true
+        }
+        break
+      case 'ifStmt':
+        if (statement.conditions.some((c) => 'name' in c && c.name === name)) return true
+        if (blockDeclares(statement.then.statements, name)) return true
+        if (statement.else) {
+          const otherwise = statement.else.kind === 'block' ? statement.else.statements : [statement.else]
+          if (blockDeclares(otherwise, name)) return true
+        }
+        break
+      case 'guardStmt':
+        if (statement.conditions.some((c) => 'name' in c && c.name === name)) return true
+        break
+      case 'whileStmt':
+        if (statement.conditions.some((c) => 'name' in c && c.name === name)) return true
+        if (blockDeclares(statement.body.statements, name)) return true
+        break
+      case 'repeatStmt':
+        if (blockDeclares(statement.body.statements, name)) return true
+        break
+      case 'forInStmt':
+        if (statement.variable === name) return true
+        if (blockDeclares(statement.body.statements, name)) return true
+        break
+      case 'switchStmt':
+        for (const clause of statement.cases) {
+          if (blockDeclares(clause.body.statements, name)) return true
+        }
+        break
+      case 'doCatchStmt':
+        if (blockDeclares(statement.body.statements, name)) return true
+        for (const clause of statement.catches) {
+          if (clause.binding === name) return true
+          if (blockDeclares(clause.body.statements, name)) return true
+        }
+        break
+      default:
+        break
+    }
+  }
+  return false
+}
+
+/** Every member name a type declares, across the whole project. */
+function typesDeclaringMember(files: readonly SourceFileNode[], name: string): string[] {
+  const owners: string[] = []
+
+  const consider = (decl: Decl): void => {
+    if (
+      decl.kind !== 'structDecl' &&
+      decl.kind !== 'enumDecl' &&
+      decl.kind !== 'protocolDecl' &&
+      decl.kind !== 'extensionDecl'
+    ) {
+      return
+    }
+    const declares = decl.members.some(
+      (m) =>
+        (m.kind === 'varDecl' && m.name === name) || (m.kind === 'funcDecl' && m.name === name),
+    )
+    if (declares && !owners.includes(decl.name)) owners.push(decl.name)
+  }
+
+  for (const file of files) for (const decl of file.declarations) consider(decl)
+  return owners
+}
+
+/**
+ * Where renaming the symbol at `offset` is safe.
+ *
+ * A textual project-wide sweep is wrong in two directions at once, and both were
+ * reachable in a few lines of ordinary code: it renamed unrelated locals that merely
+ * shared a name, and it renamed one type's member on every other type that happened
+ * to declare the same one. What follows is the smallest thing that is actually true -
+ * resolve the name to the declaration it binds to, and search only that declaration's
+ * own region.
+ */
+function renameScope(
+  files: readonly SourceFileNode[],
+  file: string,
+  offset: number,
+  name: string,
+): RenameScope {
+  const chain = enclosingDeclarations(files, file, offset)
+
+  // Innermost first: the nearest declaration that binds the name owns it.
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const decl = chain[i]!
+
+    if (bodyDeclares(decl, name)) {
+      // A local or a parameter. Its scope is this body, minus any nested body that
+      // binds the name again.
+      const shadows: SourceSpan[] = []
+      if (decl.kind === 'funcDecl' || decl.kind === 'initDecl' || decl.kind === 'varDecl') {
+        for (let j = i + 1; j < chain.length; j++) {
+          const inner = chain[j]!
+          if (inner !== decl && bodyDeclares(inner, name)) shadows.push(inner.span)
+        }
+      }
+      return { within: decl.span, shadows, hasProjection: false }
+    }
+
+    const isTypeLike =
+      decl.kind === 'structDecl' ||
+      decl.kind === 'enumDecl' ||
+      decl.kind === 'protocolDecl' ||
+      decl.kind === 'extensionDecl'
+
+    if (isTypeLike) {
+      const member = decl.members.find(
+        (m): m is VarDecl | FuncDecl =>
+          (m.kind === 'varDecl' && m.name === name) || (m.kind === 'funcDecl' && m.name === name),
+      )
+      if (!member) continue
+
+      // `@State private var draft` is also reachable as `$draft`, and a rename that
+      // leaves the projection behind produces a file that refers to a name which no
+      // longer exists - the exact failure a rename is supposed to prevent.
+      const hasProjection =
+        member.kind === 'varDecl' && member.attributes.some((a) => PROPERTY_WRAPPERS.has(a.name))
+
+      // A member name only one type declares can be followed anywhere. One that
+      // several declare cannot be told apart without type information, so the rename
+      // stays inside the type that declared this one.
+      const owners = typesDeclaringMember(files, name)
+      const within = owners.length > 1 ? decl.span : null
+
+      // Members are shadowed by locals of the same name inside the type's own methods.
+      const shadows: SourceSpan[] = []
+      for (const other of decl.members) {
+        if (other !== member && bodyDeclares(other, name)) shadows.push(other.span)
+      }
+
+      return { within, shadows, hasProjection }
+    }
+  }
+
+  // Nothing enclosing binds it: a type, a global function or a global variable, all
+  // of which are visible to the whole project.
+  return { within: null, shadows: [], hasProjection: false }
+}
+
+/**
+ * Every occurrence of the symbol at `offset`, scoped to where it actually means that.
+ *
+ * Returns the empty list when the caret is not on a name, which the caller reads as
+ * "nothing to rename".
+ */
+export function renameSpansAt(
+  parsed: readonly SourceFileNode[],
+  files: readonly { readonly id: string; readonly text: string }[],
+  fileId: string,
+  offset: number,
+): { readonly name: string; readonly spans: readonly SourceSpan[] } {
+  const text = files.find((f) => f.id === fileId)?.text ?? ''
+  const raw = nameAt(text, offset)
+  if (!raw) return { name: '', spans: [] }
+
+  // Renaming from `$draft` renames `draft`; the projection follows the property.
+  const name = raw.startsWith('$') ? raw.slice(1) : raw
+  if (!name) return { name: '', spans: [] }
+
+  const scope = renameScope(parsed, fileId, offset, name)
+  const inScope = (span: SourceSpan): boolean => {
+    if (scope.within && (span.file !== scope.within.file || span.start < scope.within.start || span.end > scope.within.end)) {
+      return false
+    }
+    return !scope.shadows.some(
+      (s) => s.file === span.file && span.start >= s.start && span.end <= s.end,
+    )
+  }
+
+  const spans = referencesOf(files, name).filter(inScope)
+  if (!scope.hasProjection) return { name, spans }
+
+  const projections = referencesOf(files, `$${name}`)
+    .filter(inScope)
+    // The caller replaces the span's text with the new name, so the `$` must stay put.
+    .map((span) => ({ ...span, start: span.start + 1 }))
+
+  return { name, spans: [...spans, ...projections].sort((a, b) => a.start - b.start) }
 }
 
 /** The whole identifier the caret sits in or beside. */

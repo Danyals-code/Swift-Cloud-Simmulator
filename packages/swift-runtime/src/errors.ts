@@ -108,6 +108,14 @@ export class BreakSignal {}
 
 export class ContinueSignal {}
 
+/**
+ * `fallthrough` - carry on into the next `switch` case's body.
+ *
+ * A signal rather than a flag because the statement can sit inside an `if` inside the
+ * case, and unwinding to the switch is exactly what has to happen from there.
+ */
+export class FallthroughSignal {}
+
 export const TRAP_MESSAGES = {
   forceUnwrapNil: 'Unexpectedly found nil while unwrapping an Optional value',
   indexOutOfRange: 'Index out of range',

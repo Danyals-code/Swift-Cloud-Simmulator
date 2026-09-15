@@ -281,7 +281,7 @@ function CoveragePanel() {
             <span className="min-w-0 flex-1 truncate text-xc-text">{entry.feature}</span>
             <span className="shrink-0 text-xc-text-3">{entry.kind}</span>
             <span className="w-16 shrink-0 text-right text-xc-text-3">
-              {entry.phase === null ? 'unplanned' : `phase ${entry.phase}`}
+              {entry.recognised ? 'known gap' : 'unrecognised'}
             </span>
           </li>
         ))}

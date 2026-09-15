@@ -8,6 +8,7 @@ import type {
   DoCatchStmt,
   EnumDecl,
   Expr,
+  ForInStmt,
   FuncDecl,
   InitDecl,
   Pattern,
@@ -30,6 +31,7 @@ import {
   BreakSignal,
   ContinueSignal,
   ExecutionBudgetExceeded,
+  FallthroughSignal,
   ReturnSignal,
   SwiftThrow,
   SwiftTrap,
@@ -48,6 +50,7 @@ import {
   describe,
   dictionaryKey,
   double,
+  formatString,
   graphemes,
   int,
   keyPath,
@@ -55,7 +58,10 @@ import {
   projection,
   str,
   truthy,
+  tuple,
+  tupleElement,
   typeNameOf,
+  uniqueArray,
   unwrapProjection,
   valuesEqual,
   VOID,
@@ -122,6 +128,10 @@ export class Interpreter {
   readonly globals = new Environment()
   readonly types = new Map<string, StructDecl>()
   readonly enums = new Map<string, EnumDecl>()
+  /** `typealias Num = Int` - the name each alias stands for. */
+  private readonly typeAliases = new Map<string, string>()
+  /** `defer` blocks awaiting the exit of each running body. See `runBody`. */
+  private readonly deferred: { block: Block; scope: Environment }[][] = []
   /**
    * Members merged across extensions, protocol defaults and superclasses.
    *
@@ -147,6 +157,9 @@ export class Interpreter {
       for (const decl of file.declarations) {
         if (decl.kind === 'structDecl') this.types.set(decl.name, decl)
         else if (decl.kind === 'enumDecl') this.enums.set(decl.name, decl)
+        else if (decl.kind === 'typealiasDecl') {
+          this.typeAliases.set(decl.name, namedTypeOf(decl.target) ?? decl.name)
+        }
         else if (decl.kind === 'funcDecl') {
           this.globals.define(
             decl.name,
@@ -162,7 +175,19 @@ export class Interpreter {
     for (const file of files) {
       for (const decl of file.declarations) {
         if (decl.kind !== 'varDecl') continue
-        const value = decl.initializer ? this.evaluate(decl.initializer, this.globals) : NIL
+        const value = decl.initializer
+          ? this.evaluateExpecting(decl.initializer, this.globals, namedTypeOf(decl.typeAnnotation))
+          : NIL
+
+        if (decl.destructured) {
+          for (const [index, binding] of decl.destructured.entries()) {
+            if (binding.name === '_') continue
+            const part = value.kind === 'tuple' ? value.elements[index] : undefined
+            this.globals.define(binding.name, copyValue(part ?? NIL), decl.isLet, binding.span)
+          }
+          continue
+        }
+
         this.globals.define(decl.name, copyValue(value), decl.isLet, decl.span)
       }
     }
@@ -443,6 +468,10 @@ export class Interpreter {
 
     this.frames.push({ name, span })
     this.returnTypes.push(expected)
+    // `defer` blocks registered by this body, innermost last. Run on the way out
+    // whatever the exit was - a return, a throw, or falling off the end - which is
+    // the only behaviour that makes `defer` worth writing.
+    this.deferred.push([])
     try {
       const only = body.statements.length === 1 ? body.statements[0] : undefined
       if (only?.kind === 'exprStmt') return this.evaluateExpecting(only.expression, env, expected)
@@ -453,6 +482,8 @@ export class Interpreter {
       if (error instanceof ReturnSignal) return error.value as SwiftValue
       throw error
     } finally {
+      const pending = this.deferred.pop() ?? []
+      for (const { block, scope } of pending.reverse()) this.executeBlock(block, scope)
       this.frames.pop()
       this.returnTypes.pop()
     }
@@ -535,7 +566,7 @@ export class Interpreter {
           const sequence = this.evaluate(statement.sequence, env)
           for (const element of this.iterate(sequence, statement.sequence.span)) {
             const inner = env.child()
-            inner.define(statement.variable, element, true, statement.variableSpan)
+            this.bindLoopVariable(statement, element, inner)
             if (statement.where && !truthy(this.evaluate(statement.where, inner))) continue
             this.collectBuilderValues(statement.body, inner, out)
           }
@@ -572,6 +603,7 @@ export class Interpreter {
       defaultValue: Expr | null
       type?: TypeRef | null
       isInout?: boolean
+      isVariadic?: boolean
       span: SourceSpan
     }[],
     args: readonly CallArgument[],
@@ -582,6 +614,14 @@ export class Interpreter {
     let positionalIndex = 0
 
     for (const param of params) {
+      // `func f(_ xs: Int...)` takes every remaining positional argument as one array.
+      if (param.isVariadic) {
+        const rest = positional.slice(positionalIndex).map((a) => copyValue(a.value))
+        positionalIndex = positional.length
+        env.define(param.internalName, array(rest), true, param.span ?? span)
+        continue
+      }
+
       const byLabel = args.find((a) => a.label !== null && a.label === (param.externalName ?? param.internalName))
       let value: SwiftValue | undefined = byLabel?.value
 
@@ -676,14 +716,22 @@ export class Interpreter {
       }
 
       case 'switchStmt': {
-        const matched = this.matchSwitch(statement, env)
-        if (matched) {
+        let matched = this.matchSwitch(statement, env)
+        while (matched) {
           try {
             this.executeBlock(matched.body, matched.scope)
           } catch (error) {
             // `break` inside a switch case leaves the switch, not an enclosing loop.
-            if (!(error instanceof BreakSignal)) throw error
+            if (error instanceof BreakSignal) return
+            // `fallthrough` runs the *next* case's body, without testing its pattern -
+            // which is why it continues the loop rather than re-matching.
+            if (error instanceof FallthroughSignal) {
+              matched = this.caseAfter(statement, matched.index, env)
+              continue
+            }
+            throw error
           }
+          return
         }
         return
       }
@@ -716,7 +764,7 @@ export class Interpreter {
         for (const element of this.iterate(sequence, statement.sequence.span)) {
           this.tick(statement.span)
           const inner = env.child()
-          inner.define(statement.variable, element, true, statement.variableSpan)
+          this.bindLoopVariable(statement, element, inner)
           if (statement.where && !truthy(this.evaluate(statement.where, inner))) continue
           if (this.runLoopBody(statement.body, inner)) return
         }
@@ -736,6 +784,15 @@ export class Interpreter {
             ? this.evaluateExpecting(statement.value, env, this.returnTypes[this.returnTypes.length - 1] ?? null)
             : VOID,
         )
+
+      case 'deferStmt': {
+        const pending = this.deferred[this.deferred.length - 1]
+        if (pending) pending.push({ block: statement.body, scope: env.child() })
+        return
+      }
+
+      case 'fallthroughStmt':
+        throw new FallthroughSignal()
 
       case 'unsupportedStmt':
         throw new UnsupportedAtRuntime(statement.feature, statement.span)
@@ -799,26 +856,42 @@ export class Interpreter {
   private matchSwitch(
     statement: SwitchStmt,
     env: Environment,
-  ): { body: Block; scope: Environment } | null {
+  ): { body: Block; scope: Environment; index: number } | null {
     const subject = this.evaluate(statement.subject, env)
 
-    for (const branch of statement.cases) {
+    for (const [index, branch] of statement.cases.entries()) {
       const scope = env.child()
 
       if (branch.isDefault) {
         if (branch.where && !truthy(this.evaluate(branch.where, scope))) continue
-        return { body: branch.body, scope }
+        return { body: branch.body, scope, index }
       }
 
       for (const pattern of branch.patterns) {
         const attempt = env.child()
         if (!this.matchPattern(pattern, subject, attempt)) continue
         if (branch.where && !truthy(this.evaluate(branch.where, attempt))) continue
-        return { body: branch.body, scope: attempt }
+        return { body: branch.body, scope: attempt, index }
       }
     }
 
     return null
+  }
+
+  /**
+   * The case after `index`, for `fallthrough`.
+   *
+   * Its pattern is deliberately not tested - that is what `fallthrough` means - so
+   * any names the pattern would have bound are not in scope, exactly as in Swift,
+   * which refuses a fallthrough into a case that binds.
+   */
+  private caseAfter(
+    statement: SwitchStmt,
+    index: number,
+    env: Environment,
+  ): { body: Block; scope: Environment; index: number } | null {
+    const next = statement.cases[index + 1]
+    return next ? { body: next.body, scope: env.child(), index: index + 1 } : null
   }
 
   /** Tests one pattern against a value, binding any names it introduces. */
@@ -833,6 +906,14 @@ export class Interpreter {
 
       case 'value':
         return valuesEqual(this.evaluate(pattern.value, scope), subject)
+
+      case 'tuplePattern': {
+        if (subject.kind !== 'tuple') return false
+        if (subject.elements.length !== pattern.elements.length) return false
+        return pattern.elements.every((element, index) =>
+          this.matchPattern(element, subject.elements[index]!, scope),
+        )
+      }
 
       case 'range': {
         const range = this.evaluate(pattern.value, scope)
@@ -1020,7 +1101,14 @@ export class Interpreter {
         return this.makeEnumCase(decl, expr.member, [], expr.span)
       }
     }
-    return this.coerceToEnum(this.evaluate(expr, env), expected)
+
+    const value = this.coerceToEnum(this.evaluate(expr, env), expected)
+
+    // `let tags: Set<String> = ["a", "a"]` - the literal is an array literal either
+    // way, so the annotation is the only thing that says the duplicates go.
+    if (expected === 'Set' && value.kind === 'array') return uniqueArray(value.elements)
+
+    return value
   }
 
   private executeDeclaration(decl: Decl, env: Environment): void {
@@ -1030,6 +1118,17 @@ export class Interpreter {
         const value = decl.initializer
           ? this.evaluateExpecting(decl.initializer, env, expected)
           : NIL
+
+        // `let (a, b) = pair` spreads one tuple across several names.
+        if (decl.destructured) {
+          for (const [index, binding] of decl.destructured.entries()) {
+            if (binding.name === '_') continue
+            const part = value.kind === 'tuple' ? value.elements[index] : undefined
+            env.define(binding.name, copyValue(part ?? NIL), decl.isLet, binding.span)
+          }
+          return
+        }
+
         env.define(decl.name, copyValue(value), decl.isLet, decl.nameSpan)
         return
       }
@@ -1056,6 +1155,28 @@ export class Interpreter {
     }
   }
 
+  /**
+   * Binds one iteration's element to the loop's variable, or variables.
+   *
+   * `for (key, value) in dictionary` spreads a tuple across names; the single-name
+   * form takes the whole element. A name of `_` is a deliberate discard and binds
+   * nothing.
+   */
+  private bindLoopVariable(statement: ForInStmt, element: SwiftValue, env: Environment): void {
+    if (!statement.destructured) {
+      if (statement.variable !== '_') {
+        env.define(statement.variable, element, true, statement.variableSpan)
+      }
+      return
+    }
+
+    for (const [index, binding] of statement.destructured.entries()) {
+      if (binding.name === '_') continue
+      const part = element.kind === 'tuple' ? element.elements[index] : undefined
+      env.define(binding.name, copyValue(part ?? NIL), true, binding.span)
+    }
+  }
+
   private *iterate(value: SwiftValue, span: SourceSpan): Generator<SwiftValue> {
     if (value.kind === 'range') {
       const end = value.closed ? value.upper : value.upper - 1
@@ -1073,9 +1194,13 @@ export class Interpreter {
       return
     }
     if (value.kind === 'dictionary') {
-      for (const [k, v] of value.entries) {
-        yield { kind: 'struct', typeName: 'Pair', fields: new Map([['key', str(k)], ['value', v]]) }
-      }
+      // `(key: , value: )` - a labelled tuple, which is what Swift yields. It reads
+      // as `$0.key` in a closure and destructures as `for (k, v) in`.
+      for (const [k, v] of value.entries) yield tuple([str(k), v], ['key', 'value'])
+      return
+    }
+    if (value.kind === 'tuple') {
+      for (const element of [...value.elements]) yield element
       return
     }
     this.trap(`Type '${typeNameOf(value)}' does not conform to 'Sequence'`, span)
@@ -1142,6 +1267,16 @@ export class Interpreter {
       case 'subscript': {
         const base = this.evaluate(expr.base, env)
         const index = expr.args[0] ? this.evaluate(expr.args[0].value, env) : NIL
+
+        // `counts[key, default: 0]` is not a second index - it is the value the
+        // lookup takes when the key is absent, and dropping it turns the whole
+        // expression into nil. Evaluated lazily, as Swift's autoclosure does.
+        const fallback = expr.args.find((a) => a.label === 'default')
+        if (fallback && base.kind === 'dictionary') {
+          const found = base.entries.get(dictionaryKey(index))
+          return found ?? this.evaluate(fallback.value, env)
+        }
+
         return this.subscriptGet(base, index, expr.span)
       }
 
@@ -1163,9 +1298,10 @@ export class Interpreter {
           : this.evaluate(expr.else, env)
 
       case 'tuple':
-        return expr.elements.length === 1 && expr.elements[0]
-          ? this.evaluate(expr.elements[0], env)
-          : array(expr.elements.map((e) => this.evaluate(e, env)))
+        return tuple(
+          expr.elements.map((e) => this.evaluate(e, env)),
+          expr.labels,
+        )
 
       case 'forceUnwrap': {
         const value = this.evaluate(expr.operand, env)
@@ -1225,6 +1361,28 @@ export class Interpreter {
     const binding = env.lookup(name)
     if (binding) return unwrapProjection(binding.value)
 
+    // `Self.shared` - the type the code is written in, as a value. Resolved from the
+    // receiver rather than from a declaration, because that is what `Self` means.
+    if (name === 'Self') {
+      const receiver = env.resolveSelf() ?? env.lookup('self')?.value
+      if (receiver) return { kind: 'type', name: typeNameOf(receiver) }
+      const owner = this.owners[this.owners.length - 1]
+      if (owner) return { kind: 'type', name: owner }
+    }
+
+    // `typealias Num = Int` - a name that stands for another one everywhere.
+    const aliased = this.typeAliases.get(name)
+    if (aliased) return this.evaluateIdentifier(aliased, span, env)
+
+    // `reduce(0, +)` - an operator passed as a function. It becomes the closure it
+    // is shorthand for, `{ $0 + $1 }`, which needs no new machinery: every caller
+    // that takes a closure already knows how to invoke one.
+    if (OPERATOR_NAME.test(name)) {
+      const overload = this.globals.lookup(name)?.value
+      if (overload?.kind === 'function') return overload
+      return operatorClosure(name, span, env)
+    }
+
     // `$count` is a property wrapper's *projection*: a read/write reference to the
     // storage behind `count`, which is what lets `.sheet(isPresented: $showing)`
     // dismiss itself and `Toggle(isOn: $flag)` write back. Projecting something that
@@ -1280,6 +1438,13 @@ export class Interpreter {
       const above = this.superclassOf(this.owners[this.owners.length - 1] ?? target.typeName)
       const value = above ? this.memberOfStruct(target, member, span, above) : undefined
       if (value !== undefined) return unwrapProjection(value)
+    }
+
+    // A tuple element, by position (`pair.0`) or by label (`point.x`).
+    if (target.kind === 'tuple') {
+      const element = tupleElement(target, member)
+      if (element !== undefined) return element
+      this.trap(`Tuple has no element '${member}'`, span)
     }
 
     // `Item.self` is a metatype. The slice only ever passes one along - to
@@ -1363,6 +1528,50 @@ export class Interpreter {
     return method ? { kind: 'function', decl: method, self: null, env: scope } : undefined
   }
 
+  /** The declaration of a computed property, when the member is one. */
+  private accessorsFor(target: SwiftValue, member: string): VarDecl | undefined {
+    return this.membersOf(typeNameOf(target)).find(
+      (m): m is VarDecl => m.kind === 'varDecl' && m.name === member && m.setter !== null,
+    )
+  }
+
+  /**
+   * An assignable location backed by a property's own `get` and `set`.
+   *
+   * The setter runs against the same instance the assignment named, so a struct's
+   * `set { n = newValue }` writes its own stored property and the change is visible
+   * to the caller - which is the whole difference between a computed property and a
+   * field that happens to share its name.
+   */
+  private accessorLValue(
+    target: StructValue,
+    member: string,
+    decl: VarDecl,
+    span: SourceSpan,
+  ): LValue {
+    return {
+      description: `${typeNameOf(target)}.${member}`,
+      mutable: true,
+      get: () => {
+        if (!decl.accessor) return target.fields.get(member) ?? NIL
+        const scope = this.globals.child(target)
+        return this.runBody(
+          `${typeNameOf(target)}.${member}`,
+          decl.accessor,
+          scope,
+          span,
+          namedTypeOf(decl.typeAnnotation),
+        )
+      },
+      set: (value) => {
+        if (!decl.setter) return
+        const scope = this.globals.child(target)
+        scope.define(decl.setter.parameter, value, true, span)
+        this.runBody(`${typeNameOf(target)}.${member}`, decl.setter.body, scope, span, null)
+      },
+    }
+  }
+
   private evaluateCall(
     callee: Expr,
     argExprs: readonly Argument[],
@@ -1370,6 +1579,13 @@ export class Interpreter {
     span: SourceSpan,
     env: Environment,
   ): SwiftValue {
+    // `typealias Num = Int` makes `Num(3)` a call to `Int`. Rewriting the callee is
+    // the whole of what the alias means - there is nothing else to substitute.
+    if (callee.kind === 'identifier' && this.typeAliases.has(callee.name) && !env.lookup(callee.name)) {
+      const target = this.typeAliases.get(callee.name)!
+      return this.evaluateCall({ ...callee, name: target }, argExprs, trailing, span, env)
+    }
+
     const args: CallArgument[] = argExprs.map((arg) => ({
       label: arg.label,
       value: this.evaluate(arg.value, env),
@@ -1601,6 +1817,24 @@ export class Interpreter {
         return double(this.requireNumber(first, span))
       }
       case 'String': {
+        // `String` has several initialisers and they read different arguments.
+        // Describing the first one and ignoring the labels answers `String(format:
+        // "%.2f", 1.5)` with the literal string `%.2f` - a confident wrong answer in
+        // the middle of the preview, which is worse than not supporting it at all.
+        const formatIndex = args.findIndex((a) => a.label === 'format')
+        const format = args[formatIndex]?.value
+        if (format?.kind === 'string') {
+          const values = args.slice(formatIndex + 1).map((a) => a.value)
+          return str(formatString(format.value, values))
+        }
+
+        const repeating = args.find((a) => a.label === 'repeating')?.value
+        if (repeating !== undefined) {
+          const count = args.find((a) => a.label === 'count')?.value
+          const times = count ? Math.max(0, Math.trunc(this.requireNumber(count, span))) : 0
+          return str(describe(repeating, false).repeat(times))
+        }
+
         const first = args[0]?.value
         return first ? str(describe(first, false)) : str('')
       }
@@ -1659,6 +1893,16 @@ export class Interpreter {
         const owner = this.tryResolveLValue(expr.base, env)
         const target = owner ? owner.get() : this.evaluate(expr.base, env)
         if (target.kind !== 'struct') return null
+
+        // A property written with an explicit `set { … }` is not storage: assigning
+        // to it runs the setter with `newValue` bound, and whatever that writes is
+        // the real change. Without this the assignment landed on a field of the same
+        // name that nothing reads.
+        const accessors = this.accessorsFor(target, expr.member)
+        if (accessors?.setter) {
+          return this.accessorLValue(target, expr.member, accessors, expr.span)
+        }
+
         return throughProjection(
           fieldLValue(target, expr.member, `${describe(target, true)}.${expr.member}`),
         )
@@ -1726,6 +1970,27 @@ export class Interpreter {
       if (i < 0 || i >= chars.length) this.trap(TRAP_MESSAGES.indexOutOfRange, span)
       return str(chars[i]!)
     }
+    if (base.kind === 'tuple') {
+      const i = this.requireNumber(index, span)
+      if (!Number.isInteger(i) || i < 0 || i >= base.elements.length) {
+        this.trap(TRAP_MESSAGES.indexOutOfRange, span)
+      }
+      return base.elements[i]!
+    }
+
+    // `subscript(index: Int) -> Element` declared on the user's own type. It is
+    // parsed as a method called `subscript`, so this is an ordinary call.
+    const declared = this.membersOf(typeNameOf(base)).find(
+      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === 'subscript' && m.body !== null,
+    )
+    if (declared && base.kind === 'struct') {
+      return this.callFunction(
+        { kind: 'function', decl: declared, self: base, env: this.globals },
+        [{ label: null, value: index, span }],
+        span,
+      )
+    }
+
     this.trap(`Value of type '${typeNameOf(base)}' has no subscripts`, span)
   }
 
@@ -1787,7 +2052,112 @@ export class Interpreter {
       return left.kind === 'nil' ? this.evaluate(rightExpr, env) : left
     }
 
-    return this.applyBinary(operator, this.evaluate(leftExpr, env), this.evaluate(rightExpr, env), span)
+    // `is` and the three `as` forms. The right operand is a *type name* the parser
+    // stored as an identifier, so it must never be evaluated - doing so is what made
+    // `v as? String` report "Expected a number, found 'String'".
+    if (operator === 'is' || operator.startsWith('as')) {
+      const value = this.evaluate(leftExpr, env)
+      const name = rightExpr.kind === 'identifier' ? rightExpr.name : null
+      if (!name) this.trap('A cast needs a type name on the right', span)
+
+      if (operator === 'is') return bool(this.valueIsType(value, name))
+
+      // A plain `as` is a compile-time coercion that cannot fail, so the only work
+      // is the numeric widening `Int` -> `Double` that Swift performs implicitly.
+      if (operator === 'as') {
+        if (name === 'Double' || name === 'CGFloat' || name === 'Float') {
+          return value.kind === 'int' ? double(value.value) : value
+        }
+        return value
+      }
+
+      if (this.valueIsType(value, name)) return value
+      if (operator === 'as?') return NIL
+      this.trap(`Could not cast value of type '${typeNameOf(value)}' to '${name}'`, span)
+    }
+
+    const left = this.evaluate(leftExpr, env)
+    const right = this.evaluate(rightExpr, env)
+
+    // A project-declared operator - `static func == (a: P, b: P)`, or a top-level
+    // `func ** (a: Int, b: Int)`. Consulted before the built-in table only for
+    // operands the built-ins cannot handle, so `1 + 2` never pays for the lookup and
+    // a user overload of an operator on their own type still wins where it applies.
+    const overload = this.operatorOverload(operator, left, right)
+    if (overload) {
+      return this.callFunction(
+        overload,
+        [
+          { label: null, value: left, span },
+          { label: null, value: right, span },
+        ],
+        span,
+      )
+    }
+
+    return this.applyBinary(operator, left, right, span)
+  }
+
+  /**
+   * A user-declared implementation of an operator, when one applies.
+   *
+   * Looked up on either operand's type as a static member, then among the file's own
+   * functions. Skipped entirely for two numbers, two strings and two booleans, where
+   * the built-in meaning is the one Swift gives and a project cannot redefine it.
+   */
+  private operatorOverload(
+    operator: string,
+    left: SwiftValue,
+    right: SwiftValue,
+  ): FunctionValue | null {
+    // Two numbers, two strings or two booleans mean what Swift says they mean, and a
+    // project cannot redefine that - unless the operator is one the project itself
+    // declared, which by definition has no built-in meaning to protect.
+    if (BUILTIN_OPERATORS.has(operator) && isBuiltinOperand(left) && isBuiltinOperand(right)) {
+      return null
+    }
+
+    for (const value of [left, right]) {
+      const members = this.membersOf(typeNameOf(value))
+      const found = members.find(
+        (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === operator && m.body !== null,
+      )
+      if (found) return { kind: 'function', decl: found, self: null, env: this.globals }
+    }
+
+    const global = this.globals.lookup(operator)?.value
+    return global?.kind === 'function' ? global : null
+  }
+
+  /**
+   * Whether a value would satisfy `is Name`.
+   *
+   * Generics are erased here, so only the base name is compared - `[Item]` and
+   * `[String]` are both `Array`. Everything the interpreter can actually check is
+   * checked: the runtime kind, the declared superclass chain, and the protocols a
+   * type conforms to.
+   */
+  private valueIsType(value: SwiftValue, name: string): boolean {
+    if (name === 'Any' || name === 'AnyObject') return true
+
+    const actual = typeNameOf(value)
+    if (actual === name) return true
+
+    // `Int` is not a `Double` in Swift, but the numeric aliases are the same type.
+    if (actual === 'Double' && (name === 'CGFloat' || name === 'Float')) return true
+    if (actual === 'Int' && name === 'Int') return true
+
+    const seen = new Set<string>()
+    const inherits = (typeName: string): boolean => {
+      if (seen.has(typeName)) return false
+      seen.add(typeName)
+
+      const decl = this.conformance.types.get(typeName)?.decl
+      if (!decl || decl.kind !== 'structDecl') return false
+      return decl.inherits.some((parent) => parent.name === name || inherits(parent.name))
+    }
+
+    return inherits(actual)
   }
 
   private applyBinary(operator: string, left: SwiftValue, right: SwiftValue, span: SourceSpan): SwiftValue {
@@ -1954,6 +2324,47 @@ function namedTypeOf(type: { kind: string; name?: string } | null): string | nul
     return namedTypeOf((type as unknown as { wrapped: { kind: string; name?: string } }).wrapped)
   }
   return null
+}
+
+/** A name made entirely of operator characters. */
+const OPERATOR_NAME = /^[/=\-+!*%<>&|^~?.]+$/
+
+/**
+ * The closure an operator is shorthand for: `+` is `{ $0 + $1 }`.
+ *
+ * Built as a real closure over a synthesised body rather than as a new kind of value,
+ * because every caller that accepts a closure - `reduce`, `sorted(by:)`, `filter` -
+ * already knows how to invoke one, and a new kind would have to be taught to each.
+ */
+function operatorClosure(operator: string, span: SourceSpan, env: Environment): ClosureValue {
+  const left: Expr = { kind: 'identifier', span, name: '$0' }
+  const right: Expr = { kind: 'identifier', span, name: '$1' }
+  const expression: Expr = { kind: 'binary', span, operator, left, right }
+
+  return {
+    kind: 'closure',
+    params: [],
+    hasExplicitParams: false,
+    body: { kind: 'block', span, statements: [{ kind: 'exprStmt', span, expression }] },
+    env,
+    span,
+  }
+}
+
+/** The operators `applyBinary` implements, and which a project may not redefine. */
+const BUILTIN_OPERATORS: ReadonlySet<string> = new Set([
+  '+', '-', '*', '/', '%', '==', '!=', '<', '<=', '>', '>=', '..<', '...',
+])
+
+/** A value whose operators the built-in table already defines correctly. */
+function isBuiltinOperand(value: SwiftValue): boolean {
+  return (
+    value.kind === 'int' ||
+    value.kind === 'double' ||
+    value.kind === 'string' ||
+    value.kind === 'bool' ||
+    value.kind === 'nil'
+  )
 }
 
 /** The enum a value belongs to, or null when it is not an enum case. */
