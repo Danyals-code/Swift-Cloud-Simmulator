@@ -1,4 +1,5 @@
 import type { SourceFile } from '@studio/shared'
+import { TRAILHEAD_FILES } from './trailhead'
 import type { Project } from './types'
 
 /**
@@ -1074,6 +1075,13 @@ export const TEMPLATES: readonly Template[] = [
     name: 'Styled',
     description: 'A custom ViewModifier, and extension View naming a modifier chain.',
     files: single(STYLED),
+  },
+  {
+    id: 'trailhead',
+    name: 'Trailhead',
+    description:
+      'Eight files across four groups: tabs, two levels of navigation, scrolling in both directions, a shared store and a sheet.',
+    files: TRAILHEAD_FILES,
   },
   {
     id: 'loader',

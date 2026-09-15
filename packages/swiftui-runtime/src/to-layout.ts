@@ -183,14 +183,8 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const hitTargets = new Map<string, string>()
   const scheme = options.colorScheme ?? 'light'
   const safeArea = options.safeArea ?? ZERO_INSETS
-  const backgroundToken = screenBackgroundToken(ui.content)
-  const converter = new Converter(
-    hitTargets,
-    scheme,
-    options.typeScale ?? 1,
-    safeArea,
-    backgroundToken,
-  )
+  const background = screenBackground(ui.content, scheme) ?? systemBackground(scheme)
+  const converter = new Converter(hitTargets, scheme, options.typeScale ?? 1, safeArea, background)
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
@@ -230,7 +224,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
 
   return {
     content,
-    background: colorForName(backgroundToken, scheme) ?? systemBackground(scheme),
+    background,
     ignoresSafeArea: ui.ignoresSafeArea,
     navigationBar,
     tabBar,
@@ -242,25 +236,37 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
 /**
  * The colour the screen is, decided by what the content is.
  *
- * Only two answers, because iOS only really has two: a grouped list or form sits on
- * `systemGroupedBackground`, and everything else on `systemBackground`. The walk
- * skips the wrappers that contribute nothing of their own - a `NavigationStack`
- * around a `List` is still a list screen.
+ * Two rules, in order. A root view with its own `.background(…)` means it: writing
+ * `.background(Color(.systemGroupedBackground))` on the outermost view is how most
+ * people set a screen colour, and until now that painted the content's frame and
+ * left the navigation bar above it a different colour. Otherwise a grouped `List`
+ * or `Form` implies `systemGroupedBackground`, which is what iOS puts behind one.
+ *
+ * The walk skips wrappers that contribute nothing of their own - a
+ * `NavigationStack` around a `List` is still a list screen. Returns null when
+ * nothing says otherwise, so the caller can apply the plain system background.
  */
-function screenBackgroundToken(views: readonly ViewValue[]): string {
+function screenBackground(views: readonly ViewValue[], scheme: ColorScheme): RGBA | null {
   for (const view of views) {
     if (TRANSPARENT_VIEWS.has(view.name)) {
-      const inner = screenBackgroundToken(view.children)
-      if (inner !== 'systemBackground') return inner
+      const inner = screenBackground(view.children, scheme)
+      if (inner) return inner
       continue
     }
 
+    const explicit = resolveFillArg(modifierArg(view, 'background', 0), scheme)
+    // Only a flat colour. A gradient or a material behind the content does not
+    // extend under the bar on iOS either, so matching it would be inventing.
+    if (explicit?.kind === 'solid' && explicit.color.a > 0.95) return explicit.color
+
     if (view.name === 'List' || view.name === 'Form') {
       const style = tokenName(modifierArg(view, 'listStyle', 0)) ?? 'insetGrouped'
-      if (style !== 'plain' && style !== 'sidebar') return 'systemGroupedBackground'
+      if (style !== 'plain' && style !== 'sidebar') {
+        return colorForName('systemGroupedBackground', scheme)
+      }
     }
   }
-  return 'systemBackground'
+  return null
 }
 
 function joinRoot(children: LayoutElement[], axis: Axis): LayoutElement {
@@ -282,7 +288,7 @@ class Converter {
     private readonly typeScale: number,
     private readonly safeArea: EdgeInsets = ZERO_INSETS,
     /** The screen's own background, which the navigation bar has to match. */
-    private readonly backgroundToken: string = 'systemBackground',
+    private readonly screenBackground: RGBA = { r: 255, g: 255, b: 255, a: 1 },
   ) {}
 
   /**
@@ -421,7 +427,7 @@ class Converter {
     return this.background(
       this.fill(inset, 'navbar-fill', { horizontal: 'center', vertical: 'top' }),
       'navbar-bg',
-      this.color(this.backgroundToken),
+      this.screenBackground,
     )
   }
 
@@ -2635,8 +2641,37 @@ function labelOf(view: ViewValue): string {
   const titled = labelled(view.args, 'title')
   if (titled?.kind === 'string') return titled.value
 
-  const fromChild = view.children.map(labelOf).find((t) => t.length > 0)
-  return fromChild ?? view.name
+  /*
+    The words inside it, which is what a screen reader reads out.
+
+    This used to take the first child that produced *any* label, and a child with
+    no text of its own falls back to its own type name - so a `NavigationLink`
+    wrapping a card whose first subview is an `Image` was announced as "Image".
+    Reading the text instead gives "Cascade Ridge, North Cascades, 8.4 mi", which
+    is both the useful answer and the one iOS gives for the same view.
+  */
+  const words = textIn(view)
+  if (words.length > 0) return words.slice(0, 4).join(', ')
+
+  return view.name
+}
+
+/**
+ * Every string a view's subtree draws, in order.
+ *
+ * `Label` as well as `Text`: its title is an argument rather than a child, so a
+ * subtree made only of labels would otherwise look wordless.
+ */
+function textIn(view: ViewValue): string[] {
+  const out: string[] = []
+
+  if (view.name === 'Text' || view.name === 'Label') {
+    const value = stringArg(positional(view.args, 0))
+    if (value) out.push(value)
+  }
+  for (const child of view.children) out.push(...textIn(child))
+
+  return out
 }
 
 /** The hit-test role, which decides what the renderer builds for this control. */
