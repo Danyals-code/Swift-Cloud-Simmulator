@@ -31,6 +31,15 @@ export class MemoryProjectStore implements ProjectStore {
 export class IndexedDbProjectStore implements ProjectStore {
   private db: Promise<IDBPDatabase> | null = null
 
+  /**
+   * Opens the database, and forgets a failed attempt.
+   *
+   * Caching the promise is right; caching a *rejected* one is not. A single blocked
+   * open - a version upgrade held by another tab, a browser that turns IndexedDB off
+   * mid-session - used to be remembered for the life of the page, so every later save
+   * reused the same rejection and the user's work stopped being written with nothing
+   * on screen to say so.
+   */
   private connect(): Promise<IDBPDatabase> {
     this.db ??= openDB(DB_NAME, DB_VERSION, {
       upgrade(db) {
@@ -39,6 +48,9 @@ export class IndexedDbProjectStore implements ProjectStore {
           store.createIndex('updatedAt', 'updatedAt')
         }
       },
+    }).catch((error: unknown) => {
+      this.db = null
+      throw error
     })
     return this.db
   }

@@ -5,8 +5,7 @@ import {
   completionsAt,
   definitionAt,
   hoverAt,
-  nameAt,
-  referencesOf,
+  renameSpansAt,
   type CompletionResult,
   type SymbolInfo,
 } from '@studio/swift-sema'
@@ -67,9 +66,7 @@ export function referencesFor(
   fileId: string,
   offset: number,
 ): { readonly name: string; readonly spans: readonly SourceSpan[] } {
-  const text = files.find((f) => f.id === fileId)?.text ?? ''
-  const name = nameAt(text, offset)
-  return name ? { name, spans: referencesOf(files, name) } : { name: '', spans: [] }
+  return renameSpansAt(parseAll(files), files, fileId, offset)
 }
 
 export type { CompletionResult, SymbolInfo }

@@ -1,4 +1,4 @@
-import type { SourceSpan, UIEvent } from '@studio/shared'
+import type { LogLevel, SourceSpan, UIEvent } from '@studio/shared'
 import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
@@ -54,7 +54,7 @@ export interface EvaluationResult {
   readonly views: readonly ViewValue[]
   /** The composed screen: navigation, tabs and presentation applied. */
   readonly ui: ResolvedUI | null
-  readonly logs: readonly { message: string; span: SourceSpan }[]
+  readonly logs: readonly { message: string; span: SourceSpan; level: LogLevel }[]
   readonly failure: RuntimeFailure | null
   readonly rootTypeName: string | null
 }
@@ -99,6 +99,20 @@ export class AppRuntime {
   private handlers: ReadonlyMap<string, ViewIntent> = new Map()
   /** Identifies the loaded program, so a real edit reloads and a tap does not. */
   private programKey = ''
+
+  /**
+   * A failure raised while loading, held over until the next `evaluate`.
+   *
+   * Top-level `let`/`var` initialisers run during the load, so `let first = items[0]`
+   * on an empty array traps there rather than inside the render pass. Letting that
+   * throw out of `load` takes the whole compile with it: the worker rejects, the
+   * studio reports that the compiler stopped, and the line that actually failed is
+   * never marked. Holding it makes it an ordinary runtime failure with a span.
+   */
+  private loadFailure: RuntimeFailure | null = null
+
+  /** How many custom views deep the current expansion is. See `expand`. */
+  private expandDepth = 0
   /** Set when the change being rendered happened inside `withAnimation`. */
   private animation: AnimationPayload | null = null
 
@@ -169,7 +183,13 @@ export class AppRuntime {
     this.host.conformsTo = (typeName, protocolName) =>
       this.interpreter.conformsTo(typeName, protocolName)
     this.host.callViewExtension = (name, receiver, call) => this.callViewExtension(name, receiver, call)
-    this.interpreter.load(files)
+
+    this.loadFailure = null
+    try {
+      this.interpreter.load(files)
+    } catch (error) {
+      this.loadFailure = toFailure(error)
+    }
 
     this.entryTypeName = model.entryPoint?.name ?? null
     // A file with a view and a `#Preview` and no `@main` is an ordinary thing to
@@ -192,6 +212,16 @@ export class AppRuntime {
    * root from the AST. The resolver then decides what of it is actually on screen.
    */
   evaluate(): EvaluationResult {
+    if (this.loadFailure) {
+      return {
+        views: [],
+        ui: null,
+        logs: this.host.takeLogs(),
+        failure: this.loadFailure,
+        rootTypeName: null,
+      }
+    }
+
     this.previousLive = this.live
     this.live = new Map()
     this.handlers = new Map()
@@ -271,7 +301,7 @@ export class AppRuntime {
     } catch (error) {
       // A trap inside an action is surfaced as a log rather than thrown, so one bad
       // tap cannot tear down the preview.
-      this.host.log(`Action failed: ${toFailure(error).message}`, spanOf(intent))
+      this.host.log(`Action failed: ${toFailure(error).message}`, spanOf(intent), 'error')
     }
 
     this.animation = this.host.pendingAnimation
@@ -367,7 +397,7 @@ export class AppRuntime {
     } catch (error) {
       // A failing lifecycle callback is reported, not fatal: the screen it was about
       // to decorate is still worth showing.
-      this.host.log(`Lifecycle callback failed: ${toFailure(error).message}`, closure.span)
+      this.host.log(`Lifecycle callback failed: ${toFailure(error).message}`, closure.span, 'error')
     }
   }
 
@@ -542,7 +572,20 @@ export class AppRuntime {
     const decl = this.interpreter.types.get(instance.typeName)
     if (!decl) return []
 
+    // A view whose body names itself recurses until the JavaScript stack gives out,
+    // and an engine-level stack overflow is not something `toFailure` recognises, so
+    // it escapes the compile entirely. The interpreter already budgets Swift call
+    // depth; view expansion is the other recursion and needs its own.
+    if (this.expandDepth >= MAX_VIEW_DEPTH) {
+      throw new SwiftTrap(
+        `View nesting is more than ${MAX_VIEW_DEPTH} deep. This usually means a view's body contains the view itself.`,
+        decl.span,
+        [],
+      )
+    }
+
     const identity = this.identity.push(instance.typeName)
+    this.expandDepth++
     try {
       this.seedState(instance, decl, identity)
       this.live.set(identity, instance)
@@ -567,6 +610,7 @@ export class AppRuntime {
         return value.kind === 'struct' ? this.expand(value) : []
       })
     } finally {
+      this.expandDepth--
       this.identity.pop()
     }
   }
@@ -792,6 +836,15 @@ function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): Sw
 
 /** How far a list row slides to reveal its delete action. */
 const SWIPE_WIDTH = 88
+
+/**
+ * The deepest chain of custom views the preview will expand.
+ *
+ * Generous by the standards of a real screen - a deeply factored app nests perhaps
+ * fifteen - and far below the depth at which the JavaScript stack gives out, which
+ * is the failure this exists to convert into a diagnostic.
+ */
+const MAX_VIEW_DEPTH = 120
 
 /** `WindowGroup` holds the app's content; it is a scene, not a view. */
 function isSceneWrapper(view: ViewValue): boolean {

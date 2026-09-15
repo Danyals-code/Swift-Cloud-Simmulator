@@ -19,9 +19,13 @@ import { collectConformance } from '@studio/swift-syntax'
 import {
   isKnownGlobal,
   isKnownModifier,
+  isViewRoot,
   KNOWN_ATTRIBUTES,
   KNOWN_TYPES,
+  MODIFIER_LABELS,
+  NON_MODIFIER_MEMBERS,
   PROPERTY_WRAPPERS,
+  SUPPORTED_MODIFIERS,
   SUPPORTED_VIEWS,
   UNIMPLEMENTED_MODIFIERS,
   UNIMPLEMENTED_VIEWS,
@@ -65,6 +69,11 @@ export class Checker {
   private readonly typeParameterNames = new Set<string>()
   /** Non-zero while checking the body of an extension on a type the preview owns. */
   private inViewExtension = 0
+
+  /** Method names the project adds in an extension - its own modifiers. */
+  private readonly declaredModifiers = new Set<string>()
+  /** `typealias` names, which resolve as types anywhere the target would. */
+  private readonly typeAliases = new Set<string>()
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
   private conformance: ConformanceModel = collectConformance([])
   private readonly globalScope = new Scope()
@@ -136,7 +145,25 @@ export class Checker {
       } else if (decl.kind === 'funcDecl') {
         this.globalScope.declare({ name: decl.name, kind: 'function', span: decl.nameSpan })
       } else if (decl.kind === 'varDecl') {
-        this.globalScope.declare({ name: decl.name, kind: 'local', span: decl.nameSpan })
+        if (decl.destructured) {
+          for (const binding of decl.destructured) {
+            this.globalScope.declare({ name: binding.name, kind: 'local', span: binding.span })
+          }
+        } else {
+          this.globalScope.declare({ name: decl.name, kind: 'local', span: decl.nameSpan })
+        }
+      } else if (decl.kind === 'typealiasDecl') {
+        // The alias is a type name wherever the type it stands for would be one.
+        this.typeAliases.add(decl.name)
+        this.globalScope.declare({ name: decl.name, kind: 'type', span: decl.nameSpan })
+      } else if (decl.kind === 'extensionDecl') {
+        // `extension View { func card() -> some View { … } }` is the idiom for a
+        // reusable modifier, so its methods are modifiers as far as the coverage
+        // check is concerned. Collected in pass 1 because a view may be written
+        // before the extension that gives it the modifier.
+        for (const member of decl.members) {
+          if (member.kind === 'funcDecl') this.declaredModifiers.add(member.name)
+        }
       }
     }
   }
@@ -215,6 +242,28 @@ export class Checker {
         file.declarations.some((d) => d.kind === 'macroDecl' && d.name === 'Preview' && d.body),
       )
       if (preview) return null
+
+      // A `PreviewProvider` names a view to show just as `#Preview` does, and the
+      // project is not missing an entry point - the preview is in the older form the
+      // runtime does not read yet. Sending the user to add `@main` would be sending
+      // them to fix something that is not wrong.
+      const legacyPreview = files
+        .flatMap((file) => file.declarations)
+        .find(
+          (d): d is StructDecl =>
+            d.kind === 'structDecl' && d.inherits.some((t) => t.name === 'PreviewProvider'),
+        )
+      if (legacyPreview) {
+        this.report(
+          legacyPreview.nameSpan,
+          'error',
+          'no_entry_point',
+          "The preview does not read 'PreviewProvider' yet. Use a '#Preview { … }' block, " +
+            "or add '@main' to a struct that conforms to 'App'.",
+          'PreviewProvider',
+        )
+        return null
+      }
 
       const anchor = files[0]
       if (anchor) {
@@ -510,7 +559,14 @@ export class Checker {
         const decl = statement.declaration
         this.checkDeclaration(decl, scope)
         if (decl.kind === 'varDecl') {
-          scope.declare({ name: decl.name, kind: 'local', span: decl.nameSpan })
+          // `let (a, b) = pair` declares every name in the list, not just the first.
+          if (decl.destructured) {
+            for (const binding of decl.destructured) {
+              scope.declare({ name: binding.name, kind: 'local', span: binding.span })
+            }
+          } else {
+            scope.declare({ name: decl.name, kind: 'local', span: decl.nameSpan })
+          }
         } else if (decl.kind === 'funcDecl') {
           scope.declare({ name: decl.name, kind: 'function', span: decl.nameSpan })
         } else if (decl.kind === 'structDecl' || decl.kind === 'enumDecl') {
@@ -565,7 +621,11 @@ export class Checker {
       case 'forInStmt': {
         this.checkExpression(statement.sequence, scope)
         const inner = scope.child()
-        if (statement.variable) {
+        if (statement.destructured) {
+          for (const binding of statement.destructured) {
+            inner.declare({ name: binding.name, kind: 'local', span: binding.span })
+          }
+        } else if (statement.variable) {
           inner.declare({ name: statement.variable, kind: 'local', span: statement.variableSpan })
         }
         if (statement.where) this.checkExpression(statement.where, inner)
@@ -645,7 +705,9 @@ export class Checker {
         // the `.accentColor` modifier - a warning on correct code, which is the one
         // thing this checker must never produce.
         if (expr.callee.kind === 'memberAccess') {
-          this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan)
+          const onAView = rootsInAView(expr.callee.base)
+          this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan, onAView)
+          if (onAView) this.checkArgumentLabels(expr.callee.member, expr.args)
         }
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
@@ -734,14 +796,13 @@ export class Checker {
   /** A callee gets view-coverage treatment before ordinary resolution. */
   private checkCallee(callee: Expr, scope: Scope): void {
     if (callee.kind === 'identifier') {
-      const phase = UNIMPLEMENTED_VIEWS.get(callee.name)
-      if (phase !== undefined && !scope.has(callee.name)) {
+      if (UNIMPLEMENTED_VIEWS.has(callee.name) && !scope.has(callee.name)) {
         this.report(
           callee.span,
           'warning',
           'unsupported_swiftui_view',
-          `'${callee.name}' is not drawn by the preview yet (arriving in Phase ${phase}). ` +
-            'It is exported to Xcode unchanged.',
+          `'${callee.name}' is real SwiftUI that the preview does not draw. ` +
+            'It renders as a labelled placeholder and exports to Xcode unchanged.',
           callee.name,
         )
         return
@@ -770,13 +831,21 @@ export class Checker {
     // `_` is the wildcard pattern, never a reference.
     if (name === '_' || name === '') return
 
-    const phase = UNIMPLEMENTED_VIEWS.get(name)
-    if (phase !== undefined) {
+    // `Self` is the enclosing type, which the checker always has in scope by
+    // construction: it only appears inside one.
+    if (name === 'Self') return
+
+    if (this.typeAliases.has(name)) return
+
+    // An operator standing in for a function: the `+` of `reduce(0, +)`.
+    if (/^[/=\-+!*%<>&|^~?.]+$/.test(name)) return
+
+    if (UNIMPLEMENTED_VIEWS.has(name)) {
       this.report(
         span,
         'warning',
         'unsupported_swiftui_view',
-        `'${name}' is not drawn by the preview yet (arriving in Phase ${phase}).`,
+        `'${name}' is real SwiftUI that the preview does not draw.`,
         name,
       )
       return
@@ -824,25 +893,72 @@ export class Checker {
   }
 
   /**
-   * Warns when a chain uses a real SwiftUI modifier the preview does not apply.
+   * Warns when a chain uses a modifier the preview does not apply.
    *
-   * Only names in the unimplemented map produce a warning, and only where the member
-   * was called. An unrecognised member is passed over in silence, because `Color.red`
-   * and `.largeTitle` are member accesses too and there is no type information yet to
-   * tell them apart from a modifier.
+   * Two cases, and the second is the one that was missing. A name in the
+   * unimplemented map warns wherever it is called, because the name is unambiguous.
+   * A name that is *not recognised at all* warns only when the chain it sits on
+   * demonstrably starts at a view - `Text("a").shimmer()` - because `Color.red` and
+   * `store.add()` are member calls too and there is no type information to tell them
+   * apart. Without that second case a misspelled modifier, and the fifty or so real
+   * ones the preview silently drops, produce no diagnostic at all: the studio says
+   * the code is fine and the preview quietly ignores it, which is exactly what the
+   * coverage contract exists to prevent.
    */
-  private checkModifierCoverage(member: string, span: SourceSpan): void {
-    const phase = UNIMPLEMENTED_MODIFIERS.get(member)
-    if (phase === undefined) return
+  private checkModifierCoverage(member: string, span: SourceSpan, onAView: boolean): void {
+    if (UNIMPLEMENTED_MODIFIERS.has(member)) {
+      this.report(
+        span,
+        'warning',
+        'unsupported_swiftui_modifier',
+        `'.${member}' is recognised but not applied by the preview. ` +
+          'It is exported to Xcode unchanged.',
+        `.${member}`,
+      )
+      return
+    }
+
+    if (!onAView) return
+    if (SUPPORTED_MODIFIERS.has(member)) return
+    if (this.declaredModifiers.has(member)) return
+    // A modifier's argument is often built by a call on a helper the preview does
+    // know - `.frame(width: size.rounded())` - but those sit under an argument, not
+    // on the chain, so they never reach here.
+    if (NON_MODIFIER_MEMBERS.has(member)) return
 
     this.report(
       span,
       'warning',
       'unsupported_swiftui_modifier',
-      `'.${member}' is not applied by the preview yet (arriving in Phase ${phase}). ` +
+      `The preview does not recognise the modifier '.${member}', so it is ignored here. ` +
         'It is exported to Xcode unchanged.',
       `.${member}`,
     )
+  }
+
+  /**
+   * Warns on an argument label a modifier does not take.
+   *
+   * Restricted to the modifiers in `MODIFIER_LABELS`, whose signatures are small
+   * enough to write down in full. Everything else is left alone: the preview has no
+   * type information to check a label against, and inventing one would put a warning
+   * on correct code.
+   */
+  private checkArgumentLabels(member: string, args: readonly { label: string | null; value: Expr }[]): void {
+    const known = MODIFIER_LABELS.get(member)
+    if (!known) return
+
+    for (const arg of args) {
+      if (arg.label === null || known.has(arg.label)) continue
+      this.report(
+        arg.value.span,
+        'warning',
+        'unsupported_swiftui_modifier',
+        `'.${member}' has no argument '${arg.label}:', so the preview ignores it. ` +
+          'It is exported to Xcode unchanged, where it will not compile.',
+        `.${member}(${arg.label}:)`,
+      )
+    }
   }
 
   // ------------------------------------------------------------------ output
@@ -896,6 +1012,33 @@ function editDistance(a: string, b: string): number {
   }
 
   return previous[b.length]!
+}
+
+/**
+ * Whether a member chain demonstrably starts at a SwiftUI view.
+ *
+ * Walks `Text("a").bold().shimmer()` back to `Text` and asks whether that names a
+ * view the preview knows. Deliberately conservative: a chain rooted at a variable,
+ * at a gesture, or at one of the project's own views answers false, because there is
+ * no type information to say what it is and a coverage warning on someone's own
+ * method would be exactly the false positive this checker must not produce.
+ */
+function rootsInAView(expr: Expr | null): boolean {
+  let current = expr
+
+  while (current) {
+    if (current.kind === 'call') {
+      current = current.callee
+      continue
+    }
+    if (current.kind === 'memberAccess') {
+      current = current.base
+      continue
+    }
+    return current.kind === 'identifier' && isViewRoot(current.name)
+  }
+
+  return false
 }
 
 function propertyWrapperOf(decl: VarDecl): string | null {

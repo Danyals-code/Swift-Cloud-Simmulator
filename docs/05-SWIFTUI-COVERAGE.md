@@ -4,7 +4,9 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after Phase 10: **98 ✅ · 39 🟡 · 29 ⬜ · 3 ✗**.
+Last updated after the honesty pass (defect register phases 1-3), which changed what several
+rows claim rather than what they draw. The headline counts are deliberately not restated here
+until the full reconciliation: a total that is one pass out of date is worse than none.
 
 Anything not listed renders a labelled placeholder box and is counted by the coverage telemetry
 (FR-4.11, NFR-6). Those counts are visible in the studio's **Coverage** panel and never leave the
@@ -41,10 +43,11 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | ✅ | 3 | interpolation, concatenation, `Date`/number formatting in 6 |
+| `Text` | 🟡 | 3 | interpolation, and `format:` number styles (`.number`, `.percent`, `.currency(code:)`). **`Text + Text` concatenation is not implemented**, and `Date` does not exist at runtime, so `Text(date, style:)` traps |
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | ~80 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
 | `Image("asset")` | ⬜ | - | reported as unavailable rather than drawn as a grey box |
+| `GroupBox` `LabeledContent` `ControlGroup` `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`; there is no network in the worker |
 | `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet |
 | `ProgressView` | 🟡 | 6 | determinate bar; the indeterminate form is a static ring |
@@ -205,7 +208,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Scene` phases | ⬜ | - |
 | `@State` | ✅ | 3 |
 | `@Binding` (and `$value` projections) | ✅ | 6 | passes down any number of views |
-| Key paths (`\.self`, `\.id`) | ✅ | 6 | applied, not type-checked |
+| Key paths (`\.self`, `\.id`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`); **not where a closure is expected**, so `map(\.name)` is rejected |
 | `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere |
 | `.environmentObject` / `@EnvironmentObject` | 🟡 | 7 | reaches views expanded while the modifier is in scope - see below |
 | `.environment(\.key, …)` | 🟡 | 7 | same scoping rule |
@@ -240,7 +243,8 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | `if let` / `guard let` / condition lists | ✅ | 7 | short-circuiting, and `guard`'s bindings escape |
 | `while` / `repeat` / `break` / `continue` / `for … where` | ✅ | 7 | |
 | `static` members | ✅ | 7 | |
-| Key paths (`\.self`, `\.id`, `\Type.member`) | ✅ | 6 | applied, not type-checked |
+| Key paths (`\.self`, `\.id`, `\Type.member`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`); **not where a closure is expected**, so `map(\.name)` is rejected |
+| `as?` / `as!` / `is` | ✅ | - | compares the runtime type, the declared superclass chain and protocol conformances; generics are erased, so `[Item]` and `[String]` are both `Array` |
 | Closures, trailing closures, `$0` | ✅ | 1 | |
 | Contextual member syntax (`.home` for an enum) | ✅ | 7 | resolved where a declaration states the type |
 | `protocol`, requirements, `extension` | ✅ | 8 | defaults from `extension P`, merged once for the whole toolchain |
@@ -251,8 +255,16 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | Inheritance, `override`, `super` | ✅ | 8 | `super` resolves against the type that *declared* the method |
 | `async` / `await` / `Task { }` | 🟡 | 8 | runs synchronously and in order; nothing suspends |
 | `Task.sleep` / `Task.yield` | 🟡 | 8 | return immediately - see below |
-| `typealias`, `subscript`, `operator` declarations | ⬜ | - | |
-| `actor`, `@Sendable`, structured concurrency | ⬜ | - | needs suspension the interpreter does not have |
+| `typealias`, `subscript`, `operator` declarations | ✅ | - | an alias substitutes its target; a subscript is a method named `subscript`; an `infix operator` declaration parses and takes multiplication's precedence, which is Swift's own default |
+| `actor`, `@Sendable`, structured concurrency | 🟡 | - | `actor` parses as a class and `async let` as a `let`; there is nothing to isolate from, since everything runs on one thread and in order |
+| Multiple trailing closures | ✅ | - | `Button { } label: { }`, `Section { } header: { } footer: { }`, `.alert(…) { } message: { }` and the rest |
+| Explicit `get` / `set` accessors, `willSet` / `didSet` | ✅ | - | assigning to a computed property runs its setter with `newValue` bound |
+| Tuples | ✅ | - | `.0` and labels, `let (a, b) =`, `for (k, v) in`, tuple patterns in `switch`, equality |
+| Operator declarations as members | ✅ | - | `static func ==`, `static func <`, `prefix func`; dispatched before the built-in table for operands the built-ins do not define |
+| An operator used as a value | ✅ | - | `reduce(0, +)` is the closure `{ $0 + $1 }` |
+| Variadic parameters, attributes on a parameter | ✅ | - | `Int...`; `@ViewBuilder` and `@escaping` on a parameter, which is what a custom container view needs |
+| `defer`, `fallthrough`, labelled `break` | ✅ | - | `defer` runs on every exit; a label is consumed and the loop is the one it names |
+| `Self` | ✅ | - | resolves to the type the code is written in |
 
 ## Known approximations
 
@@ -295,6 +307,18 @@ Listed in the exported README so nothing is a surprise on the Mac:
    at runtime whatever the annotation said, and constraint checking is what the export hands to a
    real compiler.
 10. **Performance** - the interpreter is far slower than compiled Swift; do not judge frame rates.
+11. **A recognised modifier that is not applied still warns, every time.** There are around
+    fifty of them and they are listed in `UNIMPLEMENTED_MODIFIERS`. The warning is the
+    contract: the modifier is exported unchanged and the preview does nothing with it. A
+    modifier the tables do not know at all warns too, but only where the chain it sits on
+    demonstrably starts at a view - a chain rooted at a variable carries no type
+    information, and a warning there would land on the project's own methods.
+12. **Renaming is scoped, which means it can rename too little.** A local is renamed within
+    its own body; a member is followed across the project only when no other type declares
+    the same member name, and otherwise stays inside the type that declared it. The
+    alternative was a textual sweep that renamed unrelated symbols, and a rename that misses
+    a use leaves a name the compiler will point at, where one that renames the wrong symbol
+    leaves code that compiles and is wrong.
 
 ## The strictness pass (R5)
 

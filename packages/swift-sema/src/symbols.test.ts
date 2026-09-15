@@ -356,7 +356,7 @@ describe('hover', () => {
     const found = hover(`struct ContentView: View {
     var body: some View { Ta|ble { Text("x") } }
 }`)
-    expect(found?.doc).toMatch(/not drawn by the preview yet/i)
+    expect(found?.doc).toMatch(/the preview does not draw/i)
   })
 
   it('shows a function’s signature', () => {

@@ -39,6 +39,25 @@ function persistence(): ProjectStore {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * Writes a project, returning what went wrong rather than throwing.
+ *
+ * Every caller here is fire-and-forget from a React effect, so a rejection would be
+ * an unhandled one - which is to say invisible. IndexedDB is genuinely unavailable in
+ * a private window in more than one browser, and a person whose work has stopped
+ * being written needs to be told, not to find out on the next reload.
+ */
+async function writeProject(project: Project): Promise<string | null> {
+  try {
+    await persistence().save(project)
+    return null
+  } catch (error) {
+    return error instanceof Error && error.message
+      ? `Could not save: ${error.message}`
+      : 'Could not save to this browser’s storage.'
+  }
+}
+
 /** Preview settings live outside the project: they describe how you are looking at it. */
 export interface PreviewSettings {
   readonly colorScheme: 'light' | 'dark'
@@ -56,6 +75,15 @@ export interface StudioState {
   /** false until the first load resolves; avoids flashing the template over saved work */
   loaded: boolean
   lastSavedAt: number | null
+  /**
+   * Set when persistence failed, cleared by the next save that works.
+   *
+   * The editor keeps going either way - the project is in memory and the export does
+   * not need the database - but silence was the wrong answer: work that is not being
+   * written is exactly the thing a person needs told, and IndexedDB is off in a
+   * private window in more than one browser.
+   */
+  saveError: string | null
   preview: PreviewSettings
 
   load: () => Promise<void>
@@ -115,6 +143,7 @@ export const useStudio = create<StudioState>((set, get) => {
     openFileIds: [],
     loaded: false,
     lastSavedAt: null,
+    saveError: null,
     preview: { colorScheme: 'light', typeScale: 1, zoom: 'fit' },
 
     async load() {
@@ -131,11 +160,23 @@ export const useStudio = create<StudioState>((set, get) => {
           openFileIds: first ? [first] : [],
           loaded: true,
         })
-        await persistence().save(shared)
+        const problem = await writeProject(shared)
+        if (problem) set({ saveError: problem })
         return
       }
 
-      const existing = await persistence().load(DEFAULT_PROJECT_ID)
+      // A failed load must not leave the studio waiting forever on `loaded`. Falling
+      // back to the starter project loses nothing that was not already unreachable.
+      let existing: Project | null = null
+      let failure: string | null = null
+      try {
+        existing = await persistence().load(DEFAULT_PROJECT_ID)
+      } catch (error) {
+        failure = error instanceof Error && error.message
+          ? `Could not open saved work: ${error.message}`
+          : 'Could not open saved work from this browser’s storage.'
+      }
+
       const project = existing ?? createDefaultProject()
       const first = project.files[0]?.id ?? null
 
@@ -144,8 +185,17 @@ export const useStudio = create<StudioState>((set, get) => {
         activeFileId: first,
         openFileIds: first ? [first] : [],
         loaded: true,
+        saveError: failure,
       })
-      if (!existing) await persistence().save(project)
+
+      // Laying down the starter project deliberately does *not* move `lastSavedAt`:
+      // the indicator answers "is what I typed written down", and starting the clock
+      // before the user has typed anything makes it say yes while their first edits
+      // are still in the debounce.
+      if (!existing && !failure) {
+        const problem = await writeProject(project)
+        if (problem) set({ saveError: problem })
+      }
     },
 
     async flush() {
@@ -155,8 +205,9 @@ export const useStudio = create<StudioState>((set, get) => {
       }
       const { project } = get()
       if (!project) return
-      await persistence().save(project)
-      set({ lastSavedAt: Date.now() })
+
+      const problem = await writeProject(project)
+      set(problem ? { saveError: problem } : { lastSavedAt: Date.now(), saveError: null })
     },
 
     setFileText(fileId, text) {

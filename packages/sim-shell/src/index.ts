@@ -89,8 +89,20 @@ export const DEVICES: Readonly<Record<DeviceKey, DeviceSpec>> = {
 /** Phase 0 and the vertical slice target exactly one device. */
 export const DEFAULT_DEVICE: DeviceKey = 'iphone-15'
 
-export function getDevice(key: DeviceKey): DeviceSpec {
-  return DEVICES[key]
+/**
+ * The device for a key, falling back rather than returning undefined.
+ *
+ * The key can come from a share link or from a project saved by an older build, so
+ * "not a device we have" is ordinary input, not a programming error. Returning
+ * undefined put it one property access away from taking the whole studio down.
+ */
+export function getDevice(key: DeviceKey | string): DeviceSpec {
+  return DEVICES[key as DeviceKey] ?? DEVICES[DEFAULT_DEVICE]
+}
+
+/** Whether a string names a device this build knows. */
+export function isDeviceKey(value: string): value is DeviceKey {
+  return Object.hasOwn(DEVICES, value)
 }
 
 export const DEVICE_LIST: readonly DeviceSpec[] = Object.values(DEVICES)

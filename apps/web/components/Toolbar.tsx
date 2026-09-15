@@ -13,6 +13,8 @@ export interface ToolbarProps {
   projectName: string
   device: DeviceKey
   savedAt: number | null
+  /** Set when the browser refused to store the project. */
+  saveError: string | null
   /** A compile is in flight and the tree on screen is from an older revision. */
   busy: boolean
   /** Live recompilation is suspended; edits are not being run. */
@@ -61,6 +63,7 @@ export function Toolbar({
   projectName,
   device,
   savedAt,
+  saveError,
   busy,
   paused,
   errors,
@@ -156,6 +159,7 @@ export function Toolbar({
         errors={errors}
         warnings={warnings}
         savedAt={savedAt}
+        saveError={saveError}
         lastCompileMs={lastCompileMs}
         workerError={workerError}
       />
@@ -232,6 +236,7 @@ function StatusView({
   errors,
   warnings,
   savedAt,
+  saveError,
   lastCompileMs,
   workerError,
 }: {
@@ -240,6 +245,7 @@ function StatusView({
   errors: number
   warnings: number
   savedAt: number | null
+  saveError: string | null
   lastCompileMs: number | null
   workerError: string | null
 }) {
@@ -284,9 +290,11 @@ function StatusView({
         data-testid="save-indicator"
       >
         <span
-          className={`h-[5px] w-[5px] rounded-full ${savedAt ? 'bg-xc-ok/70' : 'bg-xc-text-3/60'}`}
+          className={`h-[5px] w-[5px] rounded-full ${
+            saveError ? 'bg-xc-error/80' : savedAt ? 'bg-xc-ok/70' : 'bg-xc-text-3/60'
+          }`}
         />
-        {savedAt ? 'Saved' : 'Not saved yet'}
+        {saveError ? 'Not saving' : savedAt ? 'Saved' : 'Not saved yet'}
       </span>
     </div>
   )

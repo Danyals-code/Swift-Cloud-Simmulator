@@ -330,7 +330,7 @@ function toResult(
   const total = performance.now() - startedAt
 
   const logs: LogEntry[] = (evaluation?.logs ?? []).map((entry) => ({
-    level: 'log' as const,
+    level: entry.level,
     message: entry.message,
     origin: entry.span,
     at: total,

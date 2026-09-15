@@ -32,8 +32,8 @@ export interface CoverageEntry {
   readonly count: number
   /** Epoch milliseconds. */
   readonly lastSeen: number
-  /** The phase that plans to implement it, when one is recorded. */
-  readonly phase: number | null
+  /** False when the name is not in the preview's tables at all - a discovery. */
+  readonly recognised: boolean
 }
 
 type Store = Record<string, { kind: CoverageKind; count: number; lastSeen: number }>
@@ -81,11 +81,18 @@ function kindOf(diagnostic: Diagnostic): CoverageKind | null {
   }
 }
 
-/** The planned phase for a feature, from the same tables the checker warns from. */
-export function plannedPhase(feature: string, kind: CoverageKind): number | null {
-  if (kind === 'modifier') return UNIMPLEMENTED_MODIFIERS.get(feature.replace(/^\./, '')) ?? null
-  if (kind === 'view') return UNIMPLEMENTED_VIEWS.get(feature) ?? null
-  return null
+/**
+ * Whether the preview recognises the feature by name.
+ *
+ * The distinction the ranking actually wants: a name the tables already carry is a
+ * known gap, and a name they do not is something a user reached for that nobody had
+ * written down - which is the whole reason to measure. It replaces a planned-phase
+ * column whose numbers all said 7 and stopped being true after Phase 10.
+ */
+export function isRecognised(feature: string, kind: CoverageKind): boolean {
+  if (kind === 'modifier') return UNIMPLEMENTED_MODIFIERS.has(feature.replace(/^\./, ''))
+  if (kind === 'view') return UNIMPLEMENTED_VIEWS.has(feature)
+  return true
 }
 
 /**
@@ -132,7 +139,7 @@ export function coverageRanking(): CoverageEntry[] {
       kind: entry.kind,
       count: entry.count,
       lastSeen: entry.lastSeen,
-      phase: plannedPhase(feature, entry.kind),
+      recognised: isRecognised(feature, entry.kind),
     }))
     .sort((a, b) => b.count - a.count || a.feature.localeCompare(b.feature))
 }

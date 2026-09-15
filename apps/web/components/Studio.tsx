@@ -32,6 +32,7 @@ export function Studio() {
   const openFileIds = useStudio((s) => s.openFileIds)
   const loaded = useStudio((s) => s.loaded)
   const lastSavedAt = useStudio((s) => s.lastSavedAt)
+  const saveError = useStudio((s) => s.saveError)
   const previewSettings = useStudio((s) => s.preview)
 
   const load = useStudio((s) => s.load)
@@ -330,6 +331,7 @@ export function Studio() {
         projectName={project.manifest.name}
         device={project.manifest.device}
         savedAt={lastSavedAt}
+        saveError={saveError}
         busy={stale}
         paused={paused}
         errors={errors}

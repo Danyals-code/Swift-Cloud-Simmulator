@@ -460,7 +460,11 @@ class Resolver {
     const pushed = this.ctx.state.stack(stackId)
 
     let screen: readonly ViewValue[] = stack.children
-    const titles: string[] = [titleOf(stack.children, 'Home')]
+    // The root's title when it sets none is *no title*, as in SwiftUI. It used to
+    // default to "Home", which put a word on screen that appears nowhere in the
+    // user's code - a small invention, and the preview inventing anything is the one
+    // thing it must not do.
+    const titles: string[] = [titleOf(stack.children, '')]
     let depth = 0
 
     for (const linkPath of pushed) {
@@ -485,10 +489,12 @@ class Resolver {
     const backId = depth > 0 ? this.register(`${stackId}/back`, { kind: 'pop' }) : null
     const toolbar = this.resolveToolbar(screen, stackId)
 
+    // An untitled screen still needs a back button that says something, and "Back" is
+    // what iOS itself falls back to.
     const backButton: ViewValue | null = backId
       ? {
           name: BACK_BUTTON,
-          args: [{ label: 'title', value: { kind: 'string', value: titles[depth - 1] ?? 'Back' } }],
+          args: [{ label: 'title', value: { kind: 'string', value: titles[depth - 1] || 'Back' } }],
           children: [],
           modifiers: [],
           action: null,
@@ -502,7 +508,7 @@ class Resolver {
       title,
       large: displayMode !== 'inline' && depth === 0 && title.length > 0,
       canGoBack: depth > 0,
-      backTitle: titles[Math.max(0, depth - 1)] ?? 'Back',
+      backTitle: titles[Math.max(0, depth - 1)] || 'Back',
       leading: backButton ? [backButton] : toolbar.leading,
       trailing: toolbar.trailing,
       view: {
@@ -516,7 +522,12 @@ class Resolver {
       },
     }
 
-    return { content: screen, navigationBar: title.length > 0 || depth > 0 ? bar : null }
+    // A bar with nothing in it is not drawn. A toolbar counts as something in it, or
+    // a screen whose only chrome is a trailing button would lose that button.
+    const hasChrome =
+      title.length > 0 || depth > 0 || toolbar.leading.length > 0 || toolbar.trailing.length > 0
+
+    return { content: screen, navigationBar: hasChrome ? bar : null }
   }
 
   /**
@@ -709,13 +720,41 @@ class Resolver {
         views: overlayViews,
         detent: detentOf(view, modifier),
         title: stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
-        message: stringArg(labelled(modifier.args, 'message')) ?? '',
+        message: this.messageOf(modifier),
         dismiss,
         dismissId,
       }
     }
     return null
   }
+
+  /**
+   * An alert's explanatory line.
+   *
+   * `.alert(title:isPresented:actions:message:)` spells the message as a second
+   * trailing closure, so it arrives as a labelled closure argument rather than as a
+   * string - and reading only the string form dropped it entirely.
+   */
+  private messageOf(modifier: ModifierValue): string {
+    const direct = stringArg(labelled(modifier.args, 'message'))
+    if (direct !== null) return direct
+
+    const closure = modifier.args.find((a) => a.label === 'message')?.value
+    if (closure?.kind !== 'closure') return ''
+
+    return this.ctx
+      .build(closure, [])
+      .flatMap((v) => textOf(v))
+      .join(' ')
+  }
+}
+
+/** Every string a view draws, for the one-line summary an alert message needs. */
+function textOf(view: ViewValue): string[] {
+  const own = view.args
+    .map((a) => (a.value.kind === 'string' ? a.value.value : null))
+    .filter((s): s is string => s !== null)
+  return [...own, ...view.children.flatMap(textOf)]
 }
 
 // -------------------------------------------------------------------- helpers

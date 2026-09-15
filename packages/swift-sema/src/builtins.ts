@@ -87,32 +87,145 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // styles that are recognised and drawn plainly
   'toggleStyle', 'pickerStyle', 'labelStyle', 'monospaced', 'placeholder',
   // device edges
-  'ignoresSafeArea', 'safeAreaInset', 'id', 'zIndex',
+  'ignoresSafeArea', 'id',
   // Environment injection.
   'environment', 'environmentObject',
   // The deprecated spelling of `.tint`, and a `Color` property of the same name.
   'accentColor',
 ])
 
-/** Real SwiftUI views that the preview does not draw yet, with the phase that adds them. */
-export const UNIMPLEMENTED_VIEWS: ReadonlyMap<string, number> = new Map([
-  ['NavigationSplitView', 7],
-
-  ['TimelineView', 7], ['Chart', 7],
-  ['Table', 7], ['OutlineGroup', 7],
+/**
+ * Names that make something a gesture rather than a view.
+ *
+ * They sit in `SUPPORTED_VIEWS` because that set is really "identifiers the preview
+ * knows", but a chain rooted at one of them is a gesture builder - `.onChanged`,
+ * `.updating` - not a modifier chain, so the coverage check must not treat its
+ * members as modifiers.
+ */
+export const GESTURE_TYPES: ReadonlySet<string> = new Set([
+  'DragGesture', 'LongPressGesture', 'TapGesture', 'SpatialTapGesture',
+  'MagnificationGesture', 'MagnifyGesture', 'RotationGesture', 'RotateGesture',
 ])
 
-/** Real SwiftUI modifiers the preview ignores for now. */
-export const UNIMPLEMENTED_MODIFIERS: ReadonlyMap<string, number> = new Map([
-  ['mask', 7], ['popover', 7], ['refreshable', 7], ['alignmentGuide', 7],
-  ['kerning', 7], ['minimumScaleFactor', 7],
-  ['scrollDismissesKeyboard', 7], ['scrollTargetBehavior', 7],
-  ['symbolRenderingMode', 7], ['imageScale', 7], ['interpolation', 7],
-  ['matchedGeometryEffect', 7], ['phaseAnimator', 7], ['keyframeAnimator', 7],
-  ['kerning', 7],
-  ['monospaced', 7], ['minimumScaleFactor', 7],
-  ['scrollDismissesKeyboard', 7], ['scrollTargetBehavior', 7],
-  ['symbolRenderingMode', 7], ['imageScale', 7], ['interpolation', 7],
+/** Members that appear on a view-rooted chain without being modifiers. */
+export const NON_MODIFIER_MEMBERS: ReadonlySet<string> = new Set([
+  // Gesture builders, in case one is reached through a view root.
+  'onChanged', 'onEnded', 'updating', 'sequenced', 'exclusively', 'simultaneously',
+  // `Path` and `AnyTransition` builders.
+  'move', 'addLine', 'addCurve', 'addQuadCurve', 'addArc', 'addRect', 'addEllipse',
+  'addRoundedRect', 'addPath', 'closeSubpath', 'combined', 'asymmetric',
+  // Reached on a shape or a style rather than on the view.
+  'opacity', 'init',
+])
+
+/**
+ * Modifiers whose argument labels are known *completely*.
+ *
+ * Only these are label-checked, and the bar for adding one is that the whole set can
+ * be written down with confidence. A label the preview silently ignores is a value
+ * the user typed and never sees applied - `.frame(wdith: 10)` lays out at the
+ * intrinsic width and says nothing - but a warning on a label that does exist would
+ * be worse, so the table stays small rather than guessing at the large signatures.
+ */
+export const MODIFIER_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [
+    'frame',
+    new Set([
+      'width', 'height', 'alignment',
+      'minWidth', 'idealWidth', 'maxWidth',
+      'minHeight', 'idealHeight', 'maxHeight',
+      'depth', 'minDepth', 'idealDepth', 'maxDepth', 'alignment3D',
+    ]),
+  ],
+  ['offset', new Set(['x', 'y'])],
+  ['position', new Set(['x', 'y'])],
+  ['shadow', new Set(['color', 'radius', 'x', 'y'])],
+  ['blur', new Set(['radius', 'opaque'])],
+  ['fixedSize', new Set(['horizontal', 'vertical'])],
+  ['scaleEffect', new Set(['x', 'y', 'anchor'])],
+  ['rotationEffect', new Set(['anchor'])],
+  ['aspectRatio', new Set(['contentMode'])],
+  ['border', new Set(['width'])],
+  ['cornerRadius', new Set(['antialiased'])],
+  ['overlay', new Set(['alignment'])],
+  ['background', new Set(['alignment', 'ignoresSafeAreaEdges'])],
+])
+
+/** A chain rooted at one of these is a modifier chain the coverage check can judge. */
+export function isViewRoot(name: string): boolean {
+  return (SUPPORTED_VIEWS.has(name) || UNIMPLEMENTED_VIEWS.has(name)) && !GESTURE_TYPES.has(name)
+}
+
+/**
+ * Real SwiftUI views the preview does not draw.
+ *
+ * Membership is what turns `GroupBox { … }` from a red "cannot find in scope" that
+ * blanks the whole preview into a labelled placeholder inside an otherwise working
+ * screen - which is what FR-4.11 promises and what makes the rest of the file still
+ * worth looking at. A name missing from here is treated as a typo, so the list has
+ * to cover the real framework rather than only the parts already drawn.
+ *
+ * A set, not a map: the phases it used to carry all said 7, and kept saying it after
+ * Phase 10 shipped.
+ */
+export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
+  // containers
+  'GroupBox', 'ControlGroup', 'ScrollViewReader', 'NavigationSplitView',
+  'LabeledContent', 'EquatableView',
+  // data-driven
+  'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
+  // time and charts
+  'TimelineView', 'Chart', 'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark',
+  // platform surfaces a browser has no analogue for
+  'Map', 'Marker', 'Annotation', 'VideoPlayer', 'SceneView',
+  // scenes other than the one WindowGroup the preview shows
+  'Settings', 'MenuBarExtra', 'DocumentGroup',
+])
+
+/**
+ * Real SwiftUI modifiers the preview recognises by name and does not apply.
+ *
+ * A set rather than a map: the phase numbers this used to carry all said 7, which
+ * stopped being a promise the moment Phase 10 shipped, and the coverage matrix marks
+ * every one of these with a dash precisely because a phase number is a commitment.
+ * Membership here says one true thing - the name is real SwiftUI, and nothing it
+ * asks for happens in the preview.
+ *
+ * `monospaced` was in this list *and* in the supported one, so a modifier the
+ * preview does apply warned on every compile. Anything added here must not be there.
+ */
+export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
+  // layout
+  'alignmentGuide', 'containerRelativeFrame', 'safeAreaInset', 'coordinateSpace',
+  // painting and effects
+  'mask', 'blendMode', 'colorMultiply', 'hueRotation', 'rotation3DEffect',
+  'compositingGroup', 'drawingGroup', 'geometryGroup', 'redacted', 'visualEffect',
+  'zIndex',
+  // typography
+  'kerning', 'tracking', 'baselineOffset', 'lineSpacing', 'minimumScaleFactor',
+  'truncationMode', 'allowsTightening', 'monospacedDigit', 'underline', 'strikethrough',
+  // symbols and images
+  'symbolRenderingMode', 'symbolVariant', 'imageScale', 'interpolation',
+  // motion
+  'matchedGeometryEffect', 'phaseAnimator', 'keyframeAnimator',
+  // scrolling and lists
+  'refreshable', 'scrollDismissesKeyboard', 'scrollTargetBehavior', 'scrollPosition',
+  'scrollDisabled', 'scrollContentBackground', 'listSectionSeparator', 'listRowSpacing',
+  // presentation and chrome
+  'popover', 'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
+  'tabViewStyle',
+  // controls
+  'controlSize', 'buttonBorderShape', 'progressViewStyle', 'gaugeStyle', 'menuStyle',
+  'datePickerStyle', 'strokeBorder',
+  // text entry
+  'textInputAutocapitalization', 'autocorrectionDisabled',
+  // environment set on the view rather than by the preview's own controls
+  'dynamicTypeSize', 'preferredColorScheme',
+  // accessibility beyond label, value, hint and hidden
+  'accessibilityElement', 'accessibilityAddTraits', 'accessibilityIdentifier',
+  'accessibilitySortPriority',
+  // interaction with no analogue in the preview
+  'onHover', 'draggable', 'dropDestination', 'contentShape',
 ])
 
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */
