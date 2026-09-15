@@ -9,6 +9,9 @@
     "start": "next start",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.4",
     "@codemirror/language": "^6.10.8",

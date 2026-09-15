@@ -135,7 +135,13 @@ Then open http://localhost:3000.
 
 ### Deploying
 
-`vercel.json` is configured for the monorepo. From the repo root:
+The app deploys to Vercel as a standard npm-workspace monorepo. Set the project's
+**Root Directory** to `apps/web`; Vercel then detects the workspace, installs from
+the repo root and builds in the subdirectory with no custom commands.
+
+`apps/web/vercel.json` carries the framework marker and the security headers.
+Nothing overrides the install or build steps, which is deliberate: an override is a
+second place for the build to be wrong, and the defaults are correct here.
 
 ```bash
 npx vercel --prod
