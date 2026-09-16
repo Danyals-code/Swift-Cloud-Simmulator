@@ -595,6 +595,12 @@ function TextContent({ node }: { node: RenderNode }) {
         ? 'flex-end'
         : 'flex-start'
 
+  // The line box carries the first run's typography, and a span appears only where a
+  // line is made of more than one. Single-run text is almost all text, so this is the
+  // path that has to stay cheap - and it keeps the colour on the element the line *is*
+  // rather than on a child, which is what anything reading the painted colour expects.
+  const typography: CSSProperties = { ...runStyle(first), whiteSpace: 'pre' }
+
   if (payload.lines && payload.lines.length > 0) {
     return (
       <>
@@ -602,6 +608,7 @@ function TextContent({ node }: { node: RenderNode }) {
           <div
             key={i}
             style={{
+              ...typography,
               position: 'absolute',
               left: 0,
               top: line.origin.y,
@@ -610,14 +617,13 @@ function TextContent({ node }: { node: RenderNode }) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: justify,
-              whiteSpace: 'pre',
             }}
           >
             {line.slices
               ? line.slices.map((slice, j) => (
                   <RunSpan key={j} run={payload.runs[slice.run] ?? first} text={slice.text} />
                 ))
-              : <RunSpan run={first} text={line.text} />}
+              : line.text}
           </div>
         ))}
       </>
@@ -627,16 +633,16 @@ function TextContent({ node }: { node: RenderNode }) {
   return (
     <div
       style={{
+        ...typography,
         display: 'flex',
         height: '100%',
         alignItems: 'center',
         justifyContent: justify,
-        whiteSpace: 'pre',
       }}
     >
-      {payload.runs.map((run, i) => (
-        <RunSpan key={i} run={run} text={run.text} />
-      ))}
+      {payload.runs.length > 1
+        ? payload.runs.map((run, i) => <RunSpan key={i} run={run} text={run.text} />)
+        : first.text}
     </div>
   )
 }
@@ -650,6 +656,12 @@ function TextContent({ node }: { node: RenderNode }) {
  * CSS has one property for both and a span may have either or both.
  */
 function RunSpan({ run, text }: { run: TextRun; text: string }) {
+  return <span style={runStyle(run)}>{text}</span>
+}
+
+/** Everything one run says about how its characters are drawn. */
+function runStyle(run: TextRun): CSSProperties {
+  // CSS has one property for both, and a run may carry either or both.
   const decoration = [
     run.underline ? 'underline' : null,
     run.strikethrough ? 'line-through' : null,
@@ -657,24 +669,20 @@ function RunSpan({ run, text }: { run: TextRun; text: string }) {
     .filter(Boolean)
     .join(' ')
 
-  return (
-    <span
-      style={{
-        fontFamily: run.font.family,
-        fontSize: run.font.size,
-        fontWeight: run.font.weight,
-        fontStyle: run.font.italic ? 'italic' : 'normal',
-        lineHeight: `${run.font.lineHeight}px`,
-        color: cssColor(run.color),
-        ...(decoration ? { textDecoration: decoration } : {}),
-        ...(run.tracking ? { letterSpacing: run.tracking } : {}),
-        ...(run.baselineOffset ? { position: 'relative', bottom: run.baselineOffset } : {}),
-        ...(run.tabularNumbers ? { fontVariantNumeric: 'tabular-nums' } : {}),
-      }}
-    >
-      {text}
-    </span>
-  )
+  return {
+    fontFamily: run.font.family,
+    fontSize: run.font.size,
+    fontWeight: run.font.weight,
+    fontStyle: run.font.italic ? 'italic' : 'normal',
+    lineHeight: `${run.font.lineHeight}px`,
+    color: cssColor(run.color),
+    ...(decoration ? { textDecoration: decoration } : {}),
+    // The paint half of tracking; the measurement half already happened in the worker,
+    // so the two agree by construction rather than by both guessing.
+    ...(run.tracking ? { letterSpacing: run.tracking } : {}),
+    ...(run.baselineOffset ? { position: 'relative', bottom: run.baselineOffset } : {}),
+    ...(run.tabularNumbers ? { fontVariantNumeric: 'tabular-nums' } : {}),
+  }
 }
 
 /**

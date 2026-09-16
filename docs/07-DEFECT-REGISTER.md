@@ -4,9 +4,14 @@ What a systematic sweep of the studio found, in the order worth fixing.
 
 Roughly 870 checks driven straight through the compile pipeline, the language service,
 the project model and the exporter. **231 came back wrong.** The repo's own gates were
-all green while that was true, because the eighteen templates use none of the
+all green while that was true, because the eighteen templates used none of the
 constructs that fail - so the corpus, not the interpreter, was what "18 / 18 templates
 with zero placeholders" measured.
+
+**All ten phases are now closed.** The corpus is the last of them to close, and the
+most load-bearing: the gallery is written the way people write, and two tests name the
+idioms it must keep containing. Everything still not built is listed here with the
+reason, and carries the same reason in the coverage matrix.
 
 Phases run by severity first, then by how much real code each one unlocks. The order is
 a dependency order as well as a severity one: the parser gaps in Phase 4 sit above the
@@ -24,8 +29,8 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 6 | Fix the strictness pass where it is wrong | 4 | ✅ |
 | 7 | Finish the editor intelligence | 3 | ✅ |
 | 8 | Validate what a share link carries | 4 | ✅ |
-| 9 | Draw what is honestly not drawn yet | 9 | 🟡 3 of 9 |
-| 10 | Make the documentation match the code | 7 | 🟡 4 of 7 |
+| 9 | Draw what is honestly not drawn yet | 9 | ✅ |
+| 10 | Make the documentation match the code | 7 | ✅ |
 
 ## What was swept
 
@@ -318,110 +323,263 @@ inside the root. All four formats now write through one guarded map rather than 
 copies of the same path arithmetic, which is what let the difference hide in the first
 place.
 
-## Phase 9 - Draw what is honestly not drawn yet 🟡
+## Phase 9 - Draw what is honestly not drawn yet ✅
 
-Real feature work, and the right place for it is after the preview reports these
-accurately - which Phase 2 did. Each line is a body of work rather than a bug, and
-this pass took the two that are not: the controls that were drawn and answered to
-nothing, and the symbol alias. **9.2 to 9.7 are untouched**, and the sizes below say
-what each still needs.
+Real feature work rather than bugs, and the right place for it was after the preview
+reported these accurately - which Phase 2 did. Each line below is closed by building
+it, or by declining it with a reason that is also in the coverage matrix.
 
 | # | State | |
 | --- | --- | --- |
-| 9.1 | 🟡 4 of 6 | `Stepper`, `DisclosureGroup`, `Picker` and `Menu` are operable. `DatePicker` and `ColorPicker` still draw and do not open |
-| 9.2 | ⬜ | Text attributes. Starts with a render-tree change, and the measurement half (`minimumScaleFactor`, `allowsTightening`, `truncationMode`) needs the line breaker |
-| 9.3 | ⬜ | Control styles that all draw the same |
-| 9.4 | ⬜ | Layout: `safeAreaInset`, `alignmentGuide`, the `Layout` protocol, lazy-stack virtualisation |
-| 9.5 | ⬜ | Effects and animation, including exit transitions |
-| 9.6 | ⬜ | The remaining views. `GroupBox` is the one still failing the fourteen-snippet measure |
-| 9.7 | ⬜ | Data flow: `@AppStorage`, `@FocusState`, `PreferenceKey`, Combine |
+| 9.1 | ✅ | `DatePicker` opens onto a calendar and `ColorPicker` onto a palette |
+| 9.2 | ✅ | Text attributes, both the paint half and the measurement half |
+| 9.3 | ✅ | Every built-in control style draws differently; the two custom ones are declined |
+| 9.4 | ✅ | `safeAreaInset`, `alignmentGuide`, `containerRelativeFrame`; the `Layout` protocol declined |
+| 9.5 | ✅ | The colour and transform effects, and the `value:` gate on `.animation` |
+| 9.6 | ✅ | Ten views drawn, four left with reasons |
+| 9.7 | ✅ | `@AppStorage`, `@FocusState`, `PreviewProvider`, `Binding(get:set:)`, `scenePhase`, `openURL` |
 | 9.8 | ✅ | **Not reproducible.** See below |
 | 9.9 | ✅ | `gear` is drawn |
 
-### 9.1 - controls that were drawn and answered to nothing
+### 9.1 - the two controls that could not open
 
-A preview that looks interactive and is not is a worse lie than one that looks
-static, because the user blames their own code. These four now work, and are covered
-by `tests/controls.test.ts`.
+These were what the first controls pass left behind, because neither can be a list of
+the options the user wrote - the thing that made `Stepper`, `DisclosureGroup`, `Picker`
+and `Menu` cheap. They share the menu's *mechanism* - open, choose, close - and none of
+its content.
 
-| | Was | Now |
-| --- | --- | --- |
-| `Stepper` | Drawn with both halves and no hit target at all | Each half is its own target. `step:` is honoured, and `in:` is a bound the press may not leave - a control that counts past its own range shows a number the app could never show |
-| `DisclosureGroup` | Rendered permanently expanded, with no way to collapse it | Starts closed, opens and closes, and the chevron turns. Where the user wrote `isExpanded:` that binding is the truth; where they did not, the framework keeps the state, exactly as it does for a navigation stack |
-| `Picker` | Had a hit target whose intent was to write its own selection back over itself | Opens onto the options the user wrote, ticks the one currently chosen, and choosing writes the binding and closes in one press |
-| `Menu` | No hit target | Opens onto its buttons; pressing one runs its action and closes |
+A date picker opens onto the month its value falls in. Choosing a day writes the
+binding and keeps the time of day; the arrows page the month without touching the
+value, because the user has not chosen yet. Which month is on show is framework state,
+beside the navigation stack and the open menu, for the same reason those are.
 
-The menu is drawn as a panel at the bottom of the screen. iOS anchors it to the
-control it came from, and the resolver does not know where that ended up on screen -
-so this is an approximation of *position*, never of content, and it is recorded as
-one in the coverage matrix.
+A colour picker offers SwiftUI's named colours rather than a continuous surface: those
+are the colours the exported Swift can *name*, and letting someone land on one their
+code cannot express is a worse answer than a smaller choice.
 
-### The dimmed area behind a sheet never worked
+The closed date row also showed `2025-06-15 15:06:40 +0000` where iOS shows a formatted
+date. It is formatted now, and `displayedComponents:` picks date, time or both.
 
-Found while giving the menu a way to dismiss itself. The coverage matrix offers
-"tap outside it" as *the* way to close a sheet in a preview, and the pipeline builds
-a dim layer with a hit target on it for exactly that - but the render conversion
-attached hit targets only to the invisible `hit` boxes, and the dim layer is a
-*fill*. Every tap outside a sheet, alert or dialog has been landing on nothing.
+### 9.2 - text, which was two items pretending to be one
 
-The mapping now happens once, for every node, rather than in one branch of a switch
-over paint kinds - which is the shape of the fix that stops the next paint kind
-losing it too.
+`TextRun` carried text, font and colour, so `.underline()` had nowhere to land; and the
+painter read `runs[0]` and dropped the rest, so even the runs that did exist could not
+all be drawn. `Text + Text` needed both of those fixed, which is why the register's
+9.2 and its `Text + Text` row under 9.6 were one piece of work.
+
+Five of the attributes are measurement rather than paint, and that is what made them
+the hard half: `.tracking` widens every cluster, `.lineSpacing` grows the box,
+`.minimumScaleFactor` re-measures at smaller sizes until the text fits,
+`.allowsTightening` condenses before breaking, and `.monospacedDigit` gives every digit
+the widest one's advance. Each changes the frame the engine reports, which is the whole
+reason they could not be handed to CSS.
+
+`.truncationMode` is decided against everything still to come rather than the last
+visible line - `.head` keeps the end of the text and `.middle` keeps both ends, and
+neither means anything once the text past the break has been thrown away.
+
+Covered by `tests/text-attributes.test.ts` and `packages/swiftui-layout/src/metrics.test.ts`.
+
+### 9.3 - the styles that were "recognised" and inert
+
+`.toggleStyle`, `.pickerStyle` and `.labelStyle` sat in the branch marked "recognised,
+and either read elsewhere or deliberately inert". Nothing read them, so they were the
+quietest kind of wrong: no warning, and a control that draws the default whatever was
+asked for.
+
+Each changes the drawing now, and styles are inherited, because that is where people
+write them - `.pickerStyle` goes on the `Form`, not on each picker. An inline picker
+stays operable: the resolver registers a choose intent per option whatever the style,
+and the layout decides which targets it draws.
+
+Custom `ToggleStyle` and `LabelStyle` are **declined**, with the reason the roadmap
+already gave: the same mechanism as `ButtonStyle`, except a Toggle's configuration
+carries a *binding* the style writes through, and half of that is worse than none.
+
+Found here: a bordered button had been drawing square corners since the style was
+added. The radius was applied inside the background rather than around it, and a fill
+only takes a radius from the inherited environment.
+
+### 9.4 - layout, which needed the engine changed rather than extended
+
+A stack was offsetting each child by the stack's alignment. That is the *answer* for
+the default case rather than the rule: SwiftUI lines up each child's alignment
+**guide**, and where the default guides sit is what makes `.leading` and `.center`
+behave as they do. Written the other way round, `.alignmentGuide` had nothing to
+replace.
+
+The guide closure is the user's and takes the view's measured dimensions, so it is
+passed to the layout pass as a function: `swiftui-layout` calls it and does not know
+what is on the other side, which keeps the dependency pointing one way.
+
+`.safeAreaInset` insets rather than overlays - the child is offered the space that is
+left, so a bar drawn this way does not cover the last row.
+
+The `Layout` protocol and `AnyLayout` are **declined**: they need a `Subviews` proxy
+and callbacks from the engine into the interpreter for sizing as well as placement,
+which is a real seam, and custom conformances are rare in app code. Lazy-stack
+virtualisation is **accepted as measured rather than fixed**: 200 rows lay out in
+7.6 ms against a 120 ms budget, so the cost is real and not worth the identity
+complexity.
+
+### 9.5 - effects, most of which CSS already agrees with
+
+A hue rotation is a hue rotation and a blend mode is a blend mode: for most of this the
+work was a field on the render tree rather than an approximation. Two are not.
+`.colorMultiply` is an overlay in multiply mode because no CSS filter multiplies by an
+arbitrary colour, and `.rotation3DEffect` needs a perspective or the browser draws a
+flat squash.
+
+`.blendMode` takes the sixteen modes both vocabularies share; the rest warn rather than
+being drawn as the nearest one. The table lives in `swift-sema` because the *checker*
+needs it: `.blendMode` is a supported modifier now, so without a rule at the argument an
+undrawable mode would be accepted in silence.
+
+`.animation(_:value:)` honours its gate. That needs the previous render's value, which
+only the resolver has, so it is decided there and stamped on the modifier - the same
+shape as a `DisclosureGroup`'s open-ness.
+
+**Declined**, each for the reason the roadmap gave: `matchedGeometryEffect`,
+`.phaseAnimator`, `.keyframeAnimator`, `Animatable`, and exit transitions. All four of
+the first need the renderer to own frames or trees it does not own.
+
+### 9.6 - the views
+
+Drawn: `GroupBox`, `LabeledContent`, `ControlGroup`, `Section` footers,
+`NavigationSplitView` (collapsed to a stack, which is what a phone does), `TimelineView`
+(once, because there is no clock), `.popover` (as a sheet, which is what iOS does at
+this width), `.tabViewStyle(.page)` (dots that are also the way through), the sidebar
+list style, and `Text + Text`.
+
+`ToolbarItemGroup` placements already worked; the matrix said they did not.
+
+Left, with reasons rather than dates:
+
+| | Why |
+| --- | --- |
+| `Image("asset")` | **Declined.** A project file here is text. There is no asset catalogue for a name to resolve against, so there is nothing to draw and no work in the renderer changes that |
+| `Chart` | Needs a mark model and a plottable-value protocol - a package rather than a view |
+| `Table` / `OutlineGroup` | Both are real work and both draw a labelled placeholder meanwhile |
+| `ScrollViewReader` | `scrollTo` is an *imperative* command travelling worker to renderer, which is a direction the protocol does not have |
+
+### 9.7 - data flow
+
+`@AppStorage` is not `@State` with a different spelling: it is keyed by a string, so
+two views naming one key share a value and the value outlives the view that wrote it.
+It has a store of its own, which the end-of-pass sweep that prunes `@State` never
+touches, and harvest writes back only what changed - otherwise a sibling's stale copy
+overwrites the new value.
+
+`PreviewProvider` is read as a root. It is what every project written before Xcode 15
+carries, and reporting "no entry point" for one sent the user to fix what was not
+wrong.
+
+`Binding(get:set:)` and `.constant(…)` build a projection, so a computed binding is
+indistinguishable downstream from a projected one.
+
+`scenePhase` reads `.active` and `openURL` is callable and logs. Neither can do
+anything else honestly.
+
+**Declined:** `PreferenceKey` - a value travelling *up* needs a second pass and a
+re-render when a handler writes state, and `GeometryReader` covers what people reach
+for it for. **Left open:** `onReceive` and Combine, which need publishers and a
+scheduler the preview does not have.
 
 ### 9.8 was already closed
 
 The register says the back button carries no accessible label and cannot be found by
-name. It can: it is labelled with the title of the screen it returns to, which is
-what iOS does, and `tests/phase6.test.ts` has been finding it that way since Phase 6.
+name. It can: it is labelled with the title of the screen it returns to, which is what
+iOS does, and `tests/phase6.test.ts` has been finding it that way since Phase 6.
 Measured by putting the pre-Phase-9 file back and asking for the label rather than by
 reading the code.
 
-Left as a finding rather than quietly dropped: the sweep produced this item, later
-work closed it, and nothing noticed. It is the one entry in 84 that did not
-reproduce.
+Left as a finding rather than quietly dropped: the sweep produced this item, later work
+closed it, and nothing noticed. It is the one entry in 84 that did not reproduce.
 
-### Found while working here, not fixed
+### Found while closing this phase
 
-- **A property named `open` cannot be read at the start of an expression.**
-  `var n: Int { open }` reports "Expected an expression, found 'open'", while
-  `"\(open)"` and `$open` are both fine, and `some`, `any` and `each` work
-  everywhere. Phase 4.11 made contextual keywords work as *declaration* names; this
-  is the same word in statement-start expression position, where the parser is still
-  looking for a declaration modifier. Narrow, real, and not Phase 9's.
+Each of these was a defect the sweep did not produce, turned up by writing the tests
+for something next to it. They are listed because the *way* they were found is the
+argument for the corpus rewrite in 10.6.
 
----
+- **A view listed as unimplemented stopped the whole preview.** `Table(rows) {
+  TableColumn("Name") { row in Text(row.name) } }` had its content closure run with
+  nothing to pass, so `row` was nil and reading a property of it trapped. An
+  unimplemented view's closure is not run at all now: its children are discarded in
+  favour of the placeholder anyway.
+- **`var body: some View { Color.blue }` drew nothing.** Three view builders each had
+  their own copy of "keep the values that are already views", and a `Color` is a view
+  without being one - so it was dropped at the root while the same colour inside a
+  `VStack` drew fine.
+- **`.safeAreaInset` was claimed and unimplemented at once.** It sat in the branch
+  marked "read by the pipeline, which owns the device's edges" *and* in the
+  unimplemented-modifier list. Nothing read it.
+- **`Picker { ForEach(options) { … } }` left its options a level down**, so the
+  segmented drawing rendered a placeholder for a container and the popup had nothing to
+  tick. That is how a picker over a collection is written.
+- **`AsyncImage` drew a grey box** while the matrix said it drew its `placeholder:`.
+  The placeholder arrives as a labelled closure argument and the code looked for a
+  *modifier* of that name.
+- **A contextual keyword could be declared and never read.** `var open = 1` parsed
+  because every position that asks for a name consults the contextual-keyword list, and
+  expression position did not. Seventeen of them read now; `get` and `set` are names
+  everywhere except at the start of a computed property's body, where `{ get` begins an
+  accessor block in Swift too.
 
-### What remains, in full
+## Phase 10 - Make the documentation match the code ✅
 
-The list the sweep produced, minus what this pass closed. Each is a body of work
-rather than a bug, and the phase stays open until they are done or declined.
-
-| # | Item |
-| --- | --- |
-| 9.1 | `DatePicker` and `ColorPicker` are drawn and cannot open. Both need an editor of their own - a calendar and a colour surface - rather than a list of the options the user wrote, which is what made the other four cheap |
-| 9.2 | Text rendering beyond size, weight and colour: `underline`, `strikethrough`, `lineSpacing`, `kerning`, `tracking`, `baselineOffset`, `minimumScaleFactor`, `truncationMode`, `lineLimit(_: Range)`, `monospacedDigit`, `allowsTightening`. `TextRun` has no field for any of them, so this starts with a render-tree change. The first six are whole-Text attributes and need no line-breaker work; the rest need measurement to answer back |
-| 9.3 | Control styles that all draw the same: `toggleStyle`, `pickerStyle`, `labelStyle`, `progressViewStyle`, `gaugeStyle`, `controlSize`, `buttonBorderShape`, and custom `ToggleStyle` / `LabelStyle` |
-| 9.4 | Layout: `safeAreaInset`, `alignmentGuide`, `containerRelativeFrame`, the `Layout` protocol, `AnyLayout`, virtualisation for the lazy stacks |
-| 9.5 | Effects and animation: `mask`, `blendMode`, `hueRotation`, `colorMultiply`, `rotation3DEffect`, `redacted`, `visualEffect`, `matchedGeometryEffect`, `phaseAnimator`, `keyframeAnimator`, `Animatable`, the `value:` gate on `.animation`, and exit transitions |
-| 9.6 | Views: `GroupBox`, `LabeledContent`, `ControlGroup`, `ScrollViewReader`, `NavigationSplitView`, `Table`, `OutlineGroup`, `TimelineView`, `Chart`, `.popover`, `Image("asset")`, `tabViewStyle(.page)`, `ToolbarItemGroup` placements, `Section` footers, the sidebar list style, and `Text` + `Text` - which is a *runtime error* today rather than a placeholder, and so the worst-behaved row in the table |
-| 9.7 | Data flow: `@AppStorage`, `@SceneStorage`, `@FocusState`, `PreferenceKey`, `onReceive` and Combine, `openURL`, `scenePhase`, `PreviewProvider`, `Binding(get:set:)`, and `.navigationDestination(for:)` with a built-in type |
-
-## Phase 10 - Make the documentation match the code 🟡
-
-The coverage matrix calls itself the public contract and says a partial row with nothing
-said is indistinguishable from a bug. These are the rows where that was true.
+The coverage matrix calls itself the public contract and says a partial row with
+nothing said is indistinguishable from a bug. These were the rows where that was true.
 
 | # | Item | State |
 | --- | --- | --- |
-| 10.1 | Rows marked done that were not: `Text` concatenation, `Date` and number formatting, key paths, `GeometryReader` as its own coordinate space, `Link` and `AsyncImage` (neither constructible without `URL`), `.navigationDestination` for built-in types | 🟡 the first three corrected; the rest wait on 5.1 and 9.7 |
-| 10.2 | The matrix contradicts itself on materials: the `.background` row says they are not drawn, the `Material` row says they are. The second is true | ⬜ |
+| 10.1 | Rows marked done that were not | ✅ |
+| 10.2 | The matrix contradicted itself on materials | ✅ |
 | 10.3 | `monospaced` appeared in both the supported and the unimplemented table | ✅ |
 | 10.4 | Eight duplicated keys in the unimplemented modifier map | ✅ |
-| 10.5 | Every unimplemented diagnostic promised Phase 7, after Phase 10 shipped and after the matrix stopped promising phases | ✅ |
-| 10.6 | The eighteen templates contain no `UUID`, no `Date()`, no `allCases`, no `Button { } label: { }` and no `get {`; `Identifiable` models use `let id: Int`. A handful of templates written the way people actually write would turn most of this document into failing tests | ⬜ |
-| 10.7 | Gaps the matrix did not mention at all: type casts, tuples, accessors, property observers, operator declarations, multiple trailing closures, `@ViewBuilder` parameters, `Self`, variadics, bitwise operators, `Binding(get:set:)` | 🟡 all but bitwise operators and `Binding(get:set:)` now have rows |
+| 10.5 | Every unimplemented diagnostic promised Phase 7 | ✅ |
+| 10.6 | The templates used none of the constructs that fail | ✅ |
+| 10.7 | Gaps the matrix did not mention at all | ✅ |
 
----
+### 10.1 - three were already true, one was not
+
+The seven rows split three ways. `Text` concatenation, `Date` and number formatting and
+key paths were corrected in earlier passes. `.navigationDestination(for:)` with a
+built-in type, `Link`, and `GeometryReader` as its own coordinate space turned out to
+be true already - they had been waiting on `URL` and on the data-flow work, and nobody
+re-checked once those landed.
+
+`AsyncImage` was not true, and had not been since Phase 7. It is pinned now, along with
+the other three, by tests in `tests/matrix-claims.test.ts` that assert what is *drawn* -
+the only kind of test that can catch "marked done and not done".
+
+### 10.5 - closed for views and modifiers, and missed for wrappers
+
+The property-wrapper diagnostic still said "arriving in Phase 7" after Phase 7 shipped,
+in the one table the earlier close did not reach. All of those wrappers are supported
+now, so the message is gone rather than corrected - and a test asserts that *no*
+diagnostic contains a phase number at all, which is what stops it coming back a third
+time.
+
+### 10.6 - the corpus was measuring itself
+
+"Eighteen templates render with zero placeholders" was measuring the corpus rather than
+the interpreter. Two hundred and thirty-one defects lived behind that number because
+the gallery used none of the constructs that fail: every `Identifiable` carried `let
+id: Int` with hand-written numbers - the one identity scheme no real app uses - and
+nothing called `UUID()`, `Date()` or `allCases`, nobody wrote `Button { } label: { }`,
+and no property had an explicit `get {`.
+
+The inbox, the settings form, the task list and both navigation corpora are rewritten
+around what people type. A nineteenth template, Typesetting, exercises what Phase 9
+built: concatenation with a face per half, underline and strikethrough, tracking, line
+spacing, truncation in the middle, shrink-to-fit, redaction with a button that lifts
+it, and a `.safeAreaInset` footer.
+
+Two tests keep it that way. One lists the idioms the corpus must contain and names each
+in its failure message; the other refuses `let id: Int` outright. Without them the
+gallery drifts back to the safe subset, which is how the number came to mean nothing
+the first time.
 
 ## Method
 

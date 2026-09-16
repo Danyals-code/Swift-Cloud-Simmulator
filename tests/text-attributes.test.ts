@@ -150,6 +150,19 @@ describe('text attributes', () => {
   })
 })
 
+describe('what the renderer is handed', () => {
+  it('leaves single-run text as one line box with no span inside it', () => {
+    // The shape the DOM ends up with follows from this: a line with no slices is
+    // painted by the line element itself, which is what keeps the painted colour on
+    // the element the line *is* rather than on a child of it. Making every line a
+    // span broke a dark-mode gate that reads the line's own computed colour, and
+    // cost a DOM node per line of every label in every app.
+    const payload = firstText(run(view('Text("one two three four").frame(width: 90)')))
+    expect(payload.runs).toHaveLength(1)
+    expect((payload.lines ?? []).every((l) => l.slices === undefined)).toBe(true)
+  })
+})
+
 describe('Text + Text', () => {
   it('renders both halves instead of stopping the preview', () => {
     const result = run(view('Text("Hello, ") + Text("world")'))
