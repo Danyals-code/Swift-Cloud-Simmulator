@@ -122,7 +122,7 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1441 passing |
+| Unit tests | 1443 passing |
 | End-to-end | 52 / 52 passing |
 | Templates rendering with zero placeholders | 18 / 18 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |

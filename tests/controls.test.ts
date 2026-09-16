@@ -176,7 +176,7 @@ describe('Picker', () => {
     const r = tap(run(picker), 'Letter')
     expect(texts(r)).toContain('Alpha')
     expect(texts(r)).toContain('Gamma')
-    expect(controls(r)).toEqual(['Letter', 'Dismiss', 'Alpha', 'Beta', 'Gamma'])
+    expect(controls(r)).toEqual(['Letter', 'Close menu', 'Alpha', 'Beta', 'Gamma'])
   })
 
   it('ticks the option currently chosen, and only that one', () => {
@@ -195,7 +195,7 @@ describe('Picker', () => {
 
   it('leaves the value alone when dismissed without choosing', () => {
     let r = tap(run(picker), 'Letter')
-    r = tap(r, 'Dismiss')
+    r = tap(r, 'Close menu')
     expect(texts(r)).toContain('Chosen: b')
     expect(texts(r)).not.toContain('Alpha')
   })
@@ -230,7 +230,7 @@ describe('Menu', () => {
 
   it('does nothing when dismissed', () => {
     let r = tap(run(menu), 'Options')
-    r = tap(r, 'Dismiss')
+    r = tap(r, 'Close menu')
     expect(texts(r)).toContain('Last: none')
   })
 })
@@ -244,6 +244,29 @@ describe('the dimmed area behind a presentation', () => {
     '    }',
   ].join('\n')
 
+  it('does not take a name the user has already used', () => {
+    // The backdrop became pressable in this phase, and the end-to-end fixture's
+    // sheet contains `Button("Dismiss")` - so calling the backdrop "Dismiss" too put
+    // two controls with one name on the screen, which is ambiguous for anything
+    // driving the preview by name. The backdrop is the one that can be renamed.
+    const withOwnButton = [
+      '    @State private var showing = true',
+      '    var body: some View {',
+      '        Text("Behind")',
+      '            .sheet(isPresented: $showing) { Button("Dismiss") { showing = false } }',
+      '    }',
+    ].join('\n')
+
+    const names = controls(run(withOwnButton)).filter((n) => n !== undefined)
+    expect(new Set(names).size, `duplicate control names: ${JSON.stringify(names)}`).toBe(names.length)
+    expect(names).toContain('Dismiss')
+    expect(names).toContain('Close sheet')
+  })
+
+  it('names itself for what it closes', () => {
+    expect(controls(run(sheet))).toContain('Close sheet')
+  })
+
   it('dismisses what it sits behind when tapped', () => {
     // The coverage matrix offers this as *the* way to close a sheet in a preview,
     // and it did nothing: the dim layer is a fill with a hit target on it, and the
@@ -252,7 +275,7 @@ describe('the dimmed area behind a presentation', () => {
     let r = run(sheet)
     expect(texts(r)).toContain('Inside')
 
-    r = tap(r, 'Dismiss')
+    r = tap(r, 'Close sheet')
     expect(texts(r)).not.toContain('Inside')
     expect(texts(r)).toContain('Behind')
   })

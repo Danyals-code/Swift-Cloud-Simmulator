@@ -435,6 +435,23 @@ Where a new test asserts that something is *not* wrong any more, it was run agai
 deliberately broken version first. A test that cannot fail is not evidence, and two of
 the ones written for these phases only looked like evidence until that was checked.
 
+### The end-to-end suite can pass against code that is not there
+
+`playwright.config.ts` sets `reuseExistingServer: !process.env.CI`, and `npm run build`
+is cached by Turborepo. Both are right for the inner loop and together they make a
+local `npm run e2e` capable of reporting 52 / 52 against a server started before the
+change under test. That happened in Phase 9: the suite was green locally and CI failed
+on the first push, because making the dimmed backdrop pressable gave the screen two
+controls named "Dismiss" - the backdrop and the fixture's own `Button("Dismiss")`.
+
+Before trusting a local run, force both: `npm run build -- --force`, then
+`CI=1 npx playwright test`, which also matches CI's single worker and retry count.
+
+The fix was the product's, not the test's. The backdrop is named for what it closes -
+"Close sheet", "Close menu" - because a user's button can be called anything and the
+backdrop is the one of the two that can be renamed unilaterally. `tests/controls.test.ts`
+now asserts that no two controls on a screen share a name.
+
 ### One flaky gate, stated rather than re-run until green
 
 `e2e/smoke.spec.ts` - "the Swift Playgrounds export carries the edited source" - failed
