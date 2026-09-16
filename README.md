@@ -127,22 +127,18 @@ What it handles now is most of the SwiftUI people actually write:
   there. A project you edited is kept when you start another; one you never touched
   is not, because a template can be recreated in two clicks and a list that only
   grows is a list nobody reads.
-- **Somewhere to start** - twenty-two templates behind one sheet that asks the
-  only question a new session has: *where does this project come from*. Three
-  answers, and they are the three things down its left edge - what is already in
-  this browser, a whole **app** to start from, or one **feature** to read. The
-  split is the point: four of the templates are real multi-screen projects
-  (`Trailhead`, `Ledger`, `Kitchen`, `Pulse`) with a model, a store and folders
-  that mean something, and eighteen are one file teaching one idea. A pile of
-  twenty-two cards sorted by name cannot tell you which is which.
-
-  All of them are written the way people write rather than the way this is easy:
-  `UUID` identities, dates, `allCases`, both spellings of `Button`, explicit
-  getters, `$store.property` bound straight into a model.
-- **A way back in** - the sheet is the app icon in the top-left corner, so
-  starting over is one click from anywhere. It asks before it replaces work, and
-  only when there is work to lose: a project still identical to the template it
-  came from is replaced without a dialog nobody would have read.
+- **Somewhere to start** - the welcome window separates your saved projects,
+  complete app templates, and focused feature examples. Search by name or concept,
+  see the screens included in each app, and create a project from one clear action.
+  The layout adapts to narrow windows and keeps the create button visible.
+  Five multi-screen apps (`Folio`, `Trailhead`, `Ledger`, `Kitchen`, and `Pulse`)
+  demonstrate shared state and organized source files. Eighteen small examples
+  cover individual SwiftUI features. Folio includes a searchable library, book
+  details, a saved reading list, an add-book sheet, and reader preferences.
+- **A way back in** - the app icon in the top-left reopens the welcome window.
+  Edited projects stay in **Your projects**, including the last keystrokes before
+  switching templates. Untouched templates can be recreated without accumulating
+  extra copies in the project list.
 - **Files can come back** - the counterpart to Export, and the round trip the whole
   product is built around. Pick the `.swift` files from a project you exported and
   have since edited on a Mac, *or the `.zip` the export itself wrote* - all four

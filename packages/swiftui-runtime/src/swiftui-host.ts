@@ -12,6 +12,8 @@ import {
   str,
   type ClosureValue,
   type HostCall,
+  type CallArgument,
+  truthy,
   type InterpreterHost,
   type SwiftValue,
 } from '@studio/swift-runtime'
@@ -101,6 +103,7 @@ const CONTENT_CLOSURE_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
   ['Button', new Set(['label'])],
   ['Menu', new Set(['label'])],
   ['Label', new Set(['icon'])],
+  ['Tab', new Set(['label'])],
   ['Section', new Set(['header', 'footer'])],
   ['Toggle', new Set(['label'])],
   ['Picker', new Set(['label'])],
@@ -301,6 +304,25 @@ export class SwiftUIHost implements InterpreterHost {
 
   /** Per-pass counter, so two readers on one source line get distinct keys. */
   private geometryOrdinals = new Map<string, number>()
+
+  /** Scope the entire receiver expression, including children built eagerly inside stacks. */
+  withMemberScope(member: string, args: readonly CallArgument[], evaluate: () => SwiftValue): SwiftValue {
+    const values: [string, SwiftValue][] = []
+    const objects: [string, SwiftValue][] = []
+    const first = args[0]?.value
+    if (member === 'environmentObject' && first?.kind === 'struct') {
+      objects.push([first.typeName, first])
+    } else if (member === 'environment') {
+      const key = asKeyPath(first)?.components[0]
+      const value = args[1]?.value
+      if (key && value) values.push([key, value])
+    } else if (member === 'disabled' && first) {
+      values.push(['isEnabled', bool(!truthy(first) && truthy(this.environment.value('isEnabled') ?? bool(true)))])
+    } else if ((member === 'controlSize' || member === 'font' || member === 'dynamicTypeSize') && first) {
+      values.push([member, first])
+    }
+    return values.length || objects.length ? this.environment.scoped(values, objects, evaluate) : evaluate()
+  }
 
   beginPass(): void {
     this.geometryOrdinals.clear()
@@ -587,10 +609,8 @@ export class SwiftUIHost implements InterpreterHost {
   /**
    * Applies `.environmentObject` / `.environment`, with the injection in scope.
    *
-   * The target is expanded *inside* the scope, which is what gets the value to the
-   * view's `body`. A view value that is already built keeps the modifier recorded so
-   * the inspector still shows it, even though nothing below it can read it - see the
-   * limitation in `view-environment.ts`.
+   * Direct custom views expand here; children already constructed by the receiver
+   * were evaluated under withMemberScope. Keep the modifier for inspection.
    */
   private withInjectedEnvironment(
     target: SwiftValue,

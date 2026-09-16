@@ -60,6 +60,12 @@ function nodes(result: CompileResult): readonly RenderNode[] {
   return result.renderTree!.nodes
 }
 
+function worldFrame(tree: RenderTree, node: RenderNode) {
+  let x = node.frame.x, y = node.frame.y, parent = node.parent
+  while (parent) { const p = tree.nodes.find(n => n.id === parent)!; x += p.frame.x; y += p.frame.y; parent = p.parent }
+  return { ...node.frame, x, y }
+}
+
 function texts(tree: RenderTree | null): string[] {
   return (tree?.nodes ?? []).flatMap((n) => n.text?.runs.map((r) => r.text) ?? [])
 }
@@ -181,8 +187,8 @@ struct SettingsView: View {
     // Screen 2.
     result = tap(result.renderTree, 'Work')
     expect(texts(result.renderTree)).toContain('Settings')
-    // The back button is labelled with the screen it returns to, as iOS does.
-    expect(texts(result.renderTree)).toContain('Folders')
+    // The icon-only back button keeps the destination as its accessibility label.
+    expect(result.renderTree!.nodes.some(n => n.hitTarget && n.a11y?.label === 'Folders')).toBe(true)
 
     // Screen 3.
     result = tap(result.renderTree, 'Settings')
@@ -332,7 +338,7 @@ struct Row: View {
 })
 
 describe('Image and Label', () => {
-  it('draws an SF Symbol as an approximated glyph', () => {
+  it('keeps an SF name for the Ionicons painter without a Unicode substitute', () => {
     const result = run(
       app(`    var body: some View {
         Image(systemName: "star.fill")
@@ -341,18 +347,18 @@ describe('Image and Label', () => {
     const image = nodes(result).find((n) => n.kind === 'image')
     expect(image).toBeDefined()
     expect(image!.image!.approximated).toBe(true)
-    expect(image!.image!.glyph).not.toBe('')
+    expect(image!.image!.glyph).toBe('')
+    expect(image!.image!.symbol).toBe('star.fill')
   })
 
-  it('falls back to a base symbol when a variant is unknown', () => {
+  it('uses an explicit missing symbol when a variant is unknown', () => {
     const result = run(
       app(`    var body: some View {
         Image(systemName: "star.square.badge.something")
     }`),
     )
-    // `star` is known, so an unrecognised variant lands on the base star rather than
-    // on the "no such symbol" box.
-    expect(glyphs(result.renderTree)).toEqual(['☆'])
+    // Losing a badge could change meaning, so do not silently draw a plain star.
+    expect(glyphs(result.renderTree)).toEqual(['▢'])
   })
 
   it('lays a Label out as icon then title on one line', () => {
@@ -460,7 +466,7 @@ describe('List', () => {
     }`),
     )
     const shown = texts(result.renderTree)
-    expect(shown).toContain('FRUIT')
+    expect(shown).toContain('Fruit')
     expect(shown).toContain('Apple')
     expect(shown).toContain('Banana')
   })
@@ -476,7 +482,7 @@ describe('List', () => {
     const row = nodes(result).find((n) => n.text?.runs[0]?.text === 'Only')!
     // The 44pt floor is applied to the row, so its text sits centred within it.
     expect(row.frame.height).toBeLessThanOrEqual(44)
-    expect(row.frame.x).toBeGreaterThanOrEqual(32)
+    expect(worldFrame(result.renderTree!, row).x).toBeGreaterThanOrEqual(32)
   })
 
   it('scrolls when its rows exceed the screen', () => {
@@ -654,7 +660,7 @@ describe('TabView', () => {
     const result = run(SOURCE)
     const labels = nodes(result).filter((n) => n.text?.runs[0]?.text === 'Home')
     const item = labels[labels.length - 1]!
-    expect(item.frame.y).toBeGreaterThan(device.height - 120)
+    expect(worldFrame(result.renderTree!, item).y).toBeGreaterThan(device.height - 120)
   })
 })
 

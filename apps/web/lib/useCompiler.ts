@@ -4,6 +4,8 @@ import * as Comlink from 'comlink'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CompileResult,
+  PreviewTarget,
+  DynamicTypeSize,
   CompilerApi,
   CompletionResult,
   SourceSpan,
@@ -13,7 +15,7 @@ import type {
   UIEvent,
 } from '@studio/shared'
 import type { DeviceSpec } from '@studio/sim-shell'
-import { measureFontsWhenReady } from './fontMetrics'
+import { measureFontsWhenReady, measureTextBatch } from './fontMetrics'
 import { recordCoverage } from './telemetry'
 
 /** Edit-to-recompile debounce. Long enough to coalesce a fast typist's burst, short enough to feel live. */
@@ -29,6 +31,7 @@ export interface CompilerState {
 
 interface WorkerHandle {
   worker: Worker
+  ready?: Promise<void>
   api: Comlink.Remote<CompilerApi>
 }
 
@@ -52,11 +55,13 @@ function spawnWorker(): WorkerHandle {
  *    with it (requirement NFR-3).
  */
 export interface CompilerOptions {
+  previewTarget?: PreviewTarget
   files: readonly SourceFile[]
   device: DeviceSpec
   colorScheme: 'light' | 'dark'
   /** Dynamic Type multiplier, 1 = the Large default. */
   typeScale?: number
+  dynamicTypeSize?: DynamicTypeSize
   /**
    * Suspends the recompile-on-edit loop.
    *
@@ -72,6 +77,8 @@ export function useCompiler({
   device,
   colorScheme,
   typeScale = 1,
+  dynamicTypeSize,
+  previewTarget,
   paused = false,
 }: CompilerOptions) {
   const handleRef = useRef<WorkerHandle | null>(null)
@@ -100,8 +107,8 @@ export function useCompiler({
 
     const handle = spawnWorker()
     fontsRef.current ??= measureFontsWhenReady()
-    void fontsRef.current.then((fonts) => {
-      if (fonts.length > 0) void handle.api.setFontMetrics(fonts)
+    handle.ready = fontsRef.current.then(async (fonts) => {
+      if (fonts.length > 0) await handle.api.setFontMetrics(fonts)
     })
     handle.worker.addEventListener('error', (event) => {
       setState((s) => ({
@@ -116,7 +123,7 @@ export function useCompiler({
   }, [])
 
   const accept = useCallback((result: CompileResult) => {
-    if (result.revision < paintedRef.current) return
+    if (result.revision < revisionRef.current || result.revision < paintedRef.current) return
     paintedRef.current = result.revision
     // Recorded before the paint, so what the Coverage panel shows always describes
     // the tree on screen rather than the one before it.
@@ -124,21 +131,43 @@ export function useCompiler({
     setState({ result, stale: false, workerError: null })
   }, [])
 
+  const refine = useCallback(async (initial: CompileResult, handle: WorkerHandle) => {
+    let result = initial
+    // New wrapping can ask for new runs. Bound refinement and expose any remaining
+    // estimates instead of looping indefinitely or issuing one RPC per string.
+    for (let pass = 0; pass < 8; pass++) {
+      if (result.revision !== revisionRef.current || handle !== handleRef.current) return
+      const requests = result.textMeasurement?.requests ?? []
+      if (!requests.length) break
+      const measured = measureTextBatch(requests)
+      if (!measured.length) break
+      const next = await handle.api.setTextMeasurements(measured, result.revision, result.textMeasurement?.generation)
+      if (!next) return
+      result = next
+    }
+    accept(result)
+  }, [accept])
+
   const runCompile = useCallback(async () => {
     const handle = ensureWorker()
     const revision = ++revisionRef.current
     setState((s) => (s.result ? { ...s, stale: true } : s))
 
     try {
-      accept(
+      await handle.ready
+      if (revision !== revisionRef.current || handle !== handleRef.current) return
+      await refine(
         await handle.api.compile({
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
           safeArea: device.safeArea,
           colorScheme,
+          previewTarget,
           typeScale,
+          dynamicTypeSize,
+          displayScale: device.scale,
           revision,
-        }),
+        }), handle,
       )
     } catch (error) {
       setState((s) => ({
@@ -148,7 +177,32 @@ export function useCompiler({
       }))
       handleRef.current = null
     }
-  }, [accept, colorScheme, device, ensureWorker, files, typeScale])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget])
+
+  const latestCompile = useRef(runCompile)
+  const latestPaused = useRef(paused)
+  useEffect(() => { latestCompile.current = runCompile; latestPaused.current = paused }, [runCompile, paused])
+  useEffect(() => {
+    let active = true
+    const refresh = () => {
+      const handle = handleRef.current
+      fontsRef.current = measureFontsWhenReady()
+      if (!handle) return
+      handle.ready = fontsRef.current.then(async (fonts) => {
+        if (!active || handle !== handleRef.current) return
+        await handle.api.setFontMetrics(fonts)
+      })
+      void handle.ready.then(() => {
+        if (!active || handle !== handleRef.current) return
+        if (latestPaused.current && paintedRef.current >= 0) {
+          return handle.api.relayout(++revisionRef.current).then((result) => refine(result, handle))
+        }
+        void latestCompile.current()
+      }).catch(() => { /* The normal compile path reports a worker failure. */ })
+    }
+    document.fonts?.addEventListener('loadingdone', refresh)
+    return () => { active = false; document.fonts?.removeEventListener('loadingdone', refresh) }
+  }, [refine])
 
   /**
    * Debounced recompile whenever the sources or the device change.
@@ -182,24 +236,28 @@ export function useCompiler({
   const dispatch = useCallback(
     async (event: UIEvent) => {
       try {
-        accept(await ensureWorker().api.dispatch(event, ++revisionRef.current))
+        const handle = ensureWorker()
+        await handle.ready
+        await refine(await handle.api.dispatch(event, ++revisionRef.current), handle)
       } catch {
         // A dead worker during interaction: respawn and recompile from source.
         handleRef.current = null
         void runCompile()
       }
     },
-    [accept, ensureWorker, runCompile],
+    [refine, ensureWorker, runCompile],
   )
 
   const reset = useCallback(async () => {
     try {
-      accept(await ensureWorker().api.reset(++revisionRef.current))
+      const handle = ensureWorker()
+      await handle.ready
+      await refine(await handle.api.reset(++revisionRef.current), handle)
     } catch {
       handleRef.current = null
       void runCompile()
     }
-  }, [accept, ensureWorker, runCompile])
+  }, [refine, ensureWorker, runCompile])
 
   /**
    * Editor intelligence, asked of the worker on demand.

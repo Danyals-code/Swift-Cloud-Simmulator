@@ -1,5 +1,7 @@
 'use client'
 
+import { DYNAMIC_TYPE_SIZES, dynamicTypeForScale, type DynamicTypeSize } from '@studio/shared'
+
 import { useLayoutEffect, useRef, useState } from 'react'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
 import { EMPTY_RENDER_TREE, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
@@ -38,14 +40,14 @@ const PANE_PADDING = 28
 const DEVICE_Z = 1_000_000
 
 /** Dynamic Type steps, matching the iOS accessibility slider's usable range. */
-const TYPE_SCALES: readonly MenuItem[] = [
-  { value: '0.82', label: 'Text XS' },
-  { value: '0.91', label: 'Text S' },
-  { value: '1', label: 'Text M', detail: 'Default' },
-  { value: '1.12', label: 'Text L' },
-  { value: '1.35', label: 'Text XL' },
-  { value: '1.6', label: 'Text XXL' },
-]
+const TYPE_SCALES: readonly MenuItem[] = DYNAMIC_TYPE_SIZES.map((value) => ({
+  value,
+  label: ({ xSmall: 'Text XS', small: 'Text S', medium: 'Text M', large: 'Text L',
+    xLarge: 'Text XL', xxLarge: 'Text XXL', xxxLarge: 'Text XXXL',
+    accessibility1: 'Text AX1', accessibility2: 'Text AX2', accessibility3: 'Text AX3',
+    accessibility4: 'Text AX4', accessibility5: 'Text AX5' })[value],
+  ...(value === 'large' ? { detail: 'Default' } : {}),
+}))
 
 const ZOOMS: readonly MenuItem[] = [
   { value: 'fit', label: 'Fit', detail: 'Auto' },
@@ -110,6 +112,7 @@ export function DevicePane({
   return (
     <section className="flex h-full min-w-0 flex-col bg-xc-canvas" aria-label="Preview">
       <header className="flex h-[28px] shrink-0 items-center gap-2 border-b border-black/30 bg-xc-sidebar px-2">
+        <span className="shrink-0 text-[10px] text-xc-text-2" title="iOS 27 appearance preview — native calibration pending">iOS 27 Preview</span>
         <SegmentedControl
           label="Appearance"
           testId="scheme-toggle"
@@ -123,8 +126,8 @@ export function DevicePane({
 
         <PopupButton
           items={TYPE_SCALES}
-          value={String(preview.typeScale)}
-          onChange={(value) => onPreviewChange({ typeScale: Number(value) })}
+          value={preview.dynamicTypeSize ?? dynamicTypeForScale(preview.typeScale)}
+          onChange={(value) => onPreviewChange({ dynamicTypeSize: value as DynamicTypeSize })}
           label="Dynamic Type size"
           title="Dynamic Type size - a layout input, not just a font size"
           testId="type-scale-select"

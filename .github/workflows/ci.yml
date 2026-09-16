@@ -64,7 +64,7 @@ jobs:
           retention-days: 3
 
   e2e:
-    name: End-to-end (Phase 0 gate)
+    name: End-to-end and iOS 27 screen matrix
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -87,7 +87,7 @@ jobs:
         run: npm run e2e
 
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: playwright-report
           path: playwright-report

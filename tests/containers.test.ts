@@ -166,14 +166,19 @@ describe('Section footers', () => {
   it('leaves a section without one unchanged', () => {
     const result = run(list('Section("Account") { Text("Row") }'))
     expect(texts(result)).toContain('Row')
-    expect(texts(result)).toContain('ACCOUNT')
+    expect(texts(result)).toContain('Account')
   })
 
   it('keeps the header above and the footer below the same section', () => {
     const result = run(
       list('Section("Account") { Text("Row") } footer: { Text("Note.") }'),
     )
-    expect(textNode(result, 'ACCOUNT').frame.y).toBeLessThan(textNode(result, 'Row').frame.y)
-    expect(textNode(result, 'Row').frame.y).toBeLessThan(textNode(result, 'Note.').frame.y)
+    const y = (text: string) => {
+      let node = textNode(result, text), value = node.frame.y
+      while (node.parent) { node = result.renderTree!.nodes.find(n => n.id === node.parent)!; value += node.frame.y }
+      return value
+    }
+    expect(y('Account')).toBeLessThan(y('Row'))
+    expect(y('Row')).toBeLessThan(y('Note.'))
   })
 })

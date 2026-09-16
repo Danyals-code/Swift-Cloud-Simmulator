@@ -9,6 +9,8 @@ import {
   rerender,
   resetPipelineState,
   setFontMetrics,
+  setTextMeasurements,
+  relayout,
 } from '@studio/swiftui-runtime'
 import type {
   CompileRequest,
@@ -22,6 +24,7 @@ import type {
   SymbolInfo,
   UIEvent,
 } from '@studio/shared'
+import { workerTextMeasurer } from '../lib/workerFontMetrics'
 
 /**
  * The compiler worker.
@@ -53,8 +56,10 @@ const api: CompilerApi = {
   },
 
   async setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void> {
-    setFontMetrics(fonts)
+    setFontMetrics(fonts, workerTextMeasurer(fonts), true)
   },
+  async setTextMeasurements(data, revision, generation) { return setTextMeasurements(data, revision, generation) },
+  async relayout(revision) { return relayout(revision) },
 
   // Editor intelligence. Here for the same reason as everything else Swift-shaped:
   // the main thread must stay at 60 fps while typing, and re-parsing a project on

@@ -1,4 +1,9 @@
+import { stackGaps } from './spacing'
+import { symbolMetrics } from '@studio/shared'
 import type {
+  CornerStyle,
+  ShapeStroke,
+  SliderPayload,
   FilterSpec,
   Fill,
   Rect,
@@ -11,6 +16,7 @@ import type {
 import {
   childEnvironment,
   type Alignment,
+  type EdgeInsets,
   type Axis,
   type AnimationHint,
   type GridElement,
@@ -68,17 +74,19 @@ export type PaintSpec =
       readonly lineSpacing?: number
     }
   | { readonly kind: 'fill'; readonly fill: Fill }
+  | { readonly kind: 'slider'; readonly style: SliderPayload }
   | {
       readonly kind: 'shape'
       readonly shape: ShapeKind
+      readonly cornerStyle?: CornerStyle
       readonly fill?: Fill
-      readonly stroke?: { readonly color: RGBA; readonly width: number }
+      readonly stroke?: ShapeStroke
     }
   | {
       readonly kind: 'path'
       readonly d: string
       readonly fill?: Fill
-      readonly stroke?: { readonly color: RGBA; readonly width: number }
+      readonly stroke?: ShapeStroke
       readonly fillRule: 'nonzero' | 'evenodd'
     }
   | {
@@ -89,9 +97,11 @@ export type PaintSpec =
       readonly approximated: boolean
       readonly resizable: boolean
       readonly symbol?: string
+  readonly symbolScale?: number
     }
   | {
       readonly kind: 'scroll'
+      readonly contentInsets?: EdgeInsets
       readonly axis: 'vertical' | 'horizontal'
       readonly content: Size
       readonly showsIndicators: boolean
@@ -100,6 +110,8 @@ export type PaintSpec =
   | { readonly kind: 'hit' }
 
 export interface PlacedNode {
+  readonly cornerStyle?: CornerStyle
+  readonly clipShape?: { readonly kind: ShapeKind; readonly cornerStyle?: CornerStyle }
   readonly id: string
   readonly frame: Rect
   readonly z: number
@@ -108,6 +120,12 @@ export interface PlacedNode {
   readonly paint: PaintSpec
   readonly origin?: SourceSpan
   readonly hitTarget?: {
+    readonly step?: number
+    readonly secure?: boolean
+    readonly inputInset?: number
+    readonly thumbDiameter?: number
+    readonly placeholderColor?: RGBA
+    readonly cornerRadius?: number
     readonly handlerId: string
     readonly label: string
     readonly role: HitRole
@@ -259,6 +277,9 @@ export class LayoutEngine {
         return { width: measured.width, height: measured.height }
       }
 
+      case 'slider':
+        return { width: resolve(proposal.width, 160, UNBOUNDED), height: element.height }
+
       case 'spacer': {
         // Greedy along its stack's axis, zero across it.
         const along = element.axis === 'vertical' ? proposal.height : proposal.width
@@ -271,13 +292,13 @@ export class LayoutEngine {
       // Shapes, colours and paths fill whatever they are offered. A path's own
       // coordinates are absolute within its frame - it does not scale to fit, which
       // is SwiftUI's behaviour too.
+      case 'shape': {
+        const width = resolve(proposal.width, 10, UNBOUNDED), height = resolve(proposal.height, 10, UNBOUNDED)
+        return element.shape === 'circle' ? { width: Math.min(width, height), height: Math.min(width, height) } : { width, height }
+      }
       case 'path':
-      case 'shape':
       case 'fill':
-        return {
-          width: resolve(proposal.width, 10, UNBOUNDED),
-          height: resolve(proposal.height, 10, UNBOUNDED),
-        }
+        return { width: resolve(proposal.width, 10, UNBOUNDED), height: resolve(proposal.height, 10, UNBOUNDED) }
 
       case 'image': {
         // A symbol is a glyph: its box comes from the font, exactly as in SwiftUI,
@@ -288,7 +309,7 @@ export class LayoutEngine {
             height: resolve(proposal.height, 24, UNBOUNDED),
           }
         }
-        return { width: env.font.size * 1.18, height: env.font.lineHeight }
+        return { width: env.font.size * symbolMetrics(element.symbol).widthEm * (element.symbolScale ?? 1), height: Math.max(env.font.lineHeight, env.font.size * symbolMetrics(element.symbol).heightEm * (element.symbolScale ?? 1)) }
       }
 
       case 'scroll': {
@@ -351,7 +372,7 @@ export class LayoutEngine {
     if (children.length === 0) return { width: 0, height: 0 }
 
     const vertical = element.axis === 'vertical'
-    const spacingTotal = element.spacing * (children.length - 1)
+    const spacingTotal = stackGaps(element).reduce((sum, gap) => sum + gap, 0)
     const cross = vertical ? proposal.width : proposal.height
     const main = vertical ? proposal.height : proposal.width
 
@@ -379,6 +400,11 @@ export class LayoutEngine {
     for (const size of sizes) {
       crossExtent = Math.max(crossExtent, vertical ? size.width : size.height)
       mainExtent += vertical ? size.height : size.width
+    }
+
+    if (!vertical && (element.alignment.vertical === 'firstTextBaseline' || element.alignment.vertical === 'lastTextBaseline')) {
+      const guides = children.map((child, i) => this.baselineOf(child, sizes[i]!, env, element.alignment.vertical === 'lastTextBaseline'))
+      crossExtent = Math.max(...guides) + Math.max(...sizes.map((size, i) => size.height - guides[i]!))
     }
 
     return vertical
@@ -450,6 +476,14 @@ export class LayoutEngine {
     const inner = childEnvironment(env, modifier)
 
     switch (modifier.kind) {
+      case 'square': {
+        const size = this.measure(element.child, proposal, inner)
+        const side = Math.max(size.width, size.height)
+        return { width: side, height: side }
+      }
+      case 'inputFrame':
+        return { width: resolve(proposal.width, 160, UNBOUNDED), height: Math.max(modifier.minHeight, inner.font.lineHeight + modifier.paddingY * 2) }
+
       case 'padding': {
         const { top, leading, bottom, trailing } = modifier.insets
         const size = this.measure(
@@ -686,7 +720,8 @@ export class LayoutEngine {
         // `.minimumScaleFactor` shrank the text to make it fit, so the painted runs
         // take the same factor. Measuring at one size and painting at another is the
         // one thing a measured layout exists to rule out.
-        const painted = measured.scale === 1 ? runs : runs.map((run) => scaleRun(run, measured.scale))
+        let painted = measured.scale === 1 ? runs : runs.map((run) => scaleRun(run, measured.scale))
+        if (measured.tightening) painted = painted.map((run) => ({ ...run, tracking: (run.tracking ?? 0) - measured.tightening! }))
         const lineFont = measured.scale === 1 ? env.font : scaleFont(env.font, measured.scale)
 
         out.push({
@@ -712,6 +747,11 @@ export class LayoutEngine {
         return z + 1
       }
 
+      case 'slider':
+        out.push({ id: element.id, frame: bounds, z, opacity: env.opacity, cornerRadius: 0,
+          paint: { kind: 'slider', style: element.style }, ...debugInfo(element), ...decorations(env, parent) })
+        return z + 1
+
       case 'image': {
         out.push({
           id: element.id,
@@ -726,6 +766,7 @@ export class LayoutEngine {
             color: env.foregroundColor,
             approximated: element.approximated,
             resizable: element.resizable,
+            symbolScale: element.symbolScale,
             ...(element.symbol ? { symbol: element.symbol } : {}),
           },
           ...debugInfo(element),
@@ -790,6 +831,7 @@ export class LayoutEngine {
           paint: {
             kind: 'shape',
             shape: element.shape,
+            cornerStyle: element.cornerStyle,
             // A stroked shape with no fill is an outline, which is what
             // `.stroke(…)` alone means.
             ...(element.fill
@@ -797,7 +839,7 @@ export class LayoutEngine {
               : element.stroke
                 ? {}
                 : { fill: { kind: 'solid' as const, color: env.foregroundColor } }),
-            ...(element.stroke ? { stroke: element.stroke } : {}),
+            ...(element.stroke ? { stroke: { ...element.stroke, color: element.stroke.usesForeground ? env.foregroundColor : element.stroke.color } } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -808,10 +850,15 @@ export class LayoutEngine {
       case 'fill':
         out.push({
           id: element.id,
-          frame: bounds,
+          frame: element.pixelAligned ? {
+            ...bounds,
+            x: Math.round(bounds.x * (env.displayScale ?? 3)) / (env.displayScale ?? 3),
+            y: Math.round(bounds.y * (env.displayScale ?? 3)) / (env.displayScale ?? 3),
+          } : bounds,
           z,
           opacity: env.opacity,
           cornerRadius: env.cornerRadius,
+          cornerStyle: env.cornerStyle,
           paint: { kind: 'fill', fill: element.fill },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -885,6 +932,7 @@ export class LayoutEngine {
         kind: 'scroll',
         axis: element.axis,
         content: contentSize,
+        contentInsets: element.contentInsets,
         showsIndicators: element.showsIndicators,
       },
       ...debugInfo(element),
@@ -894,7 +942,12 @@ export class LayoutEngine {
 
     return this.place(
       element.content,
-      { x: 0, y: 0, width: contentSize.width, height: contentSize.height },
+      // The scroll extent can fill the viewport, while an intrinsic child keeps
+      // its measured cross-axis size and is centered (for example a padded VStack).
+      { x: vertical ? Math.max(0, (bounds.width - content.width) / 2) : 0,
+        y: vertical ? 0 : Math.max(0, (bounds.height - content.height) / 2),
+        width: vertical ? content.width : contentSize.width,
+        height: vertical ? contentSize.height : content.height },
       env,
       out,
       z + 1,
@@ -1031,6 +1084,51 @@ export class LayoutEngine {
     return next
   }
 
+  /** Baselines propagate through padding, frames, and nested stacks. */
+  private baselineOf(element: LayoutElement, size: Size, env: LayoutEnvironment, last: boolean): number {
+    if (element.kind === 'text') {
+      const measured = measureRuns(measuredRuns(paintedRuns(element, env)), env.font, size.width,
+        this.metrics, env.lineLimit, env.lineSpacing ?? 0, textOptions(env))
+      if (!measured.lines.length) return size.height
+      const index = last ? measured.lines.length - 1 : 0
+      return measured.lines.slice(0, index).reduce((sum, line) => sum + line.height + (env.lineSpacing ?? 0), 0) + measured.lines[index]!.baseline
+    }
+    if (element.kind === 'image') return Math.min(size.height, this.metrics.baseline(env.font))
+    if (element.kind === 'modified') {
+      const m = element.modifier, inner = childEnvironment(env, m)
+      if (m.kind === 'padding') {
+        const childSize = { width: Math.max(0, size.width - m.insets.leading - m.insets.trailing), height: Math.max(0, size.height - m.insets.top - m.insets.bottom) }
+        return m.insets.top + this.baselineOf(element.child, childSize, inner, last)
+      }
+      if (m.kind === 'frame') {
+        const childSize = this.measure(element.child, { width: size.width, height: size.height }, inner)
+        return alignOffset(m.alignment.vertical, size.height, childSize.height) + this.baselineOf(element.child, childSize, inner, last)
+      }
+      if (m.kind === 'alignmentGuide' && m.guide === (last ? 'lastTextBaseline' : 'firstTextBaseline')) return m.compute(size)
+      return this.baselineOf(element.child, size, inner, last)
+    }
+    if (element.kind === 'stack' && element.children.length) {
+      const sizes = this.stackChildSizes(element, { width: size.width, height: size.height }, env)
+      const guides = element.children.map((child, i) => this.baselineOf(child, sizes[i]!, env, last))
+      if (element.axis === 'horizontal') {
+        const alignment = element.alignment.vertical
+        const alignedToBaseline = alignment === 'firstTextBaseline' || alignment === 'lastTextBaseline'
+        const alignmentGuides = alignedToBaseline
+          ? element.children.map((child, i) => this.baselineOf(child, sizes[i]!, env, alignment === 'lastTextBaseline'))
+          : []
+        const common = alignedToBaseline ? Math.max(...alignmentGuides) : 0
+        const positioned = guides.map((guide, i) => guide + (alignedToBaseline
+          ? common - alignmentGuides[i]!
+          : alignOffset(alignment, size.height, sizes[i]!.height)))
+        return last ? Math.max(...positioned) : Math.min(...positioned)
+      }
+      if (!last) return guides[0]!
+      return sizes.slice(0, -1).reduce((sum, child) => sum + child.height, 0) +
+        stackGaps(element).reduce((sum, gap) => sum + gap, 0) + guides[guides.length - 1]!
+    }
+    return size.height
+  }
+
   private placeStack(
     element: StackElement,
     bounds: Rect,
@@ -1045,13 +1143,17 @@ export class LayoutEngine {
     // Re-run the measure pass so children are placed at exactly the sizes they
     // reported; the cache makes this free.
     const sizes = this.stackChildSizes(element, proposal, env)
+    const gaps = stackGaps(element)
 
     const crossAlignment = vertical ? element.alignment.horizontal : element.alignment.vertical
     const guides = element.children.map((child, i) => {
       const size = sizes[i]!
       const across = vertical ? size.width : size.height
       const override = alignmentGuideOf(child, crossAlignment)
-      return override ? override(size) : defaultGuide(crossAlignment, across)
+      return override ? override(size)
+        : crossAlignment === 'firstTextBaseline' || crossAlignment === 'lastTextBaseline'
+          ? this.baselineOf(child, size, env, crossAlignment === 'lastTextBaseline')
+          : defaultGuide(crossAlignment, across)
     })
     const maxGuide = guides.reduce((max, g) => Math.max(max, g), 0)
     const widest = sizes.reduce((max, s) => Math.max(max, vertical ? s.width : s.height), 0)
@@ -1075,7 +1177,7 @@ export class LayoutEngine {
         : { x: bounds.x + offset, y: bounds.y + crossOffset, width: size.width, height: size.height }
 
       next = this.place(child, childBounds, env, out, next, parent)
-      offset += (vertical ? size.height : size.width) + element.spacing
+      offset += (vertical ? size.height : size.width) + (gaps[i] ?? 0)
     }
 
     return next
@@ -1099,7 +1201,7 @@ export class LayoutEngine {
       return sizes
     }
 
-    let remaining = resolve(main, 0, UNBOUNDED) - element.spacing * (element.children.length - 1)
+    let remaining = resolve(main, 0, UNBOUNDED) - stackGaps(element).reduce((sum, gap) => sum + gap, 0)
     const order = this.flexibilityOrder(element.children, vertical, cross, env)
 
     for (const [position, index] of order.entries()) {
@@ -1124,6 +1226,11 @@ export class LayoutEngine {
     const inner = childEnvironment(env, modifier)
 
     switch (modifier.kind) {
+      case 'square': {
+        const size = this.measure(element.child, { width: bounds.width, height: bounds.height }, inner)
+        return this.place(element.child, alignedRect(bounds, size, CENTRE), inner, out, z, parent)
+      }
+
       case 'padding': {
         const { top, leading, bottom, trailing } = modifier.insets
         return this.place(
@@ -1266,6 +1373,7 @@ export class LayoutEngine {
               ? Math.min(bounds.width, bounds.height) / 2
               : modifier.cornerRadius,
           clip: true,
+          clipShape: { kind: modifier.shape, cornerStyle: modifier.style },
           paint: { kind: 'hit' },
           ...(parent ? { parent } : {}),
         })
@@ -1483,12 +1591,15 @@ export class LayoutEngine {
         return this.place(element.child, bounds, inner, out, z, parent)
 
       case 'hitTarget': {
+        let controlEnv = inner
+        let control = element.child
+        while (control.kind === 'modified') { controlEnv = childEnvironment(controlEnv, control.modifier); control = control.child }
         const next = this.place(element.child, bounds, inner, out, z, parent)
         out.push({
           id: `${element.id}-hit`,
           frame: bounds,
           z: next,
-          opacity: 1,
+          opacity: modifier.role === 'textField' ? controlEnv.opacity : 1,
           cornerRadius: 0,
           paint: { kind: 'hit' },
           hitTarget: {
@@ -1496,8 +1607,14 @@ export class LayoutEngine {
             label: modifier.label,
             role: modifier.role,
             enabled: modifier.enabled && !inner.hitTestingDisabled,
-            font: inner.font,
-            color: inner.foregroundColor,
+            font: controlEnv.font,
+            color: modifier.color ?? controlEnv.foregroundColor,
+            step: modifier.step,
+            secure: modifier.secure,
+            inputInset: modifier.inputInset,
+            thumbDiameter: modifier.thumbDiameter,
+            placeholderColor: modifier.placeholderColor,
+            cornerRadius: modifier.cornerRadius,
             ...(modifier.value !== undefined ? { value: modifier.value } : {}),
             ...(modifier.placeholder !== undefined ? { placeholder: modifier.placeholder } : {}),
             ...(modifier.min !== undefined ? { min: modifier.min } : {}),
@@ -1683,7 +1800,7 @@ function resolveFrameAxis(
  * guides are. Writing it this way is what lets `.alignmentGuide` replace one.
  */
 function defaultGuide(
-  alignment: 'leading' | 'center' | 'trailing' | 'top' | 'bottom',
+  alignment: 'leading' | 'center' | 'trailing' | 'top' | 'bottom' | 'firstTextBaseline' | 'lastTextBaseline',
   size: number,
 ): number {
   if (alignment === 'center') return size / 2
@@ -1714,7 +1831,7 @@ function alignmentGuideOf(
 }
 
 function alignOffset(
-  alignment: 'leading' | 'center' | 'trailing' | 'top' | 'bottom',
+  alignment: 'leading' | 'center' | 'trailing' | 'top' | 'bottom' | 'firstTextBaseline' | 'lastTextBaseline',
   available: number,
   size: number,
 ): number {
@@ -1773,7 +1890,7 @@ function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly Pai
       ...base.font,
       ...(run.font?.family !== undefined ? { family: run.font.family } : {}),
       ...(run.font?.size !== undefined
-        ? { size: run.font.size, lineHeight: run.font.size * LINE_HEIGHT_RATIO }
+        ? { size: run.font.size, lineHeight: run.font.lineHeight ?? Math.round(run.font.size * LINE_HEIGHT_RATIO) }
         : {}),
       ...(run.font?.weight !== undefined ? { weight: run.font.weight } : {}),
       ...(run.font?.italic !== undefined ? { italic: run.font.italic } : {}),
@@ -1803,7 +1920,7 @@ function applyRunAttributes(base: PaintedRun, run: TextRunSpec): PaintedRun {
  * line height from. The same ratio the font resolver uses, kept here rather than
  * imported so `swiftui-layout` keeps owning every number layout depends on.
  */
-const LINE_HEIGHT_RATIO = 1.21
+const LINE_HEIGHT_RATIO = 1.29
 
 function scaleFont(font: ResolvedFont, scale: number): ResolvedFont {
   return { ...font, size: font.size * scale, lineHeight: font.lineHeight * scale }
@@ -1833,6 +1950,7 @@ function measuredRuns(runs: readonly PaintedRun[]): readonly MeasuredRun[] {
     font: run.font,
     ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
     ...(run.tabularNumbers ? { tabularNumbers: true } : {}),
+    ...(run.baselineOffset !== undefined ? { baselineOffset: run.baselineOffset } : {}),
   }))
 }
 

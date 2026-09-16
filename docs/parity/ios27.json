@@ -1,0 +1,76 @@
+{
+  "profile": "ios-27",
+  "status": "provisional",
+  "nativeCaptures": [
+    {
+      "manifest": "native/iphone18pro-light/measurements.json",
+      "states": [
+        "library",
+        "settings",
+        "details",
+        "alert",
+        "sheet",
+        "scrolled-library"
+      ],
+      "scope": "light/default-text phone; capture settings assumed"
+    }
+  ],
+  "nativeMeasurements": "native/iphone18pro-light/measurements.json",
+  "browserGeometryBaselines": "tests/__snapshots__/ios27-regression.test.ts.snap",
+  "fixture": "tests/fixtures/ios27-screens.swift",
+  "matrix": [
+    {
+      "device": "iphone-se-3",
+      "appearance": [
+        "light",
+        "dark"
+      ],
+      "textSize": "large"
+    },
+    {
+      "device": "iphone-15",
+      "appearance": [
+        "light",
+        "dark"
+      ],
+      "textSize": "large"
+    },
+    {
+      "device": "ipad-11",
+      "appearance": [
+        "light",
+        "dark"
+      ],
+      "textSize": "large"
+    },
+    {
+      "device": "iphone-15",
+      "appearance": [
+        "light"
+      ],
+      "textSize": "accessibility3"
+    }
+  ],
+  "states": [
+    "library",
+    "scrolled-library",
+    "details",
+    "settings",
+    "sheet",
+    "alert",
+    "menu"
+  ],
+  "intentionalDifferences": [
+    "Ionicons artwork replaces SF Symbols",
+    "Materials use blur without glass refraction"
+  ],
+  "pending": [
+    "Remaining native matrix and capture-setting confirmation",
+    "Native region image thresholds",
+    "Non-Mac font comparison",
+    "Native SDK build verification",
+    "Before/after end-to-end latency comparison"
+  ],
+  "geometryTolerancePoints": 1,
+  "lineCountTolerance": 0
+}

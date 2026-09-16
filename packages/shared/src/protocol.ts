@@ -1,3 +1,6 @@
+import type { DynamicTypeSize } from './dynamic-type'
+import type { MeasuredTextData, TextMeasureRequest } from './text-measurement'
+import type { PreviewTarget } from './appearance'
 import type { Diagnostic } from './diagnostics'
 import type { FileId, SourceSpan } from './source'
 import type { Point, RenderTree } from './render-tree'
@@ -17,6 +20,7 @@ export interface SourceFile {
 }
 
 export interface CompileRequest {
+  readonly previewTarget?: PreviewTarget
   readonly files: readonly SourceFile[]
   /** logical point size of the target device, from sim-shell */
   readonly canvas: { readonly width: number; readonly height: number }
@@ -40,6 +44,8 @@ export interface CompileRequest {
    * That is exactly what makes it worth previewing.
    */
   readonly typeScale?: number
+  readonly dynamicTypeSize?: DynamicTypeSize
+  readonly displayScale?: number
   /**
    * Bumped by the caller on every request; echoed back so a slow response for an
    * older revision can be discarded rather than flashing stale output.
@@ -78,6 +84,8 @@ export interface CompileResult {
   readonly renderTree: RenderTree | null
   readonly logs: readonly LogEntry[]
   readonly timings: CompileTimings
+  /** Pending shaped runs are resolved in one bounded main-thread batch. */
+  readonly textMeasurement?: { readonly generation?: number; readonly provisional: boolean; readonly requests: readonly TextMeasureRequest[] }
 }
 
 /**
@@ -146,6 +154,8 @@ export interface CompilerApi {
    * startup, before the first compile.
    */
   setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void>
+  setTextMeasurements(data: readonly MeasuredTextData[], revision: number, generation?: number): Promise<CompileResult | null>
+  relayout(revision: number): Promise<CompileResult>
 
   /**
    * Editor intelligence, all three asking the same question from a different angle:
@@ -185,6 +195,8 @@ export interface CompletionResult {
 /** One measured font face. Mirrors `MeasuredFont` in `swiftui-layout`. */
 export interface MeasuredFontData {
   readonly family: string
+  readonly resolvedFamily?: string
+  readonly referenceWidth?: number
   readonly weight: number
   readonly advances: Readonly<Record<string, number>>
   readonly fallback: number

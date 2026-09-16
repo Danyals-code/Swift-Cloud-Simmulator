@@ -1,0 +1,163 @@
+{
+  "source": "Six original PNGs supplied by the user on 2026-09-16. No resizing, recoloring, or cropping.",
+  "status": "partial-native-calibration",
+  "runtime": "ios-27 (conversation target; no machine-readable capture metadata supplied)",
+  "device": "iPhone 18 Pro (Simulator filename)",
+  "assumptions": {
+    "scale": 3,
+    "logicalSize": [
+      402,
+      874
+    ],
+    "dynamicTypeSize": "large",
+    "safeArea": {
+      "top": 62,
+      "bottom": 34
+    },
+    "fixtureUnchanged": true
+  },
+  "metadataVerification": "PNG dimensions/color space and hashes verified. Runtime, text-size, and unchanged fixture awaiting user confirmation.",
+  "fixtureSha256": "50a1a305fef0087a4f3a0d67dd3f46af1eb42458a1dec34298239df627c0b216",
+  "captures": [
+    {
+      "state": "library",
+      "file": "library.png",
+      "originalFilename": "Screenshot iPhone 18 Pro 09-16-2026 at 9.09.16\u202fPM.png",
+      "sha256": "b4019192215edd422275a18b7682fa802173da95ecf1365fcc575661389d8087",
+      "pixels": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "state": "settings",
+      "file": "settings.png",
+      "originalFilename": "Screenshot iPhone 18 Pro 09-16-2026 at 9.10.01\u202fPM.png",
+      "sha256": "1ce4edc3ee72af9137c378fb9ffb47cbccffb03273d506e8cf5b8089d95f076a",
+      "pixels": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "state": "details",
+      "file": "details.png",
+      "originalFilename": "Screenshot iPhone 18 Pro 09-16-2026 at 9.10.53\u202fPM.png",
+      "sha256": "ea4429ced3a2bb0ecb4fb4c22c0d209e53dbc8ae316d63f1be211de11b8e352e",
+      "pixels": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "state": "alert",
+      "file": "alert.png",
+      "originalFilename": "Screenshot iPhone 18 Pro 09-16-2026 at 9.11.02\u202fPM.png",
+      "sha256": "1e0dc7c4b9912f91300f7091070230817976996f525eef035ee8187638bbc368",
+      "pixels": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "state": "sheet",
+      "file": "sheet.png",
+      "originalFilename": "Screenshot iPhone 18 Pro 09-16-2026 at 9.11.13\u202fPM.png",
+      "sha256": "62937e134b020f6a2ec329a37ab54ff211ae1c03cc1e906c4e68f1b55ac831f0",
+      "pixels": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "state": "scrolled-library",
+      "file": "scrolled-library.png",
+      "originalFilename": "Screenshot iPhone 18 Pro 09-16-2026 at 9.11.24\u202fPM.png",
+      "sha256": "67d2d2778fd9ab5f980097b4cf53c251b351e627ef41ef732072babcfd61ec35",
+      "pixels": [
+        1206,
+        2622
+      ]
+    }
+  ],
+  "measured": {
+    "groupedBackgroundRGB": [
+      242,
+      242,
+      247
+    ],
+    "rowBackgroundRGB": [
+      255,
+      255,
+      255
+    ],
+    "purpleRGB": [
+      203,
+      48,
+      224
+    ],
+    "separatorCompositeRGB": [
+      232,
+      232,
+      232
+    ],
+    "searchCompositeRGB": [
+      227,
+      227,
+      233
+    ],
+    "listOuterInset": 16,
+    "rowTextInset": 32,
+    "rowStride": 52,
+    "libraryFirstCardTop": 262.33,
+    "librarySecondCardTop": 518.33,
+    "settingsFirstCardTop": 208.33,
+    "settingsSecondCardTop": 347.33,
+    "tabSurfaceApprox": {
+      "x": 107,
+      "y": 791,
+      "width": 188,
+      "height": 62
+    },
+    "searchSurface": {
+      "x": 16,
+      "y": 168,
+      "width": 370,
+      "height": 44
+    },
+    "switchApprox": {
+      "width": 64,
+      "height": 28,
+      "thumbWidth": 38,
+      "thumbHeight": 24
+    },
+    "alertApprox": {
+      "x": 41,
+      "y": 375,
+      "width": 320,
+      "height": 152,
+      "actionWidth": 140,
+      "actionHeight": 48,
+      "actionGap": 8
+    },
+    "sheetApprox": {
+      "x": 8,
+      "y": 415,
+      "width": 386,
+      "height": 451
+    },
+    "nativeLongRowLines": 3,
+    "nativeDetailDescriptionLines": 3
+  },
+  "method": "Pixel coordinates from the original sRGB images divided by the assumed 3\u00d7 scale; solid-region colors counted without antialiasing. Material boundary measurements are approximate. Text ink is not a layout frame.",
+  "remaining": [
+    "Dark mode",
+    "Second phone width",
+    "iPad",
+    "Accessibility text",
+    "Native menu",
+    "Exact native text baselines and continuous corners",
+    "Non-Mac fonts",
+    "Calibrated region-image thresholds"
+  ]
+}

@@ -116,6 +116,7 @@ export interface TextPayload {
  * line's text would get a repeated substring wrong.
  */
 export interface TextLineSlice {
+  readonly baseline?: number
   /** index into `TextPayload.runs` */
   readonly run: number
   readonly text: string
@@ -128,6 +129,8 @@ export interface TextLine {
   readonly origin: Point
   readonly width: number
   readonly baseline: number
+  readonly fontBaseline?: number
+  readonly height?: number
   /**
    * The runs this line is made of, in order.
    *
@@ -151,11 +154,25 @@ export type ShapeKind =
   | 'capsule'
   | 'spinner'
 
+export type CornerStyle = 'circular' | 'continuous'
+export interface ShapeStroke { readonly color: RGBA; readonly width: number; readonly placement?: 'center' | 'inside'; readonly usesForeground?: boolean }
+
+export interface SliderPayload {
+  readonly fraction: number
+  readonly trackHeight: number
+  readonly thumbDiameter: number
+  readonly tint: RGBA
+  readonly trackColor: RGBA
+  readonly thumbColor: RGBA
+  readonly ticks?: readonly number[]
+}
+
 export interface ShapePayload {
+  readonly cornerStyle?: CornerStyle
   readonly shape: ShapeKind
   readonly cornerRadius?: number
   readonly fill?: Fill
-  readonly stroke?: { readonly color: RGBA; readonly width: number }
+  readonly stroke?: ShapeStroke
 }
 
 /**
@@ -196,6 +213,12 @@ export interface PlaceholderPayload {
 }
 
 export interface HitTarget {
+  readonly step?: number
+  readonly secure?: boolean
+  readonly inputInset?: number
+  readonly thumbDiameter?: number
+  readonly cornerRadius?: number
+  readonly placeholderColor?: RGBA
   /** identifies which interactive element was hit when dispatching back to the worker */
   readonly handlerId: string
   readonly role: 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture' | 'drag'
@@ -276,6 +299,7 @@ export interface ImagePayload {
   readonly approximated: boolean
   /** The symbol name, for drawing it, for the inspector and for telemetry. */
   readonly symbol?: string
+  readonly symbolScale?: number
   /** `.resizable()` - the image fills its frame rather than being sized by the font. */
   readonly resizable?: boolean
 }
@@ -288,6 +312,7 @@ export interface ImagePayload {
  * them with its own physics rather than us reimplementing momentum in the worker.
  */
 export interface ScrollPayload {
+  readonly contentInsets?: { readonly top: number; readonly leading: number; readonly bottom: number; readonly trailing: number }
   readonly axis: 'vertical' | 'horizontal'
   readonly content: Size
   readonly showsIndicators: boolean
@@ -314,14 +339,22 @@ export interface PathPayload {
   /** SVG path data - `M`, `L`, `C`, `Q`, `A`, `Z`. */
   readonly d: string
   readonly fill?: Fill
-  readonly stroke?: { readonly color: RGBA; readonly width: number }
+  readonly stroke?: ShapeStroke
   /** `evenodd` for a path with holes, as `.fill(style:)` selects. */
   readonly fillRule?: 'nonzero' | 'evenodd'
 }
 
-export type RenderNodeKind = 'layer' | 'text' | 'shape' | 'image' | 'path' | 'placeholder'
+export type RenderNodeKind = 'layer' | 'text' | 'shape' | 'image' | 'path' | 'slider' | 'placeholder'
 
 export interface RenderNode {
+  /** A modal presentation makes the underlying subtree unavailable to input. */
+  readonly inert?: boolean
+  readonly blocksPointer?: boolean
+  /** Live DOM positioning keeps an open menu beside a scrolled control. */
+  readonly anchorId?: string
+  readonly slider?: SliderPayload
+  readonly cornerStyle?: CornerStyle
+  readonly clipShape?: { readonly kind: ShapeKind; readonly cornerStyle?: CornerStyle }
   /**
    * ViewIdentity - stable across re-renders for the same logical view. Drives DOM
    * reuse, `@State` box lookup, and FLIP animation. See docs/02-ARCHITECTURE.md §6.2.
@@ -341,6 +374,8 @@ export interface RenderNode {
   readonly shape?: ShapePayload
   readonly image?: ImagePayload
   readonly path?: PathPayload
+  readonly chrome?: { readonly scrollId: string; readonly collapseDistance: number }
+  readonly chromeRole?: 'navigationSurface' | 'largeTitle' | 'inlineTitle'
   readonly scroll?: ScrollPayload
   readonly placeholder?: PlaceholderPayload
   readonly hitTarget?: HitTarget
@@ -390,6 +425,9 @@ export interface RenderNode {
 }
 
 export interface RenderTree {
+  readonly chrome?: { readonly scrollId: string; readonly collapseDistance: number }
+  readonly calibration?: 'provisional' | 'verified'
+  readonly colorScheme?: 'light' | 'dark'
   /** the device's logical point size this tree was laid out for */
   readonly canvas: Size
   /** flat and pre-ordered (painter's algorithm): a parent always precedes its children */

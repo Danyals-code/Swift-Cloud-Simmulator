@@ -1,5 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb'
-import { summarize, type Project, type ProjectStore, type ProjectSummary } from './types'
+import { normalizeProject, summarize, type Project, type ProjectStore, type ProjectSummary } from './types'
 
 /**
  * The key every project used to be written to.
@@ -36,11 +36,12 @@ export class MemoryProjectStore implements ProjectStore {
   }
 
   async load(id: string): Promise<Project | null> {
-    return this.projects.get(id) ?? null
+    const project = this.projects.get(id)
+    return project ? normalizeProject(project) : null
   }
 
   async save(project: Project): Promise<void> {
-    this.projects.set(project.id, project)
+    this.projects.set(project.id, normalizeProject(project))
   }
 
   async remove(id: string): Promise<void> {
@@ -83,13 +84,14 @@ export class IndexedDbProjectStore implements ProjectStore {
 
   async load(id: string): Promise<Project | null> {
     const db = await this.connect()
-    return ((await db.get(STORE, id)) as Project | undefined) ?? null
+    const project = (await db.get(STORE, id)) as Project | undefined
+    return project ? normalizeProject(project) : null
   }
 
   async save(project: Project): Promise<void> {
     const db = await this.connect()
     // structuredClone strips the readonly-ness IDB cannot serialise around.
-    await db.put(STORE, structuredClone(project))
+    await db.put(STORE, structuredClone(normalizeProject(project)))
   }
 
   async remove(id: string): Promise<void> {

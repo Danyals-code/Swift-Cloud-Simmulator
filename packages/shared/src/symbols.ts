@@ -1,14 +1,9 @@
 /**
- * How an SF Symbol name is looked up.
+ * Legacy symbol-name helpers retained for API compatibility.
  *
- * The symbol set is organised by suffix: `star`, `star.fill`, `star.circle`,
- * `star.circle.fill` are one family, and a name nobody has drawn usually still has
- * a sensible base shape sitting one or two suffixes up. Stripping progressively is
- * what lets a table of eighty shapes answer for several hundred names.
- *
- * It lives in `shared` because two sides need the same answer and must not drift:
- * the worker, which decides whether a name is known at all (and therefore whether
- * to count it as missing coverage), and the renderer, which decides what to draw.
+ * The preview worker and renderer use exact definitions in `symbol-map.ts`.
+ * Do not use suffix stripping for rendering: removing `.slash` or `.fill` can
+ * change the meaning of a symbol.
  */
 
 /**

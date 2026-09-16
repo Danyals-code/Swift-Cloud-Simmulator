@@ -1,4 +1,5 @@
-import { bool, int, opaque, str, type SwiftValue } from '@studio/swift-runtime'
+import { dynamicTypeForScale, type DynamicTypeSize } from '@studio/shared'
+import { bool, double, opaque, str, type SwiftValue } from '@studio/swift-runtime'
 import { TOKEN_TYPE, type EnvironmentFrame } from './view-value'
 
 export type { EnvironmentFrame }
@@ -13,13 +14,9 @@ export type { EnvironmentFrame }
  * - **Environment objects** - `@EnvironmentObject var store: Store`. Keyed by the
  *   *type* of the object, injected by an ancestor's `.environmentObject(store)`.
  *
- * **A known limitation, stated rather than hidden.** SwiftUI's environment flows to
- * every descendant. Ours flows to views expanded *while the modifier is in scope*,
- * which covers the idiom `Root().environmentObject(store)` - where the modifier is
- * applied to the view whose body has not run yet - and not the case where the
- * modifier sits above children that were already built. Views expand eagerly here,
- * and making them lazy is a larger change than this phase takes on. The coverage
- * matrix records it as 🟡 for exactly this reason.
+ * Modifier scopes are installed before a receiver expression is evaluated. This
+ * reaches custom bodies inside eagerly constructed stacks. Deferred builders retain
+ * snapshots of that scope, so destinations and sheets see the same values.
  */
 
 export const DISMISS_TYPE = 'DismissAction'
@@ -39,6 +36,8 @@ export const OPEN_URL_TYPE = 'OpenURLAction'
 export interface EnvironmentInputs {
   readonly colorScheme: 'light' | 'dark'
   readonly typeScale: number
+  readonly dynamicTypeSize?: DynamicTypeSize
+  readonly displayScale?: number
   readonly locale: string
   readonly layoutDirection: 'leftToRight' | 'rightToLeft'
   readonly horizontalSizeClass: 'compact' | 'regular'
@@ -54,33 +53,19 @@ export const DEFAULT_ENVIRONMENT: EnvironmentInputs = {
   verticalSizeClass: 'regular',
 }
 
-/**
- * Dynamic Type sizes, as `\.dynamicTypeSize` reports them.
- *
- * The scale is a multiplier everywhere else in the pipeline because that is what
- * layout needs; user code sees the named size, because that is what it compares
- * against.
- */
-function dynamicTypeSize(scale: number): string {
-  if (scale <= 0.85) return 'xSmall'
-  if (scale <= 0.95) return 'small'
-  if (scale < 1.05) return 'large'
-  if (scale < 1.25) return 'xLarge'
-  if (scale < 1.5) return 'xxLarge'
-  return 'accessibility1'
-}
-
 /** The environment values a fresh root starts with. */
 export function rootEnvironmentValues(inputs: EnvironmentInputs): Map<string, SwiftValue> {
   return new Map<string, SwiftValue>([
     ['colorScheme', opaque(TOKEN_TYPE, { name: inputs.colorScheme })],
-    ['dynamicTypeSize', opaque(TOKEN_TYPE, { name: dynamicTypeSize(inputs.typeScale) })],
+    ['dynamicTypeSize', opaque(TOKEN_TYPE, { name: inputs.dynamicTypeSize ?? dynamicTypeForScale(inputs.typeScale) })],
     ['locale', str(inputs.locale)],
     ['layoutDirection', opaque(TOKEN_TYPE, { name: inputs.layoutDirection })],
     ['horizontalSizeClass', opaque(TOKEN_TYPE, { name: inputs.horizontalSizeClass })],
     ['verticalSizeClass', opaque(TOKEN_TYPE, { name: inputs.verticalSizeClass })],
     ['isEnabled', bool(true)],
-    ['pixelLength', int(1)],
+    ['controlSize', opaque(TOKEN_TYPE, { name: 'regular' })],
+    ['pixelLength', double(1 / (inputs.displayScale ?? 3))],
+    ['displayScale', double(inputs.displayScale ?? 3)],
     // The preview has one window and it is always on screen, so the phase is always
     // `.active`. Reported rather than absent: code that branches on it runs, and the
     // branch it takes is the one a foregrounded app takes.
@@ -95,10 +80,8 @@ export function rootEnvironmentValues(inputs: EnvironmentInputs): Map<string, Sw
 /**
  * A stack of environment frames, pushed as views expand.
  *
- * Lexical rather than structural, deliberately: `.environmentObject(store)` is in
- * scope for whatever expands while it is applied, which is the same rule a dynamic
- * scope follows and the closest honest approximation of SwiftUI's downward flow given
- * eager expansion.
+ * The host scopes receiver evaluation and captures frames for deferred builders.
+ * Pushing copied maps keeps sibling branches and later presentations isolated.
  */
 export class EnvironmentStack {
   private values: Map<string, SwiftValue>

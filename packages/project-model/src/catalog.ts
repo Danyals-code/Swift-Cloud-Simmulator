@@ -38,6 +38,8 @@ export interface TemplateInfo {
    */
   readonly tagline: string
   readonly description: string
+  /** Screen names for apps, or concepts taught by a focused example. */
+  readonly highlights?: readonly string[]
   /** The paths it lays down, in navigator order. The text lives in `templates.ts`. */
   readonly files: readonly string[]
 }
@@ -64,7 +66,7 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     name: 'Task list',
     kind: 'feature',
     tagline: 'Rows built from a loop, each answering a tap.',
-    description: 'A loop building rows, with state driving their appearance.',
+    description: 'An interactive checklist with per-row actions, a completion count, and a reset toolbar button.',
     files: ['Sources/TasksApp.swift'],
   },
   {
@@ -87,8 +89,8 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     id: 'navigation',
     name: 'Explore',
     kind: 'feature',
-    tagline: 'Tap a row, push a screen, come back.',
-    description: 'A navigation stack over a list, pushing a detail screen.',
+    tagline: 'Search destinations and open their details.',
+    description: 'A searchable list with symbol labels, a navigation stack, and an inline detail title.',
     files: ['Sources/ExplorerApp.swift'],
   },
   {
@@ -111,8 +113,8 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     id: 'tabs',
     name: 'Tabs',
     kind: 'feature',
-    tagline: 'Three screens behind a tab bar.',
-    description: 'Three tabs, each its own view, with a real tab bar.',
+    tagline: 'Switch screens with tabs or a button.',
+    description: 'Three navigation stacks with a shared tab selection, grouped lists, and a profile form.',
     files: ['Sources/TabsApp.swift'],
   },
   {
@@ -172,12 +174,30 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     files: ['Sources/StyledApp.swift'],
   },
   {
+    id: 'folio',
+    name: 'Folio',
+    kind: 'app',
+    tagline: 'A little home for your next great read.',
+    description: 'Browse a library, open a book, save it to your reading list, and add your own. A small, complete app with shared state and editable preferences.',
+    highlights: ['Library', 'Book details', 'Reading list', 'Add a book', 'Settings'],
+    files: [
+      'Sources/FolioApp.swift',
+      'Sources/Models/Library.swift',
+      'Sources/Components/BookRow.swift',
+      'Sources/Features/LibraryView.swift',
+      'Sources/Features/BookDetailView.swift',
+      'Sources/Features/AddBookView.swift',
+      'Sources/Features/SettingsView.swift',
+    ],
+  },
+  {
     id: 'trailhead',
     name: 'Trailhead',
     kind: 'app',
     tagline: 'Browse walks, save the good ones, read the route.',
     description:
-      'Eight files across four groups: tabs, two levels of navigation, scrolling in both directions, a shared store and a sheet.',
+      'Find a weekend walk, filter by distance, and save a route for later. Includes trail details, directions, a profile, and a shared collection of saved walks.',
+    highlights: ['Discover', 'Trail details', 'Saved walks', 'Profile', 'Filters'],
     files: [
       'Sources/TrailheadApp.swift',
       'Sources/Models/Trail.swift',
@@ -193,9 +213,10 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     id: 'ledger',
     name: 'Ledger',
     kind: 'app',
-    tagline: 'Add what you spent, and watch three tabs agree about it.',
+    tagline: 'Keep everyday spending in view.',
     description:
-      'Eight files: three tabs over a shared store, a searchable list with swipe-to-delete, a form in a sheet that dismisses itself, and a control bound straight into the model.',
+      'Track expenses, search your transactions, and set a monthly budget. Add an expense once and see the summary and remaining budget update together.',
+    highlights: ['Summary', 'Spending', 'Expense details', 'Add expense', 'Budget'],
     files: [
       'Sources/LedgerApp.swift',
       'Sources/Models/Expense.swift',
@@ -213,7 +234,8 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     kind: 'app',
     tagline: 'Read a recipe, scale it, tick the steps off.',
     description:
-      'Seven files and no tab bar: one navigation stack, a protocol with a default implementation scaling every quantity, and a child view that owns no state of its own.',
+      'Browse recipes by course, save favorites, adjust the servings, and follow a cooking checklist. A focused example of navigation and reusable components.',
+    highlights: ['Recipes', 'Recipe details', 'Cooking steps'],
     files: [
       'Sources/KitchenApp.swift',
       'Sources/Models/Recipe.swift',
@@ -228,9 +250,10 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     id: 'pulse',
     name: 'Pulse',
     kind: 'app',
-    tagline: 'Every number on screen, computed from the same seven sessions.',
+    tagline: 'See your training week take shape.',
     description:
-      'Eight files: a progress ring drawn with a Path inside a GeometryReader, a week of bars, a Grid of totals, and a sheet bound straight into the store.',
+      'Review weekly activity, explore past sessions, and adjust your training target. The progress ring, daily bars, and totals share one training log.',
+    highlights: ['Today', 'History', 'Session details', 'Weekly target'],
     files: [
       'Sources/PulseApp.swift',
       'Sources/Models/Session.swift',

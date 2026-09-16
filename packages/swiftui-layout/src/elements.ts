@@ -1,4 +1,4 @@
-import type { FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type { CornerStyle, ShapeStroke, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -22,7 +22,7 @@ export const ZERO_INSETS: EdgeInsets = { top: 0, leading: 0, bottom: 0, trailing
 export type Axis = 'vertical' | 'horizontal'
 
 export type HorizontalAlignment = 'leading' | 'center' | 'trailing'
-export type VerticalAlignment = 'top' | 'center' | 'bottom'
+export type VerticalAlignment = 'top' | 'center' | 'bottom' | 'firstTextBaseline' | 'lastTextBaseline'
 
 export interface Alignment {
   readonly horizontal: HorizontalAlignment
@@ -37,6 +37,7 @@ export type LayoutElement =
   | TextElement
   | SpacerElement
   | ShapeElement
+  | SliderElement
   | FillElement
   | ImageElement
   | ScrollElement
@@ -49,6 +50,8 @@ export type LayoutElement =
   | EmptyElement
 
 interface ElementBase {
+  readonly preferredSpacing?: EdgeInsets
+  readonly pixelAligned?: boolean
   /** Stable across re-renders; becomes the RenderNode id and drives DOM reuse. */
   readonly id: string
   readonly origin?: SourceSpan
@@ -67,7 +70,8 @@ interface ElementBase {
 export interface StackElement extends ElementBase {
   readonly kind: 'stack'
   readonly axis: Axis
-  readonly spacing: number
+  /** null asks for pair-specific automatic spacing. */
+  readonly spacing: number | null
   readonly alignment: Alignment
   readonly children: readonly LayoutElement[]
 }
@@ -92,6 +96,7 @@ export interface TextRunSpec {
   readonly font?: {
     readonly family?: string
     readonly size?: number
+    readonly lineHeight?: number
     readonly weight?: number
     readonly italic?: boolean
   }
@@ -132,12 +137,19 @@ export interface SpacerElement extends ElementBase {
 
 /** `Rectangle`, `Circle`, and friends: greedy in both axes. */
 export interface ShapeElement extends ElementBase {
+  readonly cornerStyle?: CornerStyle
   readonly kind: 'shape'
   readonly shape: ShapeKind
   readonly cornerRadius?: number
   /** `.fill(…)`; without one the shape takes the inherited foreground colour. */
   readonly fill?: Fill
-  readonly stroke?: { readonly color: RGBA; readonly width: number }
+  readonly stroke?: ShapeStroke
+}
+
+export interface SliderElement extends ElementBase {
+  readonly kind: 'slider'
+  readonly height: number
+  readonly style: SliderPayload
 }
 
 /** A bare `Color` used as a view. Greedy in both axes, like a shape. */
@@ -168,6 +180,7 @@ export interface ImageElement extends ElementBase {
    * framework's own chevrons have no `debugName` at all.
    */
   readonly symbol?: string
+  readonly symbolScale?: number
 }
 
 /**
@@ -178,6 +191,7 @@ export interface ImageElement extends ElementBase {
  * its own physics. Everything else in the render tree stays flat and absolute.
  */
 export interface ScrollElement extends ElementBase {
+  readonly contentInsets?: EdgeInsets
   readonly kind: 'scroll'
   readonly axis: Axis
   readonly showsIndicators: boolean
@@ -329,7 +343,10 @@ export type LayoutModifier =
     }
   | { readonly kind: 'foregroundStyle'; readonly color: RGBA }
   | { readonly kind: 'opacity'; readonly value: number }
-  | { readonly kind: 'cornerRadius'; readonly radius: number }
+  | { readonly kind: 'cornerRadius'; readonly radius: number; readonly style?: CornerStyle }
+  | { readonly kind: 'square' }
+  | { readonly kind: 'inputFrame'; readonly minHeight: number; readonly paddingY: number }
+  | { readonly kind: 'controlFont'; readonly font: ResolvedFont }
   | { readonly kind: 'overlay'; readonly content: LayoutElement; readonly alignment: Alignment }
   | {
       readonly kind: 'border'
@@ -368,7 +385,7 @@ export type LayoutModifier =
   | { readonly kind: 'geometry'; readonly key: string }
   /** `.fixedSize()` - take the ideal size and ignore the proposal on that axis. */
   | { readonly kind: 'fixedSize'; readonly horizontal: boolean; readonly vertical: boolean }
-  | { readonly kind: 'clip'; readonly shape: ShapeKind; readonly cornerRadius: number }
+  | { readonly kind: 'clip'; readonly shape: ShapeKind; readonly cornerRadius: number; readonly style?: CornerStyle }
   | { readonly kind: 'scale'; readonly x: number; readonly y: number }
   | { readonly kind: 'rotate'; readonly degrees: number }
   /** `.rotation3DEffect(_:axis:)` - the same paint-time transform, about an axis. */
@@ -455,6 +472,13 @@ export type LayoutModifier =
   | { readonly kind: 'transition'; readonly spec: TransitionHint }
   | {
       readonly kind: 'hitTarget'
+      readonly step?: number
+      readonly secure?: boolean
+      readonly inputInset?: number
+      readonly thumbDiameter?: number
+      readonly cornerRadius?: number
+      readonly placeholderColor?: RGBA
+      readonly color?: RGBA
       readonly handlerId: string
       readonly label: string
       readonly role: HitRole
@@ -509,6 +533,9 @@ export interface TransitionHint {
  * `VStack { Text(…) }.font(.largeTitle)` size its text correctly.
  */
 export interface LayoutEnvironment {
+  readonly fontExplicit?: boolean
+  readonly cornerStyle?: CornerStyle
+  readonly displayScale?: number
   readonly font: ResolvedFont
   readonly foregroundColor: RGBA
   readonly opacity: number
@@ -598,9 +625,12 @@ export function childEnvironment(
     // either order - so the adjustment is remembered separately and re-applied when
     // a new face is set. Without that, `.font(.title).fontWeight(.semibold)` would
     // silently lose the weight, which is the order most SwiftUI is written in.
+    case 'controlFont':
+      return env.fontExplicit ? env : { ...env, font: { ...modifier.font, weight: env.fontWeight ?? modifier.font.weight, italic: env.fontItalic ?? modifier.font.italic, family: env.fontFamily ?? modifier.font.family } }
     case 'font':
       return {
         ...env,
+        fontExplicit: true,
         font: {
           ...modifier.font,
           ...(env.fontWeight !== undefined ? { weight: env.fontWeight } : {}),
@@ -628,7 +658,7 @@ export function childEnvironment(
     case 'opacity':
       return { ...env, opacity: env.opacity * modifier.value }
     case 'cornerRadius':
-      return { ...env, cornerRadius: modifier.radius }
+      return { ...env, cornerRadius: modifier.radius, cornerStyle: modifier.style ?? env.cornerStyle }
     case 'clip':
       return { ...env, cornerRadius: modifier.cornerRadius }
     case 'animate':

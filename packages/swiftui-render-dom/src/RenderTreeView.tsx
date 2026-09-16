@@ -1,3 +1,7 @@
+import { useId, useState, useRef, useLayoutEffect, type UIEvent as ReactUIEvent } from 'react'
+import { ShapeView } from './ShapeView'
+import { SliderView, ControlStyles } from './SliderView'
+import { symbolMetrics, shapePath } from '@studio/shared'
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
   cssColor,
@@ -10,7 +14,7 @@ import {
   type TextRun,
   type UIEvent,
 } from '@studio/shared'
-import { symbolShapes, symbolStrokeScale } from './symbols'
+import { symbolAsset, symbolStrokeScale } from './symbols'
 
 export interface RenderTreeViewProps {
   tree: RenderTree
@@ -64,6 +68,12 @@ export const RenderTreeView = memo(function RenderTreeView({
   debugOutlines = false,
   inspect,
 }: RenderTreeViewProps) {
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (!surfaceRef.current) return
+    const scroller = tree.chrome && surfaceRef.current.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(tree.chrome.scrollId)}"]`)
+    updateChrome(surfaceRef.current, scroller?.scrollTop ?? 0, tree.chrome?.collapseDistance ?? 0)
+  }, [tree.chrome])
   const hoveredNode = inspect?.hovered
     ? tree.nodes.find((n) => n.id === inspect.hovered)
     : undefined
@@ -83,10 +93,14 @@ export const RenderTreeView = memo(function RenderTreeView({
 
   return (
     <div
+      ref={surfaceRef}
       data-testid="render-tree"
+      data-calibration={tree.calibration ?? 'provisional'}
+      onScrollCapture={event => captureChrome(event, tree.chrome)}
       data-revision={tree.revision}
       style={{
         position: 'relative',
+        colorScheme: tree.colorScheme ?? 'light',
         width: tree.canvas.width,
         height: tree.canvas.height,
         overflow: 'hidden',
@@ -97,6 +111,7 @@ export const RenderTreeView = memo(function RenderTreeView({
       }}
     >
       <TransitionKeyframes />
+      <ControlStyles />
 
       {(byParent.get('') ?? []).map((node) => (
         <RenderNodeView
@@ -113,6 +128,19 @@ export const RenderTreeView = memo(function RenderTreeView({
     </div>
   )
 })
+
+function updateChrome(surface: HTMLElement, offset: number, distance: number) {
+  const collapse = Math.min(Math.max(0, offset), distance)
+  const progress = distance > 0 ? collapse / distance : 0
+  surface.style.setProperty('--chrome-collapse', `${collapse}px`)
+  surface.style.setProperty('--chrome-progress', `${progress}`)
+  surface.style.setProperty('--chrome-large', `${Math.max(0, 1 - progress * 1.5)}`)
+  surface.style.setProperty('--chrome-inline', `${Math.max(0, (progress - 0.5) * 2)}`)
+}
+function captureChrome(event: ReactUIEvent<HTMLDivElement>, chrome: RenderTree['chrome']) {
+  const target = event.target as HTMLElement
+  if (chrome && target.dataset.nodeId === chrome.scrollId) updateChrome(event.currentTarget, target.scrollTop, chrome.collapseDistance)
+}
 
 /**
  * The keyframes entry transitions play.
@@ -204,6 +232,36 @@ function RenderNodeView({
   debugOutlines: boolean
   inspect?: RenderTreeViewProps['inspect']
 }) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (panelRef.current && node.chrome) {
+      const scroller = panelRef.current.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.chrome.scrollId)}"]`)
+      updateChrome(panelRef.current, scroller?.scrollTop ?? 0, node.chrome.collapseDistance)
+    }
+  }, [node.chrome])
+  useLayoutEffect(() => {
+    const panel = panelRef.current
+    if (!panel || !node.anchorId) return
+    const root = panel.closest<HTMLElement>('[data-testid="render-tree"]')
+    const anchor = root?.querySelector<HTMLElement>(`[data-handler-id="${CSS.escape(node.anchorId)}"]`)
+    if (!root || !anchor) return
+    const place = () => {
+      const a = anchor.getBoundingClientRect(), r = root.getBoundingClientRect()
+      const scale = r.width / root.offsetWidth || 1
+      const margin = 12, gap = 8
+      const x = Math.max(margin, Math.min(root.offsetWidth - node.frame.width - margin, (a.right - r.left) / scale - node.frame.width))
+      const below = (a.bottom - r.top) / scale + gap
+      const above = (a.top - r.top) / scale - gap - node.frame.height
+      const y = Math.max(margin, Math.min(root.offsetHeight - node.frame.height - margin, below + node.frame.height <= root.offsetHeight - margin ? below : above))
+      const container = (panel.offsetParent as HTMLElement | null)?.getBoundingClientRect() ?? r
+      panel.style.left = `${x - (container.left - r.left) / scale}px`
+      panel.style.top = `${y - (container.top - r.top) / scale}px`
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [node.anchorId, node.frame.width, node.frame.height])
+  const [pressed, setPressed] = useState(false)
   const interactive = node.hitTarget?.enabled === true
   const inspecting = inspect !== undefined && node.id !== 'screen'
   const children = byParent.get(node.id)
@@ -217,14 +275,23 @@ function RenderNodeView({
     height: node.frame.height,
     zIndex: node.z,
     opacity: node.opacity,
+    ...(node.chromeRole === 'inlineTitle' ? { opacity: 'var(--chrome-inline, 0)' as unknown as number } : {}),
+    ...(node.chromeRole === 'largeTitle' ? { top: `calc(${node.frame.y}px - var(--chrome-collapse, 0px))`, opacity: 'var(--chrome-large, 1)' as unknown as number } : {}),
+    ...(node.chromeRole === 'navigationSurface' ? { height: `calc(${node.frame.height}px - var(--chrome-collapse, 0px))` } : {}),
     // Only hit targets receive pointer events, so a text label painted on top of a
     // button does not swallow the tap meant for the button underneath it. A scroller
     // needs them too, or the wheel does nothing. In inspector mode every node is
     // hittable, which is the whole point.
-    pointerEvents: inspecting || interactive || scroll ? 'auto' : 'none',
+    pointerEvents: inspecting || interactive || scroll || node.blocksPointer ? 'auto' : 'none',
     cursor: inspecting ? 'crosshair' : interactive ? 'pointer' : 'default',
-    ...(node.background ? { background: cssFill(node.background) } : {}),
-    ...(node.cornerRadius ? { borderRadius: node.cornerRadius } : {}),
+    ...(node.background && node.cornerStyle !== 'continuous' ? { background: cssFill(node.background) } : {}),
+    ...(node.chromeRole === 'navigationSurface' && node.background?.kind === 'solid' ? {
+      background: `rgb(${node.background.color.r} ${node.background.color.g} ${node.background.color.b} / calc(1 - 0.28 * var(--chrome-progress, 0)))`,
+      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+    } : {}),
+    ...(node.clipShape ? { clipPath: `path("${shapePath(node.clipShape.kind, node.frame.width, node.frame.height, node.cornerRadius, node.clipShape.cornerStyle)}")` } : {}),
+    ...(pressed && interactive ? { backgroundColor: 'rgb(128 128 128 / 0.16)', borderRadius: node.hitTarget?.cornerRadius ?? 8 } : {}),
+    ...(node.cornerRadius && !node.clipShape ? { borderRadius: node.cornerRadius } : {}),
     ...(node.clip ? { overflow: scroll ? 'auto' : 'hidden' } : {}),
     ...(scroll
       ? {
@@ -289,7 +356,7 @@ function RenderNodeView({
   // A control the browser owns. Its frame was still decided by the layout engine;
   // what the DOM supplies is the interaction the engine has no way to model.
   const nativeControl =
-    interactive && handlerId && onEvent && (role === 'textField' || role === 'slider')
+    handlerId && onEvent && (role === 'textField' || role === 'slider')
       ? renderControl(node, handlerId, onEvent)
       : null
 
@@ -300,6 +367,8 @@ function RenderNodeView({
 
   const content: ReactNode = (
     <>
+      {node.background && node.cornerStyle === 'continuous' ? <ShapeView shape={{ shape: 'roundedRectangle', cornerRadius: node.cornerRadius, cornerStyle: node.cornerStyle, fill: node.background }} width={node.frame.width} height={node.frame.height} /> : null}
+      {node.slider ? <SliderView slider={node.slider} width={node.frame.width} height={node.frame.height} /> : null}
       {redacted ? <RedactedBar /> : null}
       {!redacted && node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
       {!redacted && node.kind === 'image' && node.image ? <ImageContent node={node} /> : null}
@@ -327,16 +396,36 @@ function RenderNodeView({
 
   return (
     <div
+      ref={panelRef}
       data-node-id={node.id}
+      data-handler-id={node.hitTarget?.handlerId}
+      inert={node.inert || undefined}
+      data-chrome-role={node.chromeRole}
+      onScrollCapture={node.chrome ? event => captureChrome(event, node.chrome) : undefined}
       data-kind={node.kind}
       style={style}
-      role={node.a11y?.role}
+      role={nativeControl ? undefined : node.a11y?.role}
+      tabIndex={!nativeControl && interactive && (role === 'button' || role === 'toggle') ? 0 : undefined}
+      aria-checked={role === 'toggle' ? node.hitTarget?.value === 'on' : undefined}
+      onPointerUp={() => setPressed(false)}
+      onPointerCancel={() => setPressed(false)}
+      onKeyUp={() => setPressed(false)}
+      onBlur={() => setPressed(false)}
+      onKeyDown={!nativeControl && interactive && handlerId && onEvent ? (event) => {
+        if ((event.key === 'Enter' || event.key === ' ') && (role === 'button' || role === 'toggle')) {
+          event.preventDefault()
+          if (event.repeat) return
+          setPressed(true)
+          onEvent(role === 'toggle' ? { kind: 'toggle', handlerId, value: node.hitTarget?.value !== 'on' } : { kind: 'tap', handlerId, location: { x: node.frame.width / 2, y: node.frame.height / 2 } })
+        }
+      } : undefined}
       aria-label={node.a11y?.label}
+      aria-disabled={node.hitTarget && !node.hitTarget.enabled ? true : undefined}
       aria-valuetext={node.a11y?.value}
       aria-description={node.a11y?.hint}
       aria-hidden={node.a11y?.hidden}
       onPointerEnter={inspecting ? () => inspect.onHover(node) : undefined}
-      onPointerLeave={inspecting ? () => inspect.onHover(null) : undefined}
+      onPointerLeave={() => { setPressed(false); if (inspecting) inspect.onHover(null) }}
       onClick={
         inspecting
           ? (e) => {
@@ -349,6 +438,8 @@ function RenderNodeView({
         !inspecting && interactive && handlerId && onEvent && !nativeControl
           ? (e) => {
               e.preventDefault()
+              setPressed(true)
+              e.currentTarget.focus()
               const bounds = e.currentTarget.getBoundingClientRect()
               const scale = bounds.width / node.frame.width || 1
               const at = (event: { clientX: number; clientY: number }) => ({
@@ -466,6 +557,9 @@ function renderControl(
   if (hit.role === 'textField') {
     return (
       <input
+        className="swiftui-field"
+        type={hit.secure ? 'password' : 'text'}
+        disabled={!hit.enabled}
         value={hit.value ?? ''}
         placeholder={hit.placeholder ?? ''}
         aria-label={node.a11y?.label}
@@ -478,7 +572,8 @@ function renderControl(
           border: 'none',
           outline: 'none',
           background: 'transparent',
-          padding: '0 8px',
+          padding: `0 ${hit.inputInset ?? 0}px`,
+          '--field-placeholder': hit.placeholderColor ? cssColor(hit.placeholderColor) : 'GrayText',
           boxSizing: 'border-box',
           ...(font
             ? {
@@ -489,18 +584,20 @@ function renderControl(
               }
             : {}),
           ...(hit.color ? { color: cssColor(hit.color) } : {}),
-        }}
+        } as CSSProperties}
       />
     )
   }
 
   return (
     <input
+      className="swiftui-range"
+      disabled={!hit.enabled}
       type="range"
       value={hit.value ?? '0'}
       min={hit.min ?? 0}
       max={hit.max ?? 1}
-      step={(((hit.max ?? 1) - (hit.min ?? 0)) / 100).toString()}
+      step={hit.step && hit.step > 0 ? hit.step : 'any'}
       aria-label={node.a11y?.label}
       onChange={(e) => onEvent({ kind: 'slide', handlerId, value: Number(e.target.value) })}
       style={{
@@ -509,8 +606,9 @@ function renderControl(
         width: '100%',
         height: '100%',
         margin: 0,
-        accentColor: 'rgb(0 122 255)',
-      }}
+        cursor: hit.enabled ? 'pointer' : 'default',
+        '--range-thumb': `${hit.thumbDiameter ?? 28}px`,
+      } as CSSProperties}
     />
   )
 }
@@ -614,17 +712,19 @@ function TextContent({ node }: { node: RenderNode }) {
               left: 0,
               top: line.origin.y,
               width: '100%',
-              height: first.font.lineHeight,
+              height: line.height ?? first.font.lineHeight,
               display: 'flex',
-              alignItems: 'center',
+              alignItems: 'flex-start',
               justifyContent: justify,
             }}
           >
             {line.slices
-              ? line.slices.map((slice, j) => (
-                  <RunSpan key={j} run={payload.runs[slice.run] ?? first} text={slice.text} />
-                ))
-              : line.text}
+              ? line.slices.map((slice, j) => {
+                  const run = payload.runs[slice.run] ?? first
+                  return <span key={j} dir="auto" style={{ ...runStyle(run), position: 'relative',
+                    top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{slice.text}</span>
+                })
+              : <span dir="auto" style={{ position: 'relative', top: line.baseline - (line.fontBaseline ?? line.baseline) - (first.baselineOffset ?? 0) }}>{line.text}</span>}
           </div>
         ))}
       </>
@@ -675,6 +775,7 @@ function runStyle(run: TextRun): CSSProperties {
     fontSize: run.font.size,
     fontWeight: run.font.weight,
     fontStyle: run.font.italic ? 'italic' : 'normal',
+    fontKerning: 'normal',
     lineHeight: `${run.font.lineHeight}px`,
     color: cssColor(run.color),
     ...(decoration ? { textDecoration: decoration } : {}),
@@ -686,84 +787,28 @@ function runStyle(run: TextRun): CSSProperties {
   }
 }
 
-/**
- * Paints a symbol.
- *
- * Drawn from the shape table when the name is in it, and from the Unicode fallback
- * glyph when it is not. Either way it is an *approximation*, never Apple's: SF
- * Symbols cannot be redistributed to a browser (risk R2). `title` says so on hover,
- * so the difference is discoverable rather than a surprise when the project is
- * first built in Xcode.
- *
- * The box was already decided by the layout engine - `font.size * 1.18` wide, one
- * line tall, exactly as SwiftUI sizes a non-resizable symbol - so this only has to
- * fill it. The drawing is centred and slightly narrower than the box, which is how
- * a real symbol sits beside text of the same size.
- */
+/** Paint a bundled Ionicon or explicit vector fallback using the worker's metrics. */
 function ImageContent({ node }: { node: RenderNode }) {
   const image = node.image!
-  const shapes = image.symbol ? symbolShapes(image.symbol) : null
-  const title =
-    image.approximated && image.symbol ? `${image.symbol} - approximated` : undefined
-
-  const box: CSSProperties = {
-    width: '100%',
-    height: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: cssColor(image.color),
-    userSelect: 'none',
-  }
-
-  if (shapes) {
-    // `.resizable()` gives the node a frame of its own; anything else is sized from
-    // the font, and 1.28x the point size is about where a symbol's optical height
-    // lands next to text at the same size.
-    const side = node.image!.resizable
-      ? Math.min(node.frame.width, node.frame.height)
-      : image.font.size * 1.28
-    const scale = symbolStrokeScale(image.font.weight)
-
-    return (
-      <div title={title} style={box}>
-        <svg
-          width={side}
-          height={side}
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden
-          style={{ display: 'block', overflow: 'visible' }}
-        >
-          {shapes.map((shape, i) =>
-            shape.stroke ? (
-              <path
-                key={i}
-                d={shape.d}
-                stroke="currentColor"
-                strokeWidth={shape.stroke * scale}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            ) : (
-              <path key={i} d={shape.d} fill="currentColor" />
-            ),
-          )}
-        </svg>
-      </div>
-    )
-  }
-
+  const maskId = useId().replaceAll(':', '')
+  const asset = image.symbol ? symbolAsset(image.symbol, maskId) : null
+  const metrics = symbolMetrics(image.symbol)
+  const title = image.symbol ? `${image.symbol} — ${asset?.source === 'ionicons' ? 'Ionicons approximation' : asset ? 'vector approximation' : 'unsupported symbol'}` : undefined
+  const height = image.resizable ? node.frame.height : image.font.size * metrics.heightEm * (image.symbolScale ?? 1)
+  const width = image.resizable ? node.frame.width : image.font.size * metrics.widthEm * (image.symbolScale ?? 1)
   return (
-    <div
-      title={title}
-      style={{
-        ...box,
-        fontSize: image.font.size,
-        lineHeight: `${image.font.lineHeight}px`,
-      }}
-    >
-      {image.glyph}
+    <div title={title} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: cssColor(image.color), userSelect: 'none' }}>
+      {asset ? (
+        <svg width={width} height={height} viewBox={asset.viewBox} fill="currentColor"
+          preserveAspectRatio="xMidYMid meet" aria-hidden
+          style={{ display: 'block', '--symbol-weight': symbolStrokeScale(image.font.weight) } as CSSProperties}
+          dangerouslySetInnerHTML={{ __html: asset.body }} />
+      ) : (
+        <svg width={width} height={height} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4M12 16v1" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      )}
     </div>
   )
 }
@@ -839,25 +884,7 @@ function ShapeContent({ node }: { node: RenderNode }) {
   const shape = node.shape!
   if (shape.shape === 'spinner') return <SpinnerContent />
 
-  const radius =
-    shape.shape === 'circle' || shape.shape === 'ellipse' || shape.shape === 'capsule'
-      ? '50%'
-      : (shape.cornerRadius ?? 0)
-
-  return (
-    <div
-      style={{
-        width: '100%',
-        height: '100%',
-        boxSizing: 'border-box',
-        borderRadius: radius,
-        background: shape.fill ? cssFill(shape.fill) : undefined,
-        border: shape.stroke
-          ? `${shape.stroke.width}px solid ${cssColor(shape.stroke.color)}`
-          : undefined,
-      }}
-    />
-  )
+  return <ShapeView shape={shape} width={node.frame.width} height={node.frame.height} />
 }
 
 /**

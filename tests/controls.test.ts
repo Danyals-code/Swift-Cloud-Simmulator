@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
-import { symbolShapes } from '@studio/swiftui-render-dom'
+import { symbolAsset } from '@studio/swiftui-render-dom'
 import { DEVICES } from '@studio/sim-shell'
 
 /**
@@ -284,7 +284,7 @@ describe('the dimmed area behind a presentation', () => {
 describe('SF Symbols', () => {
   it('draws `gear`, not only `gearshape`', () => {
     // One alias short of the whole common set. `gear` is the name people type.
-    expect(symbolShapes('gear')).not.toBeNull()
-    expect(symbolShapes('gear')).toEqual(symbolShapes('gearshape'))
+    expect(symbolAsset('gear')).not.toBeNull()
+    expect(symbolAsset('gear')).toEqual(symbolAsset('gearshape'))
   })
 })

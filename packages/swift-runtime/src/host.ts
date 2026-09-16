@@ -38,6 +38,9 @@ export interface HostCall {
  * through to its own error reporting rather than the host having to guess.
  */
 export interface InterpreterHost {
+  /** Install a builder environment before evaluating a receiver's children. */
+  withMemberScope?(member: string, args: readonly CallArgument[], evaluate: () => SwiftValue): SwiftValue
+
   /** A bare name in value position: `Color`, `Font`, `EmptyView`. */
   resolveGlobal?(name: string): SwiftValue | undefined
 

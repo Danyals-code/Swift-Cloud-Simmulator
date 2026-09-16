@@ -1,5 +1,5 @@
 import { deflateSync, inflateSync } from 'fflate'
-import type { SourceFile } from '@studio/shared'
+import { isPreviewTarget, normalizePreviewTarget, type PreviewTarget, type SourceFile } from '@studio/shared'
 import { DEFAULT_DEVICE, DEVICES } from '@studio/sim-shell'
 import type { Project, ProjectManifest } from './types'
 import { normalizeFileName, normalizeFolderPath, normalizeProjectName } from './types'
@@ -46,6 +46,7 @@ const FORMAT_VERSION = 1
 const MAX_SHARE_FILES = 256
 
 interface SharePayload {
+  readonly p?: PreviewTarget
   readonly v: number
   readonly n: string
   readonly b: string
@@ -90,6 +91,7 @@ function fromBase64Url(encoded: string): Uint8Array | null {
 export function encodeProject(project: Project): string | null {
   const payload: SharePayload = {
     v: FORMAT_VERSION,
+    p: normalizePreviewTarget(project.manifest.previewTarget),
     n: project.manifest.name,
     b: project.manifest.bundleId,
     d: project.manifest.deploymentTarget,
@@ -132,6 +134,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
     // payload had not earned, and every reader downstream then believed it.
     device: payload.t in DEVICES ? (payload.t as ProjectManifest['device']) : DEFAULT_DEVICE,
     colorScheme: 'light',
+    previewTarget: normalizePreviewTarget(payload.p),
   }
 
   const files: SourceFile[] = payload.f.map((file) => ({ id: file.i, text: file.t }))
@@ -201,6 +204,7 @@ function isSharePayload(value: unknown): value is SharePayload {
   const p = value as Partial<SharePayload>
   return (
     p.v === FORMAT_VERSION &&
+    (p.p === undefined || isPreviewTarget(p.p)) &&
     typeof p.n === 'string' &&
     typeof p.b === 'string' &&
     typeof p.d === 'string' &&

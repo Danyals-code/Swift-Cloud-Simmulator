@@ -32,7 +32,7 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'Button', 'Toggle', 'TextField', 'SecureField', 'Slider', 'Stepper', 'ProgressView', 'Picker',
   // collections and navigation
   'List', 'Section', 'Form',
-  'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView',
+  'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView', 'Tab',
   'DisclosureGroup', 'AnyView', 'GroupBox', 'LabeledContent', 'ControlGroup',
   'NavigationSplitView', 'TimelineView',
   // controls drawn plainly
@@ -77,11 +77,12 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // navigation and presentation
   'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar',
   'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
+  'presentationCornerRadius', 'presentationDragIndicator', 'interactiveDismissDisabled',
   'popover', 'tabItem', 'tag', 'tabViewStyle',
   // lists
-  'listStyle', 'listRowBackground',
+  'listStyle', 'listRowBackground', 'listRowSpacing', 'listSectionSpacing', 'scrollContentBackground',
   // interaction
-  'onTapGesture', 'onLongPressGesture', 'disabled', 'buttonStyle', 'textFieldStyle',
+  'onTapGesture', 'onLongPressGesture', 'disabled', 'buttonStyle', 'textFieldStyle', 'imageScale',
   'gesture', 'simultaneousGesture', 'highPriorityGesture',
   // lifecycle
   'onAppear', 'onDisappear', 'task', 'onChange',
@@ -96,7 +97,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // device edges
   'ignoresSafeArea', 'id',
   // Environment injection.
-  'environment', 'environmentObject',
+  'environment', 'environmentObject', 'dynamicTypeSize', 'strokeBorder',
   // The deprecated spelling of `.tint`, and a `Color` property of the same name.
   'accentColor',
 ])
@@ -195,7 +196,7 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   'EditButton', 'PasteButton', 'RenameButton',
   'UnevenRoundedRectangle', 'AnyShape',
   // iOS 18
-  'Tab', 'TabSection', 'MeshGradient',
+  'TabSection', 'MeshGradient',
 ])
 
 /**
@@ -217,20 +218,20 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'mask', 'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
 
   // symbols and images
-  'symbolRenderingMode', 'symbolVariant', 'imageScale', 'interpolation',
+  'symbolRenderingMode', 'symbolVariant', 'interpolation',
   // motion
   'matchedGeometryEffect', 'phaseAnimator', 'keyframeAnimator',
   // scrolling and lists
   'refreshable', 'scrollDismissesKeyboard', 'scrollTargetBehavior', 'scrollPosition',
-  'scrollDisabled', 'scrollContentBackground', 'listSectionSeparator', 'listRowSpacing',
+  'scrollDisabled', 'listSectionSeparator',
   // presentation and chrome
   'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
   // controls
-  'menuStyle', 'datePickerStyle', 'strokeBorder',
+  'menuStyle', 'datePickerStyle',
   // text entry
   'textInputAutocapitalization', 'autocorrectionDisabled',
   // environment set on the view rather than by the preview's own controls
-  'dynamicTypeSize', 'preferredColorScheme',
+  'preferredColorScheme',
   // accessibility beyond label, value, hint and hidden
   'accessibilityElement', 'accessibilityAddTraits', 'accessibilityIdentifier',
   'accessibilitySortPriority',
@@ -272,9 +273,9 @@ export const BLEND_MODES: ReadonlyMap<string, string> = new Map([
 /**
  * The style tokens each style modifier actually applies.
  *
- * `.buttonStyle` is a supported modifier, so `.buttonStyle(.glass)` passed the name
- * check, found no branch that handled `.glass`, and drew a bare label - clean
- * Problems pane, nothing applied, nothing said. That is precisely the failure
+ * A supported modifier can still receive an unsupported token, for example
+ * `.toggleStyle(.neon)`. Silently falling through would leave the Problems pane
+ * clean while applying no style. That is precisely the failure
  * `UNIMPLEMENTED_MODIFIERS` exists to prevent, arriving one level down at the
  * argument, and `BLEND_MODES` above is the same observation handled for one modifier
  * and not for the rest.
@@ -292,7 +293,7 @@ export const BLEND_MODES: ReadonlyMap<string, string> = new Map([
  * what they mean - so both warn.
  */
 export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['buttonStyle', new Set(['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent'])],
+  ['buttonStyle', new Set(['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent', 'glass', 'glassProminent'])],
   ['pickerStyle', new Set(['automatic', 'menu', 'segmented', 'inline', 'wheel'])],
   ['toggleStyle', new Set(['automatic', 'switch', 'button', 'checkbox'])],
   ['labelStyle', new Set(['automatic', 'titleAndIcon', 'titleOnly', 'iconOnly'])],

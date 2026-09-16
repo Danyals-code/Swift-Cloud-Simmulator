@@ -17,6 +17,7 @@
     "@types/react": "^19.0.2"
   },
   "dependencies": {
-    "@studio/shared": "*"
+    "@studio/shared": "*",
+    "ionicons": "8.0.13"
   }
 }

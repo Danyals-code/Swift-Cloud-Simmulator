@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CompileRequest, RenderNode } from '@studio/shared'
 import { symbolCandidates } from '@studio/shared'
-import { symbolShapes, symbolStrokeScale } from '@studio/swiftui-render-dom'
+import { symbolAsset, symbolStrokeScale } from '@studio/swiftui-render-dom'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
 import { DEVICES } from '@studio/sim-shell'
 
@@ -118,7 +118,7 @@ describe('list rows', () => {
 })
 
 describe('the tab bar', () => {
-  it('draws the hairline iOS puts between it and the content', () => {
+  it('floats a rounded blur surface inside the screen margins', () => {
     const tree = compileSource(
       app(`        TabView {
             Text("One").tabItem { Label("One", systemImage: "house") }
@@ -126,10 +126,11 @@ describe('the tab bar', () => {
         }`),
     ).renderTree!
 
-    const separator = tree.nodes.find((n) => n.id.startsWith('tabbar-sepl'))
-    expect(separator, 'no hairline above the tab bar').toBeDefined()
-    expect(separator!.frame.height).toBeLessThanOrEqual(1)
-    expect(separator!.frame.width).toBe(device.width)
+    const panel = tree.nodes.find(n => n.id === 'tabbar-surface-material')!
+    expect(panel.material).toBeDefined()
+    expect(panel.cornerRadius).toBeGreaterThanOrEqual(panel.frame.height / 2)
+    expect(panel.frame.width).toBeLessThan(device.width)
+    expect(tree.nodes.some(n => n.id === 'tab-0-selectedf')).toBe(true)
   })
 })
 
@@ -176,26 +177,23 @@ describe('the symbol table', () => {
       'chevron.down',
       'chevron.up.chevron.down',
     ]) {
-      expect(symbolShapes(name), `${name} has no shape`).not.toBeNull()
+      expect(symbolAsset(name), `${name} has no shape`).not.toBeNull()
     }
   })
 
-  it('falls back to a base shape for an unlisted variant', () => {
-    // Nothing draws `star.square.fill`; `star` answers for it rather than nothing.
-    expect(symbolShapes('star.square.fill')).toEqual(symbolShapes('star'))
+  it('preserves enclosure and fill for supported variants', () => {
+    expect(symbolAsset('star.square.fill')).not.toEqual(symbolAsset('star'))
+    expect(symbolAsset('star.square.fill')?.body).toContain('<mask')
+    expect(symbolAsset('star.unknown')).toBeNull()
   })
 
   it('returns null rather than a wrong shape for an unknown name', () => {
-    expect(symbolShapes('definitely.not.a.symbol')).toBeNull()
+    expect(symbolAsset('definitely.not.a.symbol')).toBeNull()
   })
 
   it('gives every shape either a stroke or a fill, never both undefined', () => {
     for (const name of ['star', 'star.fill', 'person', 'house.fill', 'sun.max', 'trash']) {
-      for (const shape of symbolShapes(name)!) {
-        expect(shape.d.length, `${name} has an empty path`).toBeGreaterThan(4)
-        // A shape is stroked at a positive width or filled; zero would draw nothing.
-        expect(shape.stroke === undefined || shape.stroke > 0).toBe(true)
-      }
+      expect(symbolAsset(name)?.body, `${name} has no SVG`).toMatch(/<(use|path|circle|rect|ellipse|polyline|polygon|line) /)
     }
   })
 
@@ -372,7 +370,7 @@ describe('a sheet detent', () => {
                 Text("sheet")${detents}
             }`)
     const nodes = compileSource(source).renderTree!.nodes
-    const panel = nodes.find((n) => n.id.startsWith('ov-bgf'))
+    const panel = nodes.find((n) => n.id === 'overlay-surface')
     expect(panel, `no sheet panel; ids were ${nodes.map((n) => n.id).join(' ')}`).toBeDefined()
     return panel!.frame.y
   }
@@ -624,9 +622,9 @@ ${buttons}
     return compileSource(source).renderTree!.nodes
   }
 
-  it('is a 270pt panel at the radius iOS uses', () => {
+  it('uses the captured native alert width', () => {
     const panel = nodesOf(TWO).find((n) => n.id.startsWith('ov-bg'))
-    expect(panel!.frame.width).toBe(270)
+    expect(panel!.frame.width).toBe(320)
   })
 
   /** A flat panel over a dimmed screen is the part a screenshot always gave away. */
@@ -635,29 +633,13 @@ ${buttons}
     expect(panel, 'no material behind the alert').toBeDefined()
   })
 
-  /**
-   * The buttons were centred text in the same padded stack as the title, with nothing
-   * between them. iOS builds them as full-width rows divided by hairlines.
-   */
-  it('divides the head from the buttons with a hairline across the full width', () => {
-    const rule = nodesOf(TWO).find((n) => n.id.startsWith('ov-btnrule-top'))
-    expect(rule, 'no rule under the message').toBeDefined()
-    expect(rule!.frame.width).toBe(270)
-    expect(rule!.frame.height).toBeLessThanOrEqual(1)
-  })
-
-  it('puts two buttons side by side, split by a vertical hairline down the middle', () => {
+  it('uses separated pill actions without an old-style divider strip', () => {
     const nodes = nodesOf(TWO)
-    const rule = nodes.find((n) => n.id.startsWith('ov-btnrule1'))
-    const panel = nodes.find((n) => n.id.startsWith('ov-bg'))!
-
-    expect(rule, 'no rule between the two buttons').toBeDefined()
-    expect(rule!.frame.width).toBeLessThanOrEqual(1)
-    expect(rule!.frame.height).toBe(44)
-    // The panel is a material, which owns a real box, so everything inside it is
-    // positioned in *its* space rather than the screen's. Comparing the rule's x to
-    // the panel's own x would be comparing two different coordinate systems.
-    expect(rule!.frame.x).toBeCloseTo(panel.frame.width / 2, 0)
+    const pills = nodes.filter(n => /^ov-btn\d-pillf$/.test(n.id))
+    expect(pills).toHaveLength(2)
+    expect(nodes.some(n => n.id.startsWith('ov-btnrule'))).toBe(false)
+    expect(pills[0]!.frame).toMatchObject({ width: 140, height: 48 })
+    expect(pills[1]!.frame.x - pills[0]!.frame.x - pills[0]!.frame.width).toBe(8)
   })
 
   /**
@@ -676,10 +658,10 @@ ${buttons}
                 Button("Two") { }
                 Button("Cancel", role: .cancel) { }`),
     )
-    const rules = nodes.filter((n) => /^ov-btnrule\d/.test(n.id))
+    const rules = nodes.filter((n) => /^ov-btn\d-pillf$/.test(n.id))
 
-    expect(rules.length).toBe(2)
-    for (const rule of rules) expect(rule.frame.width).toBe(270)
+    expect(rules.length).toBe(3)
+    for (const rule of rules) expect(rule.frame.width).toBe(288)
   })
 
   /**
@@ -698,12 +680,12 @@ ${buttons}
   })
 
   /** Its one visual effect on iOS, and only inside an alert. */
-  it('draws the cancel button semibold', () => {
+  it('uses the regular weight captured in native alert actions', () => {
     const nodes = nodesOf(TWO)
     const weight = (text: string) =>
       nodes.flatMap((n) => n.text?.runs ?? []).find((r) => r.text === text)!.font.weight
 
-    expect(weight('Cancel')).toBe(600)
+    expect(weight('Cancel')).toBe(400)
     expect(weight('Delete')).toBe(400)
   })
 })
@@ -794,6 +776,14 @@ describe('the search field', () => {
 })
 
 describe('inset grouped sections', () => {
+  function sectionCards(source: string) {
+    const nodes = compileSource(source).renderTree!.nodes
+    return nodes.filter(n => /s\dbg/.test(n.id)).map(n => {
+      let y = n.frame.y, parent = n.parent
+      while (parent) { const p = nodes.find(n => n.id === parent)!; y += p.frame.y; parent = p.parent }
+      return { ...n, frame: { ...n.frame, y } }
+    }).sort((a, b) => a.frame.y - b.frame.y)
+  }
   const TWO_SECTIONS = app(`        Form {
             Section { Text("first") }
             Section { Text("second") }
@@ -805,21 +795,14 @@ describe('inset grouped sections', () => {
    * between them - which says the opposite of what a section break says.
    */
   it('leave a gap between cards that have no header', () => {
-    const cards = compileSource(TWO_SECTIONS)
-      .renderTree!.nodes.filter((n) => /s\dbg/.test(n.id))
-      .sort((a, b) => a.frame.y - b.frame.y)
+    const cards = sectionCards(TWO_SECTIONS)
 
     expect(cards.length).toBe(2)
     expect(cards[1]!.frame.y - (cards[0]!.frame.y + cards[0]!.frame.height)).toBeGreaterThan(8)
   })
 
-  it('leave no gap above the first one, which sits against the bar', () => {
-    const first = compileSource(TWO_SECTIONS)
-      .renderTree!.nodes.filter((n) => /s\dbg/.test(n.id))
-      .sort((a, b) => a.frame.y - b.frame.y)[0]!
-
-    // Inside the list's own scrolling content, so zero means flush with the top.
-    expect(first.frame.y).toBe(0)
+  it('keeps the profile top margin above the first card', () => {
+    expect(sectionCards(TWO_SECTIONS)[0]!.frame.y - device.safeArea.top).toBe(10)
   })
 
   /**
@@ -828,9 +811,7 @@ describe('inset grouped sections', () => {
    */
   it('do not double the gap when the section has a header', () => {
     const gapBetween = (source: string): number => {
-      const cards = compileSource(source)
-        .renderTree!.nodes.filter((n) => /s\dbg/.test(n.id))
-        .sort((a, b) => a.frame.y - b.frame.y)
+      const cards = sectionCards(source)
       return cards[1]!.frame.y - (cards[0]!.frame.y + cards[0]!.frame.height)
     }
 
@@ -848,18 +829,17 @@ describe('inset grouped sections', () => {
   })
 })
 
-describe('a style token the preview does not draw', () => {
+describe('style token coverage', () => {
   /**
-   * `.buttonStyle` is a supported modifier, so `.glass` passed the name check, found
-   * no branch that handled it, and drew a bare label: nothing applied and nothing
-   * said. The same failure `UNIMPLEMENTED_MODIFIERS` prevents for names, one level
-   * down at the argument.
+   * Supported tokens must paint a style; unsupported tokens must warn. Glass
+   * styles are intentionally approximated with blur in the iOS 27 profile.
    */
-  it('warns instead of being silently ignored', () => {
+  it('uses blur for the supported glass style', () => {
     const result = compileSource(app('        Button("x") { }.buttonStyle(.glass)'))
     const warning = result.diagnostics.find((d) => d.severity === 'warning')
 
-    expect(warning?.message).toContain('.buttonStyle(.glass)')
+    expect(warning).toBeUndefined()
+    expect(result.renderTree?.nodes.some((n) => n.material?.blur === 12)).toBe(true)
     expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
   })
 
@@ -931,16 +911,13 @@ describe('the symbol table', () => {
       'text.aligncenter',
       'text.alignright',
     ]) {
-      expect(symbolShapes(name), `${name} has no shape`).not.toBeNull()
+      expect(symbolAsset(name), `${name} has no shape`).not.toBeNull()
     }
   })
 
   it('keeps every new shape drawable: a path with either a stroke or a fill', () => {
     for (const name of ['tray', 'airplane', 'chart.pie', 'keyboard', 'waveform']) {
-      for (const shape of symbolShapes(name)!) {
-        expect(shape.d.length, `${name} has an empty path`).toBeGreaterThan(4)
-        expect(shape.stroke === undefined || shape.stroke > 0).toBe(true)
-      }
+      expect(symbolAsset(name)?.body, `${name} has no SVG`).toMatch(/<(use|path|circle|rect|ellipse|polyline|polygon|line) /)
     }
   })
 })

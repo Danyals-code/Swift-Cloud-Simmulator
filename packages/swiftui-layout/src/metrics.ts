@@ -1,25 +1,10 @@
-import type { ResolvedFont } from '@studio/shared'
+import { textMeasureKey, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
 
 /**
- * Text measurement.
- *
- * The layout engine runs in a Web Worker, which has no fonts and no DOM. Rather
- * than make layout asynchronous - which would infect every call site and introduce
- * a visible reflow on the first frame - measurement is synchronous against a table
- * of per-character advance widths.
- *
- * The table is built once on the main thread from the real font (see
- * `apps/web/lib/fontMetrics.ts`) and handed to the worker. Until it arrives, and in
- * Node for tests, the built-in estimates below are used. That makes layout
- * deterministic and unit-testable, with the browser supplying exact numbers in
- * production.
- *
- * **Known limitation:** summing advances ignores kerning and ligatures. For Latin UI
- * text the error is well under 1% of line width, and it never accumulates across
- * lines because each line re-measures from its own characters. It would matter for
- * justified body text, which SwiftUI does not do.
+ * Synchronous shaped-run measurement, cached by the full font and text. Browsers
+ * supply a verified worker canvas or batch missing runs from the main thread.
+ * Node and unavailable fonts use explicit estimates, never claimed as measured.
  */
-
 /** Advance widths in em units, keyed by character. */
 export type AdvanceTable = Readonly<Record<string, number>>
 
@@ -75,12 +60,63 @@ export function fontKey(family: string, weight: number): string {
  *
  * Constructed empty in the worker and in tests, where every lookup falls back to the
  * built-in estimates. The main thread measures the real faces once at startup and
- * hands them over, after which lookups are exact.
+ * hands them over as fallback estimates. Exact widths come from shaped runs at
+ * the actual point size, synchronously or through a main-thread batch.
  */
+export type RunMeasurer = (request: TextMeasureRequest) => TextMetricsData | null
+
 export class FontMetricsTable {
+  private readonly runs = new Map<string, TextMetricsData>()
+  private readonly estimates = new Map<string, TextMetricsData>()
+  private readonly pending = new Map<string, TextMeasureRequest>()
+  private estimated = false
+
+  beginLayout(): void { this.pending.clear(); this.estimated = false }
+  get measurementState() { return { provisional: this.estimated, requests: [...this.pending.values()] } }
+  setRuns(data: readonly MeasuredTextData[]): void {
+    for (const entry of data) {
+      if ([entry.width, entry.ascent, entry.descent].every(Number.isFinite)) {
+        this.estimates.delete(entry.key)
+        this.remember(entry.key, entry)
+      }
+    }
+  }
+  private remember(key: string, value: TextMetricsData): void {
+    if (this.runs.size >= 12000) this.runs.delete(this.runs.keys().next().value!)
+    this.runs.set(key, value)
+  }
+  measure(request: TextMeasureRequest): TextMetricsData {
+    const key = textMeasureKey(request)
+    const cached = this.runs.get(key)
+    if (cached) return cached
+    const measured = this.measurer?.(request)
+    if (measured && [measured.width, measured.ascent, measured.descent].every(Number.isFinite)) {
+      this.remember(key, measured)
+      return measured
+    }
+    this.estimated = true
+    if (this.collectRequests && this.pending.size < 2048 && request.text.length <= 8192) this.pending.set(key, request)
+    const estimate = this.estimates.get(key)
+    if (estimate) return estimate
+    const { font, tracking = 0, tabularNumbers = false } = request
+    const digit = tabularNumbers ? widestDigit(font, this) : 0
+    const clusters = graphemes(request.text)
+    const width = clusters.reduce((sum, cluster) => sum +
+      (digit && /^[0-9]$/.test(cluster) ? digit : this.advance(cluster, font)) + tracking, 0)
+    const metrics = this.metricsFor(font).metrics
+    const result = { width: Math.max(0, width), ascent: metrics.ascent * font.size, descent: metrics.descent * font.size }
+    if (this.estimates.size >= 12000) this.estimates.delete(this.estimates.keys().next().value!)
+    if (request.text.length <= 8192) this.estimates.set(key, result)
+    return result
+  }
+  baseline(font: ResolvedFont): number {
+    const m = this.measure({ text: 'Hg', font })
+    return (font.lineHeight - m.ascent - m.descent) / 2 + m.ascent
+  }
+
   private readonly measured = new Map<string, FontMetrics>()
 
-  constructor(fonts: readonly MeasuredFont[] = []) {
+  constructor(fonts: readonly MeasuredFont[] = [], private readonly measurer?: RunMeasurer, private readonly collectRequests = false) {
     for (const font of fonts) this.measured.set(fontKey(font.family, font.weight), font)
   }
 
@@ -114,7 +150,8 @@ export class FontMetricsTable {
 
     // A multi-code-point cluster is one glyph: an emoji with a skin-tone modifier, or
     // a base letter with a combining mark. Measuring per code point would double-count.
-    if (grapheme.length > 1 || first > 0x2000) return emWidthOf(first) * scale
+    if (first > 0x2000) return emWidthOf(first) * scale
+    if (grapheme.length > 1) return (metrics.advances[String.fromCodePoint(first)] ?? emWidthOf(first)) * scale
 
     return (metrics.advances[grapheme] ?? metrics.fallback) * scale
   }
@@ -149,9 +186,13 @@ export interface TextLineSliceBox {
   readonly run: number
   readonly text: string
   readonly width: number
+  readonly baseline?: number
 }
 
 export interface TextLineBox {
+  readonly fontBaseline?: number
+  readonly height: number
+  readonly baseline: number
   readonly text: string
   readonly width: number
   /** Absent when the text was a single run, which is the common case. */
@@ -159,6 +200,7 @@ export interface TextLineBox {
 }
 
 export interface TextMeasurement {
+  readonly tightening?: number
   readonly width: number
   readonly height: number
   readonly lines: readonly TextLineBox[]
@@ -175,9 +217,8 @@ export interface TextMeasurement {
 /**
  * One span of text with the face and spacing it is measured in.
  *
- * `tracking` is extra advance after each cluster - `.tracking` and `.kerning` both
- * arrive here. It is part of *measurement* rather than painting, which is the whole
- * reason the attribute could not simply be handed to the renderer.
+ * `tracking` is extra advance after each cluster; `.tracking` and `.kerning` both
+ * arrive here. Measurement and painting must apply the same spacing.
  */
 export interface MeasuredRun {
   readonly text: string
@@ -185,6 +226,7 @@ export interface MeasuredRun {
   readonly tracking?: number
   /** `.monospacedDigit`: every digit measures as the widest one. */
   readonly tabularNumbers?: boolean
+  readonly baselineOffset?: number
 }
 
 const GRAPHEME_SEGMENTER =
@@ -205,6 +247,7 @@ function graphemes(text: string): string[] {
  * a given "ab" came from cannot be recovered from the line's text.
  */
 interface Cluster {
+  readonly spec: MeasuredRun
   readonly text: string
   readonly run: number
   readonly width: number
@@ -228,7 +271,7 @@ function clustersOf(
       const width = digitWidth > 0 && text >= '0' && text <= '9'
         ? digitWidth
         : table.advance(text, spec.font)
-      out.push({ text, run, width: width + tracking })
+      out.push({ text, run, width: width + tracking, spec: { ...spec, tracking } })
     }
   }
   return out
@@ -260,14 +303,7 @@ export function measureText(
   return measureRuns([{ text, font, tracking }], font, maxWidth, table, lineLimit, lineSpacing)
 }
 
-/**
- * Measures attributed spans as one paragraph flow.
- *
- * `lineFont` decides the line height. SwiftUI uses the `Text`'s own font for that
- * rather than growing the line box to fit a larger concatenated span, and
- * reproducing it keeps a mixed-size concatenation from re-spacing the paragraph
- * around it.
- */
+/** Attributed paragraph flow; each line reserves ascent/descent for its runs. */
 export function measureRuns(
   runs: readonly MeasuredRun[],
   lineFont: ResolvedFont,
@@ -383,7 +419,7 @@ function layOut(
   truncation: 'head' | 'middle' | 'tail' = 'tail',
   tighten = 0,
 ): TextMeasurement {
-  runs = scale === 1 ? runs : runs.map((run) => ({ ...run, font: scaled(run.font, scale) }))
+  runs = scale === 1 ? runs : runs.map((run) => ({ ...run, font: scaled(run.font, scale), tracking: (run.tracking ?? 0) * scale, baselineOffset: (run.baselineOffset ?? 0) * scale }))
   const multiRun = runs.length > 1
   const all = clustersOf(runs, table, tighten)
 
@@ -394,7 +430,7 @@ function layOut(
   const endParagraph = (): void => {
     const index = paragraphs.length
     paragraphs.push(paragraph)
-    wrapped.push(...wrapParagraph(paragraph, maxWidth, index))
+    wrapped.push(...wrapParagraph(paragraph, maxWidth, index, table))
     paragraph = []
   }
 
@@ -428,37 +464,48 @@ function layOut(
 
   const lines = wrapped.map((line) => line.clusters)
 
-  const boxes = lines.map((line) => toLineBox(line, multiRun))
-  const lineHeight = table.lineHeight(lineFont)
+  const boxes = lines.map((line) => toLineBox(line, multiRun, table, lineFont))
 
   return {
     width: boxes.reduce((max, line) => Math.max(max, line.width), 0),
     // `.lineSpacing` is the gap *between* lines, so one line is unaffected by it.
-    height: boxes.length * lineHeight + Math.max(0, boxes.length - 1) * lineSpacing,
+    height: boxes.reduce((sum, line) => sum + line.height, 0) + Math.max(0, boxes.length - 1) * lineSpacing,
     lines: boxes,
+    tightening: tighten,
     scale,
   }
 }
 
-function toLineBox(clusters: readonly Cluster[], multiRun: boolean): TextLineBox {
-  const text = clusters.map((c) => c.text).join('')
-  const width = clusters.reduce((sum, c) => sum + c.width, 0)
-  if (!multiRun) return { text, width }
-
-  const slices: TextLineSliceBox[] = []
+function slicesOf(clusters: readonly Cluster[]): { run: number; text: string; spec: MeasuredRun }[] {
+  const slices: { run: number; text: string; spec: MeasuredRun }[] = []
   for (const cluster of clusters) {
     const last = slices[slices.length - 1]
-    if (last && last.run === cluster.run) {
-      slices[slices.length - 1] = {
-        run: last.run,
-        text: last.text + cluster.text,
-        width: last.width + cluster.width,
-      }
-    } else {
-      slices.push({ run: cluster.run, text: cluster.text, width: cluster.width })
-    }
+    if (last?.run === cluster.run) last.text += cluster.text
+    else slices.push({ run: cluster.run, text: cluster.text, spec: cluster.spec })
   }
-  return { text, width, slices }
+  return slices
+}
+
+function toLineBox(clusters: readonly Cluster[], multiRun: boolean, table: FontMetricsTable, font: ResolvedFont): TextLineBox {
+  const slices = slicesOf(clusters)
+  const base = table.baseline(font)
+  let above = base
+  let below = font.lineHeight - base
+  const boxes = slices.map(({ run, text, spec }) => {
+    const metrics = table.measure({ ...spec, text })
+    const baseline = (spec.font.lineHeight - metrics.ascent - metrics.descent) / 2 + metrics.ascent
+    above = Math.max(above, baseline + (spec.baselineOffset ?? 0))
+    below = Math.max(below, spec.font.lineHeight - baseline - (spec.baselineOffset ?? 0))
+    return { run, text, width: metrics.width, baseline }
+  })
+  return {
+    text: clusters.map((c) => c.text).join(''),
+    width: boxes.reduce((sum, slice) => sum + slice.width, 0),
+    height: above + below,
+    baseline: above,
+    fontBaseline: boxes[0]?.baseline ?? base,
+    ...(multiRun ? { slices: boxes } : {}),
+  }
 }
 
 /**
@@ -476,38 +523,26 @@ function truncate(
   table: FontMetricsTable,
   mode: 'head' | 'middle' | 'tail' = 'tail',
 ): Cluster[] {
-  const ellipsis = '…'
-  const run = line[line.length - 1]?.run ?? 0
-  const width = table.advance(ellipsis, font)
-  const mark: Cluster = { text: ellipsis, run, width }
+  const source = line[line.length - 1]
+  const mark: Cluster = { text: '…', run: source?.run ?? 0, width: 0, spec: source?.spec ?? { text: '', font } }
   const clusters = trimEnd(line)
-  const budget = Number.isFinite(maxWidth) ? maxWidth - width : Number.POSITIVE_INFINITY
-
-  if (mode === 'head') return [mark, ...takeFrom(clusters, budget, 'end')]
-  if (mode === 'tail') return [...trimEnd(takeFrom(clusters, budget, 'start')), mark]
-
-  // Middle: half the budget from each end, the leading half taking the odd point so a
-  // single-character budget keeps the first character rather than the last.
-  const lead = trimEnd(takeFrom(clusters, budget / 2, 'start'))
-  const tail = takeFrom(clusters.slice(lead.length), budget - measure(lead), 'end')
-  return [...lead, mark, ...tail]
-}
-
-/** As many clusters as fit in `budget`, taken from one end. */
-function takeFrom(clusters: readonly Cluster[], budget: number, from: 'start' | 'end'): Cluster[] {
-  const ordered = from === 'start' ? clusters : [...clusters].reverse()
-  let used = 0
-  const kept: Cluster[] = []
-  for (const cluster of ordered) {
-    if (used + cluster.width > budget) break
-    kept.push(cluster)
-    used += cluster.width
+  const candidate = (count: number): Cluster[] => {
+    if (mode === 'head') return [mark, ...clusters.slice(clusters.length - count)]
+    if (mode === 'tail') return [...trimEnd(clusters.slice(0, count)), mark]
+    const lead = Math.ceil(count / 2)
+    return [...trimEnd(clusters.slice(0, lead)), mark, ...clusters.slice(clusters.length - (count - lead))]
   }
-  return from === 'start' ? kept : kept.reverse()
+  let lo = 0, hi = clusters.length
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2)
+    if (measure(candidate(mid), table) <= maxWidth + BREAK_TOLERANCE) lo = mid
+    else hi = mid - 1
+  }
+  return candidate(lo)
 }
 
-function measure(clusters: readonly Cluster[]): number {
-  return clusters.reduce((sum, c) => sum + c.width, 0)
+function measure(clusters: readonly Cluster[], table: FontMetricsTable): number {
+  return slicesOf(clusters).reduce((sum, slice) => sum + table.measure({ ...slice.spec, text: slice.text }).width, 0)
 }
 
 function trimEnd(clusters: readonly Cluster[]): Cluster[] {
@@ -540,46 +575,34 @@ function wrapParagraph(
   clusters: readonly Cluster[],
   maxWidth: number,
   paragraph: number,
+  table: FontMetricsTable,
 ): WrappedLine[] {
   if (clusters.length === 0) return [{ clusters: [], paragraph, from: 0 }]
-
   const limit = maxWidth + BREAK_TOLERANCE
-  const total = clusters.reduce((sum, c) => sum + c.width, 0)
-  if (!Number.isFinite(maxWidth) || total <= limit) {
+  if (!Number.isFinite(maxWidth) || measure(clusters, table) <= limit) {
     return [{ clusters: [...clusters], paragraph, from: 0 }]
   }
-
   const lines: WrappedLine[] = []
-  let lineStart = 0
-  let lineWidth = 0
-  /** Index just past the last space seen on this line, i.e. where a break may go. */
-  let lastBreak = -1
-
-  for (let i = 0; i < clusters.length; i++) {
-    const width = clusters[i]!.width
-
-    if (lineWidth + width > limit && i > lineStart) {
-      // Break at the last word boundary; if the word itself is too long, break here.
-      const breakAt = lastBreak > lineStart ? lastBreak : i
-      lines.push({ clusters: trimEnd(clusters.slice(lineStart, breakAt)), paragraph, from: lineStart })
-      lineStart = breakAt
-      lineWidth = measureSlice(clusters, lineStart, i)
-      lastBreak = -1
+  let start = 0
+  while (start < clusters.length) {
+    let lo = start + 1, hi = clusters.length
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2)
+      if (measure(clusters.slice(start, mid), table) <= limit) lo = mid
+      else hi = mid - 1
     }
-
-    lineWidth += width
-    if (clusters[i]!.text === ' ') lastBreak = i + 1
+    let end = lo
+    if (end < clusters.length && clusters[end]!.text !== ' ') {
+      // A word ending exactly at the limit already IS a word boundary.
+      // Backtracking here moved that whole word onto the next line during placement.
+      // Prefer a word boundary. CJK and an overlong word can break at a grapheme.
+      for (let i = end - 1; i >= start; i--) {
+        if (clusters[i]!.text === ' ') { end = i + 1; break }
+      }
+    }
+    lines.push({ clusters: trimEnd(clusters.slice(start, end)), paragraph, from: start })
+    start = end
+    while (start < clusters.length && clusters[start]!.text === ' ') start++
   }
-
-  if (lineStart < clusters.length) {
-    lines.push({ clusters: trimEnd(clusters.slice(lineStart)), paragraph, from: lineStart })
-  }
-
   return lines
-}
-
-function measureSlice(clusters: readonly Cluster[], from: number, to: number): number {
-  let sum = 0
-  for (let i = from; i < to; i++) sum += clusters[i]!.width
-  return sum
 }

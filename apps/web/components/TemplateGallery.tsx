@@ -10,21 +10,9 @@ import {
 } from '@studio/project-model'
 import { Icon, type IconName } from './ui/Icon'
 import { PushButton } from './ui/Control'
+import styles from './TemplateGallery.module.css'
 
-/**
- * The sheet the studio opens with, and the one the app icon reopens.
- *
- * It answers one question - *where does this project come from* - and there are only
- * three honest answers, so they are the three things down the left: what is already
- * in this browser, a whole app to start from, or one feature to read. Xcode splits
- * the same question across a welcome window and a template sheet; merging them means
- * "continue what I was doing" is not two clicks further away than "throw it away".
- *
- * The split between App and Feature is the point of the left rail. A pile of twenty
- * cards sorted by name cannot tell you that Counter is a thing to read in a minute
- * and Trailhead is a project to work in, and picking the wrong one wastes the first
- * five minutes somebody spends here.
- */
+/** Welcome window and project browser. Template sources load only after selection. */
 
 export type GallerySource = 'open' | TemplateKind
 
@@ -54,9 +42,9 @@ export interface TemplateGalleryProps {
 }
 
 const SOURCES: readonly { key: GallerySource; label: string; icon: IconName; hint: string }[] = [
-  { key: 'open', label: 'Open', icon: 'folder', hint: 'What is already here, or files from your computer' },
-  { key: 'app', label: 'App', icon: 'screens', hint: 'A whole project: several screens, a model, a store' },
-  { key: 'feature', label: 'Feature', icon: 'grid', hint: 'One file, one idea, read in a minute' },
+  { key: 'open', label: 'Your projects', icon: 'folder', hint: 'Continue a project or import Swift files' },
+  { key: 'app', label: 'App templates', icon: 'screens', hint: 'Complete apps with connected screens' },
+  { key: 'feature', label: 'Features', icon: 'grid', hint: 'Small examples of one SwiftUI concept' },
 ]
 
 export function TemplateGallery({
@@ -81,6 +69,9 @@ export function TemplateGallery({
   // otherwise the apps, because a first-time reader learns more from a project than
   // from a counter.
   const [source, setSource] = useState<GallerySource>(origin === 'restored' ? 'open' : 'app')
+  const [query, setQuery] = useState('')
+  const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
   const [selected, setSelected] = useState<string>(apps[0]?.id ?? '')
   const [pending, setPending] = useState<{ what: string; run: () => void } | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
@@ -97,31 +88,50 @@ export function TemplateGallery({
   const panelRef = useRef<HTMLDivElement | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
 
-  const shown = source === 'feature' ? features : source === 'app' ? apps : []
-  const template = TEMPLATE_CATALOG.find((t) => t.id === selected)
+  const candidates = source === 'feature' ? features : source === 'app' ? apps : []
+  const shown = candidates.filter((item) =>
+    [item.name, item.tagline, item.description, ...(item.highlights ?? [])]
+      .join(' ').toLowerCase().includes(query.trim().toLowerCase()),
+  )
+  const template = shown.find((item) => item.id === selected) ?? shown[0]
 
   useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
     panelRef.current?.focus()
+    return () => previous?.focus()
   }, [])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      if (pending) setPending(null)
-      else onClose()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (creatingRef.current) return
+        if (deleting) setDeleting(null)
+        else if (pending) setPending(null)
+        else onClose()
+      }
+      if (event.key !== 'Tab') return
+      const root = panelRef.current?.parentElement
+      const activeDialog = root?.querySelector('[role="alertdialog"]') ?? panelRef.current
+      const controls = activeDialog?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([type="file"]), [tabindex="0"]',
+      )
+      const first = controls?.[0]
+      const last = controls?.[controls.length - 1]
+      if (!first || !last) return
+      if (event.shiftKey && (document.activeElement === first || !activeDialog?.contains(document.activeElement))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === activeDialog || !activeDialog?.contains(document.activeElement))) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, pending])
+  }, [onClose, pending, deleting])
 
-  /**
-   * Every path that replaces the project goes through here.
-   *
-   * A confirmation on untouched work is a dialog that has taught people to dismiss
-   * dialogs, so it is asked only when there is genuinely something to lose - and when
-   * it is asked, it names the project and says plainly that there is no undo.
-   */
+  /** Confirm before leaving an edited project; the saved copy remains in recents. */
   const replacing = useCallback(
     (what: string, run: () => void) => {
       if (pristine) run()
@@ -130,14 +140,23 @@ export function TemplateGallery({
     [pristine],
   )
 
-  const create = useCallback(() => {
-    if (!template) return
-    replacing(template.name, () => {
-      void onChoose(template.id).then((made) => {
-        if (!made) setCreateError(`${template.name} could not be loaded. Check the connection.`)
-      })
+  const choose = useCallback((item: TemplateInfo) => {
+    if (creatingRef.current) return
+    replacing(item.name, () => {
+      creatingRef.current = true
+      setCreating(true)
+      setCreateError(null)
+      void onChoose(item.id)
+        .then((made) => {
+          if (!made) setCreateError(`${item.name} could not be loaded. Please try again.`)
+        })
+        .catch(() => setCreateError(`${item.name} could not be loaded. Please try again.`))
+        .finally(() => {
+          creatingRef.current = false
+          setCreating(false)
+        })
     })
-  }, [template, replacing, onChoose])
+  }, [replacing, onChoose])
 
   /**
    * What came out of the picker, whichever of the two shapes it was.
@@ -187,12 +206,10 @@ export function TemplateGallery({
     [onOpenFiles, replacing],
   )
 
-  const primary = source === 'open' ? 'Continue' : 'Create'
-
   return (
     <div
-      className="fixed inset-0 z-[950] flex items-start justify-center bg-black/55 pt-[7vh] backdrop-blur-[2px]"
-      onPointerDown={atLaunch ? undefined : onClose}
+      className={styles.backdrop}
+      onPointerDown={atLaunch || creating ? undefined : onClose}
       data-testid="template-gallery"
     >
       <div
@@ -202,28 +219,22 @@ export function TemplateGallery({
         aria-modal="true"
         aria-label="Choose what to open"
         onPointerDown={(event) => event.stopPropagation()}
-        className="flex h-[min(620px,82vh)] w-[min(880px,94vw)] flex-col overflow-hidden rounded-[10px] border border-black/60 bg-xc-bar shadow-[0_28px_80px_rgb(0_0_0/0.6)]"
+        className={styles.window}
       >
-        <header className="shrink-0 border-b border-black/40 px-5 py-3.5">
-          <h2 className="text-[13px] font-semibold text-xc-text">
-            {atLaunch ? 'Welcome to SwiftUI Web Studio' : 'Open a project'}
-          </h2>
-          <p className="mt-0.5 text-[11px] text-xc-text-3">
-            Pick up where you left off, start from a whole app, or read one feature.
-          </p>
-        </header>
-
-        <div className="grid min-h-0 flex-1 grid-cols-[172px_1fr]">
-          <nav
-            aria-label="Source"
-            className="flex min-h-0 flex-col gap-0.5 overflow-auto border-r border-black/40 bg-black/15 p-2"
-          >
+        <aside className={styles.sidebar}>
+          <div className={styles.brand}>
+            <span className={styles.brandMark}><GallerySymbol name="code-slash" /></span>
+            <span><strong>SwiftUI</strong><span>Web Studio</span></span>
+          </div>
+          <nav aria-label="Source" className={styles.navigation}>
             {SOURCES.map((item) => (
               <button
                 key={item.key}
                 type="button"
+                disabled={creating}
                 onClick={() => {
                   setCreateError(null)
+                  setQuery('')
                   setSource(item.key)
                   if (item.key === 'app') setSelected(apps[0]?.id ?? '')
                   if (item.key === 'feature') setSelected(features[0]?.id ?? '')
@@ -231,102 +242,87 @@ export function TemplateGallery({
                 aria-pressed={source === item.key}
                 title={item.hint}
                 data-testid={`gallery-source-${item.key}`}
-                className={`flex items-center gap-2 rounded-[6px] px-2.5 py-[7px] text-left text-[12px] transition-colors ${
-                  source === item.key
-                    ? 'bg-xc-accent/20 text-xc-text'
-                    : 'text-xc-text-2 hover:bg-white/[0.06] hover:text-xc-text'
-                }`}
+                className={styles.navItem}
               >
-                <Icon name={item.icon} size={14} className="shrink-0 text-xc-text-3" />
-                <span className="truncate">{item.label}</span>
-                {item.key !== 'open' ? (
-                  <span className="ml-auto text-[10.5px] text-xc-text-3">
-                    {item.key === 'app' ? apps.length : features.length}
-                  </span>
-                ) : null}
+                <Icon name={item.icon} size={17} />
+                <span>{item.label}</span>
+                {item.key !== 'open' && <small>{item.key === 'app' ? apps.length : features.length}</small>}
               </button>
             ))}
-
-            <p className="mt-auto px-2.5 pb-1 pt-4 text-[10.5px] leading-relaxed text-xc-text-3">
-              Every template renders with nothing missing. That is the gate they have to
-              pass to be in here.
-            </p>
           </nav>
-
-          <div className="flex min-h-0 min-w-0 flex-col">
-            {source === 'open' ? (
-              <OpenPane
-                projectId={projectId}
-                recents={recents}
-                origin={origin}
-                savedAt={savedAt}
-                error={openError}
-                onOpen={(id) => {
-                  if (id === projectId) {
-                    onClose()
-                    return
-                  }
-                  // Switching projects is not a replacement: the one being left is
-                  // written down and stays in the list, so there is nothing to lose
-                  // and nothing to confirm.
-                  onOpenProject(id)
-                  onClose()
-                }}
-                onRemove={(id) => {
-                  const summary = recents.find((r) => r.id === id)
-                  if (!summary) return
-                  setDeleting(summary)
-                }}
-                onBrowse={() => fileInput.current?.click()}
-              />
-            ) : (
-              <>
-                <div className="min-h-0 flex-1 overflow-auto p-4">
-                  <div
-                    className={`grid gap-3 ${
-                      source === 'app'
-                        ? 'grid-cols-[repeat(auto-fill,minmax(176px,1fr))]'
-                        : 'grid-cols-[repeat(auto-fill,minmax(124px,1fr))]'
-                    }`}
-                  >
-                    {shown.map((item) => (
-                      <TemplateCard
-                        key={item.id}
-                        template={item}
-                        selected={item.id === selected}
-                        onSelect={() => setSelected(item.id)}
-                        onConfirm={() => replacing(item.name, () => onChoose(item.id))}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                <TemplateDetail template={template} />
-              </>
-            )}
+          <div className={styles.sidebarNote}>
+            <span className={styles.noteLine} />
+            <strong>Write. Preview. Make it yours.</strong>
+            <p>Start in your browser.<br />Continue in Xcode.</p>
           </div>
-        </div>
+        </aside>
 
-        <footer className="flex shrink-0 items-center gap-2 border-t border-black/40 px-5 py-3">
-          <span className={`text-[11px] ${createError ? 'text-xc-error' : 'text-xc-text-3'}`}>
-            {createError ??
-              (source === 'open'
-                ? 'Opening files replaces everything currently in the project.'
-                : 'Creating from a template replaces everything currently in the project.')}
-          </span>
-          <span className="ml-auto flex items-center gap-2">
-            <PushButton onClick={onClose} testId="gallery-dismiss">
-              {atLaunch ? 'Not now' : 'Cancel'}
-            </PushButton>
-            <PushButton
-              onClick={source === 'open' ? onClose : create}
-              active
-              testId="template-confirm"
-            >
-              {primary}
-            </PushButton>
-          </span>
-        </footer>
+        <div className={styles.main}>
+          <header className={styles.header}>
+            <div>
+              <p className={styles.eyebrow}>{atLaunch ? 'WELCOME TO YOUR WORKSPACE' : 'MAKE SOMETHING NEW'}</p>
+              <h2>{source === 'open' ? 'Pick up where you left off.' : source === 'app' ? 'Your next app starts here.' : 'One idea. A working example.'}</h2>
+              <p className={styles.subtitle}>
+                {source === 'open' ? 'Your saved projects and Swift files, in one place.' : source === 'app' ? 'Real screens, connected flows, and code you can make your own.' : 'Explore a SwiftUI feature, change the code, and see what happens.'}
+              </p>
+            </div>
+            <button type="button" className={styles.close} onClick={onClose} disabled={creating} aria-label="Close welcome screen">
+              <Icon name="xmark" size={17} />
+            </button>
+          </header>
+          {source === 'open' ? (
+            <OpenPane
+              projectId={projectId}
+              recents={recents}
+              origin={origin}
+              savedAt={savedAt}
+              error={openError}
+              onOpen={(id) => {
+                if (id !== projectId) onOpenProject(id)
+                onClose()
+              }}
+              onRemove={(id) => {
+                const summary = recents.find((r) => r.id === id)
+                if (summary) setDeleting(summary)
+              }}
+              onBrowse={() => fileInput.current?.click()}
+            />
+          ) : (
+            <>
+              <div className={styles.catalogBar}>
+                <span>{shown.length} {source === 'app' ? 'app templates' : 'feature examples'}</span>
+                <label className={styles.search}>
+                  <Icon name="search" size={15} />
+                  <input aria-label="Search templates" placeholder={source === 'app' ? 'Find an app…' : 'Find a feature…'} value={query} onChange={(event) => setQuery(event.target.value)} />
+                  {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><Icon name="xmark" size={13} /></button>}
+                </label>
+              </div>
+              <div className={styles.catalog}>
+                <div className={source === 'app' ? styles.appGrid : styles.featureGrid}>
+                  {shown.map((item) => (
+                    <TemplateCard key={item.id} template={item} selected={item.id === template?.id}
+                      disabled={creating} onSelect={() => setSelected(item.id)} onConfirm={() => choose(item)} />
+                  ))}
+                </div>
+                {shown.length === 0 && <div className={styles.empty} role="status"><Icon name="search" size={28} /><strong>No templates found</strong><p>Try “navigation”, “settings”, or “list”.</p><button type="button" onClick={() => setQuery('')}>Show all templates</button></div>}
+              </div>
+              <TemplateDetail template={template} />
+            </>
+          )}
+          <footer className={styles.footer}>
+            <span className={styles.footerNote} role={createError ? 'alert' : undefined}>
+              {createError ?? (source === 'open' ? 'Projects are saved in this browser.' : 'Creates a new project, ready to edit and preview.')}
+            </span>
+            <div className={styles.actions}>
+              <button type="button" className={styles.secondary} onClick={onClose} disabled={creating} data-testid="gallery-dismiss">{atLaunch ? 'Not now' : 'Cancel'}</button>
+              <button type="button" className={styles.primary} disabled={creating || (source !== 'open' && !template)} data-testid="template-confirm"
+                onClick={source === 'open' ? onClose : () => { if (template) choose(template) }}>
+                {creating ? 'Creating…' : source === 'open' ? 'Continue editing' : source === 'app' ? 'Create app' : 'Open example'}
+                <Icon name="chevron-right" size={14} />
+              </button>
+            </div>
+          </footer>
+        </div>
       </div>
 
       {/*
@@ -411,7 +407,7 @@ function OpenPane({
   onBrowse: () => void
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-4">
+    <div className={styles.openPane}>
       <h3 className="text-[10px] font-semibold uppercase tracking-wider text-xc-text-3">
         In this browser
       </h3>
@@ -443,11 +439,9 @@ function OpenPane({
 
       <div className="mt-2 rounded-[8px] border border-dashed border-white/12 bg-white/[0.02] p-4">
         <p className="text-[11.5px] leading-relaxed text-xc-text-2">
-          Pick the <span className="font-mono text-[11px] text-xc-text">.swift</span> files from a
-          project you exported and have since edited on a Mac, or the{' '}
-          <span className="font-mono text-[11px] text-xc-text">.zip</span> the export itself wrote.
-          Folders are rebuilt from the names, and the target is named after whichever file declares{' '}
-          <span className="font-mono text-[11px] text-xc-text">@main</span>.
+          Open <span className="font-mono text-[11px] text-xc-text">.swift</span> files from
+          your project, or an exported{' '}
+          <span className="font-mono text-[11px] text-xc-text">.zip</span> archive. Your files stay on this device.
         </p>
         <span className="mt-3 flex items-center gap-2">
           <PushButton onClick={onBrowse} icon="folder" testId="gallery-browse">
@@ -533,84 +527,50 @@ function RecentRow({
   )
 }
 
-/** The strip under the grid: what the selected template is, and what it lays down. */
+const TEMPLATE_ART: Readonly<Record<string, readonly [string, string]>> = {
+  folio: ['library', '#ab9af5'], trailhead: ['leaf', '#79d6af'], ledger: ['bar-chart', '#7ab8ff'],
+  kitchen: ['flame-outline', '#f4bb80'], pulse: ['pulse', '#ee95ad'], counter: ['add-circle-outline', '#7ab8ff'],
+  stacks: ['grid', '#ab9af5'], tasks: ['checkbox-outline', '#79d6af'], card: ['person-circle-outline', '#f4bb80'],
+  palette: ['color-wand-outline', '#ee95ad'], navigation: ['navigate-outline', '#7ab8ff'], settings: ['settings-outline', '#ab9af5'],
+  gallery: ['image-outline', '#79d6af'], tabs: ['menu', '#7ab8ff'], motion: ['sparkles-outline', '#f4bb80'],
+  inbox: ['mail-outline', '#7ab8ff'], store: ['cart-outline', '#79d6af'], flow: ['flag-outline', '#ab9af5'],
+  drawing: ['pencil', '#ee95ad'], drag: ['swap-vertical', '#f4bb80'], styled: ['color-wand', '#ab9af5'],
+  typesetting: ['document-text-outline', '#7ab8ff'], loader: ['cloud-outline', '#79d6af'],
+}
+
+function GallerySymbol({ name }: { name: string }) {
+  return <svg viewBox="0 0 512 512" fill="currentColor" aria-hidden="true" focusable="false"><use href={`/ionicons-8.0.13.svg#${name}`} /></svg>
+}
+
 function TemplateDetail({ template }: { template: TemplateInfo | undefined }) {
   if (!template) return null
-
   return (
-    <div className="shrink-0 border-t border-black/40 bg-black/15 px-4 py-3">
-      <span className="flex items-baseline gap-2">
-        <h3 className="text-[12px] font-semibold text-xc-text">{template.name}</h3>
-        <p className="min-w-0 truncate text-[11px] text-xc-text-2">{template.tagline}</p>
-      </span>
-      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-xc-text-3">
-        {template.description}
-      </p>
-      <p className="mt-1.5 truncate font-mono text-[10.5px] text-xc-text-3">
-        {template.files.length} {template.files.length === 1 ? 'file' : 'files'} ·{' '}
-        {template.files.map((path) => path.replace(/^Sources\//, '')).join('  ')}
-      </p>
+    <div className={styles.detail} data-testid="template-detail">
+      <div className={styles.detailHeading}><strong>{template.name}</strong><span>{template.files.length} {template.files.length === 1 ? 'Swift file' : 'Swift files'}</span></div>
+      <p>{template.description}</p>
+      {template.highlights && <div className={styles.screenList} aria-label="Included screens">{template.highlights.map((screen) => <span key={screen}>{screen}</span>)}</div>}
     </div>
   )
 }
 
-function TemplateCard({
-  template,
-  selected,
-  onSelect,
-  onConfirm,
-}: {
+function TemplateCard({ template, selected, disabled, onSelect, onConfirm }: {
   template: TemplateInfo
   selected: boolean
+  disabled: boolean
   onSelect: () => void
   onConfirm: () => void
 }) {
-  const app = template.kind === 'app'
-
+  const [symbol, color] = TEMPLATE_ART[template.id] ?? ['code-slash', '#7ab8ff']
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      onDoubleClick={onConfirm}
-      aria-pressed={selected}
-      data-testid={`template-${template.id}`}
-      className={`flex flex-col items-center gap-2 rounded-[8px] border p-3 text-center transition-colors ${
-        selected
-          ? 'border-xc-accent bg-xc-accent/15'
-          : 'border-transparent hover:border-white/10 hover:bg-white/[0.05]'
-      }`}
-    >
-      {/*
-        A stand-in for the screen the template draws rather than a real thumbnail:
-        rendering twenty-two previews to make a picker would mean running the whole
-        pipeline twenty-two times before anyone has chosen anything. An app template
-        is drawn as a stack, which is the one thing the shape can honestly say.
-      */}
-      <span className="relative grid h-[52px] w-[40px] place-items-center">
-        {app ? (
-          <span className="absolute left-[7px] top-0 h-[46px] w-[33px] rounded-[5px] border border-white/10 bg-white/[0.04]" />
-        ) : null}
-        <span
-          className={`absolute ${
-            app ? 'bottom-0 left-0 h-[46px] w-[33px]' : 'inset-0'
-          } grid place-items-center rounded-[6px] border border-white/10 bg-gradient-to-b from-white/[0.12] to-white/[0.03]`}
-        >
-          <Icon
-            name={app ? 'screens' : 'disclosure-closed'}
-            size={14}
-            className="text-xc-text-3"
-          />
-        </span>
+    <button type="button" onClick={onSelect} onDoubleClick={onConfirm} aria-pressed={selected} disabled={disabled}
+      data-testid={`template-${template.id}`} className={template.kind === 'app' ? styles.appCard : styles.featureCard}>
+      <span className={styles.templateIcon} style={{ color, backgroundColor: `${color}18` }}><GallerySymbol name={symbol} /></span>
+      <span className={styles.cardCopy}>
+        <span className={styles.cardTitle}>{template.name}{template.id === 'folio' && <small>NEW</small>}</span>
+        <span className={styles.cardTagline}>{template.tagline}</span>
+        {template.kind === 'app' && <span className={styles.cardMeta}>{template.highlights?.length ?? 3} screens · {template.files.length} files</span>}
       </span>
-
-      <span className="w-full truncate text-[11.5px] text-xc-text">{template.name}</span>
-      {app ? (
-        <span className="line-clamp-2 text-[10px] leading-snug text-xc-text-3">
-          {template.tagline}
-        </span>
-      ) : template.files.length > 1 ? (
-        <span className="text-[10px] text-xc-text-3">{template.files.length} files</span>
-      ) : null}
+      <span className={styles.selectedMark}>{selected && <Icon name="check" size={12} />}</span>
     </button>
   )
 }
@@ -638,11 +598,11 @@ function ReplaceConfirm({
   return (
     <Confirm
       icon="warning"
-      title={`Replace “${projectName}” with ${what}?`}
-      body={`This project has been edited since it was created. Replacing its ${fileCount} ${fileCount === 1 ? 'file' : 'files'} cannot be undone, and nothing here has a copy anywhere else.`}
-      note="Export or copy a share link first if you want to keep it."
+      title={`Open ${what}?`}
+      body={`You are leaving “${projectName}” and its ${fileCount} ${fileCount === 1 ? 'file' : 'files'}. Your edited project will stay in Your projects.`}
+      note="Export a copy whenever you want a backup outside this browser."
       cancel="Keep editing"
-      confirm="Replace"
+      confirm="Open project"
       testId="replace-confirm"
       onCancel={onCancel}
       onConfirm={onConfirm}

@@ -63,8 +63,8 @@ describe('multiple trailing closures', () => {
   })
 
   it('builds a Section from its header closure', () => {
-    // A grouped list uppercases its header, as iOS does.
-    expect(drew(view('List { Section { Text("row") } header: { Text("Head") } }'))).toContain('HEAD')
+    // Modern list headers preserve the capitalization supplied in Swift.
+    expect(drew(view('List { Section { Text("row") } header: { Text("Head") } }'))).toContain('Head')
   })
 
   it('builds a Menu from its label closure', () => {

@@ -33,7 +33,7 @@ export interface DeviceSpec {
   readonly homeIndicator: boolean
 }
 
-export type DeviceKey = 'iphone-se-3' | 'iphone-15' | 'iphone-16-pro-max' | 'ipad-11'
+export type DeviceKey = 'iphone-se-3' | 'iphone-15' | 'iphone-16-pro-max' | 'iphone-18-pro' | 'ipad-11'
 
 export const DEVICES: Readonly<Record<DeviceKey, DeviceSpec>> = {
   'iphone-se-3': {
@@ -71,6 +71,13 @@ export const DEVICES: Readonly<Record<DeviceKey, DeviceSpec>> = {
     hasDynamicIsland: true,
     statusBarHeight: 57,
     homeIndicator: true,
+  },
+  // 1206 × 2622 user-supplied Simulator capture at 3×. Insets are the calibration
+  // assumptions recorded with that evidence; hardware artwork remains approximate.
+  'iphone-18-pro': {
+    key: 'iphone-18-pro', name: 'iPhone 18 Pro', width: 402, height: 874, scale: 3,
+    safeArea: { top: 62, leading: 0, bottom: 34, trailing: 0 },
+    cornerRadius: 55, hasDynamicIsland: true, statusBarHeight: 57, homeIndicator: true,
   },
   'ipad-11': {
     key: 'ipad-11',

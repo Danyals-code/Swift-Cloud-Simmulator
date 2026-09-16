@@ -172,7 +172,7 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
           !result ? (
             <Empty>No compile yet.</Empty>
           ) : (
-            <Timings timings={result.timings} />
+            <div><Timings timings={result.timings} /><p className="px-3 py-1 text-[11px] text-xc-text-2">Text measurement: {!result.textMeasurement ? 'unavailable' : result.textMeasurement.provisional ? 'estimated in part' : 'measured'}</p></div>
           )
         ) : null}
       </div>

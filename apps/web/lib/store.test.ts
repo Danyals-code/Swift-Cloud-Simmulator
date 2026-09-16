@@ -83,6 +83,17 @@ describe('creating a project from a template', () => {
     expect(kept.map((p) => p.name).sort()).toEqual(['CounterApp', 'TasksApp'])
   })
 
+  it('saves the last keystrokes when a template opens before autosave runs', async () => {
+    await useStudio.getState().load()
+    const outgoing = useStudio.getState().project!
+    useStudio.getState().setFileText(outgoing.files[0]!.id, '// just typed')
+
+    await useStudio.getState().applyTemplate('folio')
+    await useStudio.getState().openProject(outgoing.id)
+
+    expect(useStudio.getState().project!.files[0]!.text).toBe('// just typed')
+  })
+
   it('discards the outgoing project when nobody touched it', async () => {
     // Otherwise a click through five templates leaves five projects nobody chose.
     await useStudio.getState().load()

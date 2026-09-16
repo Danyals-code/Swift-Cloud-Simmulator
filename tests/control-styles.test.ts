@@ -346,13 +346,14 @@ describe('.controlSize and .buttonBorderShape', () => {
     expect(warnings(run(button('.buttonBorderShape(.capsule)')))).toEqual([])
   })
 
-  it('.capsule rounds further than the default', () => {
-    const plain = nodes(run(button(''))).find((n) => n.cornerRadius === 8)
+  it('uses a capsule by default and honors roundedRectangle', () => {
+    const plain = nodes(run(button('.buttonBorderShape(.roundedRectangle)'))).find((n) => n.cornerRadius === 8)
     const capsule = nodes(run(button('.buttonBorderShape(.capsule)'))).find(
       (n) => (n.cornerRadius ?? 0) > 8,
     )
-    expect(plain, 'the default button is an 8pt radius').toBeDefined()
+    expect(plain, 'an explicit rounded rectangle retains its corners').toBeDefined()
     expect(capsule, 'a capsule button rounds further').toBeDefined()
+    expect(nodes(run(button(''))).some((n) => n.cornerRadius === capsule!.cornerRadius)).toBe(true)
   })
 
   it('a bordered button is rounded at all', () => {

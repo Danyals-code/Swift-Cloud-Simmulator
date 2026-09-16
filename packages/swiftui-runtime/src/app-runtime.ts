@@ -266,7 +266,9 @@ export class AppRuntime {
       this.handlers = ui.handlers
       // `@Environment(\.dismiss)` is callable at any depth, so it has to resolve to
       // whatever is presented *now* rather than to whatever was when it was read.
-      const dismiss = ui.overlay?.dismiss ?? null
+      let presented = ui.overlay
+      while (presented?.screen?.overlay) presented = presented.screen.overlay
+      const dismiss = presented?.dismiss ?? null
       this.host.dismissAction = dismiss
         ? () => {
             this.perform(dismiss, { kind: 'tap', handlerId: '', location: { x: 0, y: 0 } })
@@ -463,6 +465,7 @@ export class AppRuntime {
   private perform(intent: ViewIntent, event: UIEvent): void {
     switch (intent.kind) {
       case 'run':
+        if (intent.dismiss) this.perform(intent.dismiss, event)
         this.interpreter.callClosure(intent.closure, [], intent.closure.span)
         return
 

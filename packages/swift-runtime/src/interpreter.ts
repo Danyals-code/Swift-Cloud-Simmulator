@@ -1896,7 +1896,10 @@ export class Interpreter {
 
     // A method or modifier call: `value.member(args)`.
     if (callee.kind === 'memberAccess') {
-      return this.evaluateMemberCall(callee.base, callee.member, callee.memberSpan, args, allArgs, trailingClosure, span, env)
+      const evaluate = () => this.evaluateMemberCall(callee.base, callee.member, callee.memberSpan, args, allArgs, trailingClosure, span, env)
+      return callee.base && this.host.withMemberScope
+        ? this.host.withMemberScope(callee.member, args, evaluate)
+        : evaluate()
     }
 
     const value = this.evaluate(callee, env)

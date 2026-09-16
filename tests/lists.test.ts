@@ -184,14 +184,14 @@ struct RootView: View {
 }
 `
 
-  it('draws a search field above the list', () => {
+  it('draws search in the navigation drawer on phones', () => {
     const result = run(SEARCH_APP)
     const field = (result.renderTree?.nodes ?? []).find((n) => n.hitTarget?.role === 'textField')
     expect(field).toBeDefined()
     expect(field!.hitTarget!.placeholder).toBe('Search')
 
-    // Above the list, not inside it: it must not scroll away with the rows.
-    expect(field!.parent).toBeUndefined()
+    expect(field!.parent).toBe(result.renderTree!.chrome!.scrollId)
+    expect(field!.frame.y).toBeLessThan(100)
   })
 
   it('filters the list through its binding', () => {

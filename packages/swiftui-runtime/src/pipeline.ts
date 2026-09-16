@@ -1,10 +1,15 @@
+import { SURFACES } from './appearance/surfaces'
+import { primaryScroll, scrollInsets } from './containers/screen'
+import type { ScreenLayout } from './to-layout'
 import {
+  APPEARANCE_CALIBRATION,
   hasBlockingError,
   rgba,
   type CompileRequest,
   type CompileResult,
   type Diagnostic,
   type LogEntry,
+  type MeasuredTextData,
   type Rect,
   type RenderNode,
   type RenderTree,
@@ -19,13 +24,14 @@ import {
   type LayoutElement,
   type LayoutEnvironment,
   type MeasuredFont,
+  type RunMeasurer,
   type PlacedNode,
 } from '@studio/swiftui-layout'
 import { AppRuntime, type EvaluationResult } from './app-runtime'
 import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
-import { screenToLayout, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
+import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import type { OverlayKind } from './presentation'
 
 /**
@@ -46,19 +52,39 @@ const runtime = new AppRuntime()
 
 /** Replaced once the main thread measures the real fonts. */
 let metrics = new FontMetricsTable()
+let fontGeneration = 0
 let revision = 0
+let lastEvaluation: EvaluationResult | null = null
 let lastAnalysis: { request: CompileRequest; analysis: Analysis } | null = null
 
 /** z ranges, so bars always paint over content and presentations over everything. */
 const BAR_Z = 100_000
 const OVERLAY_Z = 200_000
 
-export function setFontMetrics(fonts: readonly MeasuredFont[]): void {
-  metrics = new FontMetricsTable(fonts)
+export function setFontMetrics(fonts: readonly MeasuredFont[], measurer?: RunMeasurer, collectRequests = false): void {
+  fontGeneration++
+  metrics = new FontMetricsTable(fonts, measurer, collectRequests)
+}
+
+/** Font-only refinement reuses the evaluated view and preserves live state. */
+export function relayout(revision: number): CompileResult {
+  if (!lastAnalysis || !lastEvaluation) return rerender(revision)
+  const { analysis, request } = lastAnalysis
+  const next = { ...request, revision }
+  lastAnalysis = { analysis, request: next }
+  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, null, performance.now(), 0, 0)
+  return finish(next, analysis, lastEvaluation, performance.now(), 0)
+}
+
+export function setTextMeasurements(data: readonly MeasuredTextData[], revision: number, generation = fontGeneration): CompileResult | null {
+  if (generation !== fontGeneration || lastAnalysis?.request.revision !== revision) return null
+  metrics.setRuns(data)
+  return relayout(revision)
 }
 
 export function resetPipelineState(): void {
   runtime.reset()
+  lastEvaluation = null
 }
 
 /** Returns true when the event changed something and a re-render is warranted. */
@@ -106,7 +132,8 @@ function analyse(request: CompileRequest): Analysis {
 
 function rootEnvironment(request: CompileRequest): LayoutEnvironment {
   return {
-    font: bodyFont(request.typeScale ?? 1),
+    displayScale: request.displayScale ?? 3,
+    font: bodyFont(request.dynamicTypeSize ?? request.typeScale ?? 1),
     foregroundColor: labelColor(request.colorScheme),
     opacity: 1,
     cornerRadius: 0,
@@ -123,6 +150,7 @@ function rootEnvironment(request: CompileRequest): LayoutEnvironment {
  * positioning, which is precisely the concept a proposal-based engine does not have.
  */
 function render(request: CompileRequest, evaluation: EvaluationResult): RenderTree {
+  metrics.beginLayout()
   const engine = new LayoutEngine(metrics)
   // `withAnimation { … }` animates every change in its transaction, so the hint goes
   // on the root environment and every node below inherits it for exactly one frame.
@@ -138,14 +166,21 @@ function render(request: CompileRequest, evaluation: EvaluationResult): RenderTr
   const screen = ui
     ? screenToLayout(ui, {
         colorScheme: scheme,
+        previewTarget: request.previewTarget,
         typeScale: request.typeScale ?? 1,
+        dynamicTypeSize: request.dynamicTypeSize,
+        displayScale: request.displayScale,
         safeArea,
+        viewportWidth: canvas.width,
         callGuide,
       })
     : {
         content: viewsToLayout(evaluation.views, {
           colorScheme: scheme,
+        previewTarget: request.previewTarget,
           typeScale: request.typeScale ?? 1,
+        dynamicTypeSize: request.dynamicTypeSize,
+        displayScale: request.displayScale,
           callGuide,
         }).element,
         background: systemBackground(scheme),
@@ -153,63 +188,50 @@ function render(request: CompileRequest, evaluation: EvaluationResult): RenderTr
         navigationBar: null,
         tabBar: null,
         overlay: null,
+        hitTargets: new Map<string, string>(),
       }
 
+  return { ...composeScreen(engine, screen, canvas, safeArea, env), colorScheme: scheme, calibration: APPEARANCE_CALIBRATION.status }
+}
+
+function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { width: number; height: number }, safeArea: { top: number; leading: number; bottom: number; trailing: number }, env: LayoutEnvironment): RenderTree {
   const barHeight = screen.navigationBar?.height ?? 0
   const tabHeight = screen.tabBar ? TAB_BAR_HEIGHT : 0
-
-  // `.ignoresSafeArea()` is a statement about the *device*, so the pipeline is where
-  // it belongs: it changes the rect the root is proposed, which no modifier wrapper
-  // inside the tree could reach.
+  const regular = canvas.width >= 600
+  const topTabs = regular ? tabHeight : 0
+  const bottomTabs = regular ? 0 : tabHeight
+  const bottomSearch = screen.search?.placement === 'bottom' ? screen.search.height : 0
+  const topSearch = screen.search?.placement === 'top' ? screen.search.height : 0
+  const scroll = !screen.ignoresSafeArea ? primaryScroll(screen.content) : null
+  const collapseDistance = scroll && screen.navigationBar?.large ? Math.max(0, barHeight - NAV_BAR_HEIGHT) : 0
+  const content = scroll ? scrollInsets(screen.content, { top: collapseDistance, leading: 0, bottom: bottomTabs + bottomSearch + safeArea.bottom, trailing: 0 }) : screen.content
   const contentBounds: Rect = screen.ignoresSafeArea
     ? { x: 0, y: 0, width: canvas.width, height: canvas.height }
-    : {
-        x: safeArea.leading,
-        y: safeArea.top + barHeight,
+    : { x: safeArea.leading, y: safeArea.top + topTabs + topSearch + barHeight - collapseDistance,
         width: canvas.width - safeArea.leading - safeArea.trailing,
-        height: canvas.height - safeArea.top - safeArea.bottom - barHeight - tabHeight,
-      }
-
-  // SwiftUI centres root content in its window: a VStack hugging its content sits in
-  // the middle of the screen rather than pinned to the top.
-  const placed = engine.layout(screen.content, contentBounds, env, CENTER)
+        height: Math.max(0, canvas.height - safeArea.top - topTabs - topSearch - barHeight + collapseDistance - (scroll ? 0 : safeArea.bottom + bottomTabs + bottomSearch)) }
+  const placed = engine.layout(content, contentBounds, env, CENTER)
   let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
-
   if (screen.navigationBar) {
-    // The bar extends up behind the status bar, as it does on a real device.
-    const bar = engine.layout(
-      screen.navigationBar.element,
-      { x: 0, y: 0, width: canvas.width, height: safeArea.top + barHeight },
-      env,
-      CENTER,
-    )
+    const bar = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
     tree = appendPlaced(tree, bar, BAR_Z)
+    tree = { ...tree, nodes: tree.nodes.map(node => {
+      if (node.id === 'navbar-title') return { ...node, ...(collapseDistance ? { chromeRole: 'inlineTitle' as const } : {}), opacity: screen.navigationBar!.large ? 0 : node.opacity }
+      if (collapseDistance && node.id === 'navbar-large-title') return { ...node, chromeRole: 'largeTitle' as const }
+      if (collapseDistance && node.id === 'navbar-bgf') return { ...node, chromeRole: 'navigationSurface' as const }
+      return node
+    }) }
   }
-
   if (screen.tabBar) {
-    const bar = engine.layout(
-      screen.tabBar,
-      {
-        x: 0,
-        y: canvas.height - safeArea.bottom - tabHeight,
-        width: canvas.width,
-        height: tabHeight + safeArea.bottom,
-      },
-      env,
-      CENTER,
-    )
-    tree = appendPlaced(tree, bar, BAR_Z)
+    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : canvas.height - Math.max(0, safeArea.bottom - SURFACES.tab.safeAreaOverlap) - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER)
+    tree = appendPlaced(tree, bar, BAR_Z + 1000)
   }
-
-  if (screen.overlay) {
-    tree = appendPlaced(
-      tree,
-      presentOverlay(engine, screen.overlay, canvas, safeArea, env),
-      OVERLAY_Z,
-    )
+  if (screen.search) {
+    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? canvas.height - safeArea.bottom - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
+    tree = appendPlaced(tree, search, BAR_Z + 2000)
   }
-
-  return tree
+  if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
+  return { ...tree, ...(scroll && collapseDistance ? { chrome: { scrollId: scroll.id, collapseDistance } } : {}) }
 }
 
 function withAnimation(
@@ -227,7 +249,7 @@ function presentOverlay(
   canvas: { width: number; height: number },
   safeArea: { top: number; leading: number; bottom: number; trailing: number },
   env: LayoutEnvironment,
-): PlacedNode[] {
+): RenderNode[] {
   const nodes: PlacedNode[] = []
 
   // Everything behind a presentation dims, and tapping the dimmed area dismisses it
@@ -238,7 +260,7 @@ function presentOverlay(
     z: 0,
     opacity: 1,
     cornerRadius: 0,
-    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, 0.32) } },
+    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, 0.2) } },
     ...(overlay.dismissId
       ? {
           hitTarget: {
@@ -252,10 +274,24 @@ function presentOverlay(
   })
 
   const rect = overlayRect(overlay, canvas, safeArea)
+  const dimNodes = placedToRenderTree(nodes, canvas, 0).nodes.slice(1).map(n => ({ ...n, blocksPointer: true }))
+  if (overlay.screen) {
+    const sheet = overlay.kind === 'sheet' || overlay.kind === 'popover'
+    const top = sheet ? (overlay.showsDragIndicator !== false ? 10 : 12) : safeArea.top
+    const bottom = overlay.kind === 'cover' ? safeArea.bottom : Math.max(12, safeArea.bottom - SURFACES.sheet.margin)
+    const nested = composeScreen(engine, overlay.screen, { width: rect.width, height: rect.height }, { top, leading: 0, trailing: 0, bottom }, env)
+    const prefix = 'overlay/'
+    const radius = sheet ? overlay.cornerRadius ?? SURFACES.sheet.radius : 0
+    const surface: RenderNode = { id: 'overlay-surface', kind: 'layer', frame: rect, z: 1, opacity: 1, ...(sheet ? { material: { opacity: 0.5, blur: 28, light: overlay.light } } : {}), clip: true, border: { width: 0.5, color: { ...env.foregroundColor, a: 0.2 }, cornerRadius: radius }, cornerRadius: radius, cornerStyle: 'continuous',
+      ...(nested.chrome ? { chrome: { ...nested.chrome, scrollId: prefix + nested.chrome.scrollId } } : {}) }
+    const content = nested.nodes.map(n => ({ ...n, id: prefix + n.id, parent: n.parent ? prefix + n.parent : surface.id, z: n.z + 2 }))
+    const grabber: RenderNode[] = sheet && overlay.showsDragIndicator !== false ? [{ id: 'overlay-grabber', kind: 'shape', frame: { x: (rect.width - SURFACES.sheet.grabberWidth) / 2, y: 6, width: SURFACES.sheet.grabberWidth, height: SURFACES.sheet.grabberHeight }, z: OVERLAY_Z - 1, opacity: 0.4, parent: surface.id, shape: { shape: 'capsule', fill: { kind: 'solid', color: env.foregroundColor } } }] : []
+    return [...dimNodes, surface, ...content, ...grabber]
+  }
   const surface = engine.layout(
     overlay.element,
     rect,
-    { ...env, cornerRadius: overlay.kind === 'sheet' ? 12 : overlay.kind === 'cover' ? 0 : 14 },
+    { ...env, cornerRadius: overlay.kind === 'sheet' ? overlay.cornerRadius ?? SURFACES.sheet.radius : overlay.kind === 'cover' ? 0 : SURFACES.alert.radius },
     overlay.kind === 'alert'
       ? CENTER
       : overlay.kind === 'dialog' || overlay.kind === 'menu'
@@ -266,7 +302,17 @@ function presentOverlay(
   // The dim layer is z 0 here; the surface must sit above it.
   for (const node of surface) nodes.push({ ...node, z: node.z + 1 })
 
-  return nodes
+  const painted = placedToRenderTree(nodes, canvas, 0).nodes.slice(2)
+  if (overlay.kind === 'menu') {
+    // A single local panel can be anchored after browser scroll offsets are known.
+    const roots = painted.filter(n => !n.parent)
+    const x = Math.min(...roots.map(n => n.frame.x)), y = Math.min(...roots.map(n => n.frame.y))
+    const width = Math.max(...roots.map(n => n.frame.x + n.frame.width)) - x
+    const height = Math.max(...roots.map(n => n.frame.y + n.frame.height)) - y
+    const panel: RenderNode = { id: 'overlay-menu', kind: 'layer', frame: { x, y, width, height }, z: 1, opacity: 1, anchorId: overlay.anchorId }
+    return [...dimNodes, panel, ...painted.map(n => n.parent ? n : { ...n, parent: panel.id, frame: { ...n.frame, x: n.frame.x - x, y: n.frame.y - y } })]
+  }
+  return [...dimNodes, ...painted]
 }
 
 /**
@@ -308,22 +354,27 @@ function overlayRect(
   }
 
   if (overlay.kind === 'alert') {
-    const width = Math.min(270, canvas.width - 80)
-    return { x: (canvas.width - width) / 2, y: 0, width, height: canvas.height }
+    const width = Math.min(SURFACES.alert.width, canvas.width - SURFACES.alert.margin * 2)
+    return { x: (canvas.width - width) / 2, y: safeArea.top, width, height: canvas.height - safeArea.top - safeArea.bottom }
   }
 
-  if (overlay.kind === 'dialog' || overlay.kind === 'menu') {
-    const width = canvas.width - 16
-    return { x: 8, y: 0, width, height: canvas.height - safeArea.bottom - 8 }
+  if (overlay.kind === 'menu') {
+    const width = Math.min(SURFACES.menu.width, canvas.width - SURFACES.menu.margin * 2)
+    return { x: canvas.width - width - SURFACES.menu.margin, y: safeArea.top, width, height: canvas.height - safeArea.top - safeArea.bottom - SURFACES.menu.margin }
   }
 
-  // A sheet: a negative detent is an absolute height in points, a positive one a
-  // fraction of the screen - which is exactly how `PresentationDetent` is spelled.
-  const height =
-    overlay.detent < 0
-      ? Math.min(-overlay.detent, canvas.height - safeArea.top)
-      : canvas.height * overlay.detent
-  return { x: 0, y: canvas.height - height, width: canvas.width, height }
+  if (overlay.kind === 'dialog') {
+    const width = Math.min(440, canvas.width - 16)
+    return { x: (canvas.width - width) / 2, y: 0, width, height: canvas.height - safeArea.bottom - 8 }
+  }
+
+  const margin = SURFACES.sheet.margin
+  const available = Math.max(0, canvas.height - safeArea.top - SURFACES.sheet.top - margin)
+  const detentHeight = (value: number) => Math.min(available, value < 0 ? -value + safeArea.bottom : (canvas.height - safeArea.bottom) * value + safeArea.bottom)
+  const height = Math.min(...(overlay.detents?.length ? overlay.detents : [overlay.detent]).map(detentHeight))
+  const width = Math.min(SURFACES.sheet.maxWidth, canvas.width - margin * 2)
+  return { x: (canvas.width - width) / 2, y: canvas.width >= 600 ? (canvas.height - height) / 2 : canvas.height - height - margin, width, height }
+
 }
 
 /** A tree carrying only a message, for states where there is nothing to draw. */
@@ -393,6 +444,7 @@ function toResult(
     diagnostics,
     renderTree,
     logs,
+    textMeasurement: renderTree && !evaluation?.failure ? { ...metrics.measurementState, generation: fontGeneration } : undefined,
     timings: {
       parse: analysis.parseMs,
       check: analysis.checkMs,
@@ -496,6 +548,7 @@ function finish(
     )
   }
 
+  lastEvaluation = evaluation
   const layoutStart = performance.now()
   let renderTree = render(request, evaluation)
 
@@ -513,6 +566,7 @@ function finish(
   }
 
   const layoutMs = performance.now() - layoutStart
+  lastEvaluation = evaluation
 
   return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, layoutMs)
 }
@@ -547,6 +601,8 @@ function environmentFor(request: CompileRequest): EnvironmentInputs {
   return {
     colorScheme: request.colorScheme,
     typeScale: scale,
+    dynamicTypeSize: request.dynamicTypeSize,
+    displayScale: request.displayScale,
     locale: 'en_US',
     layoutDirection: 'leftToRight',
     // A phone is compact across and regular down; a landscape phone and an iPad are

@@ -128,6 +128,8 @@ export function Studio() {
     device,
     colorScheme: previewSettings.colorScheme,
     typeScale: previewSettings.typeScale,
+    dynamicTypeSize: previewSettings.dynamicTypeSize,
+    previewTarget: project?.manifest.previewTarget,
     paused,
   })
 

@@ -1,34 +1,21 @@
+import { DEFAULT_PREVIEW_TARGET } from '@studio/shared'
 import type { SourceFile } from '@studio/shared'
 import { STARTER_TEMPLATE_ID, TEMPLATE_CATALOG, type TemplateInfo } from './catalog'
 import { fingerprintFiles, newProjectId } from './open'
+import { FOLIO_FILES } from './folio'
 import { KITCHEN_FILES } from './kitchen'
 import { LEDGER_FILES } from './ledger'
 import { PULSE_FILES } from './pulse'
 import { TRAILHEAD_FILES } from './trailhead'
 import type { Project } from './types'
 
+export { FOLIO_FILES } from './folio'
 export { KITCHEN_FILES } from './kitchen'
 export { LEDGER_FILES } from './ledger'
 export { PULSE_FILES } from './pulse'
 export { TRAILHEAD_FILES } from './trailhead'
 
-/**
- * The template gallery.
- *
- * Every template must render with **zero** unsupported placeholders (Phase 4 gate 2),
- * which constrains them to the views the slice actually draws. That is a real limit
- * and it shows: there is no List, no NavigationStack, no Image. Shipping a gorgeous
- * template gallery that renders half-drawn would be worse than a small honest one -
- * a template is a promise that this is what the tool can do.
- *
- * The gallery grows with the coverage matrix, not ahead of it.
- *
- * Every template also has to survive dark mode, which means using the *adaptive*
- * semantic colours rather than fixed greys. `Color(white: 0.95)` does not adapt, so a
- * template using it shows white text on a light background the moment appearance
- * flips - the single most common dark-mode mistake, and not one to ship as an
- * example.
- */
+/** Templates use adaptive colors and must render without unsupported placeholders. */
 
 /**
  * A template with its Swift.
@@ -190,89 +177,44 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
-            Text("Tasks")
-                .font(.largeTitle)
-
-            Text("\\(complete) of \\(tasks.count) complete")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 8) {
-                ForEach(tasks) { task in
-                    Row(title: task.title, complete: task.done)
+        NavigationStack {
+            List {
+                Section("Today") {
+                    ForEach(tasks) { task in
+                        Button {
+                            toggle(task)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: task.done ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(task.done ? Color.green : Color.secondary)
+                                Text(task.title)
+                                    .strikethrough(task.done)
+                                    .foregroundStyle(task.done ? Color.secondary : Color.primary)
+                            }
+                        }
+                    }
+                } footer: {
+                    Text("\\(complete) of \\(tasks.count) complete. Tap a task to change it.")
                 }
             }
-
-            Spacer()
-
-            HStack {
-                Button {
-                    undo()
-                } label: {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
+            .navigationTitle("Tasks")
+            .toolbar {
+                Button("Reset") {
+                    for index in 0..<tasks.count {
+                        tasks[index].done = false
+                    }
                 }
-                .padding()
-                .background(Color.gray.opacity(0.15))
-                .cornerRadius(8)
-
-                Spacer()
-
-                Button {
-                    advance()
-                } label: {
-                    Label("Complete", systemImage: "checkmark")
-                }
-                .padding()
-                .background(Color.blue.opacity(0.15))
-                .cornerRadius(8)
             }
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
+        .tint(.green)
     }
 
-    private func advance() {
+    private func toggle(_ task: Task) {
         for index in 0..<tasks.count {
-            if !tasks[index].done {
-                tasks[index].done = true
-                return
+            if tasks[index].id == task.id {
+                tasks[index].done.toggle()
             }
         }
-    }
-
-    private func undo() {
-        var index = tasks.count - 1
-        while index >= 0 {
-            if tasks[index].done {
-                tasks[index].done = false
-                return
-            }
-            index -= 1
-        }
-    }
-}
-
-struct Row: View {
-    let title: String
-    let complete: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: complete ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(complete ? Color.green : Color.secondary)
-
-            Text(title)
-                .strikethrough(complete)
-                .foregroundStyle(complete ? Color.secondary : Color.primary)
-
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(10)
     }
 }`,
 )
@@ -288,9 +230,9 @@ const PROFILE_CARD = app(
             Spacer()
 
             VStack(spacing: 12) {
-                Circle()
-                    .foregroundStyle(Color.teal)
-                    .frame(width: 72, height: 72)
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 72))
+                    .foregroundStyle(.teal)
 
                 Text("Ada Lovelace")
                     .font(.title2)
@@ -302,14 +244,14 @@ const PROFILE_CARD = app(
                 Button(following ? "Following" : "Follow") {
                     following = !following
                 }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(following ? Color.gray.opacity(0.2) : Color.blue.opacity(0.2))
-                .cornerRadius(10)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .controlSize(.large)
+                .tint(following ? Color.gray : Color.teal)
             }
             .padding(24)
             .background(Color(.secondarySystemGroupedBackground))
-            .cornerRadius(16)
+            .cornerRadius(28)
 
             Spacer()
         }
@@ -377,6 +319,7 @@ const NAVIGATION = app(
 }
 
 struct ContentView: View {
+    @State private var query = ""
     let destinations = [
         Destination(name: "Kyoto", region: "Kansai", symbol: "leaf"),
         Destination(name: "Reykjavik", region: "Capital Region", symbol: "snowflake"),
@@ -387,14 +330,17 @@ struct ContentView: View {
         NavigationStack {
             List {
                 Section("Destinations") {
-                    ForEach(destinations) { destination in
-                        NavigationLink(destination.name) {
+                    ForEach(destinations.filter { query.isEmpty || $0.name.lowercased().contains(query.lowercased()) }) { destination in
+                        NavigationLink {
                             DetailView(destination: destination)
+                        } label: {
+                            Label(destination.name, systemImage: destination.symbol)
                         }
                     }
                 }
             }
             .navigationTitle("Explore")
+            .searchable(text: $query, prompt: "Find a destination")
         }
     }
 }
@@ -420,6 +366,7 @@ struct DetailView: View {
         }
         .padding()
         .navigationTitle(destination.name)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }`,
 )
@@ -532,62 +479,52 @@ const TABS = app(
   'TabsApp',
   'ContentView',
   `struct ContentView: View {
+    @State private var selected = 0
+
     var body: some View {
-        TabView {
-            TodayView()
-                .tabItem {
-                    Label("Today", systemImage: "sun.max")
+        TabView(selection: $selected) {
+            NavigationStack {
+                List {
+                    Section("A little inspiration") {
+                        Label("Take a walk outside", systemImage: "leaf")
+                        Label("Read a few pages", systemImage: "book")
+                        Label("Make something new", systemImage: "pencil")
+                    }
+                    Section {
+                        Button("Browse the library") { selected = 1 }
+                    }
                 }
+                .navigationTitle("Today")
+            }
+            .tabItem { Label("Today", systemImage: "sun.max") }
+            .tag(0)
 
-            LibraryView()
-                .tabItem {
-                    Label("Library", systemImage: "folder")
+            NavigationStack {
+                List {
+                    Section("Collections") {
+                        Label("Weekend ideas", systemImage: "bookmark")
+                        Label("Things to learn", systemImage: "lightbulb")
+                        Label("Favorite places", systemImage: "map")
+                    }
                 }
+                .navigationTitle("Library")
+            }
+            .tabItem { Label("Library", systemImage: "folder") }
+            .tag(1)
 
-            ProfileView()
-                .tabItem {
-                    Label("Profile", systemImage: "person.circle")
+            NavigationStack {
+                Form {
+                    Section("About you") {
+                        LabeledContent("Name", value: "Ada Lovelace")
+                        LabeledContent("Member since", value: "2026")
+                    }
                 }
+                .navigationTitle("Profile")
+            }
+            .tabItem { Label("Profile", systemImage: "person.circle") }
+            .tag(2)
         }
-    }
-}
-
-struct TodayView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            Text("Today")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            Text("Three things worth doing.")
-                .foregroundStyle(Color.secondary)
-        }
-        .padding()
-    }
-}
-
-struct LibraryView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "folder")
-                .font(.largeTitle)
-                .foregroundStyle(Color.accentColor)
-            Text("Nothing saved yet.")
-                .foregroundStyle(Color.secondary)
-        }
-        .padding()
-    }
-}
-
-struct ProfileView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            Text("Ada Lovelace")
-                .font(.title)
-            Text("Member since 1843")
-                .font(.footnote)
-                .foregroundStyle(Color.secondary)
-        }
-        .padding()
+        .tint(.indigo)
     }
 }`,
 )
@@ -614,10 +551,9 @@ const ANIMATION = app(
                     expanded = !expanded
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 10)
-            .background(Color.accentColor.opacity(0.15))
-            .cornerRadius(10)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1166,6 +1102,7 @@ const SOURCES: Readonly<Record<string, readonly SourceFile[]>> = {
   drawing: single(DRAWING),
   drag: single(DRAGGABLE),
   styled: single(STYLED),
+  folio: FOLIO_FILES,
   trailhead: TRAILHEAD_FILES,
   ledger: LEDGER_FILES,
   kitchen: KITCHEN_FILES,
@@ -1207,6 +1144,7 @@ export function createProjectFromTemplate(template: Template, now: number = Date
       name: appName,
       bundleId: `com.example.${appName}`,
       deploymentTarget: '17.0',
+      previewTarget: DEFAULT_PREVIEW_TARGET,
       device: 'iphone-15',
       colorScheme: 'light',
       // What `isPristine` compares against later, so the confirmation before a

@@ -77,7 +77,7 @@ export type ViewIntent =
       readonly by: number
       readonly bounds?: { readonly min: number; readonly max: number }
     }
-  | { readonly kind: 'run'; readonly closure: ClosureValue }
+  | { readonly kind: 'run'; readonly closure: ClosureValue; readonly dismiss?: ViewIntent }
   /** A gesture attached with `.gesture(…)`; the event decides which handlers run. */
   | { readonly kind: 'gesture'; readonly gesture: SwiftValue }
   /** Dragging a list row sideways to reveal its actions. */

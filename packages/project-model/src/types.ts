@@ -1,7 +1,8 @@
-import type { FileId, SourceFile } from '@studio/shared'
+import { normalizePreviewTarget, type FileId, type SourceFile, type PreviewTarget } from '@studio/shared'
 import type { DeviceKey } from '@studio/sim-shell'
 
 export interface ProjectManifest {
+  readonly previewTarget?: PreviewTarget
   /** Display name and the Xcode target name. */
   readonly name: string
   /** e.g. `com.example.CounterApp` */
@@ -64,6 +65,10 @@ export interface ProjectStore {
   load(id: string): Promise<Project | null>
   save(project: Project): Promise<void>
   remove(id: string): Promise<void>
+}
+
+export function normalizeProject(project: Project): Project {
+  return { ...project, manifest: { ...project.manifest, previewTarget: normalizePreviewTarget(project.manifest.previewTarget) } }
 }
 
 export function summarize(project: Project): ProjectSummary {

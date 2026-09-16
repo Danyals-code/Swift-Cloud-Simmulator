@@ -234,10 +234,10 @@ describe('list styles', () => {
 
   it('a sidebar names its sections in sentence case', () => {
     // The one thing about the style that is unmistakable at a glance. Every other
-    // list shouts its headers in caption caps; a sidebar does not.
+    // Modern section headers preserve their supplied capitalization in each style.
     expect(texts(run(list('.listStyle(.sidebar)')))).toContain('Head')
-    expect(texts(run(list('.listStyle(.plain)')))).toContain('HEAD')
-    expect(texts(run(list()))).toContain('HEAD')
+    expect(texts(run(list('.listStyle(.plain)')))).toContain('Head')
+    expect(texts(run(list()))).toContain('Head')
   })
 
   it('a sidebar lays its rows out flat, on the grouped background', () => {

@@ -1,6 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
+import type { DynamicTypeSize } from '@studio/shared'
 
 import {
   addFile,
@@ -114,6 +115,7 @@ export interface PreviewSettings {
   readonly colorScheme: 'light' | 'dark'
   /** Dynamic Type multiplier, 1 = the Large default. */
   readonly typeScale: number
+  readonly dynamicTypeSize?: DynamicTypeSize
   /** `'fit'`, or a numeric scale as a string. Not a number, so `'fit'` stays a value. */
   readonly zoom: string
 }
@@ -222,6 +224,8 @@ export const useStudio = create<StudioState>((set, get) => {
    * old project back.
    */
   async function replace(project: Project): Promise<void> {
+    // Keep the latest keystrokes in the outgoing project's saved copy.
+    await get().flush()
     const outgoing = get().project
     const first = project.files[0]?.id ?? null
 

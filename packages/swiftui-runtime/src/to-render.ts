@@ -56,6 +56,8 @@ export function appendPlaced(
 
 function toRenderNode(node: PlacedNode): RenderNode | null {
   const base = {
+    cornerStyle: node.cornerStyle,
+    clipShape: node.clipShape,
     id: node.id,
     frame: node.frame,
     // +1 so nothing collides with the screen backdrop at z 0.
@@ -91,6 +93,12 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
           hitTarget: {
             handlerId: node.hitTarget.handlerId,
             role: node.hitTarget.role,
+            step: node.hitTarget.step,
+            secure: node.hitTarget.secure,
+            inputInset: node.hitTarget.inputInset,
+            thumbDiameter: node.hitTarget.thumbDiameter,
+            cornerRadius: node.hitTarget.cornerRadius,
+            placeholderColor: node.hitTarget.placeholderColor,
             enabled: node.hitTarget.enabled,
             ...(node.hitTarget.value !== undefined ? { value: node.hitTarget.value } : {}),
             ...(node.hitTarget.placeholder !== undefined
@@ -109,14 +117,19 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
   switch (node.paint.kind) {
     case 'text': {
       const paint = node.paint
-      const step = paint.font.lineHeight + (paint.lineSpacing ?? 0)
-      const lines: TextLine[] = paint.lines.map((line, index) => ({
+      let top = 0
+      const lines: TextLine[] = paint.lines.map((line) => {
+        const y = top
+        top += line.height + (paint.lineSpacing ?? 0)
+        return ({
         text: line.text,
-        origin: { x: 0, y: index * step },
+        origin: { x: 0, y },
         width: line.width,
-        baseline: paint.font.lineHeight * 0.78,
+        baseline: line.baseline,
+        fontBaseline: line.fontBaseline,
+        height: line.height,
         ...(line.slices ? { slices: line.slices } : {}),
-      }))
+      })})
 
       return {
         ...base,
@@ -140,6 +153,9 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
       }
     }
 
+    case 'slider':
+      return { ...base, kind: 'slider', slider: node.paint.style }
+
     case 'image': {
       const paint = node.paint
       return {
@@ -151,6 +167,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
           color: paint.color,
           approximated: paint.approximated,
           resizable: paint.resizable,
+          symbolScale: paint.symbolScale,
           ...(paint.symbol ? { symbol: paint.symbol } : {}),
         },
         a11y: { role: 'img', label: node.debugName ?? 'Image' },
@@ -165,6 +182,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
         scroll: {
           axis: node.paint.axis,
           content: node.paint.content,
+          contentInsets: node.paint.contentInsets,
           showsIndicators: node.paint.showsIndicators,
         },
       }
@@ -178,6 +196,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
         kind: 'shape',
         shape: {
           shape: node.paint.shape,
+          cornerStyle: node.paint.cornerStyle,
           ...(node.paint.fill ? { fill: node.paint.fill } : {}),
           ...(node.paint.stroke ? { stroke: node.paint.stroke } : {}),
           ...(node.cornerRadius > 0 ? { cornerRadius: node.cornerRadius } : {}),

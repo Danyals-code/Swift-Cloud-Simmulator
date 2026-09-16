@@ -260,14 +260,14 @@ test('gate 4 - dark mode and Dynamic Type re-render without losing state', async
   expect(await nodeHeight(page, 'Hello, World!')).toBe(41)
 
   // Dynamic Type is a layout input: text grows, and every frame above it with it.
-  await setTypeScale(page, '1.6')
+  await setTypeScale(page, 'xxxLarge')
   await expect.poll(() => nodeHeight(page, 'Hello, World!'), { timeout: 5_000 }).toBeGreaterThan(41)
   await expect(preview(page)).toContainText('Count: 2')
 
   await page.getByRole('button', { name: 'Dark', exact: true }).click()
   await expect(preview(page)).toContainText('Count: 2', { timeout: 5_000 })
 
-  await setTypeScale(page, '1')
+  await setTypeScale(page, 'large')
   await expect.poll(() => nodeHeight(page, 'Hello, World!'), { timeout: 5_000 }).toBe(41)
   await expect(preview(page)).toContainText('Count: 2')
 })

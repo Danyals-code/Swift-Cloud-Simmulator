@@ -1,3 +1,4 @@
+import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
   asDate,
   asProjection,
@@ -104,6 +105,11 @@ export interface Overlay {
   readonly views: readonly ViewValue[]
   /** Fraction of the screen height a sheet occupies. */
   readonly detent: number
+  readonly detents?: readonly number[]
+  readonly anchorId?: string
+  readonly cornerRadius?: number
+  readonly showsDragIndicator?: boolean
+  readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'search' | 'ignoresSafeArea' | 'overlay'>
   readonly title: string
   readonly message: string
   /** Tapping outside dismisses, unless the presentation is non-interactive. */
@@ -128,10 +134,11 @@ export interface LifecycleHook {
   readonly watched?: SwiftValue
 }
 
-/** A `.searchable` field, which belongs above the content rather than inside it. */
+/** Search placement is resolved by device context during screen composition. */
 export interface SearchField {
   readonly text: string
   readonly prompt: string
+  readonly placement: string
   readonly path: string
 }
 
@@ -330,6 +337,7 @@ class Resolver {
    * only place that can know what is above a given button.
    */
   private readonly buttonStyles: SwiftValue[] = []
+  private visualStyle: readonly ModifierValue[] = []
 
   constructor(private readonly ctx: ResolveContext) {}
 
@@ -348,7 +356,7 @@ class Resolver {
 
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
-    const overlay = this.menuOverlay(screen.content) ?? this.findOverlay(screen.content)
+    const overlay = this.findOverlay(screen.content) ?? this.menuOverlay(screen.content)
 
     return {
       content: screen.content,
@@ -372,16 +380,19 @@ class Resolver {
    * used in preference to the ordinal, so a row keeps its path - and therefore its
    * `@State` and its DOM node - when the collection is reordered.
    */
-  private stampList(views: readonly ViewValue[], prefix: string): ViewValue[] {
-    return views.map((view, index) => this.stamp(view, `${prefix}-${index}`))
+  private stampList(views: readonly ViewValue[], prefix: string, inherited = this.visualStyle): ViewValue[] {
+    return views.map((view, index) => this.stamp(inheritVisualStyle(view, inherited), `${prefix}-${index}`))
   }
 
   private stamp(view: ViewValue, path: string): ViewValue {
+    view = inheritVisualStyle(view, this.visualStyle)
+    const outerStyle = this.visualStyle
+    this.visualStyle = visualModifiers(view)
     const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.closure ?? null
 
     // A custom style written on this view is in scope for its whole subtree, and for
     // this view itself when it is the button.
-    const style = this.customButtonStyle(view)
+    const style = this.buttonStyleValue(view)
     if (style) this.buttonStyles.push(style)
 
     try {
@@ -401,15 +412,15 @@ class Resolver {
       return this.operable(this.gateAnimation(stamped, path), path)
     } finally {
       if (style) this.buttonStyles.pop()
+      this.visualStyle = outerStyle
     }
   }
 
-  /** The argument of a `.buttonStyle` that names a type the project declared. */
-  private customButtonStyle(view: ViewValue): SwiftValue | null {
+  /** Built-in tokens also shadow an inherited custom style. */
+  private buttonStyleValue(view: ViewValue): SwiftValue | null {
     const modifier = view.modifiers.find((m) => m.name === 'buttonStyle')
     const argument = modifier?.args[0]?.value
-    // A struct, not a token: `.bordered` is a built-in and stays on the built-in path.
-    return argument && argument.kind === 'struct' ? argument : null
+    return argument ?? null
   }
 
   /**
@@ -421,7 +432,7 @@ class Resolver {
    */
   private applyButtonStyle(view: ViewValue, path: string): ViewValue {
     const style = this.buttonStyles[this.buttonStyles.length - 1]
-    if (!style || !this.ctx.styleButton) return view
+    if (!style || style.kind !== 'struct' || !this.ctx.styleButton) return view
 
     // `configuration.label` is whatever the button was going to draw: its title when
     // it was given one, otherwise its content views.
@@ -929,6 +940,7 @@ class Resolver {
 
     return {
       kind: 'menu',
+      anchorId: handlerIdFor(open),
       views: rows,
       detent: 0,
       title: stringArg(control.args.find((a) => a.label === null)?.value) ?? '',
@@ -969,7 +981,7 @@ class Resolver {
       const destination = link ? this.destinationFor(link, screen) : null
       if (!destination || destination.length === 0) break
 
-      screen = this.stampList(destination, `n${depth + 1}`)
+      screen = this.stampList(destination, `n${depth + 1}`, visualModifiers(link ?? stack))
       titles.push(titleOf(screen, labelTextOf(link!) || 'Back'))
       depth++
     }
@@ -993,7 +1005,7 @@ class Resolver {
           name: BACK_BUTTON,
           args: [{ label: 'title', value: { kind: 'string', value: titles[depth - 1] || 'Back' } }],
           children: [],
-          modifiers: [],
+          modifiers: visualModifiers(stack),
           action: null,
           span: stack.span,
           path: `${stackId}/back`,
@@ -1012,7 +1024,7 @@ class Resolver {
         name: NAV_BAR,
         args: [{ label: 'title', value: { kind: 'string', value: title } }],
         children: [...(backButton ? [backButton] : toolbar.leading), ...toolbar.trailing],
-        modifiers: [],
+        modifiers: visualModifiers(stack),
         action: null,
         span: stack.span,
         path: `${stackId}/bar`,
@@ -1055,7 +1067,8 @@ class Resolver {
     screen: readonly ViewValue[],
     stackId: string,
   ): { leading: ViewValue[]; trailing: ViewValue[] } {
-    const toolbar = collectModifier(screen, 'toolbar')
+    const owner = [...allModifiers(screen)].find(({ modifier }) => modifier.name === 'toolbar')
+    const toolbar = owner?.modifier
     if (!toolbar?.closure) return { leading: [], trailing: [] }
 
     const items = this.ctx.build(toolbar.closure, [], toolbar.environment)
@@ -1071,7 +1084,7 @@ class Resolver {
 
       const bucket = placement && LEADING_PLACEMENTS.has(placement) ? leading : trailing
       contents.forEach((content, inner) => {
-        bucket.push(this.stamp(content, `${stackId}/tb-${index}-${inner}`))
+        bucket.push(this.stamp(inheritVisualStyle(content, visualModifiers(owner!.view)), `${stackId}/tb-${index}-${inner}`))
       })
     })
 
@@ -1085,10 +1098,12 @@ class Resolver {
     const selection = labelled(tabs.args, 'selection')
     const binding = asProjection(selection)
 
-    const pages = tabs.children
+    const flatten = (views: readonly ViewValue[]): readonly ViewValue[] => views.flatMap(v => ['Group', 'ForEach'].includes(v.name) ? flatten(v.children) : [v])
+    const pages = flatten(tabs.children)
     if (pages.length === 0) return { content: [], tabBar: null }
 
-    const tagged = pages.map((page) => tokenOrValue(collectModifier([page], 'tag')?.args[0]?.value))
+    const valueOf = (page: ViewValue) => page.name === 'Tab' ? labelled(page.args, 'value') : tagValue(page)
+    const tagged = pages.map((page) => page.name === 'Tab' ? tokenOrValue(valueOf(page)) : tokenOrValue(collectModifier([page], 'tag')?.args[0]?.value))
     const current = binding ? describe(binding.get(), true) : null
     const index = current !== null ? Math.max(0, tagged.indexOf(current)) : this.ctx.state.selectedTab(tabId)
     const selected = Math.min(index, pages.length - 1)
@@ -1100,11 +1115,14 @@ class Resolver {
 
     const items = pages.map((page, i) => {
       const item = collectModifier([page], 'tabItem')
-      const label = paged ? [] : item?.closure ? this.ctx.build(item.closure, [], item.environment) : []
+      const modernLabel = page.args.filter(a => a.label === 'label').map(a => asView(a.value)).filter((v): v is ViewValue => !!v)
+      const label: readonly ViewValue[] = paged ? [] : page.name === 'Tab'
+        ? modernLabel.length ? modernLabel : [{ name: 'Label', args: page.args.filter(a => a.label === null || a.label === 'systemImage'), children: [], modifiers: [], action: null, span: page.span }]
+        : item?.closure ? this.ctx.build(item.closure, [], item.environment) : []
       const path = `${tabId}/tab-${i}`
       const intent: ViewIntent =
         binding && tagged[i] !== null
-          ? { kind: 'write', binding: selection!, value: tagValue(page) }
+          ? { kind: 'write', binding: selection!, value: valueOf(page)! }
           : { kind: 'selectTab', tab: tabId, index: i }
 
       this.register(path, intent)
@@ -1116,8 +1134,8 @@ class Resolver {
           { label: 'index', value: { kind: 'int', value: i } },
           ...(paged ? [{ label: 'paged', value: { kind: 'bool' as const, value: true } }] : []),
         ],
-        children: label.map((l, j) => this.stamp(l, `${path}-${j}`)),
-        modifiers: [],
+        children: this.stampList(label, path, visualModifiers(page)),
+        modifiers: visualModifiers(page),
         action: null,
         span: page.span,
         path,
@@ -1133,7 +1151,7 @@ class Resolver {
           name: TAB_BAR,
           args: [],
           children: items,
-          modifiers: [],
+          modifiers: visualModifiers(tabs),
           action: null,
           span: tabs.span,
           path: `${tabId}/bar`,
@@ -1146,9 +1164,7 @@ class Resolver {
    * The `.searchable` field, if the screen has one.
    *
    * Registered as a control writing its binding, exactly like a `TextField` - because
-   * that is all `.searchable` is. What it adds is placement: iOS puts the field above
-   * the content rather than in it, which is why this is resolved here and not by the
-   * layout pass.
+   * that is all `.searchable` is. Placement is resolved later from device context.
    */
   private findSearchField(views: readonly ViewValue[]): SearchField | null {
     for (const { view, modifier } of allModifiers(views)) {
@@ -1165,6 +1181,7 @@ class Resolver {
       return {
         text: current.kind === 'string' ? current.value : '',
         prompt: stringArg(labelled(modifier.args, 'prompt')) ?? 'Search',
+        placement: tokenName(labelled(modifier.args, 'placement')) ?? 'automatic',
         path,
       }
     }
@@ -1181,7 +1198,8 @@ class Resolver {
    * trap on the force-unwrap every render if the closure ran while the sheet was
    * down. SwiftUI is lazy for the same reason.
    */
-  private findOverlay(views: readonly ViewValue[]): Overlay | null {
+  private findOverlay(views: readonly ViewValue[], depth = 0): Overlay | null {
+    if (depth >= 4) return null
     for (const { view, modifier } of allModifiers(views)) {
       const kind = OVERLAY_KINDS[modifier.name]
       if (!kind) continue
@@ -1216,13 +1234,34 @@ class Resolver {
           )
         : []
 
-      const overlayViews = this.stampList(built, path)
-      const dismissId = dismiss ? this.register(`${path}/dismiss`, dismiss) : null
+      const overlayViews = this.stampList(built, path, visualModifiers(view))
+      // Alert/dialog actions dismiss their presentation even when their closure is empty.
+      if ((kind === 'alert' || kind === 'dialog') && dismiss) {
+        const attachDismiss = (view: ViewValue) => {
+          if (view.name === 'Button' && view.path) {
+            const id = handlerIdFor(view.path), intent = this.handlers.get(id)
+            if (intent?.kind === 'run') this.handlers.set(id, { ...intent, dismiss })
+          }
+          view.children.forEach(attachDismiss)
+        }
+        overlayViews.forEach(attachDismiss)
+      }
+      const disabled = collectModifier(overlayViews, 'interactiveDismissDisabled')?.args[0]?.value
+      const dismissId = dismiss && !(disabled && truthy(disabled)) ? this.register(`${path}/dismiss`, dismiss) : null
+      const tabs = findView(overlayViews, 'TabView')
+      const tabbed = tabs ? this.resolveTabs(tabs) : { content: overlayViews, tabBar: null }
+      const nav = findView(tabbed.content, 'NavigationStack') ?? findView(tabbed.content, 'NavigationView')
+      const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null }
+      const cornerRadius = numberOf(collectModifier(overlayViews, 'presentationCornerRadius')?.args[0]?.value)
+      const indicator = tokenName(collectModifier(overlayViews, 'presentationDragIndicator')?.args[0]?.value)
 
       return {
         kind,
         views: overlayViews,
-        detent: detentOf(overlayViews),
+        ...detentsOf(overlayViews),
+        ...(cornerRadius !== null ? { cornerRadius: Math.max(0, cornerRadius) } : {}),
+        showsDragIndicator: indicator !== 'hidden',
+        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
         title: stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
         message: this.messageOf(modifier),
         dismiss,
@@ -1303,18 +1342,24 @@ const LEADING_PLACEMENTS: ReadonlySet<string> = new Set([
  * because a detent is a preference in SwiftUI and propagates up from wherever inside
  * the sheet it was written.
  */
-function detentOf(presented: readonly ViewValue[]): number {
+function detentsOf(presented: readonly ViewValue[]): Pick<Overlay, 'detent' | 'detents'> {
   const detents = collectModifier(presented, 'presentationDetents')
   const value = detents?.args[0]?.value
-  if (value?.kind === 'array') {
-    const first = value.elements[0]
-    const name = tokenName(first)
+  const selected = asProjection(detents?.args.find(a => a.label === 'selection')?.value)?.get()
+  const decode = (v: SwiftValue | undefined): number => {
+    const name = tokenName(v)
     if (name === 'medium') return 0.5
-    if (name === 'large') return 0.92
-    if (name?.startsWith('detent:fraction:')) return clamp(Number(name.split(':')[2]), 0.2, 0.95)
-    if (name?.startsWith('detent:height:')) return -Number(name.split(':')[2])
+    if (name === 'large') return 1
+    if (name?.startsWith('detent:fraction:')) return clamp(Number(name.split(':')[2]), 0.01, 1)
+    if (name?.startsWith('detent:height:')) return -Math.max(1, Number(name.split(':')[2]) || 1)
+    return 1
   }
-  return 0.92
+  if (selected) return { detent: decode(selected) }
+  if (value?.kind === 'array' && value.elements.length) {
+    // Compare mixed point/fraction detents only once the actual viewport is known.
+    return { detent: 1, detents: value.elements.map(decode) }
+  }
+  return { detent: 1 }
 }
 
 function clamp(value: number, min: number, max: number): number {

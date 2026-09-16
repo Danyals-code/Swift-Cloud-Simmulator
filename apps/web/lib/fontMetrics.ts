@@ -1,24 +1,17 @@
 'use client'
 
-import type { MeasuredFontData } from '@studio/shared'
-import { MEASURED_FAMILIES } from '@studio/shared'
+import type { MeasuredFontData, MeasuredTextData, TextMeasureRequest } from '@studio/shared'
+import { canvasFont, textMeasureKey, MEASURED_FAMILIES } from '@studio/shared'
+import { FONT_PROBE } from './workerFontMetrics'
 
 /**
- * Measures the real fonts once, on the main thread, for the worker to lay out with.
- *
- * The worker has no fonts and no DOM. The alternative designs were to make layout
- * asynchronous (which infects every call site and causes a visible reflow on the
- * first frame) or to ship a hand-transcribed metrics table (which is wrong the moment
- * the font stack falls back to something else on the user's machine).
- *
- * Measuring the *actual resolved font* at startup avoids both: layout stays
- * synchronous, and the numbers describe the glyphs the user will really see. That
- * matters more now than it did: the stack resolves to SF Pro on a Mac and to Inter
- * on Windows, and those are different widths.
+ * Font readiness and main-thread fallback measurement. Startup tables are estimates
+ * and worker verification probes; final text widths are shaped at the actual point
+ * size with weight/italic/tracking, never scaled from the ASCII probe table.
  */
 
 /** The weights the text styles in `style.ts` actually use. */
-const WEIGHTS = [400, 600, 700]
+const WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900]
 
 /** Printable ASCII. Everything else falls back to a per-script estimate in the worker. */
 const CHARS = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i))
@@ -84,6 +77,8 @@ export function measureFonts(families: readonly string[] = MEASURED_FAMILIES): M
         // The shared stack, not the resolved one: this is a lookup key, and the
         // worker only ever has the shared constant to look up by.
         family,
+        resolvedFamily: resolved,
+        referenceWidth: context.measureText(FONT_PROBE).width,
         weight,
         advances,
         // Average of the lowercase letters: a better guess for unknown Latin-ish
@@ -96,6 +91,36 @@ export function measureFonts(families: readonly string[] = MEASURED_FAMILIES): M
   }
 
   return fonts
+}
+
+/** One main-thread batch for faces/features unavailable in the worker. */
+export function measureTextBatch(requests: readonly TextMeasureRequest[]): MeasuredTextData[] {
+  const context = document.createElement('canvas').getContext('2d')
+  if (!context) return []
+  const span = document.createElement('span')
+  Object.assign(span.style, { position: 'absolute', left: '-100000px', top: '0', whiteSpace: 'pre', visibility: 'hidden' })
+  document.body.append(span)
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  try {
+    return requests.map((request) => {
+      const family = tidy(resolvable(request.font.family))
+      context.font = canvasFont(request.font, family)
+      context.fontKerning = 'normal'
+      const metrics = context.measureText(request.text)
+      let width = metrics.width + Array.from(segmenter.segment(request.text)).length * (request.tracking ?? 0)
+      if (request.tabularNumbers || request.tracking) {
+        span.style.font = canvasFont(request.font, family)
+        span.style.fontVariantNumeric = request.tabularNumbers ? 'tabular-nums' : 'normal'
+        span.style.fontKerning = 'normal'
+        span.style.letterSpacing = `${request.tracking ?? 0}px`
+        span.textContent = request.text
+        width = span.getBoundingClientRect().width
+      }
+      return { key: textMeasureKey(request), width: Math.max(0, width),
+        ascent: metrics.fontBoundingBoxAscent || request.font.size * 0.78,
+        descent: metrics.fontBoundingBoxDescent || request.font.size * 0.22 }
+    })
+  } finally { span.remove() }
 }
 
 function averageOf(advances: Record<string, number>, sample: string): number {
