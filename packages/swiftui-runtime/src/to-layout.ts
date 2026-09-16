@@ -3378,9 +3378,31 @@ class Converter {
         return { kind: 'aspectRatio', ratio: null, mode: 'fill' }
 
       case 'lineLimit': {
-        const limit = numberArg(positional(args, 0))
+        // `.lineLimit(2...4)` gives a floor as well as a ceiling: at least two lines'
+        // worth of room whatever the text is, so a list's rows stop changing height as
+        // their content does.
+        const first = positional(args, 0)
+        if (first?.kind === 'range') {
+          const upper = first.closed ? first.upper : first.upper - 1
+          return {
+            kind: 'textStyle',
+            lineLimit: Math.max(1, upper),
+            minimumLines: Math.max(1, first.lower),
+          }
+        }
+
+        const limit = numberArg(first)
         return { kind: 'textStyle', lineLimit: limit === null ? null : Math.max(0, limit) }
       }
+
+      case 'allowsTightening': {
+        const first = positional(args, 0)
+        const on = first === undefined ? true : first.kind === 'bool' ? first.value : true
+        return { kind: 'textStyle', allowsTightening: on }
+      }
+
+      case 'monospacedDigit':
+        return { kind: 'textStyle', tabularNumbers: true }
 
       case 'multilineTextAlignment': {
         const name = tokenName(positional(args, 0))

@@ -130,6 +130,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
             ...(run.strikethrough ? { strikethrough: true } : {}),
             ...(run.tracking ? { tracking: run.tracking } : {}),
             ...(run.baselineOffset ? { baselineOffset: run.baselineOffset } : {}),
+            ...(run.tabularNumbers ? { tabularNumbers: true } : {}),
           })),
           alignment: paint.align ?? 'leading',
           lines,

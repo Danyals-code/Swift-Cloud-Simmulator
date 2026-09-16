@@ -46,6 +46,7 @@ export interface PaintedRun {
   readonly strikethrough?: boolean
   readonly tracking?: number
   readonly baselineOffset?: number
+  readonly tabularNumbers?: boolean
 }
 
 export type PaintSpec =
@@ -1745,6 +1746,7 @@ function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly Pai
     ...(env.strikethrough ? { strikethrough: true } : {}),
     ...(env.tracking ? { tracking: env.tracking } : {}),
     ...(env.baselineOffset ? { baselineOffset: env.baselineOffset } : {}),
+    ...(env.tabularNumbers ? { tabularNumbers: true } : {}),
   })
 
   if (!element.runs || element.runs.length === 0) return [inherited(element.text)]
@@ -1809,6 +1811,8 @@ function textOptions(env: LayoutEnvironment): MeasureOptions {
   return {
     ...(env.minimumScale !== undefined ? { minimumScale: env.minimumScale } : {}),
     ...(env.truncation !== undefined ? { truncation: env.truncation } : {}),
+    ...(env.allowsTightening ? { allowsTightening: true } : {}),
+    ...(env.minimumLines !== undefined ? { minimumLines: env.minimumLines } : {}),
   }
 }
 
@@ -1817,6 +1821,7 @@ function measuredRuns(runs: readonly PaintedRun[]): readonly MeasuredRun[] {
     text: run.text,
     font: run.font,
     ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
+    ...(run.tabularNumbers ? { tabularNumbers: true } : {}),
   }))
 }
 

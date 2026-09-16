@@ -85,6 +85,14 @@ export interface TextRun {
   readonly tracking?: number
   /** `.baselineOffset`: points above the baseline, negative for below. */
   readonly baselineOffset?: number
+  /**
+   * `.monospacedDigit`: every digit takes the width of the widest.
+   *
+   * A measurement property as much as a paint one - a counter that does not jitter is
+   * the whole point - so the metrics use one advance for all ten digits and the
+   * painter asks for the same thing from the font.
+   */
+  readonly tabularNumbers?: boolean
 }
 
 export interface TextPayload {

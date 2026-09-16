@@ -669,6 +669,7 @@ function RunSpan({ run, text }: { run: TextRun; text: string }) {
         ...(decoration ? { textDecoration: decoration } : {}),
         ...(run.tracking ? { letterSpacing: run.tracking } : {}),
         ...(run.baselineOffset ? { position: 'relative', bottom: run.baselineOffset } : {}),
+        ...(run.tabularNumbers ? { fontVariantNumeric: 'tabular-nums' } : {}),
       }}
     >
       {text}

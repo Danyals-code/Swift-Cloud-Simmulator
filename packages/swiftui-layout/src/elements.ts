@@ -320,6 +320,12 @@ export type LayoutModifier =
       readonly minimumScale?: number
       /** `.truncationMode` - which end of an over-long line the ellipsis replaces. */
       readonly truncation?: 'head' | 'middle' | 'tail'
+      /** `.allowsTightening` - letters may be drawn closer together to avoid a break. */
+      readonly allowsTightening?: boolean
+      /** `.lineLimit(2...4)` - the floor, reserved even when the text is shorter. */
+      readonly minimumLines?: number
+      /** `.monospacedDigit` - every digit takes the widest one's advance. */
+      readonly tabularNumbers?: boolean
     }
   | { readonly kind: 'foregroundStyle'; readonly color: RGBA }
   | { readonly kind: 'opacity'; readonly value: number }
@@ -557,6 +563,9 @@ export interface LayoutEnvironment {
    */
   readonly minimumScale?: number
   readonly truncation?: 'head' | 'middle' | 'tail'
+  readonly allowsTightening?: boolean
+  readonly minimumLines?: number
+  readonly tabularNumbers?: boolean
   /** Set by `.allowsHitTesting(false)`: the subtree paints but does not respond. */
   readonly hitTestingDisabled?: boolean
   /**
@@ -639,6 +648,13 @@ export function childEnvironment(
         ...(modifier.lineSpacing !== undefined ? { lineSpacing: modifier.lineSpacing } : {}),
         ...(modifier.minimumScale !== undefined ? { minimumScale: modifier.minimumScale } : {}),
         ...(modifier.truncation !== undefined ? { truncation: modifier.truncation } : {}),
+        ...(modifier.allowsTightening !== undefined
+          ? { allowsTightening: modifier.allowsTightening }
+          : {}),
+        ...(modifier.minimumLines !== undefined ? { minimumLines: modifier.minimumLines } : {}),
+        ...(modifier.tabularNumbers !== undefined
+          ? { tabularNumbers: modifier.tabularNumbers }
+          : {}),
       }
     default:
       return env

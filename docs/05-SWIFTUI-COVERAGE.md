@@ -8,7 +8,7 @@ Last updated after the picker and view pass (defect register phases 9.1 and 9.6)
 gave `DatePicker` a calendar and `ColorPicker` a palette, and drew the views that only
 ever needed drawing.
 
-**155 ✅ · 48 🟡 · 12 ⬜ · 11 ✗**, over 226 rows, counted from this file rather than carried
+**157 ✅ · 48 🟡 · 11 ⬜ · 11 ✗**, over 227 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -158,7 +158,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.labelStyle` | ✅ | - | `.iconOnly` and `.titleOnly` drop the half they name; inherited, so a Button can set it for its Label |
 | `.controlSize` / `.buttonBorderShape` | ✅ | - | the first scales a bordered button's padding, the second its corner |
 | `.listStyle` / `.textFieldStyle` | ✅ | 6 |
-| `.lineLimit` / `.multilineTextAlignment` / `.textCase` | ✅ | 7 | inherited, so a stack can set them for its text |
+| `.lineLimit` / `.multilineTextAlignment` / `.textCase` | ✅ | 7 | inherited, so a stack can set them for its text. The `2...4` form reserves its floor as well as capping at its ceiling |
 | `.monospaced` | ✅ | 7 |
 | `.fontDesign` | ✅ | 10 | inherited separately from size, as in SwiftUI |
 | `.underline` / `.strikethrough` | ✅ | - | inherited like the font, and each takes the `Bool` form so a binding can switch one off |
@@ -166,7 +166,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.baselineOffset` / `.lineSpacing` | ✅ | - | `lineSpacing` is a gap *between* lines, so a single line is unaffected |
 | `.minimumScaleFactor` | ✅ | - | re-measures at smaller sizes until the text fits its line limit, then truncates what is still over. Stepped in tenths of the range rather than continuously |
 | `.truncationMode` | ✅ | - | `.head`, `.middle` and `.tail`, decided against the whole remaining text rather than the last visible line |
-| `.allowsTightening` | ⬜ | - | condensing letter spacing to avoid a break, which needs a second measuring pass per line |
+| `.allowsTightening` | ✅ | - | condenses up to half a point per character, and only where the text would otherwise break |
+| `.monospacedDigit` | ✅ | - | every digit takes the widest one's advance, in the measured frame as well as the paint |
 | `.symbolRenderingMode` / `.symbolVariant` | ⬜ | - | the substitute glyphs have no multicolour variants |
 
 ## Shapes and styles

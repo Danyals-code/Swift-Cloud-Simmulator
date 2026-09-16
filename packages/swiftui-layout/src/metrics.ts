@@ -183,6 +183,8 @@ export interface MeasuredRun {
   readonly text: string
   readonly font: ResolvedFont
   readonly tracking?: number
+  /** `.monospacedDigit`: every digit measures as the widest one. */
+  readonly tabularNumbers?: boolean
 }
 
 const GRAPHEME_SEGMENTER =
@@ -208,16 +210,34 @@ interface Cluster {
   readonly width: number
 }
 
-function clustersOf(runs: readonly MeasuredRun[], table: FontMetricsTable): Cluster[] {
+function clustersOf(
+  runs: readonly MeasuredRun[],
+  table: FontMetricsTable,
+  tighten = 0,
+): Cluster[] {
   const out: Cluster[] = []
   for (let run = 0; run < runs.length; run++) {
     const spec = runs[run]!
-    const tracking = spec.tracking ?? 0
+    const tracking = (spec.tracking ?? 0) - tighten
+    // `.monospacedDigit` gives every digit the widest one's advance, which is what
+    // stops a counter jittering as it counts. Measured, not painted: a column of
+    // numbers that lines up on screen and not in the reported frame is no use.
+    const digitWidth = spec.tabularNumbers ? widestDigit(spec.font, table) : 0
+
     for (const text of graphemes(spec.text)) {
-      out.push({ text, run, width: table.advance(text, spec.font) + tracking })
+      const width = digitWidth > 0 && text >= '0' && text <= '9'
+        ? digitWidth
+        : table.advance(text, spec.font)
+      out.push({ text, run, width: width + tracking })
     }
   }
   return out
+}
+
+function widestDigit(font: ResolvedFont, table: FontMetricsTable): number {
+  let widest = 0
+  for (const digit of '0123456789') widest = Math.max(widest, table.advance(digit, font))
+  return widest
 }
 
 /**
@@ -262,34 +282,66 @@ export function measureRuns(
   // it was given or the floor is reached. SwiftUI shrinks continuously; a tenth of the
   // range is far below the point at which a difference is visible, and it bounds the
   // work at ten measurements rather than an unbounded search.
+  // `.allowsTightening` draws the letters closer together rather than breaking or
+  // shrinking. SwiftUI tightens a little before it does anything else, so this is
+  // tried first and in small steps - a fifth of a point at a time, to a maximum of
+  // half a point, which is about where tightening stops being invisible.
+  if (options.allowsTightening && lineLimit !== null && lineLimit > 0) {
+    // From zero, so text that already fits is never tightened: the modifier is
+    // permission to tighten when it would otherwise break, not an instruction to.
+    for (let step = 0; step <= 3; step++) {
+      const attempt = layOut(
+        runs,
+        lineFont,
+        maxWidth,
+        table,
+        null,
+        lineSpacing,
+        1,
+        options.truncation,
+        (step * 0.5) / 3,
+      )
+      if (attempt.lines.length <= lineLimit) return padTo(attempt, options.minimumLines, lineFont, table, lineSpacing)
+    }
+  }
+
   const floor = options.minimumScale ?? 1
   if (floor < 1 && lineLimit !== null && lineLimit > 0) {
     for (let step = 0; step <= 10; step++) {
       const scale = 1 - (step / 10) * (1 - floor)
       const attempt = layOut(runs, scaled(lineFont, scale), maxWidth, table, null, lineSpacing, scale)
-      if (attempt.lines.length <= lineLimit) return attempt
+      if (attempt.lines.length <= lineLimit) {
+        return padTo(attempt, options.minimumLines, lineFont, table, lineSpacing)
+      }
     }
     // Nothing fits even at the floor. SwiftUI shrinks as far as it is allowed and then
     // truncates what is still over, rather than giving up and drawing at full size.
-    return layOut(
-      runs,
-      scaled(lineFont, floor),
-      maxWidth,
+    return padTo(
+      layOut(runs, scaled(lineFont, floor), maxWidth, table, lineLimit, lineSpacing, floor, options.truncation),
+      options.minimumLines,
+      lineFont,
       table,
-      lineLimit,
       lineSpacing,
-      floor,
-      options.truncation,
     )
   }
 
-  return layOut(runs, lineFont, maxWidth, table, lineLimit, lineSpacing, 1, options.truncation)
+  return padTo(
+    layOut(runs, lineFont, maxWidth, table, lineLimit, lineSpacing, 1, options.truncation),
+    options.minimumLines,
+    lineFont,
+    table,
+    lineSpacing,
+  )
 }
 
 /** What measurement needs beyond the text itself. */
 export interface MeasureOptions {
   readonly minimumScale?: number
   readonly truncation?: 'head' | 'middle' | 'tail'
+  /** `.allowsTightening`: letters may be drawn closer together to avoid a break. */
+  readonly allowsTightening?: boolean
+  /** `.lineLimit(2...4)` - the *floor*; the ceiling is the ordinary `lineLimit`. */
+  readonly minimumLines?: number
 }
 
 /** The same face at a fraction of its size. */
@@ -297,6 +349,27 @@ function scaled(font: ResolvedFont, scale: number): ResolvedFont {
   return scale === 1
     ? font
     : { ...font, size: font.size * scale, lineHeight: font.lineHeight * scale }
+}
+
+/**
+ * Reserves room for a `.lineLimit(2...4)`'s lower bound.
+ *
+ * The range form asks for *at least* as many lines as its floor, so a one-line label
+ * inside one still occupies two - which is the whole point: a list whose rows change
+ * height as their text changes is what the floor exists to prevent.
+ */
+function padTo(
+  measured: TextMeasurement,
+  minimumLines: number | undefined,
+  font: ResolvedFont,
+  table: FontMetricsTable,
+  lineSpacing: number,
+): TextMeasurement {
+  if (!minimumLines || measured.lines.length >= minimumLines) return measured
+
+  const step = table.lineHeight(font) * measured.scale + lineSpacing
+  const missing = minimumLines - measured.lines.length
+  return { ...measured, height: measured.height + missing * step }
 }
 
 function layOut(
@@ -308,10 +381,11 @@ function layOut(
   lineSpacing: number,
   scale: number,
   truncation: 'head' | 'middle' | 'tail' = 'tail',
+  tighten = 0,
 ): TextMeasurement {
   runs = scale === 1 ? runs : runs.map((run) => ({ ...run, font: scaled(run.font, scale) }))
   const multiRun = runs.length > 1
-  const all = clustersOf(runs, table)
+  const all = clustersOf(runs, table, tighten)
 
   let wrapped: WrappedLine[] = []
   let paragraph: Cluster[] = []

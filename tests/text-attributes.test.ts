@@ -311,3 +311,50 @@ describe('the half that asks measurement to answer back', () => {
     }
   })
 })
+
+describe('the last three, which are all measurement', () => {
+  it('monospacedDigit reaches the painted run, so the font agrees', () => {
+    const payload = firstText(run(view('Text("123").monospacedDigit()')))
+    expect(payload.runs[0]?.tabularNumbers).toBe(true)
+  })
+
+  it('allowsTightening draws the letters closer rather than breaking', () => {
+    const line = 'Text("tightening avoids a break").lineLimit(1)'
+    const loose = textNodes(run(view(`${line}.frame(width: 190)`)))[0]!
+    const tight = textNodes(run(view(`${line}.allowsTightening(true).frame(width: 190)`)))[0]!
+
+    // The loose one has to shorten; the tightened one fits what the loose one cut.
+    const textOf = (node: (typeof loose)) => node.text?.lines?.[0]?.text ?? ''
+    expect(textOf(loose)).toContain('…')
+    expect(textOf(tight).length).toBeGreaterThan(textOf(loose).length)
+  })
+
+  it('allowsTightening does nothing to text that already fits', () => {
+    const plain = textNodes(run(view('Text("short").lineLimit(1).fixedSize()')))[0]!
+    const tight = textNodes(
+      run(view('Text("short").lineLimit(1).allowsTightening(true).fixedSize()')),
+    )[0]!
+    expect(tight.frame.width).toBeCloseTo(plain.frame.width, 3)
+  })
+
+  it('lineLimit(2...4) reserves the floor even when the text is shorter', () => {
+    // The point of the range form: a list whose rows change height as their text
+    // changes is exactly what the lower bound prevents.
+    const one = textNodes(run(view('Text("one line").frame(width: 300)')))[0]!
+    const floored = textNodes(run(view('Text("one line").lineLimit(2...4).frame(width: 300)')))[0]!
+    expect(floored.frame.height).toBeCloseTo(one.frame.height * 2, 1)
+  })
+
+  it('lineLimit(2...4) still truncates past its ceiling', () => {
+    const long = 'Text("one two three four five six seven eight nine ten eleven twelve")'
+    const payload = firstText(run(view(`${long}.lineLimit(2...4).frame(width: 90)`)))
+    expect(payload.lines?.length).toBe(4)
+    expect(payload.lines?.at(-1)?.text.endsWith('…')).toBe(true)
+  })
+
+  it('none of the three warns any more', () => {
+    for (const modifier of ['monospacedDigit()', 'allowsTightening(true)', 'lineLimit(2...4)']) {
+      expect(warnings(run(view(`Text("a").${modifier}`))), modifier).toEqual([])
+    }
+  })
+})
