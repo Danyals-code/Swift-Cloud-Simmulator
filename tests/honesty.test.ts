@@ -180,11 +180,21 @@ describe('what the preview cannot do, it says', () => {
     expect(warnings(run(view('Text("a").monospaced()')))).toEqual([])
   })
 
-  it('says PreviewProvider is unread rather than sending the user after @main', () => {
+  it('renders a PreviewProvider rather than reporting a missing entry point', () => {
+    // It used to report one. The older spelling names a view to show exactly as
+    // `#Preview` does, and every project written before Xcode 15 still carries it -
+    // so sending the user to add `@main` was sending them to fix what was not wrong.
     const result = run(
-      'import SwiftUI\nstruct C: View { var body: some View { Text("c") } }\nstruct C_Previews: PreviewProvider {\n    static var previews: some View { C() }\n}\n',
+      [
+        'import SwiftUI',
+        'struct C: View { var body: some View { Text("c") } }',
+        'struct C_Previews: PreviewProvider {',
+        '    static var previews: some View { C() }',
+        '}',
+      ].join('\n'),
     )
-    expect(errors(result)[0]).toContain('PreviewProvider')
+    expect(errors(result)).toEqual([])
+    expect(texts(result)).toContain('c')
   })
 })
 

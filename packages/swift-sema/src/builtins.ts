@@ -263,21 +263,31 @@ export const KNOWN_FUNCTIONS: ReadonlySet<string> = new Set([
   'type', 'fatalError', 'assert', 'assertionFailure', 'precondition', 'preconditionFailure',
 ])
 
-/** Property wrappers, mapped to whether the preview implements them. */
-export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean; phase: number }> = new Map([
-  ['State', { supported: true, phase: 3 }],
-  ['Binding', { supported: true, phase: 6 }],
-  ['StateObject', { supported: true, phase: 7 }],
-  ['ObservedObject', { supported: true, phase: 7 }],
-  ['EnvironmentObject', { supported: true, phase: 7 }],
-  ['Environment', { supported: true, phase: 7 }],
+/**
+ * Property wrappers, mapped to whether the preview implements them.
+ *
+ * A set of names and a flag, with no phase numbers: the ones this carried all said 7,
+ * and kept saying it after Phase 10 shipped - the same defect the view and modifier
+ * lists had, in the one table the sweep that found it did not reach.
+ */
+export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean }> = new Map([
+  ['State', { supported: true }],
+  ['Binding', { supported: true }],
+  ['StateObject', { supported: true }],
+  ['ObservedObject', { supported: true }],
+  ['EnvironmentObject', { supported: true }],
+  ['Environment', { supported: true }],
   // A stored property on a class, which is a reference - so a change is visible
   // everywhere holding it, with or without the wrapper.
-  ['Published', { supported: true, phase: 7 }],
-  ['AppStorage', { supported: false, phase: 7 }],
-  ['SceneStorage', { supported: false, phase: 7 }],
-  ['FocusState', { supported: false, phase: 7 }],
-  ['GestureState', { supported: true, phase: 7 }],
+  ['Published', { supported: true }],
+  // Keyed by the string they name rather than by the view, so the value outlives the
+  // view that wrote it and two views naming one key see one value.
+  ['AppStorage', { supported: true }],
+  ['SceneStorage', { supported: true }],
+  // Storage the code reads and writes. Nothing focuses a field from outside the
+  // program, because the preview has no keyboard - see the coverage matrix.
+  ['FocusState', { supported: true }],
+  ['GestureState', { supported: true }],
 ])
 
 /** Attributes that are meaningful rather than property wrappers. */

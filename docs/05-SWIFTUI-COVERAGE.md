@@ -4,10 +4,11 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the control-style pass (defect register phase 9.3), which stopped
-`.toggleStyle`, `.pickerStyle` and `.labelStyle` being recognised and inert.
+Last updated after the data-flow pass (defect register phase 9.7), which made
+`@AppStorage` storage keyed by its string, read a `PreviewProvider` as a root, and
+built a `Binding(get:set:)` a control cannot tell from a projected one.
 
-**139 ✅ · 43 🟡 · 30 ⬜ · 3 ✗**, over 215 rows, counted from this file rather than carried
+**141 ✅ · 48 🟡 · 25 ⬜ · 4 ✗**, over 218 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -191,9 +192,9 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render |
 | `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency |
 | `.onChange(of:)` | ✅ | 7 | not fired for the initial value, as SwiftUI does not |
-| `.onReceive` | ⬜ | - | needs Combine |
+| `.onReceive` | ⬜ | - | needs Combine, which needs publishers and a scheduler the preview does not have |
 | `.disabled` / `.allowsHitTesting` | ✅ | 7 |
-| `.focused` | ⬜ | - |
+| `.focused` | 🟡 | - | `@FocusState` is storage the code reads and writes; nothing focuses a field from outside the program, since the preview has no keyboard |
 
 ## Animation
 
@@ -218,21 +219,24 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Feature | Status | Phase |
 | --- | --- | --- |
 | `App` / `@main` / `WindowGroup` | ✅ | 3 |
-| `Scene` phases | ⬜ | - |
+| `Scene` phases | 🟡 | - | `scenePhase` reads `.active`, because the preview's one window is always on screen |
 | `@State` | ✅ | 3 |
 | `@Binding` (and `$value` projections) | ✅ | 6 | passes down any number of views |
 | Key paths (`\.self`, `\.id`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`); **not where a closure is expected**, so `map(\.name)` is rejected |
 | `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere |
+| `@AppStorage` / `@SceneStorage` | 🟡 | - | keyed by the string, so views sharing a key share a value and it outlives the view that wrote it. Held for the session rather than on disk - see approximations |
+| `@FocusState` | 🟡 | - | storage the code reads and writes |
+| `Binding(get:set:)` | ✅ | - | a projection built from the user's closures; a control cannot tell it from `$value` |
 | `.environmentObject` / `@EnvironmentObject` | 🟡 | 7 | reaches views expanded while the modifier is in scope - see below |
 | `.environment(\.key, …)` | 🟡 | 7 | same scoping rule |
 | `colorScheme`, `dynamicTypeSize` | ✅ | 4 |
 | `locale`, `layoutDirection` | 🟡 | 7 | reported; there is no RTL layout or localisation yet |
 | `horizontalSizeClass` / `verticalSizeClass` | ✅ | 7 | derived from the device size |
 | `dismiss` | ✅ | 7 |
-| `openURL` | ⬜ | - |
-| `PreferenceKey` | ⬜ | - | needs a value to travel *up* the tree |
+| `openURL` | 🟡 | - | callable; logs the URL rather than navigating, which would take the unsaved project with it |
+| `PreferenceKey` | ✗ | - | declined: a value travelling *up* needs a second pass and a re-render when a handler writes state. `GeometryReader` covers what people reach for it for |
 | `#Preview` macro | ✅ | 10 | parsed, and used as the root when nothing is `@main` |
-| `PreviewProvider` (the older form) | ⬜ | - | |
+| `PreviewProvider` (the older form) | ✅ | - | its `previews` body is the root when nothing is `@main` and there is no `#Preview` |
 
 ## Accessibility
 
@@ -380,17 +384,24 @@ Listed in the exported README so nothing is a surprise on the Mac:
     control sits mid-screen. The compositor decides what the options are before the layout
     engine decides where the control ended up, so anchoring would mean resolving the menu
     after layout. An approximation of position; the options and the tick are exact.
-16. **A `.wheel` picker is a dimmed column, not a spinner.** A wheel has depth, momentum
+16. **`@AppStorage` is a session, not a disk.** The value is keyed by its string and
+    shared between every view naming it, and it outlives the view that wrote it - which
+    is the whole difference from `@State`. It does not outlive the tab: there is no
+    `UserDefaults` in a worker, and writing to browser storage would make one project's
+    preview visible to another. It also follows `@State` on one point real defaults do
+    not: editing the declared default re-seeds, because a user who just changed `= 0`
+    to `= 10` is waiting to see 10.
+17. **A `.wheel` picker is a dimmed column, not a spinner.** A wheel has depth, momentum
     and a selection band; a static column has none of them. What it carries honestly is
     which option is selected, so the chosen row is drawn at full strength and the rest
     are dimmed. The options and the selection are exact; the motion is absent rather
     than approximated.
-17. **`.kerning` and `.tracking` are applied identically.** Both add advance after every
+18. **`.kerning` and `.tracking` are applied identically.** Both add advance after every
     character. Swift's `kerning` adjusts the space *between* characters and so leaves the
     last one alone, where `tracking` adds after it too - a difference of one character's
     spacing at the end of a line, well under a point at UI sizes. Stated rather than
     silently rounded away.
-18. **Renaming is scoped, which means it can rename too little.** A local is renamed within
+19. **Renaming is scoped, which means it can rename too little.** A local is renamed within
     its own body; a member is followed across the project only when no other type declares
     the same member name, and otherwise stays inside the type that declared it. The
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses

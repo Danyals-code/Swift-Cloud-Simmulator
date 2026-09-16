@@ -202,15 +202,39 @@ describe('coverage diagnostics are honest, not wrong', () => {
     expect(warnings(app('        Text("x").foregroundStyle(Color.red)'))).toEqual([])
   })
 
-  it('flags an unsupported property wrapper by name', () => {
+  it('says nothing about a property wrapper it implements', () => {
+    // `@AppStorage` warned here, and the warning said "arriving in Phase 7" after
+    // Phase 7 had shipped. It is storage now, so there is nothing to say.
     const source = `@main struct M: App { var body: some Scene { WindowGroup { } } }
 struct V: View {
     @AppStorage("seen") var seen = false
     var body: some View { Text("x") }
 }`
-    const wrapper = warnings(source).find((d) => d.feature === '@AppStorage')
-    expect(wrapper).toBeDefined()
-    expect(wrapper!.message).toContain('Phase 7')
+    expect(warnings(source).find((d) => d.feature === '@AppStorage')).toBeUndefined()
+  })
+
+  it('still flags a wrapper it has never heard of', () => {
+    const source = `@main struct M: App { var body: some Scene { WindowGroup { } } }
+struct V: View {
+    @FetchRequest var rows: [Int]
+    var body: some View { Text("x") }
+}`
+    const found = warnings(source).find((d) => d.feature === '@FetchRequest')
+    expect(found).toBeDefined()
+    expect(found!.message).toContain('exported unchanged')
+  })
+
+  it('promises no phase number in any diagnostic it emits', () => {
+    // Every unimplemented diagnostic used to promise Phase 7, and kept promising it
+    // after Phase 10 shipped. This is the assertion that stops it coming back.
+    const source = `@main struct M: App { var body: some Scene { WindowGroup { } } }
+struct V: View {
+    @FetchRequest var rows: [Int]
+    var body: some View { Text("x").blendMode(.multiply).madeUpModifier() }
+}`
+    for (const diagnostic of analyse(source)) {
+      expect(diagnostic.message, diagnostic.message).not.toMatch(/Phase \d/)
+    }
   })
 
   it('knows a user enum as a type annotation', () => {

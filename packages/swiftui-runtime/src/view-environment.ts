@@ -22,6 +22,16 @@ import { TOKEN_TYPE } from './view-value'
 
 export const DISMISS_TYPE = 'DismissAction'
 
+/**
+ * `@Environment(\.openURL)` - callable, and it opens nothing.
+ *
+ * A preview that navigated the browser away from the studio would lose the user's
+ * unsaved project, and one that opened a tab would be a side effect the code did not
+ * ask a *preview* for. Calling it logs the URL, so the call is visible in the console
+ * and the code around it runs; the exported project opens the URL for real.
+ */
+export const OPEN_URL_TYPE = 'OpenURLAction'
+
 export interface EnvironmentFrame {
   readonly values: ReadonlyMap<string, SwiftValue>
   readonly objects: ReadonlyMap<string, SwiftValue>
@@ -73,9 +83,14 @@ export function rootEnvironmentValues(inputs: EnvironmentInputs): Map<string, Sw
     ['verticalSizeClass', opaque(TOKEN_TYPE, { name: inputs.verticalSizeClass })],
     ['isEnabled', bool(true)],
     ['pixelLength', int(1)],
+    // The preview has one window and it is always on screen, so the phase is always
+    // `.active`. Reported rather than absent: code that branches on it runs, and the
+    // branch it takes is the one a foregrounded app takes.
+    ['scenePhase', opaque(TOKEN_TYPE, { name: 'active' })],
     // Callable, and resolved by the host rather than by the interpreter: see
     // `callValue` in `host.ts`.
     ['dismiss', opaque(DISMISS_TYPE, { kind: 'dismiss' })],
+    ['openURL', opaque(OPEN_URL_TYPE, { kind: 'openURL' })],
   ])
 }
 

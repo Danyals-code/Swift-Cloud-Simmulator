@@ -6,7 +6,9 @@ import {
   describe,
   double,
   int,
+  asProjection,
   opaque,
+  projection,
   str,
   type ClosureValue,
   type HostCall,
@@ -14,7 +16,7 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
-import { DISMISS_TYPE, EnvironmentStack } from './view-environment'
+import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
   asCanvasContext,
   asPath,
@@ -600,6 +602,7 @@ export class SwiftUIHost implements InterpreterHost {
     // Values first: these are not views, so they have to be handled before the
     // "is this a view name?" guard below rejects them.
     if (name === 'Task') return this.runTask(call)
+    if (name === 'Binding') return this.makeBinding(call)
     if (name === 'Color') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
@@ -999,10 +1002,51 @@ export class SwiftUIHost implements InterpreterHost {
     })
   }
 
-  callValue(target: SwiftValue): SwiftValue | undefined {
-    if (target.kind !== 'opaque' || target.typeName !== DISMISS_TYPE) return undefined
-    this.dismissAction?.()
-    return { kind: 'void' }
+  /**
+   * `Binding(get:set:)` - a binding computed rather than projected.
+   *
+   * The mechanism was already there: a projection is a pair of functions over storage
+   * someone else owns, and `$count` builds one from a variable. This builds the same
+   * pair from the user's own closures, so a computed binding is indistinguishable
+   * downstream from a projected one - a `Toggle` cannot tell them apart, which is the
+   * point of the form.
+   *
+   * `.constant(x)` is the other spelling and the one previews are full of: a binding
+   * that reads a value and discards what is written to it.
+   */
+  private makeBinding(call: HostCall): SwiftValue | undefined {
+    const get = call.args.find((a) => a.label === 'get')?.value
+    const set = call.args.find((a) => a.label === 'set')?.value
+    if (get?.kind !== 'closure') return undefined
+
+    return projection({
+      get: () => call.invoke(get),
+      set: (value) => {
+        if (set?.kind === 'closure') call.invoke(set, [value])
+      },
+      description: 'Binding(get:set:)',
+    })
+  }
+
+  callValue(target: SwiftValue, call: HostCall): SwiftValue | undefined {
+    if (target.kind !== 'opaque') return undefined
+
+    if (target.typeName === DISMISS_TYPE) {
+      this.dismissAction?.()
+      return { kind: 'void' }
+    }
+
+    if (target.typeName === OPEN_URL_TYPE) {
+      // Logged rather than opened. Navigating the browser away would take the user's
+      // unsaved project with it, and opening a tab is a side effect a preview was not
+      // asked for - so the call runs, says what it would have done, and the exported
+      // project does it for real.
+      const url = call.args[0]?.value
+      this.log(`openURL(${url ? describe(url, true) : ''})`, call.span, 'log')
+      return { kind: 'void' }
+    }
+
+    return undefined
   }
 
   /**
@@ -1049,6 +1093,18 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   getMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
+    // `binding.wrappedValue` - the long spelling of reading the binding, and how a
+    // computed `Binding(get:set:)` is nearly always read.
+    //
+    // It answers for any value, not only a projection, because reading a variable
+    // already unwraps one: `let b = Binding(get:set:)` puts a projection in `b` and
+    // `b` reads as the value it projects. So by the time `.wrappedValue` is asked for,
+    // the projection is gone and the value is the answer - which is the same erasure
+    // `Optional(x)` being `x` relies on.
+    if (member === 'wrappedValue') {
+      return asProjection(target)?.get() ?? target
+    }
+
     // `value.translation.width`, `value.location.x`, `size.width` …
     const geometry = geometryMember(target, member)
     if (geometry !== undefined) return geometry
