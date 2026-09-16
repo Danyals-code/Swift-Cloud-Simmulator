@@ -6,8 +6,16 @@ import {
   type Fill,
   type RGBA,
   type ShapeKind,
+  type Size,
 } from '@studio/shared'
-import { asDate, asProjection, foundationDescription, truthy, type SwiftValue } from '@studio/swift-runtime'
+import {
+  asDate,
+  asProjection,
+  foundationDescription,
+  truthy,
+  type ClosureValue,
+  type SwiftValue,
+} from '@studio/swift-runtime'
 import { BLEND_MODES, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import {
   CENTER,
@@ -163,6 +171,15 @@ export interface ConversionOptions {
     readonly bottom: number
     readonly trailing: number
   }
+  /**
+   * Runs an `.alignmentGuide` closure with the view's measured dimensions.
+   *
+   * The one thing the layout pass cannot do for itself: the closure is the user's,
+   * and it runs in the interpreter, which lives a layer up. Supplied as a function so
+   * `swiftui-layout` stays free of any interpreter knowledge - it calls this, it does
+   * not know what is on the other side.
+   */
+  readonly callGuide?: (closure: ClosureValue, size: Size) => number
 }
 
 export function viewsToLayout(
@@ -172,6 +189,7 @@ export function viewsToLayout(
   const rootAxis = options.rootAxis ?? 'vertical'
   const hitTargets = new Map<string, string>()
   const converter = new Converter(hitTargets, options.colorScheme ?? 'light', options.typeScale ?? 1)
+  converter.useGuideRunner(options.callGuide ?? null)
   const children = converter.convertList(views, 'v', rootAxis)
 
   return { element: joinRoot(children, rootAxis), hitTargets }
@@ -192,6 +210,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const safeArea = options.safeArea ?? ZERO_INSETS
   const background = screenBackground(ui.content, scheme) ?? systemBackground(scheme)
   const converter = new Converter(hitTargets, scheme, options.typeScale ?? 1, safeArea, background)
+  converter.useGuideRunner(options.callGuide ?? null)
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
@@ -416,6 +435,13 @@ class Converter {
    * The renderer needs the name to draw the right shape, and four inline copies is
    * four chances for the name and the glyph to disagree.
    */
+  /** Runs an `.alignmentGuide` closure; absent when nothing can run one. */
+  private callGuide: ((closure: ClosureValue, size: Size) => number) | null = null
+
+  useGuideRunner(run: ((closure: ClosureValue, size: Size) => number) | null): void {
+    this.callGuide = run
+  }
+
   /**
    * The control styles in force, inherited like the font.
    *
@@ -3003,8 +3029,9 @@ class Converter {
         return null
 
       case 'ignoresSafeArea':
-      case 'safeAreaInset':
-        // Read by the pipeline, which owns the device's edges.
+        // Read by the pipeline, which owns the device's edges. `.safeAreaInset` was
+        // grouped here and is not: nothing read it, and it was in the unimplemented
+        // list at the same time - so it both warned and was claimed to be handled.
         return null
 
       case 'zIndex':
@@ -3114,6 +3141,55 @@ class Converter {
       case 'lineSpacing': {
         const value = numberArg(positional(args, 0))
         return value === null ? null : { kind: 'textStyle', lineSpacing: Math.max(0, value) }
+      }
+
+      case 'alignmentGuide': {
+        const guide = tokenName(positional(args, 0))
+        const closure = modifier.closure
+        if (!guide || !closure || !this.callGuide) return null
+
+        const run = this.callGuide
+        return { kind: 'alignmentGuide', guide, compute: (size: Size) => run(closure, size) }
+      }
+
+      case 'safeAreaInset': {
+        const edge = tokenName(labelled(args, 'edge')) ?? 'bottom'
+        // Evaluated by the host, because an inset is on screen from the first frame -
+        // unlike a sheet's, whose closure must not run while it is down.
+        const views = args
+          .filter((a) => a.label === 'content')
+          .map((a) => asView(a.value))
+          .filter((v): v is ViewValue => v !== null)
+        if (views.length === 0) return null
+
+        return {
+          kind: 'safeAreaInset',
+          edge:
+            edge === 'top' || edge === 'leading' || edge === 'trailing'
+              ? edge
+              : 'bottom',
+          spacing: numberArg(labelled(args, 'spacing')) ?? 0,
+          content: {
+            kind: 'stack',
+            id: `${id}inset`,
+            axis: edge === 'leading' || edge === 'trailing' ? 'vertical' : 'horizontal',
+            spacing: 0,
+            alignment: CENTER,
+            children: this.convertList(views, `${id}inset`, 'horizontal'),
+          },
+        }
+      }
+
+      case 'containerRelativeFrame': {
+        const axes = tokenName(positional(args, 0)) ?? 'horizontal'
+        const count = numberArg(labelled(args, 'count')) ?? 1
+        return {
+          kind: 'containerRelativeFrame',
+          horizontal: axes !== 'vertical',
+          vertical: axes !== 'horizontal',
+          count: Math.max(1, Math.round(count)),
+          spacing: numberArg(labelled(args, 'spacing')) ?? 0,
+        }
       }
 
       case 'animation': {

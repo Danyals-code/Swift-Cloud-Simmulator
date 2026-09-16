@@ -4,11 +4,11 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the effects pass (defect register phase 9.5), which drew the colour
-and transform effects CSS shares a definition with, and made `.animation(_:value:)`
-honour its gate.
+Last updated after the layout pass (defect register phase 9.4), which changed the stack
+to align *guides* rather than edges - the rule SwiftUI actually follows, and what makes
+`.alignmentGuide` mean anything.
 
-**145 ✅ · 48 🟡 · 21 ⬜ · 8 ✗**, over 222 rows, counted from this file rather than carried
+**147 ✅ · 49 🟡 · 16 ⬜ · 10 ✗**, over 222 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -35,13 +35,13 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `ForEach` | ✅ | 6 | ranges, `Identifiable`, `id:` key paths; identity follows the element |
 | `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's |
 | `GeometryReader` | ✅ | 7 | reports its real size through `size` and `frame(in:)`, and is its own coordinate space |
-| `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks - correct, but not virtualised |
+| `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks: correct, and not virtualised. A 200-row stack measures in 7.6 ms against a 120 ms budget, so the cost is real and not yet worth the identity complexity |
 | `LazyVGrid` / `LazyHGrid` | ✅ | 6 | fixed, flexible and adaptive columns |
 | `Grid` / `GridRow` | ✅ | 7 | columns align across rows |
 | `ViewThatFits` | ✅ | 7 | |
 | `AnyView` | ✅ | 7 | erasure is a compile-time concern; at runtime it is its content |
-| `Layout` protocol (custom layouts) | ⬜ | - | our engine already speaks this protocol |
-| `AnyLayout` | ⬜ | - | |
+| `Layout` protocol (custom layouts) | ✗ | - | needs a `Subviews` proxy and callbacks from the engine back into the interpreter for sizing as well as placement - a real seam, and custom conformances are rare in app code |
+| `AnyLayout` | ✗ | - | the same seam |
 
 ## Content views
 
@@ -125,9 +125,9 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.position` | ✅ | 7 | centres the view on a point in its parent's space |
 | `.aspectRatio` / `.scaledToFit` / `.scaledToFill` | ✅ | 7 | |
 | `.ignoresSafeArea` | ✅ | 7 | resolved by the pipeline, which owns the device's edges |
-| `.safeAreaInset` | ⬜ | - | |
-| `.alignmentGuide` | ⬜ | - | |
-| `.containerRelativeFrame` | ⬜ | - | |
+| `.safeAreaInset` | ✅ | - | all four edges; the content is *inset*, not overlaid, so a bar drawn this way does not cover the last row |
+| `.alignmentGuide` | ✅ | - | the stack aligns guides rather than edges, so a guide can be replaced. `d.width`, `d.height` and `d[.leading]` and friends all read |
+| `.containerRelativeFrame` | 🟡 | - | takes the container's size along the named axes, divided by `count`. The container is whatever proposed the size, which is the scroll view or stack above it |
 
 ## Modifiers - appearance
 

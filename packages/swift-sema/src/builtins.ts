@@ -53,6 +53,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'modifier',
   // layout
   'frame', 'padding', 'offset', 'position', 'fixedSize', 'clipShape', 'clipped',
+  'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame',
   'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill',
   // appearance
   'background', 'overlay', 'border', 'shadow', 'cornerRadius', 'opacity',
@@ -198,7 +199,7 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
  */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // layout
-  'alignmentGuide', 'containerRelativeFrame', 'safeAreaInset', 'coordinateSpace',
+  'coordinateSpace',
   // painting and effects
   'mask', 'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
   // typography

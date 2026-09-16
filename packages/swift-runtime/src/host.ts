@@ -100,6 +100,15 @@ export interface InterpreterHost {
     span: SourceSpan,
   ): SwiftValue | undefined
 
+  /**
+   * `target[index]` where the interpreter does not own `target`.
+   *
+   * `d[.leading]` inside an `.alignmentGuide` closure is the case: `d` is a
+   * `ViewDimensions`, which belongs to the host, and subscripting it is how every
+   * guide but `d.width` is written.
+   */
+  subscript?(target: SwiftValue, index: SwiftValue, span: SourceSpan): SwiftValue | undefined
+
   /** `print(...)` and anything else that writes to the console. */
   log?(message: string, span: SourceSpan): void
 }

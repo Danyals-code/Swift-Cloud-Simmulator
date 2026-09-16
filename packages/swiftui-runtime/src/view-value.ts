@@ -170,6 +170,15 @@ export interface GradientPayload {
 /** A `GeometryProxy`, as `GeometryReader`'s closure receives it. */
 export const GEOMETRY_TYPE = 'GeometryProxy'
 
+/**
+ * `ViewDimensions` - what an `.alignmentGuide` closure is handed.
+ *
+ * The view's own measured size, plus the default guides reachable by subscript. It
+ * exists only for the length of that closure: the size is not known until the view
+ * has been measured, and it is meaningless afterwards.
+ */
+export const DIMENSIONS_TYPE = 'ViewDimensions'
+
 export interface GeometryPayload {
   readonly width: number
   readonly height: number

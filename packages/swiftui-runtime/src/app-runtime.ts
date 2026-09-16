@@ -1,4 +1,4 @@
-import type { LogLevel, SourceSpan, UIEvent } from '@studio/shared'
+import type { LogLevel, Size, SourceSpan, UIEvent } from '@studio/shared'
 import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
@@ -37,6 +37,7 @@ import {
   asSwiftValue,
   asView,
   BUTTON_CONFIGURATION_TYPE,
+  DIMENSIONS_TYPE,
   handlerIdFor,
   type AnimationPayload,
   type ViewIntent,
@@ -327,6 +328,27 @@ export class AppRuntime {
     this.host.pendingAnimation = null
     this.harvest()
     return true
+  }
+
+  /**
+   * Runs an `.alignmentGuide` closure with a view's measured dimensions.
+   *
+   * Handed to the layout pass, which is the only stage that knows the size and the
+   * only one that cannot run Swift. A closure that traps answers with the default
+   * guide rather than taking the preview down: the guide is a number, and a wrong
+   * number misplaces one view where an exception blanks the screen.
+   */
+  guideRunner(): (closure: ClosureValue, size: Size) => number {
+    return (closure, size) => {
+      const dimensions = opaque(DIMENSIONS_TYPE, { width: size.width, height: size.height })
+      try {
+        const result = this.interpreter.callClosure(closure, [dimensions], closure.span)
+        return result.kind === 'int' || result.kind === 'double' ? result.value : 0
+      } catch (error) {
+        this.host.log(`Alignment guide failed: ${toFailure(error).message}`, closure.span, 'error')
+        return 0
+      }
+    }
   }
 
   /** Drops every state box, framework state included. */
@@ -650,11 +672,7 @@ export class AppRuntime {
       const env = this.interpreter.globals.child(instance)
       const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
 
-      return produced.flatMap((value) => {
-        const view = asView(value)
-        if (view) return [view]
-        return value.kind === 'struct' ? this.expand(value) : []
-      })
+      return this.viewsFrom(produced)
     } finally {
       this.expandDepth--
       this.identity.pop()
@@ -776,21 +794,27 @@ export class AppRuntime {
    * level and sees exactly what a top-level function would.
    */
   private runPreviewBody(body: Block): ViewValue[] {
-    const produced = this.interpreter.runViewBuilderBlock(body, this.interpreter.globals.child(null))
-    return produced.flatMap((value) => {
-      const view = asView(value)
-      if (view) return [view]
-      return value.kind === 'struct' ? this.expand(value) : []
-    })
+    const env = this.interpreter.globals.child(null)
+    return this.viewsFrom(this.interpreter.runViewBuilderBlock(body, env))
   }
 
   private buildViews(closure: ClosureValue, args: readonly SwiftValue[] = []): readonly ViewValue[] {
-    const produced = this.interpreter.runViewBuilder(closure, args)
-    return produced.flatMap((value) => {
-      const view = asView(value)
-      if (view) return [view]
-      return value.kind === 'struct' ? this.expand(value) : []
-    })
+    return this.viewsFrom(this.interpreter.runViewBuilder(closure, args))
+  }
+
+  /**
+   * Everything a builder produced, as views.
+   *
+   * A user's struct is expanded here, because only the runtime can run a `body`;
+   * everything else goes to the host, which knows that a `Color` and a `Path` are
+   * views too. Three builders each had their own copy of this and all three kept only
+   * the values that were already views - so `var body: some View { Color.blue }` drew
+   * nothing, while the same colour inside a `VStack` drew fine.
+   */
+  private viewsFrom(values: readonly SwiftValue[]): ViewValue[] {
+    return values.flatMap((value) =>
+      value.kind === 'struct' ? this.expand(value) : this.host.toViews([value]),
+    )
   }
 
   private seedState(instance: StructValue, decl: StructDecl, identity: string): void {

@@ -45,6 +45,7 @@ import {
   BUTTON_CONFIGURATION_TYPE,
   COLOR_TYPE,
   EDGE_INSETS_TYPE,
+  DIMENSIONS_TYPE,
   GEOMETRY_TYPE,
   isView,
   STROKE_STYLE_TYPE,
@@ -512,12 +513,7 @@ export class SwiftUIHost implements InterpreterHost {
       if (key && value) values.push([key, value])
     }
 
-    const modifier: ModifierValue = {
-      name: member,
-      args: toArgs(call),
-      span: call.span,
-      closure: call.trailingClosure,
-    }
+    const modifier = this.makeModifier(member, call)
 
     return this.environment.scoped(values, objects, () => {
       const base = asView(target) ?? this.expandForModifier(target, call.span)
@@ -534,7 +530,15 @@ export class SwiftUIHost implements InterpreterHost {
    * silent, which is the failure mode this project refuses: the code looked honoured
    * and drew nothing.
    */
-  private toViews(values: readonly SwiftValue[]): ViewValue[] {
+  /**
+   * Every value a view builder can produce, as views.
+   *
+   * Public because the runtime's own builders need the same conversion: a `Color` and
+   * a `Path` are views without being view *values*, and a builder that only accepts
+   * the latter drops them. `var body: some View { Color.blue }` drew nothing at all
+   * for exactly that reason - the canonical one-liner for filling a screen.
+   */
+  toViews(values: readonly SwiftValue[]): ViewValue[] {
     return values.flatMap((value) => {
       const view = asView(value)
       if (view) return [view]
@@ -840,14 +844,7 @@ export class SwiftUIHost implements InterpreterHost {
     // falls through to the interpreter's own "no such member" reporting.
     const base = asView(target) ?? this.expandForModifier(target, call.span)
     if (base) {
-      const modifier: ModifierValue = {
-        name: member,
-        args: toArgs(call),
-        span: call.span,
-        // Unevaluated on purpose: a sheet's content must not run while it is down.
-        closure: call.trailingClosure,
-      }
-      return view({ ...base, modifiers: [...base.modifiers, modifier] })
+      return view({ ...base, modifiers: [...base.modifiers, this.makeModifier(member, call)] })
     }
 
     // Path building. The payload is mutated in place, which is what the closure form
@@ -919,15 +916,7 @@ export class SwiftUIHost implements InterpreterHost {
       !COLOR_MEMBERS.has(member)
     ) {
       const wrapped = this.colorAsView(target, call.span)
-      if (wrapped) {
-        const modifier: ModifierValue = {
-          name: member,
-          args: toArgs(call),
-          span: call.span,
-          closure: call.trailingClosure,
-        }
-        return view({ ...wrapped, modifiers: [modifier] })
-      }
+      if (wrapped) return view({ ...wrapped, modifiers: [this.makeModifier(member, call)] })
     }
 
     if (target.kind === 'opaque' && target.typeName === COLOR_TYPE) {
@@ -1026,6 +1015,69 @@ export class SwiftUIHost implements InterpreterHost {
       },
       description: 'Binding(get:set:)',
     })
+  }
+
+  /**
+   * `d[.leading]` inside an `.alignmentGuide` closure.
+   *
+   * `ViewDimensions` is subscripted by an alignment, and every guide but `.width`
+   * and `.height` is written that way. The values are the defaults SwiftUI uses,
+   * measured from the view's own leading and top edges - which is what makes
+   * `.alignmentGuide(.leading) { d in d[.trailing] }` line up the right edges.
+   */
+  subscript(target: SwiftValue, index: SwiftValue): SwiftValue | undefined {
+    if (target.kind !== 'opaque' || target.typeName !== DIMENSIONS_TYPE) return undefined
+    const size = target.payload as { width: number; height: number }
+
+    const name = tokenNameOf(index) ?? ''
+    switch (name) {
+      case 'leading':
+      case 'top':
+        return { kind: 'double', value: 0 }
+      case 'trailing':
+        return { kind: 'double', value: size.width }
+      case 'bottom':
+        return { kind: 'double', value: size.height }
+      case 'center':
+        // Ambiguous on its own: `HorizontalAlignment.center` and its vertical twin are
+        // both spelled `.center`, and the token carries no axis. The horizontal one is
+        // the reading that is right in a VStack, which is where guides are written.
+        return { kind: 'double', value: size.width / 2 }
+      case 'firstTextBaseline':
+      case 'lastTextBaseline':
+        // Approximated as the text baseline of a single line, which is what a view
+        // with one line of text has. Recorded in the coverage matrix.
+        return { kind: 'double', value: size.height * 0.78 }
+      default:
+        return undefined
+    }
+  }
+
+  /**
+   * Modifier content that is always on screen, evaluated now rather than held.
+   *
+   * A sheet's closure must not run while the sheet is down, which is why modifier
+   * closures are kept unevaluated by default. A `.safeAreaInset`'s is the opposite
+   * case: it is part of the layout from the first frame, and holding it would mean
+   * the layout pass asking the interpreter to run something, which is a seam that
+   * does not exist and should not be opened for one modifier.
+   */
+  private makeModifier(member: string, call: HostCall): ModifierValue {
+    return {
+      name: member,
+      args: [...toArgs(call), ...this.eagerContent(member, call)],
+      span: call.span,
+      // Unevaluated on purpose: a sheet's content must not run while it is down.
+      closure: call.trailingClosure,
+    }
+  }
+
+  private eagerContent(member: string, call: HostCall): ViewArg[] {
+    if (member !== 'safeAreaInset' || !call.trailingClosure) return []
+    return call
+      .invokeBuilder(call.trailingClosure)
+      .filter((value) => asView(value) !== null)
+      .map((value) => ({ label: 'content', value }))
   }
 
   callValue(target: SwiftValue, call: HostCall): SwiftValue | undefined {

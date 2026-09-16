@@ -132,12 +132,21 @@ function render(request: CompileRequest, evaluation: EvaluationResult): RenderTr
   const safeArea = request.safeArea ?? { top: 0, leading: 0, bottom: 0, trailing: 0 }
 
   const ui = evaluation.ui
+  // The layout pass runs `.alignmentGuide` closures, which needs the interpreter -
+  // handed in as a function so `swiftui-layout` stays free of any knowledge of one.
+  const callGuide = runtime.guideRunner()
   const screen = ui
-    ? screenToLayout(ui, { colorScheme: scheme, typeScale: request.typeScale ?? 1, safeArea })
+    ? screenToLayout(ui, {
+        colorScheme: scheme,
+        typeScale: request.typeScale ?? 1,
+        safeArea,
+        callGuide,
+      })
     : {
         content: viewsToLayout(evaluation.views, {
           colorScheme: scheme,
           typeScale: request.typeScale ?? 1,
+          callGuide,
         }).element,
         background: systemBackground(scheme),
         ignoresSafeArea: false,

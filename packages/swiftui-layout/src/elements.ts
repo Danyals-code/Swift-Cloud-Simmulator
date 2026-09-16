@@ -1,4 +1,4 @@
-import type { FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, SourceSpan } from '@studio/shared'
+import type { FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -368,6 +368,40 @@ export type LayoutModifier =
       readonly x: number
       readonly y: number
       readonly z: number
+    }
+  /**
+   * `.alignmentGuide(_:computeValue:)` - where this view's guide actually sits.
+   *
+   * A *function* rather than a number, because the closure is the user's and takes
+   * the view's own dimensions - which are not known until it has been measured. It
+   * runs in the interpreter; the engine only calls it, which is why this is the one
+   * place `swiftui-layout` holds something that is not plain data.
+   */
+  | {
+      readonly kind: 'alignmentGuide'
+      /** `leading`, `center`, `trailing`, `top`, `bottom`, `firstTextBaseline`, ... */
+      readonly guide: string
+      readonly compute: (size: Size) => number
+    }
+  /**
+   * `.safeAreaInset(edge:)` - content pinned to an edge, insetting what it covers.
+   *
+   * Not an overlay: the child is offered the space that is left, which is the whole
+   * difference and the reason a toolbar drawn this way does not cover the last row.
+   */
+  | {
+      readonly kind: 'safeAreaInset'
+      readonly edge: 'top' | 'bottom' | 'leading' | 'trailing'
+      readonly content: LayoutElement
+      readonly spacing: number
+    }
+  /** `.containerRelativeFrame(_:)` - take the container's full size along an axis. */
+  | {
+      readonly kind: 'containerRelativeFrame'
+      readonly horizontal: boolean
+      readonly vertical: boolean
+      readonly count: number
+      readonly spacing: number
     }
   /** `.blendMode` - how the subtree composites with what is under it. */
   | { readonly kind: 'blendMode'; readonly mode: string }

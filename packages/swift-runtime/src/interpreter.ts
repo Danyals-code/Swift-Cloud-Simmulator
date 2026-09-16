@@ -2358,6 +2358,9 @@ export class Interpreter {
       )
     }
 
+    const fromHost = this.host.subscript?.(base, index, span)
+    if (fromHost !== undefined) return fromHost
+
     this.trap(`Value of type '${typeNameOf(base)}' has no subscripts`, span)
   }
 
