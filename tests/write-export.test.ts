@@ -1,7 +1,7 @@
 import { it } from 'vitest'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { TEMPLATES, createProjectFromTemplate } from '@studio/project-model'
+import { TEMPLATES, createProjectFromTemplate } from '@studio/project-model/templates'
 import { buildExportBundle } from '@studio/exporter'
 
 /** Writes a real export to disk for manual inspection. Skipped unless asked for. */

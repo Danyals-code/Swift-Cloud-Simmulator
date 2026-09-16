@@ -5,31 +5,68 @@ import { create } from 'zustand'
 import {
   addFile,
   addFolder,
-  createDefaultProject,
-  createProjectFromTemplate,
   createProjectStore,
   decodeProject,
-  DEFAULT_PROJECT_ID,
   dirname,
   duplicateFile,
   isInFolder,
+  isPristine,
+  LEGACY_PROJECT_ID,
   moveFile,
   payloadFromFragment,
   normalizeFileName,
   normalizeFolderPath,
+  projectFromFiles,
   removeFile,
   removeFolder,
   renameFile,
   renameFolder,
-  templateById,
   withFileText,
+  type OpenedFile,
   type Project,
   type ProjectStore,
+  type ProjectSummary,
 } from '@studio/project-model'
 import type { DeviceKey } from '@studio/sim-shell'
 import type { FileId, SourceSpan } from '@studio/shared'
 
 const AUTOSAVE_MS = 500
+
+/**
+ * Which project to reopen.
+ *
+ * In `localStorage` rather than in the database, because it is a fact about this
+ * browser rather than about any project: reopening the last one is a preference, and
+ * losing it costs one click on the welcome sheet.
+ */
+const LAST_OPENED_KEY = 'studio.lastOpened'
+
+function rememberLastOpened(id: string): void {
+  try {
+    localStorage.setItem(LAST_OPENED_KEY, id)
+  } catch {
+    // Private windows and blocked site data. The sheet still lists everything.
+  }
+}
+
+function lastOpenedId(): string | null {
+  try {
+    return localStorage.getItem(LAST_OPENED_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Loading the templates.
+ *
+ * Dynamic on purpose: the corpus is about 31 KB gzipped and nothing needs it until
+ * somebody presses Create or arrives with nothing saved. Everything the welcome sheet
+ * draws comes from the catalog, which is in the initial bundle and is a kilobyte.
+ */
+async function templates() {
+  return import('@studio/project-model/templates')
+}
 
 let store: ProjectStore | null = null
 function persistence(): ProjectStore {
@@ -38,6 +75,20 @@ function persistence(): ProjectStore {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * The first load, so it can only happen once.
+ *
+ * React runs an effect twice in development, and a `<StrictMode>` double-mount used
+ * to be harmless here because every project was written to one fixed key: the second
+ * load overwrote the first and nobody could tell. Now that a new project gets its own
+ * id, two loads that both find an empty database mint *two* starter projects - and
+ * the studio opens with a duplicate of itself in the recents list.
+ *
+ * Held at module scope rather than in the store, because the point is that it
+ * survives a component remounting.
+ */
+let loading: Promise<void> | null = null
 
 /**
  * Writes a project, returning what went wrong rather than throwing.
@@ -74,6 +125,26 @@ export interface StudioState {
   openFileIds: FileId[]
   /** false until the first load resolves; avoids flashing the template over saved work */
   loaded: boolean
+  /**
+   * What the first load found, which is what the welcome sheet reports.
+   *
+   * `'restored'` - work was already in this browser and is what you are looking at.
+   * `'shared'`   - the page was opened with a link carrying a project.
+   * `'fresh'`    - nothing was saved, so the starter project was laid down.
+   *
+   * The sheet needs all three: it offers to continue only in the first case, and it
+   * does not open at all in the second, because following a link is already an
+   * explicit request to see *that* project.
+   */
+  origin: 'restored' | 'shared' | 'fresh' | null
+  /**
+   * Every project in this browser, newest first.
+   *
+   * Refreshed whenever the set changes rather than watched, because the only thing
+   * that reads it is the welcome sheet and the only thing that writes it is this
+   * store. Empty until the first load resolves.
+   */
+  recents: readonly ProjectSummary[]
   lastSavedAt: number | null
   /**
    * Set when persistence failed, cleared by the next save that works.
@@ -108,7 +179,26 @@ export interface StudioState {
   setPreview: (settings: Partial<PreviewSettings>) => void
   /** Rewrites every span to `newName`, returning how many were changed. */
   renameSymbol: (spans: readonly SourceSpan[], newName: string) => number
-  applyTemplate: (templateId: string) => void
+  /**
+   * Creates a project from a template.
+   *
+   * Async because the sources are a separate chunk. Returns false when that chunk
+   * could not be fetched - offline, or a deploy that moved it mid-session - so the
+   * caller can say so. A Create button that silently does nothing is worse than one
+   * that fails.
+   */
+  applyTemplate: (templateId: string) => Promise<boolean>
+  /** Reopens one of the projects in this browser. */
+  openProject: (id: string) => Promise<void>
+  /** Deletes a project. Refuses the one that is open - close it by opening another. */
+  removeProject: (id: string) => Promise<void>
+  /**
+   * Replaces the project with one built from files off the user's disk.
+   *
+   * Returns false when nothing usable was in the selection, so the caller can say so
+   * rather than presenting an empty project as a successful open.
+   */
+  openFiles: (files: readonly OpenedFile[]) => boolean
 }
 
 export const useStudio = create<StudioState>((set, get) => {
@@ -121,6 +211,57 @@ export const useStudio = create<StudioState>((set, get) => {
   function scheduleSave(): void {
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(() => void get().flush(), AUTOSAVE_MS)
+  }
+
+  /**
+   * Swaps the whole project out: a template, or files opened off the disk.
+   *
+   * Every tab is closed rather than filtered, because none of them name a file that
+   * still exists, and the write is immediate rather than debounced - a replacement is
+   * a decision, not a keystroke, and a reload half a second later must not bring the
+   * old project back.
+   */
+  async function replace(project: Project): Promise<void> {
+    const outgoing = get().project
+    const first = project.files[0]?.id ?? null
+
+    set({
+      project,
+      activeFileId: first,
+      openFileIds: first ? [first] : [],
+      origin: 'restored',
+    })
+    rememberLastOpened(project.id)
+    await get().flush()
+
+    /**
+     * What happens to what was open.
+     *
+     * Kept, unless it is still exactly what it was created as. A project somebody
+     * worked on is the one thing here that cannot be recreated, so it stays in the
+     * list; a template nobody touched can be made again in two clicks, and keeping
+     * one per click would fill the list with things nobody chose to keep.
+     */
+    if (outgoing && outgoing.id !== project.id) {
+      const untouched = isPristine(outgoing)
+      if (untouched) {
+        try {
+          await persistence().remove(outgoing.id)
+        } catch {
+          // A project that could not be deleted is a stale row, not lost work.
+        }
+      }
+    }
+    await refreshRecents()
+  }
+
+  /** Re-reads the list the welcome sheet shows. Failure leaves the old list up. */
+  async function refreshRecents(): Promise<void> {
+    try {
+      set({ recents: await persistence().list() })
+    } catch {
+      // The sheet still offers the templates and the file picker.
+    }
   }
 
   function commit(project: Project, activeFileId?: FileId): void {
@@ -137,67 +278,110 @@ export const useStudio = create<StudioState>((set, get) => {
     scheduleSave()
   }
 
+  /**
+   * The body of the first load, run exactly once by `load` above.
+   *
+   * A separate function rather than an inline closure so the guard reads as one
+   * thing: "start this if it has not started".
+   */
+  async function firstLoad(): Promise<void> {
+    // A share link wins over whatever is stored, because following one is an
+    // explicit request to see *that* project. The fragment is then cleared, so a
+    // later reload does not silently discard whatever the user has since typed.
+    const shared = sharedProjectFromLocation()
+    if (shared) {
+      clearShareFragment()
+      const first = shared.files[0]?.id ?? null
+      set({
+        project: shared,
+        activeFileId: first,
+        openFileIds: first ? [first] : [],
+        loaded: true,
+        origin: 'shared',
+      })
+      const problem = await writeProject(shared)
+      if (problem) set({ saveError: problem })
+      return
+    }
+
+    // A failed load must not leave the studio waiting forever on `loaded`. Falling
+    // back to the starter project loses nothing that was not already unreachable.
+    let existing: Project | null = null
+    let failure: string | null = null
+    let summaries: readonly ProjectSummary[] = []
+
+    try {
+      summaries = await persistence().list()
+      // Whatever was open last, then the most recently touched, then the key every
+      // project used to share - which is how an install from before projects had
+      // their own ids still finds its work.
+      const wanted = lastOpenedId()
+      const id =
+        (wanted && summaries.some((p) => p.id === wanted) ? wanted : null) ??
+        summaries[0]?.id ??
+        LEGACY_PROJECT_ID
+      existing = await persistence().load(id)
+    } catch (error) {
+      failure = error instanceof Error && error.message
+        ? `Could not open saved work: ${error.message}`
+        : 'Could not open saved work from this browser’s storage.'
+    }
+
+    // The starter project lives in the same chunk the templates do. If it cannot be
+    // fetched there is nothing to open, and the studio has to say that rather than
+    // sit on "Loading project…" for ever.
+    let project = existing
+    if (!project) {
+      try {
+        project = (await templates()).createDefaultProject()
+      } catch {
+        set({ loaded: true, origin: 'fresh', saveError: 'Could not load the starter project. Check the connection and reload.' })
+        return
+      }
+    }
+    const first = project.files[0]?.id ?? null
+
+    set({
+      project,
+      activeFileId: first,
+      openFileIds: first ? [first] : [],
+      loaded: true,
+      origin: existing ? 'restored' : 'fresh',
+      recents: summaries,
+      saveError: failure,
+    })
+    rememberLastOpened(project.id)
+
+    // Laying down the starter project deliberately does *not* move `lastSavedAt`:
+    // the indicator answers "is what I typed written down", and starting the clock
+    // before the user has typed anything makes it say yes while their first edits
+    // are still in the debounce.
+    if (!existing && !failure) {
+      const problem = await writeProject(project)
+      if (problem) set({ saveError: problem })
+      else await refreshRecents()
+    }
+  }
+
   return {
     project: null,
     activeFileId: null,
     openFileIds: [],
     loaded: false,
+    origin: null,
+    recents: [],
     lastSavedAt: null,
     saveError: null,
     preview: { colorScheme: 'light', typeScale: 1, zoom: 'fit' },
 
-    async load() {
-      // A share link wins over whatever is stored, because following one is an
-      // explicit request to see *that* project. The fragment is then cleared, so a
-      // later reload does not silently discard whatever the user has since typed.
-      const shared = sharedProjectFromLocation()
-      if (shared) {
-        clearShareFragment()
-        const first = shared.files[0]?.id ?? null
-        set({
-          project: shared,
-          activeFileId: first,
-          openFileIds: first ? [first] : [],
-          loaded: true,
-        })
-        const problem = await writeProject(shared)
-        if (problem) set({ saveError: problem })
-        return
-      }
-
-      // A failed load must not leave the studio waiting forever on `loaded`. Falling
-      // back to the starter project loses nothing that was not already unreachable.
-      let existing: Project | null = null
-      let failure: string | null = null
-      try {
-        existing = await persistence().load(DEFAULT_PROJECT_ID)
-      } catch (error) {
-        failure = error instanceof Error && error.message
-          ? `Could not open saved work: ${error.message}`
-          : 'Could not open saved work from this browser’s storage.'
-      }
-
-      const project = existing ?? createDefaultProject()
-      const first = project.files[0]?.id ?? null
-
-      set({
-        project,
-        activeFileId: first,
-        openFileIds: first ? [first] : [],
-        loaded: true,
-        saveError: failure,
+    load() {
+      // Already done, or already running: either way there is nothing to start.
+      if (get().loaded) return Promise.resolve()
+      loading ??= firstLoad().finally(() => {
+        loading = null
       })
-
-      // Laying down the starter project deliberately does *not* move `lastSavedAt`:
-      // the indicator answers "is what I typed written down", and starting the clock
-      // before the user has typed anything makes it say yes while their first edits
-      // are still in the debounce.
-      if (!existing && !failure) {
-        const problem = await writeProject(project)
-        if (problem) set({ saveError: problem })
-      }
+      return loading
     },
-
     async flush() {
       if (saveTimer) {
         clearTimeout(saveTimer)
@@ -393,14 +577,71 @@ export const useStudio = create<StudioState>((set, get) => {
       return spans.length
     },
 
-    applyTemplate(templateId) {
-      const template = templateById(templateId)
-      if (!template) return
+    async applyTemplate(templateId) {
+      let module: Awaited<ReturnType<typeof templates>>
+      try {
+        module = await templates()
+      } catch {
+        return false
+      }
 
-      const project = createProjectFromTemplate(template)
-      const first = project.files[0]?.id ?? null
-      set({ project, activeFileId: first, openFileIds: first ? [first] : [] })
-      scheduleSave()
+      const template = module.templateById(templateId)
+      if (!template) return false
+
+      await replace(module.createProjectFromTemplate(template))
+      return true
+    },
+
+    openFiles(files) {
+      const project = projectFromFiles(files)
+      if (!project) return false
+      void replace(project)
+      return true
+    },
+
+    async openProject(id) {
+      if (get().project?.id === id) return
+
+      // The project on screen is written before anything else is read: the debounce
+      // may still be holding the last few keystrokes, and they belong to the project
+      // being left rather than to the one being opened.
+      await get().flush()
+
+      let opened: Project | null = null
+      try {
+        opened = await persistence().load(id)
+      } catch {
+        opened = null
+      }
+      if (!opened) {
+        // The row was stale - deleted in another tab, or storage went away.
+        await refreshRecents()
+        return
+      }
+
+      const first = opened.files[0]?.id ?? null
+      set({
+        project: opened,
+        activeFileId: first,
+        openFileIds: first ? [first] : [],
+        origin: 'restored',
+        lastSavedAt: null,
+      })
+      rememberLastOpened(id)
+      await refreshRecents()
+    },
+
+    async removeProject(id) {
+      // Deleting what is on screen would leave the studio holding a project that no
+      // longer exists, and the next autosave would write it straight back.
+      if (get().project?.id === id) return
+
+      try {
+        await persistence().remove(id)
+      } catch {
+        // Nothing useful to do: the row stays, and the list says so on the next read.
+      }
+      await refreshRecents()
     },
   }
 })

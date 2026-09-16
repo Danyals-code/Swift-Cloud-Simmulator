@@ -11,6 +11,7 @@ import type {
   ForInStmt,
   FuncDecl,
   InitDecl,
+  Param,
   Pattern,
   SourceFileNode,
   Stmt,
@@ -20,7 +21,12 @@ import type {
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
-import { collectConformance, hoistNestedTypes, type ConformanceModel } from '@studio/swift-syntax'
+import {
+  argumentLabels,
+  collectConformance,
+  hoistNestedTypes,
+  type ConformanceModel,
+} from '@studio/swift-syntax'
 import {
   bindingLValue,
   Environment,
@@ -82,9 +88,13 @@ import {
   type DictionaryValue,
   type EnumValue,
   type FunctionValue,
+  type ProjectionPayload,
   type StructValue,
   type SwiftValue,
 } from './values'
+
+/** A span for a value the source never wrote down - a synthesised enum case. */
+const NOWHERE: SourceSpan = { file: '', start: 0, end: 0 }
 
 export interface InterpreterOptions {
   readonly host?: InterpreterHost
@@ -292,8 +302,9 @@ export class Interpreter {
     // Declared initialiser wins over the memberwise one, which is also Swift's rule:
     // writing an `init` suppresses the synthesised member-wise initialiser for a class
     // entirely, and for a struct once it is in the same file.
-    const initialiser = members.find(
-      (m): m is InitDecl => m.kind === 'initDecl' && m.body !== null,
+    const initialiser = pickOverload(
+      members.filter((m): m is InitDecl => m.kind === 'initDecl' && m.body !== null),
+      labelsOf(args),
     )
 
     if (initialiser) {
@@ -370,7 +381,12 @@ export class Interpreter {
    * `self` inside such a member is the case itself, which is how an enum's computed
    * property - `var title: String { switch self { … } }` - is written.
    */
-  private memberOfEnum(target: EnumValue, member: string, span: SourceSpan): SwiftValue | undefined {
+  private memberOfEnum(
+    target: EnumValue,
+    member: string,
+    span: SourceSpan,
+    labels?: readonly (string | null)[],
+  ): SwiftValue | undefined {
     if (member === 'rawValue') return target.rawValue ?? NIL
 
     const decl = this.enums.get(target.typeName)
@@ -387,15 +403,44 @@ export class Interpreter {
         this.globals.child(target),
         span,
         namedTypeOf(computed.typeAnnotation),
+        computed.attributes.some((a) => a.name === 'ViewBuilder'),
       )
     }
 
-    const method = members.find(
-      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null,
-    )
+    const method = pickOverload(methodsNamed(members, member), labels)
     if (method) return { kind: 'function', decl: method, self: null, env: this.globals.child(target) }
 
     return undefined
+  }
+
+  /**
+   * A *method* on the receiver, ignoring any property that shares its name.
+   *
+   * Swift lets a type declare `var spent: Double` and `func spent(on:) -> Double`
+   * and they are two different members; only one of them can be called. The general
+   * lookup answers properties first, which is right for a read and wrong for a call -
+   * `spent(on: .food)` found the `Double` and then tried to call it.
+   */
+  private methodOn(
+    self: SwiftValue,
+    name: string,
+    labels: readonly (string | null)[],
+    lookupIn?: string,
+  ): FunctionValue | undefined {
+    if (self.kind !== 'struct' && self.kind !== 'enum') return undefined
+    const owner = lookupIn ?? self.typeName
+    const decl = pickOverload(methodsNamed(this.membersOf(owner), name), labels)
+    if (!decl) return undefined
+
+    return self.kind === 'struct'
+      ? {
+          kind: 'function',
+          decl,
+          self,
+          env: this.globals,
+          owner: this.declaringTypeOf(owner, decl),
+        }
+      : { kind: 'function', decl, self: null, env: this.globals.child(self) }
   }
 
   /** Reads a member from a struct: stored field, computed property, or bound method. */
@@ -408,6 +453,12 @@ export class Interpreter {
      * only the member list changes, which is the whole of what `super` means.
      */
     lookupIn: string = target.typeName,
+    /**
+     * The labels the call site wrote, where there is a call site. Two methods may
+     * share a name and differ only in these, and picking the wrong one runs a body
+     * with an unbound parameter rather than failing.
+     */
+    labels?: readonly (string | null)[],
   ): SwiftValue | undefined {
     if (lookupIn === target.typeName) {
       const field = target.fields.get(member)
@@ -427,12 +478,11 @@ export class Interpreter {
         this.globals.child(target),
         span,
         namedTypeOf(computed.typeAnnotation),
+        computed.attributes.some((a) => a.name === 'ViewBuilder'),
       )
     }
 
-    const method = members.find(
-      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null,
-    )
+    const method = pickOverload(methodsNamed(members, member), labels)
     if (method) {
       return {
         kind: 'function',
@@ -467,6 +517,17 @@ export class Interpreter {
     env: Environment,
     span: SourceSpan,
     expected: string | null = null,
+    /**
+     * `@ViewBuilder`: the body is a *list of views*, not statements with a value.
+     *
+     * Without this a helper of more than one statement returned nothing at all -
+     * `@ViewBuilder func row(_ b: Bool) -> some View { if b { Text("y") } else {
+     * Text("n") } }` drew an empty screen and reported no problem, because the
+     * implicit return below only covers a single expression and a builder body is
+     * almost never one. Splitting a long body into `@ViewBuilder` helpers is one of
+     * the first things anybody does to a real view.
+     */
+    isViewBuilder = false,
   ): SwiftValue {
     // Runaway *recursion* would exhaust the JS call stack long before the step budget
     // fires, surfacing as a RangeError from inside the interpreter rather than as a
@@ -489,6 +550,15 @@ export class Interpreter {
     // the only behaviour that makes `defer` worth writing.
     this.deferred.push([])
     try {
+      if (isViewBuilder) {
+        const built: SwiftValue[] = []
+        this.collectBuilderValues(body, env, built)
+        if (built.length === 1) return built[0]!
+        // More than one, which is a `TupleView` in Swift. The host owns what that is
+        // here, because the interpreter has no idea what a view is.
+        return this.host.groupValues?.(built, span) ?? built[0] ?? VOID
+      }
+
       const only = body.statements.length === 1 ? body.statements[0] : undefined
       if (only?.kind === 'exprStmt') return this.evaluateExpecting(only.expression, env, expected)
 
@@ -606,7 +676,14 @@ export class Interpreter {
     const label = fn.self ? `${fn.self.typeName}.${decl.name}` : decl.name
     this.owners.push(fn.owner ?? null)
     try {
-      return this.runBody(label, decl.body, env, span, namedTypeOf(decl.returnType))
+      return this.runBody(
+        label,
+        decl.body,
+        env,
+        span,
+        namedTypeOf(decl.returnType),
+        decl.attributes.some((a) => a.name === 'ViewBuilder'),
+      )
     } finally {
       this.owners.pop()
     }
@@ -1028,6 +1105,7 @@ export class Interpreter {
 
   // ------------------------------------------------------------------- enums
 
+
   /**
    * Resolves a contextual enum member against an expected type.
    *
@@ -1055,11 +1133,20 @@ export class Interpreter {
       return this.host.coerceToType?.(value, typeName) ?? value
     }
 
-    const name = (value.payload as { name?: string } | null)?.name
+    const payload = value.payload as { name?: string; args?: readonly SwiftValue[] } | null
+    const name = payload?.name
     if (typeof name !== 'string') return value
     if (!decl.cases.some((c) => c.name === name)) return value
 
-    return this.makeEnumCase(decl, name, [], { file: '', start: 0, end: 0 })
+    // `.done("hi")` carries its payload here, because the contextual form is the one
+    // real code writes and a case built without its associated values matches the
+    // pattern and binds nothing.
+    const args = (payload?.args ?? []).map((argument) => ({
+      label: null,
+      value: argument,
+      span: NOWHERE,
+    }))
+    return this.makeEnumCase(decl, name, args, NOWHERE)
   }
 
   // ------------------------------------------------------------------ errors
@@ -1557,6 +1644,26 @@ export class Interpreter {
     const fromHost = this.host.getMember?.(target, member, span)
     if (fromHost !== undefined) return fromHost
 
+    /**
+     * `$store.volume` - a member of a projection is a projection onto that member.
+     *
+     * SwiftUI writes this as `@dynamicMemberLookup` on `Binding` and on the wrapper
+     * an `@ObservedObject` projects, and it is how half the bindings in real code are
+     * spelled: `Slider(value: $settings.volume)`, `TextField(text: $draft.title)`,
+     * `Toggle(isOn: $store.notify)`. Without it the only way to hand a control a
+     * binding into a model was to mirror the value into a `@State` and copy it back.
+     *
+     * Last, after the host and the built-ins have had their chance, so
+     * `$count.wrappedValue` still means what it has always meant.
+     */
+    const projected = asProjection(target)
+    if (projected) {
+      const owner = projected.get()
+      if (owner.kind === 'struct' && owner.fields.has(member)) {
+        return memberProjection(projected, member)
+      }
+    }
+
     this.trap(`Value of type '${typeNameOf(target)}' has no member '${member}'`, span)
   }
 
@@ -1699,6 +1806,16 @@ export class Interpreter {
         return this.callClosure(local.value, allArgs.map((a) => a.value), span)
       }
 
+      // `spent(on: .food)` written inside the type it belongs to. The member wins
+      // over anything global, which is Swift's scoping, and a *method* wins over a
+      // property of the same name, which is the half `evaluateIdentifier` cannot know
+      // because it is not told that a call is being made.
+      const onSelf = env.resolveSelf()
+      if (onSelf) {
+        const method = this.methodOn(onSelf, callee.name, labelsOf(allArgs))
+        if (method) return this.callFunction(method, allArgs, span)
+      }
+
       // A declaration in the project wins over anything the host offers, which is
       // Swift's own rule: a local type shadows the module's. It matters more than it
       // looks - `Task` is a perfectly ordinary name for a to-do app's model type, and
@@ -1818,7 +1935,12 @@ export class Interpreter {
     // can call the thing it overrode instead of itself.
     if (baseExpr.kind === 'superExpr' && target.kind === 'struct') {
       const above = this.superclassOf(this.owners[this.owners.length - 1] ?? target.typeName)
-      const bound = above ? this.memberOfStruct(target, member, memberSpan, above) : undefined
+      // A method wins over a property of the same name here too - `super.spent()`
+      // is a call, whatever `spent` also happens to be.
+      const bound = above
+        ? (this.methodOn(target, member, labelsOf(allArgs), above) ??
+          this.memberOfStruct(target, member, memberSpan, above, labelsOf(allArgs)))
+        : undefined
       if (bound?.kind === 'function') return this.callFunction(bound, allArgs, span)
     }
 
@@ -1846,13 +1968,17 @@ export class Interpreter {
     }
 
     if (target.kind === 'enum') {
-      const bound = this.memberOfEnum(target, member, memberSpan)
+      const bound =
+        this.methodOn(target, member, labelsOf(allArgs)) ??
+        this.memberOfEnum(target, member, memberSpan, labelsOf(allArgs))
       if (bound?.kind === 'function') return this.callFunction(bound, allArgs, span)
       if (bound?.kind === 'closure') return this.callClosure(bound, allArgs.map((a) => a.value), span)
     }
 
     if (target.kind === 'struct') {
-      const bound = this.memberOfStruct(target, member, memberSpan)
+      const bound =
+        this.methodOn(target, member, labelsOf(allArgs)) ??
+        this.memberOfStruct(target, member, memberSpan, undefined, labelsOf(allArgs))
       if (bound?.kind === 'function') {
         const isMutating = bound.decl.modifiers.some((m) => m.name === 'mutating')
         if (isMutating && lvalue && !lvalue.mutable) {
@@ -1949,6 +2075,45 @@ export class Interpreter {
         if (!first) return undefined
         const magnitude = Math.abs(this.requireNumber(first, span))
         return first.kind === 'int' ? int(magnitude) : double(magnitude)
+      }
+      /**
+       * `Dictionary(grouping:by:)` - the one-liner that turns a flat list into
+       * sections, and the reason `Set` and `Array` had constructors here and this did
+       * not: nothing in the corpus grouped anything.
+       */
+      case 'Dictionary': {
+        const grouping = args.find((a) => a.label === 'grouping')?.value
+        const by = args.find((a) => a.label === 'by')?.value
+        if (grouping?.kind === 'array' && by?.kind === 'closure') {
+          // Insertion order, so a sectioned list comes out in the order the groups
+          // were met. Swift's own hash order promises nothing either way.
+          const buckets = new Map<string, SwiftValue[]>()
+          for (const element of grouping.elements) {
+            const slot = dictionaryKey(this.callClosure(by, [element], span))
+            const bucket = buckets.get(slot)
+            if (bucket) bucket.push(copyValue(element))
+            else buckets.set(slot, [copyValue(element)])
+          }
+
+          const out = new Map<string, SwiftValue>()
+          for (const [slot, bucket] of buckets) out.set(slot, array(bucket))
+          return { kind: 'dictionary', entries: out }
+        }
+
+        // `Dictionary(uniqueKeysWithValues:)` over an array of pairs.
+        const pairs = args.find((a) => a.label === 'uniqueKeysWithValues')?.value
+        if (pairs?.kind === 'array') {
+          const out = new Map<string, SwiftValue>()
+          for (const pair of pairs.elements) {
+            if (pair.kind !== 'tuple') continue
+            const key = pair.elements[0]
+            const value = pair.elements[1]
+            if (key && value) out.set(dictionaryKey(key), copyValue(value))
+          }
+          return { kind: 'dictionary', entries: out }
+        }
+
+        return undefined
       }
       case 'Int':
       case 'Double': {
@@ -2279,14 +2444,38 @@ export class Interpreter {
         const element = this.subscriptLValue(base, index, expr.span)
         if (!element) return null
 
+        /**
+         * `counts[key, default: 0] += 1`, which is how every tally in Swift is written.
+         *
+         * A compound assignment reads through the lvalue before it writes, and the
+         * plain getter answers nil for a key that is not there yet - so the read
+         * failed with "Expected a number, found 'Optional'" on the first occurrence
+         * of every key. The default belongs to the *read* half, and only there.
+         */
+        const fallback = expr.args.find((a) => a.label === 'default')
+        const withDefault =
+          fallback && base.kind === 'dictionary'
+            ? {
+                ...element,
+                get: () => {
+                  const found = base.entries.get(dictionaryKey(index))
+                  return found ?? this.evaluate(fallback.value, env)
+                },
+              }
+            : element
+
         // `let scores = ["a": 1]` then `scores["b"] = 2` is a compile error in Swift,
         // and the element of a constant collection has to inherit the constancy: the
         // storage is the collection, and writing through a position is still writing
         // to it.
         const container = this.tryResolveLValue(expr.base, env)
         return container && !container.mutable
-          ? { ...element, mutable: false, description: `${container.description}${element.description}` }
-          : element
+          ? {
+              ...withDefault,
+              mutable: false,
+              description: `${container.description}${element.description}`,
+            }
+          : withDefault
       }
 
       default:
@@ -2743,6 +2932,85 @@ function isStaticDecl(decl: { modifiers: readonly { name: string }[] }): boolean
  * every lvalue means assignment, compound assignment and `mutating` methods all get
  * this for free instead of each needing to know about bindings.
  */
+/**
+ * A projection onto one field of whatever another projection refers to.
+ *
+ * The write-back is the part that has to be right. A class is a reference, so
+ * setting the field has already changed the object everyone else is holding; a
+ * struct is a value, so the whole thing has to be pushed back through the outer
+ * projection or the change lands on a copy and disappears. Reading the owner afresh
+ * on every access rather than capturing it keeps a computed `Binding(get:set:)`
+ * behaving like the storage it stands for.
+ */
+function memberProjection(outer: ProjectionPayload, field: string): SwiftValue {
+  return projection({
+    get: () => {
+      const owner = outer.get()
+      return owner.kind === 'struct' ? (owner.fields.get(field) ?? { kind: 'nil' }) : { kind: 'nil' }
+    },
+    set: (value) => {
+      const owner = outer.get()
+      if (owner.kind !== 'struct') return
+      owner.fields.set(field, value)
+      if (!owner.reference) outer.set(owner)
+    },
+    description: `${outer.description}.${field}`,
+  })
+}
+
+/**
+ * Overload resolution, by argument label.
+ *
+ * Swift identifies a function by its name *and* its labels, so `minutes(on:)` and
+ * `minutes(of:)` are two functions. Where a call wrote its labels, they choose;
+ * where they are not known - a method reached as a value, a `super` lookup with no
+ * arguments - the first declared wins, which is what every lookup here did before
+ * overloads were kept apart at all.
+ *
+ * Deliberately falls back rather than failing. A trailing closure arrives unlabelled
+ * even when its parameter has a label, so a strict match would reject
+ * `sheet(isPresented:)` written the way everybody writes it; the fallback makes an
+ * unmatched call behave exactly as it used to.
+ */
+function pickOverload<T extends { readonly params: readonly Param[] }>(
+  candidates: readonly T[],
+  labels: readonly (string | null)[] | undefined,
+): T | undefined {
+  if (candidates.length <= 1 || !labels) return candidates[0]
+  return candidates.find((decl) => labelsMatch(decl.params, labels)) ?? candidates[0]
+}
+
+/**
+ * Whether a call writing these labels could be this declaration.
+ *
+ * A parameter with a default may be left out, so the written labels have to appear in
+ * order among the declared ones and every parameter they skip has to have a default.
+ */
+function labelsMatch(params: readonly Param[], written: readonly (string | null)[]): boolean {
+  const declared = argumentLabels(params)
+  if (written.length > declared.length) return false
+
+  let next = 0
+  for (let i = 0; i < declared.length; i++) {
+    if (next < written.length && written[next] === declared[i]) {
+      next++
+      continue
+    }
+    if (!params[i]!.defaultValue) return false
+  }
+  return next === written.length
+}
+
+function labelsOf(args: readonly CallArgument[]): readonly (string | null)[] {
+  return args.map((arg) => arg.label ?? null)
+}
+
+function methodsNamed(members: readonly Decl[], name: string): readonly FuncDecl[] {
+  return members.filter(
+    (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === name && m.body !== null,
+  )
+}
+
 function throughProjection(lvalue: LValue): LValue {
   const projected = asProjection(lvalue.get())
   if (!projected) return lvalue

@@ -21,11 +21,20 @@
  *    it consumed a tenth of the budget and would eventually have forced a real
  *    feature to be cut to pay for bytes that were never sent.
  *
- * 2. **This is a ratchet on total shipped bytes, not a proxy for load time.** Moving
- *    code behind a dynamic import makes the first paint smaller and this number very
- *    slightly *larger*, because the split costs a little overhead. That is a good
- *    trade the gate cannot see, so the per-chunk breakdown below is printed with the
- *    largest first: that one is the better load-time signal.
+ * 2. **Two numbers, because one of them was the wrong one to optimise.** The total is
+ *    a ratchet on shipped bytes: it only ever grows, and it is what stops fifty
+ *    reasonable decisions adding up to three megabytes. But moving code behind a
+ *    dynamic import makes the first paint *smaller* and the total very slightly
+ *    larger, because a split costs overhead - so for a while the only gate in the
+ *    build actively discouraged the thing most worth doing. Splitting the template
+ *    corpus out took 21 KB off the first paint and put 3 KB on the total, and nothing
+ *    in CI could tell that apart from a regression.
+ *
+ *    So the largest chunk is gated too. Turbopack emits no per-route manifest, and
+ *    the framework's own entry - `rootMainFiles` - measures React and the Next
+ *    runtime rather than the studio, so it moves for none of the reasons worth
+ *    watching. The biggest chunk *is* the studio, it is on the critical path, and it
+ *    is exactly what a static import of something large lands in.
  *
  * NFR-1 splits its budget into shell and worker, but Turbopack does not emit a
  * per-route chunk manifest and there is no stable way to attribute a hashed chunk to
@@ -58,6 +67,22 @@ const KB = 1024
  *              The measured number fell by 38 KB without a byte changing hands.
  */
 const BUDGET_KB = 450
+
+/**
+ * The biggest single chunk, in KB gzipped - which is the studio's own.
+ *
+ * On the critical path and, unlike the total, it goes *down* when something large is
+ * moved behind a dynamic import. That is the whole reason it is here: for a while the
+ * only gate in the build got very slightly worse when the code got better.
+ *
+ * Set close to where it sits rather than comfortably above it. A ceiling with room in
+ * it stops nothing.
+ *
+ * History:
+ *   Phase 11 - 183 KB before, 162 KB after `@studio/project-model/templates` became a
+ *              separate entry point imported only where a template is created.
+ */
+const LARGEST_CHUNK_KB = 172
 
 function walkJs(dir) {
   const out = []
@@ -119,13 +144,26 @@ function main() {
   const total = sizes.reduce((sum, c) => sum + c.kb, 0)
   const pct = (total / BUDGET_KB) * 100
 
+  const largest = sizes[0]?.kb ?? 0
+  const largestPct = (largest / LARGEST_CHUNK_KB) * 100
+
+  const label = (used, budget, share) => (used > budget ? 'FAIL' : share > 85 ? 'WARN' : 'ok')
+
   if (asJson) {
-    console.log(JSON.stringify({ total, budget: BUDGET_KB, chunks: sizes }, null, 2))
+    console.log(
+      JSON.stringify(
+        { total, budget: BUDGET_KB, largest, largestBudget: LARGEST_CHUNK_KB, chunks: sizes },
+        null,
+        2,
+      ),
+    )
   } else {
-    const status = total > BUDGET_KB ? 'FAIL' : pct > 85 ? 'WARN' : 'ok'
     console.log('\n  Client JS budget (gzipped)\n')
     console.log(
-      `  ${status.padEnd(5)} ${total.toFixed(1).padStart(7)} KB  /  ${BUDGET_KB} KB  (${pct.toFixed(0)}%)   ${chunks.length} chunks\n`,
+      `  ${label(total, BUDGET_KB, pct).padEnd(5)} ${total.toFixed(1).padStart(7)} KB  /  ${BUDGET_KB} KB  (${pct.toFixed(0)}%)   total, ${chunks.length} chunks`,
+    )
+    console.log(
+      `  ${label(largest, LARGEST_CHUNK_KB, largestPct).padEnd(5)} ${largest.toFixed(1).padStart(7)} KB  /  ${LARGEST_CHUNK_KB} KB  (${largestPct.toFixed(0)}%)   largest chunk\n`,
     )
     console.log('  Largest:')
     for (const { file, kb } of sizes.slice(0, 6)) {
@@ -139,6 +177,15 @@ function main() {
       `Bundle budget exceeded: ${total.toFixed(1)} KB gzipped against a ${BUDGET_KB} KB budget.\n` +
         'Either trim the payload or raise BUDGET_KB in tooling/check-bundle-budget.mjs as a\n' +
         'deliberate decision, recording the new baseline in the History note above.',
+    )
+    process.exit(1)
+  }
+
+  if (largest > LARGEST_CHUNK_KB) {
+    console.error(
+      `Largest chunk over budget: ${largest.toFixed(1)} KB gzipped against a ${LARGEST_CHUNK_KB} KB ceiling.\n` +
+        'Something big is being imported statically that could be imported on demand -\n' +
+        'look at what that chunk pulls in before raising LARGEST_CHUNK_KB.',
     )
     process.exit(1)
   }

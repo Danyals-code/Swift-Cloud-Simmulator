@@ -313,11 +313,7 @@ export class SwiftUIHost implements InterpreterHost {
    * closure built.
    */
   private makeGeometryReader(call: HostCall): SwiftValue {
-    const site = `g${call.span.start}`
-    const ordinal = this.geometryOrdinals.get(site) ?? 0
-    this.geometryOrdinals.set(site, ordinal + 1)
-    const key = ordinal === 0 ? site : `${site}#${ordinal}`
-
+    const key = this.measuredSite(`g${call.span.start}`)
     const size = this.geometry.get(key) ?? this.defaultGeometry
     const proxy = opaque(GEOMETRY_TYPE, { width: size.width, height: size.height })
 
@@ -329,6 +325,93 @@ export class SwiftUIHost implements InterpreterHost {
       action: null,
       span: call.span,
       geometryKey: key,
+    })
+  }
+
+  /**
+   * A key for one site that needs to know the size it was given.
+   *
+   * The same site expands more than once - a reader inside a `ForEach` - so the
+   * ordinal keeps each occurrence's measurement apart. Shared with the shape
+   * expansion below, which has exactly the same ordering problem.
+   */
+  private measuredSite(site: string): string {
+    const ordinal = this.geometryOrdinals.get(site) ?? 0
+    this.geometryOrdinals.set(site, ordinal + 1)
+    return ordinal === 0 ? site : `${site}#${ordinal}`
+  }
+
+  /**
+   * A user type conforming to `Shape`, as something that can be drawn.
+   *
+   * `struct Arc: Shape { func path(in rect: CGRect) -> Path }` is how real SwiftUI
+   * code writes a shape, and it needs the one thing the interpreter cannot have: the
+   * rect it is about to be laid out in. That is the same ordering problem
+   * `GeometryReader` has, so it gets the same answer - the size measured last pass,
+   * with the pipeline running a second one when the guess was wrong.
+   *
+   * The result is a greedy container holding the `Path` the shape drew, which is
+   * exactly what a shape is: it fills what it is given.
+   */
+  shapeAsView(target: SwiftValue, span: SourceSpan): ViewValue | null {
+    if (target.kind !== 'struct') return null
+    if (!this.conformsTo?.(target.typeName, 'Shape') || !this.callMethod) return null
+
+    const key = this.measuredSite(`shape${span.start}`)
+    const size = this.geometry.get(key) ?? this.defaultGeometry
+    const rect = opaque(RECT_TYPE, { x: 0, y: 0, width: size.width, height: size.height })
+
+    const drawn = this.callMethod(target, 'path', [rect])
+    if (!drawn || !asPath(drawn)) return null
+
+    const path: ViewValue = {
+      name: 'Path',
+      args: [{ label: null, value: drawn }],
+      children: [],
+      modifiers: [],
+      action: null,
+      span,
+    }
+
+    return {
+      name: 'ShapeView',
+      args: [],
+      children: [path],
+      modifiers: [],
+      action: null,
+      span,
+      geometryKey: key,
+    }
+  }
+
+  /**
+   * A modifier written on a custom shape.
+   *
+   * Two kinds, and they belong in different places. `.fill`, `.stroke` and `.trim`
+   * are the shape's own - they change what is drawn, so they go on the `Path` - while
+   * `.frame`, `.padding` and everything else are view modifiers and belong on the
+   * container, or a `.frame(width: 160)` would leave the shape greedy and the ring
+   * would fill the screen.
+   *
+   * Returns null when the target is not a shape at all, so every other dispatch below
+   * is untouched.
+   */
+  private shapeModifier(target: SwiftValue, member: string, call: HostCall): SwiftValue | null {
+    const existing = asView(target)
+    const container =
+      existing?.name === 'ShapeView' ? existing : this.shapeAsView(target, call.span)
+    if (!container) return null
+
+    const modifier = this.makeModifier(member, call)
+    if (!SHAPE_MEMBERS.has(member)) {
+      return view({ ...container, modifiers: [...container.modifiers, modifier] })
+    }
+
+    const drawn = container.children[0]
+    if (!drawn) return null
+    return view({
+      ...container,
+      children: [{ ...drawn, modifiers: [...drawn.modifiers, modifier] }],
     })
   }
 
@@ -690,6 +773,26 @@ export class SwiftUIHost implements InterpreterHost {
       })
     }
 
+    /**
+     * `AnyView(someView)` - erasure, which at runtime is its content and nothing else.
+     *
+     * The content arrives as an *argument* rather than as a trailing closure, and the
+     * layout flattens this view by walking its children - so with nothing moved
+     * across, an erased view drew nothing at all. There is no type here to erase; the
+     * wrapper exists only so the layout can see through it.
+     */
+    if (name === 'AnyView') {
+      const content = call.args.find((a) => a.label === null)?.value
+      return view({
+        name,
+        args: [],
+        children: content ? this.toViews([content]) : [],
+        modifiers: [],
+        action: null,
+        span: call.span,
+      })
+    }
+
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
@@ -867,6 +970,11 @@ export class SwiftUIHost implements InterpreterHost {
     // SwiftUI, so the struct is expanded into the views its `body` produces and the
     // modifier applied to those - a struct with no `body` expands to nothing and
     // falls through to the interpreter's own "no such member" reporting.
+    // Before the general view path: a shape's `.stroke` has to land on the path it
+    // draws, and a shape's `.frame` on the box it draws into.
+    const shaped = this.shapeModifier(target, member, call)
+    if (shaped) return shaped
+
     const base = asView(target) ?? this.expandForModifier(target, call.span)
     if (base) {
       return view({ ...base, modifiers: [...base.modifiers, this.makeModifier(member, call)] })
@@ -1111,6 +1219,9 @@ export class SwiftUIHost implements InterpreterHost {
       span: call.span,
       // Unevaluated on purpose: a sheet's content must not run while it is down.
       closure: call.trailingClosure,
+      // Only where there is something deferred to run later. Every other modifier
+      // resolves inside the scope it was written in and has no use for this.
+      ...(call.trailingClosure ? { environment: this.environment.snapshot() } : {}),
     }
   }
 
@@ -1150,6 +1261,27 @@ export class SwiftUIHost implements InterpreterHost {
    * without this hook, every animation collapses to its default duration and the
    * number the user typed is silently discarded.
    */
+  /**
+   * What a `@ViewBuilder` body of more than one statement produces.
+   *
+   * SwiftUI calls it a `TupleView`; the preview has no such thing and does not need
+   * one, because an implicit `Group` behaves identically - its children are laid out
+   * by whatever contains it, and a modifier applied to it applies to all of them.
+   */
+  groupValues(values: readonly SwiftValue[], span: SourceSpan): SwiftValue | undefined {
+    const children = this.toViews(values)
+    if (children.length === 0) return undefined
+
+    return view({
+      name: 'Group',
+      args: [],
+      children,
+      modifiers: [],
+      action: null,
+      span,
+    })
+  }
+
   callImplicitMember(member: string, call: HostCall): SwiftValue | undefined {
     if (ANIMATION_CURVES[member] || member === 'spring' || member === 'interpolatingSpring') {
       return this.makeAnimation(member, call)
@@ -1187,7 +1319,19 @@ export class SwiftUIHost implements InterpreterHost {
     if (member === 'height' || member === 'fraction') {
       return token(`detent:${member}:${numberOf(call.args[0]?.value) ?? 0}`)
     }
-    return undefined
+
+    /**
+     * Anything else is the project's own: `.done("hi")` where a `Load` is expected.
+     *
+     * The host cannot know which enum that is - only the declared type at the call
+     * site can say - so it answers with the name *and the arguments*, and
+     * `coerceToEnum` builds the case once the expected type is known. Returning a
+     * bare name here is what used to lose the payload.
+     */
+    return opaque(TOKEN_TYPE, {
+      name: member,
+      args: call.args.map((a) => a.value),
+    } satisfies TokenPayload)
   }
 
   getMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
@@ -1523,6 +1667,15 @@ const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {
 }
 
 /** Members that belong to `Color` itself rather than to it as a view. */
+/**
+ * The members that belong to the shape rather than to the view around it.
+ *
+ * SwiftUI's own split: these are declared on `Shape` and either answer another shape
+ * or turn one into a view. Everything else a shape accepts, it accepts because a
+ * shape is a view.
+ */
+const SHAPE_MEMBERS = new Set(['fill', 'stroke', 'strokeBorder', 'trim', 'inset', 'offset', 'size'])
+
 const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init'])
 
 const GRADIENTS: Readonly<Record<string, GradientPayload['kind']>> = {

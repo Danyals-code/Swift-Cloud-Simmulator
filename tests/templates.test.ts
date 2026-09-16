@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { CompileRequest, Diagnostic, RenderNode } from '@studio/shared'
-import { TEMPLATES, appNameOf, createProjectFromTemplate } from '@studio/project-model'
-import { compile, resetPipelineState } from '@studio/swiftui-runtime'
+import type { CompileRequest, Diagnostic, RenderNode, RenderTree } from '@studio/shared'
+import { TEMPLATES, appNameOf, createProjectFromTemplate } from '@studio/project-model/templates'
+import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
 import { DEVICES } from '@studio/sim-shell'
 
 /**
@@ -54,6 +54,71 @@ function describeDiagnostic(d: Diagnostic): string {
 
 function placeholders(nodes: readonly RenderNode[]): RenderNode[] {
   return nodes.filter((n) => n.kind === 'placeholder')
+}
+
+/**
+ * The checks that have to hold on *any* screen, not just the first one.
+ *
+ * Pulled out of the root tests below so the crawl can make exactly the same
+ * assertions about a pushed detail view, a presented sheet and a second tab. The
+ * root tests keep their own `it` blocks, because a failure there should say which
+ * check failed rather than "screen 4".
+ */
+function assertScreenIsSound(tree: RenderTree, where: string): void {
+  const unsupported = placeholders(tree.nodes).map(
+    (n) => `${n.placeholder?.feature}: ${n.placeholder?.reason}`,
+  )
+  expect(unsupported, `${where} draws an unsupported placeholder`).toEqual([])
+
+  for (const node of tree.nodes) {
+    const { x, y, width, height } = node.frame
+    expect(Number.isFinite(x) && Number.isFinite(y), `${where}: ${node.id} position`).toBe(true)
+    expect(Number.isFinite(width) && Number.isFinite(height), `${where}: ${node.id} size`).toBe(true)
+    expect(width, `${where}: ${node.id} width`).toBeGreaterThanOrEqual(0)
+    expect(height, `${where}: ${node.id} height`).toBeGreaterThanOrEqual(0)
+    expect(Math.abs(x), `${where}: ${node.id} x`).toBeLessThan(device.width * 4)
+    expect(Math.abs(y), `${where}: ${node.id} y`).toBeLessThan(device.height * 4)
+  }
+
+  for (const node of tree.nodes) {
+    for (const run of node.text?.runs ?? []) {
+      if (run.color.a < 0.1) continue
+      const behind = backgroundBehind(tree.nodes, node)
+      if (!behind) continue
+      expect(
+        contrastRatio(run.color, behind),
+        `${where}: "${run.text}" is unreadable on its background`,
+      ).toBeGreaterThan(1.8)
+    }
+  }
+}
+
+/** Every distinct handler a person could press, in paint order. */
+function pressable(tree: RenderTree): { id: string; label: string }[] {
+  const seen = new Set<string>()
+  const out: { id: string; label: string }[] = []
+
+  for (const node of tree.nodes) {
+    const hit = node.hitTarget
+    if (!hit || hit.role !== 'button' || !hit.enabled) continue
+    if (seen.has(hit.handlerId)) continue
+    seen.add(hit.handlerId)
+    out.push({
+      id: hit.handlerId,
+      label: (node.text?.runs ?? []).map((r) => r.text).join('') || node.a11y?.label || hit.handlerId,
+    })
+  }
+  return out
+}
+
+/** The control that goes back, if this screen has one. */
+function backButton(tree: RenderTree): string | null {
+  return pressable(tree).find((t) => t.id.endsWith('/back'))?.id ?? null
+}
+
+function press(handlerId: string, revision: number): RenderTree | null {
+  if (!applyEvent({ kind: 'tap', handlerId, location: { x: 0, y: 0 } })) return null
+  return rerender(revision).renderTree
 }
 
 describe.each(TEMPLATES)('template: $name', (template) => {
@@ -145,6 +210,103 @@ describe.each(TEMPLATES)('template: $name', (template) => {
           `"${run.text}" is unreadable on its background`,
         ).toBeGreaterThan(1.8)
       }
+    }
+  })
+
+  /**
+   * Every screen the template has, not just the one it opens on.
+   *
+   * Everything above this measures the *root*. For a one-file template that is the
+   * whole template; for an eight-file app it is the first screen, and every detail
+   * view behind a NavigationLink, every sheet and every tab but the first could be
+   * broken - a trap, a placeholder, unreadable text - with all of it passing.
+   *
+   * That was not hypothetical. Trailhead's route list printed `Text("\(step.id)")`
+   * where `id` had become a `UUID`, so three lines of the detail screen read as
+   * 36-character hex strings. It shipped, and every gate was green, because no test
+   * had ever pushed that screen.
+   *
+   * So this presses things. Depth-first from the root, at most `MAX_DEPTH` deep and
+   * `MAX_SCREENS` screens in total, coming back via the navigation bar's own back
+   * button where there is one. It runs in dark mode because that is the harder of the
+   * two appearances and the other checks do not depend on the palette.
+   *
+   * The budget is a real constraint rather than a guess: every screen is a full
+   * evaluate-lay out-render pass, and the whole suite has to stay usable.
+   */
+  const MAX_DEPTH = 3
+  const MAX_SCREENS = 20
+  const MAX_TARGETS_PER_SCREEN = 10
+
+  it('renders every screen a press can reach as cleanly as the first', () => {
+    resetPipelineState()
+    const root = compile(requestFor(template.files, 'dark')).renderTree
+    expect(root, 'template produced no render tree').not.toBeNull()
+
+    let revision = 1
+    let screens = 0
+    const visited = new Set<string>()
+
+    /**
+     * What makes two screens the same for the purpose of not visiting both.
+     *
+     * Every string it draws, in paint order, and *not* a prefix of them: a sheet is
+     * drawn over the screen that presented it, so the first few hundred characters of
+     * a presented screen are the ones underneath it. Comparing a prefix marked every
+     * sheet in the corpus as already seen.
+     */
+    const shapeOf = (tree: RenderTree) =>
+      tree.nodes.flatMap((n) => (n.text?.runs ?? []).map((r) => r.text)).join('\u0000')
+
+    const explore = (tree: RenderTree, depth: number, trail: string): void => {
+      if (depth >= MAX_DEPTH || screens >= MAX_SCREENS) return
+
+      // Captured before anything is pressed: the list changes underneath us as soon
+      // as it does, and these ids stay valid for the life of this run.
+      const targets = pressable(tree)
+        .filter((t) => !t.id.endsWith('/back'))
+        .slice(0, MAX_TARGETS_PER_SCREEN)
+
+      for (const target of targets) {
+        if (screens >= MAX_SCREENS) return
+
+        const next = press(target.id, ++revision)
+        // A press that changed nothing has no screen to check - a disabled Save, a
+        // toggle already in that state.
+        if (!next) continue
+
+        const shape = shapeOf(next)
+        const where = `${trail} > ${target.label}`
+        if (!visited.has(shape)) {
+          visited.add(shape)
+          screens++
+          if (process.env.CRAWL) console.log(`[${template.name}] ${screens}. ${where}`)
+          assertScreenIsSound(next, where)
+          explore(next, depth + 1, where)
+        }
+
+        // Back out so the next sibling is pressed from where this one was. Where
+        // there is no way back - a press that toggled state rather than navigating -
+        // carry on from wherever we are, which is still a screen worth checking.
+        const back = backButton(next)
+        if (back) {
+          const returned = press(back, ++revision)
+          if (returned) tree = returned
+        }
+      }
+    }
+
+    // The root counts as visited, or the tab bar's own tab is a "new" screen: pressing
+    // Summary while on Summary writes the binding and redraws the same thing, and
+    // recursing into it spent a whole level of depth to arrive back where we started.
+    visited.add(shapeOf(root!))
+    explore(root!, 0, template.name)
+
+    // A template whose screens are all one press away should have reached some of
+    // them; a one-file template legitimately has none, and says so by having no
+    // pressable controls at all.
+    if (template.kind === 'app') {
+      expect(screens, 'no screen beyond the root was reachable').toBeGreaterThan(2)
     }
   })
 

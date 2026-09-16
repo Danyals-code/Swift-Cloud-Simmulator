@@ -19,6 +19,7 @@ import {
   int,
   NIL,
   numericValue,
+  projection,
   str,
   tuple,
   typeNameOf,
@@ -894,6 +895,34 @@ function arrayMethod(
       return array(target.elements.slice(0, Math.max(0, target.elements.length - n)).map(copyValue))
     }
     case 'reduce': {
+      /**
+       * `reduce(into:)` is a different function wearing the same name.
+       *
+       * The closure takes the accumulator `inout` and returns nothing, so reading its
+       * *result* - which is what the plain form does - collected a list of Voids. It
+       * is the standard way to build a dictionary from a sequence, and it failed with
+       * "'acc' is a 'let' constant", which names the symptom rather than the cause.
+       *
+       * The accumulator is handed over as a projection, which is the same mechanism
+       * `inout` and `@Binding` already use: assignment and mutating methods write
+       * through it, so `acc.append(x)` and `acc[k, default: 0] += 1` both land.
+       */
+      const into = labelled('into')
+      if (into !== undefined) {
+        const closure = closureArg()
+        let accumulator = copyValue(into)
+        const box = projection({
+          get: () => accumulator,
+          set: (value) => {
+            accumulator = value
+          },
+          description: 'the accumulator',
+        })
+
+        for (const element of target.elements) invoke(closure, [box, element])
+        return accumulator
+      }
+
       const initial = arg(0)
       if (!initial) return undefined
       const closure = closureArg()

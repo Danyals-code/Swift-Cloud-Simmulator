@@ -3,6 +3,7 @@ import type {
   EnumDecl,
   ExtensionDecl,
   FuncDecl,
+  Param,
   ProtocolDecl,
   SourceFileNode,
   StructDecl,
@@ -64,11 +65,42 @@ export interface ConformanceModel {
   readonly extensions: ReadonlyMap<string, readonly ExtensionDecl[]>
 }
 
+/**
+ * The argument labels a call has to write, in order.
+ *
+ * `null` for a parameter declared `_`, which is a call site that writes no label at
+ * all. This is half of a function's identity in Swift: `move(to:)` and `move(from:)`
+ * are two functions, not one written twice.
+ */
+export function argumentLabels(params: readonly Param[]): readonly (string | null)[] {
+  return params.map((p) => (p.externalName === '_' ? null : (p.externalName ?? p.internalName)))
+}
+
+/**
+ * What makes two declarations the same member.
+ *
+ * The labels are in here because Swift's are: a type may declare `minutes(on:)` and
+ * `minutes(of:)` and they are unrelated functions. Keying on the bare name collapsed
+ * them into one, and since the later layer overwrote the earlier, `log.minutes(on:
+ * day)` silently ran the body of `minutes(of:)` with an unbound parameter - a wrong
+ * answer rather than an error, which is the worst kind of wrong the preview can be.
+ *
+ * Parameter *types* are the other half of Swift's rule and are deliberately not
+ * here: the interpreter is not typed, so `f(_ x: Int)` and `f(_ x: String)` still
+ * collide. That is a much rarer shape than label overloading, and guessing between
+ * two untyped candidates would be worse than picking the one that was written last.
+ */
 function memberKey(decl: Decl): MemberKey | null {
-  if (decl.kind === 'funcDecl') return `func:${decl.name}`
+  if (decl.kind === 'funcDecl') return `func:${decl.name}(${labelList(decl.params)})`
   if (decl.kind === 'varDecl') return `var:${decl.name}`
-  if (decl.kind === 'initDecl') return `init:${decl.params.length}`
+  if (decl.kind === 'initDecl') return `init:(${labelList(decl.params)})`
   return null
+}
+
+function labelList(params: readonly Param[]): string {
+  return argumentLabels(params)
+    .map((label) => label ?? '_')
+    .join(',')
 }
 
 /** A protocol member with no body is a requirement - it says what, not how. */

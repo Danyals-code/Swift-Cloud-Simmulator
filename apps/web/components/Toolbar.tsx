@@ -10,6 +10,8 @@ import { PaneToggles, PushButton, ToolButton } from './ui/Control'
 export type PaneKey = 'navigator' | 'debug' | 'preview'
 
 export interface ToolbarProps {
+  /** The app icon opens the sheet that says where a project comes from. */
+  onOpenGallery: () => void
   projectName: string
   device: DeviceKey
   savedAt: number | null
@@ -60,6 +62,7 @@ const PANES: readonly { key: PaneKey; icon: 'sidebar-left' | 'sidebar-bottom' | 
  * affect.
  */
 export function Toolbar({
+  onOpenGallery,
   projectName,
   device,
   savedAt,
@@ -98,10 +101,22 @@ export function Toolbar({
       data-testid="toolbar"
       className="@container/toolbar flex h-[38px] shrink-0 items-center gap-2 overflow-hidden border-b border-xc-line bg-xc-bar px-2.5"
     >
+      {/*
+        The app icon, and the way back to the sheet the studio opened with.
+        It was decoration; a mark in the top-left corner that does nothing is a
+        button people will press anyway, so it is the one they expect it to be.
+      */}
       <span className="flex shrink-0 items-center gap-2 pr-1">
-        <span className="grid h-[18px] w-[18px] place-items-center rounded-[5px] bg-gradient-to-b from-[#ff7a45] to-xc-swift text-[10px] font-bold text-white shadow-[0_1px_2px_rgb(0_0_0/0.4)]">
+        <button
+          type="button"
+          onClick={onOpenGallery}
+          aria-label="Open a project"
+          title="Open a project - what is here, an app to start from, or one feature"
+          data-testid="app-icon"
+          className="grid h-[18px] w-[18px] place-items-center rounded-[5px] bg-gradient-to-b from-[#ff7a45] to-xc-swift text-[10px] font-bold text-white shadow-[0_1px_2px_rgb(0_0_0/0.4)] transition-[filter] hover:brightness-110 active:brightness-95"
+        >
           S
-        </span>
+        </button>
       </span>
 
       <ToolButton

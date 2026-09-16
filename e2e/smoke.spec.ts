@@ -9,8 +9,20 @@ import { expect, test, type Page } from '@playwright/test'
  * preview refusing to run correct code.
  */
 
+/**
+ * Opens the studio and dismisses the welcome sheet.
+ *
+ * The studio opens with it: the first question is where the project comes from, and
+ * a tool that answers that question for you is a tool that has picked for you. Every
+ * test below is about what happens *after* that choice, so they all start by keeping
+ * what is already open.
+ */
 async function openStudio(page: Page) {
   await page.goto('/')
+  await expect(page.getByTestId('template-gallery')).toBeVisible()
+  await page.getByTestId('gallery-dismiss').click()
+  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+
   await expect(page.getByTestId('editor')).toBeVisible()
   await expect(page.getByTestId('render-tree')).toBeVisible()
 }

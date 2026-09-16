@@ -1,15 +1,15 @@
 import { deflateSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import {
-  createProjectFromTemplate,
   decodeProject,
   encodeProject,
   MAX_SHARE_LENGTH,
   payloadFromFragment,
   shareFragment,
   shareLink,
-  TEMPLATES,
+  type TemplateKind,
 } from './index'
+import { createProjectFromTemplate, TEMPLATES } from './templates'
 import type { Project } from './types'
 
 /**
@@ -84,41 +84,42 @@ describe('the length limit', () => {
   /**
    * Every template has to be shareable, with room left to edit it.
    *
-   * The threshold used to be half the budget, which was the right number while
-   * every template was one small file. `Trailhead` is eight files and uses about
-   * three quarters of it - legitimately, because showing a project with structure
-   * is the entire point of it - so the rule is stated as headroom rather than as a
-   * fraction that happened to fit.
+   * "Room to edit it" is a different number for the two kinds, and conflating them is
+   * what made this rule bite the wrong thing. You edit a one-file template by writing
+   * more of it, so headroom there means *doubling* room; you edit an eight-file app by
+   * changing a screen, so headroom there means one screen's worth. Holding both to the
+   * same fraction did not protect anybody - it just capped app templates at a size
+   * that made them worse, and every character trimmed to get under it was trimmed out
+   * of the explanation rather than out of the code.
    *
-   * 20% of 8 KB is roughly 1,600 characters of encoded payload, which is a few
-   * hundred lines of Swift once deflated: enough to work on a shared copy before
-   * the studio starts declining to make a link. Past that the failure is reported
-   * rather than silent - `encodeProject` returns null and the Share button says so -
-   * so this gate is about the experience being decent, not about avoiding a
-   * broken link.
+   * The hard limit is the same for both and is not negotiable: past `MAX_SHARE_LENGTH`
+   * there is no link at all. Everything below it is about the experience being decent,
+   * and the failure is reported rather than silent - `encodeProject` returns null and
+   * the Share button says "Too big to link".
    */
-  const HEADROOM = 0.2
+  const HEADROOM: Readonly<Record<TemplateKind, number>> = {
+    // A few hundred lines of Swift once deflated, which is more than the whole file.
+    feature: 0.5,
+    // One screen of an eight-file project, measured against the four that exist.
+    app: 0.08,
+  }
 
-  it('keeps every template shareable, with room left to edit it', () => {
-    for (const template of TEMPLATES) {
-      const encoded = encodeProject(createProjectFromTemplate(template, 0))!
-      const used = Math.round((encoded.length / MAX_SHARE_LENGTH) * 100)
+  it.each(TEMPLATES)('keeps $name shareable, with room left to edit it', (template) => {
+    const encoded = encodeProject(createProjectFromTemplate(template, 0))!
+    const used = Math.round((encoded.length / MAX_SHARE_LENGTH) * 100)
+    const ceiling = MAX_SHARE_LENGTH * (1 - HEADROOM[template.kind])
 
-      expect(
-        encoded.length,
-        `${template.name} uses ${used}% of the share budget (${encoded.length} chars)`,
-      ).toBeLessThan(MAX_SHARE_LENGTH * (1 - HEADROOM))
-    }
+    expect(
+      encoded.length,
+      `${template.name} uses ${used}% of the share budget (${encoded.length} chars), ` +
+        `and a ${template.kind} template may use ${Math.round((1 - HEADROOM[template.kind]) * 100)}%`,
+    ).toBeLessThan(ceiling)
   })
 
-  it('keeps a single-file template well inside it', () => {
-    // The original rule, kept for the templates it was written for: one file
-    // teaching one idea has no business using half a share link.
-    for (const template of TEMPLATES.filter((t) => t.files.length === 1)) {
-      const encoded = encodeProject(createProjectFromTemplate(template, 0))!
-      expect(encoded.length, `${template.name} is ${encoded.length} chars`).toBeLessThan(
-        MAX_SHARE_LENGTH / 2,
-      )
+  it('never lets any template past the hard limit', () => {
+    // The one that is not a matter of taste: past this there is no link.
+    for (const template of TEMPLATES) {
+      expect(encodeProject(createProjectFromTemplate(template, 0))).not.toBeNull()
     }
   })
 

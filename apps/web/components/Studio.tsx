@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ExportFormat } from '@studio/shared'
-import { buildFileTree, encodeProject, shareLink } from '@studio/project-model'
+import { buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice, type DeviceKey } from '@studio/sim-shell'
 import type { FileId, RenderNode, SourceSpan, UIEvent } from '@studio/shared'
@@ -31,6 +31,7 @@ export function Studio() {
   const activeFileId = useStudio((s) => s.activeFileId)
   const openFileIds = useStudio((s) => s.openFileIds)
   const loaded = useStudio((s) => s.loaded)
+  const origin = useStudio((s) => s.origin)
   const lastSavedAt = useStudio((s) => s.lastSavedAt)
   const saveError = useStudio((s) => s.saveError)
   const previewSettings = useStudio((s) => s.preview)
@@ -52,6 +53,10 @@ export function Studio() {
   const setPreview = useStudio((s) => s.setPreview)
   const renameSymbol = useStudio((s) => s.renameSymbol)
   const applyTemplate = useStudio((s) => s.applyTemplate)
+  const openFiles = useStudio((s) => s.openFiles)
+  const openProject = useStudio((s) => s.openProject)
+  const removeProject = useStudio((s) => s.removeProject)
+  const recents = useStudio((s) => s.recents)
 
   const shown = useLayout((s) => s.shown)
   const navigatorWidth = useLayout((s) => s.navigatorWidth)
@@ -64,6 +69,15 @@ export function Studio() {
   const [paused, setPaused] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  /**
+   * Whether the sheet on screen opened by itself.
+   *
+   * Only the launch one refuses to close on a click outside: at launch nothing behind
+   * it has been chosen yet, so a stray click dismissing it would leave somebody
+   * looking at a project they did not pick.
+   */
+  const [galleryAtLaunch, setGalleryAtLaunch] = useState(false)
+  const greeted = useRef(false)
   const [caret, setCaret] = useState(0)
   const splitRef = useRef<HTMLDivElement | null>(null)
   const [available, setAvailable] = useState(Number.POSITIVE_INFINITY)
@@ -73,6 +87,26 @@ export function Studio() {
   useEffect(() => {
     void load()
   }, [load])
+
+  /**
+   * The sheet at launch.
+   *
+   * Once, after the first load resolves, and never for a project that arrived in a
+   * link - following one is already an explicit request to see *that* project, and
+   * asking "what would you like to open?" over the top of it is a question that has
+   * been answered.
+   */
+  useEffect(() => {
+    if (!loaded || greeted.current || origin === 'shared') return
+    greeted.current = true
+    setGalleryAtLaunch(true)
+    setGalleryOpen(true)
+  }, [loaded, origin])
+
+  const openGallery = useCallback(() => {
+    setGalleryAtLaunch(false)
+    setGalleryOpen(true)
+  }, [])
 
   // Debounced autosave can lose the last edit when a tab is closed or backgrounded,
   // so force the pending write at both of the points the browser gives us.
@@ -328,6 +362,7 @@ export function Studio() {
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
       <Toolbar
+        onOpenGallery={openGallery}
         projectName={project.manifest.name}
         device={project.manifest.device}
         savedAt={lastSavedAt}
@@ -374,7 +409,7 @@ export function Studio() {
                 onDuplicateFile={duplicateFile}
                 onMoveFile={moveFile}
                 onRevealDiagnostic={revealSpanIn}
-                onOpenTemplates={() => setGalleryOpen(true)}
+                onOpenTemplates={openGallery}
               />
             </div>
             <Splitter
@@ -506,10 +541,28 @@ export function Studio() {
 
       {galleryOpen ? (
         <TemplateGallery
+          projectId={project.id}
+          projectName={project.manifest.name}
+          fileCount={files.length}
+          recents={recents}
+          pristine={isPristine(project)}
+          origin={origin}
+          savedAt={lastSavedAt}
+          atLaunch={galleryAtLaunch}
           onClose={() => setGalleryOpen(false)}
-          onChoose={(templateId) => {
-            setGalleryOpen(false)
-            applyTemplate(templateId)
+          onChoose={async (templateId) => {
+            const made = await applyTemplate(templateId)
+            // Kept open on failure: the sheet is where the message goes, and closing
+            // it would leave somebody looking at a project they did not ask for.
+            if (made) setGalleryOpen(false)
+            return made
+          }}
+          onOpenProject={(id) => void openProject(id)}
+          onRemoveProject={(id) => void removeProject(id)}
+          onOpenFiles={(picked) => {
+            const opened = openFiles(picked)
+            if (opened) setGalleryOpen(false)
+            return opened
           }}
         />
       ) : null}

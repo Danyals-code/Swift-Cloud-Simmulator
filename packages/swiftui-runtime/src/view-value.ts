@@ -98,6 +98,17 @@ export interface ViewArg {
   readonly value: SwiftValue
 }
 
+/**
+ * A captured environment: the values and objects in scope at one point.
+ *
+ * Lives here rather than in `view-environment.ts` because a `ModifierValue` carries
+ * one, and a modifier is the thing that outlives the scope it was written in.
+ */
+export interface EnvironmentFrame {
+  readonly values: ReadonlyMap<string, SwiftValue>
+  readonly objects: ReadonlyMap<string, SwiftValue>
+}
+
 export interface ModifierValue {
   readonly name: string
   readonly args: readonly ViewArg[]
@@ -111,6 +122,19 @@ export interface ModifierValue {
    * and the resolver runs it only if and when the sheet is actually presented.
    */
   readonly closure: ClosureValue | null
+  /**
+   * The environment in scope where the modifier was *written*.
+   *
+   * A deferred closure runs long after the expansion that declared it has unwound, so
+   * without this a pushed `navigationDestination` or a presented `.sheet` saw an empty
+   * environment - and `@EnvironmentObject var store: Store` on a detail screen trapped
+   * with "Value of type 'Optional' has no member …". SwiftUI hands a destination the
+   * environment of the place it was declared, and so does this.
+   *
+   * Held by reference rather than copied: `EnvironmentStack.scoped` replaces its maps
+   * instead of mutating them, so the frame captured here cannot be written through.
+   */
+  readonly environment?: EnvironmentFrame
 }
 
 export const VIEW_TYPE = 'View'
@@ -120,6 +144,19 @@ export const TOKEN_TYPE = 'Token'
 
 export interface TokenPayload {
   readonly name: string
+  /**
+   * The arguments the contextual call was written with, where it had any.
+   *
+   * `.done("hi")` passed to a parameter of an enum type is a case *with a payload*,
+   * and the token is all the interpreter has until the expected type says which enum
+   * it belongs to. Dropping them here meant `case .done(let s)` matched and bound
+   * nothing - the branch ran, `s` did not exist, and the failure named a variable
+   * rather than the thing that lost it.
+   *
+   * Absent for every token the host makes for its own contextual members, which are
+   * names rather than constructors.
+   */
+  readonly args?: readonly SwiftValue[]
 }
 
 /**

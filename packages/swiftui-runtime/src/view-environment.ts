@@ -1,5 +1,7 @@
 import { bool, int, opaque, str, type SwiftValue } from '@studio/swift-runtime'
-import { TOKEN_TYPE } from './view-value'
+import { TOKEN_TYPE, type EnvironmentFrame } from './view-value'
+
+export type { EnvironmentFrame }
 
 /**
  * The SwiftUI environment.
@@ -32,10 +34,6 @@ export const DISMISS_TYPE = 'DismissAction'
  */
 export const OPEN_URL_TYPE = 'OpenURLAction'
 
-export interface EnvironmentFrame {
-  readonly values: ReadonlyMap<string, SwiftValue>
-  readonly objects: ReadonlyMap<string, SwiftValue>
-}
 
 /** Device and preview state the environment exposes to user code. */
 export interface EnvironmentInputs {
@@ -129,6 +127,40 @@ export class EnvironmentStack {
   /** The only object injected, when the property's type could not be determined. */
   soleObject(): SwiftValue | undefined {
     return this.objects.size === 1 ? [...this.objects.values()][0] : undefined
+  }
+
+  /**
+   * The frame in scope right now, for a closure that will run after it has unwound.
+   *
+   * Cheap and safe to hold: `scoped` below replaces its maps rather than mutating
+   * them, so whatever is handed out here stays exactly as it was.
+   */
+  snapshot(): EnvironmentFrame {
+    return { values: this.values, objects: this.objects }
+  }
+
+  /**
+   * Runs `fn` with a captured frame in scope instead of the current one.
+   *
+   * The deferred half of `scoped`: a `navigationDestination` builder runs at resolve
+   * time, by which point the expansion that declared it is long finished.
+   */
+  withFrame<T>(frame: EnvironmentFrame | undefined, fn: () => T): T {
+    if (!frame) return fn()
+
+    this.saved.push({ values: this.values, objects: this.objects })
+    this.values = new Map(frame.values)
+    this.objects = new Map(frame.objects)
+
+    try {
+      return fn()
+    } finally {
+      const previous = this.saved.pop()
+      if (previous) {
+        this.values = previous.values
+        this.objects = previous.objects
+      }
+    }
   }
 
   /** Runs `fn` with additional values and objects in scope. */

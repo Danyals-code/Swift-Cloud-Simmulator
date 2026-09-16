@@ -853,6 +853,35 @@ class Converter {
         out.push(...this.convertList(view.children, path, axis))
         return
       }
+
+      /**
+       * A `Group` carrying modifiers is still not a container.
+       *
+       * SwiftUI applies a `Group`'s modifiers to each of its children rather than to
+       * a box around them - `Group { A; B }.font(.caption)` *is* `A.font(.caption)`
+       * and `B.font(.caption)`, and `.frame(width: 100)` sizes each of them. So the
+       * modifiers are pushed down and the group disappears, which is both simpler and
+       * more correct than wrapping.
+       *
+       * Without this, a modified group reached the switch below, matched nothing, and
+       * drew a placeholder - which is what `Group { … }.font(…)` did, and what every
+       * `@ViewBuilder` helper of more than one statement now produces.
+       */
+      if (view.name === 'Group' && view.children.length > 0) {
+        out.push(
+          ...this.convertList(
+            view.children.map((child, i) => ({
+              ...child,
+              path: child.path ?? `${path}-${i}`,
+              modifiers: [...child.modifiers, ...view.modifiers],
+            })),
+            path,
+            axis,
+          ),
+        )
+        return
+      }
+
       out.push(this.convert(view, path, axis))
     })
     return out
@@ -1130,6 +1159,10 @@ class Converter {
           ...origin,
         }
 
+      // A custom `Shape` draws into the box it is given, which is the same thing a
+      // `GeometryReader` is: greedy, its own coordinate space, and measured so the
+      // next pass can hand the shape the rect it actually got.
+      case 'ShapeView':
       case 'GeometryReader':
         return {
           kind: 'modified',

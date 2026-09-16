@@ -10,6 +10,19 @@ export interface ProjectManifest {
   readonly deploymentTarget: string
   readonly device: DeviceKey
   readonly colorScheme: 'light' | 'dark'
+  /**
+   * A fingerprint of the files this project was created with.
+   *
+   * The only thing `isPristine` needs, and the reason it needs nothing else: asking
+   * "has anything changed since this was made" used to mean comparing against every
+   * template's source, which kept the whole corpus in the initial bundle for the sake
+   * of one confirmation dialog.
+   *
+   * Optional, because a project stored before this existed does not have one and a
+   * shared one does not carry it. Absent means "assume it has been worked on", which
+   * is the direction that costs a dialog rather than somebody's afternoon.
+   */
+  readonly origin?: string
 }
 
 export interface Project {
