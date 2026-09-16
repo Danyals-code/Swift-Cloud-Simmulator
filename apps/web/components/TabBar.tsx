@@ -33,7 +33,7 @@ export function TabBar({
     <div
       role="tablist"
       data-testid="tab-bar"
-      className="flex h-[28px] shrink-0 items-stretch overflow-x-auto border-b border-xc-line bg-xc-bar"
+      className="flex h-[34px] shrink-0 items-stretch overflow-x-auto border-b border-xc-line bg-xc-bar"
     >
       {openFileIds.map((fileId) => {
         const active = fileId === activeFileId

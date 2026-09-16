@@ -20,6 +20,8 @@ export interface SourceFile {
 }
 
 export interface CompileRequest {
+  /** Separates live app state when the IDE opens a different project. */
+  readonly projectId?: string
   readonly previewTarget?: PreviewTarget
   readonly files: readonly SourceFile[]
   /** logical point size of the target device, from sim-shell */

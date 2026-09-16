@@ -65,8 +65,11 @@ const KB = 1024
  *   Phase 0  - 324 KB actual (React, Next runtime, CodeMirror). Budget 450.
  *   Phase 10 - 367 KB actual, after excluding the nomodule polyfills (see note 1).
  *              The measured number fell by 38 KB without a byte changing hands.
+ *   Prompt creation - 457 KB actual with two additional multi-file apps and the
+ *              lazy-loaded provider form, draft validation, and source review.
+ *              The main chunk remains 162 KB; allow 470 KB for the expanded scope.
  */
-const BUDGET_KB = 450
+const BUDGET_KB = 470
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.

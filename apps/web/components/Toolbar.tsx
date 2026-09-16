@@ -99,7 +99,7 @@ export function Toolbar({
   return (
     <header
       data-testid="toolbar"
-      className="@container/toolbar flex h-[38px] shrink-0 items-center gap-2 overflow-hidden border-b border-xc-line bg-xc-bar px-2.5"
+      className="@container/toolbar flex h-[48px] shrink-0 items-center gap-2 overflow-hidden border-b border-xc-line bg-xc-bar px-4"
     >
       {/*
         The app icon, and the way back to the sheet the studio opened with.
@@ -113,9 +113,9 @@ export function Toolbar({
           aria-label="Open a project"
           title="Open a project - what is here, an app to start from, or one feature"
           data-testid="app-icon"
-          className="grid h-[18px] w-[18px] place-items-center rounded-[5px] bg-gradient-to-b from-[#ff7a45] to-xc-swift text-[10px] font-bold text-white shadow-[0_1px_2px_rgb(0_0_0/0.4)] transition-[filter] hover:brightness-110 active:brightness-95"
+          className="inline-flex h-[28px] items-center gap-2 rounded-[6px] px-2 text-[12px] font-medium text-xc-text-2 hover:bg-white/5 hover:text-xc-text"
         >
-          S
+          <Icon name="screens" size={17} /><span className="hidden @[700px]/toolbar:inline">Studio</span>
         </button>
       </span>
 
@@ -124,7 +124,7 @@ export function Toolbar({
         label="Run"
         title="Run the preview from scratch, dropping its state (⌘R)"
         onClick={onRun}
-        tone="text-xc-ok"
+        tone="text-xc-text-2"
         testId="run-button"
       />
       <ToolButton
@@ -137,7 +137,7 @@ export function Toolbar({
         }
         onClick={onTogglePaused}
         active={paused}
-        tone={paused ? 'text-xc-warn' : 'text-xc-error'}
+        tone={paused ? 'text-xc-warn' : 'text-xc-text-2'}
         testId="pause-button"
         size={13}
       />
@@ -282,12 +282,12 @@ function StatusView({
                 icon: 'warning' as const,
                 text: `Succeeded · ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`,
               }
-            : { tone: 'text-xc-text-2', icon: 'check' as const, text: 'Succeeded' }
+            : { tone: 'text-xc-text-2', icon: 'check' as const, text: 'Preview ready' }
 
   return (
     <div
       data-testid="status-view"
-      className="mx-auto hidden h-[24px] w-[clamp(200px,26vw,420px)] shrink items-center gap-2 overflow-hidden rounded-[6px] border border-black/40 bg-black/25 px-2.5 text-[11px] shadow-[0_1px_0_rgb(255_255_255/0.04)_inset] @[900px]/toolbar:flex"
+      className="mx-auto hidden h-[24px] w-[clamp(200px,26vw,420px)] shrink items-center gap-2 overflow-hidden px-2.5 text-[11px] @[900px]/toolbar:flex"
     >
       <span className={`flex items-center gap-1.5 ${state.tone}`}>
         <Icon name={state.icon} size={12} weight={2} className={busy ? 'animate-spin' : undefined} />

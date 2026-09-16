@@ -174,6 +174,57 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     files: ['Sources/StyledApp.swift'],
   },
   {
+  "id": "dispatch",
+  "name": "Dispatch",
+  "kind": "app",
+  "tagline": "A shared workspace for projects and tasks.",
+  "description": "Manage a team workspace with priorities, project filters, task creation, completion, activity history, and preferences. Changes flow through one observable model.",
+  "highlights": [
+    "Overview",
+    "Projects",
+    "Task details",
+    "New task",
+    "Activity",
+    "Preferences"
+  ],
+  "files": [
+    "Sources/DispatchApp.swift",
+    "Sources/Models/Workspace.swift",
+    "Sources/Components/TaskRow.swift",
+    "Sources/Features/OverviewView.swift",
+    "Sources/Features/ProjectsView.swift",
+    "Sources/Features/TaskDetailView.swift",
+    "Sources/Features/NewTaskView.swift",
+    "Sources/Features/ActivityView.swift"
+  ]
+},
+  {
+  "id": "market",
+  "name": "Market",
+  "kind": "app",
+  "tagline": "A complete storefront, from browsing to checkout.",
+  "description": "Browse and filter products, save favorites, adjust bag quantities, place a local demo order, and review its details. Includes empty states and validated checkout.",
+  "highlights": [
+    "Discover",
+    "Product details",
+    "Bag",
+    "Checkout",
+    "Confirmation",
+    "Orders",
+    "Order details"
+  ],
+  "files": [
+    "Sources/MarketApp.swift",
+    "Sources/Models/Shop.swift",
+    "Sources/Components/ProductTile.swift",
+    "Sources/Features/CatalogView.swift",
+    "Sources/Features/ProductView.swift",
+    "Sources/Features/BagView.swift",
+    "Sources/Features/CheckoutView.swift",
+    "Sources/Features/OrdersView.swift"
+  ]
+},
+  {
     id: 'folio',
     name: 'Folio',
     kind: 'app',

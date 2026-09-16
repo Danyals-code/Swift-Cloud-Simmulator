@@ -2,6 +2,8 @@ import { DEFAULT_PREVIEW_TARGET } from '@studio/shared'
 import type { SourceFile } from '@studio/shared'
 import { STARTER_TEMPLATE_ID, TEMPLATE_CATALOG, type TemplateInfo } from './catalog'
 import { fingerprintFiles, newProjectId } from './open'
+import { DISPATCH_FILES } from './dispatch'
+import { MARKET_FILES } from './market'
 import { FOLIO_FILES } from './folio'
 import { KITCHEN_FILES } from './kitchen'
 import { LEDGER_FILES } from './ledger'
@@ -1102,6 +1104,8 @@ const SOURCES: Readonly<Record<string, readonly SourceFile[]>> = {
   drawing: single(DRAWING),
   drag: single(DRAGGABLE),
   styled: single(STYLED),
+  dispatch: DISPATCH_FILES,
+  market: MARKET_FILES,
   folio: FOLIO_FILES,
   trailhead: TRAILHEAD_FILES,
   ledger: LEDGER_FILES,
@@ -1150,6 +1154,7 @@ export function createProjectFromTemplate(template: Template, now: number = Date
       // What `isPristine` compares against later, so the confirmation before a
       // replacement can tell "untouched" from "worked on" without the corpus.
       origin: fingerprintFiles(files),
+      templateId: template.id,
     },
     files,
     createdAt: now,

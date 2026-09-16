@@ -456,6 +456,7 @@ function toResult(
 }
 
 export function compile(request: CompileRequest): CompileResult {
+  if (lastAnalysis?.request.projectId !== request.projectId) resetPipelineState()
   const startedAt = performance.now()
   const analysis = analyse(request)
   lastAnalysis = { request, analysis }

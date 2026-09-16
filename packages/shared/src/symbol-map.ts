@@ -10,6 +10,16 @@ export interface SymbolDefinition {
 }
 
 export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
+  "book": { "icon": "book-outline" },
+  "book.fill": { "icon": "book" },
+  "book.closed": { "icon": "book-outline" },
+  "book.closed.fill": { "icon": "book" },
+  "shippingbox": { "icon": "cube-outline" },
+  "shippingbox.fill": { "icon": "cube" },
+  "suitcase": { "icon": "briefcase-outline" },
+  "suitcase.fill": { "icon": "briefcase" },
+  "cup.and.saucer": { "icon": "cafe-outline" },
+  "cup.and.saucer.fill": { "icon": "cafe" },
   "books.vertical": { "icon": "library-outline" },
   "books.vertical.fill": { "icon": "library" },
   "mountain.2": {

@@ -1442,6 +1442,7 @@ export class LayoutEngine {
         // a filter applies to everything below, and an accessibility label replaces
         // what is read for the whole group.
         const id = `${element.id}-${modifier.kind}`
+        const wrapperIndex = out.length
         out.push({
           id,
           frame: bounds,
@@ -1471,7 +1472,7 @@ export class LayoutEngine {
             : {}),
           ...(parent ? { parent } : {}),
         })
-        return this.place(
+        const next = this.place(
           element.child,
           { x: 0, y: 0, width: bounds.width, height: bounds.height },
           inner,
@@ -1479,6 +1480,20 @@ export class LayoutEngine {
           z + 1,
           id,
         )
+        if (modifier.kind === 'a11y') {
+          const controls: number[] = []
+          for (let i = wrapperIndex + 1; i < out.length; i++) {
+            if (out[i]!.hitTarget) controls.push(i)
+          }
+          // A label on one control belongs to its real hit target, not an empty
+          // wrapper beside the button's default accessible name.
+          if (controls.length === 1) {
+            const target = controls[0]!
+            out[target] = { ...out[target]!, a11y: { ...out[target]!.a11y, ...out[wrapperIndex]!.a11y } }
+            out[wrapperIndex] = { ...out[wrapperIndex]!, a11y: undefined }
+          }
+        }
+        return next
       }
 
       case 'hitTestable':

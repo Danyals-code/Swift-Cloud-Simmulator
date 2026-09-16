@@ -186,6 +186,13 @@ describe('environment values before custom view evaluation', () => {
 })
 
 describe('Ionicons adapter', () => {
+  it('includes the artwork used by every gallery card', () => {
+    const sprite = readFileSync('apps/web/public/ionicons-8.0.13.svg', 'utf8')
+    const gallery = readFileSync('apps/web/components/TemplateGallery.tsx', 'utf8')
+    const names = [...gallery.matchAll(/\['([a-z][a-z-]+)', '#[\da-f]+'/g)].map((m) => m[1])
+    expect(names.length).toBeGreaterThan(20)
+    for (const name of [...names, 'code-slash']) expect(sprite, name).toContain(`id="${name}"`)
+  })
   it('can paint every mapping known to the worker', () => {
     const sprite = readFileSync('apps/web/public/ionicons-8.0.13.svg', 'utf8')
     for (const [name, definition] of Object.entries(SYMBOL_MAP)) {

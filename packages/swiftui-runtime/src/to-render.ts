@@ -109,7 +109,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
             ...(node.hitTarget.font ? { font: node.hitTarget.font } : {}),
             ...(node.hitTarget.color ? { color: node.hitTarget.color } : {}),
           },
-          a11y: { role: a11yRole(node.hitTarget.role), label: node.hitTarget.label },
+          a11y: { role: a11yRole(node.hitTarget.role), label: node.hitTarget.label, ...node.a11y },
         }
       : {}),
   }

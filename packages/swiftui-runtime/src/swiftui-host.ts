@@ -917,6 +917,26 @@ export class SwiftUIHost implements InterpreterHost {
       for (const item of produced) labelled.push({ label: argument.label, value: view(item) })
     }
 
+    if (name === 'NavigationLink') {
+      // In `NavigationLink { Detail() } label: { Card() }`, only Card belongs
+      // on the current screen. Keep Detail under the destination argument so
+      // the presentation resolver can select it after a push.
+      return view({
+        name,
+        args: [
+          ...args.filter((a) => !named.some((n) => n.label === a.label)),
+          ...children.map((child) => ({ label: 'destination', value: view(child) })),
+        ],
+        children: labelled.flatMap((argument) => {
+          const child = asView(argument.value)
+          return child ? [child] : []
+        }),
+        modifiers: [],
+        action: null,
+        span: call.span,
+      })
+    }
+
     return view({
       name,
       args: [...args.filter((a) => !named.some((n) => n.label === a.label)), ...labelled],

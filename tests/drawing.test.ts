@@ -249,6 +249,17 @@ describe('materials', () => {
 })
 
 describe('accessibility and hit testing', () => {
+  it('puts custom labels and hints on the interactive button', () => {
+    const result = run(app(`var body: some View {
+      Button { } label: { Image(systemName: "plus") }
+        .accessibilityLabel("Add item")
+        .accessibilityHint("Adds an item to the bag")
+    }`))
+    const control = nodes(result).find(n => n.hitTarget?.role === 'button')
+    expect(control?.a11y?.label).toBe('Add item')
+    expect(control?.a11y?.hint).toBe('Adds an item to the bag')
+  })
+
   it('applies an accessibility label to the group it wraps', () => {
     const result = run(
       app(`    var body: some View {

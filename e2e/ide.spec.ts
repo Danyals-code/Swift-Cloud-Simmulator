@@ -33,6 +33,23 @@ async function openStudio(page: Page) {
 
 const preview = (page: Page) => page.getByTestId('render-tree')
 
+test('Fit shows the entire phone and manual zoom keeps its top reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await openStudio(page)
+  const bounds = () => page.evaluate(() => {
+    const pane = document.querySelector('[data-testid="device-pane"]')!.getBoundingClientRect()
+    const frame = document.querySelector('[data-testid="device-frame"]')!.getBoundingClientRect()
+    return { top: frame.top - pane.top, left: frame.left - pane.left, bottom: pane.bottom - frame.bottom, right: pane.right - frame.right }
+  })
+  await expect.poll(async () => { return Math.min(...Object.values(await bounds())) }).toBeGreaterThanOrEqual(27)
+  await page.getByTestId('zoom-select').click()
+  await page.getByTestId('zoom-select-menu-1').click()
+  await expect.poll(async () => (await bounds()).top).toBeGreaterThanOrEqual(27)
+  await page.getByTestId('zoom-select').click()
+  await page.getByTestId('zoom-select-menu-fit').click()
+  await expect.poll(async () => { return Math.min(...Object.values(await bounds())) }).toBeGreaterThanOrEqual(27)
+})
+
 /**
  * Creates a source file through the navigator's New menu.
  *

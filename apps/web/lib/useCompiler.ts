@@ -55,6 +55,7 @@ function spawnWorker(): WorkerHandle {
  *    with it (requirement NFR-3).
  */
 export interface CompilerOptions {
+  projectId?: string
   previewTarget?: PreviewTarget
   files: readonly SourceFile[]
   device: DeviceSpec
@@ -73,6 +74,7 @@ export interface CompilerOptions {
 }
 
 export function useCompiler({
+  projectId,
   files,
   device,
   colorScheme,
@@ -158,6 +160,7 @@ export function useCompiler({
       if (revision !== revisionRef.current || handle !== handleRef.current) return
       await refine(
         await handle.api.compile({
+          projectId,
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
           safeArea: device.safeArea,
@@ -177,7 +180,7 @@ export function useCompiler({
       }))
       handleRef.current = null
     }
-  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId])
 
   const latestCompile = useRef(runCompile)
   const latestPaused = useRef(paused)
@@ -214,9 +217,12 @@ export function useCompiler({
    * there is nothing left to coalesce.
    */
   const first = useRef(true)
+  const compiledProject = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (paused) return
-    const immediate = first.current
+    const changedProject = compiledProject.current !== projectId
+    if (paused && !changedProject) return
+    compiledProject.current = projectId
+    const immediate = first.current || changedProject
     first.current = false
 
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -224,7 +230,7 @@ export function useCompiler({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [runCompile, paused])
+  }, [runCompile, paused, projectId])
 
   useEffect(() => {
     return () => {

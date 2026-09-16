@@ -99,6 +99,48 @@ beforeEach(() => {
   resetPipelineState()
 })
 
+describe('custom navigation labels', () => {
+  it('draws the label first and reveals destination controls only after a push', () => {
+    const result = run(app(`var body: some View {
+      NavigationStack {
+        NavigationLink { Detail() } label: { Label("Open item", systemImage: "book") }
+          .navigationTitle("Library")
+      }
+    }`, `struct Detail: View {
+      @State private var saved = false
+      var body: some View {
+        VStack {
+          Text("Detail screen")
+          Button(saved ? "Saved" : "Save item") { saved = true }
+        }.navigationTitle("Details")
+      }
+    }`))
+    expect(texts(result.renderTree)).toContain('Open item')
+    expect(texts(result.renderTree)).not.toContain('Detail screen')
+    expect(texts(result.renderTree)).not.toContain('Save item')
+    const pushed = tap(result.renderTree, 'Open item')
+    expect(texts(pushed.renderTree)).toContain('Detail screen')
+    expect(texts(pushed.renderTree)).not.toContain('Open item')
+    expect(texts(tap(pushed.renderTree, 'Save item').renderTree)).toContain('Saved')
+  })
+})
+
+it('keeps state during edits but resets tabs when a different project opens', () => {
+  const source = app(`var body: some View {
+    TabView {
+      Text("First screen").tabItem { Text("First") }
+      Text("Second screen").tabItem { Text("Second") }
+    }
+  }`)
+  const initial = compile({ ...request(source), projectId: 'one' })
+  expect(texts(tap(initial.renderTree, 'Second').renderTree)).toContain('Second screen')
+  const edited = compile({ ...request(source + '\n'), projectId: 'one' })
+  expect(texts(edited.renderTree)).toContain('Second screen')
+  const replaced = compile({ ...request(source), projectId: 'two' })
+  expect(texts(replaced.renderTree)).toContain('First screen')
+  expect(texts(replaced.renderTree)).not.toContain('Second screen')
+})
+
 // ------------------------------------------------------------------ gate 3
 
 describe('gate 3 - a three-screen navigation flow with a sheet and animation', () => {

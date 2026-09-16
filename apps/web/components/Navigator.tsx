@@ -121,7 +121,7 @@ export function Navigator({
       data-testid="file-rail"
       aria-label="Project navigator"
     >
-      <header className="flex h-[28px] shrink-0 items-center gap-1 border-b border-black/30 px-1.5">
+      <header className="flex h-[34px] shrink-0 items-center gap-1 border-b border-xc-line px-1.5">
         <NavTab active={tab === 'project'} onClick={() => setTab('project')} label="Project">
           <Icon name="folder" size={13} />
         </NavTab>
@@ -607,7 +607,7 @@ function NavTab({
 /** Xcode's navigator filter, in the same place Xcode puts it. */
 function FilterField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <div className="flex h-[28px] shrink-0 items-center gap-1.5 border-t border-black/30 px-2">
+    <div className="flex h-[34px] shrink-0 items-center gap-1.5 border-t border-xc-line px-2">
       <Icon name="search" size={12} className="shrink-0 text-xc-text-3" />
       <input
         value={value}

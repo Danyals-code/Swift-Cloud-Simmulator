@@ -4,7 +4,15 @@ import { dirname, resolve } from 'node:path'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const mapping = readFileSync(resolve(root, 'packages/shared/src/symbol-map.ts'), 'utf8')
-const icons = [...new Set([...mapping.matchAll(/"icon": "([^"#]+)"/g)].map((m) => m[1]))].sort()
+const gallery = readFileSync(resolve(root, 'apps/web/components/TemplateGallery.tsx'), 'utf8')
+// Gallery artwork uses the same sprite as the simulator. Keep both consumers in
+// the generated asset so rebuilding it cannot silently remove welcome icons.
+const galleryIcons = [...gallery.matchAll(/\['([a-z][a-z-]+)', '#[\da-f]+'/g)].map((m) => m[1])
+const icons = [...new Set([
+  ...[...mapping.matchAll(/"icon": "([^"#]+)"/g)].map((m) => m[1]),
+  ...galleryIcons,
+  ...[...gallery.matchAll(/<GallerySymbol name="([a-z-]+)"/g)].map((m) => m[1]),
+])].sort()
 const version = JSON.parse(readFileSync(resolve(root, 'node_modules/ionicons/package.json'), 'utf8')).version
 if (version !== '8.0.13') throw new Error('Review icon changes before updating the pinned version')
 const assets = {}

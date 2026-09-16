@@ -15,20 +15,20 @@
  */
 @theme {
   /* Surfaces, lightest chrome to darkest canvas. */
-  --color-xc-bar: #323236;
-  --color-xc-bar-raised: #3c3c42;
-  --color-xc-sidebar: #2a2a2e;
+  --color-xc-bar: #29292d;
+  --color-xc-bar-raised: #36363b;
+  --color-xc-sidebar: #252529;
   --color-xc-editor: #1f1f24;
-  --color-xc-canvas: #17171a;
+  --color-xc-canvas: #303034;
   --color-xc-panel: #2e2e33;
 
   /* Separators. `line` divides panes, `line-soft` divides rows inside one. */
-  --color-xc-line: #17171a;
+  --color-xc-line: #ffffff12;
   --color-xc-line-soft: #3e3e43;
 
   --color-xc-text: #dfdfe0;
   --color-xc-text-2: #9a9aa2;
-  --color-xc-text-3: #6c7986;
+  --color-xc-text-3: #92929c;
 
   --color-xc-accent: #0a84ff;
   --color-xc-select: #0b5fd5;

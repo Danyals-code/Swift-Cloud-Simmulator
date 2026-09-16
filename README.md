@@ -23,6 +23,14 @@ Swift *interpreter* used **only to drive the preview**. Export is a file copy pl
 scaffolding, so what you write is exactly what Xcode compiles. This makes export lossless by
 construction and keeps the product honest: the preview can be imperfect, the output never is.
 
+## Start a project
+
+Choose one of seven multi-screen app templates, explore 18 feature examples, import Swift files,
+or use **From a prompt** to generate a first app with your own OpenAI or Anthropic API key.
+Set the page count, navigation, accent, and sample content, then review the Swift files before
+opening them. See [prompt creation](docs/prompt-creation.md) for credential handling, limits,
+provider documentation, and deployment requirements. Visual simulator editing is planned separately.
+
 ## Documentation
 
 | Doc | What's in it |
@@ -42,7 +50,7 @@ construction and keeps the product honest: the preview can be imperfect, the out
 | **Build strategy** | Vertical slice - a narrow subset carried end to end, ~5-7 weeks |
 | **Export format** | `.xcodeproj` only |
 | **Storage** | Local-only: IndexedDB + share-by-URL. No accounts, no database, works offline |
-| **AI features** | Deferred to Phase 7 |
+| **Prompt creation** | Bring an OpenAI or Anthropic API key; generate and review a first SwiftUI app |
 
 ## Status
 
@@ -182,7 +190,7 @@ for a name to resolve against.
 | Lint | clean |
 | Unit tests | 1616 passing |
 | End-to-end | 52 / 52 passing |
-| Templates rendering with zero placeholders | 19 / 19 |
+| Templates rendering with zero placeholders | 25 / 25 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
 | Coverage matrix | 157 ✅ · 48 🟡 · 11 ⬜ · 11 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |

@@ -1037,12 +1037,17 @@ class Converter {
 
   private convertInner(view: ViewValue, path: string, parentAxis: Axis): LayoutElement {
     let element = this.baseElement(view, path, parentAxis)
+    const accessibility: { index: number; modifier: LayoutModifier }[] = []
 
     // Modifiers wrap outward in source order, so `.padding().background()` nests as
     // background(padding(view)) and therefore covers the padding.
     for (const [index, modifier] of view.modifiers.entries()) {
       const converted = this.convertModifier(modifier, `${path}m${index}`, view)
       if (!converted) continue
+      if (view.intent && converted.kind === 'a11y') {
+        accessibility.push({ index, modifier: converted })
+        continue
+      }
       element = { kind: 'modified', id: `${path}m${index}`, modifier: converted, child: element }
     }
 
@@ -1053,6 +1058,9 @@ class Converter {
     if (view.intent) {
       if (boolArg(modifierArg(view, 'disabled', 0))) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
       if (!segmented) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
+    }
+    for (const { index, modifier } of accessibility) {
+      element = { kind: 'modified', id: `${path}m${index}`, modifier, child: element }
     }
 
     const preferredSpacing = view.name === 'Text' ? this.appearance.spacing.text

@@ -71,6 +71,21 @@ describe('the first load', () => {
 })
 
 describe('creating a project from a template', () => {
+  it('keeps an imported project even when none of its files were edited', async () => {
+    await useStudio.getState().load()
+    await useStudio.getState().openFiles([{ name: 'Original.swift', text: 'import SwiftUI\n@main struct Original: App { var body: some Scene { WindowGroup { Text("Keep me") } } }' }])
+    const imported = useStudio.getState().project!
+    await useStudio.getState().applyTemplate('tasks')
+    expect((await persistence.load(imported.id))?.files).toEqual(imported.files)
+  })
+
+  it('keeps older projects whose template provenance is unknown', async () => {
+    await useStudio.getState().load()
+    const old = useStudio.getState().project!
+    useStudio.setState({ project: { ...old, manifest: { ...old.manifest, templateId: undefined } } })
+    await useStudio.getState().applyTemplate('tasks')
+    expect(await persistence.load(old.id)).not.toBeNull()
+  })
   it('keeps the outgoing project when it has been worked on', async () => {
     await useStudio.getState().load()
     const outgoing = useStudio.getState().project!
@@ -123,6 +138,12 @@ describe('creating a project from a template', () => {
 })
 
 describe('the recents list', () => {
+  it('reports a stale project without changing the current project', async () => {
+    await useStudio.getState().load()
+    const current = useStudio.getState().project!.id
+    expect(await useStudio.getState().openProject('missing')).toBe(false)
+    expect(useStudio.getState().project!.id).toBe(current)
+  })
   it('names every project in this browser', async () => {
     await useStudio.getState().load()
     useStudio.getState().setFileText(useStudio.getState().project!.files[0]!.id, '// changed')

@@ -10,11 +10,14 @@ import {
 } from '@studio/project-model'
 import { Icon, type IconName } from './ui/Icon'
 import { PushButton } from './ui/Control'
+import dynamic from 'next/dynamic'
 import styles from './TemplateGallery.module.css'
+
+const PromptCreator = dynamic(() => import('./PromptCreator').then(m => m.PromptCreator), { loading: () => <p className="p-8 text-xc-text-2">Loading project creator…</p> })
 
 /** Welcome window and project browser. Template sources load only after selection. */
 
-export type GallerySource = 'open' | TemplateKind
+export type GallerySource = 'open' | 'prompt' | TemplateKind
 
 export interface TemplateGalleryProps {
   /** The project on screen, so the sheet can say what replacing it would cost. */
@@ -33,9 +36,9 @@ export interface TemplateGalleryProps {
   /** Returns false when the template's sources could not be fetched. */
   onChoose: (templateId: string) => Promise<boolean>
   /** Returns false when nothing usable was in the selection. */
-  onOpenFiles: (files: readonly OpenedFile[]) => boolean
+  onOpenFiles: (files: readonly OpenedFile[]) => Promise<boolean>
   /** Reopens a project already in this browser. */
-  onOpenProject: (id: string) => void
+  onOpenProject: (id: string) => Promise<boolean>
   /** Deletes one. Never the one that is open. */
   onRemoveProject: (id: string) => void
   onClose: () => void
@@ -44,6 +47,7 @@ export interface TemplateGalleryProps {
 const SOURCES: readonly { key: GallerySource; label: string; icon: IconName; hint: string }[] = [
   { key: 'open', label: 'Your projects', icon: 'folder', hint: 'Continue a project or import Swift files' },
   { key: 'app', label: 'App templates', icon: 'screens', hint: 'Complete apps with connected screens' },
+  { key: 'prompt', label: 'From a prompt', icon: 'new-file', hint: 'Describe an app and generate its first version' },
   { key: 'feature', label: 'Features', icon: 'grid', hint: 'Small examples of one SwiftUI concept' },
 ]
 
@@ -72,6 +76,7 @@ export function TemplateGallery({
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
+  const setGenerationBusy = useCallback((busy: boolean) => { creatingRef.current = busy; setCreating(busy) }, [])
   const [selected, setSelected] = useState<string>(apps[0]?.id ?? '')
   const [pending, setPending] = useState<{ what: string; run: () => void } | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
@@ -114,7 +119,7 @@ export function TemplateGallery({
       const root = panelRef.current?.parentElement
       const activeDialog = root?.querySelector('[role="alertdialog"]') ?? panelRef.current
       const controls = activeDialog?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([type="file"]), [tabindex="0"]',
+        'button:not([disabled]), input:not([disabled]):not([type="file"]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]',
       )
       const first = controls?.[0]
       const last = controls?.[controls.length - 1]
@@ -183,7 +188,7 @@ export function TemplateGallery({
         }
         setOpenError(null)
         replacing(`${archive.name}`, () => {
-          if (!onOpenFiles(files)) setOpenError('Nothing in that archive could be opened.')
+          void onOpenFiles(files).then((opened) => { if (!opened) setOpenError('Nothing in that archive could be opened.') })
         })
         return
       }
@@ -200,7 +205,7 @@ export function TemplateGallery({
 
       setOpenError(null)
       replacing(`${swift.length} file${swift.length === 1 ? '' : 's'}`, () => {
-        if (!onOpenFiles(swift)) setOpenError('Those files could not be opened.')
+        void onOpenFiles(swift).then((opened) => { if (!opened) setOpenError('Those files could not be opened.') })
       })
     },
     [onOpenFiles, replacing],
@@ -246,31 +251,29 @@ export function TemplateGallery({
               >
                 <Icon name={item.icon} size={17} />
                 <span>{item.label}</span>
-                {item.key !== 'open' && <small>{item.key === 'app' ? apps.length : features.length}</small>}
+                {(item.key === 'app' || item.key === 'feature') && <small>{item.key === 'app' ? apps.length : features.length}</small>}
               </button>
             ))}
           </nav>
           <div className={styles.sidebarNote}>
-            <span className={styles.noteLine} />
-            <strong>Write. Preview. Make it yours.</strong>
-            <p>Start in your browser.<br />Continue in Xcode.</p>
+            <strong>SwiftUI Web Studio</strong>
+            <p>Local projects.<br />Live preview. Xcode export.</p>
           </div>
         </aside>
 
         <div className={styles.main}>
           <header className={styles.header}>
             <div>
-              <p className={styles.eyebrow}>{atLaunch ? 'WELCOME TO YOUR WORKSPACE' : 'MAKE SOMETHING NEW'}</p>
-              <h2>{source === 'open' ? 'Pick up where you left off.' : source === 'app' ? 'Your next app starts here.' : 'One idea. A working example.'}</h2>
+              <h2>{source === 'open' ? 'Your projects' : source === 'app' ? 'App templates' : source === 'prompt' ? 'Create from a prompt' : 'Feature examples'}</h2>
               <p className={styles.subtitle}>
-                {source === 'open' ? 'Your saved projects and Swift files, in one place.' : source === 'app' ? 'Real screens, connected flows, and code you can make your own.' : 'Explore a SwiftUI feature, change the code, and see what happens.'}
+                {source === 'open' ? 'Continue working or import a Swift project.' : source === 'app' ? 'A starting point with connected screens and working interactions.' : source === 'prompt' ? 'Describe your app. Review its first version. Make it yours.' : 'Focused examples you can run, read, and adapt.'}
               </p>
             </div>
             <button type="button" className={styles.close} onClick={onClose} disabled={creating} aria-label="Close welcome screen">
               <Icon name="xmark" size={17} />
             </button>
           </header>
-          {source === 'open' ? (
+          {source === 'prompt' ? <PromptCreator onOpenFiles={onOpenFiles} onBusy={setGenerationBusy} /> : source === 'open' ? (
             <OpenPane
               projectId={projectId}
               recents={recents}
@@ -278,8 +281,10 @@ export function TemplateGallery({
               savedAt={savedAt}
               error={openError}
               onOpen={(id) => {
-                if (id !== projectId) onOpenProject(id)
-                onClose()
+                void onOpenProject(id).then((opened) => {
+                  if (opened) onClose()
+                  else setOpenError('This project is no longer available. It may have been removed in another tab.')
+                })
               }}
               onRemove={(id) => {
                 const summary = recents.find((r) => r.id === id)
@@ -309,7 +314,7 @@ export function TemplateGallery({
               <TemplateDetail template={template} />
             </>
           )}
-          <footer className={styles.footer}>
+          {source !== 'prompt' && <footer className={styles.footer}>
             <span className={styles.footerNote} role={createError ? 'alert' : undefined}>
               {createError ?? (source === 'open' ? 'Projects are saved in this browser.' : 'Creates a new project, ready to edit and preview.')}
             </span>
@@ -321,7 +326,7 @@ export function TemplateGallery({
                 <Icon name="chevron-right" size={14} />
               </button>
             </div>
-          </footer>
+          </footer>}
         </div>
       </div>
 
@@ -369,7 +374,7 @@ export function TemplateGallery({
         className="hidden"
         data-testid="open-files-input"
         onChange={(event) => {
-          void handleFiles(event.target.files)
+          void handleFiles(event.target.files).catch(() => setOpenError('Those files could not be read. Please select them again.'))
           // Cleared so picking the same files twice in a row fires again.
           event.target.value = ''
         }}
@@ -429,7 +434,7 @@ function OpenPane({
         {origin === 'shared'
           ? 'The project open now arrived in a link. It is yours once you edit it.'
           : recents.length > 1
-            ? 'Nothing here has left this browser. A project you edited is kept when you start another; one you never touched is not.'
+            ? 'Imported and generated projects are kept. Untouched catalog templates can be recreated from App templates.'
             : 'Nothing here has left this browser.'}
       </p>
 
@@ -494,7 +499,7 @@ function RecentRow({
             : 'border-white/10 bg-white/[0.04] hover:border-xc-accent/60 hover:bg-white/[0.07]'
         }`}
       >
-        <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[7px] bg-gradient-to-b from-[#ff7a45] to-xc-swift text-[13px] font-bold text-white">
+        <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[7px] bg-white/10 text-[13px] font-medium text-xc-text">
           {summary.name.slice(0, 1).toUpperCase()}
         </span>
         <span className="min-w-0">
@@ -528,6 +533,7 @@ function RecentRow({
 }
 
 const TEMPLATE_ART: Readonly<Record<string, readonly [string, string]>> = {
+  dispatch: ['albums-outline', '#b1aac8'], market: ['bag-handle-outline', '#93bcb6'],
   folio: ['library', '#ab9af5'], trailhead: ['leaf', '#79d6af'], ledger: ['bar-chart', '#7ab8ff'],
   kitchen: ['flame-outline', '#f4bb80'], pulse: ['pulse', '#ee95ad'], counter: ['add-circle-outline', '#7ab8ff'],
   stacks: ['grid', '#ab9af5'], tasks: ['checkbox-outline', '#79d6af'], card: ['person-circle-outline', '#f4bb80'],
@@ -566,7 +572,7 @@ function TemplateCard({ template, selected, disabled, onSelect, onConfirm }: {
       data-testid={`template-${template.id}`} className={template.kind === 'app' ? styles.appCard : styles.featureCard}>
       <span className={styles.templateIcon} style={{ color, backgroundColor: `${color}18` }}><GallerySymbol name={symbol} /></span>
       <span className={styles.cardCopy}>
-        <span className={styles.cardTitle}>{template.name}{template.id === 'folio' && <small>NEW</small>}</span>
+        <span className={styles.cardTitle}>{template.name}</span>
         <span className={styles.cardTagline}>{template.tagline}</span>
         {template.kind === 'app' && <span className={styles.cardMeta}>{template.highlights?.length ?? 3} screens · {template.files.length} files</span>}
       </span>

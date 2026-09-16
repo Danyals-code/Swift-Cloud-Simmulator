@@ -24,6 +24,8 @@ export interface ProjectManifest {
    * is the direction that costs a dialog rather than somebody's afternoon.
    */
   readonly origin?: string
+  /** Only catalog templates are safe to recreate and discard when untouched. */
+  readonly templateId?: string
 }
 
 export interface Project {

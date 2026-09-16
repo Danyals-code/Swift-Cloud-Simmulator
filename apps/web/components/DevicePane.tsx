@@ -97,10 +97,10 @@ export function DevicePane({
     if (!el) return
 
     const fit = () => {
-      const availableH = el.clientHeight - PANE_PADDING * 2 - BEZEL * 2
-      const availableW = el.clientWidth - PANE_PADDING * 2 - BEZEL * 2
+      const availableH = el.clientHeight - PANE_PADDING * 2
+      const availableW = el.clientWidth - PANE_PADDING * 2
       if (availableH <= 0 || availableW <= 0) return
-      setFitScale(Math.min(1, availableH / device.height, availableW / device.width))
+      setFitScale(Math.min(1, availableH / (device.height + BEZEL * 2), availableW / (device.width + BEZEL * 2)))
     }
 
     fit()
@@ -111,7 +111,7 @@ export function DevicePane({
 
   return (
     <section className="flex h-full min-w-0 flex-col bg-xc-canvas" aria-label="Preview">
-      <header className="flex h-[28px] shrink-0 items-center gap-2 border-b border-black/30 bg-xc-sidebar px-2">
+      <header className="flex h-[34px] shrink-0 items-center gap-2 border-b border-xc-line bg-xc-sidebar px-2">
         <span className="shrink-0 text-[10px] text-xc-text-2" title="iOS 27 appearance preview — native calibration pending">iOS 27 Preview</span>
         <SegmentedControl
           label="Appearance"
@@ -155,7 +155,8 @@ export function DevicePane({
 
       <div
         ref={containerRef}
-        className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto"
+        className="relative flex min-h-0 flex-1 overflow-auto"
+        style={{ padding: PANE_PADDING }}
         data-testid="device-pane"
         // The pointer can leave the device without crossing any node's boundary -
         // straight off the bezel - so the pane itself has to clear the highlight.
@@ -163,16 +164,16 @@ export function DevicePane({
       >
         <div
           style={{
-            transform: `scale(${scale})`,
-            transformOrigin: 'center center',
-            transition: 'transform 120ms ease-out',
-            // Without this the unscaled box still claims its full size, so a 100%
-            // zoom on a small pane scrolls to empty space around the device.
-            width: device.width + BEZEL * 2,
-            height: device.height + BEZEL * 2,
+            // Layout owns the scaled footprint. Transforming a full-sized flex
+            // child leaves invisible overflow and can clip the top of the phone.
+            position: 'relative',
+            width: (device.width + BEZEL * 2) * scale,
+            height: (device.height + BEZEL * 2) * scale,
+            margin: 'auto',
             flexShrink: 0,
           }}
         >
+          <div style={{ position: 'absolute', top: 0, left: 0, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
           <DeviceFrame device={device}>
             <RenderTreeView
               tree={tree ?? EMPTY_RENDER_TREE}
@@ -194,6 +195,7 @@ export function DevicePane({
               <HomeIndicator device={device} colorScheme={preview.colorScheme} />
             ) : null}
           </DeviceFrame>
+          </div>
         </div>
 
         <InspectorReadout node={highlighted} active={inspecting} />

@@ -124,6 +124,7 @@ export function Studio() {
   const files = project?.files ?? NO_FILES
 
   const { result, stale, workerError, dispatch, reset, language } = useCompiler({
+    projectId: project?.id,
     files,
     device,
     colorScheme: previewSettings.colorScheme,
@@ -262,6 +263,7 @@ export function Studio() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (galleryOpen || switcherOpen) return
       if (!(e.ctrlKey || e.metaKey)) return
       const key = e.key.toLowerCase()
 
@@ -292,7 +294,7 @@ export function Studio() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePane, run])
+  }, [togglePane, run, galleryOpen, switcherOpen])
 
   const handleChange = useCallback(
     (text: string) => {
@@ -363,6 +365,7 @@ export function Studio() {
 
   return (
     <main className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
+      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || rename !== null}>
       <Toolbar
         onOpenGallery={openGallery}
         projectName={project.manifest.name}
@@ -530,6 +533,7 @@ export function Studio() {
         ) : null}
       </div>
 
+      </div>
       {switcherOpen ? (
         <FileSwitcher
           files={files}
@@ -559,10 +563,10 @@ export function Studio() {
             if (made) setGalleryOpen(false)
             return made
           }}
-          onOpenProject={(id) => void openProject(id)}
+          onOpenProject={openProject}
           onRemoveProject={(id) => void removeProject(id)}
-          onOpenFiles={(picked) => {
-            const opened = openFiles(picked)
+          onOpenFiles={async (picked) => {
+            const opened = await openFiles(picked)
             if (opened) setGalleryOpen(false)
             return opened
           }}

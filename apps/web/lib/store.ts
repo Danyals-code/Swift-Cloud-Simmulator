@@ -191,7 +191,7 @@ export interface StudioState {
    */
   applyTemplate: (templateId: string) => Promise<boolean>
   /** Reopens one of the projects in this browser. */
-  openProject: (id: string) => Promise<void>
+  openProject: (id: string) => Promise<boolean>
   /** Deletes a project. Refuses the one that is open - close it by opening another. */
   removeProject: (id: string) => Promise<void>
   /**
@@ -200,7 +200,7 @@ export interface StudioState {
    * Returns false when nothing usable was in the selection, so the caller can say so
    * rather than presenting an empty project as a successful open.
    */
-  openFiles: (files: readonly OpenedFile[]) => boolean
+  openFiles: (files: readonly OpenedFile[]) => Promise<boolean>
 }
 
 export const useStudio = create<StudioState>((set, get) => {
@@ -247,7 +247,7 @@ export const useStudio = create<StudioState>((set, get) => {
      * one per click would fill the list with things nobody chose to keep.
      */
     if (outgoing && outgoing.id !== project.id) {
-      const untouched = isPristine(outgoing)
+      const untouched = outgoing.manifest.templateId !== undefined && isPristine(outgoing)
       if (untouched) {
         try {
           await persistence().remove(outgoing.id)
@@ -596,15 +596,15 @@ export const useStudio = create<StudioState>((set, get) => {
       return true
     },
 
-    openFiles(files) {
+    async openFiles(files) {
       const project = projectFromFiles(files)
       if (!project) return false
-      void replace(project)
+      await replace(project)
       return true
     },
 
     async openProject(id) {
-      if (get().project?.id === id) return
+      if (get().project?.id === id) return true
 
       // The project on screen is written before anything else is read: the debounce
       // may still be holding the last few keystrokes, and they belong to the project
@@ -620,7 +620,7 @@ export const useStudio = create<StudioState>((set, get) => {
       if (!opened) {
         // The row was stale - deleted in another tab, or storage went away.
         await refreshRecents()
-        return
+        return false
       }
 
       const first = opened.files[0]?.id ?? null
@@ -633,6 +633,7 @@ export const useStudio = create<StudioState>((set, get) => {
       })
       rememberLastOpened(id)
       await refreshRecents()
+      return true
     },
 
     async removeProject(id) {
