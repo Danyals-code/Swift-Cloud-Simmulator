@@ -316,6 +316,10 @@ export type LayoutModifier =
       readonly tracking?: number
       readonly baselineOffset?: number
       readonly lineSpacing?: number
+      /** `.minimumScaleFactor` - the smallest fraction of the font size text may shrink to. */
+      readonly minimumScale?: number
+      /** `.truncationMode` - which end of an over-long line the ellipsis replaces. */
+      readonly truncation?: 'head' | 'middle' | 'tail'
     }
   | { readonly kind: 'foregroundStyle'; readonly color: RGBA }
   | { readonly kind: 'opacity'; readonly value: number }
@@ -543,6 +547,16 @@ export interface LayoutEnvironment {
   readonly tracking?: number
   readonly baselineOffset?: number
   readonly lineSpacing?: number
+  /**
+   * `.minimumScaleFactor` and `.truncationMode` - the two that ask measurement to
+   * answer back rather than to record something.
+   *
+   * Shrinking has to re-measure at a smaller size until the text fits, and truncating
+   * has to know which end to cut. Neither is expressible as a paint attribute, which
+   * is why they sat out the first text pass.
+   */
+  readonly minimumScale?: number
+  readonly truncation?: 'head' | 'middle' | 'tail'
   /** Set by `.allowsHitTesting(false)`: the subtree paints but does not respond. */
   readonly hitTestingDisabled?: boolean
   /**
@@ -623,6 +637,8 @@ export function childEnvironment(
           ? { baselineOffset: modifier.baselineOffset }
           : {}),
         ...(modifier.lineSpacing !== undefined ? { lineSpacing: modifier.lineSpacing } : {}),
+        ...(modifier.minimumScale !== undefined ? { minimumScale: modifier.minimumScale } : {}),
+        ...(modifier.truncation !== undefined ? { truncation: modifier.truncation } : {}),
       }
     default:
       return env

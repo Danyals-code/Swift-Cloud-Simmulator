@@ -4,11 +4,10 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the layout pass (defect register phase 9.4), which changed the stack
-to align *guides* rather than edges - the rule SwiftUI actually follows, and what makes
-`.alignmentGuide` mean anything.
+Last updated after the measurement half of the text pass (defect register phase 9.2),
+which shrinks text to fit and truncates at the end the user asked for.
 
-**147 ✅ · 49 🟡 · 16 ⬜ · 10 ✗**, over 222 rows, counted from this file rather than carried
+**150 ✅ · 49 🟡 · 16 ⬜ · 10 ✗**, over 225 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -163,7 +162,9 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.underline` / `.strikethrough` | ✅ | - | inherited like the font, and each takes the `Bool` form so a binding can switch one off |
 | `.kerning` / `.tracking` | ✅ | - | measured, not painted: the extra advance is in the width the engine reports. The two are applied identically - see approximations |
 | `.baselineOffset` / `.lineSpacing` | ✅ | - | `lineSpacing` is a gap *between* lines, so a single line is unaffected |
-| `.minimumScaleFactor` / `.allowsTightening` | ⬜ | - | both ask measurement to answer back - shrink until it fits - which the one-pass measure cannot do |
+| `.minimumScaleFactor` | ✅ | - | re-measures at smaller sizes until the text fits its line limit, then truncates what is still over. Stepped in tenths of the range rather than continuously |
+| `.truncationMode` | ✅ | - | `.head`, `.middle` and `.tail`, decided against the whole remaining text rather than the last visible line |
+| `.allowsTightening` | ⬜ | - | condensing letter spacing to avoid a break, which needs a second measuring pass per line |
 | `.symbolRenderingMode` / `.symbolVariant` | ⬜ | - | the substitute glyphs have no multicolour variants |
 
 ## Shapes and styles
@@ -268,6 +269,7 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | `as?` / `as!` / `is` | ✅ | - | compares the runtime type, the declared superclass chain and protocol conformances; generics are erased, so `[Item]` and `[String]` are both `Array` |
 | Closures, trailing closures, `$0` | ✅ | 1 | |
 | Contextual member syntax (`.home` for an enum) | ✅ | 7 | resolved where a declaration states the type |
+| Contextual keywords as names | ✅ | - | `open`, `some`, `any`, `where`, `final` and the rest, both declared and read. `get` and `set` are names everywhere except at the start of a computed property's body, where `{ get` is an accessor block in Swift too |
 | `protocol`, requirements, `extension` | ✅ | 8 | defaults from `extension P`, merged once for the whole toolchain |
 | `associatedtype` | 🟡 | 8 | the name resolves; nothing constrains it |
 | `inout` parameters | ✅ | 8 | the same projection `@Binding` uses |

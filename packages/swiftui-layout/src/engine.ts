@@ -31,6 +31,7 @@ import {
 import {
   FontMetricsTable,
   measureRuns,
+  type MeasureOptions,
   type MeasuredRun,
   type TextLineBox,
 } from './metrics'
@@ -252,6 +253,7 @@ export class LayoutEngine {
           this.metrics,
           env.lineLimit,
           env.lineSpacing ?? 0,
+          textOptions(env),
         )
         return { width: measured.width, height: measured.height }
       }
@@ -667,7 +669,14 @@ export class LayoutEngine {
           this.metrics,
           env.lineLimit,
           env.lineSpacing ?? 0,
+          textOptions(env),
         )
+        // `.minimumScaleFactor` shrank the text to make it fit, so the painted runs
+        // take the same factor. Measuring at one size and painting at another is the
+        // one thing a measured layout exists to rule out.
+        const painted = measured.scale === 1 ? runs : runs.map((run) => scaleRun(run, measured.scale))
+        const lineFont = measured.scale === 1 ? env.font : scaleFont(env.font, measured.scale)
+
         out.push({
           id: element.id,
           frame: bounds,
@@ -676,11 +685,11 @@ export class LayoutEngine {
           cornerRadius: 0,
           paint: {
             kind: 'text',
-            text: runs.map((run) => run.text).join(''),
+            text: painted.map((run) => run.text).join(''),
             lines: measured.lines,
-            font: env.font,
+            font: lineFont,
             color: env.foregroundColor,
-            runs,
+            runs: painted,
             ...(env.textAlign ? { align: env.textAlign } : {}),
             ...(env.lineSpacing ? { lineSpacing: env.lineSpacing } : {}),
           },
@@ -1782,6 +1791,26 @@ function applyRunAttributes(base: PaintedRun, run: TextRunSpec): PaintedRun {
  * imported so `swiftui-layout` keeps owning every number layout depends on.
  */
 const LINE_HEIGHT_RATIO = 1.21
+
+function scaleFont(font: ResolvedFont, scale: number): ResolvedFont {
+  return { ...font, size: font.size * scale, lineHeight: font.lineHeight * scale }
+}
+
+function scaleRun(run: PaintedRun, scale: number): PaintedRun {
+  return {
+    ...run,
+    font: scaleFont(run.font, scale),
+    ...(run.tracking !== undefined ? { tracking: run.tracking * scale } : {}),
+  }
+}
+
+/** What text measurement needs from the environment beyond the font. */
+function textOptions(env: LayoutEnvironment): MeasureOptions {
+  return {
+    ...(env.minimumScale !== undefined ? { minimumScale: env.minimumScale } : {}),
+    ...(env.truncation !== undefined ? { truncation: env.truncation } : {}),
+  }
+}
 
 function measuredRuns(runs: readonly PaintedRun[]): readonly MeasuredRun[] {
   return runs.map((run) => ({

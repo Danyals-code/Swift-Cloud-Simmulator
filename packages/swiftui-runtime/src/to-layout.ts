@@ -3065,8 +3065,7 @@ class Converter {
       case 'monospaced':
         return { kind: 'font', font: monospacedFont(this.typeScale) }
 
-      case 'minimumScaleFactor':
-        return { kind: 'unsupported', name: modifier.name }
+
 
       case 'position':
         return {
@@ -3141,6 +3140,21 @@ class Converter {
       case 'lineSpacing': {
         const value = numberArg(positional(args, 0))
         return value === null ? null : { kind: 'textStyle', lineSpacing: Math.max(0, value) }
+      }
+
+      case 'minimumScaleFactor': {
+        const value = numberArg(positional(args, 0))
+        return value === null
+          ? null
+          : { kind: 'textStyle', minimumScale: Math.max(0.1, Math.min(1, value)) }
+      }
+
+      case 'truncationMode': {
+        const mode = tokenName(positional(args, 0))
+        return {
+          kind: 'textStyle',
+          truncation: mode === 'head' ? 'head' : mode === 'middle' ? 'middle' : 'tail',
+        }
       }
 
       case 'alignmentGuide': {

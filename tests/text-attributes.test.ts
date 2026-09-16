@@ -243,3 +243,71 @@ describe('Text + Text', () => {
     expect(errors(result).length).toBeGreaterThan(0)
   })
 })
+
+describe('the half that asks measurement to answer back', () => {
+  const long = 'Text("one two three four five six seven eight")'
+
+  it('minimumScaleFactor shrinks the text until it fits its line limit', () => {
+    const clipped = firstText(run(view(`${long}.lineLimit(1).frame(width: 120)`)))
+    const shrunk = firstText(
+      run(view(`${long}.lineLimit(1).minimumScaleFactor(0.5).frame(width: 120)`)),
+    )
+
+    expect(shrunk.runs[0]!.font.size).toBeLessThan(clipped.runs[0]!.font.size)
+    // And it does not shrink past the floor it was given.
+    expect(shrunk.runs[0]!.font.size).toBeGreaterThanOrEqual(clipped.runs[0]!.font.size * 0.5)
+  })
+
+  it('leaves text that already fits at full size', () => {
+    const plain = firstText(run(view('Text("ok").lineLimit(1).fixedSize()')))
+    const scalable = firstText(
+      run(view('Text("ok").lineLimit(1).minimumScaleFactor(0.5).fixedSize()')),
+    )
+    expect(scalable.runs[0]!.font.size).toBe(plain.runs[0]!.font.size)
+  })
+
+  it('truncates at the tail by default', () => {
+    const payload = firstText(run(view(`${long}.lineLimit(1).frame(width: 120)`)))
+    const line = payload.lines?.[0]?.text ?? ''
+    expect(line.endsWith('…')).toBe(true)
+    expect(line.startsWith('one')).toBe(true)
+  })
+
+  it('.head keeps the end and marks the start', () => {
+    const payload = firstText(
+      run(view(`${long}.lineLimit(1).truncationMode(.head).frame(width: 120)`)),
+    )
+    const line = payload.lines?.[0]?.text ?? ''
+    expect(line.startsWith('…')).toBe(true)
+    expect(line.endsWith('eight')).toBe(true)
+  })
+
+  it('.middle keeps both ends', () => {
+    const payload = firstText(
+      run(view(`${long}.lineLimit(1).truncationMode(.middle).frame(width: 120)`)),
+    )
+    const line = payload.lines?.[0]?.text ?? ''
+    expect(line.startsWith('one')).toBe(true)
+    expect(line.endsWith('eight')).toBe(true)
+    expect(line).toContain('…')
+  })
+
+  it('never reports a line wider than the box it was measured in', () => {
+    // The point of doing this in measurement rather than in CSS: whatever is drawn,
+    // the frame the engine reported has to be one the text actually occupies.
+    for (const mode of ['.head', '.middle', '.tail']) {
+      const node = textNodes(
+        run(view(`${long}.lineLimit(1).truncationMode(${mode}).frame(width: 120)`)),
+      )[0]!
+      for (const line of node.text?.lines ?? []) {
+        expect(line.width, mode).toBeLessThanOrEqual(120.05)
+      }
+    }
+  })
+
+  it('neither warns any more', () => {
+    for (const modifier of ['minimumScaleFactor(0.5)', 'truncationMode(.middle)']) {
+      expect(warnings(run(view(`Text("a").${modifier}`))), modifier).toEqual([])
+    }
+  })
+})

@@ -162,6 +162,14 @@ export interface TextMeasurement {
   readonly width: number
   readonly height: number
   readonly lines: readonly TextLineBox[]
+  /**
+   * The fraction of the requested size the text was actually laid out at.
+   *
+   * 1 unless `.minimumScaleFactor` shrank it. The painter has to apply the same
+   * factor, or the text is measured small and drawn large - which is the one failure
+   * a measured layout exists to make impossible.
+   */
+  readonly scale: number
 }
 
 /**
@@ -247,31 +255,104 @@ export function measureRuns(
   table: FontMetricsTable,
   lineLimit: number | null = null,
   lineSpacing = 0,
+  options: MeasureOptions = {},
 ): TextMeasurement {
+  // `.minimumScaleFactor` shrinks rather than truncating, so the size has to be found
+  // by measuring: try the full size, and step down until the text fits the line limit
+  // it was given or the floor is reached. SwiftUI shrinks continuously; a tenth of the
+  // range is far below the point at which a difference is visible, and it bounds the
+  // work at ten measurements rather than an unbounded search.
+  const floor = options.minimumScale ?? 1
+  if (floor < 1 && lineLimit !== null && lineLimit > 0) {
+    for (let step = 0; step <= 10; step++) {
+      const scale = 1 - (step / 10) * (1 - floor)
+      const attempt = layOut(runs, scaled(lineFont, scale), maxWidth, table, null, lineSpacing, scale)
+      if (attempt.lines.length <= lineLimit) return attempt
+    }
+    // Nothing fits even at the floor. SwiftUI shrinks as far as it is allowed and then
+    // truncates what is still over, rather than giving up and drawing at full size.
+    return layOut(
+      runs,
+      scaled(lineFont, floor),
+      maxWidth,
+      table,
+      lineLimit,
+      lineSpacing,
+      floor,
+      options.truncation,
+    )
+  }
+
+  return layOut(runs, lineFont, maxWidth, table, lineLimit, lineSpacing, 1, options.truncation)
+}
+
+/** What measurement needs beyond the text itself. */
+export interface MeasureOptions {
+  readonly minimumScale?: number
+  readonly truncation?: 'head' | 'middle' | 'tail'
+}
+
+/** The same face at a fraction of its size. */
+function scaled(font: ResolvedFont, scale: number): ResolvedFont {
+  return scale === 1
+    ? font
+    : { ...font, size: font.size * scale, lineHeight: font.lineHeight * scale }
+}
+
+function layOut(
+  runs: readonly MeasuredRun[],
+  lineFont: ResolvedFont,
+  maxWidth: number,
+  table: FontMetricsTable,
+  lineLimit: number | null,
+  lineSpacing: number,
+  scale: number,
+  truncation: 'head' | 'middle' | 'tail' = 'tail',
+): TextMeasurement {
+  runs = scale === 1 ? runs : runs.map((run) => ({ ...run, font: scaled(run.font, scale) }))
   const multiRun = runs.length > 1
   const all = clustersOf(runs, table)
 
-  let lines: Cluster[][] = []
+  let wrapped: WrappedLine[] = []
   let paragraph: Cluster[] = []
+  const paragraphs: Cluster[][] = []
+
+  const endParagraph = (): void => {
+    const index = paragraphs.length
+    paragraphs.push(paragraph)
+    wrapped.push(...wrapParagraph(paragraph, maxWidth, index))
+    paragraph = []
+  }
+
   for (const cluster of all) {
     if (cluster.text === '\n') {
-      lines.push(...wrapParagraph(paragraph, maxWidth))
-      paragraph = []
+      endParagraph()
       continue
     }
     paragraph.push(cluster)
   }
-  lines.push(...wrapParagraph(paragraph, maxWidth))
+  endParagraph()
 
   // `.lineLimit(n)` truncates rather than shrinking, and the last kept line takes an
-  // ellipsis - which also has to fit, so it replaces the tail rather than pushing the
-  // line past its width.
-  if (lineLimit !== null && lineLimit > 0 && lines.length > lineLimit) {
-    const kept = lines.slice(0, lineLimit)
-    const last = kept[kept.length - 1]
-    if (last) kept[kept.length - 1] = truncate(last, lineFont, maxWidth, table)
-    lines = kept
+  // ellipsis - which also has to fit, so it replaces part of the line rather than
+  // pushing it past its width.
+  //
+  // What it replaces is decided against *everything still to come*, not against the
+  // last kept line alone: `.head` keeps the end of the text and `.middle` keeps both
+  // ends, and neither means anything if the text beyond the break has already been
+  // thrown away. Tail truncation is unaffected, which is why this went unnoticed.
+  if (lineLimit !== null && lineLimit > 0 && wrapped.length > lineLimit) {
+    const kept = wrapped.slice(0, lineLimit)
+    const last = kept[kept.length - 1]!
+    const remaining = paragraphs[last.paragraph]!.slice(last.from)
+    kept[kept.length - 1] = {
+      ...last,
+      clusters: truncate(remaining, lineFont, maxWidth, table, truncation),
+    }
+    wrapped = kept
   }
+
+  const lines = wrapped.map((line) => line.clusters)
 
   const boxes = lines.map((line) => toLineBox(line, multiRun))
   const lineHeight = table.lineHeight(lineFont)
@@ -281,6 +362,7 @@ export function measureRuns(
     // `.lineSpacing` is the gap *between* lines, so one line is unaffected by it.
     height: boxes.length * lineHeight + Math.max(0, boxes.length - 1) * lineSpacing,
     lines: boxes,
+    scale,
   }
 }
 
@@ -305,28 +387,53 @@ function toLineBox(clusters: readonly Cluster[], multiRun: boolean): TextLineBox
   return { text, width, slices }
 }
 
-/** Replaces the tail of a line with an ellipsis, keeping it inside `maxWidth`. */
+/**
+ * Replaces part of a line with an ellipsis, keeping it inside `maxWidth`.
+ *
+ * `.truncationMode` says which part. The tail is SwiftUI's default and the one people
+ * mean; `.head` keeps the end of a path or a filename, and `.middle` keeps both ends,
+ * which is what a Finder-style label needs. All three keep exactly the clusters that
+ * fit, so the line never reports a width it does not occupy.
+ */
 function truncate(
   line: readonly Cluster[],
   font: ResolvedFont,
   maxWidth: number,
   table: FontMetricsTable,
+  mode: 'head' | 'middle' | 'tail' = 'tail',
 ): Cluster[] {
   const ellipsis = '…'
   const run = line[line.length - 1]?.run ?? 0
-  const ellipsisWidth = table.advance(ellipsis, font)
+  const width = table.advance(ellipsis, font)
+  const mark: Cluster = { text: ellipsis, run, width }
+  const clusters = trimEnd(line)
+  const budget = Number.isFinite(maxWidth) ? maxWidth - width : Number.POSITIVE_INFINITY
 
-  let width = 0
+  if (mode === 'head') return [mark, ...takeFrom(clusters, budget, 'end')]
+  if (mode === 'tail') return [...trimEnd(takeFrom(clusters, budget, 'start')), mark]
+
+  // Middle: half the budget from each end, the leading half taking the odd point so a
+  // single-character budget keeps the first character rather than the last.
+  const lead = trimEnd(takeFrom(clusters, budget / 2, 'start'))
+  const tail = takeFrom(clusters.slice(lead.length), budget - measure(lead), 'end')
+  return [...lead, mark, ...tail]
+}
+
+/** As many clusters as fit in `budget`, taken from one end. */
+function takeFrom(clusters: readonly Cluster[], budget: number, from: 'start' | 'end'): Cluster[] {
+  const ordered = from === 'start' ? clusters : [...clusters].reverse()
+  let used = 0
   const kept: Cluster[] = []
-  for (const cluster of trimEnd(line)) {
-    if (Number.isFinite(maxWidth) && width + cluster.width + ellipsisWidth > maxWidth) break
+  for (const cluster of ordered) {
+    if (used + cluster.width > budget) break
     kept.push(cluster)
-    width += cluster.width
+    used += cluster.width
   }
+  return from === 'start' ? kept : kept.reverse()
+}
 
-  const trimmed = trimEnd(kept)
-  trimmed.push({ text: ellipsis, run, width: ellipsisWidth })
-  return trimmed
+function measure(clusters: readonly Cluster[]): number {
+  return clusters.reduce((sum, c) => sum + c.width, 0)
 }
 
 function trimEnd(clusters: readonly Cluster[]): Cluster[] {
@@ -348,14 +455,27 @@ function trimEnd(clusters: readonly Cluster[]): Cluster[] {
  */
 const BREAK_TOLERANCE = 0.05
 
-function wrapParagraph(clusters: readonly Cluster[], maxWidth: number): Cluster[][] {
-  if (clusters.length === 0) return [[]]
+/** A wrapped line, and where in its paragraph it started - which truncation needs. */
+interface WrappedLine {
+  readonly clusters: Cluster[]
+  readonly paragraph: number
+  readonly from: number
+}
+
+function wrapParagraph(
+  clusters: readonly Cluster[],
+  maxWidth: number,
+  paragraph: number,
+): WrappedLine[] {
+  if (clusters.length === 0) return [{ clusters: [], paragraph, from: 0 }]
 
   const limit = maxWidth + BREAK_TOLERANCE
   const total = clusters.reduce((sum, c) => sum + c.width, 0)
-  if (!Number.isFinite(maxWidth) || total <= limit) return [[...clusters]]
+  if (!Number.isFinite(maxWidth) || total <= limit) {
+    return [{ clusters: [...clusters], paragraph, from: 0 }]
+  }
 
-  const lines: Cluster[][] = []
+  const lines: WrappedLine[] = []
   let lineStart = 0
   let lineWidth = 0
   /** Index just past the last space seen on this line, i.e. where a break may go. */
@@ -367,7 +487,7 @@ function wrapParagraph(clusters: readonly Cluster[], maxWidth: number): Cluster[
     if (lineWidth + width > limit && i > lineStart) {
       // Break at the last word boundary; if the word itself is too long, break here.
       const breakAt = lastBreak > lineStart ? lastBreak : i
-      lines.push(trimEnd(clusters.slice(lineStart, breakAt)))
+      lines.push({ clusters: trimEnd(clusters.slice(lineStart, breakAt)), paragraph, from: lineStart })
       lineStart = breakAt
       lineWidth = measureSlice(clusters, lineStart, i)
       lastBreak = -1
@@ -377,7 +497,9 @@ function wrapParagraph(clusters: readonly Cluster[], maxWidth: number): Cluster[
     if (clusters[i]!.text === ' ') lastBreak = i + 1
   }
 
-  if (lineStart < clusters.length) lines.push(trimEnd(clusters.slice(lineStart)))
+  if (lineStart < clusters.length) {
+    lines.push({ clusters: trimEnd(clusters.slice(lineStart)), paragraph, from: lineStart })
+  }
 
   return lines
 }
