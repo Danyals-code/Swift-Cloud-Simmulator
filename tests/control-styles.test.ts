@@ -219,6 +219,52 @@ describe('.pickerStyle', () => {
     )
     expect(texts(result)).toContain('Two')
   })
+
+  /**
+   * `Picker { ForEach(options) { … } }` - how a picker over a collection is written.
+   *
+   * Its options are a level down inside the `ForEach`, and nothing flattened them: the
+   * segmented drawing rendered a placeholder for a container it did not recognise, and
+   * the popup had a list with nothing in it to tick. A template caught this, but only
+   * as "the Settings template has a placeholder", which names the symptom and not the
+   * cause - so it is pinned here, beside the style that exposed it.
+   */
+  const overForEach = (style: string) =>
+    app(
+      [
+        '    @State private var choice = "b"',
+        '    var body: some View {',
+        '        Picker("Pick", selection: $choice) {',
+        '            ForEach(["a", "b", "c"], id: \\.self) { option in',
+        '                Text(option).tag(option)',
+        '            }',
+        '        }' + style,
+        '    }',
+      ].join('\n'),
+    )
+
+  it('takes its options from a ForEach, drawn inline', () => {
+    const result = run(overForEach('.pickerStyle(.segmented)'))
+    expect(warnings(result)).toEqual([])
+    expect(nodes(result).filter((n) => n.kind === 'placeholder')).toEqual([])
+    expect(texts(result)).toEqual(expect.arrayContaining(['a', 'b', 'c']))
+    expect(buttons(result).length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('takes them from a ForEach when it opens onto them too', () => {
+    resetPipelineState()
+    const first = compile(request(overForEach('')))
+    const control = nodes(first).find((n) => n.hitTarget && n.a11y?.label === 'Pick')
+    expect(control, 'expected the picker to be pressable').toBeDefined()
+    applyEvent({ kind: 'tap', handlerId: control!.hitTarget!.handlerId, location: { x: 0, y: 0 } })
+
+    const opened = rerender(revision++)
+    expect(nodes(opened).filter((n) => n.kind === 'placeholder')).toEqual([])
+    expect(texts(opened)).toEqual(expect.arrayContaining(['a', 'b', 'c']))
+    // The one currently chosen is ticked, which is the only thing on screen that
+    // reports the value once the list is up.
+    expect(nodes(opened).some((n) => n.image?.symbol === 'checkmark')).toBe(true)
+  })
 })
 
 describe('.labelStyle', () => {
