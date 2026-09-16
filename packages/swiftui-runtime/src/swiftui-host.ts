@@ -674,6 +674,22 @@ export class SwiftUIHost implements InterpreterHost {
       return this.makeDataDriven(name, args, call)
     }
 
+    // `AsyncImage(url:) { image in … } placeholder: { … }`. The content closure takes
+    // the loaded image, which there is never going to be - the worker has no network -
+    // so running it would hand the user's code a nil where an `Image` belongs. Only
+    // the placeholder is built, which is what a real device shows first anyway.
+    if (name === 'AsyncImage') {
+      const placeholder = call.args.find((a) => a.label === 'placeholder')?.value
+      return view({
+        name,
+        args,
+        children: placeholder?.kind === 'closure' ? this.toViews(call.invokeBuilder(placeholder)) : [],
+        modifiers: [],
+        action: null,
+        span: call.span,
+      })
+    }
+
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)

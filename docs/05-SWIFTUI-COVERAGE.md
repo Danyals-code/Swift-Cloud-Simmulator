@@ -55,7 +55,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
 | `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
-| `AsyncImage` | 🟡 | 7 | constructible now that `URL` exists; draws its `placeholder:`, because there is no network in the worker |
+| `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
 | `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
 | `ProgressView` | ✅ | 6 | determinate bar; `.circular` and the indeterminate form are a ring |
 | `Gauge` | 🟡 | 7 | `.gaugeStyle` chooses a ring or a bar; the ring does not show the value as an arc |
