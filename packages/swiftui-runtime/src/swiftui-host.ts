@@ -6,7 +6,9 @@ import {
   describe,
   double,
   int,
+  asProjection,
   opaque,
+  projection,
   str,
   type ClosureValue,
   type HostCall,
@@ -14,7 +16,7 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
-import { DISMISS_TYPE, EnvironmentStack } from './view-environment'
+import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
   asCanvasContext,
   asPath,
@@ -43,6 +45,7 @@ import {
   BUTTON_CONFIGURATION_TYPE,
   COLOR_TYPE,
   EDGE_INSETS_TYPE,
+  DIMENSIONS_TYPE,
   GEOMETRY_TYPE,
   isView,
   STROKE_STYLE_TYPE,
@@ -157,6 +160,18 @@ const DATA_DRIVEN_VIEWS: ReadonlySet<string> = new Set(['ForEach', 'List', 'Pick
 
 function view(v: ViewValue): SwiftValue {
   return opaque(VIEW_TYPE, v)
+}
+
+/**
+ * Whether a view may take part in a `Text` concatenation.
+ *
+ * Only `Text` itself, and only because Swift's `+` on views is declared on `Text`
+ * alone. Accepting a `VStack` here would build a Text whose spans have no text and
+ * quietly draw nothing, which is the kind of silent wrong the preview exists to
+ * avoid - so it declines and the operator reports itself instead.
+ */
+function isTextLike(v: ViewValue): boolean {
+  return v.name === 'Text'
 }
 
 function token(name: string): SwiftValue {
@@ -498,12 +513,7 @@ export class SwiftUIHost implements InterpreterHost {
       if (key && value) values.push([key, value])
     }
 
-    const modifier: ModifierValue = {
-      name: member,
-      args: toArgs(call),
-      span: call.span,
-      closure: call.trailingClosure,
-    }
+    const modifier = this.makeModifier(member, call)
 
     return this.environment.scoped(values, objects, () => {
       const base = asView(target) ?? this.expandForModifier(target, call.span)
@@ -520,7 +530,15 @@ export class SwiftUIHost implements InterpreterHost {
    * silent, which is the failure mode this project refuses: the code looked honoured
    * and drew nothing.
    */
-  private toViews(values: readonly SwiftValue[]): ViewValue[] {
+  /**
+   * Every value a view builder can produce, as views.
+   *
+   * Public because the runtime's own builders need the same conversion: a `Color` and
+   * a `Path` are views without being view *values*, and a builder that only accepts
+   * the latter drops them. `var body: some View { Color.blue }` drew nothing at all
+   * for exactly that reason - the canonical one-liner for filling a screen.
+   */
+  toViews(values: readonly SwiftValue[]): ViewValue[] {
     return values.flatMap((value) => {
       const view = asView(value)
       if (view) return [view]
@@ -588,6 +606,7 @@ export class SwiftUIHost implements InterpreterHost {
     // Values first: these are not views, so they have to be handled before the
     // "is this a view name?" guard below rejects them.
     if (name === 'Task') return this.runTask(call)
+    if (name === 'Binding') return this.makeBinding(call)
     if (name === 'Color') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
@@ -655,6 +674,22 @@ export class SwiftUIHost implements InterpreterHost {
       return this.makeDataDriven(name, args, call)
     }
 
+    // `AsyncImage(url:) { image in … } placeholder: { … }`. The content closure takes
+    // the loaded image, which there is never going to be - the worker has no network -
+    // so running it would hand the user's code a nil where an `Image` belongs. Only
+    // the placeholder is built, which is what a real device shows first anyway.
+    if (name === 'AsyncImage') {
+      const placeholder = call.args.find((a) => a.label === 'placeholder')?.value
+      return view({
+        name,
+        args,
+        children: placeholder?.kind === 'closure' ? this.toViews(call.invokeBuilder(placeholder)) : [],
+        modifiers: [],
+        action: null,
+        span: call.span,
+      })
+    }
+
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
@@ -697,8 +732,17 @@ export class SwiftUIHost implements InterpreterHost {
 
     // Content closures are result builders: `VStack { a; b }` yields two children,
     // and an `if` inside contributes only the taken branch.
+    //
+    // Not for a view the preview does not draw. Its children are discarded in favour
+    // of a placeholder, so running the closure can only have side effects - and a
+    // closure that takes a parameter the caller cannot supply gets `nil` and traps.
+    // `TableColumn("Name") { row in Text(row.name) }` took the whole preview down
+    // that way: a view listed as *unimplemented* stopped the screen rather than
+    // drawing the labelled box that listing promises.
     const children =
-      call.trailingClosure && !isAction ? this.toViews(call.invokeBuilder(call.trailingClosure)) : []
+      call.trailingClosure && !isAction && !UNIMPLEMENTED_VIEWS.has(name)
+        ? this.toViews(call.invokeBuilder(call.trailingClosure))
+        : []
 
     return view({
       name,
@@ -825,14 +869,7 @@ export class SwiftUIHost implements InterpreterHost {
     // falls through to the interpreter's own "no such member" reporting.
     const base = asView(target) ?? this.expandForModifier(target, call.span)
     if (base) {
-      const modifier: ModifierValue = {
-        name: member,
-        args: toArgs(call),
-        span: call.span,
-        // Unevaluated on purpose: a sheet's content must not run while it is down.
-        closure: call.trailingClosure,
-      }
-      return view({ ...base, modifiers: [...base.modifiers, modifier] })
+      return view({ ...base, modifiers: [...base.modifiers, this.makeModifier(member, call)] })
     }
 
     // Path building. The payload is mutated in place, which is what the closure form
@@ -904,15 +941,7 @@ export class SwiftUIHost implements InterpreterHost {
       !COLOR_MEMBERS.has(member)
     ) {
       const wrapped = this.colorAsView(target, call.span)
-      if (wrapped) {
-        const modifier: ModifierValue = {
-          name: member,
-          args: toArgs(call),
-          span: call.span,
-          closure: call.trailingClosure,
-        }
-        return view({ ...wrapped, modifiers: [modifier] })
-      }
+      if (wrapped) return view({ ...wrapped, modifiers: [this.makeModifier(member, call)] })
     }
 
     if (target.kind === 'opaque' && target.typeName === COLOR_TYPE) {
@@ -946,6 +975,10 @@ export class SwiftUIHost implements InterpreterHost {
       }
     }
 
+    if (target.kind === 'type' && target.name === 'Binding' && member === 'constant') {
+      return this.constantBinding(call)
+    }
+
     if (target.kind === 'type' && target.name === 'Animation') {
       return this.makeAnimation(member, call)
     }
@@ -958,10 +991,156 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   /** `dismiss()` - the one callable the environment hands out. */
-  callValue(target: SwiftValue): SwiftValue | undefined {
-    if (target.kind !== 'opaque' || target.typeName !== DISMISS_TYPE) return undefined
-    this.dismissAction?.()
-    return { kind: 'void' }
+  /**
+   * `Text("Hello, ") + Text(name).bold()` - the one operator SwiftUI defines on views.
+   *
+   * The result is a `Text` whose children are the two operands, so each half keeps its
+   * own modifier chain and the layout pass can turn them into attributed runs. Making
+   * it a view rather than a joined string is what lets the halves differ: joining the
+   * text would throw away exactly the styling the operator exists to combine.
+   *
+   * Anything else opaque is left alone and traps as it did, because inventing a
+   * meaning for `Color.red + 1` would be a worse answer than the error.
+   */
+  applyOperator(operator: string, left: SwiftValue, right: SwiftValue, span: SourceSpan): SwiftValue | undefined {
+    if (operator !== '+') return undefined
+
+    const a = asView(left)
+    const b = asView(right)
+    if (!a || !b) return undefined
+    if (!isTextLike(a) || !isTextLike(b)) return undefined
+
+    return view({
+      name: 'Text',
+      args: [],
+      children: [a, b],
+      modifiers: [],
+      action: null,
+      span,
+    })
+  }
+
+  /**
+   * `Binding.constant(x)` - a binding that reads a value and swallows what is written.
+   *
+   * The spelling every preview and every stateless subview uses, and the one place a
+   * `Binding` appears without a `@State` behind it. Without it, `.constant(…)` was an
+   * unresolved member and a control given one had nothing to read.
+   */
+  private constantBinding(call: HostCall): SwiftValue | undefined {
+    const value = call.args.find((a) => a.label === null)?.value
+    if (!value) return undefined
+    return projection({ get: () => value, set: () => {}, description: 'Binding.constant' })
+  }
+
+  /**
+   * `Binding(get:set:)` - a binding computed rather than projected.
+   *
+   * The mechanism was already there: a projection is a pair of functions over storage
+   * someone else owns, and `$count` builds one from a variable. This builds the same
+   * pair from the user's own closures, so a computed binding is indistinguishable
+   * downstream from a projected one - a `Toggle` cannot tell them apart, which is the
+   * point of the form.
+   *
+   * `.constant(x)` is the other spelling and the one previews are full of: a binding
+   * that reads a value and discards what is written to it.
+   */
+  private makeBinding(call: HostCall): SwiftValue | undefined {
+    const get = call.args.find((a) => a.label === 'get')?.value
+    const set = call.args.find((a) => a.label === 'set')?.value
+    if (get?.kind !== 'closure') return undefined
+
+    return projection({
+      get: () => call.invoke(get),
+      set: (value) => {
+        if (set?.kind === 'closure') call.invoke(set, [value])
+      },
+      description: 'Binding(get:set:)',
+    })
+  }
+
+  /**
+   * `d[.leading]` inside an `.alignmentGuide` closure.
+   *
+   * `ViewDimensions` is subscripted by an alignment, and every guide but `.width`
+   * and `.height` is written that way. The values are the defaults SwiftUI uses,
+   * measured from the view's own leading and top edges - which is what makes
+   * `.alignmentGuide(.leading) { d in d[.trailing] }` line up the right edges.
+   */
+  subscript(target: SwiftValue, index: SwiftValue): SwiftValue | undefined {
+    if (target.kind !== 'opaque' || target.typeName !== DIMENSIONS_TYPE) return undefined
+    const size = target.payload as { width: number; height: number }
+
+    const name = tokenNameOf(index) ?? ''
+    switch (name) {
+      case 'leading':
+      case 'top':
+        return { kind: 'double', value: 0 }
+      case 'trailing':
+        return { kind: 'double', value: size.width }
+      case 'bottom':
+        return { kind: 'double', value: size.height }
+      case 'center':
+        // Ambiguous on its own: `HorizontalAlignment.center` and its vertical twin are
+        // both spelled `.center`, and the token carries no axis. The horizontal one is
+        // the reading that is right in a VStack, which is where guides are written.
+        return { kind: 'double', value: size.width / 2 }
+      case 'firstTextBaseline':
+      case 'lastTextBaseline':
+        // Approximated as the text baseline of a single line, which is what a view
+        // with one line of text has. Recorded in the coverage matrix.
+        return { kind: 'double', value: size.height * 0.78 }
+      default:
+        return undefined
+    }
+  }
+
+  /**
+   * Modifier content that is always on screen, evaluated now rather than held.
+   *
+   * A sheet's closure must not run while the sheet is down, which is why modifier
+   * closures are kept unevaluated by default. A `.safeAreaInset`'s is the opposite
+   * case: it is part of the layout from the first frame, and holding it would mean
+   * the layout pass asking the interpreter to run something, which is a seam that
+   * does not exist and should not be opened for one modifier.
+   */
+  private makeModifier(member: string, call: HostCall): ModifierValue {
+    return {
+      name: member,
+      args: [...toArgs(call), ...this.eagerContent(member, call)],
+      span: call.span,
+      // Unevaluated on purpose: a sheet's content must not run while it is down.
+      closure: call.trailingClosure,
+    }
+  }
+
+  private eagerContent(member: string, call: HostCall): ViewArg[] {
+    if (member !== 'safeAreaInset' || !call.trailingClosure) return []
+    return call
+      .invokeBuilder(call.trailingClosure)
+      .filter((value) => asView(value) !== null)
+      .map((value) => ({ label: 'content', value }))
+  }
+
+  callValue(target: SwiftValue, call: HostCall): SwiftValue | undefined {
+    if (target.kind !== 'opaque') return undefined
+
+    if (target.typeName === DISMISS_TYPE) {
+      this.dismissAction?.()
+      return { kind: 'void' }
+    }
+
+    if (target.typeName === OPEN_URL_TYPE) {
+      // Logged rather than opened. Navigating the browser away would take the user's
+      // unsaved project with it, and opening a tab is a side effect a preview was not
+      // asked for - so the call runs, says what it would have done, and the exported
+      // project does it for real.
+      const url = call.args[0]?.value
+      this.log(`openURL(${url ? describe(url, true) : ''})`, call.span, 'log')
+      return { kind: 'void' }
+    }
+
+    return undefined
   }
 
   /**
@@ -977,6 +1156,10 @@ export class SwiftUIHost implements InterpreterHost {
     }
     if (TRANSITIONS.has(member)) return this.makeTransition(member, call)
     if (member === 'system') return this.makeSystemFont(call)
+
+    // `.constant(false)` where a `Binding` is expected - the contextual spelling, and
+    // the one previews actually use. `Binding.constant(…)` reaches `callMember`.
+    if (member === 'constant') return this.constantBinding(call)
 
     // `.custom("Avenir", size: 24)`. The face itself cannot be honoured - a browser
     // has no access to a project's bundled fonts - but the *size* is a layout input,
@@ -1008,6 +1191,18 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   getMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
+    // `binding.wrappedValue` - the long spelling of reading the binding, and how a
+    // computed `Binding(get:set:)` is nearly always read.
+    //
+    // It answers for any value, not only a projection, because reading a variable
+    // already unwraps one: `let b = Binding(get:set:)` puts a projection in `b` and
+    // `b` reads as the value it projects. So by the time `.wrappedValue` is asked for,
+    // the projection is gone and the value is the answer - which is the same erasure
+    // `Optional(x)` being `x` relies on.
+    if (member === 'wrappedValue') {
+      return asProjection(target)?.get() ?? target
+    }
+
     // `value.translation.width`, `value.location.x`, `size.width` …
     const geometry = geometryMember(target, member)
     if (geometry !== undefined) return geometry

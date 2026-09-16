@@ -6,9 +6,17 @@ import {
   type Fill,
   type RGBA,
   type ShapeKind,
+  type Size,
 } from '@studio/shared'
-import { asDate, asProjection, foundationDescription, truthy, type SwiftValue } from '@studio/swift-runtime'
-import { UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
+import {
+  asDate,
+  asProjection,
+  foundationDescription,
+  truthy,
+  type ClosureValue,
+  type SwiftValue,
+} from '@studio/swift-runtime'
+import { BLEND_MODES, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import {
   CENTER,
   insets,
@@ -22,11 +30,16 @@ import {
   type HorizontalAlignment,
   type LayoutElement,
   type LayoutModifier,
+  type TextRunSpec,
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
 import {
   ALERT,
   BACK_BUTTON,
+  COLOUR_EDITOR,
+  COLOUR_SWATCH,
+  DATE_CELL,
+  DATE_EDITOR,
   DIALOG,
   MENU,
   NAV_BAR,
@@ -129,6 +142,10 @@ const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
   'ForEach',
   'NavigationStack',
   'NavigationView',
+  // On a phone a split view *is* a stack: the sidebar is the first screen and the
+  // detail is pushed onto it. The multi-column form needs a width an iPhone has not
+  // got, so collapsing is the real behaviour rather than an approximation of it.
+  'NavigationSplitView',
   'TabView',
   'AnyView',
 ])
@@ -162,6 +179,15 @@ export interface ConversionOptions {
     readonly bottom: number
     readonly trailing: number
   }
+  /**
+   * Runs an `.alignmentGuide` closure with the view's measured dimensions.
+   *
+   * The one thing the layout pass cannot do for itself: the closure is the user's,
+   * and it runs in the interpreter, which lives a layer up. Supplied as a function so
+   * `swiftui-layout` stays free of any interpreter knowledge - it calls this, it does
+   * not know what is on the other side.
+   */
+  readonly callGuide?: (closure: ClosureValue, size: Size) => number
 }
 
 export function viewsToLayout(
@@ -171,6 +197,7 @@ export function viewsToLayout(
   const rootAxis = options.rootAxis ?? 'vertical'
   const hitTargets = new Map<string, string>()
   const converter = new Converter(hitTargets, options.colorScheme ?? 'light', options.typeScale ?? 1)
+  converter.useGuideRunner(options.callGuide ?? null)
   const children = converter.convertList(views, 'v', rootAxis)
 
   return { element: joinRoot(children, rootAxis), hitTargets }
@@ -191,6 +218,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const safeArea = options.safeArea ?? ZERO_INSETS
   const background = screenBackground(ui.content, scheme) ?? systemBackground(scheme)
   const converter = new Converter(hitTargets, scheme, options.typeScale ?? 1, safeArea, background)
+  converter.useGuideRunner(options.callGuide ?? null)
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
@@ -287,6 +315,80 @@ function joinRoot(children: LayoutElement[], axis: Axis): LayoutElement {
   }
 }
 
+/**
+ * The style modifiers that decide how a control draws.
+ *
+ * Kept apart from `LayoutModifier` because these are resolved while the tree is being
+ * *built* - a segmented picker is a different set of elements, not the same elements
+ * painted differently - so the engine's own inherited environment is too late.
+ */
+interface ControlStyles {
+  readonly toggle?: string
+  readonly picker?: string
+  readonly label?: string
+  readonly progressView?: string
+  readonly gauge?: string
+  readonly controlSize?: string
+  readonly buttonBorderShape?: string
+}
+
+const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
+  ['toggleStyle', 'toggle'],
+  ['pickerStyle', 'picker'],
+  ['labelStyle', 'label'],
+  ['progressViewStyle', 'progressView'],
+  ['gaugeStyle', 'gauge'],
+  ['controlSize', 'controlSize'],
+  ['buttonBorderShape', 'buttonBorderShape'],
+]
+
+function withStyles(outer: ControlStyles, view: ViewValue): ControlStyles {
+  let next = outer
+  for (const [modifier, key] of STYLE_MODIFIERS) {
+    const name = tokenName(modifierArg(view, modifier, 0))
+    if (name !== null) next = { ...next, [key]: name }
+  }
+  return next
+}
+
+/** How much a `.controlSize` scales a control's padding and text. */
+function controlScale(size: string | undefined): number {
+  switch (size) {
+    case 'mini':
+      return 0.75
+    case 'small':
+      return 0.85
+    case 'large':
+      return 1.2
+    default:
+      return 1
+  }
+}
+
+/** `axis: (x: 0, y: 1, z: 0)` - the tuple `.rotation3DEffect` takes. */
+function axisVector(value: SwiftValue | undefined): { x: number; y: number; z: number } {
+  const fallback = { x: 0, y: 1, z: 0 }
+  if (!value || value.kind !== 'tuple') return fallback
+
+  const component = (name: string, index: number): number => {
+    const labelled = value.labels.indexOf(name)
+    return numberArg(value.elements[labelled >= 0 ? labelled : index]) ?? 0
+  }
+
+  const vector = { x: component('x', 0), y: component('y', 1), z: component('z', 2) }
+  return vector.x === 0 && vector.y === 0 && vector.z === 0 ? fallback : vector
+}
+
+/** The weekday initials over a calendar. Not localised; neither is the rest of the chrome. */
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+/** A `Section`'s three parts, or a run of rows written outside any section. */
+interface Section {
+  readonly header: LayoutElement | null
+  readonly footer: LayoutElement | null
+  readonly rows: LayoutElement[]
+}
+
 class Converter {
   constructor(
     private readonly hitTargets: Map<string, string>,
@@ -344,6 +446,23 @@ class Converter {
    * The renderer needs the name to draw the right shape, and four inline copies is
    * four chances for the name and the glyph to disagree.
    */
+  /** Runs an `.alignmentGuide` closure; absent when nothing can run one. */
+  private callGuide: ((closure: ClosureValue, size: Size) => number) | null = null
+
+  useGuideRunner(run: ((closure: ClosureValue, size: Size) => number) | null): void {
+    this.callGuide = run
+  }
+
+  /**
+   * The control styles in force, inherited like the font.
+   *
+   * `.labelStyle(.iconOnly)` on a `Button` applies to the `Label` inside it, and
+   * `.pickerStyle(.segmented)` is nearly always written on the `Form` rather than on
+   * each picker - so reading only a control's own modifiers would miss the spelling
+   * people actually use. Pushed and popped around each subtree by `convert`.
+   */
+  private styles: ControlStyles = {}
+
   private symbolImage(id: string, name: string): LayoutElement {
     const symbol = resolveSymbol(name)
     return {
@@ -456,6 +575,62 @@ class Converter {
    * same size, which is the one piece of chrome on screen at all times and so the
    * one worth getting right.
    */
+  /**
+   * The page indicator a `.page` tab view draws instead of a tab bar.
+   *
+   * iOS pages by swiping and the dots are only an indicator. A preview has no swipe,
+   * so each dot is also the control that gets to that page - an addition rather than
+   * an approximation, and the only way through the pages here.
+   */
+  private pageDots(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
+    const dots = bar.items.map((item, index) => {
+      const selected = boolArg(labelled(item.args, 'selected'))
+      const dot: LayoutElement = {
+        kind: 'modified',
+        id: `dot-${index}-frame`,
+        modifier: { kind: 'frame', width: 7, height: 7, alignment: CENTER },
+        child: {
+          kind: 'modified',
+          id: `dot-${index}-tint`,
+          modifier: {
+            kind: 'foregroundStyle',
+            color: selected ? this.color('label') : this.color('tertiaryLabel'),
+          },
+          child: { kind: 'shape', id: `dot-${index}`, shape: 'circle' },
+        },
+      }
+
+      // The target is bigger than the dot, because a 7pt circle is not a tap target.
+      const target: LayoutElement = {
+        kind: 'modified',
+        id: `dot-${index}-hit`,
+        modifier: { kind: 'padding', insets: uniformInsets(6) },
+        child: dot,
+      }
+
+      return item.path ? this.withHitTarget(target, item.path, 'button', `Page ${index + 1}`) : target
+    })
+
+    return {
+      kind: 'modified',
+      id: 'pagedots-height',
+      modifier: { kind: 'frame', height: TAB_BAR_HEIGHT, alignment: CENTER },
+      child: {
+        kind: 'stack',
+        id: 'pagedots-row',
+        axis: 'horizontal',
+        spacing: 2,
+        alignment: CENTER,
+        children: [
+          { kind: 'spacer', id: 'pagedots-lead', axis: 'horizontal', minLength: 0 },
+          ...dots,
+          { kind: 'spacer', id: 'pagedots-trail', axis: 'horizontal', minLength: 0 },
+        ],
+        debugName: TAB_BAR,
+      },
+    }
+  }
+
   private tabLabel(view: ViewValue, path: string): LayoutElement {
     const title = stringArg(positional(view.args, 0))
     const systemImage = stringArg(labelled(view.args, 'systemImage'))
@@ -483,6 +658,11 @@ class Converter {
 
   /** The tab bar: evenly divided items, the selected one tinted. */
   tabBar(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
+    // `.tabViewStyle(.page)` is a row of dots, not a bar of labels.
+    if (bar.items.some((item) => boolArg(labelled(item.args, 'paged')))) {
+      return this.pageDots(bar)
+    }
+
     const items = bar.items.map((item, index) => {
       const selected = boolArg(labelled(item.args, 'selected'))
       const tint = selected ? this.color('accentColor') : this.color('secondaryLabel')
@@ -680,6 +860,16 @@ class Converter {
 
   convert(view: ViewValue, fallbackPath: string, parentAxis: Axis): LayoutElement {
     const path = view.path ?? fallbackPath
+    const outer = this.styles
+    this.styles = withStyles(outer, view)
+    try {
+      return this.convertInner(view, path, parentAxis)
+    } finally {
+      this.styles = outer
+    }
+  }
+
+  private convertInner(view: ViewValue, path: string, parentAxis: Axis): LayoutElement {
     let element = this.baseElement(view, path, parentAxis)
 
     // Modifiers wrap outward in source order, so `.padding().background()` nests as
@@ -773,8 +963,18 @@ class Converter {
     }
 
     switch (view.name) {
-      case 'Text':
-        return { kind: 'text', id: path, text: textOf(view), ...origin }
+      case 'Text': {
+        // A concatenation carries its operands as children; anything else is one run,
+        // and stays on the path that allocates nothing per run.
+        const runs = view.children.length > 0 ? this.textRuns(view) : null
+        return {
+          kind: 'text',
+          id: path,
+          text: runs ? runs.map((run) => run.text).join('') : textOf(view),
+          ...(runs ? { runs } : {}),
+          ...origin,
+        }
+      }
 
       case 'VStack':
       case 'HStack':
@@ -993,6 +1193,42 @@ class Converter {
       case 'DisclosureGroup':
         return this.disclosureGroup(view, path, origin)
 
+      case 'GroupBox':
+        return this.groupBox(view, path, origin)
+
+      case 'LabeledContent':
+        return this.labeledContent(view, path, origin)
+
+      case 'ControlGroup':
+        return this.controlGroup(view, path, origin)
+
+      case DATE_EDITOR:
+        return this.dateEditor(view, path, origin)
+
+      case DATE_CELL:
+        return this.dateCell(view, path, origin)
+
+      case COLOUR_EDITOR:
+        return this.colourEditor(view, path, origin)
+
+      case COLOUR_SWATCH:
+        return this.colourSwatch(view, path, origin)
+
+      case 'TimelineView':
+        // The schedule is a clock the preview does not run, so the content is drawn
+        // once, at the moment of the render. Its `context` is not supplied - a
+        // closure that reads `context.date` has nothing to read - so what is drawn is
+        // whatever the body produces without one. See the coverage matrix.
+        return {
+          kind: 'stack',
+          id: path,
+          axis: 'vertical',
+          spacing: 0,
+          alignment: CENTER,
+          children: this.convertList(view.children, `${path}c`, 'vertical'),
+          ...origin,
+        }
+
       case 'Gauge':
         return this.gauge(view, path, origin)
 
@@ -1051,6 +1287,420 @@ class Converter {
   }
 
   // ------------------------------------------------------------- containers
+
+  /**
+   * The spans of a concatenated `Text`.
+   *
+   * `Text("a").bold() + Text("b")` reaches here as a `Text` with the two operands as
+   * children, each carrying its own modifier chain. Each chain is read into an
+   * *override* rather than a resolved style, so a span that set nothing still takes
+   * the size and colour of wherever the concatenation ends up - which is what SwiftUI
+   * does, and what makes `.font(.title)` on the whole expression reach both halves.
+   *
+   * Nested concatenation is left-associative, so the tree is flattened here and the
+   * renderer only ever sees a flat list.
+   */
+  private textRuns(view: ViewValue): readonly TextRunSpec[] {
+    const out: TextRunSpec[] = []
+
+    const walk = (operand: ViewValue): void => {
+      if (operand.name === 'Text' && operand.children.length > 0) {
+        for (const child of operand.children) walk(child)
+        // A modifier on the concatenation itself applies to every span below it.
+        const outer = this.runAttributes(operand)
+        if (Object.keys(outer).length > 0) {
+          for (let i = 0; i < out.length; i++) out[i] = { ...outer, ...out[i]! }
+        }
+        return
+      }
+      out.push({ text: textOf(operand), ...this.runAttributes(operand) })
+    }
+
+    for (const child of view.children) walk(child)
+    const outer = this.runAttributes(view)
+    if (Object.keys(outer).length > 0) {
+      for (let i = 0; i < out.length; i++) out[i] = { ...outer, ...out[i]! }
+    }
+    return out
+  }
+
+  /** What one span's own modifier chain sets, as overrides on its surroundings. */
+  private runAttributes(view: ViewValue): Omit<TextRunSpec, 'text'> {
+    let font: { family?: string; size?: number; weight?: number; italic?: boolean } | undefined
+    let color: RGBA | undefined
+    let underline: boolean | undefined
+    let strikethrough: boolean | undefined
+    let tracking: number | undefined
+    let baselineOffset: number | undefined
+
+    const face = (patch: { family?: string; size?: number; weight?: number; italic?: boolean }) => {
+      font = { ...font, ...patch }
+    }
+
+    for (const modifier of view.modifiers) {
+      const first = positional(modifier.args, 0)
+      switch (modifier.name) {
+        case 'font': {
+          const resolved = resolveFontArg(first, this.typeScale)
+          if (resolved) {
+            face({
+              family: resolved.family,
+              size: resolved.size,
+              weight: resolved.weight,
+              italic: resolved.italic,
+            })
+          }
+          break
+        }
+        case 'fontWeight':
+          face({ weight: resolveWeightArg(first) ?? 700 })
+          break
+        case 'bold':
+          face({ weight: 700 })
+          break
+        case 'italic':
+          face({ italic: true })
+          break
+        case 'monospaced':
+          face({ family: MONO_FAMILY })
+          break
+        case 'fontDesign': {
+          const design = tokenName(first)
+          face({
+            family:
+              design === 'rounded'
+                ? ROUNDED_FAMILY
+                : design === 'monospaced'
+                  ? MONO_FAMILY
+                  : UI_FONT_FAMILY,
+          })
+          break
+        }
+        case 'foregroundColor':
+        case 'foregroundStyle': {
+          const resolved = resolveColorArg(first, this.scheme)
+          if (resolved) color = resolved
+          break
+        }
+        case 'underline':
+          underline = first === undefined ? true : first.kind === 'bool' ? first.value : true
+          break
+        case 'strikethrough':
+          strikethrough = first === undefined ? true : first.kind === 'bool' ? first.value : true
+          break
+        case 'kerning':
+        case 'tracking': {
+          const value = numberArg(first)
+          if (value !== null) tracking = value
+          break
+        }
+        case 'baselineOffset': {
+          const value = numberArg(first)
+          if (value !== null) baselineOffset = value
+          break
+        }
+        default:
+          break
+      }
+    }
+
+    return {
+      ...(font ? { font } : {}),
+      ...(color ? { color } : {}),
+      ...(underline !== undefined ? { underline } : {}),
+      ...(strikethrough !== undefined ? { strikethrough } : {}),
+      ...(tracking !== undefined ? { tracking } : {}),
+      ...(baselineOffset !== undefined ? { baselineOffset } : {}),
+    }
+  }
+
+  /**
+   * `GroupBox { … }` - a titled card.
+   *
+   * iOS draws it as secondary-background panel with a 12pt radius and the label
+   * above it in the body font, which is what this builds. It was one of the
+   * placeholders that failed the fourteen-snippet measure, and it is a container
+   * rather than a control: nothing about it needed a new mechanism, only the drawing.
+   */
+  private groupBox(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label')
+
+    const content: LayoutElement = {
+      kind: 'stack',
+      id: `${path}body`,
+      axis: 'vertical',
+      spacing: 8,
+      alignment: { horizontal: 'leading', vertical: 'center' },
+      children: this.convertList(view.children, `${path}c`, 'vertical'),
+    }
+
+    const padded: LayoutElement = {
+      kind: 'modified',
+      id: `${path}pad`,
+      modifier: { kind: 'padding', insets: uniformInsets(14) },
+      child: {
+        kind: 'modified',
+        id: `${path}wide`,
+        modifier: {
+          kind: 'frame',
+          maxWidth: Number.POSITIVE_INFINITY,
+          alignment: { horizontal: 'leading', vertical: 'center' },
+        },
+        child: content,
+      },
+    }
+
+    const card = this.background(
+      padded,
+      `${path}bg`,
+      this.color('secondarySystemGroupedBackground'),
+      12,
+    )
+
+    if (!title) return { ...card, ...origin }
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'vertical',
+      spacing: 8,
+      alignment: { horizontal: 'leading', vertical: 'center' },
+      children: [this.styledText(`${path}t`, title, 'body', 'label', 600), card],
+      ...origin,
+    }
+  }
+
+  /**
+   * `LabeledContent("Total", value: "$12")` - a label leading, its value trailing.
+   *
+   * The same row a `Form` draws for a setting, which is where the view is nearly
+   * always written. The value takes the secondary colour, so the pair reads as
+   * label-and-value rather than as two labels.
+   */
+  private labeledContent(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label') ?? ''
+    const valueArg = labelled(view.args, 'value')
+    const value = valueArg ? (stringArg(valueArg) ?? displayValue(valueArg)) : null
+
+    // The content form - `LabeledContent("Total") { Text("$12") }` - puts the value
+    // in the children instead, and either spelling draws the same row.
+    const trailing: LayoutElement =
+      value !== null
+        ? this.styledText(`${path}v`, value, 'body', 'secondaryLabel')
+        : {
+            kind: 'stack',
+            id: `${path}v`,
+            axis: 'horizontal',
+            spacing: 4,
+            alignment: CENTER,
+            children: this.convertList(view.children, `${path}c`, 'horizontal'),
+          }
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [
+        this.styledText(`${path}l`, title, 'body', 'label'),
+        { kind: 'spacer', id: `${path}sp`, axis: 'horizontal', minLength: 0 },
+        trailing,
+      ],
+      ...origin,
+    }
+  }
+
+  /**
+   * `ControlGroup { … }` - its controls in a row.
+   *
+   * Drawn as the row iOS draws in a toolbar rather than as a segmented picker: the
+   * segmented form is what `ControlGroup` looks like in a menu, and the resolver has
+   * no way to know which it landed in. The row is the form that is right more often,
+   * and the difference is spacing rather than content.
+   */
+  private controlGroup(view: ViewValue, path: string, origin: object): LayoutElement {
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 12,
+      alignment: CENTER,
+      children: this.convertList(view.children, `${path}c`, 'horizontal'),
+      ...origin,
+    }
+  }
+
+  /**
+   * A `DatePicker`'s calendar.
+   *
+   * The month's name between its two arrows, a row of weekday initials, then the days
+   * in a seven-column grid. The resolver decided which days exist and what pressing
+   * one does; this only draws them, which is why the leading blanks arrive as cells
+   * with no label rather than being counted here.
+   */
+  private dateEditor(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(labelled(view.args, 'title')) ?? ''
+    const [back, forward, ...days] = view.children
+
+    const header: LayoutElement = {
+      kind: 'stack',
+      id: `${path}hdr`,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [
+        this.styledText(`${path}month`, title, 'headline', 'label'),
+        { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
+        ...(back ? [this.convert(back, `${path}back`, 'horizontal')] : []),
+        ...(forward ? [this.convert(forward, `${path}fwd`, 'horizontal')] : []),
+      ],
+    }
+
+    const weekdays: LayoutElement = {
+      kind: 'stack',
+      id: `${path}dow`,
+      axis: 'horizontal',
+      spacing: 0,
+      alignment: CENTER,
+      children: WEEKDAYS.map((day, i) => ({
+        kind: 'modified',
+        id: `${path}dow${i}f`,
+        modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER },
+        child: this.styledText(`${path}dow${i}`, day, 'caption', 'secondaryLabel'),
+      })),
+    }
+
+    const rows: LayoutElement[] = []
+    for (let start = 0; start < days.length; start += 7) {
+      const week = days.slice(start, start + 7)
+      rows.push({
+        kind: 'stack',
+        id: `${path}w${start}`,
+        axis: 'horizontal',
+        spacing: 0,
+        alignment: CENTER,
+        children: week.map((day, i) => ({
+          kind: 'modified' as const,
+          id: `${path}w${start}c${i}f`,
+          modifier: {
+            kind: 'frame' as const,
+            maxWidth: Number.POSITIVE_INFINITY,
+            alignment: CENTER,
+          },
+          child: this.convert(day, `${path}w${start}c${i}`, 'horizontal'),
+        })),
+      })
+    }
+
+    return {
+      kind: 'modified',
+      id: `${path}pad`,
+      modifier: { kind: 'padding', insets: uniformInsets(12) },
+      child: {
+        kind: 'stack',
+        id: path,
+        axis: 'vertical',
+        spacing: 8,
+        alignment: CENTER,
+        children: [header, weekdays, ...rows],
+      },
+      ...origin,
+    }
+  }
+
+  /** One day of the calendar: the number, on a tinted disc when it is the chosen one. */
+  private dateCell(view: ViewValue, path: string, origin: object): LayoutElement {
+    const label = stringArg(labelled(view.args, 'label')) ?? ''
+    const selected = truthyBinding(labelled(view.args, 'selected'))
+
+    const text = this.styledText(
+      `${path}t`,
+      label,
+      'body',
+      selected ? 'systemBackground' : 'label',
+    )
+
+    const box: LayoutElement = {
+      kind: 'modified',
+      id: `${path}box`,
+      modifier: { kind: 'frame', width: 32, height: 32, alignment: CENTER },
+      child: text,
+    }
+
+    return selected
+      ? { ...this.background(box, `${path}bg`, this.color('accentColor'), 16), ...origin }
+      : { ...box, ...origin }
+  }
+
+  /** A `ColorPicker`'s palette: the named colours, four to a row. */
+  private colourEditor(view: ViewValue, path: string, origin: object): LayoutElement {
+    const rows: LayoutElement[] = []
+    for (let start = 0; start < view.children.length; start += 6) {
+      const row = view.children.slice(start, start + 6)
+      rows.push({
+        kind: 'stack',
+        id: `${path}r${start}`,
+        axis: 'horizontal',
+        spacing: 12,
+        alignment: CENTER,
+        children: row.map((swatch, i) => this.convert(swatch, `${path}r${start}s${i}`, 'horizontal')),
+      })
+    }
+
+    return {
+      kind: 'modified',
+      id: `${path}pad`,
+      modifier: { kind: 'padding', insets: uniformInsets(16) },
+      child: {
+        kind: 'stack',
+        id: path,
+        axis: 'vertical',
+        spacing: 12,
+        alignment: CENTER,
+        children: rows,
+      },
+      ...origin,
+    }
+  }
+
+  /** One swatch: the colour as a disc, ringed when it is the one selected. */
+  private colourSwatch(view: ViewValue, path: string, origin: object): LayoutElement {
+    const fill = resolveColorArg(labelled(view.args, 'colour'), this.scheme) ?? this.color('label')
+    const selected = truthyBinding(labelled(view.args, 'selected'))
+
+    const disc: LayoutElement = {
+      kind: 'modified',
+      id: `${path}f`,
+      modifier: { kind: 'frame', width: 36, height: 36, alignment: CENTER },
+      child: {
+        kind: 'modified',
+        id: `${path}c`,
+        modifier: { kind: 'foregroundStyle', color: fill },
+        child: { kind: 'shape', id: path, shape: 'circle' },
+      },
+    }
+
+    if (!selected) return { ...disc, ...origin }
+
+    return {
+      kind: 'modified',
+      id: `${path}ring`,
+      modifier: {
+        kind: 'border',
+        color: this.color('label'),
+        width: 2,
+        cornerRadius: 22,
+      },
+      child: {
+        kind: 'modified',
+        id: `${path}ringpad`,
+        modifier: { kind: 'padding', insets: uniformInsets(3) },
+        child: disc,
+      },
+      ...origin,
+    }
+  }
 
   private divider(path: string, parentAxis: Axis, origin: object): LayoutElement {
     const line: LayoutElement = {
@@ -1114,7 +1764,7 @@ class Converter {
     const style = tokenName(modifierArg(view, 'listStyle', 0)) ?? (view.name === 'Form' ? 'insetGrouped' : 'insetGrouped')
     const grouped = style !== 'plain' && style !== 'sidebar'
 
-    const sections = this.listSections(view, path)
+    const sections = this.listSections(view, path, style === 'sidebar')
     const blocks: LayoutElement[] = []
 
     sections.forEach((section, index) => {
@@ -1183,6 +1833,27 @@ class Converter {
             }
           : card,
       )
+
+      if (section.footer) {
+        blocks.push({
+          kind: 'modified',
+          id: `${path}s${index}f`,
+          modifier: {
+            kind: 'padding',
+            insets: insets(6, grouped ? ROW_INSET + 16 : ROW_INSET, 0, ROW_INSET),
+          },
+          child: {
+            kind: 'modified',
+            id: `${path}s${index}ff`,
+            modifier: {
+              kind: 'frame',
+              maxWidth: Number.POSITIVE_INFINITY,
+              alignment: { horizontal: 'leading', vertical: 'center' },
+            },
+            child: section.footer,
+          },
+        })
+      }
     })
 
     const column: LayoutElement = {
@@ -1201,17 +1872,16 @@ class Converter {
     return this.background(
       { kind: 'scroll', id: path, axis: 'vertical', showsIndicators: true, content: column, ...origin },
       `${path}bg`,
-      this.color(grouped ? 'systemGroupedBackground' : 'systemBackground'),
+      // A sidebar sits on the grouped background like an inset list, and lays its rows
+      // out flat like a plain one - which is why it is neither of the two branches.
+      this.color(grouped || style === 'sidebar' ? 'systemGroupedBackground' : 'systemBackground'),
     )
   }
 
   /** Splits a list's children into sections, wrapping each child as a row. */
-  private listSections(
-    view: ViewValue,
-    path: string,
-  ): { header: LayoutElement | null; rows: LayoutElement[] }[] {
-    const sections: { header: LayoutElement | null; rows: LayoutElement[] }[] = []
-    let current: { header: LayoutElement | null; rows: LayoutElement[] } = { header: null, rows: [] }
+  private listSections(view: ViewValue, path: string, sidebar = false): Section[] {
+    const sections: Section[] = []
+    let current: Section = { header: null, footer: null, rows: [] }
 
     const flatten = (views: readonly ViewValue[]): ViewValue[] =>
       views.flatMap((v) => (v.name === 'ForEach' ? flatten(v.children) : [v]))
@@ -1219,15 +1889,25 @@ class Converter {
     for (const child of flatten(view.children)) {
       if (child.name === 'Section') {
         if (current.rows.length > 0 || current.header) sections.push(current)
+        const id = child.path ?? path
         const title = stringArg(positional(child.args, 0)) ?? argText(child, 'header')
+        const footer = argText(child, 'footer')
         current = {
+          // A sidebar names its sections in sentence case at the body size, which is
+          // the one thing about the style that is unmistakable at a glance; every
+          // other list shouts them in caption caps.
           header: title
-            ? this.styledText(`${child.path ?? path}hdr`, title.toUpperCase(), 'caption', 'secondaryLabel')
+            ? sidebar
+              ? this.styledText(`${id}hdr`, title, 'subheadline', 'secondaryLabel', 600)
+              : this.styledText(`${id}hdr`, title.toUpperCase(), 'caption', 'secondaryLabel')
             : null,
+          // Sentence case and left aligned under the card, which is how iOS draws the
+          // explanatory line under a group of settings.
+          footer: footer ? this.styledText(`${id}ftr`, footer, 'caption', 'secondaryLabel') : null,
           rows: flatten(child.children).map((row) => this.listRow(row, path)),
         }
         sections.push(current)
-        current = { header: null, rows: [] }
+        current = { header: null, footer: null, rows: [] }
         continue
       }
       current.rows.push(this.listRow(child, path))
@@ -1428,8 +2108,14 @@ class Converter {
     const systemImage = stringArg(labelled(view.args, 'systemImage'))
     const symbol = systemImage ? resolveSymbol(systemImage) : null
 
+    // `.labelStyle` decides which halves are drawn. `.titleAndIcon` is the default
+    // and needs no branch; the other two drop a half that is still exported.
+    const style = this.styles.label
+    const wantsIcon = style !== 'titleOnly'
+    const wantsTitle = style !== 'iconOnly'
+
     const children: LayoutElement[] = []
-    if (symbol) {
+    if (symbol && wantsIcon) {
       children.push({
         kind: 'image',
         id: `${path}icon`,
@@ -1439,8 +2125,8 @@ class Converter {
         ...(systemImage ? { symbol: systemImage } : {}),
       })
     }
-    if (title !== null) children.push({ kind: 'text', id: `${path}title`, text: title })
-    children.push(...this.convertList(view.children, path, 'horizontal'))
+    if (title !== null && wantsTitle) children.push({ kind: 'text', id: `${path}title`, text: title })
+    if (wantsTitle || !symbol) children.push(...this.convertList(view.children, path, 'horizontal'))
 
     return {
       kind: 'stack',
@@ -1490,6 +2176,22 @@ class Converter {
     const prominent = style === 'borderedProminent'
     const tint = resolveColorArg(modifierArg(view, 'tint', 0), this.scheme) ?? this.color('accentColor')
 
+    // `.controlSize` scales the padding, which is what makes a `.small` button small:
+    // the label's font is the environment's and is not touched here.
+    const scale = controlScale(this.styles.controlSize)
+    const padV = Math.round(7 * scale)
+    const padH = Math.round(14 * scale)
+
+    // `.buttonBorderShape` changes only the corner. A capsule is half the button's
+    // height, which the layout does not know yet, so the radius is large enough to
+    // round any control-height box and is clamped by the renderer.
+    const radius =
+      this.styles.buttonBorderShape === 'capsule'
+        ? 999
+        : this.styles.buttonBorderShape === 'circle'
+          ? 999
+          : 8
+
     const tinted: LayoutElement = {
       kind: 'modified',
       id: `${path}btncolor`,
@@ -1500,29 +2202,23 @@ class Converter {
       child: label,
     }
 
-    return {
+    const padded: LayoutElement = {
       kind: 'modified',
-      id: `${path}btnbg`,
-      modifier: {
-        kind: 'background',
-        content: {
-          kind: 'fill',
-          id: `${path}btnfill`,
-          fill: { kind: 'solid', color: prominent ? tint : { ...tint, a: tint.a * 0.15 } },
-        },
-      },
-      child: {
-        kind: 'modified',
-        id: `${path}btnradius`,
-        modifier: { kind: 'cornerRadius', radius: 8 },
-        child: {
-          kind: 'modified',
-          id: `${path}btnpad`,
-          modifier: { kind: 'padding', insets: insets(7, 14, 7, 14) },
-          child: tinted,
-        },
-      },
+      id: `${path}btnpad`,
+      modifier: { kind: 'padding', insets: insets(padV, padH, padV, padH) },
+      child: tinted,
     }
+
+    // Through the helper, which puts the radius *outside* the background. Written
+    // inside-out here until now, and a corner radius only reaches a fill through the
+    // inherited environment - so a bordered button has been drawing square corners
+    // since the style was added, which no test asserted either way.
+    return this.background(
+      padded,
+      `${path}btn`,
+      prominent ? tint : { ...tint, a: tint.a * 0.15 },
+      radius,
+    )
   }
 
   private navigationLink(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -1604,6 +2300,7 @@ class Converter {
   private toggle(view: ViewValue, path: string, origin: object): LayoutElement {
     const on = truthyBinding(labelled(view.args, 'isOn'))
     const title = stringArg(positional(view.args, 0))
+    const style = this.styles.toggle
 
     const label: LayoutElement =
       title !== null
@@ -1659,6 +2356,76 @@ class Converter {
           },
         ],
       },
+    }
+
+    // `.button` is the toggle drawn as a control that stays pressed - iOS tints the
+    // whole thing while it is on - so there is no track at all, and `.checkbox` puts a
+    // box where the switch was and leads with it rather than trailing.
+    if (style === 'button') {
+      const tinted: LayoutElement = {
+        kind: 'modified',
+        id: `${path}btncolor`,
+        modifier: {
+          kind: 'foregroundStyle',
+          color: on ? this.color('accentColor') : this.color('label'),
+        },
+        child: label,
+      }
+      return {
+        kind: 'modified',
+        id: `${path}btnbg`,
+        modifier: {
+          kind: 'background',
+          content: {
+            kind: 'fill',
+            id: `${path}btnfill`,
+            fill: {
+              kind: 'solid',
+              color: on
+                ? { ...this.color('accentColor'), a: 0.18 }
+                : this.color('systemFill'),
+            },
+          },
+        },
+        child: {
+          kind: 'modified',
+          id: `${path}btnradius`,
+          modifier: { kind: 'cornerRadius', radius: 8 },
+          child: {
+            kind: 'modified',
+            id: `${path}btnpad`,
+            modifier: { kind: 'padding', insets: insets(7, 14, 7, 14) },
+            child: tinted,
+          },
+        },
+        ...origin,
+      }
+    }
+
+    if (style === 'checkbox') {
+      const box: LayoutElement = {
+        kind: 'modified',
+        id: `${path}boxframe`,
+        modifier: { kind: 'frame', width: 20, height: 20, alignment: CENTER },
+        child: {
+          kind: 'modified',
+          id: `${path}boxcolor`,
+          modifier: {
+            kind: 'foregroundStyle',
+            color: on ? this.color('accentColor') : this.color('secondaryLabel'),
+          },
+          child: this.symbolImage(`${path}box`, on ? 'checkmark.square' : 'square'),
+        },
+      }
+      return {
+        kind: 'stack',
+        id: path,
+        axis: 'horizontal',
+        spacing: 8,
+        alignment: CENTER,
+        children: [box, label],
+        ...origin,
+      }
     }
 
     return {
@@ -1800,7 +2567,10 @@ class Converter {
     const total = numberArg(labelled(view.args, 'total')) ?? 1
     const title = stringArg(positional(view.args, 0))
 
-    if (value === null) {
+    // `.progressViewStyle(.circular)` is a ring whatever the value, which is what iOS
+    // draws: the determinate bar is the `.linear` style, and asking for the circular
+    // one with a value in hand still gets a ring rather than the bar.
+    if (value === null || this.styles.progressView === 'circular') {
       // Indeterminate: iOS draws a spinner. A dotted ring is the closest honest
       // static approximation, and the renderer spins it.
       return {
@@ -1871,7 +2641,26 @@ class Converter {
   private picker(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label') ?? ''
     const selection = bindingValue(labelled(view.args, 'selection'))
-    const value = selection ? displayValue(selection) : ''
+    // A `DatePicker` shows a *formatted* date, which is the whole point of the row.
+    // `displayValue` on a Date gives `2025-06-15 15:06:40 +0000` - a plausible-looking
+    // string no date picker on iOS has ever shown - and `displayedComponents:` says
+    // which halves of it to draw.
+    const date = view.name === 'DatePicker' ? asDate(selection ?? undefined) : null
+    const value = date
+      ? dateText(date.epochSeconds, datePickerStyleFor(view))
+      : selection
+        ? displayValue(selection)
+        : ''
+
+    // Only a real `Picker` has options to draw inline; `DatePicker`, `ColorPicker` and
+    // `Menu` come through here too and have none.
+    if (view.name === 'Picker') {
+      const style = this.styles.picker
+      if (style === 'segmented') return this.segmentedPicker(view, path, origin)
+      if (style === 'inline' || style === 'wheel') {
+        return this.inlinePicker(view, path, origin, style === 'wheel')
+      }
+    }
 
     return {
       kind: 'stack',
@@ -1899,6 +2688,154 @@ class Converter {
           },
         },
       ],
+      ...origin,
+    }
+  }
+
+  /**
+   * `.pickerStyle(.segmented)` - every option on screen, the chosen one on a pill.
+   *
+   * The options are the views the user wrote, and each gets the target the resolver
+   * registered for it, so pressing a segment writes the binding exactly as choosing
+   * from the popup does. A segmented control whose segments were not pressable would
+   * be the same lie the popup was before the controls pass.
+   */
+  private segmentedPicker(view: ViewValue, path: string, origin: object): LayoutElement {
+    const segments = view.children.map((child, index) => {
+      const chosen = truthyBinding(labelled(child.args, 'selected'))
+      const content: LayoutElement = {
+        kind: 'modified',
+        id: `${path}seg${index}f`,
+        modifier: { kind: 'font', font: fontForToken('subheadline', this.typeScale)! },
+        child: {
+          kind: 'modified',
+          id: `${path}seg${index}pad`,
+          modifier: { kind: 'padding', insets: insets(6, 12, 6, 12) },
+          child: {
+            kind: 'modified',
+            id: `${path}seg${index}w`,
+            modifier: {
+              kind: 'frame',
+              maxWidth: Number.POSITIVE_INFINITY,
+              alignment: CENTER,
+            },
+            child: this.convert(child, `${path}seg${index}c`, 'horizontal'),
+          },
+        },
+      }
+
+      const pill: LayoutElement = chosen
+        ? this.background(content, `${path}seg${index}bg`, this.color('systemBackground'), 7)
+        : content
+
+      return this.withHitTarget(
+        pill,
+        `${path}/seg-${index}`,
+        'button',
+        textIn(child).join(' '),
+        child,
+        false,
+      )
+    })
+
+    const row: LayoutElement = {
+      kind: 'stack',
+      id: `${path}segs`,
+      axis: 'horizontal',
+      spacing: 2,
+      alignment: CENTER,
+      children: segments,
+    }
+
+    return {
+      ...this.background(
+        { kind: 'modified', id: `${path}segpad`, modifier: { kind: 'padding', insets: uniformInsets(2) }, child: row },
+        `${path}segtrack`,
+        this.color('systemFill'),
+        9,
+      ),
+      ...origin,
+    }
+  }
+
+  /**
+   * `.pickerStyle(.inline)` and `.wheel` - the options as a column.
+   *
+   * `.inline` is exact: iOS lists the options in place and ticks the chosen one. The
+   * wheel is not - a spinner has depth, momentum and a selection band, none of which
+   * a static column has - so it is drawn as the same column with the chosen row
+   * emphasised, and the matrix says so rather than leaving it to be discovered.
+   */
+  private inlinePicker(
+    view: ViewValue,
+    path: string,
+    origin: object,
+    wheel: boolean,
+  ): LayoutElement {
+    const rows = view.children.map((child, index) => {
+      const chosen = truthyBinding(labelled(child.args, 'selected'))
+
+      const label = this.convert(child, `${path}opt${index}c`, 'horizontal')
+      const tick: LayoutElement = chosen
+        ? {
+            kind: 'modified',
+            id: `${path}opt${index}tk`,
+            modifier: { kind: 'foregroundStyle', color: this.color('accentColor') },
+            child: this.symbolImage(`${path}opt${index}t`, 'checkmark'),
+          }
+        : { kind: 'empty', id: `${path}opt${index}t` }
+
+      const row: LayoutElement = {
+        kind: 'modified',
+        id: `${path}opt${index}pad`,
+        modifier: { kind: 'padding', insets: insets(11, 0, 11, 0) },
+        child: {
+          kind: 'stack',
+          id: `${path}opt${index}`,
+          axis: 'horizontal',
+          spacing: 8,
+          alignment: CENTER,
+          children: wheel
+            ? [
+                {
+                  kind: 'modified',
+                  id: `${path}opt${index}w`,
+                  modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER },
+                  child: label,
+                },
+              ]
+            : [
+                label,
+                { kind: 'spacer', id: `${path}opt${index}sp`, axis: 'horizontal', minLength: 8 },
+                tick,
+              ],
+        },
+      }
+
+      // A wheel dims everything but the selection, which is the one thing about it a
+      // static drawing can carry honestly.
+      const shaded: LayoutElement =
+        wheel && !chosen
+          ? { kind: 'modified', id: `${path}opt${index}dim`, modifier: { kind: 'opacity', value: 0.45 }, child: row }
+          : row
+
+      return this.withHitTarget(
+        shaded,
+        `${path}/seg-${index}`,
+        'button',
+        textIn(child).join(' '),
+        child,
+        false,
+      )
+    })
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'vertical',
+      spacing: 0,
+      alignment: CENTER,
+      children: rows,
       ...origin,
     }
   }
@@ -2081,18 +3018,32 @@ class Converter {
     const max = range?.kind === 'range' ? range.upper : 1
     const fraction = max === min ? 0 : Math.max(0, Math.min(1, (value - min) / (max - min)))
 
-    return this.progressView(
-      {
-        ...view,
-        name: 'ProgressView',
-        args: [
-          { label: 'value', value: { kind: 'double', value: fraction } },
-          { label: 'total', value: { kind: 'double', value: 1 } },
-        ],
-      },
-      path,
-      origin,
-    )
+    // A gauge is a progress view with a range, so the drawing is shared and only the
+    // style name differs: every `accessoryCircular` spelling is a ring, and the rest
+    // are the bar. Translated here rather than duplicating the two drawings.
+    const gaugeStyle = this.styles.gauge ?? ''
+    const outer = this.styles
+    this.styles = {
+      ...outer,
+      progressView: gaugeStyle.toLowerCase().includes('circular') ? 'circular' : 'linear',
+    }
+
+    try {
+      return this.progressView(
+        {
+          ...view,
+          name: 'ProgressView',
+          args: [
+            { label: 'value', value: { kind: 'double', value: fraction } },
+            { label: 'total', value: { kind: 'double', value: 1 } },
+          ],
+        },
+        path,
+        origin,
+      )
+    } finally {
+      this.styles = outer
+    }
   }
 
   /** The search field `.searchable` adds above a list. */
@@ -2301,6 +3252,44 @@ class Converter {
       case 'contrast':
         return { kind: 'filter', filter: { contrast: numberArg(positional(args, 0)) ?? 1 } }
 
+      case 'hueRotation': {
+        // An `Angle`, not a number: `.hueRotation(.degrees(90))` is how it is written.
+        const angle = angleDegrees(positional(args, 0) ?? labelled(args, 'angle'))
+        return angle === null ? null : { kind: 'filter', filter: { hueRotate: angle } }
+      }
+
+      case 'colorMultiply': {
+        const color = resolveColorArg(positional(args, 0), this.scheme)
+        return color ? { kind: 'filter', filter: { multiply: color } } : null
+      }
+
+      case 'rotation3DEffect': {
+        const degrees = angleDegrees(positional(args, 0) ?? labelled(args, 'angle'))
+        if (degrees === null) return null
+        const axis = labelled(args, 'axis')
+        const vector = axisVector(axis)
+        return { kind: 'rotate3D', degrees, ...vector }
+      }
+
+      case 'blendMode': {
+        const mode = tokenName(positional(args, 0))
+        const css = mode ? BLEND_MODES.get(mode) : undefined
+        // A mode CSS has no equivalent for is left to the unsupported path, which
+        // warns - rather than silently picking the nearest one, which would draw
+        // something plausible that the device will not.
+        return css ? { kind: 'blendMode', mode: css } : { kind: 'unsupported', name: 'blendMode' }
+      }
+
+      case 'unredacted':
+        // Turns the flag back off for a subtree inside a redacted one.
+        return { kind: 'unredacted' }
+
+      case 'redacted': {
+        // `.redacted(reason: .placeholder)` is the only reason SwiftUI ships, and
+        // `.unredacted()` is its own modifier rather than an argument here.
+        return { kind: 'redacted' }
+      }
+
       case 'grayscale':
         return { kind: 'filter', filter: { grayscale: numberArg(positional(args, 0)) ?? 0 } }
 
@@ -2326,8 +3315,9 @@ class Converter {
         return null
 
       case 'ignoresSafeArea':
-      case 'safeAreaInset':
-        // Read by the pipeline, which owns the device's edges.
+        // Read by the pipeline, which owns the device's edges. `.safeAreaInset` was
+        // grouped here and is not: nothing read it, and it was in the unimplemented
+        // list at the same time - so it both warned and was claimed to be handled.
         return null
 
       case 'zIndex':
@@ -2346,6 +3336,10 @@ class Converter {
       case 'toggleStyle':
       case 'pickerStyle':
       case 'labelStyle':
+      case 'progressViewStyle':
+      case 'gaugeStyle':
+      case 'controlSize':
+      case 'buttonBorderShape':
       case 'placeholder':
       case 'contextMenu':
       case 'badge':
@@ -2357,9 +3351,7 @@ class Converter {
       case 'monospaced':
         return { kind: 'font', font: monospacedFont(this.typeScale) }
 
-      case 'kerning':
-      case 'minimumScaleFactor':
-        return { kind: 'unsupported', name: modifier.name }
+
 
       case 'position':
         return {
@@ -2386,9 +3378,31 @@ class Converter {
         return { kind: 'aspectRatio', ratio: null, mode: 'fill' }
 
       case 'lineLimit': {
-        const limit = numberArg(positional(args, 0))
+        // `.lineLimit(2...4)` gives a floor as well as a ceiling: at least two lines'
+        // worth of room whatever the text is, so a list's rows stop changing height as
+        // their content does.
+        const first = positional(args, 0)
+        if (first?.kind === 'range') {
+          const upper = first.closed ? first.upper : first.upper - 1
+          return {
+            kind: 'textStyle',
+            lineLimit: Math.max(1, upper),
+            minimumLines: Math.max(1, first.lower),
+          }
+        }
+
+        const limit = numberArg(first)
         return { kind: 'textStyle', lineLimit: limit === null ? null : Math.max(0, limit) }
       }
+
+      case 'allowsTightening': {
+        const first = positional(args, 0)
+        const on = first === undefined ? true : first.kind === 'bool' ? first.value : true
+        return { kind: 'textStyle', allowsTightening: on }
+      }
+
+      case 'monospacedDigit':
+        return { kind: 'textStyle', tabularNumbers: true }
 
       case 'multilineTextAlignment': {
         const name = tokenName(positional(args, 0))
@@ -2406,9 +3420,112 @@ class Converter {
         }
       }
 
+      // The text attributes. All inherited, because in SwiftUI they are View
+      // modifiers rather than Text ones: `VStack { Text(...) }.underline()` underlines
+      // what is inside it.
+      case 'underline':
+      case 'strikethrough': {
+        // `.underline(isActive)` and `.underline(isActive, color:)` both lead with a
+        // Bool. No argument means on, which is the form almost everyone writes.
+        const first = positional(args, 0)
+        const on = first === undefined ? true : first.kind === 'bool' ? first.value : true
+        return modifier.name === 'underline'
+          ? { kind: 'textStyle', underline: on }
+          : { kind: 'textStyle', strikethrough: on }
+      }
+
+      case 'kerning':
+      case 'tracking': {
+        const value = numberArg(positional(args, 0))
+        return value === null ? null : { kind: 'textStyle', tracking: value }
+      }
+
+      case 'baselineOffset': {
+        const value = numberArg(positional(args, 0))
+        return value === null ? null : { kind: 'textStyle', baselineOffset: value }
+      }
+
+      case 'lineSpacing': {
+        const value = numberArg(positional(args, 0))
+        return value === null ? null : { kind: 'textStyle', lineSpacing: Math.max(0, value) }
+      }
+
+      case 'minimumScaleFactor': {
+        const value = numberArg(positional(args, 0))
+        return value === null
+          ? null
+          : { kind: 'textStyle', minimumScale: Math.max(0.1, Math.min(1, value)) }
+      }
+
+      case 'truncationMode': {
+        const mode = tokenName(positional(args, 0))
+        return {
+          kind: 'textStyle',
+          truncation: mode === 'head' ? 'head' : mode === 'middle' ? 'middle' : 'tail',
+        }
+      }
+
+      case 'alignmentGuide': {
+        const guide = tokenName(positional(args, 0))
+        const closure = modifier.closure
+        if (!guide || !closure || !this.callGuide) return null
+
+        const run = this.callGuide
+        return { kind: 'alignmentGuide', guide, compute: (size: Size) => run(closure, size) }
+      }
+
+      case 'safeAreaInset': {
+        const edge = tokenName(labelled(args, 'edge')) ?? 'bottom'
+        // Evaluated by the host, because an inset is on screen from the first frame -
+        // unlike a sheet's, whose closure must not run while it is down.
+        const views = args
+          .filter((a) => a.label === 'content')
+          .map((a) => asView(a.value))
+          .filter((v): v is ViewValue => v !== null)
+        if (views.length === 0) return null
+
+        return {
+          kind: 'safeAreaInset',
+          edge:
+            edge === 'top' || edge === 'leading' || edge === 'trailing'
+              ? edge
+              : 'bottom',
+          spacing: numberArg(labelled(args, 'spacing')) ?? 0,
+          content: {
+            kind: 'stack',
+            id: `${id}inset`,
+            axis: edge === 'leading' || edge === 'trailing' ? 'vertical' : 'horizontal',
+            spacing: 0,
+            alignment: CENTER,
+            children: this.convertList(views, `${id}inset`, 'horizontal'),
+          },
+        }
+      }
+
+      case 'containerRelativeFrame': {
+        const axes = tokenName(positional(args, 0)) ?? 'horizontal'
+        const count = numberArg(labelled(args, 'count')) ?? 1
+        return {
+          kind: 'containerRelativeFrame',
+          horizontal: axes !== 'vertical',
+          vertical: axes !== 'horizontal',
+          count: Math.max(1, Math.round(count)),
+          spacing: numberArg(labelled(args, 'spacing')) ?? 0,
+        }
+      }
+
       case 'animation': {
         const hint = animationHint(args[0]?.value)
-        return hint ? { kind: 'animate', hint } : null
+        if (!hint) return null
+
+        // `.animation(_:value:)` animates only when `value` changed, which the
+        // resolver decided - it is the stage that remembers the last render. The
+        // form without a `value:` animates its subtree unconditionally, as SwiftUI's
+        // deprecated one does.
+        const gated = args.some((a) => a.label === 'value')
+        if (gated && !boolArg(labelled(args, 'armed'))) return null
+
+        return { kind: 'animate', hint }
       }
 
       case 'transition': {
@@ -2704,6 +3821,29 @@ function displayValue(value: SwiftValue): string {
  * The absolute ones are the browser's locale formatting, so the separators and the
  * order are the platform's real ones.
  */
+/**
+ * Which halves of a date a `DatePicker` row shows.
+ *
+ * `displayedComponents:` is a set, and the two members that matter are `.date` and
+ * `.hourAndMinute`. Omitted, SwiftUI shows both - which is why the default here is
+ * neither of the single-part styles.
+ */
+function datePickerStyleFor(view: ViewValue): string | null {
+  const components = labelled(view.args, 'displayedComponents')
+  if (!components) return null
+
+  const names =
+    components.kind === 'array'
+      ? components.elements.map((e) => tokenName(e) ?? '')
+      : [tokenName(components) ?? '']
+
+  const wantsDate = names.includes('date')
+  const wantsTime = names.includes('hourAndMinute')
+  if (wantsDate && !wantsTime) return 'date'
+  if (wantsTime && !wantsDate) return 'time'
+  return null
+}
+
 function dateText(epochSeconds: number, style: string | null): string {
   const date = new Date(epochSeconds * 1000)
 

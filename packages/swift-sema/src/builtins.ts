@@ -33,7 +33,8 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   // collections and navigation
   'List', 'Section', 'Form',
   'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView',
-  'DisclosureGroup', 'AnyView',
+  'DisclosureGroup', 'AnyView', 'GroupBox', 'LabeledContent', 'ControlGroup',
+  'NavigationSplitView', 'TimelineView',
   // controls drawn plainly
   'DatePicker', 'ColorPicker', 'TextEditor', 'Menu', 'ShareLink', 'Gauge', 'AsyncImage',
   // shapes and drawing
@@ -53,6 +54,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'modifier',
   // layout
   'frame', 'padding', 'offset', 'position', 'fixedSize', 'clipShape', 'clipped',
+  'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame',
   'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill',
   // appearance
   'background', 'overlay', 'border', 'shadow', 'cornerRadius', 'opacity',
@@ -60,9 +62,12 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // typography
   'font', 'bold', 'italic', 'fontWeight', 'fontDesign',
   'lineLimit', 'multilineTextAlignment', 'textCase',
+  'underline', 'strikethrough', 'kerning', 'tracking', 'baselineOffset', 'lineSpacing',
+  'minimumScaleFactor', 'truncationMode', 'allowsTightening', 'monospacedDigit',
   // transforms, filters and motion
-  'scaleEffect', 'rotationEffect', 'animation', 'transition',
+  'scaleEffect', 'rotationEffect', 'rotation3DEffect', 'animation', 'transition',
   'blur', 'saturation', 'brightness', 'contrast', 'grayscale',
+  'hueRotation', 'colorMultiply', 'blendMode', 'redacted', 'unredacted',
   // drawing styles
   'fill', 'stroke', 'trim',
   // accessibility
@@ -71,7 +76,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // navigation and presentation
   'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar',
   'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
-  'tabItem', 'tag',
+  'popover', 'tabItem', 'tag', 'tabViewStyle',
   // lists
   'listStyle', 'listRowBackground',
   // interaction
@@ -84,8 +89,9 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'listRowSeparator', 'listRowInsets', 'scrollIndicators',
   // text entry
   'keyboardType', 'submitLabel', 'onSubmit', 'focused',
-  // styles that are recognised and drawn plainly
-  'toggleStyle', 'pickerStyle', 'labelStyle', 'monospaced', 'placeholder',
+  // control styles, each of which changes what is drawn
+  'toggleStyle', 'pickerStyle', 'labelStyle', 'progressViewStyle', 'gaugeStyle',
+  'controlSize', 'buttonBorderShape', 'monospaced', 'placeholder',
   // device edges
   'ignoresSafeArea', 'id',
   // Environment injection.
@@ -170,12 +176,11 @@ export function isViewRoot(name: string): boolean {
  */
 export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // containers
-  'GroupBox', 'ControlGroup', 'ScrollViewReader', 'NavigationSplitView',
-  'LabeledContent', 'EquatableView',
+  'ScrollViewReader', 'EquatableView',
   // data-driven
   'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
-  // time and charts
-  'TimelineView', 'Chart', 'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark',
+  // charts
+  'Chart', 'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark',
   // platform surfaces a browser has no analogue for
   'Map', 'Marker', 'Annotation', 'VideoPlayer', 'SceneView',
   // scenes other than the one WindowGroup the preview shows
@@ -196,14 +201,10 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
  */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // layout
-  'alignmentGuide', 'containerRelativeFrame', 'safeAreaInset', 'coordinateSpace',
+  'coordinateSpace',
   // painting and effects
-  'mask', 'blendMode', 'colorMultiply', 'hueRotation', 'rotation3DEffect',
-  'compositingGroup', 'drawingGroup', 'geometryGroup', 'redacted', 'visualEffect',
-  'zIndex',
-  // typography
-  'kerning', 'tracking', 'baselineOffset', 'lineSpacing', 'minimumScaleFactor',
-  'truncationMode', 'allowsTightening', 'monospacedDigit', 'underline', 'strikethrough',
+  'mask', 'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
+
   // symbols and images
   'symbolRenderingMode', 'symbolVariant', 'imageScale', 'interpolation',
   // motion
@@ -212,11 +213,9 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'refreshable', 'scrollDismissesKeyboard', 'scrollTargetBehavior', 'scrollPosition',
   'scrollDisabled', 'scrollContentBackground', 'listSectionSeparator', 'listRowSpacing',
   // presentation and chrome
-  'popover', 'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
-  'tabViewStyle',
+  'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
   // controls
-  'controlSize', 'buttonBorderShape', 'progressViewStyle', 'gaugeStyle', 'menuStyle',
-  'datePickerStyle', 'strokeBorder',
+  'menuStyle', 'datePickerStyle', 'strokeBorder',
   // text entry
   'textInputAutocapitalization', 'autocorrectionDisabled',
   // environment set on the view rather than by the preview's own controls
@@ -226,6 +225,37 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'accessibilitySortPriority',
   // interaction with no analogue in the preview
   'onHover', 'draggable', 'dropDestination', 'contentShape',
+])
+
+/**
+ * SwiftUI blend modes the preview can draw, mapped to the CSS mode that means the same.
+ *
+ * Here rather than in the renderer because the *checker* needs it too: `.blendMode` is
+ * a supported modifier, so a mode outside this set would otherwise be accepted and
+ * silently ignored - which is the failure the whole unimplemented-modifier machinery
+ * exists to prevent, arriving one level down at the argument instead of the name.
+ *
+ * `.plusLighter`, `.plusDarker` and the `sourceAtop` / `destinationOver` family are
+ * absent because CSS has no equivalent. Drawing them as the nearest mode would put
+ * something plausible on screen that the device will not draw.
+ */
+export const BLEND_MODES: ReadonlyMap<string, string> = new Map([
+  ['normal', 'normal'],
+  ['multiply', 'multiply'],
+  ['screen', 'screen'],
+  ['overlay', 'overlay'],
+  ['darken', 'darken'],
+  ['lighten', 'lighten'],
+  ['colorDodge', 'color-dodge'],
+  ['colorBurn', 'color-burn'],
+  ['softLight', 'soft-light'],
+  ['hardLight', 'hard-light'],
+  ['difference', 'difference'],
+  ['exclusion', 'exclusion'],
+  ['hue', 'hue'],
+  ['saturation', 'saturation'],
+  ['color', 'color'],
+  ['luminosity', 'luminosity'],
 ])
 
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */
@@ -264,21 +294,31 @@ export const KNOWN_FUNCTIONS: ReadonlySet<string> = new Set([
   'type', 'fatalError', 'assert', 'assertionFailure', 'precondition', 'preconditionFailure',
 ])
 
-/** Property wrappers, mapped to whether the preview implements them. */
-export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean; phase: number }> = new Map([
-  ['State', { supported: true, phase: 3 }],
-  ['Binding', { supported: true, phase: 6 }],
-  ['StateObject', { supported: true, phase: 7 }],
-  ['ObservedObject', { supported: true, phase: 7 }],
-  ['EnvironmentObject', { supported: true, phase: 7 }],
-  ['Environment', { supported: true, phase: 7 }],
+/**
+ * Property wrappers, mapped to whether the preview implements them.
+ *
+ * A set of names and a flag, with no phase numbers: the ones this carried all said 7,
+ * and kept saying it after Phase 10 shipped - the same defect the view and modifier
+ * lists had, in the one table the sweep that found it did not reach.
+ */
+export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean }> = new Map([
+  ['State', { supported: true }],
+  ['Binding', { supported: true }],
+  ['StateObject', { supported: true }],
+  ['ObservedObject', { supported: true }],
+  ['EnvironmentObject', { supported: true }],
+  ['Environment', { supported: true }],
   // A stored property on a class, which is a reference - so a change is visible
   // everywhere holding it, with or without the wrapper.
-  ['Published', { supported: true, phase: 7 }],
-  ['AppStorage', { supported: false, phase: 7 }],
-  ['SceneStorage', { supported: false, phase: 7 }],
-  ['FocusState', { supported: false, phase: 7 }],
-  ['GestureState', { supported: true, phase: 7 }],
+  ['Published', { supported: true }],
+  // Keyed by the string they name rather than by the view, so the value outlives the
+  // view that wrote it and two views naming one key see one value.
+  ['AppStorage', { supported: true }],
+  ['SceneStorage', { supported: true }],
+  // Storage the code reads and writes. Nothing focuses a field from outside the
+  // program, because the preview has no keyboard - see the coverage matrix.
+  ['FocusState', { supported: true }],
+  ['GestureState', { supported: true }],
 ])
 
 /** Attributes that are meaningful rather than property wrappers. */

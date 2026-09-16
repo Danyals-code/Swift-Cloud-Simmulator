@@ -6,6 +6,8 @@ import {
   cssTransition,
   type RenderNode,
   type RenderTree,
+  type RGBA,
+  type TextRun,
   type UIEvent,
 } from '@studio/shared'
 import { symbolShapes, symbolStrokeScale } from './symbols'
@@ -246,10 +248,16 @@ function RenderNodeView({
       : {}),
     ...(node.transform
       ? {
-          transform: `scale(${node.transform.scaleX}, ${node.transform.scaleY}) rotate(${node.transform.rotate}deg)`,
+          transform: cssTransform(node.transform),
+          // A rotation about x or y is a projection, and without a perspective the
+          // browser draws it as a flat squash - which is not what SwiftUI shows.
+          ...(node.transform.rotateX || node.transform.rotateY
+            ? { transformStyle: 'preserve-3d' as const, perspective: '640px' }
+            : {}),
         }
       : {}),
     ...(node.filter ? { filter: cssFilter(node.filter) } : {}),
+    ...(node.blendMode ? { mixBlendMode: node.blendMode as CSSProperties['mixBlendMode'] } : {}),
     ...(node.transition ? { animation: transitionAnimation(node) } : {}),
     ...(node.material
       ? {
@@ -284,13 +292,20 @@ function RenderNodeView({
       ? renderControl(node, handlerId, onEvent)
       : null
 
+  // `.redacted(reason: .placeholder)`: the content's *shape* without the content. The
+  // engine already decided the frame, and that frame is exactly what the bar occupies -
+  // which is why this is a paint-time swap rather than a different subtree.
+  const redacted = node.redacted && (node.kind === 'text' || node.kind === 'image')
+
   const content: ReactNode = (
     <>
-      {node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
-      {node.kind === 'image' && node.image ? <ImageContent node={node} /> : null}
+      {redacted ? <RedactedBar /> : null}
+      {!redacted && node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
+      {!redacted && node.kind === 'image' && node.image ? <ImageContent node={node} /> : null}
       {node.kind === 'shape' && node.shape ? <ShapeContent node={node} /> : null}
       {node.kind === 'path' && node.path ? <PathContent node={node} /> : null}
       {node.kind === 'placeholder' && node.placeholder ? <PlaceholderContent node={node} /> : null}
+      {node.filter?.multiply ? <ColorMultiply color={node.filter.multiply} /> : null}
       {nativeControl}
       {children?.length ? (
         <ScrollContent node={node}>
@@ -500,12 +515,73 @@ function renderControl(
 }
 
 /**
+ * `.redacted(reason: .placeholder)` - a bar the size of what it hides.
+ *
+ * The rounded grey bar iOS draws, inset a little vertically so a redacted line of
+ * text does not fill its whole line box - which is how the real one looks beside an
+ * unredacted neighbour.
+ */
+function RedactedBar() {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        margin: '2px 0',
+        borderRadius: 4,
+        background: 'currentColor',
+        opacity: 0.18,
+      }}
+    />
+  )
+}
+
+/**
+ * `.colorMultiply` - every channel of the subtree multiplied by a colour.
+ *
+ * Drawn as an overlay in multiply blend mode, which is that operation exactly rather
+ * than an approximation of it. It cannot be a CSS filter because there is no filter
+ * function that multiplies by an arbitrary colour.
+ */
+function ColorMultiply({ color }: { color: RGBA }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: cssColor(color),
+        mixBlendMode: 'multiply',
+        pointerEvents: 'none',
+      }}
+    />
+  )
+}
+
+/**
+ * The CSS for a paint-time transform.
+ *
+ * One property rather than several, because CSS applies them in order about a single
+ * origin and SwiftUI applies its own about the view's centre - so splitting them
+ * across nodes would rotate about a point the user did not write.
+ */
+function cssTransform(t: NonNullable<RenderNode['transform']>): string {
+  const parts = [`scale(${t.scaleX}, ${t.scaleY})`, `rotate(${t.rotate}deg)`]
+  if (t.rotateX) parts.push(`rotateX(${t.rotateX}deg)`)
+  if (t.rotateY) parts.push(`rotateY(${t.rotateY}deg)`)
+  return parts.join(' ')
+}
+
+/**
  * Paints text.
  *
  * When the layout engine resolved line boxes, each line is positioned absolutely at
  * the offset the engine computed. Letting CSS re-wrap instead would mean two
  * different algorithms deciding where the breaks go - and the frame the engine
  * reported would no longer match the text actually drawn in it.
+ *
+ * A line is drawn from its *slices* when it has them, so a line that crosses a run
+ * boundary keeps each half's own face. Without that, `Text("a").bold() + Text("b")`
+ * drew both halves bold: the first run won and the rest were dropped.
  */
 function TextContent({ node }: { node: RenderNode }) {
   const payload = node.text!
@@ -519,15 +595,11 @@ function TextContent({ node }: { node: RenderNode }) {
         ? 'flex-end'
         : 'flex-start'
 
-  const typography: CSSProperties = {
-    fontFamily: first.font.family,
-    fontSize: first.font.size,
-    fontWeight: first.font.weight,
-    fontStyle: first.font.italic ? 'italic' : 'normal',
-    lineHeight: `${first.font.lineHeight}px`,
-    color: cssColor(first.color),
-    whiteSpace: 'pre',
-  }
+  // The line box carries the first run's typography, and a span appears only where a
+  // line is made of more than one. Single-run text is almost all text, so this is the
+  // path that has to stay cheap - and it keeps the colour on the element the line *is*
+  // rather than on a child, which is what anything reading the painted colour expects.
+  const typography: CSSProperties = { ...runStyle(first), whiteSpace: 'pre' }
 
   if (payload.lines && payload.lines.length > 0) {
     return (
@@ -547,7 +619,11 @@ function TextContent({ node }: { node: RenderNode }) {
               justifyContent: justify,
             }}
           >
-            {line.text}
+            {line.slices
+              ? line.slices.map((slice, j) => (
+                  <RunSpan key={j} run={payload.runs[slice.run] ?? first} text={slice.text} />
+                ))
+              : line.text}
           </div>
         ))}
       </>
@@ -564,23 +640,49 @@ function TextContent({ node }: { node: RenderNode }) {
         justifyContent: justify,
       }}
     >
-      {payload.runs.map((run, i) => (
-        <span
-          key={i}
-          style={{
-            fontFamily: run.font.family,
-            fontSize: run.font.size,
-            fontWeight: run.font.weight,
-            fontStyle: run.font.italic ? 'italic' : 'normal',
-            lineHeight: `${run.font.lineHeight}px`,
-            color: cssColor(run.color),
-          }}
-        >
-          {run.text}
-        </span>
-      ))}
+      {payload.runs.length > 1
+        ? payload.runs.map((run, i) => <RunSpan key={i} run={run} text={run.text} />)
+        : first.text}
     </div>
   )
+}
+
+/**
+ * One attributed span.
+ *
+ * `letterSpacing` is the paint half of tracking; the measurement half already
+ * happened in the worker, so the two agree by construction rather than by both
+ * guessing. `textDecoration` carries underline and strikethrough together because
+ * CSS has one property for both and a span may have either or both.
+ */
+function RunSpan({ run, text }: { run: TextRun; text: string }) {
+  return <span style={runStyle(run)}>{text}</span>
+}
+
+/** Everything one run says about how its characters are drawn. */
+function runStyle(run: TextRun): CSSProperties {
+  // CSS has one property for both, and a run may carry either or both.
+  const decoration = [
+    run.underline ? 'underline' : null,
+    run.strikethrough ? 'line-through' : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  return {
+    fontFamily: run.font.family,
+    fontSize: run.font.size,
+    fontWeight: run.font.weight,
+    fontStyle: run.font.italic ? 'italic' : 'normal',
+    lineHeight: `${run.font.lineHeight}px`,
+    color: cssColor(run.color),
+    ...(decoration ? { textDecoration: decoration } : {}),
+    // The paint half of tracking; the measurement half already happened in the worker,
+    // so the two agree by construction rather than by both guessing.
+    ...(run.tracking ? { letterSpacing: run.tracking } : {}),
+    ...(run.baselineOffset ? { position: 'relative', bottom: run.baselineOffset } : {}),
+    ...(run.tabularNumbers ? { fontVariantNumeric: 'tabular-nums' } : {}),
+  }
 }
 
 /**

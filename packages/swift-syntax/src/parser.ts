@@ -2160,6 +2160,21 @@ export class Parser {
       return { kind: 'keyPath', span: this.spanFrom(token), components }
     }
 
+    // A keyword Swift lets you use as an ordinary name, being *read*.
+    //
+    // Declaring one already worked: `var open = 1` and `let any = 2` parse, because
+    // every position that asks for a name consults `CONTEXTUAL_KEYWORDS`. Expression
+    // position did not, so a property could be declared and never read - and the
+    // error pointed at the name rather than at anything the user could act on.
+    //
+    // Safe here because it is the last thing tried: every keyword with a meaning in
+    // an expression was matched by the switch above.
+    if (token.kind === 'keyword' && CONTEXTUAL_KEYWORDS.has(token.text)) {
+      this.advance()
+      this.skipExplicitGenericArguments()
+      return { kind: 'identifier', span: token.span, name: token.text }
+    }
+
     this.error(
       token.span,
       'unexpected_token',

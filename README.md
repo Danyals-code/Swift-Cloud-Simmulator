@@ -46,30 +46,45 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Status
 
-**Phases 0-10 complete.** The studio parses, checks, runs and renders real Swift
-across multiple files, exports to four project formats, and shares a project
-through a link that needs no server.
+**Phases 0-10 complete, and the defect register's ten phases with them.** The
+studio parses, checks, runs and renders real Swift across multiple files, exports
+to four project formats, and shares a project through a link that needs no server.
 
 What it handles now is most of the SwiftUI people actually write:
 
 - **Language** - structs and classes with inheritance and `super`, protocols and
   extensions, enums with raw and associated values, nested types, `switch` with
   pattern matching, `if let` and `guard let`, loops, closures, key paths,
-  generics, `throws` / `do-catch`, `inout`.
+  generics, `throws` / `do-catch`, `inout`. Words Swift lets you use as names -
+  `open`, `some`, `any`, `where` - are names wherever you write them.
 - **The standard library** - the `String`, `Array`, `Dictionary` and `Set`
   members real code calls, the maths functions, `zip` and `stride`, and the
   Foundation corner SwiftUI leans on: `UUID` for an `Identifiable` id, `Date`
   with intervals and comparison, and a `URL` for `Link` and `AsyncImage`.
-- **Structure** - navigation stacks and links, tabs, lists, forms, sheets,
-  alerts, scroll views, grids, `ForEach`.
+- **Structure** - navigation stacks and links (including `NavigationSplitView`,
+  collapsed as a phone collapses it), tabs with a bar or with page dots, lists in
+  every style, forms, sections with headers *and* footers, sheets, popovers,
+  alerts, scroll views, grids, `ForEach`, `GroupBox`, `LabeledContent`.
 - **State** - `@State`, `@Binding`, `ObservableObject` with `@StateObject` and
-  `@ObservedObject`, `@EnvironmentObject`, `@Environment`.
+  `@ObservedObject`, `@EnvironmentObject`, `@Environment`, and `@AppStorage`,
+  which is keyed by its string and outlives the view that wrote it.
 - **Interaction** - the form controls, drag and magnify gestures with
-  `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`. A
-  `Stepper` counts by its step and stops at its bounds, a `DisclosureGroup` opens
-  and closes, and a `Picker` or `Menu` opens onto the options the user wrote.
+  `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`.
+  Every control that is drawn answers to a press: a `Stepper` counts by its step,
+  a `Picker` opens or lays its options out in place, a `DatePicker` opens onto a
+  calendar and a `ColorPicker` onto a palette.
+- **Text** - the attributes, not just the size and the weight: underline,
+  strikethrough, tracking, line spacing, baseline offset, monospaced digits, and
+  the three that ask measurement to answer back - shrink-to-fit, tightening, and
+  truncation at whichever end you asked for. `Text + Text` renders with a face
+  per half.
 - **Drawing** - `Path`, `Canvas`, shapes with `.fill` and `.stroke`, gradients,
-  materials, colour filters, `withAnimation` and transitions.
+  materials, colour filters, blend modes, 3D rotation, redaction,
+  `withAnimation` and transitions. `.animation(_:value:)` animates only when its
+  value changed.
+- **Layout** - the proposal/response engine, and a stack that aligns its
+  children's *guides* rather than their edges, so `.alignmentGuide` means
+  something. `.safeAreaInset` insets rather than overlays.
 - **Reuse** - custom `ViewModifier`, `extension View { func … }` and custom
   `ButtonStyle`: the three ways a real codebase names a look and applies it.
 - **The editor** - Xcode's Default (Dark) palette, a jump bar over every file,
@@ -82,14 +97,16 @@ What it handles now is most of the SwiftUI people actually write:
   rename and drag files between; draggable pane dividers; Xcode's own keyboard
   shortcuts for showing and hiding them; and a Pause that stops the preview
   recompiling while you type.
-- **Paste and go** - `#Preview` blocks parse, and a view with only a preview
-  renders rather than reporting that the project has no entry point.
+- **Paste and go** - `#Preview` blocks parse, `PreviewProvider` is read as a root,
+  and a view with only a preview renders rather than reporting that the project
+  has no entry point.
 - **A share link is treated as a stranger's bytes** - every value it carries is
   validated before it becomes a project, and the exporter refuses to write an
   entry outside the archive's own root whatever it is handed.
-- **Somewhere to start** - eighteen templates, one of which (`Trailhead`) is a
-  whole eight-file project rather than a snippet: tabs, two levels of
-  navigation, scrolling in both directions, a shared store and a sheet.
+- **Somewhere to start** - nineteen templates, written the way people write
+  rather than the way this is easy: `UUID` identities, dates, `allCases`, both
+  spellings of `Button`, explicit getters. One of them (`Trailhead`) is a whole
+  eight-file project rather than a snippet.
 
 The [coverage matrix](docs/05-SWIFTUI-COVERAGE.md) is the exact contract, and it
 is honest about the 🟡 rows as well as the ✅ ones.
@@ -101,8 +118,8 @@ Three things are outstanding, and none of them is hidden:
   - the pbxproj parses, its object graph resolves, every bundle is structurally
   complete, and each format carries the user's bytes unchanged. See
   [docs/06-VERTICAL-SLICE.md](docs/06-VERTICAL-SLICE.md) section 4.12.
-- **The conformance corpus is 17 projects, not the 100 Phase 6's first gate asks
-  for.** Eighty-five more authored in a single pass would be padding; the corpus
+- **The conformance corpus is 19 projects, not the 100 Phase 6's first gate asks
+  for.** Eighty-one more authored in a single pass would be padding; the corpus
   grows as real projects arrive. See section 4.15.
 - **Coverage telemetry has no data**, because nothing has shipped and nothing is
   transmitted. The instrument is built and visible in the studio's Coverage
@@ -113,34 +130,31 @@ the matrix rather than discovered: **concurrency does not suspend** - everything
 async runs immediately and in order - and **generics are erased**, so constraints
 are recorded and never enforced.
 
-Not built: custom `ToggleStyle`, the `Layout` protocol, `PreferenceKey`,
-`Animatable`, and the remaining ⬜ rows in the coverage matrix - each marked "-"
-rather than a phase, because a phase number is a promise, and each with its reason
-recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-build).
+Not built, each with its reason recorded in the matrix and the [defect
+register](docs/07-DEFECT-REGISTER.md) rather than a phase number: custom
+`ToggleStyle` and `LabelStyle`, the `Layout` protocol, `PreferenceKey`,
+`Animatable`, `matchedGeometryEffect`, exit transitions, Combine, `Chart`,
+`Table`, `OutlineGroup`, `ScrollViewReader`, and `Image("asset")` - which cannot
+work here at all, because a project file is text and there is no asset catalogue
+for a name to resolve against.
 
 | Check | Result |
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1443 passing |
+| Unit tests | 1616 passing |
 | End-to-end | 52 / 52 passing |
-| Templates rendering with zero placeholders | 18 / 18 |
+| Templates rendering with zero placeholders | 19 / 19 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
-| Coverage matrix | 125 ✅ · 46 🟡 · 30 ⬜ · 3 ✗ |
+| Coverage matrix | 157 ✅ · 48 🟡 · 11 ⬜ · 11 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
-| Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 394 KB gzipped / 450 KB budget (88%) |
+| Tap to repaint | 0.4 ms (budget: 32 ms) |
+| Client JS | 411 KB gzipped / 450 KB budget (91%) |
 
-Next is the [defect register](docs/07-DEFECT-REGISTER.md), which is the working
-backlog: its phases 1 to 8 are closed and phase 9 is a third done. What remains
-there is the drawing work - the text attributes, which start with a render-tree
-change, the control styles that all draw alike, and the views still standing in as
-placeholders.
-
-After that, the [roadmap's à-la-carte Phase 7](docs/03-ROADMAP.md) - a real
-`swiftc` verification service, accounts, AI codegen, GitHub export - each of which
-needs hosting, a key or an OAuth app; and whatever the coverage telemetry says
-people reached for.
+Next is the [roadmap's à-la-carte Phase 7](docs/03-ROADMAP.md) - a real `swiftc`
+verification service, accounts, AI codegen, GitHub export - each of which needs
+hosting, a key or an OAuth app; and whatever the coverage telemetry says people
+reached for.
 
 ## Getting started
 

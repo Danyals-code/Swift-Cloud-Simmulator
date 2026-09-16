@@ -651,7 +651,7 @@ function attributeItems(): SymbolInfo[] {
       name,
       kind: 'attribute',
       detail: 'property wrapper',
-      doc: info.supported ? undefined : `Not supported in the preview yet (Phase ${info.phase}).`,
+      doc: info.supported ? undefined : 'Not applied by the preview; exported to Xcode unchanged.',
     })
   }
   for (const name of KNOWN_ATTRIBUTES) {

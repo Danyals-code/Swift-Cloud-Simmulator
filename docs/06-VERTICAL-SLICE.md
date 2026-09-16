@@ -625,11 +625,17 @@ actually built, and - just as important - what was not.
 
 ### 4.15 - What was not built, and why
 
-**Gate 1 is not met and was not going to be.** The corpus is 11 templates, not 100. Authoring
-eighty-nine more in one pass would produce padding - files written to satisfy a count rather than to
-exercise a construct - and every one of them would then have to be maintained. The eleven that exist
-each cover a distinct area, and the honest statement is that the corpus grows as real projects
+**Gate 1 is not met and was not going to be.** The corpus is 19 templates, not 100. Authoring
+eighty-one more in one pass would produce padding - files written to satisfy a count rather than to
+exercise a construct - and every one of them would then have to be maintained. The nineteen that
+exist each cover a distinct area, and the honest statement is that the corpus grows as real projects
 arrive, which is the same thing the telemetry is for.
+
+What *did* change about the corpus is more important than its size. It was written in the subset the
+preview found easy - integer identities, no `UUID`, no `Date`, no `allCases` - so "every template
+renders with zero placeholders" was measuring the gallery rather than the interpreter, and 231
+defects lived behind it. The defect register's 10.6 rewrote it around what people type, and two
+tests now name the idioms it has to keep containing.
 
 **Gate 2 cannot be met yet by construction.** There is no usage data because nothing has shipped and
 nothing is transmitted. The instrument is built and visible; the ranking is empty until someone uses

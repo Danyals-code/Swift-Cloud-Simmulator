@@ -24,10 +24,30 @@ import {
   type StackElement,
   type TableElement,
   type TextAlign,
+  type TextElement,
+  type TextRunSpec,
   type TransitionHint,
 } from './elements'
-import { FontMetricsTable, measureText, type TextLineBox } from './metrics'
+import {
+  FontMetricsTable,
+  measureRuns,
+  type MeasureOptions,
+  type MeasuredRun,
+  type TextLineBox,
+} from './metrics'
 import type { ProposedDimension, ProposedSize } from './proposal'
+
+/** One attributed span of painted text, with every attribute already resolved. */
+export interface PaintedRun {
+  readonly text: string
+  readonly font: ResolvedFont
+  readonly color: RGBA
+  readonly underline?: boolean
+  readonly strikethrough?: boolean
+  readonly tracking?: number
+  readonly baselineOffset?: number
+  readonly tabularNumbers?: boolean
+}
 
 export type PaintSpec =
   | {
@@ -37,6 +57,15 @@ export type PaintSpec =
       readonly font: ResolvedFont
       readonly color: RGBA
       readonly align?: TextAlign
+      /**
+       * The attributed spans, resolved against the environment.
+       *
+       * Always at least one, so the renderer has a single rule rather than a special
+       * case for plain text. `lines` carries slices into this list wherever a line
+       * crosses a run boundary.
+       */
+      readonly runs: readonly PaintedRun[]
+      readonly lineSpacing?: number
     }
   | { readonly kind: 'fill'; readonly fill: Fill }
   | {
@@ -109,10 +138,18 @@ export interface PlacedNode {
     readonly x: number
     readonly y: number
   }
-  readonly transform?: { readonly scaleX: number; readonly scaleY: number; readonly rotate: number }
+  readonly transform?: {
+    readonly scaleX: number
+    readonly scaleY: number
+    readonly rotate: number
+    readonly rotateX?: number
+    readonly rotateY?: number
+  }
   readonly animation?: AnimationHint
   readonly transition?: TransitionHint
   readonly filter?: FilterSpec
+  readonly blendMode?: string
+  readonly redacted?: boolean
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
   readonly a11y?: {
     readonly label?: string
@@ -209,7 +246,16 @@ export class LayoutEngine {
 
       case 'text': {
         const maxWidth = resolve(proposal.width, Number.POSITIVE_INFINITY, UNBOUNDED)
-        const measured = measureText(displayText(element.text, env), env.font, maxWidth, this.metrics, env.lineLimit)
+        const runs = paintedRuns(element, env)
+        const measured = measureRuns(
+          measuredRuns(runs),
+          env.font,
+          maxWidth,
+          this.metrics,
+          env.lineLimit,
+          env.lineSpacing ?? 0,
+          textOptions(env),
+        )
         return { width: measured.width, height: measured.height }
       }
 
@@ -455,9 +501,46 @@ export class LayoutEngine {
         return this.measure(element.child, ideal, inner)
       }
 
+      case 'containerRelativeFrame': {
+        // The container's own size along the named axis, divided into `count` parts.
+        // The proposal *is* that size: a scroll view proposes its visible width, and
+        // a stack proposes what is left, which is what the modifier asks for.
+        const inner_ = this.measure(element.child, proposal, inner)
+        const across = resolve(proposal.width, inner_.width, inner_.width)
+        const down = resolve(proposal.height, inner_.height, inner_.height)
+        return {
+          width: modifier.horizontal
+            ? (across - modifier.spacing * (modifier.count - 1)) / modifier.count
+            : inner_.width,
+          height: modifier.vertical
+            ? (down - modifier.spacing * (modifier.count - 1)) / modifier.count
+            : inner_.height,
+        }
+      }
+
+      case 'safeAreaInset': {
+        // The inset content takes its ideal size across the axis it is pinned to, and
+        // the child is offered what is left - which is the difference from an overlay.
+        const vertical_ = modifier.edge === 'top' || modifier.edge === 'bottom'
+        const bar = this.measure(modifier.content, proposal, inner)
+        const taken = (vertical_ ? bar.height : bar.width) + modifier.spacing
+        const reduced: ProposedSize = vertical_
+          ? { width: proposal.width, height: shrink(proposal.height, taken) }
+          : { width: shrink(proposal.width, taken), height: proposal.height }
+        const body = this.measure(element.child, reduced, inner)
+        return vertical_
+          ? { width: Math.max(body.width, bar.width), height: body.height + taken }
+          : { width: body.width + taken, height: Math.max(body.height, bar.height) }
+      }
+
+      case 'alignmentGuide':
       case 'scale':
-        // `.scaleEffect` is a paint-time transform: layout still reserves the
-        // untransformed size, which is why a scaled view overlaps its neighbours.
+      case 'rotate3D':
+      case 'blendMode':
+      case 'redacted':
+      case 'unredacted':
+        // Paint-time: layout still reserves the untransformed size, which is why a
+        // scaled view overlaps its neighbours and a redacted one keeps its shape.
         return this.measure(element.child, proposal, inner)
 
       case 'position':
@@ -579,8 +662,22 @@ export class LayoutEngine {
         return z
 
       case 'text': {
-        const text = displayText(element.text, env)
-        const measured = measureText(text, env.font, bounds.width, this.metrics, env.lineLimit)
+        const runs = paintedRuns(element, env)
+        const measured = measureRuns(
+          measuredRuns(runs),
+          env.font,
+          bounds.width,
+          this.metrics,
+          env.lineLimit,
+          env.lineSpacing ?? 0,
+          textOptions(env),
+        )
+        // `.minimumScaleFactor` shrank the text to make it fit, so the painted runs
+        // take the same factor. Measuring at one size and painting at another is the
+        // one thing a measured layout exists to rule out.
+        const painted = measured.scale === 1 ? runs : runs.map((run) => scaleRun(run, measured.scale))
+        const lineFont = measured.scale === 1 ? env.font : scaleFont(env.font, measured.scale)
+
         out.push({
           id: element.id,
           frame: bounds,
@@ -589,11 +686,13 @@ export class LayoutEngine {
           cornerRadius: 0,
           paint: {
             kind: 'text',
-            text,
+            text: painted.map((run) => run.text).join(''),
             lines: measured.lines,
-            font: env.font,
+            font: lineFont,
             color: env.foregroundColor,
+            runs: painted,
             ...(env.textAlign ? { align: env.textAlign } : {}),
+            ...(env.lineSpacing ? { lineSpacing: env.lineSpacing } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -936,6 +1035,16 @@ export class LayoutEngine {
     // reported; the cache makes this free.
     const sizes = this.stackChildSizes(element, proposal, env)
 
+    const crossAlignment = vertical ? element.alignment.horizontal : element.alignment.vertical
+    const guides = element.children.map((child, i) => {
+      const size = sizes[i]!
+      const across = vertical ? size.width : size.height
+      const override = alignmentGuideOf(child, crossAlignment)
+      return override ? override(size) : defaultGuide(crossAlignment, across)
+    })
+    const maxGuide = guides.reduce((max, g) => Math.max(max, g), 0)
+    const widest = sizes.reduce((max, s) => Math.max(max, vertical ? s.width : s.height), 0)
+
     let offset = 0
     let next = z
 
@@ -944,12 +1053,11 @@ export class LayoutEngine {
       const size = sizes[i]!
 
       const crossAvailable = vertical ? bounds.width : bounds.height
-      const crossSize = vertical ? size.width : size.height
-      const crossOffset = alignOffset(
-        vertical ? element.alignment.horizontal : element.alignment.vertical,
-        crossAvailable,
-        crossSize,
-      )
+      // Align the *guides*, not the edges. With the default guides this is identical
+      // to offsetting by the alignment - a `.trailing` stack still puts every right
+      // edge together - and it is what makes `.alignmentGuide` mean anything at all.
+      const crossOffset =
+        alignOffset(crossAlignment, crossAvailable, widest) + (maxGuide - guides[i]!)
 
       const childBounds: Rect = vertical
         ? { x: bounds.x + crossOffset, y: bounds.y + offset, width: size.width, height: size.height }
@@ -1262,7 +1370,8 @@ export class LayoutEngine {
             this.place(element.child, bounds, stripHitTargets(inner), out, z, parent)
 
       case 'scale':
-      case 'rotate': {
+      case 'rotate':
+      case 'rotate3D': {
         const transformId = `${element.id}-xform`
         out.push({
           id: transformId,
@@ -1271,10 +1380,7 @@ export class LayoutEngine {
           opacity: env.opacity,
           cornerRadius: 0,
           paint: { kind: 'hit' },
-          transform:
-            modifier.kind === 'scale'
-              ? { scaleX: modifier.x, scaleY: modifier.y, rotate: 0 }
-              : { scaleX: 1, scaleY: 1, rotate: modifier.degrees },
+          transform: transformFor(modifier),
           ...(parent ? { parent } : {}),
           ...(env.animation ? { animation: env.animation } : {}),
         })
@@ -1287,6 +1393,83 @@ export class LayoutEngine {
           transformId,
         )
       }
+
+      case 'containerRelativeFrame': {
+        // The container is the bounds this was offered, so the fraction is taken from
+        // them here rather than from whatever the parent chose to hand down: a view
+        // asking for a third of the container must get a third even when its parent
+        // placed it across the whole width.
+        const width = modifier.horizontal
+          ? (bounds.width - modifier.spacing * (modifier.count - 1)) / modifier.count
+          : bounds.width
+        const height = modifier.vertical
+          ? (bounds.height - modifier.spacing * (modifier.count - 1)) / modifier.count
+          : bounds.height
+
+        const inner_ = this.measure(element.child, { width, height }, inner)
+        return this.place(
+          element.child,
+          {
+            x: bounds.x,
+            y: bounds.y,
+            width: modifier.horizontal ? width : inner_.width,
+            height: modifier.vertical ? height : inner_.height,
+          },
+          inner,
+          out,
+          z,
+          parent,
+        )
+      }
+
+      case 'safeAreaInset': {
+        const vertical_ = modifier.edge === 'top' || modifier.edge === 'bottom'
+        const bar = this.measure(
+          modifier.content,
+          { width: bounds.width, height: bounds.height },
+          inner,
+        )
+        const taken = (vertical_ ? bar.height : bar.width) + modifier.spacing
+
+        const barBounds: Rect = vertical_
+          ? {
+              x: bounds.x,
+              y: modifier.edge === 'top' ? bounds.y : bounds.y + bounds.height - bar.height,
+              width: bounds.width,
+              height: bar.height,
+            }
+          : {
+              x: modifier.edge === 'leading' ? bounds.x : bounds.x + bounds.width - bar.width,
+              y: bounds.y,
+              width: bar.width,
+              height: bounds.height,
+            }
+
+        const bodyBounds: Rect = vertical_
+          ? {
+              x: bounds.x,
+              y: modifier.edge === 'top' ? bounds.y + taken : bounds.y,
+              width: bounds.width,
+              height: Math.max(0, bounds.height - taken),
+            }
+          : {
+              x: modifier.edge === 'leading' ? bounds.x + taken : bounds.x,
+              y: bounds.y,
+              width: Math.max(0, bounds.width - taken),
+              height: bounds.height,
+            }
+
+        const next = this.place(element.child, bodyBounds, inner, out, z, parent)
+        return this.place(modifier.content, barBounds, inner, out, next, parent)
+      }
+
+      case 'alignmentGuide':
+      case 'blendMode':
+      case 'redacted':
+      case 'unredacted':
+        // These are inherited paint facts rather than boxes of their own, so they
+        // travel in the environment and every node below carries them out.
+        return this.place(element.child, bounds, inner, out, z, parent)
 
       case 'hitTarget': {
         const next = this.place(element.child, bounds, inner, out, z, parent)
@@ -1335,14 +1518,50 @@ function debugInfo(element: LayoutElement): {
 }
 
 /** Fields every painted node inherits from where it sits, rather than from itself. */
+/**
+ * The paint-time transform a modifier describes.
+ *
+ * The three share one node because they share one CSS property, and emitting one node
+ * per axis would stack transform origins that SwiftUI applies about a single centre.
+ */
+function transformFor(
+  modifier:
+    | { readonly kind: 'scale'; readonly x: number; readonly y: number }
+    | { readonly kind: 'rotate'; readonly degrees: number }
+    | { readonly kind: 'rotate3D'; readonly degrees: number; readonly x: number; readonly y: number; readonly z: number },
+): { scaleX: number; scaleY: number; rotate: number; rotateX?: number; rotateY?: number } {
+  if (modifier.kind === 'scale') return { scaleX: modifier.x, scaleY: modifier.y, rotate: 0 }
+  if (modifier.kind === 'rotate') return { scaleX: 1, scaleY: 1, rotate: modifier.degrees }
+
+  // The axis is a vector, so a rotation about (1, 1, 0) is half about each. Splitting
+  // it by component is what SwiftUI's own projection does.
+  const { degrees, x, y, z } = modifier
+  const length = Math.sqrt(x * x + y * y + z * z) || 1
+  return {
+    scaleX: 1,
+    scaleY: 1,
+    rotate: (degrees * z) / length,
+    rotateX: (degrees * x) / length,
+    rotateY: (degrees * y) / length,
+  }
+}
+
 function decorations(
   env: LayoutEnvironment,
   parent: string | null,
-): { parent?: string; animation?: AnimationHint; transition?: TransitionHint } {
+): {
+  parent?: string
+  animation?: AnimationHint
+  transition?: TransitionHint
+  blendMode?: string
+  redacted?: boolean
+} {
   return {
     ...(parent ? { parent } : {}),
     ...(env.animation ? { animation: env.animation } : {}),
     ...(env.transition ? { transition: env.transition } : {}),
+    ...(env.blendMode ? { blendMode: env.blendMode } : {}),
+    ...(env.redacted ? { redacted: true } : {}),
   }
 }
 
@@ -1445,6 +1664,44 @@ function resolveFrameAxis(
   return size
 }
 
+/**
+ * Where a view's alignment guide sits by default, measured from its own edge.
+ *
+ * This is SwiftUI's actual model: a stack lines up its children's *guides*, and the
+ * familiar behaviour of `.leading` and `.center` falls out of where the default
+ * guides are. Writing it this way is what lets `.alignmentGuide` replace one.
+ */
+function defaultGuide(
+  alignment: 'leading' | 'center' | 'trailing' | 'top' | 'bottom',
+  size: number,
+): number {
+  if (alignment === 'center') return size / 2
+  if (alignment === 'trailing' || alignment === 'bottom') return size
+  return 0
+}
+
+/**
+ * The guide this element overrides, if it overrides the one being aligned on.
+ *
+ * Looks through the modifier wrappers, because `.padding().alignmentGuide(…)` and
+ * `.alignmentGuide(…).padding()` are the same view with the wrappers in a different
+ * order, and a guide that only worked in one of them would be a puzzle rather than a
+ * feature. The outermost matching guide wins, as the last modifier written does.
+ */
+function alignmentGuideOf(
+  element: LayoutElement,
+  alignment: string,
+): ((size: Size) => number) | null {
+  let current: LayoutElement = element
+  while (current.kind === 'modified') {
+    if (current.modifier.kind === 'alignmentGuide' && current.modifier.guide === alignment) {
+      return current.modifier.compute
+    }
+    current = current.child
+  }
+  return null
+}
+
 function alignOffset(
   alignment: 'leading' | 'center' | 'trailing' | 'top' | 'bottom',
   available: number,
@@ -1473,6 +1730,101 @@ const CENTRE: Alignment = { horizontal: 'center', vertical: 'center' }
  * Applies `.textCase`, which is the one text policy that changes the string itself
  * rather than how it is laid out.
  */
+/**
+ * Resolves a text element's spans against the environment it is drawn in.
+ *
+ * Every field of a run is an override, so a `Text` that set nothing produces exactly
+ * the run the environment describes - which is why the single-run path costs one
+ * array of one object rather than a branch through the whole painter.
+ */
+function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly PaintedRun[] {
+  const inherited = (text: string): PaintedRun => ({
+    text: displayText(text, env),
+    font: env.font,
+    color: env.foregroundColor,
+    ...(env.underline ? { underline: true } : {}),
+    ...(env.strikethrough ? { strikethrough: true } : {}),
+    ...(env.tracking ? { tracking: env.tracking } : {}),
+    ...(env.baselineOffset ? { baselineOffset: env.baselineOffset } : {}),
+    ...(env.tabularNumbers ? { tabularNumbers: true } : {}),
+  })
+
+  if (!element.runs || element.runs.length === 0) return [inherited(element.text)]
+
+  return element.runs.map((run) => {
+    const base = inherited(run.text)
+    if (!run.font && run.color === undefined) {
+      return applyRunAttributes(base, run)
+    }
+    // A run that names a size is a different face, so its line height comes from the
+    // metrics rather than from whatever the inherited face happened to have.
+    const font: ResolvedFont = {
+      ...base.font,
+      ...(run.font?.family !== undefined ? { family: run.font.family } : {}),
+      ...(run.font?.size !== undefined
+        ? { size: run.font.size, lineHeight: run.font.size * LINE_HEIGHT_RATIO }
+        : {}),
+      ...(run.font?.weight !== undefined ? { weight: run.font.weight } : {}),
+      ...(run.font?.italic !== undefined ? { italic: run.font.italic } : {}),
+    }
+    return applyRunAttributes(
+      { ...base, font, ...(run.color ? { color: run.color } : {}) },
+      run,
+    )
+  })
+}
+
+/** The paint-only half of a run: attributes that override what the environment set. */
+function applyRunAttributes(base: PaintedRun, run: TextRunSpec): PaintedRun {
+  return {
+    ...base,
+    ...(run.underline !== undefined ? { underline: run.underline } : {}),
+    ...(run.strikethrough !== undefined ? { strikethrough: run.strikethrough } : {}),
+    ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
+    ...(run.baselineOffset !== undefined ? { baselineOffset: run.baselineOffset } : {}),
+  }
+}
+
+/**
+ * SwiftUI's line height for a face, as a multiple of its size.
+ *
+ * Only needed where a run sets its own size and there is no resolved font to copy a
+ * line height from. The same ratio the font resolver uses, kept here rather than
+ * imported so `swiftui-layout` keeps owning every number layout depends on.
+ */
+const LINE_HEIGHT_RATIO = 1.21
+
+function scaleFont(font: ResolvedFont, scale: number): ResolvedFont {
+  return { ...font, size: font.size * scale, lineHeight: font.lineHeight * scale }
+}
+
+function scaleRun(run: PaintedRun, scale: number): PaintedRun {
+  return {
+    ...run,
+    font: scaleFont(run.font, scale),
+    ...(run.tracking !== undefined ? { tracking: run.tracking * scale } : {}),
+  }
+}
+
+/** What text measurement needs from the environment beyond the font. */
+function textOptions(env: LayoutEnvironment): MeasureOptions {
+  return {
+    ...(env.minimumScale !== undefined ? { minimumScale: env.minimumScale } : {}),
+    ...(env.truncation !== undefined ? { truncation: env.truncation } : {}),
+    ...(env.allowsTightening ? { allowsTightening: true } : {}),
+    ...(env.minimumLines !== undefined ? { minimumLines: env.minimumLines } : {}),
+  }
+}
+
+function measuredRuns(runs: readonly PaintedRun[]): readonly MeasuredRun[] {
+  return runs.map((run) => ({
+    text: run.text,
+    font: run.font,
+    ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
+    ...(run.tabularNumbers ? { tabularNumbers: true } : {}),
+  }))
+}
+
 function displayText(text: string, env: LayoutEnvironment): string {
   if (env.textCase === 'upper') return text.toUpperCase()
   if (env.textCase === 'lower') return text.toLowerCase()

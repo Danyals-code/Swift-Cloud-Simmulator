@@ -157,30 +157,46 @@ struct Swatch: View {
 const TOGGLE_LIST = app(
   'TasksApp',
   'ContentView',
-  `struct ContentView: View {
-    @State private var done = 0
-    private let total = 4
+  `struct Task: Identifiable {
+    let id = UUID()
+    var title: String
+    var done: Bool
+}
+
+struct ContentView: View {
+    @State private var tasks = [
+        Task(title: "Draft the brief", done: true),
+        Task(title: "Review the copy", done: true),
+        Task(title: "Send for sign-off", done: false),
+        Task(title: "Archive the folder", done: false)
+    ]
+
+    private var complete: Int {
+        get { tasks.filter { $0.done }.count }
+    }
 
     var body: some View {
         VStack(spacing: 14) {
             Text("Tasks")
                 .font(.largeTitle)
 
-            Text("\\(done) of \\(total) complete")
+            Text("\\(complete) of \\(tasks.count) complete")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 8) {
-                for index in 0..<total {
-                    Row(index: index, complete: index < done)
+                ForEach(tasks) { task in
+                    Row(title: task.title, complete: task.done)
                 }
             }
 
             Spacer()
 
             HStack {
-                Button("Undo") {
-                    if done > 0 { done -= 1 }
+                Button {
+                    undo()
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
                 }
                 .padding()
                 .background(Color.gray.opacity(0.15))
@@ -188,8 +204,10 @@ const TOGGLE_LIST = app(
 
                 Spacer()
 
-                Button("Complete") {
-                    if done < total { done += 1 }
+                Button {
+                    advance()
+                } label: {
+                    Label("Complete", systemImage: "checkmark")
                 }
                 .padding()
                 .background(Color.blue.opacity(0.15))
@@ -198,30 +216,51 @@ const TOGGLE_LIST = app(
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private func advance() {
+        for index in 0..<tasks.count {
+            if !tasks[index].done {
+                tasks[index].done = true
+                return
+            }
+        }
+    }
+
+    private func undo() {
+        var index = tasks.count - 1
+        while index >= 0 {
+            if tasks[index].done {
+                tasks[index].done = false
+                return
+            }
+            index -= 1
+        }
     }
 }
 
 struct Row: View {
-    var index = 0
-    var complete = false
+    let title: String
+    let complete: Bool
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle()
-                .foregroundStyle(complete ? Color.green : Color.gray.opacity(0.3))
-                .frame(width: 18, height: 18)
+            Image(systemName: complete ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(complete ? Color.green : Color.secondary)
 
-            Text("Task \\(index + 1)")
+            Text(title)
+                .strikethrough(complete)
                 .foregroundStyle(complete ? Color.secondary : Color.primary)
 
             Spacer()
         }
-        .padding(10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(10)
     }
-}
-`,
+}`,
 )
 
 const PROFILE_CARD = app(
@@ -317,7 +356,7 @@ const NAVIGATION = app(
   'ExplorerApp',
   'ContentView',
   `struct Destination: Identifiable {
-    let id: Int
+    let id = UUID()
     let name: String
     let region: String
     let symbol: String
@@ -325,9 +364,9 @@ const NAVIGATION = app(
 
 struct ContentView: View {
     let destinations = [
-        Destination(id: 1, name: "Kyoto", region: "Kansai", symbol: "leaf"),
-        Destination(id: 2, name: "Reykjavik", region: "Capital Region", symbol: "snowflake"),
-        Destination(id: 3, name: "Lisbon", region: "Estremadura", symbol: "sun.max")
+        Destination(name: "Kyoto", region: "Kansai", symbol: "leaf"),
+        Destination(name: "Reykjavik", region: "Capital Region", symbol: "snowflake"),
+        Destination(name: "Lisbon", region: "Estremadura", symbol: "sun.max")
     ]
 
     var body: some View {
@@ -374,11 +413,33 @@ struct DetailView: View {
 const SETTINGS_FORM = app(
   'SettingsApp',
   'ContentView',
-  `struct ContentView: View {
-    @State private var notifications = true
+  `enum Theme: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+}
+
+struct ContentView: View {
+    @AppStorage("notifications") private var notifications = true
+    @AppStorage("theme") private var theme = "system"
     @State private var sounds = false
     @State private var volume = 0.6
     @State private var displayName = "Ada"
+    @State private var digestAt = Date()
+
+    private var chosen: Theme {
+        get {
+            Theme.allCases.first { $0.rawValue == theme } ?? .system
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -388,19 +449,26 @@ const SETTINGS_FORM = app(
                     Label("Signed in", systemImage: "person.circle")
                 }
 
+                Section("Appearance") {
+                    Picker("Theme", selection: $theme) {
+                        ForEach(Theme.allCases) { option in
+                            Text(option.label).tag(option.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } footer: {
+                    Text("Currently using the \\(chosen.label.lowercased()) appearance.")
+                }
+
                 Section("Alerts") {
                     Toggle("Notifications", isOn: $notifications)
                     Toggle("Sounds", isOn: $sounds)
                     Slider(value: $volume, in: 0...1)
+                    DatePicker("Daily digest", selection: $digestAt, displayedComponents: [.hourAndMinute])
                 }
 
                 Section("About") {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("1.0")
-                            .foregroundStyle(Color.secondary)
-                    }
+                    LabeledContent("Version", value: "1.0")
                 }
             }
             .navigationTitle("Settings")
@@ -548,28 +616,25 @@ const SHEET_LIST = app(
   'InboxApp',
   'ContentView',
   `struct Message: Identifiable {
-    let id: Int
+    let id = UUID()
     var subject: String
+    var received: Date
     var read: Bool
 }
 
 struct ContentView: View {
     @State private var messages = [
-        Message(id: 1, subject: "Welcome aboard", read: true),
-        Message(id: 2, subject: "Your export is ready", read: false),
-        Message(id: 3, subject: "Weekly digest", read: false)
+        Message(subject: "Welcome aboard", received: Date().addingTimeInterval(-3600), read: true),
+        Message(subject: "Your export is ready", received: Date().addingTimeInterval(-900), read: false),
+        Message(subject: "Weekly digest", received: Date().addingTimeInterval(-120), read: false)
     ]
     @State private var composing = false
     @State private var draft = ""
 
     var unread: Int {
-        var count = 0
-        for message in messages {
-            if !message.read {
-                count += 1
-            }
+        get {
+            messages.filter { !$0.read }.count
         }
-        return count
     }
 
     var body: some View {
@@ -580,16 +645,27 @@ struct ContentView: View {
                         HStack(spacing: 10) {
                             Image(systemName: message.read ? "envelope.open" : "envelope")
                                 .foregroundStyle(message.read ? Color.secondary : Color.accentColor)
-                            Text(message.subject)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(message.subject)
+                                Text(message.received, style: .relative)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
                             Spacer()
                         }
                     }
+                } footer: {
+                    Text("Pull a message aside to file it. Nothing here leaves the device.")
                 }
             }
             .navigationTitle("\\(unread) unread")
             .toolbar {
-                Button("Compose") {
+                Button {
                     composing = true
+                } label: {
+                    Label("Compose", systemImage: "square.and.pencil")
                 }
             }
             .sheet(isPresented: $composing) {
@@ -979,6 +1055,79 @@ const DRAGGABLE = app(
 }`,
 )
 
+const TYPESETTING = app(
+  'TypeApp',
+  'ContentView',
+  `struct ContentView: View {
+    @State private var loading = true
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Type").font(.largeTitle).fontWeight(.bold)
+                    + Text(" setting").font(.largeTitle).foregroundStyle(Color.accentColor)
+
+                Text("Two halves of one line, each with a face of its own.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Underlined, for a link that is not one")
+                        .underline()
+
+                    Text("Struck through, for a price that was")
+                        .strikethrough()
+
+                    Text("W I D E")
+                        .tracking(6)
+                        .font(.headline)
+
+                    Text("A paragraph set with extra leading, so the lines breathe a little further apart than the face asks for on its own.")
+                        .lineSpacing(7)
+
+                    Text("A single line that will not fit, shortened in the middle rather than at its end")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(.secondary)
+
+                    Text("Shrunk to fit rather than cut")
+                        .font(.title2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .frame(width: 180)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Placeholder while it loads")
+                        .font(.headline)
+                    Text("This paragraph is redacted, which draws the shape of the content without the content itself.")
+                        .foregroundStyle(.secondary)
+                }
+                .redacted(reason: loading ? .placeholder : [])
+
+                Button {
+                    loading.toggle()
+                } label: {
+                    Label(loading ? "Reveal" : "Redact", systemImage: "eye")
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .safeAreaInset(edge: .bottom) {
+            Text("Everything above is measured, not guessed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(12)
+                .frame(maxWidth: .infinity)
+                .background(Color(.secondarySystemGroupedBackground))
+        }
+    }
+}`,
+)
+
 export const TEMPLATES: readonly Template[] = [
   {
     id: 'counter',
@@ -1082,6 +1231,12 @@ export const TEMPLATES: readonly Template[] = [
     description:
       'Eight files across four groups: tabs, two levels of navigation, scrolling in both directions, a shared store and a sheet.',
     files: TRAILHEAD_FILES,
+  },
+  {
+    id: 'typesetting',
+    name: 'Typesetting',
+    description: 'Text attributes, concatenation, shrink-to-fit and an inset footer.',
+    files: single(TYPESETTING),
   },
   {
     id: 'loader',

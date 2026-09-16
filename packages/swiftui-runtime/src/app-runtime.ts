@@ -1,4 +1,4 @@
-import type { LogLevel, SourceSpan, UIEvent } from '@studio/shared'
+import type { LogLevel, Size, SourceSpan, UIEvent } from '@studio/shared'
 import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
@@ -37,6 +37,7 @@ import {
   asSwiftValue,
   asView,
   BUTTON_CONFIGURATION_TYPE,
+  DIMENSIONS_TYPE,
   handlerIdFor,
   type AnimationPayload,
   type ViewIntent,
@@ -77,6 +78,15 @@ export class AppRuntime {
   private interpreter = new Interpreter()
   private host = new SwiftUIHost()
   private readonly state = new StateStore()
+  /**
+   * `@AppStorage` and `@SceneStorage`, keyed by the string they name.
+   *
+   * Not a `StateStore`: those boxes are pruned when the view that owned them leaves
+   * the tree, and the point of this storage is that it does not go away with the view.
+   */
+  private readonly defaults = new Map<string, { value: SwiftValue; initializer: string }>()
+  /** What each view was handed for a stored property, so harvest can tell a write from a copy. */
+  private readonly seeded = new Map<string, SwiftValue>()
   private readonly ui = new UIState()
 
   private entryTypeName: string | null = null
@@ -305,7 +315,15 @@ export class AppRuntime {
 
     try {
       this.perform(intent, event)
-      if (wasOpen !== null && this.ui.openMenu() === wasOpen && intent.kind !== 'openMenu') {
+      // `stepMonth` is the exception: paging a calendar is a press *within* the
+      // editor rather than a choice made from it, and closing on it would make the
+      // arrows unusable - one press forward, and the picker is gone.
+      if (
+        wasOpen !== null &&
+        this.ui.openMenu() === wasOpen &&
+        intent.kind !== 'openMenu' &&
+        intent.kind !== 'stepMonth'
+      ) {
         this.ui.setOpenMenu(null)
       }
     } catch (error) {
@@ -320,9 +338,32 @@ export class AppRuntime {
     return true
   }
 
+  /**
+   * Runs an `.alignmentGuide` closure with a view's measured dimensions.
+   *
+   * Handed to the layout pass, which is the only stage that knows the size and the
+   * only one that cannot run Swift. A closure that traps answers with the default
+   * guide rather than taking the preview down: the guide is a number, and a wrong
+   * number misplaces one view where an exception blanks the screen.
+   */
+  guideRunner(): (closure: ClosureValue, size: Size) => number {
+    return (closure, size) => {
+      const dimensions = opaque(DIMENSIONS_TYPE, { width: size.width, height: size.height })
+      try {
+        const result = this.interpreter.callClosure(closure, [dimensions], closure.span)
+        return result.kind === 'int' || result.kind === 'double' ? result.value : 0
+      } catch (error) {
+        this.host.log(`Alignment guide failed: ${toFailure(error).message}`, closure.span, 'error')
+        return 0
+      }
+    }
+  }
+
   /** Drops every state box, framework state included. */
   reset(): void {
     this.state.clear()
+    this.defaults.clear()
+    this.seeded.clear()
     this.ui.clear()
     this.geometry.clear()
     this.host.geometry = this.geometry
@@ -486,6 +527,14 @@ export class AppRuntime {
         return
       }
 
+      case 'stepMonth': {
+        // Pages the calendar without touching the binding: the user has not chosen a
+        // date yet, and moving their appointment by pressing an arrow would be a
+        // surprise the real picker does not spring.
+        this.ui.stepMonth(intent.control, intent.by)
+        return
+      }
+
       case 'openMenu': {
         this.ui.setOpenMenu(intent.menu)
         return
@@ -639,11 +688,7 @@ export class AppRuntime {
       const env = this.interpreter.globals.child(instance)
       const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
 
-      return produced.flatMap((value) => {
-        const view = asView(value)
-        if (view) return [view]
-        return value.kind === 'struct' ? this.expand(value) : []
-      })
+      return this.viewsFrom(produced)
     } finally {
       this.expandDepth--
       this.identity.pop()
@@ -765,26 +810,38 @@ export class AppRuntime {
    * level and sees exactly what a top-level function would.
    */
   private runPreviewBody(body: Block): ViewValue[] {
-    const produced = this.interpreter.runViewBuilderBlock(body, this.interpreter.globals.child(null))
-    return produced.flatMap((value) => {
-      const view = asView(value)
-      if (view) return [view]
-      return value.kind === 'struct' ? this.expand(value) : []
-    })
+    const env = this.interpreter.globals.child(null)
+    return this.viewsFrom(this.interpreter.runViewBuilderBlock(body, env))
   }
 
   private buildViews(closure: ClosureValue, args: readonly SwiftValue[] = []): readonly ViewValue[] {
-    const produced = this.interpreter.runViewBuilder(closure, args)
-    return produced.flatMap((value) => {
-      const view = asView(value)
-      if (view) return [view]
-      return value.kind === 'struct' ? this.expand(value) : []
-    })
+    return this.viewsFrom(this.interpreter.runViewBuilder(closure, args))
+  }
+
+  /**
+   * Everything a builder produced, as views.
+   *
+   * A user's struct is expanded here, because only the runtime can run a `body`;
+   * everything else goes to the host, which knows that a `Color` and a `Path` are
+   * views too. Three builders each had their own copy of this and all three kept only
+   * the values that were already views - so `var body: some View { Color.blue }` drew
+   * nothing, while the same colour inside a `VStack` drew fine.
+   */
+  private viewsFrom(values: readonly SwiftValue[]): ViewValue[] {
+    return values.flatMap((value) =>
+      value.kind === 'struct' ? this.expand(value) : this.host.toViews([value]),
+    )
   }
 
   private seedState(instance: StructValue, decl: StructDecl, identity: string): void {
     for (const property of statefulProperties(this.interpreter.membersOf(decl.name))) {
-      const initial = instance.fields.get(property.name)
+      // `@FocusState private var focused: Bool` is written without an initialiser and
+      // starts false, which is the one wrapper that declares its value that way.
+      const declared = instance.fields.get(property.name)
+      const initial =
+        declared === undefined || declared.kind === 'nil'
+          ? (defaultForWrapper(property) ?? declared)
+          : declared
       if (initial === undefined) continue
 
       const stored = this.state.resolve(
@@ -796,7 +853,38 @@ export class AppRuntime {
       instance.fields.set(property.name, stored)
     }
 
+    this.seedDefaults(instance, decl, identity)
     this.seedEnvironment(instance, decl)
+  }
+
+  /**
+   * `@AppStorage("key")` and `@SceneStorage("key")`.
+   *
+   * Keyed by the *string*, not by the view that declared it, which is the whole
+   * difference from `@State`: two views naming the same key see one value, and the
+   * value outlives the view that wrote it. So these boxes are never pruned when a
+   * view leaves the tree, and the `endPass` sweep that keeps `@State` honest would
+   * be exactly wrong here.
+   *
+   * It follows `@State` on one point: editing the default re-seeds. Real
+   * `UserDefaults` would keep the old value, but a user who just changed `= 0` to
+   * `= 10` is waiting to see 10, and a preview that ignores the edit reads as stuck.
+   */
+  private seedDefaults(instance: StructValue, decl: StructDecl, identity: string): void {
+    for (const property of storedProperties(this.interpreter.membersOf(decl.name))) {
+      const key = storageKey(property)
+      if (key === null) continue
+
+      const initial = instance.fields.get(property.name)
+      if (initial === undefined) continue
+
+      const print = fingerprint(property.initializer)
+      const existing = this.defaults.get(key)
+      const value = existing && existing.initializer === print ? existing.value : initial
+      this.defaults.set(key, { value, initializer: print })
+      instance.fields.set(property.name, value)
+      this.seeded.set(`${identity}.${property.name}`, value)
+    }
   }
 
   /**
@@ -841,6 +929,22 @@ export class AppRuntime {
         if (value === undefined) continue
         this.state.store(identity, property.name, value, fingerprint(property.initializer))
       }
+
+      // Only what *changed*. Every view holding a key has its own copy of the value,
+      // and a pass ends with all of them still holding what they were seeded with
+      // except the one an action wrote through - so writing them all back lets a
+      // sibling's stale copy overwrite the new value. `@State` never had this problem
+      // because each box belongs to one view; shared storage is the whole point here.
+      for (const property of storedProperties(this.interpreter.membersOf(instance.typeName))) {
+        const key = storageKey(property)
+        const value = instance.fields.get(property.name)
+        if (key === null || value === undefined) continue
+
+        const seeded = this.seeded.get(`${identity}.${property.name}`)
+        if (seeded && valuesEqual(seeded, value)) continue
+
+        this.defaults.set(key, { value, initializer: fingerprint(property.initializer) })
+      }
     }
   }
 }
@@ -851,15 +955,69 @@ export class AppRuntime {
  * `@StateObject` belongs here beside `@State` and `@ObservedObject` does not - that
  * is the entire difference between them. A `@StateObject` is created once and kept;
  * an `@ObservedObject` is handed in from outside and owned by whoever made it.
+ *
+ * `@FocusState` is here too. There is no keyboard in the preview, so nothing focuses
+ * a field from outside the program - but the property is still storage the code reads
+ * and writes, and treating it as such is what makes `isFocused = true` in an
+ * `.onAppear` run rather than fail.
  */
 function statefulProperties(members: readonly Decl[]): VarDecl[] {
   return members.filter(
     (m): m is VarDecl =>
       m.kind === 'varDecl' &&
       m.attributes.some(
-        (a) => a.name === 'State' || a.name === 'StateObject' || a.name === 'GestureState',
+        (a) =>
+          a.name === 'State' ||
+          a.name === 'StateObject' ||
+          a.name === 'GestureState' ||
+          a.name === 'FocusState',
       ),
   )
+}
+
+/**
+ * The value a wrapper starts at when the user wrote no initialiser.
+ *
+ * Only `@FocusState` reaches here: SwiftUI gives it a zero value from its type, and
+ * `@FocusState var focused: Bool` is the spelling in every example Apple writes.
+ * Without it the property is `nil`, and `if focused` then takes the wrong branch -
+ * a preview quietly disagreeing with the device.
+ */
+function defaultForWrapper(property: VarDecl): SwiftValue | undefined {
+  if (!property.attributes.some((a) => a.name === 'FocusState')) return undefined
+  const annotation = property.typeAnnotation
+  if (annotation?.kind === 'namedType' && annotation.name === 'Bool') return { kind: 'bool', value: false }
+  // An enum-typed `@FocusState` is optional in SwiftUI - nothing is focused yet.
+  return { kind: 'nil' }
+}
+
+/** `@AppStorage("key")` and `@SceneStorage("key")` - keyed by the string, not the view. */
+function storedProperties(members: readonly Decl[]): VarDecl[] {
+  return members.filter(
+    (m): m is VarDecl =>
+      m.kind === 'varDecl' &&
+      m.attributes.some((a) => a.name === 'AppStorage' || a.name === 'SceneStorage'),
+  )
+}
+
+/**
+ * The key a storage wrapper was given, or null when it was not given a literal one.
+ *
+ * An attribute's argument is an *expression node*, not a value - nothing has run yet
+ * when the key is needed - so this reads the literal's text segments rather than
+ * evaluating it. A key built at runtime is therefore not one this can see, and the
+ * property falls back to behaving as plain state, which is the safe direction: it
+ * still reads and writes, it simply is not shared.
+ */
+function storageKey(property: VarDecl): string | null {
+  const attribute = property.attributes.find(
+    (a) => a.name === 'AppStorage' || a.name === 'SceneStorage',
+  )
+  const first = attribute?.args[0]?.value
+  if (!first || first.kind !== 'stringLiteral') return null
+
+  const literal = first.segments.every((segment) => segment.kind === 'text')
+  return literal ? first.segments.map((segment) => (segment.kind === 'text' ? segment.value : '')).join('') : null
 }
 
 /** `@Environment(\.colorScheme)` - the key path the attribute was given. */
@@ -971,6 +1129,32 @@ function findPreviewBody(files: readonly SourceFileNode[]): Block | null {
   for (const file of files) {
     for (const decl of file.declarations) {
       if (decl.kind === 'macroDecl' && decl.name === 'Preview' && decl.body) return decl.body
+    }
+  }
+  return findPreviewsProperty(files)
+}
+
+/**
+ * `struct C_Previews: PreviewProvider { static var previews: some View { C() } }`.
+ *
+ * The spelling before the `#Preview` macro, and the one every project written before
+ * Xcode 15 still carries. It names a view to show exactly as `#Preview` does, so it
+ * is read the same way: the body of `previews` becomes the root when nothing is
+ * `@main`.
+ *
+ * Looked for only after the macro, because a file carrying both was written to be
+ * seen through the newer one.
+ */
+function findPreviewsProperty(files: readonly SourceFileNode[]): Block | null {
+  for (const file of files) {
+    for (const decl of file.declarations) {
+      if (decl.kind !== 'structDecl') continue
+      if (!decl.inherits.some((t) => t.name === 'PreviewProvider')) continue
+
+      for (const member of decl.members) {
+        if (member.kind !== 'varDecl' || member.name !== 'previews') continue
+        if (member.accessor) return member.accessor
+      }
     }
   }
   return null

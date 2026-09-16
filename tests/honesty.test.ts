@@ -150,10 +150,12 @@ describe('what the preview cannot do, it says', () => {
   })
 
   it('reports a real modifier it accepts and ignores', () => {
-    expect(warnings(run(view('Text("a").lineSpacing(20)')))[0]).toContain('lineSpacing')
+    // `.drawingGroup` rather than something a later phase might draw: it asks for
+    // Metal rasterisation, which a DOM renderer has no analogue for at all.
+    expect(warnings(run(view('Text("a").drawingGroup()')))[0]).toContain('drawingGroup')
     expect(warnings(run(view('ZStack { Text("a").zIndex(5) }')))[0]).toContain('zIndex')
-    expect(warnings(run(view('Text("a").containerRelativeFrame(.horizontal)')))[0]).toContain(
-      'containerRelativeFrame',
+    expect(warnings(run(view('Text("a").coordinateSpace(name: "x")')))[0]).toContain(
+      'coordinateSpace',
     )
   })
 
@@ -169,20 +171,32 @@ describe('what the preview cannot do, it says', () => {
   })
 
   it('draws a placeholder for real SwiftUI it does not implement', () => {
-    const result = run(view('GroupBox("t") { Text("a") }'))
+    // `Map` rather than a view a later phase might draw: it is declined outright -
+    // Apple's tiles are not redistributable - so this stays true as coverage grows.
+    const result = run(view('Map()'))
     expect(errors(result)).toEqual([])
-    expect((result.renderTree?.nodes ?? []).some((n) => n.placeholder?.feature === 'GroupBox')).toBe(true)
+    expect((result.renderTree?.nodes ?? []).some((n) => n.placeholder?.feature === 'Map')).toBe(true)
   })
 
   it('does not warn about a modifier it does apply', () => {
     expect(warnings(run(view('Text("a").monospaced()')))).toEqual([])
   })
 
-  it('says PreviewProvider is unread rather than sending the user after @main', () => {
+  it('renders a PreviewProvider rather than reporting a missing entry point', () => {
+    // It used to report one. The older spelling names a view to show exactly as
+    // `#Preview` does, and every project written before Xcode 15 still carries it -
+    // so sending the user to add `@main` was sending them to fix what was not wrong.
     const result = run(
-      'import SwiftUI\nstruct C: View { var body: some View { Text("c") } }\nstruct C_Previews: PreviewProvider {\n    static var previews: some View { C() }\n}\n',
+      [
+        'import SwiftUI',
+        'struct C: View { var body: some View { Text("c") } }',
+        'struct C_Previews: PreviewProvider {',
+        '    static var previews: some View { C() }',
+        '}',
+      ].join('\n'),
     )
-    expect(errors(result)[0]).toContain('PreviewProvider')
+    expect(errors(result)).toEqual([])
+    expect(texts(result)).toContain('c')
   })
 })
 

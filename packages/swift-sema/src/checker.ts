@@ -28,6 +28,7 @@ import {
   PROPERTY_WRAPPERS,
   SUPPORTED_MODIFIERS,
   SUPPORTED_VIEWS,
+  BLEND_MODES,
   UNIMPLEMENTED_MODIFIERS,
   UNIMPLEMENTED_VIEWS,
 } from './builtins'
@@ -252,27 +253,18 @@ export class Checker {
       )
       if (preview) return null
 
-      // A `PreviewProvider` names a view to show just as `#Preview` does, and the
-      // project is not missing an entry point - the preview is in the older form the
-      // runtime does not read yet. Sending the user to add `@main` would be sending
-      // them to fix something that is not wrong.
+      // A `PreviewProvider` names a view to show just as `#Preview` does - it is the
+      // spelling every project written before Xcode 15 still carries - and the runtime
+      // reads its `previews` body as the root. Not an entry point to complain about.
       const legacyPreview = files
         .flatMap((file) => file.declarations)
-        .find(
+        .some(
           (d): d is StructDecl =>
-            d.kind === 'structDecl' && d.inherits.some((t) => t.name === 'PreviewProvider'),
+            d.kind === 'structDecl' &&
+            d.inherits.some((t) => t.name === 'PreviewProvider') &&
+            d.members.some((m) => m.kind === 'varDecl' && m.name === 'previews' && m.accessor),
         )
-      if (legacyPreview) {
-        this.report(
-          legacyPreview.nameSpan,
-          'error',
-          'no_entry_point',
-          "The preview does not read 'PreviewProvider' yet. Use a '#Preview { … }' block, " +
-            "or add '@main' to a struct that conforms to 'App'.",
-          'PreviewProvider',
-        )
-        return null
-      }
+      if (legacyPreview) return null
 
       const anchor = files[0]
       if (anchor) {
@@ -490,6 +482,14 @@ export class Checker {
     }
   }
 
+  /**
+   * A property wrapper the preview knows and does not implement.
+   *
+   * Every entry in `PROPERTY_WRAPPERS` is supported as of the data-flow pass, so this
+   * currently reports nothing - it is the guard for the next wrapper added to the
+   * table ahead of its implementation. A wrapper the table has never heard of is
+   * already covered by `checkAttributes`, which is why nothing is duplicated here.
+   */
   private checkPropertyWrapper(decl: VarDecl): void {
     const wrapper = propertyWrapperOf(decl)
     if (!wrapper) return
@@ -501,8 +501,8 @@ export class Checker {
       decl.attributes.find((a) => a.name === wrapper)?.span ?? decl.nameSpan,
       'warning',
       'unsupported_language_feature',
-      `'@${wrapper}' is not supported in the preview yet (arriving in Phase ${info.phase}). ` +
-        'The property still exports to Xcode unchanged.',
+      `'@${wrapper}' is not applied by the preview: the property behaves as a plain ` +
+        'stored property here. It exports to Xcode unchanged.',
       `@${wrapper}`,
     )
   }
@@ -723,7 +723,10 @@ export class Checker {
         if (expr.callee.kind === 'memberAccess') {
           const onAView = rootsInAView(expr.callee.base)
           this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan, onAView)
-          if (onAView) this.checkArgumentLabels(expr.callee.member, expr.args)
+          if (onAView) {
+            this.checkArgumentLabels(expr.callee.member, expr.args)
+            this.checkBlendMode(expr.callee.member, expr.args)
+          }
         }
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
@@ -955,6 +958,35 @@ export class Checker {
       `The preview does not recognise the modifier '.${member}', so it is ignored here. ` +
         'It is exported to Xcode unchanged.',
       `.${member}`,
+    )
+  }
+
+  /**
+   * Warns on a blend mode the preview cannot draw.
+   *
+   * `.blendMode` is a supported modifier, so without this a mode CSS has no
+   * equivalent for would be accepted and silently ignored - the same failure the
+   * unimplemented-modifier list prevents for names, arriving one level down at the
+   * argument. Drawing the nearest mode instead would put something plausible on
+   * screen that the device does not draw.
+   *
+   * Only a literal `.mode` is checked. A mode held in a variable has no value here,
+   * and guessing at one would warn on correct code.
+   */
+  private checkBlendMode(member: string, args: readonly { label: string | null; value: Expr }[]): void {
+    if (member !== 'blendMode') return
+
+    const first = args[0]?.value
+    if (first?.kind !== 'memberAccess' || first.base !== null) return
+    if (BLEND_MODES.has(first.member)) return
+
+    this.report(
+      first.span,
+      'warning',
+      'unsupported_swiftui_modifier',
+      `'.blendMode(.${first.member})' has no equivalent the preview can draw, so it is ` +
+        'ignored rather than approximated. It is exported to Xcode unchanged.',
+      `.blendMode(.${first.member})`,
     )
   }
 

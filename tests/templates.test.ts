@@ -253,4 +253,49 @@ describe('the gallery', () => {
   it('starts with the reference app', () => {
     expect(TEMPLATES[0]!.id).toBe('counter')
   })
+
+  /**
+   * The corpus has to look like code people write - defect register 10.6.
+   *
+   * "Eighteen templates render with zero placeholders" was measuring the *corpus*
+   * rather than the interpreter: 231 defects lived behind it because the gallery used
+   * none of the constructs that failed. `Identifiable` models all carried `let id:
+   * Int`, nothing called `UUID()` or `Date()` or `allCases`, nobody wrote `Button { }
+   * label: { }` or an explicit `get {`.
+   *
+   * This is the assertion that stops it drifting back to the safe subset: each of
+   * these is something the matrix claims and the corpus previously never exercised,
+   * so a regression in one of them now fails a template rather than going unnoticed
+   * until someone writes real code.
+   */
+  it('is written the way people write, not the way the preview finds easy', () => {
+    const corpus = TEMPLATES.flatMap((t) => t.files.map((f) => f.text)).join('\n')
+
+    const idioms: [string, RegExp][] = [
+      ['a UUID identity', /let id = UUID\(\)/],
+      ['a Date', /Date\(\)/],
+      ['an enum over allCases', /\.allCases/],
+      ['the label: form of Button', /\}\s*label:\s*\{/],
+      ['an explicit getter', /\bget\s*\{/],
+      ['a raw-value enum', /:\s*String,\s*CaseIterable/],
+      ['a closure over a model collection', /\.filter\s*\{/],
+      ['storage that outlives a view', /@AppStorage/],
+      ['a text attribute', /\.strikethrough\(|\.underline\(/],
+      ['a concatenated Text', /\+ Text\(/],
+      ['a section footer', /\}\s*footer:\s*\{/],
+      ['a date picker', /DatePicker\(/],
+    ]
+
+    for (const [what, pattern] of idioms) {
+      expect(pattern.test(corpus), `no template contains ${what}`).toBe(true)
+    }
+  })
+
+  it('no longer identifies a model by an integer it made up', () => {
+    // Every `Identifiable` in the gallery used `let id: Int` with hand-written
+    // numbers, which is the one identity scheme no real app uses and the only one
+    // that never exercises `UUID`.
+    const corpus = TEMPLATES.flatMap((t) => t.files.map((f) => f.text)).join('\n')
+    expect(/let id: Int/.test(corpus)).toBe(false)
+  })
 })

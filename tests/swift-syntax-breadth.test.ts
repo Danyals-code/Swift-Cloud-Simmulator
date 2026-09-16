@@ -155,6 +155,41 @@ describe('declarations', () => {
     }
   })
 
+  it('reads one back, which declaring it never implied', () => {
+    // Declaring worked and reading did not: every position that asks for a *name*
+    // consulted the contextual-keyword list, and expression position did not. So a
+    // property could be declared and never used, and the error pointed at the name.
+    const names = [
+      'open', 'some', 'any', 'final', 'lazy', 'weak', 'dynamic', 'optional',
+      'indirect', 'required', 'where', 'prefix', 'postfix', 'infix', 'mutating',
+      'override', 'convenience',
+    ]
+    for (const name of names) {
+      const source = app(
+        [
+          `    private var ${name} = 21`,
+          `    private var doubled: Int { ${name} * 2 }`,
+          '    var body: some View { Text("\\(doubled)") }',
+        ].join('\n'),
+      )
+      expect(drew(source), name).toContain('42')
+    }
+  })
+
+  it('reads `get` and `set` everywhere but where an accessor block begins', () => {
+    // `var n: Int { get * 2 }` is an accessor block in Swift too, so this is the
+    // language's own boundary rather than one of ours. Anywhere else they are names.
+    const source = app(
+      [
+        '    private var get = 21',
+        '    private var set = 2',
+        '    private var doubled: Int { return get * set }',
+        '    var body: some View { Text("\\(doubled) \\(get) \\(set)") }',
+      ].join('\n'),
+    )
+    expect(drew(source)).toContain('42 21 2')
+  })
+
   it('resolves Self to the enclosing type', () => {
     expect(drew(app('    static let name = "s"\n    var body: some View { Text(Self.name) }'))).toContain('s')
   })
