@@ -36,6 +36,10 @@ import {
 import {
   ALERT,
   BACK_BUTTON,
+  COLOUR_EDITOR,
+  COLOUR_SWATCH,
+  DATE_CELL,
+  DATE_EDITOR,
   DIALOG,
   MENU,
   NAV_BAR,
@@ -138,6 +142,10 @@ const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
   'ForEach',
   'NavigationStack',
   'NavigationView',
+  // On a phone a split view *is* a stack: the sidebar is the first screen and the
+  // detail is pushed onto it. The multi-column form needs a width an iPhone has not
+  // got, so collapsing is the real behaviour rather than an approximation of it.
+  'NavigationSplitView',
   'TabView',
   'AnyView',
 ])
@@ -371,6 +379,9 @@ function axisVector(value: SwiftValue | undefined): { x: number; y: number; z: n
   return vector.x === 0 && vector.y === 0 && vector.z === 0 ? fallback : vector
 }
 
+/** The weekday initials over a calendar. Not localised; neither is the rest of the chrome. */
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
 /** A `Section`'s three parts, or a run of rows written outside any section. */
 interface Section {
   readonly header: LayoutElement | null
@@ -564,6 +575,62 @@ class Converter {
    * same size, which is the one piece of chrome on screen at all times and so the
    * one worth getting right.
    */
+  /**
+   * The page indicator a `.page` tab view draws instead of a tab bar.
+   *
+   * iOS pages by swiping and the dots are only an indicator. A preview has no swipe,
+   * so each dot is also the control that gets to that page - an addition rather than
+   * an approximation, and the only way through the pages here.
+   */
+  private pageDots(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
+    const dots = bar.items.map((item, index) => {
+      const selected = boolArg(labelled(item.args, 'selected'))
+      const dot: LayoutElement = {
+        kind: 'modified',
+        id: `dot-${index}-frame`,
+        modifier: { kind: 'frame', width: 7, height: 7, alignment: CENTER },
+        child: {
+          kind: 'modified',
+          id: `dot-${index}-tint`,
+          modifier: {
+            kind: 'foregroundStyle',
+            color: selected ? this.color('label') : this.color('tertiaryLabel'),
+          },
+          child: { kind: 'shape', id: `dot-${index}`, shape: 'circle' },
+        },
+      }
+
+      // The target is bigger than the dot, because a 7pt circle is not a tap target.
+      const target: LayoutElement = {
+        kind: 'modified',
+        id: `dot-${index}-hit`,
+        modifier: { kind: 'padding', insets: uniformInsets(6) },
+        child: dot,
+      }
+
+      return item.path ? this.withHitTarget(target, item.path, 'button', `Page ${index + 1}`) : target
+    })
+
+    return {
+      kind: 'modified',
+      id: 'pagedots-height',
+      modifier: { kind: 'frame', height: TAB_BAR_HEIGHT, alignment: CENTER },
+      child: {
+        kind: 'stack',
+        id: 'pagedots-row',
+        axis: 'horizontal',
+        spacing: 2,
+        alignment: CENTER,
+        children: [
+          { kind: 'spacer', id: 'pagedots-lead', axis: 'horizontal', minLength: 0 },
+          ...dots,
+          { kind: 'spacer', id: 'pagedots-trail', axis: 'horizontal', minLength: 0 },
+        ],
+        debugName: TAB_BAR,
+      },
+    }
+  }
+
   private tabLabel(view: ViewValue, path: string): LayoutElement {
     const title = stringArg(positional(view.args, 0))
     const systemImage = stringArg(labelled(view.args, 'systemImage'))
@@ -591,6 +658,11 @@ class Converter {
 
   /** The tab bar: evenly divided items, the selected one tinted. */
   tabBar(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
+    // `.tabViewStyle(.page)` is a row of dots, not a bar of labels.
+    if (bar.items.some((item) => boolArg(labelled(item.args, 'paged')))) {
+      return this.pageDots(bar)
+    }
+
     const items = bar.items.map((item, index) => {
       const selected = boolArg(labelled(item.args, 'selected'))
       const tint = selected ? this.color('accentColor') : this.color('secondaryLabel')
@@ -1130,6 +1202,33 @@ class Converter {
       case 'ControlGroup':
         return this.controlGroup(view, path, origin)
 
+      case DATE_EDITOR:
+        return this.dateEditor(view, path, origin)
+
+      case DATE_CELL:
+        return this.dateCell(view, path, origin)
+
+      case COLOUR_EDITOR:
+        return this.colourEditor(view, path, origin)
+
+      case COLOUR_SWATCH:
+        return this.colourSwatch(view, path, origin)
+
+      case 'TimelineView':
+        // The schedule is a clock the preview does not run, so the content is drawn
+        // once, at the moment of the render. Its `context` is not supplied - a
+        // closure that reads `context.date` has nothing to read - so what is drawn is
+        // whatever the body produces without one. See the coverage matrix.
+        return {
+          kind: 'stack',
+          id: path,
+          axis: 'vertical',
+          spacing: 0,
+          alignment: CENTER,
+          children: this.convertList(view.children, `${path}c`, 'vertical'),
+          ...origin,
+        }
+
       case 'Gauge':
         return this.gauge(view, path, origin)
 
@@ -1428,6 +1527,177 @@ class Converter {
       spacing: 12,
       alignment: CENTER,
       children: this.convertList(view.children, `${path}c`, 'horizontal'),
+      ...origin,
+    }
+  }
+
+  /**
+   * A `DatePicker`'s calendar.
+   *
+   * The month's name between its two arrows, a row of weekday initials, then the days
+   * in a seven-column grid. The resolver decided which days exist and what pressing
+   * one does; this only draws them, which is why the leading blanks arrive as cells
+   * with no label rather than being counted here.
+   */
+  private dateEditor(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(labelled(view.args, 'title')) ?? ''
+    const [back, forward, ...days] = view.children
+
+    const header: LayoutElement = {
+      kind: 'stack',
+      id: `${path}hdr`,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [
+        this.styledText(`${path}month`, title, 'headline', 'label'),
+        { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
+        ...(back ? [this.convert(back, `${path}back`, 'horizontal')] : []),
+        ...(forward ? [this.convert(forward, `${path}fwd`, 'horizontal')] : []),
+      ],
+    }
+
+    const weekdays: LayoutElement = {
+      kind: 'stack',
+      id: `${path}dow`,
+      axis: 'horizontal',
+      spacing: 0,
+      alignment: CENTER,
+      children: WEEKDAYS.map((day, i) => ({
+        kind: 'modified',
+        id: `${path}dow${i}f`,
+        modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER },
+        child: this.styledText(`${path}dow${i}`, day, 'caption', 'secondaryLabel'),
+      })),
+    }
+
+    const rows: LayoutElement[] = []
+    for (let start = 0; start < days.length; start += 7) {
+      const week = days.slice(start, start + 7)
+      rows.push({
+        kind: 'stack',
+        id: `${path}w${start}`,
+        axis: 'horizontal',
+        spacing: 0,
+        alignment: CENTER,
+        children: week.map((day, i) => ({
+          kind: 'modified' as const,
+          id: `${path}w${start}c${i}f`,
+          modifier: {
+            kind: 'frame' as const,
+            maxWidth: Number.POSITIVE_INFINITY,
+            alignment: CENTER,
+          },
+          child: this.convert(day, `${path}w${start}c${i}`, 'horizontal'),
+        })),
+      })
+    }
+
+    return {
+      kind: 'modified',
+      id: `${path}pad`,
+      modifier: { kind: 'padding', insets: uniformInsets(12) },
+      child: {
+        kind: 'stack',
+        id: path,
+        axis: 'vertical',
+        spacing: 8,
+        alignment: CENTER,
+        children: [header, weekdays, ...rows],
+      },
+      ...origin,
+    }
+  }
+
+  /** One day of the calendar: the number, on a tinted disc when it is the chosen one. */
+  private dateCell(view: ViewValue, path: string, origin: object): LayoutElement {
+    const label = stringArg(labelled(view.args, 'label')) ?? ''
+    const selected = truthyBinding(labelled(view.args, 'selected'))
+
+    const text = this.styledText(
+      `${path}t`,
+      label,
+      'body',
+      selected ? 'systemBackground' : 'label',
+    )
+
+    const box: LayoutElement = {
+      kind: 'modified',
+      id: `${path}box`,
+      modifier: { kind: 'frame', width: 32, height: 32, alignment: CENTER },
+      child: text,
+    }
+
+    return selected
+      ? { ...this.background(box, `${path}bg`, this.color('accentColor'), 16), ...origin }
+      : { ...box, ...origin }
+  }
+
+  /** A `ColorPicker`'s palette: the named colours, four to a row. */
+  private colourEditor(view: ViewValue, path: string, origin: object): LayoutElement {
+    const rows: LayoutElement[] = []
+    for (let start = 0; start < view.children.length; start += 6) {
+      const row = view.children.slice(start, start + 6)
+      rows.push({
+        kind: 'stack',
+        id: `${path}r${start}`,
+        axis: 'horizontal',
+        spacing: 12,
+        alignment: CENTER,
+        children: row.map((swatch, i) => this.convert(swatch, `${path}r${start}s${i}`, 'horizontal')),
+      })
+    }
+
+    return {
+      kind: 'modified',
+      id: `${path}pad`,
+      modifier: { kind: 'padding', insets: uniformInsets(16) },
+      child: {
+        kind: 'stack',
+        id: path,
+        axis: 'vertical',
+        spacing: 12,
+        alignment: CENTER,
+        children: rows,
+      },
+      ...origin,
+    }
+  }
+
+  /** One swatch: the colour as a disc, ringed when it is the one selected. */
+  private colourSwatch(view: ViewValue, path: string, origin: object): LayoutElement {
+    const fill = resolveColorArg(labelled(view.args, 'colour'), this.scheme) ?? this.color('label')
+    const selected = truthyBinding(labelled(view.args, 'selected'))
+
+    const disc: LayoutElement = {
+      kind: 'modified',
+      id: `${path}f`,
+      modifier: { kind: 'frame', width: 36, height: 36, alignment: CENTER },
+      child: {
+        kind: 'modified',
+        id: `${path}c`,
+        modifier: { kind: 'foregroundStyle', color: fill },
+        child: { kind: 'shape', id: path, shape: 'circle' },
+      },
+    }
+
+    if (!selected) return { ...disc, ...origin }
+
+    return {
+      kind: 'modified',
+      id: `${path}ring`,
+      modifier: {
+        kind: 'border',
+        color: this.color('label'),
+        width: 2,
+        cornerRadius: 22,
+      },
+      child: {
+        kind: 'modified',
+        id: `${path}ringpad`,
+        modifier: { kind: 'padding', insets: uniformInsets(3) },
+        child: disc,
+      },
       ...origin,
     }
   }
@@ -2364,7 +2634,16 @@ class Converter {
   private picker(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label') ?? ''
     const selection = bindingValue(labelled(view.args, 'selection'))
-    const value = selection ? displayValue(selection) : ''
+    // A `DatePicker` shows a *formatted* date, which is the whole point of the row.
+    // `displayValue` on a Date gives `2025-06-15 15:06:40 +0000` - a plausible-looking
+    // string no date picker on iOS has ever shown - and `displayedComponents:` says
+    // which halves of it to draw.
+    const date = view.name === 'DatePicker' ? asDate(selection ?? undefined) : null
+    const value = date
+      ? dateText(date.epochSeconds, datePickerStyleFor(view))
+      : selection
+        ? displayValue(selection)
+        : ''
 
     // Only a real `Picker` has options to draw inline; `DatePicker`, `ColorPicker` and
     // `Menu` come through here too and have none.
@@ -3513,6 +3792,29 @@ function displayValue(value: SwiftValue): string {
  * The absolute ones are the browser's locale formatting, so the separators and the
  * order are the platform's real ones.
  */
+/**
+ * Which halves of a date a `DatePicker` row shows.
+ *
+ * `displayedComponents:` is a set, and the two members that matter are `.date` and
+ * `.hourAndMinute`. Omitted, SwiftUI shows both - which is why the default here is
+ * neither of the single-part styles.
+ */
+function datePickerStyleFor(view: ViewValue): string | null {
+  const components = labelled(view.args, 'displayedComponents')
+  if (!components) return null
+
+  const names =
+    components.kind === 'array'
+      ? components.elements.map((e) => tokenName(e) ?? '')
+      : [tokenName(components) ?? '']
+
+  const wantsDate = names.includes('date')
+  const wantsTime = names.includes('hourAndMinute')
+  if (wantsDate && !wantsTime) return 'date'
+  if (wantsTime && !wantsDate) return 'time'
+  return null
+}
+
 function dateText(epochSeconds: number, style: string | null): string {
   const date = new Date(epochSeconds * 1000)
 

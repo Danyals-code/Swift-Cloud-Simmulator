@@ -1,6 +1,9 @@
 import {
+  asDate,
   asProjection,
+  dateValue,
   describe,
+  opaque,
   truthy,
   type ClosureValue,
   type SwiftValue,
@@ -10,6 +13,7 @@ import {
   handlerIdFor,
   payloadOf,
   ANIMATION_TYPE,
+  COLOR_TYPE,
   type AnimationPayload,
   type ModifierValue,
   type ViewArg,
@@ -51,6 +55,30 @@ export const TAB_ITEM = '_TabItem'
 export const ALERT = '_Alert'
 export const DIALOG = '_ConfirmationDialog'
 export const MENU = '_Menu'
+/** A `DatePicker`'s calendar, and one day of it. */
+export const DATE_EDITOR = '_DateEditor'
+export const DATE_CELL = '_DateCell'
+/** A `ColorPicker`'s palette, and one colour of it. */
+export const COLOUR_EDITOR = '_ColourEditor'
+export const COLOUR_SWATCH = '_ColourSwatch'
+
+/** Month names for the calendar header. Not localised; neither is the rest of the chrome. */
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+/**
+ * The colours a `ColorPicker` offers.
+ *
+ * SwiftUI's own named colours, because those are the ones the exported code can name.
+ * A continuous surface would let the user land on a colour their Swift cannot say.
+ */
+const SWATCHES = [
+  'red', 'orange', 'yellow', 'green', 'mint', 'teal',
+  'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown',
+  'gray', 'black', 'white', 'primary',
+]
 
 export interface NavigationBar {
   readonly title: string
@@ -206,6 +234,23 @@ export class UIState {
     return previous !== undefined && previous !== value
   }
 
+  /**
+   * Which month each open `DatePicker` is showing, relative to its value's own.
+   *
+   * Framework state in the same sense the navigation stack is: the user's binding
+   * holds a *date*, and paging to another month before choosing a day must not change
+   * it - so there is nowhere else for this to live.
+   */
+  private months = new Map<string, number>()
+
+  monthOffset(control: string): number {
+    return this.months.get(control) ?? 0
+  }
+
+  stepMonth(control: string, by: number): void {
+    this.months.set(control, this.monthOffset(control) + by)
+  }
+
   /** How far a list row has been swiped open, in points. */
   private swipes = new Map<string, number>()
 
@@ -283,7 +328,11 @@ class Resolver {
     const tabs = findView(stamped, 'TabView')
     const withTabs = tabs ? this.resolveTabs(tabs) : { content: stamped, tabBar: null }
 
-    const nav = findView(withTabs.content, 'NavigationStack') ?? findView(withTabs.content, 'NavigationView')
+    const nav =
+      findView(withTabs.content, 'NavigationStack') ??
+      findView(withTabs.content, 'NavigationView') ??
+      // A phone collapses a split view into a stack, so it is resolved as one.
+      findView(withTabs.content, 'NavigationSplitView')
     const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
 
     // A menu sits above everything, including a sheet: it is the thing the user just
@@ -553,6 +602,15 @@ class Resolver {
       return view
     }
 
+    if (view.name === 'DatePicker' || view.name === 'ColorPicker') {
+      // Drawn and unopenable until now. Each needs an editor of its own rather than
+      // the list of options that made the other four cheap - a calendar and a colour
+      // surface - so they share the menu's *mechanism* and none of its content.
+      const intent: ViewIntent = { kind: 'openMenu', menu: path }
+      this.handlers.set(handlerIdFor(path), intent)
+      return { ...view, intent }
+    }
+
     if (view.name === 'Picker' || view.name === 'Menu') {
       // Pressing the control shows its options. This replaces the intent
       // `CONTROL_BINDINGS` gives a Picker - writing the selection back over itself,
@@ -622,6 +680,176 @@ class Resolver {
   }
 
   /**
+   * A `DatePicker`'s editor: the month its value falls in, as a grid of days.
+   *
+   * The month on show is framework state - the user's binding holds a *date*, and
+   * paging to another month before choosing a day must not change it - so it lives
+   * beside the navigation stack and the open menu, keyed by the control's path.
+   *
+   * The arithmetic is done here in JavaScript, where a real calendar exists. That is
+   * not the same as giving the *interpreter* a `Calendar`: this is framework chrome,
+   * and the coverage matrix's "a Date has no calendar" is about what the user's own
+   * code can call, which is unchanged.
+   */
+  private dateEditor(
+    control: ViewValue,
+    open: string,
+    dismiss: ViewIntent,
+    dismissId: string,
+  ): Overlay {
+    const selection = labelled(control.args, 'selection')
+    const projection = asProjection(selection)
+    const seconds = asDate(projection?.get() ?? { kind: 'nil' })?.epochSeconds ?? Date.now() / 1000
+    const chosen = new Date(seconds * 1000)
+
+    const shown = new Date(chosen)
+    shown.setUTCDate(1)
+    shown.setUTCMonth(shown.getUTCMonth() + this.ctx.state.monthOffset(open))
+
+    const year = shown.getUTCFullYear()
+    const month = shown.getUTCMonth()
+    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+    const leading = new Date(Date.UTC(year, month, 1)).getUTCDay()
+
+    const cells: ViewValue[] = []
+    for (let i = 0; i < leading; i++) {
+      cells.push(this.editorCell(`${open}/pad-${i}`, '', false, null))
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const path = `${open}/day-${day}`
+      // The time of day is the binding's own, so choosing a date does not silently
+      // move an appointment to midnight.
+      const value = new Date(chosen)
+      value.setUTCFullYear(year, month, day)
+
+      const selected =
+        chosen.getUTCFullYear() === year &&
+        chosen.getUTCMonth() === month &&
+        chosen.getUTCDate() === day
+
+      const write: ViewIntent | null = selection
+        ? { kind: 'choose', binding: selection, value: dateValue(value.getTime() / 1000) }
+        : null
+      if (write) this.register(path, write)
+      cells.push(this.editorCell(path, String(day), selected, write))
+    }
+
+    const step = (delta: number, label: string): ViewValue => {
+      const path = `${open}/month-${delta}`
+      const intent: ViewIntent = { kind: 'stepMonth', control: open, by: delta }
+      this.register(path, intent)
+      return this.editorCell(path, label, false, intent)
+    }
+
+    return {
+      kind: 'menu',
+      views: [
+        {
+          name: DATE_EDITOR,
+          args: [
+            { label: 'title', value: { kind: 'string', value: MONTHS[month]! + ' ' + year } },
+          ],
+          children: [step(-1, '\u2039'), step(1, '\u203a'), ...cells],
+          modifiers: [],
+          action: null,
+          span: control.span,
+          path: `${open}/editor`,
+        },
+      ],
+      detent: 0,
+      title: stringArg(control.args.find((a) => a.label === null)?.value) ?? '',
+      message: '',
+      dismiss,
+      dismissId,
+    }
+  }
+
+  /**
+   * A `ColorPicker`'s editor: the system palette as swatches.
+   *
+   * Not a continuous colour surface. A gradient wheel needs a drag with a colour
+   * model behind it, and a preview that let you land on a colour the exported code
+   * cannot name would be worse than one that offers the colours SwiftUI itself names
+   * - which is what almost every `ColorPicker` in app code is used to pick.
+   */
+  private colourEditor(
+    control: ViewValue,
+    open: string,
+    dismiss: ViewIntent,
+    dismissId: string,
+  ): Overlay {
+    const selection = labelled(control.args, 'selection')
+    const projection = asProjection(selection)
+    const current = projection ? describe(projection.get(), true) : null
+
+    const swatches = SWATCHES.map((name) => {
+      const path = `${open}/colour-${name}`
+      const value = opaque(COLOR_TYPE, { name })
+      const intent: ViewIntent | null = selection
+        ? { kind: 'choose', binding: selection, value }
+        : null
+      if (intent) this.register(path, intent)
+
+      return {
+        name: COLOUR_SWATCH,
+        args: [
+          { label: 'colour', value },
+          { label: 'selected', value: { kind: 'bool' as const, value: current === describe(value, true) } },
+        ],
+        children: [],
+        modifiers: [],
+        action: null,
+        span: control.span,
+        path,
+        ...(intent ? { intent } : {}),
+      } satisfies ViewValue
+    })
+
+    return {
+      kind: 'menu',
+      views: [
+        {
+          name: COLOUR_EDITOR,
+          args: [],
+          children: swatches,
+          modifiers: [],
+          action: null,
+          span: control.span,
+          path: `${open}/editor`,
+        },
+      ],
+      detent: 0,
+      title: stringArg(control.args.find((a) => a.label === null)?.value) ?? '',
+      message: '',
+      dismiss,
+      dismissId,
+    }
+  }
+
+  /** One cell of the date grid: a label, whether it is chosen, and what pressing it does. */
+  private editorCell(
+    path: string,
+    label: string,
+    selected: boolean,
+    intent: ViewIntent | null,
+  ): ViewValue {
+    return {
+      name: DATE_CELL,
+      args: [
+        { label: 'label', value: { kind: 'string', value: label } },
+        { label: 'selected', value: { kind: 'bool', value: selected } },
+      ],
+      children: [],
+      modifiers: [],
+      action: null,
+      span: { file: '', start: 0, end: 0 },
+      path,
+      ...(intent ? { intent } : {}),
+    }
+  }
+
+  /**
    * The open `Picker` or `Menu`, as an overlay of its options.
    *
    * Built from the control's own children rather than invented: a Picker's options
@@ -648,6 +876,9 @@ class Resolver {
 
     const dismiss: ViewIntent = { kind: 'openMenu', menu: null }
     const dismissId = this.register(`${open}/dismiss`, dismiss)
+
+    if (control.name === 'DatePicker') return this.dateEditor(control, open, dismiss, dismissId)
+    if (control.name === 'ColorPicker') return this.colourEditor(control, open, dismiss, dismissId)
 
     const selection = labelled(control.args, 'selection')
     const binding = asProjection(selection)
@@ -843,9 +1074,14 @@ class Resolver {
     const index = current !== null ? Math.max(0, tagged.indexOf(current)) : this.ctx.state.selectedTab(tabId)
     const selected = Math.min(index, pages.length - 1)
 
+    // `.tabViewStyle(.page)` replaces the tab bar with page dots: a row of indicators
+    // rather than labelled buttons, and one that is still pressable - iOS pages by
+    // swiping, which a preview has no analogue for, so the dots are the way through.
+    const paged = (tokenName(modifierOn(tabs, 'tabViewStyle')?.args[0]?.value) ?? '').startsWith('page')
+
     const items = pages.map((page, i) => {
       const item = collectModifier([page], 'tabItem')
-      const label = item?.closure ? this.ctx.build(item.closure) : []
+      const label = paged ? [] : item?.closure ? this.ctx.build(item.closure) : []
       const path = `${tabId}/tab-${i}`
       const intent: ViewIntent =
         binding && tagged[i] !== null
@@ -859,6 +1095,7 @@ class Resolver {
         args: [
           { label: 'selected', value: { kind: 'bool', value: i === selected } },
           { label: 'index', value: { kind: 'int', value: i } },
+          ...(paged ? [{ label: 'paged', value: { kind: 'bool' as const, value: true } }] : []),
         ],
         children: label.map((l, j) => this.stamp(l, `${path}-${j}`)),
         modifiers: [],
@@ -1079,6 +1316,11 @@ function tokenName(value: SwiftValue | undefined): string | null {
 function tokenOrValue(value: SwiftValue | undefined): string | null {
   if (value === undefined) return null
   return tokenName(value) ?? describe(value, true)
+}
+
+/** A modifier written on this view itself, rather than anywhere in its subtree. */
+function modifierOn(view: ViewValue, name: string): ModifierValue | null {
+  return view.modifiers.find((m) => m.name === name) ?? null
 }
 
 function tagValue(page: ViewValue): SwiftValue {

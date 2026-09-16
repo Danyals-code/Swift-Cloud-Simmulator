@@ -315,7 +315,15 @@ export class AppRuntime {
 
     try {
       this.perform(intent, event)
-      if (wasOpen !== null && this.ui.openMenu() === wasOpen && intent.kind !== 'openMenu') {
+      // `stepMonth` is the exception: paging a calendar is a press *within* the
+      // editor rather than a choice made from it, and closing on it would make the
+      // arrows unusable - one press forward, and the picker is gone.
+      if (
+        wasOpen !== null &&
+        this.ui.openMenu() === wasOpen &&
+        intent.kind !== 'openMenu' &&
+        intent.kind !== 'stepMonth'
+      ) {
         this.ui.setOpenMenu(null)
       }
     } catch (error) {
@@ -516,6 +524,14 @@ export class AppRuntime {
 
       case 'expand': {
         this.ui.toggleExpanded(intent.group)
+        return
+      }
+
+      case 'stepMonth': {
+        // Pages the calendar without touching the binding: the user has not chosen a
+        // date yet, and moving their appointment by pressing an arrow would be a
+        // surprise the real picker does not spring.
+        this.ui.stepMonth(intent.control, intent.by)
         return
       }
 

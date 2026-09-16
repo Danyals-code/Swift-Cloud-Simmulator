@@ -716,8 +716,17 @@ export class SwiftUIHost implements InterpreterHost {
 
     // Content closures are result builders: `VStack { a; b }` yields two children,
     // and an `if` inside contributes only the taken branch.
+    //
+    // Not for a view the preview does not draw. Its children are discarded in favour
+    // of a placeholder, so running the closure can only have side effects - and a
+    // closure that takes a parameter the caller cannot supply gets `nil` and traps.
+    // `TableColumn("Name") { row in Text(row.name) }` took the whole preview down
+    // that way: a view listed as *unimplemented* stopped the screen rather than
+    // drawing the labelled box that listing promises.
     const children =
-      call.trailingClosure && !isAction ? this.toViews(call.invokeBuilder(call.trailingClosure)) : []
+      call.trailingClosure && !isAction && !UNIMPLEMENTED_VIEWS.has(name)
+        ? this.toViews(call.invokeBuilder(call.trailingClosure))
+        : []
 
     return view({
       name,
@@ -950,6 +959,10 @@ export class SwiftUIHost implements InterpreterHost {
       }
     }
 
+    if (target.kind === 'type' && target.name === 'Binding' && member === 'constant') {
+      return this.constantBinding(call)
+    }
+
     if (target.kind === 'type' && target.name === 'Animation') {
       return this.makeAnimation(member, call)
     }
@@ -989,6 +1002,19 @@ export class SwiftUIHost implements InterpreterHost {
       action: null,
       span,
     })
+  }
+
+  /**
+   * `Binding.constant(x)` - a binding that reads a value and swallows what is written.
+   *
+   * The spelling every preview and every stateless subview uses, and the one place a
+   * `Binding` appears without a `@State` behind it. Without it, `.constant(…)` was an
+   * unresolved member and a control given one had nothing to read.
+   */
+  private constantBinding(call: HostCall): SwiftValue | undefined {
+    const value = call.args.find((a) => a.label === null)?.value
+    if (!value) return undefined
+    return projection({ get: () => value, set: () => {}, description: 'Binding.constant' })
   }
 
   /**
@@ -1114,6 +1140,10 @@ export class SwiftUIHost implements InterpreterHost {
     }
     if (TRANSITIONS.has(member)) return this.makeTransition(member, call)
     if (member === 'system') return this.makeSystemFont(call)
+
+    // `.constant(false)` where a `Binding` is expected - the contextual spelling, and
+    // the one previews actually use. `Binding.constant(…)` reaches `callMember`.
+    if (member === 'constant') return this.constantBinding(call)
 
     // `.custom("Avenir", size: 24)`. The face itself cannot be honoured - a browser
     // has no access to a project's bundled fonts - but the *size* is a layout input,

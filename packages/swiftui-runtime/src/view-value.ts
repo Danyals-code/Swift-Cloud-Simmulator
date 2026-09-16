@@ -84,6 +84,8 @@ export type ViewIntent =
   | { readonly kind: 'swipe'; readonly row: string }
   /** Opening or closing a `DisclosureGroup`, which nothing in the user's code holds. */
   | { readonly kind: 'expand'; readonly group: string }
+  /** Paging a `DatePicker`'s calendar, which changes what is shown and not the value. */
+  | { readonly kind: 'stepMonth'; readonly control: string; readonly by: number }
   /** Showing a `Picker`'s or `Menu`'s options. Null closes whatever is open. */
   | { readonly kind: 'openMenu'; readonly menu: string | null }
   /** Choosing one of them: writes the selection and closes in one press. */

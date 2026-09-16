@@ -4,10 +4,11 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the measurement half of the text pass (defect register phase 9.2),
-which shrinks text to fit and truncates at the end the user asked for.
+Last updated after the picker and view pass (defect register phases 9.1 and 9.6), which
+gave `DatePicker` a calendar and `ColorPicker` a palette, and drew the views that only
+ever needed drawing.
 
-**150 ✅ · 49 🟡 · 16 ⬜ · 10 ✗**, over 225 rows, counted from this file rather than carried
+**153 ✅ · 50 🟡 · 13 ⬜ · 10 ✗**, over 226 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -59,7 +60,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `ProgressView` | ✅ | 6 | determinate bar; `.circular` and the indeterminate form are a ring |
 | `Gauge` | 🟡 | 7 | `.gaugeStyle` chooses a ring or a bar; the ring does not show the value as an arc |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
-| `TimelineView` | ⬜ | - | needs a clock the preview does not run |
+| `TimelineView` | 🟡 | - | its content is drawn once, at the moment of the render. The schedule is a clock the preview does not run, and the `context` is not supplied |
 | `Chart` (Swift Charts) | ⬜ | - | bar, line, point only |
 | `Map` (MapKit) | ✗ | - | Needs a licensed tile source; placeholder with a note |
 | `UIViewRepresentable` | ✗ | - | Cannot run UIKit; labelled placeholder |
@@ -75,7 +76,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `TextField` / `SecureField` | 🟡 | 6 | a real input with a caret; `SecureField` does not mask yet |
 | `TextEditor` | 🟡 | 7 | a single-line field; no multi-line editing |
 | `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. The popup is drawn at the bottom rather than anchored to the control |
-| `DatePicker` / `ColorPicker` | 🟡 | 7 | drawn as a labelled row; not yet openable. Each needs an editor of its own rather than a list of options |
+| `DatePicker` | 🟡 | 7 | a formatted row that opens onto a calendar: pick a day, page the month. `displayedComponents:` chooses date, time or both. No time-of-day editor, so the row's time is the binding's own |
+| `ColorPicker` | 🟡 | 7 | opens onto SwiftUI's named colours as swatches. Not a continuous surface - see approximations |
 | `Menu` | 🟡 | 7 | opens onto its buttons; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
 
 ## Collections and navigation
@@ -91,13 +93,13 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.searchable` | ✅ | 7 | a field above the content, writing its binding |
 | `.refreshable` | ⬜ | - | pull-to-refresh has no meaning in a static preview |
 | `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |
-| `Table` / `OutlineGroup` | ⬜ | - | |
+| `Table` / `OutlineGroup` | ⬜ | - | a labelled placeholder. The closure of a view the preview does not draw is no longer run, so a `TableColumn`'s row parameter cannot trap |
 | `NavigationStack` + `NavigationLink` | ✅ | 6 | both the `destination:` and `value:` forms |
 | `.navigationDestination` | ✅ | 6 | `for:` with a metatype, resolved on push |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
 | `.toolbar` | 🟡 | 6 | bar buttons, leading and trailing; no `ToolbarItemGroup` placements |
-| `TabView` | 🟡 | 6 | tab bar with `.tabItem`, bound or unbound selection; no page style |
-| `NavigationSplitView` | ⬜ | - | iPad only |
+| `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, and `.page`, whose dots are also the way through - a preview has no swipe |
+| `NavigationSplitView` | ✅ | - | collapses to a navigation stack showing the sidebar, which is what a phone does |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
 
 ## Presentation
@@ -108,7 +110,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.fullScreenCover` | ✅ | 6 |
 | `.alert` | 🟡 | 6 | title, message and buttons; no text-field alerts |
 | `.confirmationDialog` | 🟡 | 6 | anchored to the bottom edge |
-| `.popover` | ⬜ | - |
+| `.popover` | ✅ | - | presented as a sheet, which is what iOS does at this width |
 | `@Environment(\.dismiss)` | ✅ | 7 | closes whatever is presented when it is called |
 
 ## Modifiers - layout and sizing
@@ -231,7 +233,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere |
 | `@AppStorage` / `@SceneStorage` | 🟡 | - | keyed by the string, so views sharing a key share a value and it outlives the view that wrote it. Held for the session rather than on disk - see approximations |
 | `@FocusState` | 🟡 | - | storage the code reads and writes |
-| `Binding(get:set:)` | ✅ | - | a projection built from the user's closures; a control cannot tell it from `$value` |
+| `Binding(get:set:)` / `.constant` | ✅ | - | a projection built from the user's closures, or one that reads a value and swallows writes; a control cannot tell either from `$value` |
 | `.environmentObject` / `@EnvironmentObject` | 🟡 | 7 | reaches views expanded while the modifier is in scope - see below |
 | `.environment(\.key, …)` | 🟡 | 7 | same scoping rule |
 | `colorScheme`, `dynamicTypeSize` | ✅ | 4 |
@@ -390,24 +392,29 @@ Listed in the exported README so nothing is a surprise on the Mac:
     control sits mid-screen. The compositor decides what the options are before the layout
     engine decides where the control ended up, so anchoring would mean resolving the menu
     after layout. An approximation of position; the options and the tick are exact.
-16. **`@AppStorage` is a session, not a disk.** The value is keyed by its string and
+16. **A `ColorPicker` offers named colours, not a surface.** SwiftUI's own palette as
+    swatches, because those are the colours the exported Swift can *name*. A continuous
+    wheel would let a user land on a colour their code cannot express, which is a worse
+    answer than a smaller choice. A `DatePicker` is the same shape of decision one level
+    down: a calendar and no clock, so the time of day stays whatever the binding held.
+17. **`@AppStorage` is a session, not a disk.** The value is keyed by its string and
     shared between every view naming it, and it outlives the view that wrote it - which
     is the whole difference from `@State`. It does not outlive the tab: there is no
     `UserDefaults` in a worker, and writing to browser storage would make one project's
     preview visible to another. It also follows `@State` on one point real defaults do
     not: editing the declared default re-seeds, because a user who just changed `= 0`
     to `= 10` is waiting to see 10.
-17. **A `.wheel` picker is a dimmed column, not a spinner.** A wheel has depth, momentum
+18. **A `.wheel` picker is a dimmed column, not a spinner.** A wheel has depth, momentum
     and a selection band; a static column has none of them. What it carries honestly is
     which option is selected, so the chosen row is drawn at full strength and the rest
     are dimmed. The options and the selection are exact; the motion is absent rather
     than approximated.
-18. **`.kerning` and `.tracking` are applied identically.** Both add advance after every
+19. **`.kerning` and `.tracking` are applied identically.** Both add advance after every
     character. Swift's `kerning` adjusts the space *between* characters and so leaves the
     last one alone, where `tracking` adds after it too - a difference of one character's
     spacing at the end of a line, well under a point at UI sizes. Stated rather than
     silently rounded away.
-19. **Renaming is scoped, which means it can rename too little.** A local is renamed within
+20. **Renaming is scoped, which means it can rename too little.** A local is renamed within
     its own body; a member is followed across the project only when no other type declares
     the same member name, and otherwise stays inside the type that declared it. The
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses

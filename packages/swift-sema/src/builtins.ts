@@ -34,6 +34,7 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'List', 'Section', 'Form',
   'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView',
   'DisclosureGroup', 'AnyView', 'GroupBox', 'LabeledContent', 'ControlGroup',
+  'NavigationSplitView', 'TimelineView',
   // controls drawn plainly
   'DatePicker', 'ColorPicker', 'TextEditor', 'Menu', 'ShareLink', 'Gauge', 'AsyncImage',
   // shapes and drawing
@@ -75,7 +76,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // navigation and presentation
   'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar',
   'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
-  'tabItem', 'tag',
+  'popover', 'tabItem', 'tag', 'tabViewStyle',
   // lists
   'listStyle', 'listRowBackground',
   // interaction
@@ -175,11 +176,11 @@ export function isViewRoot(name: string): boolean {
  */
 export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // containers
-  'ScrollViewReader', 'NavigationSplitView', 'EquatableView',
+  'ScrollViewReader', 'EquatableView',
   // data-driven
   'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
-  // time and charts
-  'TimelineView', 'Chart', 'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark',
+  // charts
+  'Chart', 'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark',
   // platform surfaces a browser has no analogue for
   'Map', 'Marker', 'Annotation', 'VideoPlayer', 'SceneView',
   // scenes other than the one WindowGroup the preview shows
@@ -213,8 +214,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'refreshable', 'scrollDismissesKeyboard', 'scrollTargetBehavior', 'scrollPosition',
   'scrollDisabled', 'scrollContentBackground', 'listSectionSeparator', 'listRowSpacing',
   // presentation and chrome
-  'popover', 'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
-  'tabViewStyle',
+  'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
   // controls
   'menuStyle', 'datePickerStyle', 'strokeBorder',
   // text entry
