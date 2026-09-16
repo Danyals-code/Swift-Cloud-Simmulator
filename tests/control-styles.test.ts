@@ -302,18 +302,19 @@ describe('.labelStyle', () => {
 describe('.progressViewStyle and .gaugeStyle', () => {
   it('a determinate ProgressView is a bar by default', () => {
     const result = run(app('    var body: some View { ProgressView(value: 0.5) }'))
-    expect(nodes(result).some((n) => n.shape?.shape === 'circle')).toBe(false)
+    expect(nodes(result).some((n) => n.shape?.shape === 'spinner')).toBe(false)
   })
 
-  it('.circular is a ring even with a value in hand', () => {
+  // The indeterminate drawing is the activity indicator now, not a filled circle.
+  it('.circular is a spinner even with a value in hand', () => {
     const result = run(
       app('    var body: some View { ProgressView(value: 0.5).progressViewStyle(.circular) }'),
     )
     expect(warnings(result)).toEqual([])
-    expect(nodes(result).some((n) => n.shape?.shape === 'circle')).toBe(true)
+    expect(nodes(result).some((n) => n.shape?.shape === 'spinner')).toBe(true)
   })
 
-  it('an accessoryCircular gauge is a ring, a linear one is not', () => {
+  it('an accessoryCircular gauge is a spinner, a linear one is not', () => {
     const circular = run(
       app(
         '    var body: some View { Gauge(value: 0.5) { Text("g") }.gaugeStyle(.accessoryCircular) }',
@@ -324,8 +325,8 @@ describe('.progressViewStyle and .gaugeStyle', () => {
         '    var body: some View { Gauge(value: 0.5) { Text("g") }.gaugeStyle(.accessoryLinear) }',
       ),
     )
-    expect(nodes(circular).some((n) => n.shape?.shape === 'circle')).toBe(true)
-    expect(nodes(linear).some((n) => n.shape?.shape === 'circle')).toBe(false)
+    expect(nodes(circular).some((n) => n.shape?.shape === 'spinner')).toBe(true)
+    expect(nodes(linear).some((n) => n.shape?.shape === 'spinner')).toBe(false)
   })
 })
 

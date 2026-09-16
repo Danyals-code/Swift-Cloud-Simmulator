@@ -229,6 +229,17 @@ export class Interpreter {
     return this.conformance.types.get(typeName)?.conformances.has(protocolName) ?? false
   }
 
+  /**
+   * Whether the project declared a type by this name.
+   *
+   * For the host, which answers for a great many names it does not own the only claim
+   * to - `Tab`, `Settings`, `Marker`, `Table` are all SwiftUI *and* all plausible
+   * things to write in an app. A name the project declared is the project's.
+   */
+  declaresType(typeName: string): boolean {
+    return this.conformance.types.has(typeName)
+  }
+
   /** The superclass of a class, for `super`. */
   superclassOf(typeName: string): string | null {
     return this.conformance.types.get(typeName)?.superclass ?? null

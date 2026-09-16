@@ -137,7 +137,19 @@ export interface TextLine {
   readonly slices?: readonly TextLineSlice[]
 }
 
-export type ShapeKind = 'rectangle' | 'roundedRectangle' | 'circle' | 'ellipse' | 'capsule'
+/**
+ * `spinner` is the odd one: not a shape a user can name, but the one iOS draws for an
+ * indeterminate `ProgressView`. It lives here rather than as its own node kind because
+ * it behaves like every other shape - a frame, a foreground colour, a place in the
+ * paint order - and differs only in what the renderer puts inside the box.
+ */
+export type ShapeKind =
+  | 'rectangle'
+  | 'roundedRectangle'
+  | 'circle'
+  | 'ellipse'
+  | 'capsule'
+  | 'spinner'
 
 export interface ShapePayload {
   readonly shape: ShapeKind

@@ -24,6 +24,18 @@ the matrix; almost every one of these lived in the space *between* two claims th
 each true on their own. The fastest way to find what a preview gets wrong is to write
 the app you would have written anyway.
 
+**Phase 13 is open, and its first eight items are closed.** Seven sample screens were
+written against the running studio and then measured in the DOM, which is the same rule
+turned on the *chrome*: seventeen defects, three of which blank the preview from
+ordinary Swift, and four of which are a single missing tint showing up on every screen
+at once. Nothing in it is a name the coverage matrix gets wrong. Everything in it is a
+detail shared by every screen that draws the name.
+
+Fourteen of the seventeen are closed: the traps, the four colour bugs, and the chrome
+apart from one. What is left is 13.11, which turned out to need a change to how a
+screen composes rather than a change to a colour; 13.16, which is open by degree
+rather than by kind; and 13.17, which is a decision rather than a defect.
+
 Phases run by severity first, then by how much real code each one unlocks. The order is
 a dependency order as well as a severity one: the parser gaps in Phase 4 sit above the
 library gaps in Phase 5, because code that does not parse never reaches the library.
@@ -44,6 +56,7 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 10 | Make the documentation match the code | 7 | ✅ |
 | 11 | What writing three new app templates found | 10 | ✅ |
 | 12 | What writing an app, rather than reading the matrix, found | 8 | ✅ |
+| 13 | What writing seven sample screens found | 17 | 🟡 |
 
 ## What was swept
 
@@ -928,6 +941,439 @@ bodies are supported; contextual members are supported and enum payloads are sup
 The corpus rule from 10.6 said the gallery must be written the way people write. This
 is the same rule one level up: the *tests* have to be written the way people write, and
 the cheapest way to do that is to write an app and see what happens.
+
+## Phase 13 - What writing seven sample screens found 🟡
+
+Phases 11 and 12 wrote *apps*. This one wrote *screens*: seven samples aimed at the
+chrome rather than at the language, each one rendered and then measured in the DOM
+against what iOS draws. The finding is not that a feature is missing. It is that most
+of them are there and a handful of shared details are wrong, and because they are
+shared, one wrong detail is visible on every screen at once.
+
+Three of these produce a *blank preview* from ordinary Swift, which is the failure
+Phase 3 exists to prevent arriving from a new direction.
+
+| # | Item | State |
+| --- | --- | --- |
+| 13.1 | `.red.opacity(0.5)` and `.title.bold()` trap and blank the preview | ✅ |
+| 13.2 | A progress bar fills from its centre | ✅ |
+| 13.3 | `.presentationDetents` is read off the presenting view | ✅ |
+| 13.4 | One unknown view name blanks the screen | ✅ |
+| 13.5 | `ButtonRole` does not exist | ✅ |
+| 13.6 | A button's label is never tinted | ✅ |
+| 13.7 | Every label on screen is 15% transparent | ✅ |
+| 13.8 | `.tint` as a shape style is the label colour | ✅ |
+| 13.9 | An alert is not built like an alert | ✅ |
+| 13.10 | The segmented control has no shadow and no dividers | ✅ |
+| 13.11 | The bars are opaque | ⬜ |
+| 13.12 | An indeterminate `ProgressView` is a filled circle | ✅ |
+| 13.13 | The search field has no magnifier | ✅ |
+| 13.14 | Grouped sections touch each other | ✅ |
+| 13.15 | An unknown style token is a silent no-op | ✅ |
+| 13.16 | The symbol table is 160 names | 🟡 |
+| 13.17 | iOS 26 is absent, which is a decision rather than a defect | ⬜ |
+
+### 13.1 - the shorthand everybody writes
+
+```swift
+.foregroundStyle(.red.opacity(0.5))            // trap
+.shadow(color: .black.opacity(0.2), radius: 4) // trap
+.fill(.blue.gradient)                          // trap
+Color.red.opacity(0.5)                         // fine
+```
+
+"Value of type 'Token' has no member 'opacity'". A leading-dot colour resolves to a
+`Token` and stays one, so the bare form works and any member on it does not. The
+explicit `Color.red` form is a real colour and behaves.
+
+`.shadow(color: .black.opacity(0.1), radius: 8)` is close to boilerplate in a card
+layout, and it does not fail quietly: the trap stops evaluation and the whole screen
+falls back to the last good tree. A contextual member that is *used* rather than
+passed needs the same resolution `Color.red` gets.
+
+A token asked for a member `Color` answers is promoted to a colour and the member
+re-dispatched, in both the call path and the read path. Narrow in both directions: only
+the members `Color` itself has, and only names the palette knows, so
+`.ultraThinMaterial.opacity(0.5)` is declined and still reports. Promoting whatever was
+asked for whatever it was asked for would replace a value the user built with one the
+host invented, which is the rule `coerceToType` next to it is already written to.
+
+Checking the other contextual types was written down here as worth doing, and doing it
+found `Font` with the identical bug: `.font(.title.bold())` and
+`.font(.body.weight(.semibold))` trapped on "Value of type 'Token' has no member", and
+those are about as ordinary a line of SwiftUI as exists. Fixed in the same shape, and
+closed here rather than filed, because a trap that blanks the preview is what this phase
+*is*.
+
+A font comes back as a token again rather than as a font value, because that is how
+fonts already travel: `.system(size:weight:)` is a token whose name carries its size and
+weight, and `resolveFontArg` is the single place that reads one. A `style:` token is the
+same idea keeping the style's *name*, so `.title.bold()` still leads at 34 - the value
+the text-style table gives - rather than at the 36 a ratio recomputed from 28 rounds to.
+Four members: `weight`, `bold`, `italic` and `monospaced`. `.monospacedDigit()` and
+`.leading(_:)` still report, because answering them would mean handing back a font that
+ignores what was asked.
+
+The rest of the contextual types are genuinely fine: `.rect(cornerRadius:)` and
+`.linear(duration:)` arrive through `callImplicitMember`, which sees the arguments, and
+`.easeInOut` and `.opacity` become animations and transitions before they are ever plain
+tokens. All four were run rather than reasoned about, which is how `Font` turned up.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "a contextual colour with a member on it" and
+"a contextual text style with a face change on it".
+
+### 13.2 - a progress bar fills from its centre
+
+`ProgressView(value: 0.4)` draws grey, then blue, then grey. The fill is sized by
+`{ kind: 'scale', x: fraction, y: 1 }` in `progressView` (`to-layout.ts`), and the
+transform in `RenderTreeView.tsx` emits `scale(x, y)` with no `transform-origin`, so
+CSS uses its default of `50% 50%`.
+
+Two ways to fix it and they are not equivalent. Setting the origin to the leading edge
+fixes the bar; giving the fill a real width fixes the bar *and* means the rounded cap
+at its trailing end is not squashed horizontally, which the scale approach always gets
+wrong. The width won, which needed one new layout modifier: `relativeWidth` takes its
+fraction off the proposal during measurement and then does nothing at placement, because
+by then the parent has already sized the rect. A proposal of `nil` or `'infinity'` is not
+an amount and has no fraction to take, so the modifier stands aside - the same thing
+`.frame(maxWidth:)` does when it is offered no width to bound.
+
+The same code path draws `Gauge`, which is a progress view with a range, so it was fixed
+by the same change and is pinned by its own test.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "a determinate progress bar".
+
+### 13.3 - the detent is read off the wrong view
+
+`detentOf` in `presentation.ts` looks for `presentationDetents` on the modifiers of
+the view that carries `.sheet`. SwiftUI puts it on the sheet's *content*:
+
+```swift
+.sheet(isPresented: $show) {
+    ComposeView().presentationDetents([.medium])
+}
+```
+
+so it is never found and every sheet falls to the `0.92` default. A `.medium` sheet is
+the commonest kind there is.
+
+It reads the presented views now, through `collectModifier`, which searches the whole
+subtree rather than only its root - a detent is a preference in SwiftUI and propagates up
+from wherever inside the sheet it was written.
+
+`presentationBackground`, `presentationCornerRadius` and `presentationDragIndicator` sit
+on the same view and are still not recognised at all. They are 13.9's work, not this
+one's: each needs something drawn, where the detent only needed looking in the right
+place.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "a sheet detent".
+
+### 13.4 - one unknown name takes the screen
+
+`ContentUnavailableView` is iOS 17 and is not in the builtins, so it is
+`unresolved_identifier`, which is blocking, which blanks the preview. `Table`, `Chart`
+and `Map` are unknown in exactly the same way and draw a labelled placeholder instead.
+
+The difference is only that those three are listed, and the list's own comment says
+why that is the mechanism: "a name missing from here is treated as a typo, so the list
+has to cover the real framework rather than only the parts already drawn". The fix is
+therefore the list, not a heuristic. A heuristic that let any unknown capitalised name
+through would also let `ConentView()` through, and a typo on a type name is exactly the
+thing a checker is for.
+
+Added: `ContentUnavailableView`, `PhaseAnimator`, `KeyframeAnimator`, `EditButton`,
+`PasteButton`, `RenameButton`, `UnevenRoundedRectangle`, `AnyShape` and `PhotosPicker`
+for iOS 16 and 17, and `Tab`, `TabSection` and `MeshGradient` for 18. Each one now warns
+and draws the labelled placeholder that already existed.
+
+`ContentUnavailableView` is drawn now rather than placeholdered, which came with the
+coverage work in 13.16: an empty state is what a screen shows *before* it has anything
+to show, so it is among the first things written and the first things looked at. The
+static-member spelling, `ContentUnavailableView.search`, arrives carrying no arguments
+at all - the initialisers all take at least a label - and stands for text iOS supplies
+itself.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "a view name the preview does not draw".
+
+### 13.5 to 13.8 - four colour bugs, visible everywhere
+
+`grep -rn "destructive\|ButtonRole" packages/` returns one unrelated comment. The role
+is parsed, accepted and dropped, so a destructive button is label-coloured in a form,
+in an alert, in a confirmation dialog and in a swipe action.
+
+`applyButtonStyle` returns the label untouched for anything that is not `.bordered` or
+`.borderedProminent`, which is to say for `.automatic`, `.borderless` and `.plain`.
+Measured on a toolbar item: `rgba(0, 0, 0, 0.85)`, where iOS draws `rgb(0, 122, 255)`.
+`Link` is already tinted, so the mechanism exists and `Button` is not using it.
+
+`label` and `primary` are `rgba(0, 0, 0, 0.85)` in `style.ts`, and
+`rgba(255, 255, 255, 0.9)` in the dark table. `UIColor.label` is opaque in both
+appearances. Every string in every preview is drawn 15% transparent, which is most of
+why the result reads as washed out beside a device.
+
+`.foregroundStyle(.tint)` resolves to the label colour rather than to the accent.
+
+These four are one change in shape if not in code: what colour is a thing that has not
+been given one. They are also the cheapest items in the register and the ones that
+change the most screenshots.
+
+All four are closed. `label` and `primary` are opaque in both appearances; the
+*secondary* levels stay translucent, which is how they go on working over a coloured
+background. `.tint` is in the palette as an alias of the accent, so it behaves like every
+other colour name and `.tint.opacity(0.5)` works through 13.1's promotion. A button's
+label takes the accent unless the style is `.plain`, which is the style that exists to
+opt out, and `role: .destructive` makes that tint red - in a form, in a toolbar, in an
+alert and in a swipe action, because all four go through the same `button()`.
+
+`role: .cancel` is still drawn like any other button. Its only effect on iOS is the
+semibold weight it gets *inside an alert*, which is a property of the alert's button
+strip rather than of the button, and the strip is 13.9.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "what colour a label is when nothing has
+said" and "a button label".
+
+### 13.9 - an alert is not built like an alert
+
+The box is right: 270pt wide, 14pt radius, a 32% backdrop. Measured and correct.
+
+Inside it, the buttons were centred text in a stack. iOS builds them as full-width 44pt
+rows divided by hairlines, with two sharing one row split by a vertical hairline,
+`.cancel` leading and semibold and `.destructive` red.
+
+All of that is built now, and the head and the strip are two blocks rather than one
+padded stack - which is what made the old shape impossible, since the buttons sat
+inside the title's padding with nothing between them. The panel is a material.
+
+SwiftUI *reorders* the buttons, and the strip does too: the `.cancel` one goes leading
+in a pair and last in a stack however it was declared. Written into the strip rather
+than left to the caller, because the caller is the user's own source and SwiftUI does
+not honour its order here either.
+
+`role: .cancel`'s semibold weight is the one place the role changes a face rather than
+a colour, and it belongs to the *alert* rather than to `Button` - a cancel button in a
+form is not semibold. A flag set while the strip converts its buttons is how the one
+tells the other.
+
+The vertical rule between a pair cost a second pass: written as `maxHeight: .infinity`
+it took every point the screen would give, and a two-button alert came out the height
+of the phone. A fixed 44 is what a row is.
+
+`confirmationDialog` is the same strip in a different frame and came out of the same
+change.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "an alert".
+
+### 13.10 - the segmented control
+
+The structure was right - a track at radius 9, the selected segment a
+`systemBackground` pill at radius 7, inset 2 - and everything that makes it read as a
+control was missing: the shadow under the pill, the hairlines between adjacent
+*unselected* segments, and the label size.
+
+All three are in. The rules are drawn between segments rather than as a border on each,
+which would double up between every pair and leave the outermost ones ruled against
+nothing; the two beside the chosen pill are omitted, because its own edge already
+separates them. The label is 13pt, semibold on the chosen one, where `subheadline` at
+15 regular was two points large and made a three-segment control run wider than iOS
+draws it.
+
+The track is `tertiarySystemFill` now. It was `systemFill`, which is nearly twice as
+dark - the difference between a control cut into a surface and a filled box sitting on
+one. That fill and `quaternarySystemFill` were both missing from the palette, and the
+search field was drawn at the same wrong value for the same reason.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "a segmented picker".
+
+### 13.11 - the bars are opaque
+
+**Open, and it is a bigger change than this entry first said.**
+
+`navigationBar` fills with `screenBackground` and the tab bar does the same. On iOS both
+are translucent materials, and a navigation bar grows a hairline when content scrolls
+under it.
+
+The obvious version of this fix is theatre. Content is laid out *below* the bars here -
+the screen's content rect starts under the navigation bar and stops above the tab bar -
+so a material over the bar would blur the bar's own background and change nothing that
+anyone could see. And the hairline is not a constant: iOS shows it only when content is
+actually underneath, which this preview cannot know, because the browser owns the scroll
+offset. Drawing it always would be wrong at the top of every large-title screen, which
+is the commonest state there is.
+
+What it really needs is for content to compose *under* the bars, with the scroll view
+carrying a top inset the size of the bar so that its resting position is unchanged. That
+is a change to `screenToLayout` and to the scroll element, and it interacts with
+`.safeAreaInset`, which is already built on the current arrangement.
+
+The concrete symptom, which is worth more than "the bars are opaque": a screen whose
+content carries a **gradient** background draws a flat 155-point strip above it with a
+hard horizontal edge, because `screenBackground` only hoists a background that is a flat
+opaque colour. Measured: the gradient starts at y=155 and the bar above it is white. On
+iOS the scroll view runs to the top of the screen and the gradient runs under the bar.
+That is the same defect as this one seen from the other side, and whichever is fixed
+first should fix both.
+
+### 13.12 and 13.13 - two controls drawn as something else
+
+`ProgressView()` with no value was a filled `secondaryLabel` circle. The comment beside
+it claimed "a dotted ring ... and the renderer spins it", and neither half was true of
+what appeared.
+
+It is the activity indicator now: eight tapered spokes fading round the circle, turning
+once a second in eight discrete steps. `steps(8)` rather than a smooth rotation because
+a real one *is* stepped - the lit spoke moves from one to the next - and a continuously
+sweeping ring is the Android indicator, not this one. Carried as a `spinner` shape kind
+rather than its own node kind, because it behaves like every other shape and differs
+only in what the renderer puts inside the box.
+
+`searchField` built a magnifying glass and a field side by side, and then
+`withHitTarget` made the whole padded box one text field, so the renderer put an
+`<input>` across all of it. Confirmed in the DOM: the input spanned the full 316 points
+and there was no `<svg>` anywhere near the search area.
+
+Two faults, and both are fixed. The hit target is scoped to the field rather than the
+box, so the glass is painted beside it and the caret starts where iOS starts it; the
+cost is the few points of grey under the glass no longer focusing the field, which is a
+smaller lie than a search bar with no glass in it. And the icon is built through
+`symbolImage` now, so the *name* reaches the renderer and the drawn magnifier is used -
+built inline, it carried only the Unicode fallback. `Stepper` had the same inline
+construction and so drew its minus and plus as characters; it goes through the same
+helper.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "the search field".
+
+### 13.14 - grouped sections touch
+
+Measured on a two-section `Form`: the first card ran y 155 to 272 and the second
+started at 272. Two headerless sections drew as one card with a hairline between them,
+which says the opposite of what a section break says.
+
+A section with a header supplies the gap through the header's own top padding, and one
+without supplied nothing. There is 20 points between cards now, only where there is no
+header and never above the first.
+
+**The card inset is deliberately unchanged.** iOS insets a card further from the screen
+edge than the 16 used here - 20 is the number usually quoted - but nobody has put this
+beside a device and measured it, and it moves every grouped row on every screen. Left
+at 16 with the reason written next to the constant, rather than changed from memory.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "inset grouped sections".
+
+### 13.15 - an unknown style token is a silent no-op
+
+`Button("x") { }.buttonStyle(.glass)` compiles clean and draws a bare label.
+`buttonStyle` is a supported modifier, so the name passes, and `.glass` is not one of
+the two styles `applyButtonStyle` handles, so nothing happens and nothing is said.
+
+This is the exact failure the unimplemented-modifier machinery exists to prevent,
+arriving one level down at the argument instead of at the name - the same observation
+`BLEND_MODES` is in `builtins.ts` to handle, applied to one modifier and not to the
+rest.
+
+`STYLE_TOKENS` closes it for all ten of them, and `checkStyleToken` is `checkBlendMode`
+generalised. A set per modifier of the tokens that are *drawn*, rather than a list of
+the ones that fail, because the failing set grows every WWDC and the working set does
+not; anything absent warns.
+
+Deciding membership meant reading the converter token by token rather than transcribing
+Apple's enums, and the rule is: a token is in when the converter takes a branch of its
+own for it, or when it is a spelling of the default. That put `.pickerStyle(.navigationLink)`
+and `.listStyle(.inset)` *out* - both fall through to a drawing that is not what they
+mean - which is the same honesty the entry is about, found one level further in.
+
+Only a literal `.token` is checked. A style held in a variable has no value here, and
+guessing would warn on correct code.
+
+Pinned by `tests/chrome-fidelity.test.ts`, "a style token the preview does not draw".
+
+### 13.16 - the symbol table is 160 names
+
+89 drawn as shapes, 71 more in the Unicode fallback, plus variant resolution. Two of
+the seven samples hit a name in neither: `tray.fill` and `speaker.wave.3.fill` both
+came out as an empty box, and an empty box in a mail list is not an approximation of
+anything.
+
+The honesty rule holds and the inspector still badges it, so this is 🟡 rather than
+open. What would move it is frequency: the next hundred names by how often they appear
+in real SwiftUI, not the next hundred alphabetically.
+
+Eighteen of them are drawn now, chosen that way: `tray` and `tray.fill`, `paperclip`,
+`shield`, `waveform`, `percent`, `thermometer`, `hourglass`, `alarm`, `iphone`, `tv`,
+`keyboard`, `airplane`, `chart.pie`, `list.dash`, `text.aligncenter` and
+`text.alignright`. Roughly 175 names in total.
+
+Two of the eighteen were wrong on the first pass and only a rendered sheet showed it:
+`airplane` came out as a bird and `chart.pie` as a blob with a wedge stuck to it. Path
+data cannot be reviewed by reading it, which is the same lesson as the rest of the
+phase one level down.
+
+Still 🟡, and it will stay 🟡: the table is finite by construction and the honest
+question is only which hundred names are next.
+
+### 13.17 - iOS 26
+
+The preview targets iOS 17 and the export agrees with it - `deploymentTarget: '17.0'`,
+devices stopping at iPhone 16 Pro Max. iOS 18 is visually almost identical to 17 for
+standard controls, so closing 13.5 through 13.14 *is* what "look like iOS 18" means.
+
+iOS 26's Liquid Glass is a different design system, and none of it exists here:
+`glassEffect`, `tabViewBottomAccessory`, `tabBarMinimizeBehavior`,
+`backgroundExtensionEffect` and `scrollEdgeEffectStyle` warn and are ignored;
+`GlassEffectContainer` and `ToolbarSpacer` are unresolved identifiers.
+
+Listed rather than scheduled. Drawing Liquid Glass for a project whose deployment
+target is 17.0 would be the preview telling a lie about the device, so if it is built
+it is built as a second design system selected by the target, not as a replacement for
+the first.
+
+### Found while closing 13.1-13.8
+
+**The host answered for names it did not own.** Adding `Tab` to the unimplemented-view
+list broke a standing test, and the break was not the list's fault. `getMember` ends in
+a run of branches keyed on a type's *name* - `Color`, `Animation`, `Material`, and any
+view name at all - with nothing asking whether the project had declared that name
+itself. `enum Tab { case home }` is how a `TabView` selection is written, and
+`Tab.allCases` on one that did not declare `CaseIterable` answered with a **view**. The
+failure surfaced two members later as "Value of type 'View' has no member 'count'",
+which names neither the type nor the mistake.
+
+It had been true for `Settings`, `Table`, `Marker` and `Annotation` for as long as those
+names had been in the list, and `Tab` is simply the first of them an app is likely to
+want. A `declaresType` hook answers it now, supplied beside `conformsTo`, and the host
+declines any type the project declared. The checker had the same hole one level up:
+`checkCallee` guarded against a *local* shadowing the name and not against a type, so
+`Marker(...)` warned in a file whose second line said `struct Marker`.
+
+**Two template tests were measuring the wrong thing**, and both only showed it once the
+colours were right.
+
+The contrast check asserted a ratio for every text run including empty ones, and
+`Button("") { }` over a coloured swatch - which the Palette template does, because a
+swatch is not a caption - failed the moment button labels became tinted. An empty run
+has no legibility to assess, the same way a transparent one does not, and it is skipped
+beside it.
+
+The dark-mode check pooled every painted colour into one set per appearance and required
+the two sets to differ. But a correct dark mode is very often a *swap*: black text on
+white becomes white text on black, and the two appearances then hold exactly the same
+two colours in exactly the opposite places. Making `label` opaque turned the Vectors
+template into precisely that, and the test called it "does not adapt", which is the
+reverse of the truth. It compares colours per node now, which is what it meant.
+
+Neither is a weakened assertion. One dropped a check that could not mean anything; the
+other replaced a proxy with the property it was standing in for.
+
+### What this phase is evidence for
+
+The same argument as 11 and 12, pointed at the chrome. Phases 1-10 swept the coverage
+matrix, and the matrix is about *names*: is `Button` supported, is `.alert` supported,
+is `ProgressView` supported. All three are, and all three are drawn wrong, because
+what a sweep by name cannot see is the shared detail - a tint that is never applied, a
+transform origin that was never set, a colour that is 15% transparent.
+
+Seven screens found it in an afternoon, because a screen is where a shared detail
+becomes visible. The measure for this phase is therefore not a count of names: it is a
+screenshot of each sample beside the same code in a simulator.
 
 ## Method
 

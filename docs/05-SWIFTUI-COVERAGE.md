@@ -49,16 +49,17 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- | --- |
 | `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes |
 | `Label` | ✅ | 6 | icon then title |
-| `Image(systemName:)` | 🟡 | 6 | ~80 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
+| `Image(systemName:)` | 🟡 | 6 | ~175 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
 | `GroupBox` | ✅ | - | a titled card: the label above, the contents on a rounded secondary panel |
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
+| `ContentUnavailableView` | ✅ | 13 | the empty state: a large symbol over a title over a description. `.search` is the stock spelling and carries its own text |
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
 | `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
 | `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
-| `ProgressView` | ✅ | 6 | determinate bar; `.circular` and the indeterminate form are a ring |
-| `Gauge` | 🟡 | 7 | `.gaugeStyle` chooses a ring or a bar; the ring does not show the value as an arc |
+| `ProgressView` | ✅ | 6 | determinate bar filling from its leading edge; `.circular` and the indeterminate form are the turning activity indicator |
+| `Gauge` | 🟡 | 7 | `.gaugeStyle` chooses a spinner or a bar; the circular form does not show the value as an arc |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
 | `TimelineView` | 🟡 | - | its content is drawn once, at the moment of the render. The schedule is a clock the preview does not run, and the `context` is not supplied |
 | `Chart` (Swift Charts) | ⬜ | - | needs a mark model and a plottable-value protocol of its own, which is a package rather than a view |
@@ -90,7 +91,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included |
 | `.onMove` | 🟡 | 7 | `move(fromOffsets:toOffset:)` works; there is no drag-to-reorder UI |
 | `.swipeActions` | 🟡 | 7 | recognised; the revealed action is the standard Delete |
-| `.searchable` | ✅ | 7 | a field above the content, writing its binding |
+| `.searchable` | ✅ | 7 | a field above the content, with its magnifying glass, writing its binding |
 | `.refreshable` | ⬜ | - | pull-to-refresh has no meaning in a static preview |
 | `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |
 | `Table` / `OutlineGroup` | ⬜ | - | a labelled placeholder. The closure of a view the preview does not draw is no longer run, so a `TableColumn`'s row parameter cannot trap |
@@ -108,7 +109,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- |
 | `.sheet` (+ `presentationDetents`) | ✅ | 6 |
 | `.fullScreenCover` | ✅ | 6 |
-| `.alert` | 🟡 | 6 | title, message and buttons; no text-field alerts |
+| `.alert` | 🟡 | 6 | title and message over a button strip built the way iOS builds one: full-width rows divided by hairlines, two side by side, `.cancel` leading and semibold, `.destructive` red. No text-field alerts |
 | `.confirmationDialog` | 🟡 | 6 | anchored to the bottom edge |
 | `.popover` | ✅ | - | presented as a sheet, which is what iOS does at this width |
 | `@Environment(\.dismiss)` | ✅ | 7 | closes whatever is presented when it is called |
@@ -343,7 +344,8 @@ Listed in the exported README so nothing is a surprise on the Mac:
    design. Layout is correct either way - the main thread measures whichever face actually resolved
    rather than reading a transcribed table - but two machines will break lines in different places,
    and neither is CoreText.
-2. **SF Symbols** - Apple's symbol artwork cannot be redistributed to a browser (R2). About eighty
+2. **SF Symbols** - Apple's symbol artwork cannot be redistributed to a browser (R2). About a
+   hundred and seventy-five
    names are *drawn*, as shapes on a 24-unit monoline grid at the proportions SF Symbols uses;
    everything else falls back to a Unicode character carrying the same meaning. Both are
    approximations, the shapes differ from Apple's, and the inspector marks every symbol as

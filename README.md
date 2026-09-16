@@ -33,7 +33,7 @@ construction and keeps the product honest: the preview can be imperfect, the out
 | [04 - Swift language subset](docs/04-SWIFT-SUBSET.md) | Exactly which Swift features are in/out, by tier |
 | [05 - SwiftUI coverage matrix](docs/05-SWIFTUI-COVERAGE.md) | Views, modifiers, styles - the living checklist |
 | [06 - Vertical slice (v0.1)](docs/06-VERTICAL-SLICE.md) | **The decided first build** - reference app, subset, per-phase task lists and findings |
-| [07 - Defect register](docs/07-DEFECT-REGISTER.md) | **The working backlog** - what an 870-check sweep found, in ten phases, plus an eleventh that writing three new app templates turned up. What is closed and what is not |
+| [07 - Defect register](docs/07-DEFECT-REGISTER.md) | **The working backlog** - what an 870-check sweep found, in twelve closed phases, plus a thirteenth, open, that seven sample screens turned up. What is closed and what is not |
 
 ## Decided scope for v0.1
 
@@ -58,6 +58,16 @@ payload on the way into a function. Two of them returned a *wrong answer* with a
 Problems pane, which is the one failure this product cannot have. All eighteen are
 closed, and the lesson is in the phases: a sweep tests the claims in the matrix, and
 almost every one of these lived in the space between two claims that were each true.
+
+**The register's thirteenth phase is open, and fourteen of its seventeen items are
+closed.** The same rule turned on the chrome: seven sample screens, rendered and then
+measured against what iOS draws, found seventeen defects a sweep by name cannot see.
+Three of them blanked the preview from ordinary Swift - `.shadow(color: .black.opacity(0.1))`
+and `.font(.title.bold())` both trapped - and four were one missing tint showing up on
+every screen at once. The rest were the chrome: an alert built like an alert, a search
+field with its magnifying glass, a spinner that spins. What is left is one item that
+needs content to compose *under* the bars rather than below them, and the symbol table,
+which is finite by construction.
 
 What it handles now is most of the SwiftUI people actually write:
 

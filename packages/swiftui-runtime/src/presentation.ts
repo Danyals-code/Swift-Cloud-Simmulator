@@ -1222,7 +1222,7 @@ class Resolver {
       return {
         kind,
         views: overlayViews,
-        detent: detentOf(view, modifier),
+        detent: detentOf(overlayViews),
         title: stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
         message: this.messageOf(modifier),
         dismiss,
@@ -1284,10 +1284,27 @@ const LEADING_PLACEMENTS: ReadonlySet<string> = new Set([
   'navigationBarLeading', 'topBarLeading', 'cancellationAction', 'leading',
 ])
 
-/** Presentation detents, as a fraction of screen height. */
-function detentOf(view: ViewValue, modifier: ModifierValue): number {
-  void modifier
-  const detents = view.modifiers.find((m) => m.name === 'presentationDetents')
+/**
+ * Presentation detents, as a fraction of screen height.
+ *
+ * Read from the sheet's *content*, which is where SwiftUI puts it:
+ *
+ * ```swift
+ * .sheet(isPresented: $show) {
+ *     ComposeView().presentationDetents([.medium])
+ * }
+ * ```
+ *
+ * This used to look at the modifiers of the view carrying `.sheet`, where nobody
+ * writes it and nothing was ever found, so every sheet in every project fell to the
+ * `.large` default and a `.medium` one was impossible to see.
+ *
+ * `collectModifier` searches the whole presented subtree rather than only its root,
+ * because a detent is a preference in SwiftUI and propagates up from wherever inside
+ * the sheet it was written.
+ */
+function detentOf(presented: readonly ViewValue[]): number {
+  const detents = collectModifier(presented, 'presentationDetents')
   const value = detents?.args[0]?.value
   if (value?.kind === 'array') {
     const first = value.elements[0]

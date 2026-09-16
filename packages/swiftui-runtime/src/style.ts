@@ -121,15 +121,36 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
   black: rgba(0, 0, 0),
   white: rgba(255, 255, 255),
   clear: rgba(0, 0, 0, 0),
-  primary: rgba(0, 0, 0, 0.85),
+  /**
+   * Opaque, which is what `UIColor.label` is in both appearances.
+   *
+   * This was 85% black, and the 15% was on every string in every preview at once:
+   * every title, every row, every button, every navigation bar. Nothing looked
+   * broken and nothing looked like iOS either, and a washed-out screenshot is the
+   * hardest kind of wrong to find, because there is no single view to point at.
+   *
+   * The *secondary* levels really are translucent, and they stay so - that is how
+   * they keep working over a coloured background.
+   */
+  primary: rgba(0, 0, 0),
   secondary: rgba(60, 60, 67, 0.6),
   accentColor: rgba(0, 122, 255),
   accent: rgba(0, 122, 255),
+  /**
+   * `.tint` as a *style*: `Text("New").foregroundStyle(.tint)`.
+   *
+   * The accent colour, which is what the tint is until something changes it. There is
+   * no tint in the environment to read - `.tint(.pink)` is applied where it is written
+   * and does not flow down - so a `.tint` style below a custom one resolves to the
+   * default rather than to that colour. Named here rather than special-cased, so the
+   * token behaves like every other colour name, `.tint.opacity(0.5)` included.
+   */
+  tint: rgba(0, 122, 255),
 
   // Semantic colours. These adapt, which is the entire reason for two tables -
   // `Color(white: 0.95)` does not adapt, and a preview that treats them alike would
   // hide the most common dark-mode mistake there is.
-  label: rgba(0, 0, 0, 0.85),
+  label: rgba(0, 0, 0),
   secondaryLabel: rgba(60, 60, 67, 0.6),
   tertiaryLabel: rgba(60, 60, 67, 0.3),
   separator: rgba(60, 60, 67, 0.29),
@@ -140,6 +161,12 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
   secondarySystemGroupedBackground: rgba(255, 255, 255),
   systemFill: rgba(120, 120, 128, 0.2),
   secondarySystemFill: rgba(120, 120, 128, 0.16),
+  // The two lighter fills. A search field and a segmented track are both
+  // `tertiarySystemFill` on iOS and were both drawn at `systemFill` here, which is
+  // nearly twice as dark - the difference between a control resting on a surface and
+  // one cut into it.
+  tertiarySystemFill: rgba(118, 118, 128, 0.12),
+  quaternarySystemFill: rgba(116, 116, 128, 0.08),
 }
 
 const DARK_COLORS: Readonly<Record<string, RGBA>> = {
@@ -156,12 +183,13 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   purple: rgba(191, 90, 242),
   pink: rgba(255, 55, 95),
   brown: rgba(172, 142, 104),
-  primary: rgba(255, 255, 255, 0.9),
+  primary: rgba(255, 255, 255),
   secondary: rgba(235, 235, 245, 0.6),
   accentColor: rgba(10, 132, 255),
   accent: rgba(10, 132, 255),
+  tint: rgba(10, 132, 255),
 
-  label: rgba(255, 255, 255, 0.9),
+  label: rgba(255, 255, 255),
   secondaryLabel: rgba(235, 235, 245, 0.6),
   tertiaryLabel: rgba(235, 235, 245, 0.3),
   separator: rgba(84, 84, 88, 0.6),
@@ -172,6 +200,8 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   secondarySystemGroupedBackground: rgba(28, 28, 30),
   systemFill: rgba(120, 120, 128, 0.36),
   secondarySystemFill: rgba(120, 120, 128, 0.32),
+  tertiarySystemFill: rgba(118, 118, 128, 0.24),
+  quaternarySystemFill: rgba(116, 116, 128, 0.18),
 }
 
 export function labelColor(scheme: ColorScheme): RGBA {
@@ -326,6 +356,23 @@ export const FONT_WEIGHTS: Readonly<Record<string, number>> = {
 export function resolveFontArg(value: SwiftValue | undefined, scale = 1): ResolvedFont | null {
   if (!value || value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return null
   const name = (value.payload as TokenPayload).name
+
+  // `.title.bold()`, `.body.weight(.semibold)`, `.caption.italic()` - a text style
+  // with a face change on it. Encoded as the style's own name plus the changes rather
+  // than resolved to a point size here, so the style keeps the line height Apple
+  // designed for it: `.title` leads at 34, where 28 * 1.29 would round to 36.
+  if (name.startsWith('style:')) {
+    const [style, weight, design, italic] = name.slice('style:'.length).split(':')
+    const base = fontForToken(style ?? 'body', scale)
+    if (!base) return null
+    return {
+      ...base,
+      family:
+        design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : base.family,
+      weight: FONT_WEIGHTS[weight ?? ''] ?? base.weight,
+      italic: italic === 'italic',
+    }
+  }
 
   if (name.startsWith('system:')) {
     const [, size, weight, design] = name.split(':')

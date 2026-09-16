@@ -37,6 +37,7 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'NavigationSplitView', 'TimelineView',
   // controls drawn plainly
   'DatePicker', 'ColorPicker', 'TextEditor', 'Menu', 'ShareLink', 'Gauge', 'AsyncImage',
+  'ContentUnavailableView',
   // shapes and drawing
   'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path', 'Canvas',
   // styles
@@ -182,9 +183,19 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // charts
   'Chart', 'BarMark', 'LineMark', 'PointMark', 'AreaMark', 'RuleMark',
   // platform surfaces a browser has no analogue for
-  'Map', 'Marker', 'Annotation', 'VideoPlayer', 'SceneView',
+  'Map', 'Marker', 'Annotation', 'VideoPlayer', 'SceneView', 'PhotosPicker',
   // scenes other than the one WindowGroup the preview shows
   'Settings', 'MenuBarExtra', 'DocumentGroup',
+  // iOS 16 and 17, which the deployment target is - every one of these was a typo as
+  // far as the checker was concerned, and a typo is blocking, so one of them anywhere
+  // in a file blanked the whole preview. `ContentUnavailableView` is the one that
+  // found this: an empty-state view is written on the way to a first screen, not after
+  // it.
+  'PhaseAnimator', 'KeyframeAnimator',
+  'EditButton', 'PasteButton', 'RenameButton',
+  'UnevenRoundedRectangle', 'AnyShape',
+  // iOS 18
+  'Tab', 'TabSection', 'MeshGradient',
 ])
 
 /**
@@ -256,6 +267,53 @@ export const BLEND_MODES: ReadonlyMap<string, string> = new Map([
   ['saturation', 'saturation'],
   ['color', 'color'],
   ['luminosity', 'luminosity'],
+])
+
+/**
+ * The style tokens each style modifier actually applies.
+ *
+ * `.buttonStyle` is a supported modifier, so `.buttonStyle(.glass)` passed the name
+ * check, found no branch that handled `.glass`, and drew a bare label - clean
+ * Problems pane, nothing applied, nothing said. That is precisely the failure
+ * `UNIMPLEMENTED_MODIFIERS` exists to prevent, arriving one level down at the
+ * argument, and `BLEND_MODES` above is the same observation handled for one modifier
+ * and not for the rest.
+ *
+ * A set per modifier rather than a list of the ones that *fail*, because the failing
+ * set grows every WWDC and the working set does not. Anything absent warns.
+ *
+ * Aliases are members here too: `.automatic` is not drawn differently from the
+ * default for most of these, but it is a real spelling that means "the default", so
+ * warning on it would be warning on correct code that behaves correctly.
+ *
+ * The rule for membership, applied token by token against the converter: it takes a
+ * branch of its own, or it is a spelling of the default. `.pickerStyle(.navigationLink)`
+ * and `.listStyle(.inset)` are neither - both fall through to a drawing that is not
+ * what they mean - so both warn.
+ */
+export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['buttonStyle', new Set(['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent'])],
+  ['pickerStyle', new Set(['automatic', 'menu', 'segmented', 'inline', 'wheel'])],
+  ['toggleStyle', new Set(['automatic', 'switch', 'button', 'checkbox'])],
+  ['labelStyle', new Set(['automatic', 'titleAndIcon', 'titleOnly', 'iconOnly'])],
+  ['progressViewStyle', new Set(['automatic', 'linear', 'circular'])],
+  [
+    'gaugeStyle',
+    new Set([
+      'automatic',
+      'linearCapacity',
+      'accessoryLinear',
+      'accessoryLinearCapacity',
+      'accessoryCircular',
+      'accessoryCircularCapacity',
+      'circular',
+      'linear',
+    ]),
+  ],
+  ['listStyle', new Set(['automatic', 'plain', 'grouped', 'insetGrouped', 'sidebar'])],
+  ['controlSize', new Set(['mini', 'small', 'regular', 'large'])],
+  ['buttonBorderShape', new Set(['automatic', 'capsule', 'circle', 'roundedRectangle'])],
+  ['textFieldStyle', new Set(['automatic', 'plain', 'roundedBorder'])],
 ])
 
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */

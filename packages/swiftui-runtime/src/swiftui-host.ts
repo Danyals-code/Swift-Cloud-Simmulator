@@ -16,6 +16,7 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
+import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
   asCanvasContext,
@@ -245,6 +246,18 @@ export class SwiftUIHost implements InterpreterHost {
 
   /** Whether a user type conforms to a protocol. Supplied with `callMethod`. */
   conformsTo: ((typeName: string, protocolName: string) => boolean) | null = null
+
+  /**
+   * Whether the project declared a type by this name. Supplied with `conformsTo`.
+   *
+   * The host answers for a lot of names on the strength of the name alone, and
+   * several of them are ones an app would reasonably declare for itself: `Tab`,
+   * `Settings`, `Marker`, `Table`, `Annotation`. Without this, `enum Tab { case home }`
+   * - which is how the selection for a `TabView` is written - had `Tab.allCases`
+   * answer with a *view*, and the failure surfaced two members later as "Value of type
+   * 'View' has no member 'count'".
+   */
+  declaresType: ((typeName: string) => boolean) | null = null
 
   /**
    * Calls a method the project declared in `extension View`.
@@ -1041,6 +1054,14 @@ export class SwiftUIHost implements InterpreterHost {
       return target
     }
 
+    // `.red.opacity(0.5)` - a contextual colour asked for one of `Color`'s members.
+    const promoted = this.colorFromToken(target, member)
+    if (promoted) return this.callMember(promoted, member, call)
+
+    // `.title.bold()` - the same shape of problem one type over.
+    const restyled = this.fontFromToken(target, member, call)
+    if (restyled) return restyled
+
     // A view modifier written on a colour: `Color.red.frame(width: 100)`. The colour
     // becomes the view it already is, and the modifier applies to that.
     if (
@@ -1380,10 +1401,20 @@ export class SwiftUIHost implements InterpreterHost {
       if (member in payload) return double(payload[member]!)
     }
 
+    // `.blue.gradient` - the same promotion the call path does, for the member of
+    // `Color` that is written without parentheses.
+    const promoted = this.colorFromToken(target, member)
+    if (promoted) return this.getMember(promoted, member, span)
+
     // `Color.red.gradient` - SwiftUI's one-line shade of a flat colour.
     if (target.kind === 'opaque' && target.typeName === COLOR_TYPE && member === 'gradient') {
       return this.colorGradient(target, target.payload as ColorPayload)
     }
+
+    // Every branch below answers on the strength of a type's *name*, so a name the
+    // project declared belongs to the project. Declining sends the member back to the
+    // interpreter, which reports against the real declaration.
+    if (target.kind === 'type' && this.declaresType?.(target.name)) return undefined
 
     if (target.kind === 'type') {
       if (target.name === 'Color') return color({ name: member })
@@ -1416,6 +1447,84 @@ export class SwiftUIHost implements InterpreterHost {
     if (typeName === 'Animation') return this.animationToken(name)
     if (typeName === 'AnyTransition') return this.transitionToken(name)
     return undefined
+  }
+
+  /**
+   * A contextual colour that has been asked for one of `Color`'s own members.
+   *
+   * `.red` is a token because nothing where it is written says which type it belongs
+   * to, and `coerceToType` above settles that when a *declaration* does. A member
+   * settles it just as well, and it is the only thing that can inside a modifier
+   * argument - which is exactly where `.foregroundStyle(.red.opacity(0.5))` and
+   * `.shadow(color: .black.opacity(0.1), radius: 8)` live. Both used to trap, and a
+   * trap takes the whole preview down rather than the one view that caused it.
+   *
+   * Narrow in both directions on purpose: only the members `Color` itself answers,
+   * and only names the palette knows. `.ultraThinMaterial.opacity(0.5)` is declined
+   * and still reports honestly, because promoting any token that was asked for any
+   * member would replace a value the user built with one the host invented - which is
+   * the rule `coerceToType` is written to.
+   */
+  private colorFromToken(target: SwiftValue, member: string): SwiftValue | undefined {
+    if (target.kind !== 'opaque' || target.typeName !== TOKEN_TYPE) return undefined
+    if (!COLOR_MEMBERS.has(member)) return undefined
+
+    const { name } = target.payload as TokenPayload
+    return colorForName(name) === null ? undefined : color({ name })
+  }
+
+  /**
+   * A contextual text style asked to change its face: `.title.bold()`.
+   *
+   * `Color` was not the only type with the problem above it - `.font(.title.bold())`
+   * and `.font(.body.weight(.semibold))` trapped on "Value of type 'Token' has no
+   * member", and took the screen with them, for exactly the same reason.
+   *
+   * The result is a token again rather than a font value, because that is how fonts
+   * already travel here: `.system(size:weight:)` is a token whose *name* carries its
+   * size and weight, and `resolveFontArg` is the one place that reads them. A `style:`
+   * token is the same idea keeping the style's name, so the line height stays the one
+   * the table gives rather than a ratio recomputed from the size.
+   *
+   * Only the four members whose effect the preview can honour. `.monospacedDigit()`
+   * and `.leading(_:)` are deliberately absent: answering them would mean returning a
+   * font that ignores what was asked, which is worse than the report.
+   */
+  private fontFromToken(
+    target: SwiftValue,
+    member: string,
+    call: HostCall,
+  ): SwiftValue | undefined {
+    if (target.kind !== 'opaque' || target.typeName !== TOKEN_TYPE) return undefined
+
+    const { name } = target.payload as TokenPayload
+    const [style = '', weight = '', design = '', italic = ''] = name.startsWith('style:')
+      ? name.slice('style:'.length).split(':')
+      : [name, '', '', '']
+
+    // A text style and nothing else. `.done.bold()` on a project's own enum case is
+    // not a font, and must go on reporting as one of its own members.
+    if (fontForToken(style) === null) return undefined
+
+    const next = { style, weight, design, italic }
+    switch (member) {
+      case 'weight':
+        next.weight = tokenNameOf(call.args[0]?.value) ?? weight
+        break
+      case 'bold':
+        next.weight = 'bold'
+        break
+      case 'italic':
+        next.italic = 'italic'
+        break
+      case 'monospaced':
+        next.design = 'monospaced'
+        break
+      default:
+        return undefined
+    }
+
+    return token(`style:${next.style}:${next.weight}:${next.design}:${next.italic}`)
   }
 
   /**
