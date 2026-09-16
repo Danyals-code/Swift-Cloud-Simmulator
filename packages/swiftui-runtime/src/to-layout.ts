@@ -288,6 +288,13 @@ function joinRoot(children: LayoutElement[], axis: Axis): LayoutElement {
   }
 }
 
+/** A `Section`'s three parts, or a run of rows written outside any section. */
+interface Section {
+  readonly header: LayoutElement | null
+  readonly footer: LayoutElement | null
+  readonly rows: LayoutElement[]
+}
+
 class Converter {
   constructor(
     private readonly hitTargets: Map<string, string>,
@@ -1004,6 +1011,15 @@ class Converter {
       case 'DisclosureGroup':
         return this.disclosureGroup(view, path, origin)
 
+      case 'GroupBox':
+        return this.groupBox(view, path, origin)
+
+      case 'LabeledContent':
+        return this.labeledContent(view, path, origin)
+
+      case 'ControlGroup':
+        return this.controlGroup(view, path, origin)
+
       case 'Gauge':
         return this.gauge(view, path, origin)
 
@@ -1189,6 +1205,123 @@ class Converter {
     }
   }
 
+  /**
+   * `GroupBox { … }` - a titled card.
+   *
+   * iOS draws it as secondary-background panel with a 12pt radius and the label
+   * above it in the body font, which is what this builds. It was one of the
+   * placeholders that failed the fourteen-snippet measure, and it is a container
+   * rather than a control: nothing about it needed a new mechanism, only the drawing.
+   */
+  private groupBox(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label')
+
+    const content: LayoutElement = {
+      kind: 'stack',
+      id: `${path}body`,
+      axis: 'vertical',
+      spacing: 8,
+      alignment: { horizontal: 'leading', vertical: 'center' },
+      children: this.convertList(view.children, `${path}c`, 'vertical'),
+    }
+
+    const padded: LayoutElement = {
+      kind: 'modified',
+      id: `${path}pad`,
+      modifier: { kind: 'padding', insets: uniformInsets(14) },
+      child: {
+        kind: 'modified',
+        id: `${path}wide`,
+        modifier: {
+          kind: 'frame',
+          maxWidth: Number.POSITIVE_INFINITY,
+          alignment: { horizontal: 'leading', vertical: 'center' },
+        },
+        child: content,
+      },
+    }
+
+    const card = this.background(
+      padded,
+      `${path}bg`,
+      this.color('secondarySystemGroupedBackground'),
+      12,
+    )
+
+    if (!title) return { ...card, ...origin }
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'vertical',
+      spacing: 8,
+      alignment: { horizontal: 'leading', vertical: 'center' },
+      children: [this.styledText(`${path}t`, title, 'body', 'label', 600), card],
+      ...origin,
+    }
+  }
+
+  /**
+   * `LabeledContent("Total", value: "$12")` - a label leading, its value trailing.
+   *
+   * The same row a `Form` draws for a setting, which is where the view is nearly
+   * always written. The value takes the secondary colour, so the pair reads as
+   * label-and-value rather than as two labels.
+   */
+  private labeledContent(view: ViewValue, path: string, origin: object): LayoutElement {
+    const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label') ?? ''
+    const valueArg = labelled(view.args, 'value')
+    const value = valueArg ? (stringArg(valueArg) ?? displayValue(valueArg)) : null
+
+    // The content form - `LabeledContent("Total") { Text("$12") }` - puts the value
+    // in the children instead, and either spelling draws the same row.
+    const trailing: LayoutElement =
+      value !== null
+        ? this.styledText(`${path}v`, value, 'body', 'secondaryLabel')
+        : {
+            kind: 'stack',
+            id: `${path}v`,
+            axis: 'horizontal',
+            spacing: 4,
+            alignment: CENTER,
+            children: this.convertList(view.children, `${path}c`, 'horizontal'),
+          }
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 8,
+      alignment: CENTER,
+      children: [
+        this.styledText(`${path}l`, title, 'body', 'label'),
+        { kind: 'spacer', id: `${path}sp`, axis: 'horizontal', minLength: 0 },
+        trailing,
+      ],
+      ...origin,
+    }
+  }
+
+  /**
+   * `ControlGroup { … }` - its controls in a row.
+   *
+   * Drawn as the row iOS draws in a toolbar rather than as a segmented picker: the
+   * segmented form is what `ControlGroup` looks like in a menu, and the resolver has
+   * no way to know which it landed in. The row is the form that is right more often,
+   * and the difference is spacing rather than content.
+   */
+  private controlGroup(view: ViewValue, path: string, origin: object): LayoutElement {
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'horizontal',
+      spacing: 12,
+      alignment: CENTER,
+      children: this.convertList(view.children, `${path}c`, 'horizontal'),
+      ...origin,
+    }
+  }
+
   private divider(path: string, parentAxis: Axis, origin: object): LayoutElement {
     const line: LayoutElement = {
       kind: 'fill',
@@ -1320,6 +1453,27 @@ class Converter {
             }
           : card,
       )
+
+      if (section.footer) {
+        blocks.push({
+          kind: 'modified',
+          id: `${path}s${index}f`,
+          modifier: {
+            kind: 'padding',
+            insets: insets(6, grouped ? ROW_INSET + 16 : ROW_INSET, 0, ROW_INSET),
+          },
+          child: {
+            kind: 'modified',
+            id: `${path}s${index}ff`,
+            modifier: {
+              kind: 'frame',
+              maxWidth: Number.POSITIVE_INFINITY,
+              alignment: { horizontal: 'leading', vertical: 'center' },
+            },
+            child: section.footer,
+          },
+        })
+      }
     })
 
     const column: LayoutElement = {
@@ -1343,12 +1497,9 @@ class Converter {
   }
 
   /** Splits a list's children into sections, wrapping each child as a row. */
-  private listSections(
-    view: ViewValue,
-    path: string,
-  ): { header: LayoutElement | null; rows: LayoutElement[] }[] {
-    const sections: { header: LayoutElement | null; rows: LayoutElement[] }[] = []
-    let current: { header: LayoutElement | null; rows: LayoutElement[] } = { header: null, rows: [] }
+  private listSections(view: ViewValue, path: string): Section[] {
+    const sections: Section[] = []
+    let current: Section = { header: null, footer: null, rows: [] }
 
     const flatten = (views: readonly ViewValue[]): ViewValue[] =>
       views.flatMap((v) => (v.name === 'ForEach' ? flatten(v.children) : [v]))
@@ -1356,15 +1507,20 @@ class Converter {
     for (const child of flatten(view.children)) {
       if (child.name === 'Section') {
         if (current.rows.length > 0 || current.header) sections.push(current)
+        const id = child.path ?? path
         const title = stringArg(positional(child.args, 0)) ?? argText(child, 'header')
+        const footer = argText(child, 'footer')
         current = {
           header: title
-            ? this.styledText(`${child.path ?? path}hdr`, title.toUpperCase(), 'caption', 'secondaryLabel')
+            ? this.styledText(`${id}hdr`, title.toUpperCase(), 'caption', 'secondaryLabel')
             : null,
+          // Sentence case and left aligned under the card, which is how iOS draws the
+          // explanatory line under a group of settings.
+          footer: footer ? this.styledText(`${id}ftr`, footer, 'caption', 'secondaryLabel') : null,
           rows: flatten(child.children).map((row) => this.listRow(row, path)),
         }
         sections.push(current)
-        current = { header: null, rows: [] }
+        current = { header: null, footer: null, rows: [] }
         continue
       }
       current.rows.push(this.listRow(child, path))

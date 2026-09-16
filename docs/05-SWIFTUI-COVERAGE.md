@@ -4,11 +4,10 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the text pass (defect register phase 9.2), which gave `TextRun` the
-attributes it had no field for, taught the line breaker to carry runs across a break, and
-made `Text + Text` render instead of stopping the preview.
+Last updated after the container pass (defect register phase 9.6), which drew `GroupBox`,
+`LabeledContent`, `ControlGroup` and `Section` footers instead of labelling them as absent.
 
-**131 ✅ · 45 🟡 · 30 ⬜ · 3 ✗**, over 209 rows, counted from this file rather than carried
+**134 ✅ · 45 🟡 · 30 ⬜ · 3 ✗**, over 212 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -51,7 +50,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | ~80 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
 | `Image("asset")` | ⬜ | - | reported as unavailable rather than drawn as a grey box |
-| `GroupBox` `LabeledContent` `ControlGroup` `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
+| `GroupBox` | ✅ | - | a titled card: the label above, the contents on a rounded secondary panel |
+| `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
+| `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
+| `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
 | `AsyncImage` | 🟡 | 7 | constructible now that `URL` exists; draws its `placeholder:`, because there is no network in the worker |
 | `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
 | `ProgressView` | 🟡 | 6 | determinate bar; the indeterminate form is a static ring |
@@ -81,7 +83,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `List` | 🟡 | 6 | plain and the grouped styles; no sidebar style |
-| `Section` | 🟡 | 6 | header; footers are not drawn yet |
+| `Section` | ✅ | 6 | header and footer, the footer in the secondary colour under the card |
 | `Form` | ✅ | 6 | the grouped-list form |
 | `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included |
 | `.onMove` | 🟡 | 7 | `move(fromOffsets:toOffset:)` works; there is no drag-to-reorder UI |

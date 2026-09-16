@@ -33,7 +33,7 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   // collections and navigation
   'List', 'Section', 'Form',
   'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView',
-  'DisclosureGroup', 'AnyView',
+  'DisclosureGroup', 'AnyView', 'GroupBox', 'LabeledContent', 'ControlGroup',
   // controls drawn plainly
   'DatePicker', 'ColorPicker', 'TextEditor', 'Menu', 'ShareLink', 'Gauge', 'AsyncImage',
   // shapes and drawing
@@ -171,8 +171,7 @@ export function isViewRoot(name: string): boolean {
  */
 export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // containers
-  'GroupBox', 'ControlGroup', 'ScrollViewReader', 'NavigationSplitView',
-  'LabeledContent', 'EquatableView',
+  'ScrollViewReader', 'NavigationSplitView', 'EquatableView',
   // data-driven
   'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
   // time and charts

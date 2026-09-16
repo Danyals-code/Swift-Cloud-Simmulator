@@ -169,9 +169,11 @@ describe('what the preview cannot do, it says', () => {
   })
 
   it('draws a placeholder for real SwiftUI it does not implement', () => {
-    const result = run(view('GroupBox("t") { Text("a") }'))
+    // `Map` rather than a view a later phase might draw: it is declined outright -
+    // Apple's tiles are not redistributable - so this stays true as coverage grows.
+    const result = run(view('Map()'))
     expect(errors(result)).toEqual([])
-    expect((result.renderTree?.nodes ?? []).some((n) => n.placeholder?.feature === 'GroupBox')).toBe(true)
+    expect((result.renderTree?.nodes ?? []).some((n) => n.placeholder?.feature === 'Map')).toBe(true)
   })
 
   it('does not warn about a modifier it does apply', () => {
