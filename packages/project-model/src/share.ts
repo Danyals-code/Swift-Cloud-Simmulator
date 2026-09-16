@@ -1,6 +1,8 @@
 import { deflateSync, inflateSync } from 'fflate'
 import type { SourceFile } from '@studio/shared'
+import { DEFAULT_DEVICE, DEVICES } from '@studio/sim-shell'
 import type { Project, ProjectManifest } from './types'
+import { normalizeFileName, normalizeFolderPath, normalizeProjectName } from './types'
 
 /**
  * Share links that carry the whole project in the URL.
@@ -32,6 +34,16 @@ export const MAX_SHARE_LENGTH = 8192
 
 /** Bumped only if the payload shape changes in a way an older reader would misread. */
 const FORMAT_VERSION = 1
+
+/**
+ * The most files a link may claim to carry.
+ *
+ * The length limit already bounds the payload, but it bounds it *compressed*: a few
+ * hundred bytes of repeated filenames inflate into tens of thousands of entries, and
+ * every one of them becomes a file in the exported archive. A ceiling here costs
+ * nothing - the largest template is eight files - and removes the question.
+ */
+const MAX_SHARE_FILES = 256
 
 interface SharePayload {
   readonly v: number
@@ -110,12 +122,15 @@ export function decodeProject(encoded: string, now: number): Project | null {
   }
 
   if (!isSharePayload(payload)) return null
+  if (!isSafePayload(payload)) return null
 
   const manifest: ProjectManifest = {
     name: payload.n,
     bundleId: payload.b,
     deploymentTarget: payload.d,
-    device: payload.t as ProjectManifest['device'],
+    // Validated rather than cast. The cast was the whole of 8.3: it made a claim the
+    // payload had not earned, and every reader downstream then believed it.
+    device: payload.t in DEVICES ? (payload.t as ProjectManifest['device']) : DEFAULT_DEVICE,
     colorScheme: 'light',
   }
 
@@ -133,6 +148,52 @@ export function decodeProject(encoded: string, now: number): Project | null {
     createdAt: now,
     updatedAt: now,
   }
+}
+
+/**
+ * Whether every *value* in a decoded payload is one this project may hold.
+ *
+ * `isSharePayload` checks types; this checks meanings, and the difference was a
+ * hole. A share link is a stranger's bytes - anyone can write one, and the studio
+ * opens it on sight - and two of its fields become paths inside the exported zip.
+ * A file id of `Sources/../../../evil.swift` produced the archive entry
+ * `MyApp/MyApp/../../../evil.swift`, and a project name of `../../evil` escaped in
+ * every entry at once, from a link 136 bytes long.
+ *
+ * The rule is idempotence against the normalisers the rest of the app already uses:
+ * a value is safe exactly when normalising it changes nothing. That is stricter than
+ * writing a second set of rules here, and it cannot drift from the first set, which
+ * is what a second set would eventually do.
+ *
+ * Anything checked here rejects the whole link rather than being repaired. A payload
+ * is machine-generated from a project that was already valid, so one that fails was
+ * corrupted or tampered with - and quietly opening a *different* project from the one
+ * the link names is its own small lie.
+ *
+ * The device is deliberately *not* checked here, and the line is worth stating. A bad
+ * name or file id can put a file outside the archive, and a bad bundle identifier or
+ * deployment target produces an export Xcode will not build - both are reasons to
+ * refuse the link. A device is a preview setting: getting it wrong costs a frame size
+ * and nothing else, and Phase 3.7 already decided such a link opens on the default
+ * rather than not at all. Throwing away someone's code over the size of the phone it
+ * is drawn in would be the wrong trade.
+ */
+function isSafePayload(payload: SharePayload): boolean {
+  if (normalizeProjectName(payload.n) !== payload.n) return false
+
+  // Apple's own character set for a bundle identifier. Not a security boundary - the
+  // pbxproj writer quotes and escapes what it writes, so an odd one is contained
+  // rather than injected - but a link carrying one that cannot build is still broken.
+  if (!/^[A-Za-z0-9][A-Za-z0-9.-]{0,154}$/.test(payload.b)) return false
+  if (!/^\d{1,2}(\.\d{1,2}){0,2}$/.test(payload.d)) return false
+
+  if (payload.f.length > MAX_SHARE_FILES) return false
+  if (!payload.f.every((file) => normalizeFileName(file.i) === file.i)) return false
+
+  const folders = payload.g ?? []
+  return folders.every(
+    (folder) => typeof folder === 'string' && normalizeFolderPath(folder) === folder,
+  )
 }
 
 function isSharePayload(value: unknown): value is SharePayload {

@@ -53,29 +53,40 @@ through a link that needs no server.
 What it handles now is most of the SwiftUI people actually write:
 
 - **Language** - structs and classes with inheritance and `super`, protocols and
-  extensions, enums with raw and associated values, `switch` with pattern
-  matching, `if let` and `guard let`, loops, closures, key paths, generics,
-  `throws` / `do-catch`, `inout`.
+  extensions, enums with raw and associated values, nested types, `switch` with
+  pattern matching, `if let` and `guard let`, loops, closures, key paths,
+  generics, `throws` / `do-catch`, `inout`.
+- **The standard library** - the `String`, `Array`, `Dictionary` and `Set`
+  members real code calls, the maths functions, `zip` and `stride`, and the
+  Foundation corner SwiftUI leans on: `UUID` for an `Identifiable` id, `Date`
+  with intervals and comparison, and a `URL` for `Link` and `AsyncImage`.
 - **Structure** - navigation stacks and links, tabs, lists, forms, sheets,
   alerts, scroll views, grids, `ForEach`.
 - **State** - `@State`, `@Binding`, `ObservableObject` with `@StateObject` and
   `@ObservedObject`, `@EnvironmentObject`, `@Environment`.
 - **Interaction** - the form controls, drag and magnify gestures with
-  `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`.
+  `@GestureState`, `.onAppear` / `.onChange`, swipe-to-delete, `.searchable`. A
+  `Stepper` counts by its step and stops at its bounds, a `DisclosureGroup` opens
+  and closes, and a `Picker` or `Menu` opens onto the options the user wrote.
 - **Drawing** - `Path`, `Canvas`, shapes with `.fill` and `.stroke`, gradients,
   materials, colour filters, `withAnimation` and transitions.
 - **Reuse** - custom `ViewModifier`, `extension View { func … }` and custom
   `ButtonStyle`: the three ways a real codebase names a look and applies it.
 - **The editor** - Xcode's Default (Dark) palette, a jump bar over every file,
-  completion from the project's own declarations as well as SwiftUI's, go to
-  definition, hover, quick fixes that apply themselves, and rename across every
-  file.
+  quick fixes that apply themselves, and rename across every file. Completion
+  knows what a value *is*: a String offers `uppercased` rather than 159 view
+  modifiers, a model struct offers its own members, and a view offers both. Go to
+  definition follows a member through its receiver, and hover describes the
+  standard library and the property wrappers as well as the project's own names.
 - **The studio around it** - a project navigator with real groups you can make,
   rename and drag files between; draggable pane dividers; Xcode's own keyboard
   shortcuts for showing and hiding them; and a Pause that stops the preview
   recompiling while you type.
 - **Paste and go** - `#Preview` blocks parse, and a view with only a preview
   renders rather than reporting that the project has no entry point.
+- **A share link is treated as a stranger's bytes** - every value it carries is
+  validated before it becomes a project, and the exporter refuses to write an
+  entry outside the archive's own root whatever it is handed.
 - **Somewhere to start** - eighteen templates, one of which (`Trailhead`) is a
   whole eight-file project rather than a snippet: tabs, two levels of
   navigation, scrolling in both directions, a shared store and a sheet.
@@ -111,19 +122,25 @@ recorded in [the roadmap](docs/03-ROADMAP.md#what-phase-9-deliberately-did-not-b
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1170 passing |
+| Unit tests | 1443 passing |
 | End-to-end | 52 / 52 passing |
 | Templates rendering with zero placeholders | 18 / 18 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
-| Coverage matrix | 98 ✅ · 39 🟡 · 29 ⬜ · 3 ✗ |
+| Coverage matrix | 125 ✅ · 46 🟡 · 30 ⬜ · 3 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
 | Tap to repaint | 0.2 ms (budget: 32 ms) |
-| Client JS | 390 KB gzipped / 450 KB budget (87%) |
+| Client JS | 394 KB gzipped / 450 KB budget (88%) |
 
-Next: [Phase 7's à-la-carte items](docs/03-ROADMAP.md) - a real `swiftc`
-verification service, accounts, AI codegen, GitHub export - each of which needs
-hosting, a key or an OAuth app; and whatever the coverage telemetry says people
-reached for.
+Next is the [defect register](docs/07-DEFECT-REGISTER.md), which is the working
+backlog: its phases 1 to 8 are closed and phase 9 is a third done. What remains
+there is the drawing work - the text attributes, which start with a render-tree
+change, the control styles that all draw alike, and the views still standing in as
+placeholders.
+
+After that, the [roadmap's à-la-carte Phase 7](docs/03-ROADMAP.md) - a real
+`swiftc` verification service, accounts, AI codegen, GitHub export - each of which
+needs hosting, a key or an OAuth app; and whatever the coverage telemetry says
+people reached for.
 
 ## Getting started
 

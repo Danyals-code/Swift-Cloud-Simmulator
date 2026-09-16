@@ -80,6 +80,14 @@ const BAG =
  * `symbolCandidates`, to its base shape - and failing that, to the Unicode glyph
  * the worker supplies, which is what the whole table used to be.
  */
+/** Shared by `gear` and `gearshape`, which are one drawing here. */
+const COG: readonly SymbolShape[] = [
+  s(
+    'M10.6 3.4h2.8l.45 2.35a6.7 6.7 0 0 1 1.8 1.05l2.25-.8 1.4 2.4-1.8 1.55a6.8 6.8 0 0 1 0 2.1l1.8 1.55-1.4 2.4-2.25-.8a6.7 6.7 0 0 1-1.8 1.05L13.4 20.6h-2.8l-.45-2.35a6.7 6.7 0 0 1-1.8-1.05l-2.25.8-1.4-2.4 1.8-1.55a6.8 6.8 0 0 1 0-2.1L4.7 10.4l1.4-2.4 2.25.8a6.7 6.7 0 0 1 1.8-1.05L10.6 3.4Z',
+  ),
+  s('M12 9.4a2.6 2.6 0 1 0 0 5.2a2.6 2.6 0 1 0 0-5.2Z', 1.5),
+]
+
 const SYMBOLS: Readonly<Record<string, readonly SymbolShape[]>> = {
   // ---------------------------------------------------------- navigation
   'chevron.right': [s('M9.4 4.9 16.5 12l-7.1 7.1')],
@@ -221,12 +229,12 @@ const SYMBOLS: Readonly<Record<string, readonly SymbolShape[]>> = {
   // ------------------------------------------------------------- objects
   house: [s('M3.6 11.2 12 4.2l8.4 7'), s('M5.6 12.6v7.2h12.8v-7.2')],
   'house.fill': [f('M3.2 11.6 12 4.2l8.8 7.4-1.2 1.4v7.2a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1v-7.2l-1.2-1.4Z')],
-  gearshape: [
-    s(
-      'M10.6 3.4h2.8l.45 2.35a6.7 6.7 0 0 1 1.8 1.05l2.25-.8 1.4 2.4-1.8 1.55a6.8 6.8 0 0 1 0 2.1l1.8 1.55-1.4 2.4-2.25-.8a6.7 6.7 0 0 1-1.8 1.05L13.4 20.6h-2.8l-.45-2.35a6.7 6.7 0 0 1-1.8-1.05l-2.25.8-1.4-2.4 1.8-1.55a6.8 6.8 0 0 1 0-2.1L4.7 10.4l1.4-2.4 2.25.8a6.7 6.7 0 0 1 1.8-1.05L10.6 3.4Z',
-    ),
-    s('M12 9.4a2.6 2.6 0 1 0 0 5.2a2.6 2.6 0 1 0 0-5.2Z', 1.5),
-  ],
+  gearshape: COG,
+  // `gear` and `gearshape` are different drawings in SF Symbols and the same idea.
+  // Drawing one as the other is an approximation; leaving `gear` to the Unicode
+  // fallback while its sibling got a real shape was an inconsistency, and `gear` is
+  // the name people actually type.
+  gear: COG,
   magnifyingglass: [s('M10.9 3.9a6.6 6.6 0 1 0 0 13.2a6.6 6.6 0 1 0 0-13.2Z'), s('M15.7 15.7 20.4 20.4')],
   trash: [
     s('M4.6 6.6h14.8'),

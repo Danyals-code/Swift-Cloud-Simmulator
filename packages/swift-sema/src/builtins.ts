@@ -235,7 +235,8 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Color', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
-  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date',
+  'Material', 'StrokeStyle', 'GeometryProxy', 'Gradient', 'AnyShapeStyle',
+  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
   'ViewModifier', 'ButtonStyle', 'LabelStyle', 'ToggleStyle', 'Configuration',
@@ -247,9 +248,20 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Void', 'Any', 'AnyObject', 'Never',
 ])
 
-/** Free functions available in the preview. */
+/**
+ * Free functions available in the preview.
+ *
+ * Membership means the *runtime* implements it, not that the name exists in Swift.
+ * `zip` and `stride` sat here for three phases with nothing behind them, so the
+ * checker stayed quiet and the interpreter then reported "cannot find zip in scope" -
+ * the same shape of lie as a view listed as supported and drawn as nothing.
+ */
 export const KNOWN_FUNCTIONS: ReadonlySet<string> = new Set([
   'print', 'min', 'max', 'abs', 'zip', 'stride', 'withAnimation',
+  // maths, which `import Foundation` brings in
+  'sqrt', 'pow', 'round', 'floor', 'ceil',
+  // diagnostics and reflection
+  'type', 'fatalError', 'assert', 'assertionFailure', 'precondition', 'preconditionFailure',
 ])
 
 /** Property wrappers, mapped to whether the preview implements them. */
@@ -273,6 +285,20 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean; phase:
 export const KNOWN_ATTRIBUTES: ReadonlySet<string> = new Set([
   'main', 'ViewBuilder', 'escaping', 'autoclosure', 'available', 'discardableResult',
   'inlinable', 'frozen', 'objc', 'MainActor', 'Observable', 'Sendable',
+])
+
+/**
+ * Built-in value types whose members the checker has no list of.
+ *
+ * `extension String { var shout: String { uppercased() } }` calls a member of the
+ * receiver with no receiver written, and the standard library's member list is not
+ * something this checker holds - so inside one of these, an unresolved name is an
+ * unknown rather than an error. `View` is deliberately absent: an extension on it is
+ * already handled, and more narrowly, by the modifier rule.
+ */
+export const EXTENSIBLE_BUILTIN_TYPES: ReadonlySet<string> = new Set([
+  'Int', 'Double', 'Float', 'CGFloat', 'Bool', 'String', 'Character',
+  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL', 'Color', 'Font',
 ])
 
 export function isKnownGlobal(name: string): boolean {

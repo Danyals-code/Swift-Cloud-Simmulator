@@ -203,7 +203,17 @@ export function resolveColorPayload(payload: ColorPayload, scheme: ColorScheme =
           )
         : grayscale(payload.white ?? 0)
 
-  return payload.opacity === undefined ? base : { ...base, a: base.a * payload.opacity }
+  const shaded =
+    payload.shade === undefined
+      ? base
+      : {
+          ...base,
+          r: Math.round(base.r * payload.shade),
+          g: Math.round(base.g * payload.shade),
+          b: Math.round(base.b * payload.shade),
+        }
+
+  return payload.opacity === undefined ? shaded : { ...shaded, a: shaded.a * payload.opacity }
 }
 
 /**

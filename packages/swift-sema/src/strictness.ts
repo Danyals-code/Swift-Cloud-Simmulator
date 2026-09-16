@@ -146,7 +146,11 @@ class StrictnessLinter {
       for (const param of decl.params) {
         this.declare(param.internalName, {
           type: knownOf(param.type),
-          isLet: true,
+          // A parameter is a constant - except an `inout` one, which is a reference
+          // to the caller's storage and exists precisely to be written. Declaring it
+          // a `let` made `func bump(_ x: inout Int) { x += 1 }`, the whole point of
+          // the feature, report that `x` is a constant.
+          isLet: !param.isInout,
           span: param.span,
           elementType: elementTypeOf(param.type),
         })
@@ -536,7 +540,25 @@ class StrictnessLinter {
     )
   }
 
-  /** A method that writes to `self` must be declared `mutating`. */
+  /**
+   * A method that writes to `self` must be declared `mutating`.
+   *
+   * Except through a property wrapper, which is the case this used to get exactly
+   * backwards. `@State`, `@Binding` and every other SwiftUI wrapper has a
+   * **nonmutating** setter - that is precisely what lets `body`, which is a
+   * non-mutating computed property, write to them at all. So `func bump() { count
+   * += 1 }` next to `@State private var count` is not just legal, it is the single
+   * most common shape in SwiftUI, and this fired on it and offered to insert
+   * `mutating` - after which `body` can no longer call the method and Xcode rejects
+   * the file. A warning that is wrong is bad; a fix-it that breaks working code is
+   * worse, and this was both.
+   *
+   * The test is "carries any attribute at all" rather than a list of the wrappers
+   * SwiftUI ships, because a wrapper the project declared itself is on no list, and
+   * whether its setter is mutating cannot be known from here. The cost of the wider
+   * test is a missed warning on `@available var n = 0`, which is the direction the
+   * house rule asks to err in.
+   */
   private mutatingSelf(decl: FuncDecl, owner: StructDecl | null): void {
     if (!owner || !decl.body) return
     // Only value types need `mutating`. A class method writing a property is
@@ -546,7 +568,13 @@ class StrictnessLinter {
 
     const stored = new Set(
       owner.members
-        .filter((m): m is VarDecl => m.kind === 'varDecl' && m.accessor === null && !m.isLet)
+        .filter(
+          (m): m is VarDecl =>
+            m.kind === 'varDecl' &&
+            m.accessor === null &&
+            !m.isLet &&
+            m.attributes.length === 0,
+        )
         .map((m) => m.name),
     )
     if (stored.size === 0) return
@@ -853,12 +881,50 @@ function findAssignedNames(block: Block): string[] {
 }
 
 function walkStatements(block: Block, visit: (statement: Stmt) => void): void {
-  for (const statement of block.statements) {
-    visit(statement)
-    if (statement.kind === 'ifStmt') {
+  for (const statement of block.statements) walkStatement(statement, visit)
+}
+
+/**
+ * Every statement in a body, nested ones included.
+ *
+ * This walked only into `if` and `for`, which made two different checks wrong in
+ * opposite directions. `missingReturn` asks whether a body contains a `return`
+ * anywhere, so a function whose returns were all inside a `switch`, a `while`, a
+ * `repeat` or a `do` was told it had none - a warning on correct code. And
+ * `findAssignedNames` asks what a method writes to, so a struct method assigning a
+ * property inside a `switch` was not told it needed `mutating` - a real error
+ * missed. One incomplete walk, one false positive and one false negative.
+ *
+ * `else if` is the other half of it: the `else` of an `if` is either a block or
+ * *another `if`*, and only the block branch was followed, so an `else if` chain
+ * hid everything below its first rung.
+ */
+function walkStatement(statement: Stmt, visit: (statement: Stmt) => void): void {
+  visit(statement)
+
+  switch (statement.kind) {
+    case 'ifStmt':
       walkStatements(statement.then, visit)
       if (statement.else?.kind === 'block') walkStatements(statement.else, visit)
-    }
-    if (statement.kind === 'forInStmt') walkStatements(statement.body, visit)
+      else if (statement.else) walkStatement(statement.else, visit)
+      return
+    case 'switchStmt':
+      for (const branch of statement.cases) walkStatements(branch.body, visit)
+      return
+    case 'doCatchStmt':
+      walkStatements(statement.body, visit)
+      for (const clause of statement.catches) walkStatements(clause.body, visit)
+      return
+    case 'guardStmt':
+      walkStatements(statement.else, visit)
+      return
+    case 'forInStmt':
+    case 'whileStmt':
+    case 'repeatStmt':
+    case 'deferStmt':
+      walkStatements(statement.body, visit)
+      return
+    default:
+      return
   }
 }

@@ -26,6 +26,7 @@ import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
+import type { OverlayKind } from './presentation'
 
 /**
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
@@ -233,7 +234,7 @@ function presentOverlay(
       ? {
           hitTarget: {
             handlerId: overlay.dismissId,
-            label: 'Dismiss',
+            label: dismissLabel(overlay.kind),
             role: 'button' as const,
             enabled: true,
           },
@@ -248,7 +249,7 @@ function presentOverlay(
     { ...env, cornerRadius: overlay.kind === 'sheet' ? 12 : overlay.kind === 'cover' ? 0 : 14 },
     overlay.kind === 'alert'
       ? CENTER
-      : overlay.kind === 'dialog'
+      : overlay.kind === 'dialog' || overlay.kind === 'menu'
         ? { horizontal: 'center', vertical: 'bottom' }
         : { horizontal: 'leading', vertical: 'top' },
   )
@@ -257,6 +258,35 @@ function presentOverlay(
   for (const node of surface) nodes.push({ ...node, z: node.z + 1 })
 
   return nodes
+}
+
+/**
+ * What the dimmed backdrop is called.
+ *
+ * Named for *what it closes* rather than "Dismiss", which is the word a user's own
+ * button most often carries - `.sheet { Button("Dismiss") { … } }` is in this repo's
+ * own end-to-end fixture. Two controls answering to one name is ambiguous for anyone
+ * driving the preview by name, whether that is a screen reader or a test, and the
+ * backdrop is the one of the two that can be named unilaterally.
+ *
+ * iOS does not expose this backdrop to VoiceOver at all - it has a swipe instead, and
+ * the preview does not. So it stays reachable and says which thing it puts away.
+ */
+function dismissLabel(kind: OverlayKind): string {
+  switch (kind) {
+    case 'sheet':
+      return 'Close sheet'
+    case 'cover':
+      return 'Close screen'
+    case 'alert':
+      return 'Close alert'
+    case 'dialog':
+      return 'Close options'
+    case 'menu':
+      return 'Close menu'
+    default:
+      return 'Close popover'
+  }
 }
 
 function overlayRect(
@@ -273,7 +303,7 @@ function overlayRect(
     return { x: (canvas.width - width) / 2, y: 0, width, height: canvas.height }
   }
 
-  if (overlay.kind === 'dialog') {
+  if (overlay.kind === 'dialog' || overlay.kind === 'menu') {
     const width = canvas.width - 16
     return { x: 8, y: 0, width, height: canvas.height - safeArea.bottom - 8 }
   }

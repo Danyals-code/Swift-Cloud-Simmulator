@@ -218,6 +218,103 @@ describe('mutability', () => {
     ).toEqual([])
   })
 
+  it('says nothing about a method that writes a wrapped property', () => {
+    // The pass fired on this, which is the most standard shape in SwiftUI: every
+    // property wrapper has a *nonmutating* setter, which is exactly what lets
+    // `body` - a non-mutating computed property - write to one. And the fix-it it
+    // offered inserted `mutating`, after which `body` can no longer call the method
+    // and Xcode rejects the file. A wrong warning is bad; a fix-it that breaks
+    // working code is worse.
+    expect(
+      messages(`struct ContentView: View {
+    @State private var count = 0
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button("Go") { bump() }
+    }
+
+    func bump() {
+        count += 1
+        isOn = true
+    }
+}`),
+    ).toEqual([])
+  })
+
+  it('says nothing about a method that writes a property with any attribute', () => {
+    // A wrapper the project declared itself is on no list of SwiftUI's, and whether
+    // its setter is mutating cannot be known from here. An attribute on a stored
+    // property is a wrapper in practice, so carrying one is enough to stay quiet.
+    expect(
+      messages(`struct Screen {
+    @Tracked var count = 0
+
+    func bump() {
+        count += 1
+    }
+}`),
+    ).toEqual([])
+  })
+
+  it('still flags a method that writes a plain stored property', () => {
+    // The check has to keep working: the exclusion is for wrapped properties, not
+    // for every property on a struct with a wrapper somewhere in it.
+    const found = lint(`struct ContentView: View {
+    @State private var count = 0
+    var title = ""
+
+    var body: some View { Text(title) }
+
+    func rename() {
+        title = "x"
+    }
+}`)
+    expect(found).toHaveLength(1)
+    expect(found[0]!.message).toContain("'rename' assigns to 'title'")
+  })
+
+  it('flags a method that writes a property inside a switch', () => {
+    // The walk stopped at `if` and `for`, so an assignment in a `switch` was
+    // invisible - the same incomplete walk that made `missingReturn` fire on
+    // correct code, seen from the other side.
+    const found = lint(`struct Counter {
+    var count = 0
+
+    func apply(_ up: Bool) {
+        switch up {
+        case true: count += 1
+        case false: count -= 1
+        }
+    }
+}`)
+    expect(found).toHaveLength(1)
+    expect(found[0]!.message).toContain("is not declared 'mutating'")
+  })
+
+  it('says nothing about writing an inout parameter', () => {
+    // An `inout` parameter is a reference to the caller's storage and exists to be
+    // written. It was declared as a `let`, so the one thing the feature is for
+    // reported as an error.
+    expect(
+      messages(`struct Maths {
+    func bump(_ value: inout Int) {
+        value += 1
+    }
+}`),
+    ).toEqual([])
+  })
+
+  it('still flags assignment to an ordinary parameter', () => {
+    const found = lint(`struct Maths {
+    func bump(_ value: Int) -> Int {
+        value = value + 1
+        return value
+    }
+}`)
+    expect(found[0]!.message).toContain("is a 'let' constant")
+  })
+
   it('says nothing about a class method that writes a property', () => {
     // Only value types need `mutating`. Flagging a class method would be a warning
     // on ordinary, correct Swift - and this pass fired on exactly that until the
@@ -389,6 +486,42 @@ describe('returns', () => {
       ),
     ).toEqual([])
   })
+
+  /**
+   * The walk behind this check followed only `if` and `for`, so a function whose
+   * returns were all inside anything else was told it had none. Every construct
+   * below is a place a `return` can legitimately live, and each one is written with
+   * nothing returnable at the top level, so only the walk can find it.
+   */
+  it.each([
+    ['a switch', `        switch n {
+        case 0: return "zero"
+        default: return "more"
+        }`],
+    ['a switch over an optional', `        let v: Int? = n
+        switch v {
+        case .some(let x): return "\\(x)"
+        case .none: return "none"
+        }`],
+    ['a while', `        while true { return "\\(n)" }`],
+    ['a repeat', `        repeat { return "\\(n)" } while false`],
+    ['a do-catch', `        do { return "ok" } catch { return "bad" }`],
+    ['an else-if chain', `        if n > 5 { return "big" } else if n > 1 { return "mid" } else { return "small" }`],
+    ['a guard else', `        guard n > 0 else { return "none" }
+        return "some"`],
+    ['a for-in', `        for _ in 0..<n { return "looped" }
+        return "none"`],
+  ])('says nothing about a return inside %s', (_label, statements) => {
+    expect(
+      messages(`struct Maths {
+    func describe(_ n: Int) -> String {
+        let label = "x"
+        _ = label
+${statements}
+    }
+}`),
+    ).toEqual([])
+  })
 })
 
 describe('the silence case', () => {
@@ -429,6 +562,26 @@ struct TaskList: View {
         return count
     }
 
+    // Factored out of \`body\`, which is what happens to every view that grows. Each
+    // of these writes a wrapped property from a non-mutating method, and each is
+    // correct Swift: a property wrapper's setter is nonmutating, which is the whole
+    // reason \`body\` can write one.
+    func present() {
+        showingSheet = true
+    }
+
+    func dismiss() {
+        showingSheet = false
+        filter = ""
+    }
+
+    func label(for task: Task) -> String {
+        switch task.done {
+        case true: return "done"
+        case false: return "open"
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -437,7 +590,7 @@ struct TaskList: View {
                         HStack {
                             Text(task.title)
                             Spacer()
-                            Text(task.done ? "done" : "open")
+                            Text(label(for: task))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -446,7 +599,7 @@ struct TaskList: View {
             .navigationTitle("\\(remaining) left")
             .toolbar {
                 Button("Add") {
-                    showingSheet = true
+                    present()
                 }
             }
             .sheet(isPresented: $showingSheet) {
@@ -454,7 +607,7 @@ struct TaskList: View {
                     TextField("Title", text: $filter)
                         .padding()
                     Button("Close") {
-                        showingSheet = false
+                        dismiss()
                     }
                 }
             }

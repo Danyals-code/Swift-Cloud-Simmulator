@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { unzipSync } from 'fflate'
 import { createDefaultProject, type Project } from '@studio/project-model'
-import { buildExportBundle, exportProjectZip, targetRelativePath, zipFileName } from './index'
+import {
+  buildExportBundle,
+  buildPackageBundle,
+  buildSwiftPMAppBundle,
+  buildXcodeGenBundle,
+  exportProjectZip,
+  targetRelativePath,
+  zipFileName,
+} from './index'
 
 /**
  * `ignoreBOM: true` is load-bearing: TextDecoder's *default* is to silently strip a
@@ -103,4 +111,68 @@ describe('zipFileName', () => {
     const project = { ...base, manifest: { ...base.manifest, name: 'My App/v2: "final"' } }
     expect(zipFileName(project)).toBe('My-App-v2---final-.zip')
   })
+})
+
+/**
+ * The archive's own invariant: every entry is inside its own root.
+ *
+ * The values these paths are built from are validated where they enter the project,
+ * so nothing that reaches here should fail. It is asserted anyway because this is
+ * the layer that owns the guarantee, and a project can arrive from more places than
+ * it could yesterday - a share link, storage written by an older build, and whatever
+ * import route gets added next.
+ */
+describe('no entry escapes the project root', () => {
+  const formats: [string, (p: Project) => ReadonlyMap<string, Uint8Array>][] = [
+    ['xcodeproj', buildExportBundle],
+    ['swiftpm', buildSwiftPMAppBundle],
+    ['package', buildPackageBundle],
+    ['xcodegen', buildXcodeGenBundle],
+  ]
+
+  const named = (name: string): Project => {
+    const base = createDefaultProject(0)
+    return { ...base, manifest: { ...base.manifest, name } }
+  }
+
+  for (const [format, build] of formats) {
+    /**
+     * Deep enough to climb out of every layout. Three `..` escape the two-deep
+     * `.xcodeproj` nesting and land at the top of the three-deep `.swiftpm` one,
+     * which is why the rule is "inside its own root" rather than "inside the zip".
+     */
+    it.each([
+      ['a file id that climbs out', projectWith([{ id: 'Sources/../../../../evil.swift', text: 'x' }])],
+      ['a Windows file id', projectWith([{ id: 'C:\\Windows\\evil.swift', text: 'x' }])],
+      ['a project name that climbs out', named('../../evil')],
+    ])(`${format}: refuses %s`, (_label, project) => {
+      expect(() => build(project)).toThrow(/outside the project/)
+    })
+
+    it(`${format}: keeps a shallower climb inside the root rather than refusing it`, () => {
+      // Two `..` escape the two-deep `.xcodeproj` layout and land at the top of the
+      // three-deep `.swiftpm` one. Asserted rather than left implicit, because the
+      // asymmetry is the reason the guard resolves the path instead of counting dots.
+      const project = projectWith([{ id: 'Sources/../../climbed.swift', text: 'x' }])
+      const root = format === 'swiftpm' ? `${project.manifest.name}.swiftpm` : project.manifest.name
+
+      let entries: string[] = []
+      try {
+        entries = [...build(project).keys()]
+      } catch {
+        // Refused: also correct, and what the two-deep layouts do.
+        return
+      }
+      for (const entry of entries) expect(entry.startsWith(`${root}/`), entry).toBe(true)
+    })
+
+    it(`${format}: writes an ordinary project without complaint`, () => {
+      const entries = [...build(createDefaultProject(0)).keys()]
+      expect(entries.length).toBeGreaterThan(0)
+      for (const entry of entries) {
+        expect(entry, entry).not.toMatch(/(^|\/)\.\.(\/|$)/)
+        expect(entry, entry).not.toMatch(/^[/\]|^[A-Za-z]:/)
+      }
+    })
+  }
 })

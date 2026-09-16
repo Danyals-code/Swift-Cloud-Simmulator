@@ -80,6 +80,28 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
           },
         }
       : {}),
+    // Carried for every node rather than only for the invisible `hit` boxes. The
+    // dimmed layer behind a sheet is a *fill* with a hit target on it, and this
+    // conversion used to drop it - so "tap outside to dismiss", which the coverage
+    // matrix offers as the way to close a sheet, silently did nothing at all.
+    ...(node.hitTarget
+      ? {
+          hitTarget: {
+            handlerId: node.hitTarget.handlerId,
+            role: node.hitTarget.role,
+            enabled: node.hitTarget.enabled,
+            ...(node.hitTarget.value !== undefined ? { value: node.hitTarget.value } : {}),
+            ...(node.hitTarget.placeholder !== undefined
+              ? { placeholder: node.hitTarget.placeholder }
+              : {}),
+            ...(node.hitTarget.min !== undefined ? { min: node.hitTarget.min } : {}),
+            ...(node.hitTarget.max !== undefined ? { max: node.hitTarget.max } : {}),
+            ...(node.hitTarget.font ? { font: node.hitTarget.font } : {}),
+            ...(node.hitTarget.color ? { color: node.hitTarget.color } : {}),
+          },
+          a11y: { role: a11yRole(node.hitTarget.role), label: node.hitTarget.label },
+        }
+      : {}),
   }
 
   switch (node.paint.kind) {
@@ -176,26 +198,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
       return {
         ...base,
         kind: 'layer',
-        ...(node.hitTarget
-          ? {
-              hitTarget: {
-                handlerId: node.hitTarget.handlerId,
-                role: node.hitTarget.role,
-                enabled: node.hitTarget.enabled,
-                ...(node.hitTarget.value !== undefined ? { value: node.hitTarget.value } : {}),
-                ...(node.hitTarget.placeholder !== undefined
-                  ? { placeholder: node.hitTarget.placeholder }
-                  : {}),
-                ...(node.hitTarget.min !== undefined ? { min: node.hitTarget.min } : {}),
-                ...(node.hitTarget.max !== undefined ? { max: node.hitTarget.max } : {}),
-                ...(node.hitTarget.font ? { font: node.hitTarget.font } : {}),
-                ...(node.hitTarget.color ? { color: node.hitTarget.color } : {}),
-              },
-              a11y: { role: a11yRole(node.hitTarget.role), label: node.hitTarget.label },
-            }
-          : node.a11y
-            ? { a11y: node.a11y }
-            : {}),
+        ...(!node.hitTarget && node.a11y ? { a11y: node.a11y } : {}),
       }
   }
 }

@@ -87,6 +87,51 @@ export function withFileText(project: Project, fileId: FileId, text: string): Pr
 export const SOURCE_DIR = 'Sources'
 
 /**
+ * Control characters, checked numerically: a regex range for them is unreadable,
+ * and lint rightly objects to one.
+ */
+function hasControlCharacters(text: string): boolean {
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0
+    if (code < 0x20 || code === 0x7f) return true
+  }
+  return false
+}
+
+/**
+ * The longest project name worth accepting.
+ *
+ * Not a filesystem limit - it is a limit on how much of a zip entry's path one
+ * field can be. Every entry in the archive begins with this name twice over.
+ */
+const MAX_PROJECT_NAME = 64
+
+/**
+ * Rejects a project name that would escape the archive or confuse a filesystem.
+ *
+ * A project name is a single directory name, so unlike a file id it may not contain
+ * a separator at all: every path in the exported bundle starts with it, most of them
+ * twice, and a `/` in it would move the whole project somewhere else.
+ *
+ * Its own function rather than a reuse of `cleanSegmentPath`, because that one's job
+ * is to accept a *path* - `Models/Item` is a fine file name and a terrible project
+ * name, and the difference is exactly the separator.
+ */
+export function normalizeProjectName(name: string): string | null {
+  const trimmed = name.trim()
+  if (trimmed.length === 0 || trimmed.length > MAX_PROJECT_NAME) return null
+
+  if (trimmed.includes('/') || trimmed.includes('\\')) return null
+  if (trimmed.includes('..')) return null
+  if (/[<>:"|?*]/.test(trimmed)) return null
+  if (hasControlCharacters(trimmed)) return null
+  // A name that is only dots is a path pretending to be a name.
+  if (/^\.+$/.test(trimmed)) return null
+
+  return trimmed
+}
+
+/**
  * Rejects anything that would escape the project or confuse a filesystem.
  *
  * Shared by the file and folder normalisers so the two cannot drift: a character
@@ -99,12 +144,7 @@ function cleanSegmentPath(name: string): string | null {
 
   if (trimmed.includes('..') || trimmed.includes('//')) return null
   if (/[<>:"\\|?*]/.test(trimmed)) return null
-  // Control characters, checked numerically: a regex range for them is unreadable,
-  // and lint rightly objects to one.
-  for (const char of trimmed) {
-    const code = char.codePointAt(0) ?? 0
-    if (code < 0x20 || code === 0x7f) return null
-  }
+  if (hasControlCharacters(trimmed)) return null
   // A segment that is only dots or only spaces is a path that looks like a name.
   if (trimmed.split('/').some((segment) => segment.length === 0 || /^\.+$/.test(segment))) {
     return null

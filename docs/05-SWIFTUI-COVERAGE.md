@@ -4,9 +4,13 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the honesty pass (defect register phases 1-3), which changed what several
-rows claim rather than what they draw. The headline counts are deliberately not restated here
-until the full reconciliation: a total that is one pass out of date is worse than none.
+Last updated after the controls pass (defect register phase 9), which made four of the
+controls that were drawn answer to a press. Before it, a `Stepper` had two halves and no
+way to press either, and a `DisclosureGroup` was permanently open.
+
+**125 ✅ · 46 🟡 · 30 ⬜ · 3 ✗**, over 204 rows, counted from this file rather than carried
+forward. That is a count of what the matrix *claims*; checking every claim against the code
+is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
 Anything not listed renders a labelled placeholder box and is counted by the coverage telemetry
 (FR-4.11, NFR-6). Those counts are visible in the studio's **Coverage** panel and never leave the
@@ -30,7 +34,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Group` | ✅ | 3 | |
 | `ForEach` | ✅ | 6 | ranges, `Identifiable`, `id:` key paths; identity follows the element |
 | `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's |
-| `GeometryReader` | ✅ | 7 | reports its real size, and is its own coordinate space |
+| `GeometryReader` | ✅ | 7 | reports its real size through `size` and `frame(in:)`, and is its own coordinate space |
 | `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks - correct, but not virtualised |
 | `LazyVGrid` / `LazyHGrid` | ✅ | 6 | fixed, flexible and adaptive columns |
 | `Grid` / `GridRow` | ✅ | 7 | columns align across rows |
@@ -43,13 +47,13 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | 🟡 | 3 | interpolation, and `format:` number styles (`.number`, `.percent`, `.currency(code:)`). **`Text + Text` concatenation is not implemented**, and `Date` does not exist at runtime, so `Text(date, style:)` traps |
+| `Text` | 🟡 | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). **`Text + Text` concatenation is not implemented** |
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | ~80 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
 | `Image("asset")` | ⬜ | - | reported as unavailable rather than drawn as a grey box |
 | `GroupBox` `LabeledContent` `ControlGroup` `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
-| `AsyncImage` | 🟡 | 7 | draws its `placeholder:`; there is no network in the worker |
-| `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet |
+| `AsyncImage` | 🟡 | 7 | constructible now that `URL` exists; draws its `placeholder:`, because there is no network in the worker |
+| `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
 | `ProgressView` | 🟡 | 6 | determinate bar; the indeterminate form is a static ring |
 | `Gauge` | 🟡 | 7 | drawn as a labelled bar, whatever the gauge style |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
@@ -60,17 +64,17 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 ## Controls
 
-| View | Status | Phase |
-| --- | --- | --- |
-| `Button` | ✅ | 3 |
-| `Toggle` | ✅ | 6 |
-| `Slider` | ✅ | 6 |
-| `Stepper` | 🟡 | 6 | drawn and laid out; the two halves are not separately tappable yet |
+| View | Status | Phase | Notes |
+| --- | --- | --- | --- |
+| `Button` | ✅ | 3 | |
+| `Toggle` | ✅ | 6 | |
+| `Slider` | ✅ | 6 | |
+| `Stepper` | ✅ | 6 | each half is its own target; `step:` and `in:` are both honoured |
 | `TextField` / `SecureField` | 🟡 | 6 | a real input with a caret; `SecureField` does not mask yet |
 | `TextEditor` | 🟡 | 7 | a single-line field; no multi-line editing |
-| `Picker` | 🟡 | 6 | drawn in the menu style, showing its selection; not yet openable |
-| `DatePicker` / `ColorPicker` | 🟡 | 7 | drawn as a labelled row; not yet openable |
-| `Menu` | 🟡 | 7 | drawn as its label; not yet openable |
+| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. The panel is drawn at the bottom rather than anchored to the control |
+| `DatePicker` / `ColorPicker` | 🟡 | 7 | drawn as a labelled row; not yet openable. Each needs an editor of its own rather than a list of options |
+| `Menu` | 🟡 | 7 | opens onto its buttons; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
 
 ## Collections and navigation
 
@@ -84,7 +88,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.swipeActions` | 🟡 | 7 | recognised; the revealed action is the standard Delete |
 | `.searchable` | ✅ | 7 | a field above the content, writing its binding |
 | `.refreshable` | ⬜ | - | pull-to-refresh has no meaning in a static preview |
-| `DisclosureGroup` | 🟡 | 7 | label and content; the chevron does not collapse it |
+| `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |
 | `Table` / `OutlineGroup` | ⬜ | - | |
 | `NavigationStack` + `NavigationLink` | ✅ | 6 | both the `destination:` and `value:` forms |
 | `.navigationDestination` | ✅ | 6 | `for:` with a metatype, resolved on push |
@@ -127,7 +131,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Modifier | Status | Phase |
 | --- | --- | --- |
 | `.foregroundStyle` / `.foregroundColor` | ✅ | 3 |
-| `.background` (colour, gradient, shape, view) | 🟡 | 6 | materials are not drawn |
+| `.background` (colour, gradient, shape, view) | ✅ | 6 | materials included - see the `Material` row |
 | `.overlay` | ✅ | 6 | |
 | `.font` (text styles and `.system(size:weight:design:)`) | ✅ | 6 | |
 | `.bold` / `.italic` / `.fontWeight` | ✅ | 6 | compose with `.font` in either order |
@@ -155,14 +159,14 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- |
 | `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 |
 | `Path` (custom) | ✅ | 7 | lines, curves, arcs, rects and ellipses, serialised to SVG |
-| `.fill` / `.stroke` | ✅ | 7 |
+| `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`'s `lineWidth`; a `StrokeStyle` dash pattern is not drawn |
 | `.trim` | 🟡 | 7 | exact for arcs - progress rings - approximate elsewhere |
 | `.strokeBorder` | ⬜ | - |
 | `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 |
 | Dark-mode colour resolution | ✅ | 4 |
 | `LinearGradient` | ✅ | 6 | named unit points |
 | `RadialGradient` / `AngularGradient` | 🟡 | 6 | accepted and drawn as a linear gradient |
-| `Material` (`.ultraThinMaterial` etc.) | ✅ | 7 | a real translucent, blurred panel via `backdrop-filter` |
+| `Material` (`.ultraThinMaterial` etc.) | ✅ | 7 | a real translucent, blurred panel via `backdrop-filter`. `Material.ultraThin` and `.ultraThinMaterial` are the same value |
 | `ShapeStyle` conformances generally | 🟡 | 6 | colours, tokens and gradients anywhere a style is taken |
 
 ## Interaction and lifecycle
@@ -192,6 +196,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Curves: `.linear .easeIn .easeOut .easeInOut` | ✅ | 6 | CSS timing functions |
 | `.spring` (and `.bouncy` / `.snappy` / `.smooth`) | 🟡 | 6 | an overshooting bezier, not a real solver |
 | `.transition` (`.slide .opacity .scale .move`) | 🟡 | 7 | entry only; exit would need the renderer to outlive the view |
+| `AnyTransition.combined(with:)` | 🟡 | - | constructs, and the preview draws the first of the two: the render tree carries one transition kind per node |
 | `matchedGeometryEffect` | ⬜ | - | FLIP across identity change |
 | `.phaseAnimator` / `.keyframeAnimator` | ⬜ | - | |
 | `Animatable` / `animatableData` | ⬜ | - | |
@@ -243,7 +248,7 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | `if let` / `guard let` / condition lists | ✅ | 7 | short-circuiting, and `guard`'s bindings escape |
 | `while` / `repeat` / `break` / `continue` / `for … where` | ✅ | 7 | |
 | `static` members | ✅ | 7 | |
-| Key paths (`\.self`, `\.id`, `\Type.member`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`); **not where a closure is expected**, so `map(\.name)` is rejected |
+| Key paths (`\.self`, `\.id`, `\Type.member`) | ✅ | 6 | applied where a view takes one (`ForEach(id:)`) and where a closure is expected (`map(\.name)`, `filter(\.isDone)`, `first(where:)`) |
 | `as?` / `as!` / `is` | ✅ | - | compares the runtime type, the declared superclass chain and protocol conformances; generics are erased, so `[Item]` and `[String]` are both `Array` |
 | Closures, trailing closures, `$0` | ✅ | 1 | |
 | Contextual member syntax (`.home` for an enum) | ✅ | 7 | resolved where a declaration states the type |
@@ -265,6 +270,41 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | Variadic parameters, attributes on a parameter | ✅ | - | `Int...`; `@ViewBuilder` and `@escaping` on a parameter, which is what a custom container view needs |
 | `defer`, `fallthrough`, labelled `break` | ✅ | - | `defer` runs on every exit; a label is consumed and the loop is the one it names |
 | `Self` | ✅ | - | resolves to the type the code is written in |
+| Nested types (`struct Item { enum Status { … } }`) | 🟡 | - | reachable as `Item.Status` and, from inside, as `Status`. The bare name is visible project-wide rather than only within its parent, which accepts code Xcode would reject |
+| Bitwise operators `&` `\|` `^` `<<` `>>` | ✅ | - | 64-bit, computed in `BigInt` |
+| `_ = expr` | ✅ | - | the discard; evaluates the expression and throws the answer away |
+| Extensions on built-in types | ✅ | - | `extension String { var shout: String { uppercased() } }`; the receiver's own members are in scope unqualified |
+
+## Standard library and Foundation
+
+The part of the library SwiftUI code actually calls. It had no section here until the
+defect register's Phase 5, which is part of why fifty-five of its calls could be
+missing without anything saying so.
+
+| Feature | Status | Phase | Notes |
+| --- | --- | --- | --- |
+| `String` - `count`, `uppercased`, `hasPrefix`, `contains`, `split`, `replacingOccurrences`, `trimmingCharacters` | ✅ | 2 | counted and sliced by grapheme cluster, so `"👋🏽".count` is 1 |
+| `String` - `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `starts(with:)`, `append` | ✅ | - | |
+| `String` - `unicodeScalars` | ✅ | - | code points, which is the whole difference from `count` |
+| `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | |
+| `Array` - `allSatisfy`, `flatMap`, `dropFirst`, `dropLast`, `first(where:)`, `last(where:)`, `lastIndex`, `randomElement`, `shuffled` | ✅ | - | `shuffled` is Fisher-Yates, not the biased one-line sort |
+| `Array` - `append`, `insert`, `remove`, `removeAll`, `removeFirst`, `removeLast`, `popLast`, `sort`, `reverse`, `shuffle`, `swapAt`, `replaceSubrange`, `removeSubrange` | ✅ | - | mutating, and refused on a `let` as Xcode refuses them |
+| `Dictionary` - subscript, `default:`, `keys`, `values`, `updateValue`, `removeValue` | ✅ | 2 | |
+| `Dictionary` - `sorted`, `mapValues`, `filter`, `map`, `contains` | ✅ | - | over `(key: , value: )` pairs; `filter` answers a dictionary and `sorted` an array |
+| `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation drop duplicates; iteration is in insertion order rather than Swift's unspecified hash order |
+| `Int` / `Double` conversion from `String` | ✅ | - | failable, matched to Swift's grammar: `" 42"`, `"4_2"` and `"0x10"` are nil |
+| `Int.max` / `Int.min` | 🟡 | - | 2^53 - 1, not 2^63 - 1 - see approximations |
+| `Int.random(in:)`, `Double.random(in:)`, `Bool.random()` | ✅ | - | |
+| `Double` - `rounded()`, `rounded(.up/.down/.towardZero)`, `squareRoot`, `truncatingRemainder`, `isMultiple(of:)` | ✅ | - | halves round away from zero, as Swift's do |
+| `sqrt`, `pow`, `round`, `floor`, `ceil`, `abs`, `min`, `max` | ✅ | - | |
+| `zip`, `stride(from:to:by:)`, `stride(from:through:by:)` | ✅ | - | arrays rather than lazy sequences |
+| `type(of:)`, `fatalError`, `assert`, `precondition` | ✅ | - | a failed assertion is a trap reported on its line |
+| Bitwise `&`, `\|`, `^`, `<<`, `>>` | ✅ | - | computed in `BigInt`, so a shift past 32 bits is not truncated |
+| `UUID` | ✅ | - | random, and prints as its `uuidString` |
+| `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, `formatted()`, comparison, `Date.now`. No calendar: there is no `Calendar`, no `DateComponents` and no `DateFormatter` |
+| `URL` | 🟡 | - | `URL(string:)` is failable and the string is kept as written; `absoluteString`, `path`, `host`, `scheme`, `query`, `lastPathComponent`, `pathExtension`, `appendingPathComponent`. Nothing is fetched |
+| `Codable` over JSON | ⬜ | - | listed in Phase 2's scope and never built |
+| `Calendar`, `DateFormatter`, `NumberFormatter`, `Measurement` | ⬜ | - | `Text`'s `format:` styles cover what view code usually needs |
 
 ## Known approximations
 
@@ -313,7 +353,26 @@ Listed in the exported README so nothing is a surprise on the Mac:
     modifier the tables do not know at all warns too, but only where the chain it sits on
     demonstrably starts at a view - a chain rooted at a variable carries no type
     information, and a warning there would land on the project's own methods.
-12. **Renaming is scoped, which means it can rename too little.** A local is renamed within
+12. **`Int.max` is 2^53 - 1, not 2^63 - 1.** A JavaScript number is exact only to 2^53, and the
+    interpreter traps rather than silently lose precision past it - so reporting Swift's real
+    bound would hand back a value that prints plausibly and traps on the first arithmetic done
+    with it. `Int.max` is written almost exclusively as the starting point for a minimum, where
+    either bound behaves identically. The same limit is why `1 << 60` traps rather than rounding.
+13. **A `Date` has no calendar.** Intervals, comparison and formatting work; there is no
+    `Calendar`, `DateComponents` or `DateFormatter`, so "the start of this month" cannot be
+    computed. `Text(date, style: .relative)` and `.timer` are computed once, at render, because
+    the preview has no clock to tick them with.
+14. **Locale-formatted output is the browser's.** `Date.formatted()`, `Text(date, style:)` and
+    `Text(_, format:)` go through `Intl`, so the separators, the order and the currency symbols
+    are the platform's real ones rather than a transcription - and two machines in different
+    regions will legitimately show different text.
+15. **A menu is drawn at the bottom of the screen, not beside its control.** A `Picker`
+    or `Menu` opens onto a panel across the foot of the device, which is where iOS puts the
+    same list when it is presented from a form - and is not where iOS puts it when the
+    control sits mid-screen. The compositor decides what the options are before the layout
+    engine decides where the control ended up, so anchoring would mean resolving the menu
+    after layout. An approximation of position; the options and the tick are exact.
+16. **Renaming is scoped, which means it can rename too little.** A local is renamed within
     its own body; a member is followed across the project only when no other type declares
     the same member name, and otherwise stays inside the type that declared it. The
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses
@@ -327,13 +386,18 @@ Separate from coverage, and pointed the other way: the interpreter is *more* per
 there. It only fires where the type involved is certain - from a literal or an explicit annotation -
 because a false positive would teach people to ignore the panel.
 
-| Check | Example that is flagged |
-| --- | --- |
-| Mixed numeric arithmetic | `let w: Int = 10; let s: Double = 1.5; w * s` |
-| `Text` given a non-string | `Text(count)` |
-| Property wrapper on a `let` | `@State private let count = 0` |
-| Assignment to a `let` | `let total = 0; total = 1` |
-| Non-`mutating` method writing a property | `func bump() { count += 1 }` |
-| `ForEach` without identity | `ForEach(items)` where the element is not `Identifiable` |
-| Omitted argument labels | `greet("Ada")` for `func greet(name:)` |
-| Missing `return` | a multi-statement `func` body with a return type and no `return` |
+| Check | Example that is flagged | And deliberately not |
+| --- | --- | --- |
+| Mixed numeric arithmetic | `let w: Int = 10; let s: Double = 1.5; w * s` | `scale * 2` - an integer literal takes its type from context |
+| `Text` given a non-string | `Text(count)` | `Text("\(count)")` |
+| Property wrapper on a `let` | `@State private let count = 0` | the same wrapper on a `var` |
+| Assignment to a `let` | `let total = 0; total = 1` | writing an `inout` parameter, which is the caller's storage |
+| Non-`mutating` method writing a property | `func bump() { count += 1 }` on a plain stored `var` | the same method writing a `@State`, `@Binding` or any other wrapped property: their setters are **nonmutating**, which is what lets `body` write them |
+| `ForEach` without identity | `ForEach(items)` where the element is not `Identifiable` | a range, or an explicit `id:` |
+| Omitted argument labels | `greet("Ada")` for `func greet(name:)` | a parameter declared `_` |
+| Missing `return` | a multi-statement `func` body with a return type and no `return` anywhere | a body whose returns are inside a `switch`, `while`, `repeat`, `do`/`catch`, `guard`'s `else` or an `else if` chain |
+
+The right-hand column is the half that matters. A pass that cries wolf is worse than no
+pass, because people stop reading the panel and then the true warnings go unread too -
+and the `mutating` row was exactly that until the defect register's Phase 6: it fired on
+the commonest shape in SwiftUI and offered a fix-it that broke the file it was applied to.

@@ -2,6 +2,7 @@ import type { SourceSpan } from '@studio/shared'
 import type {
   Decl,
   EnumDecl,
+  Expr,
   FuncDecl,
   Param,
   SourceFileNode,
@@ -20,6 +21,13 @@ import {
   KNOWN_ATTRIBUTES,
   KNOWN_TYPES,
 } from './builtins'
+import {
+  builtinTypeName,
+  FREE_FUNCTIONS,
+  STDLIB_MEMBERS,
+  WRAPPER_DOCS,
+  type StdlibMember,
+} from './stdlib-symbols'
 
 /**
  * The symbol index behind completion, go-to-definition, hover and rename.
@@ -128,7 +136,14 @@ function receiverBefore(text: string, dotOffset: number): string | null {
     if (i < 0) return null
     start = i
     while (start > 0 && /[A-Za-z0-9_$]/.test(text[start - 1]!)) start--
-    return text.slice(start, i) || null
+    const head = text.slice(start, i) || null
+
+    // `items[0].` is a *subscript*: the receiver is an element, and its type is not
+    // written anywhere. Answering with the collection's own members offers `map` on
+    // an Int - a name that does not exist, which is the one thing this must not do.
+    if (text[end - 1] === ']' && head) return null
+
+    return head
   }
 
   while (start > 0 && /[A-Za-z0-9_$]/.test(text[start - 1]!)) start--
@@ -466,6 +481,7 @@ function declaredTypeOf(files: readonly SourceFileNode[], file: string, offset: 
     }
     const init = decl.initializer
     if (init?.kind === 'call' && init.callee.kind === 'identifier') found = init.callee.name
+    else found = literalTypeOf(init) ?? found
   }
 
   const walkDecl = (decl: Decl): void => {
@@ -500,6 +516,92 @@ function declaredTypeOf(files: readonly SourceFileNode[], file: string, offset: 
   }
 
   return found
+}
+
+/**
+ * The type of an initialiser that is a literal.
+ *
+ * `let title = "Untitled"` states its type as plainly as an annotation does, and
+ * most code never writes the annotation. Reading it is still reading what was
+ * written, which is the line this file does not cross - nothing here infers through
+ * a call, an operator or a member.
+ */
+function literalTypeOf(expr: Expr | null): string | null {
+  switch (expr?.kind) {
+    case 'stringLiteral':
+      return 'String'
+    case 'integerLiteral':
+      return 'Int'
+    case 'floatLiteral':
+      return 'Double'
+    case 'booleanLiteral':
+      return 'Bool'
+    case 'arrayLiteral':
+      return 'Array'
+    case 'dictionaryLiteral':
+      return 'Dictionary'
+    default:
+      return null
+  }
+}
+
+/** Whether a declared type is a view, and so takes modifiers. */
+function conformsToView(files: readonly SourceFileNode[], typeName: string): boolean {
+  return collectConformance(files).types.get(typeName)?.conformances.has('View') ?? false
+}
+
+/**
+ * The built-in type of a literal written immediately before a `.`.
+ *
+ * Only the two spellings that are unambiguous. A number is deliberately left out:
+ * `1.` is the start of `1.5` at least as often as it is a member access, and
+ * answering the wrong thing mid-keystroke is worse than answering nothing.
+ */
+function literalTypeBefore(text: string, dotOffset: number): string | null {
+  let end = dotOffset
+  while (end > 0 && /\s/.test(text[end - 1]!)) end--
+  if (end === 0) return null
+
+  const ch = text[end - 1]!
+  if (ch === '"') return 'String'
+  if (ch !== ']') return null
+
+  // Walk the bracket group back to its opener. A head before it - `items[0]` - makes
+  // this a subscript rather than a literal, and its element type is unknown.
+  let depth = 0
+  let i = end - 1
+  for (; i >= 0; i--) {
+    const c = text[i]!
+    if (c === ']') depth++
+    else if (c === '[') {
+      depth--
+      if (depth === 0) break
+    }
+  }
+  if (i < 0) return null
+  if (i > 0 && /[A-Za-z0-9_$)\]]/.test(text[i - 1]!)) return null
+
+  const inside = text.slice(i + 1, end - 1)
+  return /^[^[\]]*:/.test(inside) ? 'Dictionary' : 'Array'
+}
+
+/**
+ * The completion list for a built-in type.
+ *
+ * A method with arguments inserts an open parenthesis and leaves the caret inside
+ * it; one without inserts both, because `uppercased` alone is a compile error and
+ * nobody wants to type the empty pair.
+ */
+function stdlibItems(typeName: string): SymbolInfo[] {
+  const members = STDLIB_MEMBERS.get(typeName) ?? []
+  return members.map((member) => ({
+    name: member.name,
+    kind: member.kind,
+    detail: member.detail,
+    doc: member.doc,
+    insert:
+      member.kind === 'method' ? (member.takesArguments ? `${member.name}(` : `${member.name}()`) : undefined,
+  }))
 }
 
 // ------------------------------------------------------------------ built-ins
@@ -585,14 +687,35 @@ export function completionsAt(
   if (before?.ch === '.') {
     const receiver = receiverBefore(text, before.at)
 
+    // `"abc".` and `[1, 2].` - a literal says its own type.
+    const literal = literalTypeBefore(text, before.at)
+    if (literal) return { from, items: stdlibItems(literal) }
+
     // `Tab.` or `store.` - a name we can resolve to a declared type.
     if (receiver) {
       const direct = membersOfType(files, receiver)
       if (direct) return { from, items: direct }
 
       const declared = declaredTypeOf(files, file, offset, receiver)
-      const members = declared ? membersOfType(files, declared) : null
-      if (members) return { from, items: [...members, ...modifierItems()] }
+      if (declared) {
+        // The project's own declaration wins over a built-in of the same name, which
+        // is Swift's rule: a to-do app may declare `Task`, and a calendar `Date`.
+        const members = membersOfType(files, declared)
+        if (members) {
+          // Modifiers only after something that really is a view. A plain model
+          // struct takes none of them, and saying otherwise is inventing an API.
+          return {
+            from,
+            items: conformsToView(files, declared) ? [...members, ...modifierItems()] : members,
+          }
+        }
+
+        // `text.` where `text` is a String. Offering view modifiers here was the
+        // single least useful list in the editor: 159 entries, none of them valid,
+        // burying the members that are.
+        const builtin = builtinTypeName(declared)
+        if (builtin) return { from, items: stdlibItems(builtin) }
+      }
     }
 
     // Either contextual member syntax - `.largeTitle`, `.home` - or a receiver whose
@@ -646,6 +769,12 @@ export function definitionAt(
   const name = nameAt(text, offset)
   if (!name) return null
 
+  // `item.title` - a member, and the receiver says which type's. Tried first,
+  // because a member that shares a spelling with something in scope is still the
+  // member: `item.count` must not jump to a local called `count`.
+  const member = memberDefinition(files, file, text, offset, name)
+  if (member) return member
+
   const scope = scopeAt(files, file, offset)
   for (let i = scope.length - 1; i >= 0; i--) {
     const symbol = scope[i]!
@@ -659,6 +788,47 @@ export function definitionAt(
   // unambiguous match is offered. Jumping to the wrong one is worse than not jumping.
   const matches = enumCasesNamed(files, name)
   return matches.length === 1 ? matches[0]! : null
+}
+
+/**
+ * The declaration of `name` when it is written after a dot.
+ *
+ * Resolved through the receiver where the receiver's type is written down, which is
+ * the same rule completion follows - and where it is not, through the project's own
+ * declarations, but only when exactly one type declares that member name. Jumping to
+ * the wrong `title` is worse than not jumping, the same judgement the enum-case
+ * fallback above already makes.
+ */
+function memberDefinition(
+  files: readonly SourceFileNode[],
+  file: string,
+  text: string,
+  offset: number,
+  name: string,
+): SymbolInfo | null {
+  const { from } = wordAt(text, offset)
+  const before = previousMeaningful(text, from)
+  if (before?.ch !== '.') return null
+
+  const find = (candidates: readonly SymbolInfo[] | null): SymbolInfo | null =>
+    candidates?.find((m) => m.name === name && m.span) ?? null
+
+  const receiver = receiverBefore(text, before.at)
+  if (receiver) {
+    // `Item.` - the type named directly, for a static member or an enum case.
+    const direct = find(membersOfType(files, receiver))
+    if (direct) return direct
+
+    const declared = declaredTypeOf(files, file, offset, receiver)
+    if (declared) {
+      const member = find(membersOfType(files, declared))
+      if (member) return member
+    }
+  }
+
+  const owners = typesDeclaringMember(files, name)
+  if (owners.length !== 1) return null
+  return find(membersOfType(files, owners[0]!))
 }
 
 /** What to show when hovering: the same symbol, plus built-ins that have no span. */
@@ -693,7 +863,72 @@ export function hoverAt(
     }
   }
   if (KNOWN_TYPES.has(name)) return { name, kind: 'type', detail: 'type' }
+
+  // `@State` - the attribute is written before the name, so the caret is on the
+  // bare word and the `@` is the only thing that says what it is.
+  const wrapperDoc = WRAPPER_DOCS.get(name)
+  if (wrapperDoc && previousMeaningful(text, wordAt(text, offset).from)?.ch === '@') {
+    return { name, kind: 'attribute', detail: 'property wrapper', doc: wrapperDoc }
+  }
+
+  const free = FREE_FUNCTIONS.get(name)
+  if (free) return { name, kind: 'function', detail: free.detail, doc: free.doc }
+
+  // A standard library member: `text.count`, `items.map`. Resolved through the
+  // receiver where its type is written, and otherwise by the name alone - which is
+  // safe in a way *jumping* to it would not be, because hover only has to describe
+  // something and the description is the same wherever the member came from.
+  const stdlib = stdlibMemberAt(files, file, text, offset, name)
+  if (stdlib) return stdlib
+
   return null
+}
+
+/**
+ * The standard library member the caret rests on, described.
+ *
+ * Where the receiver's type is written down, that type's list is the only one
+ * consulted. Where it is not, a member is reported only when every built-in type
+ * that has the name describes it the same way - `count` means the same thing on a
+ * String, an Array and a Dictionary, while `first` does not, so the first is
+ * described and the second is left alone rather than guessed at.
+ */
+function stdlibMemberAt(
+  files: readonly SourceFileNode[],
+  file: string,
+  text: string,
+  offset: number,
+  name: string,
+): SymbolInfo | null {
+  const { from } = wordAt(text, offset)
+  const before = previousMeaningful(text, from)
+  if (before?.ch !== '.') return null
+
+  const describe = (member: StdlibMember): SymbolInfo => ({
+    name: member.name,
+    kind: member.kind,
+    detail: member.detail,
+    doc: member.doc,
+  })
+
+  const literal = literalTypeBefore(text, before.at)
+  const receiver = literal ? null : receiverBefore(text, before.at)
+  const declared = receiver ? builtinTypeName(declaredTypeOf(files, file, offset, receiver)) : null
+  const known = literal ?? declared
+
+  if (known) {
+    const member = STDLIB_MEMBERS.get(known)?.find((m) => m.name === name)
+    return member ? describe(member) : null
+  }
+
+  let agreed: StdlibMember | null = null
+  for (const members of STDLIB_MEMBERS.values()) {
+    const member = members.find((m) => m.name === name)
+    if (!member) continue
+    if (!agreed) agreed = member
+    else if (agreed.detail !== member.detail || agreed.doc !== member.doc) return null
+  }
+  return agreed ? describe(agreed) : null
 }
 
 /**
