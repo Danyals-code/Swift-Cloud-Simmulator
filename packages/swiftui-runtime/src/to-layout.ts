@@ -8,7 +8,7 @@ import {
   type ShapeKind,
 } from '@studio/shared'
 import { asDate, asProjection, foundationDescription, truthy, type SwiftValue } from '@studio/swift-runtime'
-import { UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
+import { BLEND_MODES, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import {
   CENTER,
   insets,
@@ -336,6 +336,20 @@ function controlScale(size: string | undefined): number {
     default:
       return 1
   }
+}
+
+/** `axis: (x: 0, y: 1, z: 0)` - the tuple `.rotation3DEffect` takes. */
+function axisVector(value: SwiftValue | undefined): { x: number; y: number; z: number } {
+  const fallback = { x: 0, y: 1, z: 0 }
+  if (!value || value.kind !== 'tuple') return fallback
+
+  const component = (name: string, index: number): number => {
+    const labelled = value.labels.indexOf(name)
+    return numberArg(value.elements[labelled >= 0 ? labelled : index]) ?? 0
+  }
+
+  const vector = { x: component('x', 0), y: component('y', 1), z: component('z', 2) }
+  return vector.x === 0 && vector.y === 0 && vector.z === 0 ? fallback : vector
 }
 
 /** A `Section`'s three parts, or a run of rows written outside any section. */
@@ -2926,6 +2940,44 @@ class Converter {
       case 'contrast':
         return { kind: 'filter', filter: { contrast: numberArg(positional(args, 0)) ?? 1 } }
 
+      case 'hueRotation': {
+        // An `Angle`, not a number: `.hueRotation(.degrees(90))` is how it is written.
+        const angle = angleDegrees(positional(args, 0) ?? labelled(args, 'angle'))
+        return angle === null ? null : { kind: 'filter', filter: { hueRotate: angle } }
+      }
+
+      case 'colorMultiply': {
+        const color = resolveColorArg(positional(args, 0), this.scheme)
+        return color ? { kind: 'filter', filter: { multiply: color } } : null
+      }
+
+      case 'rotation3DEffect': {
+        const degrees = angleDegrees(positional(args, 0) ?? labelled(args, 'angle'))
+        if (degrees === null) return null
+        const axis = labelled(args, 'axis')
+        const vector = axisVector(axis)
+        return { kind: 'rotate3D', degrees, ...vector }
+      }
+
+      case 'blendMode': {
+        const mode = tokenName(positional(args, 0))
+        const css = mode ? BLEND_MODES.get(mode) : undefined
+        // A mode CSS has no equivalent for is left to the unsupported path, which
+        // warns - rather than silently picking the nearest one, which would draw
+        // something plausible that the device will not.
+        return css ? { kind: 'blendMode', mode: css } : { kind: 'unsupported', name: 'blendMode' }
+      }
+
+      case 'unredacted':
+        // Turns the flag back off for a subtree inside a redacted one.
+        return { kind: 'unredacted' }
+
+      case 'redacted': {
+        // `.redacted(reason: .placeholder)` is the only reason SwiftUI ships, and
+        // `.unredacted()` is its own modifier rather than an argument here.
+        return { kind: 'redacted' }
+      }
+
       case 'grayscale':
         return { kind: 'filter', filter: { grayscale: numberArg(positional(args, 0)) ?? 0 } }
 
@@ -3066,7 +3118,16 @@ class Converter {
 
       case 'animation': {
         const hint = animationHint(args[0]?.value)
-        return hint ? { kind: 'animate', hint } : null
+        if (!hint) return null
+
+        // `.animation(_:value:)` animates only when `value` changed, which the
+        // resolver decided - it is the stage that remembers the last render. The
+        // form without a `value:` animates its subtree unconditionally, as SwiftUI's
+        // deprecated one does.
+        const gated = args.some((a) => a.label === 'value')
+        if (gated && !boolArg(labelled(args, 'armed'))) return null
+
+        return { kind: 'animate', hint }
       }
 
       case 'transition': {

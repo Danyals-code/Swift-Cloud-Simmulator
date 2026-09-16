@@ -62,6 +62,8 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
     z: node.z + 1,
     opacity: node.opacity,
     ...(node.cornerRadius > 0 ? { cornerRadius: node.cornerRadius } : {}),
+    ...(node.blendMode ? { blendMode: node.blendMode } : {}),
+    ...(node.redacted ? { redacted: true } : {}),
     ...(node.origin ? { origin: node.origin } : {}),
     ...(node.parent ? { parent: node.parent } : {}),
     ...(node.clip ? { clip: true } : {}),

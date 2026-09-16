@@ -28,6 +28,7 @@ import {
   PROPERTY_WRAPPERS,
   SUPPORTED_MODIFIERS,
   SUPPORTED_VIEWS,
+  BLEND_MODES,
   UNIMPLEMENTED_MODIFIERS,
   UNIMPLEMENTED_VIEWS,
 } from './builtins'
@@ -722,7 +723,10 @@ export class Checker {
         if (expr.callee.kind === 'memberAccess') {
           const onAView = rootsInAView(expr.callee.base)
           this.checkModifierCoverage(expr.callee.member, expr.callee.memberSpan, onAView)
-          if (onAView) this.checkArgumentLabels(expr.callee.member, expr.args)
+          if (onAView) {
+            this.checkArgumentLabels(expr.callee.member, expr.args)
+            this.checkBlendMode(expr.callee.member, expr.args)
+          }
         }
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
@@ -954,6 +958,35 @@ export class Checker {
       `The preview does not recognise the modifier '.${member}', so it is ignored here. ` +
         'It is exported to Xcode unchanged.',
       `.${member}`,
+    )
+  }
+
+  /**
+   * Warns on a blend mode the preview cannot draw.
+   *
+   * `.blendMode` is a supported modifier, so without this a mode CSS has no
+   * equivalent for would be accepted and silently ignored - the same failure the
+   * unimplemented-modifier list prevents for names, arriving one level down at the
+   * argument. Drawing the nearest mode instead would put something plausible on
+   * screen that the device does not draw.
+   *
+   * Only a literal `.mode` is checked. A mode held in a variable has no value here,
+   * and guessing at one would warn on correct code.
+   */
+  private checkBlendMode(member: string, args: readonly { label: string | null; value: Expr }[]): void {
+    if (member !== 'blendMode') return
+
+    const first = args[0]?.value
+    if (first?.kind !== 'memberAccess' || first.base !== null) return
+    if (BLEND_MODES.has(first.member)) return
+
+    this.report(
+      first.span,
+      'warning',
+      'unsupported_swiftui_modifier',
+      `'.blendMode(.${first.member})' has no equivalent the preview can draw, so it is ` +
+        'ignored rather than approximated. It is exported to Xcode unchanged.',
+      `.blendMode(.${first.member})`,
     )
   }
 

@@ -361,6 +361,20 @@ export type LayoutModifier =
   | { readonly kind: 'clip'; readonly shape: ShapeKind; readonly cornerRadius: number }
   | { readonly kind: 'scale'; readonly x: number; readonly y: number }
   | { readonly kind: 'rotate'; readonly degrees: number }
+  /** `.rotation3DEffect(_:axis:)` - the same paint-time transform, about an axis. */
+  | {
+      readonly kind: 'rotate3D'
+      readonly degrees: number
+      readonly x: number
+      readonly y: number
+      readonly z: number
+    }
+  /** `.blendMode` - how the subtree composites with what is under it. */
+  | { readonly kind: 'blendMode'; readonly mode: string }
+  /** `.redacted(reason:)` - draw the shape of the content, not the content. */
+  | { readonly kind: 'redacted' }
+  /** `.unredacted()` - the subtree is drawn for real inside a redacted one. */
+  | { readonly kind: 'unredacted' }
   | { readonly kind: 'zIndex'; readonly value: number }
   /** `.blur`, `.saturation`, `.brightness`, `.contrast`, `.grayscale`. */
   | { readonly kind: 'filter'; readonly filter: FilterSpec }
@@ -497,6 +511,14 @@ export interface LayoutEnvironment {
   readonly lineSpacing?: number
   /** Set by `.allowsHitTesting(false)`: the subtree paints but does not respond. */
   readonly hitTestingDisabled?: boolean
+  /**
+   * `.blendMode` and `.redacted` - paint facts that apply to everything below.
+   *
+   * Inherited rather than wrapped, because both describe how the *content* is drawn:
+   * a box around the subtree would composite or redact the box, not what is in it.
+   */
+  readonly blendMode?: string
+  readonly redacted?: boolean
 }
 
 export function childEnvironment(
@@ -546,6 +568,12 @@ export function childEnvironment(
       return { ...env, animation: modifier.hint }
     case 'transition':
       return { ...env, transition: modifier.spec }
+    case 'blendMode':
+      return { ...env, blendMode: modifier.mode }
+    case 'redacted':
+      return { ...env, redacted: true }
+    case 'unredacted':
+      return { ...env, redacted: false }
     case 'textStyle':
       return {
         ...env,

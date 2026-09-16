@@ -187,6 +187,25 @@ export class UIState {
     this.menu = id
   }
 
+  /**
+   * The last value each `.animation(_:value:)` was gated on, by path.
+   *
+   * SwiftUI animates that subtree only when `value` changes; without this the
+   * modifier animated everything below it on every render, so a view that merely
+   * re-rendered slid around. Holding the previous value is the whole mechanism -
+   * there is nothing to diff against otherwise.
+   */
+  private animationValues = new Map<string, string>()
+
+  /** True when the gate's value differs from the last render's, and records the new one. */
+  animationGateOpen(path: string, value: string): boolean {
+    const previous = this.animationValues.get(path)
+    this.animationValues.set(path, value)
+    // The first sight of a view is not a change. SwiftUI does not animate a view in
+    // because it appeared - that is what `.transition` is for.
+    return previous !== undefined && previous !== value
+  }
+
   /** How far a list row has been swiped open, in points. */
   private swipes = new Map<string, number>()
 
@@ -319,7 +338,7 @@ class Resolver {
 
       if (intent) this.handlers.set(handlerIdFor(path), intent)
       this.collectLifecycle(restyled, path)
-      return this.operable(stamped, path)
+      return this.operable(this.gateAnimation(stamped, path), path)
     } finally {
       if (style) this.buttonStyles.pop()
     }
@@ -491,6 +510,31 @@ class Resolver {
    * The sub-paths registered here are the ones `to-layout` builds hit targets at, and
    * the two agree because both derive the id from the same path.
    */
+  /**
+   * Decides whether an `.animation(_:value:)` on this view is armed this frame.
+   *
+   * Recorded as an argument on the modifier rather than resolved in the layout pass,
+   * for the same reason a `DisclosureGroup`'s open-ness is: the decision needs state
+   * that outlives one render, and the resolver is the one stage that has it.
+   */
+  private gateAnimation(view: ViewValue, path: string): ViewValue {
+    const index = view.modifiers.findIndex(
+      (m) => m.name === 'animation' && m.args.some((a) => a.label === 'value'),
+    )
+    if (index < 0) return view
+
+    const modifier = view.modifiers[index]!
+    const gate = modifier.args.find((a) => a.label === 'value')!.value
+    const open = this.ctx.state.animationGateOpen(`${path}m${index}`, describe(gate, true))
+
+    const modifiers = [...view.modifiers]
+    modifiers[index] = {
+      ...modifier,
+      args: [...modifier.args, { label: 'armed', value: { kind: 'bool' as const, value: open } }],
+    }
+    return { ...view, modifiers }
+  }
+
   private operable(view: ViewValue, path: string): ViewValue {
     if (view.name === 'Stepper') {
       const binding = labelled(view.args, 'value')

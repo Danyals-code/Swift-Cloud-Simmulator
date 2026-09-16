@@ -151,6 +151,16 @@ export interface FilterSpec {
   readonly brightness?: number
   readonly contrast?: number
   readonly grayscale?: number
+  /** `.hueRotation` - degrees around the colour wheel. */
+  readonly hueRotate?: number
+  /**
+   * `.colorMultiply` - every channel multiplied by this colour.
+   *
+   * Not a CSS filter: drawn as an overlay in multiply blend mode, which is the same
+   * operation. Carried here rather than as a background because it applies to the
+   * subtree, exactly as the filters do.
+   */
+  readonly multiply?: RGBA
 }
 
 /**
@@ -221,6 +231,15 @@ export interface TransformSpec {
   readonly scaleY: number
   /** degrees, clockwise */
   readonly rotate: number
+  /**
+   * `.rotation3DEffect(_:axis:)` - degrees about the x and y axes.
+   *
+   * A real rotation in CSS, with the perspective the browser needs to make it look
+   * like one. SwiftUI's own is a projection with a fixed perspective too, so this is
+   * the same *kind* of drawing rather than a flat approximation of a 3D one.
+   */
+  readonly rotateX?: number
+  readonly rotateY?: number
 }
 
 export interface ImagePayload {
@@ -326,6 +345,21 @@ export interface RenderNode {
   readonly filter?: FilterSpec
   /** `.regularMaterial` and friends: a translucent, blurred backdrop. */
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
+  /**
+   * `.blendMode` - how this node composites with what is already painted.
+   *
+   * The CSS name, because the two vocabularies agree on every mode SwiftUI has that a
+   * browser also has. A mode with no CSS equivalent never reaches here.
+   */
+  readonly blendMode?: string
+  /**
+   * `.redacted(reason: .placeholder)` - the content replaced by a grey bar.
+   *
+   * A flag rather than a rewritten subtree: the redaction is a paint-time decision in
+   * SwiftUI too, and rewriting the tree would lose the frames the engine computed for
+   * the real content, which are exactly the frames the bars have to occupy.
+   */
+  readonly redacted?: boolean
   /** where in the Swift source this came from - powers hover-to-source in the inspector */
   readonly origin?: SourceSpan
   /** Inspector readout: what this view is called and what was applied to it (FR-5.8). */
@@ -374,6 +408,7 @@ export function cssFilter(filter: FilterSpec): string | undefined {
   if (filter.brightness !== undefined) parts.push(`brightness(${1 + filter.brightness})`)
   if (filter.contrast !== undefined) parts.push(`contrast(${filter.contrast})`)
   if (filter.grayscale) parts.push(`grayscale(${filter.grayscale})`)
+  if (filter.hueRotate) parts.push(`hue-rotate(${filter.hueRotate}deg)`)
   return parts.length > 0 ? parts.join(' ') : undefined
 }
 

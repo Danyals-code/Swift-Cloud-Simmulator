@@ -4,11 +4,11 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the data-flow pass (defect register phase 9.7), which made
-`@AppStorage` storage keyed by its string, read a `PreviewProvider` as a root, and
-built a `Binding(get:set:)` a control cannot tell from a projected one.
+Last updated after the effects pass (defect register phase 9.5), which drew the colour
+and transform effects CSS shares a definition with, and made `.animation(_:value:)`
+honour its gate.
 
-**141 ✅ · 48 🟡 · 25 ⬜ · 4 ✗**, over 218 rows, counted from this file rather than carried
+**145 ✅ · 48 🟡 · 21 ⬜ · 8 ✗**, over 222 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -145,7 +145,11 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.border` | ✅ | 6 |
 | `.rotationEffect` / `.scaleEffect` | ✅ | 6 | paint-time, so layout keeps the untransformed size |
 | `.blur` / `.saturation` / `.brightness` / `.contrast` / `.grayscale` | ✅ | 7 |
-| `.mask` | ⬜ | - |
+| `.mask` | ⬜ | - | needs an arbitrary view as a mask image, which CSS can only do for a shape |
+| `.blendMode` | 🟡 | - | the sixteen modes CSS shares with SwiftUI; `.plusLighter` and the `sourceAtop` family warn rather than drawing the nearest one |
+| `.hueRotation` / `.colorMultiply` | ✅ | - | the multiply is an overlay, since no CSS filter multiplies by a colour |
+| `.rotation3DEffect` | ✅ | - | a real rotation with a perspective, about the axis vector given |
+| `.redacted` / `.unredacted` | ✅ | - | text and images become bars of the size the engine laid out for them |
 | `.tint` / `.accentColor` | ✅ | 6 |
 | `.buttonStyle` | 🟡 | 6 | `.bordered` and `.borderedProminent`; others fall back to plain. `.controlSize` scales it and `.buttonBorderShape` rounds it |
 | `.toggleStyle` | ✅ | - | `.switch`, `.button` and `.checkbox` each draw differently, and all three stay pressable |
@@ -201,18 +205,18 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Feature | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `withAnimation` | ✅ | 6 | animates every change in its transaction, for one frame |
-| `.animation(_:value:)` | 🟡 | 6 | animates its subtree; the `value:` gate is not honoured |
+| `.animation(_:value:)` | ✅ | 6 | animates its subtree only when `value` changes, and not on the first render |
 | Curves: `.linear .easeIn .easeOut .easeInOut` | ✅ | 6 | CSS timing functions |
 | `.spring` (and `.bouncy` / `.snappy` / `.smooth`) | 🟡 | 6 | an overshooting bezier, not a real solver |
 | `.transition` (`.slide .opacity .scale .move`) | 🟡 | 7 | entry only; exit would need the renderer to outlive the view |
 | `AnyTransition.combined(with:)` | 🟡 | - | constructs, and the preview draws the first of the two: the render tree carries one transition kind per node |
-| `matchedGeometryEffect` | ⬜ | - | FLIP across identity change |
-| `.phaseAnimator` / `.keyframeAnimator` | ⬜ | - | |
-| `Animatable` / `animatableData` | ⬜ | - | |
+| `matchedGeometryEffect` | ✗ | - | FLIP across an identity change needs the renderer to own both trees at once - the same shadow copy exit transitions need |
+| `.phaseAnimator` / `.keyframeAnimator` | ✗ | - | both drive frames from a clock the preview does not run |
+| `Animatable` / `animatableData` | ✗ | - | interpolating an arbitrary value needs an animation system that owns the frames; ours is CSS keyframes, deliberately |
 | Custom `ViewModifier` + `.modifier(…)` | ✅ | 8 | `body(content:)` is called with the view as a value |
 | `extension View { func … }` | ✅ | 8 | the idiom for a reusable modifier chain |
 | Custom `ButtonStyle` | ✅ | 9 | applies to every button below it, not only the one it is written on |
-| Custom `ToggleStyle` / `LabelStyle` | ⬜ | - | the same mechanism, but a Toggle's configuration carries a *binding* |
+| Custom `ToggleStyle` / `LabelStyle` | ✗ | - | the same mechanism as `ButtonStyle`, except a Toggle's configuration carries a *binding* the style writes through. Half of that is worse than none |
 
 ## Environment and app structure
 

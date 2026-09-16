@@ -62,8 +62,9 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'lineLimit', 'multilineTextAlignment', 'textCase',
   'underline', 'strikethrough', 'kerning', 'tracking', 'baselineOffset', 'lineSpacing',
   // transforms, filters and motion
-  'scaleEffect', 'rotationEffect', 'animation', 'transition',
+  'scaleEffect', 'rotationEffect', 'rotation3DEffect', 'animation', 'transition',
   'blur', 'saturation', 'brightness', 'contrast', 'grayscale',
+  'hueRotation', 'colorMultiply', 'blendMode', 'redacted', 'unredacted',
   // drawing styles
   'fill', 'stroke', 'trim',
   // accessibility
@@ -199,9 +200,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // layout
   'alignmentGuide', 'containerRelativeFrame', 'safeAreaInset', 'coordinateSpace',
   // painting and effects
-  'mask', 'blendMode', 'colorMultiply', 'hueRotation', 'rotation3DEffect',
-  'compositingGroup', 'drawingGroup', 'geometryGroup', 'redacted', 'visualEffect',
-  'zIndex',
+  'mask', 'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
   // typography
   'minimumScaleFactor', 'truncationMode', 'allowsTightening', 'monospacedDigit',
   // symbols and images
@@ -225,6 +224,37 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'accessibilitySortPriority',
   // interaction with no analogue in the preview
   'onHover', 'draggable', 'dropDestination', 'contentShape',
+])
+
+/**
+ * SwiftUI blend modes the preview can draw, mapped to the CSS mode that means the same.
+ *
+ * Here rather than in the renderer because the *checker* needs it too: `.blendMode` is
+ * a supported modifier, so a mode outside this set would otherwise be accepted and
+ * silently ignored - which is the failure the whole unimplemented-modifier machinery
+ * exists to prevent, arriving one level down at the argument instead of the name.
+ *
+ * `.plusLighter`, `.plusDarker` and the `sourceAtop` / `destinationOver` family are
+ * absent because CSS has no equivalent. Drawing them as the nearest mode would put
+ * something plausible on screen that the device will not draw.
+ */
+export const BLEND_MODES: ReadonlyMap<string, string> = new Map([
+  ['normal', 'normal'],
+  ['multiply', 'multiply'],
+  ['screen', 'screen'],
+  ['overlay', 'overlay'],
+  ['darken', 'darken'],
+  ['lighten', 'lighten'],
+  ['colorDodge', 'color-dodge'],
+  ['colorBurn', 'color-burn'],
+  ['softLight', 'soft-light'],
+  ['hardLight', 'hard-light'],
+  ['difference', 'difference'],
+  ['exclusion', 'exclusion'],
+  ['hue', 'hue'],
+  ['saturation', 'saturation'],
+  ['color', 'color'],
+  ['luminosity', 'luminosity'],
 ])
 
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */

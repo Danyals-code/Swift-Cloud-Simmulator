@@ -6,6 +6,7 @@ import {
   cssTransition,
   type RenderNode,
   type RenderTree,
+  type RGBA,
   type TextRun,
   type UIEvent,
 } from '@studio/shared'
@@ -247,10 +248,16 @@ function RenderNodeView({
       : {}),
     ...(node.transform
       ? {
-          transform: `scale(${node.transform.scaleX}, ${node.transform.scaleY}) rotate(${node.transform.rotate}deg)`,
+          transform: cssTransform(node.transform),
+          // A rotation about x or y is a projection, and without a perspective the
+          // browser draws it as a flat squash - which is not what SwiftUI shows.
+          ...(node.transform.rotateX || node.transform.rotateY
+            ? { transformStyle: 'preserve-3d' as const, perspective: '640px' }
+            : {}),
         }
       : {}),
     ...(node.filter ? { filter: cssFilter(node.filter) } : {}),
+    ...(node.blendMode ? { mixBlendMode: node.blendMode as CSSProperties['mixBlendMode'] } : {}),
     ...(node.transition ? { animation: transitionAnimation(node) } : {}),
     ...(node.material
       ? {
@@ -285,13 +292,20 @@ function RenderNodeView({
       ? renderControl(node, handlerId, onEvent)
       : null
 
+  // `.redacted(reason: .placeholder)`: the content's *shape* without the content. The
+  // engine already decided the frame, and that frame is exactly what the bar occupies -
+  // which is why this is a paint-time swap rather than a different subtree.
+  const redacted = node.redacted && (node.kind === 'text' || node.kind === 'image')
+
   const content: ReactNode = (
     <>
-      {node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
-      {node.kind === 'image' && node.image ? <ImageContent node={node} /> : null}
+      {redacted ? <RedactedBar /> : null}
+      {!redacted && node.kind === 'text' && node.text ? <TextContent node={node} /> : null}
+      {!redacted && node.kind === 'image' && node.image ? <ImageContent node={node} /> : null}
       {node.kind === 'shape' && node.shape ? <ShapeContent node={node} /> : null}
       {node.kind === 'path' && node.path ? <PathContent node={node} /> : null}
       {node.kind === 'placeholder' && node.placeholder ? <PlaceholderContent node={node} /> : null}
+      {node.filter?.multiply ? <ColorMultiply color={node.filter.multiply} /> : null}
       {nativeControl}
       {children?.length ? (
         <ScrollContent node={node}>
@@ -498,6 +512,63 @@ function renderControl(
       }}
     />
   )
+}
+
+/**
+ * `.redacted(reason: .placeholder)` - a bar the size of what it hides.
+ *
+ * The rounded grey bar iOS draws, inset a little vertically so a redacted line of
+ * text does not fill its whole line box - which is how the real one looks beside an
+ * unredacted neighbour.
+ */
+function RedactedBar() {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        margin: '2px 0',
+        borderRadius: 4,
+        background: 'currentColor',
+        opacity: 0.18,
+      }}
+    />
+  )
+}
+
+/**
+ * `.colorMultiply` - every channel of the subtree multiplied by a colour.
+ *
+ * Drawn as an overlay in multiply blend mode, which is that operation exactly rather
+ * than an approximation of it. It cannot be a CSS filter because there is no filter
+ * function that multiplies by an arbitrary colour.
+ */
+function ColorMultiply({ color }: { color: RGBA }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: cssColor(color),
+        mixBlendMode: 'multiply',
+        pointerEvents: 'none',
+      }}
+    />
+  )
+}
+
+/**
+ * The CSS for a paint-time transform.
+ *
+ * One property rather than several, because CSS applies them in order about a single
+ * origin and SwiftUI applies its own about the view's centre - so splitting them
+ * across nodes would rotate about a point the user did not write.
+ */
+function cssTransform(t: NonNullable<RenderNode['transform']>): string {
+  const parts = [`scale(${t.scaleX}, ${t.scaleY})`, `rotate(${t.rotate}deg)`]
+  if (t.rotateX) parts.push(`rotateX(${t.rotateX}deg)`)
+  if (t.rotateY) parts.push(`rotateY(${t.rotateY}deg)`)
+  return parts.join(' ')
 }
 
 /**

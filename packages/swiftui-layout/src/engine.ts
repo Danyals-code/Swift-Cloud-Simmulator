@@ -136,10 +136,18 @@ export interface PlacedNode {
     readonly x: number
     readonly y: number
   }
-  readonly transform?: { readonly scaleX: number; readonly scaleY: number; readonly rotate: number }
+  readonly transform?: {
+    readonly scaleX: number
+    readonly scaleY: number
+    readonly rotate: number
+    readonly rotateX?: number
+    readonly rotateY?: number
+  }
   readonly animation?: AnimationHint
   readonly transition?: TransitionHint
   readonly filter?: FilterSpec
+  readonly blendMode?: string
+  readonly redacted?: boolean
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
   readonly a11y?: {
     readonly label?: string
@@ -491,8 +499,12 @@ export class LayoutEngine {
       }
 
       case 'scale':
-        // `.scaleEffect` is a paint-time transform: layout still reserves the
-        // untransformed size, which is why a scaled view overlaps its neighbours.
+      case 'rotate3D':
+      case 'blendMode':
+      case 'redacted':
+      case 'unredacted':
+        // Paint-time: layout still reserves the untransformed size, which is why a
+        // scaled view overlaps its neighbours and a redacted one keeps its shape.
         return this.measure(element.child, proposal, inner)
 
       case 'position':
@@ -1306,7 +1318,8 @@ export class LayoutEngine {
             this.place(element.child, bounds, stripHitTargets(inner), out, z, parent)
 
       case 'scale':
-      case 'rotate': {
+      case 'rotate':
+      case 'rotate3D': {
         const transformId = `${element.id}-xform`
         out.push({
           id: transformId,
@@ -1315,10 +1328,7 @@ export class LayoutEngine {
           opacity: env.opacity,
           cornerRadius: 0,
           paint: { kind: 'hit' },
-          transform:
-            modifier.kind === 'scale'
-              ? { scaleX: modifier.x, scaleY: modifier.y, rotate: 0 }
-              : { scaleX: 1, scaleY: 1, rotate: modifier.degrees },
+          transform: transformFor(modifier),
           ...(parent ? { parent } : {}),
           ...(env.animation ? { animation: env.animation } : {}),
         })
@@ -1331,6 +1341,13 @@ export class LayoutEngine {
           transformId,
         )
       }
+
+      case 'blendMode':
+      case 'redacted':
+      case 'unredacted':
+        // These are inherited paint facts rather than boxes of their own, so they
+        // travel in the environment and every node below carries them out.
+        return this.place(element.child, bounds, inner, out, z, parent)
 
       case 'hitTarget': {
         const next = this.place(element.child, bounds, inner, out, z, parent)
@@ -1379,14 +1396,50 @@ function debugInfo(element: LayoutElement): {
 }
 
 /** Fields every painted node inherits from where it sits, rather than from itself. */
+/**
+ * The paint-time transform a modifier describes.
+ *
+ * The three share one node because they share one CSS property, and emitting one node
+ * per axis would stack transform origins that SwiftUI applies about a single centre.
+ */
+function transformFor(
+  modifier:
+    | { readonly kind: 'scale'; readonly x: number; readonly y: number }
+    | { readonly kind: 'rotate'; readonly degrees: number }
+    | { readonly kind: 'rotate3D'; readonly degrees: number; readonly x: number; readonly y: number; readonly z: number },
+): { scaleX: number; scaleY: number; rotate: number; rotateX?: number; rotateY?: number } {
+  if (modifier.kind === 'scale') return { scaleX: modifier.x, scaleY: modifier.y, rotate: 0 }
+  if (modifier.kind === 'rotate') return { scaleX: 1, scaleY: 1, rotate: modifier.degrees }
+
+  // The axis is a vector, so a rotation about (1, 1, 0) is half about each. Splitting
+  // it by component is what SwiftUI's own projection does.
+  const { degrees, x, y, z } = modifier
+  const length = Math.sqrt(x * x + y * y + z * z) || 1
+  return {
+    scaleX: 1,
+    scaleY: 1,
+    rotate: (degrees * z) / length,
+    rotateX: (degrees * x) / length,
+    rotateY: (degrees * y) / length,
+  }
+}
+
 function decorations(
   env: LayoutEnvironment,
   parent: string | null,
-): { parent?: string; animation?: AnimationHint; transition?: TransitionHint } {
+): {
+  parent?: string
+  animation?: AnimationHint
+  transition?: TransitionHint
+  blendMode?: string
+  redacted?: boolean
+} {
   return {
     ...(parent ? { parent } : {}),
     ...(env.animation ? { animation: env.animation } : {}),
     ...(env.transition ? { transition: env.transition } : {}),
+    ...(env.blendMode ? { blendMode: env.blendMode } : {}),
+    ...(env.redacted ? { redacted: true } : {}),
   }
 }
 
