@@ -1764,7 +1764,7 @@ class Converter {
     const style = tokenName(modifierArg(view, 'listStyle', 0)) ?? (view.name === 'Form' ? 'insetGrouped' : 'insetGrouped')
     const grouped = style !== 'plain' && style !== 'sidebar'
 
-    const sections = this.listSections(view, path)
+    const sections = this.listSections(view, path, style === 'sidebar')
     const blocks: LayoutElement[] = []
 
     sections.forEach((section, index) => {
@@ -1872,12 +1872,14 @@ class Converter {
     return this.background(
       { kind: 'scroll', id: path, axis: 'vertical', showsIndicators: true, content: column, ...origin },
       `${path}bg`,
-      this.color(grouped ? 'systemGroupedBackground' : 'systemBackground'),
+      // A sidebar sits on the grouped background like an inset list, and lays its rows
+      // out flat like a plain one - which is why it is neither of the two branches.
+      this.color(grouped || style === 'sidebar' ? 'systemGroupedBackground' : 'systemBackground'),
     )
   }
 
   /** Splits a list's children into sections, wrapping each child as a row. */
-  private listSections(view: ViewValue, path: string): Section[] {
+  private listSections(view: ViewValue, path: string, sidebar = false): Section[] {
     const sections: Section[] = []
     let current: Section = { header: null, footer: null, rows: [] }
 
@@ -1891,8 +1893,13 @@ class Converter {
         const title = stringArg(positional(child.args, 0)) ?? argText(child, 'header')
         const footer = argText(child, 'footer')
         current = {
+          // A sidebar names its sections in sentence case at the body size, which is
+          // the one thing about the style that is unmistakable at a glance; every
+          // other list shouts them in caption caps.
           header: title
-            ? this.styledText(`${id}hdr`, title.toUpperCase(), 'caption', 'secondaryLabel')
+            ? sidebar
+              ? this.styledText(`${id}hdr`, title, 'subheadline', 'secondaryLabel', 600)
+              : this.styledText(`${id}hdr`, title.toUpperCase(), 'caption', 'secondaryLabel')
             : null,
           // Sentence case and left aligned under the card, which is how iOS draws the
           // explanatory line under a group of settings.

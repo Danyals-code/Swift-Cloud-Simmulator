@@ -229,6 +229,24 @@ describe('the views that only needed drawing', () => {
   })
 })
 
+describe('list styles', () => {
+  const list = (style = '') => view(`List { Section("Head") { Text("row") } }${style}`)
+
+  it('a sidebar names its sections in sentence case', () => {
+    // The one thing about the style that is unmistakable at a glance. Every other
+    // list shouts its headers in caption caps; a sidebar does not.
+    expect(texts(run(list('.listStyle(.sidebar)')))).toContain('Head')
+    expect(texts(run(list('.listStyle(.plain)')))).toContain('HEAD')
+    expect(texts(run(list()))).toContain('HEAD')
+  })
+
+  it('a sidebar lays its rows out flat, on the grouped background', () => {
+    const cards = (r: CompileResult) => nodes(r).filter((n) => n.background && n.cornerRadius).length
+    expect(cards(run(list('.listStyle(.sidebar)')))).toBe(0)
+    expect(cards(run(list()))).toBeGreaterThan(0)
+  })
+})
+
 describe('a view the preview does not draw stops at its own box', () => {
   it('Table draws a placeholder rather than stopping the screen', () => {
     // `TableColumn("Name") { row in … }` had its closure run with nothing to pass, so

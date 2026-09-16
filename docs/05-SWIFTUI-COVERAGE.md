@@ -8,7 +8,7 @@ Last updated after the picker and view pass (defect register phases 9.1 and 9.6)
 gave `DatePicker` a calendar and `ColorPicker` a palette, and drew the views that only
 ever needed drawing.
 
-**153 ✅ · 50 🟡 · 13 ⬜ · 10 ✗**, over 226 rows, counted from this file rather than carried
+**155 ✅ · 48 🟡 · 12 ⬜ · 11 ✗**, over 226 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -50,7 +50,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes |
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | ~80 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
-| `Image("asset")` | ⬜ | - | reported as unavailable rather than drawn as a grey box |
+| `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
 | `GroupBox` | ✅ | - | a titled card: the label above, the contents on a rounded secondary panel |
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
@@ -61,7 +61,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Gauge` | 🟡 | 7 | `.gaugeStyle` chooses a ring or a bar; the ring does not show the value as an arc |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
 | `TimelineView` | 🟡 | - | its content is drawn once, at the moment of the render. The schedule is a clock the preview does not run, and the `context` is not supplied |
-| `Chart` (Swift Charts) | ⬜ | - | bar, line, point only |
+| `Chart` (Swift Charts) | ⬜ | - | needs a mark model and a plottable-value protocol of its own, which is a package rather than a view |
 | `Map` (MapKit) | ✗ | - | Needs a licensed tile source; placeholder with a note |
 | `UIViewRepresentable` | ✗ | - | Cannot run UIKit; labelled placeholder |
 
@@ -84,7 +84,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `List` | 🟡 | 6 | plain and the grouped styles; no sidebar style |
+| `List` | ✅ | 6 | plain, the grouped styles and `.sidebar`, which names its sections in sentence case on the grouped background |
 | `Section` | ✅ | 6 | header and footer, the footer in the secondary colour under the card |
 | `Form` | ✅ | 6 | the grouped-list form |
 | `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included |
@@ -97,7 +97,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `NavigationStack` + `NavigationLink` | ✅ | 6 | both the `destination:` and `value:` forms |
 | `.navigationDestination` | ✅ | 6 | `for:` with a metatype, resolved on push |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
-| `.toolbar` | 🟡 | 6 | bar buttons, leading and trailing; no `ToolbarItemGroup` placements |
+| `.toolbar` | ✅ | 6 | bar buttons leading and trailing, singly or in a `ToolbarItemGroup` |
 | `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | ✅ | - | collapses to a navigation stack showing the sidebar, which is what a phone does |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
