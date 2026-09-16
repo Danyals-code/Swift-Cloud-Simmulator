@@ -10,6 +10,7 @@ import {
 } from './formats'
 
 export * from './bundle'
+export * from './import'
 export * from './formats'
 export { generatePbxproj, IdAllocator, targetRelativePath, type XcodeProjectPlan } from './pbxproj'
 export { parsePlist, serializePlist, type PlistDict, type PlistValue } from './plist'

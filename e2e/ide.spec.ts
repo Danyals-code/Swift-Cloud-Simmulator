@@ -13,8 +13,20 @@ import { expect, test, type Page } from '@playwright/test'
  * actually wired to the UI.
  */
 
+/**
+ * Opens the studio and dismisses the welcome sheet.
+ *
+ * The studio opens with it: the first question is where the project comes from, and
+ * a tool that answers that question for you is a tool that has picked for you. Every
+ * test below is about what happens *after* that choice, so they all start by keeping
+ * what is already open.
+ */
 async function openStudio(page: Page) {
   await page.goto('/')
+  await expect(page.getByTestId('template-gallery')).toBeVisible()
+  await page.getByTestId('gallery-dismiss').click()
+  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+
   await expect(page.getByTestId('editor')).toBeVisible()
   await expect(page.getByTestId('render-tree')).toBeVisible()
 }
@@ -184,6 +196,7 @@ test('gate 2 - a template from the gallery loads and renders cleanly', async ({ 
 
   await page.getByTestId('new-file').click()
   await page.getByTestId('new-file-menu-template').click()
+  await page.getByTestId('gallery-source-feature').click()
   await page.getByTestId('template-tasks').click()
   await page.getByTestId('template-confirm').click()
 

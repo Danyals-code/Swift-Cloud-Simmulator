@@ -8,10 +8,21 @@ all green while that was true, because the eighteen templates used none of the
 constructs that fail - so the corpus, not the interpreter, was what "18 / 18 templates
 with zero placeholders" measured.
 
-**All ten phases are now closed.** The corpus is the last of them to close, and the
-most load-bearing: the gallery is written the way people write, and two tests name the
+**Phases 1-10 are closed.** The corpus was the last of them, and the most
+load-bearing: the gallery is written the way people write, and two tests name the
 idioms it must keep containing. Everything still not built is listed here with the
 reason, and carries the same reason in the coverage matrix.
+
+**Phases 11 and 12 exist because 10 worked, and both are closed.** Four multi-screen
+templates were written against the real pipeline, and writing ordinary Swift against it
+found eighteen defects the whole of phases 1-10 had not - including two where the
+interpreter returned a *wrong answer* with a clean Problems pane, and several where an
+entire screen drew nothing and said nothing.
+
+That is the argument for the corpus rule, made one level up. A sweep tests the claims in
+the matrix; almost every one of these lived in the space *between* two claims that were
+each true on their own. The fastest way to find what a preview gets wrong is to write
+the app you would have written anyway.
 
 Phases run by severity first, then by how much real code each one unlocks. The order is
 a dependency order as well as a severity one: the parser gaps in Phase 4 sit above the
@@ -31,6 +42,8 @@ Status: ✅ closed · 🟡 partly closed (what remains is stated) · ⬜ open
 | 8 | Validate what a share link carries | 4 | ✅ |
 | 9 | Draw what is honestly not drawn yet | 9 | ✅ |
 | 10 | Make the documentation match the code | 7 | ✅ |
+| 11 | What writing three new app templates found | 10 | ✅ |
+| 12 | What writing an app, rather than reading the matrix, found | 8 | ✅ |
 
 ## What was swept
 
@@ -580,6 +593,341 @@ Two tests keep it that way. One lists the idioms the corpus must contain and nam
 in its failure message; the other refuses `let id: Int` outright. Without them the
 gallery drifts back to the safe subset, which is how the number came to mean nothing
 the first time.
+
+## Phase 11 - What writing three new app templates found
+
+Three multi-screen templates were written against the real pipeline rather than against
+the matrix, which is the only way to find out what the matrix is wrong about. Every
+defect below was hit by ordinary Swift on the way to a screen that renders, not by
+probing for it.
+
+| # | Item | State |
+| --- | --- | --- |
+| 11.1 | Overloads collapsed to whichever was written last | ✅ |
+| 11.2 | A method and a property sharing a name could not coexist | ✅ |
+| 11.3 | `$store.property` was not a binding | ✅ |
+| 11.4 | Trailhead does not compile in Xcode | ✅ |
+| 11.5 | Custom `Shape` conformances, unsupported and unlisted | ✅ |
+| 11.6 | The corpus is 7% of the client JS budget | ✅ |
+| 11.7 | The share limit, not the matrix, is what caps the gallery | ✅ |
+| 11.8 | The template gate only ever renders the first screen | ✅ |
+| 11.9 | Open cannot read what Export writes | ✅ |
+| 11.10 | One project slot, named after the counter | ✅ |
+
+### 11.1 - the worst kind of wrong
+
+`Ledger` wanted `spent` and `spent(on:)`; `Pulse` wanted `minutes(on:)` and
+`minutes(of:)`. Both are ordinary Swift and neither worked, because `memberKey` in
+`conformance.ts` keyed a function on its bare name. Two overloads collided, the later
+layer overwrote the earlier, and the survivor was then called with the labels of the
+one that had been dropped - so its parameter bound to nothing.
+
+`box.value(of: 1)` returned `"from:nil"`. Not a trap, not a diagnostic: an answer.
+Pulse drew a week of bars reading 0, 0, 0, 0, 0, 0, 0 and reported no problems.
+
+That is the one failure mode this product cannot have. Everything else rests on the
+preview being an honest rehearsal of what Xcode will compile, and a wrong number with a
+clean Problems pane is indistinguishable from a right one until it reaches a Mac.
+
+A member key carries its argument labels now, and the call site picks the overload
+whose labels it wrote. Where they match nothing the first declaration still wins, which
+is what the lookup did before and what a trailing closure needs - `sheet(isPresented:)`
+written the way everybody writes it arrives with no label at all. Parameter *types* are
+the other half of Swift's rule and are deliberately still not modelled: the interpreter
+is untyped, and guessing between two untyped candidates would be worse than picking the
+one written last. The matrix says so.
+
+Pinned by `packages/swift-runtime/src/overloads.test.ts`.
+
+### 11.2 - properties answered a call
+
+`var spent: Double` and `func spent(on: Category) -> Double` are two members in Swift.
+Here the general lookup answered properties before methods, which is right for a read
+and wrong for a call: `spent(on: .food)` found the `Double` and tried to call it, and
+the unqualified form inside the type failed the same way one level deeper.
+
+Calls ask for a method specifically now, before the property lookup runs. Reads are
+untouched.
+
+### 11.3 - the binding half of `@ObservedObject`
+
+`Slider(value: $ledger.monthlyBudget)` trapped with "Value of type 'Binding' has no
+member 'monthlyBudget'". SwiftUI spells this as `@dynamicMemberLookup` on `Binding` and
+on the wrapper an observed object projects, and it is how a large share of real bindings
+are written - a control writing into a model without mirroring the value into a `@State`
+and copying it back.
+
+The mechanism was already there: a projection is a reference to storage, so a member of
+one is a reference to a field of that storage. The write-back is the part that had to be
+right - a class is a reference and is already changed, a struct is a value and has to be
+pushed back through the outer projection or the change lands on a copy.
+
+### 11.4 - the flagship template did not compile
+
+Found while checking what the new templates had to match. `Trailhead` carried two type
+errors that Xcode rejects and an untyped interpreter cannot see:
+
+- `@Published var savedIDs = [2]` is `[Int]`, and `Trail.id` is a `UUID`. Every
+  `savedIDs.contains(trail.id)` was a type error; here it silently answered false, so
+  the Saved tab showed its empty state and the Save button never appeared to do
+  anything.
+- `NavigationLink(value: trail)` and `.navigationDestination(for: Trail.self)` both
+  require `Trail: Hashable`, and `Trail` declared only `Identifiable`. Swift synthesises
+  that conformance, but only for a type that asks for it.
+
+A template is a promise that this is what the tool can do, and an exported project Xcode
+refuses to open is the loudest possible way to break the promise the whole architecture
+exists to keep. The store is keyed by name now and `Trail` declares `Hashable`. The
+three new templates declare it too, and their ids and their collections are the same
+type.
+
+Nothing in the suite would have caught either, because the gate runs the *interpreter*
+and the interpreter is untyped by design. That is the other half of 11.8.
+
+### 11.5 - a gap the matrix had no row for, and now has a row and an implementation
+
+`struct Arc: Shape { func path(in rect: CGRect) -> Path }` parsed, and `.stroke` on it
+answered "Value of type 'Arc' has no member 'stroke'". Custom shapes are everywhere in
+real SwiftUI, and the matrix listed `Path`, the built-in shapes and custom
+`ViewModifier` while saying nothing about this one - which by the matrix's own rule is
+indistinguishable from a bug.
+
+The reason it looked hard is that a shape has to be handed the rect it is about to be
+laid out in, and layout has not run yet. That is the same ordering problem
+`GeometryReader` has, and the answer already in the codebase works here too: the size
+measured last pass, with the pipeline running a second one when the guess was wrong. A
+shape becomes a greedy container holding the `Path` it drew, which is what a shape is.
+
+The modifiers split in two, and getting that right is most of the work: `.fill`,
+`.stroke` and `.trim` are the shape's own and go on the path, while `.frame` and the
+rest are view modifiers and go on the box - or `.frame(width: 160)` would leave the
+shape greedy and the ring would fill the screen.
+
+`CGRect` needed `minX`, `midY` and the rest while this was going in. They are derived
+rather than stored, as Swift derives them; without them every custom shape reported no
+such member on the first line of its `path(in:)`.
+
+### 11.6 - the templates were 7% of the client bundle
+
+`npm run budget` reported 424 KB of a 450 KB budget, and the template corpus was about
+31 KB gzipped of it - all in the initial chunk, because `store.ts` imported
+`createDefaultProject` from a package index that re-exported every template's source.
+
+The metadata and the Swift are separate modules now. `catalog.ts` has what the sheet
+needs to *draw* the gallery - name, kind, tagline, description, file paths - and is
+about a kilobyte; `@studio/project-model/templates` has the sources and is imported
+dynamically, by `applyTemplate` and by the one path that lays down a starter project.
+`catalog.test.ts` asserts the two lists still agree, so a template added to one and
+forgotten in the other fails rather than half-existing.
+
+`isPristine` was what made this more than a `dynamic import`: it compared the project
+against every template's text, so the sheet could not open without the whole corpus.
+The project records a fingerprint of what it was created with instead. That is the
+persisted field the first implementation avoided, and it earns its place now: it is
+twelve characters, it survives a share link (absent, so the confirmation asks - the
+conservative direction), and it keeps the property that mattered, which is that a
+project edited and undone back to the original still counts as untouched.
+
+**The measurement moved in the other direction, and that turned out to be the finding.**
+The first paint dropped by 21 KB and the *total* rose by 3, because a split costs
+overhead - so the only gate in the build got very slightly worse when the code got
+better, and nothing in CI could tell that apart from a regression. The budget check
+gates the largest chunk as well now. Turbopack emits no per-route manifest and the
+framework's own entry measures React rather than the studio, so the biggest chunk is
+the honest proxy: it is the studio, it is on the critical path, and it is exactly where
+a careless static import lands.
+
+### 11.7 - the share limit was capping the gallery
+
+Not the coverage matrix, which is what the templates doc said. `share.test.ts` required
+every template inside 80% of `MAX_SHARE_LENGTH`; Trailhead sat at 98% of that and
+`Kitchen` was cut four separate times to get under it - two recipes and most of the doc
+comments. None of those cuts made the template better.
+
+"Room left to edit it" is a different number for the two kinds, and conflating them was
+the error. You edit a one-file template by writing more of it, so headroom there means
+doubling room; you edit an eight-file app by changing a screen. The hard limit is
+unchanged and applies to both - past `MAX_SHARE_LENGTH` there is no link at all - and
+the headroom is now 50% for a feature template and 8% for an app one.
+
+### 11.8 - the gate reaches past the first screen
+
+`tests/templates.test.ts` measured the *root*. For a one-file template that is the whole
+template; for an eight-file app it was the first screen, with every detail view, sheet
+and non-first tab uncovered.
+
+It presses things now: depth-first from the root, at most three deep and twenty screens,
+coming back through the navigation bar's own back button, running the same assertions -
+no placeholders, finite geometry inside the screen, readable text - on everything it
+reaches. It runs in dark mode, because that is the harder appearance and the other
+checks do not depend on the palette.
+
+It found two defects on its first run. One was in `Trailhead`: the route list printed
+the step's `id` where its number belonged, and `id` had become a `UUID` - so three lines
+of the detail screen read as 36-character hex strings. It had shipped, and every gate
+was green, because no test had ever pushed that screen. The other is 12.3.
+
+### 11.9 - Open reads what Export writes
+
+The Open pane took loose `.swift` files; Export wrote a `.zip`. The round trip the whole
+product is built around therefore had "unzip it yourself" in the middle of it.
+
+`readProjectArchive` lives in the exporter, where `fflate` already is, and is imported
+on demand so nothing new reaches the initial bundle. The four formats nest sources three
+different ways and the archive adds a root folder, so the wrapper is peeled rather than
+stripped in a fixed order: `App/App/`, `App/Sources/App/`, `App/Sources/`. A test
+round-trips all four and asserts the user's bytes come back unchanged.
+
+An archive is a stranger's bytes, so entry names never become paths: the count and the
+total size are capped before anything is decoded, a path that climbs out keeps only its
+name, and the project model normalises everything again afterwards.
+
+### 11.10 - projects have their own ids, and a list
+
+`DEFAULT_PROJECT_ID` was the string `counter-app`, and every project the studio ever
+held was written to it.
+
+Each one gets its own id now, the welcome sheet's Open pane is the list of them, and
+the old key is read on startup so an install from before this still finds its work. The
+rule for what is kept is the one the confirmation already implies: **a project you
+edited is kept when you start another; one you never touched is not.** A template can be
+recreated in two clicks, and keeping one per click would fill the list with things
+nobody chose to keep.
+
+Deleting is the one action in the sheet that destroys something and makes nothing, so
+it asks first, and it refuses the project that is open - there would be nothing to show
+afterwards, and the next autosave would write it straight back.
+
+Closing this uncovered 12.8 underneath it.
+
+## Phase 12 - What writing an app, rather than reading the matrix, found
+
+Phase 11 closed by writing three templates. This one closed it the rest of the way and
+then kept going in the same direction: sitting down to write the Swift a real app is
+made of - a `@ViewBuilder` helper, a switch over an enum with a payload, a tally built
+with `reduce(into:)` - and running it.
+
+Seven defects, and the number that matters is this: **three of them were silent.** The
+screen was empty or the figure was wrong, and the Problems pane said "No problems."
+None of the seven is exotic and none was reachable by probing the coverage matrix,
+because the matrix already claimed all seven.
+
+| # | Item | State |
+| --- | --- | --- |
+| 12.1 | A `@ViewBuilder` helper of more than one statement drew nothing | ✅ |
+| 12.2 | A contextual enum case dropped its associated values | ✅ |
+| 12.3 | `@EnvironmentObject` was empty on any deferred screen | ✅ |
+| 12.4 | A `Group` carrying a modifier drew a placeholder | ✅ |
+| 12.5 | `AnyView` drew nothing at all | ✅ |
+| 12.6 | `reduce(into:)` refused to write to its own accumulator | ✅ |
+| 12.7 | No `Dictionary(grouping:by:)` | ✅ |
+| 12.8 | Two concurrent first loads laid down two starter projects | ✅ |
+
+### 12.1 - the helper that drew nothing
+
+Splitting a long body into `@ViewBuilder` helpers is the first thing anybody does to a
+real view, and every form of it produced an empty screen with no diagnostic:
+
+```swift
+@ViewBuilder func row(_ on: Bool) -> some View {
+    if on { Text("yes") } else { Text("no") }
+}
+```
+
+A helper of a *single expression* worked, which is why it went unnoticed for so long:
+the implicit return covers one expression and a builder body almost never is one.
+Everything else fell off the end of the function and returned `Void`.
+
+`runBody` now runs a body carrying the attribute as a builder, and hands more than one
+value to the host to wrap - an implicit `Group`, which is what SwiftUI's `TupleView`
+does here. The attribute is the flag, not the return type: a plain function returning
+`some View` still runs its statements and returns what it returns.
+
+### 12.2 - the payload that was dropped on the way in
+
+```swift
+describe(.done("hi"))       // "Cannot find 's' in scope"
+describe(Load.done("hi"))   // fine
+```
+
+A contextual member is resolved against the *declared type* at the call site, which is
+the right design - only that type can say which enum `.done` belongs to. But the token
+standing in for it until then carried the name and not the arguments, so `coerceToEnum`
+built a case with an empty payload. The `switch` matched `.done` and bound nothing, and
+the failure named the user's variable rather than the thing that lost it.
+
+The token carries its arguments now. The spelling that worked is the one nobody uses.
+
+### 12.3 - the environment that stopped at the push
+
+`@EnvironmentObject var store: Store` on a screen reached through
+`navigationDestination` trapped with "Value of type 'Optional' has no member …". The
+environment here is a lexical stack, and a deferred builder - a pushed destination, a
+presented sheet, a toolbar - runs at resolve time, long after the expansion that
+declared it has unwound.
+
+It was written down as a known limitation, and the flagship template worked around it
+by handing the store to the detail screen as an `@ObservedObject` parameter. That is
+not what anyone writes, and the workaround is what made it look acceptable.
+
+A deferred modifier captures the frame it was *written* in and restores it when it
+runs, which is what SwiftUI does. Held by reference rather than copied: the stack
+replaces its maps instead of mutating them, so a captured frame cannot be written
+through.
+
+### 12.4 and 12.5 - two views that are not containers
+
+`Group { … }.font(.caption)` drew a grey placeholder - the modifier made the group
+opaque to the layout, which then matched nothing in its switch. The fix is also the
+correct semantics rather than an approximation of them: SwiftUI applies a `Group`'s
+modifiers to *each child*, so they are pushed down and the group disappears.
+
+`AnyView(Text("erased"))` drew nothing. Its content arrives as an argument rather than
+as a trailing closure, and the layout flattens the view by walking its children.
+
+Both were ✅ in the matrix.
+
+### 12.6 and 12.7 - building a collection up
+
+`reduce(into:)` is a different function wearing the same name: its closure takes the
+accumulator `inout` and returns nothing, so reading the closure's *result* collected a
+list of Voids and the first mutation failed with "'acc' is a 'let' constant". The
+accumulator is handed over as a projection now - the mechanism `inout` and `@Binding`
+already use - so `acc.append(x)` and `acc[k, default: 0] += 1` both land.
+
+The second of those needed its own fix: a compound assignment reads before it writes,
+and the plain getter answered nil for a key that was not there yet. The default belongs
+to the read half.
+
+`Dictionary(grouping:by:)` did not exist, which is the one-liner that turns a flat list
+into sections.
+
+### 12.8 - two starter projects, from one visit
+
+Found while looking at what 11.10 had changed. React mounts an effect twice in
+development; both loads found an empty database and both laid down a starter project.
+
+It had been true for as long as the effect had, and was invisible because every project
+was written to one fixed key - the second load overwrote the first. Giving projects
+their own ids fixed one bug and uncovered another underneath it, which is the ordinary
+way of things. The first load is now a promise held at module scope, so it happens once
+however many times it is asked for.
+
+### What this phase is actually evidence for
+
+Phases 1-10 swept 870 checks against the matrix and found 231 defects. Phases 11 and 12
+wrote four apps and found eleven more - including the worst one in the register, an
+overload resolved to the wrong function - in a fraction of the time.
+
+That is not an argument against sweeping. It is an argument about what a sweep can
+see: it tests the claims, and every one of these lived in the space *between* two
+claims that were each true on their own. `@ViewBuilder` is supported and multi-statement
+bodies are supported; contextual members are supported and enum payloads are supported;
+`Group` is supported and modifiers are supported. Each pair failed where they met.
+
+The corpus rule from 10.6 said the gallery must be written the way people write. This
+is the same rule one level up: the *tests* have to be written the way people write, and
+the cheapest way to do that is to write an app and see what happens.
 
 ## Method
 

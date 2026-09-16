@@ -5,7 +5,8 @@
 Each phase has a **goal**, a **scope**, **deliverables**, and an **acceptance gate**. The gate is a
 demonstrable, testable statement - if it does not pass, the phase is not done and the next phase
 does not start. Sizing is given as focused-developer weeks; treat it as relative weight rather than
-a promise, and expect it to compress substantially when the implementation is AI-assisted.
+a promise. What the numbers are good for is the *ratio* between phases, which is what decides the
+order; the absolute figures have never survived contact with any schedule.
 
 The sequencing principle: **prove the riskiest thing earliest.** The two things most likely to sink
 this project are the layout engine (R1) and export correctness (G3). Both are forced to the front -

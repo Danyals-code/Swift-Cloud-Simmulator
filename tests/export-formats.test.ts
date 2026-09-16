@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { unzipSync } from 'fflate'
-import { TEMPLATES, createProjectFromTemplate, type Project } from '@studio/project-model'
+import { type Project } from '@studio/project-model'
+import { TEMPLATES, createProjectFromTemplate } from '@studio/project-model/templates'
 import {
   bundleFor,
   EXPORT_FORMATS,

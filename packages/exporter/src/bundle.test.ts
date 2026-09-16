@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { unzipSync } from 'fflate'
-import { createDefaultProject, type Project } from '@studio/project-model'
+import { type Project } from '@studio/project-model'
+import { createDefaultProject } from '@studio/project-model/templates'
 import {
   buildExportBundle,
   buildPackageBundle,

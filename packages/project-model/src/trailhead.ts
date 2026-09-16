@@ -97,7 +97,9 @@ enum Difficulty: String {
     }
 }
 
-struct Trail: Identifiable {
+/// Hashable because NavigationLink(value:) pushes the whole value, and Swift
+/// synthesises that conformance only for a type that declares it.
+struct Trail: Identifiable, Hashable {
     let id = UUID()
     let name: String
     let region: String
@@ -121,7 +123,7 @@ const STORE = `import SwiftUI
 
 /// One instance, reached from every tab: saving on the detail screen changes the Saved tab.
 final class TrailStore: ObservableObject {
-    @Published var savedIDs = [2]
+    @Published var savedNames = ["Heather Meadows"]
 
     let trails = [
         Trail(name: "Cascade Ridge", region: "North Cascades", miles: 8.4, ascent: 2900, difficulty: .hard, symbol: "mountain.2",
@@ -161,19 +163,19 @@ final class TrailStore: ObservableObject {
 
     var saved: [Trail] {
         return trails.filter { trail in
-            return savedIDs.contains(trail.id)
+            return savedNames.contains(trail.name)
         }
     }
 
     func isSaved(_ trail: Trail) -> Bool {
-        return savedIDs.contains(trail.id)
+        return savedNames.contains(trail.name)
     }
 
     func toggleSaved(_ trail: Trail) {
-        if let index = savedIDs.firstIndex(of: trail.id) {
-            savedIDs.remove(at: index)
+        if let index = savedNames.firstIndex(of: trail.name) {
+            savedNames.remove(at: index)
         } else {
-            savedIDs.append(trail.id)
+            savedNames.append(trail.name)
         }
     }
 }
@@ -460,7 +462,7 @@ struct TrailDetailView: View {
 
                     ForEach(directions) { step in
                         HStack(alignment: .top, spacing: 10) {
-                            Text("\\(step.id)")
+                            Text("\\(step.number)")
                                 .font(.caption)
                                 .foregroundStyle(Color.secondary)
                                 .frame(width: 18, alignment: .leading)
@@ -499,15 +501,18 @@ struct TrailDetailView: View {
 
     var directions: [Step] {
         return [
-            Step(text: "Follow the forest road to the upper car park."),
-            Step(text: "Cross the creek at the second bridge, then turn uphill."),
-            Step(text: "Stay left where the track forks below the pass.")
+            Step(number: 1, text: "Follow the forest road to the upper car park."),
+            Step(number: 2, text: "Cross the creek at the second bridge, then turn uphill."),
+            Step(number: 3, text: "Stay left where the track forks below the pass.")
         ]
     }
 }
 
+/// The number is its own field rather than its identity: id is what ForEach follows
+/// and has no business being read by a person.
 struct Step: Identifiable {
     let id = UUID()
+    let number: Int
     let text: String
 }
 

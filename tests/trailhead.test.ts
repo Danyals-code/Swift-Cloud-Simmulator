@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CompileRequest, RenderNode, RenderTree } from '@studio/shared'
-import { TRAILHEAD_FILES } from '@studio/project-model'
+import { TRAILHEAD_FILES } from '@studio/project-model/templates'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
 import { DEVICES } from '@studio/sim-shell'
 

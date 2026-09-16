@@ -33,7 +33,7 @@ construction and keeps the product honest: the preview can be imperfect, the out
 | [04 - Swift language subset](docs/04-SWIFT-SUBSET.md) | Exactly which Swift features are in/out, by tier |
 | [05 - SwiftUI coverage matrix](docs/05-SWIFTUI-COVERAGE.md) | Views, modifiers, styles - the living checklist |
 | [06 - Vertical slice (v0.1)](docs/06-VERTICAL-SLICE.md) | **The decided first build** - reference app, subset, per-phase task lists and findings |
-| [07 - Defect register](docs/07-DEFECT-REGISTER.md) | **The working backlog** - what an 870-check sweep found, in ten phases, with what is closed and what is not |
+| [07 - Defect register](docs/07-DEFECT-REGISTER.md) | **The working backlog** - what an 870-check sweep found, in ten phases, plus an eleventh that writing three new app templates turned up. What is closed and what is not |
 
 ## Decided scope for v0.1
 
@@ -49,6 +49,15 @@ construction and keeps the product honest: the preview can be imperfect, the out
 **Phases 0-10 complete, and the defect register's ten phases with them.** The
 studio parses, checks, runs and renders real Swift across multiple files, exports
 to four project formats, and shares a project through a link that needs no server.
+
+The register's eleventh and twelfth phases are worth reading before the rest of this.
+Four multi-screen templates were written against the real pipeline, and ordinary Swift
+found eighteen defects that ten phases of sweeping had not: an overload resolved to the
+wrong function, a `@ViewBuilder` helper that drew nothing, an enum case that lost its
+payload on the way into a function. Two of them returned a *wrong answer* with a clean
+Problems pane, which is the one failure this product cannot have. All eighteen are
+closed, and the lesson is in the phases: a sweep tests the claims in the matrix, and
+almost every one of these lived in the space between two claims that were each true.
 
 What it handles now is most of the SwiftUI people actually write:
 
@@ -103,10 +112,33 @@ What it handles now is most of the SwiftUI people actually write:
 - **A share link is treated as a stranger's bytes** - every value it carries is
   validated before it becomes a project, and the exporter refuses to write an
   entry outside the archive's own root whatever it is handed.
-- **Somewhere to start** - nineteen templates, written the way people write
-  rather than the way this is easy: `UUID` identities, dates, `allCases`, both
-  spellings of `Button`, explicit getters. One of them (`Trailhead`) is a whole
-  eight-file project rather than a snippet.
+- **Projects, plural** - every project gets its own id and the welcome sheet lists
+  what is in this browser, so creating from a template no longer destroys what was
+  there. A project you edited is kept when you start another; one you never touched
+  is not, because a template can be recreated in two clicks and a list that only
+  grows is a list nobody reads.
+- **Somewhere to start** - twenty-two templates behind one sheet that asks the
+  only question a new session has: *where does this project come from*. Three
+  answers, and they are the three things down its left edge - what is already in
+  this browser, a whole **app** to start from, or one **feature** to read. The
+  split is the point: four of the templates are real multi-screen projects
+  (`Trailhead`, `Ledger`, `Kitchen`, `Pulse`) with a model, a store and folders
+  that mean something, and eighteen are one file teaching one idea. A pile of
+  twenty-two cards sorted by name cannot tell you which is which.
+
+  All of them are written the way people write rather than the way this is easy:
+  `UUID` identities, dates, `allCases`, both spellings of `Button`, explicit
+  getters, `$store.property` bound straight into a model.
+- **A way back in** - the sheet is the app icon in the top-left corner, so
+  starting over is one click from anywhere. It asks before it replaces work, and
+  only when there is work to lose: a project still identical to the template it
+  came from is replaced without a dialog nobody would have read.
+- **Files can come back** - the counterpart to Export, and the round trip the whole
+  product is built around. Pick the `.swift` files from a project you exported and
+  have since edited on a Mac, *or the `.zip` the export itself wrote* - all four
+  formats read back, with the wrapper folders peeled and your bytes unchanged.
+  Nothing is uploaded; the picker is the browser's own, and an archive is treated as
+  what it is: a stranger's bytes, capped and re-normalised before anything is opened.
 
 The [coverage matrix](docs/05-SWIFTUI-COVERAGE.md) is the exact contract, and it
 is honest about the 🟡 rows as well as the ✅ ones.
@@ -118,8 +150,8 @@ Three things are outstanding, and none of them is hidden:
   - the pbxproj parses, its object graph resolves, every bundle is structurally
   complete, and each format carries the user's bytes unchanged. See
   [docs/06-VERTICAL-SLICE.md](docs/06-VERTICAL-SLICE.md) section 4.12.
-- **The conformance corpus is 19 projects, not the 100 Phase 6's first gate asks
-  for.** Eighty-one more authored in a single pass would be padding; the corpus
+- **The conformance corpus is 22 projects, not the 100 Phase 6's first gate asks
+  for.** Seventy-eight more authored in a single pass would be padding; the corpus
   grows as real projects arrive. See section 4.15.
 - **Coverage telemetry has no data**, because nothing has shipped and nothing is
   transmitted. The instrument is built and visible in the studio's Coverage

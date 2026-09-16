@@ -1,6 +1,16 @@
 import type { SourceFile } from '@studio/shared'
+import { STARTER_TEMPLATE_ID, TEMPLATE_CATALOG, type TemplateInfo } from './catalog'
+import { fingerprintFiles, newProjectId } from './open'
+import { KITCHEN_FILES } from './kitchen'
+import { LEDGER_FILES } from './ledger'
+import { PULSE_FILES } from './pulse'
 import { TRAILHEAD_FILES } from './trailhead'
 import type { Project } from './types'
+
+export { KITCHEN_FILES } from './kitchen'
+export { LEDGER_FILES } from './ledger'
+export { PULSE_FILES } from './pulse'
+export { TRAILHEAD_FILES } from './trailhead'
 
 /**
  * The template gallery.
@@ -20,17 +30,21 @@ import type { Project } from './types'
  * example.
  */
 
-export interface Template {
-  readonly id: string
-  readonly name: string
-  readonly description: string
+/**
+ * A template with its Swift.
+ *
+ * `files` is the one field that differs from the catalog entry - there it is the list
+ * of paths the sheet shows, here it is those paths with their text - so the metadata
+ * is inherited and that one property replaced.
+ */
+export interface Template extends Omit<TemplateInfo, 'files'> {
   /**
    * The files the template lays down, in navigator order.
    *
    * Was a single `source` string, which made every template a one-file project by
-   * construction - and so made it impossible to ship an example of the thing
-   * people actually build, which is several screens across several files. A
-   * template that cannot show structure cannot teach it.
+   * construction - and so made it impossible to ship an example of the thing people
+   * actually build, which is several screens across several files. A template that
+   * cannot show structure cannot teach it.
    */
   readonly files: readonly SourceFile[]
 }
@@ -1128,147 +1142,78 @@ const TYPESETTING = app(
 }`,
 )
 
-export const TEMPLATES: readonly Template[] = [
-  {
-    id: 'counter',
-    name: 'Counter',
-    description: 'State, a Spacer and modifier ordering - the reference app.',
-    files: single(COUNTER_APP_SOURCE),
-  },
-  {
-    id: 'stacks',
-    name: 'Stacks',
-    description: 'VStack, HStack and ZStack, plus a reusable sub-view.',
-    files: single(STACKS),
-  },
-  {
-    id: 'tasks',
-    name: 'Task list',
-    description: 'A loop building rows, with state driving their appearance.',
-    files: single(TOGGLE_LIST),
-  },
-  {
-    id: 'card',
-    name: 'Profile card',
-    description: 'A centred card with a button that toggles its own label.',
-    files: single(PROFILE_CARD),
-  },
-  {
-    id: 'palette',
-    name: 'Palette',
-    description: 'A nested loop grid, and a function returning a Color.',
-    files: single(GRID),
-  },
-  {
-    id: 'navigation',
-    name: 'Explore',
-    description: 'A navigation stack over a list, pushing a detail screen.',
-    files: single(NAVIGATION),
-  },
-  {
-    id: 'settings',
-    name: 'Settings',
-    description: 'A form of grouped sections: toggles, a slider and a text field.',
-    files: single(SETTINGS_FORM),
-  },
-  {
-    id: 'gallery',
-    name: 'Gallery',
-    description: 'An adaptive grid of symbol tiles inside a scroll view.',
-    files: single(PHOTO_GRID),
-  },
-  {
-    id: 'tabs',
-    name: 'Tabs',
-    description: 'Three tabs, each its own view, with a real tab bar.',
-    files: single(TABS),
-  },
-  {
-    id: 'motion',
-    name: 'Motion',
-    description: 'withAnimation driving size, corner radius and shadow together.',
-    files: single(ANIMATION),
-  },
-  {
-    id: 'inbox',
-    name: 'Inbox',
-    description: 'A list, a toolbar button and a sheet that composes a message.',
-    files: single(SHEET_LIST),
-  },
-  {
-    id: 'store',
-    name: 'Order',
-    description: 'An ObservableObject shared between two views, with @StateObject.',
-    files: single(OBSERVABLE),
-  },
-  {
-    id: 'flow',
-    name: 'Steps',
-    description: 'An enum driving the screen, switched on in the body.',
-    files: single(STATE_MACHINE),
-  },
-  {
-    id: 'drawing',
-    name: 'Vectors',
-    description: 'Path, arcs and trim - a progress ring drawn from scratch.',
-    files: single(DRAWING),
-  },
-  {
-    id: 'drag',
-    name: 'Drag',
-    description: 'A drag gesture with @GestureState, and a spring on release.',
-    files: single(DRAGGABLE),
-  },
-  {
-    id: 'styled',
-    name: 'Styled',
-    description: 'A custom ViewModifier, and extension View naming a modifier chain.',
-    files: single(STYLED),
-  },
-  {
-    id: 'trailhead',
-    name: 'Trailhead',
-    description:
-      'Eight files across four groups: tabs, two levels of navigation, scrolling in both directions, a shared store and a sheet.',
-    files: TRAILHEAD_FILES,
-  },
-  {
-    id: 'typesetting',
-    name: 'Typesetting',
-    description: 'Text attributes, concatenation, shrink-to-fit and an inset footer.',
-    files: single(TYPESETTING),
-  },
-  {
-    id: 'loader',
-    name: 'Loader',
-    description: 'A protocol with a default, and do/catch handling a thrown error.',
-    files: single(LOADER),
-  },
-]
+/**
+ * The files each template lays down, keyed by the catalog's id.
+ *
+ * Separate from the metadata so the two can live in different chunks. A key here
+ * with no catalog entry - or the reverse - is caught by `catalog.test.ts` rather
+ * than producing a template that half exists.
+ */
+const SOURCES: Readonly<Record<string, readonly SourceFile[]>> = {
+  counter: single(COUNTER_APP_SOURCE),
+  stacks: single(STACKS),
+  tasks: single(TOGGLE_LIST),
+  card: single(PROFILE_CARD),
+  palette: single(GRID),
+  navigation: single(NAVIGATION),
+  settings: single(SETTINGS_FORM),
+  gallery: single(PHOTO_GRID),
+  tabs: single(TABS),
+  motion: single(ANIMATION),
+  inbox: single(SHEET_LIST),
+  store: single(OBSERVABLE),
+  flow: single(STATE_MACHINE),
+  drawing: single(DRAWING),
+  drag: single(DRAGGABLE),
+  styled: single(STYLED),
+  trailhead: TRAILHEAD_FILES,
+  ledger: LEDGER_FILES,
+  kitchen: KITCHEN_FILES,
+  pulse: PULSE_FILES,
+  typesetting: single(TYPESETTING),
+  loader: single(LOADER),
+}
 
-export const DEFAULT_PROJECT_ID = 'counter-app'
+/**
+ * The gallery, sources included.
+ *
+ * Paired with `catalog.ts` rather than restating it: the metadata lives there so the
+ * welcome sheet can draw the gallery without pulling 31 KB of Swift into the initial
+ * bundle, and this module - which nothing in the app's static graph imports - adds
+ * the files. `catalog.test.ts` asserts the two lists still agree.
+ */
+export const TEMPLATES: readonly Template[] = TEMPLATE_CATALOG.map((info) => ({
+  ...info,
+  files: SOURCES[info.id] ?? [],
+}))
 
 export function templateById(id: string): Template | undefined {
   return TEMPLATES.find((t) => t.id === id)
 }
 
 export function createDefaultProject(now: number = Date.now()): Project {
-  return createProjectFromTemplate(TEMPLATES[0]!, now)
+  return createProjectFromTemplate(templateById(STARTER_TEMPLATE_ID) ?? TEMPLATES[0]!, now)
 }
 
 export function createProjectFromTemplate(template: Template, now: number = Date.now()): Project {
   const appName = appNameOf(template)
+  const files = template.files.map((file) => ({ id: file.id, text: file.text }))
 
   return {
-    id: DEFAULT_PROJECT_ID,
+    // Its own id. Every project the studio held used to be written to one key, so
+    // creating from a template destroyed whatever was there with no copy anywhere.
+    id: newProjectId(),
     manifest: {
       name: appName,
       bundleId: `com.example.${appName}`,
       deploymentTarget: '17.0',
       device: 'iphone-15',
       colorScheme: 'light',
+      // What `isPristine` compares against later, so the confirmation before a
+      // replacement can tell "untouched" from "worked on" without the corpus.
+      origin: fingerprintFiles(files),
     },
-    files: template.files.map((file) => ({ id: file.id, text: file.text })),
+    files,
     createdAt: now,
     updatedAt: now,
   }
