@@ -37,11 +37,21 @@ for (const [device, scheme, type] of [
     await preview(page).getByRole('button', { name: 'Compose', exact: true }).click()
     const sheet = preview(page).locator('[data-node-id="overlay-surface"]')
     await expect(sheet.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Taylor')
-    await expect(preview(page).getByRole('button', { name: 'Settings', exact: true })).toHaveCount(0)
+    // The background remains painted behind the sheet. Playwright's role lookup
+    // does not consistently exclude inert subtrees (microsoft/playwright#36938),
+    // so verify browser interaction blocking directly rather than DOM absence.
+    const settings = preview(page).getByRole('button', { name: 'Settings', exact: true, includeHidden: true })
+    await expect(settings).toHaveCount(1)
+    expect(await settings.evaluate(element => element.closest('[inert]') !== null)).toBe(true)
+    await settings.focus()
+    await expect(settings).not.toBeFocused()
     await capture(page, info, 'sheet')
     await sheet.getByRole('button', { name: 'Done', exact: true }).click()
     await expect(sheet).toHaveCount(0)
-    await preview(page).getByRole('button', { name: 'Settings', exact: true }).click()
+    expect(await settings.evaluate(element => element.closest('[inert]') !== null)).toBe(false)
+    await settings.focus()
+    await expect(settings).toBeFocused()
+    await settings.press('Enter')
     await expect(preview(page).getByRole('switch', { name: 'Notifications', exact: true })).toBeVisible()
     await capture(page, info, 'settings')
   })
