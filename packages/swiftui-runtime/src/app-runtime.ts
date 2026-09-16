@@ -193,6 +193,7 @@ export class AppRuntime {
     this.host.callMethod = (receiver, name, args) => this.callMethod(receiver, name, args)
     this.host.conformsTo = (typeName, protocolName) =>
       this.interpreter.conformsTo(typeName, protocolName)
+    this.host.declaresType = (typeName) => this.interpreter.declaresType(typeName)
     this.host.callViewExtension = (name, receiver, call) => this.callViewExtension(name, receiver, call)
 
     this.loadFailure = null

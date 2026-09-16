@@ -501,6 +501,17 @@ export class LayoutEngine {
         return this.measure(element.child, ideal, inner)
       }
 
+      case 'relativeWidth': {
+        // The proposal is what the parent has to give, so the fraction comes off that.
+        // `null` and `'infinity'` are not amounts and have no fraction to take, so the
+        // child answers for itself and the modifier does nothing - which is the same
+        // thing `.frame(maxWidth:)` does when it is offered no width to bound.
+        const offered = typeof proposal.width === 'number' ? proposal.width : null
+        const width = offered === null ? proposal.width : Math.max(0, offered * modifier.fraction)
+        const inner_ = this.measure(element.child, { width, height: proposal.height }, inner)
+        return { width: typeof width === 'number' ? width : inner_.width, height: inner_.height }
+      }
+
       case 'containerRelativeFrame': {
         // The container's own size along the named axis, divided into `count` parts.
         // The proposal *is* that size: a scroll view proposes its visible width, and

@@ -34,16 +34,25 @@ function requestFor(
 }
 
 /** Every distinct colour painted by a tree, as `r,g,b,a` strings. */
-function paintedColors(nodes: readonly RenderNode[]): Set<string> {
-  const out = new Set<string>()
+/**
+ * What each node paints, keyed by the node.
+ *
+ * Keyed rather than pooled into one set, because a correct dark mode is very often a
+ * *swap*: black text on white becomes white text on black, and the two appearances
+ * then contain exactly the same two colours in exactly the opposite places. Comparing
+ * the pools called that "does not adapt", which is the reverse of the truth.
+ */
+function paintedColors(nodes: readonly RenderNode[]): Map<string, string> {
+  const out = new Map<string, string>()
   for (const node of nodes) {
     if (node.background?.kind === 'solid') {
       const c = node.background.color
-      out.add(`${c.r},${c.g},${c.b},${c.a}`)
+      out.set(`${node.id} bg`, `${c.r},${c.g},${c.b},${c.a}`)
     }
-    for (const run of node.text?.runs ?? []) {
-      out.add(`${run.color.r},${run.color.g},${run.color.b},${run.color.a}`)
-    }
+    node.text?.runs.forEach((run, index) => {
+      const c = run.color
+      out.set(`${node.id} run${index}`, `${c.r},${c.g},${c.b},${c.a}`)
+    })
   }
   return out
 }
@@ -82,7 +91,10 @@ function assertScreenIsSound(tree: RenderTree, where: string): void {
 
   for (const node of tree.nodes) {
     for (const run of node.text?.runs ?? []) {
-      if (run.color.a < 0.1) continue
+      // Nothing to read, for the same reason a transparent run is skipped: an
+      // empty label has no legibility to assess. `Button("")` over a coloured
+      // swatch is a real thing people write, and it is a swatch, not a caption.
+      if (run.color.a < 0.1 || run.text.trim() === "") continue
       const behind = backgroundBehind(tree.nodes, node)
       if (!behind) continue
       expect(
@@ -186,11 +198,10 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     resetPipelineState()
     const dark = paintedColors(compile(requestFor(template.files, 'dark')).renderTree!.nodes)
 
-    const shared = [...light].filter((c) => dark.has(c))
-    // Some colours legitimately match - a fixed brand tint, a white-on-tint label -
-    // but the palettes must not be identical.
-    expect([...dark].some((c) => !light.has(c))).toBe(true)
-    expect(shared.length).toBeLessThan(light.size)
+    // Some things legitimately paint the same in both - a fixed brand tint, a
+    // white-on-tint label - but the screen as a whole must not.
+    const changed = [...light].filter(([where, colour]) => dark.get(where) !== colour)
+    expect(changed.length, 'every node paints the same colour in both appearances').toBeGreaterThan(0)
   })
 
   it('stays legible in dark mode: text never matches its own backdrop', () => {
@@ -202,7 +213,10 @@ describe.each(TEMPLATES)('template: $name', (template) => {
 
     for (const node of tree.nodes) {
       for (const run of node.text?.runs ?? []) {
-        if (run.color.a < 0.1) continue
+        // Nothing to read, for the same reason a transparent run is skipped: an
+      // empty label has no legibility to assess. `Button("")` over a coloured
+      // swatch is a real thing people write, and it is a swatch, not a caption.
+      if (run.color.a < 0.1 || run.text.trim() === "") continue
         const behind = backgroundBehind(tree.nodes, node)
         if (!behind) continue
         expect(

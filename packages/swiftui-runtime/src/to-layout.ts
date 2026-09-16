@@ -157,6 +157,22 @@ export const TAB_BAR_HEIGHT = 49
 const ROW_MIN_HEIGHT = 44
 const ROW_INSET = 16
 const SEPARATOR_HEIGHT = 0.5
+
+/**
+ * The space an inset-grouped list leaves between two section cards.
+ *
+ * Only used where a section has no header of its own; where there is one, its top
+ * padding is the gap and the text sits inside it.
+ *
+ * `ROW_INSET` is separately suspect: iOS insets a card further from the screen edge
+ * than 16, and the value is deliberately unchanged here because nobody has put this
+ * beside a device and measured it. Moving it moves every grouped row on every screen,
+ * which is not a change to make from memory.
+ */
+const SECTION_GAP = 20
+
+/** A row in an alert or confirmation dialog, which iOS sizes like a list row. */
+const ALERT_BUTTON_HEIGHT = 44
 const SWITCH = { width: 51, height: 31, knob: 27 }
 /** Must match the runtime's swipe width, or the action would not line up. */
 const SWIPE_WIDTH = 88
@@ -463,6 +479,16 @@ class Converter {
    */
   private styles: ControlStyles = {}
 
+  /**
+   * Set while converting the `.cancel` button of an alert.
+   *
+   * `role: .cancel` has exactly one visual effect on iOS and it is the semibold weight
+   * it gets inside an alert - nowhere else, and never on its own. So it belongs to the
+   * strip that knows it is an alert rather than to `Button`, which does not, and this
+   * flag is how the one tells the other.
+   */
+  private alertCancelWeight = false
+
   private symbolImage(id: string, name: string): LayoutElement {
     const symbol = resolveSymbol(name)
     return {
@@ -750,6 +776,85 @@ class Converter {
     )
   }
 
+  /**
+   * An alert's buttons: full-width rows divided by hairlines.
+   *
+   * Two of them share one row split by a vertical rule; one, or three or more, stack.
+   * That is the whole of iOS's rule and it is why an alert with two buttons looks
+   * different from one with three.
+   *
+   * SwiftUI also *reorders*: whatever order they were declared in, the `.cancel` one
+   * goes leading in a pair and last in a stack. Written into the strip rather than
+   * left to the caller, because the caller is the user's own source and SwiftUI does
+   * not honour its order here either.
+   */
+  private alertButtons(overlay: Overlay): LayoutElement[] {
+    const buttons = overlay.views.filter((v) => v.name === 'Button')
+    if (buttons.length === 0) {
+      // A dialog with something other than buttons in it, or an alert with none. The
+      // content is converted as it stands rather than forced into a strip.
+      return overlay.views.map((v, i) => this.convert(v, `ov-${i}`, 'vertical'))
+    }
+
+    const cancelAt = buttons.findIndex((v) => tokenName(labelled(v.args, 'role')) === 'cancel')
+    const others = buttons.filter((_, i) => i !== cancelAt)
+    const cancel = cancelAt >= 0 ? buttons[cancelAt]! : null
+    const side = buttons.length === 2
+
+    const ordered = cancel ? (side ? [cancel, ...others] : [...others, cancel]) : buttons
+
+    const rows = ordered.map((view, index) => {
+      const isCancel = tokenName(labelled(view.args, 'role')) === 'cancel'
+      const previous = this.alertCancelWeight
+      this.alertCancelWeight = isCancel
+      try {
+        return {
+          kind: 'modified' as const,
+          id: `ov-btn${index}frame`,
+          modifier: {
+            kind: 'frame' as const,
+            minHeight: ALERT_BUTTON_HEIGHT,
+            ...(side ? { maxWidth: Number.POSITIVE_INFINITY } : { maxWidth: Number.POSITIVE_INFINITY }),
+            alignment: CENTER,
+          },
+          child: this.convert(view, `ov-${index}`, 'vertical'),
+        }
+      } finally {
+        this.alertCancelWeight = previous
+      }
+    })
+
+    const rule = (id: string, vertical: boolean): LayoutElement => ({
+      kind: 'modified',
+      id,
+      // The vertical rule is a fixed height, not a greedy one. `maxHeight: .infinity`
+      // made the pair of buttons take every point the screen would give and turned a
+      // two-button alert into a full-height panel.
+      modifier: vertical
+        ? { kind: 'frame', width: SEPARATOR_HEIGHT, height: ALERT_BUTTON_HEIGHT, alignment: CENTER }
+        : { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, height: SEPARATOR_HEIGHT, alignment: CENTER },
+      child: { kind: 'fill', id: `${id}l`, fill: { kind: 'solid', color: this.color('separator') } },
+    })
+
+    const divided: LayoutElement[] = []
+    rows.forEach((row, index) => {
+      if (index > 0) divided.push(rule(`ov-btnrule${index}`, side))
+      divided.push(row)
+    })
+
+    return [
+      rule('ov-btnrule-top', false),
+      {
+        kind: 'stack',
+        id: 'ov-btns',
+        axis: side ? 'horizontal' : 'vertical',
+        spacing: 0,
+        alignment: CENTER,
+        children: divided,
+      },
+    ]
+  }
+
   /** A sheet, cover, alert, dialog or menu, laid out as its own little screen. */
   overlay(overlay: Overlay): LayoutElement {
     const body = overlay.views.map((v, i) => this.convert(v, `ov-${i}`, 'vertical'))
@@ -762,36 +867,62 @@ class Converter {
         ? [this.styledText('ov-message', overlay.message, 'footnote', 'secondaryLabel')]
         : []
 
+      /*
+        The head is padded; the buttons are not.
+
+        An alert is two blocks separated by a hairline that runs the full width of the
+        panel, and the buttons under it are full-width rows rather than centred text.
+        Both blocks used to live in one padded stack, so the buttons sat inside the
+        padding with nothing between them - "Cancel" and "Delete" as two lines of
+        text, which is not what any alert on the platform looks like.
+      */
+      const head: LayoutElement = {
+        kind: 'modified',
+        id: 'ov-pad',
+        modifier: { kind: 'padding', insets: insets(19, 16, 19, 16) },
+        child: {
+          kind: 'stack',
+          id: 'ov-headstack',
+          axis: 'vertical',
+          spacing: 4,
+          alignment: CENTER,
+          children: [...(overlay.title ? [title] : []), ...message],
+        },
+      }
+
+      const panel: LayoutElement = {
+        kind: 'stack',
+        id: 'ov-stack',
+        axis: 'vertical',
+        spacing: 0,
+        alignment: CENTER,
+        children: [
+          ...(overlay.title || message.length > 0 ? [head] : []),
+          ...this.alertButtons(overlay),
+        ],
+        debugName: overlay.kind === 'alert' ? ALERT : DIALOG,
+      }
+
       // An alert hugs its content vertically and fills the width it is given, which
       // is why only the horizontal axis is filled here.
-      return this.background(
-        this.fill(
-          {
-            kind: 'modified',
-            id: 'ov-pad',
-            modifier: { kind: 'padding', insets: uniformInsets(16) },
-            child: {
-              kind: 'stack',
-              id: 'ov-stack',
-              axis: 'vertical',
-              spacing: 10,
-              alignment: CENTER,
-              children: [
-                ...(overlay.title ? [title] : []),
-                ...message,
-                ...body,
-              ],
-              debugName: overlay.kind === 'alert' ? ALERT : DIALOG,
-            },
+      return {
+        kind: 'modified',
+        id: 'ov-bgr',
+        modifier: { kind: 'cornerRadius', radius: 14 },
+        child: {
+          kind: 'modified',
+          id: 'ov-bg',
+          // A material, which is what iOS puts behind an alert. A flat panel over a
+          // dimmed screen is the one part of this that a screenshot always gave away.
+          modifier: {
+            kind: 'material',
+            opacity: MATERIALS.thickMaterial!,
+            blur: 24,
+            light: this.scheme === 'light',
           },
-          'ov-fill',
-          CENTER,
-          false,
-        ),
-        'ov-bg',
-        this.color('secondarySystemGroupedBackground'),
-        14,
-      )
+          child: this.fill(panel, 'ov-fill', CENTER, false),
+        },
+      }
     }
 
     const grabber: LayoutElement = {
@@ -1261,6 +1392,9 @@ class Converter {
           children: this.convertList(view.children, `${path}c`, 'vertical'),
           ...origin,
         }
+
+      case 'ContentUnavailableView':
+        return this.contentUnavailable(view, path, origin)
 
       case 'Gauge':
         return this.gauge(view, path, origin)
@@ -1801,6 +1935,26 @@ class Converter {
     const blocks: LayoutElement[] = []
 
     sections.forEach((section, index) => {
+      /*
+        The gap between one card and the next.
+
+        A header supplies it through its own top padding, and a section without one
+        used to supply nothing at all: two headerless sections drew as a single card
+        with a hairline between them, which is a different thing entirely - a section
+        break is how a form says these fields are not those fields.
+
+        Only between cards, never above the first, which sits against whatever the
+        navigation bar left.
+      */
+      if (grouped && index > 0 && !section.header) {
+        blocks.push({
+          kind: 'modified',
+          id: `${path}s${index}gap`,
+          modifier: { kind: 'frame', height: SECTION_GAP, alignment: CENTER },
+          child: { kind: 'empty', id: `${path}s${index}gapx` },
+        })
+      }
+
       if (section.header) {
         blocks.push({
           kind: 'modified',
@@ -2190,10 +2344,14 @@ class Converter {
             ...origin,
           }
 
+    const font = this.alertCancelWeight
+      ? { ...bodyFont(this.typeScale), weight: 600 }
+      : bodyFont(this.typeScale)
+
     const styled: LayoutElement = {
       kind: 'modified',
       id: `${path}style`,
-      modifier: { kind: 'font', font: bodyFont(this.typeScale) },
+      modifier: { kind: 'font', font },
       child: label,
       ...origin,
     }
@@ -2201,13 +2359,47 @@ class Converter {
     return this.applyButtonStyle(view, styled, path)
   }
 
-  /** `.bordered` and `.borderedProminent` are shape-and-fill, not just a tint. */
+  /**
+   * The colour a button's label takes.
+   *
+   * `role: .destructive` is red, and `.tint(_:)` overrides the accent. The role used
+   * to be dropped entirely - `grep destructive` over the whole of `packages/` found
+   * one unrelated comment - so "Delete" and "Cancel" were the same colour in a form,
+   * in an alert, in a confirmation dialog and in a swipe action, which is the one
+   * place a colour is load-bearing rather than decorative.
+   */
+  private buttonTint(view: ViewValue): RGBA {
+    if (tokenName(labelled(view.args, 'role')) === 'destructive') return this.color('red')
+    return resolveColorArg(modifierArg(view, 'tint', 0), this.scheme) ?? this.color('accentColor')
+  }
+
+  /**
+   * `.bordered` and `.borderedProminent` are shape-and-fill; the rest is a tint.
+   *
+   * A button's label is the accent colour in SwiftUI, and that is most of what makes
+   * an iOS screen look like one: the blue is how you can tell what is pressable. This
+   * returned the label untouched for `.automatic`, `.borderless` and `.plain` - three
+   * of the five styles, and the two defaults - so every button, every toolbar item
+   * and every alert button was drawn in the label colour.
+   *
+   * `.plain` is the one that genuinely keeps the inherited foreground, and it is why
+   * this cannot simply tint everything: `.plain` exists precisely to opt out.
+   */
   private applyButtonStyle(view: ViewValue, label: LayoutElement, path: string): LayoutElement {
     const style = tokenName(modifierArg(view, 'buttonStyle', 0))
-    if (style !== 'bordered' && style !== 'borderedProminent') return label
+    const tint = this.buttonTint(view)
+
+    if (style !== 'bordered' && style !== 'borderedProminent') {
+      if (style === 'plain') return label
+      return {
+        kind: 'modified',
+        id: `${path}btntint`,
+        modifier: { kind: 'foregroundStyle', color: tint },
+        child: label,
+      }
+    }
 
     const prominent = style === 'borderedProminent'
-    const tint = resolveColorArg(modifierArg(view, 'tint', 0), this.scheme) ?? this.color('accentColor')
 
     // `.controlSize` scales the padding, which is what makes a `.small` button small:
     // the label's font is the environment's and is not touched here.
@@ -2580,18 +2772,13 @@ class Converter {
   }
 
   private glyphButton(id: string, symbol: string): LayoutElement {
-    const glyph = resolveSymbol(symbol)
     return {
       kind: 'modified',
       id: `${id}frame`,
       modifier: { kind: 'frame', width: 46, height: 32, alignment: CENTER },
-      child: {
-        kind: 'image',
-        id,
-        glyph: glyph.glyph,
-        resizable: false,
-        approximated: true,
-      },
+      // Also through `symbolImage`. A `Stepper` built its minus and plus inline and so
+      // drew the Unicode characters where the shape table has both.
+      child: this.symbolImage(id, symbol),
     }
   }
 
@@ -2604,8 +2791,8 @@ class Converter {
     // draws: the determinate bar is the `.linear` style, and asking for the circular
     // one with a value in hand still gets a ring rather than the bar.
     if (value === null || this.styles.progressView === 'circular') {
-      // Indeterminate: iOS draws a spinner. A dotted ring is the closest honest
-      // static approximation, and the renderer spins it.
+      // Indeterminate: the activity indicator, eight spokes turning. This was a filled
+      // grey circle, which is not an approximation of a spinner - it is a dot.
       return {
         kind: 'modified',
         id: `${path}frame`,
@@ -2614,7 +2801,7 @@ class Converter {
           kind: 'modified',
           id: `${path}color`,
           modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
-          child: { kind: 'shape', id: path, shape: 'circle', ...origin },
+          child: { kind: 'shape', id: path, shape: 'spinner', ...origin },
         },
       }
     }
@@ -2636,23 +2823,18 @@ class Converter {
             child: { kind: 'fill', id: `${path}track`, fill: { kind: 'solid', color: this.color('systemFill') } },
           },
           {
+            // A real width rather than a horizontal scale. Scaling drew the fill from
+            // the middle of the track outwards, because CSS scales about the centre
+            // and nothing set an origin, and it flattened the rounded cap at the end
+            // of the bar into an ellipse on the way.
             kind: 'modified',
             id: `${path}fillframe`,
-            modifier: {
-              kind: 'frame',
-              maxWidth: fraction <= 0 ? 0 : Number.POSITIVE_INFINITY,
-              alignment: { horizontal: 'leading', vertical: 'center' },
-            },
+            modifier: { kind: 'relativeWidth', fraction },
             child: {
               kind: 'modified',
-              id: `${path}fillscale`,
-              modifier: { kind: 'scale', x: fraction, y: 1 },
-              child: {
-                kind: 'modified',
-                id: `${path}fillround`,
-                modifier: { kind: 'cornerRadius', radius: 2 },
-                child: { kind: 'fill', id: `${path}fill`, fill: { kind: 'solid', color: this.color('accentColor') } },
-              },
+              id: `${path}fillround`,
+              modifier: { kind: 'cornerRadius', radius: 2 },
+              child: { kind: 'fill', id: `${path}fill`, fill: { kind: 'solid', color: this.color('accentColor') } },
             },
           },
         ],
@@ -2739,7 +2921,12 @@ class Converter {
       const content: LayoutElement = {
         kind: 'modified',
         id: `${path}seg${index}f`,
-        modifier: { kind: 'font', font: fontForToken('subheadline', this.typeScale)! },
+        // 13pt, and semibold on the chosen one. `subheadline` at 15 regular was two
+        // points large and made a three-segment control run wider than iOS draws it.
+        modifier: {
+          kind: 'font',
+          font: { ...fontForToken('footnote', this.typeScale)!, weight: chosen ? 600 : 400 },
+        },
         child: {
           kind: 'modified',
           id: `${path}seg${index}pad`,
@@ -2757,8 +2944,27 @@ class Converter {
         },
       }
 
+      // The shadow under the chosen segment, which is what lifts it off the track.
+      // Without it the pill reads as a lighter patch of the same surface rather than
+      // as something sitting on top of it, and the control looks like iOS 12.
       const pill: LayoutElement = chosen
-        ? this.background(content, `${path}seg${index}bg`, this.color('systemBackground'), 7)
+        ? {
+            kind: 'modified',
+            id: `${path}seg${index}lift`,
+            modifier: {
+              kind: 'shadow',
+              color: { r: 0, g: 0, b: 0, a: 0.12 },
+              radius: 3,
+              x: 0,
+              y: 1,
+            },
+            child: this.background(
+              content,
+              `${path}seg${index}bg`,
+              this.color('systemBackground'),
+              7,
+            ),
+          }
         : content
 
       return this.withHitTarget(
@@ -2771,20 +2977,50 @@ class Converter {
       )
     })
 
+    /*
+      The hairlines between unselected segments.
+
+      iOS divides adjacent segments with a short vertical rule and hides the two next
+      to the chosen pill, because the pill's own edge already separates them. Drawn
+      here rather than as a border on each segment, which would double up between
+      every pair and leave the outermost ones with a rule against nothing.
+    */
+    const chosenIndex = view.children.findIndex((child) =>
+      truthyBinding(labelled(child.args, 'selected')),
+    )
+    const withDividers: LayoutElement[] = []
+    segments.forEach((segment, index) => {
+      if (index > 0 && index !== chosenIndex && index - 1 !== chosenIndex) {
+        withDividers.push({
+          kind: 'modified',
+          id: `${path}seg${index}div`,
+          modifier: { kind: 'frame', width: SEPARATOR_HEIGHT, height: 16, alignment: CENTER },
+          child: {
+            kind: 'fill',
+            id: `${path}seg${index}divl`,
+            fill: { kind: 'solid', color: this.color('separator') },
+          },
+        })
+      }
+      withDividers.push(segment)
+    })
+
     const row: LayoutElement = {
       kind: 'stack',
       id: `${path}segs`,
       axis: 'horizontal',
       spacing: 2,
       alignment: CENTER,
-      children: segments,
+      children: withDividers,
     }
 
     return {
       ...this.background(
         { kind: 'modified', id: `${path}segpad`, modifier: { kind: 'padding', insets: uniformInsets(2) }, child: row },
         `${path}segtrack`,
-        this.color('systemFill'),
+        // `tertiarySystemFill`, which is the track iOS draws. `systemFill` is nearly
+        // twice as dark and made the control look like a filled box.
+        this.color('tertiarySystemFill'),
         9,
       ),
       ...origin,
@@ -3044,6 +3280,77 @@ class Converter {
   }
 
   /** `Gauge` - a labelled bar, which is the accessible form of every gauge style. */
+  /**
+   * `ContentUnavailableView("No Results", systemImage: "magnifyingglass")`.
+   *
+   * The empty state, centred: a large symbol over a title over a description, all in
+   * the secondary colour except the title. Drawn rather than placeholdered because it
+   * is what a screen shows *before* it has anything to show, which makes it one of the
+   * first things written and one of the first things looked at.
+   *
+   * `.search` is the stock spelling and carries its own text and symbol, so a screen
+   * that writes it gets the same thing iOS gives it rather than an empty box.
+   */
+  private contentUnavailable(view: ViewValue, path: string, origin: object): LayoutElement {
+    const written = stringArg(positional(view.args, 0))
+    const symbolArg = stringArg(labelled(view.args, 'systemImage'))
+
+    // `ContentUnavailableView.search` is a static member rather than a call, so it
+    // arrives carrying nothing at all. No title and no symbol can only be that
+    // spelling - the initialisers all take at least a label - and it stands for text
+    // iOS supplies itself.
+    const stock = written === null && symbolArg === null
+    const title = written ?? (stock ? 'No Results' : '')
+    const symbol = symbolArg ?? (stock ? 'magnifyingglass' : '')
+
+    // `description:` takes a `Text`, not a string, so it arrives as a view.
+    const describing = argViews(view, 'description')[0]
+    const description = describing ? textIn(describing).join(' ') : ''
+
+    const children: LayoutElement[] = []
+
+    if (symbol) {
+      children.push({
+        kind: 'modified',
+        id: `${path}iconf`,
+        // 52pt, which is roughly where iOS lands it: large enough to be the thing you
+        // see first, small enough not to become the subject.
+        modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 52 * this.typeScale } },
+        child: {
+          kind: 'modified',
+          id: `${path}iconc`,
+          modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
+          child: this.symbolImage(`${path}icon`, symbol),
+        },
+      })
+    }
+
+    if (title) children.push(this.styledText(`${path}title`, title, 'title2', 'label', 600))
+    if (description) {
+      children.push(this.styledText(`${path}desc`, description, 'body', 'secondaryLabel'))
+    }
+
+    return {
+      kind: 'modified',
+      id: `${path}fill`,
+      modifier: {
+        kind: 'frame',
+        maxWidth: Number.POSITIVE_INFINITY,
+        maxHeight: Number.POSITIVE_INFINITY,
+        alignment: CENTER,
+      },
+      child: {
+        kind: 'stack',
+        id: path,
+        axis: 'vertical',
+        spacing: 8,
+        alignment: CENTER,
+        children,
+        ...origin,
+      },
+    }
+  }
+
   private gauge(view: ViewValue, path: string, origin: object): LayoutElement {
     const value = numberArg(bindingValue(labelled(view.args, 'value')) ?? undefined) ?? 0
     const range = labelled(view.args, 'in')
@@ -3081,8 +3388,6 @@ class Converter {
 
   /** The search field `.searchable` adds above a list. */
   searchField(text: string, placeholder: string, path: string): LayoutElement {
-    const glyph = resolveSymbol('magnifyingglass')
-
     const row: LayoutElement = {
       kind: 'stack',
       id: `${path}row`,
@@ -3094,20 +3399,38 @@ class Converter {
           kind: 'modified',
           id: `${path}iconcolor`,
           modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
-          child: {
-            kind: 'image',
-            id: `${path}icon`,
-            glyph: glyph.glyph,
-            resizable: false,
-            approximated: true,
+          // Through `symbolImage`, so the name reaches the renderer and the drawn
+          // magnifier is used. Built inline, it carried only the Unicode fallback.
+          child: this.symbolImage(`${path}icon`, 'magnifyingglass'),
+        },
+        /*
+          The hit target is the field, not the whole box.
+
+          It used to wrap the padded box, and the renderer draws a text field as an
+          `<input>` at `inset: 0` of whatever it is put on - so the input covered the
+          magnifying glass, and the glass was never visible in any search bar the
+          studio drew. Measured in the DOM: the input spanned all 316 points of the
+          field and there was no `<svg>` anywhere near it.
+
+          Scoping the target to the field leaves the icon painted beside it and starts
+          the caret where iOS starts it. The cost is that the few points of grey under
+          the glass no longer focus the field, which is a smaller lie than a search bar
+          with no glass in it.
+        */
+        this.withHitTarget(
+          {
+            kind: 'modified',
+            id: `${path}fieldframe`,
+            modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER },
+            child: { kind: 'empty', id: `${path}field` },
           },
-        },
-        {
-          kind: 'modified',
-          id: `${path}fieldframe`,
-          modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER },
-          child: { kind: 'empty', id: `${path}field` },
-        },
+          path,
+          'textField',
+          placeholder || 'Search',
+          undefined,
+          false,
+          { value: text, placeholder: placeholder || 'Search' },
+        ),
       ],
     }
 
@@ -3118,16 +3441,11 @@ class Converter {
       child: row,
     }
 
-    const styled = this.background(padded, `${path}bg`, this.color('systemFill'), 10)
-
     return {
       kind: 'modified',
       id: `${path}outer`,
       modifier: { kind: 'padding', insets: insets(8, ROW_INSET, 8, ROW_INSET) },
-      child: this.withHitTarget(styled, path, 'textField', placeholder || 'Search', undefined, false, {
-        value: text,
-        placeholder: placeholder || 'Search',
-      }),
+      child: this.background(padded, `${path}bg`, this.color('tertiarySystemFill'), 10),
     }
   }
 

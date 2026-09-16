@@ -29,6 +29,7 @@ import {
   SUPPORTED_MODIFIERS,
   SUPPORTED_VIEWS,
   BLEND_MODES,
+  STYLE_TOKENS,
   UNIMPLEMENTED_MODIFIERS,
   UNIMPLEMENTED_VIEWS,
 } from './builtins'
@@ -726,6 +727,7 @@ export class Checker {
           if (onAView) {
             this.checkArgumentLabels(expr.callee.member, expr.args)
             this.checkBlendMode(expr.callee.member, expr.args)
+            this.checkStyleToken(expr.callee.member, expr.args)
           }
         }
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
@@ -815,7 +817,12 @@ export class Checker {
   /** A callee gets view-coverage treatment before ordinary resolution. */
   private checkCallee(callee: Expr, scope: Scope): void {
     if (callee.kind === 'identifier') {
-      if (UNIMPLEMENTED_VIEWS.has(callee.name) && !scope.has(callee.name)) {
+      // A type the project declared is the project's, whatever SwiftUI also calls it.
+      // `Tab`, `Settings`, `Marker` and `Table` are all real SwiftUI and all plausible
+      // names for an app's own type, and warning on `Marker(...)` where the file two
+      // lines up says `struct Marker` teaches people to stop reading the panel.
+      const shadowed = scope.has(callee.name) || this.types.has(callee.name)
+      if (UNIMPLEMENTED_VIEWS.has(callee.name) && !shadowed) {
         this.report(
           callee.span,
           'warning',
@@ -987,6 +994,38 @@ export class Checker {
       `'.blendMode(.${first.member})' has no equivalent the preview can draw, so it is ` +
         'ignored rather than approximated. It is exported to Xcode unchanged.',
       `.blendMode(.${first.member})`,
+    )
+  }
+
+  /**
+   * Warns on a style token the preview does not apply.
+   *
+   * The same rule as `checkBlendMode` above, generalised to every style modifier with
+   * a closed set of tokens. `.buttonStyle(.glass)` used to compile clean and draw a
+   * plain label, which is the worst of the three possible outcomes: not drawn, not
+   * reported, and indistinguishable from a style that *is* applied.
+   *
+   * Only a literal `.token`. A style held in a variable or returned from a function
+   * has no value here, and guessing would put a warning on correct code.
+   */
+  private checkStyleToken(
+    member: string,
+    args: readonly { label: string | null; value: Expr }[],
+  ): void {
+    const known = STYLE_TOKENS.get(member)
+    if (!known) return
+
+    const first = args[0]?.value
+    if (first?.kind !== 'memberAccess' || first.base !== null) return
+    if (known.has(first.member)) return
+
+    this.report(
+      first.span,
+      'warning',
+      'unsupported_swiftui_modifier',
+      `'.${member}(.${first.member})' is not a style the preview draws, so it is ignored ` +
+        'rather than approximated. It is exported to Xcode unchanged.',
+      `.${member}(.${first.member})`,
     )
   }
 

@@ -132,6 +132,7 @@ function TransitionKeyframes() {
       @keyframes studio-move-bottom { from { opacity: 0; transform: translateY(24px) } }
       @keyframes studio-move-leading { from { opacity: 0; transform: translateX(-24px) } }
       @keyframes studio-move-trailing { from { opacity: 0; transform: translateX(24px) } }
+      @keyframes studio-spin { to { transform: rotate(360deg) } }
     `}</style>
   )
 }
@@ -799,8 +800,45 @@ function PathContent({ node }: { node: RenderNode }) {
   )
 }
 
+/**
+ * The activity indicator, as iOS draws it: eight tapered spokes fading round the
+ * circle, the whole thing turning once a second in eight discrete steps.
+ *
+ * `steps(8)` rather than a smooth rotation because a real one *is* stepped - the lit
+ * spoke moves from one to the next - and a continuously sweeping ring is the Android
+ * indicator, not this one.
+ *
+ * This used to be a filled grey circle. The comment above it claimed a dotted ring
+ * that the renderer spun, and neither half was true of what appeared.
+ */
+function SpinnerContent() {
+  const spokes = Array.from({ length: 8 }, (_, i) => i)
+
+  return (
+    <svg viewBox="0 0 24 24" width="100%" height="100%" aria-hidden="true">
+      <g style={{ transformOrigin: '12px 12px', animation: 'studio-spin 0.8s steps(8) infinite' }}>
+        {spokes.map((i) => (
+          <rect
+            key={i}
+            x={11}
+            y={2.2}
+            width={2}
+            height={6}
+            rx={1}
+            fill="currentColor"
+            opacity={0.25 + (i / spokes.length) * 0.75}
+            transform={`rotate(${i * 45} 12 12)`}
+          />
+        ))}
+      </g>
+    </svg>
+  )
+}
+
 function ShapeContent({ node }: { node: RenderNode }) {
   const shape = node.shape!
+  if (shape.shape === 'spinner') return <SpinnerContent />
+
   const radius =
     shape.shape === 'circle' || shape.shape === 'ellipse' || shape.shape === 'capsule'
       ? '50%'

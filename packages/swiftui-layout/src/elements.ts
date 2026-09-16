@@ -405,6 +405,16 @@ export type LayoutModifier =
       readonly content: LayoutElement
       readonly spacing: number
     }
+  /**
+   * A fraction of the width the parent offered.
+   *
+   * What a determinate `ProgressView` or `Gauge` fill is, and the one shape of frame
+   * `.frame(width:)` cannot express: the bar has no width of its own until the row it
+   * sits in has one. Drawn instead by scaling the fill horizontally, which put a 40%
+   * bar in the middle of its track - CSS scales about the centre - and squashed the
+   * rounded cap at its end while it was there.
+   */
+  | { readonly kind: 'relativeWidth'; readonly fraction: number }
   /** `.containerRelativeFrame(_:)` - take the container's full size along an axis. */
   | {
       readonly kind: 'containerRelativeFrame'
