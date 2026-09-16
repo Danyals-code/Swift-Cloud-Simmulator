@@ -98,7 +98,7 @@ enum Difficulty: String {
 }
 
 struct Trail: Identifiable {
-    let id: Int
+    let id = UUID()
     let name: String
     let region: String
     let miles: Double
@@ -124,21 +124,21 @@ final class TrailStore: ObservableObject {
     @Published var savedIDs = [2]
 
     let trails = [
-        Trail(id: 1, name: "Cascade Ridge", region: "North Cascades", miles: 8.4, ascent: 2900, difficulty: .hard, symbol: "mountain.2",
+        Trail(name: "Cascade Ridge", region: "North Cascades", miles: 8.4, ascent: 2900, difficulty: .hard, symbol: "mountain.2",
               summary: "A long climb through old growth to a ridge above three valleys."),
-        Trail(id: 2, name: "Heather Meadows", region: "Mount Baker", miles: 3.1, ascent: 620, difficulty: .easy, symbol: "leaf",
+        Trail(name: "Heather Meadows", region: "Mount Baker", miles: 3.1, ascent: 620, difficulty: .easy, symbol: "leaf",
               summary: "An easy loop through subalpine meadows, best in late August."),
-        Trail(id: 3, name: "Blue Lake Basin", region: "Okanogan", miles: 5.6, ascent: 1250, difficulty: .moderate, symbol: "drop",
+        Trail(name: "Blue Lake Basin", region: "Okanogan", miles: 5.6, ascent: 1250, difficulty: .moderate, symbol: "drop",
               summary: "Switchbacks to a cold lake under granite spires. Busy after ten."),
-        Trail(id: 4, name: "Sun Point", region: "Methow", miles: 2.2, ascent: 400, difficulty: .easy, symbol: "sun.max",
+        Trail(name: "Sun Point", region: "Methow", miles: 2.2, ascent: 400, difficulty: .easy, symbol: "sun.max",
               summary: "A short walk to a south-facing bench that stays warm into October."),
-        Trail(id: 5, name: "Granite Pass", region: "North Cascades", miles: 11.0, ascent: 3400, difficulty: .hard, symbol: "bolt",
+        Trail(name: "Granite Pass", region: "North Cascades", miles: 11.0, ascent: 3400, difficulty: .hard, symbol: "bolt",
               summary: "The long way in. Snow lingers on the north side until mid July."),
-        Trail(id: 6, name: "Rainy Tarn", region: "Okanogan", miles: 4.3, ascent: 880, difficulty: .moderate, symbol: "drop",
+        Trail(name: "Rainy Tarn", region: "Okanogan", miles: 4.3, ascent: 880, difficulty: .moderate, symbol: "drop",
               summary: "A short steep pull to a tarn that holds the light until late."),
-        Trail(id: 7, name: "Larch Hollow", region: "Methow", miles: 6.8, ascent: 1600, difficulty: .moderate, symbol: "tree",
+        Trail(name: "Larch Hollow", region: "Methow", miles: 6.8, ascent: 1600, difficulty: .moderate, symbol: "tree",
               summary: "Golden for two weeks in October and quiet for the other fifty."),
-        Trail(id: 8, name: "Cutthroat Lake", region: "North Cascades", miles: 3.8, ascent: 500, difficulty: .easy, symbol: "drop",
+        Trail(name: "Cutthroat Lake", region: "North Cascades", miles: 3.8, ascent: 500, difficulty: .easy, symbol: "drop",
               summary: "Flat to the lake, then as far up the basin as the light allows.")
     ]
 
@@ -499,15 +499,15 @@ struct TrailDetailView: View {
 
     var directions: [Step] {
         return [
-            Step(id: 1, text: "Follow the forest road to the upper car park."),
-            Step(id: 2, text: "Cross the creek at the second bridge, then turn uphill."),
-            Step(id: 3, text: "Stay left where the track forks below the pass.")
+            Step(text: "Follow the forest road to the upper car park."),
+            Step(text: "Cross the creek at the second bridge, then turn uphill."),
+            Step(text: "Stay left where the track forks below the pass.")
         ]
     }
 }
 
 struct Step: Identifiable {
-    let id: Int
+    let id = UUID()
     let text: String
 }
 

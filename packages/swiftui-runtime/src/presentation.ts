@@ -628,7 +628,13 @@ class Resolver {
         const binding = asProjection(selection)
         const current = binding ? describe(binding.get(), true) : null
 
-        const children = view.children.map((child, index) => {
+        // `Picker { ForEach(options) { … } }` is how a picker over a collection is
+        // written, and its options are a level down. Flattened once, here, so the
+        // overlay and the segmented drawing both see options rather than a container -
+        // otherwise each has to know, and one of them will not.
+        const options = flattenForEach(view.children)
+
+        const children = options.map((child, index) => {
           const tag = tokenOrValue(collectModifier([child], 'tag')?.args[0]?.value)
           if (tag !== null) {
             this.register(`${path}/seg-${index}`, {
@@ -651,6 +657,8 @@ class Resolver {
 
         return { ...view, intent, children }
       }
+
+      if (view.name === 'Picker') return { ...view, intent, children: flattenForEach(view.children) }
 
       return { ...view, intent }
     }
@@ -1321,6 +1329,11 @@ function tokenOrValue(value: SwiftValue | undefined): string | null {
 /** A modifier written on this view itself, rather than anywhere in its subtree. */
 function modifierOn(view: ViewValue, name: string): ModifierValue | null {
   return view.modifiers.find((m) => m.name === name) ?? null
+}
+
+/** A `ForEach`'s rows are siblings of whatever surrounds it, never a nested container. */
+function flattenForEach(views: readonly ViewValue[]): ViewValue[] {
+  return views.flatMap((v) => (v.name === 'ForEach' ? flattenForEach(v.children) : [v]))
 }
 
 function tagValue(page: ViewValue): SwiftValue {
