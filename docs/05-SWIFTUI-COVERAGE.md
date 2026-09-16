@@ -4,11 +4,11 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the controls pass (defect register phase 9), which made four of the
-controls that were drawn answer to a press. Before it, a `Stepper` had two halves and no
-way to press either, and a `DisclosureGroup` was permanently open.
+Last updated after the text pass (defect register phase 9.2), which gave `TextRun` the
+attributes it had no field for, taught the line breaker to carry runs across a break, and
+made `Text + Text` render instead of stopping the preview.
 
-**125 ✅ · 46 🟡 · 30 ⬜ · 3 ✗**, over 204 rows, counted from this file rather than carried
+**131 ✅ · 45 🟡 · 30 ⬜ · 3 ✗**, over 209 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -47,7 +47,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | 🟡 | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). **`Text + Text` concatenation is not implemented** |
+| `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes |
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | ~80 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
 | `Image("asset")` | ⬜ | - | reported as unavailable rather than drawn as a grey box |
@@ -150,7 +150,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.lineLimit` / `.multilineTextAlignment` / `.textCase` | ✅ | 7 | inherited, so a stack can set them for its text |
 | `.monospaced` | ✅ | 7 |
 | `.fontDesign` | ✅ | 10 | inherited separately from size, as in SwiftUI |
-| `.kerning` / `.minimumScaleFactor` | ⬜ | - | both change *measured* width, so neither is a paint-only change |
+| `.underline` / `.strikethrough` | ✅ | - | inherited like the font, and each takes the `Bool` form so a binding can switch one off |
+| `.kerning` / `.tracking` | ✅ | - | measured, not painted: the extra advance is in the width the engine reports. The two are applied identically - see approximations |
+| `.baselineOffset` / `.lineSpacing` | ✅ | - | `lineSpacing` is a gap *between* lines, so a single line is unaffected |
+| `.minimumScaleFactor` / `.allowsTightening` | ⬜ | - | both ask measurement to answer back - shrink until it fits - which the one-pass measure cannot do |
 | `.symbolRenderingMode` / `.symbolVariant` | ⬜ | - | the substitute glyphs have no multicolour variants |
 
 ## Shapes and styles
@@ -372,7 +375,12 @@ Listed in the exported README so nothing is a surprise on the Mac:
     control sits mid-screen. The compositor decides what the options are before the layout
     engine decides where the control ended up, so anchoring would mean resolving the menu
     after layout. An approximation of position; the options and the tick are exact.
-16. **Renaming is scoped, which means it can rename too little.** A local is renamed within
+16. **`.kerning` and `.tracking` are applied identically.** Both add advance after every
+    character. Swift's `kerning` adjusts the space *between* characters and so leaves the
+    last one alone, where `tracking` adds after it too - a difference of one character's
+    spacing at the end of a line, well under a point at UI sizes. Stated rather than
+    silently rounded away.
+17. **Renaming is scoped, which means it can rename too little.** A local is renamed within
     its own body; a member is followed across the project only when no other type declares
     the same member name, and otherwise stays inside the type that declared it. The
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses

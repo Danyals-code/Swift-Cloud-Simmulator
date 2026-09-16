@@ -85,6 +85,21 @@ export interface InterpreterHost {
    */
   coerceToType?(value: SwiftValue, typeName: string): SwiftValue | undefined
 
+  /**
+   * A binary operator applied to a value the interpreter does not own.
+   *
+   * `Text("a") + Text("b")` is the whole reason this exists: both operands are
+   * opaque, so every arithmetic path below rejects them and the trap takes the
+   * entire preview down with it. Asked only when a built-in rule has not already
+   * matched, so nothing here can change what `1 + 1` means.
+   */
+  applyOperator?(
+    operator: string,
+    left: SwiftValue,
+    right: SwiftValue,
+    span: SourceSpan,
+  ): SwiftValue | undefined
+
   /** `print(...)` and anything else that writes to the console. */
   log?(message: string, span: SourceSpan): void
 }

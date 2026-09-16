@@ -150,7 +150,7 @@ describe('what the preview cannot do, it says', () => {
   })
 
   it('reports a real modifier it accepts and ignores', () => {
-    expect(warnings(run(view('Text("a").lineSpacing(20)')))[0]).toContain('lineSpacing')
+    expect(warnings(run(view('Text("a").blendMode(.multiply)')))[0]).toContain('blendMode')
     expect(warnings(run(view('ZStack { Text("a").zIndex(5) }')))[0]).toContain('zIndex')
     expect(warnings(run(view('Text("a").containerRelativeFrame(.horizontal)')))[0]).toContain(
       'containerRelativeFrame',

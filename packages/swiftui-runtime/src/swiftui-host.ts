@@ -159,6 +159,18 @@ function view(v: ViewValue): SwiftValue {
   return opaque(VIEW_TYPE, v)
 }
 
+/**
+ * Whether a view may take part in a `Text` concatenation.
+ *
+ * Only `Text` itself, and only because Swift's `+` on views is declared on `Text`
+ * alone. Accepting a `VStack` here would build a Text whose spans have no text and
+ * quietly draw nothing, which is the kind of silent wrong the preview exists to
+ * avoid - so it declines and the operator reports itself instead.
+ */
+function isTextLike(v: ViewValue): boolean {
+  return v.name === 'Text'
+}
+
 function token(name: string): SwiftValue {
   return opaque(TOKEN_TYPE, { name })
 }
@@ -958,6 +970,35 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   /** `dismiss()` - the one callable the environment hands out. */
+  /**
+   * `Text("Hello, ") + Text(name).bold()` - the one operator SwiftUI defines on views.
+   *
+   * The result is a `Text` whose children are the two operands, so each half keeps its
+   * own modifier chain and the layout pass can turn them into attributed runs. Making
+   * it a view rather than a joined string is what lets the halves differ: joining the
+   * text would throw away exactly the styling the operator exists to combine.
+   *
+   * Anything else opaque is left alone and traps as it did, because inventing a
+   * meaning for `Color.red + 1` would be a worse answer than the error.
+   */
+  applyOperator(operator: string, left: SwiftValue, right: SwiftValue, span: SourceSpan): SwiftValue | undefined {
+    if (operator !== '+') return undefined
+
+    const a = asView(left)
+    const b = asView(right)
+    if (!a || !b) return undefined
+    if (!isTextLike(a) || !isTextLike(b)) return undefined
+
+    return view({
+      name: 'Text',
+      args: [],
+      children: [a, b],
+      modifiers: [],
+      action: null,
+      span,
+    })
+  }
+
   callValue(target: SwiftValue): SwiftValue | undefined {
     if (target.kind !== 'opaque' || target.typeName !== DISMISS_TYPE) return undefined
     this.dismissAction?.()

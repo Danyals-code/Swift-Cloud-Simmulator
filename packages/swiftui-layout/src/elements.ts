@@ -78,9 +78,42 @@ export interface ZStackElement extends ElementBase {
   readonly children: readonly LayoutElement[]
 }
 
+/**
+ * One span of a `Text`, with whatever that span set for itself.
+ *
+ * Every field is an *override* on the inherited environment, so a run that sets
+ * nothing renders identically to the plain text it replaced. That is what lets
+ * `Text("a").bold() + Text("b")` bold only its first half while both halves keep the
+ * size and colour their surroundings gave them.
+ */
+export interface TextRunSpec {
+  readonly text: string
+  /** Absent fields inherit; `size` recomputes the line height from the metrics. */
+  readonly font?: {
+    readonly family?: string
+    readonly size?: number
+    readonly weight?: number
+    readonly italic?: boolean
+  }
+  readonly color?: RGBA
+  readonly underline?: boolean
+  readonly strikethrough?: boolean
+  readonly tracking?: number
+  readonly baselineOffset?: number
+}
+
 export interface TextElement extends ElementBase {
   readonly kind: 'text'
+  /** The whole string: what `.textCase` transforms, and the accessible label. */
   readonly text: string
+  /**
+   * The attributed spans, when there is more than one.
+   *
+   * Absent for the overwhelmingly common single-run `Text`, which then measures and
+   * paints from `text` and the environment alone - no per-run allocation on the path
+   * every label in every app goes down.
+   */
+  readonly runs?: readonly TextRunSpec[]
 }
 
 /**
@@ -265,12 +298,24 @@ export type LayoutModifier =
       /** `.fontDesign(.rounded)` - the face changes, the metrics with it. */
       readonly family?: string
     }
-  /** `.lineLimit`, `.multilineTextAlignment`, `.textCase` - inherited text policy. */
+  /**
+   * `.lineLimit`, `.multilineTextAlignment`, `.textCase` and the text attributes -
+   * inherited text policy.
+   *
+   * The attributes belong here rather than on `Text` because in SwiftUI they are
+   * View modifiers: `VStack { Text(…) }.underline()` underlines the text inside it.
+   * A wrapper around the stack would have nothing to draw on.
+   */
   | {
       readonly kind: 'textStyle'
       readonly lineLimit?: number | null
       readonly alignment?: TextAlign
       readonly textCase?: 'upper' | 'lower' | null
+      readonly underline?: boolean
+      readonly strikethrough?: boolean
+      readonly tracking?: number
+      readonly baselineOffset?: number
+      readonly lineSpacing?: number
     }
   | { readonly kind: 'foregroundStyle'; readonly color: RGBA }
   | { readonly kind: 'opacity'; readonly value: number }
@@ -438,6 +483,18 @@ export interface LayoutEnvironment {
   readonly lineLimit?: number | null
   readonly textAlign?: TextAlign
   readonly textCase?: 'upper' | 'lower' | null
+  /**
+   * Text attributes, inherited on the same rule as the font.
+   *
+   * `tracking` and `lineSpacing` are the two that change *measurement* - the first
+   * widens every cluster, the second the line box - so both are read by the metrics
+   * pass rather than only by the painter.
+   */
+  readonly underline?: boolean
+  readonly strikethrough?: boolean
+  readonly tracking?: number
+  readonly baselineOffset?: number
+  readonly lineSpacing?: number
   /** Set by `.allowsHitTesting(false)`: the subtree paints but does not respond. */
   readonly hitTestingDisabled?: boolean
 }
@@ -495,6 +552,15 @@ export function childEnvironment(
         ...(modifier.lineLimit !== undefined ? { lineLimit: modifier.lineLimit } : {}),
         ...(modifier.alignment !== undefined ? { textAlign: modifier.alignment } : {}),
         ...(modifier.textCase !== undefined ? { textCase: modifier.textCase } : {}),
+        ...(modifier.underline !== undefined ? { underline: modifier.underline } : {}),
+        ...(modifier.strikethrough !== undefined
+          ? { strikethrough: modifier.strikethrough }
+          : {}),
+        ...(modifier.tracking !== undefined ? { tracking: modifier.tracking } : {}),
+        ...(modifier.baselineOffset !== undefined
+          ? { baselineOffset: modifier.baselineOffset }
+          : {}),
+        ...(modifier.lineSpacing !== undefined ? { lineSpacing: modifier.lineSpacing } : {}),
       }
     default:
       return env

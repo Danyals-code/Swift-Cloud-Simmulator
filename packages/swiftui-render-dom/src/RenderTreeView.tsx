@@ -6,6 +6,7 @@ import {
   cssTransition,
   type RenderNode,
   type RenderTree,
+  type TextRun,
   type UIEvent,
 } from '@studio/shared'
 import { symbolShapes, symbolStrokeScale } from './symbols'
@@ -506,6 +507,10 @@ function renderControl(
  * the offset the engine computed. Letting CSS re-wrap instead would mean two
  * different algorithms deciding where the breaks go - and the frame the engine
  * reported would no longer match the text actually drawn in it.
+ *
+ * A line is drawn from its *slices* when it has them, so a line that crosses a run
+ * boundary keeps each half's own face. Without that, `Text("a").bold() + Text("b")`
+ * drew both halves bold: the first run won and the rest were dropped.
  */
 function TextContent({ node }: { node: RenderNode }) {
   const payload = node.text!
@@ -519,16 +524,6 @@ function TextContent({ node }: { node: RenderNode }) {
         ? 'flex-end'
         : 'flex-start'
 
-  const typography: CSSProperties = {
-    fontFamily: first.font.family,
-    fontSize: first.font.size,
-    fontWeight: first.font.weight,
-    fontStyle: first.font.italic ? 'italic' : 'normal',
-    lineHeight: `${first.font.lineHeight}px`,
-    color: cssColor(first.color),
-    whiteSpace: 'pre',
-  }
-
   if (payload.lines && payload.lines.length > 0) {
     return (
       <>
@@ -536,7 +531,6 @@ function TextContent({ node }: { node: RenderNode }) {
           <div
             key={i}
             style={{
-              ...typography,
               position: 'absolute',
               left: 0,
               top: line.origin.y,
@@ -545,9 +539,14 @@ function TextContent({ node }: { node: RenderNode }) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: justify,
+              whiteSpace: 'pre',
             }}
           >
-            {line.text}
+            {line.slices
+              ? line.slices.map((slice, j) => (
+                  <RunSpan key={j} run={payload.runs[slice.run] ?? first} text={slice.text} />
+                ))
+              : <RunSpan run={first} text={line.text} />}
           </div>
         ))}
       </>
@@ -557,29 +556,52 @@ function TextContent({ node }: { node: RenderNode }) {
   return (
     <div
       style={{
-        ...typography,
         display: 'flex',
         height: '100%',
         alignItems: 'center',
         justifyContent: justify,
+        whiteSpace: 'pre',
       }}
     >
       {payload.runs.map((run, i) => (
-        <span
-          key={i}
-          style={{
-            fontFamily: run.font.family,
-            fontSize: run.font.size,
-            fontWeight: run.font.weight,
-            fontStyle: run.font.italic ? 'italic' : 'normal',
-            lineHeight: `${run.font.lineHeight}px`,
-            color: cssColor(run.color),
-          }}
-        >
-          {run.text}
-        </span>
+        <RunSpan key={i} run={run} text={run.text} />
       ))}
     </div>
+  )
+}
+
+/**
+ * One attributed span.
+ *
+ * `letterSpacing` is the paint half of tracking; the measurement half already
+ * happened in the worker, so the two agree by construction rather than by both
+ * guessing. `textDecoration` carries underline and strikethrough together because
+ * CSS has one property for both and a span may have either or both.
+ */
+function RunSpan({ run, text }: { run: TextRun; text: string }) {
+  const decoration = [
+    run.underline ? 'underline' : null,
+    run.strikethrough ? 'line-through' : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    <span
+      style={{
+        fontFamily: run.font.family,
+        fontSize: run.font.size,
+        fontWeight: run.font.weight,
+        fontStyle: run.font.italic ? 'italic' : 'normal',
+        lineHeight: `${run.font.lineHeight}px`,
+        color: cssColor(run.color),
+        ...(decoration ? { textDecoration: decoration } : {}),
+        ...(run.tracking ? { letterSpacing: run.tracking } : {}),
+        ...(run.baselineOffset ? { position: 'relative', bottom: run.baselineOffset } : {}),
+      }}
+    >
+      {text}
+    </span>
   )
 }
 

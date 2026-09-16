@@ -22,6 +22,7 @@ import {
   type HorizontalAlignment,
   type LayoutElement,
   type LayoutModifier,
+  type TextRunSpec,
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
 import {
@@ -773,8 +774,18 @@ class Converter {
     }
 
     switch (view.name) {
-      case 'Text':
-        return { kind: 'text', id: path, text: textOf(view), ...origin }
+      case 'Text': {
+        // A concatenation carries its operands as children; anything else is one run,
+        // and stays on the path that allocates nothing per run.
+        const runs = view.children.length > 0 ? this.textRuns(view) : null
+        return {
+          kind: 'text',
+          id: path,
+          text: runs ? runs.map((run) => run.text).join('') : textOf(view),
+          ...(runs ? { runs } : {}),
+          ...origin,
+        }
+      }
 
       case 'VStack':
       case 'HStack':
@@ -1051,6 +1062,132 @@ class Converter {
   }
 
   // ------------------------------------------------------------- containers
+
+  /**
+   * The spans of a concatenated `Text`.
+   *
+   * `Text("a").bold() + Text("b")` reaches here as a `Text` with the two operands as
+   * children, each carrying its own modifier chain. Each chain is read into an
+   * *override* rather than a resolved style, so a span that set nothing still takes
+   * the size and colour of wherever the concatenation ends up - which is what SwiftUI
+   * does, and what makes `.font(.title)` on the whole expression reach both halves.
+   *
+   * Nested concatenation is left-associative, so the tree is flattened here and the
+   * renderer only ever sees a flat list.
+   */
+  private textRuns(view: ViewValue): readonly TextRunSpec[] {
+    const out: TextRunSpec[] = []
+
+    const walk = (operand: ViewValue): void => {
+      if (operand.name === 'Text' && operand.children.length > 0) {
+        for (const child of operand.children) walk(child)
+        // A modifier on the concatenation itself applies to every span below it.
+        const outer = this.runAttributes(operand)
+        if (Object.keys(outer).length > 0) {
+          for (let i = 0; i < out.length; i++) out[i] = { ...outer, ...out[i]! }
+        }
+        return
+      }
+      out.push({ text: textOf(operand), ...this.runAttributes(operand) })
+    }
+
+    for (const child of view.children) walk(child)
+    const outer = this.runAttributes(view)
+    if (Object.keys(outer).length > 0) {
+      for (let i = 0; i < out.length; i++) out[i] = { ...outer, ...out[i]! }
+    }
+    return out
+  }
+
+  /** What one span's own modifier chain sets, as overrides on its surroundings. */
+  private runAttributes(view: ViewValue): Omit<TextRunSpec, 'text'> {
+    let font: { family?: string; size?: number; weight?: number; italic?: boolean } | undefined
+    let color: RGBA | undefined
+    let underline: boolean | undefined
+    let strikethrough: boolean | undefined
+    let tracking: number | undefined
+    let baselineOffset: number | undefined
+
+    const face = (patch: { family?: string; size?: number; weight?: number; italic?: boolean }) => {
+      font = { ...font, ...patch }
+    }
+
+    for (const modifier of view.modifiers) {
+      const first = positional(modifier.args, 0)
+      switch (modifier.name) {
+        case 'font': {
+          const resolved = resolveFontArg(first, this.typeScale)
+          if (resolved) {
+            face({
+              family: resolved.family,
+              size: resolved.size,
+              weight: resolved.weight,
+              italic: resolved.italic,
+            })
+          }
+          break
+        }
+        case 'fontWeight':
+          face({ weight: resolveWeightArg(first) ?? 700 })
+          break
+        case 'bold':
+          face({ weight: 700 })
+          break
+        case 'italic':
+          face({ italic: true })
+          break
+        case 'monospaced':
+          face({ family: MONO_FAMILY })
+          break
+        case 'fontDesign': {
+          const design = tokenName(first)
+          face({
+            family:
+              design === 'rounded'
+                ? ROUNDED_FAMILY
+                : design === 'monospaced'
+                  ? MONO_FAMILY
+                  : UI_FONT_FAMILY,
+          })
+          break
+        }
+        case 'foregroundColor':
+        case 'foregroundStyle': {
+          const resolved = resolveColorArg(first, this.scheme)
+          if (resolved) color = resolved
+          break
+        }
+        case 'underline':
+          underline = first === undefined ? true : first.kind === 'bool' ? first.value : true
+          break
+        case 'strikethrough':
+          strikethrough = first === undefined ? true : first.kind === 'bool' ? first.value : true
+          break
+        case 'kerning':
+        case 'tracking': {
+          const value = numberArg(first)
+          if (value !== null) tracking = value
+          break
+        }
+        case 'baselineOffset': {
+          const value = numberArg(first)
+          if (value !== null) baselineOffset = value
+          break
+        }
+        default:
+          break
+      }
+    }
+
+    return {
+      ...(font ? { font } : {}),
+      ...(color ? { color } : {}),
+      ...(underline !== undefined ? { underline } : {}),
+      ...(strikethrough !== undefined ? { strikethrough } : {}),
+      ...(tracking !== undefined ? { tracking } : {}),
+      ...(baselineOffset !== undefined ? { baselineOffset } : {}),
+    }
+  }
 
   private divider(path: string, parentAxis: Axis, origin: object): LayoutElement {
     const line: LayoutElement = {
@@ -2357,7 +2494,6 @@ class Converter {
       case 'monospaced':
         return { kind: 'font', font: monospacedFont(this.typeScale) }
 
-      case 'kerning':
       case 'minimumScaleFactor':
         return { kind: 'unsupported', name: modifier.name }
 
@@ -2404,6 +2540,36 @@ class Converter {
           kind: 'textStyle',
           textCase: name === 'uppercase' ? 'upper' : name === 'lowercase' ? 'lower' : null,
         }
+      }
+
+      // The text attributes. All inherited, because in SwiftUI they are View
+      // modifiers rather than Text ones: `VStack { Text(...) }.underline()` underlines
+      // what is inside it.
+      case 'underline':
+      case 'strikethrough': {
+        // `.underline(isActive)` and `.underline(isActive, color:)` both lead with a
+        // Bool. No argument means on, which is the form almost everyone writes.
+        const first = positional(args, 0)
+        const on = first === undefined ? true : first.kind === 'bool' ? first.value : true
+        return modifier.name === 'underline'
+          ? { kind: 'textStyle', underline: on }
+          : { kind: 'textStyle', strikethrough: on }
+      }
+
+      case 'kerning':
+      case 'tracking': {
+        const value = numberArg(positional(args, 0))
+        return value === null ? null : { kind: 'textStyle', tracking: value }
+      }
+
+      case 'baselineOffset': {
+        const value = numberArg(positional(args, 0))
+        return value === null ? null : { kind: 'textStyle', baselineOffset: value }
+      }
+
+      case 'lineSpacing': {
+        const value = numberArg(positional(args, 0))
+        return value === null ? null : { kind: 'textStyle', lineSpacing: Math.max(0, value) }
       }
 
       case 'animation': {

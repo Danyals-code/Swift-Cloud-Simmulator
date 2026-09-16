@@ -2606,6 +2606,14 @@ export class Interpreter {
       return this.applyBitwise(operator, left, right, span)
     }
 
+    // A value the interpreter does not own - a view, a colour, a font. Every branch
+    // below wants a number, so without this the operator traps and the whole preview
+    // stops rather than the one expression failing.
+    if (left.kind === 'opaque' || right.kind === 'opaque') {
+      const fromHost = this.host.applyOperator?.(operator, left, right, span)
+      if (fromHost !== undefined) return fromHost
+    }
+
     const a = this.requireNumber(left, span)
     const b = this.requireNumber(right, span)
     // Int arithmetic only stays Int when both operands are.

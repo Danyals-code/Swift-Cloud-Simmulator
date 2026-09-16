@@ -60,6 +60,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // typography
   'font', 'bold', 'italic', 'fontWeight', 'fontDesign',
   'lineLimit', 'multilineTextAlignment', 'textCase',
+  'underline', 'strikethrough', 'kerning', 'tracking', 'baselineOffset', 'lineSpacing',
   // transforms, filters and motion
   'scaleEffect', 'rotationEffect', 'animation', 'transition',
   'blur', 'saturation', 'brightness', 'contrast', 'grayscale',
@@ -202,8 +203,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'compositingGroup', 'drawingGroup', 'geometryGroup', 'redacted', 'visualEffect',
   'zIndex',
   // typography
-  'kerning', 'tracking', 'baselineOffset', 'lineSpacing', 'minimumScaleFactor',
-  'truncationMode', 'allowsTightening', 'monospacedDigit', 'underline', 'strikethrough',
+  'minimumScaleFactor', 'truncationMode', 'allowsTightening', 'monospacedDigit',
   // symbols and images
   'symbolRenderingMode', 'symbolVariant', 'imageScale', 'interpolation',
   // motion

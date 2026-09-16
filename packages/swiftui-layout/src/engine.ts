@@ -24,10 +24,28 @@ import {
   type StackElement,
   type TableElement,
   type TextAlign,
+  type TextElement,
+  type TextRunSpec,
   type TransitionHint,
 } from './elements'
-import { FontMetricsTable, measureText, type TextLineBox } from './metrics'
+import {
+  FontMetricsTable,
+  measureRuns,
+  type MeasuredRun,
+  type TextLineBox,
+} from './metrics'
 import type { ProposedDimension, ProposedSize } from './proposal'
+
+/** One attributed span of painted text, with every attribute already resolved. */
+export interface PaintedRun {
+  readonly text: string
+  readonly font: ResolvedFont
+  readonly color: RGBA
+  readonly underline?: boolean
+  readonly strikethrough?: boolean
+  readonly tracking?: number
+  readonly baselineOffset?: number
+}
 
 export type PaintSpec =
   | {
@@ -37,6 +55,15 @@ export type PaintSpec =
       readonly font: ResolvedFont
       readonly color: RGBA
       readonly align?: TextAlign
+      /**
+       * The attributed spans, resolved against the environment.
+       *
+       * Always at least one, so the renderer has a single rule rather than a special
+       * case for plain text. `lines` carries slices into this list wherever a line
+       * crosses a run boundary.
+       */
+      readonly runs: readonly PaintedRun[]
+      readonly lineSpacing?: number
     }
   | { readonly kind: 'fill'; readonly fill: Fill }
   | {
@@ -209,7 +236,15 @@ export class LayoutEngine {
 
       case 'text': {
         const maxWidth = resolve(proposal.width, Number.POSITIVE_INFINITY, UNBOUNDED)
-        const measured = measureText(displayText(element.text, env), env.font, maxWidth, this.metrics, env.lineLimit)
+        const runs = paintedRuns(element, env)
+        const measured = measureRuns(
+          measuredRuns(runs),
+          env.font,
+          maxWidth,
+          this.metrics,
+          env.lineLimit,
+          env.lineSpacing ?? 0,
+        )
         return { width: measured.width, height: measured.height }
       }
 
@@ -579,8 +614,15 @@ export class LayoutEngine {
         return z
 
       case 'text': {
-        const text = displayText(element.text, env)
-        const measured = measureText(text, env.font, bounds.width, this.metrics, env.lineLimit)
+        const runs = paintedRuns(element, env)
+        const measured = measureRuns(
+          measuredRuns(runs),
+          env.font,
+          bounds.width,
+          this.metrics,
+          env.lineLimit,
+          env.lineSpacing ?? 0,
+        )
         out.push({
           id: element.id,
           frame: bounds,
@@ -589,11 +631,13 @@ export class LayoutEngine {
           cornerRadius: 0,
           paint: {
             kind: 'text',
-            text,
+            text: runs.map((run) => run.text).join(''),
             lines: measured.lines,
             font: env.font,
             color: env.foregroundColor,
+            runs,
             ...(env.textAlign ? { align: env.textAlign } : {}),
+            ...(env.lineSpacing ? { lineSpacing: env.lineSpacing } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -1473,6 +1517,77 @@ const CENTRE: Alignment = { horizontal: 'center', vertical: 'center' }
  * Applies `.textCase`, which is the one text policy that changes the string itself
  * rather than how it is laid out.
  */
+/**
+ * Resolves a text element's spans against the environment it is drawn in.
+ *
+ * Every field of a run is an override, so a `Text` that set nothing produces exactly
+ * the run the environment describes - which is why the single-run path costs one
+ * array of one object rather than a branch through the whole painter.
+ */
+function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly PaintedRun[] {
+  const inherited = (text: string): PaintedRun => ({
+    text: displayText(text, env),
+    font: env.font,
+    color: env.foregroundColor,
+    ...(env.underline ? { underline: true } : {}),
+    ...(env.strikethrough ? { strikethrough: true } : {}),
+    ...(env.tracking ? { tracking: env.tracking } : {}),
+    ...(env.baselineOffset ? { baselineOffset: env.baselineOffset } : {}),
+  })
+
+  if (!element.runs || element.runs.length === 0) return [inherited(element.text)]
+
+  return element.runs.map((run) => {
+    const base = inherited(run.text)
+    if (!run.font && run.color === undefined) {
+      return applyRunAttributes(base, run)
+    }
+    // A run that names a size is a different face, so its line height comes from the
+    // metrics rather than from whatever the inherited face happened to have.
+    const font: ResolvedFont = {
+      ...base.font,
+      ...(run.font?.family !== undefined ? { family: run.font.family } : {}),
+      ...(run.font?.size !== undefined
+        ? { size: run.font.size, lineHeight: run.font.size * LINE_HEIGHT_RATIO }
+        : {}),
+      ...(run.font?.weight !== undefined ? { weight: run.font.weight } : {}),
+      ...(run.font?.italic !== undefined ? { italic: run.font.italic } : {}),
+    }
+    return applyRunAttributes(
+      { ...base, font, ...(run.color ? { color: run.color } : {}) },
+      run,
+    )
+  })
+}
+
+/** The paint-only half of a run: attributes that override what the environment set. */
+function applyRunAttributes(base: PaintedRun, run: TextRunSpec): PaintedRun {
+  return {
+    ...base,
+    ...(run.underline !== undefined ? { underline: run.underline } : {}),
+    ...(run.strikethrough !== undefined ? { strikethrough: run.strikethrough } : {}),
+    ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
+    ...(run.baselineOffset !== undefined ? { baselineOffset: run.baselineOffset } : {}),
+  }
+}
+
+/**
+ * SwiftUI's line height for a face, as a multiple of its size.
+ *
+ * Only needed where a run sets its own size and there is no resolved font to copy a
+ * line height from. The same ratio the font resolver uses, kept here rather than
+ * imported so `swiftui-layout` keeps owning every number layout depends on.
+ */
+const LINE_HEIGHT_RATIO = 1.21
+
+function measuredRuns(runs: readonly PaintedRun[]): readonly MeasuredRun[] {
+  return runs.map((run) => ({
+    text: run.text,
+    font: run.font,
+    ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
+  }))
+}
+
 function displayText(text: string, env: LayoutEnvironment): string {
   if (env.textCase === 'upper') return text.toUpperCase()
   if (env.textCase === 'lower') return text.toLowerCase()

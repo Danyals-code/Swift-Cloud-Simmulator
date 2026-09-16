@@ -66,10 +66,25 @@ export interface ResolvedFont {
 
 export type TextAlignment = 'leading' | 'center' | 'trailing'
 
+/**
+ * One attributed span of a `Text`.
+ *
+ * Plain text is a single run. A run per span is what `Text + Text` needs - the two
+ * halves keep their own font and colour - and it is also what the attributes below
+ * are attached to, because SwiftUI lets each half of a concatenation carry its own.
+ */
 export interface TextRun {
   readonly text: string
   readonly font: ResolvedFont
   readonly color: RGBA
+  /** `.underline()` */
+  readonly underline?: boolean
+  /** `.strikethrough()` */
+  readonly strikethrough?: boolean
+  /** `.kerning` / `.tracking`: extra points between characters. Changes measured width. */
+  readonly tracking?: number
+  /** `.baselineOffset`: points above the baseline, negative for below. */
+  readonly baselineOffset?: number
 }
 
 export interface TextPayload {
@@ -81,6 +96,22 @@ export interface TextPayload {
    * text metrics service rather than by CSS.
    */
   readonly lines?: readonly TextLine[]
+  /** `.lineSpacing`: extra points between lines, on top of the font's own leading. */
+  readonly lineSpacing?: number
+}
+
+/**
+ * One run's contribution to one line.
+ *
+ * A line is sliced rather than re-measured because the line breaker already decided
+ * where every cluster went: re-deriving which run a character belongs to from the
+ * line's text would get a repeated substring wrong.
+ */
+export interface TextLineSlice {
+  /** index into `TextPayload.runs` */
+  readonly run: number
+  readonly text: string
+  readonly width: number
 }
 
 export interface TextLine {
@@ -89,6 +120,13 @@ export interface TextLine {
   readonly origin: Point
   readonly width: number
   readonly baseline: number
+  /**
+   * The runs this line is made of, in order.
+   *
+   * Absent for single-run text, which is almost all of it - the renderer then paints
+   * `text` with the first run's attributes and allocates nothing per line.
+   */
+  readonly slices?: readonly TextLineSlice[]
 }
 
 export type ShapeKind = 'rectangle' | 'roundedRectangle' | 'circle' | 'ellipse' | 'capsule'

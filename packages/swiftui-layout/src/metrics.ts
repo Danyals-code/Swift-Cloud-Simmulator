@@ -143,15 +143,38 @@ function emWidthOf(codePoint: number): number {
   return 0.6
 }
 
+/** One run's contribution to one line, in the order the line is painted. */
+export interface TextLineSliceBox {
+  /** index into the run list this measurement was made from */
+  readonly run: number
+  readonly text: string
+  readonly width: number
+}
+
 export interface TextLineBox {
   readonly text: string
   readonly width: number
+  /** Absent when the text was a single run, which is the common case. */
+  readonly slices?: readonly TextLineSliceBox[]
 }
 
 export interface TextMeasurement {
   readonly width: number
   readonly height: number
   readonly lines: readonly TextLineBox[]
+}
+
+/**
+ * One span of text with the face and spacing it is measured in.
+ *
+ * `tracking` is extra advance after each cluster - `.tracking` and `.kerning` both
+ * arrive here. It is part of *measurement* rather than painting, which is the whole
+ * reason the attribute could not simply be handed to the renderer.
+ */
+export interface MeasuredRun {
+  readonly text: string
+  readonly font: ResolvedFont
+  readonly tracking?: number
 }
 
 const GRAPHEME_SEGMENTER =
@@ -162,6 +185,31 @@ const GRAPHEME_SEGMENTER =
 function graphemes(text: string): string[] {
   if (!GRAPHEME_SEGMENTER) return [...text]
   return Array.from(GRAPHEME_SEGMENTER.segment(text), (s) => s.segment)
+}
+
+/**
+ * A grapheme with the run it came from and the width it takes.
+ *
+ * Breaking works on these rather than on a string because a line that crosses a run
+ * boundary has to be attributable afterwards: which half of `Text("ab") + Text("ab")`
+ * a given "ab" came from cannot be recovered from the line's text.
+ */
+interface Cluster {
+  readonly text: string
+  readonly run: number
+  readonly width: number
+}
+
+function clustersOf(runs: readonly MeasuredRun[], table: FontMetricsTable): Cluster[] {
+  const out: Cluster[] = []
+  for (let run = 0; run < runs.length; run++) {
+    const spec = runs[run]!
+    const tracking = spec.tracking ?? 0
+    for (const text of graphemes(spec.text)) {
+      out.push({ text, run, width: table.advance(text, spec.font) + tracking })
+    }
+  }
+  return out
 }
 
 /**
@@ -178,17 +226,42 @@ export function measureText(
   maxWidth: number,
   table: FontMetricsTable,
   lineLimit: number | null = null,
+  tracking = 0,
+  lineSpacing = 0,
 ): TextMeasurement {
-  const paragraphs = text.split('\n')
-  let lines: TextLineBox[] = []
+  return measureRuns([{ text, font, tracking }], font, maxWidth, table, lineLimit, lineSpacing)
+}
 
-  for (const paragraph of paragraphs) {
-    if (paragraph.length === 0) {
-      lines.push({ text: '', width: 0 })
+/**
+ * Measures attributed spans as one paragraph flow.
+ *
+ * `lineFont` decides the line height. SwiftUI uses the `Text`'s own font for that
+ * rather than growing the line box to fit a larger concatenated span, and
+ * reproducing it keeps a mixed-size concatenation from re-spacing the paragraph
+ * around it.
+ */
+export function measureRuns(
+  runs: readonly MeasuredRun[],
+  lineFont: ResolvedFont,
+  maxWidth: number,
+  table: FontMetricsTable,
+  lineLimit: number | null = null,
+  lineSpacing = 0,
+): TextMeasurement {
+  const multiRun = runs.length > 1
+  const all = clustersOf(runs, table)
+
+  let lines: Cluster[][] = []
+  let paragraph: Cluster[] = []
+  for (const cluster of all) {
+    if (cluster.text === '\n') {
+      lines.push(...wrapParagraph(paragraph, maxWidth))
+      paragraph = []
       continue
     }
-    lines.push(...wrapParagraph(paragraph, font, maxWidth, table))
+    paragraph.push(cluster)
   }
+  lines.push(...wrapParagraph(paragraph, maxWidth))
 
   // `.lineLimit(n)` truncates rather than shrinking, and the last kept line takes an
   // ellipsis - which also has to fit, so it replaces the tail rather than pushing the
@@ -196,38 +269,70 @@ export function measureText(
   if (lineLimit !== null && lineLimit > 0 && lines.length > lineLimit) {
     const kept = lines.slice(0, lineLimit)
     const last = kept[kept.length - 1]
-    if (last) kept[kept.length - 1] = truncate(last, font, maxWidth, table)
+    if (last) kept[kept.length - 1] = truncate(last, lineFont, maxWidth, table)
     lines = kept
   }
 
+  const boxes = lines.map((line) => toLineBox(line, multiRun))
+  const lineHeight = table.lineHeight(lineFont)
+
   return {
-    width: lines.reduce((max, line) => Math.max(max, line.width), 0),
-    height: lines.length * table.lineHeight(font),
-    lines,
+    width: boxes.reduce((max, line) => Math.max(max, line.width), 0),
+    // `.lineSpacing` is the gap *between* lines, so one line is unaffected by it.
+    height: boxes.length * lineHeight + Math.max(0, boxes.length - 1) * lineSpacing,
+    lines: boxes,
   }
+}
+
+function toLineBox(clusters: readonly Cluster[], multiRun: boolean): TextLineBox {
+  const text = clusters.map((c) => c.text).join('')
+  const width = clusters.reduce((sum, c) => sum + c.width, 0)
+  if (!multiRun) return { text, width }
+
+  const slices: TextLineSliceBox[] = []
+  for (const cluster of clusters) {
+    const last = slices[slices.length - 1]
+    if (last && last.run === cluster.run) {
+      slices[slices.length - 1] = {
+        run: last.run,
+        text: last.text + cluster.text,
+        width: last.width + cluster.width,
+      }
+    } else {
+      slices.push({ run: cluster.run, text: cluster.text, width: cluster.width })
+    }
+  }
+  return { text, width, slices }
 }
 
 /** Replaces the tail of a line with an ellipsis, keeping it inside `maxWidth`. */
 function truncate(
-  line: TextLineBox,
+  line: readonly Cluster[],
   font: ResolvedFont,
   maxWidth: number,
   table: FontMetricsTable,
-): TextLineBox {
+): Cluster[] {
   const ellipsis = '…'
+  const run = line[line.length - 1]?.run ?? 0
   const ellipsisWidth = table.advance(ellipsis, font)
-  const clusters = graphemes(line.text.trimEnd())
 
   let width = 0
-  const kept: string[] = []
-  for (const cluster of clusters) {
-    const advance = table.advance(cluster, font)
-    if (Number.isFinite(maxWidth) && width + advance + ellipsisWidth > maxWidth) break
+  const kept: Cluster[] = []
+  for (const cluster of trimEnd(line)) {
+    if (Number.isFinite(maxWidth) && width + cluster.width + ellipsisWidth > maxWidth) break
     kept.push(cluster)
-    width += advance
+    width += cluster.width
   }
 
-  return { text: kept.join('').trimEnd() + ellipsis, width: width + ellipsisWidth }
+  const trimmed = trimEnd(kept)
+  trimmed.push({ text: ellipsis, run, width: ellipsisWidth })
+  return trimmed
+}
+
+function trimEnd(clusters: readonly Cluster[]): Cluster[] {
+  let end = clusters.length
+  while (end > 0 && clusters[end - 1]!.text === ' ') end--
+  return clusters.slice(0, end)
 }
 
 /**
@@ -236,63 +341,49 @@ function truncate(
  * Not a fudge factor - a numerical one. A stack placed at exactly the size it
  * measured divides that size back up by subtraction, so the last child is offered
  * its own ideal width minus a few units in the last place. Without a tolerance,
- * `HStack { Image(…); Text("Starred") }` wraps to two lines purely because
+ * `HStack { Image(...); Text("Starred") }` wraps to two lines purely because
  * `83.18 - 6 - 20.06` is a hair under `57.12`. At a twentieth of a point the
  * tolerance is invisible, and it is four orders of magnitude above the error it
  * absorbs.
  */
 const BREAK_TOLERANCE = 0.05
 
-function wrapParagraph(
-  paragraph: string,
-  font: ResolvedFont,
-  maxWidth: number,
-  table: FontMetricsTable,
-): TextLineBox[] {
-  const clusters = graphemes(paragraph)
-  const widths = clusters.map((c) => table.advance(c, font))
+function wrapParagraph(clusters: readonly Cluster[], maxWidth: number): Cluster[][] {
+  if (clusters.length === 0) return [[]]
 
   const limit = maxWidth + BREAK_TOLERANCE
-  const total = widths.reduce((sum, w) => sum + w, 0)
-  if (!Number.isFinite(maxWidth) || total <= limit) {
-    return [{ text: paragraph, width: total }]
-  }
+  const total = clusters.reduce((sum, c) => sum + c.width, 0)
+  if (!Number.isFinite(maxWidth) || total <= limit) return [[...clusters]]
 
-  const lines: TextLineBox[] = []
+  const lines: Cluster[][] = []
   let lineStart = 0
   let lineWidth = 0
   /** Index just past the last space seen on this line, i.e. where a break may go. */
   let lastBreak = -1
 
   for (let i = 0; i < clusters.length; i++) {
-    const width = widths[i]!
+    const width = clusters[i]!.width
 
     if (lineWidth + width > limit && i > lineStart) {
       // Break at the last word boundary; if the word itself is too long, break here.
       const breakAt = lastBreak > lineStart ? lastBreak : i
-      const slice = clusters.slice(lineStart, breakAt).join('')
-      lines.push({ text: slice.trimEnd(), width: measureSlice(widths, lineStart, breakAt) })
+      lines.push(trimEnd(clusters.slice(lineStart, breakAt)))
       lineStart = breakAt
-      lineWidth = measureSlice(widths, lineStart, i)
+      lineWidth = measureSlice(clusters, lineStart, i)
       lastBreak = -1
     }
 
     lineWidth += width
-    if (clusters[i] === ' ') lastBreak = i + 1
+    if (clusters[i]!.text === ' ') lastBreak = i + 1
   }
 
-  if (lineStart < clusters.length) {
-    lines.push({
-      text: clusters.slice(lineStart).join('').trimEnd(),
-      width: measureSlice(widths, lineStart, clusters.length),
-    })
-  }
+  if (lineStart < clusters.length) lines.push(trimEnd(clusters.slice(lineStart)))
 
   return lines
 }
 
-function measureSlice(widths: readonly number[], from: number, to: number): number {
+function measureSlice(clusters: readonly Cluster[], from: number, to: number): number {
   let sum = 0
-  for (let i = from; i < to; i++) sum += widths[i]!
+  for (let i = from; i < to; i++) sum += clusters[i]!.width
   return sum
 }

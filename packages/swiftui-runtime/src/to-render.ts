@@ -107,21 +107,31 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
   switch (node.paint.kind) {
     case 'text': {
       const paint = node.paint
-      const lineHeight = paint.font.lineHeight
+      const step = paint.font.lineHeight + (paint.lineSpacing ?? 0)
       const lines: TextLine[] = paint.lines.map((line, index) => ({
         text: line.text,
-        origin: { x: 0, y: index * lineHeight },
+        origin: { x: 0, y: index * step },
         width: line.width,
-        baseline: lineHeight * 0.78,
+        baseline: paint.font.lineHeight * 0.78,
+        ...(line.slices ? { slices: line.slices } : {}),
       }))
 
       return {
         ...base,
         kind: 'text',
         text: {
-          runs: [{ text: paint.text, font: paint.font, color: paint.color }],
+          runs: paint.runs.map((run) => ({
+            text: run.text,
+            font: run.font,
+            color: run.color,
+            ...(run.underline ? { underline: true } : {}),
+            ...(run.strikethrough ? { strikethrough: true } : {}),
+            ...(run.tracking ? { tracking: run.tracking } : {}),
+            ...(run.baselineOffset ? { baselineOffset: run.baselineOffset } : {}),
+          })),
           alignment: paint.align ?? 'leading',
           lines,
+          ...(paint.lineSpacing ? { lineSpacing: paint.lineSpacing } : {}),
         },
         a11y: { role: 'text', label: paint.text },
       }
