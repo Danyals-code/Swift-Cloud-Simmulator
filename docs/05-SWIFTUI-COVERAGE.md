@@ -31,7 +31,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `VStack` / `HStack` / `ZStack` | ✅ | 3 | alignment, spacing |
 | `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
 | `Divider` | ✅ | 6 | hairline across its stack's axis |
-| `Group` | ✅ | 3 | |
+| `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
 | `ForEach` | ✅ | 6 | ranges, `Identifiable`, `id:` key paths; identity follows the element |
 | `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's |
 | `GeometryReader` | ✅ | 7 | reports its real size through `size` and `frame(in:)`, and is its own coordinate space |
@@ -39,7 +39,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `LazyVGrid` / `LazyHGrid` | ✅ | 6 | fixed, flexible and adaptive columns |
 | `Grid` / `GridRow` | ✅ | 7 | columns align across rows |
 | `ViewThatFits` | ✅ | 7 | |
-| `AnyView` | ✅ | 7 | erasure is a compile-time concern; at runtime it is its content |
+| `AnyView` | ✅ | 7 | erasure is a compile-time concern; at runtime it is its content, wherever the content arrives - as the argument it is written as, not only as a builder closure |
 | `Layout` protocol (custom layouts) | ✗ | - | needs a `Subviews` proxy and callbacks from the engine back into the interpreter for sizing as well as placement - a real seam, and custom conformances are rare in app code |
 | `AnyLayout` | ✗ | - | the same seam |
 
@@ -179,6 +179,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`'s `lineWidth`; a `StrokeStyle` dash pattern is not drawn |
 | `.trim` | 🟡 | 7 | exact for arcs - progress rings - approximate elsewhere |
 | `.strokeBorder` | ⬜ | - |
+| Custom `Shape` conformances | ✅ | 11 | `struct Arc: Shape { func path(in rect: CGRect) -> Path }`, with `.fill`, `.stroke` and `.trim` on the path it draws and `.frame` on the box it draws into. The rect is the one the shape was laid out in last pass, converging on the next - the same answer `GeometryReader` gives to the same ordering problem. `rect.minX` and the rest are derived, as `CGRect` derives them |
 | `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 |
 | Dark-mode colour resolution | ✅ | 4 |
 | `LinearGradient` | ✅ | 6 | named unit points |
@@ -231,12 +232,12 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `@State` | ✅ | 3 |
 | `@Binding` (and `$value` projections) | ✅ | 6 | passes down any number of views |
 | Key paths (`\.self`, `\.id`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`); **not where a closure is expected**, so `map(\.name)` is rejected |
-| `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere |
+| `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere. `$store.property` projects a `Binding` into the model, so `Slider(value: $ledger.monthlyBudget)` writes where it reads - the dynamic member lookup SwiftUI puts on the wrapper |
 | `@AppStorage` / `@SceneStorage` | 🟡 | - | keyed by the string, so views sharing a key share a value and it outlives the view that wrote it. Held for the session rather than on disk - see approximations |
 | `@FocusState` | 🟡 | - | storage the code reads and writes |
 | `Binding(get:set:)` / `.constant` | ✅ | - | a projection built from the user's closures, or one that reads a value and swallows writes; a control cannot tell either from `$value` |
-| `.environmentObject` / `@EnvironmentObject` | 🟡 | 7 | reaches views expanded while the modifier is in scope - see below |
-| `.environment(\.key, …)` | 🟡 | 7 | same scoping rule |
+| `.environmentObject` / `@EnvironmentObject` | ✅ | 11 | reaches views expanded while the modifier is in scope, *and* the deferred ones - a pushed `navigationDestination`, a presented `.sheet`, a `.toolbar` - which capture the frame they were written in and restore it when they run. Before that, a detail screen reading an `@EnvironmentObject` trapped |
+| `.environment(\.key, …)` | ✅ | 7 | same scoping rule |
 | `colorScheme`, `dynamicTypeSize` | ✅ | 4 |
 | `locale`, `layoutDirection` | 🟡 | 7 | reported; there is no RTL layout or localisation yet |
 | `horizontalSizeClass` / `verticalSizeClass` | ✅ | 7 | derived from the device size |
@@ -271,7 +272,7 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | Key paths (`\.self`, `\.id`, `\Type.member`) | ✅ | 6 | applied where a view takes one (`ForEach(id:)`) and where a closure is expected (`map(\.name)`, `filter(\.isDone)`, `first(where:)`) |
 | `as?` / `as!` / `is` | ✅ | - | compares the runtime type, the declared superclass chain and protocol conformances; generics are erased, so `[Item]` and `[String]` are both `Array` |
 | Closures, trailing closures, `$0` | ✅ | 1 | |
-| Contextual member syntax (`.home` for an enum) | ✅ | 7 | resolved where a declaration states the type |
+| Contextual member syntax (`.home` for an enum) | ✅ | 7 | resolved where a declaration states the type, and carrying its associated values: `describe(.done("hi"))` binds in `case .done(let text)`. The payload used to be dropped, so the branch matched and bound nothing |
 | Contextual keywords as names | ✅ | - | `open`, `some`, `any`, `where`, `final` and the rest, both declared and read. `get` and `set` are names everywhere except at the start of a computed property's body, where `{ get` is an accessor block in Swift too |
 | `protocol`, requirements, `extension` | ✅ | 8 | defaults from `extension P`, merged once for the whole toolchain |
 | `associatedtype` | 🟡 | 8 | the name resolves; nothing constrains it |
@@ -283,6 +284,7 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | `Task.sleep` / `Task.yield` | 🟡 | 8 | return immediately - see below |
 | `typealias`, `subscript`, `operator` declarations | ✅ | - | an alias substitutes its target; a subscript is a method named `subscript`; an `infix operator` declaration parses and takes multiplication's precedence, which is Swift's own default |
 | `actor`, `@Sendable`, structured concurrency | 🟡 | - | `actor` parses as a class and `async let` as a `let`; there is nothing to isolate from, since everything runs on one thread and in order |
+| `@ViewBuilder` on a function or property | ✅ | 11 | a helper of several statements, an `if`/`else` or a `switch` produces all of its views. Without it only a single-expression helper worked, because the implicit return covers one expression and a builder body almost never is one |
 | Multiple trailing closures | ✅ | - | `Button { } label: { }`, `Section { } header: { } footer: { }`, `.alert(…) { } message: { }` and the rest |
 | Explicit `get` / `set` accessors, `willSet` / `didSet` | ✅ | - | assigning to a computed property runs its setter with `newValue` bound |
 | Tuples | ✅ | - | `.0` and labels, `let (a, b) =`, `for (k, v) in`, tuple patterns in `switch`, equality |
@@ -295,6 +297,8 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | Bitwise operators `&` `\|` `^` `<<` `>>` | ✅ | - | 64-bit, computed in `BigInt` |
 | `_ = expr` | ✅ | - | the discard; evaluates the expression and throws the answer away |
 | Extensions on built-in types | ✅ | - | `extension String { var shout: String { uppercased() } }`; the receiver's own members are in scope unqualified |
+| Overloading by argument label | ✅ | - | `minutes(on:)` and `minutes(of:)` are two members, chosen by the labels the call writes. Overloading by parameter *type* alone is not: the interpreter is untyped, so `f(_ x: Int)` and `f(_ x: String)` still collapse to whichever was written last |
+| A method and a property sharing a name | ✅ | - | `var spent` and `func spent(on:)` coexist as they do in Swift; a call reaches the method and a read reaches the property |
 
 ## Standard library and Foundation
 
@@ -307,11 +311,13 @@ missing without anything saying so.
 | `String` - `count`, `uppercased`, `hasPrefix`, `contains`, `split`, `replacingOccurrences`, `trimmingCharacters` | ✅ | 2 | counted and sliced by grapheme cluster, so `"👋🏽".count` is 1 |
 | `String` - `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `starts(with:)`, `append` | ✅ | - | |
 | `String` - `unicodeScalars` | ✅ | - | code points, which is the whole difference from `count` |
-| `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | |
+| `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | `reduce(into:)` too, whose closure takes the accumulator `inout` - the standard way to build a dictionary from a sequence |
 | `Array` - `allSatisfy`, `flatMap`, `dropFirst`, `dropLast`, `first(where:)`, `last(where:)`, `lastIndex`, `randomElement`, `shuffled` | ✅ | - | `shuffled` is Fisher-Yates, not the biased one-line sort |
 | `Array` - `append`, `insert`, `remove`, `removeAll`, `removeFirst`, `removeLast`, `popLast`, `sort`, `reverse`, `shuffle`, `swapAt`, `replaceSubrange`, `removeSubrange` | ✅ | - | mutating, and refused on a `let` as Xcode refuses them |
 | `Dictionary` - subscript, `default:`, `keys`, `values`, `updateValue`, `removeValue` | ✅ | 2 | |
 | `Dictionary` - `sorted`, `mapValues`, `filter`, `map`, `contains` | ✅ | - | over `(key: , value: )` pairs; `filter` answers a dictionary and `sorted` an array |
+| `Dictionary(grouping:by:)`, `Dictionary(uniqueKeysWithValues:)` | ✅ | 11 | grouping keeps the order the groups were first met, which is what a sectioned list wants and what Swift's hash order promises nothing about |
+| `counts[key, default: 0] += 1` | ✅ | 11 | the default belongs to the read half of a compound assignment; without it the first occurrence of every key read nil |
 | `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation drop duplicates; iteration is in insertion order rather than Swift's unspecified hash order |
 | `Int` / `Double` conversion from `String` | ✅ | - | failable, matched to Swift's grammar: `" 42"`, `"4_2"` and `"0x10"` are nil |
 | `Int.max` / `Int.min` | 🟡 | - | 2^53 - 1, not 2^63 - 1 - see approximations |

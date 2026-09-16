@@ -107,11 +107,52 @@ export function geometryMember(value: SwiftValue, member: string): SwiftValue | 
   }
 
   const payload = value.payload as Record<string, unknown>
+
+  // A rect's derived edges and centre. Every custom `Shape` reads these - a path has
+  // to be drawn somewhere inside the rect it was handed - and without them
+  // `rect.midX` reported no such member and the shape drew nothing.
+  if (value.typeName === RECT_TYPE) {
+    const derived = rectMember(payload, member)
+    if (derived !== undefined) return double(derived)
+  }
+
   const found = payload[member]
 
   if (typeof found === 'number') return double(found)
   if (found && typeof found === 'object') return found as SwiftValue
   return undefined
+}
+
+/**
+ * `minX`, `midY`, `maxX` and the rest, computed rather than stored.
+ *
+ * Swift's `CGRect` derives all of them from origin and size, and so does this -
+ * storing them would mean eight numbers that can disagree with the four that matter.
+ * `origin` and `size` are handled by the payload lookup above, which finds the
+ * objects; these are the scalars.
+ */
+function rectMember(payload: Record<string, unknown>, member: string): number | undefined {
+  const x = typeof payload.x === 'number' ? payload.x : 0
+  const y = typeof payload.y === 'number' ? payload.y : 0
+  const w = typeof payload.width === 'number' ? payload.width : 0
+  const h = typeof payload.height === 'number' ? payload.height : 0
+
+  switch (member) {
+    case 'minX':
+      return Math.min(x, x + w)
+    case 'midX':
+      return x + w / 2
+    case 'maxX':
+      return Math.max(x, x + w)
+    case 'minY':
+      return Math.min(y, y + h)
+    case 'midY':
+      return y + h / 2
+    case 'maxY':
+      return Math.max(y, y + h)
+    default:
+      return undefined
+  }
 }
 
 /**

@@ -40,6 +40,7 @@ import {
   DIMENSIONS_TYPE,
   handlerIdFor,
   type AnimationPayload,
+  type EnvironmentFrame,
   type ViewIntent,
   type ViewValue,
 } from './view-value'
@@ -257,7 +258,7 @@ export class AppRuntime {
 
       const ui = resolveUI(views, {
         state: this.ui,
-        build: (closure, args) => this.buildViews(closure, args),
+        build: (closure, args, environment) => this.buildViews(closure, args, environment),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
         animation: this.animation,
       })
@@ -683,7 +684,12 @@ export class AppRuntime {
       const body = this.interpreter.membersOf(instance.typeName).find(
         (m): m is VarDecl => m.kind === 'varDecl' && m.name === 'body' && m.accessor !== null,
       )
-      if (!body?.accessor) return []
+      if (!body?.accessor) {
+        // A `Shape` conformance has `path(in:)` and no `body`, and is a view all the
+        // same: `Arc()` in a stack draws, filled with the foreground style.
+        const shape = this.host.shapeAsView(instance, decl.span)
+        return shape ? [shape] : []
+      }
 
       const env = this.interpreter.globals.child(instance)
       const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
@@ -814,8 +820,22 @@ export class AppRuntime {
     return this.viewsFrom(this.interpreter.runViewBuilderBlock(body, env))
   }
 
-  private buildViews(closure: ClosureValue, args: readonly SwiftValue[] = []): readonly ViewValue[] {
-    return this.viewsFrom(this.interpreter.runViewBuilder(closure, args))
+  /**
+   * Runs a view-builder closure, optionally with the environment it was written in.
+   *
+   * The frame matters only for the deferred ones - a pushed destination, a presented
+   * sheet, a toolbar - which run at resolve time, after the expansion that declared
+   * them has unwound. Without it `@EnvironmentObject` on a detail screen resolves to
+   * nothing, which is not a limitation the user can see coming.
+   */
+  private buildViews(
+    closure: ClosureValue,
+    args: readonly SwiftValue[] = [],
+    environment?: EnvironmentFrame,
+  ): readonly ViewValue[] {
+    return this.host.environment.withFrame(environment, () =>
+      this.viewsFrom(this.interpreter.runViewBuilder(closure, args)),
+    )
   }
 
   /**

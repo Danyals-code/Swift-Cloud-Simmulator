@@ -15,6 +15,7 @@ import {
   ANIMATION_TYPE,
   COLOR_TYPE,
   type AnimationPayload,
+  type EnvironmentFrame,
   type ModifierValue,
   type ViewArg,
   type ViewIntent,
@@ -286,8 +287,18 @@ export class UIState {
 
 export interface ResolveContext {
   readonly state: UIState
-  /** Runs a view-builder closure, returning the views it produced. */
-  build(closure: ClosureValue, args?: readonly SwiftValue[]): readonly ViewValue[]
+  /**
+   * Runs a view-builder closure, returning the views it produced.
+   *
+   * `environment` is the frame the closure was *written* in, which a deferred one -
+   * a pushed destination, a presented sheet - needs because the scope that declared
+   * it unwound long before this runs.
+   */
+  build(
+    closure: ClosureValue,
+    args?: readonly SwiftValue[],
+    environment?: EnvironmentFrame,
+  ): readonly ViewValue[]
   /**
    * Runs a custom `ButtonStyle`'s `makeBody(configuration:)`.
    *
@@ -1037,7 +1048,7 @@ class Resolver {
 
     const builder = collectModifier(screen, 'navigationDestination')
     if (!builder?.closure) return null
-    return this.ctx.build(builder.closure, [value])
+    return this.ctx.build(builder.closure, [value], builder.environment)
   }
 
   private resolveToolbar(
@@ -1047,7 +1058,7 @@ class Resolver {
     const toolbar = collectModifier(screen, 'toolbar')
     if (!toolbar?.closure) return { leading: [], trailing: [] }
 
-    const items = this.ctx.build(toolbar.closure)
+    const items = this.ctx.build(toolbar.closure, [], toolbar.environment)
     const leading: ViewValue[] = []
     const trailing: ViewValue[] = []
 
@@ -1089,7 +1100,7 @@ class Resolver {
 
     const items = pages.map((page, i) => {
       const item = collectModifier([page], 'tabItem')
-      const label = paged ? [] : item?.closure ? this.ctx.build(item.closure) : []
+      const label = paged ? [] : item?.closure ? this.ctx.build(item.closure, [], item.environment) : []
       const path = `${tabId}/tab-${i}`
       const intent: ViewIntent =
         binding && tagged[i] !== null
@@ -1201,6 +1212,7 @@ class Resolver {
         ? this.ctx.build(
             modifier.closure,
             itemValue && itemValue.kind !== 'nil' ? [itemValue] : [],
+            modifier.environment,
           )
         : []
 
@@ -1235,7 +1247,7 @@ class Resolver {
     if (closure?.kind !== 'closure') return ''
 
     return this.ctx
-      .build(closure, [])
+      .build(closure, [], modifier.environment)
       .flatMap((v) => textOf(v))
       .join(' ')
   }

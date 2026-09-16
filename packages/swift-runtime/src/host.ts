@@ -86,6 +86,15 @@ export interface InterpreterHost {
   coerceToType?(value: SwiftValue, typeName: string): SwiftValue | undefined
 
   /**
+   * Several values produced by one `@ViewBuilder` body, as a single value.
+   *
+   * Swift's builder wraps them in a `TupleView`; what that is here is the host's
+   * business, because the interpreter does not know what a view is. Returning
+   * undefined leaves the first value, which is what happened before this existed.
+   */
+  groupValues?(values: readonly SwiftValue[], span: SourceSpan): SwiftValue | undefined
+
+  /**
    * A binary operator applied to a value the interpreter does not own.
    *
    * `Text("a") + Text("b")` is the whole reason this exists: both operands are
