@@ -15,6 +15,7 @@
 
 /** Stroked paths, on a 16x16 grid. */
 const STROKE: Readonly<Record<string, string>> = {
+  appearance: 'M8 2.25a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5ZM8 2.25v11.5M10 3v10M12 4v8',
   'chevron-down': 'M4 6.25 8 10.25l4-4',
   'chevron-right': 'M6.25 4 10.25 8l-4 4',
   'chevron-up-down': 'M5 6.75 8 3.75l3 3M5 9.25l3 3 3-3',

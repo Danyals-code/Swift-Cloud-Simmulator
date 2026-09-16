@@ -45,7 +45,7 @@ export function TabBar({
             className={`group relative flex min-w-[112px] max-w-[220px] shrink-0 items-center transition-colors ${
               active
                 ? 'bg-xc-editor text-xc-text'
-                : 'bg-transparent text-xc-text-2 hover:bg-white/[0.04]'
+                : 'bg-transparent text-xc-text-2 hover:bg-xc-line-soft'
             }`}
           >
             <button
@@ -73,13 +73,13 @@ export function TabBar({
               type="button"
               onClick={() => onClose(fileId)}
               aria-label={`Close ${fileBasename(fileId)}`}
-              className="mr-1 grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[4px] text-xc-text-3 opacity-0 transition hover:bg-white/15 hover:text-xc-text focus-visible:opacity-100 group-hover:opacity-100"
+              className="mr-1 grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[4px] text-xc-text-3 opacity-0 transition hover:bg-xc-line-soft hover:text-xc-text focus-visible:opacity-100 group-hover:opacity-100"
             >
               <Icon name="xmark" size={9} weight={1.8} />
             </button>
 
             {/* One hairline between neighbours, drawn by the tab on the right. */}
-            <span aria-hidden className="absolute inset-y-0 right-0 w-px bg-black/30" />
+            <span aria-hidden className="absolute inset-y-0 right-0 w-px bg-xc-line" />
             {active ? (
               <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-xc-accent/70" />
             ) : null}

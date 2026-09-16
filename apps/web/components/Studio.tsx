@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ExportFormat } from '@studio/shared'
 import { buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
-import { getDevice, type DeviceKey } from '@studio/sim-shell'
+import { getDevice } from '@studio/sim-shell'
 import type { FileId, RenderNode, SourceSpan, UIEvent } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
@@ -17,7 +17,8 @@ import { JumpBar } from './JumpBar'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery } from './TemplateGallery'
-import { Toolbar } from './Toolbar'
+import { Toolbar, PreviewTools } from './Toolbar'
+import styles from './Workspace.module.css'
 import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
 
@@ -58,6 +59,11 @@ export function Studio() {
   const removeProject = useStudio((s) => s.removeProject)
   const recents = useStudio((s) => s.recents)
 
+  const mode = useLayout(s => s.mode)
+  const setMode = useLayout(s => s.setMode)
+  const theme = useLayout(s => s.theme)
+  const setTheme = useLayout(s => s.setTheme)
+  useEffect(() => { document.documentElement.dataset.workspaceTheme = theme }, [theme])
   const shown = useLayout((s) => s.shown)
   const navigatorWidth = useLayout((s) => s.navigatorWidth)
   const previewWidth = useLayout((s) => s.previewWidth)
@@ -191,7 +197,8 @@ export function Studio() {
     // always shown, even if the editor then has to go under its comfortable
     // minimum: hiding the one thing somebody just switched on is worse than a
     // narrow editor, and they can close it again in one keystroke.
-    const showNavigator = shown.navigator
+    const showNavigator = shown.navigator && !(mode === 'design' && available < 820)
+    if (mode === 'design') return { nav: showNavigator ? navigatorWidth : 0, preview: 0, showNavigator, showPreview: true }
     const showPreview =
       shown.preview &&
       !(
@@ -216,7 +223,7 @@ export function Studio() {
       showNavigator,
       showPreview,
     }
-  }, [available, navigatorWidth, previewWidth, shown.navigator, shown.preview])
+  }, [available, navigatorWidth, previewWidth, shown.navigator, shown.preview, mode])
 
   /**
    * Toggling a pane.
@@ -233,12 +240,18 @@ export function Studio() {
     [setPane, shown],
   )
 
+  const openSource = useCallback((fileId: FileId) => {
+    setActiveFile(fileId)
+    if (mode === 'design') setMode('develop')
+  }, [setActiveFile, mode, setMode])
+
   const revealSpanIn = useCallback(
     (file: FileId, offset: number) => {
       if (file !== activeFileId) setActiveFile(file)
+      if (mode === 'design') setMode('develop')
       setReveal({ offset, nonce: ++revealNonce.current })
     },
-    [activeFileId, setActiveFile],
+    [activeFileId, setActiveFile, mode, setMode],
   )
 
   /** Inspector click: jump the editor to the Swift that produced this view (FR-5.8). */
@@ -363,22 +376,20 @@ export function Studio() {
   const errors = allDiagnostics.filter((d) => d.severity === 'error').length
   const warnings = allDiagnostics.filter((d) => d.severity === 'warning').length
 
+  const previewTools = <PreviewTools paused={paused} inspecting={inspecting} busy={stale} errors={errors} warnings={warnings} workerError={workerError} onRun={run} onTogglePaused={() => setPaused(v => !v)} onToggleInspect={() => setInspecting(v => !v)} />
+
   return (
-    <main className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
-      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || rename !== null}>
+    <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
+      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen}>
       <Toolbar
+        mode={mode}
+        onModeChange={setMode}
+        theme={theme}
+        onThemeChange={setTheme}
         onOpenGallery={openGallery}
         projectName={project.manifest.name}
-        device={project.manifest.device}
         savedAt={lastSavedAt}
         saveError={saveError}
-        busy={stale}
-        paused={paused}
-        errors={errors}
-        warnings={warnings}
-        lastCompileMs={result?.timings.total ?? null}
-        workerError={workerError}
-        inspecting={inspecting}
         // The toggles report the preference, so each is a switch that always
         // responds; `suppressed` is how a pane that is on but has no room says so.
         panes={new Set((Object.keys(shown) as PaneKey[]).filter((key) => shown[key]))}
@@ -386,10 +397,6 @@ export function Studio() {
           new Set<PaneKey>(shown.preview && !layout.showPreview ? (['preview'] as const) : [])
         }
         onTogglePane={togglePane}
-        onDeviceChange={(d: DeviceKey) => setDevice(d)}
-        onRun={run}
-        onTogglePaused={() => setPaused((v) => !v)}
-        onToggleInspect={() => setInspecting((v) => !v)}
         onExport={handleExport}
         onShare={handleShare}
       />
@@ -404,8 +411,8 @@ export function Studio() {
                 filesWithErrors={filesWithErrors}
                 diagnostics={allDiagnostics}
                 canDelete={files.length > 1}
-                onSelect={setActiveFile}
-                onCreateFile={createFile}
+                onSelect={openSource}
+                onCreateFile={(name, parent) => { setMode('develop'); return createFile(name, parent) }}
                 onCreateFolder={createFolder}
                 onRenameFile={renameFile}
                 onRenameFolder={renameFolder}
@@ -430,7 +437,7 @@ export function Studio() {
           </>
         ) : null}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col" style={mode === 'design' ? { display: 'none' } : undefined}>
           <TabBar
             openFileIds={openFileIds}
             activeFileId={activeFileId}
@@ -506,7 +513,7 @@ export function Studio() {
 
         {layout.showPreview ? (
           <>
-            <Splitter
+            {mode !== 'design' && <Splitter
               orientation="col"
               size={layout.preview}
               onResize={(size) => setSize('preview', size)}
@@ -515,9 +522,12 @@ export function Studio() {
               direction={-1}
               label="Preview width"
               onToggle={() => togglePane('preview')}
-            />
-            <div style={{ width: layout.preview }} className="shrink-0 overflow-hidden">
+            />}
+            <div style={mode === 'design' ? { flex: 1, minWidth: 0 } : { width: layout.preview }} className="shrink-0 overflow-hidden">
               <DevicePane
+                expanded={mode === 'design'}
+                onDeviceChange={setDevice}
+                tools={previewTools}
                 device={device}
                 tree={result?.renderTree ?? null}
                 stale={stale}
@@ -532,6 +542,7 @@ export function Studio() {
           </>
         ) : null}
       </div>
+      {!layout.showPreview && <div className={styles.codeFooter}>{previewTools}</div>}
 
       </div>
       {switcherOpen ? (
@@ -539,7 +550,7 @@ export function Studio() {
           files={files}
           onSelect={(fileId) => {
             setSwitcherOpen(false)
-            setActiveFile(fileId)
+            openSource(fileId)
           }}
           onClose={() => setSwitcherOpen(false)}
         />
@@ -621,7 +632,7 @@ function RenameBar({
         spellCheck={false}
         aria-label="New name"
         data-testid="rename-input"
-        className="h-[20px] w-48 rounded-[5px] border border-xc-accent bg-black/40 px-2 font-mono text-xc-text outline-none"
+        className="h-[20px] w-48 rounded-[5px] border border-xc-accent bg-xc-panel px-2 font-mono text-xc-text outline-none"
       />
       <span className="text-xc-text-3" data-testid="rename-count">
         {rename.spans.length} {rename.spans.length === 1 ? 'occurrence' : 'occurrences'} in{' '}

@@ -1,44 +1,120 @@
 @import 'tailwindcss';
 
-/**
- * The studio's design tokens.
- *
- * One vocabulary, named after what a surface *is* rather than what colour it
- * happens to be, so a palette change is one edit here instead of a hunt through
- * nine components for `#141418`. The values are Xcode's Default (Dark)
- * appearance: the editor canvas is the theme's own `#1F1F24`, and the chrome
- * around it follows macOS's window materials at the same remove Xcode keeps.
- *
- * Only dark is filled in. The names carry no appearance in them, so adding light
- * later is this block plus a `prefers-color-scheme` override - not a second pass
- * over every component.
- */
+/* Workspace appearance is independent of the simulated app. */
 @theme {
   /* Surfaces, lightest chrome to darkest canvas. */
-  --color-xc-bar: #29292d;
-  --color-xc-bar-raised: #36363b;
-  --color-xc-sidebar: #252529;
-  --color-xc-editor: #1f1f24;
-  --color-xc-canvas: #303034;
-  --color-xc-panel: #2e2e33;
+  --color-xc-bar: #ffffff;
+  --color-xc-bar-raised: #f4f4f5;
+  --color-xc-sidebar: #ffffff;
+  --color-xc-editor: #fafafa;
+  --color-xc-canvas: #e9e9ec;
+  --color-xc-panel: #ffffff;
 
   /* Separators. `line` divides panes, `line-soft` divides rows inside one. */
-  --color-xc-line: #ffffff12;
-  --color-xc-line-soft: #3e3e43;
+  --color-xc-line: #e5e5e8;
+  --color-xc-line-soft: #ededf0;
 
-  --color-xc-text: #dfdfe0;
-  --color-xc-text-2: #9a9aa2;
-  --color-xc-text-3: #92929c;
+  --color-xc-text: #26262b;
+  --color-xc-text-2: #66666e;
+  --color-xc-text-3: #777780;
 
-  --color-xc-accent: #0a84ff;
-  --color-xc-select: #0b5fd5;
-  --color-xc-select-off: #48484c;
+  --color-xc-accent: #0d78f2;
+  --color-xc-select: #e6f1ff;
+  --color-xc-select-off: #eeeeF2;
 
-  --color-xc-error: #ff5f56;
-  --color-xc-warn: #f5b21e;
-  --color-xc-ok: #32d74b;
+  --color-xc-error: #c83a32;
+  --color-xc-warn: #996b10;
+  --color-xc-ok: #22834a;
   /* Swift's own orange, for the source-file glyph. */
-  --color-xc-swift: #f05138;
+  --color-xc-swift: #777780;
+}
+
+:root {
+  color-scheme: light;
+  --workspace-dots: #bcbcc44a;
+  --workspace-scrim: #2626303d;
+  --workspace-accent-hover: #0868d8;
+  --workspace-scrollbar: rgb(0 0 0 / 0.18);
+  --workspace-scrollbar-hover: rgb(0 0 0 / 0.28);
+  --editor-background: #ffffff;
+  --editor-text: #353540;
+  --editor-caret: #22222b;
+  --editor-selection: #dcecff;
+  --editor-selectionMatch: #eaf3ff;
+  --editor-currentLine: #f6f7fa;
+  --editor-gutter: #ffffff;
+  --editor-gutterText: #93939e;
+  --editor-gutterActive: #353540;
+  --editor-panel: #ffffff;
+  --editor-panelBorder: #e0e0e6;
+  --editor-comment: #93939e;
+  --editor-string: #a44939;
+  --editor-number: #6854af;
+  --editor-keyword: #9650a0;
+  --editor-preprocessor: #a36825;
+  --editor-attribute: #946936;
+  --editor-typeDeclaration: #267f91;
+  --editor-otherDeclaration: #277084;
+  --editor-projectType: #276f78;
+  --editor-projectMember: #357e6c;
+  --editor-systemType: #7658a3;
+  --editor-systemMember: #7658a3;
+  --editor-url: #0d78f2;
+  --editor-invalid: #c83a32;
+  --editor-backgroundColor: #0a84ff;
+  --editor-color: #ffffff;
+}
+
+:root[data-workspace-theme="dark"] {
+  color-scheme: dark;
+  --color-xc-bar: #242426;
+  --color-xc-bar-raised: #303033;
+  --color-xc-sidebar: #242426;
+  --color-xc-editor: #202022;
+  --color-xc-canvas: #19191b;
+  --color-xc-panel: #2a2a2d;
+  --color-xc-line: #3c3c40;
+  --color-xc-line-soft: #343438;
+  --color-xc-text: #ededf0;
+  --color-xc-text-2: #b9b9c1;
+  --color-xc-text-3: #a0a0aa;
+  --color-xc-accent: #529dff;
+  --color-xc-select: #253e5d;
+  --color-xc-select-off: #38383e;
+  --color-xc-error: #ff827a;
+  --color-xc-warn: #e4b55f;
+  --color-xc-ok: #75c897;
+  --color-xc-swift: #a0a0aa;
+  --workspace-dots: #54545b55;
+  --workspace-scrim: #00000080;
+  --workspace-accent-hover: #287fe8;
+  --workspace-scrollbar: rgb(255 255 255 / 0.2);
+  --workspace-scrollbar-hover: rgb(255 255 255 / 0.3);
+  --editor-background: #202022;
+  --editor-text: #d9d9e0;
+  --editor-caret: #eeeeF2;
+  --editor-selection: #304b6b;
+  --editor-selectionMatch: #2b394b;
+  --editor-currentLine: #29292e;
+  --editor-gutter: #202022;
+  --editor-gutterText: #898995;
+  --editor-gutterActive: #ededf0;
+  --editor-panel: #2a2a2d;
+  --editor-panelBorder: #3c3c40;
+  --editor-comment: #92929f;
+  --editor-string: #df9c88;
+  --editor-number: #b7a1ed;
+  --editor-keyword: #d39edc;
+  --editor-preprocessor: #d6b183;
+  --editor-attribute: #d6b183;
+  --editor-typeDeclaration: #85c6d0;
+  --editor-otherDeclaration: #8abac9;
+  --editor-projectType: #7fc4c6;
+  --editor-projectMember: #90c8b6;
+  --editor-systemType: #b7a1dc;
+  --editor-systemMember: #b7a1dc;
+  --editor-url: #77b4ff;
+  --editor-invalid: #ff827a;
 }
 
 html,
@@ -57,8 +133,8 @@ body {
   overflow: hidden;
 }
 
-/* The simulated app sets every colour explicitly, so it must not inherit the dark
-   studio chrome. Belt and braces against a future Tailwind preflight change. */
+/* The simulated app sets every colour explicitly, so it must not inherit the
+   workspace chrome. Belt and braces against a future Tailwind preflight change. */
 [data-testid='render-tree'] {
   color: initial;
   font-family: initial;
@@ -96,13 +172,13 @@ body {
   height: 11px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.16);
+  background: var(--workspace-scrollbar);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 0.3);
+  background: var(--workspace-scrollbar-hover);
   border: 2px solid transparent;
   background-clip: content-box;
 }

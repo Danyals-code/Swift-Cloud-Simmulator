@@ -22,6 +22,8 @@ async function openStudio(page: Page) {
   await expect(page.getByTestId('template-gallery')).toBeVisible()
   await page.getByTestId('gallery-dismiss').click()
   await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await page.getByTestId('workspace-develop').click()
+  if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') await page.getByTestId('pane-toggle-debug').click()
 
   await expect(page.getByTestId('editor')).toBeVisible()
   await expect(page.getByTestId('render-tree')).toBeVisible()
@@ -773,6 +775,8 @@ test('Phase 10 - F2 renames every occurrence and says how many first', async ({ 
 
   const bar = page.getByTestId('rename-bar')
   await expect(bar).toBeVisible({ timeout: 5000 })
+  await expect(page.getByTestId('rename-input')).toBeFocused()
+  expect(await page.getByTestId('rename-input').evaluate(element => element.closest('[inert]') !== null)).toBe(false)
   // The count is stated before anything changes: matching is by name, so two unrelated
   // symbols spelled the same look identical to the analyser. A wrong number is the
   // user's cue to press Escape.

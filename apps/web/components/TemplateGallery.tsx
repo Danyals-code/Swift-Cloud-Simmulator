@@ -442,7 +442,7 @@ function OpenPane({
         From your computer
       </h3>
 
-      <div className="mt-2 rounded-[8px] border border-dashed border-white/12 bg-white/[0.02] p-4">
+      <div className="mt-2 rounded-[8px] border border-dashed border-white/12 bg-xc-line-soft p-4">
         <p className="text-[11.5px] leading-relaxed text-xc-text-2">
           Open <span className="font-mono text-[11px] text-xc-text">.swift</span> files from
           your project, or an exported{' '}
@@ -496,10 +496,10 @@ function RecentRow({
         className={`flex min-w-0 flex-1 items-center gap-3 rounded-[8px] border p-3 text-left transition-colors ${
           open
             ? 'border-xc-accent/60 bg-xc-accent/10'
-            : 'border-white/10 bg-white/[0.04] hover:border-xc-accent/60 hover:bg-white/[0.07]'
+            : 'border-xc-line bg-xc-line-soft hover:border-xc-accent/60 hover:bg-xc-line-soft'
         }`}
       >
-        <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[7px] bg-white/10 text-[13px] font-medium text-xc-text">
+        <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[7px] bg-xc-line-soft text-[13px] font-medium text-xc-text">
           {summary.name.slice(0, 1).toUpperCase()}
         </span>
         <span className="min-w-0">
@@ -524,7 +524,7 @@ function RecentRow({
         aria-label={`Delete ${summary.name}`}
         title={open ? 'Open another project first' : `Delete ${summary.name} from this browser`}
         data-testid={`gallery-remove-${summary.id}`}
-        className="grid h-[30px] w-[26px] shrink-0 place-items-center rounded-[6px] text-xc-text-3 opacity-0 transition-opacity hover:bg-white/10 hover:text-xc-error focus-visible:opacity-100 disabled:pointer-events-none group-hover/row:opacity-100"
+        className="grid h-[30px] w-[26px] shrink-0 place-items-center rounded-[6px] text-xc-text-3 opacity-0 transition-opacity hover:bg-xc-line-soft hover:text-xc-error focus-visible:opacity-100 disabled:pointer-events-none group-hover/row:opacity-100"
       >
         <Icon name="xmark" size={12} />
       </button>
@@ -648,7 +648,7 @@ function Confirm({
         aria-modal="true"
         aria-label={title}
         onPointerDown={(event) => event.stopPropagation()}
-        className="w-[min(380px,90vw)] rounded-[10px] border border-black/60 bg-xc-bar p-5 text-center shadow-[0_28px_80px_rgb(0_0_0/0.65)]"
+        className="w-[min(380px,90vw)] rounded-[10px] border border-xc-line bg-xc-bar p-5 text-center shadow-[0_28px_80px_rgb(0_0_0/0.65)]"
       >
         <span
           className={`mx-auto grid h-[34px] w-[34px] place-items-center rounded-full ${

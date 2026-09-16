@@ -38,7 +38,7 @@ test('provider errors keep the prompt and existing project intact', async ({ pag
   await page.getByLabel('App description', { exact: true }).fill('A project planner with tasks and weekly summaries.')
   await page.getByLabel('API key', { exact: true }).fill('sk-ant-test-not-a-real-key')
   await page.getByRole('button', { name: 'Generate app', exact: true }).click()
-  await expect(page.getByRole('alert')).toHaveText('Check your API key.')
+  await expect(page.getByTestId('prompt-creator').getByRole('alert')).toHaveText('Check your API key.')
   await expect(page.getByLabel('App description', { exact: true })).toHaveValue('A project planner with tasks and weekly summaries.')
   await expect(page.getByTestId('project-name')).toHaveText('CounterApp')
 })

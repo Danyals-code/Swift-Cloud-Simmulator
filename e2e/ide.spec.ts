@@ -26,6 +26,8 @@ async function openStudio(page: Page) {
   await expect(page.getByTestId('template-gallery')).toBeVisible()
   await page.getByTestId('gallery-dismiss').click()
   await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await page.getByTestId('workspace-develop').click()
+  if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') await page.getByTestId('pane-toggle-debug').click()
 
   await expect(page.getByTestId('editor')).toBeVisible()
   await expect(page.getByTestId('render-tree')).toBeVisible()

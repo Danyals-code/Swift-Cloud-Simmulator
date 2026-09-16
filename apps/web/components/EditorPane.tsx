@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { basicSetup } from 'codemirror'
-import { EditorState, type Extension } from '@codemirror/state'
+import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { StreamLanguage } from '@codemirror/language'
@@ -17,7 +17,8 @@ import {
 import { hoverTooltip } from '@codemirror/view'
 import { search, searchKeymap } from '@codemirror/search'
 import type { Diagnostic, SourceSpan, SymbolInfo } from '@studio/shared'
-import { xcodeDark } from '../lib/xcodeTheme'
+import { editorTheme } from '../lib/editorTheme'
+import { useLayout } from '../lib/layout'
 
 /**
  * What the editor may ask the compiler worker about a caret position.
@@ -95,6 +96,8 @@ export function EditorPane({
 }: EditorPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const theme = useLayout(s => s.theme)
+  const appearance = useRef(new Compartment())
   /**
    * Latest callbacks, so the CodeMirror extensions below never need rebuilding on
    * re-render - tearing down the view would lose the cursor and the undo history.
@@ -185,7 +188,8 @@ export function EditorPane({
     const extensions: Extension[] = [
       basicSetup,
       StreamLanguage.define(swift),
-      xcodeDark,
+      editorTheme,
+      appearance.current.of(EditorView.darkTheme.of(theme === 'dark')),
       // `override` replaces basicSetup's word-based source entirely. Left alongside
       // it, the two merge and every identifier already in the file comes back as a
       // suggestion - including the half-typed one being completed.
@@ -282,6 +286,10 @@ export function EditorPane({
     // never tears down and rebuilds the editor (which would lose cursor and history).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: appearance.current.reconfigure(EditorView.darkTheme.of(theme === 'dark')) })
+  }, [theme])
 
   // Push external document changes in (template reset, project load) without
   // clobbering the cursor when the incoming text is what the user just typed.

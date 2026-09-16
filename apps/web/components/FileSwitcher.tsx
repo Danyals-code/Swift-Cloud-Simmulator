@@ -51,7 +51,7 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
       data-testid="file-switcher"
     >
       <div
-        className="w-[min(520px,90vw)] overflow-hidden rounded-lg border border-white/10 bg-[#17171c] shadow-2xl"
+        className="w-[min(520px,90vw)] overflow-hidden rounded-lg border border-xc-line bg-xc-panel shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <input
@@ -78,12 +78,12 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
               setHighlight((h) => Math.max(h - 1, 0))
             }
           }}
-          className="w-full border-b border-white/10 bg-transparent px-4 py-3 text-[13px] text-zinc-100 outline-none placeholder:text-zinc-600"
+          className="w-full border-b border-xc-line bg-transparent px-4 py-3 text-[13px] text-xc-text outline-none placeholder:text-xc-text-3"
         />
 
         <ul className="max-h-[50vh] overflow-auto py-1">
           {matches.length === 0 ? (
-            <li className="px-4 py-2 text-[12px] text-zinc-600">No matching files.</li>
+            <li className="px-4 py-2 text-[12px] text-xc-text-3">No matching files.</li>
           ) : (
             matches.map((file, index) => (
               <li key={file.id}>
@@ -92,11 +92,11 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
                   onClick={() => onSelect(file.id)}
                   onMouseEnter={() => setHighlight(index)}
                   className={`flex w-full items-baseline gap-2 px-4 py-1.5 text-left text-[12px] ${
-                    index === highlight ? 'bg-sky-500/15 text-sky-100' : 'text-zinc-300'
+                    index === highlight ? 'bg-xc-select text-xc-text' : 'text-xc-text-2'
                   }`}
                 >
                   <span>{fileBasename(file.id)}</span>
-                  <span className="truncate text-[11px] text-zinc-600">{file.id}</span>
+                  <span className="truncate text-[11px] text-xc-text-3">{file.id}</span>
                 </button>
               </li>
             ))

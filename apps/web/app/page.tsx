@@ -13,7 +13,7 @@ import dynamic from 'next/dynamic'
 const Studio = dynamic(() => import('../components/Studio').then((m) => m.Studio), {
   ssr: false,
   loading: () => (
-    <main className="grid h-dvh place-items-center bg-[#0d0d10] text-sm text-zinc-500">
+    <main className="grid h-dvh place-items-center bg-xc-editor text-sm text-xc-text-3">
       Loading studio…
     </main>
   ),

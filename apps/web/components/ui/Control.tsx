@@ -19,10 +19,10 @@ import { Icon, type IconName } from './Icon'
 const BASE =
   'inline-flex h-[22px] items-center justify-center gap-1.5 rounded-[5px] text-[12px] leading-none transition-colors disabled:pointer-events-none disabled:opacity-40'
 
-const QUIET = 'text-xc-text-2 hover:bg-white/10 hover:text-xc-text active:bg-white/[0.16]'
+const QUIET = 'text-xc-text-2 hover:bg-xc-line-soft hover:text-xc-text active:bg-xc-line-soft'
 
 const BORDERED =
-  'border border-white/10 bg-white/[0.06] px-2.5 text-xc-text hover:bg-white/[0.12] active:bg-white/[0.18]'
+  'border border-xc-line bg-xc-line-soft px-2.5 text-xc-text hover:bg-xc-line-soft active:bg-xc-line-soft'
 
 export interface ToolButtonProps {
   icon: IconName
@@ -60,7 +60,7 @@ export function ToolButton({
       title={title ?? label}
       data-testid={testId}
       className={`${BASE} w-[26px] ${
-        active ? 'bg-white/[0.16] text-xc-text' : tone ? `${tone} hover:bg-white/10` : QUIET
+        active ? 'bg-xc-line-soft text-xc-text' : tone ? `${tone} hover:bg-xc-line-soft` : QUIET
       }`}
     >
       <Icon name={icon} size={size} />
@@ -139,7 +139,7 @@ export function SegmentedControl({
       role="group"
       aria-label={label}
       data-testid={testId}
-      className="inline-flex h-[22px] items-center gap-px rounded-[5px] border border-white/10 bg-black/20 p-px"
+      className="inline-flex h-[22px] items-center gap-px rounded-[5px] border border-xc-line bg-xc-line-soft p-px"
     >
       {options.map((option) => {
         const selected = option.value === value
@@ -152,7 +152,7 @@ export function SegmentedControl({
             title={option.title ?? option.label}
             className={`inline-flex h-[18px] items-center gap-1 rounded-[4px] px-2 text-[11px] leading-none transition-colors ${
               selected
-                ? 'bg-white/[0.18] text-xc-text shadow-[0_1px_0_rgb(255_255_255/0.06)_inset]'
+                ? 'bg-xc-panel text-xc-text shadow-[0_1px_3px_rgb(0_0_0/0.08)]'
                 : 'text-xc-text-2 hover:text-xc-text'
             }`}
           >
@@ -187,7 +187,7 @@ export function PaneToggles({ options, shown, suppressed, onToggle }: PaneToggle
       role="group"
       aria-label="Panes"
       data-testid="pane-toggles"
-      className="inline-flex h-[22px] items-center gap-px rounded-[5px] border border-white/10 bg-black/20 p-px"
+      className="inline-flex h-[22px] items-center gap-px rounded-[5px] border border-xc-line bg-xc-line-soft p-px"
     >
       {options.map((option) => {
         const on = shown.has(option.key)
@@ -207,9 +207,9 @@ export function PaneToggles({ options, shown, suppressed, onToggle }: PaneToggle
             data-testid={`pane-toggle-${option.key}`}
             className={`inline-flex h-[18px] w-[26px] items-center justify-center rounded-[4px] transition-colors ${
               cramped
-                ? 'bg-white/[0.07] text-xc-text-3'
+                ? 'bg-xc-line-soft text-xc-text-3'
                 : on
-                  ? 'bg-white/[0.18] text-xc-text'
+                  ? 'bg-xc-line-soft text-xc-text'
                   : 'text-xc-text-3 hover:text-xc-text-2'
             }`}
           >

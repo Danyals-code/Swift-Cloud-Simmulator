@@ -6,6 +6,7 @@ const preview = (page: Page) => page.getByTestId('render-tree')
 async function openFixture(page: Page) {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
   await page.keyboard.press('ControlOrMeta+a')

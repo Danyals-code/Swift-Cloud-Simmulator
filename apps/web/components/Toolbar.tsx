@@ -1,329 +1,84 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { DEVICE_LIST, type DeviceKey } from '@studio/sim-shell'
 import { EXPORT_FORMATS, type ExportFormat } from '@studio/shared'
+import type { WorkspaceMode, WorkspaceTheme } from '../lib/layout'
 import { Icon } from './ui/Icon'
-import { MenuButton, PopupButton, type MenuItem } from './ui/Menu'
+import { MenuButton } from './ui/Menu'
 import { PaneToggles, PushButton, ToolButton } from './ui/Control'
+import styles from './Workspace.module.css'
 
 export type PaneKey = 'navigator' | 'debug' | 'preview'
 
 export interface ToolbarProps {
-  /** The app icon opens the sheet that says where a project comes from. */
+  mode: WorkspaceMode
+  onModeChange: (mode: WorkspaceMode) => void
+  theme: WorkspaceTheme
+  onThemeChange: (theme: WorkspaceTheme) => void
   onOpenGallery: () => void
   projectName: string
-  device: DeviceKey
   savedAt: number | null
-  /** Set when the browser refused to store the project. */
   saveError: string | null
-  /** A compile is in flight and the tree on screen is from an older revision. */
-  busy: boolean
-  /** Live recompilation is suspended; edits are not being run. */
-  paused: boolean
-  errors: number
-  warnings: number
-  /** Total pipeline time of the last compile, in ms. */
-  lastCompileMs: number | null
-  workerError: string | null
-  inspecting: boolean
   panes: ReadonlySet<PaneKey>
-  /** Panes that are switched on but have no room in the current window. */
   suppressed: ReadonlySet<PaneKey>
   onTogglePane: (pane: PaneKey) => void
-  onDeviceChange: (device: DeviceKey) => void
-  /** Re-run the preview from scratch: drop every `@State` box and re-evaluate. */
-  onRun: () => void
-  onTogglePaused: () => void
-  onToggleInspect: () => void
   onExport: (format: ExportFormat) => void
-  /** Copies a share link, and reports what happened so the button can say it. */
   onShare: () => Promise<'copied' | 'too-large' | 'failed'>
 }
 
-const PANES: readonly { key: PaneKey; icon: 'sidebar-left' | 'sidebar-bottom' | 'sidebar-right'; label: string; title: string }[] = [
-  { key: 'navigator', icon: 'sidebar-left', label: 'Navigator', title: 'Hide or show the navigator (⌘0)' },
-  { key: 'debug', icon: 'sidebar-bottom', label: 'Debug area', title: 'Hide or show the debug area (⌘⇧Y)' },
-  { key: 'preview', icon: 'sidebar-right', label: 'Preview', title: 'Hide or show the preview (⌘⌥↩)' },
-]
-
-/**
- * The toolbar.
- *
- * Laid out the way Xcode's is, because the arrangement carries meaning that a row
- * of equal buttons does not: what *runs* the thing is hard left, what the thing
- * currently *is* sits in the middle where nothing competes with it, and what
- * changes the *view* is hard right. The old toolbar had eight controls in a line
- * with the loudest colour on the least-used one.
- *
- * Preview settings - appearance, Dynamic Type, zoom - are deliberately not here.
- * They describe how you are looking at the simulated app rather than what the
- * project is, so they live on the preview pane's own bar, next to the thing they
- * affect.
- */
-export function Toolbar({
-  onOpenGallery,
-  projectName,
-  device,
-  savedAt,
-  saveError,
-  busy,
-  paused,
-  errors,
-  warnings,
-  lastCompileMs,
-  workerError,
-  inspecting,
-  panes,
-  suppressed,
-  onTogglePane,
-  onDeviceChange,
-  onRun,
-  onTogglePaused,
-  onToggleInspect,
-  onExport,
-  onShare,
-}: ToolbarProps) {
-  const devices: MenuItem[] = DEVICE_LIST.map((d) => ({
-    value: d.key,
-    label: d.name,
-    detail: `${d.width}×${d.height}`,
-  }))
-
-  const formats: MenuItem[] = EXPORT_FORMATS.map((format) => ({
-    value: format.id,
-    label: format.name,
-    detail: format.description,
-  }))
-
-  return (
-    <header
-      data-testid="toolbar"
-      className="@container/toolbar flex h-[48px] shrink-0 items-center gap-2 overflow-hidden border-b border-xc-line bg-xc-bar px-4"
-    >
-      {/*
-        The app icon, and the way back to the sheet the studio opened with.
-        It was decoration; a mark in the top-left corner that does nothing is a
-        button people will press anyway, so it is the one they expect it to be.
-      */}
-      <span className="flex shrink-0 items-center gap-2 pr-1">
-        <button
-          type="button"
-          onClick={onOpenGallery}
-          aria-label="Open a project"
-          title="Open a project - what is here, an app to start from, or one feature"
-          data-testid="app-icon"
-          className="inline-flex h-[28px] items-center gap-2 rounded-[6px] px-2 text-[12px] font-medium text-xc-text-2 hover:bg-white/5 hover:text-xc-text"
-        >
-          <Icon name="screens" size={17} /><span className="hidden @[700px]/toolbar:inline">Studio</span>
-        </button>
-      </span>
-
-      <ToolButton
-        icon="run"
-        label="Run"
-        title="Run the preview from scratch, dropping its state (⌘R)"
-        onClick={onRun}
-        tone="text-xc-text-2"
-        testId="run-button"
-      />
-      <ToolButton
-        icon="stop"
-        label={paused ? 'Resume live preview' : 'Pause live preview'}
-        title={
-          paused
-            ? 'Resume: run the preview again on every edit'
-            : 'Pause: stop recompiling while you type'
-        }
-        onClick={onTogglePaused}
-        active={paused}
-        tone={paused ? 'text-xc-warn' : 'text-xc-text-2'}
-        testId="pause-button"
-        size={13}
-      />
-
-      <span className="mx-1 h-[18px] w-px shrink-0 bg-white/10" />
-
-      {/*
-        The scheme, as Xcode states it: what is being built, on what. One control
-        rather than two naked dropdowns, because the two halves are read together.
-
-        Hidden outright in a window too narrow for it rather than allowed to shrink
-        to nothing: a flex item at zero width still *paints* its children, so the
-        project name and the destination were drawing on top of the buttons to
-        their right.
-      */}
-      <span className="hidden min-w-0 shrink items-center gap-1.5 overflow-hidden text-[12px] @[620px]/toolbar:flex">
-        <span className="truncate font-medium text-xc-text" data-testid="project-name">
-          {projectName}
-        </span>
-        <Icon name="chevron-right" size={10} className="text-xc-text-3" />
-        <PopupButton
-          items={devices}
-          value={device}
-          onChange={(value) => onDeviceChange(value as DeviceKey)}
-          label="Destination"
-          title="The device the preview is laid out for"
-          testId="device-select"
-        />
-      </span>
-
-      <StatusView
-        busy={busy}
-        paused={paused}
-        errors={errors}
-        warnings={warnings}
-        savedAt={savedAt}
-        saveError={saveError}
-        lastCompileMs={lastCompileMs}
-        workerError={workerError}
-      />
-
-      <span className="ml-auto flex shrink-0 items-center gap-2">
-        <PushButton
-          onClick={onToggleInspect}
-          active={inspecting}
-          label="Inspect views"
-          title="Inspect views (⌘I)"
-          testId="inspect-toggle"
-          icon="inspect"
-        >
-          Inspect
-        </PushButton>
-
-        <ShareButton onShare={onShare} />
-
-        {/*
-          A split button. Four formats exist and almost everyone wants the same one,
-          so the default stays a single click and the menu answers the question only
-          for the people who actually have it.
-        */}
-        <span className="inline-flex h-[22px] items-stretch overflow-hidden rounded-[5px] border border-white/10 bg-white/[0.06]">
-          <button
-            type="button"
-            onClick={() => onExport('xcodeproj')}
-            data-testid="export-button"
-            title="Export an .xcodeproj as a .zip"
-            className="inline-flex items-center gap-1.5 px-2.5 text-[12px] leading-none text-xc-text transition-colors hover:bg-white/[0.12] active:bg-white/[0.18]"
-          >
-            <Icon name="download" size={13} />
-            Export
-          </button>
-          <MenuButton
-            items={formats}
-            onSelect={(value) => onExport(value as ExportFormat)}
-            label="Export format"
-            title="Export in another format"
-            testId="export-format"
-            className="inline-flex w-[20px] items-center justify-center border-l border-white/10 text-xc-text-2 transition-colors hover:bg-white/[0.12] hover:text-xc-text active:bg-white/[0.18]"
-          >
-            <Icon name="chevron-down" size={10} />
-          </MenuButton>
-        </span>
-
-        <span className="mx-0.5 h-[18px] w-px shrink-0 bg-white/10" />
-
-        <PaneToggles
-          options={PANES}
-          shown={panes}
-          suppressed={suppressed}
-          onToggle={(key) => onTogglePane(key as PaneKey)}
-        />
-      </span>
-    </header>
-  )
-}
-
-/**
- * The activity view.
- *
- * Xcode's central status panel, and it is central for a reason: it is the one
- * thing in the window that answers "is my code all right?" without being asked.
- * The old toolbar reported that as a grey dot labelled "Saved", which answers a
- * different and much less interesting question.
- *
- * Save state is still in here, quietly, at the right - it matters exactly once,
- * when you are about to close the tab.
- */
-function StatusView({
-  busy,
-  paused,
-  errors,
-  warnings,
-  savedAt,
-  saveError,
-  lastCompileMs,
-  workerError,
-}: {
-  busy: boolean
+interface PreviewToolsProps {
   paused: boolean
+  inspecting: boolean
+  busy: boolean
   errors: number
   warnings: number
-  savedAt: number | null
-  saveError: string | null
-  lastCompileMs: number | null
   workerError: string | null
-}) {
-  const state = workerError
-    ? { tone: 'text-xc-error', icon: 'error' as const, text: 'Compiler stopped' }
-    : paused
-      ? { tone: 'text-xc-warn', icon: 'stop' as const, text: 'Paused' }
-      : busy
-        ? { tone: 'text-xc-text-2', icon: 'refresh' as const, text: 'Running…' }
-        : errors > 0
-          ? {
-              tone: 'text-xc-error',
-              icon: 'error' as const,
-              text: `Failed · ${errors} ${errors === 1 ? 'error' : 'errors'}`,
-            }
-          : warnings > 0
-            ? {
-                tone: 'text-xc-warn',
-                icon: 'warning' as const,
-                text: `Succeeded · ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`,
-              }
-            : { tone: 'text-xc-text-2', icon: 'check' as const, text: 'Preview ready' }
-
-  return (
-    <div
-      data-testid="status-view"
-      className="mx-auto hidden h-[24px] w-[clamp(200px,26vw,420px)] shrink items-center gap-2 overflow-hidden px-2.5 text-[11px] @[900px]/toolbar:flex"
-    >
-      <span className={`flex items-center gap-1.5 ${state.tone}`}>
-        <Icon name={state.icon} size={12} weight={2} className={busy ? 'animate-spin' : undefined} />
-        <span className="whitespace-nowrap">{state.text}</span>
-      </span>
-
-      {lastCompileMs !== null && !busy && !workerError ? (
-        <span className="hidden whitespace-nowrap text-xc-text-3 @[1060px]/toolbar:inline">
-          {lastCompileMs.toFixed(1)} ms
-        </span>
-      ) : null}
-
-      <span
-        className="ml-auto hidden items-center gap-1.5 whitespace-nowrap text-xc-text-3 @[1180px]/toolbar:flex"
-        data-testid="save-indicator"
-      >
-        <span
-          className={`h-[5px] w-[5px] rounded-full ${
-            saveError ? 'bg-xc-error/80' : savedAt ? 'bg-xc-ok/70' : 'bg-xc-text-3/60'
-          }`}
-        />
-        {saveError ? 'Not saving' : savedAt ? 'Saved' : 'Not saved yet'}
-      </span>
-    </div>
-  )
+  onRun: () => void
+  onTogglePaused: () => void
+  onToggleInspect: () => void
 }
 
-/**
- * Copies a share link and says what happened, in place.
- *
- * The result has to be visible: a button that silently did nothing is
- * indistinguishable from one that worked, and the failure that matters - a project
- * too big for a URL - is invisible until someone pastes a truncated link. The
- * label reverts on its own, because a permanent "Copied" is a lie after the first
- * second.
- */
+const PANES = [
+  { key: 'navigator', icon: 'sidebar-left' as const, label: 'Navigator', title: 'Show files (⌘0)' },
+  { key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debug area', title: 'Show problems and output (⌘⇧Y)' },
+  { key: 'preview', icon: 'sidebar-right' as const, label: 'Preview', title: 'Show preview (⌘⌥↩)' },
+]
+
+/** Project actions stay in the header; preview tools live beside the canvas. */
+export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, onModeChange, theme, onThemeChange,
+  panes, suppressed, onTogglePane, onExport, onShare }: ToolbarProps) {
+  return <header data-testid="toolbar" className={styles.toolbar}>
+    <div className={styles.project}>
+      <button type="button" onClick={onOpenGallery} aria-label="Open a project" title="Projects and templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={21} /></button>
+      <div className={styles.projectCopy}><span className={styles.projectName} data-testid="project-name">{projectName}</span><span data-testid="save-indicator" className={saveError ? styles.saveError : styles.saveStatus}>{saveError ? 'Could not save' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
+    </div>
+    <nav className={styles.modes} aria-label="Workspace view">
+      {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Focus on the app preview' : 'Code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Develop'}</button>)}
+    </nav>
+    <div className={styles.actions}>
+      <button type="button" data-testid="workspace-theme" className={styles.themeToggle} aria-label="Workspace dark mode" aria-pressed={theme === 'dark'} title={`Switch workspace to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}><Icon name="appearance" size={17} /></button>
+      <span className={styles.paneControls}><PaneToggles options={PANES} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>
+      <span className={styles.share}><ShareButton onShare={onShare} /></span>
+      <div className={styles.exportGroup}>
+        <button type="button" onClick={() => onExport('xcodeproj')} data-testid="export-button" title="Export an Xcode project" className={styles.export}>Export<Icon name="download" size={14} /></button>
+        <MenuButton items={EXPORT_FORMATS.map(f => ({value:f.id,label:f.name,detail:f.description}))} onSelect={value => onExport(value as ExportFormat)} label="Export format" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={11} /></MenuButton>
+      </div>
+    </div>
+  </header>
+}
+
+export function PreviewTools({ paused, inspecting, busy, errors, warnings, workerError, onRun, onTogglePaused, onToggleInspect }: PreviewToolsProps) {
+  const message = workerError ? 'Preview stopped' : errors ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : busy ? 'Updating' : paused ? 'Paused' : warnings ? `${warnings} warnings` : 'Live preview'
+  return <div className={styles.toolDock} aria-label="Preview tools">
+    <ToolButton icon="run" label="Run" title="Restart preview (⌘R)" onClick={onRun} testId="run-button" size={16} />
+    <ToolButton icon="stop" label={paused ? 'Resume live preview' : 'Pause live preview'} active={paused} onClick={onTogglePaused} testId="pause-button" size={13} />
+    <span className={styles.divider} />
+    <PushButton onClick={onToggleInspect} active={inspecting} label="Inspect views" title="Inspect and reveal source (⌘I)" testId="inspect-toggle" icon="inspect">Inspect</PushButton>
+    <span className={styles.divider} />
+    <span data-testid="status-view" role="status" className={styles.previewStatus}><i data-state={errors || workerError ? 'error' : paused ? 'paused' : 'ready'} />{message}</span>
+  </div>
+}
+
 function ShareButton({ onShare }: { onShare: ToolbarProps['onShare'] }) {
   const [result, setResult] = useState<'copied' | 'too-large' | 'failed' | null>(null)
 

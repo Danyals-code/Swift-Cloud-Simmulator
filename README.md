@@ -31,6 +31,14 @@ Set the page count, navigation, accent, and sample content, then review the Swif
 opening them. See [prompt creation](docs/prompt-creation.md) for credential handling, limits,
 provider documentation, and deployment requirements. Visual simulator editing is planned separately.
 
+## Workspace views
+
+The workspace opens in **Design**, with a live app in the center and preview settings on the right.
+Choose **Develop** to work with code and preview together. Clicking a
+source file or inspecting a view opens its code. Problems and output are available from the toolbar's
+bottom-panel button. The appearance button in the top bar switches the workspace between light and dark. This is separate
+from the simulated app’s appearance. Your workspace, theme, and panel sizes are remembered in this browser.
+
 ## Documentation
 
 | Doc | What's in it |

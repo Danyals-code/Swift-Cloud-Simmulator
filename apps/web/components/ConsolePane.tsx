@@ -69,7 +69,7 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-xc-editor" data-testid="console">
-      <header className="flex h-[26px] shrink-0 items-center gap-0.5 border-b border-black/30 bg-xc-bar px-1.5">
+      <header className="flex h-[26px] shrink-0 items-center gap-0.5 border-b border-xc-line bg-xc-bar px-1.5">
         <TabButton active={tab === 'problems'} onClick={() => setTab('problems')}>
           Problems
           {errors > 0 ? <Badge tone="error">{errors}</Badge> : null}
@@ -87,7 +87,7 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
         </TabButton>
 
         {tab === 'problems' || tab === 'console' ? (
-          <span className="ml-auto flex h-[18px] min-w-0 items-center gap-1.5 rounded-[5px] border border-white/10 bg-black/25 px-1.5">
+          <span className="ml-auto flex h-[18px] min-w-0 items-center gap-1.5 rounded-[5px] border border-xc-line bg-xc-bar-raised px-1.5">
             <Icon name="filter" size={11} className="shrink-0 text-xc-text-3" />
             <input
               value={filter}
@@ -125,7 +125,7 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
                   <button
                     type="button"
                     onClick={() => onRevealSpan(d.span.file, d.span.start)}
-                    className="flex w-full items-start gap-2 rounded-[4px] px-1.5 py-[3px] text-left transition-colors hover:bg-white/[0.06]"
+                    className="flex w-full items-start gap-2 rounded-[4px] px-1.5 py-[3px] text-left transition-colors hover:bg-xc-line-soft"
                   >
                     <Icon
                       name={d.severity === 'error' ? 'error' : d.severity === 'warning' ? 'warning' : 'info'}
@@ -207,7 +207,7 @@ function Timings({ timings }: { timings: CompileResult['timings'] }) {
       {stages.map(([label, value]) => (
         <div key={label} className="flex items-center gap-2 py-[2px]">
           <span className="w-16 shrink-0 text-xc-text-3">{label}</span>
-          <span className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-white/[0.07]">
+          <span className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-xc-line-soft">
             <span
               className={`block h-full rounded-full ${value > 40 ? 'bg-xc-warn' : 'bg-xc-accent'}`}
               style={{ width: `${Math.max(1.5, (value / peak) * 100)}%` }}
@@ -217,7 +217,7 @@ function Timings({ timings }: { timings: CompileResult['timings'] }) {
         </div>
       ))}
 
-      <div className="mt-1.5 flex items-center gap-2 border-t border-white/[0.08] pt-1.5">
+      <div className="mt-1.5 flex items-center gap-2 border-t border-xc-line pt-1.5">
         <span className="w-16 shrink-0 text-xc-text-3">total</span>
         <span className="min-w-0 flex-1" />
         <span
@@ -275,7 +275,7 @@ function CoveragePanel() {
         {entries.map((entry) => (
           <li
             key={entry.feature}
-            className="flex items-center gap-2 rounded-[4px] px-1.5 py-[3px] hover:bg-white/[0.06]"
+            className="flex items-center gap-2 rounded-[4px] px-1.5 py-[3px] hover:bg-xc-line-soft"
           >
             <span className="w-8 shrink-0 text-right text-xc-warn">{entry.count}</span>
             <span className="min-w-0 flex-1 truncate text-xc-text">{entry.feature}</span>
@@ -309,7 +309,7 @@ function TabButton({
       onClick={onClick}
       aria-pressed={active}
       className={`flex h-[18px] items-center gap-1.5 rounded-[5px] px-2 text-[11.5px] transition-colors ${
-        active ? 'bg-white/[0.14] text-xc-text' : 'text-xc-text-3 hover:text-xc-text-2'
+        active ? 'bg-xc-line-soft text-xc-text' : 'text-xc-text-3 hover:text-xc-text-2'
       }`}
     >
       {children}
@@ -323,7 +323,7 @@ function Badge({ tone, children }: { tone: 'error' | 'warning' | 'quiet'; childr
       ? 'bg-xc-error/25 text-xc-error'
       : tone === 'warning'
         ? 'bg-xc-warn/25 text-xc-warn'
-        : 'bg-white/10 text-xc-text-3'
+        : 'bg-xc-line-soft text-xc-text-3'
   return <span className={`rounded-full px-1 text-[9px] leading-[13px] ${style}`}>{children}</span>
 }
 

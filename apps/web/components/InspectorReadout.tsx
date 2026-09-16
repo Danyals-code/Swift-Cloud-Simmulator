@@ -21,29 +21,29 @@ export function InspectorReadout({ node, active }: InspectorReadoutProps) {
   return (
     <div
       data-testid="inspector-readout"
-      className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-white/10 bg-[#101014]/95 px-3 py-2 font-mono text-[11px] backdrop-blur"
+      className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-xc-line bg-xc-panel/95 px-3 py-2 font-mono text-[11px] backdrop-blur"
     >
       {node ? (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="font-semibold text-sky-300">{node.inspect?.name ?? node.kind}</span>
+          <span className="font-semibold text-xc-accent">{node.inspect?.name ?? node.kind}</span>
 
-          <span className="text-zinc-500" data-testid="inspector-frame">
+          <span className="text-xc-text-2" data-testid="inspector-frame">
             {round(node.frame.x)}, {round(node.frame.y)} · {round(node.frame.width)} ×{' '}
             {round(node.frame.height)}
           </span>
 
           {node.inspect?.modifiers?.length ? (
-            <span className="text-zinc-600">{node.inspect.modifiers.join(' ')}</span>
+            <span className="text-xc-text-3">{node.inspect.modifiers.join(' ')}</span>
           ) : null}
 
           {node.origin ? (
-            <span className="ml-auto text-zinc-500">click to reveal</span>
+            <span className="ml-auto text-xc-text-2">click to reveal</span>
           ) : (
-            <span className="ml-auto text-zinc-700">no source</span>
+            <span className="ml-auto text-xc-text-3">no source</span>
           )}
         </div>
       ) : (
-        <span className="text-zinc-600">Hover a view to inspect it.</span>
+        <span className="text-xc-text-3">Hover a view to inspect it.</span>
       )}
     </div>
   )

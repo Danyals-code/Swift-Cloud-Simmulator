@@ -36,7 +36,7 @@ type Editing =
   | { readonly mode: 'rename'; readonly target: string; readonly isFolder: boolean }
 
 const INDENT = 13
-const ROW = 'flex h-[22px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text-[12px]'
+const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text-[12px]'
 
 /**
  * The project navigator.
@@ -121,12 +121,12 @@ export function Navigator({
       data-testid="file-rail"
       aria-label="Project navigator"
     >
-      <header className="flex h-[34px] shrink-0 items-center gap-1 border-b border-xc-line px-1.5">
+      <header className="flex h-[46px] shrink-0 items-center gap-1 border-b border-xc-line px-1.5">
         <NavTab active={tab === 'project'} onClick={() => setTab('project')} label="Project">
-          <Icon name="folder" size={13} />
+          <span className="text-[12px] font-medium">Files</span>
         </NavTab>
         <NavTab active={tab === 'issues'} onClick={() => setTab('issues')} label="Issues">
-          <Icon name="warning" size={13} />
+          <span className="text-[12px] font-medium">Issues</span>
           {errors + warnings > 0 ? (
             <span
               className={`rounded-full px-1 text-[9px] leading-[13px] ${
@@ -145,7 +145,7 @@ export function Navigator({
             label="New file or group"
             title="Add a file, a group, or start from a template"
             testId="new-file"
-            className="inline-flex h-[20px] w-[22px] items-center justify-center rounded-[5px] text-xc-text-2 transition-colors hover:bg-white/10 hover:text-xc-text"
+            className="inline-flex h-[20px] w-[22px] items-center justify-center rounded-[5px] text-xc-text-2 transition-colors hover:bg-xc-line-soft hover:text-xc-text"
           >
             <Icon name="plus" size={13} weight={1.8} />
           </MenuButton>
@@ -435,8 +435,8 @@ function Tree({
                   isDropTarget
                     ? 'bg-xc-accent/30 text-xc-text'
                     : selectedFolder === node.path
-                      ? 'bg-xc-select text-white'
-                      : 'text-xc-text hover:bg-white/[0.06]'
+                      ? 'bg-xc-select text-xc-text'
+                      : 'text-xc-text hover:bg-xc-line-soft'
                 }`}
               >
                 {/*
@@ -458,13 +458,13 @@ function Tree({
                   <Icon
                     name={open ? 'disclosure-open' : 'disclosure-closed'}
                     size={10}
-                    className={selectedFolder === node.path ? 'text-white/80' : 'text-xc-text-3'}
+                    className={selectedFolder === node.path ? 'text-xc-text/80' : 'text-xc-text-3'}
                   />
                 </span>
                 <Icon
                   name="folder"
                   size={14}
-                  className={selectedFolder === node.path ? 'text-white' : 'text-[#8ab4f8]'}
+                  className={selectedFolder === node.path ? 'text-xc-text' : 'text-[#8ab4f8]'}
                 />
                 <span className="truncate">{node.name}</span>
               </button>
@@ -531,7 +531,7 @@ function FileRow({
       aria-current={active ? 'true' : undefined}
       style={{ paddingLeft: depth * INDENT + 4 }}
       className={`${ROW} transition-colors ${
-        active ? 'bg-xc-select text-white' : 'text-xc-text hover:bg-white/[0.06]'
+        active ? 'bg-xc-select text-xc-text' : 'text-xc-text hover:bg-xc-line-soft'
       }`}
     >
       <span className="w-[10px] shrink-0" />
@@ -596,7 +596,7 @@ function NavTab({
       aria-label={label}
       data-testid={`navigator-tab-${label.toLowerCase()}`}
       className={`inline-flex h-[20px] items-center gap-1 rounded-[5px] px-2 transition-colors ${
-        active ? 'bg-white/[0.14] text-xc-text' : 'text-xc-text-3 hover:text-xc-text-2'
+        active ? 'bg-xc-line-soft text-xc-text' : 'text-xc-text-3 hover:text-xc-text-2'
       }`}
     >
       {children}
@@ -676,7 +676,7 @@ function IssueList({
                 <button
                   type="button"
                   onClick={() => onReveal(diagnostic.span.file, diagnostic.span.start)}
-                  className="flex w-full items-start gap-1.5 rounded-[5px] py-1 pl-5 pr-1.5 text-left text-[11px] leading-snug text-xc-text-2 transition-colors hover:bg-white/[0.06]"
+                  className="flex w-full items-start gap-1.5 rounded-[5px] py-1 pl-5 pr-1.5 text-left text-[11px] leading-snug text-xc-text-2 transition-colors hover:bg-xc-line-soft"
                 >
                   <Icon
                     name={diagnostic.severity === 'error' ? 'error' : 'warning'}
@@ -746,7 +746,7 @@ function NameField({
         // Committing on blur would lose the name whenever focus moves for any other
         // reason; cancelling is recoverable, a silently dropped rename is not.
         onBlur={onCancel}
-        className="h-[22px] w-full rounded-[4px] border border-xc-accent bg-black/40 px-1.5 text-[12px] text-xc-text outline-none"
+        className="h-[22px] w-full rounded-[4px] border border-xc-accent bg-xc-panel px-1.5 text-[12px] text-xc-text outline-none"
       />
     </div>
   )

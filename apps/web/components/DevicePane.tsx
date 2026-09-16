@@ -5,13 +5,17 @@ import { DYNAMIC_TYPE_SIZES, dynamicTypeForScale, type DynamicTypeSize } from '@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
 import { EMPTY_RENDER_TREE, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
-import type { DeviceSpec } from '@studio/sim-shell'
+import { DEVICE_LIST, type DeviceKey, type DeviceSpec } from '@studio/sim-shell'
+import styles from './Workspace.module.css'
 import type { PreviewSettings } from '../lib/store'
 import { InspectorReadout } from './InspectorReadout'
 import { PopupButton, type MenuItem } from './ui/Menu'
 import { SegmentedControl } from './ui/Control'
 
 export interface DevicePaneProps {
+  expanded?: boolean
+  onDeviceChange: (key: DeviceKey) => void
+  tools?: React.ReactNode
   device: DeviceSpec
   tree: RenderTree | null
   stale: boolean
@@ -70,10 +74,12 @@ const ZOOMS: readonly MenuItem[] = [
  * gives equal weight to a project setting and a viewing preference.
  */
 export function DevicePane({
+  expanded = false,
+  onDeviceChange,
+  tools,
   device,
   tree,
   stale,
-  paused,
   onEvent,
   inspecting,
   onRevealSource,
@@ -109,50 +115,15 @@ export function DevicePane({
     return () => observer.disconnect()
   }, [device.height, device.width])
 
+  const devicePicker = <PopupButton items={DEVICE_LIST.map(d => ({ value: d.key, label: d.name, detail: `${d.width} × ${d.height}` }))} value={device.key} onChange={value => onDeviceChange(value as DeviceKey)} label="Destination" testId="device-select" />
+  const schemePicker = <SegmentedControl label="Appearance" testId="scheme-toggle" options={[{value:'light',label:'Light'},{value:'dark',label:'Dark'}]} value={preview.colorScheme} onChange={value => onPreviewChange({colorScheme:value as 'light' | 'dark'})} />
+  const typePicker = <PopupButton items={TYPE_SCALES} value={preview.dynamicTypeSize ?? dynamicTypeForScale(preview.typeScale)} onChange={value => onPreviewChange({dynamicTypeSize:value as DynamicTypeSize})} label="Dynamic Type size" testId="type-scale-select" />
+  const zoomPicker = <PopupButton items={ZOOMS} value={preview.zoom} onChange={value => onPreviewChange({zoom:value})} label="Zoom" title={`Zoom — ${Math.round(scale * 100)}%`} testId="zoom-select" />
+
   return (
-    <section className="flex h-full min-w-0 flex-col bg-xc-canvas" aria-label="Preview">
-      <header className="flex h-[34px] shrink-0 items-center gap-2 border-b border-xc-line bg-xc-sidebar px-2">
-        <span className="shrink-0 text-[10px] text-xc-text-2" title="iOS 27 appearance preview — native calibration pending">iOS 27 Preview</span>
-        <SegmentedControl
-          label="Appearance"
-          testId="scheme-toggle"
-          options={[
-            { value: 'light', label: 'Light' },
-            { value: 'dark', label: 'Dark' },
-          ]}
-          value={preview.colorScheme}
-          onChange={(value) => onPreviewChange({ colorScheme: value as 'light' | 'dark' })}
-        />
-
-        <PopupButton
-          items={TYPE_SCALES}
-          value={preview.dynamicTypeSize ?? dynamicTypeForScale(preview.typeScale)}
-          onChange={(value) => onPreviewChange({ dynamicTypeSize: value as DynamicTypeSize })}
-          label="Dynamic Type size"
-          title="Dynamic Type size - a layout input, not just a font size"
-          testId="type-scale-select"
-        />
-
-        <span className="ml-auto flex items-center gap-2">
-          {paused ? (
-            <span
-              className="rounded-[4px] bg-xc-warn/20 px-1.5 py-px text-[10px] text-xc-warn"
-              data-testid="preview-paused"
-            >
-              Paused
-            </span>
-          ) : null}
-          <PopupButton
-            items={ZOOMS}
-            value={preview.zoom}
-            onChange={(value) => onPreviewChange({ zoom: value })}
-            label="Zoom"
-            title={`Zoom - currently ${Math.round(scale * 100)}%`}
-            testId="zoom-select"
-          />
-        </span>
-      </header>
-
+    <section className={styles.preview} aria-label="Preview" data-expanded={expanded}>
+      <div className={styles.stage}>
+      {expanded ? <div className={styles.canvasHeading}><strong>{device.name}</strong><span>{inspecting ? 'Select a view to reveal its code' : 'Interactive preview'}</span></div> : <header className={styles.compactSettings}>{devicePicker}{schemePicker}{typePicker}{zoomPicker}</header>}
       <div
         ref={containerRef}
         className="relative flex min-h-0 flex-1 overflow-auto"
@@ -173,7 +144,7 @@ export function DevicePane({
             flexShrink: 0,
           }}
         >
-          <div style={{ position: 'absolute', top: 0, left: 0, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+          <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
           <DeviceFrame device={device}>
             <RenderTreeView
               tree={tree ?? EMPTY_RENDER_TREE}
@@ -200,6 +171,27 @@ export function DevicePane({
 
         <InspectorReadout node={highlighted} active={inspecting} />
       </div>
+      <footer className={styles.canvasFooter}>{tools}</footer>
+      </div>
+      {expanded && <aside className={styles.properties} aria-label="Preview settings">
+        <header>Preview</header>
+        <div className={styles.propertySection}>
+          <h3>Device</h3>
+          <div className={styles.propertyRow}>{devicePicker}</div>
+          <div className={styles.dimensions}><span><small>W</small>{device.width}</span><span><small>H</small>{device.height}</span></div>
+        </div>
+        <div className={styles.propertySection}>
+          <h3>Display</h3>
+          <div className={styles.propertyRow}><span>Appearance</span>{schemePicker}</div>
+          <div className={styles.propertyRow}><span>Text size</span>{typePicker}</div>
+          <div className={styles.propertyRow}><span>Canvas zoom</span>{zoomPicker}</div>
+        </div>
+        <div className={styles.propertySection}>
+          <h3>iOS 27 preview</h3>
+          <p>Tap, scroll, and try your app. Switch to Develop to see the SwiftUI behind it.</p>
+          <p>Inspect a view to jump to its source.</p>
+        </div>
+      </aside>}
     </section>
   )
 }
@@ -226,8 +218,8 @@ function DeviceFrame({ device, children }: { device: DeviceSpec; children: React
         borderRadius: device.cornerRadius + BEZEL,
         background: 'linear-gradient(150deg, #55555c 0%, #26262a 12%, #1c1c1f 50%, #303036 100%)',
         boxShadow: [
-          '0 18px 50px rgb(0 0 0 / 0.5)',
-          '0 2px 8px rgb(0 0 0 / 0.35)',
+          '0 18px 40px rgb(25 25 35 / 0.12)',
+          '0 2px 8px rgb(25 25 35 / 0.1)',
           '0 0 0 1px rgb(255 255 255 / 0.07)',
           'inset 0 1px 1px rgb(255 255 255 / 0.14)',
         ].join(', '),

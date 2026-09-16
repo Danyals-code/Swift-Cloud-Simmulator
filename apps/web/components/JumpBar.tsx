@@ -78,7 +78,7 @@ export function JumpBar({ fileId, text, caret, onJump }: JumpBarProps) {
             label="Jump to a declaration"
             title="Everything this file declares"
             testId="jump-bar-symbols"
-            className="flex min-w-0 items-center gap-1 rounded-[4px] px-1 py-0.5 text-xc-text transition-colors hover:bg-white/10"
+            className="flex min-w-0 items-center gap-1 rounded-[4px] px-1 py-0.5 text-xc-text transition-colors hover:bg-xc-line-soft"
           >
             {current ? (
               <>

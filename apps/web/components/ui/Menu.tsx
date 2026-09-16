@@ -158,7 +158,7 @@ export function MenuPanel({
         tabIndex={-1}
         data-testid={testId}
         style={{ left: placement.left, top: placement.top, minWidth: placement.width }}
-        className="fixed z-[901] max-h-[60vh] min-w-[160px] overflow-auto rounded-md border border-black/50 bg-xc-panel py-[5px] shadow-[0_10px_34px_rgb(0_0_0/0.55)]"
+        className="fixed z-[901] max-h-[60vh] min-w-[160px] overflow-auto rounded-md border border-xc-line bg-xc-panel py-[5px] shadow-[0_8px_30px_rgb(0_0_0/0.12)]"
       >
         {items.map((item, index) => {
           const isSelected = item.value === selected
@@ -167,7 +167,7 @@ export function MenuPanel({
           return (
             <div key={item.value}>
               {item.separated && index > 0 ? (
-                <div className="my-[5px] h-px bg-white/10" role="separator" />
+                <div className="my-[5px] h-px bg-xc-line-soft" role="separator" />
               ) : null}
 
               <button
@@ -185,7 +185,7 @@ export function MenuPanel({
                 }}
                 onPointerEnter={() => !item.disabled && setActive(index)}
                 className={`flex w-full items-center gap-2 px-2 text-left text-[12px] leading-none disabled:opacity-40 ${
-                  isActive && !item.disabled ? 'bg-xc-accent text-white' : 'text-xc-text'
+                  isActive && !item.disabled ? 'bg-xc-accent text-xc-text' : 'text-xc-text'
                 }`}
                 style={{ height: ROW_HEIGHT, borderRadius: 4 }}
               >
@@ -197,7 +197,7 @@ export function MenuPanel({
                 {item.detail ? (
                   <span
                     className={`ml-auto shrink-0 pl-4 text-[11px] ${
-                      isActive && !item.disabled ? 'text-white/70' : 'text-xc-text-3'
+                      isActive && !item.disabled ? 'text-xc-text/70' : 'text-xc-text-3'
                     }`}
                   >
                     {item.detail}
@@ -274,7 +274,7 @@ export function PopupButton({
         }}
         className={
           className ??
-          'flex h-[22px] items-center gap-1.5 rounded-[5px] border border-white/10 bg-white/[0.06] px-2 text-[12px] text-xc-text transition-colors hover:bg-white/[0.12] active:bg-white/[0.18]'
+          'flex h-[22px] items-center gap-1.5 rounded-[5px] border border-xc-line bg-xc-line-soft px-2 text-[12px] text-xc-text transition-colors hover:bg-xc-line-soft active:bg-xc-line-soft'
         }
       >
         <span className="truncate">{current?.label ?? placeholder ?? value}</span>

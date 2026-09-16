@@ -1,6 +1,6 @@
 # Prompt-to-app creation
 
-Open **Studio → From a prompt**, choose OpenAI or Anthropic, enter a model ID and API key, and describe the app. Choose 1–6 pages (including details/forms/settings), navigation, accent color, sample content, and an optional settings page. Generate, review the files and preview check, then open the draft as a separate project.
+Open **the project menu (top left) → From a prompt**, choose OpenAI or Anthropic, enter a model ID and API key, and describe the app. Choose 1–6 pages (including details/forms/settings), navigation, accent color, sample content, and an optional settings page. Generate, review the files and preview check, then open the draft as a separate project.
 
 The result is ordinary SwiftUI source. It can be edited, previewed, shared, and exported with the existing tools. No attribution or watermark is appended. Simulator visual editing is not implemented in this release.
 
