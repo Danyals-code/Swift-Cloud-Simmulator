@@ -4,10 +4,10 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the container pass (defect register phase 9.6), which drew `GroupBox`,
-`LabeledContent`, `ControlGroup` and `Section` footers instead of labelling them as absent.
+Last updated after the control-style pass (defect register phase 9.3), which stopped
+`.toggleStyle`, `.pickerStyle` and `.labelStyle` being recognised and inert.
 
-**134 ✅ · 45 🟡 · 30 ⬜ · 3 ✗**, over 212 rows, counted from this file rather than carried
+**139 ✅ · 43 🟡 · 30 ⬜ · 3 ✗**, over 215 rows, counted from this file rather than carried
 forward. That is a count of what the matrix *claims*; checking every claim against the code
 is the defect register's 10.1, and it is still open for the rows no recent phase touched.
 
@@ -56,8 +56,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
 | `AsyncImage` | 🟡 | 7 | constructible now that `URL` exists; draws its `placeholder:`, because there is no network in the worker |
 | `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
-| `ProgressView` | 🟡 | 6 | determinate bar; the indeterminate form is a static ring |
-| `Gauge` | 🟡 | 7 | drawn as a labelled bar, whatever the gauge style |
+| `ProgressView` | ✅ | 6 | determinate bar; `.circular` and the indeterminate form are a ring |
+| `Gauge` | 🟡 | 7 | `.gaugeStyle` chooses a ring or a bar; the ring does not show the value as an arc |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
 | `TimelineView` | ⬜ | - | needs a clock the preview does not run |
 | `Chart` (Swift Charts) | ⬜ | - | bar, line, point only |
@@ -74,7 +74,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Stepper` | ✅ | 6 | each half is its own target; `step:` and `in:` are both honoured |
 | `TextField` / `SecureField` | 🟡 | 6 | a real input with a caret; `SecureField` does not mask yet |
 | `TextEditor` | 🟡 | 7 | a single-line field; no multi-line editing |
-| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. The panel is drawn at the bottom rather than anchored to the control |
+| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. The popup is drawn at the bottom rather than anchored to the control |
 | `DatePicker` / `ColorPicker` | 🟡 | 7 | drawn as a labelled row; not yet openable. Each needs an editor of its own rather than a list of options |
 | `Menu` | 🟡 | 7 | opens onto its buttons; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
 
@@ -146,8 +146,11 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.blur` / `.saturation` / `.brightness` / `.contrast` / `.grayscale` | ✅ | 7 |
 | `.mask` | ⬜ | - |
 | `.tint` / `.accentColor` | ✅ | 6 |
-| `.buttonStyle` | 🟡 | 6 | `.bordered` and `.borderedProminent`; others fall back to plain |
-| `.toggleStyle` / `.pickerStyle` / `.labelStyle` | 🟡 | 7 | recognised; every style draws the same |
+| `.buttonStyle` | 🟡 | 6 | `.bordered` and `.borderedProminent`; others fall back to plain. `.controlSize` scales it and `.buttonBorderShape` rounds it |
+| `.toggleStyle` | ✅ | - | `.switch`, `.button` and `.checkbox` each draw differently, and all three stay pressable |
+| `.pickerStyle` | ✅ | - | `.segmented`, `.inline` and `.wheel` draw their options on screen, each option pressable; `.menu` and `.navigationLink` open onto them. The wheel is a dimmed column, not a spinner |
+| `.labelStyle` | ✅ | - | `.iconOnly` and `.titleOnly` drop the half they name; inherited, so a Button can set it for its Label |
+| `.controlSize` / `.buttonBorderShape` | ✅ | - | the first scales a bordered button's padding, the second its corner |
 | `.listStyle` / `.textFieldStyle` | ✅ | 6 |
 | `.lineLimit` / `.multilineTextAlignment` / `.textCase` | ✅ | 7 | inherited, so a stack can set them for its text |
 | `.monospaced` | ✅ | 7 |
@@ -377,12 +380,17 @@ Listed in the exported README so nothing is a surprise on the Mac:
     control sits mid-screen. The compositor decides what the options are before the layout
     engine decides where the control ended up, so anchoring would mean resolving the menu
     after layout. An approximation of position; the options and the tick are exact.
-16. **`.kerning` and `.tracking` are applied identically.** Both add advance after every
+16. **A `.wheel` picker is a dimmed column, not a spinner.** A wheel has depth, momentum
+    and a selection band; a static column has none of them. What it carries honestly is
+    which option is selected, so the chosen row is drawn at full strength and the rest
+    are dimmed. The options and the selection are exact; the motion is absent rather
+    than approximated.
+17. **`.kerning` and `.tracking` are applied identically.** Both add advance after every
     character. Swift's `kerning` adjusts the space *between* characters and so leaves the
     last one alone, where `tracking` adds after it too - a difference of one character's
     spacing at the end of a line, well under a point at UI sizes. Stated rather than
     silently rounded away.
-17. **Renaming is scoped, which means it can rename too little.** A local is renamed within
+18. **Renaming is scoped, which means it can rename too little.** A local is renamed within
     its own body; a member is followed across the project only when no other type declares
     the same member name, and otherwise stays inside the type that declared it. The
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses

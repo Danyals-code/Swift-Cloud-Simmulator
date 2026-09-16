@@ -85,8 +85,9 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'listRowSeparator', 'listRowInsets', 'scrollIndicators',
   // text entry
   'keyboardType', 'submitLabel', 'onSubmit', 'focused',
-  // styles that are recognised and drawn plainly
-  'toggleStyle', 'pickerStyle', 'labelStyle', 'monospaced', 'placeholder',
+  // control styles, each of which changes what is drawn
+  'toggleStyle', 'pickerStyle', 'labelStyle', 'progressViewStyle', 'gaugeStyle',
+  'controlSize', 'buttonBorderShape', 'monospaced', 'placeholder',
   // device edges
   'ignoresSafeArea', 'id',
   // Environment injection.
@@ -214,8 +215,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'popover', 'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
   'tabViewStyle',
   // controls
-  'controlSize', 'buttonBorderShape', 'progressViewStyle', 'gaugeStyle', 'menuStyle',
-  'datePickerStyle', 'strokeBorder',
+  'menuStyle', 'datePickerStyle', 'strokeBorder',
   // text entry
   'textInputAutocapitalization', 'autocorrectionDisabled',
   // environment set on the view rather than by the preview's own controls

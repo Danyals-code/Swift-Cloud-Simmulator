@@ -515,6 +515,41 @@ class Resolver {
       // which is what "drawn but does not open" looked like from the inside.
       const intent: ViewIntent = { kind: 'openMenu', menu: path }
       this.handlers.set(handlerIdFor(path), intent)
+
+      // A Picker drawn inline - segmented, wheel or inline - shows every option on
+      // screen rather than behind a press, so each option needs a target of its own.
+      // They are registered whatever the style, and the layout decides which ones it
+      // actually draws: the resolver owns what choosing *means*, the layout owns what
+      // is on screen, and a registration nothing points at costs a map entry.
+      const selection = labelled(view.args, 'selection')
+      if (view.name === 'Picker' && selection) {
+        const binding = asProjection(selection)
+        const current = binding ? describe(binding.get(), true) : null
+
+        const children = view.children.map((child, index) => {
+          const tag = tokenOrValue(collectModifier([child], 'tag')?.args[0]?.value)
+          if (tag !== null) {
+            this.register(`${path}/seg-${index}`, {
+              kind: 'choose',
+              binding: selection,
+              value: tagValue(child),
+            })
+          }
+          return {
+            ...child,
+            args: [
+              ...child.args,
+              {
+                label: 'selected',
+                value: { kind: 'bool' as const, value: tag !== null && tag === current },
+              },
+            ],
+          } satisfies ViewValue
+        })
+
+        return { ...view, intent, children }
+      }
+
       return { ...view, intent }
     }
 

@@ -288,6 +288,56 @@ function joinRoot(children: LayoutElement[], axis: Axis): LayoutElement {
   }
 }
 
+/**
+ * The style modifiers that decide how a control draws.
+ *
+ * Kept apart from `LayoutModifier` because these are resolved while the tree is being
+ * *built* - a segmented picker is a different set of elements, not the same elements
+ * painted differently - so the engine's own inherited environment is too late.
+ */
+interface ControlStyles {
+  readonly toggle?: string
+  readonly picker?: string
+  readonly label?: string
+  readonly progressView?: string
+  readonly gauge?: string
+  readonly controlSize?: string
+  readonly buttonBorderShape?: string
+}
+
+const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
+  ['toggleStyle', 'toggle'],
+  ['pickerStyle', 'picker'],
+  ['labelStyle', 'label'],
+  ['progressViewStyle', 'progressView'],
+  ['gaugeStyle', 'gauge'],
+  ['controlSize', 'controlSize'],
+  ['buttonBorderShape', 'buttonBorderShape'],
+]
+
+function withStyles(outer: ControlStyles, view: ViewValue): ControlStyles {
+  let next = outer
+  for (const [modifier, key] of STYLE_MODIFIERS) {
+    const name = tokenName(modifierArg(view, modifier, 0))
+    if (name !== null) next = { ...next, [key]: name }
+  }
+  return next
+}
+
+/** How much a `.controlSize` scales a control's padding and text. */
+function controlScale(size: string | undefined): number {
+  switch (size) {
+    case 'mini':
+      return 0.75
+    case 'small':
+      return 0.85
+    case 'large':
+      return 1.2
+    default:
+      return 1
+  }
+}
+
 /** A `Section`'s three parts, or a run of rows written outside any section. */
 interface Section {
   readonly header: LayoutElement | null
@@ -352,6 +402,16 @@ class Converter {
    * The renderer needs the name to draw the right shape, and four inline copies is
    * four chances for the name and the glyph to disagree.
    */
+  /**
+   * The control styles in force, inherited like the font.
+   *
+   * `.labelStyle(.iconOnly)` on a `Button` applies to the `Label` inside it, and
+   * `.pickerStyle(.segmented)` is nearly always written on the `Form` rather than on
+   * each picker - so reading only a control's own modifiers would miss the spelling
+   * people actually use. Pushed and popped around each subtree by `convert`.
+   */
+  private styles: ControlStyles = {}
+
   private symbolImage(id: string, name: string): LayoutElement {
     const symbol = resolveSymbol(name)
     return {
@@ -688,6 +748,16 @@ class Converter {
 
   convert(view: ViewValue, fallbackPath: string, parentAxis: Axis): LayoutElement {
     const path = view.path ?? fallbackPath
+    const outer = this.styles
+    this.styles = withStyles(outer, view)
+    try {
+      return this.convertInner(view, path, parentAxis)
+    } finally {
+      this.styles = outer
+    }
+  }
+
+  private convertInner(view: ViewValue, path: string, parentAxis: Axis): LayoutElement {
     let element = this.baseElement(view, path, parentAxis)
 
     // Modifiers wrap outward in source order, so `.padding().background()` nests as
@@ -1721,8 +1791,14 @@ class Converter {
     const systemImage = stringArg(labelled(view.args, 'systemImage'))
     const symbol = systemImage ? resolveSymbol(systemImage) : null
 
+    // `.labelStyle` decides which halves are drawn. `.titleAndIcon` is the default
+    // and needs no branch; the other two drop a half that is still exported.
+    const style = this.styles.label
+    const wantsIcon = style !== 'titleOnly'
+    const wantsTitle = style !== 'iconOnly'
+
     const children: LayoutElement[] = []
-    if (symbol) {
+    if (symbol && wantsIcon) {
       children.push({
         kind: 'image',
         id: `${path}icon`,
@@ -1732,8 +1808,8 @@ class Converter {
         ...(systemImage ? { symbol: systemImage } : {}),
       })
     }
-    if (title !== null) children.push({ kind: 'text', id: `${path}title`, text: title })
-    children.push(...this.convertList(view.children, path, 'horizontal'))
+    if (title !== null && wantsTitle) children.push({ kind: 'text', id: `${path}title`, text: title })
+    if (wantsTitle || !symbol) children.push(...this.convertList(view.children, path, 'horizontal'))
 
     return {
       kind: 'stack',
@@ -1783,6 +1859,22 @@ class Converter {
     const prominent = style === 'borderedProminent'
     const tint = resolveColorArg(modifierArg(view, 'tint', 0), this.scheme) ?? this.color('accentColor')
 
+    // `.controlSize` scales the padding, which is what makes a `.small` button small:
+    // the label's font is the environment's and is not touched here.
+    const scale = controlScale(this.styles.controlSize)
+    const padV = Math.round(7 * scale)
+    const padH = Math.round(14 * scale)
+
+    // `.buttonBorderShape` changes only the corner. A capsule is half the button's
+    // height, which the layout does not know yet, so the radius is large enough to
+    // round any control-height box and is clamped by the renderer.
+    const radius =
+      this.styles.buttonBorderShape === 'capsule'
+        ? 999
+        : this.styles.buttonBorderShape === 'circle'
+          ? 999
+          : 8
+
     const tinted: LayoutElement = {
       kind: 'modified',
       id: `${path}btncolor`,
@@ -1793,29 +1885,23 @@ class Converter {
       child: label,
     }
 
-    return {
+    const padded: LayoutElement = {
       kind: 'modified',
-      id: `${path}btnbg`,
-      modifier: {
-        kind: 'background',
-        content: {
-          kind: 'fill',
-          id: `${path}btnfill`,
-          fill: { kind: 'solid', color: prominent ? tint : { ...tint, a: tint.a * 0.15 } },
-        },
-      },
-      child: {
-        kind: 'modified',
-        id: `${path}btnradius`,
-        modifier: { kind: 'cornerRadius', radius: 8 },
-        child: {
-          kind: 'modified',
-          id: `${path}btnpad`,
-          modifier: { kind: 'padding', insets: insets(7, 14, 7, 14) },
-          child: tinted,
-        },
-      },
+      id: `${path}btnpad`,
+      modifier: { kind: 'padding', insets: insets(padV, padH, padV, padH) },
+      child: tinted,
     }
+
+    // Through the helper, which puts the radius *outside* the background. Written
+    // inside-out here until now, and a corner radius only reaches a fill through the
+    // inherited environment - so a bordered button has been drawing square corners
+    // since the style was added, which no test asserted either way.
+    return this.background(
+      padded,
+      `${path}btn`,
+      prominent ? tint : { ...tint, a: tint.a * 0.15 },
+      radius,
+    )
   }
 
   private navigationLink(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -1897,6 +1983,7 @@ class Converter {
   private toggle(view: ViewValue, path: string, origin: object): LayoutElement {
     const on = truthyBinding(labelled(view.args, 'isOn'))
     const title = stringArg(positional(view.args, 0))
+    const style = this.styles.toggle
 
     const label: LayoutElement =
       title !== null
@@ -1952,6 +2039,76 @@ class Converter {
           },
         ],
       },
+    }
+
+    // `.button` is the toggle drawn as a control that stays pressed - iOS tints the
+    // whole thing while it is on - so there is no track at all, and `.checkbox` puts a
+    // box where the switch was and leads with it rather than trailing.
+    if (style === 'button') {
+      const tinted: LayoutElement = {
+        kind: 'modified',
+        id: `${path}btncolor`,
+        modifier: {
+          kind: 'foregroundStyle',
+          color: on ? this.color('accentColor') : this.color('label'),
+        },
+        child: label,
+      }
+      return {
+        kind: 'modified',
+        id: `${path}btnbg`,
+        modifier: {
+          kind: 'background',
+          content: {
+            kind: 'fill',
+            id: `${path}btnfill`,
+            fill: {
+              kind: 'solid',
+              color: on
+                ? { ...this.color('accentColor'), a: 0.18 }
+                : this.color('systemFill'),
+            },
+          },
+        },
+        child: {
+          kind: 'modified',
+          id: `${path}btnradius`,
+          modifier: { kind: 'cornerRadius', radius: 8 },
+          child: {
+            kind: 'modified',
+            id: `${path}btnpad`,
+            modifier: { kind: 'padding', insets: insets(7, 14, 7, 14) },
+            child: tinted,
+          },
+        },
+        ...origin,
+      }
+    }
+
+    if (style === 'checkbox') {
+      const box: LayoutElement = {
+        kind: 'modified',
+        id: `${path}boxframe`,
+        modifier: { kind: 'frame', width: 20, height: 20, alignment: CENTER },
+        child: {
+          kind: 'modified',
+          id: `${path}boxcolor`,
+          modifier: {
+            kind: 'foregroundStyle',
+            color: on ? this.color('accentColor') : this.color('secondaryLabel'),
+          },
+          child: this.symbolImage(`${path}box`, on ? 'checkmark.square' : 'square'),
+        },
+      }
+      return {
+        kind: 'stack',
+        id: path,
+        axis: 'horizontal',
+        spacing: 8,
+        alignment: CENTER,
+        children: [box, label],
+        ...origin,
+      }
     }
 
     return {
@@ -2093,7 +2250,10 @@ class Converter {
     const total = numberArg(labelled(view.args, 'total')) ?? 1
     const title = stringArg(positional(view.args, 0))
 
-    if (value === null) {
+    // `.progressViewStyle(.circular)` is a ring whatever the value, which is what iOS
+    // draws: the determinate bar is the `.linear` style, and asking for the circular
+    // one with a value in hand still gets a ring rather than the bar.
+    if (value === null || this.styles.progressView === 'circular') {
       // Indeterminate: iOS draws a spinner. A dotted ring is the closest honest
       // static approximation, and the renderer spins it.
       return {
@@ -2166,6 +2326,16 @@ class Converter {
     const selection = bindingValue(labelled(view.args, 'selection'))
     const value = selection ? displayValue(selection) : ''
 
+    // Only a real `Picker` has options to draw inline; `DatePicker`, `ColorPicker` and
+    // `Menu` come through here too and have none.
+    if (view.name === 'Picker') {
+      const style = this.styles.picker
+      if (style === 'segmented') return this.segmentedPicker(view, path, origin)
+      if (style === 'inline' || style === 'wheel') {
+        return this.inlinePicker(view, path, origin, style === 'wheel')
+      }
+    }
+
     return {
       kind: 'stack',
       id: path,
@@ -2192,6 +2362,154 @@ class Converter {
           },
         },
       ],
+      ...origin,
+    }
+  }
+
+  /**
+   * `.pickerStyle(.segmented)` - every option on screen, the chosen one on a pill.
+   *
+   * The options are the views the user wrote, and each gets the target the resolver
+   * registered for it, so pressing a segment writes the binding exactly as choosing
+   * from the popup does. A segmented control whose segments were not pressable would
+   * be the same lie the popup was before the controls pass.
+   */
+  private segmentedPicker(view: ViewValue, path: string, origin: object): LayoutElement {
+    const segments = view.children.map((child, index) => {
+      const chosen = truthyBinding(labelled(child.args, 'selected'))
+      const content: LayoutElement = {
+        kind: 'modified',
+        id: `${path}seg${index}f`,
+        modifier: { kind: 'font', font: fontForToken('subheadline', this.typeScale)! },
+        child: {
+          kind: 'modified',
+          id: `${path}seg${index}pad`,
+          modifier: { kind: 'padding', insets: insets(6, 12, 6, 12) },
+          child: {
+            kind: 'modified',
+            id: `${path}seg${index}w`,
+            modifier: {
+              kind: 'frame',
+              maxWidth: Number.POSITIVE_INFINITY,
+              alignment: CENTER,
+            },
+            child: this.convert(child, `${path}seg${index}c`, 'horizontal'),
+          },
+        },
+      }
+
+      const pill: LayoutElement = chosen
+        ? this.background(content, `${path}seg${index}bg`, this.color('systemBackground'), 7)
+        : content
+
+      return this.withHitTarget(
+        pill,
+        `${path}/seg-${index}`,
+        'button',
+        textIn(child).join(' '),
+        child,
+        false,
+      )
+    })
+
+    const row: LayoutElement = {
+      kind: 'stack',
+      id: `${path}segs`,
+      axis: 'horizontal',
+      spacing: 2,
+      alignment: CENTER,
+      children: segments,
+    }
+
+    return {
+      ...this.background(
+        { kind: 'modified', id: `${path}segpad`, modifier: { kind: 'padding', insets: uniformInsets(2) }, child: row },
+        `${path}segtrack`,
+        this.color('systemFill'),
+        9,
+      ),
+      ...origin,
+    }
+  }
+
+  /**
+   * `.pickerStyle(.inline)` and `.wheel` - the options as a column.
+   *
+   * `.inline` is exact: iOS lists the options in place and ticks the chosen one. The
+   * wheel is not - a spinner has depth, momentum and a selection band, none of which
+   * a static column has - so it is drawn as the same column with the chosen row
+   * emphasised, and the matrix says so rather than leaving it to be discovered.
+   */
+  private inlinePicker(
+    view: ViewValue,
+    path: string,
+    origin: object,
+    wheel: boolean,
+  ): LayoutElement {
+    const rows = view.children.map((child, index) => {
+      const chosen = truthyBinding(labelled(child.args, 'selected'))
+
+      const label = this.convert(child, `${path}opt${index}c`, 'horizontal')
+      const tick: LayoutElement = chosen
+        ? {
+            kind: 'modified',
+            id: `${path}opt${index}tk`,
+            modifier: { kind: 'foregroundStyle', color: this.color('accentColor') },
+            child: this.symbolImage(`${path}opt${index}t`, 'checkmark'),
+          }
+        : { kind: 'empty', id: `${path}opt${index}t` }
+
+      const row: LayoutElement = {
+        kind: 'modified',
+        id: `${path}opt${index}pad`,
+        modifier: { kind: 'padding', insets: insets(11, 0, 11, 0) },
+        child: {
+          kind: 'stack',
+          id: `${path}opt${index}`,
+          axis: 'horizontal',
+          spacing: 8,
+          alignment: CENTER,
+          children: wheel
+            ? [
+                {
+                  kind: 'modified',
+                  id: `${path}opt${index}w`,
+                  modifier: { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, alignment: CENTER },
+                  child: label,
+                },
+              ]
+            : [
+                label,
+                { kind: 'spacer', id: `${path}opt${index}sp`, axis: 'horizontal', minLength: 8 },
+                tick,
+              ],
+        },
+      }
+
+      // A wheel dims everything but the selection, which is the one thing about it a
+      // static drawing can carry honestly.
+      const shaded: LayoutElement =
+        wheel && !chosen
+          ? { kind: 'modified', id: `${path}opt${index}dim`, modifier: { kind: 'opacity', value: 0.45 }, child: row }
+          : row
+
+      return this.withHitTarget(
+        shaded,
+        `${path}/seg-${index}`,
+        'button',
+        textIn(child).join(' '),
+        child,
+        false,
+      )
+    })
+
+    return {
+      kind: 'stack',
+      id: path,
+      axis: 'vertical',
+      spacing: 0,
+      alignment: CENTER,
+      children: rows,
       ...origin,
     }
   }
@@ -2374,18 +2692,32 @@ class Converter {
     const max = range?.kind === 'range' ? range.upper : 1
     const fraction = max === min ? 0 : Math.max(0, Math.min(1, (value - min) / (max - min)))
 
-    return this.progressView(
-      {
-        ...view,
-        name: 'ProgressView',
-        args: [
-          { label: 'value', value: { kind: 'double', value: fraction } },
-          { label: 'total', value: { kind: 'double', value: 1 } },
-        ],
-      },
-      path,
-      origin,
-    )
+    // A gauge is a progress view with a range, so the drawing is shared and only the
+    // style name differs: every `accessoryCircular` spelling is a ring, and the rest
+    // are the bar. Translated here rather than duplicating the two drawings.
+    const gaugeStyle = this.styles.gauge ?? ''
+    const outer = this.styles
+    this.styles = {
+      ...outer,
+      progressView: gaugeStyle.toLowerCase().includes('circular') ? 'circular' : 'linear',
+    }
+
+    try {
+      return this.progressView(
+        {
+          ...view,
+          name: 'ProgressView',
+          args: [
+            { label: 'value', value: { kind: 'double', value: fraction } },
+            { label: 'total', value: { kind: 'double', value: 1 } },
+          ],
+        },
+        path,
+        origin,
+      )
+    } finally {
+      this.styles = outer
+    }
   }
 
   /** The search field `.searchable` adds above a list. */
@@ -2639,6 +2971,10 @@ class Converter {
       case 'toggleStyle':
       case 'pickerStyle':
       case 'labelStyle':
+      case 'progressViewStyle':
+      case 'gaugeStyle':
+      case 'controlSize':
+      case 'buttonBorderShape':
       case 'placeholder':
       case 'contextMenu':
       case 'badge':
