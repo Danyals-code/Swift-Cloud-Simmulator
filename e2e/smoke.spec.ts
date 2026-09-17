@@ -742,21 +742,34 @@ test('Phase 9 - a share link carries the project to a fresh session', async ({ p
   // A different browser context is a genuinely fresh session: no IndexedDB, no
   // localStorage. If the marker survives, it travelled in the URL and nowhere else.
   const fresh = await context.browser()!.newContext()
-  const other = await fresh.newPage()
-  await other.goto(link)
-  await expect(other.getByTestId('editor')).toBeVisible()
-  await expect(other.locator('.cm-content')).toContainText(marker, { timeout: 8_000 })
+  try {
+    const other = await fresh.newPage()
+    await other.goto(link)
+    // Sharing carries the project, not the sender's Develop workspace preference.
+    await expect(other.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
+    await expect(other.getByTestId('render-tree')).toBeVisible()
+    await expect(other.getByTestId('editor')).toBeHidden()
+    await other.getByTestId('workspace-develop').click()
+    await expect(other.getByTestId('editor')).toBeVisible()
+    await expect(other.locator('.cm-content')).toContainText(marker, { timeout: 8_000 })
 
-  // The payload is cleared once read, so a reload cannot silently discard later edits.
-  expect(other.url()).not.toContain('#p=')
-  await fresh.close()
+    // The payload is cleared once read, so a reload cannot silently discard later edits.
+    expect(other.url()).not.toContain('#p=')
+  } finally {
+    await fresh.close()
+  }
 })
 
 test('Phase 9 - a corrupt share link falls back instead of failing', async ({ page }) => {
   // The payload comes from a URL a stranger pasted. Truncation is ordinary.
   await page.goto('/#p=not-a-real-payload')
-  await expect(page.getByTestId('editor')).toBeVisible()
+  await expect(page.getByTestId('template-gallery')).toBeVisible()
+  await page.getByTestId('gallery-dismiss').click()
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
   await expect(page.getByTestId('render-tree')).toBeVisible()
+  await expect(page.getByTestId('editor')).toBeHidden()
+  await page.getByTestId('workspace-develop').click()
+  await expect(page.getByTestId('editor')).toBeVisible()
   await expect(page.locator('.cm-content')).toContainText('import SwiftUI', { timeout: 8_000 })
 })
 
