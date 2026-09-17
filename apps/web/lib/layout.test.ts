@@ -38,3 +38,17 @@ it('changing theme leaves workspace and pane settings untouched', () => {
   useLayout.getState().setTheme('dark')
   expect(useLayout.getState()).toMatchObject({ mode, shown, theme: 'dark' })
 })
+
+it('opens Layers for Design and Files for Code on every explicit mode switch', () => {
+  useLayout.getState().setMode('design')
+  expect(useLayout.getState().navigatorTab).toBe('layers')
+  useLayout.getState().setNavigatorTab('issues')
+  useLayout.getState().setMode('develop')
+  expect(useLayout.getState().navigatorTab).toBe('project')
+  useLayout.getState().setPane('navigator', false)
+  useLayout.getState().setMode('design')
+  expect(useLayout.getState().navigatorTab).toBe('layers')
+  expect(useLayout.getState().shown.navigator).toBe(true)
+  expect(restoreLayout({ mode: 'design', navigatorTab: 'issues' }, useLayout.getState()).navigatorTab).toBe('layers')
+  expect(restoreLayout({ mode: 'develop', navigatorTab: 'layers' }, useLayout.getState()).navigatorTab).toBe('project')
+})

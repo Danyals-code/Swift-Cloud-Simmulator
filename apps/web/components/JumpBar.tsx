@@ -82,7 +82,7 @@ export function JumpBar({ fileId, text, caret, onJump }: JumpBarProps) {
           >
             {current ? (
               <>
-                <span className="grid h-[13px] w-[13px] shrink-0 place-items-center rounded-[3px] bg-xc-accent/25 text-[8px] font-bold text-xc-accent">
+                <span className="grid h-[13px] w-[13px] shrink-0 place-items-center rounded-[3px] bg-xc-accent/25 text-[10px] font-bold text-xc-accent">
                   {KIND_LABEL[current.kind]}
                 </span>
                 <span className="truncate">{current.name}</span>

@@ -27,7 +27,7 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'SwiftUI Web Studio',
+  title: 'Swift Web Studio',
   description:
     'Write real Swift and SwiftUI in the browser, preview it live, and export an Xcode project.',
 }

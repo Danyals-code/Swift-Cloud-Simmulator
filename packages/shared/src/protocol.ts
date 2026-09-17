@@ -1,3 +1,4 @@
+import type { ViewLayer } from './view-layer'
 import type { DynamicTypeSize } from './dynamic-type'
 import type { MeasuredTextData, TextMeasureRequest } from './text-measurement'
 import type { PreviewTarget } from './appearance'
@@ -84,6 +85,7 @@ export interface CompileResult {
    * FR-6.3, because the user is mid-keystroke most of the time.
    */
   readonly renderTree: RenderTree | null
+  readonly viewHierarchy?: readonly ViewLayer[]
   readonly logs: readonly LogEntry[]
   readonly timings: CompileTimings
   /** Pending shaped runs are resolved in one bounded main-thread batch. */

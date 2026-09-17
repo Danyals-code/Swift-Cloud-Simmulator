@@ -128,7 +128,7 @@ body {
   color: var(--color-xc-text);
   font-family: -apple-system, BlinkMacSystemFont, var(--font-ui), 'Segoe UI', system-ui,
     sans-serif;
-  font-size: 12px;
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }

@@ -20,6 +20,7 @@ test('Design opens first with an interactive preview and settings', async ({ pag
 test('opening a source file from Design reveals code and preserves the preference', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('navigator-tab-project').click()
   await page.getByTestId('file-rail').getByText('CounterApp.swift', { exact: true }).click()
   await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'develop')
   await expect(page.getByTestId('editor')).toBeVisible()

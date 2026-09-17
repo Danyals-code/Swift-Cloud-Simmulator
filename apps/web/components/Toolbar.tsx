@@ -39,7 +39,7 @@ interface PreviewToolsProps {
 }
 
 const PANES = [
-  { key: 'navigator', icon: 'sidebar-left' as const, label: 'Navigator', title: 'Show files (⌘0)' },
+  { key: 'navigator', icon: 'sidebar-left' as const, label: 'Navigator', title: 'Show navigator (⌘0)' },
   { key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debug area', title: 'Show problems and output (⌘⇧Y)' },
   { key: 'preview', icon: 'sidebar-right' as const, label: 'Preview', title: 'Show preview (⌘⌥↩)' },
 ]
@@ -53,7 +53,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, 
       <div className={styles.projectCopy}><span className={styles.projectName} data-testid="project-name">{projectName}</span><span data-testid="save-indicator" className={saveError ? styles.saveError : styles.saveStatus}>{saveError ? 'Could not save' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
     </div>
     <nav className={styles.modes} aria-label="Workspace view">
-      {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Focus on the app preview' : 'Code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Develop'}</button>)}
+      {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Focus on the app preview' : 'Code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Code'}</button>)}
     </nav>
     <div className={styles.actions}>
       <button type="button" data-testid="workspace-theme" className={styles.themeToggle} aria-label="Workspace dark mode" aria-pressed={theme === 'dark'} title={`Switch workspace to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}><Icon name="appearance" size={17} /></button>

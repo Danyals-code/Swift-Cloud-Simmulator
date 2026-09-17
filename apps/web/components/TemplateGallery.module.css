@@ -5,28 +5,28 @@
 .brandMark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 6px; background: var(--color-xc-text); color: var(--color-xc-text); box-shadow: inset 0 1px 0 #ffffff44; }
 .brandMark svg { width: 25px; height: 25px; }
 .brand strong { font-size: 17px; letter-spacing: -.3px; }
-.brand > span > span { display: block; margin-top: 2px; color: var(--color-xc-text-3); font-size: 12px; }
+.brand > span > span { display: block; margin-top: 2px; color: var(--color-xc-text-3); font-size: 14px; }
 .navigation { display: flex; flex-direction: column; gap: 5px; }
-.navItem { display: flex; align-items: center; gap: 10px; min-height: 43px; padding: 10px; border-radius: 6px; text-align: left; color: var(--color-xc-text-2); font-size: 12px; cursor: pointer; }
+.navItem { display: flex; align-items: center; gap: 10px; min-height: 43px; padding: 10px; border-radius: 6px; text-align: left; color: var(--color-xc-text-2); font-size: 14px; cursor: pointer; }
 .navItem[aria-pressed='true'] { background: var(--color-xc-line); color: var(--color-xc-text); }
 .navItem[aria-pressed='true'] > svg { color: var(--color-xc-text); }
 .navItem:hover { background: var(--color-xc-bar-raised); }
-.navItem small { margin-left: auto; font-size: 10px; color: var(--color-xc-text-3); }
-.sidebarNote { margin-top: auto; padding: 24px 9px 0; font-size: 11px; line-height: 1.7; color: var(--color-xc-text-3); }
+.navItem small { margin-left: auto; font-size: 12px; color: var(--color-xc-text-3); }
+.sidebarNote { margin-top: auto; padding: 24px 9px 0; font-size: 13px; line-height: 1.7; color: var(--color-xc-text-3); }
 .sidebarNote strong { font-weight: 500; color: var(--color-xc-text-2); }
 .sidebarNote p { margin: 7px 0 0; }
 .noteLine { display: block; width: 28px; height: 2px; margin-bottom: 15px; background: var(--color-xc-text); }
 .main { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 32px 30px 24px; }
-.eyebrow { margin: 0 0 10px; color: var(--color-xc-text-3); font-size: 10px; font-weight: 600; letter-spacing: 1.4px; }
+.eyebrow { margin: 0 0 10px; color: var(--color-xc-text-3); font-size: 12px; font-weight: 600; letter-spacing: 1.4px; }
 .header h2 { margin: 0; font-size: 22px; font-weight: 600; line-height: 1.2; letter-spacing: -.4px; }
-.subtitle { margin: 10px 0 0; font-size: 12px; line-height: 1.6; color: var(--color-xc-text-3); }
+.subtitle { margin: 10px 0 0; font-size: 14px; line-height: 1.6; color: var(--color-xc-text-3); }
 .close { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%; background: var(--color-xc-bar-raised); color: var(--color-xc-text-3); cursor: pointer; }
 .close:hover { background: var(--color-xc-bar-raised); color: var(--color-xc-text); }
-.catalogBar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 30px 17px; color: var(--color-xc-text-3); font-size: 11px; }
+.catalogBar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 30px 17px; color: var(--color-xc-text-3); font-size: 13px; }
 .search { display: flex; align-items: center; gap: 8px; width: min(240px, 60%); height: 34px; border: 1px solid var(--color-xc-line); border-radius: 6px; padding: 0 10px; background: var(--color-xc-bar-raised); color: var(--color-xc-text-3); }
 .search:focus-within { border-color: var(--color-xc-accent); }
-.search input { min-width: 0; width: 100%; background: transparent; color: var(--color-xc-text); outline: none; font-size: 12px; }
+.search input { min-width: 0; width: 100%; background: transparent; color: var(--color-xc-text); outline: none; font-size: 14px; }
 .search input::placeholder { color: var(--color-xc-text-3); }
 .search input:focus-visible { outline: none; }
 .search button { cursor: pointer; }
@@ -36,7 +36,7 @@
 .appCard { min-height: 126px; flex-direction: row; padding: 18px 24px 18px 16px; gap: 12px; }
 .appCard .templateIcon { width: 38px; height: 38px; }
 .appCard .templateIcon svg { width: 23px; height: 23px; }
-.appCard .cardTagline { font-size: 11px; }
+.appCard .cardTagline { font-size: 13px; }
 .appCard .cardMeta { margin-top: 10px; }
 .appCard .selectedMark { right: 9px; top: 10px; width: 14px; height: 14px; }
 .appCard[aria-pressed='true'], .featureCard[aria-pressed='true'] { background: var(--color-xc-bar-raised); border-color: var(--color-xc-accent); }
@@ -45,35 +45,35 @@
 .templateIcon svg { width: 25px; height: 25px; }
 .cardCopy { display: block; min-width: 0; }
 .cardTitle { display: flex; align-items: center; gap: 9px; color: var(--color-xc-text); font-size: 15px; font-weight: 600; }
-.cardTitle small { padding: 2px 5px; border-radius: 4px; color: #6d59c1; background: #6d59c114; font-size: 8px; letter-spacing: .7px; }
-.cardTagline { display: block; margin-top: 6px; color: var(--color-xc-text-3); font-size: 12px; line-height: 1.5; }
-.cardMeta { display: block; margin-top: 14px; color: var(--color-xc-text-3); font-size: 10px; }
+.cardTitle small { padding: 2px 5px; border-radius: 4px; color: #6d59c1; background: #6d59c114; font-size: 10px; letter-spacing: .7px; }
+.cardTagline { display: block; margin-top: 6px; color: var(--color-xc-text-3); font-size: 14px; line-height: 1.5; }
+.cardMeta { display: block; margin-top: 14px; color: var(--color-xc-text-3); font-size: 12px; }
 .selectedMark { position: absolute; right: 14px; top: 15px; display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid var(--color-xc-line); border-radius: 50%; }
 [aria-pressed='true'] > .selectedMark { border-color: var(--color-xc-accent); background: #0d78f2; color: #ffffff; }
 .featureCard { min-height: 110px; align-items: flex-start; padding: 16px 28px 16px 14px; gap: 12px; }
 .featureCard .templateIcon { width: 34px; height: 34px; border-radius: 10px; }
 .featureCard .templateIcon svg { width: 20px; height: 20px; }
-.featureCard .cardTitle { font-size: 13px; }
-.featureCard .cardTagline { font-size: 11px; }
+.featureCard .cardTitle { font-size: 14px; }
+.featureCard .cardTagline { font-size: 13px; }
 .featureCard .selectedMark { width: 14px; height: 14px; right: 10px; top: 17px; }
 .detail { padding: 17px 30px; border-top: 1px solid var(--color-xc-line); background: var(--color-xc-editor); }
-.detailHeading { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.detailHeading { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; font-size: 14px; }
 .detailHeading strong { font-weight: 600; }
-.detailHeading > span { color: var(--color-xc-text-3); font-size: 10px; white-space: nowrap; }
-.detail p { margin: 7px 0 0; color: var(--color-xc-text-3); font-size: 11px; line-height: 1.6; }
+.detailHeading > span { color: var(--color-xc-text-3); font-size: 12px; white-space: nowrap; }
+.detail p { margin: 7px 0 0; color: var(--color-xc-text-3); font-size: 13px; line-height: 1.6; }
 .screenList { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
-.screenList span { border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 3px 7px; font-size: 10px; color: var(--color-xc-text-2); }
+.screenList span { border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 3px 7px; font-size: 12px; color: var(--color-xc-text-2); }
 .footer { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 18px 30px; border-top: 1px solid var(--color-xc-line); }
-.footerNote { color: var(--color-xc-text-3); font-size: 10px; line-height: 1.5; max-width: 230px; }
+.footerNote { color: var(--color-xc-text-3); font-size: 12px; line-height: 1.5; max-width: 230px; }
 .footerNote[role='alert'] { color: var(--color-xc-error); }
 .actions { display: flex; gap: 8px; flex-shrink: 0; }
-.primary, .secondary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 0 15px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
+.primary, .secondary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 0 15px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; }
 .primary { background: #0d78f2; color: #ffffff; }
 .primary:hover { background: var(--workspace-accent-hover); }
 .secondary { color: var(--color-xc-text-2); background: var(--color-xc-bar-raised); }
 .secondary:hover { background: var(--color-xc-line); }
 .window button:disabled { opacity: .45; cursor: default; }
-.empty { display: flex; min-height: 210px; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: var(--color-xc-text-3); font-size: 12px; text-align: center; }
+.empty { display: flex; min-height: 210px; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: var(--color-xc-text-3); font-size: 14px; text-align: center; }
 .empty strong { color: var(--color-xc-text); font-size: 15px; }
 .empty button { color: var(--color-xc-accent); cursor: pointer; }
 
@@ -83,7 +83,7 @@
   .sidebar { padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--color-xc-line); }
   .brand, .sidebarNote { display: none; }
   .navigation { flex-direction: row; }
-  .navItem { flex: 1; justify-content: center; font-size: 11px; gap: 6px; padding: 7px; }
+  .navItem { flex: 1; justify-content: center; font-size: 13px; gap: 6px; padding: 7px; }
   .navItem small { display: none; }
   .header { padding: 22px 20px 18px; }
   .header h2 { font-size: 23px; }
@@ -93,15 +93,15 @@
 }
 @media (max-width: 480px) {
   .backdrop { padding: 8px; }
-  .navItem { font-size: 10px; }
+  .navItem { font-size: 12px; }
   .navItem > svg { display: none; }
   .header h2 { font-size: 21px; }
-  .subtitle { font-size: 11px; }
-  .eyebrow { font-size: 8px; }
+  .subtitle { font-size: 13px; }
+  .eyebrow { font-size: 10px; }
   .appGrid, .featureGrid { grid-template-columns: 1fr; }
   .appCard { flex-direction: row; min-height: 130px; padding: 18px 28px 18px 16px; }
   .cardTitle { font-size: 14px; }
-  .cardTagline { font-size: 11px; }
+  .cardTagline { font-size: 13px; }
   .footer { align-items: stretch; flex-direction: column; gap: 10px; }
   .footerNote { max-width: none; }
   .actions { justify-content: flex-end; }

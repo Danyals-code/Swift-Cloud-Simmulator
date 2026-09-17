@@ -21,7 +21,7 @@ export function InspectorReadout({ node, active }: InspectorReadoutProps) {
   return (
     <div
       data-testid="inspector-readout"
-      className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-xc-line bg-xc-panel/95 px-3 py-2 font-mono text-[11px] backdrop-blur"
+      className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-xc-line bg-xc-panel/95 px-3 py-2 font-mono text-[13px] backdrop-blur"
     >
       {node ? (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">

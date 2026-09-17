@@ -99,7 +99,7 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
               spellCheck={false}
               aria-label="Filter output"
               data-testid="console-filter"
-              className="w-[130px] min-w-0 bg-transparent text-[11px] text-xc-text placeholder:text-xc-text-3"
+              className="w-[130px] min-w-0 bg-transparent text-[13px] text-xc-text placeholder:text-xc-text-3"
             />
           </span>
         ) : null}
@@ -172,7 +172,7 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
           !result ? (
             <Empty>No compile yet.</Empty>
           ) : (
-            <div><Timings timings={result.timings} /><p className="px-3 py-1 text-[11px] text-xc-text-2">Text measurement: {!result.textMeasurement ? 'unavailable' : result.textMeasurement.provisional ? 'estimated in part' : 'measured'}</p></div>
+            <div><Timings timings={result.timings} /><p className="px-3 py-1 text-[13px] text-xc-text-2">Text measurement: {!result.textMeasurement ? 'unavailable' : result.textMeasurement.provisional ? 'estimated in part' : 'measured'}</p></div>
           )
         ) : null}
       </div>
@@ -324,7 +324,7 @@ function Badge({ tone, children }: { tone: 'error' | 'warning' | 'quiet'; childr
       : tone === 'warning'
         ? 'bg-xc-warn/25 text-xc-warn'
         : 'bg-xc-line-soft text-xc-text-3'
-  return <span className={`rounded-full px-1 text-[9px] leading-[13px] ${style}`}>{children}</span>
+  return <span className={`rounded-full px-1 text-[11px] leading-[13px] ${style}`}>{children}</span>
 }
 
 function Empty({ children }: { children: React.ReactNode }) {

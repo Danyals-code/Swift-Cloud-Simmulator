@@ -184,7 +184,7 @@ export function MenuPanel({
                   if (!item.disabled) onChoose(item.value)
                 }}
                 onPointerEnter={() => !item.disabled && setActive(index)}
-                className={`flex w-full items-center gap-2 px-2 text-left text-[12px] leading-none disabled:opacity-40 ${
+                className={`flex w-full items-center gap-2 px-2 text-left text-[14px] leading-none disabled:opacity-40 ${
                   isActive && !item.disabled ? 'bg-xc-accent text-xc-text' : 'text-xc-text'
                 }`}
                 style={{ height: ROW_HEIGHT, borderRadius: 4 }}
@@ -196,7 +196,7 @@ export function MenuPanel({
                 <span className="truncate">{item.label}</span>
                 {item.detail ? (
                   <span
-                    className={`ml-auto shrink-0 pl-4 text-[11px] ${
+                    className={`ml-auto shrink-0 pl-4 text-[13px] ${
                       isActive && !item.disabled ? 'text-xc-text/70' : 'text-xc-text-3'
                     }`}
                   >
@@ -274,7 +274,7 @@ export function PopupButton({
         }}
         className={
           className ??
-          'flex h-[22px] items-center gap-1.5 rounded-[5px] border border-xc-line bg-xc-line-soft px-2 text-[12px] text-xc-text transition-colors hover:bg-xc-line-soft active:bg-xc-line-soft'
+          'flex h-[22px] items-center gap-1.5 rounded-[5px] border border-xc-line bg-xc-line-soft px-2 text-[14px] text-xc-text transition-colors hover:bg-xc-line-soft active:bg-xc-line-soft'
         }
       >
         <span className="truncate">{current?.label ?? placeholder ?? value}</span>

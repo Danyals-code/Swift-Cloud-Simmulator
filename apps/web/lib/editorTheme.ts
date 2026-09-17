@@ -40,7 +40,7 @@ const chrome = EditorView.theme(
       color: EDITOR_COLORS.text,
       backgroundColor: EDITOR_COLORS.background,
       height: '100%',
-      fontSize: '12px',
+      fontSize: '14px',
     },
     '.cm-content': {
       caretColor: EDITOR_COLORS.caret,
@@ -93,7 +93,7 @@ const chrome = EditorView.theme(
       borderColor: 'var(--color-xc-line)',
     },
     '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--color-xc-line)' },
-    '.cm-panel.cm-search': { padding: '5px 8px', fontSize: '12px' },
+    '.cm-panel.cm-search': { padding: '5px 8px', fontSize: '14px' },
     '.cm-panel.cm-search input, .cm-panel.cm-search button, .cm-textfield': {
       backgroundColor: 'var(--color-xc-bar-raised)',
       color: EDITOR_COLORS.text,
@@ -121,7 +121,7 @@ const chrome = EditorView.theme(
     '.cm-tooltip.cm-tooltip-autocomplete > ul': {
       fontFamily:
         'ui-monospace, "SF Mono", SFMono-Regular, Menlo, "JetBrains Mono", Consolas, monospace',
-      fontSize: '12px',
+      fontSize: '14px',
       maxHeight: '16em',
     },
     '.cm-tooltip.cm-tooltip-autocomplete > ul > li': { padding: '3px 8px', lineHeight: '1.4' },

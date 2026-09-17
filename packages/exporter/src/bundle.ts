@@ -136,7 +136,7 @@ function readme(project: Project, sourcePaths: readonly string[]): string {
 
   return `# ${name}
 
-Exported from SwiftUI Web Studio.
+Exported from Swift Web Studio.
 
 | | |
 | --- | --- |

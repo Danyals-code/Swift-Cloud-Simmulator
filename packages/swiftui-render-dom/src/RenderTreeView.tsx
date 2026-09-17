@@ -19,6 +19,8 @@ import { beginContextPress } from './context-press'
 
 export interface RenderTreeViewProps {
   tree: RenderTree
+  /** Workspace layer selection, without intercepting preview interactions. */
+  selectedIds?: ReadonlySet<string>
   /** Raised when an interactive node is activated. */
   onEvent?: (event: UIEvent) => void
   /**
@@ -67,6 +69,7 @@ export const RenderTreeView = memo(function RenderTreeView({
   onEvent,
   stale = false,
   debugOutlines = false,
+  selectedIds,
   inspect,
 }: RenderTreeViewProps) {
   const surfaceRef = useRef<HTMLDivElement>(null)
@@ -120,6 +123,7 @@ export const RenderTreeView = memo(function RenderTreeView({
           node={node}
           byParent={byParent}
           onEvent={onEvent}
+          selectedIds={selectedIds}
           debugOutlines={debugOutlines}
           inspect={inspect}
         />
@@ -225,12 +229,14 @@ function RenderNodeView({
   byParent,
   onEvent,
   debugOutlines,
+  selectedIds,
   inspect,
 }: {
   node: RenderNode
   byParent: ReadonlyMap<string, RenderNode[]>
   onEvent?: (event: UIEvent) => void
   debugOutlines: boolean
+  selectedIds?: ReadonlySet<string>
   inspect?: RenderTreeViewProps['inspect']
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -351,6 +357,7 @@ function RenderNodeView({
         }
       : {}),
     ...(debugOutlines ? { outline: '1px solid rgb(0 122 255 / 0.35)', outlineOffset: -1 } : {}),
+    ...(selectedIds?.has(node.id) ? { outline: '2px solid rgb(0 122 255)', outlineOffset: -2 } : {}),
   }
 
   const handlerId = node.hitTarget?.handlerId
@@ -388,6 +395,7 @@ function RenderNodeView({
               node={child}
               byParent={byParent}
               onEvent={onEvent}
+              selectedIds={selectedIds}
               debugOutlines={debugOutlines}
               inspect={inspect}
             />
@@ -401,6 +409,7 @@ function RenderNodeView({
     <div
       ref={panelRef}
       data-node-id={node.id}
+      data-layer-selected={selectedIds?.has(node.id) || undefined}
       data-handler-id={node.hitTarget?.handlerId}
       inert={node.inert || undefined}
       data-chrome-role={node.chromeRole}

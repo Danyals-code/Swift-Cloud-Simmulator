@@ -83,7 +83,7 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
 
         <ul className="max-h-[50vh] overflow-auto py-1">
           {matches.length === 0 ? (
-            <li className="px-4 py-2 text-[12px] text-xc-text-3">No matching files.</li>
+            <li className="px-4 py-2 text-[14px] text-xc-text-3">No matching files.</li>
           ) : (
             matches.map((file, index) => (
               <li key={file.id}>
@@ -91,12 +91,12 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
                   type="button"
                   onClick={() => onSelect(file.id)}
                   onMouseEnter={() => setHighlight(index)}
-                  className={`flex w-full items-baseline gap-2 px-4 py-1.5 text-left text-[12px] ${
+                  className={`flex w-full items-baseline gap-2 px-4 py-1.5 text-left text-[14px] ${
                     index === highlight ? 'bg-xc-select text-xc-text' : 'text-xc-text-2'
                   }`}
                 >
                   <span>{fileBasename(file.id)}</span>
-                  <span className="truncate text-[11px] text-xc-text-3">{file.id}</span>
+                  <span className="truncate text-[13px] text-xc-text-3">{file.id}</span>
                 </button>
               </li>
             ))

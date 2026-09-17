@@ -218,7 +218,7 @@ function swiftpmReadme(project: Project): string {
   const name = project.manifest.name
   return `# ${name}
 
-Exported from SwiftUI Web Studio as a **Swift Playgrounds app package**.
+Exported from Swift Web Studio as a **Swift Playgrounds app package**.
 
 ## On iPad
 
@@ -246,7 +246,7 @@ function packageReadme(project: Project): string {
   const name = project.manifest.name
   return `# ${name}
 
-Exported from SwiftUI Web Studio as a **Swift package**.
+Exported from Swift Web Studio as a **Swift package**.
 
 \`\`\`bash
 swift build
@@ -269,7 +269,7 @@ function xcodeGenReadme(project: Project): string {
   const name = project.manifest.name
   return `# ${name}
 
-Exported from SwiftUI Web Studio as an **XcodeGen spec**.
+Exported from Swift Web Studio as an **XcodeGen spec**.
 
 \`\`\`bash
 brew install xcodegen

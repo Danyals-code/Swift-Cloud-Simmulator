@@ -18,6 +18,7 @@ export interface DevicePaneProps {
   tools?: React.ReactNode
   device: DeviceSpec
   tree: RenderTree | null
+  selectedRenderIds?: ReadonlySet<string>
   stale: boolean
   paused: boolean
   onEvent: (event: UIEvent) => void
@@ -79,6 +80,7 @@ export function DevicePane({
   tools,
   device,
   tree,
+  selectedRenderIds,
   stale,
   onEvent,
   inspecting,
@@ -148,6 +150,7 @@ export function DevicePane({
           <DeviceFrame device={device}>
             <RenderTreeView
               tree={tree ?? EMPTY_RENDER_TREE}
+              selectedIds={selectedRenderIds}
               onEvent={onEvent}
               stale={stale}
               {...(inspecting
@@ -188,7 +191,7 @@ export function DevicePane({
         </div>
         <div className={styles.propertySection}>
           <h3>iOS 27 preview</h3>
-          <p>Tap, scroll, and try your app. Switch to Develop to see the SwiftUI behind it.</p>
+          <p>Tap, scroll, and try your app. Switch to Code to see the SwiftUI behind it.</p>
           <p>Inspect a view to jump to its source.</p>
         </div>
       </aside>}

@@ -61,7 +61,7 @@ export function TabBar({
                 }
               }}
               title={fileId}
-              className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 text-[12px]"
+              className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 text-[14px]"
             >
               {hasError ? (
                 <Icon name="error" size={11} weight={2} className="shrink-0 text-xc-error" />

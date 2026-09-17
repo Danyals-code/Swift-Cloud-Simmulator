@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const PORT = 3100
+// A separate port lets local checks run without reusing an older studio server.
+const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 3100)
 const BASE_URL = `http://127.0.0.1:${PORT}`
 
 export default defineConfig({

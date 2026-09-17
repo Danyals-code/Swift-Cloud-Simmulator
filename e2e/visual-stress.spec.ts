@@ -71,7 +71,12 @@ struct ContentView: View {
   await expect(preview.getByText('Count: 11', { exact: true })).toBeVisible()
   await button.click({ delay: 650 })
   await expect(preview.getByRole('button', { name: 'Add ten', exact: true })).toBeVisible()
-  await preview.getByRole('button', { name: 'Close menu', exact: true }).click({ position: { x: 2, y: 2 } })
+  const backdrop = preview.getByRole('button', { name: 'Close menu', exact: true })
+  const bounds = await backdrop.boundingBox()
+  expect(bounds).not.toBeNull()
+  // Screen corners are clipped by the bezel; click below the status bar, away from the menu.
+  await page.mouse.click(bounds!.x + bounds!.width * 0.15, bounds!.y + bounds!.height * 0.2)
+  await expect(backdrop).toHaveCount(0)
   await expect(preview.getByText('Count: 11', { exact: true })).toBeVisible()
   const field = preview.getByRole('textbox', { name: 'Email', exact: true })
   await expect(field).toHaveAttribute('inputmode', 'email')

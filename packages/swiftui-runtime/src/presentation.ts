@@ -1,3 +1,5 @@
+import type { ViewLayer } from '@studio/shared'
+import { layerLabel, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
   asDate,
@@ -147,6 +149,7 @@ export interface SearchField {
 }
 
 export interface ResolvedUI {
+  readonly viewHierarchy?: readonly ViewLayer[]
   readonly content: readonly ViewValue[]
   readonly search: SearchField | null
   /** True when the content asked to extend under the device's edges. */
@@ -350,7 +353,7 @@ class Resolver {
     const stamped = this.stampList(views, 'v')
 
     const tabs = findView(stamped, 'TabView')
-    const withTabs = tabs ? this.resolveTabs(tabs) : { content: stamped, tabBar: null }
+    const withTabs = tabs ? this.resolveTabs(tabs) : { content: stamped, tabBar: null, pages: [], selected: 0 }
 
     const nav =
       findView(withTabs.content, 'NavigationStack') ??
@@ -363,7 +366,38 @@ class Resolver {
     // opened, and it is the only one they can interact with while it is up.
     const overlay = this.findOverlay(screen.content) ?? this.menuOverlay(screen.content)
 
+    const screenLayers = (content: readonly ViewValue[], bar: NavigationBar | null | undefined): ViewLayer[] => [
+      ...viewLayers(content),
+      ...(bar && (bar.leading.length || bar.trailing.length) ? [{
+        id: `${bar.view.path}/layers`, name: 'Toolbar', type: 'Toolbar',
+        children: viewLayers([...bar.leading, ...bar.trailing]),
+      }] : []),
+    ]
+    const activeLayers = screenLayers(screen.content, screen.navigationBar)
+    const pageLayers: ViewLayer[] = withTabs.pages.length ? withTabs.pages.map((page, index) => {
+      const item = withTabs.tabBar?.items[index]
+      const active = index === withTabs.selected
+      return {
+        id: `page:${page.path}`, name: (item && layerLabel(item)) || titleOf([page], `Page ${index + 1}`),
+        type: 'Page', source: page.span,
+        page: { active, ...(item?.path ? { handlerId: handlerIdFor(item.path) } : {}) },
+        children: active ? screen.navigationBar?.canGoBack ? [{
+          id: `destination:${page.path}`, name: screen.navigationBar.title || 'Details',
+          type: 'Destination', children: activeLayers,
+        }] : activeLayers : viewLayers([page]),
+      }
+    }) : [{
+      id: 'page:root', name: screen.navigationBar?.title || 'Main page', type: 'Page',
+      page: { active: true }, children: activeLayers,
+    }]
+    if (overlay) pageLayers.push({
+      id: `page:overlay:${overlay.kind}`, name: overlay.title || overlay.screen?.navigationBar?.title || ({ sheet: 'Sheet', cover: 'Full screen', alert: 'Alert', dialog: 'Confirmation', popover: 'Popover', menu: 'Menu' })[overlay.kind],
+      type: 'Presentation', page: { active: true },
+      children: screenLayers(overlay.screen?.content ?? overlay.views, overlay.screen?.navigationBar),
+    })
+
     return {
+      viewHierarchy: pageLayers,
       content: screen.content,
       search: this.findSearchField(screen.content),
       ignoresSafeArea: collectModifier(screen.content, 'ignoresSafeArea') !== null,
@@ -1126,14 +1160,14 @@ class Resolver {
 
   // ----------------------------------------------------------------- tabs
 
-  private resolveTabs(tabs: ViewValue): { content: readonly ViewValue[]; tabBar: TabBar | null } {
+  private resolveTabs(tabs: ViewValue): { content: readonly ViewValue[]; tabBar: TabBar | null; pages: readonly ViewValue[]; selected: number } {
     const tabId = tabs.path ?? 'tabs'
     const selection = labelled(tabs.args, 'selection')
     const binding = asProjection(selection)
 
     const flatten = (views: readonly ViewValue[]): readonly ViewValue[] => views.flatMap(v => ['Group', 'ForEach'].includes(v.name) ? flatten(v.children) : [v])
     const pages = flatten(tabs.children)
-    if (pages.length === 0) return { content: [], tabBar: null }
+    if (pages.length === 0) return { content: [], tabBar: null, pages, selected: 0 }
 
     const valueOf = (page: ViewValue) => page.name === 'Tab' ? labelled(page.args, 'value') : tagValue(page)
     const tagged = pages.map((page) => page.name === 'Tab' ? tokenOrValue(valueOf(page)) : tokenOrValue(collectModifier([page], 'tag')?.args[0]?.value))
@@ -1179,6 +1213,7 @@ class Resolver {
     })
 
     return {
+      pages, selected,
       content: [pages[selected]!],
       tabBar: {
         items,

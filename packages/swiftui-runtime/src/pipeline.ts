@@ -459,6 +459,7 @@ function toResult(
     revision: request.revision,
     diagnostics,
     renderTree,
+    viewHierarchy: evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],
     logs,
     textMeasurement: renderTree && !evaluation?.failure ? { ...metrics.measurementState, generation: fontGeneration } : undefined,
     timings: {

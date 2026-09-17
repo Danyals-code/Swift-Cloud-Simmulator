@@ -46,8 +46,8 @@ export interface TemplateGalleryProps {
 
 const SOURCES: readonly { key: GallerySource; label: string; icon: IconName; hint: string }[] = [
   { key: 'open', label: 'Your projects', icon: 'folder', hint: 'Continue a project or import Swift files' },
+  { key: 'prompt', label: 'Agentic Coding', icon: 'new-file', hint: 'Describe an app and generate its first version' },
   { key: 'app', label: 'App templates', icon: 'screens', hint: 'Complete apps with connected screens' },
-  { key: 'prompt', label: 'From a prompt', icon: 'new-file', hint: 'Describe an app and generate its first version' },
   { key: 'feature', label: 'Features', icon: 'grid', hint: 'Small examples of one SwiftUI concept' },
 ]
 
@@ -69,10 +69,7 @@ export function TemplateGallery({
   const apps = useMemo(() => TEMPLATE_CATALOG.filter((t) => t.kind === 'app'), [])
   const features = useMemo(() => TEMPLATE_CATALOG.filter((t) => t.kind === 'feature'), [])
 
-  // Opens on whatever the visitor most likely wants: their own work if there is any,
-  // otherwise the apps, because a first-time reader learns more from a project than
-  // from a counter.
-  const [source, setSource] = useState<GallerySource>(origin === 'restored' ? 'open' : 'app')
+  const [source, setSource] = useState<GallerySource>('prompt')
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
@@ -229,7 +226,7 @@ export function TemplateGallery({
         <aside className={styles.sidebar}>
           <div className={styles.brand}>
             <span className={styles.brandMark}><GallerySymbol name="code-slash" /></span>
-            <span><strong>SwiftUI</strong><span>Web Studio</span></span>
+            <span><strong>Swift</strong><span>Web Studio</span></span>
           </div>
           <nav aria-label="Source" className={styles.navigation}>
             {SOURCES.map((item) => (
@@ -256,7 +253,7 @@ export function TemplateGallery({
             ))}
           </nav>
           <div className={styles.sidebarNote}>
-            <strong>SwiftUI Web Studio</strong>
+            <strong>Swift Web Studio</strong>
             <p>Local projects.<br />Live preview. Xcode export.</p>
           </div>
         </aside>
@@ -264,12 +261,12 @@ export function TemplateGallery({
         <div className={styles.main}>
           <header className={styles.header}>
             <div>
-              <h2>{source === 'open' ? 'Your projects' : source === 'app' ? 'App templates' : source === 'prompt' ? 'Create from a prompt' : 'Feature examples'}</h2>
+              <h2>{source === 'open' ? 'Your projects' : source === 'app' ? 'App templates' : source === 'prompt' ? 'Agentic Coding' : 'Feature examples'}</h2>
               <p className={styles.subtitle}>
                 {source === 'open' ? 'Continue working or import a Swift project.' : source === 'app' ? 'A starting point with connected screens and working interactions.' : source === 'prompt' ? 'Describe your app. Review its first version. Make it yours.' : 'Focused examples you can run, read, and adapt.'}
               </p>
             </div>
-            <button type="button" className={styles.close} onClick={onClose} disabled={creating} aria-label="Close welcome screen">
+            <button type="button" className={styles.close} onClick={onClose} disabled={creating} aria-label="Close welcome screen" data-testid="gallery-dismiss">
               <Icon name="xmark" size={17} />
             </button>
           </header>
@@ -319,7 +316,7 @@ export function TemplateGallery({
               {createError ?? (source === 'open' ? 'Projects are saved in this browser.' : 'Creates a new project, ready to edit and preview.')}
             </span>
             <div className={styles.actions}>
-              <button type="button" className={styles.secondary} onClick={onClose} disabled={creating} data-testid="gallery-dismiss">{atLaunch ? 'Not now' : 'Cancel'}</button>
+              <button type="button" className={styles.secondary} onClick={onClose} disabled={creating} data-testid="gallery-cancel">{atLaunch ? 'Not now' : 'Cancel'}</button>
               <button type="button" className={styles.primary} disabled={creating || (source !== 'open' && !template)} data-testid="template-confirm"
                 onClick={source === 'open' ? onClose : () => { if (template) choose(template) }}>
                 {creating ? 'Creating…' : source === 'open' ? 'Continue editing' : source === 'app' ? 'Create app' : 'Open example'}

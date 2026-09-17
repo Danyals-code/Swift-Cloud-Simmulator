@@ -17,7 +17,7 @@ import { Icon, type IconName } from './Icon'
  */
 
 const BASE =
-  'inline-flex h-[22px] items-center justify-center gap-1.5 rounded-[5px] text-[12px] leading-none transition-colors disabled:pointer-events-none disabled:opacity-40'
+  'inline-flex h-[22px] items-center justify-center gap-1.5 rounded-[5px] text-[14px] leading-none transition-colors disabled:pointer-events-none disabled:opacity-40'
 
 const QUIET = 'text-xc-text-2 hover:bg-xc-line-soft hover:text-xc-text active:bg-xc-line-soft'
 
@@ -150,7 +150,7 @@ export function SegmentedControl({
             onClick={() => onChange(option.value)}
             aria-pressed={selected}
             title={option.title ?? option.label}
-            className={`inline-flex h-[18px] items-center gap-1 rounded-[4px] px-2 text-[11px] leading-none transition-colors ${
+            className={`inline-flex h-[18px] items-center gap-1 rounded-[4px] px-2 text-[13px] leading-none transition-colors ${
               selected
                 ? 'bg-xc-panel text-xc-text shadow-[0_1px_3px_rgb(0_0_0/0.08)]'
                 : 'text-xc-text-2 hover:text-xc-text'

@@ -5,9 +5,10 @@ import type { ExportFormat } from '@studio/shared'
 import { buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
-import type { FileId, RenderNode, SourceSpan, UIEvent } from '@studio/shared'
+import type { FileId, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
+import { findLayer, layerRenderIds } from '../lib/layers'
 import { useCompiler } from '../lib/useCompiler'
 import { ConsolePane } from './ConsolePane'
 import { DevicePane } from './DevicePane'
@@ -59,6 +60,8 @@ export function Studio() {
   const removeProject = useStudio((s) => s.removeProject)
   const recents = useStudio((s) => s.recents)
 
+  const [layerSelection, setLayerSelection] = useState<{ projectId: string; id: string } | null>(null)
+  const navigatorTab = useLayout(s => s.navigatorTab)
   const mode = useLayout(s => s.mode)
   const setMode = useLayout(s => s.setMode)
   const theme = useLayout(s => s.theme)
@@ -317,6 +320,20 @@ export function Studio() {
   )
 
   const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
+  const layers = result?.viewHierarchy ?? NO_FILES
+  const selectedLayerId = layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null
+  const selectedRenderIds = useMemo(() => layerRenderIds(
+    mode === 'design' && navigatorTab === 'layers' && selectedLayerId ? findLayer(layers, selectedLayerId) : undefined,
+    result?.renderTree, layers,
+  ), [layers, selectedLayerId, result?.renderTree, mode, navigatorTab])
+  const selectLayer = (layer: ViewLayer, page: ViewLayer) => {
+    if (stale || !project) return
+    setLayerSelection({ projectId: project.id, id: layer.id })
+    if (page.page?.handlerId && !page.page.active) {
+      void dispatch({ kind: 'tap', handlerId: page.page.handlerId, location: { x: 0, y: 0 } })
+    }
+  }
+
 
   /** The rename in progress, if F2 found something to rename. */
   const [rename, setRename] = useState<{ name: string; spans: readonly SourceSpan[] } | null>(null)
@@ -406,6 +423,11 @@ export function Studio() {
           <>
             <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
               <Navigator
+                key={project.id}
+                layers={layers}
+                selectedLayerId={selectedLayerId}
+                stale={stale}
+                onSelectLayer={selectLayer}
                 tree={fileTree}
                 activeFileId={activeFileId}
                 filesWithErrors={filesWithErrors}
@@ -530,6 +552,7 @@ export function Studio() {
                 tools={previewTools}
                 device={device}
                 tree={result?.renderTree ?? null}
+                selectedRenderIds={selectedRenderIds}
                 stale={stale}
                 paused={paused}
                 onEvent={handleEvent}

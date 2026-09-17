@@ -2,12 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { dirname, fileBasename, type TreeNode } from '@studio/project-model'
+import { useLayout } from '../lib/layout'
+import { Layers } from './Layers'
+import type { ViewLayer } from '@studio/shared'
 import type { Diagnostic, FileId } from '@studio/shared'
 import { Icon } from './ui/Icon'
 import { ContextMenu, MenuButton, type MenuItem } from './ui/Menu'
 import { ToolButton } from './ui/Control'
 
 export interface NavigatorProps {
+  layers: readonly ViewLayer[]
+  selectedLayerId: string | null
+  stale: boolean
+  onSelectLayer: (layer: ViewLayer, page: ViewLayer) => void
   tree: readonly TreeNode[]
   activeFileId: FileId | null
   filesWithErrors: ReadonlySet<FileId>
@@ -27,8 +34,6 @@ export interface NavigatorProps {
   onOpenTemplates: () => void
 }
 
-type Tab = 'project' | 'issues'
-
 /** An inline text field the tree is currently showing, for a new item or a rename. */
 type Editing =
   | { readonly mode: 'new-file'; readonly parent: string }
@@ -36,7 +41,7 @@ type Editing =
   | { readonly mode: 'rename'; readonly target: string; readonly isFolder: boolean }
 
 const INDENT = 13
-const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text-[12px]'
+const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text-[14px]'
 
 /**
  * The project navigator.
@@ -53,6 +58,7 @@ const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text
  */
 export function Navigator({
   tree,
+  layers, selectedLayerId, stale, onSelectLayer,
   activeFileId,
   filesWithErrors,
   diagnostics,
@@ -69,7 +75,8 @@ export function Navigator({
   onRevealDiagnostic,
   onOpenTemplates,
 }: NavigatorProps) {
-  const [tab, setTab] = useState<Tab>('project')
+  const tab = useLayout(s => s.navigatorTab)
+  const setTab = useLayout(s => s.setNavigatorTab)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const [filter, setFilter] = useState('')
   const [editing, setEditing] = useState<Editing | null>(null)
@@ -123,13 +130,16 @@ export function Navigator({
     >
       <header className="flex h-[46px] shrink-0 items-center gap-1 border-b border-xc-line px-1.5">
         <NavTab active={tab === 'project'} onClick={() => setTab('project')} label="Project">
-          <span className="text-[12px] font-medium">Files</span>
+          <span className="text-[14px] font-medium">Files</span>
+        </NavTab>
+        <NavTab active={tab === 'layers'} onClick={() => setTab('layers')} label="Layers">
+          <span className="text-[14px] font-medium">Layers</span>
         </NavTab>
         <NavTab active={tab === 'issues'} onClick={() => setTab('issues')} label="Issues">
-          <span className="text-[12px] font-medium">Issues</span>
+          <span className="text-[14px] font-medium">Issues</span>
           {errors + warnings > 0 ? (
             <span
-              className={`rounded-full px-1 text-[9px] leading-[13px] ${
+              className={`rounded-full px-1 text-[11px] leading-[13px] ${
                 errors > 0 ? 'bg-xc-error/25 text-xc-error' : 'bg-xc-warn/25 text-xc-warn'
               }`}
             >
@@ -138,7 +148,7 @@ export function Navigator({
           ) : null}
         </NavTab>
 
-        <span className="ml-auto">
+        <span className="ml-auto" hidden={tab !== 'project'}>
           <MenuButton
             items={newItems}
             onSelect={(value) => startNew(value)}
@@ -220,6 +230,8 @@ export function Navigator({
 
           <FilterField value={filter} onChange={setFilter} />
         </>
+      ) : tab === 'layers' ? (
+        <Layers pages={layers} selectedId={selectedLayerId} stale={stale} onSelect={onSelectLayer} />
       ) : (
         <IssueList diagnostics={diagnostics} onReveal={onRevealDiagnostic} />
       )}
@@ -595,7 +607,7 @@ function NavTab({
       title={label}
       aria-label={label}
       data-testid={`navigator-tab-${label.toLowerCase()}`}
-      className={`inline-flex h-[20px] items-center gap-1 rounded-[5px] px-2 transition-colors ${
+      className={`inline-flex h-[30px] items-center gap-1 rounded-[5px] px-2 transition-colors ${
         active ? 'bg-xc-line-soft text-xc-text' : 'text-xc-text-3 hover:text-xc-text-2'
       }`}
     >
@@ -619,7 +631,7 @@ function FilterField({ value, onChange }: { value: string; onChange: (value: str
         spellCheck={false}
         aria-label="Filter files"
         data-testid="navigator-filter"
-        className="min-w-0 flex-1 bg-transparent text-[12px] text-xc-text placeholder:text-xc-text-3"
+        className="min-w-0 flex-1 bg-transparent text-[14px] text-xc-text placeholder:text-xc-text-3"
       />
       {value ? (
         <ToolButton icon="xmark" label="Clear filter" onClick={() => onChange('')} size={11} />
@@ -654,7 +666,7 @@ function IssueList({
 
   if (byFile.length === 0) {
     return (
-      <p className="p-3 text-[12px] text-xc-text-3" data-testid="issue-navigator">
+      <p className="p-3 text-[14px] text-xc-text-3" data-testid="issue-navigator">
         No issues.
       </p>
     )
@@ -664,10 +676,10 @@ function IssueList({
     <div className="min-h-0 flex-1 overflow-auto px-1.5 py-1.5" data-testid="issue-navigator">
       {byFile.map(([file, items]) => (
         <div key={file} className="mb-1.5">
-          <div className="flex items-center gap-1.5 px-1 py-1 text-[12px] text-xc-text">
+          <div className="flex items-center gap-1.5 px-1 py-1 text-[14px] text-xc-text">
             <SwiftFileIcon error={items.some((d) => d.severity === 'error')} />
             <span className="truncate">{fileBasename(file)}</span>
-            <span className="ml-auto text-[11px] text-xc-text-3">{items.length}</span>
+            <span className="ml-auto text-[13px] text-xc-text-3">{items.length}</span>
           </div>
 
           <ul>
@@ -676,7 +688,7 @@ function IssueList({
                 <button
                   type="button"
                   onClick={() => onReveal(diagnostic.span.file, diagnostic.span.start)}
-                  className="flex w-full items-start gap-1.5 rounded-[5px] py-1 pl-5 pr-1.5 text-left text-[11px] leading-snug text-xc-text-2 transition-colors hover:bg-xc-line-soft"
+                  className="flex w-full items-start gap-1.5 rounded-[5px] py-1 pl-5 pr-1.5 text-left text-[13px] leading-snug text-xc-text-2 transition-colors hover:bg-xc-line-soft"
                 >
                   <Icon
                     name={diagnostic.severity === 'error' ? 'error' : 'warning'}
@@ -746,7 +758,7 @@ function NameField({
         // Committing on blur would lose the name whenever focus moves for any other
         // reason; cancelling is recoverable, a silently dropped rename is not.
         onBlur={onCancel}
-        className="h-[22px] w-full rounded-[4px] border border-xc-accent bg-xc-panel px-1.5 text-[12px] text-xc-text outline-none"
+        className="h-[22px] w-full rounded-[4px] border border-xc-accent bg-xc-panel px-1.5 text-[14px] text-xc-text outline-none"
       />
     </div>
   )

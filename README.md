@@ -1,4 +1,4 @@
-# SwiftUI Web Studio
+# Swift Web Studio
 
 A browser-based IDE for writing **real Swift / SwiftUI code**, previewing it live in a simulated
 iPhone, and exporting a ready-to-open Xcode project - all served from Vercel, no Mac required to
@@ -25,16 +25,22 @@ construction and keeps the product honest: the preview can be imperfect, the out
 
 ## Start a project
 
-Choose one of seven multi-screen app templates, explore 18 feature examples, import Swift files,
-or use **From a prompt** to generate a first app with your own OpenAI or Anthropic API key.
+The welcome screen opens on **Agentic Coding**, where you can generate a first app with your
+own OpenAI or Anthropic API key. You can also choose one of seven multi-screen app templates,
+explore 18 feature examples, or import Swift files.
 Set the page count, navigation, accent, and sample content, then review the Swift files before
 opening them. See [prompt creation](docs/prompt-creation.md) for credential handling, limits,
 provider documentation, and deployment requirements. Visual simulator editing is planned separately.
 
 ## Workspace views
 
-The workspace opens in **Design**, with a live app in the center and preview settings on the right.
-Choose **Develop** to work with code and preview together. Clicking a
+The workspace opens in **Design**, with **Layers** on the left, the live app in the center,
+and preview settings on the right. Layers shows each tab and its nested SwiftUI views. Select a
+page to preview it, or a layer to highlight it without running its action. Filter, collapse,
+and navigate the hierarchy with the keyboard. Destinations and presentations appear when opened;
+unopened closures are never run just to fill the panel. This is a read-only hierarchy, not visual editing.
+
+Choose **Code** for **Files + code + simulator**. Switching back to Design restores Layers. Clicking a
 source file or inspecting a view opens its code. Problems and output are available from the toolbar's
 bottom-panel button. The appearance button in the top bar switches the workspace between light and dark. This is separate
 from the simulated app’s appearance. Your workspace, theme, and panel sizes are remembered in this browser.
