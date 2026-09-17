@@ -46,6 +46,7 @@ import {
   type StackFrame,
 } from './errors'
 import type { CallArgument, HostCall, InterpreterHost } from './host'
+import { checkPreviewSize, checkRepeatedValue, PREVIEW_LIMITS } from './limits'
 import {
   BUILTIN_TYPE_NAMES,
   callBuiltinMember,
@@ -1326,10 +1327,11 @@ export class Interpreter {
     }
   }
 
-  private *iterate(value: SwiftValue, span: SourceSpan): Generator<SwiftValue> {
+  private *iterate(value: SwiftValue, span: SourceSpan, materializing = false): Generator<SwiftValue> {
     if (value.kind === 'range') {
       const end = value.closed ? value.upper : value.upper - 1
-      for (let i = value.lower; i <= end; i++) yield int(i)
+      if (materializing) checkPreviewSize(Math.max(0, end - value.lower + 1), PREVIEW_LIMITS.collectionElements, 'Range element count', span)
+      for (let i = value.lower; i <= end; i++) { this.tick(span); yield int(i) }
       return
     }
     if (value.kind === 'array') {
@@ -2173,8 +2175,12 @@ export class Interpreter {
         const repeating = args.find((a) => a.label === 'repeating')?.value
         if (repeating !== undefined) {
           const count = args.find((a) => a.label === 'count')?.value
-          const times = count ? Math.max(0, Math.trunc(this.requireNumber(count, span))) : 0
-          return str(describe(repeating, false).repeat(times))
+          const times = count ? this.requireNumber(count, span) : 0
+          if (times < 0) this.trap("Can't construct String with count < 0", span)
+          const text = describe(repeating, false)
+          checkPreviewSize(times, PREVIEW_LIMITS.stringLength, 'String repeat count', span)
+          checkPreviewSize(text.length * times, PREVIEW_LIMITS.stringLength, 'String length', span)
+          return str(text.repeat(times))
         }
 
         const first = args[0]?.value
@@ -2227,7 +2233,7 @@ export class Interpreter {
         if (first === undefined) return uniqueArray([])
         if (first.kind === 'array') return uniqueArray(first.elements.map(copyValue))
         if (first.kind === 'string') return uniqueArray(graphemes(first.value).map(str))
-        if (first.kind === 'range') return uniqueArray([...this.iterate(first, span)])
+        if (first.kind === 'range') return uniqueArray([...this.iterate(first, span, true)])
         return undefined
       }
       case 'Array': {
@@ -2236,14 +2242,17 @@ export class Interpreter {
         const repeating = args.find((a) => a.label === 'repeating')?.value
         if (repeating !== undefined) {
           const count = args.find((a) => a.label === 'count')?.value
-          const times = count ? Math.max(0, Math.trunc(this.requireNumber(count, span))) : 0
+          const times = count ? this.requireNumber(count, span) : 0
+          if (times < 0) this.trap(TRAP_MESSAGES.negativeArrayCount, span)
+          checkPreviewSize(times, PREVIEW_LIMITS.collectionElements, 'Array count', span)
+          checkRepeatedValue(repeating, times, span)
           return array(Array.from({ length: times }, () => copyValue(repeating)))
         }
 
         const first = args[0]?.value
         if (first === undefined) return array([])
         if (first.kind === 'array') return array(first.elements.map(copyValue))
-        return array([...this.iterate(first, span)].map(copyValue))
+        return array([...this.iterate(first, span, true)].map(copyValue))
       }
 
       // ------------------------------------------------------ free functions
@@ -2280,8 +2289,8 @@ export class Interpreter {
         const first = args[0]?.value
         const second = args[1]?.value
         if (!first || !second) return undefined
-        const left = [...this.iterate(first, span)]
-        const right = [...this.iterate(second, span)]
+        const left = [...this.iterate(first, span, true)]
+        const right = [...this.iterate(second, span, true)]
         // Stops at the shorter one, as Swift's does.
         const pairs = left.slice(0, Math.min(left.length, right.length))
         return array(pairs.map((value, i) => tuple([copyValue(value), copyValue(right[i]!)])))
@@ -2771,6 +2780,7 @@ export class Interpreter {
     if (left.kind === 'string' && right.kind === 'string') {
       switch (operator) {
         case '+':
+          checkPreviewSize(left.value.length + right.value.length, PREVIEW_LIMITS.stringLength, 'String length', span)
           return str(left.value + right.value)
         case '<':
           return bool(left.value < right.value)
@@ -2786,6 +2796,7 @@ export class Interpreter {
     }
 
     if (left.kind === 'array' && right.kind === 'array' && operator === '+') {
+      checkPreviewSize(left.elements.length + right.elements.length, PREVIEW_LIMITS.collectionElements, 'Array count', span)
       return array([...left.elements, ...right.elements].map(copyValue))
     }
 

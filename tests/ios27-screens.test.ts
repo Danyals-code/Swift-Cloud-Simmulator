@@ -147,7 +147,7 @@ describe('screen composition', () => {
     for (const key of ['iphone-se-3', 'ipad-11'] as const) {
       const d = DEVICES[key]
       const r = run('Text("Under").sheet(isPresented: .constant(true)) { Text("Sheet").presentationDetents([.height(400), .medium]) }', { canvas: d, safeArea: d.safeArea })
-      expect(r.renderTree!.nodes.find(n => n.id === 'overlay-surface')!.frame.height).toBe(Math.min(400 + d.safeArea.bottom, (d.height - d.safeArea.bottom) / 2 + d.safeArea.bottom))
+      expect(r.renderTree!.nodes.find(n => n.id === 'overlay-surface')!.frame.height).toBe(Math.min(400 + Math.max(0, d.safeArea.bottom - 8), (d.height - d.safeArea.bottom) / 2 + d.safeArea.bottom))
     }
   })
   it('can open a menu inside a sheet and restore the sheet after selection', () => {

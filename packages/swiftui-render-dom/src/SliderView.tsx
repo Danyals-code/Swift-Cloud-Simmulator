@@ -2,14 +2,15 @@ import { cssColor, type SliderPayload } from '@studio/shared'
 
 /** Paint only. The overlaid range input owns drag, focus and keyboard behavior. */
 export function SliderView({ slider, width, height }: { slider: SliderPayload; width: number; height: number }) {
-  const diameter = Math.min(slider.thumbDiameter, width, height)
+  const diameter = Math.min(slider.thumbDiameter, width)
+  const thumbHeight = Math.min(slider.thumbHeight ?? diameter, height)
   const r = diameter / 2, cy = height / 2, length = Math.max(0, width - diameter)
   const x = r + length * slider.fraction
   return <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} aria-hidden="true" style={{ overflow: 'visible', display: 'block' }}>
-    <rect x={r} y={cy - slider.trackHeight / 2} width={length} height={slider.trackHeight} rx={slider.trackHeight / 2} fill={cssColor(slider.trackColor)} />
-    <rect x={r} y={cy - slider.trackHeight / 2} width={length * slider.fraction} height={slider.trackHeight} rx={slider.trackHeight / 2} fill={cssColor(slider.tint)} />
+    <rect x={0} y={cy - slider.trackHeight / 2} width={width} height={slider.trackHeight} rx={slider.trackHeight / 2} fill={cssColor(slider.trackColor)} />
+    <rect x={0} y={cy - slider.trackHeight / 2} width={x} height={slider.trackHeight} rx={slider.trackHeight / 2} fill={cssColor(slider.tint)} />
     {slider.ticks ? slider.ticks.map((fraction, i) => <circle key={i} cx={r + length * fraction} cy={cy} r={1} fill={fraction <= slider.fraction ? 'white' : cssColor(slider.tint)} opacity={0.65} />) : null}
-    <circle cx={x} cy={cy} r={r} fill={cssColor(slider.thumbColor)} stroke="rgb(0 0 0 / 0.04)" strokeWidth={0.5} style={{ filter: 'drop-shadow(0px 1px 2px rgb(0 0 0 / 0.22))' }} />
+    <rect x={x - r} y={cy - thumbHeight / 2} width={diameter} height={thumbHeight} rx={thumbHeight / 2} fill={cssColor(slider.thumbColor)} stroke="rgb(0 0 0 / 0.04)" strokeWidth={0.5} style={{ filter: 'drop-shadow(0px 1px 2px rgb(0 0 0 / 0.22))' }} />
   </svg>
 }
 

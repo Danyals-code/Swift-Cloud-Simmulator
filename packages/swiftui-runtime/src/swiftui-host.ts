@@ -14,6 +14,9 @@ import {
   type HostCall,
   type CallArgument,
   truthy,
+  SwiftTrap,
+  PreviewLimitExceeded,
+  PREVIEW_LIMITS,
   type InterpreterHost,
   type SwiftValue,
 } from '@studio/swift-runtime'
@@ -112,6 +115,7 @@ const CONTENT_CLOSURE_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
   ['DisclosureGroup', new Set(['label'])],
   ['GroupBox', new Set(['label'])],
   ['LabeledContent', new Set(['label'])],
+  ['Gauge', new Set(['currentValueLabel', 'minimumValueLabel', 'maximumValueLabel'])],
 ])
 
 /** Names that are types rather than views: `Color.red`, `Font.title`. */
@@ -304,6 +308,7 @@ export class SwiftUIHost implements InterpreterHost {
 
   /** Per-pass counter, so two readers on one source line get distinct keys. */
   private geometryOrdinals = new Map<string, number>()
+  private constructedViews = 0
 
   /** Scope the entire receiver expression, including children built eagerly inside stacks. */
   withMemberScope(member: string, args: readonly CallArgument[], evaluate: () => SwiftValue): SwiftValue {
@@ -325,6 +330,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   beginPass(): void {
+    this.constructedViews = 0
     this.geometryOrdinals.clear()
   }
 
@@ -783,6 +789,7 @@ export class SwiftUIHost implements InterpreterHost {
     }
 
     if (!VIEW_NAMES.has(name)) return undefined
+    if (++this.constructedViews > PREVIEW_LIMITS.totalViews) throw new PreviewLimitExceeded('The preview exceeds 10,000 constructed views in one pass. Reduce nested collections or preview data.', call.span)
 
     const args = toArgs(call)
 
@@ -1274,22 +1281,37 @@ export class SwiftUIHost implements InterpreterHost {
    * does not exist and should not be opened for one modifier.
    */
   private makeModifier(member: string, call: HostCall): ModifierValue {
+    if (member === 'frame') {
+      for (const arg of call.args) {
+        if (!arg.label || !['width', 'height', 'minWidth', 'minHeight', 'idealWidth', 'idealHeight', 'maxWidth', 'maxHeight'].includes(arg.label)) continue
+        const value = numberOf(arg.value)
+        if (value !== null && (value < 0 || (!Number.isFinite(value) && !(value === Infinity && arg.label.startsWith('max'))))) {
+          throw new SwiftTrap(`Invalid frame ${arg.label}: use a finite, nonnegative dimension; .infinity is allowed only for maximum dimensions.`, call.span)
+        }
+      }
+    }
+    const deferred = member === 'contextMenu'
+      ? call.args.some(arg => arg.label === 'forSelectionType') ? null
+        : call.trailingClosure ?? asClosure(call.args.find(arg => arg.label === 'menuItems')?.value)
+      : call.trailingClosure
     return {
       name: member,
       args: [...toArgs(call), ...this.eagerContent(member, call)],
       span: call.span,
       // Unevaluated on purpose: a sheet's content must not run while it is down.
-      closure: call.trailingClosure,
+      closure: deferred,
       // Only where there is something deferred to run later. Every other modifier
       // resolves inside the scope it was written in and has no use for this.
-      ...(call.trailingClosure ? { environment: this.environment.snapshot() } : {}),
+      ...(deferred ? { environment: this.environment.snapshot() } : {}),
     }
   }
 
   private eagerContent(member: string, call: HostCall): ViewArg[] {
-    if (member !== 'safeAreaInset' || !call.trailingClosure) return []
+    if (!['safeAreaInset', 'background', 'overlay'].includes(member)) return []
+    const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'content')?.value)
+    if (!content) return []
     return call
-      .invokeBuilder(call.trailingClosure)
+      .invokeBuilder(content)
       .filter((value) => asView(value) !== null)
       .map((value) => ({ label: 'content', value }))
   }
@@ -1552,10 +1574,10 @@ export class SwiftUIHost implements InterpreterHost {
         next.weight = tokenNameOf(call.args[0]?.value) ?? weight
         break
       case 'bold':
-        next.weight = 'bold'
+        next.weight = call.args[0]?.value.kind === 'bool' && !call.args[0].value.value ? '' : 'bold'
         break
       case 'italic':
-        next.italic = 'italic'
+        next.italic = call.args[0]?.value.kind === 'bool' && !call.args[0].value.value ? '' : 'italic'
         break
       case 'monospaced':
         next.design = 'monospaced'
@@ -1638,6 +1660,11 @@ export class SwiftUIHost implements InterpreterHost {
     const idPath = asKeyPath(call.args.find((a) => a.label === 'id')?.value)
     const builder = call.trailingClosure!
 
+    const count = data?.kind === 'array' ? data.elements.length
+      : data?.kind === 'range' ? Math.max(0, data.upper - data.lower + (data.closed ? 1 : 0)) : 0
+    if (!Number.isSafeInteger(count) || count > PREVIEW_LIMITS.collectionViews) {
+      throw new PreviewLimitExceeded(`${name} is limited to ${PREVIEW_LIMITS.collectionViews.toLocaleString()} elements per collection in the preview. Reduce the preview data; the source exports unchanged.`, call.span)
+    }
     const elements: SwiftValue[] =
       data?.kind === 'array'
         ? [...data.elements]
@@ -1886,9 +1913,8 @@ function curveFor(member: string, duration: number | null): AnimationPayload | n
 function rangeElements(lower: number, upper: number, closed: boolean): SwiftValue[] {
   const out: SwiftValue[] = []
   const end = closed ? upper : upper - 1
-  // A range this long is a mistake rather than a list; capping stops one typo from
-  // spending the whole step budget building views nobody will see.
-  for (let i = lower; i <= end && out.length < 1_000; i++) out.push(int(i))
+  // The caller checks the count before expanding, so no rows are silently lost.
+  for (let i = lower; i <= end; i++) out.push(int(i))
   return out
 }
 

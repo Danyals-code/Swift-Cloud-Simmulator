@@ -244,7 +244,7 @@ describe('control geometry and input semantics', () => {
     const r = run('Slider(value: $amount, in: -1...1, step: 0.25).tint(.purple)')
     const target = nodes(r).find((n) => n.hitTarget?.role === 'slider')!
     expect(target.hitTarget).toMatchObject({ min: -1, max: 1, step: 0.25 })
-    expect(nodes(r).find((n) => n.slider)!.slider).toMatchObject({ fraction: 0.75, ticks: [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1], thumbDiameter: 28 })
+    expect(nodes(r).find((n) => n.slider)!.slider).toMatchObject({ fraction: 0.75, ticks: [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1], thumbDiameter: 36, thumbHeight: 24 })
     expect(markup(r)).toContain('step="0.25"')
     expect(markup(run('Slider(value: $amount)'))).toContain('step="any"')
   })

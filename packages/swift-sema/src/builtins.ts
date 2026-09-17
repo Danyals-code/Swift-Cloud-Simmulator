@@ -19,7 +19,7 @@
  * same table. A name may only move up a bucket in the same change that makes it true.
  */
 
-/** Views the preview renders. */
+/** Names with at least one render path. Overload limitations are checked separately. */
 export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   // layout
   'VStack', 'HStack', 'ZStack', 'Spacer', 'Group', 'Divider',
@@ -77,7 +77,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // navigation and presentation
   'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar',
   'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
-  'presentationCornerRadius', 'presentationDragIndicator', 'interactiveDismissDisabled',
+  'presentationCornerRadius', 'presentationDragIndicator', 'presentationBackground', 'interactiveDismissDisabled',
   'popover', 'tabItem', 'tag', 'tabViewStyle',
   // lists
   'listStyle', 'listRowBackground', 'listRowSpacing', 'listSectionSpacing', 'scrollContentBackground',
@@ -87,10 +87,9 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   // lifecycle
   'onAppear', 'onDisappear', 'task', 'onChange',
   // lists and forms
-  'searchable', 'onDelete', 'onMove', 'swipeActions', 'contextMenu', 'badge',
+  'searchable', 'onDelete', 'contextMenu', 'badge', 'presentationBackgroundInteraction', 'inspector',
+  'keyboardType', 'submitLabel', 'onSubmit', 'textInputAutocapitalization', 'autocorrectionDisabled',
   'listRowSeparator', 'listRowInsets', 'scrollIndicators',
-  // text entry
-  'keyboardType', 'submitLabel', 'onSubmit', 'focused',
   // control styles, each of which changes what is drawn
   'toggleStyle', 'pickerStyle', 'labelStyle', 'progressViewStyle', 'gaugeStyle',
   'controlSize', 'buttonBorderShape', 'monospaced', 'placeholder',
@@ -155,8 +154,8 @@ export const MODIFIER_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
   ['aspectRatio', new Set(['contentMode'])],
   ['border', new Set(['width'])],
   ['cornerRadius', new Set(['antialiased'])],
-  ['overlay', new Set(['alignment'])],
-  ['background', new Set(['alignment', 'ignoresSafeAreaEdges'])],
+  ['overlay', new Set(['alignment', 'content'])],
+  ['background', new Set(['alignment', 'ignoresSafeAreaEdges', 'in', 'fillStyle', 'content'])],
 ])
 
 /** A chain rooted at one of these is a modifier chain the coverage check can judge. */
@@ -213,12 +212,12 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
  */
 export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // layout
-  'coordinateSpace',
+  'safeAreaPadding', 'gridCellColumns', 'coordinateSpace',
   // painting and effects
   'mask', 'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
 
   // symbols and images
-  'symbolRenderingMode', 'symbolVariant', 'interpolation',
+  'symbolRenderingMode', 'symbolVariant', 'symbolEffect', 'interpolation',
   // motion
   'matchedGeometryEffect', 'phaseAnimator', 'keyframeAnimator',
   // scrolling and lists
@@ -226,10 +225,13 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'scrollDisabled', 'listSectionSeparator',
   // presentation and chrome
   'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
+  'popoverTip',
+  'searchScopes', 'searchSuggestions', 'onMove', 'swipeActions',
+  'fileImporter', 'fileExporter',
   // controls
   'menuStyle', 'datePickerStyle',
   // text entry
-  'textInputAutocapitalization', 'autocorrectionDisabled',
+  'focused',
   // environment set on the view rather than by the preview's own controls
   'preferredColorScheme',
   // accessibility beyond label, value, hint and hidden
@@ -294,6 +296,7 @@ export const BLEND_MODES: ReadonlyMap<string, string> = new Map([
  */
 export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['buttonStyle', new Set(['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent', 'glass', 'glassProminent'])],
+  ['tabViewStyle', new Set(['automatic', 'page'])],
   ['pickerStyle', new Set(['automatic', 'menu', 'segmented', 'inline', 'wheel'])],
   ['toggleStyle', new Set(['automatic', 'switch', 'button', 'checkbox'])],
   ['labelStyle', new Set(['automatic', 'titleAndIcon', 'titleOnly', 'iconOnly'])],

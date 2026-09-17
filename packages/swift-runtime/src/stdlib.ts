@@ -1,4 +1,5 @@
 import type { CallArgument } from './host'
+import { PREVIEW_LIMITS } from './limits'
 import {
   applyKeyPath,
   array,
@@ -693,12 +694,15 @@ function arrayMethod(
       const contents = labelled('contentsOf')
       if (contents) {
         if (contents.kind !== 'array') trap("'append(contentsOf:)' expects a sequence")
-        target.elements.push(...contents.elements.map(copyValue))
+        if (target.elements.length + contents.elements.length > PREVIEW_LIMITS.collectionElements) trap('Array append exceeds the preview limit of 100,000 elements')
+        const copied = contents.elements.map(copyValue)
+        for (const item of copied) target.elements.push(item)
         return VOID
       }
 
       const value = arg(0)
       if (!value) return undefined
+      if (target.elements.length >= PREVIEW_LIMITS.collectionElements) trap('Array append exceeds the preview limit of 100,000 elements')
       target.elements.push(copyValue(value))
       return VOID
     }

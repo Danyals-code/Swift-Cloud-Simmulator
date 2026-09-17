@@ -4,6 +4,8 @@ import {
   asKeyPath,
   asProjection,
   bool,
+  copyValue,
+  PreviewLimitExceeded,
   describe,
   double,
   ExecutionBudgetExceeded,
@@ -197,6 +199,7 @@ export class AppRuntime {
     this.host.callViewExtension = (name, receiver, call) => this.callViewExtension(name, receiver, call)
 
     this.loadFailure = null
+    this.host.beginPass()
     try {
       this.interpreter.load(files)
     } catch (error) {
@@ -406,10 +409,11 @@ export class AppRuntime {
       if (hook.kind === 'change' && hook.watched !== undefined) {
         seen.add(hook.path)
         const previous = this.watched.get(hook.path)
-        this.watched.set(hook.path, hook.watched)
-        // First sight is not a change: SwiftUI does not fire `.onChange` on appear.
-        if (previous === undefined || valuesEqual(previous, hook.watched)) continue
-        this.invokeHook(hook.closure, [hook.watched])
+        this.watched.set(hook.path, copyValue(hook.watched))
+        if (previous === undefined ? !hook.initial : valuesEqual(previous, hook.watched)) continue
+        const args = hook.closure.params.length >= 2
+          ? [previous ?? hook.watched, hook.watched] : [hook.watched]
+        this.invokeHook(hook.closure, args)
         ran = true
       }
     }
@@ -438,6 +442,8 @@ export class AppRuntime {
         ran = true
       }
     }
+
+    for (const path of this.watched.keys()) if (!seen.has(path)) this.watched.delete(path)
 
     if (ran) this.harvest(this.live)
     // A disappear closure wrote into the previous pass's instance - the one that
@@ -927,7 +933,8 @@ export class AppRuntime {
       if (environment) {
         const key = asKeyPath(keyPathArgument(environment))?.components[0]
         const value = key ? this.host.environment.value(key) : undefined
-        if (value !== undefined) instance.fields.set(member.name, value)
+        if (value === undefined) throw new UnsupportedAtRuntime(`@Environment(${key ?? 'type-based lookup'})`, member.span)
+        instance.fields.set(member.name, value)
         continue
       }
 
@@ -1114,6 +1121,9 @@ function toFailure(error: unknown): RuntimeFailure {
       frames: error.frames.map((f) => f.name),
       kind: 'trap',
     }
+  }
+  if (error instanceof PreviewLimitExceeded) {
+    return { message: error.message, span: error.span, frames: [], kind: 'budget' }
   }
   if (error instanceof ExecutionBudgetExceeded) {
     return {

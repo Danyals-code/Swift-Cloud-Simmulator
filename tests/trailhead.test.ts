@@ -62,7 +62,7 @@ function tap(tree: RenderTree, label: string): RenderTree {
     handlerId: target(tree, label).hitTarget!.handlerId,
     location: { x: 0, y: 0 },
   })
-  return rerender(request()).renderTree!
+  return rerender(revision++).renderTree!
 }
 
 beforeEach(() => {

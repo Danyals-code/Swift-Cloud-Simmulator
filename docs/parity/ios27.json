@@ -13,6 +13,21 @@
         "scrolled-library"
       ],
       "scope": "light/default-text phone; capture settings assumed"
+    },
+    {
+      "manifest": "native/iphone18pro-controls/measurements.json",
+      "fixture": "tests/fixtures/ios27-visual-stress.swift",
+      "states": [
+        "controls-light",
+        "controls-dark",
+        "containers",
+        "sheet",
+        "presentations",
+        "alert-keyboard",
+        "confirmation",
+        "details"
+      ],
+      "scope": "15 supplied iPhone 18 Pro images; light/dark; text size inferred; runtime build not embedded"
     }
   ],
   "nativeMeasurements": "native/iphone18pro-light/measurements.json",
@@ -68,7 +83,6 @@
     "Remaining native matrix and capture-setting confirmation",
     "Native region image thresholds",
     "Non-Mac font comparison",
-    "Native SDK build verification",
     "Before/after end-to-end latency comparison"
   ],
   "geometryTolerancePoints": 1,

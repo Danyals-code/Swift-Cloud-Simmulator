@@ -73,6 +73,14 @@ export class UnsupportedAtRuntime extends Error {
   }
 }
 
+/** A browser resource limit; distinct from a Swift language error. */
+export class PreviewLimitExceeded extends Error {
+  constructor(message: string, readonly span: SourceSpan) {
+    super(message)
+    this.name = 'PreviewLimitExceeded'
+  }
+}
+
 /** Non-error control flow, thrown to unwind out of a function body. */
 export class ReturnSignal {
   constructor(readonly value: unknown) {}

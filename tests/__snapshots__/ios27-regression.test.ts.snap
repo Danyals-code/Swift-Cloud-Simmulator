@@ -1380,7 +1380,7 @@ exports[`ios-27 provisional geometry regression gate > ipad-11 dark large 1`] = 
     {
       "background": {
         "color": {
-          "a": 0.2,
+          "a": 0,
           "b": 0,
           "g": 0,
           "r": 0,
@@ -4603,7 +4603,7 @@ exports[`ios-27 provisional geometry regression gate > ipad-11 light large 1`] =
     {
       "background": {
         "color": {
-          "a": 0.2,
+          "a": 0,
           "b": 0,
           "g": 0,
           "r": 0,
@@ -7866,7 +7866,7 @@ exports[`ios-27 provisional geometry regression gate > iphone-15 dark large 1`] 
     {
       "background": {
         "color": {
-          "a": 0.2,
+          "a": 0,
           "b": 0,
           "g": 0,
           "r": 0,
@@ -11169,7 +11169,7 @@ exports[`ios-27 provisional geometry regression gate > iphone-15 light accessibi
     {
       "background": {
         "color": {
-          "a": 0.2,
+          "a": 0,
           "b": 0,
           "g": 0,
           "r": 0,
@@ -14472,7 +14472,7 @@ exports[`ios-27 provisional geometry regression gate > iphone-15 light large 1`]
     {
       "background": {
         "color": {
-          "a": 0.2,
+          "a": 0,
           "b": 0,
           "g": 0,
           "r": 0,
@@ -17775,7 +17775,7 @@ exports[`ios-27 provisional geometry regression gate > iphone-18-pro light large
     {
       "background": {
         "color": {
-          "a": 0.2,
+          "a": 0,
           "b": 0,
           "g": 0,
           "r": 0,
@@ -21078,7 +21078,7 @@ exports[`ios-27 provisional geometry regression gate > iphone-se-3 dark large 1`
     {
       "background": {
         "color": {
-          "a": 0.2,
+          "a": 0,
           "b": 0,
           "g": 0,
           "r": 0,
@@ -24381,7 +24381,7 @@ exports[`ios-27 provisional geometry regression gate > iphone-se-3 light large 1
     {
       "background": {
         "color": {
-          "a": 0.2,
+          "a": 0,
           "b": 0,
           "g": 0,
           "r": 0,

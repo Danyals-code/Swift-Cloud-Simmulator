@@ -4,17 +4,20 @@ The public contract for what renders. Updated in the same PR as any runtime chan
 
 Status: ✅ done · 🟡 partial (limitations noted) · ⬜ planned, phase given · ✗ declined (reason given)
 
-Last updated after the picker and view pass (defect register phases 9.1 and 9.6), which
-gave `DatePicker` a calendar and `ColorPicker` a palette, and drew the views that only
-ever needed drawing.
+Last audited on 2026-09-17 with independent snippets and interaction tests. See
+[the compatibility audit](15-SWIFTUI-COMPATIBILITY-AUDIT.md) for confirmed failures,
+fixes, remaining gaps, resource limits, and reproduction commands. The later
+[visual checklist audit](16-SWIFTUI-VISUAL-CHECKLIST.md) covers presentations, controls,
+containers and system APIs item by item, with native comparison limitations.
 
-**157 ✅ · 48 🟡 · 11 ⬜ · 11 ✗**, over 227 rows, counted from this file rather than carried
-forward. That is a count of what the matrix *claims*; checking every claim against the code
-is the defect register's 10.1, and it is still open for the rows no recent phase touched.
+**This is a browser implementation of a subset, not the Apple SwiftUI runtime.** A supported
+name does not guarantee every overload, modifier combination, or Swift language feature.
+The status rows are a feature inventory, not a measured percentage of SwiftUI compatibility.
 
-Anything not listed renders a labelled placeholder box and is counted by the coverage telemetry
-(FR-4.11, NFR-6). Those counts are visible in the studio's **Coverage** panel and never leave the
-browser; they are what decides what gets built next.
+Known unsupported view names produce placeholders and diagnostics. Unknown framework names can
+still produce unresolved-identifier errors. Recognized unsupported modifiers warn; unknown
+modifiers warn when the checker can establish that the receiver is a view. The Coverage panel
+records these reports locally. It cannot detect all silent semantic differences.
 
 A ⬜ row is not a promise of a date - it is a statement that the construct is recognised, reported by
 name, and exported to Xcode unchanged. A row with a phase number is a commitment; a row with a `-` is
@@ -32,7 +35,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
 | `Divider` | ✅ | 6 | hairline across its stack's axis |
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
-| `ForEach` | ✅ | 6 | ranges, `Identifiable`, `id:` key paths; identity follows the element |
+| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths; binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
 | `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's |
 | `GeometryReader` | ✅ | 7 | reports its real size through `size` and `frame(in:)`, and is its own coordinate space |
 | `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks: correct, and not virtualised. A 200-row stack measures in 7.6 ms against a 120 ms budget, so the cost is real and not yet worth the identity complexity |
@@ -49,7 +52,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- | --- |
 | `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes |
 | `Label` | ✅ | 6 | icon then title |
-| `Image(systemName:)` | 🟡 | 6 | ~175 names drawn as shapes, the rest Unicode substitutes (R2) - see approximations |
+| `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations; unknown names use an explicit fallback, not Apple artwork |
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
 | `GroupBox` | ✅ | - | a titled card: the label above, the contents on a rounded secondary panel |
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
@@ -57,9 +60,9 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
 | `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
-| `Link` / `ShareLink` | ✅ | 6 | drawn tinted; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
+| `Link` / `ShareLink` | 🟡 | 6 | label only, with an explicit warning; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
 | `ProgressView` | ✅ | 6 | determinate bar filling from its leading edge; `.circular` and the indeterminate form are the turning activity indicator |
-| `Gauge` | 🟡 | 7 | `.gaugeStyle` chooses a spinner or a bar; the circular form does not show the value as an arc |
+| `Gauge` | 🟡 | 7 | linear labelled bars and value-dependent circular arcs/markers; native metrics and all label/style arrangements remain approximate |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
 | `TimelineView` | 🟡 | - | its content is drawn once, at the moment of the render. The schedule is a clock the preview does not run, and the `context` is not supplied |
 | `Chart` (Swift Charts) | ⬜ | - | needs a mark model and a plottable-value protocol of its own, which is a package rather than a view |
@@ -74,8 +77,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Toggle` | ✅ | 6 | |
 | `Slider` | ✅ | 6 | |
 | `Stepper` | ✅ | 6 | each half is its own target; `step:` and `in:` are both honoured |
-| `TextField` / `SecureField` | 🟡 | 6 | a real input with a caret; `SecureField` does not mask yet |
-| `TextEditor` | 🟡 | 7 | a single-line field; no multi-line editing |
+| `TextField` / `SecureField` | 🟡 | 6 | String-backed inputs with a caret; `SecureField` masks using a password input. Numeric value/format/formatter bindings and axis-based multiline fields warn as unsupported |
+| `TextEditor` | 🟡 | 7 | editable multiline textarea with String binding, wrapping and scrolling; native selection, keyboard and advanced TextEditor APIs remain incomplete |
 | `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. The popup is drawn at the bottom rather than anchored to the control |
 | `DatePicker` | 🟡 | 7 | a formatted row that opens onto a calendar: pick a day, page the month. `displayedComponents:` chooses date, time or both. No time-of-day editor, so the row's time is the binding's own |
 | `ColorPicker` | 🟡 | 7 | opens onto SwiftUI's named colours as swatches. Not a continuous surface - see approximations |
@@ -85,33 +88,38 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `List` | ✅ | 6 | plain, the grouped styles and `.sidebar`, which names its sections in sentence case on the grouped background |
+| `List` | 🟡 | 6 | plain/grouped/sidebar styles; binding collection closures are unsupported |
 | `Section` | ✅ | 6 | header and footer, the footer in the secondary colour under the card |
 | `Form` | ✅ | 6 | the grouped-list form |
 | `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included |
-| `.onMove` | 🟡 | 7 | `move(fromOffsets:toOffset:)` works; there is no drag-to-reorder UI |
-| `.swipeActions` | 🟡 | 7 | recognised; the revealed action is the standard Delete |
+| `.onMove` | ⬜ | - | warns; no reorder UI or modifier callback. The array move helper is separate |
+| `.swipeActions` | ⬜ | - | warns; custom actions are ignored. Standard delete requires `.onDelete` |
 | `.searchable` | ✅ | 7 | a field above the content, with its magnifying glass, writing its binding |
-| `.refreshable` | ⬜ | - | pull-to-refresh has no meaning in a static preview |
+| `.refreshable` | ⬜ | - | pull-to-refresh callback is not implemented |
 | `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |
 | `Table` / `OutlineGroup` | ⬜ | - | a labelled placeholder. The closure of a view the preview does not draw is no longer run, so a `TableColumn`'s row parameter cannot trap |
-| `NavigationStack` + `NavigationLink` | ✅ | 6 | both the `destination:` and `value:` forms |
-| `.navigationDestination` | ✅ | 6 | `for:` with a metatype, resolved on push |
+| `NavigationStack` + `NavigationLink` | 🟡 | 6 | destination/value links work. Bound `NavigationStack(path:)` is not synchronized and now warns |
+| `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
-| `.toolbar` | ✅ | 6 | bar buttons leading and trailing, singly or in a `ToolbarItemGroup` |
+| `.toolbar` | 🟡 | 6 | leading/trailing items work; keyboard, bottomBar and principal placements warn and are omitted |
 | `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, and `.page`, whose dots are also the way through - a preview has no swipe |
-| `NavigationSplitView` | ✅ | - | collapses to a navigation stack showing the sidebar, which is what a phone does |
+| `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
 
 ## Presentation
 
-| Modifier | Status | Phase |
-| --- | --- | --- |
-| `.sheet` (+ `presentationDetents`) | ✅ | 6 |
+| Modifier | Status | Phase | Notes |
+| --- | --- | --- | --- |
+| `.sheet` (+ `presentationDetents`) | 🟡 | 6 | medium/large/fraction/height and supplied selection; no detent dragging |
 | `.fullScreenCover` | ✅ | 6 |
-| `.alert` | 🟡 | 6 | title and message over a button strip built the way iOS builds one: full-width rows divided by hairlines, two side by side, `.cancel` leading and semibold, `.destructive` red. No text-field alerts |
-| `.confirmationDialog` | 🟡 | 6 | anchored to the bottom edge |
-| `.popover` | ✅ | - | presented as a sheet, which is what iOS does at this width |
+| `.alert` | 🟡 | 6 | title/message, action pills and bound text/secure fields; backdrop does not dismiss. Native keyboard/focus and all overloads incomplete |
+| `.confirmationDialog` | 🟡 | 6 | floating capsule-action panel matched to supplied iPhone capture; explicit title visibility, destructive actions and backdrop dismissal; platform adaptation approximate |
+| `.popover` | 🟡 | - | always sheet-shaped; no anchored regular-width popover |
+| `.presentationBackground` | 🟡 | - | Color and Material work; custom view backgrounds warn |
+| `.presentationBackgroundInteraction` | 🟡 | - | enabled/disabled and enabled(upThrough:) control background hit testing for the current sheet detent; no detent dragging |
+| `.inspector` | 🟡 | - | iPhone sheet adaptation and binding dismissal; no iPad trailing-column implementation |
+| `.presentationDragIndicator` / `.presentationCornerRadius` | ✅ | - | explicit visibility/radius; automatic grabber for multiple detents |
+| `.interactiveDismissDisabled` | 🟡 | - | prevents preview backdrop dismissal; native swipe gesture absent |
 | `@Environment(\.dismiss)` | ✅ | 7 | closes whatever is presented when it is called |
 
 ## Modifiers - layout and sizing
@@ -119,7 +127,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Modifier | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `.frame(width:height:alignment:)` | ✅ | 3 | |
-| `.frame(minWidth:idealWidth:maxWidth:...)` | ✅ | 3 | the flexible form; `.infinity` handling |
+| `.frame(minWidth:idealWidth:maxWidth:...)` | 🟡 | 3 | min/max constraints and maximum infinity; ideal dimensions are not applied |
 | `.padding` | ✅ | 3 | all edge-set forms |
 | `.fixedSize` | ✅ | 6 | both the whole-view and per-axis forms |
 | `.layoutPriority` | ✅ | 7 | the highest-priority group takes its space first |
@@ -136,8 +144,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Modifier | Status | Phase |
 | --- | --- | --- |
 | `.foregroundStyle` / `.foregroundColor` | ✅ | 3 |
-| `.background` (colour, gradient, shape, view) | ✅ | 6 | materials included - see the `Material` row |
-| `.overlay` | ✅ | 6 | |
+| `.background` (colour, gradient, shape, view) | ✅ | 6 | materials, content builders, alignment, and built-in shape clipping via `in:`; `fillStyle:` warns as unsupported |
+| `.overlay` | ✅ | 6 | view arguments and content builders, including interactive content and alignment |
 | `.font` (text styles and `.system(size:weight:design:)`) | ✅ | 6 | |
 | `.bold` / `.italic` / `.fontWeight` | ✅ | 6 | compose with `.font` in either order |
 | `.opacity` | ✅ | 3 |
@@ -155,7 +163,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.tint` / `.accentColor` | ✅ | 6 |
 | `.buttonStyle` | 🟡 | 6 | `.bordered` and `.borderedProminent`; others fall back to plain. `.controlSize` scales it and `.buttonBorderShape` rounds it |
 | `.toggleStyle` | ✅ | - | `.switch`, `.button` and `.checkbox` each draw differently, and all three stay pressable |
-| `.pickerStyle` | ✅ | - | `.segmented`, `.inline` and `.wheel` draw their options on screen, each option pressable; `.menu` and `.navigationLink` open onto them. The wheel is a dimmed column, not a spinner |
+| `.pickerStyle` | 🟡 | - | segmented/menu/inline selection; wheel is a dimmed column. Navigation-link and palette styles warn. Menu displays the selected label |
 | `.labelStyle` | ✅ | - | `.iconOnly` and `.titleOnly` drop the half they name; inherited, so a Button can set it for its Label |
 | `.controlSize` / `.buttonBorderShape` | ✅ | - | the first scales a bordered button's padding, the second its corner |
 | `.listStyle` / `.textFieldStyle` | ✅ | 6 |
@@ -201,10 +209,16 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.sequenced` / `.exclusively` | 🟡 | 7 | accepted; treated as simultaneous |
 | `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render |
 | `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency |
-| `.onChange(of:)` | ✅ | 7 | not fired for the initial value, as SwiftUI does not |
+| `.onChange(of:)` | ✅ | 7 | one-value and explicit zero/two-parameter callbacks; `initial: true` runs on first appearance. Independent modifiers track independent previous values |
 | `.onReceive` | ⬜ | - | needs Combine, which needs publishers and a scheduler the preview does not have |
 | `.disabled` / `.allowsHitTesting` | ✅ | 7 |
-| `.focused` | 🟡 | - | `@FocusState` is storage the code reads and writes; nothing focuses a field from outside the program, since the preview has no keyboard |
+| `.focused` | ⬜ | - | warns; `@FocusState` storage exists but native focus synchronization is absent |
+| `.onSubmit` / `.keyboardType` / `.submitLabel` | 🟡 | - | common text-field Enter submission and browser input/return-key hints, including inherited modifiers; no iOS keyboard rendering or complete submit-scope semantics |
+| `.textInputAutocapitalization` / `.autocorrectionDisabled` | 🟡 | - | browser input hints; actual behavior depends on the browser and keyboard |
+| `.contextMenu` | 🟡 | - | action menu on hold, right-click or Shift-F10; normal child button taps preserved; custom previews warn; nested/selection menus incomplete |
+| `.badge` | 🟡 | - | integer/string/Text badges on tabs and list rows; zero integer hidden; advanced styling incomplete |
+| `.searchScopes` / `.searchSuggestions` | ⬜ | - | warn; no UI |
+| `.popoverTip` / `.fileImporter` / `.fileExporter` | ⬜ | - | warn; platform integration absent |
 
 ## Animation
 
@@ -230,8 +244,8 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- |
 | `App` / `@main` / `WindowGroup` | ✅ | 3 |
 | `Scene` phases | 🟡 | - | `scenePhase` reads `.active`, because the preview's one window is always on screen |
-| `@State` | ✅ | 3 |
-| `@Binding` (and `$value` projections) | ✅ | 6 | passes down any number of views |
+| `@State` | 🟡 | 3 | declaration initialization works; `_value = State(initialValue:)` in a custom initializer is unsupported |
+| `@Binding` (and `$value` projections) | 🟡 | 6 | ordinary control/custom-view projections work; collection binding closures do not |
 | Key paths (`\.self`, `\.id`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`); **not where a closure is expected**, so `map(\.name)` is rejected |
 | `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere. `$store.property` projects a `Binding` into the model, so `Slider(value: $ledger.monthlyBudget)` writes where it reads - the dynamic member lookup SwiftUI puts on the wrapper |
 | `@AppStorage` / `@SceneStorage` | 🟡 | - | keyed by the string, so views sharing a key share a value and it outlives the view that wrote it. Held for the session rather than on disk - see approximations |
@@ -344,13 +358,8 @@ Listed in the exported README so nothing is a surprise on the Mac:
    design. Layout is correct either way - the main thread measures whichever face actually resolved
    rather than reading a transcribed table - but two machines will break lines in different places,
    and neither is CoreText.
-2. **SF Symbols** - Apple's symbol artwork cannot be redistributed to a browser (R2). About a
-   hundred and seventy-five
-   names are *drawn*, as shapes on a 24-unit monoline grid at the proportions SF Symbols uses;
-   everything else falls back to a Unicode character carrying the same meaning. Both are
-   approximations, the shapes differ from Apple's, and the inspector marks every symbol as
-   approximated. The exported Swift still says `Image(systemName:)`, so the real symbol appears the
-   moment the project is built in Xcode.
+2. **SF Symbols** - supported symbol names map to bundled Ionicons assets. These are visual
+   approximations, and unknown names use a fallback. Exported Swift retains `Image(systemName:)`.
 3. **Springs** - `.spring()` and friends are approximated with an overshooting cubic bezier. The
    motion is recognisably springy; it is not the same solver, and it will not match frame for frame.
 4. **Scrolling physics** - native browser scrolling, not iOS rubber-band deceleration.
@@ -452,3 +461,12 @@ The right-hand column is the half that matters. A pass that cries wolf is worse 
 pass, because people stop reading the panel and then the true warnings go unread too -
 and the `mutating` row was exactly that until the defect register's Phase 6: it fired on
 the commonest shape in SwiftUI and offered a fix-it that broke the file it was applied to.
+
+## Additional confirmed gaps from the September 2026 audit
+
+- `@Bindable` is not implemented as a property wrapper.
+- Custom `EnvironmentKey.defaultValue` and type-based environment lookup are not implemented.
+  Missing environment values now stop with an unsupported-runtime diagnostic instead of `nil`.
+- `.safeAreaPadding`, `.gridCellColumns`, and `.symbolEffect` are explicitly recognized as unsupported.
+- `AsyncImage` and `TimelineView` now warn about their existing partial behavior.
+- See the [audit](15-SWIFTUI-COMPATIBILITY-AUDIT.md) before relying on generated code outside the tested subset.

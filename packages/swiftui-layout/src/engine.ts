@@ -122,7 +122,14 @@ export interface PlacedNode {
   readonly hitTarget?: {
     readonly step?: number
     readonly secure?: boolean
+    readonly multiline?: boolean
     readonly inputInset?: number
+    readonly submitHandlerId?: string
+    readonly contextMenuHandlerId?: string
+    readonly inputMode?: 'text' | 'email' | 'tel' | 'url' | 'numeric' | 'decimal' | 'search'
+    readonly enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send'
+    readonly autocapitalization?: string
+    readonly autocorrection?: boolean
     readonly thumbDiameter?: number
     readonly placeholderColor?: RGBA
     readonly cornerRadius?: number
@@ -1270,7 +1277,8 @@ export class LayoutEngine {
         // in z-order. It occupies exactly the frame of what it backs, which is what
         // makes `.padding().background()` cover the padding and
         // `.background().padding()` not.
-        const next = this.place(modifier.content, bounds, inner, out, z, parent)
+        const size = this.measure(modifier.content, { width: bounds.width, height: bounds.height }, inner)
+        const next = this.place(modifier.content, modifier.alignment ? alignedRect(bounds, size, modifier.alignment) : bounds, inner, out, z, parent)
         return this.place(element.child, bounds, inner, out, next, parent)
       }
 
@@ -1609,11 +1617,12 @@ export class LayoutEngine {
         let controlEnv = inner
         let control = element.child
         while (control.kind === 'modified') { controlEnv = childEnvironment(controlEnv, control.modifier); control = control.child }
-        const next = this.place(element.child, bounds, inner, out, z, parent)
+        const passiveContext = modifier.role === 'contextMenu'
+        const next = this.place(element.child, bounds, inner, out, passiveContext ? z + 1 : z, parent)
         out.push({
           id: `${element.id}-hit`,
           frame: bounds,
-          z: next,
+          z: passiveContext ? z : next,
           opacity: modifier.role === 'textField' ? controlEnv.opacity : 1,
           cornerRadius: 0,
           paint: { kind: 'hit' },
@@ -1626,7 +1635,14 @@ export class LayoutEngine {
             color: modifier.color ?? controlEnv.foregroundColor,
             step: modifier.step,
             secure: modifier.secure,
+            multiline: modifier.multiline,
             inputInset: modifier.inputInset,
+            submitHandlerId: modifier.submitHandlerId,
+            contextMenuHandlerId: modifier.contextMenuHandlerId,
+            inputMode: modifier.inputMode,
+            enterKeyHint: modifier.enterKeyHint,
+            autocapitalization: modifier.autocapitalization,
+            autocorrection: modifier.autocorrection,
             thumbDiameter: modifier.thumbDiameter,
             placeholderColor: modifier.placeholderColor,
             cornerRadius: modifier.cornerRadius,

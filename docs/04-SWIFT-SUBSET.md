@@ -5,13 +5,11 @@ names the feature - never a silent wrong answer (FR-3.9).
 
 Legend: **T1** = Phase 1-2 must-have · **T2** = Phase 3-4 · **T3** = Phase 6 · **✗** = out of scope.
 
-**Status after Phase 8.** The vertical slice deliberately shipped a narrow language - structs,
-functions, closures, `if` and `for`. Phase 7 reopened it, because `ObservableObject` needs reference
-semantics and half of real view-model code will not parse without `guard` and `switch`. Phase 8
-finished the job: protocols and extensions, generics, error handling, `inout`, `super`, and
-`async`/`await`. What now runs, and what still does not, is listed in the
-[coverage matrix's language section](05-SWIFTUI-COVERAGE.md#swift-language) - that table is the
-current truth; the tiers below are the original plan.
+**Implementation status.** This interpreter supports common Swift syntax, with substantial gaps
+in type checking, runtime semantics, Foundation, and system frameworks. The tiers below are the
+original roadmap, not a list of shipped guarantees. Use the
+[compatibility audit](15-SWIFTUI-COMPATIBILITY-AUDIT.md) and
+[coverage matrix](05-SWIFTUI-COVERAGE.md#swift-language) for current evidence.
 
 Three of the T1/T2 rows below now read differently in practice, and the matrix says so rather than
 this table pretending otherwise:
@@ -87,7 +85,7 @@ this table pretending otherwise:
 | `Comparable`, `Equatable`, `Hashable`, `Identifiable` | Synthesised conformance | T1 |
 | `URL`, `URLSession` | `fetch`-backed, allowlisted proxy, mock mode | T3 |
 | `Combine` (`Publisher`, `@Published`, `sink`) | `@Published` only; full Combine is ✗ | T2 |
-| `FileManager`, `UserDefaults` | `UserDefaults` via `@AppStorage` → localStorage; `FileManager` is ✗ | T2 |
+| `FileManager`, `UserDefaults` | `UserDefaults` via `@AppStorage` → preview session storage; `FileManager` is ✗ | T2 |
 | `Foundation` beyond the above | ✗ | Diagnostic names the missing symbol |
 
 ## Property wrappers (built-in)
@@ -101,7 +99,7 @@ this table pretending otherwise:
 | `@Published` | T1 | Fires `objectWillChange` on `willSet` |
 | `@EnvironmentObject` | T1 | Environment lookup by type; missing value is a runtime trap, matching SwiftUI |
 | `@Environment` | T1 | Key path into the environment (colour scheme, dynamic type, dismiss, locale) |
-| `@AppStorage` | T2 | localStorage-backed |
+| `@AppStorage` | T2 | session-backed in current runtime; not persistent localStorage |
 | `@SceneStorage` | T3 | sessionStorage-backed |
 | `@FocusState` | T2 | Drives the simulated keyboard |
 | `@GestureState` | T2 | Resets on gesture end |

@@ -4,7 +4,7 @@ import type { ModifierValue, ViewValue } from './view-value'
 /** Visual environment values must survive removal of Group/navigation containers. */
 const INHERITED = new Set([
   'listStyle', 'tint', 'accentColor', 'buttonStyle', 'textFieldStyle', 'toggleStyle', 'pickerStyle',
-  'labelStyle', 'progressViewStyle', 'gaugeStyle', 'controlSize', 'buttonBorderShape',
+  'onSubmit', 'keyboardType', 'submitLabel', 'textInputAutocapitalization', 'autocorrectionDisabled', 'labelStyle', 'progressViewStyle', 'gaugeStyle', 'controlSize', 'buttonBorderShape',
   'disabled', 'allowsHitTesting', 'foregroundStyle', 'foregroundColor', 'imageScale', 'environment', 'dynamicTypeSize',
 ])
 

@@ -185,7 +185,7 @@ describe('the views that only needed drawing', () => {
     const result = run(
       view('TimelineView(.periodic(from: .now, by: 1)) { _ in Text("tick") }'),
     )
-    expect(warnings(result)).toEqual([])
+    expect(warnings(result).join(' ')).toContain('timeline runs only once')
     expect(texts(result)).toContain('tick')
   })
 

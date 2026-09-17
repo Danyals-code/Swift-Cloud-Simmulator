@@ -314,7 +314,7 @@ describe('.progressViewStyle and .gaugeStyle', () => {
     expect(nodes(result).some((n) => n.shape?.shape === 'spinner')).toBe(true)
   })
 
-  it('an accessoryCircular gauge is a spinner, a linear one is not', () => {
+  it('an accessoryCircular gauge uses a value marker and never a loading spinner', () => {
     const circular = run(
       app(
         '    var body: some View { Gauge(value: 0.5) { Text("g") }.gaugeStyle(.accessoryCircular) }',
@@ -325,7 +325,9 @@ describe('.progressViewStyle and .gaugeStyle', () => {
         '    var body: some View { Gauge(value: 0.5) { Text("g") }.gaugeStyle(.accessoryLinear) }',
       ),
     )
-    expect(nodes(circular).some((n) => n.shape?.shape === 'spinner')).toBe(true)
+    expect(nodes(circular).some((n) => n.shape?.shape === 'spinner')).toBe(false)
+    expect(nodes(circular).some((n) => n.id.endsWith('-marker'))).toBe(true)
+    expect(nodes(circular).some((n) => n.path)).toBe(true)
     expect(nodes(linear).some((n) => n.shape?.shape === 'spinner')).toBe(false)
   })
 })

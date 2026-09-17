@@ -140,6 +140,9 @@ export interface ScreenLayout {
     readonly dismissId: string | null
     readonly cornerRadius?: number
     readonly showsDragIndicator?: boolean
+    readonly background?: Fill
+    readonly backgroundInteraction?: number
+    readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
     readonly screen?: ScreenLayout
   } | null
   readonly hitTargets: ReadonlyMap<string, string>
@@ -272,9 +275,12 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
         detent: ui.overlay.detent,
         detents: ui.overlay.detents,
         anchorId: ui.overlay.anchorId,
+        backgroundInteraction: ui.overlay.backgroundInteraction,
         dismissId: ui.overlay.dismissId,
         cornerRadius: ui.overlay.cornerRadius,
         showsDragIndicator: ui.overlay.showsDragIndicator,
+        ...(ui.overlay.background ? { background: resolveFillArg(ui.overlay.background, scheme) ?? undefined } : {}),
+        ...(MATERIALS[tokenName(ui.overlay.background) ?? ''] ? { material: { ...MATERIALS[tokenName(ui.overlay.background)!]!, light: scheme === 'light' } } : {}),
         ...(ui.overlay.screen && ['sheet', 'cover', 'popover'].includes(ui.overlay.kind) ? {
           screen: screenToLayout({ ...ui, ...ui.overlay.screen }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : ui.overlay.showsDragIndicator !== false ? 10 : 12 } }),
         } : {}),
@@ -714,6 +720,22 @@ class Converter {
     }
   }
 
+  private badgeText(value: SwiftValue | undefined): string | null {
+    if (!value || value.kind === 'nil' || (value.kind === 'int' && value.value === 0)) return null
+    const text = stringArg(value) ?? numberArg(value)?.toString() ?? (asView(value) ? textIn(asView(value)!).join(' ') : null)
+    return text || null
+  }
+
+  private badgePill(text: string, path: string): LayoutElement {
+    const label: LayoutElement = { kind: 'modified', id: `${path}-font`,
+      modifier: { kind: 'font', font: { ...fontForToken('footnote', 'large')!, size: 12, lineHeight: 16 } },
+      child: { kind: 'modified', id: `${path}-color`, modifier: { kind: 'foregroundStyle', color: rgba(255, 255, 255) },
+        child: { kind: 'text', id: `${path}-text`, text } } }
+    return this.background({ kind: 'modified', id: `${path}-frame`, modifier: { kind: 'frame', minWidth: 18, minHeight: 18, alignment: CENTER },
+      child: { kind: 'modified', id: `${path}-pad`, modifier: { kind: 'padding', insets: insets(1, 4, 1, 4) }, child: label } },
+      path, rgba(255, 56, 60), 999, 'circular')
+  }
+
   /** The tab bar: evenly divided items, the selected one tinted. */
   tabBar(bar: NonNullable<ResolvedUI['tabBar']>): LayoutElement {
     const outer = this.styles
@@ -764,7 +786,13 @@ class Converter {
         child: tinted,
       }
 
-      const surface = selected ? this.background(expanded, `tab-${index}-selected`, { ...this.color('label'), a: 0.07 }, SURFACES.tab.selectedRadius, 'circular') : expanded
+      const badge = this.badgeText(labelled(item.args, 'badge'))
+      const decorated: LayoutElement = badge === null ? expanded : { kind: 'modified', id: `tab-${index}-badge-overlay`,
+        modifier: { kind: 'overlay', alignment: { horizontal: 'center', vertical: 'top' }, content: {
+          kind: 'modified', id: `tab-${index}-badge-offset`, modifier: { kind: 'offset', x: 18, y: 2 },
+          child: this.badgePill(badge, `tab-${index}-badge`),
+        } }, child: expanded }
+      const surface = selected ? this.background(decorated, `tab-${index}-selected`, { ...this.color('label'), a: 0.07 }, SURFACES.tab.selectedRadius, 'circular') : decorated
       return item.path ? this.withHitTarget(surface, item.path, 'button', labelOf(item)) : surface
     })
 
@@ -797,7 +825,7 @@ class Converter {
   /** Two actions share a row; more actions stack. Native alert actions use pills;
    * confirmation dialogs retain their separate, provisionally modeled row style. */
   private alertButtons(overlay: Overlay): LayoutElement[] {
-    const buttons = overlay.views.filter((v) => v.name === 'Button')
+    const buttons = overlay.views.filter((v) => v.name === 'Button' && (overlay.kind !== 'dialog' || tokenName(labelled(v.args, 'role')) !== 'cancel'))
     if (buttons.length === 0) {
       // A dialog with something other than buttons in it, or an alert with none. The
       // content is converted as it stands rather than forced into a strip.
@@ -807,7 +835,7 @@ class Converter {
     const cancelAt = buttons.findIndex((v) => tokenName(labelled(v.args, 'role')) === 'cancel')
     const others = buttons.filter((_, i) => i !== cancelAt)
     const cancel = cancelAt >= 0 ? buttons[cancelAt]! : null
-    const side = buttons.length === 2
+    const side = overlay.kind === 'alert' && buttons.length === 2
 
     const ordered = cancel ? (side ? [cancel, ...others] : [...others, cancel]) : buttons
 
@@ -834,41 +862,18 @@ class Converter {
       }
     })
 
-    if (overlay.kind === 'alert') {
-      return [{ kind: 'modified', id: 'ov-actions-pad', modifier: { kind: 'padding', insets: insets(0, 16, 16, 16) },
-        child: { kind: 'stack', id: 'ov-btns', axis: side ? 'horizontal' : 'vertical', spacing: 8, alignment: CENTER,
-          children: rows.map((row, i) => this.background(row, `ov-btn${i}-pill`, { ...this.color('label'), a: 0.13 }, 999, 'circular')) } }]
-    }
+    return [{ kind: 'modified', id: 'ov-actions-pad', modifier: { kind: 'padding', insets: insets(0, 16, 16, 16) },
+      child: { kind: 'stack', id: 'ov-btns', axis: side ? 'horizontal' : 'vertical', spacing: 8, alignment: CENTER,
+        children: rows.map((row, i) => this.background(row, `ov-btn${i}-pill`, { ...this.color('label'), a: 0.13 }, 999, 'circular')) } }]
+  }
 
-    const rule = (id: string, vertical: boolean): LayoutElement => ({
-      kind: 'modified',
-      id,
-      // The vertical rule is a fixed height, not a greedy one. `maxHeight: .infinity`
-      // made the pair of buttons take every point the screen would give and turned a
-      // two-button alert into a full-height panel.
-      modifier: vertical
-        ? { kind: 'frame', width: this.separatorHeight, height: ALERT_BUTTON_HEIGHT, alignment: CENTER }
-        : { kind: 'frame', maxWidth: Number.POSITIVE_INFINITY, height: this.separatorHeight, alignment: CENTER },
-      child: { kind: 'fill', id: `${id}l`, fill: { kind: 'solid', color: this.color('separator') } },
-    })
-
-    const divided: LayoutElement[] = []
-    rows.forEach((row, index) => {
-      if (index > 0) divided.push(rule(`ov-btnrule${index}`, side))
-      divided.push(row)
-    })
-
-    return [
-      rule('ov-btnrule-top', false),
-      {
-        kind: 'stack',
-        id: 'ov-btns',
-        axis: side ? 'horizontal' : 'vertical',
-        spacing: 0,
-        alignment: CENTER,
-        children: divided,
-      },
-    ]
+  private alertField(view: ViewValue, path: string): LayoutElement {
+    const input = this.withHitTarget({ kind: 'modified', id: `${path}frame`,
+      modifier: { kind: 'inputFrame', minHeight: 48, paddingY: 13 },
+      child: { kind: 'empty', id: `${path}inner` } }, view.path ?? path, 'textField', labelOf(view), view, disabledBy(view))
+    const paddedInput = input.kind === 'modified' && input.modifier.kind === 'hitTarget'
+      ? { ...input, modifier: { ...input.modifier, inputInset: 16 } } : input
+    return this.background(paddedInput, `${path}-capsule`, { ...this.color('label'), a: 0.13 }, 999, 'circular')
   }
 
   /** A sheet, cover, alert, dialog or menu, laid out as its own little screen. */
@@ -878,7 +883,7 @@ class Converter {
     if (overlay.kind === 'menu') return this.menuSurface(overlay)
 
     if (overlay.kind === 'alert' || overlay.kind === 'dialog') {
-      const title = this.styledText('ov-title', overlay.title, 'headline', 'label', 600)
+      const title = this.styledText('ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600)
       const message = overlay.message
         ? [this.styledText('ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel')]
         : []
@@ -904,7 +909,12 @@ class Converter {
         spacing: 0,
         alignment: CENTER,
         children: [
-          ...(overlay.title || message.length > 0 ? [this.fill(head, 'ov-head-fill', { horizontal: 'leading', vertical: 'center' }, false)] : []),
+          ...(overlay.title || message.length > 0 ? [this.fill(head, 'ov-head-fill', { horizontal: overlay.kind === 'dialog' ? 'center' : 'leading', vertical: 'center' }, false)] : []),
+          ...(overlay.kind === 'alert' ? overlay.views.filter(v => v.name === 'TextField' || v.name === 'SecureField').map((v, i): LayoutElement => ({
+            kind: 'modified', id: `ov-input${i}-pad`,
+            modifier: { kind: 'padding', insets: insets(0, 16, 20, 16) },
+            child: this.alertField(v, `ov-input${i}`),
+          })) : []),
           ...this.alertButtons(overlay),
         ],
         debugName: overlay.kind === 'alert' ? ALERT : DIALOG,
@@ -1059,6 +1069,11 @@ class Converter {
       if (boolArg(modifierArg(view, 'disabled', 0))) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
       if (!segmented) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
     }
+    // A passive context target sits behind descendant controls. Those controls
+    // also carry the menu handler, so a hold never steals their normal short tap.
+    if (!view.intent && view.contextMenuPath) {
+      element = this.withHitTarget(element, path, 'contextMenu', labelOf(view), view, disabledBy(view))
+    }
     for (const { index, modifier } of accessibility) {
       element = { kind: 'modified', id: `${path}m${index}`, modifier, child: element }
     }
@@ -1094,6 +1109,8 @@ class Converter {
         role,
         enabled: !disabled,
         ...control,
+        ...(view?.contextMenuPath ? { contextMenuHandlerId: handlerIdFor(`${view.contextMenuPath}/context-menu`) } : {}),
+        ...(role === 'textField' && view ? this.inputOptions(view, path) : {}),
         ...(role === 'slider' ? { color: this.color('accentColor'), thumbDiameter: CONTROL_PARTS.slider.thumb } : {}),
         ...(role === 'textField' ? { inputInset: this.styles.textField === 'roundedBorder' ? CONTROL_PARTS.field.insetX : 0, placeholderColor: this.color('secondaryLabel') } : {}),
         ...(role === 'button' ? { cornerRadius: this.styles.buttonBorderShape === 'roundedRectangle' ? this.appearance.button.roundedRectangleRadius : this.appearance.button.cornerRadius } : {}),
@@ -1101,6 +1118,20 @@ class Converter {
       },
       child: element,
       ...(view?.span ? { origin: view.span } : {}),
+    }
+  }
+
+  private inputOptions(view: ViewValue, path: string) {
+    const mode = tokenName(modifierArg(view, 'keyboardType', 0))
+    const inputMode = ({ emailAddress: 'email', URL: 'url', phonePad: 'tel', numberPad: 'numeric', decimalPad: 'decimal', numbersAndPunctuation: 'decimal', webSearch: 'search' } as const)[mode as 'emailAddress'] ?? 'text'
+    const requested = tokenName(modifierArg(view, 'submitLabel', 0)) ?? 'return'
+    const enterKeyHint = ({ done: 'done', go: 'go', next: 'next', previous: 'previous', search: 'search', send: 'send', continue: 'next', join: 'go', route: 'go' } as const)[requested as 'done'] ?? 'enter'
+    const capitalization = tokenName(modifierArg(view, 'textInputAutocapitalization', 0))
+    const correction = view.modifiers.find(m => m.name === 'autocorrectionDisabled')
+    return { inputMode, enterKeyHint,
+      ...(view.modifiers.some(m => m.name === 'onSubmit' && m.closure) ? { submitHandlerId: handlerIdFor(`${path}/submit`) } : {}),
+      ...(capitalization ? { autocapitalization: capitalization === 'never' ? 'none' : capitalization } : {}),
+      ...(correction ? { autocorrection: correction.args[0] ? !boolArg(correction.args[0].value) : false } : {}),
     }
   }
 
@@ -1112,15 +1143,18 @@ class Converter {
     max?: number
     step?: number
     secure?: boolean
+    multiline?: boolean
   } {
     switch (view.name) {
       case 'TextField':
-      case 'SecureField': {
+      case 'SecureField':
+      case 'TextEditor': {
         const bound = bindingValue(labelled(view.args, 'text'))
         return {
           value: bound?.kind === 'string' ? bound.value : '',
           placeholder: stringArg(positional(view.args, 0)) ?? '',
           secure: view.name === 'SecureField',
+          multiline: view.name === 'TextEditor',
         }
       }
       case 'Slider': {
@@ -1382,7 +1416,7 @@ class Converter {
         return this.picker(view, path, origin)
 
       case 'TextEditor':
-        return this.textField({ ...view, name: 'TextField' }, path, origin)
+        return this.textField(view, path, origin)
 
       case 'DisclosureGroup':
         return this.disclosureGroup(view, path, origin)
@@ -1557,10 +1591,10 @@ class Converter {
           face({ weight: resolveWeightArg(first) ?? 700 })
           break
         case 'bold':
-          face({ weight: 700 })
+          if (first?.kind !== 'bool' || first.value) face({ weight: 700 })
           break
         case 'italic':
-          face({ italic: true })
+          face({ italic: first?.kind !== 'bool' || first.value })
           break
         case 'monospaced':
           face({ family: MONO_FAMILY })
@@ -1615,60 +1649,21 @@ class Converter {
     }
   }
 
-  /**
-   * `GroupBox { … }` - a titled card.
-   *
-   * iOS draws it as secondary-background panel with a 12pt radius and the label
-   * above it in the body font, which is what this builds. It was one of the
-   * placeholders that failed the fourteen-snippet measure, and it is a container
-   * rather than a control: nothing about it needed a new mechanism, only the drawing.
-   */
+  /** GroupBox keeps its label and content inside one inset surface. */
   private groupBox(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label')
-
-    const content: LayoutElement = {
-      kind: 'stack',
-      id: `${path}body`,
-      axis: 'vertical',
-      spacing: 8,
-      alignment: { horizontal: 'leading', vertical: 'center' },
-      children: this.convertList(view.children, `${path}c`, 'vertical'),
-    }
-
-    const padded: LayoutElement = {
-      kind: 'modified',
-      id: `${path}pad`,
-      modifier: { kind: 'padding', insets: uniformInsets(14) },
-      child: {
-        kind: 'modified',
-        id: `${path}wide`,
-        modifier: {
-          kind: 'frame',
-          maxWidth: Number.POSITIVE_INFINITY,
-          alignment: { horizontal: 'leading', vertical: 'center' },
-        },
-        child: content,
-      },
-    }
-
-    const card = this.background(
-      padded,
-      `${path}bg`,
-      this.color('secondarySystemGroupedBackground'),
-      12,
-    )
-
-    if (!title) return { ...card, ...origin }
-
-    return {
-      kind: 'stack',
-      id: path,
-      axis: 'vertical',
-      spacing: 8,
-      alignment: { horizontal: 'leading', vertical: 'center' },
-      children: [this.styledText(`${path}t`, title, 'body', 'label', 600), card],
-      ...origin,
-    }
+    const title = stringArg(positional(view.args, 0))
+    const labels = title !== null ? [this.styledText(`${path}t`, title, 'headline', 'label')]
+      : this.convertList(argViews(view, 'label'), `${path}label`, 'horizontal')
+    const body: LayoutElement = { kind: 'stack', id: `${path}body`, axis: 'vertical', spacing: 8,
+      alignment: CENTER, children: this.convertList(view.children, `${path}c`, 'vertical') }
+    const content: LayoutElement = { kind: 'stack', id: path, axis: 'vertical', spacing: 0,
+      alignment: CENTER, ...origin, children: [
+        ...labels.map((label, i): LayoutElement => ({ kind: 'modified', id: `${path}label${i}wide`,
+          modifier: { kind: 'frame', maxWidth: Infinity, alignment: { horizontal: 'leading', vertical: 'center' } }, child: label })),
+        { kind: 'modified', id: `${path}bodywide`, modifier: { kind: 'frame', maxWidth: Infinity, alignment: CENTER }, child: body },
+      ] }
+    return this.background({ kind: 'modified', id: `${path}pad`, modifier: { kind: 'padding', insets: uniformInsets(16) }, child: content },
+      `${path}bg`, this.color('secondarySystemBackground'), 8)
   }
 
   /**
@@ -1993,7 +1988,7 @@ class Converter {
       id: path,
       rows,
       spacing: numberArg(labelled(view.args, 'horizontalSpacing')) ?? defaultSpacing(),
-      rowSpacing: numberArg(labelled(view.args, 'verticalSpacing')) ?? defaultSpacing(),
+      rowSpacing: numberArg(labelled(view.args, 'verticalSpacing')) ?? (flattened.every(row => row.name === 'GridRow' && row.children.every(cell => cell.name === 'Text')) ? 0 : defaultSpacing()),
       alignment: stackAlignment(view.args, 'vertical'),
       ...origin,
     }
@@ -2265,7 +2260,7 @@ class Converter {
     return this.background(
       padded,
       `${path}btn`,
-      prominent ? tint : { ...tint, a: tint.a * 0.15 },
+      prominent ? tint : { ...tint, a: tint.a * (this.scheme === 'dark' ? 0.25 : 0.18) },
       radius,
       cornerStyle,
     )
@@ -2366,6 +2361,7 @@ class Converter {
         child: label,
       }
       return {
+        kind: 'modified', id: `${path}button-capsule`, modifier: { kind: 'cornerRadius', radius: 999, style: 'circular' }, child: {
         kind: 'modified',
         id: `${path}btnbg`,
         modifier: {
@@ -2376,7 +2372,7 @@ class Converter {
             fill: {
               kind: 'solid',
               color: on
-                ? { ...this.color('accentColor'), a: 0.18 }
+                ? { ...this.color('accentColor'), a: this.scheme === 'dark' ? 0.2 : 0.18 }
                 : this.color('systemFill'),
             },
           },
@@ -2384,16 +2380,16 @@ class Converter {
         child: {
           kind: 'modified',
           id: `${path}btnradius`,
-          modifier: { kind: 'cornerRadius', radius: 8 },
+          modifier: { kind: 'cornerRadius', radius: 999, style: 'circular' },
           child: {
             kind: 'modified',
             id: `${path}btnpad`,
-            modifier: { kind: 'padding', insets: insets(7, 14, 7, 14) },
+            modifier: { kind: 'padding', insets: insets(6, 12, 6, 12) },
             child: tinted,
           },
         },
         ...origin,
-      }
+      } }
     }
 
     if (style === 'checkbox') {
@@ -2433,7 +2429,12 @@ class Converter {
     }
   }
 
-  private textField(_view: ViewValue, path: string, origin: object): LayoutElement {
+  private textField(view: ViewValue, path: string, origin: object): LayoutElement {
+    if (view.name === 'TextEditor') return {
+      kind: 'modified', id: `${path}frame`,
+      modifier: { kind: 'frame', minWidth: 44, maxWidth: Infinity, minHeight: 88, maxHeight: Infinity, alignment: CENTER },
+      child: { kind: 'empty', id: `${path}inner` }, ...origin,
+    }
     const bordered = this.styles.textField === 'roundedBorder'
     const m = CONTROL_PARTS.field
     const box: LayoutElement = {
@@ -2452,7 +2453,7 @@ class Converter {
     const ticks = state.step && max > min ? Math.floor((max - min) / state.step) : 0
     return { kind: 'slider', id: path, height: CONTROL_PARTS.slider.height,
       style: { fraction: max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0,
-        trackHeight: CONTROL_PARTS.slider.track, thumbDiameter: CONTROL_PARTS.slider.thumb,
+        trackHeight: CONTROL_PARTS.slider.track, thumbDiameter: CONTROL_PARTS.slider.thumb, thumbHeight: CONTROL_PARTS.slider.thumbHeight,
         tint: this.color('accentColor'), trackColor: this.color('tertiarySystemFill'), thumbColor: rgba(255, 255, 255),
         ...(ticks > 0 && ticks <= 20 ? { ticks: Array.from({ length: ticks + 1 }, (_, i) => i * state.step! / (max - min)) } : {}),
       }, ...origin }
@@ -2604,9 +2605,9 @@ class Converter {
       kind: 'stack',
       id: `${path}stack`,
       axis: 'vertical',
-      spacing: 6,
+      spacing: 3,
       alignment: { horizontal: 'leading', vertical: 'center' },
-      children: [this.styledText(`${path}title`, title, 'footnote', 'secondaryLabel'), bar],
+      children: [this.styledText(`${path}title`, title, 'body', 'label'), bar],
     }
   }
 
@@ -2618,7 +2619,8 @@ class Converter {
     // string no date picker on iOS has ever shown - and `displayedComponents:` says
     // which halves of it to draw.
     const date = view.name === 'DatePicker' ? asDate(selection ?? undefined) : null
-    const value = date
+    const selectedOption = view.name === 'Picker' ? view.children.find(child => boolArg(labelled(child.args, 'selected'))) : undefined
+    const value = selectedOption ? textIn(selectedOption).join(' ') : date
       ? dateText(date.epochSeconds, datePickerStyleFor(view))
       : selection
         ? displayValue(selection)
@@ -2701,28 +2703,9 @@ class Converter {
         },
       }
 
-      // The shadow under the chosen segment, which is what lifts it off the track.
-      // Without it the pill reads as a lighter patch of the same surface rather than
-      // as something sitting on top of it, and the control looks like iOS 12.
-      const pill: LayoutElement = chosen
-        ? {
-            kind: 'modified',
-            id: `${path}seg${index}lift`,
-            modifier: {
-              kind: 'shadow',
-              color: { r: 0, g: 0, b: 0, a: 0.12 },
-              radius: 3,
-              x: 0,
-              y: 1,
-            },
-            child: this.background(
-              content,
-              `${path}seg${index}bg`,
-              this.color('systemBackground'),
-              CONTROL_PARTS.segmented.selectedRadius,
-            ),
-          }
-        : content
+      const pill = chosen ? this.background(content, `${path}seg${index}bg`,
+        this.scheme === 'dark' ? rgba(105, 105, 111) : rgba(255, 255, 255),
+        CONTROL_PARTS.segmented.selectedRadius, 'circular') : content
 
       return this.withHitTarget(
         pill,
@@ -2734,41 +2717,13 @@ class Converter {
       )
     })
 
-    /*
-      The hairlines between unselected segments.
-
-      iOS divides adjacent segments with a short vertical rule and hides the two next
-      to the chosen pill, because the pill's own edge already separates them. Drawn
-      here rather than as a border on each segment, which would double up between
-      every pair and leave the outermost ones with a rule against nothing.
-    */
-    const chosenIndex = view.children.findIndex((child) =>
-      truthyBinding(labelled(child.args, 'selected')),
-    )
-    const withDividers: LayoutElement[] = []
-    segments.forEach((segment, index) => {
-      if (index > 0 && index !== chosenIndex && index - 1 !== chosenIndex) {
-        withDividers.push({
-          kind: 'modified',
-          id: `${path}seg${index}div`,
-          modifier: { kind: 'frame', width: this.separatorHeight, height: 16, alignment: CENTER },
-          child: {
-            kind: 'fill',
-            id: `${path}seg${index}divl`,
-            fill: { kind: 'solid', color: this.color('separator') },
-          },
-        })
-      }
-      withDividers.push(segment)
-    })
-
     const row: LayoutElement = {
       kind: 'stack',
       id: `${path}segs`,
       axis: 'horizontal',
-      spacing: 2,
+      spacing: 0,
       alignment: CENTER,
-      children: withDividers,
+      children: segments,
     }
 
     return {
@@ -2777,8 +2732,8 @@ class Converter {
         `${path}segtrack`,
         // `tertiarySystemFill`, which is the track iOS draws. `systemFill` is nearly
         // twice as dark and made the control look like a filled box.
-        this.color('tertiarySystemFill'),
-        9,
+        this.scheme === 'dark' ? rgba(49, 49, 54) : rgba(238, 238, 239),
+        CONTROL_PARTS.segmented.radius, 'circular',
       ),
       ...origin,
     }
@@ -3000,7 +2955,7 @@ class Converter {
     const title = stringArg(positional(view.args, 0)) ?? ''
     // Stamped by the resolver, which owns the open/closed state. A group drawn
     // without one has not been through it, so it draws closed rather than guessing.
-    const expanded = boolArg(labelled(view.args, 'isExpanded'))
+    const expanded = truthyBinding(labelled(view.args, 'isExpanded'))
 
     const row: LayoutElement = {
       kind: 'stack',
@@ -3014,7 +2969,7 @@ class Converter {
         {
           kind: 'modified',
           id: `${path}chevcolor`,
-          modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
+          modifier: { kind: 'foregroundStyle', color: this.color('label') },
           // The chevron is the state: down when open, trailing when closed, which is
           // what iOS draws and the only thing on screen that says which it is.
           child: this.symbolImage(`${path}chev`, expanded ? 'chevron.down' : 'chevron.right'),
@@ -3022,6 +2977,7 @@ class Converter {
       ],
     }
 
+    if (this.listDepth > 0) return this.withHitTarget(row, `${path}/row`, 'button', title)
     return {
       kind: 'stack',
       id: path,
@@ -3036,7 +2992,6 @@ class Converter {
     }
   }
 
-  /** `Gauge` - a labelled bar, which is the accessible form of every gauge style. */
   /**
    * `ContentUnavailableView("No Results", systemImage: "magnifyingglass")`.
    *
@@ -3115,32 +3070,68 @@ class Converter {
     const max = range?.kind === 'range' ? range.upper : 1
     const fraction = max === min ? 0 : Math.max(0, Math.min(1, (value - min) / (max - min)))
 
-    // A gauge is a progress view with a range, so the drawing is shared and only the
-    // style name differs: every `accessoryCircular` spelling is a ring, and the rest
-    // are the bar. Translated here rather than duplicating the two drawings.
-    const gaugeStyle = this.styles.gauge ?? ''
-    const outer = this.styles
-    this.styles = {
-      ...outer,
-      progressView: gaugeStyle.toLowerCase().includes('circular') ? 'circular' : 'linear',
+    const style = this.styles.gauge ?? 'automatic'
+    const label = this.convertList(view.children, `${path}-label`, 'horizontal')
+    const current = this.convertList(argViews(view, 'currentValueLabel'), `${path}-value`, 'horizontal')
+    const minimum = this.convertList(argViews(view, 'minimumValueLabel'), `${path}-minimum`, 'horizontal')
+    const maximum = this.convertList(argViews(view, 'maximumValueLabel'), `${path}-maximum`, 'horizontal')
+    const circular = style.toLowerCase().includes('circular')
+    if (circular) {
+      const size = 58, radius = 26, center = size / 2
+      const capacity = style !== 'accessoryCircular'
+      const start = capacity ? -90 : 135
+      const sweep = capacity ? 360 : 270
+      const point = (degrees: number) => {
+        const radians = degrees * Math.PI / 180
+        return `${center + radius * Math.cos(radians)} ${center + radius * Math.sin(radians)}`
+      }
+      const arc = (portion: number) => {
+        const angle = sweep * portion
+        // Two arcs retain a complete circle at 100%; one SVG arc cannot do that.
+        return `M ${point(start)} A ${radius} ${radius} 0 ${angle / 2 > 180 ? 1 : 0} 1 ${point(start + angle / 2)} A ${radius} ${radius} 0 ${angle / 2 > 180 ? 1 : 0} 1 ${point(start + angle)}`
+      }
+      const ring = (id: string, portion: number, color: RGBA): LayoutElement => ({
+        kind: 'path', id, d: arc(portion), fill: null, stroke: { color, width: 6 }, fillRule: 'nonzero',
+      })
+      const angle = (start + sweep * fraction) * Math.PI / 180
+      const marker: LayoutElement = {
+        kind: 'modified', id: `${path}-marker-position`, modifier: { kind: 'offset', x: radius * Math.cos(angle), y: radius * Math.sin(angle) },
+        child: { kind: 'modified', id: `${path}-marker-size`, modifier: { kind: 'frame', width: 7, height: 7, alignment: CENTER },
+          child: { kind: 'shape', id: `${path}-marker`, shape: 'circle', fill: { kind: 'solid', color: this.color('accentColor') }, stroke: { color: this.color('secondarySystemGroupedBackground'), width: 2.5 } } },
+      }
+      return {
+        kind: 'modified', id: `${path}-size`, modifier: { kind: 'frame', width: size, height: size, alignment: CENTER },
+        child: { kind: 'zstack', id: path, alignment: CENTER, ...origin, children: [
+          ring(`${path}-track`, 1, capacity ? { ...this.color('accentColor'), a: 0.35 } : this.color('accentColor')),
+          ...(capacity ? fraction > 0 ? [ring(`${path}-fill`, fraction, this.color('accentColor'))] : [] : [marker]),
+          { kind: 'modified', id: `${path}-label-offset`, modifier: { kind: 'offset', x: 0, y: !capacity && !current.length ? 19 : 0 },
+            child: { kind: 'modified', id: `${path}-center-font`, modifier: { kind: 'font', font: fontForToken(!capacity && !current.length ? 'caption2' : 'body', this.typeScale)! },
+              child: { kind: 'stack', id: `${path}-center`, axis: 'vertical', spacing: 0, alignment: CENTER, children: current.length ? current : label } } },
+          ...(!capacity && current.length ? [{ kind: 'modified' as const, id: `${path}-bottom-label`, modifier: { kind: 'offset' as const, x: 0, y: 19 },
+            child: { kind: 'modified' as const, id: `${path}-bottom-font`, modifier: { kind: 'font' as const, font: fontForToken('caption2', this.typeScale)! },
+              child: { kind: 'stack' as const, id: `${path}-bottom`, axis: 'vertical' as const, spacing: 0, alignment: CENTER, children: label } } }] : []),
+        ] },
+      }
     }
 
-    try {
-      return this.progressView(
-        {
-          ...view,
-          name: 'ProgressView',
-          args: [
-            { label: 'value', value: { kind: 'double', value: fraction } },
-            { label: 'total', value: { kind: 'double', value: 1 } },
-          ],
-        },
-        path,
-        origin,
-      )
-    } finally {
-      this.styles = outer
-    }
+    const accessory = style.startsWith('accessory')
+    const capacity = !accessory || style === 'accessoryLinearCapacity'
+    const tint = this.color('accentColor')
+    const height = accessory ? 6 : 16
+    const bar: LayoutElement = { kind: 'modified', id: `${path}-barframe`,
+      modifier: { kind: 'frame', height, maxWidth: Infinity, alignment: CENTER },
+      child: { kind: 'zstack', id: `${path}-bar`, alignment: { horizontal: 'leading', vertical: 'center' }, children: [
+        { kind: 'modified', id: `${path}-track-round`, modifier: { kind: 'cornerRadius', radius: 999 }, child: { kind: 'fill', id: `${path}-trackf`, fill: { kind: 'solid', color: capacity ? this.color('tertiarySystemFill') : tint } } },
+        ...(capacity ? [{ kind: 'modified' as const, id: `${path}-fill-width`, modifier: { kind: 'relativeWidth' as const, fraction },
+          child: { kind: 'modified' as const, id: `${path}-fill-round`, modifier: { kind: 'cornerRadius' as const, radius: 999 }, child: { kind: 'fill' as const, id: `${path}-fillf`, fill: { kind: 'solid' as const, color: tint } } } }] :
+          [{ kind: 'slider' as const, id: `${path}-indicator`, height, style: { fraction, thumbDiameter: 10, thumbHeight: 10, trackHeight: 0, tint, trackColor: tint, thumbColor: this.color('label') } }]),
+      ] } }
+    const limits: LayoutElement = { kind: 'stack', id: `${path}-limits`, axis: 'horizontal', spacing: 8, alignment: CENTER,
+      children: [...minimum, { kind: 'spacer', id: `${path}-space`, axis: 'horizontal', minLength: 0 }, ...current,
+        { kind: 'spacer', id: `${path}-space2`, axis: 'horizontal', minLength: 0 }, ...maximum] }
+    return { kind: 'stack', id: path, axis: 'vertical', spacing: 8, alignment: CENTER, ...origin, children: [
+      ...label, bar, ...(current.length || minimum.length || maximum.length ? [limits] : []),
+    ] }
   }
 
   /** Search geometry shared by the bottom bar, toolbar, and explicit drawer. */
@@ -3242,7 +3233,8 @@ class Converter {
 
       case 'background': {
         const content = this.backgroundContent(args, modifier, `${id}bg`)
-        return content ? { kind: 'background', content } : null
+        const hasView = args.some((arg) => (arg.label === null || arg.label === 'content') && asView(arg.value))
+        return content ? { kind: 'background', content, ...(hasView ? { alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER } : {}) } : null
       }
 
       case 'overlay': {
@@ -3275,10 +3267,10 @@ class Converter {
 
 
       case 'bold':
-        return { kind: 'fontTrait', weight: 700 }
+        return args[0]?.value.kind === 'bool' && !args[0].value.value ? null : { kind: 'fontTrait', weight: 700 }
 
       case 'italic':
-        return { kind: 'fontTrait', italic: true }
+        return { kind: 'fontTrait', italic: args[0]?.value.kind !== 'bool' || args[0].value.value }
 
       case 'foregroundStyle':
       case 'foregroundColor': {
@@ -3449,6 +3441,7 @@ class Converter {
       case 'submitLabel':
       case 'onSubmit':
       case 'focused':
+      case 'presentationBackground':
       case 'presentationCornerRadius':
       case 'presentationDragIndicator':
       case 'interactiveDismissDisabled':
@@ -3727,7 +3720,21 @@ class Converter {
     modifier: ModifierValue,
     id: string,
   ): LayoutElement | null {
+    const contents = args.filter((a) => a.label === 'content').flatMap((a) => {
+      const view = asView(a.value)
+      return view ? [view] : []
+    })
+    if (contents.length) return {
+      kind: 'zstack', id, alignment: CENTER,
+      children: contents.map((view, i) => this.convert(view, `${id}-${i}`, 'vertical')),
+    }
     const value = args.find((a) => a.label === null)?.value
+    const inShape = labelled(args, 'in')
+    if (inShape) {
+      const content = this.backgroundContent(args.filter((a) => a.label !== 'in'), modifier, `${id}fill`)
+      const shape = shapeOf(inShape)
+      return content ? { kind: 'modified', id, child: content, modifier: { kind: 'clip', shape: shape.kind, cornerRadius: shape.cornerRadius, style: shape.style } } : null
+    }
 
     if (value) {
       // A material is not a colour: it is a translucent panel over a blurred
@@ -3754,9 +3761,6 @@ class Converter {
       }
     }
 
-    // A trailing-closure background: `.background { RoundedRectangle(…) }`. The
-    // resolver leaves it unevaluated, so there is nothing to draw unless it did.
-    void modifier
     return null
   }
 
@@ -4290,6 +4294,7 @@ function roleOf(view: ViewValue): HitRole {
       return 'toggle'
     case 'TextField':
     case 'SecureField':
+    case 'TextEditor':
       return 'textField'
     case 'Slider':
       return 'slider'

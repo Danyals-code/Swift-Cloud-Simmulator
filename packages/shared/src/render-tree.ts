@@ -161,6 +161,7 @@ export interface SliderPayload {
   readonly fraction: number
   readonly trackHeight: number
   readonly thumbDiameter: number
+  readonly thumbHeight?: number
   readonly tint: RGBA
   readonly trackColor: RGBA
   readonly thumbColor: RGBA
@@ -215,13 +216,20 @@ export interface PlaceholderPayload {
 export interface HitTarget {
   readonly step?: number
   readonly secure?: boolean
+  readonly multiline?: boolean
   readonly inputInset?: number
+  readonly submitHandlerId?: string
+  readonly contextMenuHandlerId?: string
+  readonly inputMode?: 'text' | 'email' | 'tel' | 'url' | 'numeric' | 'decimal' | 'search'
+  readonly enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send'
+  readonly autocapitalization?: string
+  readonly autocorrection?: boolean
   readonly thumbDiameter?: number
   readonly cornerRadius?: number
   readonly placeholderColor?: RGBA
   /** identifies which interactive element was hit when dispatching back to the worker */
   readonly handlerId: string
-  readonly role: 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture' | 'drag'
+  readonly role: 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture' | 'drag' | 'contextMenu'
   readonly enabled: boolean
   /**
    * Control parameters, for the interactive elements the renderer builds for real.

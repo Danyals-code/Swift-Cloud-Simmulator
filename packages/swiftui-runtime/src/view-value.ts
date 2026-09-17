@@ -31,6 +31,8 @@ export interface ViewValue {
    * a different view than the one that was drawn.
    */
   readonly path?: string
+  /** Nearest context-menu owner; inherited so child controls retain both actions. */
+  readonly contextMenuPath?: string
   /** Framework behaviour, for controls the user did not write an action for. */
   readonly intent?: ViewIntent
   /**

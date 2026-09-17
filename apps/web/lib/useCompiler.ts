@@ -17,6 +17,7 @@ import type {
 import type { DeviceSpec } from '@studio/sim-shell'
 import { measureFontsWhenReady, measureTextBatch } from './fontMetrics'
 import { recordCoverage } from './telemetry'
+import { WorkerRequests } from './workerRequests'
 
 /** Edit-to-recompile debounce. Long enough to coalesce a fast typist's burst, short enough to feel live. */
 const DEBOUNCE_MS = 150
@@ -33,13 +34,24 @@ interface WorkerHandle {
   worker: Worker
   ready?: Promise<void>
   api: Comlink.Remote<CompilerApi>
+  requests: WorkerRequests
+  dispose(): void
 }
 
-function spawnWorker(): WorkerHandle {
+function spawnWorker(onFailure: (error: Error) => void): WorkerHandle {
   const worker = new Worker(new URL('../workers/compiler.worker.ts', import.meta.url), {
     type: 'module',
   })
-  return { worker, api: Comlink.wrap<CompilerApi>(worker) }
+  const remote = Comlink.wrap<CompilerApi>(worker)
+  const requests = new WorkerRequests((error) => { worker.terminate(); onFailure(error) })
+  // Every RPC is bounded, including completion and font refinement.
+  const api = new Proxy(remote, {
+    get(target, key) {
+      if (typeof key !== 'string') return Reflect.get(target, key)
+      return (...args: unknown[]) => requests.run(() => Promise.resolve(Reflect.apply(Reflect.get(target, key), target, args)))
+    },
+  })
+  return { worker, api, requests, dispose() { requests.stop(undefined, false); worker.terminate() } }
 }
 
 /**
@@ -107,18 +119,17 @@ export function useCompiler({
   const ensureWorker = useCallback((): WorkerHandle => {
     if (handleRef.current) return handleRef.current
 
-    const handle = spawnWorker()
+    const handle = spawnWorker((error) => {
+      if (handleRef.current !== handle) return
+      handleRef.current = null
+      setState((s) => ({ ...s, stale: false, workerError: error.message }))
+    })
     fontsRef.current ??= measureFontsWhenReady()
     handle.ready = fontsRef.current.then(async (fonts) => {
       if (fonts.length > 0) await handle.api.setFontMetrics(fonts)
     })
     handle.worker.addEventListener('error', (event) => {
-      setState((s) => ({
-        ...s,
-        workerError: event.message || 'The compiler worker stopped unexpectedly.',
-      }))
-      // Drop the handle so the next call respawns rather than talking to a corpse.
-      handleRef.current = null
+      handle.requests.stop(new Error(event.message || 'The compiler worker stopped unexpectedly.'))
     })
     handleRef.current = handle
     return handle
@@ -147,7 +158,7 @@ export function useCompiler({
       if (!next) return
       result = next
     }
-    accept(result)
+    if (handle === handleRef.current) accept(result)
   }, [accept])
 
   const runCompile = useCallback(async () => {
@@ -173,6 +184,8 @@ export function useCompiler({
         }), handle,
       )
     } catch (error) {
+      if (handleRef.current !== handle) return
+      handle.dispose()
       setState((s) => ({
         ...s,
         stale: false,
@@ -234,36 +247,33 @@ export function useCompiler({
 
   useEffect(() => {
     return () => {
-      handleRef.current?.worker.terminate()
+      handleRef.current?.dispose()
       handleRef.current = null
     }
   }, [])
 
   const dispatch = useCallback(
     async (event: UIEvent) => {
+      const handle = ensureWorker()
       try {
-        const handle = ensureWorker()
         await handle.ready
         await refine(await handle.api.dispatch(event, ++revisionRef.current), handle)
-      } catch {
-        // A dead worker during interaction: respawn and recompile from source.
-        handleRef.current = null
-        void runCompile()
+      } catch (error) {
+        handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
       }
     },
-    [refine, ensureWorker, runCompile],
+    [refine, ensureWorker],
   )
 
   const reset = useCallback(async () => {
+    const handle = ensureWorker()
     try {
-      const handle = ensureWorker()
       await handle.ready
       await refine(await handle.api.reset(++revisionRef.current), handle)
-    } catch {
-      handleRef.current = null
-      void runCompile()
+    } catch (error) {
+      handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
     }
-  }, [refine, ensureWorker, runCompile])
+  }, [refine, ensureWorker])
 
   /**
    * Editor intelligence, asked of the worker on demand.

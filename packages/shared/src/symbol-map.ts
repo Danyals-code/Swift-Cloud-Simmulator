@@ -10,6 +10,8 @@ export interface SymbolDefinition {
 }
 
 export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
+  "rectangle.on.rectangle": { "icon": "copy-outline" },
+  "rectangle.on.rectangle.fill": { "icon": "copy" },
   "book": { "icon": "book-outline" },
   "book.fill": { "icon": "book" },
   "book.closed": { "icon": "book-outline" },

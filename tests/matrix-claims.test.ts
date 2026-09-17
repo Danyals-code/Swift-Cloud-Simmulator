@@ -94,7 +94,7 @@ describe('Link and AsyncImage, which needed a URL to be constructible at all', (
     const result = run(
       view('Link("Docs", destination: URL(string: "https://example.com")!)'),
     )
-    expect(diagnostics(result)).toEqual([])
+    expect(diagnostics(result).join(' ')).toContain('only the label is drawn')
     expect(texts(result)).toContain('Docs')
   })
 
@@ -107,13 +107,15 @@ describe('Link and AsyncImage, which needed a URL to be constructible at all', (
         'AsyncImage(url: URL(string: "https://example.com/a.png")) { image in image } placeholder: { Text("loading") }',
       ),
     )
-    expect(diagnostics(result)).toEqual([])
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect(diagnostics(result).join(' ')).toContain('remote loading and image phases')
     expect(texts(result)).toContain('loading')
   })
 
   it('AsyncImage without a placeholder still draws a box rather than nothing', () => {
     const result = run(view('AsyncImage(url: URL(string: "https://example.com/a.png"))'))
-    expect(diagnostics(result)).toEqual([])
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
+    expect(diagnostics(result).join(' ')).toContain('remote loading and image phases')
     expect(nodes(result).some((n) => n.id !== 'screen' && n.background)).toBe(true)
   })
 })

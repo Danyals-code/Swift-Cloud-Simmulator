@@ -27,7 +27,7 @@ describe('supplied native phone reference', () => {
   it('matches measured structural bounds and keeps presentations interactive', () => {
     resetPipelineState()
     const d = DEVICES['iphone-18-pro']
-    let r = compile({ files: [{ id: 'App.swift', text: fixture }], canvas: d, safeArea: d.safeArea, displayScale: 3, dynamicTypeSize: 'large', revision: 1 })
+    let r = compile({ files: [{ id: 'App.swift', text: fixture }], canvas: d, safeArea: d.safeArea, displayScale: 3, colorScheme: 'light', dynamicTypeSize: 'large', revision: 1 })
     const reports: Record<string, unknown> = {}
     const nodes = () => r.renderTree!.nodes
     const dump = (name: string) => { reports[name] = nodes().filter(n => n.clip || n.material || n.hitTarget || n.id.endsWith('bgf') || n.id.endsWith('sepl') || n.text).map(n => ({ id: n.id, frame: world(r.renderTree!, n), text: n.text?.runs.map(x => x.text).join(''), lines: n.text?.lines?.length, font: n.text?.runs[0]?.font, label: n.a11y?.label })) }

@@ -355,7 +355,7 @@ describe('runtime failures are reported, not thrown', () => {
 
     const result = runtime.evaluate()
     expect(result.failure?.kind).toBe('budget')
-    expect(result.failure?.message).toContain('too long')
+    expect(result.failure?.message).toContain('10,000 constructed views')
   })
 })
 

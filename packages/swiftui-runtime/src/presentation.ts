@@ -108,6 +108,9 @@ export interface Overlay {
   readonly detents?: readonly number[]
   readonly anchorId?: string
   readonly cornerRadius?: number
+  readonly background?: SwiftValue
+  /** Omitted disables interaction; a number enables it through that encoded detent. */
+  readonly backgroundInteraction?: number
   readonly showsDragIndicator?: boolean
   readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'search' | 'ignoresSafeArea' | 'overlay'>
   readonly title: string
@@ -132,6 +135,7 @@ export interface LifecycleHook {
   readonly closure: ClosureValue
   /** For `.onChange(of:)`: the value being watched, compared against last pass. */
   readonly watched?: SwiftValue
+  readonly initial?: boolean
 }
 
 /** Search placement is resolved by device context during screen composition. */
@@ -338,6 +342,7 @@ class Resolver {
    */
   private readonly buttonStyles: SwiftValue[] = []
   private visualStyle: readonly ModifierValue[] = []
+  private contextMenuPath: string | undefined
 
   constructor(private readonly ctx: ResolveContext) {}
 
@@ -387,6 +392,11 @@ class Resolver {
   private stamp(view: ViewValue, path: string): ViewValue {
     view = inheritVisualStyle(view, this.visualStyle)
     const outerStyle = this.visualStyle
+    const outerContextMenu = this.contextMenuPath
+    if (view.modifiers.some(m => m.name === 'contextMenu' && m.closure)) {
+      this.contextMenuPath = path
+      this.register(`${path}/context-menu`, { kind: 'openMenu', menu: `${path}/context-menu` })
+    }
     this.visualStyle = visualModifiers(view)
     const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.closure ?? null
 
@@ -405,7 +415,16 @@ class Resolver {
         : this.stampList(restyled.children, path)
 
       const intent = this.intentFor(restyled)
-      const stamped: ViewValue = { ...restyled, path, children, ...(intent ? { intent } : {}) }
+      // Layers are view subtrees too: register their controls and lifecycle hooks.
+      const modifiers = restyled.modifiers.map((modifier, m) => {
+        if (!['background', 'overlay', 'safeAreaInset'].includes(modifier.name)) return modifier
+        return { ...modifier, args: modifier.args.map((arg, a) => {
+          const layer = asView(arg.value)
+          return layer && (arg.label === null || arg.label === 'content')
+            ? { ...arg, value: opaque('View', this.stamp(layer, `${path}-layer-${m}-${a}`)) } : arg
+        }) }
+      })
+      const stamped: ViewValue = { ...restyled, path, children, modifiers, contextMenuPath: this.contextMenuPath, ...(intent ? { intent } : {}) }
 
       if (intent) this.handlers.set(handlerIdFor(path), intent)
       this.collectLifecycle(restyled, path)
@@ -413,6 +432,7 @@ class Resolver {
     } finally {
       if (style) this.buttonStyles.pop()
       this.visualStyle = outerStyle
+      this.contextMenuPath = outerContextMenu
     }
   }
 
@@ -457,7 +477,7 @@ class Resolver {
 
   /** Records `.onAppear`, `.onDisappear`, `.task` and `.onChange` for this view. */
   private collectLifecycle(view: ViewValue, path: string): void {
-    for (const modifier of view.modifiers) {
+    for (const [index, modifier] of view.modifiers.entries()) {
       if (!modifier.closure) continue
 
       if (modifier.name === 'onAppear' || modifier.name === 'task') {
@@ -472,7 +492,8 @@ class Resolver {
         const watched = modifier.args.find((a) => a.label === 'of')?.value ?? modifier.args[0]?.value
         this.lifecycle.push({
           kind: 'change',
-          path: `${path}/${modifier.name}`,
+          path: `${path}/${modifier.name}-${index}`,
+          initial: truthy(labelled(modifier.args, 'initial') ?? { kind: 'bool', value: false }),
           closure: modifier.closure,
           ...(watched !== undefined ? { watched } : {}),
         })
@@ -607,6 +628,8 @@ class Resolver {
   }
 
   private operable(view: ViewValue, path: string): ViewValue {
+    const submit = view.modifiers.find(m => m.name === 'onSubmit')
+    if (submit?.closure && ['TextField', 'SecureField', 'TextEditor'].includes(view.name)) this.register(`${path}/submit`, { kind: 'run', closure: submit.closure })
     if (view.name === 'Stepper') {
       const binding = labelled(view.args, 'value')
       if (!binding || !asProjection(binding)) return view
@@ -896,7 +919,9 @@ class Resolver {
     const open = this.ctx.state.openMenu()
     if (!open) return null
 
-    const control = findByPath(views, open)
+    const isContextMenu = open.endsWith('/context-menu')
+    const ownerPath = isContextMenu ? open.slice(0, -'/context-menu'.length) : open
+    const control = findByPath(views, ownerPath)
     if (!control) {
       // The control is gone - a filter changed, a row was deleted. Closing is the
       // honest response; leaving it open would dim the screen over nothing.
@@ -907,14 +932,18 @@ class Resolver {
     const dismiss: ViewIntent = { kind: 'openMenu', menu: null }
     const dismissId = this.register(`${open}/dismiss`, dismiss)
 
-    if (control.name === 'DatePicker') return this.dateEditor(control, open, dismiss, dismissId)
-    if (control.name === 'ColorPicker') return this.colourEditor(control, open, dismiss, dismissId)
+    if (!isContextMenu && control.name === 'DatePicker') return this.dateEditor(control, open, dismiss, dismissId)
+    if (!isContextMenu && control.name === 'ColorPicker') return this.colourEditor(control, open, dismiss, dismissId)
 
-    const selection = labelled(control.args, 'selection')
+    const selection = isContextMenu ? undefined : labelled(control.args, 'selection')
     const binding = asProjection(selection)
     const current = binding ? describe(binding.get(), true) : null
 
-    const rows = control.children.map((child, index) => {
+    const contextMenu = control.modifiers.find(m => m.name === 'contextMenu')
+    const items = isContextMenu && contextMenu?.closure
+      ? this.ctx.build(contextMenu.closure, [], contextMenu.environment)
+      : control.children
+    const rows = items.map((child, index) => {
       const path = `${open}/opt-${index}`
       const tag = tokenOrValue(collectModifier([child], 'tag')?.args[0]?.value)
 
@@ -940,7 +969,7 @@ class Resolver {
 
     return {
       kind: 'menu',
-      anchorId: handlerIdFor(open),
+      anchorId: handlerIdFor(ownerPath),
       views: rows,
       detent: 0,
       title: stringArg(control.args.find((a) => a.label === null)?.value) ?? '',
@@ -975,6 +1004,7 @@ class Resolver {
     // thing it must not do.
     const titles: string[] = [titleOf(stack.children, '')]
     let depth = 0
+    let displayMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
 
     for (const linkPath of pushed) {
       const link = findByPath(screen, linkPath)
@@ -982,6 +1012,8 @@ class Resolver {
       if (!destination || destination.length === 0) break
 
       screen = this.stampList(destination, `n${depth + 1}`, visualModifiers(link ?? stack))
+      const requestedMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
+      if (requestedMode && requestedMode !== 'automatic') displayMode = requestedMode
       titles.push(titleOf(screen, labelTextOf(link!) || 'Back'))
       depth++
     }
@@ -993,7 +1025,6 @@ class Resolver {
     const explicitTitle = collectModifier(screen, 'navigationTitle')
     const title =
       stringArg(explicitTitle?.args[0]?.value) ?? (depth === 0 ? titles[0]! : titles[depth]!)
-    const displayMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
 
     const backId = depth > 0 ? this.register(`${stackId}/back`, { kind: 'pop' }) : null
     const toolbar = this.resolveToolbar(screen, stackId)
@@ -1015,7 +1046,7 @@ class Resolver {
 
     const bar: NavigationBar = {
       title,
-      large: displayMode !== 'inline' && depth === 0 && title.length > 0,
+      large: displayMode !== 'inline' && title.length > 0,
       canGoBack: depth > 0,
       backTitle: titles[Math.max(0, depth - 1)] || 'Back',
       leading: backButton ? [backButton] : toolbar.leading,
@@ -1078,6 +1109,8 @@ class Resolver {
     items.forEach((item, index) => {
       // `ToolbarItem(placement:)` wraps its content; a bare view is a trailing item.
       const placement = tokenName(labelled(item.args, 'placement'))
+      // Unsupported placements must not appear as unrelated navigation actions.
+      if (placement && ['keyboard', 'bottomBar', 'principal'].includes(placement)) return
       const contents = item.name === 'ToolbarItem' || item.name === 'ToolbarItemGroup'
         ? item.children
         : [item]
@@ -1115,6 +1148,7 @@ class Resolver {
 
     const items = pages.map((page, i) => {
       const item = collectModifier([page], 'tabItem')
+      const badge = page.modifiers.find(m => m.name === 'badge')?.args[0]?.value
       const modernLabel = page.args.filter(a => a.label === 'label').map(a => asView(a.value)).filter((v): v is ViewValue => !!v)
       const label: readonly ViewValue[] = paged ? [] : page.name === 'Tab'
         ? modernLabel.length ? modernLabel : [{ name: 'Label', args: page.args.filter(a => a.label === null || a.label === 'systemImage'), children: [], modifiers: [], action: null, span: page.span }]
@@ -1132,6 +1166,7 @@ class Resolver {
         args: [
           { label: 'selected', value: { kind: 'bool', value: i === selected } },
           { label: 'index', value: { kind: 'int', value: i } },
+          ...(badge ? [{ label: 'badge', value: badge }] : []),
           ...(paged ? [{ label: 'paged', value: { kind: 'bool' as const, value: true } }] : []),
         ],
         children: this.stampList(label, path, visualModifiers(page)),
@@ -1235,6 +1270,14 @@ class Resolver {
         : []
 
       const overlayViews = this.stampList(built, path, visualModifiers(view))
+      // Native alerts supply an OK action when their builder supplies no buttons.
+      // Without this, disabling backdrop dismissal would leave an empty alert stuck.
+      if (kind === 'alert' && dismiss && !findView(overlayViews, 'Button')) {
+        const buttonPath = `${path}/default-action`
+        this.register(buttonPath, dismiss)
+        overlayViews.push({ name: 'Button', args: [{ label: null, value: { kind: 'string', value: 'OK' } }],
+          children: [], modifiers: visualModifiers(view), action: null, span: view.span, path: buttonPath, intent: dismiss })
+      }
       // Alert/dialog actions dismiss their presentation even when their closure is empty.
       if ((kind === 'alert' || kind === 'dialog') && dismiss) {
         const attachDismiss = (view: ViewValue) => {
@@ -1246,23 +1289,26 @@ class Resolver {
         }
         overlayViews.forEach(attachDismiss)
       }
-      const disabled = collectModifier(overlayViews, 'interactiveDismissDisabled')?.args[0]?.value
-      const dismissId = dismiss && !(disabled && truthy(disabled)) ? this.register(`${path}/dismiss`, dismiss) : null
+      const disableModifier = collectModifier(overlayViews, 'interactiveDismissDisabled')
+      const disabled = disableModifier ? disableModifier.args[0] ? truthy(disableModifier.args[0].value) : true : false
+      const dismissId = dismiss && kind !== 'alert' && !disabled ? this.register(`${path}/dismiss`, dismiss) : null
       const tabs = findView(overlayViews, 'TabView')
       const tabbed = tabs ? this.resolveTabs(tabs) : { content: overlayViews, tabBar: null }
       const nav = findView(tabbed.content, 'NavigationStack') ?? findView(tabbed.content, 'NavigationView')
       const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null }
       const cornerRadius = numberOf(collectModifier(overlayViews, 'presentationCornerRadius')?.args[0]?.value)
-      const indicator = tokenName(collectModifier(overlayViews, 'presentationDragIndicator')?.args[0]?.value)
 
       return {
         kind,
         views: overlayViews,
         ...detentsOf(overlayViews),
         ...(cornerRadius !== null ? { cornerRadius: Math.max(0, cornerRadius) } : {}),
-        showsDragIndicator: indicator !== 'hidden',
+        showsDragIndicator: dragIndicatorOf(overlayViews),
+        background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
+        backgroundInteraction: backgroundInteractionOf(overlayViews),
+        ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
         screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
-        title: stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
+        title: kind === 'dialog' && tokenName(labelled(modifier.args, 'titleVisibility')) !== 'visible' ? '' : stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
         message: this.messageOf(modifier),
         dismiss,
         dismissId,
@@ -1306,6 +1352,7 @@ function textOf(view: ViewValue): string[] {
 const CONTROL_BINDINGS: Readonly<Record<string, { argument: string }>> = {
   Toggle: { argument: 'isOn' },
   TextField: { argument: 'text' },
+  TextEditor: { argument: 'text' },
   SecureField: { argument: 'text' },
   Slider: { argument: 'value' },
   Picker: { argument: 'selection' },
@@ -1313,6 +1360,7 @@ const CONTROL_BINDINGS: Readonly<Record<string, { argument: string }>> = {
 
 const OVERLAY_KINDS: Readonly<Record<string, OverlayKind>> = {
   sheet: 'sheet',
+  inspector: 'sheet',
   fullScreenCover: 'cover',
   alert: 'alert',
   confirmationDialog: 'dialog',
@@ -1342,22 +1390,37 @@ const LEADING_PLACEMENTS: ReadonlySet<string> = new Set([
  * because a detent is a preference in SwiftUI and propagates up from wherever inside
  * the sheet it was written.
  */
+function dragIndicatorOf(presented: readonly ViewValue[]): boolean {
+  const visibility = tokenName(collectModifier(presented, 'presentationDragIndicator')?.args[0]?.value)
+  if (visibility === 'visible') return true
+  if (visibility === 'hidden') return false
+  const detents = collectModifier(presented, 'presentationDetents')?.args[0]?.value
+  return detents?.kind === 'array' && detents.elements.length > 1
+}
+
+function decodeDetent(v: SwiftValue | undefined): number {
+  const name = tokenName(v)
+  if (name === 'medium') return 0.5
+  if (name === 'large') return 1
+  if (name?.startsWith('detent:fraction:')) return clamp(Number(name.split(':')[2]), 0.01, 1)
+  if (name?.startsWith('detent:height:')) return -Math.max(1, Number(name.split(':')[2]) || 1)
+  return 1
+}
+
+function backgroundInteractionOf(views: readonly ViewValue[]): number | undefined {
+  const value = collectModifier(views, 'presentationBackgroundInteraction')?.args[0]?.value
+  const option = payloadOf<{ name: string; args?: readonly SwiftValue[] }>(value, 'Token')
+  return option?.name === 'enabled' ? option.args?.length ? decodeDetent(option.args[0]) : Infinity : undefined
+}
+
 function detentsOf(presented: readonly ViewValue[]): Pick<Overlay, 'detent' | 'detents'> {
   const detents = collectModifier(presented, 'presentationDetents')
   const value = detents?.args[0]?.value
   const selected = asProjection(detents?.args.find(a => a.label === 'selection')?.value)?.get()
-  const decode = (v: SwiftValue | undefined): number => {
-    const name = tokenName(v)
-    if (name === 'medium') return 0.5
-    if (name === 'large') return 1
-    if (name?.startsWith('detent:fraction:')) return clamp(Number(name.split(':')[2]), 0.01, 1)
-    if (name?.startsWith('detent:height:')) return -Math.max(1, Number(name.split(':')[2]) || 1)
-    return 1
-  }
-  if (selected) return { detent: decode(selected) }
+  if (selected) return { detent: decodeDetent(selected) }
   if (value?.kind === 'array' && value.elements.length) {
     // Compare mixed point/fraction detents only once the actual viewport is known.
-    return { detent: 1, detents: value.elements.map(decode) }
+    return { detent: 1, detents: value.elements.map(decodeDetent) }
   }
   return { detent: 1 }
 }

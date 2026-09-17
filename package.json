@@ -14,10 +14,13 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && npm run typecheck:tests",
+    "typecheck:tests": "tsc --noEmit -p tests/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:visual": "vitest run tests/ios27-controls-native.test.ts tests/swiftui-visual-stress.test.ts tests/ios27-native.test.ts tests/ios27-regression.test.ts tests/ios27-export.test.ts",
+    "test:stress": "vitest run tests/swiftui-stress.test.ts tests/generated-preview.test.ts apps/web/lib/workerRequests.test.ts",
     "e2e": "playwright test",
     "budget": "node tooling/check-bundle-budget.mjs",
     "verify": "npm run typecheck && npm run lint && npm run test"

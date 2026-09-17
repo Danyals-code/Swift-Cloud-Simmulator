@@ -5,6 +5,11 @@ six original light/default-text phone images and their measurements now live in
 [native/iphone18pro-light](native/iphone18pro-light/measurements.json). This is a
 partial reference set, with runtime/text-size/source settings still operator-assumed.
 
+An additional 15 light/dark control and presentation images are in
+[native/iphone18pro-controls](native/iphone18pro-controls/measurements.json), paired with
+`tests/fixtures/ios27-visual-stress.swift`. See [the measurement report](../17-IOS-CONTROL-PARITY.md).
+iPhone is the current priority; the broader iPad/accessibility matrix remains pending.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh
@@ -14,7 +19,7 @@ partial reference set, with runtime/text-size/source settings still operator-ass
    Open the generated `.xcodeproj`, build using Xcode 27 / SDK 27, and run an iOS 27
    simulator. The fixture export uses deployment target 27.0 for modern Tab APIs;
    ordinary user projects keep their own deployment target. There must be only one
-   App declaration. Simulator build acceptance has not been verified in this session.
+   App declaration. The visual-stress fixture was built and run with Xcode 27.0 (27A266a).
 
 2. Start with iPhone 18 Pro, light appearance, Large/default text to match the supplied
    402 × 874 reference. Capture Library at

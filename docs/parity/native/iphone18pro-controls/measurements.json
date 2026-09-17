@@ -1,0 +1,189 @@
+{
+  "source": "User supplied native simulator screenshots, 2026-09-17. iPhone 18 Pro, 1206x2622 pixels / 402x874 points. Light and dark appearance; default text size inferred from 17-point body labels. Xcode 27 comparison fixture; runtime build not embedded in the PNGs.",
+  "fixtureSha256": "e87351387b083d4fe332b3f4010b8575f149f8eb9bfc35fc657eebb9a22c1f17",
+  "captures": [
+    {
+      "file": "controls-scrolled-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.40.08\u202fPM.png",
+      "sha256": "5c7e0113f96133cd4cc2d9be1a2763134b93b2dfa0ac87476915908db3cbb30f",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "controls-scrolled-updated-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.40.19\u202fPM.png",
+      "sha256": "d78b7bcc426e41c8f63967dd8892a4e95fe07a96e1adfa5e7996fc1c13dc38b1",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "controls-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.40.32\u202fPM.png",
+      "sha256": "fde1cfc221e021b0dcf1832cc22331f4372dcc740dd028b9ebff4d034d79bb2a",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "containers-expanded-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.40.39\u202fPM.png",
+      "sha256": "336733148f3a5389a9046688145f6717b8a9b5c9fd35a9b012779d83905e64b9",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "sheet-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.40.45\u202fPM.png",
+      "sha256": "d0978522a76f3f2486759a05ff7651dd20c7b06f43ed2937729da42757b4f44b",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "presentations-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.40.49\u202fPM.png",
+      "sha256": "eb77bfe4ac99a6ba30627b065f89301d5a3ab05d8bf06751b9d4cee8ddb4121d",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "alert-keyboard-onboarding-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.41.08\u202fPM.png",
+      "sha256": "5dc40ee437f54448845f38a2d3d4f855c97824f3682be103990f16c181c2d780",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "alert-keyboard-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.41.14\u202fPM.png",
+      "sha256": "c80879a8cc0888a3124d9f998f4c3695faaec9162a22a42babce74c0d5e6d3c9",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "confirmation-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.41.26\u202fPM.png",
+      "sha256": "3df744df2c29e2b9e660c45d382cadcd9d2fbe9c068763e0c39a88ddac57bc93",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "details-light.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.41.36\u202fPM.png",
+      "sha256": "02a85ceef2e755745811e3a979af7df67b03d9612c607cebe4e6cc107f1b37b8",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "controls-dark.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.49.24\u202fPM.png",
+      "sha256": "fa17a4599febdcce348f3ba83ba7595c1e24ab7671d08d7f822a9f1918259093",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "containers-collapsed-dark.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.49.40\u202fPM.png",
+      "sha256": "88d389ba6a4018ea0c3d3daf7e2d9a5147e323feccb85e82be35dc9013936d22",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "containers-expanded-dark.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.49.47\u202fPM.png",
+      "sha256": "eb7a217c2625a39e1b65eaa13505d27fec0eac0e7d547b624752856244b1fbcd",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "alert-keyboard-dark.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.49.58\u202fPM.png",
+      "sha256": "9d883670e247e80e197f3156f69800c73e8cb5c432ddf87a51088d49aada64a9",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "controls-dark-repeat.png",
+      "original": "Screenshot iPhone 18 Pro 09-17-2026 at 1.50.22\u202fPM.png",
+      "sha256": "0e5df2339f89242756e38ace88cf0dafc446820c431c50ae4338033bbf4d4041",
+      "size": [
+        1206,
+        2622
+      ]
+    }
+  ],
+  "measured": {
+    "lightBlue": [
+      0,
+      136,
+      255
+    ],
+    "darkBlue": [
+      0,
+      145,
+      255
+    ],
+    "lightSegmentTrack": [
+      238,
+      238,
+      239
+    ],
+    "darkSegmentTrack": [
+      49,
+      49,
+      54
+    ],
+    "darkSelectedSegment": [
+      105,
+      105,
+      111
+    ],
+    "segmentHeight": 32,
+    "buttonHeight": 34,
+    "sliderThumbWidth": 36,
+    "sliderThumbHeight": 24,
+    "sliderTrackHeight": 6,
+    "stepperWidth": 94,
+    "stepperHeight": 32,
+    "gaugeDiameter": 58,
+    "gaugeStroke": 6,
+    "linearGaugeHeight": 16,
+    "alertWidth": 320,
+    "alertFieldHeight": 48,
+    "confirmationWidth": 240,
+    "cardInset": 16,
+    "rowTextInset": 32,
+    "disclosureTextInset": 52,
+    "sheetTop": 641.33,
+    "sheetBottom": 866,
+    "sheetInset": 8,
+    "controlsCardTop": 208.67,
+    "controlsCardBottom": 498.67
+  }
+}

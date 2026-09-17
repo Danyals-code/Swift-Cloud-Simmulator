@@ -302,7 +302,7 @@ export type LayoutModifier =
       readonly maxHeight?: number
       readonly alignment: Alignment
     }
-  | { readonly kind: 'background'; readonly content: LayoutElement }
+  | { readonly kind: 'background'; readonly content: LayoutElement; readonly alignment?: Alignment }
   | { readonly kind: 'font'; readonly font: ResolvedFont }
   /** `.fontWeight` / `.bold` / `.italic`: adjust the inherited face, keep its size. */
   | {
@@ -474,7 +474,14 @@ export type LayoutModifier =
       readonly kind: 'hitTarget'
       readonly step?: number
       readonly secure?: boolean
+      readonly multiline?: boolean
       readonly inputInset?: number
+      readonly submitHandlerId?: string
+      readonly contextMenuHandlerId?: string
+      readonly inputMode?: 'text' | 'email' | 'tel' | 'url' | 'numeric' | 'decimal' | 'search'
+      readonly enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send'
+      readonly autocapitalization?: string
+      readonly autocorrection?: boolean
       readonly thumbDiameter?: number
       readonly cornerRadius?: number
       readonly placeholderColor?: RGBA
@@ -498,7 +505,7 @@ export type LayoutModifier =
   /** A modifier outside the coverage matrix: recorded, ignored for layout. */
   | { readonly kind: 'unsupported'; readonly name: string }
 
-export type HitRole = 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture' | 'drag'
+export type HitRole = 'button' | 'toggle' | 'textField' | 'slider' | 'tapGesture' | 'drag' | 'contextMenu'
 
 export type TextAlign = 'leading' | 'center' | 'trailing'
 

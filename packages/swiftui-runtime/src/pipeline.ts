@@ -230,7 +230,7 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? canvas.height - safeArea.bottom - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
     tree = appendPlaced(tree, search, BAR_Z + 2000)
   }
-  if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
+  if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
   return { ...tree, ...(scroll && collapseDistance ? { chrome: { scrollId: scroll.id, collapseDistance } } : {}) }
 }
 
@@ -251,16 +251,17 @@ function presentOverlay(
   env: LayoutEnvironment,
 ): RenderNode[] {
   const nodes: PlacedNode[] = []
+  const interactiveBackground = allowsBackgroundInteraction(overlay, canvas, safeArea)
 
   // Everything behind a presentation dims, and tapping the dimmed area dismisses it
   // - which is the only affordance a preview can offer in place of a swipe.
-  nodes.push({
+  if (!interactiveBackground) nodes.push({
     id: 'overlay-dim',
     frame: { x: 0, y: 0, width: canvas.width, height: canvas.height },
     z: 0,
     opacity: 1,
     cornerRadius: 0,
-    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, 0.2) } },
+    paint: { kind: 'fill', fill: { kind: 'solid', color: rgba(0, 0, 0, overlay.kind === 'dialog' || overlay.kind === 'menu' ? 0 : 0.2) } },
     ...(overlay.dismissId
       ? {
           hitTarget: {
@@ -282,7 +283,7 @@ function presentOverlay(
     const nested = composeScreen(engine, overlay.screen, { width: rect.width, height: rect.height }, { top, leading: 0, trailing: 0, bottom }, env)
     const prefix = 'overlay/'
     const radius = sheet ? overlay.cornerRadius ?? SURFACES.sheet.radius : 0
-    const surface: RenderNode = { id: 'overlay-surface', kind: 'layer', frame: rect, z: 1, opacity: 1, ...(sheet ? { material: { opacity: 0.5, blur: 28, light: overlay.light } } : {}), clip: true, border: { width: 0.5, color: { ...env.foregroundColor, a: 0.2 }, cornerRadius: radius }, cornerRadius: radius, cornerStyle: 'continuous',
+    const surface: RenderNode = { id: 'overlay-surface', kind: 'layer', frame: rect, z: 1, opacity: 1, blocksPointer: true, ...(overlay.background ? { background: overlay.background } : overlay.material ? { material: overlay.material } : sheet ? { material: { opacity: 0.5, blur: 28, light: overlay.light } } : {}), clip: true, border: { width: 0.5, color: { ...env.foregroundColor, a: 0.2 }, cornerRadius: radius }, cornerRadius: radius, cornerStyle: 'continuous',
       ...(nested.chrome ? { chrome: { ...nested.chrome, scrollId: prefix + nested.chrome.scrollId } } : {}) }
     const content = nested.nodes.map(n => ({ ...n, id: prefix + n.id, parent: n.parent ? prefix + n.parent : surface.id, z: n.z + 2 }))
     const grabber: RenderNode[] = sheet && overlay.showsDragIndicator !== false ? [{ id: 'overlay-grabber', kind: 'shape', frame: { x: (rect.width - SURFACES.sheet.grabberWidth) / 2, y: 6, width: SURFACES.sheet.grabberWidth, height: SURFACES.sheet.grabberHeight }, z: OVERLAY_Z - 1, opacity: 0.4, parent: surface.id, shape: { shape: 'capsule', fill: { kind: 'solid', color: env.foregroundColor } } }] : []
@@ -294,7 +295,7 @@ function presentOverlay(
     { ...env, cornerRadius: overlay.kind === 'sheet' ? overlay.cornerRadius ?? SURFACES.sheet.radius : overlay.kind === 'cover' ? 0 : SURFACES.alert.radius },
     overlay.kind === 'alert'
       ? CENTER
-      : overlay.kind === 'dialog' || overlay.kind === 'menu'
+      : overlay.kind === 'dialog' ? { horizontal: 'center', vertical: 'top' } : overlay.kind === 'menu'
         ? { horizontal: 'center', vertical: 'bottom' }
         : { horizontal: 'leading', vertical: 'top' },
   )
@@ -302,15 +303,19 @@ function presentOverlay(
   // The dim layer is z 0 here; the surface must sit above it.
   for (const node of surface) nodes.push({ ...node, z: node.z + 1 })
 
-  const painted = placedToRenderTree(nodes, canvas, 0).nodes.slice(2)
-  if (overlay.kind === 'menu') {
+  const painted = placedToRenderTree(nodes, canvas, 0).nodes.slice(interactiveBackground ? 1 : 2)
+  if (overlay.kind === 'menu' || overlay.kind === 'dialog') {
     // A single local panel can be anchored after browser scroll offsets are known.
     const roots = painted.filter(n => !n.parent)
     const x = Math.min(...roots.map(n => n.frame.x)), y = Math.min(...roots.map(n => n.frame.y))
     const width = Math.max(...roots.map(n => n.frame.x + n.frame.width)) - x
     const height = Math.max(...roots.map(n => n.frame.y + n.frame.height)) - y
     const panel: RenderNode = { id: 'overlay-menu', kind: 'layer', frame: { x, y, width, height }, z: 1, opacity: 1, anchorId: overlay.anchorId }
-    return [...dimNodes, panel, ...painted.map(n => n.parent ? n : { ...n, parent: panel.id, frame: { ...n.frame, x: n.frame.x - x, y: n.frame.y - y } })]
+    const arrow: RenderNode[] = overlay.kind === 'dialog' ? [{ id: 'overlay-dialog-arrow', kind: 'path',
+      parent: panel.id, frame: { x: width / 2 - 14, y: height - 0.5, width: 28, height: 14 }, z: 2, opacity: 1,
+      path: { d: 'M 0 0 L 11 11 Q 14 14 17 11 L 28 0', fill: { kind: 'solid', color: overlay.light ? rgba(250, 250, 252) : rgba(38, 38, 40) }, fillRule: 'nonzero' },
+    }] : []
+    return [...dimNodes, panel, ...painted.map(n => n.parent ? n : { ...n, parent: panel.id, frame: { ...n.frame, x: n.frame.x - x, y: n.frame.y - y } }), ...arrow]
   }
   return [...dimNodes, ...painted]
 }
@@ -344,6 +349,17 @@ function dismissLabel(kind: OverlayKind): string {
   }
 }
 
+function allowsBackgroundInteraction(
+  overlay: NonNullable<ReturnType<typeof screenToLayout>['overlay']>,
+  canvas: { width: number; height: number },
+  safeArea: { top: number; leading: number; bottom: number; trailing: number },
+): boolean {
+  if (!['sheet', 'popover'].includes(overlay.kind) || overlay.backgroundInteraction === undefined) return false
+  if (overlay.backgroundInteraction === Infinity) return true
+  const threshold = overlayRect({ ...overlay, detent: overlay.backgroundInteraction, detents: undefined }, canvas, safeArea)
+  return overlayRect(overlay, canvas, safeArea).height <= threshold.height + 0.5
+}
+
 function overlayRect(
   overlay: NonNullable<ReturnType<typeof screenToLayout>['overlay']>,
   canvas: { width: number; height: number },
@@ -364,13 +380,13 @@ function overlayRect(
   }
 
   if (overlay.kind === 'dialog') {
-    const width = Math.min(440, canvas.width - 16)
-    return { x: (canvas.width - width) / 2, y: 0, width, height: canvas.height - safeArea.bottom - 8 }
+    const width = Math.min(240, canvas.width - 32)
+    return { x: (canvas.width - width) / 2, y: safeArea.top, width, height: canvas.height - safeArea.top - safeArea.bottom - 8 }
   }
 
   const margin = SURFACES.sheet.margin
   const available = Math.max(0, canvas.height - safeArea.top - SURFACES.sheet.top - margin)
-  const detentHeight = (value: number) => Math.min(available, value < 0 ? -value + safeArea.bottom : (canvas.height - safeArea.bottom) * value + safeArea.bottom)
+  const detentHeight = (value: number) => Math.min(available, value < 0 ? -value + Math.max(0, safeArea.bottom - margin) : (canvas.height - safeArea.bottom) * value + safeArea.bottom)
   const height = Math.min(...(overlay.detents?.length ? overlay.detents : [overlay.detent]).map(detentHeight))
   const width = Math.min(SURFACES.sheet.maxWidth, canvas.width - margin * 2)
   return { x: (canvas.width - width) / 2, y: canvas.width >= 600 ? (canvas.height - height) / 2 : canvas.height - height - margin, width, height }
@@ -491,8 +507,7 @@ export function compile(request: CompileRequest): CompileResult {
   // that *discovered* the callback is not the pass worth showing. One more is enough:
   // a second appearance of the same path is not an appearance.
   if (evaluation.ui && runtime.runLifecycle(evaluation.ui.lifecycle)) {
-    const after = runtime.evaluate()
-    if (!after.failure) evaluation = after
+    evaluation = runtime.evaluate()
   }
 
   const evaluateMs = performance.now() - evaluateStart
@@ -523,8 +538,7 @@ export function rerender(revision: number): CompileResult {
   let evaluation = runtime.evaluate()
 
   if (evaluation.ui && runtime.runLifecycle(evaluation.ui.lifecycle)) {
-    const after = runtime.evaluate()
-    if (!after.failure) evaluation = after
+    evaluation = runtime.evaluate()
   }
 
   return finish(next, analysis, evaluation, startedAt, performance.now() - evaluateStart)
@@ -560,6 +574,7 @@ function finish(
   // always right.
   if (runtime.updateGeometry(geometryFrom(renderTree))) {
     const corrected = runtime.evaluate()
+    if (corrected.failure) return finish(request, analysis, corrected, startedAt, evaluateMs)
     if (!corrected.failure) {
       evaluation = corrected
       renderTree = render(request, corrected)
@@ -567,6 +582,12 @@ function finish(
   }
 
   const layoutMs = performance.now() - layoutStart
+  const invalid = renderTree.nodes.find((node) => !Object.values(node.frame).every(Number.isFinite) || node.frame.width < 0 || node.frame.height < 0)
+  if (invalid) {
+    lastEvaluation = null
+    const message = 'The preview produced an invalid layout size. Check frame, font, spacing, and geometry values.'
+    return toResult(request, analysis, { ...evaluation, failure: { kind: 'trap', message, span: invalid.origin ?? { file: request.files[0]?.id ?? '', start: 0, end: 0 }, frames: [] } }, noticeTree(request, 'Layout stopped', message), startedAt, evaluateMs, layoutMs)
+  }
   lastEvaluation = evaluation
 
   return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, layoutMs)

@@ -17,6 +17,7 @@
 
 export * from './values'
 export * from './errors'
+export * from './limits'
 export * from './environment'
 export * from './host'
 export { Interpreter, type InterpreterOptions } from './interpreter'

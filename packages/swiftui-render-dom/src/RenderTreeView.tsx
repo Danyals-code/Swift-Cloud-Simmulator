@@ -15,6 +15,7 @@ import {
   type UIEvent,
 } from '@studio/shared'
 import { symbolAsset, symbolStrokeScale } from './symbols'
+import { beginContextPress } from './context-press'
 
 export interface RenderTreeViewProps {
   tree: RenderTree
@@ -233,6 +234,8 @@ function RenderNodeView({
   inspect?: RenderTreeViewProps['inspect']
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const cancelContextPress = useRef<(() => void) | null>(null)
+  useLayoutEffect(() => () => cancelContextPress.current?.(), [])
   useLayoutEffect(() => {
     if (panelRef.current && node.chrome) {
       const scroller = panelRef.current.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.chrome.scrollId)}"]`)
@@ -405,13 +408,27 @@ function RenderNodeView({
       data-kind={node.kind}
       style={style}
       role={nativeControl ? undefined : node.a11y?.role}
-      tabIndex={!nativeControl && interactive && (role === 'button' || role === 'toggle') ? 0 : undefined}
+      tabIndex={!nativeControl && interactive && (role === 'button' || role === 'toggle' || role === 'contextMenu') ? 0 : undefined}
       aria-checked={role === 'toggle' ? node.hitTarget?.value === 'on' : undefined}
       onPointerUp={() => setPressed(false)}
       onPointerCancel={() => setPressed(false)}
       onKeyUp={() => setPressed(false)}
       onBlur={() => setPressed(false)}
-      onKeyDown={!nativeControl && interactive && handlerId && onEvent ? (event) => {
+      onContextMenu={!inspecting && interactive && node.hitTarget?.contextMenuHandlerId && onEvent ? event => {
+        event.preventDefault()
+        event.stopPropagation()
+        cancelContextPress.current?.()
+        setPressed(false)
+        onEvent({ kind: 'tap', handlerId: node.hitTarget!.contextMenuHandlerId!, location: { x: 0, y: 0 } })
+      } : undefined}
+      aria-haspopup={node.hitTarget?.contextMenuHandlerId ? 'menu' : undefined}
+      onKeyDown={!inspecting && interactive && handlerId && onEvent ? (event) => {
+        if (node.hitTarget?.contextMenuHandlerId && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
+          event.preventDefault()
+          onEvent({ kind: 'tap', handlerId: node.hitTarget.contextMenuHandlerId, location: { x: 0, y: 0 } })
+          return
+        }
+        if (nativeControl) return
         if ((event.key === 'Enter' || event.key === ' ') && (role === 'button' || role === 'toggle')) {
           event.preventDefault()
           if (event.repeat) return
@@ -437,6 +454,7 @@ function RenderNodeView({
       onPointerDown={
         !inspecting && interactive && handlerId && onEvent && !nativeControl
           ? (e) => {
+              if (e.button !== 0) return
               e.preventDefault()
               setPressed(true)
               e.currentTarget.focus()
@@ -447,19 +465,24 @@ function RenderNodeView({
                 y: (event.clientY - bounds.top) / scale,
               })
 
-              // A toggle reports the value it is moving *to*, so the worker never has
-              // to guess from a stale copy of the binding.
-              if (role === 'toggle') {
-                onEvent({ kind: 'toggle', handlerId, value: node.hitTarget?.value !== 'on' })
-                return
+              const location = at(e)
+              const activate = () => {
+                if (role === 'contextMenu') return
+                onEvent(role === 'toggle'
+                  ? { kind: 'toggle', handlerId, value: node.hitTarget?.value !== 'on' }
+                  : { kind: 'tap', handlerId, location })
               }
-
               if (role === 'drag') {
                 beginDrag(e, handlerId, at, onEvent)
                 return
               }
-
-              onEvent({ kind: 'tap', handlerId, location: at(e) })
+              if (node.hitTarget?.contextMenuHandlerId) {
+                cancelContextPress.current?.()
+                cancelContextPress.current = beginContextPress(e, activate, () => {
+                  setPressed(false)
+                  onEvent({ kind: 'tap', handlerId: node.hitTarget!.contextMenuHandlerId!, location })
+                })
+              } else activate()
             }
           : undefined
       }
@@ -555,13 +578,24 @@ function renderControl(
   const font = hit.font
 
   if (hit.role === 'textField') {
+    const Field = hit.multiline ? 'textarea' : 'input'
     return (
-      <input
+      <Field
         className="swiftui-field"
-        type={hit.secure ? 'password' : 'text'}
+        type={hit.multiline ? undefined : hit.secure ? 'password' : 'text'}
         disabled={!hit.enabled}
         value={hit.value ?? ''}
         placeholder={hit.placeholder ?? ''}
+        inputMode={hit.inputMode}
+        enterKeyHint={hit.enterKeyHint}
+        autoCapitalize={hit.autocapitalization}
+        autoCorrect={hit.autocorrection === undefined ? undefined : hit.autocorrection ? 'on' : 'off'}
+        spellCheck={hit.autocorrection}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.shiftKey || hit.multiline || !hit.submitHandlerId) return
+          event.preventDefault()
+          onEvent({ kind: 'tap', handlerId: hit.submitHandlerId, location: { x: 0, y: 0 } })
+        }}
         aria-label={node.a11y?.label}
         onChange={(e) => onEvent({ kind: 'textChange', handlerId, value: e.target.value })}
         style={{
@@ -572,7 +606,8 @@ function renderControl(
           border: 'none',
           outline: 'none',
           background: 'transparent',
-          padding: `0 ${hit.inputInset ?? 0}px`,
+          padding: `${hit.multiline ? 8 : 0}px ${hit.multiline ? 5 : hit.inputInset ?? 0}px`,
+          resize: 'none',
           '--field-placeholder': hit.placeholderColor ? cssColor(hit.placeholderColor) : 'GrayText',
           boxSizing: 'border-box',
           ...(font

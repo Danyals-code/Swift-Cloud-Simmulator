@@ -63,7 +63,7 @@ function node(nodes: readonly RenderNode[], id: string): RenderNode {
 
 function solid(node: RenderNode): string {
   expect(node.background?.kind).toBe('solid')
-  const c = node.background!.kind === 'solid' ? node.background.color : null
+  const c = node.background?.kind === 'solid' ? node.background.color : null
   return `${c!.r},${c!.g},${c!.b}`
 }
 
@@ -243,7 +243,7 @@ describe('a contextual colour with a member on it', () => {
       const nodes = compileSource(source).renderTree!.nodes
       const painted = nodes.find((n) => n.background?.kind === 'solid' && n.background.color.a < 1)
       expect(painted, `nothing translucent in ${source}`).toBeDefined()
-      const c = painted!.background!.kind === 'solid' ? painted!.background.color : null
+      const c = painted!.background?.kind === 'solid' ? painted!.background.color : null
       return `${c!.r},${c!.g},${c!.b},${c!.a}`
     }
 
@@ -329,7 +329,7 @@ describe('a determinate progress bar', () => {
   function bar(body: string): { track: RenderNode; fill: RenderNode } {
     const nodes = compileSource(app(body)).renderTree!.nodes
     const track = nodes.find((n) => n.id.includes('track'))
-    const fill = nodes.find((n) => n.id.endsWith('fill'))
+    const fill = nodes.find((n) => n.id.endsWith('fill') || n.id.endsWith('-fillf'))
     expect(track, 'no track').toBeDefined()
     expect(fill, 'no fill').toBeDefined()
     return { track: track!, fill: fill! }
@@ -501,7 +501,7 @@ function runColor(source: string, text: string): string {
   throw new Error(`no run "${text}"; the screen has ${JSON.stringify(seen)}`)
 }
 
-const BLUE = '0,122,255,1'
+const BLUE = '0,136,255,1'
 const RED = '255,59,48,1'
 const BLACK = '0,0,0,1'
 
@@ -698,30 +698,15 @@ describe('a segmented picker', () => {
         }
         .pickerStyle(.segmented)`)
 
-  it('lifts the chosen segment with a shadow', () => {
-    const lifted = compileSource(SEGMENTS).renderTree!.nodes.filter((n) => n.shadow)
-    expect(lifted.length, 'nothing under the chosen segment').toBeGreaterThan(0)
-  })
-
-  /**
-   * iOS divides adjacent *unselected* segments and hides the rules next to the pill,
-   * whose own edge already separates them. Three segments with the first chosen leaves
-   * exactly one rule, between the second and third.
-   */
-  it('rules between unselected segments only', () => {
-    const rules = compileSource(SEGMENTS).renderTree!.nodes.filter((n) => /seg\ddivl$/.test(n.id))
-    expect(rules.length).toBe(1)
-  })
-
-  it('draws its track at the lighter fill iOS uses, not systemFill', () => {
-    const track = compileSource(SEGMENTS).renderTree!.nodes.find((n) => n.id.startsWith('segtrack'))
-      ?? compileSource(SEGMENTS).renderTree!.nodes.find(
-        (n) => n.background?.kind === 'solid' && n.background.color.a < 0.2,
-      )
-    expect(track, 'no track').toBeDefined()
-    const fill = track!.background
-    expect(fill?.kind).toBe('solid')
-    expect(fill!.kind === 'solid' ? fill.color.a : 0).toBeCloseTo(0.12, 2)
+  it('uses capsule track and selected segment without old divider rules', () => {
+    const nodes = compileSource(SEGMENTS).renderTree!.nodes
+    const track = nodes.find(n => n.id.endsWith('segtrackf'))!
+    const selected = nodes.find(n => n.id.endsWith('seg0bgf'))!
+    expect(track.frame.height).toBe(32)
+    expect(track.cornerRadius).toBeGreaterThanOrEqual(16)
+    expect(selected.cornerRadius).toBeGreaterThanOrEqual(selected.frame.height / 2)
+    expect(nodes.filter(n => /seg\ddivl$/.test(n.id))).toHaveLength(0)
+    expect(track.background).toEqual({ kind: 'solid', color: { r: 238, g: 238, b: 239, a: 1 } })
   })
 
   it('labels segments at 13pt, semibold on the chosen one', () => {

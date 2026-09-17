@@ -717,6 +717,7 @@ export class Checker {
 
       case 'call': {
         this.checkCallee(expr.callee, scope)
+        this.checkOverloadCoverage(expr, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
         // than on every member access. Doing it there flagged `Color.accentColor` as
         // the `.accentColor` modifier - a warning on correct code, which is the one
@@ -812,6 +813,35 @@ export class Checker {
       case 'errorExpr':
         return
     }
+  }
+
+  /** A known view name does not imply that every SwiftUI overload works. */
+  private checkOverloadCoverage(expr: Extract<Expr, { kind: 'call' }>, scope: Scope): void {
+    const callee = expr.callee
+    const labels = new Set(expr.args.map((arg) => arg.label))
+    let feature: string | undefined
+    let reason: string | undefined
+    if (callee.kind === 'identifier' && !scope.has(callee.name) && !this.types.has(callee.name)) {
+      feature = callee.name
+      if (callee.name === 'NavigationStack' && labels.has('path')) reason = 'bound navigation paths are not synchronized; use NavigationLink destinations in the preview'
+      if (callee.name === 'TextField' && (labels.has('value') || labels.has('format') || labels.has('formatter'))) reason = 'value/format/formatter bindings are not implemented; use text: with a String binding'
+      if (callee.name === 'TextField' && labels.has('axis')) reason = 'axis-based multiline fields are not implemented; use TextEditor for multiline editing'
+      if (callee.name === 'Link' || callee.name === 'ShareLink') reason = 'only the label is drawn; opening URLs and the system share sheet are not implemented'
+      if (callee.name === 'ToolbarItem' || callee.name === 'ToolbarItemGroup') {
+        const placement = expr.args.find(arg => arg.label === 'placement')?.value
+        if (placement?.kind === 'memberAccess' && ['keyboard', 'bottomBar', 'principal'].includes(placement.member)) reason = `the .${placement.member} placement is not implemented; its controls are omitted`
+      }
+      if (callee.name === 'TimelineView') reason = 'the timeline runs only once and does not supply a context or advance its schedule'
+      if (callee.name === 'AsyncImage') reason = 'remote loading and image phases are not implemented; only the placeholder is previewed'
+    } else if (callee.kind === 'memberAccess' && rootsInAView(callee.base)) {
+      feature = `.${callee.member}`
+      if (callee.member === 'navigationDestination' && (labels.has('isPresented') || labels.has('item'))) reason = 'binding-driven destinations are not implemented; use NavigationLink with destination: or value: and navigationDestination(for:)'
+      if (callee.member === 'presentationBackground' && (expr.trailingClosure || labels.has('content'))) reason = 'custom view backgrounds are not implemented; use a Color or Material'
+      if (callee.member === 'contextMenu' && labels.has('forSelectionType')) reason = 'selection-based context menus are not implemented; use contextMenu with action buttons'
+      if (callee.member === 'contextMenu' && labels.has('preview')) reason = 'custom menu previews are not implemented; menu actions are available'
+      if (callee.member === 'background' && labels.has('fillStyle')) reason = 'the fillStyle argument is not applied in the preview'
+    }
+    if (feature && reason) this.report(expr.span, 'warning', callee.kind === 'identifier' ? 'unsupported_swiftui_view' : 'unsupported_swiftui_modifier', `${feature}: ${reason}. The source exports unchanged.`, feature)
   }
 
   /** A callee gets view-coverage treatment before ordinary resolution. */

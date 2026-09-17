@@ -30,7 +30,7 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
   mint: rgba(0, 199, 190),
   teal: rgba(48, 176, 199),
   cyan: rgba(50, 173, 230),
-  blue: rgba(0, 122, 255),
+  blue: rgba(0, 136, 255),
   indigo: rgba(88, 86, 214),
   purple: rgba(203, 48, 224),
   pink: rgba(255, 45, 85),
@@ -52,14 +52,14 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
    */
   primary: rgba(0, 0, 0),
   secondary: rgba(60, 60, 67, 0.6),
-  accentColor: rgba(0, 122, 255),
-  accent: rgba(0, 122, 255),
+  accentColor: rgba(0, 136, 255),
+  accent: rgba(0, 136, 255),
   /**
    * `.tint` as a *style*: `Text("New").foregroundStyle(.tint)`.
    *
    * The accent colour, which is what the tint is until something changes it. Inherited tint is resolved by the converter; these values are the root defaults.
    */
-  tint: rgba(0, 122, 255),
+  tint: rgba(0, 136, 255),
 
   // Semantic colours. These adapt, which is the entire reason for two tables -
   // `Color(white: 0.95)` does not adapt, and a preview that treats them alike would
@@ -92,16 +92,16 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   mint: rgba(99, 230, 226),
   teal: rgba(64, 200, 224),
   cyan: rgba(100, 210, 255),
-  blue: rgba(10, 132, 255),
+  blue: rgba(0, 145, 255),
   indigo: rgba(94, 92, 230),
   purple: rgba(191, 90, 242),
   pink: rgba(255, 55, 95),
   brown: rgba(172, 142, 104),
   primary: rgba(255, 255, 255),
   secondary: rgba(235, 235, 245, 0.6),
-  accentColor: rgba(10, 132, 255),
-  accent: rgba(10, 132, 255),
-  tint: rgba(10, 132, 255),
+  accentColor: rgba(0, 145, 255),
+  accent: rgba(0, 145, 255),
+  tint: rgba(0, 145, 255),
 
   label: rgba(255, 255, 255),
   secondaryLabel: rgba(235, 235, 245, 0.6),

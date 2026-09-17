@@ -75,7 +75,7 @@ describe('GroupBox', () => {
 
   it('draws a card behind the contents', () => {
     const result = run(view('GroupBox("Totals") { Text("42 items") }'))
-    const card = nodes(result).find((n) => n.cornerRadius === 12 && n.background)
+    const card = nodes(result).find((n) => n.cornerRadius === 8 && n.background)
     expect(card, 'expected a rounded panel behind the contents').toBeDefined()
   })
 

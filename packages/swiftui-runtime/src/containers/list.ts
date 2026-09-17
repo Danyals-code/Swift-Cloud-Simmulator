@@ -1,5 +1,5 @@
 import type { RGBA, ResolvedFont } from '@studio/shared'
-import type { SwiftValue } from '@studio/swift-runtime'
+import { describe, type SwiftValue } from '@studio/swift-runtime'
 import { CENTER, insets, type EdgeInsets, type LayoutElement } from '@studio/swiftui-layout'
 import { SURFACES, listAppearance } from '../appearance/surfaces'
 import { asView, payloadOf, EDGE_INSETS_TYPE, TOKEN_TYPE, type TokenPayload, type ViewValue } from '../view-value'
@@ -53,7 +53,15 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
     const edges = token(modifier?.args.find(a => a.label === 'edges')?.value)
     return token(modifier?.args[0]?.value) === 'hidden' && (!edges || edges === 'all' || edges === edge)
   }
-  const rowInsets = (row: ViewValue) => payloadOf<EdgeInsets>(arg(row, 'listRowInsets'), EDGE_INSETS_TYPE) ?? insets(row.name === 'Toggle' ? 12 : m.rowY, m.rowX, row.name === 'Toggle' ? 12 : m.rowY, m.rowX)
+  const rowInsets = (row: ViewValue) => {
+    const custom = payloadOf<EdgeInsets>(arg(row, 'listRowInsets'), EDGE_INSETS_TYPE)
+    if (custom) return custom
+    const buttonToggle = row.name === 'Toggle' && token(arg(row, 'toggleStyle')) === 'button'
+    const y = buttonToggle ? 15 : row.name === 'Toggle' ? 12 : row.name === 'Stepper' ? 10 : m.rowY
+    return insets(y, m.rowX, y, m.rowX)
+  }
+  const expandedRows = (rows: readonly ViewValue[], indent = 0): { row: ViewValue; indent: number }[] =>
+    rows.flatMap(row => [{ row, indent }, ...(row.name === 'DisclosureGroup' ? expandedRows(flatten(row.children), indent + 20) : [])])
   const blocks: LayoutElement[] = []
   let previousHadFooter = false
   sections.forEach((section, index) => {
@@ -74,14 +82,26 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
     if (index > 0) blocks.push({ kind: 'modified', id: `${id}gap`, modifier: { kind: 'frame', height: arg(view, 'listSectionSpacing') ? sectionGap : previousHadFooter ? m.afterFooterGap : header ? sectionGap : m.unheadedGap, alignment: CENTER }, child: { kind: 'empty', id: `${id}gapx` } })
     if (header) blocks.push(header)
     const rows: LayoutElement[] = []
-    section.rows.forEach((row, i) => {
+    const visibleRows = expandedRows(section.rows)
+    visibleRows.forEach(({ row, indent }, i) => {
       const rid = row.path ?? `${id}r${i}`
       let raw = c.convert(row, rid)
+      const badge = arg(row, 'badge')
+      if (badge && badge.kind !== 'nil' && !(badge.kind === 'int' && badge.value === 0)) {
+        const value = badge.kind === 'opaque' ? asView(badge)?.args[0]?.value : badge
+        const text = value ? describe(value, true) : ''
+        if (text) {
+          const decorate = (child: LayoutElement): LayoutElement => ({ kind: 'stack', id: `${rid}badge-row`, axis: 'horizontal', spacing: 8, alignment: CENTER,
+            children: [child, { kind: 'spacer', id: `${rid}badge-space`, axis: 'horizontal', minLength: 0 }, c.text(`${rid}badge-text`, text, 'body', 'secondaryLabel')] })
+          raw = raw.kind === 'modified' && raw.modifier.kind === 'hitTarget' ? { ...raw, child: decorate(raw.child) } : decorate(raw)
+        }
+      }
       if (row.swipe) raw = c.swipe(row, raw, rid)
-      const next = section.rows[i + 1]
+      const next = visibleRows[i + 1]?.row
+      const edges = { ...rowInsets(row), leading: rowInsets(row).leading + indent }
       const separator = next && style !== 'sidebar' && !hiddenSeparator(row, 'bottom') && !hiddenSeparator(next, 'top')
       const wrap = (content: LayoutElement): LayoutElement => {
-        let result = frame(`${rid}rowsize`, pad(`${rid}rowpad`, content, rowInsets(row)), m.row)
+        let result = frame(`${rid}rowsize`, pad(`${rid}rowpad`, content, edges), m.row)
         const fill = resolveFillArg(arg(row, 'listRowBackground'), c.scheme, c.tint)
         if (fill) result = { kind: 'modified', id: `${rid}rowbg`, modifier: { kind: 'background', content: { kind: 'fill', id: `${rid}rowbgf`, fill } }, child: result }
         return result
@@ -89,7 +109,7 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
       const item = raw.kind === 'modified' && raw.modifier.kind === 'hitTarget' && ['button', 'toggle'].includes(raw.modifier.role) ? { ...raw, child: wrap(raw.child) } : wrap(raw)
       rows.push(i > 0 && spacing !== 0 ? pad(`${rid}spacing`, item, insets(spacing, 0, 0, 0)) : item)
       if (separator) {
-        const rule = pad(`${id}r${i}sep`, { kind: 'modified', id: `${id}r${i}sepf`, modifier: { kind: 'frame', height: c.separatorHeight, alignment: CENTER }, child: { kind: 'fill', id: `${id}r${i}sepl`, pixelAligned: true, fill: { kind: 'solid', color: c.color('separator') } } }, insets(0, rowInsets(row).leading + (row.name === 'Label' ? 40 : 0), 0, rowInsets(row).trailing))
+        const rule = pad(`${id}r${i}sep`, { kind: 'modified', id: `${id}r${i}sepf`, modifier: { kind: 'frame', height: c.separatorHeight, alignment: CENTER }, child: { kind: 'fill', id: `${id}r${i}sepl`, pixelAligned: true, fill: { kind: 'solid', color: c.color('separator') } } }, insets(0, edges.leading + (row.name === 'Label' ? 40 : 0), 0, rowInsets(row).trailing))
         rows[rows.length - 1] = { kind: 'modified', id: `${rid}separator-overlay`, modifier: { kind: 'overlay', alignment: { horizontal: 'center', vertical: 'bottom' }, content: rule }, child: rows[rows.length - 1]! }
       }
     })
