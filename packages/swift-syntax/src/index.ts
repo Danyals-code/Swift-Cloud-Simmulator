@@ -17,3 +17,8 @@ export { Lexer, type LexResult } from './lexer'
 export { Parser, typeName, type ParseResult } from './parser'
 
 export * from './conformance'
+export {
+  viewSiteAt, deleteView, moveView, moveViewTo, insertView, copyView,
+  hideView, showView, hiddenViewsIn, HIDDEN_MARKER,
+  type ViewSite, type SourceEdit, type HiddenView,
+} from './edits'

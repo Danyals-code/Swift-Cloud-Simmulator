@@ -1,16 +1,35 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ExportFormat } from '@studio/shared'
 import { buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
-import type { FileId, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
+import type { FileId, PagePreview, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
+import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
+/**
+ * The Add palette, fetched when it is opened.
+ *
+ * It carries the catalogue of every view the studio can write, which is a couple of
+ * kilobytes that nothing needs until somebody presses Add - and the chunk it would
+ * otherwise sit in is the one the browser has to have before anything appears.
+ */
+const AddView = dynamic(() => import('./AddView').then((m) => m.AddView), { ssr: false })
+import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
-import { findLayer, layerRenderIds } from '../lib/layers'
+import { findLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
 import { useCompiler } from '../lib/useCompiler'
-import { ConsolePane } from './ConsolePane'
+/**
+ * Problems, output, timings and coverage, fetched when the panel is opened.
+ *
+ * The panel is closed by default and the four tabs behind it are a few kilobytes
+ * that the first paint does not need - and the chunk they would otherwise sit in is
+ * the one the browser must have before anything appears at all.
+ */
+const ConsolePane = dynamic(() => import('./ConsolePane').then((m) => m.ConsolePane), { ssr: false })
+import { InspectorReadout } from './InspectorReadout'
 import { DevicePane } from './DevicePane'
 import { EditorPane } from './EditorPane'
 import { FileSwitcher } from './FileSwitcher'
@@ -18,12 +37,21 @@ import { JumpBar } from './JumpBar'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery } from './TemplateGallery'
-import { Toolbar, PreviewTools } from './Toolbar'
+import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
 import styles from './Workspace.module.css'
 import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
+
+/** One edit the canvas made, as the file before and after it. */
+interface Change {
+  readonly file: FileId
+  readonly before: string
+  readonly after: string
+  /** Where to put the selection back, for the edit that produced this change. */
+  readonly offset: number | null
+}
 
 /** The narrowest the editor is allowed to get before the side panes start yielding. */
 const EDITOR_MIN = 300
@@ -61,7 +89,12 @@ export function Studio() {
   const recents = useStudio((s) => s.recents)
 
   const [layerSelection, setLayerSelection] = useState<{ projectId: string; id: string } | null>(null)
+  /** The node the inspector's pointer is over. Null whenever it is over nothing. */
+  const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
   const navigatorTab = useLayout(s => s.navigatorTab)
+  const setNavigatorTab = useLayout(s => s.setNavigatorTab)
+  const inspectorTab = useLayout(s => s.inspectorTab)
+  const setInspectorTab = useLayout(s => s.setInspectorTab)
   const mode = useLayout(s => s.mode)
   const setMode = useLayout(s => s.setMode)
   const theme = useLayout(s => s.theme)
@@ -71,11 +104,49 @@ export function Studio() {
   const navigatorWidth = useLayout((s) => s.navigatorWidth)
   const previewWidth = useLayout((s) => s.previewWidth)
   const debugHeight = useLayout((s) => s.debugHeight)
+  const settingsWidth = useLayout((s) => s.settingsWidth)
   const setSize = useLayout((s) => s.setSize)
   const setPane = useLayout((s) => s.setPane)
 
   const [inspecting, setInspecting] = useState(false)
-  const [paused, setPaused] = useState(false)
+  /**
+   * The page gallery: every page drawn at once, instead of the one that is running.
+   *
+   * Design's alone. In Code the canvas is a column beside the editor, where six
+   * phones would each be the width of a word - and the pages would be laid out on
+   * every keystroke to draw them.
+   */
+  const [allPages, setAllPages] = useState(false)
+  /** What a click on the canvas does: choose a view, or take one out. */
+  const [tool, setToolState] = useState<CanvasTool>('select')
+  const [adding, setAdding] = useState(false)
+  /** What the source says can be done to the selection, which the controls are drawn from. */
+  const [siteInfo, setSiteInfo] = useState<{ key: string; info: ViewSiteInfo | null } | null>(null)
+  /**
+   * The view to select once the edit has been compiled.
+   *
+   * By source offset, not by identity: an identity is positional, so after a move
+   * the old one names the neighbour the view was swapped with. The offset is where
+   * the view is now *written*, which is the one thing an edit can report exactly.
+   */
+  const [pendingSelect, setPendingSelect] = useState<{ file: FileId; offset: number } | null>(null)
+  /** Raised when an edit could not be made, so the canvas can say why. */
+  const [editNote, setEditNote] = useState<string | null>(null)
+  /**
+   * What the canvas has done to the file, so it can be undone.
+   *
+   * Only the studio's own edits: typing in the editor has CodeMirror's undo, which
+   * knows about carets and selections and is the right one to be holding while you
+   * are in it. These two never fire while the editor has focus.
+   */
+  const history = useRef<{ past: Change[]; future: Change[] }>({ past: [], future: [] })
+  /** A view copied from Layers or the canvas, as the Swift that draws it. */
+  const [clipboard, setClipboard] = useState<string | null>(null)
+  const [hidden, setHidden] = useState<{ key: string; views: readonly HiddenViewInfo[] }>({ key: '', views: [] })
+  const [centerOn, setCenterOn] = useState<{ id: string; nonce: number } | null>(null)
+  const centerNonce = useRef(0)
+  /** Picking up a different tool answers whatever the last refusal said. */
+  const setTool = useCallback((next: CanvasTool) => { setToolState(next); setEditNote(null) }, [])
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
   /**
@@ -112,6 +183,32 @@ export function Studio() {
     setGalleryOpen(true)
   }, [loaded, origin])
 
+  /**
+   * The gallery belongs to Edit.
+   *
+   * Live Preview hands the phone to the person using it, and a row of phones where
+   * a click opens a *page* is the opposite of that. The checkbox greys out there
+   * rather than disappearing, and it keeps its setting: coming back to Edit finds
+   * the canvas as it was left.
+   */
+  const showingAllPages = allPages && inspecting
+
+  /**
+   * The switch moves the right-hand rail with it.
+   *
+   * Designing and previewing ask different questions of the panel beside the canvas -
+   * what is this view, against how am I looking at it - so the panel follows the
+   * switch rather than waiting to be told twice. Either tab is still one press away,
+   * and pressing one is a decision the switch then leaves alone.
+   */
+  const setDesigning = useCallback((designing: boolean) => {
+    setInspecting(designing)
+    setInspectorTab(designing ? 'settings' : 'preview')
+    if (!designing) setTool('select')
+  }, [setInspectorTab, setTool])
+
+  const toggleInspect = useCallback(() => setDesigning(!inspecting), [setDesigning, inspecting])
+
   const openGallery = useCallback(() => {
     setGalleryAtLaunch(false)
     setGalleryOpen(true)
@@ -132,7 +229,7 @@ export function Studio() {
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
   const files = project?.files ?? NO_FILES
 
-  const { result, stale, workerError, dispatch, reset, language } = useCompiler({
+  const { result, stale, workerError, dispatch, reset, language, editView, describeView, copyView, hiddenViews } = useCompiler({
     projectId: project?.id,
     files,
     device,
@@ -140,7 +237,7 @@ export function Studio() {
     typeScale: previewSettings.typeScale,
     dynamicTypeSize: previewSettings.dynamicTypeSize,
     previewTarget: project?.manifest.previewTarget,
-    paused,
+    allPages: showingAllPages && mode === 'design',
   })
 
   const activeFile = useMemo(
@@ -269,17 +366,37 @@ export function Studio() {
   /**
    * Run: drop the preview's state and evaluate from scratch.
    *
-   * Also resumes, because pressing Run while paused can only mean one thing - and
-   * a Run that left the preview frozen would look broken.
+   * ⌘R and nothing else now. The dock is a switch between editing the app and using
+   * it, and a third button that silently resets everything you had typed into the
+   * running app did not belong beside those two.
    */
-  const run = useCallback(() => {
-    setPaused(false)
-    void reset()
-  }, [reset])
+  const run = useCallback(() => { void reset() }, [reset])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen) return
+      if (galleryOpen || switcherOpen || adding) return
+      const typing = (e.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"], .cm-editor')
+
+      /**
+       * The two switches, on one key each.
+       *
+       * Tab moves between designing the app and using it; the backquote moves
+       * between the two workspaces. Both are plain keys, so both stand aside for
+       * anything with a cursor in it - Tab in a form is a Tab.
+       */
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
+        if (e.key === 'Tab') {
+          e.preventDefault()
+          setDesigning(!inspecting)
+          return
+        }
+        if (e.key === '`') {
+          e.preventDefault()
+          setMode(mode === 'design' ? 'develop' : 'design')
+          return
+        }
+      }
+
       if (!(e.ctrlKey || e.metaKey)) return
       const key = e.key.toLowerCase()
 
@@ -302,7 +419,10 @@ export function Studio() {
         setSwitcherOpen(true)
       } else if (key === 'i') {
         e.preventDefault()
-        setInspecting((v) => !v)
+        toggleInspect()
+      } else if (key === 'a' && e.shiftKey) {
+        e.preventDefault()
+        if (mode === 'design' && inspecting) setAllPages((on) => !on)
       } else if (key === 'r') {
         e.preventDefault()
         run()
@@ -310,7 +430,9 @@ export function Studio() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePane, run, galleryOpen, switcherOpen])
+  }, [togglePane, run, galleryOpen, switcherOpen, adding, toggleInspect, mode, inspecting, setDesigning, setMode])
+
+
 
   const handleChange = useCallback(
     (text: string) => {
@@ -321,18 +443,356 @@ export function Studio() {
 
   const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
   const layers = result?.viewHierarchy ?? NO_FILES
-  const selectedLayerId = layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null
+  /** What the app has, against what the gallery drew - they differ only past its limit. */
+  const pageCount = useMemo(() => layers.filter((layer) => layer.type === 'Page').length, [layers])
+  /**
+   * The view an edit produced, found again in the tree the recompile made.
+   *
+   * Derived rather than assigned when the result arrives: the edit knows where the
+   * view is *written*, and the layer at that offset is the answer whenever the
+   * compile that includes it lands. Until then the old selection stands, so nothing
+   * flickers between the edit and the tree that reflects it.
+   */
+  const editedLayer = useMemo(() => {
+    if (!pendingSelect) return undefined
+    const find = (items: readonly ViewLayer[]): ViewLayer | undefined => {
+      for (const item of items) {
+        if (item.source?.file === pendingSelect.file && item.source.start === pendingSelect.offset) return item
+        const child = find(item.children)
+        if (child) return child
+      }
+    }
+    return find(layers)
+  }, [pendingSelect, layers])
+
+  const selectedLayerId = editedLayer?.id
+    ?? (layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null)
   const selectedRenderIds = useMemo(() => layerRenderIds(
     mode === 'design' && navigatorTab === 'layers' && selectedLayerId ? findLayer(layers, selectedLayerId) : undefined,
     result?.renderTree, layers,
   ), [layers, selectedLayerId, result?.renderTree, mode, navigatorTab])
   const selectLayer = (layer: ViewLayer, page: ViewLayer) => {
     if (stale || !project) return
+    setPendingSelect(null)
+    setEditNote(null)
     setLayerSelection({ projectId: project.id, id: layer.id })
+    // Bring its page into view, which is what makes Layers usable on a canvas that
+    // has been zoomed into or panned away from the page being chosen.
+    setCenterOn({ id: page.id, nonce: ++centerNonce.current })
     if (page.page?.handlerId && !page.page.active) {
       void dispatch({ kind: 'tap', handlerId: page.page.handlerId, location: { x: 0, y: 0 } })
     }
   }
+
+  /**
+   * Opening a page from the gallery.
+   *
+   * The same press the tab bar would have taken, so the app changes tab exactly as
+   * it would on the device - and the gallery redraws with the new page live.
+   */
+  const openPage = useCallback((page: PagePreview) => {
+    if (!page.handlerId) return
+    void dispatch({ kind: 'tap', handlerId: page.handlerId, location: { x: 0, y: 0 } })
+  }, [dispatch])
+
+  // ------------------------------------------------------------ editing
+
+  const selectedLayer = useMemo(
+    () => (selectedLayerId ? findLayer(layers, selectedLayerId) : undefined),
+    [layers, selectedLayerId],
+  )
+
+  /**
+   * Asks the worker what the selection's source can take.
+   *
+   * The hierarchy cannot answer this: a row drawn by a `ForEach` has siblings on
+   * screen and one statement in the file, and it is the file that decides whether
+   * "move down" means anything. So the parser is asked, once per selection.
+   */
+  useEffect(() => {
+    const source = selectedLayer?.source
+    const file = source && project ? findFile(project, source.file) : undefined
+    if (!source || !file || !selectedLayerId) return
+    let live = true
+    void describeView(file.text, source.file, source.start)
+      .then((info) => { if (live) setSiteInfo({ key: selectedLayerId, info }) })
+    return () => { live = false }
+  }, [selectedLayer, selectedLayerId, project, describeView])
+
+  // Keyed by the selection it was asked about, so an answer that arrives after the
+  // selection moved on describes nothing rather than the wrong view.
+  const site = siteInfo?.key === selectedLayerId ? siteInfo.info : null
+
+  /**
+   * Performs an edit, and keeps hold of what it edited.
+   *
+   * Everything goes through here - the canvas, Layers, the keyboard and the palette -
+   * because every one of them means the same thing: change the file, then follow the
+   * view into its new place. A refusal is reported rather than swallowed: the reasons
+   * are real ones (the end of a stack, a body that would be left empty) and a control
+   * that quietly did nothing would read as a bug.
+   */
+  const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
+    const target = layer ?? selectedLayer
+    const source = target?.source
+    const file = source && project ? findFile(project, source.file) : undefined
+    if (!source || !file) return
+
+    const result = await editView({ text: file.text, file: source.file, offset: source.start, edit })
+    if (!result) {
+      setEditNote(
+        edit.kind === 'move'
+          ? `${target!.name} is already ${edit.direction === -1 ? 'first' : 'last'} here`
+          : edit.kind === 'delete'
+            ? `${target!.name} is the whole of this view - delete it in the code`
+            : 'That view has nowhere to go here',
+      )
+      return
+    }
+
+    setEditNote(null)
+    history.current = {
+      past: [...history.current.past, { file: source.file, before: file.text, after: result.text, offset: edit.kind === 'delete' ? null : result.offset }],
+      future: [],
+    }
+    setFileText(source.file, result.text)
+    if (edit.kind === 'delete') {
+      // Nothing is selected after a delete, and the offset the deleted view had is
+      // forgotten with it: something else occupies it now, and following the offset
+      // would select whatever moved up into the gap.
+      setPendingSelect(null)
+      setLayerSelection(null)
+    } else {
+      setPendingSelect({ file: source.file, offset: result.offset })
+    }
+  }, [editView, project, selectedLayer, setFileText])
+
+  /** Where Add would put it, which the palette says before anything is added. */
+  const addTarget = selectedLayer
+    ? site?.container ? `Into ${selectedLayer.name}` : `After ${selectedLayer.name}`
+    : 'Into this screen'
+
+  /**
+   * Add, from the palette or the keyboard.
+   *
+   * With nothing selected it targets the visible page's own content, so Add works on
+   * a screen nobody has clicked into yet.
+   */
+  const addTargetLayer = useMemo(() => {
+    if (selectedLayer) return selectedLayer
+    const page = layers.find((layer) => layer.page?.active) ?? layers[0]
+    return page?.children[0]
+  }, [selectedLayer, layers])
+
+  const canAdd = !!addTargetLayer?.source && !stale
+
+  const selection = selectedLayer && site
+    ? {
+        name: selectedLayer.name,
+        type: selectedLayer.type,
+        canMoveUp: site.index > 0,
+        canMoveDown: site.index < site.siblings - 1,
+        canDelete: site.siblings > 1 || site.inContent,
+        // What it paints, so a drag can begin anywhere inside it rather than on
+        // whichever innermost view the pointer happens to be over.
+        renderIds: [...selectedRenderIds],
+      }
+    : null
+
+  const undo = useCallback(() => {
+    const change = history.current.past[history.current.past.length - 1]
+    if (!change) return
+    history.current = { past: history.current.past.slice(0, -1), future: [change, ...history.current.future] }
+    setFileText(change.file, change.before)
+    setLayerSelection(null)
+    setPendingSelect(null)
+    setEditNote('Undone')
+  }, [setFileText])
+
+  const redo = useCallback(() => {
+    const change = history.current.future[0]
+    if (!change) return
+    history.current = { past: [...history.current.past, change], future: history.current.future.slice(1) }
+    setFileText(change.file, change.after)
+    setPendingSelect(change.offset === null ? null : { file: change.file, offset: change.offset })
+    setEditNote('Redone')
+  }, [setFileText])
+
+  /** Copies the selected view as the Swift that draws it, for a paste anywhere. */
+  const copySelection = useCallback(async () => {
+    const source = selectedLayer?.source
+    const file = source && project ? findFile(project, source.file) : undefined
+    if (!source || !file) return
+    const snippet = await copyView(file.text, source.file, source.start)
+    if (!snippet) return
+    setClipboard(snippet)
+    setEditNote(`Copied ${selectedLayer!.name}`)
+    // Best effort, and never waited on: a studio clipboard is what Paste reads, and
+    // the system one is a courtesy for pasting into the editor or somewhere else.
+    try { await navigator.clipboard.writeText(snippet) } catch { /* not granted, or not secure */ }
+  }, [copyView, project, selectedLayer])
+
+  const pasteClipboard = useCallback(() => {
+    if (!clipboard) return
+    void applyEdit({ kind: 'insert', snippet: clipboard }, addTargetLayer)
+  }, [clipboard, applyEdit, addTargetLayer])
+
+  /**
+   * Showing a hidden view again.
+   *
+   * Not an edit to a *view*, because there is no view: the thing being edited is a
+   * block of comments, named by where it sits in the file. So it takes the same path
+   * as every other edit, with an offset the parser recognises rather than a layer.
+   */
+  const showHidden = useCallback((view: HiddenViewInfo) => {
+    const file = project ? findFile(project, view.file) : undefined
+    if (!file) return
+    void (async () => {
+      const result = await editView({ text: file.text, file: view.file, offset: view.offset, edit: { kind: 'show' } })
+      if (!result) { setEditNote(`Could not show ${view.name}`); return }
+      history.current = { past: [...history.current.past, { file: view.file, before: file.text, after: result.text, offset: result.offset }], future: [] }
+      setFileText(view.file, result.text)
+      setPendingSelect({ file: view.file, offset: result.offset })
+    })()
+  }, [editView, project, setFileText])
+
+  /**
+   * Every view the project is hiding, re-read whenever a compile settles.
+   *
+   * Keyed by what was read, so an answer that arrives after another edit describes
+   * the file that is open rather than the one that was.
+   */
+  useEffect(() => {
+    if (!project || stale) return
+    const key = `${project.id}:${result?.revision ?? 0}`
+    if (hidden.key === key) return
+    let live = true
+    void hiddenViews(project.files).then((views) => { if (live) setHidden({ key, views }) })
+    return () => { live = false }
+  }, [project, stale, result?.revision, hiddenViews, hidden.key])
+
+  /**
+   * The designing keys, which carry no modifier.
+   *
+   * Held apart from the Xcode chords above because they must never fire while
+   * somebody is typing: V, A and D are letters, and Backspace in a text field is a
+   * backspace. Anything with a focused field or an open sheet is left alone.
+   */
+  useEffect(() => {
+    if (mode !== 'design' || !inspecting) return
+    const onKey = (e: KeyboardEvent) => {
+      if (galleryOpen || switcherOpen || adding) return
+      const target = e.target as HTMLElement | null
+      if (target?.closest('input, textarea, [contenteditable="true"], .cm-editor')) return
+
+      const key = e.key.toLowerCase()
+      // The editing chords. Undo is the studio's here rather than the editor's,
+      // because the editor is not the thing being typed into.
+      if (e.ctrlKey || e.metaKey) {
+        if (key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo() }
+        else if (key === 'y') { e.preventDefault(); redo() }
+        else if (key === 'c') { if (selectedLayer) { e.preventDefault(); void copySelection() } }
+        else if (key === 'v') { if (clipboard) { e.preventDefault(); pasteClipboard() } }
+        else if (key === 'h') { if (selectedLayer) { e.preventDefault(); void applyEdit({ kind: 'hide' }) } }
+        return
+      }
+
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault()
+        void applyEdit({ kind: 'move', direction: e.key === 'ArrowUp' ? -1 : 1 })
+      } else if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (!selectedLayer) return
+        e.preventDefault()
+        void applyEdit({ kind: 'delete' })
+      } else if (key === 'v') {
+        setTool('select')
+      } else if (key === 'd') {
+        setTool(tool === 'delete' ? 'select' : 'delete')
+      } else if (key === 'a') {
+        if (canAdd) { e.preventDefault(); setAdding(true) }
+      } else if (e.key === 'Escape') {
+        if (tool === 'delete') setTool('select')
+        else setLayerSelection(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mode, inspecting, galleryOpen, switcherOpen, adding, applyEdit, selectedLayer, canAdd, tool, setTool,
+      undo, redo, copySelection, pasteClipboard, clipboard])
+
+  /**
+   * Undo and redo, over the edits the canvas made.
+   *
+   * A change is the whole file before and after, which is the only representation
+   * that cannot drift: replaying an *operation* backwards would have to know what
+   * the file looked like when it ran, and after a second edit it no longer does.
+   */
+  /**
+   * A drop, from the tree or from the canvas.
+   *
+   * One operation for both, because both are saying the same thing: put this view
+   * beside that one. The source's own offset and the target's are all the parser
+   * needs, and it is the parser that decides whether the result is a file that
+   * still compiles.
+   */
+  const reorderLayers = useCallback((layer: ViewLayer, target: ViewLayer, position: 'before' | 'after') => {
+    const from = layer.source
+    const to = target.source
+    if (!from || !to || from.file !== to.file) {
+      setEditNote('A view can only be moved within the file it is written in')
+      return
+    }
+    void applyEdit({ kind: 'moveTo', targetOffset: to.start, position }, layer)
+  }, [applyEdit])
+
+  /** A drop on the canvas, named in the terms the file understands. */
+  const reorderNodes = useCallback((source: RenderNode | 'selection', target: RenderNode, position: 'before' | 'after') => {
+    const from = source === 'selection' ? selectedLayer : layerForRenderNode(layers, source)
+    const to = layerForRenderNode(layers, target)
+    if (!from || !to || from.id === to.id) return
+    reorderLayers(from, to, position)
+  }, [layers, reorderLayers, selectedLayer])
+
+  /** The layer under the inspector's pointer, while Layers is there to show it. */
+  const hoveredLayerId = useMemo(
+    () => (inspecting && mode === 'design' ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
+    [inspecting, mode, layers, hoveredNode],
+  )
+
+  /**
+   * Clicking a view while inspecting.
+   *
+   * In Code that means "show me the Swift that drew this", which is what the
+   * inspector has always done. In Design there is no editor on screen to jump to,
+   * and the panel that *can* answer is Layers - so the click selects the view
+   * there and leaves you where you were. The editor is still pointed at the right
+   * line, so switching to Code afterwards lands on it.
+   */
+  const inspectSelect = useCallback(
+    (node: RenderNode) => {
+      if (mode !== 'design') {
+        revealSource(node)
+        return
+      }
+      if (tool === 'delete') {
+        const target = layerForRenderNode(layers, node)
+        if (target) void applyEdit({ kind: 'delete' }, target)
+        return
+      }
+      if (node.origin) {
+        if (node.origin.file !== activeFileId) setActiveFile(node.origin.file)
+        setReveal({ offset: node.origin.start, nonce: ++revealNonce.current })
+      }
+      const layer = layerForRenderNode(layers, node)
+      if (!layer || !project) return
+      setNavigatorTab('layers')
+      setPane('navigator', true)
+      setPendingSelect(null)
+      setEditNote(null)
+      setLayerSelection({ projectId: project.id, id: layer.id })
+    },
+    [mode, revealSource, layers, project, activeFileId, setActiveFile, setNavigatorTab, setPane, tool, applyEdit],
+  )
 
 
   /** The rename in progress, if F2 found something to rename. */
@@ -393,7 +853,59 @@ export function Studio() {
   const errors = allDiagnostics.filter((d) => d.severity === 'error').length
   const warnings = allDiagnostics.filter((d) => d.severity === 'warning').length
 
-  const previewTools = <PreviewTools paused={paused} inspecting={inspecting} busy={stale} errors={errors} warnings={warnings} workerError={workerError} onRun={run} onTogglePaused={() => setPaused(v => !v)} onToggleInspect={() => setInspecting(v => !v)} />
+  /**
+   * Problems, output, timings and coverage.
+   *
+   * One element, placed under whichever editor is on screen: the source editor in
+   * Code, the canvas in Design. It used to exist only in Code, which is why asking
+   * for it from Design used to take you there - the panel was answering with a
+   * different workspace.
+   */
+  const debugArea = shown.debug ? (
+    <>
+      <Splitter
+        orientation="row"
+        size={debugHeight}
+        onResize={(size) => setSize('debug', size)}
+        min={PANE_LIMITS.debug.min}
+        max={PANE_LIMITS.debug.max}
+        direction={-1}
+        label="Debug area height"
+        onToggle={() => togglePane('debug')}
+      />
+      <div style={{ height: debugHeight, maxHeight: '65%' }} className="flex shrink-0 flex-col">
+        {/* What the pointer is over and what is selected, at the top of the panel
+            that reports on the app. It used to be a strip under the canvas, which
+            made the canvas change height between Design and Live Preview - and a
+            simulator that resizes when you switch modes looks like a glitch. */}
+        {inspecting ? (
+          <div className={styles.readout} data-testid="canvas-bar">
+            {/* In Code the panel sits under the editor, and the same line reports
+                the same thing there - what the pointer is over, and what a click on
+                it will do, which in Code is open its source. */}
+            <InspectorReadout node={hoveredNode} active action={mode === 'design' ? 'select' : 'reveal'} />
+            {editNote ? <span className={styles.note} role="status" data-testid="edit-note">{editNote}</span> : null}
+            {selection && mode === 'design' ? (
+              <div className={styles.selection} data-testid="selection-controls">
+                <span className={styles.selectionName}>{selection.name}</span>
+                <span className={styles.selectionKind}>{selection.type}</span>
+                <button type="button" data-testid="move-up" disabled={!selection.canMoveUp} title="Move up (⌥↑)" aria-label="Move up" onClick={() => void applyEdit({ kind: 'move', direction: -1 })}><Icon name="chevron-up-down" size={13} /><span>Up</span></button>
+                <button type="button" data-testid="move-down" disabled={!selection.canMoveDown} title="Move down (⌥↓)" aria-label="Move down" onClick={() => void applyEdit({ kind: 'move', direction: 1 })}><Icon name="chevron-up-down" size={13} /><span>Down</span></button>
+                <button type="button" data-testid="hide-selection" title="Hide (⌘H)" aria-label="Hide" onClick={() => void applyEdit({ kind: 'hide' })}><Icon name="eye" size={13} /></button>
+                <button type="button" data-testid="delete-selection" disabled={!selection.canDelete} title="Delete (⌫)" aria-label="Delete" onClick={() => void applyEdit({ kind: 'delete' })}><Icon name="xmark" size={12} /></button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="min-h-0 flex-1">
+          <ConsolePane result={result} workerError={workerError} onRevealSpan={revealSpanIn} />
+        </div>
+      </div>
+    </>
+  ) : null
+
+  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd} mode={mode} busy={stale} errors={errors} warnings={warnings} workerError={workerError} />
+  const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale} errors={errors} warnings={warnings} workerError={workerError} />
 
   return (
     <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
@@ -426,6 +938,12 @@ export function Studio() {
                 key={project.id}
                 layers={layers}
                 selectedLayerId={selectedLayerId}
+                hoveredLayerId={hoveredLayerId}
+                onReorderLayer={mode === 'design' && inspecting ? reorderLayers : undefined}
+                hiddenViews={mode === 'design' ? hidden.views : NO_FILES}
+                onHideLayer={(layer) => void applyEdit({ kind: 'hide' }, layer)}
+                onShowHidden={showHidden}
+                layersEditable={mode === 'design' && inspecting}
                 stale={stale}
                 onSelectLayer={selectLayer}
                 tree={fileTree}
@@ -510,27 +1028,7 @@ export function Studio() {
             )}
           </div>
 
-          {shown.debug ? (
-            <>
-              <Splitter
-                orientation="row"
-                size={debugHeight}
-                onResize={(size) => setSize('debug', size)}
-                min={PANE_LIMITS.debug.min}
-                max={PANE_LIMITS.debug.max}
-                direction={-1}
-                label="Debug area height"
-                onToggle={() => togglePane('debug')}
-              />
-              <div style={{ height: debugHeight, maxHeight: '65%' }} className="shrink-0">
-                <ConsolePane
-                  result={result}
-                  workerError={workerError}
-                  onRevealSpan={revealSpanIn}
-                />
-              </div>
-            </>
-          ) : null}
+          {mode !== 'design' ? debugArea : null}
         </div>
 
         {layout.showPreview ? (
@@ -545,22 +1043,41 @@ export function Studio() {
               label="Preview width"
               onToggle={() => togglePane('preview')}
             />}
-            <div style={mode === 'design' ? { flex: 1, minWidth: 0 } : { width: layout.preview }} className="shrink-0 overflow-hidden">
+            <div style={mode === 'design' ? { flex: 1, minWidth: 0 } : { width: layout.preview }} className="flex shrink-0 flex-col overflow-hidden">
+              <div className="min-h-0 flex-1">
               <DevicePane
                 expanded={mode === 'design'}
+                showSettings={shown.preview}
+                settingsWidth={settingsWidth}
+                onSettingsResize={(size) => setSize('settings', size)}
+                onToggleSettings={() => togglePane('preview')}
+                onHoverNode={setHoveredNode}
+                pages={mode === 'design' && showingAllPages ? result?.pages : undefined}
+                pageCount={pageCount}
+                onSelectPage={openPage}
+                allPages={allPages}
+                onToggleAllPages={setAllPages}
+                belowCanvas={mode === 'design' ? debugArea : null}
+                tool={tool}
+                selection={selection}
+                onReorderNodes={reorderNodes}
+                centerOn={centerOn}
+                status={previewStatus}
+                inspectorTab={inspectorTab}
+                onInspectorTab={setInspectorTab}
                 onDeviceChange={setDevice}
                 tools={previewTools}
                 device={device}
                 tree={result?.renderTree ?? null}
                 selectedRenderIds={selectedRenderIds}
                 stale={stale}
-                paused={paused}
                 onEvent={handleEvent}
                 inspecting={inspecting}
-                onRevealSource={revealSource}
+                onRevealSource={inspectSelect}
                 preview={previewSettings}
                 onPreviewChange={(settings: Partial<PreviewSettings>) => setPreview(settings)}
               />
+              </div>
             </div>
           </>
         ) : null}
@@ -568,6 +1085,17 @@ export function Studio() {
       {!layout.showPreview && <div className={styles.codeFooter}>{previewTools}</div>}
 
       </div>
+      {adding ? (
+        <AddView
+          target={addTarget}
+          onClose={() => setAdding(false)}
+          onChoose={(snippet) => {
+            setAdding(false)
+            void applyEdit({ kind: 'insert', snippet: snippet.snippet }, addTargetLayer)
+          }}
+        />
+      ) : null}
+
       {switcherOpen ? (
         <FileSwitcher
           files={files}

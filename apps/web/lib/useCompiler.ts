@@ -13,6 +13,10 @@ import type {
   MeasuredFontData,
   SourceFile,
   UIEvent,
+  HiddenViewInfo,
+  ViewEditRequest,
+  ViewEditResult,
+  ViewSiteInfo,
 } from '@studio/shared'
 import type { DeviceSpec } from '@studio/sim-shell'
 import { measureFontsWhenReady, measureTextBatch } from './fontMetrics'
@@ -83,6 +87,13 @@ export interface CompilerOptions {
    * pause, not a disconnection.
    */
   paused?: boolean
+  /**
+   * Draw every page, not only the one the device is showing.
+   *
+   * Carried on the compile request as well as switched on directly, so a recompile
+   * after an edit comes back as a gallery rather than silently closing it.
+   */
+  allPages?: boolean
 }
 
 export function useCompiler({
@@ -94,6 +105,7 @@ export function useCompiler({
   dynamicTypeSize,
   previewTarget,
   paused = false,
+  allPages = false,
 }: CompilerOptions) {
   const handleRef = useRef<WorkerHandle | null>(null)
   const revisionRef = useRef(0)
@@ -180,6 +192,7 @@ export function useCompiler({
           typeScale,
           dynamicTypeSize,
           displayScale: device.scale,
+          allPages,
           revision,
         }), handle,
       )
@@ -193,7 +206,7 @@ export function useCompiler({
       }))
       handleRef.current = null
     }
-  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, allPages])
 
   const latestCompile = useRef(runCompile)
   const latestPaused = useRef(paused)
@@ -265,6 +278,36 @@ export function useCompiler({
     [refine, ensureWorker],
   )
 
+  /**
+   * Opening and closing the gallery.
+   *
+   * Sent straight to the worker rather than left to the compile effect: the source
+   * has not changed, so a recompile would wait out the keystroke debounce to
+   * produce the same program with one flag different. A worker that has not
+   * compiled yet answers null and the first compile carries the flag instead.
+   */
+  const galleryFlag = useRef(allPages)
+  useEffect(() => {
+    // The mount carries the flag on its own compile request; only a *change* needs
+    // telling, and a worker that has not compiled yet has nothing to redraw.
+    if (galleryFlag.current === allPages) return
+    galleryFlag.current = allPages
+    let live = true
+    const handle = handleRef.current
+    if (!handle) return
+    void (async () => {
+      try {
+        await handle.ready
+        if (!live || handle !== handleRef.current) return
+        const result = await handle.api.setAllPages(allPages, ++revisionRef.current)
+        if (result && live && handle === handleRef.current) await refine(result, handle)
+      } catch (error) {
+        handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
+      }
+    })()
+    return () => { live = false }
+  }, [allPages, refine])
+
   const reset = useCallback(async () => {
     const handle = ensureWorker()
     try {
@@ -287,6 +330,45 @@ export function useCompiler({
    * worth a restart on its own - the next compile will bring one back - and a
    * half-second stall on a keystroke is more disruptive than a missing list.
    */
+  /**
+   * The canvas's edits, and what it may offer.
+   *
+   * Both answer null on a dead worker rather than respawning one: an edit that
+   * cannot be made must not silently become a different edit, and the compile path
+   * is what brings the worker back.
+   */
+  const editView = useCallback(async (request: ViewEditRequest): Promise<ViewEditResult | null> => {
+    try {
+      return await ensureWorker().api.editView(request)
+    } catch {
+      return null
+    }
+  }, [ensureWorker])
+
+  const describeView = useCallback(async (text: string, file: string, offset: number): Promise<ViewSiteInfo | null> => {
+    try {
+      return await ensureWorker().api.describeView(text, file, offset)
+    } catch {
+      return null
+    }
+  }, [ensureWorker])
+
+  const copyView = useCallback(async (text: string, file: string, offset: number): Promise<string | null> => {
+    try {
+      return await ensureWorker().api.copyView(text, file, offset)
+    } catch {
+      return null
+    }
+  }, [ensureWorker])
+
+  const hiddenViews = useCallback(async (files: readonly SourceFile[]): Promise<readonly HiddenViewInfo[]> => {
+    try {
+      return await ensureWorker().api.hiddenViews(files.map((f) => ({ id: f.id, text: f.text })))
+    } catch {
+      return []
+    }
+  }, [ensureWorker])
+
   const language = useMemo(
     () => ({
       complete: async (fileId: string, offset: number): Promise<CompletionResult> => {
@@ -325,8 +407,8 @@ export function useCompiler({
   )
 
   return useMemo(
-    () => ({ ...state, dispatch, reset, recompile: runCompile, language }),
-    [state, dispatch, reset, runCompile, language],
+    () => ({ ...state, dispatch, reset, recompile: runCompile, language, editView, describeView, copyView, hiddenViews }),
+    [state, dispatch, reset, runCompile, language, editView, describeView, copyView, hiddenViews],
   )
 }
 

@@ -4,17 +4,25 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { dirname, fileBasename, type TreeNode } from '@studio/project-model'
 import { useLayout } from '../lib/layout'
 import { Layers } from './Layers'
-import type { ViewLayer } from '@studio/shared'
+import type { HiddenViewInfo, ViewLayer } from '@studio/shared'
 import type { Diagnostic, FileId } from '@studio/shared'
 import { Icon } from './ui/Icon'
 import { ContextMenu, MenuButton, type MenuItem } from './ui/Menu'
+import styles from './Workspace.module.css'
 import { ToolButton } from './ui/Control'
 
 export interface NavigatorProps {
   layers: readonly ViewLayer[]
   selectedLayerId: string | null
+  /** The layer under the inspector's pointer, highlighted while it is there. */
+  hoveredLayerId?: string | null
   stale: boolean
   onSelectLayer: (layer: ViewLayer, page: ViewLayer) => void
+  onReorderLayer?: (layer: ViewLayer, target: ViewLayer, position: 'before' | 'after') => void
+  hiddenViews?: readonly HiddenViewInfo[]
+  onHideLayer?: (layer: ViewLayer) => void
+  onShowHidden?: (view: HiddenViewInfo) => void
+  layersEditable?: boolean
   tree: readonly TreeNode[]
   activeFileId: FileId | null
   filesWithErrors: ReadonlySet<FileId>
@@ -58,7 +66,7 @@ const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text
  */
 export function Navigator({
   tree,
-  layers, selectedLayerId, stale, onSelectLayer,
+  layers, selectedLayerId, hoveredLayerId, stale, onSelectLayer, onReorderLayer, hiddenViews, onHideLayer, onShowHidden, layersEditable,
   activeFileId,
   filesWithErrors,
   diagnostics,
@@ -128,7 +136,7 @@ export function Navigator({
       data-testid="file-rail"
       aria-label="Project navigator"
     >
-      <header className="flex h-[46px] shrink-0 items-center gap-1 border-b border-xc-line px-1.5">
+      <header className={`${styles.tabs} h-[46px] shrink-0 border-b border-xc-line px-1.5`}>
         <NavTab active={tab === 'project'} onClick={() => setTab('project')} label="Project">
           <span className="text-[14px] font-medium">Files</span>
         </NavTab>
@@ -231,7 +239,8 @@ export function Navigator({
           <FilterField value={filter} onChange={setFilter} />
         </>
       ) : tab === 'layers' ? (
-        <Layers pages={layers} selectedId={selectedLayerId} stale={stale} onSelect={onSelectLayer} />
+        <Layers pages={layers} selectedId={selectedLayerId} hoveredId={hoveredLayerId} stale={stale} onSelect={onSelectLayer}
+          onReorder={onReorderLayer} hidden={hiddenViews} onHide={onHideLayer} onShow={onShowHidden} editable={layersEditable} />
       ) : (
         <IssueList diagnostics={diagnostics} onReveal={onRevealDiagnostic} />
       )}
@@ -607,9 +616,6 @@ function NavTab({
       title={label}
       aria-label={label}
       data-testid={`navigator-tab-${label.toLowerCase()}`}
-      className={`inline-flex h-[30px] items-center gap-1 rounded-[5px] px-2 transition-colors ${
-        active ? 'bg-xc-line-soft text-xc-text' : 'text-xc-text-3 hover:text-xc-text-2'
-      }`}
     >
       {children}
     </button>

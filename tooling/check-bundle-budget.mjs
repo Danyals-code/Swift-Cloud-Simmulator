@@ -68,8 +68,15 @@ const KB = 1024
  *   Prompt creation - 457 KB actual with two additional multi-file apps and the
  *              lazy-loaded provider form, draft validation, and source review.
  *              The main chunk remains 162 KB; allow 470 KB for the expanded scope.
+ *   Design tools - 467 KB actual after the page gallery and the canvas controls,
+ *              which is 99% of a 470 KB ceiling. Raised to 600 KB by decision
+ *              rather than by measurement: the studio is a tool people open and
+ *              keep open, not a page they arrive at from a search result, so the
+ *              first load is worth more bytes than the old number allowed. It is a
+ *              ceiling to notice, not a target to fill - and the per-chunk gate
+ *              below is the one that still says something about the critical path.
  */
-const BUDGET_KB = 470
+const BUDGET_KB = 600
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.

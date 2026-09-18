@@ -76,6 +76,50 @@ describe('pipeline performance', () => {
     expect(ms).toBeLessThan(120)
   })
 
+  /**
+   * The page gallery's cost, which is the one thing about it worth measuring.
+   *
+   * Six tabs drawn at once is six compositions and six layouts where there was one,
+   * and nothing else: every tab's body was already evaluated by the same pass. So
+   * the ceiling is the same 120 ms, and what the ratio has to show is that the extra
+   * work is layout-shaped - a few times one screen - rather than a second pipeline
+   * per page.
+   */
+  it('draws six pages at once inside the same 120 ms budget', () => {
+    const tabs = Array.from(
+      { length: 6 },
+      (_, i) => `            View${i}().tabItem { Label("Tab ${i}", systemImage: "star") }`,
+    ).join('\n')
+    const text =
+      'import SwiftUI\n@main struct A: App { var body: some Scene { WindowGroup { Root() } } }\n' +
+      `struct Root: View { var body: some View { TabView {\n${tabs}\n} } }\n` +
+      Array.from({ length: 6 }, (_, i) => UNIT.replaceAll('%N%', String(i))).join('\n')
+
+    const one = { ...request(text), allPages: false }
+    const all = { ...request(text), allPages: true }
+    expect(compile(all).diagnostics).toEqual([])
+    expect(compile(all).pages).toHaveLength(6)
+
+    const bestOfRequest = (req: CompileRequest) => {
+      for (let i = 0; i < 3; i++) compile(req)
+      let best = Infinity
+      for (let i = 0; i < 5; i++) {
+        const started = performance.now()
+        compile(req)
+        best = Math.min(best, performance.now() - started)
+      }
+      return best
+    }
+
+    const single = bestOfRequest(one)
+    const gallery = bestOfRequest(all)
+    console.log(`    six-page gallery: ${gallery.toFixed(2)} ms against ${single.toFixed(2)} ms for one page`)
+    expect(gallery).toBeLessThan(120)
+    // Well under one full pipeline per page, which is what makes it worth doing
+    // this way rather than compiling each page on its own.
+    expect(gallery).toBeLessThan(single * 6)
+  })
+
   it('reports zero diagnostics on the synthetic corpus', () => {
     // A performance corpus quietly full of errors measures the error path, not the
     // real one.

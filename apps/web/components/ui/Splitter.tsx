@@ -50,6 +50,21 @@ export function Splitter({
   const dragging = useRef<{ origin: number; start: number } | null>(null)
   const horizontal = orientation === 'col'
 
+  /**
+   * The drag's inputs, read at pointer-move time rather than captured.
+   *
+   * `onResize` is an inline closure in every caller, so it is a new function on
+   * every render - and a window listener re-subscribed on every render takes its
+   * cleanup with it. That cleanup used to end the drag, which made the first
+   * resize cancel the gesture that caused it: the divider moved one pixel per
+   * press and the panes looked fixed. Keeping the handler in a ref means the
+   * listeners are attached once and the drag survives the re-render it triggers.
+   */
+  const latest = useRef({ onResize, direction, horizontal })
+  useEffect(() => {
+    latest.current = { onResize, direction, horizontal }
+  })
+
   const onPointerDown = useCallback(
     (event: React.PointerEvent) => {
       event.preventDefault()
@@ -66,8 +81,9 @@ export function Splitter({
     const move = (event: PointerEvent) => {
       const drag = dragging.current
       if (!drag) return
-      const now = horizontal ? event.clientX : event.clientY
-      onResize(drag.start + (now - drag.origin) * direction)
+      const { onResize: resize, direction: sign, horizontal: sideways } = latest.current
+      const now = sideways ? event.clientX : event.clientY
+      resize(drag.start + (now - drag.origin) * sign)
     }
 
     const up = () => {
@@ -79,13 +95,16 @@ export function Splitter({
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
+    // Only on unmount, and the drag is ended there because the handle it was
+    // following has gone - a pane that is collapsed mid-drag leaves the body
+    // marked as resizing otherwise.
     return () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
       up()
     }
-  }, [direction, horizontal, onResize])
+  }, [])
 
   return (
     <div

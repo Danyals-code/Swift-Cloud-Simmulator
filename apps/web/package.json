@@ -22,6 +22,7 @@
     "@studio/project-model": "*",
     "@studio/shared": "*",
     "@studio/sim-shell": "*",
+    "@studio/swift-syntax": "*",
     "@studio/swiftui-render-dom": "*",
     "@studio/swiftui-runtime": "*",
     "codemirror": "^6.0.1",

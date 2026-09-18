@@ -102,6 +102,10 @@ test('gate 1 - edits persist across a reload', async ({ page }) => {
   await expect(page.getByTestId('save-indicator')).toContainText('Saved', { timeout: 5_000 })
 
   await page.reload()
+  // A reload opens on the welcome sheet and in Design, so the editor is asked
+  // for rather than assumed.
+  await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('workspace-develop').click()
   await expect(page.getByTestId('editor')).toBeVisible()
   expect(await editorText(page)).toContain(marker)
 })
@@ -282,8 +286,11 @@ test('Phase 3 - Run clears the preview state without changing the source', async
   await expect(tree).toContainText('Count: 1')
 
   // Run is Xcode's verb for it, and it is the same operation the old "Reset state"
-  // button performed: drop every @State box and evaluate from scratch.
-  await page.getByTestId('run-button').click()
+  // button performed: drop every @State box and evaluate from scratch. It is a
+  // keystroke rather than a button: the dock switches between editing the app and
+  // using it, and dropping the app's state is neither.
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+r')
   await expect(tree).toContainText('Count: 0')
   expect(await editorText(page)).toContain('@State private var count = 0')
 })

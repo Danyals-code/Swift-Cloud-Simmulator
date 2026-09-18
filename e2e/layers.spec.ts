@@ -79,3 +79,92 @@ test('Layers shows nested pages, selects without activating controls, and follow
   await page.getByTestId('workspace-design').click()
   await expect(page.getByTestId('navigator-tab-layers')).toHaveAttribute('aria-pressed', 'true')
 })
+
+test('inspecting the preview follows the pointer in Layers and selects what is clicked', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('workspace-develop').click()
+  const editor = page.getByTestId('editor').locator('.cm-content')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.insertText(source)
+  const preview = page.getByTestId('render-tree')
+  await expect(preview.getByText('Count: 0', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+
+  await page.getByTestId('inspect-toggle').click()
+  const layers = page.getByRole('tree', { name: 'App layers' })
+  const button = layers.getByRole('treeitem', { name: 'Increase, Button', exact: true })
+  const count = layers.getByRole('treeitem', { name: 'Count: 0, Text', exact: true })
+
+  // Hovering names the view without selecting it, and the naming stops when the
+  // pointer moves on: it is a pointer, not a choice.
+  await preview.getByRole('button', { name: 'Increase', exact: true }).hover()
+  await expect(button).toHaveAttribute('data-hovered', 'true')
+  await expect(button).toHaveAttribute('aria-selected', 'false')
+  await preview.getByText('Count: 0', { exact: true }).hover()
+  await expect(button).not.toHaveAttribute('data-hovered', 'true')
+  await expect(count).toHaveAttribute('data-hovered', 'true')
+
+  // Clicking chooses it - in Layers, without leaving Design and without running
+  // the button it landed on.
+  await preview.getByRole('button', { name: 'Increase', exact: true }).click()
+  await expect(button).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
+  await expect(preview.getByText('Count: 0', { exact: true })).toBeVisible()
+  await expect(preview.getByRole('button', { name: 'Increase', exact: true })).toHaveAttribute('data-layer-selected', 'true')
+
+  // Leaving the preview leaves the selection where it was put.
+  await page.getByTestId('toolbar').hover()
+  await expect(button).toHaveAttribute('aria-selected', 'true')
+  await expect(button).not.toHaveAttribute('data-hovered', 'true')
+})
+
+test('Pages draws every page at once, keeps one live, and opens the one that is clicked', async ({ page }, testInfo) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('workspace-develop').click()
+  const editor = page.getByTestId('editor').locator('.cm-content')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.insertText(source)
+  await expect(page.getByTestId('render-tree').getByText('Count: 0', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+
+  // The gallery is Edit's: in Live Preview a click hands the phone to the person
+  // using it, so the canvas says what the checkbox is for rather than hiding it.
+  const showAll = page.getByTestId('show-all-pages')
+  await expect(showAll).toBeDisabled()
+  await page.getByTestId('inspect-toggle').click()
+  await expect(showAll).toBeEnabled()
+  await showAll.check()
+
+  const gallery = page.getByTestId('page-gallery')
+  const phones = gallery.getByTestId('gallery-page')
+  await expect(phones).toHaveCount(2)
+  await expect(phones.first()).toContainText('Overview')
+  await expect(phones.first()).toContainText('Live')
+  await expect(phones.nth(1)).toContainText('Profile')
+
+  // Each phone is its own page, composed as that page: the one that is not
+  // running still carries its own title and its own content.
+  await expect(phones.first().getByText('Count: 0', { exact: true })).toBeVisible()
+  await expect(phones.nth(1).getByText('Taylor', { exact: true })).toBeVisible()
+  await expect(phones.nth(1).getByText('Count: 0', { exact: true })).toHaveCount(0)
+  await testInfo.attach('design-pages', { body: await page.screenshot(), contentType: 'image/png' })
+
+  // A phone that is not live is a picture of the app: pressing it opens the page.
+  await phones.nth(1).getByRole('button', { name: 'Open Profile' }).click()
+  await expect(phones.nth(1)).toContainText('Live')
+  await expect(phones.first()).not.toContainText('Live')
+
+  // Live Preview is the app again, on the page the gallery opened - and the
+  // checkbox keeps its setting rather than being cleared behind your back.
+  await page.getByTestId('live-toggle').click()
+  await expect(gallery).toHaveCount(0)
+  await expect(showAll).toBeDisabled()
+  await expect(page.getByTestId('render-tree').getByText('Taylor', { exact: true })).toBeVisible()
+  await page.getByTestId('inspect-toggle').click()
+  await expect(showAll).toBeChecked()
+  await expect(page.getByTestId('page-gallery')).toBeVisible()
+})

@@ -10,6 +10,7 @@ import {
   type Diagnostic,
   type LogEntry,
   type MeasuredTextData,
+  type PagePreview,
   type Rect,
   type RenderNode,
   type RenderTree,
@@ -74,6 +75,18 @@ export function relayout(revision: number): CompileResult {
   lastAnalysis = { analysis, request: next }
   if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, null, performance.now(), 0, 0)
   return finish(next, analysis, lastEvaluation, performance.now(), 0)
+}
+
+/**
+ * Turns the page gallery on, and redraws with it.
+ *
+ * The flag lives on the last request so every later re-render carries it too - a
+ * tap while the gallery is open must come back as a gallery, not as one phone.
+ */
+export function setAllPages(enabled: boolean, revision: number): CompileResult | null {
+  if (!lastAnalysis) return null
+  lastAnalysis = { ...lastAnalysis, request: { ...lastAnalysis.request, allPages: enabled } }
+  return rerender(revision)
 }
 
 export function setTextMeasurements(data: readonly MeasuredTextData[], revision: number, generation = fontGeneration): CompileResult | null {
@@ -149,8 +162,12 @@ function rootEnvironment(request: CompileRequest): LayoutEnvironment {
  * status bar. Expressing that inside a single layout tree would need absolute
  * positioning, which is precisely the concept a proposal-based engine does not have.
  */
-function render(request: CompileRequest, evaluation: EvaluationResult): RenderTree {
-  metrics.beginLayout()
+function render(request: CompileRequest, evaluation: EvaluationResult, accumulate = false): RenderTree {
+  // The gallery lays out several trees in one pass, and every one of them has text
+  // to measure. Only the first clears the pending set: clearing it per tree would
+  // hand back the last page's requests and leave every other tree's strings on the
+  // built-in estimates for as long as nothing else asked.
+  if (!accumulate) metrics.beginLayout()
   const engine = new LayoutEngine(metrics)
   // `withAnimation { … }` animates every change in its transaction, so the hint goes
   // on the root environment and every node below inherits it for exactly one frame.
@@ -432,6 +449,7 @@ function toResult(
   startedAt: number,
   evaluateMs: number,
   layoutMs: number,
+  pages?: readonly PagePreview[],
 ): CompileResult {
   const total = performance.now() - startedAt
 
@@ -460,6 +478,7 @@ function toResult(
     diagnostics,
     renderTree,
     viewHierarchy: evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],
+    ...(pages ? { pages } : {}),
     logs,
     textMeasurement: renderTree && !evaluation?.failure ? { ...metrics.measurementState, generation: fontGeneration } : undefined,
     timings: {
@@ -591,7 +610,53 @@ function finish(
   }
   lastEvaluation = evaluation
 
-  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, layoutMs)
+  // After the geometry retry, so a reader in a page the device is not showing
+  // cannot report a size back into the live one.
+  const pages = request.allPages ? renderPages(request, evaluation, renderTree) : undefined
+
+  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, pages)
+}
+
+/**
+ * How many pages the gallery will draw.
+ *
+ * A `TabView` over a `ForEach` can have as many tabs as the collection has elements,
+ * and each one here is a full composition and layout. Twelve is past any tab bar a
+ * phone would draw and still cheap; beyond it the caller is told the count it asked
+ * about, so the studio can say what it is not showing rather than quietly dropping it.
+ */
+const GALLERY_LIMIT = 12
+
+/**
+ * Every page, drawn on its own.
+ *
+ * The live page is not re-rendered: the tree that is already on screen *is* its
+ * answer, and rendering it twice would be two layouts of the same views that must
+ * then agree with each other.
+ */
+function renderPages(
+  request: CompileRequest,
+  evaluation: EvaluationResult,
+  active: RenderTree,
+): readonly PagePreview[] | undefined {
+  const pages = (evaluation.ui?.viewHierarchy ?? []).filter((layer) => layer.type === 'Page')
+  if (!pages.length) return undefined
+
+  const out: PagePreview[] = []
+  for (const [index, page] of pages.slice(0, GALLERY_LIMIT).entries()) {
+    const isActive = page.page?.active === true
+    const ui = isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index)
+    if (!ui) continue
+    const tree = isActive ? active : render(request, { ...evaluation, ui }, true)
+    out.push({
+      id: page.id,
+      name: page.name,
+      active: isActive,
+      ...(page.page?.handlerId ? { handlerId: page.page.handlerId } : {}),
+      tree,
+    })
+  }
+  return out
 }
 
 /** The measured size of every geometry reader in a tree, keyed as it reported. */

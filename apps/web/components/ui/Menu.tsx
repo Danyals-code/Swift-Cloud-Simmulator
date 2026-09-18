@@ -25,8 +25,10 @@ import { Icon, type IconName } from './Icon'
 export interface MenuItem {
   readonly value: string
   readonly label: string
-  /** Trailing dimmed text - a shortcut, a format's one-line description. */
+  /** Trailing dimmed text - a shortcut, a file name. Kept short: it never wraps. */
   readonly detail?: string
+  /** The longer sentence, on hover, for a row whose detail is a word. */
+  readonly title?: string
   readonly icon?: IconName
   readonly disabled?: boolean
   /** Draws a separator above this item. */
@@ -184,6 +186,7 @@ export function MenuPanel({
                   if (!item.disabled) onChoose(item.value)
                 }}
                 onPointerEnter={() => !item.disabled && setActive(index)}
+                title={item.title}
                 className={`flex w-full items-center gap-2 px-2 text-left text-[14px] leading-none disabled:opacity-40 ${
                   isActive && !item.disabled ? 'bg-xc-accent text-xc-text' : 'text-xc-text'
                 }`}
