@@ -14,3 +14,6 @@ export * from './catalog'
 export * from './open'
 export * from './stores'
 export * from './share'
+export * from './studio-metadata'
+
+export * from './transactions'

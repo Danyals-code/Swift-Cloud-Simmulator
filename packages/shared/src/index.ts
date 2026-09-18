@@ -11,3 +11,8 @@ export * from './symbols'
 export * from './symbol-map'
 export * from './export-formats'
 export * from './view-layer'
+export * from './authoring'
+export * from './authoring-capabilities'
+export * from './design-edit'
+
+export * from './authoring-writers'

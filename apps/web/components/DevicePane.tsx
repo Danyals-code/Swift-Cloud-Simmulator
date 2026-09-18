@@ -14,8 +14,13 @@ import { Icon } from './ui/Icon'
 import { Splitter } from './ui/Splitter'
 import { PANE_LIMITS, type InspectorTab } from '../lib/layout'
 import type { CanvasTool } from './Toolbar'
+import type { AuthoringNode, SourceSpan } from '@studio/shared'
+import { AuthoringInspector } from './AuthoringInspector'
 
 export interface DevicePaneProps {
+  onChangeAuthoring?: (control: string, value: string) => Promise<string | null>
+  authoringNode?: AuthoringNode
+  onRevealAuthoring?: (span: SourceSpan) => void
   expanded?: boolean
   projectId: string
   panelLayout: string
@@ -139,6 +144,9 @@ const ZOOMS: readonly MenuItem[] = [
  * gives equal weight to a project setting and a viewing preference.
  */
 export function DevicePane({
+  onChangeAuthoring,
+  authoringNode,
+  onRevealAuthoring,
   expanded = false,
   projectId,
   panelLayout,
@@ -723,9 +731,7 @@ export function DevicePane({
         {inspectorTab === 'settings' ? (
           <div className={styles.propertySection} data-testid="inspector-settings">
             <h3>{selection ? selection.name : 'Settings'}</h3>
-            <p>{selection
-              ? `Properties for this ${selection.type} will be edited here.`
-              : 'Select a view on the canvas to see what it can be given.'}</p>
+            <AuthoringInspector onChange={onChangeAuthoring} node={authoringNode} stale={stale} onReveal={onRevealAuthoring} />
           </div>
         ) : (
           <>

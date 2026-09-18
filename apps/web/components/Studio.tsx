@@ -2,7 +2,8 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ExportFormat } from '@studio/shared'
+import type { DesignEditRequest, ExportFormat } from '@studio/shared'
+import { reconcileAuthoringSelection, type AuthoringSelection } from '@studio/shared'
 import { buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
@@ -14,7 +15,6 @@ import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
 import { useCompiler } from '../lib/useCompiler'
-import { CanvasHistory } from '../lib/canvasHistory'
 /**
  * Problems, output, timings and coverage, fetched when the panel is opened.
  *
@@ -25,7 +25,7 @@ import { CanvasHistory } from '../lib/canvasHistory'
 const ConsolePane = dynamic(() => import('./ConsolePane').then((m) => m.ConsolePane), { ssr: false })
 import { InspectorReadout } from './InspectorReadout'
 import { DevicePane } from './DevicePane'
-import { EditorPane } from './EditorPane'
+const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
 import { JumpBar } from './JumpBar'
@@ -74,7 +74,7 @@ export function Studio() {
   const removeProject = useStudio((s) => s.removeProject)
   const recents = useStudio((s) => s.recents)
 
-  const [layerSelection, setLayerSelection] = useState<{ projectId: string; id: string } | null>(null)
+  const [layerSelection, setLayerSelection] = useState<{ projectId: string; id: string; anchor?: AuthoringSelection } | null>(null)
   /** The node the inspector's pointer is over. Null whenever it is over nothing. */
   const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
   const navigatorTab = useLayout(s => s.navigatorTab)
@@ -116,17 +116,10 @@ export function Studio() {
    * the old one names the neighbour the view was swapped with. The offset is where
    * the view is now *written*, which is the one thing an edit can report exactly.
    */
-  const [pendingSelect, setPendingSelect] = useState<{ file: FileId; offset: number } | null>(null)
+  const [pendingSelect, setPendingSelect] = useState<{ projectId: string; file: FileId; offset: number; text: string } | null>(null)
   /** Raised when an edit could not be made, so the canvas can say why. */
   const [editNote, setEditNote] = useState<string | null>(null)
-  /**
-   * What the canvas has done to the file, so it can be undone.
-   *
-   * Only the studio's own edits: typing in the editor has CodeMirror's undo, which
-   * knows about carets and selections and is the right one to be holding while you
-   * are in it. These two never fire while the editor has focus.
-   */
-  const history = useRef(new CanvasHistory())
+  /** Serializes source planning; typing can still invalidate an in-flight plan. */
   const editingRef = useRef(false)
   /** A view copied from Layers or the canvas, as the Swift that draws it. */
   const [clipboard, setClipboard] = useState<string | null>(null)
@@ -217,8 +210,9 @@ export function Studio() {
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
   const files = project?.files ?? NO_FILES
 
-  const { result, stale, workerError, dispatch, reset, language, editView, describeView, copyView, hiddenViews } = useCompiler({
+  const { result, stale, workerError, dispatch, reset, language, planDesignEdit, describeView, copyView, hiddenViews } = useCompiler({
     projectId: project?.id,
+    deploymentTarget: project?.manifest.deploymentTarget,
     files,
     device,
     colorScheme: previewSettings.colorScheme,
@@ -427,9 +421,17 @@ export function Studio() {
 
   const handleChange = useCallback(
     (text: string) => {
+      // An undo may still have a pending source selection. Anchor it before typing
+      // changes the text that made the pending offset valid.
+      const snapshot = result?.authoring
+      if (pendingSelect && !stale && snapshot && project?.id === pendingSelect.projectId && project.files.find(f => f.id === pendingSelect.file)?.text === pendingSelect.text) {
+        const node = snapshot.nodes.find(n => n.source.file === pendingSelect.file && n.source.start === pendingSelect.offset && !['definition', 'branch', 'template'].includes(n.kind))
+        if (node) setLayerSelection({ projectId: project.id, id: '', anchor: { snapshot, nodeId: node.id, files: project.files } })
+        setPendingSelect(null)
+      }
       if (activeFileId) setFileText(activeFileId, text)
     },
-    [activeFileId, setFileText],
+    [activeFileId, setFileText, result?.authoring, pendingSelect, stale, project],
   )
 
   const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
@@ -445,7 +447,7 @@ export function Studio() {
    * flickers between the edit and the tree that reflects it.
    */
   const editedLayer = useMemo(() => {
-    if (!pendingSelect) return undefined
+    if (!pendingSelect || stale || project?.id !== pendingSelect.projectId || project.files.find(f => f.id === pendingSelect.file)?.text !== pendingSelect.text) return undefined
     const find = (items: readonly ViewLayer[]): ViewLayer | undefined => {
       for (const item of items) {
         if (item.source?.file === pendingSelect.file && item.source.start === pendingSelect.offset) return item
@@ -454,10 +456,27 @@ export function Studio() {
       }
     }
     return find(layers)
-  }, [pendingSelect, layers])
+  }, [pendingSelect, layers, project, stale])
+
+  const authoringNode = useMemo(() => {
+    const snapshot = result?.authoring
+    if (!snapshot || snapshot.projectId !== project?.id || stale) return undefined
+    if (editedLayer) return snapshot.nodes.find(n => n.id === snapshot.runtimeToSource[editedLayer.id])
+    if (layerSelection?.anchor) return reconcileAuthoringSelection(layerSelection.anchor, snapshot, project.files) ?? undefined
+    return undefined
+  }, [result?.authoring, project, stale, editedLayer, layerSelection])
+
+  const captureLayer = useCallback((layer: ViewLayer) => {
+    if (!project || stale) return
+    if (layer.source) useStudio.getState().setDocumentSelection({ file: layer.source.file, offset: layer.source.start })
+    const snapshot = result?.authoring
+    const nodeId = snapshot?.runtimeToSource[layer.id]
+    setLayerSelection({ projectId: project.id, id: layer.id, anchor: snapshot && nodeId ? { snapshot, nodeId, files: project.files, runtimeId: layer.id } : undefined })
+  }, [project, stale, result?.authoring])
 
   const selectedLayerId = editedLayer?.id
-    ?? (layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null)
+    ?? (layerSelection?.anchor ? authoringNode?.runtimeIds.find(id => id === layerSelection.id) ?? authoringNode?.runtimeIds[0] ?? null
+      : layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null)
   const selectedRenderIds = useMemo(() => layerRenderIds(
     mode === 'design' && navigatorTab === 'layers' && selectedLayerId ? findLayer(layers, selectedLayerId) : undefined,
     result?.renderTree, layers,
@@ -466,7 +485,7 @@ export function Studio() {
     if (stale || !project) return
     setPendingSelect(null)
     setEditNote(null)
-    setLayerSelection({ projectId: project.id, id: layer.id })
+    captureLayer(layer)
     // Bring its page into view, which is what makes Layers usable on a canvas that
     // has been zoomed into or panned away from the page being chosen.
     setCenterOn({ id: page.id, nonce: ++centerNonce.current })
@@ -523,44 +542,44 @@ export function Studio() {
    * are real ones (the end of a stack, a body that would be left empty) and a control
    * that quietly did nothing would read as a bug.
    */
+  const performDesignEdit = useCallback(async (target: SourceSpan, fingerprint: string | undefined, scope: string, operation: DesignEditRequest['operation']): Promise<string | null> => {
+    const state = useStudio.getState()
+    if (!project || state.project !== project || stale) return 'The source is updating. Try again when the preview is ready.'
+    if (editingRef.current) return 'An edit is already being prepared. Try again.'
+    editingRef.current = true
+    try {
+      const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, target, fingerprint, operation })
+      if (!plan.ok) { setEditNote(plan.reason); return plan.reason }
+      const currentSelection = useStudio.getState().documentSelection
+      const selectionChanged = JSON.stringify(currentSelection) !== JSON.stringify(state.documentSelection)
+      const problem = useStudio.getState().commitTransaction(project, selectionChanged ? { ...plan, selection: undefined } : plan)
+      if (problem) { setEditNote(problem); return problem }
+      if (plan.changes.length && !selectionChanged) {
+        const selected = plan.selection
+        const snapshot = plan.authoring
+        const node = selected && snapshot?.nodes.find(n => n.source.file === selected.file && n.source.start === selected.offset && !['definition', 'branch', 'template'].includes(n.kind))
+        const files = useStudio.getState().project!.files
+        setLayerSelection(node && snapshot ? { projectId: project.id, id: '', anchor: { snapshot, nodeId: node.id, files } } : null)
+        const text = selected && useStudio.getState().project?.files.find(f => f.id === selected.file)?.text
+        setPendingSelect(selected && typeof text === 'string' ? { ...selected, projectId: project.id, text } : null)
+      }
+      setEditNote(null)
+      return null
+    } finally { editingRef.current = false }
+  }, [project, stale, planDesignEdit, result?.authoring?.revision])
+
   const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
     const target = layer ?? selectedLayer
-    const source = target?.source
-    const file = source && project ? findFile(project, source.file) : undefined
-    if (!source || !file || !project || stale || editingRef.current) return
-    editingRef.current = true
-    let result
-    try { result = await editView({ text: file.text, file: source.file, offset: source.start, edit }) }
-    finally { editingRef.current = false }
-    const current = useStudio.getState().project
-    if (current?.id !== project.id || findFile(current, source.file)?.text !== file.text) {
-      setEditNote('The source changed. Select the view again.')
-      return
-    }
-    if (!result) {
-      setEditNote(
-        edit.kind === 'move'
-          ? `${target!.name} is already ${edit.direction === -1 ? 'first' : 'last'} here`
-          : edit.kind === 'delete'
-            ? `${target!.name} is the whole of this view - delete it in the code`
-            : 'That view has nowhere to go here',
-      )
-      return
-    }
+    const model = result?.authoring
+    const node = model?.nodes.find(n => n.id === model.runtimeToSource[target?.id ?? ''])
+    if (!node) { setEditNote('Select a supported source view to edit.'); return }
+    await performDesignEdit(node.source, node.fingerprint, node.owner, edit)
+  }, [selectedLayer, result?.authoring, performDesignEdit])
 
-    setEditNote(null)
-    history.current.record({ projectId: project.id, file: source.file, before: file.text, after: result.text, offset: edit.kind === 'delete' ? null : result.offset })
-    setFileText(source.file, result.text)
-    if (edit.kind === 'delete') {
-      // Nothing is selected after a delete, and the offset the deleted view had is
-      // forgotten with it: something else occupies it now, and following the offset
-      // would select whatever moved up into the gap.
-      setPendingSelect(null)
-      setLayerSelection(null)
-    } else {
-      setPendingSelect({ file: source.file, offset: result.offset })
-    }
-  }, [editView, project, selectedLayer, setFileText, stale])
+  const changeProperty = useCallback(async (control: string, value: string) => {
+    if (!authoringNode) return 'Select the view again.'
+    return performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, { kind: 'property', control, value })
+  }, [authoringNode, performDesignEdit])
 
   /** Where Add would put it, which the palette says before anything is added. */
   const addTarget = selectedLayer
@@ -591,15 +610,15 @@ export function Studio() {
     : null
 
   const replayEdit = useCallback((direction: 'undo' | 'redo') => {
+    const replayed = useStudio.getState().replayDocument(direction)
+    if (!replayed) { setEditNote('No document edit to ' + direction); return }
     const current = useStudio.getState().project
-    if (!current || editingRef.current) return
-    const change = history.current.take(direction, current)
-    if (!change) { setEditNote('No canvas edit to ' + direction + ' in this source version'); return }
-    setFileText(change.file, direction === 'undo' ? change.before : change.after)
+    const selected = replayed.selection
+    const text = selected && current?.files.find(f => f.id === selected.file)?.text
     setLayerSelection(null)
-    setPendingSelect(direction === 'redo' && change.offset !== null ? { file: change.file, offset: change.offset } : null)
+    setPendingSelect(selected && current && typeof text === 'string' ? { ...selected, projectId: current.id, text } : null)
     setEditNote(direction === 'undo' ? 'Undone' : 'Redone')
-  }, [setFileText])
+  }, [])
   const undo = useCallback(() => replayEdit('undo'), [replayEdit])
   const redo = useCallback(() => replayEdit('redo'), [replayEdit])
 
@@ -630,18 +649,8 @@ export function Studio() {
    * as every other edit, with an offset the parser recognises rather than a layer.
    */
   const showHidden = useCallback((view: HiddenViewInfo) => {
-    const file = project ? findFile(project, view.file) : undefined
-    if (!file) return
-    void (async () => {
-      const result = await editView({ text: file.text, file: view.file, offset: view.offset, edit: { kind: 'show' } })
-      if (!result) { setEditNote(`Could not show ${view.name}`); return }
-      const current = useStudio.getState().project
-      if (current?.id !== project?.id || !current || findFile(current, view.file)?.text !== file.text) return
-      history.current.record({ projectId: current.id, file: view.file, before: file.text, after: result.text, offset: result.offset })
-      setFileText(view.file, result.text)
-      setPendingSelect({ file: view.file, offset: result.offset })
-    })()
-  }, [editView, project, setFileText])
+    void performDesignEdit({ file: view.file, start: view.offset, end: view.offset }, undefined, view.file, { kind: 'show' })
+  }, [performDesignEdit])
 
   /**
    * Every view the project is hiding, re-read whenever a compile settles.
@@ -776,9 +785,9 @@ export function Studio() {
       setPane('navigator', true)
       setPendingSelect(null)
       setEditNote(null)
-      setLayerSelection({ projectId: project.id, id: layer.id })
+      captureLayer(layer)
     },
-    [mode, revealSource, layers, project, activeFileId, setActiveFile, setNavigatorTab, setPane, tool, applyEdit],
+    [mode, revealSource, layers, project, activeFileId, setActiveFile, setNavigatorTab, setPane, tool, applyEdit, captureLayer],
   )
 
 
@@ -1001,12 +1010,13 @@ export function Studio() {
           <div className="min-h-0 flex-1">
             {activeFile ? (
               <EditorPane
-                // Remounting per file gives each its own undo history, which is what
-                // switching tabs in any editor implies.
+                // Remount editor selection per file; undo belongs to the project timeline.
                 key={`${project.id}:${activeFile.id}`}
                 text={activeFile.text}
                 diagnostics={diagnostics}
                 onChange={handleChange}
+                onUndo={undo}
+                onRedo={redo}
                 onSave={() => void flush()}
                 reveal={reveal}
                 fileId={activeFile.id}
@@ -1054,6 +1064,9 @@ export function Studio() {
                 belowCanvas={mode === 'design' ? debugArea : null}
                 tool={tool}
                 selection={selection}
+                authoringNode={authoringNode}
+                onChangeAuthoring={changeProperty}
+                onRevealAuthoring={span => revealSpanIn(span.file, span.start)}
                 onReorderNodes={reorderNodes}
                 centerOn={centerOn}
                 status={previewStatus}

@@ -1,4 +1,6 @@
+import type { DesignEditRequest, DesignEditPlan } from './design-edit'
 import type { ViewLayer } from './view-layer'
+import type { AuthoringSnapshot } from './authoring'
 import type { DynamicTypeSize } from './dynamic-type'
 import type { MeasuredTextData, TextMeasureRequest } from './text-measurement'
 import type { PreviewTarget } from './appearance'
@@ -23,6 +25,7 @@ export interface SourceFile {
 export interface CompileRequest {
   /** Separates live app state when the IDE opens a different project. */
   readonly projectId?: string
+  readonly deploymentTarget?: string
   readonly previewTarget?: PreviewTarget
   readonly files: readonly SourceFile[]
   /** logical point size of the target device, from sim-shell */
@@ -103,6 +106,7 @@ export interface PagePreview {
 
 export interface CompileResult {
   readonly revision: number
+  readonly authoring?: AuthoringSnapshot
   readonly diagnostics: readonly Diagnostic[]
   /**
    * `null` when evaluation could not produce a tree (blocking errors). The renderer
@@ -186,19 +190,6 @@ export type ViewEdit =
   | { readonly kind: 'hide' }
   | { readonly kind: 'show' }
 
-export interface ViewEditRequest {
-  readonly text: string
-  readonly file: FileId
-  readonly offset: number
-  readonly edit: ViewEdit
-}
-
-export interface ViewEditResult {
-  readonly text: string
-  /** Where the edited view is now written, so the studio can keep it selected. */
-  readonly offset: number
-}
-
 /**
  * A view this file is hiding, which is a view commented out of it.
  *
@@ -225,6 +216,7 @@ export interface ViewSiteInfo {
 
 /** The interface exposed over Comlink. */
 export interface CompilerApi {
+  planDesignEdit(request: DesignEditRequest): Promise<DesignEditPlan>
   compile(request: CompileRequest): Promise<CompileResult>
   /**
    * Dispatch an interaction, then re-evaluate.
@@ -255,15 +247,6 @@ export interface CompilerApi {
    * program to draw.
    */
   setAllPages(enabled: boolean, revision: number): Promise<CompileResult | null>
-  /**
-   * Edits the source from the canvas, returning the new file text.
-   *
-   * In the worker because the parser is: the studio's main thread has never had a
-   * Swift parser in it and this is not the reason to add one. Returns null when the
-   * edit cannot be made - the end of a block, or a delete that would empty a body -
-   * which is the same answer the controls are drawn from.
-   */
-  editView(request: ViewEditRequest): Promise<ViewEditResult | null>
   /** What can be done to the view at this offset, for drawing the controls. */
   describeView(text: string, file: FileId, offset: number): Promise<ViewSiteInfo | null>
   /** The Swift that draws this view, for a copy. */

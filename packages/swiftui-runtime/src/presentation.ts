@@ -300,6 +300,8 @@ export class UIState {
 }
 
 export interface ResolveContext {
+  /** Extra gallery images reuse the live pass’s authoring hierarchy. */
+  readonly includeViewHierarchy?: boolean
   readonly state: UIState
   /**
    * Runs a view-builder closure, returning the views it produced.
@@ -382,8 +384,8 @@ class Resolver {
         children: viewLayers([...bar.leading, ...bar.trailing]),
       }] : []),
     ]
-    const activeLayers = screenLayers(screen.content, screen.navigationBar)
-    const pageLayers: ViewLayer[] = withTabs.pages.length ? withTabs.pages.map((page, index) => {
+    const activeLayers = this.ctx.includeViewHierarchy === false ? [] : screenLayers(screen.content, screen.navigationBar)
+    const pageLayers: ViewLayer[] = this.ctx.includeViewHierarchy === false ? [] : withTabs.pages.length ? withTabs.pages.map((page, index) => {
       const item = withTabs.tabBar?.items[index]
       const active = index === withTabs.selected
       return {
@@ -399,7 +401,7 @@ class Resolver {
       id: 'page:root', name: screen.navigationBar?.title || 'Main page', type: 'Page',
       page: { active: true }, children: activeLayers,
     }]
-    if (overlay) pageLayers.push({
+    if (overlay && this.ctx.includeViewHierarchy !== false) pageLayers.push({
       id: `page:overlay:${overlay.kind}`, name: overlay.title || overlay.screen?.navigationBar?.title || ({ sheet: 'Sheet', cover: 'Full screen', alert: 'Alert', dialog: 'Confirmation', popover: 'Popover', menu: 'Menu' })[overlay.kind],
       type: 'Presentation', page: { active: true },
       children: screenLayers(overlay.screen?.content ?? overlay.views, overlay.screen?.navigationBar),

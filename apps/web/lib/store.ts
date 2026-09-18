@@ -4,6 +4,11 @@ import { create } from 'zustand'
 import type { DynamicTypeSize } from '@studio/shared'
 
 import {
+  DocumentHistory,
+  applyProjectTransaction,
+  translateDocumentSelection,
+  type ProjectTransaction,
+  type DocumentSelection,
   addFile,
   addFolder,
   createProjectStore,
@@ -123,6 +128,11 @@ export interface PreviewSettings {
 
 export interface StudioState {
   project: Project | null
+  documentRevision: number
+  documentSelection: DocumentSelection | null
+  setDocumentSelection: (selection: DocumentSelection | null) => void
+  commitTransaction: (expected: Project, transaction: ProjectTransaction) => string | null
+  replayDocument: (direction: 'undo' | 'redo') => { selection: DocumentSelection | null } | null
   activeFileId: FileId | null
   /** Files the user has opened, in tab order. */
   openFileIds: FileId[]
@@ -205,7 +215,21 @@ export interface StudioState {
   openFiles: (files: readonly OpenedFile[]) => Promise<boolean>
 }
 
-export const useStudio = create<StudioState>((set, get) => {
+export const useStudio = create<StudioState>((rawSet, get) => {
+  const history = new DocumentHistory()
+  let replaying = false
+  let typingGroup: string | undefined
+  function set(patch: Partial<StudioState>): void {
+    const previous = get()
+    if ('project' in patch && patch.project !== previous.project) {
+      if (patch.documentSelection === undefined) patch = { ...patch, documentSelection: translateDocumentSelection(previous.project, patch.project ?? null, previous.documentSelection) }
+      if (!replaying) history.record(previous.project, patch.project ?? null, previous.documentSelection, patch.documentSelection === undefined ? previous.documentSelection : patch.documentSelection, typingGroup)
+      patch = { ...patch, documentRevision: previous.documentRevision + 1 }
+      if (patch.project?.id !== previous.project?.id) patch.documentSelection = null
+    }
+    rawSet(patch)
+  }
+
   /**
    * Debounced write-behind. The editor stays responsive and IndexedDB sees one write
    * per pause rather than one per keystroke. `flush` exists so `visibilitychange` and
@@ -370,6 +394,30 @@ export const useStudio = create<StudioState>((set, get) => {
   }
 
   return {
+    documentRevision: 0,
+    documentSelection: null,
+    setDocumentSelection(selection) { set({ documentSelection: selection }) },
+    commitTransaction(expected, transaction) {
+      const current = get()
+      if (current.project !== expected) return 'The project changed while this edit was being prepared. Try again.'
+      const result = applyProjectTransaction(expected, current.documentRevision, transaction)
+      if (!result.ok) return result.reason
+      if (result.project !== expected) {
+        set({ project: result.project, ...(transaction.selection === undefined ? {} : { documentSelection: transaction.selection }) })
+        scheduleSave()
+      }
+      return null
+    },
+    replayDocument(direction) {
+      const current = get().project
+      if (!current) return null
+      const result = history.take(direction, current)
+      if (!result) return null
+      replaying = true
+      try { commit(result.project, result.selection?.file); set({ documentSelection: result.selection }) }
+      finally { replaying = false }
+      return { selection: result.selection }
+    },
     project: null,
     activeFileId: null,
     openFileIds: [],
@@ -402,8 +450,10 @@ export const useStudio = create<StudioState>((set, get) => {
 
     setFileText(fileId, text) {
       const { project } = get()
-      if (!project) return
-      set({ project: withFileText(project, fileId, text) })
+      if (!project || !project.files.some(f => f.id === fileId && f.text !== text)) return
+      typingGroup = 'typing:' + fileId
+      try { set({ project: withFileText(project, fileId, text) }) }
+      finally { typingGroup = undefined }
       scheduleSave()
     },
 

@@ -1,3 +1,4 @@
+import { planDesignEdit } from '@studio/swift-sema'
 import * as Comlink from 'comlink'
 import {
   applyEvent,
@@ -13,14 +14,12 @@ import {
   relayout,
   setAllPages,
 } from '@studio/swiftui-runtime'
-import { copyView, deleteView, hiddenViewsIn, hideView, insertView, moveView, moveViewTo, showView, viewSiteAt } from '@studio/swift-syntax'
+import { copyView, hiddenViewsIn, viewSiteAt } from '@studio/swift-syntax'
 import type {
   CompileRequest,
   CompileResult,
   CompilerApi,
   HiddenViewInfo,
-  ViewEditRequest,
-  ViewEditResult,
   ViewSiteInfo,
   CompletionResult,
   FileId,
@@ -45,6 +44,7 @@ import { workerTextMeasurer } from '../lib/workerFontMetrics'
  */
 
 const api: CompilerApi = {
+  async planDesignEdit(request) { return planDesignEdit(request) },
   async compile(request: CompileRequest): Promise<CompileResult> {
     return compile(request)
   },
@@ -67,18 +67,6 @@ const api: CompilerApi = {
   async setTextMeasurements(data, revision, generation) { return setTextMeasurements(data, revision, generation) },
   async relayout(revision) { return relayout(revision) },
   async setAllPages(enabled, revision) { return setAllPages(enabled, revision) },
-
-  // Editing the source from the canvas. Every operation is a text transform over the
-  // file the user wrote, so what comes back is a file, and applying it is the same
-  // path as typing would have taken.
-  async editView({ text, file, offset, edit }: ViewEditRequest): Promise<ViewEditResult | null> {
-    if (edit.kind === 'delete') return deleteView(text, file, offset)
-    if (edit.kind === 'move') return moveView(text, file, offset, edit.direction)
-    if (edit.kind === 'moveTo') return moveViewTo(text, file, offset, edit.targetOffset, edit.position)
-    if (edit.kind === 'hide') return hideView(text, file, offset)
-    if (edit.kind === 'show') return showView(text, file, offset)
-    return insertView(text, file, offset, edit.snippet)
-  },
 
   async copyView(text: string, file: FileId, offset: number): Promise<string | null> {
     return copyView(text, file, offset)

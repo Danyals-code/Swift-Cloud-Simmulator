@@ -23,7 +23,10 @@
     "test:stress": "vitest run tests/swiftui-stress.test.ts tests/generated-preview.test.ts apps/web/lib/workerRequests.test.ts",
     "e2e": "playwright test",
     "budget": "node tooling/check-bundle-budget.mjs",
-    "verify": "npm run typecheck && npm run lint && npm run test"
+    "verify": "npm run typecheck && npm run lint && npm run test",
+    "verify:authoring": "node tooling/verify-authoring.mjs --web",
+    "verify:authoring:native": "node tooling/verify-authoring.mjs --native",
+    "verify:authoring:environment": "node tooling/verify-authoring.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
@@ -32,6 +35,7 @@
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.12.0",
+    "pngjs": "7.0.0",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.18.1",

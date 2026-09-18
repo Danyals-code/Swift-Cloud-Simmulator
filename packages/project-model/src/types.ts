@@ -1,5 +1,6 @@
 import { normalizePreviewTarget, type FileId, type SourceFile, type PreviewTarget } from '@studio/shared'
 import type { DeviceKey } from '@studio/sim-shell'
+import type { StudioMetadata } from './studio-metadata'
 
 export interface ProjectManifest {
   readonly previewTarget?: PreviewTarget
@@ -29,6 +30,8 @@ export interface ProjectManifest {
 }
 
 export interface Project {
+  /** Optional, versioned authoring information. Derived authoring models are never persisted. */
+  readonly studio?: StudioMetadata
   readonly id: string
   readonly manifest: ProjectManifest
   readonly files: readonly SourceFile[]

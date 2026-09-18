@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { basicSetup } from 'codemirror'
-import { Compartment, EditorState, type Extension } from '@codemirror/state'
+import { Annotation, Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { StreamLanguage } from '@codemirror/language'
@@ -19,6 +19,8 @@ import { search, searchKeymap } from '@codemirror/search'
 import type { Diagnostic, SourceSpan, SymbolInfo } from '@studio/shared'
 import { editorTheme } from '../lib/editorTheme'
 import { useLayout } from '../lib/layout'
+
+const externalDocument = Annotation.define<boolean>()
 
 /**
  * What the editor may ask the compiler worker about a caret position.
@@ -55,6 +57,8 @@ const COMPLETION_TYPES: Readonly<Record<string, string>> = {
 export interface EditorPaneProps {
   text: string
   diagnostics: readonly Diagnostic[]
+  onUndo?: () => void
+  onRedo?: () => void
   onChange: (text: string) => void
   onSave: () => void
   /** The file being edited, so the worker knows which one the offset belongs to. */
@@ -86,6 +90,8 @@ export function EditorPane({
   text,
   diagnostics,
   onChange,
+  onUndo,
+  onRedo,
   onSave,
   reveal,
   fileId,
@@ -104,6 +110,8 @@ export function EditorPane({
    * Synced in an effect rather than during render, which is the rule refs exist to
    * respect.
    */
+  const onUndoRef = useRef(onUndo)
+  const onRedoRef = useRef(onRedo)
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
   const languageRef = useRef(language)
@@ -112,6 +120,8 @@ export function EditorPane({
   const onRenameRef = useRef(onRename)
   const onCaretRef = useRef(onCaret)
   useEffect(() => {
+    onUndoRef.current = onUndo
+    onRedoRef.current = onRedo
     onChangeRef.current = onChange
     onSaveRef.current = onSave
     languageRef.current = language
@@ -187,6 +197,20 @@ export function EditorPane({
 
     const extensions: Extension[] = [
       basicSetup,
+      Prec.highest(keymap.of([
+        { key: 'Mod-z', run: () => { if (!onUndoRef.current) return false; onUndoRef.current(); return true } },
+        { key: 'Mod-Shift-z', run: () => { if (!onRedoRef.current) return false; onRedoRef.current(); return true } },
+        { key: 'Mod-y', run: () => { if (!onRedoRef.current) return false; onRedoRef.current(); return true } },
+      ])),
+      Prec.highest(EditorView.domEventHandlers({
+        beforeinput: event => {
+          const callback = event.inputType === 'historyUndo' ? onUndoRef.current : event.inputType === 'historyRedo' ? onRedoRef.current : undefined
+          if (!callback) return false
+          event.preventDefault()
+          callback()
+          return true
+        },
+      })),
       StreamLanguage.define(swift),
       editorTheme,
       appearance.current.of(EditorView.darkTheme.of(theme === 'dark')),
@@ -263,7 +287,7 @@ export function EditorPane({
         },
       ]),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+        if (update.docChanged && !update.transactions.some(t => t.annotation(externalDocument))) onChangeRef.current(update.state.doc.toString())
         // Reported on document changes too: typing moves the caret without
         // producing a selection event of its own.
         if (update.docChanged || update.selectionSet) {
@@ -299,6 +323,7 @@ export function EditorPane({
     const current = view.state.doc.toString()
     if (current === text) return
     view.dispatch({
+      annotations: externalDocument.of(true),
       changes: { from: 0, to: current.length, insert: text },
       selection: { anchor: Math.min(view.state.selection.main.anchor, text.length) },
     })

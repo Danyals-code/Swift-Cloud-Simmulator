@@ -11,3 +11,6 @@ export { Checker, checkSourceFiles } from './checker'
 export { lintStrictness } from './strictness'
 export * from './symbols'
 export * from './stdlib-symbols'
+export { buildAuthoringModel, type AuthoringInput } from './authoring'
+
+export { planDesignEdit, planDesignBatch } from './design-edit'

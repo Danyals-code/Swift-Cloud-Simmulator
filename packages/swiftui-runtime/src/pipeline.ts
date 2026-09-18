@@ -3,9 +3,11 @@ import { primaryScroll, scrollInsets } from './containers/screen'
 import type { ScreenLayout } from './to-layout'
 import {
   APPEARANCE_CALIBRATION,
+  bindAuthoringRuntime,
   hasBlockingError,
   rgba,
   type CompileRequest,
+  type AuthoringSnapshot,
   type CompileResult,
   type Diagnostic,
   type LogEntry,
@@ -17,7 +19,7 @@ import {
   type UIEvent,
 } from '@studio/shared'
 import { Parser, type SourceFileNode } from '@studio/swift-syntax'
-import { Checker, lintStrictness, type SemanticModel } from '@studio/swift-sema'
+import { buildAuthoringModel, Checker, lintStrictness, type SemanticModel } from '@studio/swift-sema'
 import {
   CENTER,
   FontMetricsTable,
@@ -106,6 +108,7 @@ export function applyEvent(event: UIEvent): boolean {
 }
 
 interface Analysis {
+  readonly authoring: AuthoringSnapshot
   readonly files: readonly SourceFileNode[]
   readonly model: SemanticModel
   readonly diagnostics: readonly Diagnostic[]
@@ -132,9 +135,11 @@ function analyse(request: CompileRequest): Analysis {
   // its inference would be working from a broken tree, and a warning derived from
   // that is exactly the false positive the pass exists to avoid.
   const strict = diagnostics.some((d) => d.severity === 'error') ? [] : lintStrictness(files, model)
+  const authoring = buildAuthoringModel({ deploymentTarget: request.deploymentTarget, files: request.files, parsed: files, diagnostics: [...diagnostics, ...model.diagnostics], projectId: request.projectId ?? '', revision: request.revision })
   const checkMs = performance.now() - checkStart
 
   return {
+    authoring,
     files,
     model,
     diagnostics: [...diagnostics, ...model.diagnostics, ...strict],
@@ -475,6 +480,7 @@ function toResult(
 
   return {
     revision: request.revision,
+    authoring: bindAuthoringRuntime(analysis.authoring, evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [], request.revision),
     diagnostics,
     renderTree,
     viewHierarchy: evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],

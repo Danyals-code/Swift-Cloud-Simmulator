@@ -1,0 +1,28 @@
+.inspector { display: grid; gap: 12px; min-width: 0; }
+.owner { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
+.owner > span { overflow-wrap: anywhere; }
+.inspector button { color: var(--color-xc-accent); font-size: 11px; cursor: pointer; text-align: left; flex-shrink: 0; }
+.inspector button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 2px; }
+.note { font-size: 11px; opacity: .75; }
+.properties { display: grid; gap: 14px; margin: 0; }
+.property { border-top: 1px solid rgb(128 128 128 / .2); padding-top: 12px; }
+.property dt { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; }
+.badge { font-size: 10px; font-weight: 400; padding: 2px 5px; border: 1px solid rgb(128 128 128 / .25); border-radius: 4px; }
+.property dd { display: grid; gap: 5px; margin: 7px 0 0; min-width: 0; }
+.property code { font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; background: rgb(128 128 128 / .08); border-radius: 4px; padding: 6px; }
+.property small, .property p { font-size: 10px; line-height: 1.5; opacity: .8; margin: 0; }
+.controls { display: grid; gap: 14px; margin: 12px 0 20px; }
+.control { display: grid; gap: 5px; min-width: 0; }
+.control label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(75px, 1fr); gap: 8px; align-items: center; font-size: 12px; }
+.control input, .control select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 6px 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; }
+.control input:focus-visible, .control select:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
+.control input[aria-invalid="true"] { border-color: var(--color-xc-error); }
+.control small { font-size: 10px; color: var(--color-xc-text-3); }
+.control details, .source summary { font-size: 11px; color: var(--color-xc-text-3); }
+.control details p { font-size: 11px; line-height: 1.5; }
+.control summary, .source summary { cursor: pointer; }
+.control .error { color: var(--color-xc-error); font-size: 11px; line-height: 1.45; margin: 3px 0; }
+.control input[type="range"] { padding: 0; accent-color: var(--color-xc-accent); }
+
+.inspector header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+.empty { font-size: 12px; color: var(--color-xc-text-3); }

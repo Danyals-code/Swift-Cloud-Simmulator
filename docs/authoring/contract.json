@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "d9c283b379fd48071606d03cea39227ed37da455",
+  "node": "22.23.2",
+  "npm": "11.12.1",
+  "capabilityManifest": "packages/shared/src/authoring-capabilities.ts",
+  "sourceFixture": "tests/fixtures/authoring-core.swift",
+  "nativeUITests": "tests/fixtures/AuthoringUITests.swift",
+  "capabilityPolicy": {
+    "constructors": "Only exact argument-label sequences in the manifest are recognized for property inspection; unlisted overloads stay read-only and unsupported.",
+    "componentCalls": "One unambiguous local View definition; properties retain their call-site expressions and link to the definition.",
+    "closureSlots": "Only known content builders are traversed. Action closures are preserved as source and never evaluated by the authoring model.",
+    "propertyWriters": "Phase 2\u20133 subset writers are implemented in packages/swift-sema/src/design-controls.ts and enumerated in packages/shared/src/authoring-writers.ts. Each control carries source, scope and a recipe ID; commands validate project revision and ownership. Native/browser acceptance remains pending.",
+    "unknownExpressions": "Preserve source; do not infer editability from evaluated values.",
+    "modifierOrder": "Preserve each occurrence and its exact position, including repeated padding/background modifiers.",
+    "layoutContexts": [
+      "HStack",
+      "VStack",
+      "ZStack",
+      "ScrollView",
+      "List",
+      "ForEach",
+      "Section"
+    ],
+    "excludedAuthoring": [
+      "arbitrary generics",
+      "macros",
+      "custom Layout",
+      "network mutation",
+      "arbitrary async workflows",
+      "ambiguous symbol resolution",
+      "unknown modifier overloads"
+    ]
+  },
+  "nativeReference": {
+    "status": "blocked",
+    "xcodeVersion": "27.0",
+    "xcodeBuild": "27A266a",
+    "swiftVersion": "6.4",
+    "macOS": "27.0",
+    "macOSBuild": "26A428",
+    "runtimeBuild": null,
+    "devices": [
+      "iphone-15",
+      "iphone-18-pro"
+    ],
+    "appearances": [
+      "light",
+      "dark"
+    ],
+    "textSizes": [
+      "large",
+      "accessibility3"
+    ],
+    "orientation": "portrait",
+    "locale": "en_US",
+    "timezone": "UTC",
+    "geometryTolerancePoints": 1,
+    "lineCountTolerance": 0,
+    "repeatCaptures": 5,
+    "regionImageThresholds": null,
+    "thresholdPolicy": "Calibrate repeat-capture noise, compare corresponding content regions, and freeze thresholds only after real native evidence. Null is blocked, never zero or passing.",
+    "approximations": [
+      "symbol artwork",
+      "material rendering"
+    ],
+    "reason": "Simulator runtime identity and regional image thresholds cannot be frozen until CoreSimulator execution and captures succeed. Existing references remain provisional."
+  },
+  "requirements": [
+    "R01",
+    "R02",
+    "R03",
+    "R04",
+    "R05",
+    "R06",
+    "R07",
+    "R08",
+    "R09",
+    "R10",
+    "R11",
+    "R12",
+    "R13",
+    "R14",
+    "R15",
+    "R16"
+  ],
+  "writerManifest": "packages/shared/src/authoring-writers.ts",
+  "writerTests": [
+    "tests/design-edit.test.ts",
+    "apps/web/lib/documentTransactions.test.ts",
+    "e2e/authoring.spec.ts"
+  ]
+}

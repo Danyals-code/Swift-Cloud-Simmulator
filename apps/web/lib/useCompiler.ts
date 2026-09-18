@@ -14,8 +14,8 @@ import type {
   SourceFile,
   UIEvent,
   HiddenViewInfo,
-  ViewEditRequest,
-  ViewEditResult,
+  DesignEditRequest,
+  DesignEditPlan,
   ViewSiteInfo,
 } from '@studio/shared'
 import type { DeviceSpec } from '@studio/sim-shell'
@@ -72,6 +72,7 @@ function spawnWorker(onFailure: (error: Error) => void): WorkerHandle {
  */
 export interface CompilerOptions {
   projectId?: string
+  deploymentTarget?: string
   previewTarget?: PreviewTarget
   files: readonly SourceFile[]
   device: DeviceSpec
@@ -98,6 +99,7 @@ export interface CompilerOptions {
 
 export function useCompiler({
   projectId,
+  deploymentTarget,
   files,
   device,
   colorScheme,
@@ -184,6 +186,7 @@ export function useCompiler({
       if (revision !== revisionRef.current || handle !== handleRef.current) return
       const result = await handle.api.compile({
           projectId,
+          deploymentTarget,
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
           safeArea: device.safeArea,
@@ -208,7 +211,7 @@ export function useCompiler({
       }))
       handleRef.current = null
     }
-  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, allPages])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, allPages])
 
   const latestCompile = useRef(runCompile)
   const latestPaused = useRef(paused)
@@ -333,19 +336,10 @@ export function useCompiler({
    * worth a restart on its own - the next compile will bring one back - and a
    * half-second stall on a keystroke is more disruptive than a missing list.
    */
-  /**
-   * The canvas's edits, and what it may offer.
-   *
-   * Both answer null on a dead worker rather than respawning one: an edit that
-   * cannot be made must not silently become a different edit, and the compile path
-   * is what brings the worker back.
-   */
-  const editView = useCallback(async (request: ViewEditRequest): Promise<ViewEditResult | null> => {
-    try {
-      return await ensureWorker().api.editView(request)
-    } catch {
-      return null
-    }
+  /** Bounded worker planning; failure never mutates the project. */
+  const planDesignEdit = useCallback(async (request: DesignEditRequest): Promise<DesignEditPlan> => {
+    try { return await ensureWorker().api.planDesignEdit(request) }
+    catch { return { ok: false, reason: 'The compiler worker is unavailable. Your project was not changed.' } }
   }, [ensureWorker])
 
   const describeView = useCallback(async (text: string, file: string, offset: number): Promise<ViewSiteInfo | null> => {
@@ -411,8 +405,8 @@ export function useCompiler({
 
   const sourceStale = compiledFiles !== files
   return useMemo(
-    () => ({ ...state, stale: state.stale || sourceStale, dispatch, reset, recompile: runCompile, language, editView, describeView, copyView, hiddenViews }),
-    [state, sourceStale, dispatch, reset, runCompile, language, editView, describeView, copyView, hiddenViews],
+    () => ({ ...state, stale: state.stale || sourceStale, dispatch, reset, recompile: runCompile, language, planDesignEdit, describeView, copyView, hiddenViews }),
+    [state, sourceStale, dispatch, reset, runCompile, language, planDesignEdit, describeView, copyView, hiddenViews],
   )
 }
 

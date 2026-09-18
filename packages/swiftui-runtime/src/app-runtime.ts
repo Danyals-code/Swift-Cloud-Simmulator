@@ -313,6 +313,7 @@ export class AppRuntime {
         views,
         {
           state: this.ui,
+          includeViewHierarchy: false,
           build: (closure, args, environment) => this.buildViews(closure, args, environment),
           styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
           animation: this.animation,
