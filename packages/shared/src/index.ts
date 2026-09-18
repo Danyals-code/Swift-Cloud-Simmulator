@@ -16,3 +16,7 @@ export * from './authoring-capabilities'
 export * from './design-edit'
 
 export * from './authoring-writers'
+
+export * from './authoring-features'
+
+export * from './preview-scenarios'

@@ -468,7 +468,9 @@ export type LayoutModifier =
     }
   /** Carried through to the renderer, which animates the change with CSS. */
   | { readonly kind: 'animate'; readonly hint: AnimationHint }
-  /** `.transition(…)` - how this subtree animates in when it first appears. */
+  /** Retain transition timing even before a value-driven animation is armed. */
+  | { readonly kind: 'transitionTiming'; readonly hint: AnimationHint }
+  /** `.transition(…)` - how this subtree enters and leaves. */
   | { readonly kind: 'transition'; readonly spec: TransitionHint }
   | {
       readonly kind: 'hitTarget'
@@ -562,6 +564,7 @@ export interface LayoutEnvironment {
    * frame does not contain, such as a background's fill.
    */
   readonly animation?: AnimationHint
+  readonly transitionTiming?: AnimationHint
   /** Inherited: `.transition` on a container applies to what appears inside it. */
   readonly transition?: TransitionHint
   /**
@@ -669,7 +672,9 @@ export function childEnvironment(
     case 'clip':
       return { ...env, cornerRadius: modifier.cornerRadius }
     case 'animate':
-      return { ...env, animation: modifier.hint }
+      return { ...env, animation: modifier.hint, transitionTiming: modifier.hint }
+    case 'transitionTiming':
+      return { ...env, transitionTiming: modifier.hint }
     case 'transition':
       return { ...env, transition: modifier.spec }
     case 'blendMode':

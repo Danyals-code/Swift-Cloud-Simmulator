@@ -1,3 +1,4 @@
+import type { AuthoringOperation, ComponentDescription } from './authoring-features'
 import type { AuthoringSnapshot } from './authoring'
 import type { SourceFile, ViewEdit } from './protocol'
 import type { SourceSpan } from './source'
@@ -7,6 +8,7 @@ export interface DesignControl {
   readonly id: string
   readonly source: SourceSpan
   readonly label: string
+  readonly group?: string
   readonly kind: 'text' | 'number' | 'select'
   readonly value: string
   readonly options?: readonly string[]
@@ -21,11 +23,12 @@ export interface DesignEditRequest {
   readonly baseRevision: number
   readonly scope: string
   readonly deploymentTarget?: string
+  readonly componentDescriptions?: readonly ComponentDescription[]
   readonly authoringRevision?: number
   readonly files: readonly SourceFile[]
   readonly target: SourceSpan
   readonly fingerprint?: string
-  readonly operation: { readonly kind: 'property'; readonly control: string; readonly value: string } | ViewEdit
+  readonly operation: { readonly kind: 'property'; readonly control: string; readonly value: string } | ViewEdit | AuthoringOperation
 }
 
 export interface SourceChange {

@@ -1,3 +1,4 @@
+import { readStudioMetadata, type StudioMetadata } from './studio-metadata'
 import { deflateSync, Inflate } from 'fflate'
 import { newProjectId } from './open'
 import { isPreviewTarget, normalizePreviewTarget, type PreviewTarget, type SourceFile } from '@studio/shared'
@@ -48,6 +49,7 @@ const FORMAT_VERSION = 1
 const MAX_SHARE_FILES = 256
 
 interface SharePayload {
+  readonly s?: StudioMetadata
   readonly p?: PreviewTarget
   readonly v: number
   readonly n: string
@@ -93,6 +95,7 @@ function fromBase64Url(encoded: string): Uint8Array | null {
 export function encodeProject(project: Project): string | null {
   const payload: SharePayload = {
     v: FORMAT_VERSION,
+    ...(project.studio ? { s: project.studio } : {}),
     p: normalizePreviewTarget(project.manifest.previewTarget),
     n: project.manifest.name,
     b: project.manifest.bundleId,
@@ -143,6 +146,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
 
   if (!isSharePayload(payload)) return null
   if (!isSafePayload(payload)) return null
+  if (payload.s !== undefined && readStudioMetadata(payload.s).status !== 'valid') return null
 
   const manifest: ProjectManifest = {
     name: payload.n,
@@ -165,6 +169,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
     id: newProjectId(),
     manifest,
     files,
+    ...(payload.s ? { studio: payload.s } : {}),
     ...(folders.length > 0 ? { folders } : {}),
     createdAt: now,
     updatedAt: now,

@@ -2,9 +2,9 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { DesignEditRequest, ExportFormat } from '@studio/shared'
-import { reconcileAuthoringSelection, type AuthoringSelection } from '@studio/shared'
-import { buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
+import type { AuthoringNode, DesignEditRequest, ExportFormat, PreviewInput } from '@studio/shared'
+import { validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection } from '@studio/shared'
+import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
 import type { FileId, PagePreview, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
@@ -24,6 +24,7 @@ import { useCompiler } from '../lib/useCompiler'
  */
 const ConsolePane = dynamic(() => import('./ConsolePane').then((m) => m.ConsolePane), { ssr: false })
 import { InspectorReadout } from './InspectorReadout'
+import { PreviewScenarios } from './PreviewScenarios'
 import { DevicePane } from './DevicePane'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
@@ -209,10 +210,15 @@ export function Studio() {
 
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
   const files = project?.files ?? NO_FILES
+  const [scenarioSelection, setScenarioSelection] = useState<{ projectId: string; name: string } | null>(null)
+  const scenario = scenarioSelection?.projectId === project?.id ? project?.studio?.scenarios.find(s => s.name === scenarioSelection?.name) : undefined
+  const [previewResetEpoch, setPreviewResetEpoch] = useState(0)
+  const previewIdentity = useMemo(() => JSON.stringify([project?.id, project?.files, scenario ?? null, previewResetEpoch]), [project?.id, project?.files, scenario, previewResetEpoch])
 
   const { result, stale, workerError, dispatch, reset, language, planDesignEdit, describeView, copyView, hiddenViews } = useCompiler({
     projectId: project?.id,
     deploymentTarget: project?.manifest.deploymentTarget,
+    scenario, componentDescriptions: project?.studio?.components,
     files,
     device,
     colorScheme: previewSettings.colorScheme,
@@ -352,7 +358,7 @@ export function Studio() {
    * it, and a third button that silently resets everything you had typed into the
    * running app did not belong beside those two.
    */
-  const run = useCallback(() => { void reset() }, [reset])
+  const run = useCallback(() => { void reset().then(() => setPreviewResetEpoch(value => value + 1)) }, [reset])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -425,7 +431,7 @@ export function Studio() {
       // changes the text that made the pending offset valid.
       const snapshot = result?.authoring
       if (pendingSelect && !stale && snapshot && project?.id === pendingSelect.projectId && project.files.find(f => f.id === pendingSelect.file)?.text === pendingSelect.text) {
-        const node = snapshot.nodes.find(n => n.source.file === pendingSelect.file && n.source.start === pendingSelect.offset && !['definition', 'branch', 'template'].includes(n.kind))
+        const node = snapshot.nodes.find(n => n.source.file === pendingSelect.file && n.source.start === pendingSelect.offset && n.kind !== 'definition')
         if (node) setLayerSelection({ projectId: project.id, id: '', anchor: { snapshot, nodeId: node.id, files: project.files } })
         setPendingSelect(null)
       }
@@ -461,10 +467,33 @@ export function Studio() {
   const authoringNode = useMemo(() => {
     const snapshot = result?.authoring
     if (!snapshot || snapshot.projectId !== project?.id || stale) return undefined
+    if (pendingSelect && pendingSelect.projectId === project.id && project.files.find(f => f.id === pendingSelect.file)?.text === pendingSelect.text) { const selected = snapshot.nodes.find(n => n.source.file === pendingSelect.file && n.source.start === pendingSelect.offset && n.kind !== 'definition'); if (selected) return selected }
     if (editedLayer) return snapshot.nodes.find(n => n.id === snapshot.runtimeToSource[editedLayer.id])
     if (layerSelection?.anchor) return reconcileAuthoringSelection(layerSelection.anchor, snapshot, project.files) ?? undefined
     return undefined
-  }, [result?.authoring, project, stale, editedLayer, layerSelection])
+  }, [result?.authoring, project, stale, editedLayer, layerSelection, pendingSelect])
+
+  const selectAuthoring = useCallback((node: AuthoringNode) => {
+    const snapshot = result?.authoring
+    if (!project || stale || !snapshot || snapshot.projectId !== project.id) return
+    setPendingSelect(null); setEditNote(null)
+    useStudio.getState().setDocumentSelection({ file: node.source.file, offset: node.source.start })
+    setLayerSelection({ projectId: project.id, id: node.runtimeIds[0] ?? '', anchor: { snapshot, nodeId: node.id, files: project.files } })
+    setInspectorTab('settings')
+  }, [project, stale, result?.authoring, setInspectorTab])
+
+  const saveScenario = useCallback((name: string, inputs: readonly PreviewInput[]): string | null => {
+    const state = useStudio.getState(), snapshot = result?.authoring
+    if (!project || state.project !== project || stale || !snapshot) return 'Wait for the current source to finish compiling.'
+    const scenario = { name: name.trim(), owner: inputs[0]?.owner ?? '', hook: '', inputs }
+    const problem = validatePreviewScenario(snapshot, scenario)
+    if (problem) return problem
+    const before = project.studio, metadata = before ?? emptyStudioMetadata()
+    const after = { ...metadata, scenarios: [...metadata.scenarios.filter(s => s.name !== scenario.name), scenario] }
+    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after } })
+    if (!error) setScenarioSelection({ projectId: project.id, name: scenario.name })
+    return error
+  }, [project, stale, result?.authoring])
 
   const captureLayer = useCallback((layer: ViewLayer) => {
     if (!project || stale) return
@@ -548,7 +577,7 @@ export function Studio() {
     if (editingRef.current) return 'An edit is already being prepared. Try again.'
     editingRef.current = true
     try {
-      const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, target, fingerprint, operation })
+      const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, componentDescriptions: project.studio?.components, target, fingerprint, operation })
       if (!plan.ok) { setEditNote(plan.reason); return plan.reason }
       const currentSelection = useStudio.getState().documentSelection
       const selectionChanged = JSON.stringify(currentSelection) !== JSON.stringify(state.documentSelection)
@@ -557,7 +586,7 @@ export function Studio() {
       if (plan.changes.length && !selectionChanged) {
         const selected = plan.selection
         const snapshot = plan.authoring
-        const node = selected && snapshot?.nodes.find(n => n.source.file === selected.file && n.source.start === selected.offset && !['definition', 'branch', 'template'].includes(n.kind))
+        const node = selected && snapshot?.nodes.find(n => n.source.file === selected.file && n.source.start === selected.offset && n.kind !== 'definition')
         const files = useStudio.getState().project!.files
         setLayerSelection(node && snapshot ? { projectId: project.id, id: '', anchor: { snapshot, nodeId: node.id, files } } : null)
         const text = selected && useStudio.getState().project?.files.find(f => f.id === selected.file)?.text
@@ -934,6 +963,9 @@ export function Studio() {
             <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
               <Navigator
                 key={project.id}
+                authoring={result?.authoring}
+                selectedAuthoringId={authoringNode?.id}
+                onSelectAuthoring={selectAuthoring}
                 layers={layers}
                 selectedLayerId={selectedLayerId}
                 hoveredLayerId={hoveredLayerId}
@@ -1050,6 +1082,7 @@ export function Studio() {
               <DevicePane
                 expanded={mode === 'design'}
                 projectId={project.id}
+                previewIdentity={previewIdentity}
                 panelLayout={`${layout.showNavigator}:${shown.preview}`}
                 showSettings={shown.preview}
                 settingsWidth={settingsWidth}
@@ -1064,6 +1097,17 @@ export function Studio() {
                 belowCanvas={mode === 'design' ? debugArea : null}
                 tool={tool}
                 selection={selection}
+                authoringFeatures={{ snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
+                  const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
+                  if (state.project !== project || stale) return 'Wait for the current source to compile.'
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
+                }, onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }}
+                authoringTools={<PreviewScenarios key={project.id} snapshot={result?.authoring} stale={stale} scenarios={project.studio?.scenarios ?? []} active={scenario?.name ?? ''} onSelect={name => setScenarioSelection({ projectId: project.id, name })} onSave={saveScenario} onReset={run} onDelete={name => {
+                  const state = useStudio.getState()
+                  if (state.project !== project || !project.studio) return
+                  const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => s.name !== name) } } })
+                  if (error) setEditNote(error); else setScenarioSelection(null)
+                }} />}
                 authoringNode={authoringNode}
                 onChangeAuthoring={changeProperty}
                 onRevealAuthoring={span => revealSpanIn(span.file, span.start)}

@@ -262,12 +262,8 @@ export interface AnimationSpec {
 }
 
 /**
- * How a node animates *in* when it first appears.
- *
- * Only entry is modelled. Exit would mean keeping a node alive after the view that
- * produced it is gone, which needs the renderer to own a shadow copy of the tree -
- * and a half-built version of that is worse than none, because a view that lingers
- * after its state says it should not is a preview telling a lie.
+ * How a node enters and leaves. The renderer retains a bounded, inert snapshot
+ * for an exit and cancels it on reentry, reduced motion or a preview boundary.
  */
 export interface TransitionSpec {
   readonly kind: 'opacity' | 'slide' | 'scale' | 'move'

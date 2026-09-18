@@ -7,6 +7,7 @@ import {
   double,
   int,
   asProjection,
+  copyValue,
   opaque,
   projection,
   str,
@@ -791,7 +792,11 @@ export class SwiftUIHost implements InterpreterHost {
     if (!VIEW_NAMES.has(name)) return undefined
     if (++this.constructedViews > PREVIEW_LIMITS.totalViews) throw new PreviewLimitExceeded('The preview exceeds 10,000 constructed views in one pass. Reduce nested collections or preview data.', call.span)
 
-    const args = toArgs(call)
+    // A direct destination may be a user-defined View value, not a built-in view.
+    // Expand it with the same path used for destination builder closures.
+    const args = name === 'NavigationLink' ? toArgs(call).flatMap(argument => argument.label === 'destination'
+      ? this.toViews([argument.value]).map(destination => ({ label: 'destination', value: view(destination) }))
+      : [argument]) : toArgs(call)
 
     if (DATA_DRIVEN_VIEWS.has(name) && call.trailingClosure && this.looksDataDriven(call)) {
       return this.makeDataDriven(name, args, call)
@@ -1639,7 +1644,8 @@ export class SwiftUIHost implements InterpreterHost {
   /** True when the first argument is a collection rather than a label or a style. */
   private looksDataDriven(call: HostCall): boolean {
     const first = call.args.find((a) => a.label === null)?.value
-    return first?.kind === 'array' || first?.kind === 'range'
+    const value = asProjection(first)?.get() ?? first
+    return value?.kind === 'array' || value?.kind === 'range'
   }
 
   private hasPlainTitle(call: HostCall): boolean {
@@ -1656,7 +1662,9 @@ export class SwiftUIHost implements InterpreterHost {
    * identity and identifying by position.
    */
   private makeDataDriven(name: string, args: readonly ViewArg[], call: HostCall): SwiftValue {
-    const data = call.args.find((a) => a.label === null)?.value
+    const original = call.args.find((a) => a.label === null)?.value
+    const binding = asProjection(original)
+    const data = binding?.get() ?? original
     const idPath = asKeyPath(call.args.find((a) => a.label === 'id')?.value)
     const builder = call.trailingClosure!
 
@@ -1677,7 +1685,25 @@ export class SwiftUIHost implements InterpreterHost {
 
     elements.forEach((element, index) => {
       const key = identityKey(element, idPath?.components ?? null, index)
-      const build = () => this.toViews(call.invokeBuilder(builder, [element]))
+      // A row binding follows stable identity even if a pending handler outlives a reorder.
+      const row = binding ? projection({
+        description: `${binding.description}[${key}]`,
+        get: () => {
+          const current = binding.get()
+          if (current.kind !== 'array') return { kind: 'nil' }
+          const at = current.elements[index] && identityKey(current.elements[index]!, idPath?.components ?? null, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, idPath?.components ?? null, i) === key)
+          return at < 0 ? { kind: 'nil' } : copyValue(current.elements[at]!)
+        },
+        set: value => {
+          const current = binding.get()
+          if (current.kind !== 'array') return
+          const at = current.elements[index] && identityKey(current.elements[index]!, idPath?.components ?? null, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, idPath?.components ?? null, i) === key)
+          if (at < 0) return
+          const elements = [...current.elements]; elements[at] = copyValue(value)
+          binding.set({ ...current, elements })
+        },
+      }) : element
+      const build = () => this.toViews(call.invokeBuilder(builder, [row]))
       const rows = this.scopeIdentity ? this.scopeIdentity(key, build) : build()
 
       for (const row of rows) {

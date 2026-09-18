@@ -599,7 +599,11 @@ export class Interpreter {
   runViewBuilder(closure: ClosureValue, args: readonly SwiftValue[] = []): SwiftValue[] {
     const env = (closure.env as Environment).child()
     if (closure.hasExplicitParams) {
-      closure.params.forEach((param, i) => env.define(param.name, copyValue(args[i] ?? NIL), true, param.span))
+      closure.params.forEach((param, i) => {
+        const value = args[i] ?? NIL
+        const name = param.name.startsWith('$') && asProjection(value) ? param.name.slice(1) : param.name
+        env.define(name, copyValue(value), true, param.span)
+      })
     } else {
       args.forEach((value, i) => env.define(`$${i}`, copyValue(value), true, closure.span))
     }
@@ -760,7 +764,9 @@ export class Interpreter {
 
     if (closure.hasExplicitParams) {
       closure.params.forEach((param, i) => {
-        env.define(param.name, copyValue(args[i] ?? NIL), true, param.span)
+        const value = args[i] ?? NIL
+        const name = param.name.startsWith('$') && asProjection(value) ? param.name.slice(1) : param.name
+        env.define(name, copyValue(value), true, param.span)
       })
     } else {
       // `$0`, `$1`, … shorthand.

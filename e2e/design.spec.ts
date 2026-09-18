@@ -73,6 +73,7 @@ async function openDesign(page: Page) {
   await page.keyboard.insertText(SOURCE)
   await expect(page.getByTestId('render-tree').getByText('Alpha', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true')
   // The canvas bar reports from inside the debug panel, so these tests open the
@@ -105,6 +106,7 @@ async function source(page: Page): Promise<string> {
   await page.getByTestId('workspace-develop').click()
   const text = await page.getByTestId('editor').locator('.cm-content').innerText()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   return text
 }
 
@@ -195,6 +197,7 @@ test('a drag can carry a view into another container', async ({ page }) => {
   await page.keyboard.insertText(NESTED)
   await expect(page.getByTestId('render-tree').getByText('Inner', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await page.getByTestId('inspect-toggle').click()
 
   const layers = page.getByRole('tree', { name: 'App layers' })
@@ -223,6 +226,7 @@ test('a selected container is dragged from anywhere inside it', async ({ page })
   await page.keyboard.insertText(NESTED)
   await expect(page.getByTestId('render-tree').getByText('Inner', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await page.getByTestId('inspect-toggle').click()
 
   // Choose the stack in Layers, then drag it by one of its children: the drag moves
@@ -403,6 +407,7 @@ struct ContentView: View {
 }`)
   await expect(page.getByTestId('render-tree').getByText('Only', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await page.getByTestId('inspect-toggle').click()
   if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') {
     await page.getByTestId('pane-toggle-debug').click()
@@ -467,6 +472,7 @@ struct ContentView: View {
 }`)
   await expect(page.getByTestId('render-tree').getByText('One', { exact: true }).first()).toBeVisible()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await page.getByTestId('inspect-toggle').click()
   await page.getByTestId('show-all-pages').check()
   await expect(page.getByTestId('gallery-page')).toHaveCount(3)
@@ -554,6 +560,7 @@ struct ContentView: View {
 }`)
   await expect(page.getByTestId('render-tree').getByText('Row 0', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
 
   const appScroll = () => page.getByTestId('render-tree').evaluate((tree) => {
     const scroller = [...tree.querySelectorAll<HTMLElement>('*')]
@@ -595,6 +602,7 @@ test('leaving Edit with the gallery open leaves the live page exactly where it w
   await page.keyboard.insertText(TABS)
   await expect(page.getByTestId('render-tree').getByText('One', { exact: true }).first()).toBeVisible()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await page.getByTestId('inspect-toggle').click()
   await page.getByTestId('show-all-pages').check()
   await expect(page.getByTestId('gallery-page')).toHaveCount(3)

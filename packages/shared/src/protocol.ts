@@ -1,3 +1,4 @@
+import type { PreviewScenario, ComponentDescription } from './authoring-features'
 import type { DesignEditRequest, DesignEditPlan } from './design-edit'
 import type { ViewLayer } from './view-layer'
 import type { AuthoringSnapshot } from './authoring'
@@ -26,6 +27,8 @@ export interface CompileRequest {
   /** Separates live app state when the IDE opens a different project. */
   readonly projectId?: string
   readonly deploymentTarget?: string
+  readonly scenario?: PreviewScenario
+  readonly componentDescriptions?: readonly ComponentDescription[]
   readonly previewTarget?: PreviewTarget
   readonly files: readonly SourceFile[]
   /** logical point size of the target device, from sim-shell */

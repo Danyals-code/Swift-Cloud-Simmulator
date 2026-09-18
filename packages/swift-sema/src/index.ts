@@ -14,3 +14,5 @@ export * from './stdlib-symbols'
 export { buildAuthoringModel, type AuthoringInput } from './authoring'
 
 export { planDesignEdit, planDesignBatch } from './design-edit'
+
+export { scenarioFiles } from './authoring-scenarios'

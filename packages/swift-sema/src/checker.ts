@@ -746,6 +746,7 @@ export class Checker {
         const inner = scope.child()
         for (const param of expr.params) {
           inner.declare({ name: param.name, kind: 'parameter', span: param.span })
+          if (/^\$[A-Za-z_]/.test(param.name)) inner.declare({ name: param.name.slice(1), kind: 'parameter', span: param.span })
           if (param.type) this.checkType(param.type)
         }
         this.closureDepth++

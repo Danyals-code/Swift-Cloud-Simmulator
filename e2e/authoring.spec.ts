@@ -25,6 +25,7 @@ async function openSource(page: Page, source = SOURCE) {
   await page.keyboard.insertText(source)
   await expect(page.getByTestId('render-tree').getByText('Beta', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true')
 }
@@ -56,6 +57,7 @@ test('selection survives source inserted before the selected node', async ({ pag
   await page.keyboard.press('ControlOrMeta+Home')
   await page.keyboard.insertText('// inserted before selection\n')
   await page.getByTestId('workspace-design').click()
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await expect(page.getByTestId('authoring-inspector').getByRole('textbox', { name: 'Text', exact: true })).toHaveValue('Beta')
   await expect(page.getByRole('treeitem', { name: 'Beta, Text' })).toHaveAttribute('aria-selected', 'true')
 })

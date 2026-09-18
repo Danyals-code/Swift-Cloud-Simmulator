@@ -31,7 +31,6 @@ function tap(r: CompileResult, label: string) {
 
 // Known gaps must identify the unsupported feature. These are not compatibility passes.
 const gaps: Record<string, string> = {
-  'binding-list': "Cannot find 'item'", 'binding-foreach': "Cannot find 'item'",
   'state-initializer': "Cannot find '_count'", 'bindable-child': 'Bindable',
   'value-textfield': 'value/format/formatter', 'multiline-textfield': 'axis-based multiline',
   'navigation-path': 'bound navigation paths', 'navigation-boolean': 'binding-driven destinations',
@@ -49,6 +48,7 @@ const rejected: Record<string, string> = {
   'large-foreach': '1,000 elements',
 }
 const visible: Record<string, string[]> = {
+  'binding-list': ['One'], 'binding-foreach': ['One'],
   'basic-layout': ['Hello', 'World'], 'conditional-content': ['Disabled'],
   'optional-binding': ['Present'], 'enum-picker': ['Saved'],
   'generic-view-builder': ['Inside'], 'stored-view-builder': ['Inside'],

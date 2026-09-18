@@ -3639,7 +3639,7 @@ class Converter {
         // form without a `value:` animates its subtree unconditionally, as SwiftUI's
         // deprecated one does.
         const gated = args.some((a) => a.label === 'value')
-        if (gated && !boolArg(labelled(args, 'armed'))) return null
+        if (gated && !boolArg(labelled(args, 'armed'))) return { kind: 'transitionTiming', hint }
 
         return { kind: 'animate', hint }
       }

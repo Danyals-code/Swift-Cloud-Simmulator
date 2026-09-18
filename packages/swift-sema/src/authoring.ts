@@ -1,3 +1,5 @@
+import { enrichAuthoring } from './authoring-features'
+import type { ComponentDescription } from '@studio/shared'
 import {
   authoringCapability,
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
@@ -59,6 +61,7 @@ export interface AuthoringInput {
   readonly projectId: string
   readonly revision: number
   readonly deploymentTarget?: string
+  readonly componentDescriptions?: readonly ComponentDescription[]
   readonly parsed?: readonly SourceFileNode[]
   readonly diagnostics?: readonly Diagnostic[]
 }
@@ -168,9 +171,16 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         const template = add('template', 'Row template', closure.span, parent.owner, node)
         const locals = new Map(scope)
         const params = closure.params.length ? closure.params : [{ name: '$0', span: closure.span }]
-        for (const param of params) locals.set(param.name, { kind: 'data-binding', source: param.span })
+        for (const param of params) locals.set(param.name.replace(/^\$/, ''), { kind: 'data-binding', source: param.span })
         block(closure.body, template, locals)
       } else block(closure.body, node, scope)
+    }
+    // Section headers/footers are content slots, not repeated rows or actions.
+    if (name === 'Section' && capability) for (const arg of chain.base.args) {
+      if (!['header', 'footer'].includes(arg.label ?? '')) continue
+      const slot = add('branch', arg.label === 'header' ? 'Header' : 'Footer', arg.value.span, parent.owner, node)
+      if (arg.value.kind === 'closure') block(arg.value.body, slot, scope)
+      else expression(arg.value, slot, scope)
     }
     // Only known view-builder slots are traversed. Button actions are never treated as UI.
     for (const modifier of chain.modifiers) {
@@ -228,5 +238,5 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     forEachChild(node, collectOpaque)
   }
   parsed.forEach(collectOpaque)
-  return { schemaVersion: 1, projectId: input.projectId, revision: input.revision, nodes, roots, diagnostics, runtimeToSource: {} }
+  return enrichAuthoring({ deploymentTarget: input.deploymentTarget, ast: parsed, files: input.files, nodes, descriptions: input.componentDescriptions }, { schemaVersion: 1, projectId: input.projectId, revision: input.revision, nodes, roots, diagnostics, runtimeToSource: {} })
 }

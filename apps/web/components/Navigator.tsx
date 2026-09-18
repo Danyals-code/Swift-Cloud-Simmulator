@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { dirname, fileBasename, type TreeNode } from '@studio/project-model'
 import { useLayout } from '../lib/layout'
+import { LogicalLayers } from './LogicalLayers'
 import { Layers } from './Layers'
-import type { HiddenViewInfo, ViewLayer } from '@studio/shared'
+import type { AuthoringNode, AuthoringSnapshot, HiddenViewInfo, ViewLayer } from '@studio/shared'
 import type { Diagnostic, FileId } from '@studio/shared'
 import { Icon } from './ui/Icon'
 import { ContextMenu, MenuButton, type MenuItem } from './ui/Menu'
@@ -12,6 +13,9 @@ import styles from './Workspace.module.css'
 import { ToolButton } from './ui/Control'
 
 export interface NavigatorProps {
+  authoring?: AuthoringSnapshot
+  selectedAuthoringId?: string
+  onSelectAuthoring?: (node: AuthoringNode) => void
   layers: readonly ViewLayer[]
   selectedLayerId: string | null
   /** The layer under the inspector's pointer, highlighted while it is there. */
@@ -67,6 +71,7 @@ const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text
  */
 export function Navigator({
   tree,
+  authoring, selectedAuthoringId, onSelectAuthoring,
   layers, selectedLayerId, hoveredLayerId, stale, onSelectLayer, onReorderLayer, hiddenViews, onHideLayer, onShowHidden, layersEditable,
   activeFileId,
   filesWithErrors,
@@ -84,6 +89,7 @@ export function Navigator({
   onRevealDiagnostic,
   onOpenTemplates, onTogglePanel,
 }: NavigatorProps) {
+  const [runtimeLayers, setRuntimeLayers] = useState(false)
   const tab = useLayout(s => s.navigatorTab)
   const setTab = useLayout(s => s.setNavigatorTab)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
@@ -242,8 +248,9 @@ export function Navigator({
           <FilterField value={filter} onChange={setFilter} />
         </>
       ) : tab === 'layers' ? (
-        <Layers pages={layers} selectedId={selectedLayerId} hoveredId={hoveredLayerId} stale={stale} onSelect={onSelectLayer}
-          onReorder={onReorderLayer} hidden={hiddenViews} onHide={onHideLayer} onShow={onShowHidden} editable={layersEditable} />
+        <><div className="flex gap-2 px-3 py-2 text-xs" aria-label="Layer detail"><button type="button" aria-pressed={!runtimeLayers} onClick={() => setRuntimeLayers(false)}>Design</button><button type="button" aria-pressed={runtimeLayers} onClick={() => setRuntimeLayers(true)}>Runtime detail</button></div>
+        {!runtimeLayers && authoring && onSelectAuthoring ? <LogicalLayers snapshot={authoring} selected={selectedAuthoringId} stale={stale} onSelect={onSelectAuthoring} /> : <Layers pages={layers} selectedId={selectedLayerId} hoveredId={hoveredLayerId} stale={stale} onSelect={onSelectLayer}
+          onReorder={onReorderLayer} hidden={hiddenViews} onHide={onHideLayer} onShow={onShowHidden} editable={layersEditable} />}</>
       ) : (
         <IssueList diagnostics={diagnostics} onReveal={onRevealDiagnostic} />
       )}

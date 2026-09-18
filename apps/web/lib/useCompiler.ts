@@ -4,6 +4,7 @@ import * as Comlink from 'comlink'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CompileResult,
+  PreviewScenario, ComponentDescription,
   PreviewTarget,
   DynamicTypeSize,
   CompilerApi,
@@ -73,6 +74,8 @@ function spawnWorker(onFailure: (error: Error) => void): WorkerHandle {
 export interface CompilerOptions {
   projectId?: string
   deploymentTarget?: string
+  scenario?: PreviewScenario
+  componentDescriptions?: readonly ComponentDescription[]
   previewTarget?: PreviewTarget
   files: readonly SourceFile[]
   device: DeviceSpec
@@ -100,6 +103,7 @@ export interface CompilerOptions {
 export function useCompiler({
   projectId,
   deploymentTarget,
+  scenario, componentDescriptions,
   files,
   device,
   colorScheme,
@@ -111,6 +115,14 @@ export function useCompiler({
 }: CompilerOptions) {
   const handleRef = useRef<WorkerHandle | null>(null)
   const revisionRef = useRef(0)
+  const contextKey = JSON.stringify([projectId, scenario ?? null])
+  const [compiledContext, setCompiledContext] = useState<string | null>(null)
+  // A scenario/project boundary disposes the worker and its pending handler table.
+  useEffect(() => () => {
+    revisionRef.current++
+    handleRef.current?.dispose()
+    handleRef.current = null
+  }, [contextKey])
   const [compiledFiles, setCompiledFiles] = useState<readonly SourceFile[] | null>(null)
   /** highest revision actually painted, so stale responses can be dropped */
   const paintedRef = useRef(-1)
@@ -187,6 +199,7 @@ export function useCompiler({
       const result = await handle.api.compile({
           projectId,
           deploymentTarget,
+          scenario, componentDescriptions,
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
           safeArea: device.safeArea,
@@ -200,6 +213,7 @@ export function useCompiler({
         })
       if (revision !== revisionRef.current || handle !== handleRef.current) return
       setCompiledFiles(files)
+      setCompiledContext(contextKey)
       await refine(result, handle)
     } catch (error) {
       if (handleRef.current !== handle) return
@@ -211,7 +225,7 @@ export function useCompiler({
       }))
       handleRef.current = null
     }
-  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, allPages])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, contextKey, allPages])
 
   const latestCompile = useRef(runCompile)
   const latestPaused = useRef(paused)
@@ -272,6 +286,7 @@ export function useCompiler({
 
   const dispatch = useCallback(
     async (event: UIEvent) => {
+      if (compiledContext !== contextKey || compiledFiles !== files) return
       const handle = ensureWorker()
       try {
         await handle.ready
@@ -280,7 +295,7 @@ export function useCompiler({
         handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
       }
     },
-    [refine, ensureWorker],
+    [refine, ensureWorker, compiledContext, contextKey, compiledFiles, files],
   )
 
   /**
@@ -314,6 +329,12 @@ export function useCompiler({
   }, [allPages, refine])
 
   const reset = useCallback(async () => {
+    if (compiledContext !== contextKey || compiledFiles !== files) {
+      handleRef.current?.dispose()
+      handleRef.current = null
+      await runCompile()
+      return
+    }
     const handle = handleRef.current
     if (!handle) { await runCompile(); return }
     try {
@@ -322,7 +343,7 @@ export function useCompiler({
     } catch (error) {
       handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
     }
-  }, [refine, runCompile])
+  }, [refine, runCompile, compiledContext, contextKey, compiledFiles, files])
 
   /**
    * Editor intelligence, asked of the worker on demand.
@@ -403,7 +424,7 @@ export function useCompiler({
     [ensureWorker, files],
   )
 
-  const sourceStale = compiledFiles !== files
+  const sourceStale = compiledFiles !== files || compiledContext !== contextKey
   return useMemo(
     () => ({ ...state, stale: state.stale || sourceStale, dispatch, reset, recompile: runCompile, language, planDesignEdit, describeView, copyView, hiddenViews }),
     [state, sourceStale, dispatch, reset, runCompile, language, planDesignEdit, describeView, copyView, hiddenViews],

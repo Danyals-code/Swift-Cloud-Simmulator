@@ -1,4 +1,4 @@
-import { useId, useState, useRef, useLayoutEffect, type UIEvent as ReactUIEvent } from 'react'
+import { useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type UIEvent as ReactUIEvent } from 'react'
 import { ShapeView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
 import { symbolMetrics, shapePath } from '@studio/shared'
@@ -16,6 +16,17 @@ import {
 } from '@studio/shared'
 import { symbolAsset, symbolStrokeScale } from './symbols'
 import { beginContextPress } from './context-press'
+import { finishExit, reconcilePresence, type PresentNode, type RenderGroups } from './transition-presence'
+
+const EMPTY_NODES: readonly RenderNode[] = []
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+function subscribeMotion(notify: () => void) {
+  const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+  query.addEventListener('change', notify)
+  return () => query.removeEventListener('change', notify)
+}
+const serverMotion = () => true
+const ignorePreviewEvent = () => undefined
 
 export interface RenderTreeViewProps {
   tree: RenderTree
@@ -72,6 +83,7 @@ export const RenderTreeView = memo(function RenderTreeView({
   selectedIds,
   inspect,
 }: RenderTreeViewProps) {
+  const reduceMotion = useSyncExternalStore(subscribeMotion, reducedMotion, serverMotion)
   const surfaceRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     if (!surfaceRef.current) return
@@ -99,6 +111,7 @@ export const RenderTreeView = memo(function RenderTreeView({
     <div
       ref={surfaceRef}
       data-testid="render-tree"
+      data-studio-preview=""
       data-calibration={tree.calibration ?? 'provisional'}
       onScrollCapture={event => captureChrome(event, tree.chrome)}
       data-revision={tree.revision}
@@ -117,17 +130,7 @@ export const RenderTreeView = memo(function RenderTreeView({
       <TransitionKeyframes />
       <ControlStyles />
 
-      {(byParent.get('') ?? []).map((node) => (
-        <RenderNodeView
-          key={node.id}
-          node={node}
-          byParent={byParent}
-          onEvent={onEvent}
-          selectedIds={selectedIds}
-          debugOutlines={debugOutlines}
-          inspect={inspect}
-        />
-      ))}
+      <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
 
       {hoveredNode ? <InspectHighlight node={hoveredNode} tree={tree} /> : null}
     </div>
@@ -147,31 +150,32 @@ function captureChrome(event: ReactUIEvent<HTMLDivElement>, chrome: RenderTree['
   if (chrome && target.dataset.nodeId === chrome.scrollId) updateChrome(event.currentTarget, target.scrollTop, chrome.collapseDistance)
 }
 
-/**
- * The keyframes entry transitions play.
- *
- * Expressed as CSS rather than driven from JavaScript, and that is the whole design:
- * a CSS animation plays when an element is *mounted* and never again, which is
- * exactly `.transition`'s semantics. React keys nodes by their stable id, so an
- * element only remounts when the view it represents genuinely appeared - no hooks, no
- * per-node bookkeeping, and nothing to get out of step with the tree.
- */
+/** Entry and exit use separate names so reversing a finished entry restarts it. */
 function TransitionKeyframes() {
   return (
     <style>{`
+      @media (prefers-reduced-motion: reduce) {
+        [data-studio-preview], [data-studio-preview] * { animation: none !important; transition: none !important; }
+      }
       @keyframes studio-opacity { from { opacity: 0 } }
       @keyframes studio-scale { from { opacity: 0; transform: scale(0.85) } }
       @keyframes studio-move-top { from { opacity: 0; transform: translateY(-24px) } }
       @keyframes studio-move-bottom { from { opacity: 0; transform: translateY(24px) } }
       @keyframes studio-move-leading { from { opacity: 0; transform: translateX(-24px) } }
       @keyframes studio-move-trailing { from { opacity: 0; transform: translateX(24px) } }
+      @keyframes studio-opacity-exit { to { opacity: 0 } }
+      @keyframes studio-scale-exit { to { opacity: 0; transform: scale(0.85) } }
+      @keyframes studio-move-top-exit { to { opacity: 0; transform: translateY(-24px) } }
+      @keyframes studio-move-bottom-exit { to { opacity: 0; transform: translateY(24px) } }
+      @keyframes studio-move-leading-exit { to { opacity: 0; transform: translateX(-24px) } }
+      @keyframes studio-move-trailing-exit { to { opacity: 0; transform: translateX(24px) } }
       @keyframes studio-spin { to { transform: rotate(360deg) } }
     `}</style>
   )
 }
 
 /** The keyframe name for a transition spec. */
-function transitionAnimation(node: RenderNode): string | undefined {
+function transitionAnimation(node: RenderNode, exiting = false): string | undefined {
   const transition = node.transition
   if (!transition) return undefined
 
@@ -183,7 +187,39 @@ function transitionAnimation(node: RenderNode): string | undefined {
         : // `.slide` is a move from the leading edge unless an edge was named.
           `studio-move-${transition.edge ?? (transition.kind === 'slide' ? 'leading' : 'bottom')}`
 
-  return `${name} ${Math.round(transition.duration * 1000)}ms cubic-bezier(0.42, 0, 0.58, 1) both`
+  return `${name}${exiting ? '-exit' : ''} ${Math.round(transition.duration * 1000)}ms cubic-bezier(0.42, 0, 0.58, 1) both`
+}
+
+interface NodePresentation {
+  onEvent?: (event: UIEvent) => void
+  debugOutlines: boolean
+  selectedIds?: ReadonlySet<string>
+  inspect?: RenderTreeViewProps['inspect']
+  animate: boolean
+}
+
+function RenderNodeGroup({ nodes, byParent, ...presentation }: NodePresentation & { nodes: readonly RenderNode[]; byParent: RenderGroups }) {
+  const [state, setState] = useState(() => ({ nodes, byParent, animate: presentation.animate, entries: reconcilePresence([], nodes, byParent, false) }))
+  // This conditional adjustment finishes before React commits, keeping a removed
+  // node mounted for its exit instead of removing and reinserting its DOM.
+  if (state.nodes !== nodes || state.byParent !== byParent || state.animate !== presentation.animate) {
+    setState({ nodes, byParent, animate: presentation.animate, entries: reconcilePresence(state.entries, nodes, byParent, state.animate && presentation.animate) })
+  }
+  const complete = useCallback((id: string, token: object) => setState(current => ({ ...current, entries: finishExit(current.entries, id, token) })), [])
+  return state.entries.map(entry => <PresentRenderNode key={entry.node.id} entry={entry} complete={complete} {...presentation} />)
+}
+
+function PresentRenderNode({ entry, complete, ...presentation }: NodePresentation & { entry: PresentNode; complete: (id: string, token: object) => void }) {
+  const { node, exiting, exitToken } = entry
+  const duration = node.transition?.duration ?? 0
+  useEffect(() => {
+    if (!exiting || !exitToken) return
+    // Bounded cleanup works even when CSS animation events are absent. A token
+    // prevents an interrupted exit's delayed completion removing a later exit.
+    const timer = setTimeout(() => complete(node.id, exitToken), duration * 1000 + 50)
+    return () => clearTimeout(timer)
+  }, [exiting, exitToken, duration, node.id, complete])
+  return <RenderNodeView node={node} byParent={entry.groups} {...presentation} exiting={exiting} onEvent={exiting ? ignorePreviewEvent : presentation.onEvent} inspect={exiting ? undefined : presentation.inspect} />
 }
 
 /**
@@ -231,6 +267,8 @@ function RenderNodeView({
   debugOutlines,
   selectedIds,
   inspect,
+  animate,
+  exiting = false,
 }: {
   node: RenderNode
   byParent: ReadonlyMap<string, RenderNode[]>
@@ -238,10 +276,13 @@ function RenderNodeView({
   debugOutlines: boolean
   selectedIds?: ReadonlySet<string>
   inspect?: RenderTreeViewProps['inspect']
+  animate: boolean
+  exiting?: boolean
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const cancelContextPress = useRef<(() => void) | null>(null)
   useLayoutEffect(() => () => cancelContextPress.current?.(), [])
+  useLayoutEffect(() => { if (exiting) cancelContextPress.current?.() }, [exiting])
   useLayoutEffect(() => {
     if (panelRef.current && node.chrome) {
       const scroller = panelRef.current.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.chrome.scrollId)}"]`)
@@ -345,7 +386,7 @@ function RenderNodeView({
       : {}),
     ...(node.filter ? { filter: cssFilter(node.filter) } : {}),
     ...(node.blendMode ? { mixBlendMode: node.blendMode as CSSProperties['mixBlendMode'] } : {}),
-    ...(node.transition ? { animation: transitionAnimation(node) } : {}),
+    ...(node.transition && animate ? { animation: transitionAnimation(node, exiting) } : {}),
     ...(node.material
       ? {
           // A material is a translucent panel over a blurred backdrop, which is
@@ -397,21 +438,9 @@ function RenderNodeView({
       {node.kind === 'placeholder' && node.placeholder ? <PlaceholderContent node={node} /> : null}
       {node.filter?.multiply ? <ColorMultiply color={node.filter.multiply} /> : null}
       {nativeControl}
-      {children?.length ? (
-        <ScrollContent node={node}>
-          {children.map((child) => (
-            <RenderNodeView
-              key={child.id}
-              node={child}
-              byParent={byParent}
-              onEvent={onEvent}
-              selectedIds={selectedIds}
-              debugOutlines={debugOutlines}
-              inspect={inspect}
-            />
-          ))}
-        </ScrollContent>
-      ) : null}
+      <ScrollContent node={node}>
+        <RenderNodeGroup nodes={children ?? EMPTY_NODES} byParent={byParent} animate={animate && !exiting} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
+      </ScrollContent>
     </>
   )
 
@@ -421,7 +450,8 @@ function RenderNodeView({
       data-node-id={node.id}
       data-layer-selected={selectedIds?.has(node.id) || undefined}
       data-handler-id={node.hitTarget?.handlerId}
-      inert={node.inert || undefined}
+      inert={exiting || node.inert || undefined}
+      data-transition-exit={exiting || undefined}
       data-chrome-role={node.chromeRole}
       onScrollCapture={node.chrome ? event => captureChrome(event, node.chrome) : undefined}
       data-kind={node.kind}
@@ -459,7 +489,7 @@ function RenderNodeView({
       aria-disabled={node.hitTarget && !node.hitTarget.enabled ? true : undefined}
       aria-valuetext={node.a11y?.value}
       aria-description={node.a11y?.hint}
-      aria-hidden={node.a11y?.hidden}
+      aria-hidden={exiting || node.a11y?.hidden}
       onPointerEnter={inspecting ? () => inspect.onHover(node) : undefined}
       onPointerLeave={() => { setPressed(false); if (inspecting) inspect.onHover(null) }}
       onClick={

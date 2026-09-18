@@ -15,14 +15,18 @@ import { Splitter } from './ui/Splitter'
 import { PANE_LIMITS, type InspectorTab } from '../lib/layout'
 import type { CanvasTool } from './Toolbar'
 import type { AuthoringNode, SourceSpan } from '@studio/shared'
+import type { FeatureProps } from './AuthoringFeatures'
 import { AuthoringInspector } from './AuthoringInspector'
 
 export interface DevicePaneProps {
+  authoringFeatures?: Omit<FeatureProps, 'node'>
+  authoringTools?: React.ReactNode
   onChangeAuthoring?: (control: string, value: string) => Promise<string | null>
   authoringNode?: AuthoringNode
   onRevealAuthoring?: (span: SourceSpan) => void
   expanded?: boolean
   projectId: string
+  previewIdentity?: string
   panelLayout: string
   /** Design's right-hand rail. Its width is a workspace preference, so it is passed in. */
   showSettings?: boolean
@@ -145,10 +149,12 @@ const ZOOMS: readonly MenuItem[] = [
  */
 export function DevicePane({
   onChangeAuthoring,
+  authoringFeatures, authoringTools,
   authoringNode,
   onRevealAuthoring,
   expanded = false,
   projectId,
+  previewIdentity = projectId,
   panelLayout,
   showSettings = true,
   settingsWidth = PANE_LIMITS.settings.initial,
@@ -585,6 +591,7 @@ export function DevicePane({
     <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${at})`, transformOrigin: 'top left' }}>
       <DeviceFrame device={device}>
         <RenderTreeView
+          key={previewIdentity}
           tree={tree ?? EMPTY_RENDER_TREE}
           selectedIds={live ? selectedRenderIds : undefined}
           {...(live ? { onEvent } : {})}
@@ -730,8 +737,9 @@ export function DevicePane({
 
         {inspectorTab === 'settings' ? (
           <div className={styles.propertySection} data-testid="inspector-settings">
-            <h3>{selection ? selection.name : 'Settings'}</h3>
-            <AuthoringInspector onChange={onChangeAuthoring} node={authoringNode} stale={stale} onReveal={onRevealAuthoring} />
+            <h3>{authoringNode?.name ?? (selection ? selection.name : 'Settings')}</h3>
+            {authoringTools}
+            <AuthoringInspector features={authoringFeatures} onChange={onChangeAuthoring} node={authoringNode} stale={stale} onReveal={onRevealAuthoring} />
           </div>
         ) : (
           <>

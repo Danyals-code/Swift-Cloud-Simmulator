@@ -8,9 +8,9 @@
   "nativeUITests": "tests/fixtures/AuthoringUITests.swift",
   "capabilityPolicy": {
     "constructors": "Only exact argument-label sequences in the manifest are recognized for property inspection; unlisted overloads stay read-only and unsupported.",
-    "componentCalls": "One unambiguous local View definition; properties retain their call-site expressions and link to the definition.",
+    "componentCalls": "One unique local nongeneric View struct with a supported inferred memberwise initializer. Instance literals and described slots/actions are editable independently; shared-definition entry identifies affected call sites.",
     "closureSlots": "Only known content builders are traversed. Action closures are preserved as source and never evaluated by the authoring model.",
-    "propertyWriters": "Phase 2\u20133 subset writers are implemented in packages/swift-sema/src/design-controls.ts and enumerated in packages/shared/src/authoring-writers.ts. Each control carries source, scope and a recipe ID; commands validate project revision and ownership. Native/browser acceptance remains pending.",
+    "propertyWriters": "Phases 2–6 subset writers are implemented in packages/swift-sema/src/design-controls.ts and authoring-*.ts, enumerated in packages/shared/src/authoring-writers.ts. Commands validate project revision, ownership, signatures, source types and deployment target. Native/browser acceptance remains pending.",
     "unknownExpressions": "Preserve source; do not infer editability from evaluated values.",
     "modifierOrder": "Preserve each occurrence and its exact position, including repeated padding/background modifiers.",
     "layoutContexts": [
@@ -30,7 +30,9 @@
       "arbitrary async workflows",
       "ambiguous symbol resolution",
       "unknown modifier overloads"
-    ]
+    ],
+    "collections": "Logical row templates come from source. Typed local Identifiable arrays expose bounded record/schema editing and explicit field bindings. Preview records affect evaluation inputs only; app initial records change Swift through atomic transactions.",
+    "scenarios": "Versioned metadata holds explicit typed inputs with matching source signatures. Inputs replace evaluation AST initializers only, never Swift defaults. Arbitrary hooks are preserved but are not executed."
   },
   "nativeReference": {
     "status": "blocked",
@@ -88,6 +90,8 @@
   "writerTests": [
     "tests/design-edit.test.ts",
     "apps/web/lib/documentTransactions.test.ts",
-    "e2e/authoring.spec.ts"
+    "e2e/authoring.spec.ts",
+    "tests/authoring-workflows.test.ts",
+    "e2e/authoring-workflows.spec.ts"
   ]
 }

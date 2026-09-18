@@ -8,6 +8,7 @@ export type DiagnosticSeverity = 'error' | 'warning' | 'info'
  * without breaking the suite.
  */
 export type DiagnosticCode =
+  | 'invalid_preview_scenario'
   // syntax
   | 'expected_token'
   | 'unexpected_token'

@@ -401,6 +401,7 @@ export class AppRuntime {
 
   /** Drops every state box, framework state included. */
   reset(reload = true): void {
+    this.handlers = new Map()
     this.state.clear()
     this.defaults.clear()
     this.seeded.clear()

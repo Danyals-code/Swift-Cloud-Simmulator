@@ -1,3 +1,4 @@
+import type { CollectionSettings, ComponentSettings, BehaviorSettings, StateInput } from './authoring-features'
 import type { Diagnostic } from './diagnostics'
 import type { SourceFile } from './protocol'
 import type { SourceSpan } from './source'
@@ -35,6 +36,11 @@ export interface AuthoringNode {
   readonly children: readonly string[]
   readonly runtimeIds: readonly string[]
   readonly controls?: readonly DesignControl[]
+  readonly collection?: CollectionSettings
+  readonly component?: ComponentSettings
+  readonly behavior?: BehaviorSettings
+  readonly fields?: readonly string[]
+  readonly extraction?: { readonly allowed: boolean; readonly reason: string }
 }
 
 export interface AuthoringSnapshot {
@@ -43,6 +49,7 @@ export interface AuthoringSnapshot {
   readonly revision: number
   readonly nodes: readonly AuthoringNode[]
   readonly roots: readonly string[]
+  readonly inputs?: readonly StateInput[]
   readonly diagnostics: readonly Diagnostic[]
   readonly runtimeToSource: Readonly<Record<string, string>>
 }

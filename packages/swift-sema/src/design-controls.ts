@@ -29,6 +29,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const constructor = authoringCapability(node.name, 'view', base.args.map(a => a.label))
   if (!constructor || !Number.isFinite(targetVersion) || targetVersion < Number.parseFloat(constructor.minimumIOS)) return []
   const colors = AUTHORING_COLORS.filter(c => targetVersion >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c))
+  const listStyles = targetVersion >= 14 ? ['plain', 'inset', 'grouped', 'insetGrouped', 'sidebar'] : ['plain', 'grouped']
   const recipes: ControlRecipe[] = []
   const scope = node.properties.some(p => p.scope === 'template') ? 'All rows in this template' : `Defined in ${node.owner}`
   const raw = (span: SourceSpan) => text.slice(span.start, span.end)
@@ -90,6 +91,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     const indicators = base.args.find(a => a.label === 'showsIndicators')
     if (indicators) replace('scroll:indicators', 'Show indicators', indicators.value, 'select', ['true', 'false'], undefined, undefined, '')
   }
+  if (node.name === 'List' && !modifiers.some(m => modName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
   if (node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'number', '', undefined, 0)
   if (node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'number', '', undefined, 0)
   if (node.name === 'Text' && base.args[0]) replace('content', 'Text', base.args[0].value, 'text')
@@ -112,6 +114,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       if (name === 'frame' && arg.label === 'alignment') replace(id, label, arg.value, 'select', ALIGNMENTS)
       if (['accessibilityLabel', 'accessibilityIdentifier', 'navigationTitle'].includes(name) && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'text')
       if (['foregroundColor', 'foregroundStyle', 'background', 'fill'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
+      if (name === 'listStyle') replace(id, 'List style', arg.value, 'select', listStyles)
       if (name === 'multilineTextAlignment') replace(id, label, arg.value, 'select', ['leading', 'center', 'trailing'])
       if (name === 'font' && m.args.length === 1 && !arg.label) {
         replace(id, 'Typography', arg.value, 'select', AUTHORING_FONTS)

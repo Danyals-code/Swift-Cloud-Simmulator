@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthoringNode, DesignControl, PropertyValueKind, SourceSpan } from '@studio/shared'
+import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import styles from './AuthoringInspector.module.css'
 
 const LABELS: Record<PropertyValueKind, string> = { literal: 'Literal', token: 'Token', 'data-binding': 'Data binding', 'component-argument': 'Component input', inherited: 'Inherited', computed: 'Computed', unsupported: 'Unsupported' }
@@ -55,6 +56,7 @@ function PropertyControl({ control, onChange }: { control: DesignControl; onChan
     onKeyDown: keyDown,
   }
   return <div className={styles.control} data-testid="design-control">
+    {control.group && <small>{control.group}</small>}
     <label><span>{control.label}</span>
       {control.kind === 'select' ? <select {...input} onChange={event => { change(event.target.value); void commit() }}>
         {control.value === '' && <option value="" disabled>Use inherited / default</option>}
@@ -80,7 +82,7 @@ function PropertyControl({ control, onChange }: { control: DesignControl; onChan
   </div>
 }
 
-export function AuthoringInspector({ node, stale, onReveal, onChange }: { node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: Change }) {
+export function AuthoringInspector({ node, stale, onReveal, onChange, features }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: Change }) {
   const root = useRef<HTMLDivElement | null>(null)
   const focus = useRef<{ source: string; label: string; caret: number | null } | null>(null)
   const sourceKey = node ? `${node.owner}:${node.source.file}:${node.source.start}` : ''
@@ -102,6 +104,7 @@ export function AuthoringInspector({ node, stale, onReveal, onChange }: { node?:
   }} onBlurCapture={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) focus.current = null }} >
     <header><strong>{node.owner}</strong><button type="button" onClick={() => onReveal?.(node.source)}>View source</button></header>
     {node.runtimeIds.length > 1 && <p>This source creates {node.runtimeIds.length} preview instances. Changes apply to their shared source.</p>}
+    {features && <AuthoringFeatures key={`${features.snapshot?.projectId}:${node.id}:${node.fingerprint}:${node.collection?.signature}`} node={node} {...features} />}
     {!!node.controls?.length && onChange && <div className={styles.controls}>
       <p className={styles.note}>Design properties</p>
       {node.controls.map(control => <PropertyControl key={`${node.id}:${control.id}:${control.value}`} control={control} onChange={onChange} />)}

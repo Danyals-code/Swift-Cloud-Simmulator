@@ -1718,7 +1718,7 @@ function decorations(
   return {
     ...(parent ? { parent } : {}),
     ...(env.animation ? { animation: env.animation } : {}),
-    ...(env.transition ? { transition: env.transition } : {}),
+    ...(env.transition ? { transition: { ...env.transition, duration: env.transitionTiming?.duration ?? env.transition.duration } } : {}),
     ...(env.blendMode ? { blendMode: env.blendMode } : {}),
     ...(env.redacted ? { redacted: true } : {}),
   }

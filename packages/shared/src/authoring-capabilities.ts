@@ -14,7 +14,7 @@ export interface AuthoringCapability {
   readonly writeRule: string
 }
 
-const EDITABLE = new Set(['Text', 'Image', 'RoundedRectangle', 'Spacer', 'HStack', 'VStack', 'ZStack', 'Button', 'TextField', 'Toggle', 'ScrollView', 'fill', 'padding', 'frame', 'font', 'foregroundColor', 'foregroundStyle', 'background', 'cornerRadius', 'opacity', 'lineLimit', 'multilineTextAlignment', 'navigationTitle', 'accessibilityLabel', 'accessibilityIdentifier'])
+const EDITABLE = new Set(['Text', 'Image', 'RoundedRectangle', 'Spacer', 'HStack', 'VStack', 'ZStack', 'Button', 'TextField', 'Toggle', 'ScrollView', 'fill', 'padding', 'frame', 'font', 'foregroundColor', 'foregroundStyle', 'background', 'cornerRadius', 'opacity', 'lineLimit', 'multilineTextAlignment', 'navigationTitle', 'accessibilityLabel', 'accessibilityIdentifier', 'listStyle', 'List', 'ForEach', 'Picker'])
 
 function capability(name: string, kind: 'view' | 'modifier', forms: AuthoringCapability['forms'], content = false, minimumIOS = '13.0'): AuthoringCapability {
   return { id: `${kind}.${name}`, name, kind, forms, content, minimumIOS, preview: 'subset', editing: EDITABLE.has(name) ? 'subset' : 'planned', native: 'unverified', fixture: 'authoring-core', writeRule: 'Only discovered design controls authorize writes. See AUTHORING_WRITERS for exact boundaries; validate source ownership, target availability and the complete project revision before atomic commit.' }
@@ -32,7 +32,7 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('ScrollView', 'view', [[], [null], [null, 'showsIndicators']], true),
   capability('List', 'view', [[], [null], [null, 'id']], true),
   capability('ForEach', 'view', [[null], [null, 'id']], true),
-  capability('Section', 'view', [[], [null]], true),
+  capability('Section', 'view', [[], [null], ['header'], ['footer'], ['header', 'footer']], true),
   capability('Button', 'view', [[null]], false),
   capability('TextField', 'view', [[null, 'text']]), capability('Toggle', 'view', [[null, 'isOn']]),
   capability('Picker', 'view', [[null, 'selection']], true),

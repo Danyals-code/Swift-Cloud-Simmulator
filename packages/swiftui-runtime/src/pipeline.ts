@@ -19,7 +19,7 @@ import {
   type UIEvent,
 } from '@studio/shared'
 import { Parser, type SourceFileNode } from '@studio/swift-syntax'
-import { buildAuthoringModel, Checker, lintStrictness, type SemanticModel } from '@studio/swift-sema'
+import { buildAuthoringModel, scenarioFiles, Checker, lintStrictness, type SemanticModel } from '@studio/swift-sema'
 import {
   CENTER,
   FontMetricsTable,
@@ -135,7 +135,7 @@ function analyse(request: CompileRequest): Analysis {
   // its inference would be working from a broken tree, and a warning derived from
   // that is exactly the false positive the pass exists to avoid.
   const strict = diagnostics.some((d) => d.severity === 'error') ? [] : lintStrictness(files, model)
-  const authoring = buildAuthoringModel({ deploymentTarget: request.deploymentTarget, files: request.files, parsed: files, diagnostics: [...diagnostics, ...model.diagnostics], projectId: request.projectId ?? '', revision: request.revision })
+  const authoring = buildAuthoringModel({ deploymentTarget: request.deploymentTarget, componentDescriptions: request.componentDescriptions, files: request.files, parsed: files, diagnostics: [...diagnostics, ...model.diagnostics], projectId: request.projectId ?? '', revision: request.revision })
   const checkMs = performance.now() - checkStart
 
   return {
@@ -498,7 +498,7 @@ function toResult(
 }
 
 export function compile(request: CompileRequest): CompileResult {
-  if (lastAnalysis?.request.projectId !== request.projectId) {
+  if (lastAnalysis?.request.projectId !== request.projectId || JSON.stringify(lastAnalysis?.request.scenario) !== JSON.stringify(request.scenario)) {
     runtime.reset(false)
     lastEvaluation = null
   }
@@ -526,7 +526,16 @@ export function compile(request: CompileRequest): CompileResult {
   }
 
   const evaluateStart = performance.now()
-  runtime.load(analysis.files, analysis.model, programKeyOf(request))
+  let evaluationFiles = analysis.files
+  try { evaluationFiles = scenarioFiles({ files: request.files, ast: analysis.files, nodes: analysis.authoring.nodes }, analysis.authoring, request.scenario) }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid preview scenario.'
+    const diagnostic: Diagnostic = { severity: 'error', code: 'invalid_preview_scenario', message, span: { file: request.files[0]?.id ?? '', start: 0, end: 0 } }
+    const failed = { ...analysis, diagnostics: [...analysis.diagnostics, diagnostic] }
+    lastAnalysis = { request, analysis: failed }; lastEvaluation = null; runtime.reset(false)
+    return toResult(request, failed, null, noticeTree(request, 'Preview scenario needs updating', message), startedAt, 0, 0)
+  }
+  runtime.load(evaluationFiles, analysis.model, programKeyOf(request))
   runtime.setEnvironment(environmentFor(request))
   runtime.setDefaultGeometry(contentSizeOf(request))
 
@@ -710,7 +719,7 @@ function environmentFor(request: CompileRequest): EnvironmentInputs {
 }
 
 function programKeyOf(request: CompileRequest): string {
-  return request.files.map((f) => `${f.id} ${f.text}`).join('')
+  return request.files.map((f) => `${f.id} ${f.text}`).join('') + JSON.stringify(request.scenario ?? null)
 }
 
 export type { LayoutElement }
