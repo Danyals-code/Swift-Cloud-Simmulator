@@ -876,6 +876,7 @@ function ImageContent({ node }: { node: RenderNode }) {
   const image = node.image!
   const maskId = useId().replaceAll(':', '')
   const asset = image.symbol ? symbolAsset(image.symbol, maskId) : null
+  if (image.bitmap) return <img src={image.bitmap.url} alt={image.bitmap.name} draggable={false} style={{ display: 'block', width: '100%', height: '100%', objectFit: 'fill', userSelect: 'none' }} />
   const metrics = symbolMetrics(image.symbol)
   const title = image.symbol ? `${image.symbol} — ${asset?.source === 'ionicons' ? 'Ionicons approximation' : asset ? 'vector approximation' : 'unsupported symbol'}` : undefined
   const height = image.resizable ? node.frame.height : image.font.size * metrics.heightEm * (image.symbolScale ?? 1)

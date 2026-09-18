@@ -62,14 +62,14 @@ describe('an archive that is not one of ours', () => {
     expect(archive.files[0]?.name).toBe('Models/Item.swift')
   })
 
-  it('refuses a path that tries to climb out, keeping only its name', () => {
+  it('rejects a traversal archive without importing any files', () => {
     // Belt and braces: the project model's normaliser would reject it too, but an
     // archive is a stranger's bytes and should never get as far as being a path.
     const archive = readProjectArchive(
       zipSync({ 'App/Sources/../../../etc/Evil.swift': encode('struct Evil {}') }),
     )
-    expect(archive.files[0]?.name).toBe('Evil.swift')
-    expect(projectFromFiles(archive.files, 0)?.files[0]?.id).toBe('Sources/Evil.swift')
+    expect(archive.files).toEqual([])
+    expect(archive.problem).toContain('unsafe path')
   })
 
   it('ignores everything that is not Swift', () => {

@@ -188,6 +188,7 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
   const screen = ui
     ? screenToLayout(ui, {
         colorScheme: scheme,
+        images: request.images,
         previewTarget: request.previewTarget,
         typeScale: request.typeScale ?? 1,
         dynamicTypeSize: request.dynamicTypeSize,
@@ -199,6 +200,7 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
     : {
         content: viewsToLayout(evaluation.views, {
           colorScheme: scheme,
+        images: request.images,
         previewTarget: request.previewTarget,
           typeScale: request.typeScale ?? 1,
         dynamicTypeSize: request.dynamicTypeSize,

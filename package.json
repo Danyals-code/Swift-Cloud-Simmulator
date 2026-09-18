@@ -14,7 +14,7 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "typecheck": "turbo run typecheck && npm run typecheck:tests",
+    "typecheck": "turbo run typecheck && npm run typecheck:tests && npm run typecheck:e2e",
     "typecheck:tests": "tsc --noEmit -p tests/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
@@ -26,7 +26,8 @@
     "verify": "npm run typecheck && npm run lint && npm run test",
     "verify:authoring": "node tooling/verify-authoring.mjs --web",
     "verify:authoring:native": "node tooling/verify-authoring.mjs --native",
-    "verify:authoring:environment": "node tooling/verify-authoring.mjs"
+    "verify:authoring:environment": "node tooling/verify-authoring.mjs",
+    "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

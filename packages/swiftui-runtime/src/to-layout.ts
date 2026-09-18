@@ -7,6 +7,7 @@ import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import { appearanceFor, IOS_27 } from './appearance/ios27'
 import {
   type PreviewTarget,
+  type PreviewImageAsset,
   type DynamicTypeSize,
   isDynamicTypeSize,
   MONO_FAMILY,
@@ -183,6 +184,7 @@ const ALERT_BUTTON_HEIGHT = SURFACES.alert.buttonHeight
 const SWIPE_WIDTH = 88
 
 export interface ConversionOptions {
+  readonly images?: readonly PreviewImageAsset[]
   readonly sheetSurface?: boolean
   readonly viewportWidth?: number
   readonly previewTarget?: PreviewTarget
@@ -222,7 +224,7 @@ export function viewsToLayout(
 ): ConversionResult {
   const rootAxis = options.rootAxis ?? 'vertical'
   const hitTargets = new Map<string, string>()
-  const converter = new Converter(hitTargets, options.colorScheme ?? 'light', options.dynamicTypeSize ?? options.typeScale ?? 1, ZERO_INSETS, undefined, appearanceFor(options.previewTarget), options.displayScale ?? 3, options.viewportWidth ?? 393, options.sheetSurface)
+  const converter = new Converter(hitTargets, options.colorScheme ?? 'light', options.dynamicTypeSize ?? options.typeScale ?? 1, ZERO_INSETS, undefined, appearanceFor(options.previewTarget), options.displayScale ?? 3, options.viewportWidth ?? 393, options.sheetSurface, options.images)
   converter.useGuideRunner(options.callGuide ?? null)
   const children = converter.convertList(views, 'v', rootAxis)
 
@@ -243,7 +245,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const scheme = options.colorScheme ?? 'light'
   const safeArea = options.safeArea ?? ZERO_INSETS
   const background = screenBackground(ui.content, scheme, options.viewportWidth ?? 393, options.sheetSurface) ?? (options.sheetSurface ? rgba(0, 0, 0, 0) : systemBackground(scheme))
-  const converter = new Converter(hitTargets, scheme, options.dynamicTypeSize ?? options.typeScale ?? 1, safeArea, background, appearanceFor(options.previewTarget), options.displayScale ?? 3, options.viewportWidth ?? 393, options.sheetSurface)
+  const converter = new Converter(hitTargets, scheme, options.dynamicTypeSize ?? options.typeScale ?? 1, safeArea, background, appearanceFor(options.previewTarget), options.displayScale ?? 3, options.viewportWidth ?? 393, options.sheetSurface, options.images)
   converter.useGuideRunner(options.callGuide ?? null)
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
@@ -433,6 +435,7 @@ class Converter {
     private readonly displayScale = 3,
     private readonly viewportWidth = 393,
     private readonly sheetSurface = false,
+    private readonly images: readonly PreviewImageAsset[] = [],
   ) {}
 
   private get separatorHeight(): number { return 1 / Math.max(1, this.displayScale) }
@@ -2072,13 +2075,17 @@ class Converter {
     const resizable = view.modifiers.some((m) => m.name === 'resizable')
 
     if (systemName === null && assetName !== null) {
-      // An asset image: we have no bitmap for it, so a labelled box is the honest
-      // answer rather than a grey rectangle pretending to be the artwork.
+      const image = this.images.find(image => image.name === assetName)
+      const url = image && (this.scheme === 'dark' ? image.dark ?? image.light : image.light)
+      if (image && url && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(url)) return {
+        kind: 'image', id: path, glyph: '', resizable, approximated: false,
+        bitmap: { url, name: assetName, width: image.width, height: image.height }, ...origin,
+      }
       return {
         kind: 'placeholder',
         id: path,
         feature: `Image("${assetName}")`,
-        reason: 'Asset images are not bundled with the preview.',
+        reason: 'This named image is missing. Add it in Project resources.',
         ...origin,
       }
     }

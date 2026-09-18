@@ -290,6 +290,7 @@ export interface TransformSpec {
 }
 
 export interface ImagePayload {
+  readonly bitmap?: { readonly url: string; readonly name: string }
   /**
    * The Unicode substitute.
    *

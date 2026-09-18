@@ -17,3 +17,4 @@ export * from './share'
 export * from './studio-metadata'
 
 export * from './transactions'
+export * from './assets'

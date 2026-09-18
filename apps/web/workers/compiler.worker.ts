@@ -1,4 +1,4 @@
-import { planDesignEdit } from '@studio/swift-sema'
+import { planDesignEdit, validateResourceRemoval } from '@studio/swift-sema'
 import * as Comlink from 'comlink'
 import {
   applyEvent,
@@ -44,6 +44,7 @@ import { workerTextMeasurer } from '../lib/workerFontMetrics'
  */
 
 const api: CompilerApi = {
+  async validateResourceRemoval(files, names) { return validateResourceRemoval(files, names) },
   async planDesignEdit(request) { return planDesignEdit(request) },
   async compile(request: CompileRequest): Promise<CompileResult> {
     return compile(request)

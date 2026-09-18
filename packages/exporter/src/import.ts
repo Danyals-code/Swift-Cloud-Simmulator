@@ -1,29 +1,13 @@
-import { Unzip, UnzipInflate } from 'fflate'
+import { importSourceAssets } from './import-assets'
+import { readArchiveEntries } from './archive-reader'
+import { readHandoff, decodeText, type Handoff } from './portable'
+import type { Project } from '@studio/project-model'
 import type { OpenedFile } from '@studio/project-model'
 
-/**
- * Reading back what Export wrote.
- *
- * Export produces a `.zip`; Open took loose `.swift` files. The round trip therefore
- * read "export, unzip it yourself, then pick the files out of `Sources`" - two steps
- * more than it should be, in the one workflow the whole product is built around.
- *
- * It lives in the exporter rather than the project model for two reasons. `fflate`'s
- * unzip is already here for the writing half, so nothing new reaches the initial
- * bundle; and the four formats put sources in four different places, which is
- * knowledge that belongs next to the code that put them there.
- *
- * Everything below treats the archive as what it is: a file a stranger could have
- * handed you. Entry names are never used as paths - only their last segments reach
- * the project model, which normalises them again - and both the count and the total
- * size are capped before anything is decoded.
- */
-
-/** Enough for any project the studio can make, and far short of a decompression bomb. */
-const MAX_ENTRIES = 512
-const MAX_TOTAL_BYTES = 8 * 1024 * 1024
-
+/** Bounded archive import; all validation finishes before a project is offered to the editor. */
 export interface ImportedArchive {
+  readonly project?: Project
+  readonly handoff?: Handoff
   readonly files: readonly OpenedFile[]
   /** Why nothing came back, in words a person can act on. */
   readonly problem: string | null
@@ -39,45 +23,17 @@ export interface ImportedArchive {
  * archive with no `Sources/` at all keeps whatever folders it has below its root.
  */
 export function readProjectArchive(bytes: Uint8Array): ImportedArchive {
-  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return { files: [], problem: 'That file is not a readable zip archive.' }
-  if (bytes.length > MAX_TOTAL_BYTES) return { files: [], problem: 'That archive is too large.' }
-  const files: OpenedFile[] = []
-  let entries = 0
-  let total = 0
-  let declared = 0
   try {
-    const archive = new Unzip((file) => {
-      if (++entries > MAX_ENTRIES) throw new Error('That archive has too many entries.')
-      if (!file.name.endsWith('.swift') || isManifest(file.name)) return
-      declared += file.originalSize ?? 0
-      if (declared > MAX_TOTAL_BYTES) throw new Error('That archive holds more Swift than a project can.')
-      const chunks: Uint8Array[] = []
-      let size = 0
-      file.ondata = (error, chunk, final) => {
-        if (error) throw error
-        total += chunk.length
-        size += chunk.length
-        if (total > MAX_TOTAL_BYTES) throw new Error('That archive holds more Swift than a project can.')
-        chunks.push(chunk)
-        if (final) {
-          const source = new Uint8Array(size)
-          let offset = 0
-          for (const part of chunks) { source.set(part, offset); offset += part.length }
-          files.push({ name: insideTarget(file.name), text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(source) })
-        }
-      }
-      file.start()
-    })
-    archive.register(UnzipInflate)
-    // Bound transient expansion even when a header lies about the original size.
-    for (let offset = 0; offset < bytes.length; offset += 256) {
-      archive.push(bytes.subarray(offset, offset + 256), offset + 256 >= bytes.length)
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : ''
-    return { files: [], problem: message.startsWith('That archive') ? message : 'That file is not a readable zip archive.' }
-  }
-  return files.length ? { files, problem: null } : { files: [], problem: 'That archive has no .swift files in it.' }
+    const entries = readArchiveEntries(bytes)
+    const portable = readHandoff(entries)
+    if (portable) return { files: portable.project.files.map(f => ({ name: f.id, text: f.text })), problem: null, ...portable }
+    const files = [...entries].filter(([path]) => path.endsWith('.swift') && !isManifest(path)).map(([path, data]) => ({ name: insideTarget(path), text: decodeText(data) }))
+    const ids = new Set(files.map(f => f.name.normalize('NFC').toLowerCase()))
+    if (ids.size !== files.length) throw new Error('That archive has ambiguous source paths.')
+    const withAssets = importSourceAssets(files, entries)
+    if (withAssets) return { files, problem: null, ...withAssets }
+    return files.length ? { files, problem: null } : { files: [], problem: 'That archive has no .swift files in it.' }
+  } catch (error) { return { files: [], problem: error instanceof Error ? error.message : 'That file is not a readable zip archive.' } }
 }
 
 /**
@@ -92,9 +48,7 @@ export function readProjectArchive(bytes: Uint8Array): ImportedArchive {
  * - `App/Sources/App/Models/Item.swift`  (.swiftpm and the package)
  * - `App/Sources/Models/Item.swift`      (XcodeGen)
  *
- * Kept as a path rather than reduced to a basename so `Models/Item.swift` comes back
- * into its group - but a path that tries to climb out of one keeps only its name, and
- * the project model's own normaliser refuses it again afterwards.
+ * The archive reader rejects traversal and duplicate paths before target wrappers are removed.
  */
 function insideTarget(entry: string): string {
   const segments = normalise(entry).split('/').filter((s) => s.length > 0)

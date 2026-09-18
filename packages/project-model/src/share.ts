@@ -93,6 +93,8 @@ function fromBase64Url(encoded: string): Uint8Array | null {
  * render path, and every byte saved here is a byte of link a chat client cannot break.
  */
 export function encodeProject(project: Project): string | null {
+  // URL fragments are not a binary transport. Never create a link with missing images.
+  if (project.assets?.length) return null
   const payload: SharePayload = {
     v: FORMAT_VERSION,
     ...(project.studio ? { s: project.studio } : {}),

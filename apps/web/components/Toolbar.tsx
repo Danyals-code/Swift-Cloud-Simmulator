@@ -25,6 +25,7 @@ export interface ToolbarProps {
   suppressed: ReadonlySet<PaneKey>
   onTogglePane: (pane: PaneKey) => void
   onExport: (format: ExportFormat) => void
+  onDownloadEditable?: () => void
   onShare: () => Promise<'copied' | 'too-large' | 'failed'>
 }
 
@@ -53,7 +54,7 @@ const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debu
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
 export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, onModeChange, theme, onThemeChange,
-  panes, suppressed, onTogglePane, onExport, onShare, onRenameProject, onShortcuts }: ToolbarProps) {
+  panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts }: ToolbarProps) {
   return <header data-testid="toolbar" className={styles.toolbar}>
     <div className={styles.project}>
       <button type="button" onClick={onOpenGallery} aria-label="Open a project" title="Projects and templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={21} /></button>
@@ -66,6 +67,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, 
       <button type="button" data-testid="workspace-theme" className={styles.themeToggle} aria-label="Workspace dark mode" aria-pressed={theme === 'dark'} title={`Switch workspace to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}><Icon name="appearance" size={17} /></button>
       <span className={styles.paneControls}><PaneToggles options={debugPane} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>
       <span className={styles.share}><ShareButton onShare={onShare} /></span>
+      <button type="button" className={styles.export} data-testid="download-editable" title="Download Swift, images, app settings, and designer metadata" onClick={onDownloadEditable}>Save editable</button>
       <div className={styles.exportGroup}>
         <button type="button" onClick={() => onExport('xcodeproj')} data-testid="export-button" title="Export an Xcode project" className={styles.export}>Export<Icon name="download" size={14} /></button>
         <MenuButton items={EXPORT_FORMATS.map(f => ({value:f.id,label:f.name,detail:f.shortName,title:f.description}))} onSelect={value => onExport(value as ExportFormat)} label="Export format" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={11} /></MenuButton>
@@ -155,7 +157,7 @@ function ShareButton({ onShare }: { onShare: ToolbarProps['onShare'] }) {
     result === 'copied'
       ? 'Link copied'
       : result === 'too-large'
-        ? 'Too big to link'
+        ? 'Use Save editable'
         : result === 'failed'
           ? 'Copy failed'
           : 'Share'

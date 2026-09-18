@@ -37,11 +37,11 @@ export class MemoryProjectStore implements ProjectStore {
 
   async load(id: string): Promise<Project | null> {
     const project = this.projects.get(id)
-    return project ? normalizeProject(project) : null
+    return project ? structuredClone(normalizeProject(project)) : null
   }
 
   async save(project: Project): Promise<void> {
-    this.projects.set(project.id, normalizeProject(project))
+    this.projects.set(project.id, structuredClone(normalizeProject(project)))
   }
 
   async remove(id: string): Promise<void> {

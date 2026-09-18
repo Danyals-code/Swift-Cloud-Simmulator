@@ -3,6 +3,7 @@ import { collectionFor, addCollectionField, bindField, convertCollection, emptyS
 import { componentRecipes, componentSettings, extractComponent } from './authoring-components'
 import { behaviorSettings, configureAction, configureBinding, configureTransition, stateInputs } from './authoring-behavior'
 import { applyPatches, hasComments, patch, type FeatureContext, type SourcePatch } from './authoring-context'
+import { editResource, sharedStyles, styleProperties } from './authoring-resources'
 import { validateControlValue } from './design-controls'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
@@ -11,14 +12,15 @@ export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot
     const collection = collectionFor(ctx, node), component = componentSettings(ctx, node)
     const parent = enclosingCollection(ctx, node)
     const behavior = ['view', 'collection'].includes(node.kind) && node.name !== 'WindowGroup' ? behaviorSettings(ctx, node) : undefined
-    return { ...node, collection, component, behavior, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: component ? [...component.controls, ...(node.controls ?? [])] : node.controls }
+    return { ...node, styles: styleProperties(ctx, node), collection, component, behavior, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: component ? [...component.controls, ...(node.controls ?? [])] : node.controls }
   })
   const inputs = snapshot.nodes.filter(n => n.kind === 'definition').flatMap(n => stateInputs(ctx, n))
-  return { ...snapshot, nodes, inputs }
+  return { ...snapshot, nodes, inputs, styles: sharedStyles(ctx) }
 }
 export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation: AuthoringOperation | { kind: 'property'; control: string; value: string }): { files: SourceFile[]; offset: number } {
   let patches: SourcePatch[] = [], files: SourceFile[] = []
   switch (operation.kind) {
+    case 'style-create': case 'style-edit': case 'style-link': case 'style-local': case 'asset-use': case 'asset-references': { const result = editResource(ctx, node, operation); patches = result.patches; files = result.created ?? []; break }
     case 'property': {
       const recipe = componentRecipes(ctx, node).find(r => r.control.id === operation.control)
       if (!recipe) throw new Error('This component argument is not a supported literal or its interface has changed.')

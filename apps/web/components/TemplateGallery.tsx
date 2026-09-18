@@ -3,15 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   TEMPLATE_CATALOG,
-  type OpenedFile,
+  type OpenedFile, type Project,
   type ProjectSummary,
   type TemplateInfo,
   type TemplateKind,
 } from '@studio/project-model'
+import type { Handoff } from '@studio/exporter'
+import { readSwiftFiles } from '../lib/importSourceFiles'
 import { Icon, type IconName } from './ui/Icon'
 import { PushButton } from './ui/Control'
 import dynamic from 'next/dynamic'
 import styles from './TemplateGallery.module.css'
+
+const ImportReview = dynamic(() => import('./ImportReview').then(m => m.ImportReview))
 
 const PromptCreator = dynamic(() => import('./PromptCreator').then(m => m.PromptCreator), { loading: () => <p className="p-8 text-xc-text-2">Loading project creator…</p> })
 
@@ -20,6 +24,8 @@ const PromptCreator = dynamic(() => import('./PromptCreator').then(m => m.Prompt
 export type GallerySource = 'open' | 'prompt' | TemplateKind
 
 export interface TemplateGalleryProps {
+  currentProject?: Project
+  onImport?: (expected: Project, project: Project, removedNames: readonly string[]) => Promise<string | null>
   /** The project on screen, so the sheet can say what replacing it would cost. */
   projectId: string | null
   projectName: string
@@ -53,6 +59,7 @@ const SOURCES: readonly { key: GallerySource; label: string; icon: IconName; hin
 
 export function TemplateGallery({
   projectId,
+  currentProject, onImport,
   projectName,
   fileCount,
   recents,
@@ -69,6 +76,7 @@ export function TemplateGallery({
   const apps = useMemo(() => TEMPLATE_CATALOG.filter((t) => t.kind === 'app'), [])
   const features = useMemo(() => TEMPLATE_CATALOG.filter((t) => t.kind === 'feature'), [])
 
+  const [imported, setImported] = useState<{ local: Project; project: Project; handoff: Handoff } | null>(null)
   const [source, setSource] = useState<GallerySource>('prompt')
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
@@ -177,13 +185,14 @@ export function TemplateGallery({
 
       const archive = picked.find((file) => file.name.endsWith('.zip'))
       if (archive) {
-        if (archive.size > 8 * 1024 * 1024) { setOpenError('That archive is too large. The limit is 8 MB.'); return }
+        if (archive.size > 48 * 1024 * 1024) { setOpenError('That archive is too large. The limit is 48 MB.'); return }
         const { readProjectArchive } = await import('@studio/exporter')
-        const { files, problem } = readProjectArchive(new Uint8Array(await archive.arrayBuffer()))
+        const { files, problem, project, handoff } = readProjectArchive(new Uint8Array(await archive.arrayBuffer()))
         if (problem) {
           setOpenError(problem)
           return
         }
+        if (project && handoff && currentProject && onImport) { setImported({ local: currentProject, project, handoff }); return }
         setOpenError(null)
         replacing(`${archive.name}`, () => {
           void onOpenFiles(files).then((opened) => { if (!opened) setOpenError('Nothing in that archive could be opened.') })
@@ -191,22 +200,16 @@ export function TemplateGallery({
         return
       }
 
-      const swift = await Promise.all(
-        picked
-          .filter((file) => file.name.endsWith('.swift'))
-          .map(async (file) => ({ name: file.name, text: await file.text() })),
-      )
-      if (swift.length === 0) {
-        setOpenError('Pick .swift files, or the .zip an export wrote.')
-        return
-      }
+      let swift: readonly OpenedFile[]
+      try { swift = await readSwiftFiles(picked) }
+      catch (error) { setOpenError(error instanceof Error ? error.message : 'Those files could not be read.'); return }
 
       setOpenError(null)
       replacing(`${swift.length} file${swift.length === 1 ? '' : 's'}`, () => {
         void onOpenFiles(swift).then((opened) => { if (!opened) setOpenError('Those files could not be opened.') })
       })
     },
-    [onOpenFiles, replacing],
+    [onOpenFiles, replacing, currentProject, onImport],
   )
 
   return (
@@ -271,7 +274,7 @@ export function TemplateGallery({
               <Icon name="xmark" size={17} />
             </button>
           </header>
-          {source === 'prompt' ? <PromptCreator onOpenFiles={onOpenFiles} onBusy={setGenerationBusy} /> : source === 'open' ? (
+          {imported && onImport ? <ImportReview {...imported} incoming={imported.project} onCancel={() => setImported(null)} onApply={onImport} /> : source === 'prompt' ? <PromptCreator onOpenFiles={onOpenFiles} onBusy={setGenerationBusy} /> : source === 'open' ? (
             <OpenPane
               projectId={projectId}
               recents={recents}

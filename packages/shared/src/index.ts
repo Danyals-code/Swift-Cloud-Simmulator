@@ -20,3 +20,5 @@ export * from './authoring-writers'
 export * from './authoring-features'
 
 export * from './preview-scenarios'
+
+export * from './design-resources'

@@ -1,5 +1,6 @@
 'use client'
 
+import { SharedStyleProperties } from './SharedStyles'
 import { useState } from 'react'
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, ComponentDescription, BehaviorAction, DesignRecord, DesignValue, RecordField, PreviewInput } from '@studio/shared'
 import { defaultRecord, RecordEditor } from './RecordEditor'
@@ -8,6 +9,7 @@ import styles from './AuthoringInspector.module.css'
 export type FeatureChange = (operation: AuthoringOperation | { kind: 'insert'; snippet: string }) => Promise<string | null>
 export interface FeatureProps {
   node: AuthoringNode
+  assets?: readonly { readonly name: string; readonly id: string }[]
   snapshot?: AuthoringSnapshot
   onCommand?: FeatureChange
   onSelect?: (node: AuthoringNode) => void
@@ -15,7 +17,7 @@ export interface FeatureProps {
   onDescribe?: (description: ComponentDescription) => string | null
   onPreview?: (name: string, inputs: readonly PreviewInput[]) => string | null
 }
-export function AuthoringFeatures({ node, snapshot, onCommand, onSelect, onPreview, onDescribe, descriptions }: FeatureProps) {
+export function AuthoringFeatures({ node, snapshot, onCommand, onSelect, onPreview, onDescribe, descriptions, assets }: FeatureProps) {
   const [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false)
   const [name, setName] = useState('CardView'), [collectionName, setCollectionName] = useState('items'), [recordType, setRecordType] = useState('ItemRecord')
   const [emptyText, setEmptyText] = useState('No items yet'), [field, setField] = useState(node.fields?.[0] ?? '')
@@ -32,6 +34,8 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onSelect, onPrevi
   let parent = snapshot?.nodes.find(n => n.id === node.parentId)
   while (parent) { ancestors.unshift(parent); parent = snapshot?.nodes.find(n => n.id === parent!.parentId) }
   return <div className={styles.features}>
+    {node.name === 'Image' && node.properties.some(p => ['argument 1', 'systemName'].includes(p.name) && p.valueKind === 'literal') && !!assets?.length && <label>Bundled image<select aria-label="Bundled image" disabled={busy} value={node.properties.find(p => p.name === 'argument 1')?.expression.replace(/^"|"$/g, '') ?? ''} onChange={e => void command({ kind: 'asset-use', name: e.target.value })}><option value="" disabled>Choose image</option>{assets.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}</select></label>}
+    <SharedStyleProperties node={node} snapshot={snapshot} onCommand={command} busy={busy} />
     <nav aria-label="Selection path">{ancestors.map(n => <span key={n.id}><button type="button" onClick={() => onSelect?.(n)}>{n.name}</button> / </span>)}<span>{node.name}</span></nav>
     {node.component && <section><h3>Component instance</h3><p>{node.component.descriptionStatus}. Changes to arguments affect this instance.</p>
       <button type="button" aria-expanded={shared} onClick={() => setShared(!shared)}>Edit shared definition…</button>

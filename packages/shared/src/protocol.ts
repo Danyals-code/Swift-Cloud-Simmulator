@@ -23,7 +23,16 @@ export interface SourceFile {
   readonly text: string
 }
 
+export interface PreviewImageAsset {
+  readonly name: string
+  readonly width: number
+  readonly height: number
+  readonly light: string
+  readonly dark?: string
+}
+
 export interface CompileRequest {
+  readonly images?: readonly PreviewImageAsset[]
   /** Separates live app state when the IDE opens a different project. */
   readonly projectId?: string
   readonly deploymentTarget?: string
@@ -219,6 +228,7 @@ export interface ViewSiteInfo {
 
 /** The interface exposed over Comlink. */
 export interface CompilerApi {
+  validateResourceRemoval(files: readonly SourceFile[], removedNames: readonly string[]): Promise<string | null>
   planDesignEdit(request: DesignEditRequest): Promise<DesignEditPlan>
   compile(request: CompileRequest): Promise<CompileResult>
   /**

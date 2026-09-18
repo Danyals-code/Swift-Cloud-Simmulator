@@ -1,3 +1,4 @@
+import type { SharedStyle, StyleProperty } from './design-resources'
 import type { CollectionSettings, ComponentSettings, BehaviorSettings, StateInput } from './authoring-features'
 import type { Diagnostic } from './diagnostics'
 import type { SourceFile } from './protocol'
@@ -23,6 +24,7 @@ export interface AuthoringProperty {
 }
 
 export interface AuthoringNode {
+  readonly styles?: readonly StyleProperty[]
   /** Unique only within this snapshot. Reconcile anchors before reusing a selection. */
   readonly id: string
   readonly kind: 'definition' | 'view' | 'component' | 'collection' | 'template' | 'branch' | 'opaque'
@@ -44,6 +46,7 @@ export interface AuthoringNode {
 }
 
 export interface AuthoringSnapshot {
+  readonly styles?: readonly SharedStyle[]
   readonly schemaVersion: 1
   readonly projectId: string
   readonly revision: number

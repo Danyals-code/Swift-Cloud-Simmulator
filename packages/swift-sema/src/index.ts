@@ -16,3 +16,5 @@ export { buildAuthoringModel, type AuthoringInput } from './authoring'
 export { planDesignEdit, planDesignBatch } from './design-edit'
 
 export { scenarioFiles } from './authoring-scenarios'
+
+export { validateResourceRemoval } from './authoring-resources'

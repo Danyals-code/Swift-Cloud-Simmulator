@@ -105,15 +105,14 @@ let loading: Promise<void> | null = null
  * a private window in more than one browser, and a person whose work has stopped
  * being written needs to be told, not to find out on the next reload.
  */
-async function writeProject(project: Project): Promise<string | null> {
-  try {
-    await persistence().save(project)
-    return null
-  } catch (error) {
-    return error instanceof Error && error.message
-      ? `Could not save: ${error.message}`
-      : 'Could not save to this browser’s storage.'
-  }
+let saveQueue: Promise<unknown> = Promise.resolve()
+function writeProject(project: Project): Promise<string | null> {
+  const write = saveQueue.then(async () => {
+    try { await persistence().save(project); return null }
+    catch (error) { return error instanceof Error && error.message ? `Could not save: ${error.message}` : 'Could not save to this browser’s storage.' }
+  })
+  saveQueue = write
+  return write
 }
 
 /** Preview settings live outside the project: they describe how you are looking at it. */
@@ -213,14 +212,17 @@ export interface StudioState {
    * rather than presenting an empty project as a successful open.
    */
   openFiles: (files: readonly OpenedFile[]) => Promise<boolean>
+  importProject: (expected: Project, incoming: Project) => Promise<string | null>
 }
 
 export const useStudio = create<StudioState>((rawSet, get) => {
   const history = new DocumentHistory()
+  let importGuard: { id: string; latest: Project } | null = null
   let replaying = false
   let typingGroup: string | undefined
   function set(patch: Partial<StudioState>): void {
     const previous = get()
+    if (importGuard && patch.project?.id === importGuard.id) importGuard.latest = patch.project
     if ('project' in patch && patch.project !== previous.project) {
       if (patch.documentSelection === undefined) patch = { ...patch, documentSelection: translateDocumentSelection(previous.project, patch.project ?? null, previous.documentSelection) }
       if (!replaying) history.record(previous.project, patch.project ?? null, previous.documentSelection, patch.documentSelection === undefined ? previous.documentSelection : patch.documentSelection, typingGroup)
@@ -657,6 +659,27 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 
       await replace(module.createProjectFromTemplate(template))
       return true
+    },
+
+    async importProject(expected, incoming) {
+      if (importGuard || get().project !== expected) return 'The current project changed. Reopen the archive to review it again.'
+      await get().flush()
+      if (get().saveError) return get().saveError
+      if (get().project !== expected) return 'The project changed while saving. Reopen the archive.'
+      importGuard = { id: expected.id, latest: expected }
+      try {
+        const problem = await writeProject(incoming)
+        if (problem) return problem
+        if (get().project !== expected) {
+          if (incoming.id === expected.id) await writeProject(importGuard.latest)
+          return 'The project changed during import. Its current work was preserved. Reopen the archive.'
+        }
+        const first = incoming.files[0]?.id ?? null
+        set({ project: incoming, activeFileId: first, openFileIds: first ? [first] : [], lastSavedAt: Date.now(), saveError: null, origin: 'restored' })
+        rememberLastOpened(incoming.id)
+        await refreshRecents()
+        return null
+      } finally { importGuard = null }
     },
 
     async openFiles(files) {

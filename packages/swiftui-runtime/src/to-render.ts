@@ -170,6 +170,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
         kind: 'image',
         image: {
           glyph: paint.glyph,
+          bitmap: paint.bitmap,
           font: paint.font,
           color: paint.color,
           approximated: paint.approximated,

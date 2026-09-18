@@ -2,7 +2,7 @@
 
 Swift remains the source of truth. The inspector derives editable controls from parsed source; every design edit is planned in the compiler worker and committed against one exact project revision.
 
-Phases 2–6 have implementations for the documented subset. Browser interaction checks, native behavior and visual acceptance remain pending. The native matrix and image thresholds in `contract.json` are unchanged.
+Phases 2–8 have implementations for the documented subset. Phase 9 evidence and acceptance are tracked in [the release checklist](RELEASE-ACCEPTANCE.md). Browser interaction checks, native behavior and visual acceptance remain pending. The native matrix and image thresholds in `contract.json` are unchanged.
 
 ## Implementation
 
@@ -27,7 +27,7 @@ Component instance arguments are independent from shared definitions. Straightfo
 
 Actions cover local set/toggle, picker selection, navigation, sheet presentation/dismissal and collection insertion/deletion. Named developer functions retain their bodies. Preview scenarios select existing content/loading/error branches through declared inputs; they never overwrite Swift defaults. Metadata travels through storage and sharing and is excluded from app behavior.
 
-Computed expressions, user-defined tokens and unknown overloads stay developer-owned. Arbitrary binding logic is preserved; replacing existing action source is explicit. Layout boundaries from Phases 2–3 remain in place: axis-specific alignment prevents axis conversion, and complex/repeated/commented frame constraints cannot change sizing mode. Transition generation is bounded to opacity/slide/scale and 0–2 seconds; the renderer retains bounded inert exit snapshots and cancels stale removals on reentry. Browser/native motion acceptance remains open.
+Shared immutable colors, spacing, and text-style declarations expose explicit update/link/override controls. Computed expressions and unknown overloads stay developer-owned. Arbitrary binding logic is preserved; replacing existing action source is explicit. Layout boundaries from Phases 2–3 remain in place: axis-specific alignment prevents axis conversion, and complex/repeated/commented frame constraints cannot change sizing mode. Transition generation is bounded to opacity/slide/scale and 0–2 seconds; the renderer retains bounded inert exit snapshots and cancels stale removals on reentry. Browser/native motion acceptance remains open.
 
 ## Verification
 
@@ -59,4 +59,8 @@ npm run verify:authoring:native -- --device DEDICATED_SIMULATOR_UUID
 
 Add its exact source form and writer boundary to the shared manifests. Implement discovery and writing together in the semantic layer; never infer editability from rendered values or put source offsets in React. Add preservation, invalid-input and runtime tests, then generate an independent native form from the actual command. A UI control is not accepted until its browser interaction and native comparison evidence pass.
 
-See [Phase 0–1 evidence](PHASE-0-1-REPORT.md), [Phase 2–3 evidence](PHASE-2-3-REPORT.md), [Phase 4–6 evidence](PHASE-4-5-6-REPORT.md), and [the fixed contract](contract.json).
+See [Phase 0–1 evidence](PHASE-0-1-REPORT.md), [Phase 2–3 evidence](PHASE-2-3-REPORT.md), [Phase 4–6 evidence](PHASE-4-5-6-REPORT.md), [Phase 7–9 evidence](PHASE-7-8-9-REPORT.md), and [the fixed contract](contract.json).
+
+## Resources and handoff
+
+See the [designer guide](DESIGNER-GUIDE.md) for images, shared styles, editable downloads, and conflict review. The [extension guide](EXTENSION-GUIDE.md) documents the resource schema, bounded archive reader, worker reference validation, and transaction/persistence boundaries. Native export source bytes stay unchanged; package resource lookup has an explicit bundle requirement.

@@ -15,12 +15,15 @@ Open [localhost:3000](http://localhost:3000). Choose a template, import Swift fi
 
 ## Workflow
 
-- **Design:** select, add, move, hide, or delete views. Canvas edits update the Swift source. The Add palette contains starter snippets; use Code for bindings, actions, modifiers, and custom views.
+- **Design:** edit supported view properties, collection templates/data, component instances, and local behaviors. Settings explain the affected source; unsupported expressions stay in Code.
 - **Code:** edit Swift with diagnostics, completion, symbol navigation, and rename. The preview stays centered; Run resets its state.
 - **Organize:** double-click a file or the app name to rename it. Collapse panels from their headers and restore them from the window edges. Layers includes collapse all.
 - **Navigate:** the keyboard button beside Export opens searchable shortcuts. Quick Open finds files; Add finds view snippets.
-- **Save and share:** projects save locally in IndexedDB. Share links carry the project in the URL, subject to a size limit.
+- **Resources:** import PNG/JPEG images with dark variants and edit shared Swift colors, spacing, and text styles. Source and resource edits share undo/redo.
+- **Save and share:** local autosave uses IndexedDB. **Save editable** downloads Swift, images, settings, and designer metadata. Reimport reviews external changes by project ID. Share links support image-free projects within the URL limit.
 - **Export:** download an Xcode project, Swift Playgrounds app, Swift package, or XcodeGen specification. Swift source is preserved in every format.
+
+See the [designer guide](docs/authoring/DESIGNER-GUIDE.md), [extension guide](docs/authoring/EXTENSION-GUIDE.md), and [release acceptance checklist](docs/authoring/RELEASE-ACCEPTANCE.md).
 
 ## Preview scope
 

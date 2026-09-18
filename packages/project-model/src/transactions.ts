@@ -1,6 +1,7 @@
 import type { SourceChange } from '@studio/shared'
 import type { Project } from './types'
 import { readStudioMetadata, type StudioMetadata } from './studio-metadata'
+import { validateAssets, type ImageAsset } from './assets'
 
 export interface DocumentSelection { readonly file: string; readonly offset: number }
 export interface ProjectTransaction {
@@ -8,6 +9,7 @@ export interface ProjectTransaction {
   readonly baseRevision: number
   readonly changes: readonly SourceChange[]
   readonly studio?: { readonly before: StudioMetadata | undefined; readonly after: StudioMetadata }
+  readonly assets?: { readonly before: readonly ImageAsset[] | undefined; readonly after: readonly ImageAsset[] }
   readonly selection?: DocumentSelection | null
 }
 export type TransactionResult = { readonly ok: true; readonly project: Project } | { readonly ok: false; readonly reason: string }
@@ -23,12 +25,16 @@ export function applyProjectTransaction(project: Project, revision: number, tran
     if ((existing?.text ?? null) !== change.before) return { ok: false, reason: 'A file changed while this edit was being prepared. Try again.' }
   }
   if (transaction.studio && (JSON.stringify(project.studio) !== JSON.stringify(transaction.studio.before) || readStudioMetadata(transaction.studio.after).status !== 'valid')) return { ok: false, reason: 'Studio metadata changed or is invalid.' }
+  if (transaction.assets) {
+    if (project.assets !== transaction.assets.before) return { ok: false, reason: 'Project images changed while this edit was being prepared.' }
+    try { validateAssets(transaction.assets.after) } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : 'Invalid image resources.' } }
+  }
   const changes = transaction.changes.filter(c => c.before !== c.after)
-  if (!changes.length && (!transaction.studio || JSON.stringify(transaction.studio.before) === JSON.stringify(transaction.studio.after))) return { ok: true, project }
+  if (!changes.length && !transaction.assets && (!transaction.studio || JSON.stringify(transaction.studio.before) === JSON.stringify(transaction.studio.after))) return { ok: true, project }
   const byId = new Map(changes.map(c => [c.file, c]))
   const files = project.files.map(f => byId.has(f.id) ? { ...f, text: byId.get(f.id)!.after } : f)
   for (const c of changes) if (c.before === null) files.push({ id: c.file, text: c.after })
-  return { ok: true, project: { ...project, files, studio: transaction.studio?.after ?? project.studio, updatedAt: Date.now() } }
+  return { ok: true, project: { ...project, files, studio: transaction.studio?.after ?? project.studio, assets: transaction.assets?.after ?? project.assets, updatedAt: Date.now() } }
 }
 
 /** Translate a source selection through typing or an unambiguous file rename. */
@@ -54,7 +60,7 @@ export function translateDocumentSelection(before: Project | null, after: Projec
 }
 
 interface Entry { before: Project; after: Project; beforeSelection: DocumentSelection | null; afterSelection: DocumentSelection | null; group?: string; time: number }
-const sameDocument = (a: Project, b: Project) => a.id === b.id && JSON.stringify([a.files, a.studio, a.folders]) === JSON.stringify([b.files, b.studio, b.folders])
+const sameDocument = (a: Project, b: Project) => a.id === b.id && JSON.stringify([a.files, a.studio, a.folders, a.manifest]) === JSON.stringify([b.files, b.studio, b.folders, b.manifest]) && a.assets === b.assets
 
 /** One bounded timeline for typing, structural edits and atomic project changes. */
 export class DocumentHistory {
@@ -82,7 +88,6 @@ export class DocumentHistory {
     // An undo/redo boundary always ends a typing group.
     entry.group = undefined
     const target = direction === 'undo' ? entry.before : entry.after
-    return { project: { ...current, files: target.files, studio: target.studio, folders: target.folders, updatedAt: Date.now() }, selection: direction === 'undo' ? entry.beforeSelection : entry.afterSelection }
+    return { project: { ...current, files: target.files, studio: target.studio, folders: target.folders, assets: target.assets, manifest: target.manifest, updatedAt: Date.now() }, selection: direction === 'undo' ? entry.beforeSelection : entry.afterSelection }
   }
 }
-

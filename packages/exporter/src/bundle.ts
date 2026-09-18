@@ -1,9 +1,9 @@
+import { assetCatalog } from './resources'
 import type { Project } from '@studio/project-model'
 import { generatePbxproj, targetRelativePath } from './pbxproj'
 import {
   accentColorContents,
   appIconContents,
-  assetCatalogContents,
   gitignoreContents,
   schemeContents,
   workspaceContents,
@@ -41,6 +41,7 @@ export function newBundle(root: string): {
       if (resolved === null) {
         throw new Error(`Refusing to export an entry outside the project: ${path}`)
       }
+      if ([...files.keys()].some(p => p.normalize('NFC').toLowerCase() === resolved.normalize('NFC').toLowerCase())) throw new Error(`Duplicate export path: ${path}`)
       files.set(resolved, bytes)
     },
   }
@@ -120,7 +121,7 @@ export function buildExportBundle(project: Project): ExportBundle {
     schemeContents(project, plan.targetId),
   )
 
-  add(`${name}/Assets.xcassets/Contents.json`, assetCatalogContents())
+  for (const [path, bytes] of assetCatalog(project, `${root}/${name}/Assets.xcassets`)) put(path, bytes)
   add(`${name}/Assets.xcassets/AppIcon.appiconset/Contents.json`, appIconContents())
   add(`${name}/Assets.xcassets/AccentColor.colorset/Contents.json`, accentColorContents())
 
@@ -150,7 +151,7 @@ Exported from Swift Web Studio.
 open ${name}.xcodeproj
 \`\`\`
 
-Then press Cmd+R. The project builds and runs in the Simulator as-is.
+Then press Cmd+R with a compatible Xcode and iOS SDK. Resolve source diagnostics and add any external dependencies required by your Swift.
 
 To run on a physical device, select the target, open **Signing & Capabilities**, and
 choose your team - the project ships with automatic signing and no team set, because
@@ -173,6 +174,6 @@ SwiftUI. These differences are expected, and none of them affect the exported co
 - The interpreter is far slower than compiled Swift; do not judge frame rates by it.
 
 Your Swift source is exported exactly as written - byte for byte. Anything the
-preview could not draw is still here, unchanged, and will build normally.
+preview could not draw is still here, unchanged. Export preserves source; it does not certify that arbitrary Swift compiles.
 `
 }

@@ -166,6 +166,7 @@ export interface FillElement extends ElementBase {
  * same image with `.resizable()` fills whatever it is offered.
  */
 export interface ImageElement extends ElementBase {
+  readonly bitmap?: { readonly url: string; readonly name: string; readonly width: number; readonly height: number }
   readonly kind: 'image'
   readonly glyph: string
   readonly resizable: boolean

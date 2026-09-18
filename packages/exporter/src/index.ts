@@ -1,4 +1,8 @@
 import { zipSync } from 'fflate'
+import { attachHandoff } from './portable'
+import { targetRelativePath } from './pbxproj'
+import { assetCatalog } from './resources'
+import { encodeText } from './bundle'
 import type { Project } from '@studio/project-model'
 import { buildExportBundle, type ExportBundle } from './bundle'
 import {
@@ -11,6 +15,8 @@ import {
 
 export * from './bundle'
 export * from './import'
+export * from './portable'
+export { MAX_ARCHIVE_BYTES } from './archive-reader'
 export * from './formats'
 export { generatePbxproj, IdAllocator, targetRelativePath, type XcodeProjectPlan } from './pbxproj'
 export { parsePlist, serializePlist, type PlistDict, type PlistValue } from './plist'
@@ -38,7 +44,10 @@ export function zipBundle(bundle: ExportBundle): Uint8Array {
 }
 
 export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj'): Uint8Array {
-  return zipBundle(bundleFor(project, format))
+  const name = project.manifest.name, root = format === 'swiftpm' ? `${name}.swiftpm` : name
+  const sourceRoot = format === 'xcodeproj' ? `${root}/${name}` : format === 'xcodegen' ? `${root}/Sources` : `${root}/Sources/${name}`
+  const catalog = `${sourceRoot}/${format === 'spm' || format === 'swiftpm' ? 'Resources/' : ''}Assets.xcassets`
+  return zipBundle(attachHandoff(project, bundleFor(project, format), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog))
 }
 
 /** The file set for a format. One switch, so a new format cannot be half-wired. */
@@ -77,4 +86,18 @@ export function downloadProjectZip(project: Project, format: ExportFormat = 'xco
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
+}
+
+/** Portable designer document, kept separate from the four native export choices. */
+export function exportEditableZip(project: Project): Uint8Array {
+  const root = project.manifest.name
+  const files = assetCatalog(project, `${root}/Assets.xcassets`)
+  for (const file of project.files) files.set(`${root}/${file.id}`, encodeText(file.text))
+  return zipBundle(attachHandoff(project, files, root, id => `${root}/${id}`, `${root}/Assets.xcassets`))
+}
+export function downloadEditableProject(project: Project): void {
+  const url = URL.createObjectURL(new Blob([exportEditableZip(project).slice()], { type: 'application/zip' }))
+  const a = document.createElement('a')
+  a.href = url; a.download = `${project.manifest.name}.swiftstudio.zip`
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
 }

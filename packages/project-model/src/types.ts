@@ -1,6 +1,7 @@
 import { normalizePreviewTarget, type FileId, type SourceFile, type PreviewTarget } from '@studio/shared'
 import type { DeviceKey } from '@studio/sim-shell'
-import type { StudioMetadata } from './studio-metadata'
+import { readStudioMetadata, type StudioMetadata } from './studio-metadata'
+import { validateAssets, type ImageAsset } from './assets'
 
 export interface ProjectManifest {
   readonly previewTarget?: PreviewTarget
@@ -30,6 +31,8 @@ export interface ProjectManifest {
 }
 
 export interface Project {
+  readonly schemaVersion?: 1
+  readonly assets?: readonly ImageAsset[]
   /** Optional, versioned authoring information. Derived authoring models are never persisted. */
   readonly studio?: StudioMetadata
   readonly id: string
@@ -73,7 +76,10 @@ export interface ProjectStore {
 }
 
 export function normalizeProject(project: Project): Project {
-  return { ...project, manifest: { ...project.manifest, previewTarget: normalizePreviewTarget(project.manifest.previewTarget) } }
+  if (project.schemaVersion !== undefined && project.schemaVersion !== 1) throw new Error('This project uses a newer storage version. Open it with a newer Studio; the saved project has not been changed.')
+  if (project.studio !== undefined && readStudioMetadata(project.studio).status !== 'valid') throw new Error('This project contains unsupported or invalid Studio metadata. Its saved copy has not been changed.')
+  if (project.assets) validateAssets(project.assets)
+  return { ...project, schemaVersion: 1, manifest: { ...project.manifest, previewTarget: normalizePreviewTarget(project.manifest.previewTarget) } }
 }
 
 export function summarize(project: Project): ProjectSummary {

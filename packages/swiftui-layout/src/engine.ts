@@ -90,6 +90,7 @@ export type PaintSpec =
       readonly fillRule: 'nonzero' | 'evenodd'
     }
   | {
+      readonly bitmap?: { readonly url: string; readonly name: string }
       readonly kind: 'image'
       readonly glyph: string
       readonly font: ResolvedFont
@@ -312,10 +313,11 @@ export class LayoutEngine {
         // until `.resizable()` makes it fill what it is offered instead.
         if (element.resizable) {
           return {
-            width: resolve(proposal.width, 24, UNBOUNDED),
-            height: resolve(proposal.height, 24, UNBOUNDED),
+            width: resolve(proposal.width, element.bitmap?.width ?? 24, UNBOUNDED),
+            height: resolve(proposal.height, element.bitmap?.height ?? 24, UNBOUNDED),
           }
         }
+        if (element.bitmap) return { width: element.bitmap.width, height: element.bitmap.height }
         return { width: env.font.size * symbolMetrics(element.symbol).widthEm * (element.symbolScale ?? 1), height: Math.max(env.font.lineHeight, env.font.size * symbolMetrics(element.symbol).heightEm * (element.symbolScale ?? 1)) }
       }
 
@@ -769,6 +771,7 @@ export class LayoutEngine {
           paint: {
             kind: 'image',
             glyph: element.glyph,
+            bitmap: element.bitmap,
             font: env.font,
             color: env.foregroundColor,
             approximated: element.approximated,

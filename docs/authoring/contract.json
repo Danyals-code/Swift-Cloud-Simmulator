@@ -10,7 +10,7 @@
     "constructors": "Only exact argument-label sequences in the manifest are recognized for property inspection; unlisted overloads stay read-only and unsupported.",
     "componentCalls": "One unique local nongeneric View struct with a supported inferred memberwise initializer. Instance literals and described slots/actions are editable independently; shared-definition entry identifies affected call sites.",
     "closureSlots": "Only known content builders are traversed. Action closures are preserved as source and never evaluated by the authoring model.",
-    "propertyWriters": "Phases 2–6 subset writers are implemented in packages/swift-sema/src/design-controls.ts and authoring-*.ts, enumerated in packages/shared/src/authoring-writers.ts. Commands validate project revision, ownership, signatures, source types and deployment target. Native/browser acceptance remains pending.",
+    "propertyWriters": "Phases 2–8 subset writers are implemented in packages/swift-sema/src/design-controls.ts and authoring-*.ts, enumerated in packages/shared/src/authoring-writers.ts. Commands validate project revision, ownership, signatures, source types and deployment target. Resource transactions include source-reference validation. Native/browser acceptance remains pending.",
     "unknownExpressions": "Preserve source; do not infer editability from evaluated values.",
     "modifierOrder": "Preserve each occurrence and its exact position, including repeated padding/background modifiers.",
     "layoutContexts": [
@@ -92,6 +92,13 @@
     "apps/web/lib/documentTransactions.test.ts",
     "e2e/authoring.spec.ts",
     "tests/authoring-workflows.test.ts",
-    "e2e/authoring-workflows.spec.ts"
+    "e2e/authoring-workflows.spec.ts",
+    "tests/phase789.test.ts",
+    "tests/authoring-release.test.ts",
+    "tests/authoring-release-bench.test.ts",
+    "apps/web/lib/importProject.test.ts",
+    "apps/web/lib/importSourceFiles.test.ts",
+    "e2e/resources-handoff.spec.ts",
+    "e2e/authoring-latency.spec.ts"
   ]
 }

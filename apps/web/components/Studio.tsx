@@ -11,6 +11,8 @@ import type { FileId, PagePreview, RenderNode, SourceSpan, UIEvent, ViewLayer } 
 import { useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
+import { ProjectResources } from './ProjectResources'
+import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-model'
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
@@ -208,6 +210,7 @@ export function Studio() {
     }
   }, [flush])
 
+  const images = useMemo(() => project?.assets?.map(asset => ({ name: asset.name, width: asset.light.width / asset.scale, height: asset.light.height / asset.scale, light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined })), [project?.assets])
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
   const files = project?.files ?? NO_FILES
   const [scenarioSelection, setScenarioSelection] = useState<{ projectId: string; name: string } | null>(null)
@@ -215,10 +218,10 @@ export function Studio() {
   const [previewResetEpoch, setPreviewResetEpoch] = useState(0)
   const previewIdentity = useMemo(() => JSON.stringify([project?.id, project?.files, scenario ?? null, previewResetEpoch]), [project?.id, project?.files, scenario, previewResetEpoch])
 
-  const { result, stale, workerError, dispatch, reset, language, planDesignEdit, describeView, copyView, hiddenViews } = useCompiler({
+  const { result, stale, workerError, dispatch, reset, language, planDesignEdit, validateResourceRemoval, describeView, copyView, hiddenViews } = useCompiler({
     projectId: project?.id,
     deploymentTarget: project?.manifest.deploymentTarget,
-    scenario, componentDescriptions: project?.studio?.components,
+    images, scenario, componentDescriptions: project?.studio?.components,
     files,
     device,
     colorScheme: previewSettings.colorScheme,
@@ -579,11 +582,12 @@ export function Studio() {
     try {
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, componentDescriptions: project.studio?.components, target, fingerprint, operation })
       if (!plan.ok) { setEditNote(plan.reason); return plan.reason }
+      const preserveSelection = ['style-edit', 'style-create', 'asset-references'].includes(operation.kind)
       const currentSelection = useStudio.getState().documentSelection
       const selectionChanged = JSON.stringify(currentSelection) !== JSON.stringify(state.documentSelection)
-      const problem = useStudio.getState().commitTransaction(project, selectionChanged ? { ...plan, selection: undefined } : plan)
+      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...plan, selection: undefined } : plan)
       if (problem) { setEditNote(problem); return problem }
-      if (plan.changes.length && !selectionChanged) {
+      if (plan.changes.length && !selectionChanged && !preserveSelection) {
         const selected = plan.selection
         const snapshot = plan.authoring
         const node = selected && snapshot?.nodes.find(n => n.source.file === selected.file && n.source.start === selected.offset && n.kind !== 'definition')
@@ -954,6 +958,7 @@ export function Studio() {
         }
         onTogglePane={togglePane}
         onExport={handleExport}
+        onDownloadEditable={() => { void import('@studio/exporter').then(module => module.downloadEditableProject(project)).catch(error => setEditNote(error instanceof Error ? error.message : 'Could not download the editable project.')) }}
         onShare={handleShare}
       />
 
@@ -1097,17 +1102,32 @@ export function Studio() {
                 belowCanvas={mode === 'design' ? debugArea : null}
                 tool={tool}
                 selection={selection}
-                authoringFeatures={{ snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
+                authoringFeatures={{ assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
                   return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
                 }, onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }}
-                authoringTools={<PreviewScenarios key={project.id} snapshot={result?.authoring} stale={stale} scenarios={project.studio?.scenarios ?? []} active={scenario?.name ?? ''} onSelect={name => setScenarioSelection({ projectId: project.id, name })} onSave={saveScenario} onReset={run} onDelete={name => {
+                authoringTools={<><ProjectResources project={project} snapshot={result?.authoring} stale={stale} onCommand={operation => {
+                  const node = result?.authoring?.nodes[0]
+                  return node ? performDesignEdit(node.source, node.fingerprint, node.owner, operation) : Promise.resolve('Wait for the project to compile.')
+                }} onAssets={async (assets: readonly ImageAsset[], operation) => {
+                  const state = useStudio.getState()
+                  if (state.project !== project || stale || editingRef.current) return 'The project changed or is still compiling. Try again.'
+                  editingRef.current = true
+                  try {
+                    validateAssets(assets)
+                    const node = result?.authoring?.nodes[0]
+                    if (operation && !node) return 'Compile the source before changing image references.'
+                    const plan = operation && node ? await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, scope: node.owner, files: project.files, target: node.source, fingerprint: node.fingerprint, operation }) : { ok: true as const, projectId: project.id, baseRevision: state.documentRevision, changes: [] }
+                    if (!plan.ok) return plan.reason
+                    return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } })
+                  } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
+                }} /><PreviewScenarios key={project.id} snapshot={result?.authoring} stale={stale} scenarios={project.studio?.scenarios ?? []} active={scenario?.name ?? ''} onSelect={name => setScenarioSelection({ projectId: project.id, name })} onSave={saveScenario} onReset={run} onDelete={name => {
                   const state = useStudio.getState()
                   if (state.project !== project || !project.studio) return
                   const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => s.name !== name) } } })
                   if (error) setEditNote(error); else setScenarioSelection(null)
-                }} />}
+                }} /></>}
                 authoringNode={authoringNode}
                 onChangeAuthoring={changeProperty}
                 onRevealAuthoring={span => revealSpanIn(span.file, span.start)}
@@ -1161,6 +1181,8 @@ export function Studio() {
 
       {galleryOpen ? (
         <TemplateGallery
+          currentProject={project}
+          onImport={async (expected, incoming, removedNames) => { const referenceProblem = await validateResourceRemoval(incoming.files, removedNames); if (referenceProblem) return referenceProblem; const problem = await useStudio.getState().importProject(expected, incoming); if (!problem) setGalleryOpen(false); return problem }}
           projectId={project.id}
           projectName={project.manifest.name}
           fileCount={files.length}
