@@ -97,7 +97,10 @@ export function PushButton({
       disabled={disabled}
       title={title}
       aria-label={label}
-      aria-pressed={active ? true : undefined}
+      // Always stated, both ways. A toggle that drops the attribute when it is off
+      // is announced as an ordinary button, and "Inspect" then says nothing about
+      // whether inspecting is on - which is the only thing it is there to say.
+      aria-pressed={active}
       data-testid={testId}
       className={`${BASE} ${
         active
@@ -205,11 +208,14 @@ export function PaneToggles({ options, shown, suppressed, onToggle }: PaneToggle
             aria-disabled={cramped}
             title={cramped ? `${option.title} - no room in this window` : option.title}
             data-testid={`pane-toggle-${option.key}`}
+            // On is accent-tinted, as selected is everywhere else in the studio -
+            // a chosen tab, a chosen layer, an armed tool. Suppressed keeps the grey,
+            // because it is on without being in effect.
             className={`inline-flex h-[18px] w-[26px] items-center justify-center rounded-[4px] transition-colors ${
               cramped
                 ? 'bg-xc-line-soft text-xc-text-3'
                 : on
-                  ? 'bg-xc-line-soft text-xc-text'
+                  ? 'bg-xc-select text-xc-accent'
                   : 'text-xc-text-3 hover:text-xc-text-2'
             }`}
           >

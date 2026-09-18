@@ -53,3 +53,54 @@ export function layerRenderIds(layer: ViewLayer | undefined, tree: RenderTree | 
   visit(layer)
   return ids
 }
+
+/**
+ * The layer a painted node belongs to - the inspector's answer, read backwards.
+ *
+ * `layerRenderIds` asks "what does this layer paint"; hovering asks the same
+ * question from the other end, and it has the same two answers. A control is
+ * reached through its hit target, whose handler is keyed by the layer's identity;
+ * everything else is reached by ownership, which is a prefix relation on the
+ * resolver's paths - so the deepest layer whose identity prefixes the node's is
+ * the one that drew it. Shorter matches are ancestors and would select a whole
+ * stack for a tap on one word inside it.
+ */
+export function layerForRenderNode(
+  layers: readonly ViewLayer[],
+  node: RenderNode | null | undefined,
+): ViewLayer | undefined {
+  if (!node) return undefined
+  const handler = node.hitTarget?.handlerId
+  const control = handler?.startsWith('action-') ? handler.slice('action-'.length) : null
+
+  if (control) {
+    const owner = findLayer(layers, control)
+    if (owner) return owner
+  }
+
+  let best: ViewLayer | undefined
+  const visit = (layer: ViewLayer): void => {
+    if (node.id.startsWith(layer.id) && (!best || layer.id.length > best.id.length)) best = layer
+    layer.children.forEach(visit)
+  }
+  layers.forEach(visit)
+  return best
+}
+
+/** Every layer from the page down to `id`, so a selection can be scrolled to. */
+export function layerAncestors(layers: readonly ViewLayer[], id: string | null): readonly string[] {
+  if (!id) return []
+  const walk = (layer: ViewLayer, trail: string[]): string[] | null => {
+    if (layer.id === id) return trail
+    for (const child of layer.children) {
+      const found = walk(child, [...trail, layer.id])
+      if (found) return found
+    }
+    return null
+  }
+  for (const page of layers) {
+    const found = walk(page, [])
+    if (found) return found
+  }
+  return []
+}

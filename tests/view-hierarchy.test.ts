@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from 'vitest'
 import { compile, resetPipelineState, applyEvent, rerender } from '@studio/swiftui-runtime'
 import type { CompileResult, ViewLayer } from '@studio/shared'
-import { findLayer, layerRenderIds } from '../apps/web/lib/layers'
+import { findLayer, layerAncestors, layerForRenderNode, layerRenderIds } from '../apps/web/lib/layers'
 
 beforeEach(resetPipelineState)
 let revision = 0
@@ -110,4 +110,44 @@ it('does not highlight another ForEach label whose string key shares a prefix', 
   const ids = layerRenderIds(label, result.renderTree, result.viewHierarchy)
   const texts = result.renderTree!.nodes.filter(node => ids.has(node.id)).flatMap(node => node.text?.runs.map(run => run.text) ?? [])
   expect(texts).toEqual(['a'])
+})
+
+/**
+ * The inspector, read backwards.
+ *
+ * Hovering the preview asks the question `layerRenderIds` answers the other way
+ * round - given what was painted, which layer drew it - so the two are checked
+ * against each other rather than against a hand-written expectation. A control is
+ * reached through its hit target and everything else through path ownership, and
+ * both directions have to agree for a hover to highlight the row the click will
+ * select.
+ */
+it('names the layer that painted a node, for every node its layer claims', () => {
+  const result = run(`VStack {
+    Text("Title").font(.title)
+    Button("Add") {}
+    ForEach(0..<3, id: \\.self) { item in Text("Row \\(item)") }
+    Label("Tagged", systemImage: "tag")
+  }`)
+  expect(result.diagnostics).toEqual([])
+  const pages = result.viewHierarchy!
+  const claimed = all(pages).filter(layer => ['Text', 'Button', 'Label'].includes(layer.type))
+  expect(claimed.length).toBeGreaterThan(4)
+
+  for (const layer of claimed) {
+    const ids = layerRenderIds(layer, result.renderTree, pages)
+    expect(ids.size, layer.name).toBeGreaterThan(0)
+    for (const id of ids) {
+      const node = result.renderTree!.nodes.find(node => node.id === id)!
+      expect(layerForRenderNode(pages, node)?.id, `${layer.type} ${layer.name}`).toBe(layer.id)
+    }
+  }
+
+  const row = claimed.find(layer => layer.name === 'Row 1')!
+  const trail = layerAncestors(pages, row.id)
+  expect(trail[0]).toBe(pages[0]!.id)
+  expect(trail).not.toContain(row.id)
+  expect(findLayer(pages, trail.at(-1)!)?.children.some(child => child.id === row.id)).toBe(true)
+  expect(layerAncestors(pages, 'not-a-layer')).toEqual([])
+  expect(layerForRenderNode(pages, null)).toBeUndefined()
 })

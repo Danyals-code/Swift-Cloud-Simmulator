@@ -17,7 +17,7 @@ test('Design opens first with an interactive preview and settings', async ({ pag
   await expect(page.getByTestId('editor')).toBeHidden()
 })
 
-test('opening a source file from Design reveals code and preserves the preference', async ({ page }) => {
+test('opening a source file from Design reveals code, and a reload comes back to Design', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('navigator-tab-project').click()
@@ -26,7 +26,8 @@ test('opening a source file from Design reveals code and preserves the preferenc
   await expect(page.getByTestId('editor')).toBeVisible()
   await page.reload()
   await page.getByTestId('gallery-dismiss').click()
-  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'develop')
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
+  await expect(page.getByTestId('editor')).toBeHidden()
 })
 
 test('Design keeps preview settings reachable in a small window', async ({ page }) => {
@@ -57,9 +58,72 @@ test('workspace theme persists independently of preview appearance and mode', as
   await page.reload()
   await page.getByTestId('gallery-dismiss').click()
   await expect(theme).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'develop')
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
   await expect(previewLight).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('workspace-develop').click()
   await theme.click()
   await expect(page.getByTestId('editor').locator('.cm-editor')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'light')
+})
+
+test('the panes on both sides of each workspace can be dragged', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+
+  const width = (testId: string) => page.getByTestId(testId).evaluate(el => el.getBoundingClientRect().width)
+  const drag = async (label: string, by: number) => {
+    const handle = page.getByTestId(`splitter-${label}`)
+    const box = (await handle.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    // More than one move: a single one used to be all the divider ever saw,
+    // because the re-render it caused tore the drag down behind it.
+    await page.mouse.move(box.x + box.width / 2 + by / 2, box.y + box.height / 2)
+    await page.mouse.move(box.x + box.width / 2 + by, box.y + box.height / 2)
+    await page.mouse.up()
+  }
+
+  const layersBefore = await width('file-rail')
+  await drag('navigator-width', 90)
+  expect(await width('file-rail')).toBeGreaterThan(layersBefore + 60)
+
+  const settings = page.locator('aside[aria-label="Preview settings"]')
+  const settingsBefore = (await settings.boundingBox())!.width
+  await drag('preview-settings-width', -70)
+  expect((await settings.boundingBox())!.width).toBeGreaterThan(settingsBefore + 50)
+
+  await page.getByTestId('workspace-develop').click()
+  const pane = page.locator('section[aria-label="Preview"]')
+  const previewBefore = (await pane.boundingBox())!.width
+  await drag('preview-width', -80)
+  expect((await pane.boundingBox())!.width).toBeGreaterThan(previewBefore + 60)
+
+  // Dragged widths are a preference and survive the reload that Design does not.
+  await page.reload()
+  await page.getByTestId('gallery-dismiss').click()
+  expect(await width('file-rail')).toBeGreaterThan(layersBefore + 60)
+})
+
+test('the problems panel and the settings rail open where they were asked for', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+
+  await page.getByTestId('pane-toggle-debug').click()
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
+  await expect(page.getByTestId('console')).toBeVisible()
+  await expect(page.getByTestId('render-tree')).toBeVisible()
+  await expect(page.getByTestId('editor')).toBeHidden()
+
+  const settings = page.locator('aside[aria-label="Preview settings"]')
+  await expect(settings).toBeVisible()
+  await page.getByTestId('pane-toggle-preview').click()
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
+  await expect(settings).toBeHidden()
+  await expect(page.getByTestId('render-tree')).toBeVisible()
+  await page.getByTestId('pane-toggle-preview').click()
+  await expect(settings).toBeVisible()
+
+  await page.getByTestId('pane-toggle-navigator').click()
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
+  await expect(page.getByTestId('file-rail')).toBeHidden()
 })

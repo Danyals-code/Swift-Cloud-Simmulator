@@ -293,6 +293,36 @@ export class AppRuntime {
   }
 
   /**
+   * The same pass, composed as if another tab were selected.
+   *
+   * The page gallery's whole trick: every tab's body has already been evaluated by
+   * the pass that produced `views` - a `TabView` builds all of its children and the
+   * resolver then picks one - so a second page costs a composition and a layout and
+   * no evaluation at all. Nothing here is recorded: the handler table stays the live
+   * page's, because a press belongs to the app that is running, not to a picture of
+   * one beside it.
+   *
+   * Returns null when the pass cannot be composed that way, so a gallery of six
+   * pages is never the reason the preview goes blank.
+   */
+  resolvePage(views: readonly ViewValue[], tab: number): ResolvedUI | null {
+    try {
+      return resolveUI(
+        views,
+        {
+          state: this.ui,
+          build: (closure, args, environment) => this.buildViews(closure, args, environment),
+          styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
+          animation: this.animation,
+        },
+        tab,
+      )
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Applies an interaction, then writes back any `@State` it changed.
    *
    * Returns false when nothing matched, so the caller can skip a re-render entirely

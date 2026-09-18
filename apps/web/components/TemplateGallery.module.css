@@ -31,31 +31,27 @@
 .search input:focus-visible { outline: none; }
 .search button { cursor: pointer; }
 .catalog { flex: 1; min-height: 0; overflow-y: auto; padding: 0 30px 22px; overscroll-behavior: contain; }
-.appGrid, .featureGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.appCard, .featureCard { position: relative; display: flex; gap: 14px; min-width: 0; padding: 22px 18px; border: 1px solid var(--color-xc-line); border-radius: 7px; background: var(--color-xc-bar-raised); text-align: left; cursor: pointer; transition: background .15s, border-color .15s; }
-.appCard { min-height: 126px; flex-direction: row; padding: 18px 24px 18px 16px; gap: 12px; }
-.appCard .templateIcon { width: 38px; height: 38px; }
-.appCard .templateIcon svg { width: 23px; height: 23px; }
-.appCard .cardTagline { font-size: 13px; }
-.appCard .cardMeta { margin-top: 10px; }
-.appCard .selectedMark { right: 9px; top: 10px; width: 14px; height: 14px; }
+/* Equal rows, so a card with two lines of tagline does not make the one beside it
+   taller than the one below it. A grid of cards that are all different heights is
+   the thing that reads as "jumping". */
+.appGrid, .featureGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 12px; }
+.appCard, .featureCard { position: relative; display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 16px 30px 16px 16px; border: 1px solid var(--color-xc-line); border-radius: 7px; background: var(--color-xc-bar-raised); text-align: left; cursor: pointer; transition: background .15s, border-color .15s; }
+/* One card, two lengths. Everything an app card and a feature card share is set
+   once: the same padding, the same icon, the same type sizes and the same mark in
+   the same corner. They are the same object in the same sheet. */
+.appCard { min-height: 120px; }
 .appCard[aria-pressed='true'], .featureCard[aria-pressed='true'] { background: var(--color-xc-bar-raised); border-color: var(--color-xc-accent); }
 .appCard:hover, .featureCard:hover { background: var(--color-xc-bar-raised); border-color: var(--color-xc-line); }
-.templateIcon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 12px; }
-.templateIcon svg { width: 25px; height: 25px; }
+.templateIcon { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 10px; }
+.templateIcon svg { width: 21px; height: 21px; }
 .cardCopy { display: block; min-width: 0; }
-.cardTitle { display: flex; align-items: center; gap: 9px; color: var(--color-xc-text); font-size: 15px; font-weight: 600; }
+.cardTitle { display: flex; align-items: center; gap: 9px; color: var(--color-xc-text); font-size: 14px; font-weight: 600; }
 .cardTitle small { padding: 2px 5px; border-radius: 4px; color: #6d59c1; background: #6d59c114; font-size: 10px; letter-spacing: .7px; }
-.cardTagline { display: block; margin-top: 6px; color: var(--color-xc-text-3); font-size: 14px; line-height: 1.5; }
-.cardMeta { display: block; margin-top: 14px; color: var(--color-xc-text-3); font-size: 12px; }
-.selectedMark { position: absolute; right: 14px; top: 15px; display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid var(--color-xc-line); border-radius: 50%; }
+.cardTagline { display: block; margin-top: 5px; color: var(--color-xc-text-3); font-size: 13px; line-height: 1.5; }
+.cardMeta { display: block; margin-top: 10px; color: var(--color-xc-text-3); font-size: 12px; }
+.selectedMark { position: absolute; right: 10px; top: 12px; display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid var(--color-xc-line); border-radius: 50%; }
 [aria-pressed='true'] > .selectedMark { border-color: var(--color-xc-accent); background: #0d78f2; color: #ffffff; }
-.featureCard { min-height: 110px; align-items: flex-start; padding: 16px 28px 16px 14px; gap: 12px; }
-.featureCard .templateIcon { width: 34px; height: 34px; border-radius: 10px; }
-.featureCard .templateIcon svg { width: 20px; height: 20px; }
-.featureCard .cardTitle { font-size: 14px; }
-.featureCard .cardTagline { font-size: 13px; }
-.featureCard .selectedMark { width: 14px; height: 14px; right: 10px; top: 17px; }
+.featureCard { min-height: 104px; }
 .detail { padding: 17px 30px; border-top: 1px solid var(--color-xc-line); background: var(--color-xc-editor); }
 .detailHeading { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; font-size: 14px; }
 .detailHeading strong { font-weight: 600; }
@@ -99,9 +95,9 @@
   .subtitle { font-size: 13px; }
   .eyebrow { font-size: 10px; }
   .appGrid, .featureGrid { grid-template-columns: 1fr; }
-  .appCard { flex-direction: row; min-height: 130px; padding: 18px 28px 18px 16px; }
-  .cardTitle { font-size: 14px; }
-  .cardTagline { font-size: 13px; }
+  .appCard { min-height: 112px; }
+  .cardTitle { font-size: 13.5px; }
+  .cardTagline { font-size: 12.5px; }
   .footer { align-items: stretch; flex-direction: column; gap: 10px; }
   .footerNote { max-width: none; }
   .actions { justify-content: flex-end; }
@@ -119,7 +115,6 @@
 .openPane > p { color: var(--color-xc-text-3); }
 @media (max-width: 760px) { .openPane { padding: 0 20px 20px; } }
 
-.appCard { min-height: 118px; }
 .appCard .templateIcon { background-color: transparent !important; }
 .navigation { gap: 2px; }
 .navItem { min-height: 38px; }

@@ -50,6 +50,16 @@ export interface CompileRequest {
   readonly dynamicTypeSize?: DynamicTypeSize
   readonly displayScale?: number
   /**
+   * Render every page, not only the one on screen.
+   *
+   * Off by default and switched on by the studio's page gallery, because it costs
+   * one layout pass per page. Evaluation is unaffected either way: every tab's body
+   * is already evaluated on every pass, and what the extra passes buy is the
+   * *composition* - a navigation bar, a tab bar and a layout - for the pages the
+   * device is not currently showing.
+   */
+  readonly allPages?: boolean
+  /**
    * Bumped by the caller on every request; echoed back so a slow response for an
    * older revision can be discarded rather than flashing stale output.
    */
@@ -76,6 +86,21 @@ export interface CompileTimings {
   readonly total: number
 }
 
+/**
+ * One page of the app, drawn on its own.
+ *
+ * `id` is the `ViewLayer` id of the same page, so the gallery, Layers and the
+ * preview are all naming the same thing; `handlerId` is that page's tab item, which
+ * is what makes a page the live one.
+ */
+export interface PagePreview {
+  readonly id: string
+  readonly name: string
+  readonly active: boolean
+  readonly handlerId?: string
+  readonly tree: RenderTree
+}
+
 export interface CompileResult {
   readonly revision: number
   readonly diagnostics: readonly Diagnostic[]
@@ -86,6 +111,14 @@ export interface CompileResult {
    */
   readonly renderTree: RenderTree | null
   readonly viewHierarchy?: readonly ViewLayer[]
+  /**
+   * Every page, composed and laid out, when `allPages` asked for them.
+   *
+   * Shorter than the hierarchy's page list when an app has more pages than the
+   * gallery draws; the caller has both, so it can say so rather than quietly
+   * showing a subset.
+   */
+  readonly pages?: readonly PagePreview[]
   readonly logs: readonly LogEntry[]
   readonly timings: CompileTimings
   /** Pending shaped runs are resolved in one bounded main-thread batch. */
@@ -137,6 +170,59 @@ export function handlerOf(event: UIEvent): string {
   return event.handlerId
 }
 
+/**
+ * An edit the canvas asks for, named by where the view is written.
+ *
+ * The offset is the view's own source span, which is what the hierarchy and the
+ * render tree both carry - so "this view" means the same thing to the canvas, to
+ * Layers and to the parser that performs the edit.
+ */
+export type ViewEdit =
+  | { readonly kind: 'delete' }
+  | { readonly kind: 'move'; readonly direction: -1 | 1 }
+  | { readonly kind: 'insert'; readonly snippet: string }
+  /** A drag: put this view before or after another one, wherever that one is. */
+  | { readonly kind: 'moveTo'; readonly targetOffset: number; readonly position: 'before' | 'after' }
+  | { readonly kind: 'hide' }
+  | { readonly kind: 'show' }
+
+export interface ViewEditRequest {
+  readonly text: string
+  readonly file: FileId
+  readonly offset: number
+  readonly edit: ViewEdit
+}
+
+export interface ViewEditResult {
+  readonly text: string
+  /** Where the edited view is now written, so the studio can keep it selected. */
+  readonly offset: number
+}
+
+/**
+ * A view this file is hiding, which is a view commented out of it.
+ *
+ * Carried on the compile result because the hierarchy cannot carry it: a
+ * commented-out view is exactly what the parser produces no tree for, and the studio
+ * still has to draw the switch that brings it back.
+ */
+export interface HiddenViewInfo {
+  readonly file: FileId
+  readonly offset: number
+  readonly name: string
+  readonly type: string
+  /** The container it was hidden from, as that view's own offset. */
+  readonly container: number | null
+}
+
+/** What the canvas can do to a view, which is what its controls are drawn from. */
+export interface ViewSiteInfo {
+  readonly index: number
+  readonly siblings: number
+  readonly container: boolean
+  readonly inContent: boolean
+}
+
 /** The interface exposed over Comlink. */
 export interface CompilerApi {
   compile(request: CompileRequest): Promise<CompileResult>
@@ -160,6 +246,30 @@ export interface CompilerApi {
   setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void>
   setTextMeasurements(data: readonly MeasuredTextData[], revision: number, generation?: number): Promise<CompileResult | null>
   relayout(revision: number): Promise<CompileResult>
+  /**
+   * Turns the page gallery on or off and re-renders at once.
+   *
+   * A separate call rather than a recompile: the source has not changed, and going
+   * through `compile` would debounce the answer behind a keystroke timer and throw
+   * away nothing but time. Returns null before the first compile, when there is no
+   * program to draw.
+   */
+  setAllPages(enabled: boolean, revision: number): Promise<CompileResult | null>
+  /**
+   * Edits the source from the canvas, returning the new file text.
+   *
+   * In the worker because the parser is: the studio's main thread has never had a
+   * Swift parser in it and this is not the reason to add one. Returns null when the
+   * edit cannot be made - the end of a block, or a delete that would empty a body -
+   * which is the same answer the controls are drawn from.
+   */
+  editView(request: ViewEditRequest): Promise<ViewEditResult | null>
+  /** What can be done to the view at this offset, for drawing the controls. */
+  describeView(text: string, file: FileId, offset: number): Promise<ViewSiteInfo | null>
+  /** The Swift that draws this view, for a copy. */
+  copyView(text: string, file: FileId, offset: number): Promise<string | null>
+  /** Every view the given files are hiding. */
+  hiddenViews(files: readonly SourceFile[]): Promise<readonly HiddenViewInfo[]>
 
   /**
    * Editor intelligence, all three asking the same question from a different angle:

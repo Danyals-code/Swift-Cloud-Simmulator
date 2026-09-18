@@ -306,7 +306,17 @@ function RenderNodeView({
       ? {
           overflowX: scroll.axis === 'horizontal' ? 'auto' : 'hidden',
           overflowY: scroll.axis === 'vertical' ? 'auto' : 'hidden',
-          scrollbarWidth: scroll.showsIndicators ? 'thin' : 'none',
+          /**
+           * Never a bar, whatever `showsIndicators` says.
+           *
+           * iOS draws a scroll indicator while a finger is moving and nothing at
+           * all when it stops; a desktop scrollbar is a permanent grey rail down
+           * the side of the phone, which is furniture the device does not have.
+           * The flag is still read and still carried - it is what the source says -
+           * and what it selects between is an indicator that fades and one that
+           * never appears, neither of which is a rail.
+           */
+          scrollbarWidth: 'none',
           // iOS scrollers do not capture a page scroll once they hit their end.
           overscrollBehavior: 'contain',
         }

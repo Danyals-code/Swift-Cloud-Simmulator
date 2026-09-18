@@ -23,13 +23,27 @@
 .paneControls button { height: 28px; width: 28px; }
 .preview { display: flex; height: 100%; min-width: 0; overflow: hidden; }
 .stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background-color: var(--color-xc-canvas); background-image: radial-gradient(var(--workspace-dots) .65px, transparent .65px); background-size: 16px 16px; }
-.canvasHeading { height: 45px; flex-shrink: 0; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; color: var(--color-xc-text-3); font-size: 13px; }
+.canvasHeading { height: 45px; flex-shrink: 0; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--color-xc-text-3); font-size: 13px; }
 .canvasHeading strong { font-weight: 500; color: var(--color-xc-text-2); }
 .canvasHeading span { font-size: 12px; }
 .compactSettings { min-height: 44px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); padding: 6px 12px; }
 .compactSettings > strong { font-size: 13px; font-weight: 500; margin-right: auto; }
-.properties { width: 236px; flex-shrink: 0; background: var(--color-xc-bar); border-left: 1px solid var(--color-xc-line); overflow-y: auto; }
+.settingsSplit { display: contents; }
+.properties { width: var(--settings-width, 236px); flex-shrink: 0; background: var(--color-xc-bar); border-left: 1px solid var(--color-xc-line); overflow-y: auto; }
 .properties > header { height: 46px; display: flex; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--color-xc-line-soft); font-size: 14px; font-weight: 600; }
+/**
+ * One tab strip, used by both panels.
+ *
+ * The navigator's tabs were grey and the inspector's were accent-tinted, which is
+ * two answers to "what does selected look like" in one window. Selection is accent
+ * everywhere else in the studio - a chosen layer, a chosen row - so the tabs follow
+ * that, and both strips are the same size and shape as well as the same colour.
+ */
+.tabs { display: flex; align-items: center; gap: 4px; }
+.tabs button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--color-xc-text-3); cursor: pointer; transition: background .12s, color .12s; }
+.tabs button[aria-selected='true'], .tabs button[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.tabs button:hover[aria-selected='false'], .tabs button:hover[aria-pressed='false'] { color: var(--color-xc-text); background: var(--color-xc-line-soft); }
+.propertyTabs { composes: tabs; padding: 0 10px !important; }
 .propertySection { padding: 22px 20px; border-bottom: 1px solid var(--color-xc-line-soft); }
 .propertySection h3 { font-size: 13px; font-weight: 600; margin: 0 0 18px; }
 .propertySection p { font-size: 13px; color: var(--color-xc-text-3); line-height: 1.7; margin: 12px 0 0; }
@@ -41,20 +55,63 @@
 .dimensions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 .dimensions span { background: var(--color-xc-bar-raised); border-radius: 5px; padding: 8px; display: flex; gap: 13px; font-size: 13px; }
 .dimensions small { color: var(--color-xc-text-3); font-size: 12px; }
-.canvasFooter { height: 72px; flex-shrink: 0; display: flex; align-items: flex-start; justify-content: center; padding: 6px 12px 20px; }
-.toolDock { display: inline-flex; align-items: center; gap: 5px; padding: 8px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 12px; box-shadow: 0 4px 16px #2828320b; max-width: 100%; }
+/* The world the canvas looks at: laid out at natural size, placed by one transform. */
+.world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+.gallery { display: grid; }
+.pageCard { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.pageCard > figcaption { display: flex; align-items: center; gap: 7px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-xc-text-3); }
+.pageCard[data-active] > figcaption { color: var(--color-xc-text); font-weight: 600; }
+.pageCover { position: absolute; inset: 0; border-radius: 22px; cursor: pointer; }
+.pageCover:hover { box-shadow: 0 0 0 3px var(--color-xc-accent); }
+.pageCover:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 3px; }
+.pageCover:disabled { cursor: default; box-shadow: none; }
+.liveTag { flex-shrink: 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--color-xc-select); color: var(--color-xc-accent); }
+/* One line, always, at the top of the debug panel. It reports on one view, and a
+   report that reflows into two lines moves everything around it while the pointer
+   is moving. */
+.readout { flex-shrink: 0; border-bottom: 1px solid var(--color-xc-line); display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; height: 30px; overflow: hidden; border-top: 1px solid var(--color-xc-line); background: var(--color-xc-bar); padding: 0 12px; font-size: 12.5px; }
+.readoutInfo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.note { flex-shrink: 0; padding: 2px 8px; border-radius: 5px; background: var(--color-xc-warn); color: #241c00; font-size: 12px; }
+.selection { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.selectionName { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--color-xc-accent); }
+.selectionKind { color: var(--color-xc-text-3); }
+.selection button { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); cursor: pointer; font-size: 12px; }
+.selection button:hover:not(:disabled) { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.selection button:disabled { opacity: 0.4; cursor: default; }
+.selection button[data-testid='move-down'] > svg { transform: rotate(180deg); }
+.canvas { touch-action: none; cursor: grab; }
+.canvas[data-tool='delete'] { cursor: crosshair; }
+/* What a click will take, in the colour of taking it. The highlight is the
+   inspector's own element, so the delete tool only has to recolour it. */
+.canvas[data-tool='delete'] :global([data-testid='inspect-highlight']) { outline-color: var(--color-xc-error) !important; background: rgb(255 59 48 / 0.16) !important; }
+.showAll { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--color-xc-text-2); }
+.showAll input { width: 13px; height: 13px; accent-color: var(--workspace-accent, #0d78f2); cursor: pointer; }
+.showAll[data-disabled] { color: var(--color-xc-text-3); cursor: default; }
+.showAll[data-disabled] input { cursor: default; }
+.canvasHeading > span:last-child { display: flex; align-items: center; gap: 14px; }
+/* Bottom-aligned, so the switch is in the same place in both modes and Design's
+   tools appear above it rather than pushing it up. */
+.canvasFooter { height: 124px; flex-shrink: 0; display: flex; align-items: flex-end; justify-content: center; padding: 12px 12px 28px; }
+.toolDock { width: 312px; max-width: 100%; display: inline-flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 12px; box-shadow: 0 4px 16px #2828320b; }
+.dockRow { display: grid; align-items: center; gap: 6px; }
+.dockTools { grid-template-columns: repeat(3, 1fr); padding-bottom: 6px; border-bottom: 1px solid var(--color-xc-line-soft); }
+.dockModes { grid-template-columns: repeat(2, 1fr); }
+.dockRow > button, .dockRow > span > button { justify-content: center; height: 30px; width: 100%; }
+/* Armed, and in the colour of what it does. */
+.destructive > button[aria-pressed='true'] { border-color: var(--color-xc-error); background: color-mix(in srgb, var(--color-xc-error) 18%, transparent); color: var(--color-xc-error); }
 .toolDock > button { height: 30px; border: 0; background: transparent; }
 .toolDock > button:hover { background: var(--color-xc-bar-raised); }
 .toolDock > button[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
 .divider { height: 20px; width: 1px; background: var(--color-xc-line-soft); margin: 0 3px; }
-.previewStatus { display: flex; align-items: center; gap: 7px; font-size: 12px; white-space: nowrap; color: var(--color-xc-text-3); padding: 0 8px; }
+.previewStatus { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; white-space: nowrap; color: var(--color-xc-text-2); padding: 3px 10px 3px 8px; border-radius: 999px; background: var(--color-xc-bar-raised); }
 .previewStatus i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-xc-ok); }
 .previewStatus i[data-state='error'] { background: var(--color-xc-error); }
 .previewStatus i[data-state='paused'] { background: var(--color-xc-warn); }
 .codeFooter { display: flex; justify-content: center; padding: 10px; background: var(--color-xc-bar-raised); border-top: 1px solid var(--color-xc-line-soft); }
-@media(max-width:1100px) { .toolbar { gap: 12px; padding: 0 12px; } .paneControls { display: none; } .properties { width: 210px; } }
+@media(max-width:1100px) { .toolbar { gap: 12px; padding: 0 12px; } .paneControls { display: none; } }
 @media(max-width:900px) {
   .preview[data-expanded='true'] { flex-direction: column; }
+  .settingsSplit { display: none; }
   .properties { order: -1; width: 100%; display: flex; flex-wrap: wrap; border-left: 0; border-bottom: 1px solid var(--color-xc-line); padding: 6px 12px; gap: 8px; flex-shrink: 0; overflow: visible; }
   .properties > header, .properties h3, .dimensions, .propertySection:last-child { display: none; }
   .propertySection { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; }

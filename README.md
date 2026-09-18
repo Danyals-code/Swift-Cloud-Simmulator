@@ -34,16 +34,80 @@ provider documentation, and deployment requirements. Visual simulator editing is
 
 ## Workspace views
 
-The workspace opens in **Design**, with **Layers** on the left, the live app in the center,
+Every load opens in **Design**, with **Layers** on the left, the live app in the center,
 and preview settings on the right. Layers shows each tab and its nested SwiftUI views. Select a
 page to preview it, or a layer to highlight it without running its action. Filter, collapse,
 and navigate the hierarchy with the keyboard. Destinations and presentations appear when opened;
 unopened closures are never run just to fill the panel. This is a read-only hierarchy, not visual editing.
 
+The canvas is either being designed or being used, and the switch under it says which.
+**Edit** (**Inspect**, in Code) points at the app: hovering names the view in Layers for as long as the pointer is
+over it, and clicking selects it there - opening the tree if the view was inside something
+collapsed. **Preview** hands the phone back, and a tap is a tap. The right-hand rail
+follows the switch between its two halves, **Settings** and **Preview**, and either is still
+one press away.
+
+Edit carries three tools above the switch. **Arrange** selects, and moves what is selected:
+drag a view on the canvas onto another, or drag its row in Layers, and it lands where it was
+dropped - including inside a different container. ⌥↑ and ⌥↓ do the same a step at a time.
+**Add** opens a palette over the canvas: search 34 views by name or by what they do, and the
+chosen one lands after the selection, or inside it when a container is selected, which the
+palette says before anything is added. **Delete** arms the canvas so a click takes a view out;
+⌫ does the same to the selection.
+
+The rest is the shortcuts a canvas is expected to have. ⌘Z and ⇧⌘Z walk back and forward
+through the edits the canvas made - the editor keeps its own undo, and these never fire while
+you are typing in it. ⌘C copies a view as the Swift that draws it and ⌘V puts a second one
+beside the selection. **Tab** throws the switch between designing and previewing, and the
+backquote moves between Design and Code.
+
+The **eye** in Layers hides a view: it is commented out of the file, so it stops taking part
+in the layout as well as in the drawing, which `.hidden()` would not do. A commented-out view
+is one the parser no longer sees, so a marker line keeps it findable and Layers keeps showing
+it in its place, struck through, with the switch that brings it back. It survives Xcode, a
+diff and a merge, and reads as what it is if the studio never opens the file again.
+
+Every one of those is **an edit to the Swift file**, made by the same parser that runs the
+preview. A view is the statement that produces it, so moving one carries its modifiers with
+it and deleting a stack takes its children; the formatting around it - the blank lines, the
+comments, the indentation - is left exactly as it was written. Edits that would produce a file
+that does not compile are refused rather than made: the end of a stack has no "down", and a
+body whose only view was deleted returns nothing. Controls that need a binding are added with
+`.constant(…)`, because a click on a canvas cannot invent an `@State` property, and a file
+that compiles is worth more than a control that is already wired.
+
+The canvas itself zooms with the wheel while designing, and dragging its background moves it.
+Preview gives the wheel back to the app, which has scroll views of its own; ⌘-wheel zooms
+either way. The two are exclusive on purpose - while you are designing, a wheel over the phone
+moves the canvas and not the list under it. Choosing a page in Layers brings that page into
+view.
+
+The canvas is a viewport onto a world rather than a box with scrollbars in it: one transform
+places everything, so a drag moves it anywhere, at any zoom, with nothing to clip against and
+no edges to run into. Drag the background, or hold space or the middle button to drag from over
+a phone.
+
+**Show all**, the checkbox above the canvas, draws every page of the app at once, one phone
+each, arranged to fit. Turning it on or off never moves the page you are looking at: the zoom
+freezes where it is and the canvas shifts by exactly the distance that page would have
+travelled, so the others appear or vanish around it. Each is composed as *that* page - its own navigation bar, its own tab
+selected - rather than being a copy of the one on screen, and the extra pages cost no
+evaluation: a `TabView` builds all of its children on every pass and the resolver picks one,
+so the gallery is the composition and layout that were already skipped. Nothing is written
+back: the app's selection is read, never set, so a page nobody opened cannot fire an
+`onChange` or move the app you are using. One phone stays live; clicking any other opens it,
+exactly as pressing its tab would. It belongs to Edit and is greyed out in Live Preview,
+where a click over a phone means something else - and it keeps its setting, so coming back
+finds the canvas as it was left.
+
 Choose **Code** for **Files + code + simulator**. Switching back to Design restores Layers. Clicking a
-source file or inspecting a view opens its code. Problems and output are available from the toolbar's
-bottom-panel button. The appearance button in the top bar switches the workspace between light and dark. This is separate
-from the simulated app’s appearance. Your workspace, theme, and panel sizes are remembered in this browser.
+source file opens its code, and so does inspecting a view from Code. Problems and output are
+available from the toolbar's bottom-panel button, in whichever workspace you press it: the panel
+opens under the editor in Code and under the canvas in Design, and neither sidebar button changes
+the workspace either. Every divider is draggable, and double-clicking one collapses its pane.
+The appearance button in the top bar switches the workspace between light and dark. This is separate
+from the simulated app’s appearance. Your theme and panel sizes are remembered in this browser;
+the workspace is not, because a reload is a fresh look at the app rather than a resumed session.
 
 ## Documentation
 
@@ -135,9 +199,9 @@ What it handles now is most of the SwiftUI people actually write:
   definition follows a member through its receiver, and hover describes the
   standard library and the property wrappers as well as the project's own names.
 - **The studio around it** - a project navigator with real groups you can make,
-  rename and drag files between; draggable pane dividers; Xcode's own keyboard
-  shortcuts for showing and hiding them; and a Pause that stops the preview
-  recompiling while you type.
+  rename and drag files between; draggable pane dividers; and Xcode's own keyboard
+  shortcuts for showing and hiding them. ⌘R runs the app again from a clean state,
+  dropping every `@State` box.
 - **Paste and go** - `#Preview` blocks parse, `PreviewProvider` is read as a root,
   and a view with only a preview renders rather than reporting that the project
   has no entry point.
@@ -202,14 +266,15 @@ for a name to resolve against.
 | --- | --- |
 | Packages typechecking | 11 / 11 |
 | Lint | clean |
-| Unit tests | 1616 passing |
-| End-to-end | 52 / 52 passing |
+| Unit tests | 2818 passing, 1 skipped |
+| End-to-end | 101 / 101 passing, 1 skipped |
 | Templates rendering with zero placeholders | 25 / 25 |
 | Export formats | 4 - .xcodeproj, .swiftpm, Package.swift, project.yml |
 | Coverage matrix | 157 ✅ · 48 🟡 · 11 ⬜ · 11 ✗ |
 | Full pipeline, 500-line file | 2 ms (budget: 120 ms) |
+| Six pages drawn at once | 10 ms (budget: 120 ms) |
 | Tap to repaint | 0.4 ms (budget: 32 ms) |
-| Client JS | 411 KB gzipped / 450 KB budget (91%) |
+| Client JS | 484 KB gzipped / 600 KB budget (81%); largest chunk 166 KB / 172 KB |
 
 Next is the [roadmap's à-la-carte Phase 7](docs/03-ROADMAP.md) - a real `swiftc`
 verification service, accounts, AI codegen, GitHub export - each of which needs
@@ -262,7 +327,7 @@ default.
 apps/web/              Next.js app - editor, device frame, console, worker host
 packages/
   shared/              SourceSpan, Diagnostic, RenderTree, worker protocol
-  swift-syntax/        lexer, parser, AST                        (Phase 1)
+  swift-syntax/        lexer, parser, AST, the canvas's edits    (Phase 1)
   swift-sema/          name resolution, scopes, coverage checks   (Phase 1)
   swift-runtime/       the interpreter, value model, traps       (Phase 2)
   swiftui-runtime/     SwiftUI host, view identity, @State boxes (Phase 3)

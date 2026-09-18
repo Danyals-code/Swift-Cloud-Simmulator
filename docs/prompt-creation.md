@@ -37,4 +37,4 @@ Unit tests cover provider request formats, credentials, foreign origins, request
 
 The gallery now contains seven complete apps and 18 feature examples. Dispatch adds task management, creation, activity, and preferences; Market adds browsing, favorites, quantity changes, checkout, and order history. Both use local data, shared observable state, and native adaptive controls.
 
-The total gzipped client budget is 470 KB (measured about 457 KB after this release). This explicitly accommodates the two apps and the lazy-loaded prompt/review feature. The largest initial chunk remains about 162 KB with its existing 172 KB ceiling.
+The total gzipped client budget was 470 KB at this release (measured about 457 KB), which accommodated the two apps and the lazy-loaded prompt/review feature. It is 600 KB now, raised by decision after the design tools took the old ceiling to 99%. The largest initial chunk is the gate that still describes the critical path, and it keeps its 172 KB ceiling (about 166 KB measured).

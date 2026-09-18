@@ -44,9 +44,24 @@ test('Fit shows the entire phone and manual zoom keeps its top reachable', async
     return { top: frame.top - pane.top, left: frame.left - pane.left, bottom: pane.bottom - frame.bottom, right: pane.right - frame.right }
   })
   await expect.poll(async () => { return Math.min(...Object.values(await bounds())) }).toBeGreaterThanOrEqual(27)
+
+  // At 100% a phone is taller than the canvas, so it is centred and hangs over both
+  // edges evenly - and its top is one drag away. The canvas has no scrollable extent
+  // to run out of any more, so "reachable" is a pan rather than a scroll.
   await page.getByTestId('zoom-select').click()
   await page.getByTestId('zoom-select-menu-1').click()
-  await expect.poll(async () => (await bounds()).top).toBeGreaterThanOrEqual(27)
+  await expect.poll(async () => Math.abs((await bounds()).top - (await bounds()).bottom)).toBeLessThan(4)
+
+  // A phone this size leaves no background to grab, so the canvas is dragged the
+  // other way it can be: the middle button, which works over the phone as well.
+  const pane = (await page.getByTestId('device-pane').boundingBox())!
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + 40)
+  await page.mouse.down({ button: 'middle' })
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + 240)
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + 400)
+  await page.mouse.up({ button: 'middle' })
+  expect((await bounds()).top).toBeGreaterThanOrEqual(27)
+
   await page.getByTestId('zoom-select').click()
   await page.getByTestId('zoom-select-menu-fit').click()
   await expect.poll(async () => { return Math.min(...Object.values(await bounds())) }).toBeGreaterThanOrEqual(27)
@@ -260,7 +275,8 @@ test('gate 3 - leaving inspector mode restores tapping', async ({ page }) => {
   await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('inspector-readout')).toBeVisible()
 
-  await page.getByTestId('inspect-toggle').click()
+  // Edit and Live Preview are a switch, so leaving Edit means choosing the other.
+  await page.getByTestId('live-toggle').click()
   await expect(page.getByTestId('inspector-readout')).toHaveCount(0)
 
   await appButton(page, 'Plus').click()

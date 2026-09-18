@@ -328,8 +328,17 @@ export interface ResolveContext {
   readonly animation: AnimationPayload | null
 }
 
-export function resolveUI(views: readonly ViewValue[], ctx: ResolveContext): ResolvedUI {
-  return new Resolver(ctx).run(views)
+/**
+ * Composes the evaluated views into a screen.
+ *
+ * `forceTab` draws the app as it would look with that tab selected, which is what
+ * the page gallery asks for. It is a resolution-time override and writes nothing:
+ * the selection the app itself holds - a `@State` binding, or the framework's own
+ * record for a `TabView` without one - is read, not touched, so rendering the other
+ * pages cannot fire an `.onChange` or move the app somebody is using.
+ */
+export function resolveUI(views: readonly ViewValue[], ctx: ResolveContext, forceTab?: number): ResolvedUI {
+  return new Resolver(ctx, forceTab).run(views)
 }
 
 class Resolver {
@@ -347,7 +356,7 @@ class Resolver {
   private visualStyle: readonly ModifierValue[] = []
   private contextMenuPath: string | undefined
 
-  constructor(private readonly ctx: ResolveContext) {}
+  constructor(private readonly ctx: ResolveContext, private readonly forceTab?: number) {}
 
   run(views: readonly ViewValue[]): ResolvedUI {
     const stamped = this.stampList(views, 'v')
@@ -1172,8 +1181,8 @@ class Resolver {
     const valueOf = (page: ViewValue) => page.name === 'Tab' ? labelled(page.args, 'value') : tagValue(page)
     const tagged = pages.map((page) => page.name === 'Tab' ? tokenOrValue(valueOf(page)) : tokenOrValue(collectModifier([page], 'tag')?.args[0]?.value))
     const current = binding ? describe(binding.get(), true) : null
-    const index = current !== null ? Math.max(0, tagged.indexOf(current)) : this.ctx.state.selectedTab(tabId)
-    const selected = Math.min(index, pages.length - 1)
+    const index = this.forceTab ?? (current !== null ? Math.max(0, tagged.indexOf(current)) : this.ctx.state.selectedTab(tabId))
+    const selected = Math.max(0, Math.min(index, pages.length - 1))
 
     // `.tabViewStyle(.page)` replaces the tab bar with page dots: a row of indicators
     // rather than labelled buttons, and one that is still pressable - iOS pages by

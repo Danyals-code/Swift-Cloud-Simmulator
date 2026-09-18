@@ -23,6 +23,11 @@ export function ControlStyles() {
     [data-testid="render-tree"] .swiftui-range::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: var(--range-thumb); height: var(--range-thumb); margin-top: calc((4px - var(--range-thumb)) / 2); border: 0; border-radius: 50%; background: transparent; }
     [data-testid="render-tree"] .swiftui-range::-moz-range-track { height: 4px; background: transparent; }
     [data-testid="render-tree"] .swiftui-range::-moz-range-thumb { width: var(--range-thumb); height: var(--range-thumb); border: 0; border-radius: 50%; background: transparent; }
+    /* iOS shows a scroll indicator while you scroll and nothing when you stop, so a
+       permanent bar down the side of the phone is a thing the device does not have.
+       Scrolling itself is untouched: only the furniture goes. */
+    [data-testid="render-tree"] * { scrollbar-width: none; -ms-overflow-style: none; }
+    [data-testid="render-tree"] *::-webkit-scrollbar { width: 0; height: 0; display: none; }
     [data-testid="render-tree"] [data-kind]:focus-visible,
     [data-testid="render-tree"] [data-kind]:has(> input:focus-visible) { outline: 2px solid Highlight; outline-offset: 2px; }
   `}</style>
