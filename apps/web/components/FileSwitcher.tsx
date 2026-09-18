@@ -1,6 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { Spotlight } from './Spotlight'
+import styles from './AddView.module.css'
 import { fileBasename } from '@studio/project-model'
 import type { FileId, SourceFile } from '@studio/shared'
 
@@ -24,12 +26,6 @@ export interface FileSwitcherProps {
 export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
   const matches = useMemo(() => {
     if (query.trim().length === 0) return files
     return files
@@ -39,39 +35,26 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
       .map((entry) => entry.file)
   }, [files, query])
 
-  const choose = (index: number) => {
-    const file = matches[index]
-    if (file) onSelect(file.id)
-  }
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[12vh]"
-      onClick={onClose}
-      data-testid="file-switcher"
-    >
-      <div
-        className="w-[min(520px,90vw)] overflow-hidden rounded-lg border border-xc-line bg-xc-panel shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Spotlight label="Go to file" testId="file-switcher" onClose={onClose}>{close => <>
         <input
-          ref={inputRef}
           value={query}
           placeholder="Go to file…"
+          aria-label="Search files"
           data-testid="file-switcher-input"
           onChange={(e) => {
             setQuery(e.target.value)
             setHighlight(0)
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') onClose()
             if (e.key === 'Enter') {
               e.preventDefault()
-              choose(highlight)
+              const file = matches[highlight]
+              if (file) close(() => onSelect(file.id))
             }
             if (e.key === 'ArrowDown') {
               e.preventDefault()
-              setHighlight((h) => Math.min(h + 1, matches.length - 1))
+              setHighlight((h) => Math.max(0, Math.min(h + 1, matches.length - 1)))
             }
             if (e.key === 'ArrowUp') {
               e.preventDefault()
@@ -89,7 +72,7 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
               <li key={file.id}>
                 <button
                   type="button"
-                  onClick={() => onSelect(file.id)}
+                  onClick={() => close(() => onSelect(file.id))}
                   onMouseEnter={() => setHighlight(index)}
                   className={`flex w-full items-baseline gap-2 px-4 py-1.5 text-left text-[14px] ${
                     index === highlight ? 'bg-xc-select text-xc-text' : 'text-xc-text-2'
@@ -102,8 +85,8 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
             ))
           )}
         </ul>
-      </div>
-    </div>
+      <footer className={styles.footer}><span>↑↓ to choose · ↩ to open</span><span>esc to close</span></footer>
+      </>}</Spotlight>
   )
 }
 

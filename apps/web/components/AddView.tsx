@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { searchCatalog, type ViewSnippet } from '../lib/viewCatalog'
+import { Spotlight } from './Spotlight'
 import { Icon } from './ui/Icon'
 import styles from './AddView.module.css'
 
@@ -36,12 +37,10 @@ export function AddView({ target, onChoose, onClose }: Props) {
   }, [active, results])
 
   return (
-    <div className={styles.backdrop} data-testid="add-view-palette" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <div className={styles.palette} role="dialog" aria-label="Add a view" aria-modal="true">
+    <Spotlight label="Add a view" testId="add-view-palette" onClose={onClose}>{close => <>
         <header className={styles.field}>
           <Icon name="search" size={16} />
           <input
-            autoFocus
             value={query}
             data-testid="add-view-search"
             aria-label="Search views"
@@ -49,15 +48,15 @@ export function AddView({ target, onChoose, onClose }: Props) {
             spellCheck={false}
             onChange={(event) => { setQuery(event.target.value); setActive(0) }}
             onKeyDown={(event) => {
-              if (event.key === 'Escape') { event.preventDefault(); onClose() }
-              else if (event.key === 'ArrowDown') { event.preventDefault(); setActive((i) => Math.min(i + 1, results.length - 1)) }
+              if (event.key === 'ArrowDown') { event.preventDefault(); setActive((i) => Math.max(0, Math.min(i + 1, results.length - 1))) }
               else if (event.key === 'ArrowUp') { event.preventDefault(); setActive((i) => Math.max(i - 1, 0)) }
-              else if (event.key === 'Enter' && current) { event.preventDefault(); onChoose(current) }
+              else if (event.key === 'Enter' && current) { event.preventDefault(); close(() => onChoose(current)) }
             }}
           />
           <span className={styles.target} data-testid="add-view-target">{target}</span>
         </header>
 
+        <p className={styles.catalogNote}>Starter views. Combine them and edit their state, actions, and modifiers in Code.</p>
         <div className={styles.list} ref={listRef} role="listbox" aria-label="Views">
           {results.map((snippet, index) => (
             <button
@@ -69,7 +68,7 @@ export function AddView({ target, onChoose, onClose }: Props) {
               data-testid={`add-view-${snippet.id}`}
               className={styles.row}
               onPointerMove={() => setActive(index)}
-              onClick={() => onChoose(snippet)}
+              onClick={() => close(() => onChoose(snippet))}
             >
               <span className={styles.name}>{snippet.name}</span>
               <span className={styles.hint}>{snippet.hint}</span>
@@ -83,7 +82,6 @@ export function AddView({ target, onChoose, onClose }: Props) {
           <span>↑↓ to choose · ↩ to add · esc to close</span>
           <span>{results.length} of {searchCatalog('').length}</span>
         </footer>
-      </div>
-    </div>
+      </>}</Spotlight>
   )
 }

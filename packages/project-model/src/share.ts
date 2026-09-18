@@ -1,4 +1,5 @@
-import { deflateSync, inflateSync } from 'fflate'
+import { deflateSync, Inflate } from 'fflate'
+import { newProjectId } from './open'
 import { isPreviewTarget, normalizePreviewTarget, type PreviewTarget, type SourceFile } from '@studio/shared'
 import { DEFAULT_DEVICE, DEVICES } from '@studio/sim-shell'
 import type { Project, ProjectManifest } from './types'
@@ -31,6 +32,7 @@ import { normalizeFileName, normalizeFolderPath, normalizeProjectName } from './
  * encoded payload keeps a substantial multi-file project inside what those survive.
  */
 export const MAX_SHARE_LENGTH = 8192
+const MAX_SHARE_BYTES = 2 * 1024 * 1024
 
 /** Bumped only if the payload shape changes in a way an older reader would misread. */
 const FORMAT_VERSION = 1
@@ -101,6 +103,7 @@ export function encodeProject(project: Project): string | null {
   }
 
   const json = new TextEncoder().encode(JSON.stringify(payload))
+  if (json.length > MAX_SHARE_BYTES) return null
   const encoded = toBase64Url(deflateSync(json, { level: 9 }))
   return encoded.length > MAX_SHARE_LENGTH ? null : encoded
 }
@@ -113,12 +116,27 @@ export function encodeProject(project: Project): string | null {
  * caller's job is to fall back to the local project, not to handle an exception.
  */
 export function decodeProject(encoded: string, now: number): Project | null {
+  if (encoded.length > MAX_SHARE_LENGTH) return null
   const bytes = fromBase64Url(encoded)
   if (!bytes) return null
 
   let payload: unknown
   try {
-    payload = JSON.parse(new TextDecoder().decode(inflateSync(bytes)))
+    const chunks: Uint8Array[] = []
+    let total = 0
+    const inflater = new Inflate((chunk) => {
+      total += chunk.length
+      if (total > MAX_SHARE_BYTES) throw new Error('Shared project is too large.')
+      chunks.push(chunk)
+    })
+    // Small compressed chunks bound each allocation before the callback checks it.
+    for (let offset = 0; offset < bytes.length; offset += 256) {
+      inflater.push(bytes.subarray(offset, offset + 256), offset + 256 >= bytes.length)
+    }
+    const expanded = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) { expanded.set(chunk, offset); offset += chunk.length }
+    payload = JSON.parse(new TextDecoder().decode(expanded))
   } catch {
     return null
   }
@@ -144,7 +162,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
     // The id and the timestamps are the opener's, not the sharer's: two people opening
     // the same link must not collide, and a project cannot have been created on
     // somebody else's clock.
-    id: 'shared-project',
+    id: newProjectId(),
     manifest,
     files,
     ...(folders.length > 0 ? { folders } : {}),

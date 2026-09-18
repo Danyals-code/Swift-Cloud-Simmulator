@@ -35,7 +35,7 @@ async function openStudio(page: Page) {
 
 const preview = (page: Page) => page.getByTestId('render-tree')
 
-test('Fit shows the entire phone and manual zoom keeps its top reachable', async ({ page }) => {
+test('Code preview stays centered at every zoom and cannot be panned', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await openStudio(page)
   const bounds = () => page.evaluate(() => {
@@ -45,22 +45,19 @@ test('Fit shows the entire phone and manual zoom keeps its top reachable', async
   })
   await expect.poll(async () => { return Math.min(...Object.values(await bounds())) }).toBeGreaterThanOrEqual(27)
 
-  // At 100% a phone is taller than the canvas, so it is centred and hangs over both
-  // edges evenly - and its top is one drag away. The canvas has no scrollable extent
-  // to run out of any more, so "reachable" is a pan rather than a scroll.
+  // Manual zoom stays centered, and Code never adopts Design's pan gestures.
   await page.getByTestId('zoom-select').click()
   await page.getByTestId('zoom-select-menu-1').click()
   await expect.poll(async () => Math.abs((await bounds()).top - (await bounds()).bottom)).toBeLessThan(4)
 
-  // A phone this size leaves no background to grab, so the canvas is dragged the
-  // other way it can be: the middle button, which works over the phone as well.
+  const beforeDrag = await bounds()
   const pane = (await page.getByTestId('device-pane').boundingBox())!
   await page.mouse.move(pane.x + pane.width / 2, pane.y + 40)
   await page.mouse.down({ button: 'middle' })
   await page.mouse.move(pane.x + pane.width / 2, pane.y + 240)
   await page.mouse.move(pane.x + pane.width / 2, pane.y + 400)
   await page.mouse.up({ button: 'middle' })
-  expect((await bounds()).top).toBeGreaterThanOrEqual(27)
+  expect(await bounds()).toEqual(beforeDrag)
 
   await page.getByTestId('zoom-select').click()
   await page.getByTestId('zoom-select-menu-fit').click()

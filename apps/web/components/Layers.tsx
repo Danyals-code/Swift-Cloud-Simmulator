@@ -229,7 +229,11 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
   }
 
   return <section className={styles.panel} data-testid="layers-panel" aria-label="Layers">
-    <div className={styles.heading}><span>Pages & layers</span><span>{stale ? 'Updating…' : `${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`}</span></div>
+    <div className={styles.heading}><span>Pages & layers</span><span>{`${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`} <button type="button" data-testid="collapse-layers" title="Collapse all layers" aria-label="Collapse all layers" onClick={() => {
+      const ids = new Set<string>()
+      const collect = (layer: ViewLayer) => { if (layer.children.length) ids.add(layer.id); layer.children.forEach(collect) }
+      pages.forEach(collect); setQuery(''); setDismissed(selectedId); setCollapsed(ids)
+    }}><Icon name="collapse" size={13} /></button></span></div>
     <div ref={tree} className={styles.tree} role="tree" aria-label="App layers" aria-busy={stale}>
       {rows.map(({ layer, page, depth, parent }, index) => {
         const expandable = layer.children.length > 0

@@ -10,12 +10,15 @@ import styles from './Workspace.module.css'
 import type { PreviewSettings } from '../lib/store'
 import { PopupButton, type MenuItem } from './ui/Menu'
 import { SegmentedControl } from './ui/Control'
+import { Icon } from './ui/Icon'
 import { Splitter } from './ui/Splitter'
 import { PANE_LIMITS, type InspectorTab } from '../lib/layout'
 import type { CanvasTool } from './Toolbar'
 
 export interface DevicePaneProps {
   expanded?: boolean
+  projectId: string
+  panelLayout: string
   /** Design's right-hand rail. Its width is a workspace preference, so it is passed in. */
   showSettings?: boolean
   settingsWidth?: number
@@ -137,6 +140,8 @@ const ZOOMS: readonly MenuItem[] = [
  */
 export function DevicePane({
   expanded = false,
+  projectId,
+  panelLayout,
   showSettings = true,
   settingsWidth = PANE_LIMITS.settings.initial,
   onSettingsResize,
@@ -168,7 +173,7 @@ export function DevicePane({
   onPreviewChange,
 }: DevicePaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const [pane, setPane] = useState({ width: 0, height: 0 })
+  const [pane, setPane] = useState({ width: 0, height: 0, left: 0, top: 0, arrangeWidth: 0, arrangeHeight: 0, panelLayout, expanded, projectId })
   const gallery = expanded && !!pages?.length
   const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
 
@@ -226,7 +231,7 @@ export function DevicePane({
       const rows = Math.ceil(count / columns)
       const width = columns * frameW + (columns - 1) * GALLERY_GAP
       const height = rows * (frameH + CAPTION_HEIGHT) + (rows - 1) * GALLERY_GAP
-      const fit = Math.min((pane.width || 1) / width, (pane.height || 1) / height)
+      const fit = Math.min((pane.arrangeWidth || 1) / width, (pane.arrangeHeight || 1) / height)
       if (fit > best.fit) best = { columns, fit }
     }
     const rows = Math.ceil(count / best.columns)
@@ -235,7 +240,7 @@ export function DevicePane({
       width: best.columns * frameW + (best.columns - 1) * GALLERY_GAP,
       height: rows * (frameH + CAPTION_HEIGHT) + (rows - 1) * GALLERY_GAP,
     }
-  }, [gallery, pages?.length, pane.width, pane.height, device.width, device.height])
+  }, [gallery, pages?.length, pane.arrangeWidth, pane.arrangeHeight, device.width, device.height])
 
   /** The zoom that fits the world in the viewport, never magnifying past 1:1. */
   const fitScale = useMemo(() => {
@@ -264,12 +269,23 @@ export function DevicePane({
   useLayoutEffect(() => {
     const element = containerRef.current
     if (!element) return
-    const measure = () => setPane({ width: element.clientWidth, height: element.clientHeight })
+    const measure = () => {
+      const { left, top } = element.getBoundingClientRect()
+      const width = element.clientWidth, height = element.clientHeight
+      setPane(previous => {
+        const sameWorkspace = previous.expanded === expanded && previous.projectId === projectId
+        const panelChanged = previous.panelLayout !== panelLayout && sameWorkspace && previous.width > 0
+        const resized = previous.width !== width || previous.height !== height
+        return { width, height, left, top, panelLayout, expanded, projectId,
+          arrangeWidth: !sameWorkspace || (resized && !panelChanged) ? width : previous.arrangeWidth,
+          arrangeHeight: !sameWorkspace || (resized && !panelChanged) ? height : previous.arrangeHeight }
+      })
+    }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [panelLayout, expanded, projectId])
 
   /**
    * Fit re-centres; a chosen zoom keeps the middle of the viewport where it was.
@@ -277,16 +293,16 @@ export function DevicePane({
    * Without the second half, picking 100% from the menu would zoom about the world's
    * origin and throw the phone off the top-left corner.
    */
-  const lastFit = useRef({ zoom: '', width: 0, height: 0 })
+  const lastFit = useRef({ zoom: '', width: 0, height: 0, left: 0, top: 0, panelLayout, expanded, projectId, device: device.key })
   const liveOffset = useRef({ x: 0, y: 0 })
   const wasGallery = useRef(gallery)
 
   useLayoutEffect(() => {
-    if (pane.width <= 0) return
+    if (pane.width <= 0 || pane.panelLayout !== panelLayout || pane.expanded !== expanded || pane.projectId !== projectId) return
     const was = lastFit.current
     const resized = was.width !== pane.width || was.height !== pane.height
     const chosen = was.zoom !== preview.zoom
-    lastFit.current = { zoom: preview.zoom, width: pane.width, height: pane.height }
+    lastFit.current = { zoom: preview.zoom, width: pane.width, height: pane.height, left: pane.left, top: pane.top, panelLayout, expanded, projectId, device: device.key }
 
     /**
      * Showing all the pages, or stopping, never moves the phone you are looking at.
@@ -304,6 +320,25 @@ export function DevicePane({
     const now = live ? { x: live.offsetLeft, y: live.offsetTop } : { x: 0, y: 0 }
     const moved = liveOffset.current
     liveOffset.current = now
+
+    const newWorkspace = was.expanded !== expanded || was.projectId !== projectId || !was.width
+    if (!expanded || newWorkspace || was.device !== device.key) {
+      wasGallery.current = gallery
+      // Every Code preview and new project starts fitted and centered.
+      if (newWorkspace && preview.zoom !== 'fit') onPreviewChange({ zoom: 'fit' })
+      if (newWorkspace) {
+        viewRef.current = { x: (pane.width - arrangement.width * fitScale) / 2, y: (pane.height - arrangement.height * fitScale) / 2, scale: fitScale }
+        applyView()
+      } else centreView()
+      return
+    }
+    if (was.panelLayout !== panelLayout) {
+      const current = viewRef.current
+      viewRef.current = { ...current, x: current.x + was.left - pane.left, y: current.y + was.top - pane.top }
+      applyView()
+      if (preview.zoom === 'fit') onPreviewChange({ zoom: String(current.scale) })
+      return
+    }
 
     if (wasGallery.current !== gallery) {
       wasGallery.current = gallery
@@ -336,7 +371,7 @@ export function DevicePane({
       scale,
     }
     applyView()
-  }, [scale, preview.zoom, pane.width, pane.height, gallery, centreView, applyView, onPreviewChange])
+  }, [scale, preview.zoom, pane, gallery, centreView, applyView, onPreviewChange, panelLayout, expanded, projectId, device.key, arrangement.width, arrangement.height, fitScale])
 
   /**
    * The wheel zooms the canvas while designing, and scrolls the app while using it.
@@ -355,6 +390,7 @@ export function DevicePane({
     if (!element) return
 
     const onWheel = (event: WheelEvent) => {
+      if (!expanded) return
       const zooming = event.ctrlKey || event.metaKey || (inspecting && !event.shiftKey)
       if (!zooming) return
       event.preventDefault()
@@ -377,7 +413,7 @@ export function DevicePane({
 
     element.addEventListener('wheel', onWheel, { passive: false })
     return () => element.removeEventListener('wheel', onWheel)
-  }, [inspecting, onPreviewChange, applyView])
+  }, [expanded, inspecting, onPreviewChange, applyView])
 
   /**
    * Dragging a view onto another one moves it in the file.
@@ -392,7 +428,7 @@ export function DevicePane({
   const [dragTarget, setDragTarget] = useState<{ name: string; position: 'before' | 'after' } | null>(null)
 
   const onViewPointerDown = useCallback((event: React.PointerEvent) => {
-    if (!inspecting || tool !== 'select' || !onReorderNodes || event.button !== 0) return
+    if (!expanded || stale || !inspecting || tool !== 'select' || !onReorderNodes || event.button !== 0) return
     const element = containerRef.current
     if (!element) return
 
@@ -406,7 +442,7 @@ export function DevicePane({
     const node: RenderNode | 'selection' | null = within ? 'selection' : hoverRef.current
     if (!node) return
     viewDrag.current = { node, x: event.clientX, y: event.clientY }
-  }, [inspecting, tool, onReorderNodes, selection])
+  }, [expanded, stale, inspecting, tool, onReorderNodes, selection])
 
   useEffect(() => {
     /** What the drop would do, from where the pointer is over the target. */
@@ -471,14 +507,17 @@ export function DevicePane({
     const up = (event: KeyboardEvent) => { if (event.code === 'Space') spaceRef.current = false }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
-    window.addEventListener('blur', () => { spaceRef.current = false })
+    const blur = () => { spaceRef.current = false }
+    window.addEventListener('blur', blur)
     return () => {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', blur)
     }
   }, [])
 
   const onPanStart = useCallback((event: React.PointerEvent) => {
+    if (!expanded) return
     const background = event.target === event.currentTarget || (event.target as HTMLElement).dataset.world !== undefined
     // Middle-drag and space-drag work over the phones too, which is the way out of a
     // canvas zoomed in far enough that a phone covers the whole viewport.
@@ -486,7 +525,7 @@ export function DevicePane({
       panning.current = { x: event.clientX, y: event.clientY, from: { x: viewRef.current.x, y: viewRef.current.y } }
       setGrabbing(true)
     }
-  }, [])
+  }, [expanded])
 
   useEffect(() => {
     if (!grabbing) return
@@ -518,7 +557,7 @@ export function DevicePane({
    * second press means "show me that one" just as much as the first did.
    */
   useEffect(() => {
-    if (!centerOn) return
+    if (!expanded || !centerOn) return
     const element = containerRef.current
     const card = element?.querySelector<HTMLElement>(`[data-page-id="${CSS.escape(centerOn.id)}"]`)
       ?? element?.querySelector<HTMLElement>('[data-canvas-phone]')
@@ -532,7 +571,7 @@ export function DevicePane({
       scale: at,
     }
     applyView()
-  }, [centerOn, applyView])
+  }, [centerOn, expanded, applyView])
 
   const screenFor = (tree: RenderTree | null, live: boolean, at: number) => (
     <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${at})`, transformOrigin: 'top left' }}>
@@ -567,6 +606,8 @@ export function DevicePane({
     : [...ZOOMS, { value: preview.zoom, label: `${Math.round(Number(preview.zoom) * 100)}%` }]
   const zoomPicker = <PopupButton items={zoomItems} value={preview.zoom} onChange={value => onPreviewChange({zoom:value})} label="Zoom" title={`Zoom — ${Math.round(scale * 100)}%`} testId="zoom-select" />
 
+  const collapsePanel = <button type="button" className={styles.panelToggle} data-testid="pane-toggle-preview" aria-pressed="true" aria-label={expanded ? 'Collapse preview settings' : 'Collapse preview'} title={expanded ? 'Collapse preview settings' : 'Collapse preview'} onClick={onToggleSettings}><Icon name="sidebar-right" size={16} /></button>
+
   return (
     <section className={styles.preview} aria-label="Preview" data-expanded={expanded}>
       <div className={styles.stage}>
@@ -589,12 +630,13 @@ export function DevicePane({
             Show all
           </label>
         </span>
-      </div> : <header className={styles.compactSettings}>{devicePicker}{schemePicker}{typePicker}{zoomPicker}</header>}
+      </div> : <header className={styles.compactSettings}>{collapsePanel}{devicePicker}{schemePicker}{typePicker}{zoomPicker}</header>}
       <div
         ref={containerRef}
         className={`${styles.canvas} relative min-h-0 flex-1 overflow-hidden`}
         style={{ cursor: grabbing ? 'grabbing' : undefined }}
         data-testid="device-pane"
+        data-fixed={!expanded}
         data-tool={inspecting ? tool : undefined}
         data-dragging={dragTarget ? true : undefined}
         onPointerDown={(event) => { onPanStart(event); onViewPointerDown(event) }}
@@ -675,6 +717,7 @@ export function DevicePane({
               {tab === 'settings' ? 'Settings' : 'Preview'}
             </button>
           ))}
+          {collapsePanel}
         </header>
 
         {inspectorTab === 'settings' ? (
@@ -705,6 +748,7 @@ export function DevicePane({
           </>
         )}
       </aside>}
+      {expanded && !showSettings && <div className={styles.panelRail}><button type="button" className={styles.panelToggle} data-testid="pane-toggle-preview" aria-pressed="false" aria-label="Show preview settings" title="Show preview settings" onClick={onToggleSettings}><Icon name="sidebar-right" size={16} /></button></div>}
     </section>
   )
 }

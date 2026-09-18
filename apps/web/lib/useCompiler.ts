@@ -109,6 +109,7 @@ export function useCompiler({
 }: CompilerOptions) {
   const handleRef = useRef<WorkerHandle | null>(null)
   const revisionRef = useRef(0)
+  const [compiledFiles, setCompiledFiles] = useState<readonly SourceFile[] | null>(null)
   /** highest revision actually painted, so stale responses can be dropped */
   const paintedRef = useRef(-1)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -181,8 +182,7 @@ export function useCompiler({
     try {
       await handle.ready
       if (revision !== revisionRef.current || handle !== handleRef.current) return
-      await refine(
-        await handle.api.compile({
+      const result = await handle.api.compile({
           projectId,
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
@@ -194,8 +194,10 @@ export function useCompiler({
           displayScale: device.scale,
           allPages,
           revision,
-        }), handle,
-      )
+        })
+      if (revision !== revisionRef.current || handle !== handleRef.current) return
+      setCompiledFiles(files)
+      await refine(result, handle)
     } catch (error) {
       if (handleRef.current !== handle) return
       handle.dispose()
@@ -309,14 +311,15 @@ export function useCompiler({
   }, [allPages, refine])
 
   const reset = useCallback(async () => {
-    const handle = ensureWorker()
+    const handle = handleRef.current
+    if (!handle) { await runCompile(); return }
     try {
       await handle.ready
       await refine(await handle.api.reset(++revisionRef.current), handle)
     } catch (error) {
       handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
     }
-  }, [refine, ensureWorker])
+  }, [refine, runCompile])
 
   /**
    * Editor intelligence, asked of the worker on demand.
@@ -406,9 +409,10 @@ export function useCompiler({
     [ensureWorker, files],
   )
 
+  const sourceStale = compiledFiles !== files
   return useMemo(
-    () => ({ ...state, dispatch, reset, recompile: runCompile, language, editView, describeView, copyView, hiddenViews }),
-    [state, dispatch, reset, runCompile, language, editView, describeView, copyView, hiddenViews],
+    () => ({ ...state, stale: state.stale || sourceStale, dispatch, reset, recompile: runCompile, language, editView, describeView, copyView, hiddenViews }),
+    [state, sourceStale, dispatch, reset, runCompile, language, editView, describeView, copyView, hiddenViews],
   )
 }
 

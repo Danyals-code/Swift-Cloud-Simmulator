@@ -177,6 +177,7 @@ export function TemplateGallery({
 
       const archive = picked.find((file) => file.name.endsWith('.zip'))
       if (archive) {
+        if (archive.size > 8 * 1024 * 1024) { setOpenError('That archive is too large. The limit is 8 MB.'); return }
         const { readProjectArchive } = await import('@studio/exporter')
         const { files, problem } = readProjectArchive(new Uint8Array(await archive.arrayBuffer()))
         if (problem) {

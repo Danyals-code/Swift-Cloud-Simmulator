@@ -9,18 +9,12 @@ import { getDevice } from '@studio/sim-shell'
 import type { FileId, PagePreview, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
-/**
- * The Add palette, fetched when it is opened.
- *
- * It carries the catalogue of every view the studio can write, which is a couple of
- * kilobytes that nothing needs until somebody presses Add - and the chunk it would
- * otherwise sit in is the one the browser has to have before anything appears.
- */
-const AddView = dynamic(() => import('./AddView').then((m) => m.AddView), { ssr: false })
+import { AddView } from './AddView'
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
-import { findLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
+import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
 import { useCompiler } from '../lib/useCompiler'
+import { CanvasHistory } from '../lib/canvasHistory'
 /**
  * Problems, output, timings and coverage, fetched when the panel is opened.
  *
@@ -32,6 +26,7 @@ const ConsolePane = dynamic(() => import('./ConsolePane').then((m) => m.ConsoleP
 import { InspectorReadout } from './InspectorReadout'
 import { DevicePane } from './DevicePane'
 import { EditorPane } from './EditorPane'
+import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
 import { JumpBar } from './JumpBar'
 import { Navigator } from './Navigator'
@@ -43,15 +38,6 @@ import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
-
-/** One edit the canvas made, as the file before and after it. */
-interface Change {
-  readonly file: FileId
-  readonly before: string
-  readonly after: string
-  /** Where to put the selection back, for the edit that produced this change. */
-  readonly offset: number | null
-}
 
 /** The narrowest the editor is allowed to get before the side panes start yielding. */
 const EDITOR_MIN = 300
@@ -120,6 +106,7 @@ export function Studio() {
   /** What a click on the canvas does: choose a view, or take one out. */
   const [tool, setToolState] = useState<CanvasTool>('select')
   const [adding, setAdding] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   /** What the source says can be done to the selection, which the controls are drawn from. */
   const [siteInfo, setSiteInfo] = useState<{ key: string; info: ViewSiteInfo | null } | null>(null)
   /**
@@ -139,7 +126,8 @@ export function Studio() {
    * knows about carets and selections and is the right one to be holding while you
    * are in it. These two never fire while the editor has focus.
    */
-  const history = useRef<{ past: Change[]; future: Change[] }>({ past: [], future: [] })
+  const history = useRef(new CanvasHistory())
+  const editingRef = useRef(false)
   /** A view copied from Layers or the canvas, as the Swift that draws it. */
   const [clipboard, setClipboard] = useState<string | null>(null)
   const [hidden, setHidden] = useState<{ key: string; views: readonly HiddenViewInfo[] }>({ key: '', views: [] })
@@ -374,7 +362,7 @@ export function Studio() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen || adding) return
+      if (galleryOpen || switcherOpen || adding || shortcutsOpen) return
       const typing = (e.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"], .cm-editor')
 
       /**
@@ -385,7 +373,7 @@ export function Studio() {
        * anything with a cursor in it - Tab in a form is a Tab.
        */
       if (!e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
-        if (e.key === 'Tab') {
+        if (e.key === 'Tab' && !e.shiftKey) {
           e.preventDefault()
           setDesigning(!inspecting)
           return
@@ -402,7 +390,10 @@ export function Studio() {
 
       // Xcode's own bindings, which is the point: muscle memory is most of what
       // "feels like Xcode" means once the pixels are right.
-      if (key === '0') {
+      if (key === '/') {
+        e.preventDefault()
+        setShortcutsOpen(true)
+      } else if (key === '0') {
         e.preventDefault()
         togglePane('navigator')
       } else if (key === 'y' && e.shiftKey) {
@@ -430,7 +421,7 @@ export function Studio() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePane, run, galleryOpen, switcherOpen, adding, toggleInspect, mode, inspecting, setDesigning, setMode])
+  }, [togglePane, run, galleryOpen, switcherOpen, adding, shortcutsOpen, toggleInspect, mode, inspecting, setDesigning, setMode])
 
 
 
@@ -536,9 +527,16 @@ export function Studio() {
     const target = layer ?? selectedLayer
     const source = target?.source
     const file = source && project ? findFile(project, source.file) : undefined
-    if (!source || !file) return
-
-    const result = await editView({ text: file.text, file: source.file, offset: source.start, edit })
+    if (!source || !file || !project || stale || editingRef.current) return
+    editingRef.current = true
+    let result
+    try { result = await editView({ text: file.text, file: source.file, offset: source.start, edit }) }
+    finally { editingRef.current = false }
+    const current = useStudio.getState().project
+    if (current?.id !== project.id || findFile(current, source.file)?.text !== file.text) {
+      setEditNote('The source changed. Select the view again.')
+      return
+    }
     if (!result) {
       setEditNote(
         edit.kind === 'move'
@@ -551,10 +549,7 @@ export function Studio() {
     }
 
     setEditNote(null)
-    history.current = {
-      past: [...history.current.past, { file: source.file, before: file.text, after: result.text, offset: edit.kind === 'delete' ? null : result.offset }],
-      future: [],
-    }
+    history.current.record({ projectId: project.id, file: source.file, before: file.text, after: result.text, offset: edit.kind === 'delete' ? null : result.offset })
     setFileText(source.file, result.text)
     if (edit.kind === 'delete') {
       // Nothing is selected after a delete, and the offset the deleted view had is
@@ -565,7 +560,7 @@ export function Studio() {
     } else {
       setPendingSelect({ file: source.file, offset: result.offset })
     }
-  }, [editView, project, selectedLayer, setFileText])
+  }, [editView, project, selectedLayer, setFileText, stale])
 
   /** Where Add would put it, which the palette says before anything is added. */
   const addTarget = selectedLayer
@@ -578,11 +573,7 @@ export function Studio() {
    * With nothing selected it targets the visible page's own content, so Add works on
    * a screen nobody has clicked into yet.
    */
-  const addTargetLayer = useMemo(() => {
-    if (selectedLayer) return selectedLayer
-    const page = layers.find((layer) => layer.page?.active) ?? layers[0]
-    return page?.children[0]
-  }, [selectedLayer, layers])
+  const addTargetLayer = useMemo(() => insertionLayer(layers, selectedLayer), [selectedLayer, layers])
 
   const canAdd = !!addTargetLayer?.source && !stale
 
@@ -599,24 +590,18 @@ export function Studio() {
       }
     : null
 
-  const undo = useCallback(() => {
-    const change = history.current.past[history.current.past.length - 1]
-    if (!change) return
-    history.current = { past: history.current.past.slice(0, -1), future: [change, ...history.current.future] }
-    setFileText(change.file, change.before)
+  const replayEdit = useCallback((direction: 'undo' | 'redo') => {
+    const current = useStudio.getState().project
+    if (!current || editingRef.current) return
+    const change = history.current.take(direction, current)
+    if (!change) { setEditNote('No canvas edit to ' + direction + ' in this source version'); return }
+    setFileText(change.file, direction === 'undo' ? change.before : change.after)
     setLayerSelection(null)
-    setPendingSelect(null)
-    setEditNote('Undone')
+    setPendingSelect(direction === 'redo' && change.offset !== null ? { file: change.file, offset: change.offset } : null)
+    setEditNote(direction === 'undo' ? 'Undone' : 'Redone')
   }, [setFileText])
-
-  const redo = useCallback(() => {
-    const change = history.current.future[0]
-    if (!change) return
-    history.current = { past: [...history.current.past, change], future: history.current.future.slice(1) }
-    setFileText(change.file, change.after)
-    setPendingSelect(change.offset === null ? null : { file: change.file, offset: change.offset })
-    setEditNote('Redone')
-  }, [setFileText])
+  const undo = useCallback(() => replayEdit('undo'), [replayEdit])
+  const redo = useCallback(() => replayEdit('redo'), [replayEdit])
 
   /** Copies the selected view as the Swift that draws it, for a paste anywhere. */
   const copySelection = useCallback(async () => {
@@ -650,7 +635,9 @@ export function Studio() {
     void (async () => {
       const result = await editView({ text: file.text, file: view.file, offset: view.offset, edit: { kind: 'show' } })
       if (!result) { setEditNote(`Could not show ${view.name}`); return }
-      history.current = { past: [...history.current.past, { file: view.file, before: file.text, after: result.text, offset: result.offset }], future: [] }
+      const current = useStudio.getState().project
+      if (current?.id !== project?.id || !current || findFile(current, view.file)?.text !== file.text) return
+      history.current.record({ projectId: current.id, file: view.file, before: file.text, after: result.text, offset: result.offset })
       setFileText(view.file, result.text)
       setPendingSelect({ file: view.file, offset: result.offset })
     })()
@@ -681,7 +668,7 @@ export function Studio() {
   useEffect(() => {
     if (mode !== 'design' || !inspecting) return
     const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen || adding) return
+      if (galleryOpen || switcherOpen || adding || shortcutsOpen) return
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, [contenteditable="true"], .cm-editor')) return
 
@@ -690,7 +677,7 @@ export function Studio() {
       // because the editor is not the thing being typed into.
       if (e.ctrlKey || e.metaKey) {
         if (key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo() }
-        else if (key === 'y') { e.preventDefault(); redo() }
+        else if (key === 'y' && !e.shiftKey) { e.preventDefault(); redo() }
         else if (key === 'c') { if (selectedLayer) { e.preventDefault(); void copySelection() } }
         else if (key === 'v') { if (clipboard) { e.preventDefault(); pasteClipboard() } }
         else if (key === 'h') { if (selectedLayer) { e.preventDefault(); void applyEdit({ kind: 'hide' }) } }
@@ -717,7 +704,7 @@ export function Studio() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mode, inspecting, galleryOpen, switcherOpen, adding, applyEdit, selectedLayer, canAdd, tool, setTool,
+  }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
       undo, redo, copySelection, pasteClipboard, clipboard])
 
   /**
@@ -909,13 +896,15 @@ export function Studio() {
 
   return (
     <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
-      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen}>
+      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen}>
       <Toolbar
         mode={mode}
         onModeChange={setMode}
         theme={theme}
         onThemeChange={setTheme}
         onOpenGallery={openGallery}
+        onRenameProject={useStudio.getState().renameProject}
+        onShortcuts={() => setShortcutsOpen(true)}
         projectName={project.manifest.name}
         savedAt={lastSavedAt}
         saveError={saveError}
@@ -954,6 +943,7 @@ export function Studio() {
                 onSelect={openSource}
                 onCreateFile={(name, parent) => { setMode('develop'); return createFile(name, parent) }}
                 onCreateFolder={createFolder}
+                onTogglePanel={() => togglePane('navigator')}
                 onRenameFile={renameFile}
                 onRenameFolder={renameFolder}
                 onDeleteFile={deleteFile}
@@ -975,10 +965,12 @@ export function Studio() {
               onToggle={() => togglePane('navigator')}
             />
           </>
-        ) : null}
+        ) : <div className={styles.panelRail}><button type="button" className={styles.panelToggle} data-testid="pane-toggle-navigator" aria-pressed="false" aria-label="Show left panel" title="Show left panel" onClick={() => togglePane('navigator')}><Icon name="sidebar-left" size={16} /></button></div>}
 
         <div className="flex min-w-0 flex-1 flex-col" style={mode === 'design' ? { display: 'none' } : undefined}>
           <TabBar
+            key={project.id}
+            onRenameFile={renameFile}
             openFileIds={openFileIds}
             activeFileId={activeFileId}
             filesWithErrors={filesWithErrors}
@@ -1011,7 +1003,7 @@ export function Studio() {
               <EditorPane
                 // Remounting per file gives each its own undo history, which is what
                 // switching tabs in any editor implies.
-                key={activeFile.id}
+                key={`${project.id}:${activeFile.id}`}
                 text={activeFile.text}
                 diagnostics={diagnostics}
                 onChange={handleChange}
@@ -1047,6 +1039,8 @@ export function Studio() {
               <div className="min-h-0 flex-1">
               <DevicePane
                 expanded={mode === 'design'}
+                projectId={project.id}
+                panelLayout={`${layout.showNavigator}:${shown.preview}`}
                 showSettings={shown.preview}
                 settingsWidth={settingsWidth}
                 onSettingsResize={(size) => setSize('settings', size)}
@@ -1080,11 +1074,12 @@ export function Studio() {
               </div>
             </div>
           </>
-        ) : null}
+        ) : <div className={styles.panelRail}><button type="button" className={styles.panelToggle} data-testid="pane-toggle-preview" aria-pressed="false" aria-label="Show preview" title="Show preview" onClick={() => togglePane('preview')}><Icon name="sidebar-right" size={16} /></button></div>}
       </div>
       {!layout.showPreview && <div className={styles.codeFooter}>{previewTools}</div>}
 
       </div>
+      {shortcutsOpen ? <ShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}
       {adding ? (
         <AddView
           target={addTarget}

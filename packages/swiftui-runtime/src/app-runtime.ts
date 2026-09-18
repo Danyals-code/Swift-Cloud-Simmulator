@@ -111,7 +111,8 @@ export class AppRuntime {
   /** What each interactive element does, from the last resolved screen. */
   private handlers: ReadonlyMap<string, ViewIntent> = new Map()
   /** Identifies the loaded program, so a real edit reloads and a tap does not. */
-  private programKey = ''
+  private programKey: string | null = null
+  private loadedProgram: { files: readonly SourceFileNode[]; model: SemanticModel; key: string } | null = null
 
   /**
    * A failure raised while loading, held over until the next `evaluate`.
@@ -189,6 +190,7 @@ export class AppRuntime {
   load(files: readonly SourceFileNode[], model: SemanticModel, programKey: string): void {
     if (programKey === this.programKey && this.entryTypeName) return
 
+    this.loadedProgram = { files, model, key: programKey }
     this.interpreter = new Interpreter({ host: this.host })
     this.host.expandStruct = (value) => this.expand(value)
     this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
@@ -397,17 +399,23 @@ export class AppRuntime {
   }
 
   /** Drops every state box, framework state included. */
-  reset(): void {
+  reset(reload = true): void {
     this.state.clear()
     this.defaults.clear()
     this.seeded.clear()
     this.ui.clear()
     this.geometry.clear()
-    this.host.geometry = this.geometry
     this.appeared.clear()
     this.watched.clear()
     this.disappearing.clear()
     this.animation = null
+    this.programKey = null
+    const defaultGeometry = this.host.defaultGeometry
+    this.host = new SwiftUIHost()
+    this.host.defaultGeometry = defaultGeometry
+    this.host.geometry = this.geometry
+    const loaded = this.loadedProgram
+    if (reload && loaded) this.load(loaded.files, loaded.model, loaded.key)
   }
 
   /**

@@ -32,7 +32,8 @@ export interface NavigatorProps {
   onSelect: (fileId: FileId) => void
   onCreateFile: (name: string, parentFolder?: string) => void
   onCreateFolder: (name: string, parentFolder?: string) => void
-  onRenameFile: (fileId: FileId, name: string) => void
+  onRenameFile: (fileId: FileId, name: string) => boolean
+  onTogglePanel: () => void
   onRenameFolder: (path: string, name: string) => void
   onDeleteFile: (fileId: FileId) => void
   onDeleteFolder: (path: string) => void
@@ -81,7 +82,7 @@ export function Navigator({
   onDuplicateFile,
   onMoveFile,
   onRevealDiagnostic,
-  onOpenTemplates,
+  onOpenTemplates, onTogglePanel,
 }: NavigatorProps) {
   const tab = useLayout(s => s.navigatorTab)
   const setTab = useLayout(s => s.setNavigatorTab)
@@ -136,7 +137,8 @@ export function Navigator({
       data-testid="file-rail"
       aria-label="Project navigator"
     >
-      <header className={`${styles.tabs} h-[46px] shrink-0 border-b border-xc-line px-1.5`}>
+      <header className={`${styles.tabs} ${styles.navigatorTabs} h-[46px] shrink-0 border-b border-xc-line px-1.5`}>
+        <button type="button" data-testid="pane-toggle-navigator" aria-pressed="true" title="Collapse left panel (⌘0)" aria-label="Collapse left panel" onClick={onTogglePanel}><Icon name="sidebar-left" size={15} /></button>
         <NavTab active={tab === 'project'} onClick={() => setTab('project')} label="Project">
           <span className="text-[14px] font-medium">Files</span>
         </NavTab>
@@ -217,12 +219,13 @@ export function Navigator({
               }
               onCommitEdit={(name) => {
                 const active = editing
-                setEditing(null)
-                if (!active || !name.trim()) return
+                if (!active || !name.trim()) return false
                 if (active.mode === 'new-file') onCreateFile(name, active.parent)
                 else if (active.mode === 'new-folder') onCreateFolder(name, active.parent)
                 else if (active.isFolder) onRenameFolder(active.target, name)
-                else onRenameFile(active.target, name)
+                else if (!onRenameFile(active.target, name)) return false
+                setEditing(null)
+                return true
               }}
               onCancelEdit={() => setEditing(null)}
               onStartRename={(target, isFolder) => setEditing({ mode: 'rename', target, isFolder })}
@@ -350,7 +353,7 @@ function Tree({
   onSelect: (fileId: FileId) => void
   onSelectFolder: (path: string) => void
   onToggleFolder: (path: string) => void
-  onCommitEdit: (name: string) => void
+  onCommitEdit: (name: string) => boolean | void
   onCancelEdit: () => void
   onStartRename: (target: string, isFolder: boolean) => void
   onContextMenu: (node: TreeNode, at: { x: number; y: number }) => void
@@ -542,7 +545,9 @@ function FileRow({
         onDragStart()
       }}
       onClick={() => onSelect(node.id)}
-      onDoubleClick={() => onStartRename(node.id, false)}
+      onDoubleClick={(event) => { event.preventDefault(); onStartRename(node.id, false) }}
+      onKeyDown={(event) => { if (event.key === 'F2') { event.preventDefault(); onStartRename(node.id, false) } }}
+      title="Double-click to rename"
       onContextMenu={(event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -715,7 +720,7 @@ function IssueList({
   )
 }
 
-function NameField({
+export function NameField({
   depth,
   initial,
   placeholder,
@@ -726,12 +731,20 @@ function NameField({
   depth: number
   initial: string
   placeholder?: string
-  onCommit: (name: string) => void
+  onCommit: (name: string) => boolean | void
   onCancel: () => void
   testId: string
 }) {
   const [value, setValue] = useState(initial)
   const ref = useRef<HTMLInputElement | null>(null)
+  const finished = useRef(false)
+  const [error, setError] = useState(false)
+  const finish = () => {
+    if (finished.current) return
+    if (!value.trim()) { finished.current = true; onCancel(); return }
+    finished.current = true
+    if (onCommit(value) === false) { finished.current = false; setError(true); ref.current?.focus(); return }
+  }
 
   useEffect(() => {
     ref.current?.focus()
@@ -749,23 +762,26 @@ function NameField({
         placeholder={placeholder}
         data-testid={testId}
         spellCheck={false}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => { setValue(event.target.value); setError(false) }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault()
-            if (value.trim()) onCommit(value)
-            else onCancel()
+            finish()
           }
           if (event.key === 'Escape') {
             event.preventDefault()
+            finished.current = true
             onCancel()
           }
         }}
-        // Committing on blur would lose the name whenever focus moves for any other
-        // reason; cancelling is recoverable, a silently dropped rename is not.
-        onBlur={onCancel}
+        // Enter and clicking away both save; Escape cancels before blur can save.
+        onBlur={finish}
+        title={error ? 'Use a unique file name without path separators.' : undefined}
+        aria-invalid={error}
+        aria-label="File or group name"
         className="h-[22px] w-full rounded-[4px] border border-xc-accent bg-xc-panel px-1.5 text-[14px] text-xc-text outline-none"
       />
+      {error ? <span role="alert" className="text-[11px] text-xc-error">Choose a valid, unique name.</span> : null}
     </div>
   )
 }

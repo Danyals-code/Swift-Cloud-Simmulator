@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { EXPORT_FORMATS, type ExportFormat } from '@studio/shared'
 import type { WorkspaceMode, WorkspaceTheme } from '../lib/layout'
 import { Icon } from './ui/Icon'
@@ -17,6 +17,8 @@ export interface ToolbarProps {
   onThemeChange: (theme: WorkspaceTheme) => void
   onOpenGallery: () => void
   projectName: string
+  onRenameProject: (name: string) => boolean
+  onShortcuts: () => void
   savedAt: number | null
   saveError: string | null
   panes: ReadonlySet<PaneKey>
@@ -47,40 +49,51 @@ interface PreviewToolsProps {
   workerError: string | null
 }
 
-/**
- * The three sidebars, named for what they hold in the workspace you are in.
- *
- * The right-hand one is the simulator in Code and the preview's settings in
- * Design, and calling both "Preview" made the Design toggle look like a switch
- * for the phone itself - which is the one thing in that workspace it cannot hide.
- */
-const panesFor = (mode: WorkspaceMode) => [
-  { key: 'navigator', icon: 'sidebar-left' as const, label: mode === 'design' ? 'Layers' : 'Navigator', title: mode === 'design' ? 'Show layers (⌘0)' : 'Show navigator (⌘0)' },
-  { key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debug area', title: 'Show problems and output (⌘⇧Y)' },
-  { key: 'preview', icon: 'sidebar-right' as const, label: mode === 'design' ? 'Preview settings' : 'Preview', title: mode === 'design' ? 'Show preview settings (⌘⌥↩)' : 'Show preview (⌘⌥↩)' },
-]
+const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debug area', title: 'Show problems and output' }]
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
 export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, onModeChange, theme, onThemeChange,
-  panes, suppressed, onTogglePane, onExport, onShare }: ToolbarProps) {
+  panes, suppressed, onTogglePane, onExport, onShare, onRenameProject, onShortcuts }: ToolbarProps) {
   return <header data-testid="toolbar" className={styles.toolbar}>
     <div className={styles.project}>
       <button type="button" onClick={onOpenGallery} aria-label="Open a project" title="Projects and templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={21} /></button>
-      <div className={styles.projectCopy}><span className={styles.projectName} data-testid="project-name">{projectName}</span><span data-testid="save-indicator" className={saveError ? styles.saveError : styles.saveStatus}>{saveError ? 'Could not save' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
+      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} /><span data-testid="save-indicator" className={saveError ? styles.saveError : styles.saveStatus}>Swift Web Studio · {saveError ? 'Could not save' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
     </div>
     <nav className={styles.modes} aria-label="Workspace view">
       {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Focus on the app preview' : 'Code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Code'}</button>)}
     </nav>
     <div className={styles.actions}>
       <button type="button" data-testid="workspace-theme" className={styles.themeToggle} aria-label="Workspace dark mode" aria-pressed={theme === 'dark'} title={`Switch workspace to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}><Icon name="appearance" size={17} /></button>
-      <span className={styles.paneControls}><PaneToggles options={panesFor(mode)} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>
+      <span className={styles.paneControls}><PaneToggles options={debugPane} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>
       <span className={styles.share}><ShareButton onShare={onShare} /></span>
       <div className={styles.exportGroup}>
         <button type="button" onClick={() => onExport('xcodeproj')} data-testid="export-button" title="Export an Xcode project" className={styles.export}>Export<Icon name="download" size={14} /></button>
         <MenuButton items={EXPORT_FORMATS.map(f => ({value:f.id,label:f.name,detail:f.shortName,title:f.description}))} onSelect={value => onExport(value as ExportFormat)} label="Export format" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={11} /></MenuButton>
       </div>
+      <button type="button" data-testid="shortcuts-button" className={styles.themeToggle} aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={onShortcuts}><Icon name="keyboard" size={19} /></button>
     </div>
   </header>
+}
+
+function ProjectName({ name, onRename }: { name: string; onRename: (name: string) => boolean }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+  const [error, setError] = useState(false)
+  const input = useRef<HTMLInputElement>(null)
+  const finished = useRef(false)
+  useEffect(() => { if (editing) { input.current?.focus(); input.current?.select() } }, [editing])
+  const finish = () => {
+    if (finished.current) return
+    finished.current = true
+    if (!onRename(draft)) { finished.current = false; setError(true); input.current?.focus(); return }
+    setEditing(false)
+  }
+  return editing ? <input ref={input} className={styles.projectNameInput} data-testid="project-name-input" aria-label="App name" aria-invalid={error} title={error ? 'Use a name without path separators or special filename characters.' : 'Enter to save, Escape to cancel'} value={draft}
+    onChange={e => { setDraft(e.target.value); setError(false) }} onBlur={finish}
+    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); finish() } else if (e.key === 'Escape') { finished.current = true; setEditing(false); setDraft(name) } }} />
+    : <button type="button" className={styles.projectName} data-testid="project-name" title="Double-click to rename app" aria-label={`App name: ${name}. Double-click or press Enter to rename.`}
+      onDoubleClick={() => { finished.current = false; setEditing(true) }}
+      onKeyDown={e => { if (e.key === 'F2' || e.key === 'Enter') { e.preventDefault(); finished.current = false; setEditing(true) } }}>{name}</button>
 }
 
 /**
@@ -123,9 +136,9 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
  */
 export function PreviewStatus({ inspecting, tool, mode = 'design', busy, errors, warnings, workerError }: Pick<PreviewToolsProps, 'inspecting' | 'tool' | 'mode' | 'busy' | 'errors' | 'warnings' | 'workerError'>) {
   const editing = mode === 'design' ? 'Editing' : 'Inspecting'
-  const message = workerError ? 'Preview stopped' : errors ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : busy ? 'Updating' : warnings ? `${warnings} warnings` : inspecting ? tool === 'delete' ? 'Click a view to delete it' : editing : 'Live preview'
-  return <span data-testid="status-view" role="status" className={styles.previewStatus}>
-    <i data-state={errors || workerError ? 'error' : 'ready'} />{message}
+  const message = workerError ? 'Preview stopped' : errors ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : warnings ? `${warnings} warnings` : inspecting ? tool === 'delete' ? 'Click a view to delete it' : editing : 'Live preview'
+  return <span data-testid="status-view" role="status" aria-busy={busy} title={busy ? 'Updating preview…' : message} className={styles.previewStatus}>
+    <i data-state={errors || workerError ? 'error' : busy ? 'updating' : 'ready'} />{message}
   </span>
 }
 

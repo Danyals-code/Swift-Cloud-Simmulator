@@ -32,3 +32,7 @@
 .note { border-top: 1px solid var(--color-xc-line-soft); }
 .filter { height: 42px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--color-xc-line); color: var(--color-xc-text-3); }
 .filter input { width: 100%; min-width: 0; background: transparent; color: var(--color-xc-text); font-size: 13px; }
+
+.heading > span:last-child { display: inline-flex; align-items: center; gap: 7px; }
+.heading button { padding: 4px; border-radius: 4px; cursor: pointer; }
+.heading button:hover { background: var(--color-xc-line-soft); color: var(--color-xc-text); }

@@ -16,6 +16,7 @@ import {
   moveFile,
   payloadFromFragment,
   normalizeFileName,
+  normalizeProjectName,
   normalizeFolderPath,
   projectFromFiles,
   removeFile,
@@ -167,7 +168,8 @@ export interface StudioState {
 
   /** Creates a source file, inside `parentFolder` when one is given. */
   createFile: (name: string, parentFolder?: string) => FileId | null
-  renameFile: (fileId: FileId, name: string) => void
+  renameFile: (fileId: FileId, name: string) => boolean
+  renameProject: (name: string) => boolean
   deleteFile: (fileId: FileId) => void
   duplicateFile: (fileId: FileId) => void
 
@@ -449,16 +451,27 @@ export const useStudio = create<StudioState>((set, get) => {
      */
     renameFile(fileId, name) {
       const { project } = get()
-      if (!project) return
+      if (!project) return false
 
       const target = normalizeFileName(name, dirname(fileId))
-      if (!target || target === fileId) return
+      if (!target) return false
+      if (target === fileId) return true
 
       const renamed = renameFile(project, fileId, target)
-      if (renamed === project) return
+      if (renamed === project) return false
 
       set({ openFileIds: get().openFileIds.map((id) => (id === fileId ? target : id)) })
       commit(renamed, get().activeFileId === fileId ? target : undefined)
+      return true
+    },
+
+    renameProject(name) {
+      const project = get().project
+      const normalized = normalizeProjectName(name)
+      if (!project || !normalized) return false
+      if (project.manifest.name === normalized) return true
+      commit({ ...project, manifest: { ...project.manifest, name: normalized, templateId: undefined }, updatedAt: Date.now() })
+      return true
     },
 
     deleteFile(fileId) {

@@ -210,3 +210,27 @@ describe('the recents list', () => {
     expect(useStudio.getState().recents.map((p) => p.name)).toEqual(['TasksApp'])
   })
 })
+
+describe('renaming from the workspace', () => {
+  it('saves a renamed app and retains an otherwise untouched template', async () => {
+    await useStudio.getState().load()
+    const id = useStudio.getState().project!.id
+    expect(useStudio.getState().renameProject('My Reading App')).toBe(true)
+    await useStudio.getState().flush()
+    expect((await persistence.load(id))?.manifest.name).toBe('My Reading App')
+    await useStudio.getState().applyTemplate('tasks')
+    expect((await persistence.load(id))?.manifest.name).toBe('My Reading App')
+  })
+
+  it('reports invalid names without losing the current name', async () => {
+    await useStudio.getState().load()
+    expect(useStudio.getState().renameProject('../Bad')).toBe(false)
+    expect(useStudio.getState().project!.manifest.name).toBe('CounterApp')
+    const file = useStudio.getState().project!.files[0]!.id
+    expect(useStudio.getState().renameFile(file, '../Bad.swift')).toBe(false)
+    expect(useStudio.getState().renameFile(file, 'Renamed.swift')).toBe(true)
+    expect(useStudio.getState().activeFileId).toContain('Renamed.swift')
+    await useStudio.getState().flush()
+    expect((await persistence.load(useStudio.getState().project!.id))?.files.some(f => f.id.endsWith('Renamed.swift'))).toBe(true)
+  })
+})

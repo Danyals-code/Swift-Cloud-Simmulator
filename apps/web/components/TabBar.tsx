@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+import { NameField } from './Navigator'
 import { fileBasename } from '@studio/project-model'
 import type { FileId } from '@studio/shared'
 import { Icon } from './ui/Icon'
@@ -10,6 +12,7 @@ export interface TabBarProps {
   filesWithErrors: ReadonlySet<FileId>
   onSelect: (fileId: FileId) => void
   onClose: (fileId: FileId) => void
+  onRenameFile: (fileId: FileId, name: string) => boolean
 }
 
 /**
@@ -26,7 +29,9 @@ export function TabBar({
   filesWithErrors,
   onSelect,
   onClose,
+  onRenameFile,
 }: TabBarProps) {
+  const [editing, setEditing] = useState<FileId | null>(null)
   if (openFileIds.length === 0) return null
 
   return (
@@ -48,11 +53,14 @@ export function TabBar({
                 : 'bg-transparent text-xc-text-2 hover:bg-xc-line-soft'
             }`}
           >
-            <button
+            {editing === fileId ? <NameField depth={0} initial={fileBasename(fileId)} testId="tab-rename-input" onCancel={() => setEditing(null)}
+              onCommit={name => { if (!onRenameFile(fileId, name)) return false; setEditing(null); return true }} /> : <button
               type="button"
               role="tab"
               aria-selected={active}
               onClick={() => onSelect(fileId)}
+              onDoubleClick={() => setEditing(fileId)}
+              onKeyDown={e => { if (e.key === 'F2') { e.preventDefault(); setEditing(fileId) } }}
               // Middle-click closes, as it does in every editor and browser.
               onAuxClick={(event) => {
                 if (event.button === 1) {
@@ -60,14 +68,14 @@ export function TabBar({
                   onClose(fileId)
                 }
               }}
-              title={fileId}
+              title={`${fileId} · Double-click to rename`}
               className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 text-[14px]"
             >
               {hasError ? (
                 <Icon name="error" size={11} weight={2} className="shrink-0 text-xc-error" />
               ) : null}
               <span className="truncate">{fileBasename(fileId)}</span>
-            </button>
+            </button>}
 
             <button
               type="button"

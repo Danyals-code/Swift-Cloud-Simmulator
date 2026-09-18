@@ -287,8 +287,8 @@ export function insertView(text: string, file: FileId, offset: number, snippet: 
   if (content) {
     // An empty container: open it onto its own lines rather than inlining a child
     // into `VStack { }`, which is where nested content stops being readable.
-    const open = text.indexOf('{', found.stmt.span.start)
-    const close = text.lastIndexOf('}', found.stmt.span.end)
+    const open = content.span.start
+    const close = content.span.end - 1
     if (open === -1 || close === -1 || close < open) return null
     const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, found.stmt.span.start), found.stmt.span.start))?.[0] ?? ''
     const inner = outer + indentUnit(text)
@@ -344,6 +344,7 @@ function indentSnippet(snippet: string, indent: string): string {
  * it is if the studio never opens the file again.
  */
 export const HIDDEN_MARKER = '// hidden by Swift Web Studio'
+const HIDDEN_END = '// end hidden view'
 
 export interface HiddenView {
   /** Offset of the marker line, which is where the block starts. */
@@ -451,7 +452,7 @@ export function hideView(text: string, file: FileId, offset: number): SourceEdit
     .join('\n')
 
   return {
-    text: `${text.slice(0, cut.start)}${cut.indent}${HIDDEN_MARKER}\n${commented}\n${text.slice(cut.end)}`,
+    text: `${text.slice(0, cut.start)}${cut.indent}${HIDDEN_MARKER}\n${commented}\n${cut.indent}${HIDDEN_END}\n${text.slice(cut.end)}`,
     offset: cut.start,
   }
 }
@@ -497,9 +498,25 @@ export function hiddenViewsIn(text: string, file: FileId): readonly HiddenView[]
     const body: string[] = []
     let end = i + 1
     for (; end < lines.length && /^[ \t]*\/\//.test(lines[end]!); end++) {
+      if (lines[end]!.trim() === HIDDEN_END || lines[end]!.trim() === HIDDEN_MARKER) break
       body.push(lines[end]!.replace(/^([ \t]*)\/\/ ?/, '$1'))
     }
     if (!body.length) continue
+    if (lines[end]?.trim() === HIDDEN_END) end++
+    else {
+      // Legacy markers had no terminator. Restore only the first parsed statement.
+      const prefix = 'struct _Hidden: View { var body: some View {\n'
+      const { sourceFile } = Parser.parse(prefix + body.join('\n') + '\n} }', file)
+      let statementEnd: number | null = null
+      walk(sourceFile, (node: Node) => {
+        if (statementEnd !== null) return false
+        if (node.kind === 'exprStmt' || node.kind === 'returnStmt') { statementEnd = node.span.end - prefix.length; return false }
+      })
+      if (statementEnd === null) continue
+      const count = body.join('\n').slice(0, statementEnd).split('\n').length
+      body.splice(count)
+      end = i + 1 + count
+    }
 
     const source = body.join('\n')
     const described = describeSnippet(source, file)

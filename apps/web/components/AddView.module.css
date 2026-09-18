@@ -12,3 +12,19 @@
 .group { flex-shrink: 0; font-size: 11px; color: var(--color-xc-text-3); }
 .empty { margin: 0; padding: 18px 12px; font-size: 13px; color: var(--color-xc-text-3); }
 .footer { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-top: 1px solid var(--color-xc-line-soft); background: var(--color-xc-bar-raised); font-size: 11.5px; color: var(--color-xc-text-3); flex-shrink: 0; }
+
+.backdrop { animation: spotlight-backdrop-in 160ms ease-out both; }
+.palette { animation: spotlight-in 180ms cubic-bezier(.2,.8,.2,1) both; align-self: flex-start; }
+.backdrop[data-closing] { animation: spotlight-backdrop-out 140ms ease-in both; pointer-events: none; }
+.backdrop[data-closing] .palette { animation: spotlight-out 140ms ease-in both; }
+.catalogNote { margin: 0; padding: 10px 14px 4px; font-size: 12px; line-height: 1.5; color: var(--color-xc-text-3); }
+.shortcutRow { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px; border-radius: 7px; }
+.shortcutRow:nth-child(even) { background: var(--color-xc-line-soft); }
+.shortcutRow > div { min-width: 0; }
+.shortcutContext { display: block; margin-top: 3px; font-size: 11px; color: var(--color-xc-text-3); }
+.shortcutRow kbd { flex-shrink: 0; font-size: 12px; color: var(--color-xc-text-2); border: 1px solid var(--color-xc-line); background: var(--color-xc-bar); border-radius: 5px; padding: 3px 6px; }
+@keyframes spotlight-in { from { opacity: 0; transform: translateY(-8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes spotlight-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-5px) scale(.985); } }
+@keyframes spotlight-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spotlight-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+@media(prefers-reduced-motion: reduce) { .backdrop, .palette, .backdrop[data-closing], .backdrop[data-closing] .palette { animation: none; } }

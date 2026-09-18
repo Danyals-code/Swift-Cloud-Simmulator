@@ -104,3 +104,15 @@ export function layerAncestors(layers: readonly ViewLayer[], id: string | null):
   }
   return []
 }
+
+/** A page's source may be its Tab declaration; default insertion belongs in its content. */
+export function insertionLayer(layers: readonly ViewLayer[], selected?: ViewLayer): ViewLayer | undefined {
+  if (selected?.source && !selected.page) return selected
+  const page = selected?.page ? selected : layers.find(layer => layer.page?.active) ?? layers[0]
+  if (!page) return undefined
+  const editable = (layer: ViewLayer): ViewLayer | undefined => {
+    if (layer.source && !layer.page && layer.type !== 'Tab') return layer
+    return layer.children.map(editable).find(Boolean)
+  }
+  return page.children.map(editable).find(Boolean) ?? (page.source ? page : undefined)
+}
