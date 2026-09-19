@@ -139,6 +139,12 @@ export class StateStore {
     return this.boxes.size
   }
 
+  /** Seed a separate runtime; the caller supplies detached values. */
+  restore(boxes: ReadonlyMap<string, StateBox>): void {
+    this.boxes = new Map(boxes)
+    this.touched.clear()
+  }
+
   /** For tests and the inspector. */
   snapshot(): ReadonlyMap<string, StateBox> {
     return new Map(this.boxes)

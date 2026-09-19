@@ -39,18 +39,20 @@ struct BookRow: View {
     }
 }`
 
-async function open(page: Page, source = SOURCE) {
+async function open(page: Page, source = SOURCE, expandList = true) {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.fill(source)
-  await expect(page.getByTestId('render-tree').getByText('First book', { exact: true })).toBeVisible()
+  await expect(mainPreview(page).getByText('First book', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
   await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true')
+  if (expandList && await row(page, 'List').getAttribute('aria-expanded') !== 'true') await layers(page).getByRole('button', { name: 'Expand List', exact: true }).click()
 }
 
+const mainPreview = (page: Page) => page.locator('[data-page-kind="root"], [data-canvas-phone]').first().getByTestId('render-tree')
 const layers = (page: Page) => page.getByTestId('logical-layers')
 const row = (page: Page, name: string) => layers(page).locator(`[data-source-name="${name}"]`)
 const title = (page: Page) => row(page, 'Text').filter({ hasText: 'Library heading' })
@@ -67,26 +69,29 @@ async function expectOverlayMatches(overlay: Locator, target: Locator) {
 }
 
 async function expectRowHighlights(page: Page, rows: Locator, parts: readonly Locator[]) {
-  await expect.poll(() => highlights(page).count()).toBeGreaterThan(0)
-  const frames = await highlights(page).evaluateAll(elements => elements.map(element => {
-    const bounds = element.getBoundingClientRect()
-    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
-  }))
-  const rowFrames = await Promise.all((await rows.all()).map(element => element.boundingBox()))
+  for (const part of parts) await expect(part).toBeVisible()
   const contains = (outer: { x: number; y: number; width: number; height: number }, inner: typeof outer) => outer.x <= inner.x + 2 && outer.y <= inner.y + 2 && outer.x + outer.width >= inner.x + inner.width - 2 && outer.y + outer.height >= inner.y + inner.height - 2
-  // A transparent stack can draw separate outlines around its painted children.
-  // All of its visible content must be covered, with no unrelated row outlined.
-  for (const part of parts) {
-    await expect(part).toBeVisible()
-    const bounds = await part.boundingBox()
-    expect(bounds).not.toBeNull()
-    expect(frames.some(frame => contains(frame, bounds!))).toBe(true)
-  }
-  for (const frame of frames) expect(rowFrames.some(bounds => bounds && contains(bounds, frame))).toBe(true)
+  // Text calibration can move both content and overlays. Compare fresh geometry
+  // on every poll instead of keeping rectangles from an earlier layout frame.
+  await expect.poll(async () => {
+    const frames = await highlights(page).evaluateAll(elements => elements.map(element => {
+      const bounds = element.getBoundingClientRect()
+      return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+    }))
+    const rowFrames = await Promise.all((await rows.all()).map(element => element.boundingBox()))
+    const partFrames = await Promise.all(parts.map(element => element.boundingBox()))
+    // Transparent stacks may outline painted children separately. Every part
+    // must be covered, with no unrelated row outlined.
+    return frames.length > 0 && partFrames.every(bounds => bounds && frames.some(frame => contains(frame, bounds)))
+      && frames.every(frame => rowFrames.some(bounds => bounds && contains(bounds, frame)))
+  }).toBe(true)
 }
 
-test('primary Layers contains visual views while repetition, navigation and visibility stay in Settings', async ({ page }) => {
-  await open(page)
+test('primary Layers keeps shared designs compact and collection/navigation settings editable', async ({ page }) => {
+  await open(page, SOURCE, false)
+  await expect(row(page, 'List')).toHaveAttribute('aria-expanded', 'false')
+  await expect(row(page, 'BookRow')).toHaveCount(0)
+  await layers(page).getByRole('button', { name: 'Expand List', exact: true }).click()
   await expect(layers(page).locator('[data-source-kind="definition"], [data-source-kind="template"], [data-source-kind="branch"]')).toHaveCount(0)
   for (const name of ['ForEach', 'Section', 'NavigationLink', 'NavigationStack', 'WindowGroup']) await expect(row(page, name)).toHaveCount(0)
   await expect(row(page, 'List')).toHaveCount(1)
@@ -103,21 +108,20 @@ test('primary Layers contains visual views while repetition, navigation and visi
   await data.getByLabel('Record edit scope').selectOption('app')
   await data.getByLabel('Record title', { exact: true }).fill('Edited book')
   await data.getByRole('button', { name: 'Apply app initial data', exact: true }).click()
-  await expect(page.getByTestId('render-tree').getByText('Edited book', { exact: true })).toBeVisible()
-  await expect(page.getByTestId('render-tree').getByText('Second book', { exact: true })).toBeVisible()
+  await expect(mainPreview(page).getByText('Edited book', { exact: true })).toBeVisible()
+  await expect(mainPreview(page).getByText('Second book', { exact: true })).toBeVisible()
   await row(page, 'BookRow').click()
   await expect(page.getByTestId('settings-data')).toContainText('Repeat for each item')
   await expect(page.getByTestId('settings-context')).toContainText('Navigation')
   const extra = row(page, 'Text').filter({ hasText: 'Extra detail' })
-  await extra.click()
-  await expect(page.getByTestId('settings-context')).toContainText('Visibility')
-  await expect(page.getByTestId('settings-context')).toContainText('showExtra')
+  await expect(extra).toHaveCount(0)
+  await expect(row(page, 'BookRow')).toHaveAttribute('data-shared-design', 'true')
   await assertSource(page, SOURCE.replace('title: "First book"', 'title: "Edited book"'))
 })
 
 test('Arrange hover connects canvas and primary Layers without selecting or running actions', async ({ page }) => {
   await open(page)
-  const preview = page.getByTestId('render-tree')
+  const preview = mainPreview(page)
   const button = row(page, 'Button')
   await title(page).click()
   await preview.getByRole('button', { name: 'Increase', exact: true }).hover()
@@ -143,7 +147,7 @@ test('Arrange hover connects canvas and primary Layers without selecting or runn
 test('a repeated visual component highlights every rendered row and either row resolves back to it', async ({ page }) => {
   await open(page)
   const book = row(page, 'BookRow')
-  const preview = page.getByTestId('render-tree')
+  const preview = mainPreview(page)
   await book.hover()
   await expect(book).toHaveAttribute('data-hovered', 'true')
   const icons = preview.getByRole('img', { name: 'Image(systemName: "book")', exact: true })
@@ -163,13 +167,14 @@ test('a repeated visual component highlights every rendered row and either row r
   await assertSource(page, SOURCE)
 })
 
-test('hover clears when leaving Layers and does not outline an unrendered conditional view', async ({ page }) => {
+test('hover clears when filtering Layers and unrendered conditional views stay out of the tree', async ({ page }) => {
   await open(page)
   await title(page).hover()
   await expect(highlights(page)).toHaveCount(1)
   await page.getByLabel('Filter design layers').fill('Extra detail')
   const extra = row(page, 'Text').filter({ hasText: 'Extra detail' })
-  await extra.hover()
+  await expect(extra).toHaveCount(0)
+  await expect(layers(page)).toContainText('No matching layers.')
   await expect(highlights(page)).toHaveCount(0)
   await page.getByLabel('Filter design layers').press('Escape')
   await title(page).hover()
@@ -188,11 +193,14 @@ test('navigation and source replacement discard hover targets from the previous 
   await row(page, 'BookRow').hover()
   await expect.poll(() => highlights(page).count()).toBeGreaterThan(0)
   await page.getByTestId('live-toggle').click()
-  const preview = page.getByTestId('render-tree')
+  const preview = mainPreview(page)
   await preview.getByRole('button', { name: /First book/ }).click()
   await expect(preview.getByText('Book detail', { exact: true })).toBeVisible()
   await page.getByTestId('inspect-toggle').click()
-  await row(page, 'BookRow').hover()
+  const detail = page.locator('[data-testid="gallery-page"][data-page-kind="destination"]').first()
+  await detail.locator('figcaption button').click()
+  await expect(row(page, 'BookRow')).toHaveCount(0)
+  await expect(layers(page)).toContainText('Book detail')
   await expect(highlights(page)).toHaveCount(0)
   await page.getByTestId('workspace-develop').click()
   await page.getByTestId('editor').locator('.cm-content').fill(SOURCE.replace('Library heading', 'Updated heading'))
@@ -202,19 +210,18 @@ test('navigation and source replacement discard hover targets from the previous 
   await expect(row(page, 'Text').filter({ hasText: 'Library heading' })).toHaveCount(0)
 })
 
-test('Folio opens with views only and connects the shared Book row to all four books', async ({ page }, testInfo) => {
+test('Folio opens with its main phone elements and connects the shared Book row to all four books', async ({ page }, testInfo) => {
   await page.goto('/')
   await page.getByTestId('gallery-source-app').click()
   await page.getByTestId('template-folio').click()
   await page.getByTestId('template-confirm').click()
-  const preview = page.getByTestId('render-tree')
+  const preview = mainPreview(page)
   await expect(preview.getByText('The Secret Garden', { exact: true })).toBeVisible()
   await page.getByTestId('inspect-toggle').click()
   await expect(row(page, 'RootView')).toHaveCount(0)
   await expect(row(page, 'MainTabs')).toHaveCount(0)
-  await expect(row(page, 'TabView')).toHaveCount(1)
-  await expect(row(page, 'LibraryView')).toHaveCount(2)
-  await row(page, 'LibraryView').first().dblclick()
+  await expect(row(page, 'TabView')).toHaveCount(0)
+  await expect(row(page, 'LibraryView')).toHaveCount(0)
   await expect(row(page, 'List')).toHaveCount(1)
   await expect(row(page, 'BookRow')).toHaveCount(1)
   await expect(layers(page).locator('[data-source-kind="definition"], [data-source-kind="template"], [data-source-kind="branch"]')).toHaveCount(0)
@@ -244,7 +251,7 @@ test('a canvas hover identifies the visible ancestor when its layer is collapsed
   await open(page)
   await page.getByTestId('collapse-layers').click()
   await expect(title(page)).toHaveCount(0)
-  await page.getByTestId('render-tree').getByText('Library heading', { exact: true }).hover()
+  await mainPreview(page).getByText('Library heading', { exact: true }).hover()
   await expect(row(page, 'VStack')).toHaveAttribute('data-hovered', 'true')
   await expect(hovered(page)).toHaveCount(1)
   await expect(layers(page).locator('[aria-selected="true"]')).toHaveCount(0)
@@ -257,7 +264,7 @@ test('a canvas hover identifies the visible ancestor when its layer is collapsed
 test('hover outlines track a scrolled List and remain clipped to its visible viewport', async ({ page }) => {
   const books = ['Book(id: "one", title: "First book")', ...Array.from({ length: 39 }, (_, i) => `Book(id: "book-${i + 2}", title: "Book ${i + 2}")`)].join(', ')
   await open(page, SOURCE.replace('Book(id: "one", title: "First book"), Book(id: "two", title: "Second book")', books))
-  const preview = page.getByTestId('render-tree')
+  const preview = mainPreview(page)
   await page.getByTestId('live-toggle').click()
   await preview.getByRole('button', { name: /First book/ }).hover()
   await page.mouse.wheel(0, 440)
@@ -269,6 +276,8 @@ test('hover outlines track a scrolled List and remain clipped to its visible vie
   })
   await expect.poll(async () => (await scrollState())?.scrollTop ?? 0).toBeGreaterThan(200)
   await page.getByTestId('inspect-toggle').click()
+  if (await row(page, 'List').getAttribute('aria-expanded') !== 'true') await layers(page).getByRole('button', { name: 'Expand List', exact: true }).click()
+  await expect.poll(async () => (await scrollState())?.scrollTop ?? 0).toBeGreaterThan(200)
   await row(page, 'BookRow').hover()
   const viewport = await scrollState()
   expect(viewport).not.toBeNull()

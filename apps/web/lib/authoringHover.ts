@@ -36,3 +36,43 @@ export function authoringRenderIds(node: AuthoringNode | null | undefined, snaps
   collect(layers)
   return layerRenderIds({ id: '__source_hover__', name: '', type: '', children: roots }, tree, layers)
 }
+
+/** Resolve a source selection without trusting a runtime path reused after an edit. */
+export function resolveAuthoringRuntimeSelection(
+  node: AuthoringNode | null | undefined,
+  snapshot: AuthoringSnapshot | undefined,
+  layers: readonly ViewLayer[],
+  requestedRuntimeId?: string,
+  preferredLayers: readonly ViewLayer[] = layers,
+): { readonly layer?: ViewLayer; readonly exact: boolean } {
+  if (!node || !snapshot || !snapshot.nodes.includes(node)) return { exact: false }
+  const byId = new Map(snapshot.nodes.map(item => [item.id, item]))
+  const allowed = new Set(node.runtimeIds)
+  // Definitions and source-only wrappers do not own a painted runtime node. An
+  // entered component keeps the selected instance through one of its body views.
+  if (node.kind === 'definition' || !node.runtimeIds.length) {
+    const seen = new Set<string>()
+    const collect = (item: AuthoringNode) => {
+      if (seen.has(item.id)) return
+      seen.add(item.id)
+      item.runtimeIds.forEach(id => allowed.add(id))
+      for (const id of item.children) {
+        const child = byId.get(id)
+        if (child) collect(child)
+      }
+    }
+    collect(node)
+  }
+  if (requestedRuntimeId && allowed.has(requestedRuntimeId)) {
+    const layer = findLayer(layers, requestedRuntimeId)
+    if (layer) return { layer, exact: true }
+  }
+  const first = (items: readonly ViewLayer[]): ViewLayer | undefined => {
+    for (const item of items) {
+      if (allowed.has(item.id)) return item
+      const child = first(item.children)
+      if (child) return child
+    }
+  }
+  return { layer: first(preferredLayers) ?? first(layers), exact: false }
+}

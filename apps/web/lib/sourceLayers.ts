@@ -1,9 +1,11 @@
-import { reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile } from '@studio/shared'
+import { reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
 
 export interface SourceLayerNavigation {
   readonly snapshot: AuthoringSnapshot
   readonly files: readonly SourceFile[]
   readonly entered?: string
+  readonly pageId?: string
+  readonly opened?: ReadonlySet<string>
   readonly closed: ReadonlySet<string>
   readonly dismissed?: string
   readonly dismissedEntry?: string
@@ -14,7 +16,7 @@ export interface SourceLayerNavigation {
 export function rebaseSourceLayers(state: SourceLayerNavigation, snapshot: AuthoringSnapshot, files: readonly SourceFile[], selection?: AuthoringSelection): SourceLayerNavigation {
   if (state.snapshot === snapshot) return state.selection === selection ? state : { ...state, selection, dismissed: undefined, dismissedEntry: undefined }
   const resolve = (id: string | undefined) => id ? reconcileAuthoringSelection({ snapshot: state.snapshot, nodeId: id, files: state.files }, snapshot, files)?.id : undefined
-  return { snapshot, files, entered: resolve(state.entered), closed: new Set([...state.closed].map(resolve).filter((id): id is string => !!id)), selection, dismissed: state.selection === selection ? resolve(state.dismissed) : undefined, dismissedEntry: state.selection === selection ? resolve(state.dismissedEntry) : undefined }
+  return { snapshot, files, pageId: state.pageId, entered: resolve(state.entered), closed: new Set([...state.closed].map(resolve).filter((id): id is string => !!id)), opened: new Set([...(state.opened ?? [])].map(resolve).filter((id): id is string => !!id)), selection, dismissed: state.selection === selection ? resolve(state.dismissed) : undefined, dismissedEntry: state.selection === selection ? resolve(state.dismissedEntry) : undefined }
 }
 
 const VIEW_NAMES: Readonly<Record<string, string>> = {
@@ -74,15 +76,15 @@ export function sourceLayerHiddenOwner(snapshot: AuthoringSnapshot, hidden: Hidd
 }
 
 /** A branch can be absent from the current preview while remaining selectable. */
-export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: AuthoringNode): boolean {
+export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: AuthoringNode, visibleRuntimeIds?: ReadonlySet<string>): boolean {
   if (!Object.keys(snapshot.runtimeToSource).length) return false
   if (node.kind !== 'branch') {
     const ancestors = sourceLayerAncestors(new Map(snapshot.nodes.map(item => [item.id, item])), node.id)
     const branch = ancestors.map(id => snapshot.nodes.find(item => item.id === id)).find(item => item?.kind === 'branch')
-    return !!branch && !node.runtimeIds.length && sourceLayerNotShown(snapshot, branch)
+    return !!branch && !node.runtimeIds.some(id => !visibleRuntimeIds || visibleRuntimeIds.has(id)) && sourceLayerNotShown(snapshot, branch, visibleRuntimeIds)
   }
   const nodes = new Map(snapshot.nodes.map(item => [item.id, item]))
-  const shown = (item: AuthoringNode): boolean => item.runtimeIds.length > 0 || item.children.some(id => {
+  const shown = (item: AuthoringNode): boolean => item.runtimeIds.some(id => !visibleRuntimeIds || visibleRuntimeIds.has(id)) || item.children.some(id => {
     const child = nodes.get(id)
     // Otherwise is an alternative to this condition, not evidence its then-content is shown.
     return !!child && !(item.id === node.id && node.name === 'Condition' && child.name === 'Otherwise') && shown(child)
@@ -104,7 +106,15 @@ export function sourceLayerIsVisual(node: AuthoringNode): boolean {
   return node.kind !== 'opaque' || /^[A-Z][A-Za-z0-9_]*$/.test(node.name)
 }
 
+export interface SourceLayerRuntimeContext {
+  /** The selected phone can narrow conditional visibility within reused components. */
+  readonly runtimeLayers?: readonly ViewLayer[]
+  readonly pageSource?: SourceSpan
+  readonly visibleRuntimeIds?: ReadonlySet<string>
+}
+
 export interface SourceLayerRow {
+  readonly shared?: boolean
   readonly node: AuthoringNode
   readonly depth: number
   readonly expanded: boolean
@@ -113,7 +123,22 @@ export interface SourceLayerRow {
   readonly children: readonly string[]
 }
 
+const SEPARATE_PAGES = new Set(['Sheet', 'Full screen cover', 'Destination'])
 const SECONDARY_CONTENT = new Set(['Background', 'Overlay', 'Toolbar', 'Sheet', 'Full screen cover', 'Destination', 'Safe area inset', 'Header', 'Footer'])
+
+/** Hidden comments belong to the current phone's source scope, including empty containers. */
+export function sourceLayerHiddenInScope(snapshot: AuthoringSnapshot, hidden: HiddenViewInfo, scope: readonly AuthoringNode[]): boolean {
+  if (!scope.length) return true
+  const nodes = new Map(snapshot.nodes.map(node => [node.id, node]))
+  const contains = (node: AuthoringNode) => node.source.file === hidden.file && node.source.start <= hidden.offset && node.source.end >= hidden.offset
+  const paths = scope.map(node => [node, ...sourceLayerAncestors(nodes, node.id).map(id => nodes.get(id)!)])
+  const bounds = paths.map(path => path.find(node => node.kind === 'branch' && SEPARATE_PAGES.has(node.name)) ?? path.find(node => node.kind === 'definition') ?? path[0]!)
+  if (!bounds.some(contains)) return false
+  // A main screen declaration can also contain inline destinations and sheets.
+  // Their hidden views remain with that separate screen, not its parent phone.
+  return snapshot.nodes.filter(node => node.kind === 'branch' && SEPARATE_PAGES.has(node.name) && contains(node))
+    .every(slot => paths.some(path => path.some(node => node.id === slot.id)))
+}
 
 /** A hidden view wrapper represents its one visible label/content view, not its destination. */
 export function sourceLayerPrimaryViewId(snapshot: AuthoringSnapshot, id: string | undefined, rows: readonly Pick<SourceLayerRow, 'node'>[]): string | undefined {
@@ -152,12 +177,28 @@ export function sourceLayerVisibleId(snapshot: AuthoringSnapshot, id: string | u
 }
 
 /** Project Swift structure into visual views while retaining original source identities. */
-export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceLayerNavigation, selected: string | undefined, query: string) {
+export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceLayerNavigation, selected: string | undefined, query: string, runtime?: SourceLayerRuntimeContext) {
   const nodes = new Map(snapshot.nodes.map(n => [n.id, n]))
+  const runtimeIds = runtime?.visibleRuntimeIds ? new Set(runtime.visibleRuntimeIds) : runtime?.runtimeLayers ? new Set<string>() : undefined
+  const pageRoots: string[] = []
+  const discoverPage = (layers: readonly ViewLayer[], mappedParent = false) => {
+    for (const layer of layers) {
+      runtimeIds?.add(layer.id)
+      const sourceId = snapshot.runtimeToSource[layer.id]
+      // Runtime navigation chrome borrows its container's source location for
+      // code reveal; a back button must not resurrect that previous screen.
+      const synthetic = layer.type.startsWith('_') && nodes.get(sourceId ?? '')?.name !== layer.type
+      const mapped = layer.page || synthetic ? undefined : sourceId
+      if (!mappedParent && mapped) pageRoots.push(mapped)
+      discoverPage(layer.children, mappedParent || !!mapped)
+    }
+  }
+  if (runtime?.runtimeLayers) discoverPage(runtime.runtimeLayers)
+  const pageContexts = runtime?.runtimeLayers ? new Set(snapshot.nodes.filter(node => node.runtimeIds.some(id => runtimeIds?.has(id))).flatMap(node => [node.id, ...sourceLayerAncestors(nodes, node.id)])) : undefined
   const ancestors = sourceLayerAncestors(nodes, selected)
   const selectionNode = selected ? nodes.get(selected) : undefined
-  const selectedContext = selectionNode && ['definition', 'template'].includes(selectionNode.kind) && navigation.dismissedEntry !== selected ? selectionNode : undefined
-  const entry = selectedContext ?? (navigation.entered && (!selected || selected === navigation.entered || ancestors.includes(navigation.entered)) ? nodes.get(navigation.entered) : undefined)
+  const selectedContext = selectionNode && (['definition', 'template'].includes(selectionNode.kind) || selectionNode.kind === 'branch' && SEPARATE_PAGES.has(selectionNode.name)) && (!pageContexts || pageContexts.has(selectionNode.id)) && navigation.dismissedEntry !== selected ? selectionNode : undefined
+  const entry = selectedContext ?? (navigation.entered && (!pageContexts || pageContexts.has(navigation.entered)) && (!selected || selected === navigation.entered || ancestors.includes(navigation.entered)) ? nodes.get(navigation.entered) : undefined)
   const appRoots = snapshot.roots.filter(id => nodes.get(id)?.children.some(child => nodes.get(child)?.name === 'WindowGroup'))
   const screens = new Set<string>()
   const discover = (id: string) => { const node = nodes.get(id); if (node?.definitionId) screens.add(node.definitionId); else node?.children.forEach(discover) }
@@ -166,11 +207,21 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
     const referenced = new Set(snapshot.nodes.flatMap(node => node.definitionId ? [node.definitionId] : []))
     snapshot.roots.filter(id => !appRoots.includes(id) && !referenced.has(id)).forEach(id => screens.add(id))
   }
+  const shared = new Set<string>()
   const flatten = (ids: readonly string[], seen = new Set<string>()): string[] => ids.flatMap(id => {
     const node = nodes.get(id)
-    if (!node || seen.has(id)) return []
+    if (!node || seen.has(id) || node.kind === 'branch' && SEPARATE_PAGES.has(node.name)) return []
+    if (node.kind === 'branch' && sourceLayerNotShown(snapshot, node, runtimeIds)) return node.name === 'Condition' ? flatten(node.children.filter(child => nodes.get(child)?.name === 'Otherwise'), new Set([...seen, id])) : []
     if (sourceLayerIsVisual(node)) return [id]
-    return flatten(node.children, new Set([...seen, id]))
+    const children = flatten(node.children, new Set([...seen, id]))
+    if (node.kind === 'template' && children.length) {
+      // A ForEach owns one shared design, even when it renders many records.
+      // Multiple top-level elements still belong to a single repeated row.
+      const rows = children.length === 1 ? children : [id]
+      rows.forEach(child => shared.add(child))
+      return rows
+    }
+    return children
   })
   // RootView → MainTabs is app wiring, not a pair of extra design layers.
   const screenContent = (id: string, seen = new Set<string>()): string[] => {
@@ -182,7 +233,10 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
     if (single?.definitionId && !seen.has(single.definitionId) && single.definitionId !== id && !flatten(single.children).length) return screenContent(single.definitionId, new Set([...seen, id]))
     return content
   }
-  const roots = [...new Set(entry ? flatten(entry.kind === 'definition' || !sourceLayerIsVisual(entry) ? entry.children : [entry.id]) : [...screens].flatMap(id => screenContent(id)))]
+  const rootCandidates = [...new Set(entry ? flatten(entry.kind === 'definition' || !sourceLayerIsVisual(entry) ? entry.children : [entry.id]) : pageRoots.length ? flatten(pageRoots) : runtime?.runtimeLayers ? [] : [...screens].flatMap(id => screenContent(id)))]
+  // Runtime chrome can expose a toolbar view both beside content and inside its
+  // source owner. Keep one source-owned row rather than duplicating that region.
+  const roots = rootCandidates.filter(id => !sourceLayerAncestors(nodes, id).some(parent => rootCandidates.includes(parent)))
   const childIds = new Map<string, readonly string[]>()
   const parentIds = new Map<string, string>()
   const collect = (id: string, parentId?: string, seen = new Set<string>()) => {
@@ -216,10 +270,10 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
     const node = nodes.get(id)
     if (!node || needle && !match(id)) return
     const children = childIds.get(id) ?? []
-    const expanded = !!children.length && (!!needle || revealed.has(id) || !navigation.closed.has(id))
-    rows.push({ node, depth, expanded, parentId: parentIds.get(id), children })
+    const expanded = !!children.length && (!!needle || revealed.has(id) || !navigation.closed.has(id) && (depth === 0 && !shared.has(id) || navigation.opened?.has(id) === true))
+    rows.push({ node, depth, expanded, shared: shared.has(id), parentId: parentIds.get(id), children })
     if (expanded) children.forEach(child => visit(child, depth + 1))
   }
   roots.forEach(id => visit(id, 0))
-  return { rows, screens, entry }
+  return { rows, screens, entry, scope: (entry ? [entry] : pageRoots.map(id => nodes.get(id)!)) }
 }

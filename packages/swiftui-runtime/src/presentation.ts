@@ -1,4 +1,4 @@
-import type { ViewLayer } from '@studio/shared'
+import type { SourceSpan, ViewLayer } from '@studio/shared'
 import { layerLabel, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
@@ -339,8 +339,24 @@ export interface ResolveContext {
  * record for a `TabView` without one - is read, not touched, so rendering the other
  * pages cannot fire an `.onChange` or move the app somebody is using.
  */
-export function resolveUI(views: readonly ViewValue[], ctx: ResolveContext, forceTab?: number): ResolvedUI {
-  return new Resolver(ctx, forceTab).run(views)
+export function resolveUI(views: readonly ViewValue[], ctx: ResolveContext, forceTab?: number, preview?: { prefix?: string; basePage?: boolean }): ResolvedUI {
+  return new Resolver(ctx, forceTab, preview?.prefix, preview?.basePage).run(views)
+}
+
+export interface NestedPage {
+  readonly id: string
+  readonly parentId: string
+  readonly rootId: string
+  readonly kind: 'destination' | 'sheet' | 'cover' | 'popover'
+  readonly name: string
+  readonly source: SourceSpan
+  readonly ui: ResolvedUI
+}
+
+/** Discover real routes with real sample values; never invoke their button actions. */
+export function resolveNestedPages(views: readonly ViewValue[], ctx: ResolveContext, tab: number, rootId: string, limit: number): readonly NestedPage[] {
+  const resolver = new Resolver(ctx, tab, 'v', true)
+  return resolver.nestedPages(views, rootId, Math.max(0, limit))
 }
 
 class Resolver {
@@ -357,14 +373,21 @@ class Resolver {
   private readonly buttonStyles: SwiftValue[] = []
   private visualStyle: readonly ModifierValue[] = []
   private contextMenuPath: string | undefined
+  private previewScope: readonly ViewValue[] = []
 
-  constructor(private readonly ctx: ResolveContext, private readonly forceTab?: number) {}
+  constructor(
+    private readonly ctx: ResolveContext,
+    private readonly forceTab?: number,
+    private readonly prefix = 'v',
+    private readonly basePage = false,
+  ) {}
 
   run(views: readonly ViewValue[]): ResolvedUI {
-    const stamped = this.stampList(views, 'v')
+    const stamped = this.stampList(views, this.prefix)
 
     const tabs = findView(stamped, 'TabView')
     const withTabs = tabs ? this.resolveTabs(tabs) : { content: stamped, tabBar: null, pages: [], selected: 0 }
+    this.previewScope = withTabs.content
 
     const nav =
       findView(withTabs.content, 'NavigationStack') ??
@@ -375,7 +398,7 @@ class Resolver {
 
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
-    const overlay = this.findOverlay(screen.content) ?? this.menuOverlay(screen.content)
+    const overlay = this.basePage ? null : this.findOverlay(screen.content) ?? this.menuOverlay(screen.content)
 
     const screenLayers = (content: readonly ViewValue[], bar: NavigationBar | null | undefined): ViewLayer[] => [
       ...viewLayers(content),
@@ -419,6 +442,76 @@ class Resolver {
       animation: this.ctx.animation,
       lifecycle: this.lifecycle,
     }
+  }
+
+  /** One example per destination declaration, with bounded recursive discovery. */
+  nestedPages(views: readonly ViewValue[], rootId: string, limit: number): readonly NestedPage[] {
+    const root = this.run(views)
+    const out: NestedPage[] = []
+    const seen = new Set<string>()
+    const queue = [{ ui: root, scope: this.previewScope, parentId: rootId, depth: 0 }]
+    let attempts = 0
+    while (queue.length && out.length < limit && attempts < 64) {
+      const current = queue.shift()!
+      if (current.depth >= 3) continue
+      const add = (kind: NestedPage['kind'], source: SourceSpan, build: () => readonly ViewValue[], fallback: string) => {
+        const key = `${kind}:${encodeURIComponent(source.file)}:${source.start}:${source.end}`
+        if (seen.has(key) || out.length >= limit || attempts++ >= 64) return
+        try {
+          const built = build()
+          if (!built.length) return
+          // Route order remains stable when text or modifier values change. Byte
+          // offsets are only a within-pass dedup key, never a persistent page id.
+          const ordinal = out.filter(page => page.kind === kind && page.source.file === source.file).length
+          const id = `${rootId}/preview:${kind}:${encodeURIComponent(source.file)}:${ordinal}`
+          const nestedResolver = new Resolver(this.ctx, undefined, `preview:${id}`, true)
+          const hasNavigation = findView(built, 'NavigationStack') ?? findView(built, 'NavigationView')
+          const content = kind === 'destination' && !hasNavigation ? [{
+            name: 'NavigationStack', args: [], children: built, modifiers: visualModifiers(built[0]!), action: null, span: source,
+          } satisfies ViewValue] : built
+          let ui = nestedResolver.run(content)
+          if (kind === 'destination') {
+            const title = ui.navigationBar?.title || fallback
+            const backTitle = current.ui.navigationBar?.title || 'Back'
+            const path = `preview:${id}/back`
+            const back: ViewValue = { name: BACK_BUTTON, args: [{ label: 'title', value: { kind: 'string', value: backTitle } }], children: [], modifiers: [], action: null, span: source, path }
+            const bar = ui.navigationBar
+            const tabBar = root.tabBar ? { items: root.tabBar.items.map((item, index) => nestedResolver.stamp(item, `preview:${id}/tab-${index}`)), view: nestedResolver.stamp(root.tabBar.view, `preview:${id}/tabs`) } : null
+            ui = { ...ui, tabBar, navigationBar: {
+              title, large: bar?.large ?? false, canGoBack: true, backTitle,
+              leading: [back], trailing: bar?.trailing ?? [],
+              view: bar ? { ...bar.view, children: [back, ...bar.trailing] } : { name: NAV_BAR, args: [{ label: 'title', value: { kind: 'string', value: title } }], children: [back], modifiers: [], action: null, span: source, path: `preview:${id}/bar` },
+            } }
+          }
+          const name = ui.navigationBar?.title || titleOf(built, fallback)
+          seen.add(key)
+          out.push({ id, parentId: current.parentId, rootId, kind, name, source, ui })
+          queue.push({ ui, scope: nestedResolver.previewScope, parentId: id, depth: current.depth + 1 })
+        } catch { /* A destination lacking valid data does not blank other pages. */ }
+      }
+      const visitLinks = (content: readonly ViewValue[]) => {
+        for (const view of content) {
+          if (view.name === 'NavigationLink') {
+            const builder = this.destinationBuilder(view, current.scope)
+            add('destination', builder?.span ?? view.span, () => (this.destinationFor(view, current.scope) ?? []).map(content => inheritVisualStyle(content, visualModifiers(view))), labelTextOf(view) || 'Details')
+          }
+          visitLinks(view.children)
+        }
+      }
+      const toolbar = [...(current.ui.navigationBar?.leading ?? []), ...(current.ui.navigationBar?.trailing ?? [])]
+      visitLinks([...current.ui.content, ...toolbar])
+      for (const { view, modifier } of allModifiers([...current.scope, ...toolbar])) {
+        const kind = OVERLAY_KINDS[modifier.name]
+        if (!modifier.closure || (kind !== 'sheet' && kind !== 'cover' && kind !== 'popover')) continue
+        const item = labelled(modifier.args, 'item')
+        const itemValue = item ? (asProjection(item)?.get() ?? item) : undefined
+        // Item-driven presentations need an actual selected item; inventing one
+        // can produce an impossible screen or force-unwrap unavailable data.
+        if (item && (!itemValue || itemValue.kind === 'nil')) continue
+        add(kind, modifier.span, () => this.ctx.build(modifier.closure!, itemValue ? [itemValue] : [], modifier.environment).map(content => inheritVisualStyle(content, visualModifiers(view))), kind === 'sheet' ? 'Sheet' : kind === 'cover' ? 'Full screen' : 'Popover')
+      }
+    }
+    return out
   }
 
   // ------------------------------------------------------------- identity
@@ -1053,7 +1146,7 @@ class Resolver {
     navigationBar: NavigationBar | null
   } {
     const stackId = stack.path ?? 'nav'
-    const pushed = this.ctx.state.stack(stackId)
+    const pushed = this.basePage ? [] : this.ctx.state.stack(stackId)
 
     let screen: readonly ViewValue[] = stack.children
     // The root's title when it sets none is *no title*, as in SwiftUI. It used to
@@ -1069,7 +1162,17 @@ class Resolver {
       const destination = link ? this.destinationFor(link, screen) : null
       if (!destination || destination.length === 0) break
 
-      screen = this.stampList(destination, `n${depth + 1}`, visualModifiers(link ?? stack))
+      // A reusable destination may declare its own navigation container (for
+      // example a screen also used as a tab). The active stack already owns its
+      // chrome and back history; keep the container's content, modifiers and
+      // source identity as a transparent group instead of laying out an unknown
+      // NavigationStack node. Descendant links then push onto this same history.
+      const content = (view: ViewValue): ViewValue => ({
+        ...view,
+        name: ['NavigationStack', 'NavigationView', 'NavigationSplitView'].includes(view.name) ? 'Group' : view.name,
+        children: view.children.map(content),
+      })
+      screen = this.stampList(destination.map(content), `n${depth + 1}`, visualModifiers(link ?? stack))
       const requestedMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
       if (requestedMode && requestedMode !== 'automatic') displayMode = requestedMode
       titles.push(titleOf(screen, labelTextOf(link!) || 'Back'))
@@ -1147,9 +1250,20 @@ class Resolver {
     const value = labelled(link.args, 'value')
     if (!value) return null
 
-    const builder = collectModifier(screen, 'navigationDestination')
+    const builder = this.destinationBuilder(link, screen)
     if (!builder?.closure) return null
     return this.ctx.build(builder.closure, [value], builder.environment)
+  }
+
+  private destinationBuilder(link: ViewValue, screen: readonly ViewValue[]): ModifierValue | null {
+    const value = labelled(link.args, 'value')
+    if (!value) return null
+    const typeName = value.kind === 'struct' || value.kind === 'enum' ? value.typeName : ({ int: 'Int', double: 'Double', string: 'String', bool: 'Bool' } as Record<string, string>)[value.kind]
+    const builders = [...allModifiers(screen)].map(item => item.modifier).filter(modifier => modifier.name === 'navigationDestination' && modifier.closure && labelled(modifier.args, 'for'))
+    return builders.find(builder => {
+      const type = labelled(builder.args, 'for')
+      return type?.kind === 'type' && type.name === typeName
+    }) ?? (builders.length === 1 ? builders[0]! : null)
   }
 
   private resolveToolbar(

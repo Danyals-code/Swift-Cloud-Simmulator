@@ -118,6 +118,10 @@ export function useCompiler({
   committedEditRevision = 0,
 }: CompilerOptions) {
   const handleRef = useRef<WorkerHandle | null>(null)
+  // Gallery composition has its own RPC. Keep its latest flag on real compiles
+  // without scheduling a second, delayed source compile when Arrange changes.
+  const allPagesRef = useRef(allPages)
+  useEffect(() => { allPagesRef.current = allPages }, [allPages])
   const revisionRef = useRef(0)
   const contextKey = JSON.stringify([projectId, scenario ?? null])
   const [compiledContext, setCompiledContext] = useState<string | null>(null)
@@ -212,7 +216,7 @@ export function useCompiler({
           typeScale,
           dynamicTypeSize,
           displayScale: device.scale,
-          allPages,
+          allPages: allPagesRef.current,
           revision,
         })
       if (revision !== revisionRef.current || handle !== handleRef.current) return
@@ -229,7 +233,7 @@ export function useCompiler({
       }))
       handleRef.current = null
     }
-  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, images, contextKey, allPages])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, images, contextKey])
 
   const latestCompile = useRef(runCompile)
   const latestPaused = useRef(paused)
@@ -317,6 +321,10 @@ export function useCompiler({
     // The mount carries the flag on its own compile request; only a *change* needs
     // telling, and a worker that has not compiled yet has nothing to redraw.
     if (galleryFlag.current === allPages) return
+    // Do not invalidate a source compile that has not established this program
+    // yet. That compile carries the latest flag; its accepted files/context will
+    // also retry this effect if the flag changed while the request was running.
+    if (compiledFiles !== files || compiledContext !== contextKey) return
     galleryFlag.current = allPages
     let live = true
     const handle = handleRef.current
@@ -332,7 +340,7 @@ export function useCompiler({
       }
     })()
     return () => { live = false }
-  }, [allPages, refine])
+  }, [allPages, refine, compiledFiles, files, compiledContext, contextKey])
 
   const reset = useCallback(async () => {
     if (compiledContext !== contextKey || compiledFiles !== files) {

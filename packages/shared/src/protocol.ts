@@ -68,10 +68,9 @@ export interface CompileRequest {
    * Render every page, not only the one on screen.
    *
    * Off by default and switched on by the studio's page gallery, because it costs
-   * one layout pass per page. Evaluation is unaffected either way: every tab's body
-   * is already evaluated on every pass, and what the extra passes buy is the
-   * *composition* - a navigation bar, a tab bar and a layout - for the pages the
-   * device is not currently showing.
+   * one layout pass per page. Deferred destinations and presentations are built
+   * from a detached copy of current app state, without actions or lifecycle hooks.
+   * Main tabs remain root pages; related screens carry their owning page id.
    */
   readonly allPages?: boolean
   /**
@@ -114,6 +113,13 @@ export interface PagePreview {
   readonly active: boolean
   readonly handlerId?: string
   readonly tree: RenderTree
+  /** Related screens are placed below their owning page, rather than beside tabs. */
+  readonly parentId?: string
+  readonly rootId?: string
+  readonly kind?: 'root' | 'destination' | 'sheet' | 'cover' | 'popover'
+  readonly source?: SourceSpan
+  /** Source mapping for views only present in this isolated preview. */
+  readonly viewHierarchy?: readonly ViewLayer[]
 }
 
 export interface CompileResult {
@@ -130,9 +136,8 @@ export interface CompileResult {
   /**
    * Every page, composed and laid out, when `allPages` asked for them.
    *
-   * Shorter than the hierarchy's page list when an app has more pages than the
-   * gallery draws; the caller has both, so it can say so rather than quietly
-   * showing a subset.
+   * Root tabs are capped separately from related screens. Child pages include
+   * their own hierarchy because their views are absent from the live screen.
    */
   readonly pages?: readonly PagePreview[]
   readonly logs: readonly LogEntry[]

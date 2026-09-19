@@ -16,7 +16,10 @@ import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-m
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
-import { authoringRenderIds, hoveredSourceIds } from '../lib/authoringHover'
+import { pageSlots } from '../lib/pageLayout'
+import { navigationDestinationForPage } from '../lib/navigationPicker'
+import { useNavigationPicker } from '../lib/useNavigationPicker'
+import { authoringRenderIds, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
 import { useCompiler } from '../lib/useCompiler'
 /**
  * Problems, output, timings and coverage, fetched when the panel is opened.
@@ -81,7 +84,14 @@ export function Studio() {
   const [layerSelection, setLayerSelection] = useState<{ projectId: string; id: string; anchor?: AuthoringSelection } | null>(null)
   /** The node the inspector's pointer is over. Null whenever it is over nothing. */
   const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
-  const [hoveredAuthoring, setHoveredAuthoring] = useState<AuthoringNode | null>(null)
+  const [hoveredAuthoring, setHoveredAuthoring] = useState<{ node: AuthoringNode; runtimeId?: string; projectId?: string } | null>(null)
+  const [designPageSelection, setDesignPageSelection] = useState<{ projectId: string; id: string } | null>(null)
+  const hoverProjectId = project?.id
+  const hoverAuthoring = useCallback((node: AuthoringNode | null, runtimeId?: string) => setHoveredAuthoring(node ? { node, runtimeId, projectId: hoverProjectId } : null), [hoverProjectId])
+  const hoverPreview = useCallback((node: RenderNode | null, pageId?: string) => {
+    setHoveredNode(node)
+    if (node && pageId && hoverProjectId) setDesignPageSelection(previous => previous?.projectId === hoverProjectId && previous.id === pageId ? previous : { projectId: hoverProjectId, id: pageId })
+  }, [hoverProjectId])
   const navigatorTab = useLayout(s => s.navigatorTab)
   const setNavigatorTab = useLayout(s => s.setNavigatorTab)
   const inspectorTab = useLayout(s => s.inspectorTab)
@@ -231,7 +241,7 @@ export function Studio() {
     typeScale: previewSettings.typeScale,
     dynamicTypeSize: previewSettings.dynamicTypeSize,
     previewTarget: project?.manifest.previewTarget,
-    allPages: showingAllPages && mode === 'design',
+    allPages: inspecting && mode === 'design',
     committedEditRevision,
   })
 
@@ -448,9 +458,15 @@ export function Studio() {
   )
 
   const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
-  const layers = result?.viewHierarchy ?? NO_FILES
-  /** What the app has, against what the gallery drew - they differ only past its limit. */
-  const pageCount = useMemo(() => layers.filter((layer) => layer.type === 'Page').length, [layers])
+  const designPages = mode === 'design' && inspecting ? result?.pages : undefined
+  const designPage = designPages?.find(page => project?.id === designPageSelection?.projectId && page.id === designPageSelection?.id)
+    ?? designPages?.find(page => page.active) ?? designPages?.[0]
+  const livePage = result?.viewHierarchy?.find(layer => layer.type === 'Presentation') ?? result?.viewHierarchy?.find(layer => layer.page?.active)
+  const pageHierarchy = useMemo(() => designPage?.viewHierarchy ?? (livePage ? [livePage] : undefined), [designPage?.viewHierarchy, livePage])
+  const focusedPage = designPage ?? livePage
+  const layers = useMemo(() => designPages?.length ? designPages.flatMap(page => page.viewHierarchy ?? []) : result?.viewHierarchy ?? NO_FILES, [designPages, result?.viewHierarchy])
+  const designRootId = designPage?.rootId ?? designPage?.id
+  const pageCount = designPages?.length ?? layers.filter(layer => layer.type === 'Page').length
   /**
    * The view an edit produced, found again in the tree the recompile made.
    *
@@ -480,14 +496,29 @@ export function Studio() {
     return undefined
   }, [result?.authoring, project, stale, editedLayer, layerSelection, pendingSelect])
 
-  const selectAuthoring = useCallback((node: AuthoringNode) => {
+  const navigationPickerIdentity = useMemo(() => ({ projectId: project?.id, files: project?.files, nodeId: authoringNode?.id, inspecting, mode, inspectorTab, showSettings: shown.preview }), [project?.id, project?.files, authoringNode?.id, inspecting, mode, inspectorTab, shown.preview])
+  const navigationPicker = useNavigationPicker(navigationPickerIdentity, mode === 'design' && inspecting && shown.preview && !stale)
+  const pickingNavigation = !!navigationPicker.destinations
+  const visiblePages = useMemo(() => designPages ? pageSlots(designPages, showingAllPages || pickingNavigation ? undefined : designRootId).map(slot => slot.page) : undefined, [designPages, showingAllPages, pickingNavigation, designRootId])
+  const navigationPageTargets = useMemo(() => navigationPicker.destinations && designPages ? Object.fromEntries(designPages.map(page => [page.id, navigationDestinationForPage(page, navigationPicker.destinations!, result?.authoring, project?.files ?? NO_FILES)])) : undefined, [navigationPicker.destinations, designPages, result?.authoring, project?.files])
+
+  const selectAuthoring = useCallback((node: AuthoringNode, runtimeId?: string) => {
     const snapshot = result?.authoring
     if (!project || stale || !snapshot || snapshot.projectId !== project.id) return
     setPendingSelect(null); setEditNote(null)
     useStudio.getState().setDocumentSelection({ file: node.source.file, offset: node.source.start })
-    setLayerSelection({ projectId: project.id, id: node.runtimeIds[0] ?? '', anchor: { snapshot, nodeId: node.id, files: project.files } })
+    const runtime = runtimeId ?? (node.kind === 'definition' ? layerSelection?.anchor?.runtimeId : undefined)
+    setLayerSelection({ projectId: project.id, id: runtime ?? node.runtimeIds[0] ?? '', anchor: { snapshot, nodeId: node.id, files: project.files, ...(runtime ? { runtimeId: runtime } : {}) } })
+    if (node.kind === 'branch') {
+      const related = designPages?.filter(page => page.parentId && page.source?.file === node.source.file && page.source.start <= node.source.start && page.source.end >= node.source.end)
+        .sort((a, b) => Number(b.rootId === designRootId) - Number(a.rootId === designRootId) || (a.source!.end - a.source!.start) - (b.source!.end - b.source!.start))[0]
+      if (related) {
+        setDesignPageSelection({ projectId: project.id, id: related.id })
+        setCenterOn({ id: related.id, nonce: ++centerNonce.current })
+      }
+    }
     setInspectorTab('settings')
-  }, [project, stale, result?.authoring, setInspectorTab])
+  }, [project, stale, result?.authoring, setInspectorTab, layerSelection?.anchor?.runtimeId, designPages, designRootId])
 
   const saveScenario = useCallback((name: string, inputs: readonly PreviewInput[]): string | null => {
     const state = useStudio.getState(), snapshot = result?.authoring
@@ -510,13 +541,18 @@ export function Studio() {
     setLayerSelection({ projectId: project.id, id: layer.id, anchor: snapshot && nodeId ? { snapshot, nodeId, files: project.files, runtimeId: layer.id } : undefined })
   }, [project, stale, result?.authoring])
 
+  const sourceRuntimeSelection = useMemo(() => resolveAuthoringRuntimeSelection(authoringNode, result?.authoring, layers, layerSelection?.anchor?.runtimeId, pageHierarchy), [authoringNode, result?.authoring, layers, layerSelection?.anchor?.runtimeId, pageHierarchy])
   const selectedLayerId = editedLayer?.id
-    ?? (layerSelection?.anchor ? authoringNode?.runtimeIds.find(id => id === layerSelection.id) ?? authoringNode?.runtimeIds[0] ?? null
+    ?? (layerSelection?.anchor ? sourceRuntimeSelection.layer?.id ?? null
       : layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null)
-  const selectedRenderIds = useMemo(() => layerRenderIds(
-    mode === 'design' && navigatorTab === 'layers' && selectedLayerId ? findLayer(layers, selectedLayerId) : undefined,
-    result?.renderTree, layers,
-  ), [layers, selectedLayerId, result?.renderTree, mode, navigatorTab])
+  const selectedRenderIds = useMemo(() => {
+    if (mode !== 'design' || navigatorTab !== 'layers') return new Set<string>()
+    const trees = designPages?.map(page => page.tree) ?? [result?.renderTree]
+    const exact = sourceRuntimeSelection.exact ? sourceRuntimeSelection.layer?.id : undefined
+    return new Set(trees.flatMap(tree => [...(exact
+      ? layerRenderIds(findLayer(layers, exact), tree, layers)
+      : authoringRenderIds(authoringNode, result?.authoring, pageHierarchy ?? layers, tree))]))
+  }, [mode, navigatorTab, designPages, result?.renderTree, result?.authoring, sourceRuntimeSelection, layers, authoringNode, pageHierarchy])
   const selectLayer = (layer: ViewLayer, page: ViewLayer) => {
     if (stale || !project) return
     setPendingSelect(null)
@@ -525,21 +561,23 @@ export function Studio() {
     // Bring its page into view, which is what makes Layers usable on a canvas that
     // has been zoomed into or panned away from the page being chosen.
     setCenterOn({ id: page.id, nonce: ++centerNonce.current })
-    if (page.page?.handlerId && !page.page.active) {
+    const preview = designPages?.find(item => item.id === page.id)
+    if (preview) setDesignPageSelection({ projectId: project.id, id: preview.id })
+    else if (page.page?.handlerId && !page.page.active) {
       void dispatch({ kind: 'tap', handlerId: page.page.handlerId, location: { x: 0, y: 0 } })
     }
   }
 
-  /**
-   * Opening a page from the gallery.
-   *
-   * The same press the tab bar would have taken, so the app changes tab exactly as
-   * it would on the device - and the gallery redraws with the new page live.
-   */
+  /** Focus a design phone without navigating or mutating the running app. */
   const openPage = useCallback((page: PagePreview) => {
-    if (!page.handlerId) return
-    void dispatch({ kind: 'tap', handlerId: page.handlerId, location: { x: 0, y: 0 } })
-  }, [dispatch])
+    if (!project) return
+    setDesignPageSelection({ projectId: project.id, id: page.id })
+    setLayerSelection(null)
+    setPendingSelect(null)
+    setHoveredNode(null)
+    setHoveredAuthoring(null)
+    setCenterOn({ id: page.id, nonce: ++centerNonce.current })
+  }, [project])
 
   // ------------------------------------------------------------ editing
 
@@ -586,14 +624,21 @@ export function Studio() {
     try {
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, componentDescriptions: project.studio?.components, target, fingerprint, operation })
       if (!plan.ok) { setEditNote(plan.reason); return plan.reason }
+      // Context settings edit the navigation owner while the designer keeps the
+      // visible label/row selected. Reconcile it against the exact planned source.
+      const afterFiles = project.files.map(file => ({ ...file, text: plan.changes.find(change => change.file === file.id)?.after ?? file.text }))
+      const navigationSelection = operation.kind === 'navigation-target' && authoringNode && result?.authoring && plan.authoring
+        ? reconcileAuthoringSelection({ snapshot: result.authoring, nodeId: authoringNode.id, files: project.files }, plan.authoring, afterFiles)
+        : undefined
+      const selectedPlan = navigationSelection ? { ...plan, selection: { file: navigationSelection.source.file, offset: navigationSelection.source.start } } : plan
       const preserveSelection = ['style-edit', 'style-create', 'asset-references'].includes(operation.kind)
       const currentSelection = useStudio.getState().documentSelection
       const selectionChanged = JSON.stringify(currentSelection) !== JSON.stringify(state.documentSelection)
-      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...plan, selection: undefined } : plan)
+      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...selectedPlan, selection: undefined } : selectedPlan)
       if (problem) { setEditNote(problem); return problem }
       if (plan.changes.length) setCommittedEditRevision(revision => revision + 1)
       if (plan.changes.length && !selectionChanged && !preserveSelection) {
-        const selected = plan.selection
+        const selected = selectedPlan.selection
         const snapshot = plan.authoring
         const node = selected && snapshot?.nodes.find(n => n.source.file === selected.file && n.source.start === selected.offset && n.kind !== 'definition')
         const files = useStudio.getState().project!.files
@@ -604,7 +649,7 @@ export function Studio() {
       setEditNote(null)
       return null
     } finally { editingRef.current = false }
-  }, [project, stale, planDesignEdit, result?.authoring?.revision])
+  }, [project, stale, planDesignEdit, result?.authoring, authoringNode])
 
   const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
     const target = layer ?? selectedLayer
@@ -630,7 +675,7 @@ export function Studio() {
    * With nothing selected it targets the visible page's own content, so Add works on
    * a screen nobody has clicked into yet.
    */
-  const addTargetLayer = useMemo(() => insertionLayer(layers, selectedLayer), [selectedLayer, layers])
+  const addTargetLayer = useMemo(() => insertionLayer(pageHierarchy ?? layers, selectedLayer), [selectedLayer, pageHierarchy, layers])
 
   const canAdd = !!addTargetLayer?.source && !stale
 
@@ -789,17 +834,25 @@ export function Studio() {
 
   /** The layer under the inspector's pointer, while Layers is there to show it. */
   const hoveredLayerId = useMemo(
-    () => (inspecting && mode === 'design' && !stale && hoveredNode && result?.renderTree?.nodes.includes(hoveredNode) ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
-    [inspecting, mode, stale, result?.renderTree, layers, hoveredNode],
+    () => (inspecting && mode === 'design' && !stale && hoveredNode && (result?.renderTree?.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file) || designPages?.some(page => page.tree.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file))) ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
+    [inspecting, mode, stale, result?.renderTree, designPages, layers, hoveredNode],
   )
 
   const selectedSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, selectedLayerId), [result?.authoring, layers, selectedLayerId])
   const hoveredSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, hoveredLayerId), [result?.authoring, layers, hoveredLayerId])
-  const liveHoveredAuthoring = inspecting && mode === 'design' && navigatorTab === 'layers' && !stale && hoveredAuthoring && result?.authoring?.nodes.includes(hoveredAuthoring) ? hoveredAuthoring : null
-  const hoveredRenderIds = useMemo(() => authoringRenderIds(
-    liveHoveredAuthoring,
-    result?.authoring, layers, result?.renderTree,
-  ), [liveHoveredAuthoring, result?.authoring, layers, result?.renderTree])
+  const liveHoveredAuthoring = useMemo(() => {
+    if (!inspecting || mode !== 'design' || navigatorTab !== 'layers' || stale || !hoveredAuthoring || hoveredAuthoring.projectId !== project?.id) return null
+    const previous = hoveredAuthoring.node
+    const node = result?.authoring?.nodes.find(node => node.id === previous.id && node.fingerprint === previous.fingerprint && node.source.file === previous.source.file && node.source.start === previous.source.start && node.source.end === previous.source.end)
+    return node ? { ...hoveredAuthoring, node } : null
+  }, [inspecting, mode, navigatorTab, stale, hoveredAuthoring, project?.id, result?.authoring])
+  const hoveredRenderIds = useMemo(() => {
+    if (!liveHoveredAuthoring) return new Set<string>()
+    const { node, runtimeId } = liveHoveredAuthoring
+    const tree = designPage?.tree ?? result?.renderTree
+    return runtimeId ? layerRenderIds(findLayer(pageHierarchy ?? layers, runtimeId), tree, pageHierarchy ?? layers)
+      : authoringRenderIds(node, result?.authoring, pageHierarchy ?? layers, tree)
+  }, [liveHoveredAuthoring, designPage?.tree, result?.renderTree, result?.authoring, pageHierarchy, layers])
 
   /**
    * Clicking a view while inspecting.
@@ -811,7 +864,8 @@ export function Studio() {
    * line, so switching to Code afterwards lands on it.
    */
   const inspectSelect = useCallback(
-    (node: RenderNode) => {
+    (node: RenderNode, pageId?: string) => {
+      if (pageId && project) setDesignPageSelection({ projectId: project.id, id: pageId })
       if (mode !== 'design') {
         revealSource(node)
         return
@@ -981,14 +1035,18 @@ export function Studio() {
             <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
               <Navigator
                 key={project.id}
+                pageId={focusedPage?.id}
+                pageName={focusedPage?.name}
+                pageSource={focusedPage?.source}
+                pageLayers={pageHierarchy}
                 authoring={result?.authoring}
                 authoringFiles={project.files}
                 authoringSelection={layerSelection?.anchor}
                 selectedAuthoringId={authoringNode?.id}
                 selectedAuthoringAncestors={selectedSources}
-                hoveredAuthoringId={liveHoveredAuthoring?.id ?? hoveredSources[0]}
+                hoveredAuthoringId={liveHoveredAuthoring?.node.id ?? hoveredSources[0]}
                 hoveredAuthoringAncestors={hoveredSources.slice(1)}
-                onHoverAuthoring={setHoveredAuthoring}
+                onHoverAuthoring={hoverAuthoring}
                 onEditAuthoring={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
                 onSelectAuthoring={selectAuthoring}
                 layers={layers}
@@ -1113,16 +1171,25 @@ export function Studio() {
                 settingsWidth={settingsWidth}
                 onSettingsResize={(size) => setSize('settings', size)}
                 onToggleSettings={() => togglePane('preview')}
-                onHoverNode={setHoveredNode}
-                pages={mode === 'design' && showingAllPages ? result?.pages : undefined}
+                onHoverNode={pickingNavigation ? undefined : hoverPreview}
+                pages={visiblePages}
+                selectedPageId={designPage?.id}
                 pageCount={pageCount}
                 onSelectPage={openPage}
-                allPages={allPages}
+                allPages={allPages || pickingNavigation}
+                navigationPicker={navigationPageTargets ? {
+                  targets: navigationPageTargets,
+                  onPick: page => {
+                    const destination = navigationPageTargets[page.id]?.destination
+                    if (destination) navigationPicker.finish(destination.expression)
+                  },
+                  onCancel: () => navigationPicker.finish(null),
+                } : undefined}
                 onToggleAllPages={setAllPages}
                 belowCanvas={mode === 'design' ? debugArea : null}
                 tool={tool}
                 selection={selection}
-                authoringFeatures={{ assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
+                authoringFeatures={{ onPickNavigation: navigationPicker.start, assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
                   return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })

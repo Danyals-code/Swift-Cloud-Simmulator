@@ -112,3 +112,23 @@
 .contextItem > summary { margin-bottom: 8px; }
 .contextItem:not([open]) > summary { margin-bottom: 0; }
 .contextLinks { display: flex; gap: 6px 12px; flex-wrap: wrap; }
+
+
+.destinationEditor { display: grid; gap: 8px; min-width: 0; }
+.destinationEditor > label { font-size: 11px; font-weight: 550; }
+.destinationPicker { position: relative; min-width: 0; }
+.destinationInput { display: flex; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; background: var(--color-xc-bar-raised); }
+.destinationInput:focus-within { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
+.destinationInput input { flex: 1; width: 100%; min-width: 0; border: 0; outline: none; background: transparent; color: var(--color-xc-text); padding: 8px; font-size: 12px; }
+.destinationInput input[aria-invalid="true"] { box-shadow: inset 0 -1px var(--color-xc-error); }
+.destinationInput button { display: grid; place-items: center; width: 30px; color: var(--color-xc-text-2); }
+.destinationOptions { margin-top: 4px; display: grid; gap: 2px; max-height: 240px; overflow: auto; padding: 5px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-panel); box-shadow: 0 5px 18px rgb(0 0 0 / .12); }
+.destinationOptions > button { display: grid; gap: 3px; width: 100%; padding: 7px; border-radius: 4px; min-width: 0; color: var(--color-xc-text); }
+.destinationOptions > button:not(:disabled):hover, .destinationOptions > button[data-active="true"] { background: var(--color-xc-select); }
+.destinationOptions small { font-size: 10px; color: var(--color-xc-text-3); overflow-wrap: anywhere; }
+.destinationOptions p { padding: 7px; }
+.destinationCurrent { color: var(--color-xc-text-3); }
+.destinationCurrent code { font-size: 10px; overflow-wrap: anywhere; }
+.destinationActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.destinationActions button { padding: 5px 0; }
+.destinationActions .destinationPick { display: inline-flex; align-items: center; gap: 5px; }

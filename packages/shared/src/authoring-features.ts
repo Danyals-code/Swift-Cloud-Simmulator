@@ -55,6 +55,25 @@ export interface StateInput {
   readonly options?: readonly string[]
   readonly source: SourceSpan
 }
+export interface NavigationDestination {
+  /** Original destination expression, including the route before parameter substitution. */
+  readonly source?: SourceSpan
+  readonly title: string
+  readonly expression: string
+  readonly viewName: string
+  readonly requirements: readonly { readonly name: string; readonly type: string; readonly required: boolean }[]
+  readonly available: boolean
+  readonly reason?: string
+}
+export interface NavigationSettings {
+  readonly destination: string
+  readonly display: string
+  readonly destinations: readonly NavigationDestination[]
+  readonly editable: boolean
+  readonly reason?: string
+  readonly scope: 'link' | 'shared-route' | 'presentation'
+  readonly scopeDescription: string
+}
 export interface BehaviorSettings {
   readonly states: readonly StateInput[]
   readonly collections: readonly CollectionSettings[]
@@ -74,6 +93,7 @@ export type BehaviorAction =
   | { readonly type: 'append'; readonly collection: string; readonly record: DesignRecord }
   | { readonly type: 'delete'; readonly collection: string; readonly id: DesignValue }
 export type AuthoringOperation = ResourceOperation | ModifierOperation
+  | { readonly kind: 'navigation-target'; readonly destination: string }
   | { readonly kind: 'records'; readonly records: readonly DesignRecord[] }
   | { readonly kind: 'collection-field'; readonly name: string; readonly type: RecordField['type']; readonly optional: boolean; readonly value: DesignValue }
   | { readonly kind: 'collection-convert'; readonly name: string; readonly recordType: string }

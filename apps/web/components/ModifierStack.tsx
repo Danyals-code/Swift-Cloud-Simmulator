@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import type { AuthoringModifier, AuthoringNode, DesignControl, SourceSpan } from '@studio/shared'
 import type { FeatureChange } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
+import { navigationDestinationEditorId } from './NavigationDestinationEditor'
 import styles from './AuthoringInspector.module.css'
 
 function controlLabel(control: DesignControl, modifier: AuthoringModifier): string {
@@ -16,7 +17,7 @@ function controlLabel(control: DesignControl, modifier: AuthoringModifier): stri
   return modifier.label
 }
 
-export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = false }: { node: AuthoringNode; onChange?: PropertyChange; onCommand?: FeatureChange; onReveal?: (span: SourceSpan) => void; behavior?: boolean }) {
+export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = false, navigationSlots = [] }: { navigationSlots?: readonly AuthoringNode[]; node: AuthoringNode; onChange?: PropertyChange; onCommand?: FeatureChange; onReveal?: (span: SourceSpan) => void; behavior?: boolean }) {
   const modifiers = node.modifiers ?? []
   const entries = modifiers.map((modifier, index) => ({ modifier, index })).filter(({ modifier }) => (modifier.category === 'behavior') === behavior)
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set([0]))
@@ -55,13 +56,15 @@ export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = 
   return <div className={styles.modifierStack} data-testid={behavior ? 'behavior-modifiers' : 'modifier-stack'} aria-busy={busy}>
     {!behavior && <div className={styles.sectionHeading}><h3>Modifiers</h3><span>{entries.length}</span></div>}
     {!entries.length && !behavior && <p className={styles.note}>Add a modifier to style this view.</p>}
-    {entries.map(({ modifier, index }) => <article key={modifier.id} className={`${styles.modifierCard} ${dropIndex === index ? styles.dropBefore : ''}`} data-testid="modifier-card" data-modifier-name={modifier.name}
+    {entries.map(({ modifier, index }) => {
+      const navigation = navigationSlots.find(slot => slot.navigation?.editable && slot.source.file === modifier.source.file && slot.source.start >= modifier.source.start && slot.source.end <= modifier.source.end)
+      return <article key={modifier.id} className={`${styles.modifierCard} ${dropIndex === index ? styles.dropBefore : ''}`} data-testid="modifier-card" data-modifier-name={modifier.name}
       onDragOver={event => { if (event.dataTransfer.types.includes('application/x-studio-modifier') && !busy) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropIndex(index) } }}
       onDrop={event => { if (event.dataTransfer.types.includes('application/x-studio-modifier')) { event.preventDefault(); drop(index) } }}>
       <div className={styles.modifierHeader}>
         <span className={styles.dragHandle} aria-hidden="true" title="Drag to change order" draggable={!busy && (modifier.capabilities.moveUp || modifier.capabilities.moveDown)} onDragStart={event => { drag.current = { id: modifier.id, index }; event.dataTransfer.setData('application/x-studio-modifier', modifier.id); event.dataTransfer.effectAllowed = 'move' }} onDragEnd={() => { drag.current = null; setDropIndex(null) }}>⠿</span>
         <button type="button" className={styles.modifierToggle} aria-expanded={expanded.has(index)} onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next })}>
-          <span className={styles.chevron}>{expanded.has(index) ? '⌄' : '›'}</span><span><strong>{modifier.label}</strong><small>{modifier.summary}</small></span>
+          <span className={styles.chevron}>{expanded.has(index) ? '⌄' : '›'}</span><span><strong>{modifier.label}</strong><small>{navigation?.navigation?.display ?? modifier.summary}</small></span>
         </button>
         <button type="button" className={styles.modifierMenuButton} aria-label={`${modifier.label} actions`} aria-expanded={menu === modifier.id} onClick={() => setMenu(menu === modifier.id ? null : modifier.id)}>···</button>
       </div>
@@ -73,11 +76,12 @@ export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = 
       </div>}
       {expanded.has(index) && <div className={styles.modifierBody}>
         {modifier.controls.map(control => onChange && <PropertyControl key={`${control.id}:${control.value}`} control={control} label={controlLabel(control, modifier)} onChange={onChange} />)}
-        {!modifier.controls.length && <p className={styles.note}>{modifier.category === 'custom' ? 'Custom modifier' : 'Configured in code'}</p>}
+        {!modifier.controls.length && !navigation && <p className={styles.note}>{modifier.category === 'custom' ? 'Custom modifier' : 'Configured in code'}</p>}
         {modifier.capabilities.reason && <p className={styles.note}>{modifier.capabilities.reason}</p>}
-        {(!modifier.capabilities.edit || !modifier.controls.length) && onReveal && <button type="button" onClick={() => onReveal(modifier.source)}>Edit in Code</button>}
+        {navigation && <button type="button" onClick={() => { const editor = document.getElementById(navigationDestinationEditorId(navigation)); editor?.scrollIntoView({ block: 'nearest' }); editor?.querySelector<HTMLInputElement>('[role="combobox"]')?.focus() }}>Change destination</button>}
+        {!navigation && (!modifier.capabilities.edit || !modifier.controls.length) && onReveal && <button type="button" onClick={() => onReveal(modifier.source)}>Edit in Code</button>}
       </div>}
-    </article>)}
+    </article>})}
     {!behavior && !!entries.length && <div className={`${styles.dropEnd} ${dropIndex === modifiers.length ? styles.dropBefore : ''}`} aria-hidden="true" onDragOver={event => { if (event.dataTransfer.types.includes('application/x-studio-modifier')) { event.preventDefault(); setDropIndex(modifiers.length) } }} onDrop={event => { event.preventDefault(); drop(modifiers.length) }} />}
     {!behavior && !!node.modifierCatalog?.length && <button type="button" ref={addButton} className={styles.addModifier} disabled={busy || !onCommand} aria-expanded={picker} onClick={() => { setPicker(!picker); setQuery('') }}>＋ Add modifier</button>}
     {picker && <div className={styles.modifierPicker} role="dialog" aria-label="Add modifier" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setPicker(false); addButton.current?.focus() } }}>

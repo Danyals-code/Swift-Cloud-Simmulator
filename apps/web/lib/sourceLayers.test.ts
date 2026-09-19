@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
+import { FOLIO_FILES } from '@studio/project-model/templates'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { hiddenViewsIn } from '@studio/swift-syntax'
 import type { AuthoringSnapshot } from '@studio/shared'
-import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
+import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
 
 const collection = 'ForEach(0..<3, id: \\.self) { i in Text("Row").padding(8) }'
 const source = `import SwiftUI
@@ -326,7 +328,7 @@ struct BookRow: View { var body: some View { Text("Book title") } }
   const link = snapshot.nodes.find(node => node.name === 'NavigationLink')!
   const label = snapshot.nodes.find(node => node.name === 'BookRow' && node.kind === 'component')!
   const rows = sourceLayerRows(snapshot, navigation(snapshot), undefined, '').rows
-  expect(rows.map(row => row.node.name)).toEqual(['List', 'BookRow', 'Text'])
+  expect(rows.map(row => row.node.name)).toEqual(['List', 'BookRow'])
   expect(sourceLayerPrimaryViewId(snapshot, link.id, rows)).toBe(label.id)
   expect(sourceLayerVisibleId(snapshot, link.id, rows)).toBe(label.id)
   expect(label.parentId).toBe(link.id)
@@ -345,4 +347,188 @@ struct ContentView: View { var body: some View { List { NavigationLink(destinati
   const filtered = sourceLayerRows(snapshot, navigation(snapshot), undefined, 'First').rows
   expect(sourceLayerPrimaryViewId(snapshot, link.id, filtered)).toBeUndefined()
   expect(sourceLayerVisibleId(snapshot, link.id, filtered)).toBe(list.id)
+})
+
+
+describe('simple screen elements', () => {
+  const run = (body: string, extra = '') => {
+    resetPipelineState()
+    const text = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View { var body: some View { ${body} } }
+${extra}`
+    const result = compile({ projectId: 'p', revision: 1, files: files(text), canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    expect(result.diagnostics.filter(item => item.severity === 'error')).toEqual([])
+    const snapshot = result.authoring!
+    return { snapshot, layers: result.viewHierarchy!, state: { snapshot, files: files(text), closed: new Set<string>() } }
+  }
+
+  it('shows one shared row design for four rendered records, with row details collapsed', () => {
+    const { snapshot, layers, state } = run('List { ForEach(0..<4, id: \\.self) { index in HStack { Image(systemName: "book"); Text("Book \\(index)") } } }')
+    const result = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers })
+    expect(result.rows.map(row => row.node.name)).toEqual(['List', 'HStack'])
+    expect(result.rows[1]!.shared).toBe(true)
+    expect(result.rows[1]!.node.runtimeIds).toHaveLength(4)
+    expect(result.rows[1]!.expanded).toBe(false)
+    const rowId = result.rows[1]!.node.id
+    const expanded = sourceLayerRows(snapshot, { ...state, opened: new Set([rowId]) }, undefined, '', { runtimeLayers: layers })
+    expect(expanded.rows.map(row => row.node.name)).toEqual(['List', 'HStack', 'Image', 'Text'])
+    expect(expanded.rows.filter(row => row.shared)).toHaveLength(1)
+  })
+
+  it('keeps four independently declared designs as four editable entries', () => {
+    const { snapshot, layers, state } = run('List { Text("One"); Text("Two"); Text("Three"); Text("Four") }')
+    const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers }).rows
+    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['List', 'One', 'Two', 'Three', 'Four'])
+    expect(rows.some(row => row.shared)).toBe(false)
+    expect(new Set(rows.slice(1).map(row => row.node.source.start)).size).toBe(4)
+  })
+
+  it('groups a multi-element repeated template into one shared design', () => {
+    const { snapshot, layers, state } = run('List { ForEach(0..<4, id: \\.self) { index in Text("Title"); Text("Subtitle") } }')
+    const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers }).rows
+    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['List', 'Row design'])
+    expect(rows[1]!.shared).toBe(true)
+    expect(rows[1]!.expanded).toBe(false)
+    const entered = sourceLayerRows(snapshot, { ...state, entered: rows[1]!.node.id }, rows[1]!.node.id, '', { runtimeLayers: layers })
+    expect(entered.rows.map(row => sourceLayerLabel(row.node))).toEqual(['Title', 'Subtitle'])
+  })
+
+  it('omits unrendered alternatives and separate pages from the parent phone', () => {
+    const { snapshot, layers, state } = run('VStack { Text("Main"); if false { Text("Unavailable") } else { Text("Ready") }; NavigationLink("Details", destination: Text("Detail page")) }.sheet(isPresented: .constant(false)) { Text("Add page") }')
+    const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers }).rows
+    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['Column', 'Main', 'Ready', 'Details'])
+    expect(rows.every(row => !sourceLayerNotShown(snapshot, row.node))).toBe(true)
+    const destination = snapshot.nodes.find(node => node.kind === 'branch' && node.name === 'Destination')!
+    const separate = sourceLayerRows(snapshot, state, destination.id, '')
+    expect(separate.entry?.id).toBe(destination.id)
+    expect(separate.rows.map(row => sourceLayerLabel(row.node))).toEqual(['Detail page'])
+  })
+
+  it('scopes the main hierarchy to one phone rather than showing all tabs', () => {
+    const { snapshot, layers, state } = run('TabView { FirstView().tabItem { Text("First") }; SecondView().tabItem { Text("Second") } }', 'struct FirstView: View { var body: some View { VStack { Text("First content") } } }; struct SecondView: View { var body: some View { Text("Second content") } }')
+    const first = snapshot.nodes.find(node => node.name === 'VStack')!
+    const find = (items: typeof layers): typeof layers[number] | undefined => {
+      for (const layer of items) { if (first.runtimeIds.includes(layer.id)) return layer; const found = find(layer.children); if (found) return found }
+    }
+    const phone = find(layers)!
+    expect(phone).toBeDefined()
+    const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: [phone] }).rows
+    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['Column', 'First content'])
+    expect(rows.some(row => row.node.name === 'TabView')).toBe(false)
+    const otherDefinition = snapshot.nodes.find(node => node.kind === 'definition' && node.name === 'SecondView')!
+    const staleEntry = sourceLayerRows(snapshot, { ...state, entered: otherDefinition.id }, otherDefinition.id, '', { runtimeLayers: [phone] })
+    expect(staleEntry.entry).toBeUndefined()
+    expect(staleEntry.rows.map(row => sourceLayerLabel(row.node))).toEqual(['Column', 'First content'])
+  })
+})
+
+
+it('keeps Folio main and secondary phone layers separate using each page hierarchy', () => {
+  resetPipelineState()
+  const result = compile({ projectId: 'folio', revision: 1, files: [...FOLIO_FILES], canvas: { width: 402, height: 874 }, colorScheme: 'light', allPages: true })
+  expect(result.diagnostics.filter(item => item.severity === 'error')).toEqual([])
+  const snapshot = result.authoring!
+  const state = { snapshot, files: FOLIO_FILES, closed: new Set<string>() }
+  const main = result.pages!.find(page => page.kind === 'root' && page.name === 'Library')!
+  expect(main).toBeDefined()
+  const mainRows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: main.viewHierarchy }).rows
+  expect(mainRows.map(row => row.node.name)).toEqual(['List', 'BookRow', 'Button'])
+  expect(mainRows.find(row => row.node.name === 'BookRow')?.shared).toBe(true)
+  for (const page of result.pages!.filter(page => page.parentId)) {
+    const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: page.viewHierarchy }).rows
+    expect(rows.length, page.name).toBeGreaterThan(0)
+    expect(rows.every(row => row.node.name !== 'BookRow'), page.name).toBe(true)
+  }
+})
+
+
+describe('live Folio phone layers', () => {
+  const open = () => {
+    resetPipelineState()
+    const result = compile({ projectId: 'folio-live', revision: 1, files: [...FOLIO_FILES], canvas: { width: 402, height: 874 }, colorScheme: 'light' })
+    expect(result.diagnostics.filter(item => item.severity === 'error')).toEqual([])
+    return result
+  }
+  const rows = (result: ReturnType<typeof compile>) => {
+    const snapshot = result.authoring!
+    const focused = result.viewHierarchy!.find(layer => layer.type === 'Presentation') ?? result.viewHierarchy!.find(layer => layer.page?.active)
+    expect(focused).toBeDefined()
+    return sourceLayerRows(snapshot, { snapshot, files: FOLIO_FILES, closed: new Set() }, undefined, '', { runtimeLayers: [focused!] }).rows
+  }
+  const tap = (result: ReturnType<typeof compile>, label: string) => {
+    const target = result.renderTree!.nodes.find(node => node.hitTarget && node.a11y?.label === label)
+    expect(target).toBeDefined()
+    expect(applyEvent({ kind: 'tap', handlerId: target!.hitTarget!.handlerId, location: { x: 0, y: 0 } })).toBe(true)
+    return rerender(2)
+  }
+  it('opens directly on the Library elements before entering Arrange', () => {
+    const layers = rows(open())
+    expect(layers.map(row => row.node.name)).toEqual(['List', 'BookRow', 'Button'])
+    expect(layers.find(row => row.node.name === 'BookRow')?.shared).toBe(true)
+    expect(layers.every(row => row.node.owner === 'LibraryView')).toBe(true)
+  })
+  it('follows a pushed book detail instead of retaining the Library list', () => {
+    const detail = tap(open(), 'The Secret Garden, Frances Hodgson Burnett')
+    const layers = rows(detail)
+    expect(layers.map(row => row.node.name)).toEqual(['ScrollView', 'VStack'])
+    expect(layers.every(row => row.node.owner === 'BookDetailView')).toBe(true)
+  })
+  it('follows the presented Add book form instead of the underlying Library', () => {
+    const layers = rows(tap(open(), 'Add book'))
+    expect(layers.length).toBeGreaterThan(0)
+    expect(layers.map(row => row.node.name)).toContain('Form')
+    expect(layers.every(row => row.node.owner === 'AddBookView')).toBe(true)
+  })
+})
+
+
+it('keeps hidden restore controls with their phone, including an empty visible container', () => {
+  let text = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+  var body: some View {
+    NavigationStack {
+      VStack {
+        Text("Main hidden")
+      }.sheet(isPresented: .constant(false)) {
+        VStack {
+          Text("Modal hidden")
+          Text("Modal")
+        }
+      }
+    }
+  }
+}
+struct OtherView: View {
+  var body: some View {
+    VStack {
+      Text("Other hidden")
+    }
+  }
+}
+`
+  let snapshot = model(text)
+  for (const name of ['Main hidden', 'Modal hidden', 'Other hidden']) {
+    const target = snapshot.nodes.find(node => sourceLayerLabel(node) === name)!
+    const plan = planDesignEdit({ projectId: 'p', baseRevision: snapshot.revision, files: files(text), scope: target.owner, target: target.source, fingerprint: target.fingerprint, operation: { kind: 'hide' } })
+    expect(plan.ok, plan.ok ? name : `${name}: ${plan.reason}`).toBe(true)
+    if (!plan.ok) throw new Error(plan.reason)
+    text = plan.changes[0]!.after!
+    snapshot = model(text, snapshot.revision + 1)
+  }
+  resetPipelineState()
+  const result = compile({ projectId: 'p', revision: snapshot.revision + 1, files: files(text), canvas: { width: 402, height: 874 }, colorScheme: 'light', allPages: true })
+  snapshot = result.authoring!
+  const main = result.pages!.find(page => !page.parentId)!
+  const modal = result.pages!.find(page => page.kind === 'sheet')!
+  expect(modal).toBeDefined()
+  const state = { snapshot, files: files(text), closed: new Set<string>() }
+  const markers = hiddenViewsIn(text, 'App.swift').map(hidden => ({ file: 'App.swift', offset: hidden.start, name: hidden.name, type: hidden.type, container: hidden.container }))
+  const visible = (page: typeof main) => {
+    const { scope } = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: page.viewHierarchy })
+    return markers.filter(hidden => sourceLayerHiddenInScope(snapshot, hidden, scope)).map(hidden => hidden.name)
+  }
+  expect(visible(main)).toEqual(['Main hidden'])
+  expect(visible(modal)).toEqual(['Modal hidden'])
 })

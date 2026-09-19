@@ -204,7 +204,7 @@ test('one row design edits every rendered row without replacing their data bindi
   await padding.press('Enter')
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toBeVisible()
   await expect(page.getByTestId('render-tree').getByText('Second', { exact: true })).toBeVisible()
-  await expect(layers.getByRole('button', { name: 'All screens', exact: true })).toBeVisible()
+  await expect(layers.getByRole('button', { name: 'Main page', exact: true })).toBeVisible()
   await assertSource(page, DATA_SOURCE.replace('Text(item.title).padding(8)', 'Text(item.title).padding(20)'))
 })
 

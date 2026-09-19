@@ -1,6 +1,6 @@
 import type { AuthoringModifier, ModifierCatalogEntry } from './authoring-modifiers'
 import type { SharedStyle, StyleProperty } from './design-resources'
-import type { CollectionSettings, ComponentSettings, BehaviorSettings, StateInput } from './authoring-features'
+import type { CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, StateInput } from './authoring-features'
 import type { Diagnostic } from './diagnostics'
 import type { SourceFile } from './protocol'
 import type { SourceSpan } from './source'
@@ -44,6 +44,7 @@ export interface AuthoringNode {
   readonly collection?: CollectionSettings
   readonly component?: ComponentSettings
   readonly behavior?: BehaviorSettings
+  readonly navigation?: NavigationSettings
   readonly fields?: readonly string[]
   readonly extraction?: { readonly allowed: boolean; readonly reason: string }
 }

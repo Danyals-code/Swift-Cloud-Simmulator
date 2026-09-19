@@ -34,6 +34,8 @@ export interface RenderTreeViewProps {
   selectedIds?: ReadonlySet<string>
   /** Temporary canvas outlines for the source view under the Layers pointer. */
   hoveredIds?: ReadonlySet<string>
+  /** Optional workspace-owned offsets shared across live and design phone mounts. */
+  scrollPositions?: Map<string, { left: number; top: number }>
   /** Raised when an interactive node is activated. */
   onEvent?: (event: UIEvent) => void
   /**
@@ -84,15 +86,32 @@ export const RenderTreeView = memo(function RenderTreeView({
   debugOutlines = false,
   selectedIds,
   hoveredIds,
+  scrollPositions,
   inspect,
 }: RenderTreeViewProps) {
   const reduceMotion = useSyncExternalStore(subscribeMotion, reducedMotion, serverMotion)
   const surfaceRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
-    if (!surfaceRef.current) return
-    const scroller = tree.chrome && surfaceRef.current.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(tree.chrome.scrollId)}"]`)
-    updateChrome(surfaceRef.current, scroller?.scrollTop ?? 0, tree.chrome?.collapseDistance ?? 0)
-  }, [tree.chrome])
+    const surface = surfaceRef.current
+    if (!surface) return
+    if (scrollPositions) {
+      for (const node of tree.nodes) {
+        const saved = node.scroll && scrollPositions.get(node.id)
+        if (!saved) continue
+        const scroller = surface.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"]`)
+        if (scroller) { scroller.scrollLeft = saved.left; scroller.scrollTop = saved.top }
+      }
+    }
+    // Restore before collapsing navigation chrome, including a sheet's own bar.
+    for (const node of tree.nodes) {
+      if (!node.chrome) continue
+      const panel = surface.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"]`)
+      const scroller = panel?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.chrome.scrollId)}"]`)
+      if (panel) updateChrome(panel, scroller?.scrollTop ?? 0, node.chrome.collapseDistance)
+    }
+    const scroller = tree.chrome && surface.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(tree.chrome.scrollId)}"]`)
+    updateChrome(surface, scroller?.scrollTop ?? 0, tree.chrome?.collapseDistance ?? 0)
+  }, [tree, scrollPositions])
   const hoveredNodes = stale ? [] : tree.nodes.filter(node => node.id === inspect?.hovered || hoveredIds?.has(node.id))
 
   // Nodes grouped by the container they live in. Built once per tree rather than
@@ -114,7 +133,11 @@ export const RenderTreeView = memo(function RenderTreeView({
       data-testid="render-tree"
       data-studio-preview=""
       data-calibration={tree.calibration ?? 'provisional'}
-      onScrollCapture={event => captureChrome(event, tree.chrome)}
+      onScrollCapture={event => {
+        const target = event.target as HTMLElement
+        if (scrollPositions && target.dataset.nodeId) scrollPositions.set(target.dataset.nodeId, { left: target.scrollLeft, top: target.scrollTop })
+        captureChrome(event, tree.chrome)
+      }}
       data-revision={tree.revision}
       style={{
         position: 'relative',

@@ -167,7 +167,7 @@ function rootEnvironment(request: CompileRequest): LayoutEnvironment {
  * status bar. Expressing that inside a single layout tree would need absolute
  * positioning, which is precisely the concept a proposal-based engine does not have.
  */
-function render(request: CompileRequest, evaluation: EvaluationResult, accumulate = false): RenderTree {
+function render(request: CompileRequest, evaluation: EvaluationResult, accumulate = false, drawingRuntime = runtime): RenderTree {
   // The gallery lays out several trees in one pass, and every one of them has text
   // to measure. Only the first clears the pending set: clearing it per tree would
   // hand back the last page's requests and leave every other tree's strings on the
@@ -184,7 +184,7 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
   const ui = evaluation.ui
   // The layout pass runs `.alignmentGuide` closures, which needs the interpreter -
   // handed in as a function so `swiftui-layout` stays free of any knowledge of one.
-  const callGuide = runtime.guideRunner()
+  const callGuide = drawingRuntime.guideRunner()
   const screen = ui
     ? screenToLayout(ui, {
         colorScheme: scheme,
@@ -480,9 +480,13 @@ function toResult(
     })
   }
 
+  const authoring = bindAuthoringRuntime(analysis.authoring, evaluation?.failure ? [] : [
+    ...(evaluation?.ui?.viewHierarchy ?? []),
+    ...(pages ?? []).flatMap(page => page.viewHierarchy ?? []),
+  ], request.revision)
   return {
     revision: request.revision,
-    authoring: bindAuthoringRuntime(analysis.authoring, evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [], request.revision),
+    authoring: { ...authoring, nodes: authoring.nodes.map(node => ({ ...node, runtimeIds: [...new Set(node.runtimeIds)] })) },
     diagnostics,
     renderTree,
     viewHierarchy: evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],
@@ -650,9 +654,9 @@ const GALLERY_LIMIT = 12
 /**
  * Every page, drawn on its own.
  *
- * The live page is not re-rendered: the tree that is already on screen *is* its
- * answer, and rendering it twice would be two layouts of the same views that must
- * then agree with each other.
+ * The live root tree is reused when it is still on its main screen. A pushed or
+ * presented live screen keeps running separately while the design gallery shows
+ * its main page and related screens as independent phones.
  */
 function renderPages(
   request: CompileRequest,
@@ -663,18 +667,43 @@ function renderPages(
   if (!pages.length) return undefined
 
   const out: PagePreview[] = []
+  const preview = runtime.previewRuntime()
+  let remainingChildren = GALLERY_LIMIT
   for (const [index, page] of pages.slice(0, GALLERY_LIMIT).entries()) {
     const isActive = page.page?.active === true
-    const ui = isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index)
+    const ui = preview?.runtime.resolvePage(preview.evaluation.views, index, true)
+      ?? (isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index))
     if (!ui) continue
-    const tree = isActive ? active : render(request, { ...evaluation, ui }, true)
+    const isLiveRoot = isActive && !evaluation.ui?.navigationBar?.canGoBack && !evaluation.ui?.overlay
+    const tree = isLiveRoot ? active : render(request, { ...evaluation, ui }, true, preview?.runtime)
     out.push({
       id: page.id,
+      rootId: page.id,
+      kind: 'root',
       name: page.name,
       active: isActive,
+      ...(page.source ? { source: page.source } : {}),
       ...(page.page?.handlerId ? { handlerId: page.page.handlerId } : {}),
+      viewHierarchy: ui.viewHierarchy?.filter(layer => layer.id === page.id) ?? [page],
       tree,
     })
+    if (!preview || !remainingChildren) continue
+    const nested = preview.runtime.resolveNestedPages(preview.evaluation.views, index, page.id, remainingChildren)
+    for (const child of nested) {
+      if (!out.some(parent => parent.id === child.parentId)) continue
+      let childTree: RenderTree
+      try {
+        childTree = render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime)
+        if (childTree.nodes.some(node => !Object.values(node.frame).every(Number.isFinite) || node.frame.width < 0 || node.frame.height < 0)) continue
+      } catch { continue }
+      out.push({
+        id: child.id, parentId: child.parentId, rootId: child.rootId,
+        kind: child.kind, name: child.name, source: child.source, active: false,
+        viewHierarchy: child.ui.viewHierarchy?.map(layer => ({ ...layer, id: child.id })),
+        tree: childTree,
+      })
+    }
+    remainingChildren -= nested.length
   }
   return out
 }

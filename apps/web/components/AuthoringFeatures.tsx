@@ -2,7 +2,7 @@
 
 import { SharedStyleProperties } from './SharedStyles'
 import { useState } from 'react'
-import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, ComponentDescription, BehaviorAction, DesignRecord, DesignValue, RecordField, PreviewInput } from '@studio/shared'
+import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, ComponentDescription, BehaviorAction, DesignRecord, DesignValue, RecordField, PreviewInput, NavigationDestination } from '@studio/shared'
 import { defaultRecord, RecordEditor } from './RecordEditor'
 import { parseRecordDrafts } from '../lib/recordDrafts'
 import { settingsVisualChildren } from '../lib/authoringSettings'
@@ -16,6 +16,7 @@ export interface FeatureProps {
   snapshot?: AuthoringSnapshot
   onCommand?: FeatureChange
   onNodeCommand?: (node: AuthoringNode, operation: Parameters<FeatureChange>[0]) => Promise<string | null>
+  onPickNavigation?: (destinations: readonly NavigationDestination[]) => Promise<string | null>
   onNodeChange?: (node: AuthoringNode, control: string, value: string) => Promise<string | null>
   onSelect?: (node: AuthoringNode) => void
   descriptions?: readonly ComponentDescription[]

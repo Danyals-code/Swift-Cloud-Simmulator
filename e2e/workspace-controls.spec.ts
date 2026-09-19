@@ -42,7 +42,7 @@ test('renames the app, navigator file, and open editor tab', async ({ page }) =>
   const rail = (await page.getByTestId('file-rail').boundingBox())!
   const addFile = (await page.getByTestId('new-file').boundingBox())!
   expect(addFile.x + addFile.width).toBeLessThanOrEqual(rail.x + rail.width)
-  const file = page.getByTestId('file-rail').getByText('ContentView.swift', { exact: true })
+  const file = page.getByTestId('file-rail').getByText('CounterApp.swift', { exact: true })
   await file.dblclick()
   await page.getByTestId('file-rename-input').fill('Screen.swift')
   await page.getByTestId('file-rename-input').press('Enter')

@@ -25,7 +25,7 @@ import {
 } from '@studio/swift-runtime'
 import type { SemanticModel } from '@studio/swift-sema'
 import { fingerprint, IdentityPath, StateStore } from './identity'
-import { resolveUI, UIState, type LifecycleHook, type ResolvedUI } from './presentation'
+import { resolveUI, resolveNestedPages, UIState, type LifecycleHook, type ResolvedUI, type NestedPage } from './presentation'
 import { DEFAULT_ENVIRONMENT, type EnvironmentInputs } from './view-environment'
 import {
   asGesture,
@@ -307,22 +307,58 @@ export class AppRuntime {
    * Returns null when the pass cannot be composed that way, so a gallery of six
    * pages is never the reason the preview goes blank.
    */
-  resolvePage(views: readonly ViewValue[], tab: number): ResolvedUI | null {
+  resolvePage(views: readonly ViewValue[], tab: number, basePage = false): ResolvedUI | null {
     try {
       return resolveUI(
         views,
         {
           state: this.ui,
-          includeViewHierarchy: false,
+          includeViewHierarchy: basePage,
           build: (closure, args, environment) => this.buildViews(closure, args, environment),
           styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
           animation: this.animation,
         },
         tab,
+        { basePage },
       )
     } catch {
       return null
     }
+  }
+
+  /**
+   * Deferred page builders run in a separate interpreter. State objects are deeply
+   * copied, so even an impure destination body cannot write through an environment
+   * object into the app being edited. Actions and lifecycle callbacks never run.
+   */
+  previewRuntime(): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
+    const loaded = this.loadedProgram
+    if (!loaded) return null
+    const preview = new AppRuntime()
+    preview.load(loaded.files, loaded.model, loaded.key)
+    const copied = new Map<object, unknown>()
+    const boxes = new Map<string, { value: SwiftValue; initializer: string }>()
+    for (const [key, box] of this.state.snapshot()) {
+      try { boxes.set(key, { ...box, value: clonePreviewValue(box.value, copied) }) } catch { /* Unsafe captured code uses its fresh initializer. */ }
+    }
+    preview.state.restore(boxes)
+    for (const [key, box] of this.defaults) {
+      try { preview.defaults.set(key, { ...box, value: clonePreviewValue(box.value, copied) }) } catch { /* Same isolation rule as @State. */ }
+    }
+    preview.setEnvironment(this.environmentInputs)
+    preview.setDefaultGeometry(this.host.defaultGeometry)
+    preview.updateGeometry(this.geometry)
+    const evaluation = preview.evaluate()
+    return evaluation.failure ? null : { runtime: preview, evaluation }
+  }
+
+  resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number): readonly NestedPage[] {
+    return resolveNestedPages(views, {
+      state: new UIState(),
+      build: (closure, args, environment) => this.buildViews(closure, args, environment),
+      styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
+      animation: null,
+    }, tab, rootId, limit)
   }
 
   /**
@@ -1251,4 +1287,35 @@ function componentViews(views: readonly ViewValue[], instance: StructValue): Vie
     })),
   })
   return views.map(annotate)
+}
+
+/** Unlike Swift assignment, preview isolation also copies reference types. */
+function clonePreviewValue(value: SwiftValue, seen: Map<object, unknown>): SwiftValue {
+  const staged = new Map<object, unknown>()
+  const copy = (input: unknown): unknown => {
+    if (typeof input === 'function') throw new Error('Captured host function')
+    if (!input || typeof input !== 'object') return input
+    const kind = (input as { kind?: string }).kind
+    if (kind === 'closure' || kind === 'function') throw new Error('Captured executable state')
+    if (seen.has(input)) return seen.get(input)
+    if (staged.has(input)) return staged.get(input)
+    if (input instanceof Map) {
+      const next = new Map(); staged.set(input, next)
+      for (const [key, item] of input) next.set(copy(key), copy(item))
+      return next
+    }
+    if (input instanceof Set) {
+      const next = new Set(); staged.set(input, next)
+      for (const item of input) next.add(copy(item))
+      return next
+    }
+    if (input instanceof Date) return new Date(input.getTime())
+    const next: unknown[] | Record<string, unknown> = Array.isArray(input) ? [] : {}
+    staged.set(input, next)
+    for (const [key, item] of Object.entries(input)) (next as Record<string, unknown>)[key] = copy(item)
+    return next
+  }
+  const result = copy(value) as SwiftValue
+  for (const [key, item] of staged) seen.set(key, item)
+  return result
 }

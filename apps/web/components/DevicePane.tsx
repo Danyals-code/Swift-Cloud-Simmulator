@@ -14,7 +14,8 @@ import { Icon } from './ui/Icon'
 import { Splitter } from './ui/Splitter'
 import { PANE_LIMITS, type InspectorTab } from '../lib/layout'
 import type { CanvasTool } from './Toolbar'
-import type { AuthoringNode, SourceSpan } from '@studio/shared'
+import type { AuthoringNode, NavigationDestination, SourceSpan } from '@studio/shared'
+import { pageSlots } from '../lib/pageLayout'
 import type { FeatureProps } from './AuthoringFeatures'
 import { AuthoringInspector } from './AuthoringInspector'
 
@@ -44,19 +45,25 @@ export interface DevicePaneProps {
   onEvent: (event: UIEvent) => void
   inspecting: boolean
   /** Reveal a view's source. Null origin means the node has no source position. */
-  onRevealSource: (node: RenderNode) => void
+  onRevealSource: (node: RenderNode, pageId?: string) => void
   /** What the pointer is over while inspecting, so the workspace can follow it. */
-  onHoverNode?: (node: RenderNode | null) => void
+  onHoverNode?: (node: RenderNode | null, pageId?: string) => void
   /**
-   * Every page, drawn side by side, when the gallery is open.
+   * Tab columns with each tab's related screens underneath.
    *
    * `pageCount` is how many the app actually has, which is the same number except
    * on an app with more pages than the pipeline draws - and then the difference is
    * said out loud rather than left as a shorter row.
    */
   pages?: readonly PagePreview[]
+  navigationPicker?: {
+    targets: Readonly<Record<string, { destination?: NavigationDestination; reason?: string }>>
+    onPick: (page: PagePreview) => void
+    onCancel: () => void
+  }
+  selectedPageId?: string
   pageCount?: number
-  /** Makes a page the live one. The gallery's only interaction with a page it is not showing. */
+  /** Focuses this phone for Layers and Settings. */
   onSelectPage?: (page: PagePreview) => void
   /** The gallery's own switch, in the canvas rather than the dock it draws into. */
   allPages?: boolean
@@ -174,6 +181,8 @@ export function DevicePane({
   onRevealSource,
   onHoverNode,
   pages,
+  selectedPageId,
+  navigationPicker,
   pageCount,
   onSelectPage,
   allPages = false,
@@ -192,6 +201,7 @@ export function DevicePane({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [pane, setPane] = useState({ width: 0, height: 0, left: 0, top: 0, arrangeWidth: 0, arrangeHeight: 0, panelLayout, expanded, projectId })
   const gallery = expanded && !!pages?.length
+  const scrollMemory = useMemo(() => ({ identity: previewIdentity, positions: new Map<string, { left: number; top: number }>() }), [previewIdentity])
   const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
 
   /** The hover as of now, for handlers that run outside React's render. */
@@ -199,17 +209,19 @@ export function DevicePane({
 
   // One call site for the hover, so the pane and the workspace cannot disagree
   // about what the pointer is over.
-  const setHovered = useCallback((node: RenderNode | null) => {
+  const setHovered = useCallback((node: RenderNode | null, pageId?: string) => {
     hoverRef.current = node
     setHoveredNode(node)
-    onHoverNode?.(node)
+    onHoverNode?.(node, pageId)
   }, [onHoverNode])
 
   // Derived rather than cleared in an effect: a stale highlight must not survive
   // leaving inspector mode, and "only meaningful while inspecting" is a property of
   // the value, not something to synchronise after the fact.
-  const highlighted = inspecting && !stale && hoveredNode && tree?.nodes.includes(hoveredNode) ? hoveredNode : null
-  useEffect(() => () => setHovered(null), [tree, inspecting, projectId, setHovered])
+  const highlighted = inspecting && !stale && hoveredNode
+    ? [tree, ...(pages?.map(page => page.tree) ?? [])].flatMap(tree => tree?.nodes ?? []).find(node => node.id === hoveredNode.id && node.origin?.file === hoveredNode.origin?.file && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end) ?? null
+    : null
+  useEffect(() => () => setHovered(null), [inspecting, previewIdentity, projectId, setHovered])
 
   /**
    * The canvas is a viewport onto a world, not a box with scrollbars in it.
@@ -241,24 +253,15 @@ export function DevicePane({
     const count = pages?.length ?? 0
     if (!gallery || !count) return { columns: 1, width: frameW, height: frameH }
 
-    // Every column count is tried and the roomiest wins, rather than filling rows
-    // until they overflow: six pages in a wide pane belong in one row, and in a
-    // narrow one they belong in three columns of two.
-    let best = { columns: 1, fit: 0 }
-    for (let columns = 1; columns <= count; columns++) {
-      const rows = Math.ceil(count / columns)
-      const width = columns * frameW + (columns - 1) * GALLERY_GAP
-      const height = rows * (frameH + CAPTION_HEIGHT) + (rows - 1) * GALLERY_GAP
-      const fit = Math.min((pane.arrangeWidth || 1) / width, (pane.arrangeHeight || 1) / height)
-      if (fit > best.fit) best = { columns, fit }
-    }
-    const rows = Math.ceil(count / best.columns)
+    const slots = pageSlots(pages!)
+    const columns = Math.max(...slots.map(slot => slot.column + 1), 1)
+    const rows = Math.max(...slots.map(slot => slot.row + 1), 1)
     return {
-      columns: best.columns,
-      width: best.columns * frameW + (best.columns - 1) * GALLERY_GAP,
+      columns,
+      width: columns * frameW + (columns - 1) * GALLERY_GAP,
       height: rows * (frameH + CAPTION_HEIGHT) + (rows - 1) * GALLERY_GAP,
     }
-  }, [gallery, pages?.length, pane.arrangeWidth, pane.arrangeHeight, device.width, device.height])
+  }, [gallery, pages, device.width, device.height])
 
   /** The zoom that fits the world in the viewport, never magnifying past 1:1. */
   const fitScale = useMemo(() => {
@@ -311,16 +314,18 @@ export function DevicePane({
    * Without the second half, picking 100% from the menu would zoom about the world's
    * origin and throw the phone off the top-left corner.
    */
-  const lastFit = useRef({ zoom: '', width: 0, height: 0, left: 0, top: 0, panelLayout, expanded, projectId, device: device.key })
+  const lastFit = useRef({ zoom: '', width: 0, height: 0, left: 0, top: 0, panelLayout, expanded, projectId, device: device.key, allPages })
   const liveOffset = useRef({ x: 0, y: 0 })
   const wasGallery = useRef(gallery)
+  const pickingDestination = !!navigationPicker
+  const beforeDestinationPick = useRef<{ projectId: string; device: string; view: { x: number; y: number; scale: number } } | null>(null)
 
   useLayoutEffect(() => {
     if (pane.width <= 0 || pane.panelLayout !== panelLayout || pane.expanded !== expanded || pane.projectId !== projectId) return
     const was = lastFit.current
     const resized = was.width !== pane.width || was.height !== pane.height
     const chosen = was.zoom !== preview.zoom
-    lastFit.current = { zoom: preview.zoom, width: pane.width, height: pane.height, left: pane.left, top: pane.top, panelLayout, expanded, projectId, device: device.key }
+    lastFit.current = { zoom: preview.zoom, width: pane.width, height: pane.height, left: pane.left, top: pane.top, panelLayout, expanded, projectId, device: device.key, allPages }
 
     /**
      * Showing all the pages, or stopping, never moves the phone you are looking at.
@@ -338,6 +343,26 @@ export function DevicePane({
     const now = live ? { x: live.offsetLeft, y: live.offsetTop } : { x: 0, y: 0 }
     const moved = liveOffset.current
     liveOffset.current = now
+
+    // Picking needs an overview of every screen. Keep this temporary camera
+    // separate from the user's zoom preference and return to it on completion.
+    if (pickingDestination) {
+      beforeDestinationPick.current ??= { projectId, device: device.key, view: { ...viewRef.current } }
+      viewRef.current = { x: (pane.width - arrangement.width * fitScale) / 2, y: (pane.height - arrangement.height * fitScale) / 2, scale: fitScale }
+      wasGallery.current = gallery
+      applyView()
+      return
+    }
+    if (beforeDestinationPick.current) {
+      const previous = beforeDestinationPick.current
+      beforeDestinationPick.current = null
+      if (previous.projectId === projectId && previous.device === device.key && expanded) {
+        viewRef.current = previous.view
+        wasGallery.current = gallery
+        applyView()
+        return
+      }
+    }
 
     const newWorkspace = was.expanded !== expanded || was.projectId !== projectId || !was.width
     if (!expanded || newWorkspace || was.device !== device.key) {
@@ -358,7 +383,7 @@ export function DevicePane({
       return
     }
 
-    if (wasGallery.current !== gallery) {
+    if (wasGallery.current !== gallery || was.allPages !== allPages) {
       wasGallery.current = gallery
       const current = viewRef.current
       viewRef.current = {
@@ -389,19 +414,12 @@ export function DevicePane({
       scale,
     }
     applyView()
-  }, [scale, preview.zoom, pane, gallery, centreView, applyView, onPreviewChange, panelLayout, expanded, projectId, device.key, arrangement.width, arrangement.height, fitScale])
+  }, [pickingDestination, scale, preview.zoom, pane, gallery, allPages, selectedPageId, centreView, applyView, onPreviewChange, panelLayout, expanded, projectId, device.key, arrangement.width, arrangement.height, fitScale])
 
   /**
-   * The wheel zooms the canvas while designing, and scrolls the app while using it.
-   *
-   * The preview is a real scrolling app, so a wheel that always zoomed would take
-   * scrolling away from every List on every screen. The switch under the canvas
-   * already says which of the two you are doing, so it decides this too - and the
-   * platform's own "zoom" chord works either way for anyone who expects it.
-   *
-   * Registered by hand rather than through `onWheel`, because React's wheel listener
-   * is passive: `preventDefault` there is ignored, and the app underneath scrolled
-   * *as well as* the canvas zooming.
+   * Scroll explores design phones; Ctrl/Meta-scroll zooms about the pointer.
+   * Live Preview keeps native app scrolling. The non-passive listener prevents
+   * the phone and canvas from scrolling together in Arrange.
    */
   useEffect(() => {
     const element = containerRef.current
@@ -409,8 +427,15 @@ export function DevicePane({
 
     const onWheel = (event: WheelEvent) => {
       if (!expanded) return
-      const zooming = event.ctrlKey || event.metaKey || (inspecting && !event.shiftKey)
-      if (!zooming) return
+      const zooming = event.ctrlKey || event.metaKey
+      if (!zooming && inspecting && gallery) {
+        event.preventDefault()
+        const current = viewRef.current
+        viewRef.current = { ...current, x: current.x - (event.shiftKey ? event.deltaY : event.deltaX), y: current.y - (event.shiftKey ? 0 : event.deltaY) }
+        applyView()
+        return
+      }
+      if (!zooming && !(inspecting && !gallery && !event.shiftKey)) return
       event.preventDefault()
 
       const current = viewRef.current
@@ -426,12 +451,12 @@ export function DevicePane({
       const ratio = next / current.scale
       viewRef.current = { x: x - (x - current.x) * ratio, y: y - (y - current.y) * ratio, scale: next }
       applyView()
-      onPreviewChange({ zoom: String(Number(next.toFixed(4))) })
+      if (!pickingDestination) onPreviewChange({ zoom: String(Number(next.toFixed(4))) })
     }
 
     element.addEventListener('wheel', onWheel, { passive: false })
     return () => element.removeEventListener('wheel', onWheel)
-  }, [expanded, inspecting, onPreviewChange, applyView])
+  }, [pickingDestination, expanded, inspecting, gallery, onPreviewChange, applyView])
 
   /**
    * Dragging a view onto another one moves it in the file.
@@ -446,7 +471,7 @@ export function DevicePane({
   const [dragTarget, setDragTarget] = useState<{ name: string; position: 'before' | 'after' } | null>(null)
 
   const onViewPointerDown = useCallback((event: React.PointerEvent) => {
-    if (!expanded || stale || !inspecting || tool !== 'select' || !onReorderNodes || event.button !== 0) return
+    if (navigationPicker || !expanded || stale || !inspecting || tool !== 'select' || !onReorderNodes || event.button !== 0) return
     const element = containerRef.current
     if (!element) return
 
@@ -460,7 +485,7 @@ export function DevicePane({
     const node: RenderNode | 'selection' | null = within ? 'selection' : hoverRef.current
     if (!node) return
     viewDrag.current = { node, x: event.clientX, y: event.clientY }
-  }, [expanded, stale, inspecting, tool, onReorderNodes, selection])
+  }, [navigationPicker, expanded, stale, inspecting, tool, onReorderNodes, selection])
 
   useEffect(() => {
     /** What the drop would do, from where the pointer is over the target. */
@@ -514,6 +539,7 @@ export function DevicePane({
   const [grabbing, setGrabbing] = useState(false)
   /** Space, held: the canvas becomes grabbable from anywhere, as it does everywhere else. */
   const spaceRef = useRef(false)
+  const skipNavigationPickClick = useRef(false)
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
@@ -591,22 +617,23 @@ export function DevicePane({
     applyView()
   }, [centerOn, expanded, applyView])
 
-  const screenFor = (tree: RenderTree | null, live: boolean, at: number) => (
+  const screenFor = (tree: RenderTree | null, live: boolean, at: number, page?: PagePreview) => (
     <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${at})`, transformOrigin: 'top left' }}>
       <DeviceFrame device={device}>
         <RenderTreeView
-          key={previewIdentity}
+          key={scrollMemory.identity}
+          scrollPositions={scrollMemory.positions}
           tree={tree ?? EMPTY_RENDER_TREE}
-          selectedIds={live ? selectedRenderIds : undefined}
-          hoveredIds={live && inspecting && !stale ? hoveredRenderIds : undefined}
+          selectedIds={selectedRenderIds}
+          hoveredIds={inspecting && !stale ? hoveredRenderIds : undefined}
           {...(live ? { onEvent } : {})}
           stale={stale}
-          {...(live && inspecting
+          {...(inspecting && !navigationPicker
             ? {
                 inspect: {
                   hovered: highlighted?.id ?? null,
-                  onHover: setHovered,
-                  onSelect: onRevealSource,
+                  onHover: node => setHovered(node, page?.id),
+                  onSelect: node => onRevealSource(node, page?.id),
                 },
               }
             : {})}
@@ -635,31 +662,35 @@ export function DevicePane({
         {status}
         <span>
           <span>{
-            dragTarget
+            navigationPicker
+              ? 'Pick a highlighted screen · Escape to cancel'
+              : dragTarget
               ? `Drop ${dragTarget.position} ${dragTarget.name}`
               : gallery
               ? pageCount && pageCount > pages!.length
-                ? `${pages!.length} of ${pageCount} pages · click a page to open it`
-                : `${pages!.length} ${pages!.length === 1 ? 'page' : 'pages'} · click a page to open it`
+                ? `${pages!.length} of ${pageCount} screens · scroll to explore`
+                : `${pages!.length} ${pages!.length === 1 ? 'screen' : 'screens'} · scroll to explore · ⌘/Ctrl-scroll to zoom`
               : inspecting ? 'Hover to find a view in Layers, click to select it' : 'Interactive preview'
           }</span>
+          {navigationPicker && <button type="button" className={styles.cancelPick} onClick={navigationPicker.onCancel}>Cancel pick</button>}
           {/* Off in Live Preview, and said so rather than hidden: it is a thing the
               canvas can do, in the mode where a click means "open this page". */}
-          <label className={styles.showAll} data-disabled={!inspecting || undefined} title={inspecting ? 'Draw every page side by side (⌘⇧A)' : 'Switch to Edit to show every page'}>
-            <input type="checkbox" data-testid="show-all-pages" checked={allPages && inspecting} disabled={!inspecting} onChange={(event) => onToggleAllPages?.(event.target.checked)} />
-            Show all
+          <label className={styles.showAll} data-disabled={!inspecting || undefined} title={inspecting ? 'Show tabs side by side, with their screens underneath (⌘⇧A)' : 'Switch to Edit to explore screens'}>
+            <input type="checkbox" data-testid="show-all-pages" checked={allPages && inspecting} disabled={!inspecting || !!navigationPicker} onChange={(event) => onToggleAllPages?.(event.target.checked)} />
+            Show all tabs
           </label>
         </span>
       </div> : <header className={styles.compactSettings}>{collapsePanel}{devicePicker}{schemePicker}{typePicker}{zoomPicker}</header>}
+      <div className={styles.canvasArea}>
       <div
         ref={containerRef}
         className={`${styles.canvas} relative min-h-0 flex-1 overflow-hidden`}
-        style={{ cursor: grabbing ? 'grabbing' : undefined }}
+        style={{ cursor: grabbing ? 'grabbing' : navigationPicker ? 'crosshair' : undefined }}
         data-testid="device-pane"
         data-fixed={!expanded}
         data-tool={inspecting ? tool : undefined}
         data-dragging={dragTarget ? true : undefined}
-        onPointerDown={(event) => { onPanStart(event); onViewPointerDown(event) }}
+        onPointerDown={(event) => { skipNavigationPickClick.current = event.button === 1 || spaceRef.current; onPanStart(event); onViewPointerDown(event) }}
         // The pointer can leave the device without crossing any node's boundary -
         // straight off the bezel - so the pane itself has to clear the highlight.
         onPointerLeave={() => setHovered(null)}
@@ -674,28 +705,23 @@ export function DevicePane({
               data-testid="page-gallery"
               style={{ gridTemplateColumns: `repeat(${arrangement.columns}, ${device.width + BEZEL * 2}px)`, gap: GALLERY_GAP }}
             >
-              {pages!.map((page) => (
-                <figure key={page.id} className={styles.pageCard} data-active={page.active || undefined} data-page-id={page.id} data-testid="gallery-page">
+              {pageSlots(pages!).map(({ page, column, row, depth }) => (
+                <figure key={page.id} className={styles.pageCard} style={{ gridColumn: column + 1, gridRow: row + 1 }} data-active={page.id === selectedPageId || undefined} data-page-id={page.id} data-parent-page={page.parentId} data-page-kind={page.kind ?? 'root'} data-testid="gallery-page">
                   <div style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }}>
-                    {/* A page that is not the live one is a picture of the app, so its
-                        controls do not answer: pressing one would run the page that is
-                        running, which is a different screen. The whole phone is one
-                        button instead, and it opens the page. */}
-                    <div style={page.active ? undefined : { pointerEvents: 'none' }}>
-                      {screenFor(page.tree, page.active, 1)}
-                    </div>
-                    {page.active ? null : (
-                      <button
-                        type="button"
-                        className={styles.pageCover}
-                        onClick={() => onSelectPage?.(page)}
-                        disabled={!page.handlerId || !onSelectPage}
-                        aria-label={`Open ${page.name}`}
-                        title={page.handlerId ? `Open ${page.name}` : 'This page has no tab to open it with'}
-                      />
-                    )}
+                    {screenFor(page.tree, false, 1, page)}
+                    {navigationPicker && <button
+                      type="button"
+                      className={styles.navigationPickTarget}
+                      data-testid="navigation-pick-target"
+                      data-available={!!navigationPicker.targets[page.id]?.destination}
+                      aria-label={`Navigate to ${page.name}`}
+                      aria-disabled={!navigationPicker.targets[page.id]?.destination}
+                      title={navigationPicker.targets[page.id]?.destination ? `Choose ${page.name}` : navigationPicker.targets[page.id]?.reason}
+                      onClick={event => { if (event.detail && skipNavigationPickClick.current) return; if (navigationPicker.targets[page.id]?.destination) navigationPicker.onPick(page) }}
+                    ><span style={{ fontSize: 12 / Math.max(fitScale, 0.1), padding: `${6 / Math.max(fitScale, 0.1)}px ${8 / Math.max(fitScale, 0.1)}px` }}>{navigationPicker.targets[page.id]?.destination ? `Choose ${page.name}` : navigationPicker.targets[page.id]?.reason}</span></button>}
+
                   </div>
-                  <figcaption>{page.name}{page.active ? <span className={styles.liveTag}>Live</span> : null}</figcaption>
+                  <figcaption><button type="button" onClick={event => { if (navigationPicker) { if (event.detail && skipNavigationPickClick.current) return; if (navigationPicker.targets[page.id]?.destination) navigationPicker.onPick(page) } else onSelectPage?.(page) }} aria-label={`Edit ${page.name}`} title={depth ? `Screen within ${pages!.find(parent => parent.id === page.parentId)?.name ?? 'this tab'}` : 'Tab screen'}>{depth ? '↳ ' : ''}{page.name}</button>{page.id === selectedPageId ? <span className={styles.liveTag}>Editing</span> : null}</figcaption>
                 </figure>
               ))}
             </div>
@@ -711,6 +737,7 @@ export function DevicePane({
       </div>
 
       <footer className={styles.canvasFooter}>{tools}</footer>
+      </div>
       {belowCanvas}
       </div>
       {expanded && showSettings && <div className={styles.settingsSplit}><Splitter
@@ -762,7 +789,7 @@ export function DevicePane({
               {previewTools}
               <h3>iOS 27 preview</h3>
               <p>Tap, scroll, and try your app. Switch to Code to see the SwiftUI behind it.</p>
-              <p>Scroll to zoom the canvas, and drag the background to move it.</p>
+              <p>In Arrange, scroll to explore screens or drag the background. Use ⌘/Ctrl-scroll to zoom.</p>
             </div>
           </>
         )}
