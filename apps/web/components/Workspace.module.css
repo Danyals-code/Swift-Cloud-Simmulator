@@ -138,3 +138,11 @@
 .navigatorTabs { gap: 2px; }
 .navigatorTabs button { padding-inline: 6px; }
 .navigatorTabs > button:first-child { width: 26px; padding: 4px; flex-shrink: 0; justify-content: center; }
+
+.designerSettings { padding: 16px 12px; display: grid; gap: 14px; min-width: 0; }
+@media(max-width:900px) {
+  .properties:has(.designerSettings) { display: block; max-height: 45vh; overflow: auto; padding: 0; }
+  .properties > .propertyTabs { display: flex; flex: 0 0 100%; }
+  .designerSettings { width: 100%; padding: 12px 16px; }
+  .designerSettings h3 { display: block; }
+}

@@ -106,7 +106,8 @@ async function source(page: Page): Promise<string> {
   await page.getByTestId('workspace-develop').click()
   const text = await page.getByTestId('editor').locator('.cm-content').innerText()
   await page.getByTestId('workspace-design').click()
-  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
+  const runtimeDetail = page.getByRole('button', { name: 'Runtime detail', exact: true })
+  if (await runtimeDetail.isVisible()) await runtimeDetail.click()
   return text
 }
 
@@ -406,6 +407,7 @@ struct ContentView: View {
     }
 }`)
   await expect(page.getByTestId('render-tree').getByText('Only', { exact: true })).toBeVisible()
+  const originalSource = await editor.innerText()
   await page.getByTestId('workspace-design').click()
   await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   await page.getByTestId('inspect-toggle').click()
@@ -420,8 +422,9 @@ struct ContentView: View {
   await expect(page.getByTestId('delete-selection')).toBeDisabled()
 
   await page.keyboard.press('Backspace')
-  await expect(page.getByTestId('edit-note')).toContainText('delete it in the code')
+  await expect(page.getByTestId('edit-note')).toContainText('would leave invalid view content')
   await expect(page.getByTestId('render-tree').getByText('Only', { exact: true })).toBeVisible()
+  expect(await source(page)).toBe(originalSource)
 })
 
 test('the canvas zooms with the wheel and can be dragged anywhere, at any zoom', async ({ page }) => {

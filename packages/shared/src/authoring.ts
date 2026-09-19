@@ -1,3 +1,4 @@
+import type { AuthoringModifier, ModifierCatalogEntry } from './authoring-modifiers'
 import type { SharedStyle, StyleProperty } from './design-resources'
 import type { CollectionSettings, ComponentSettings, BehaviorSettings, StateInput } from './authoring-features'
 import type { Diagnostic } from './diagnostics'
@@ -24,6 +25,8 @@ export interface AuthoringProperty {
 }
 
 export interface AuthoringNode {
+  readonly modifiers?: readonly AuthoringModifier[]
+  readonly modifierCatalog?: readonly ModifierCatalogEntry[]
   readonly styles?: readonly StyleProperty[]
   /** Unique only within this snapshot. Reconcile anchors before reusing a selection. */
   readonly id: string
@@ -100,13 +103,9 @@ export function reconcileAuthoringSelection(selection: AuthoringSelection, next:
   const previous = selection.snapshot.nodes.filter(n => comparable(n) && n.fingerprint === old.fingerprint)
   const candidates = next.nodes.filter(comparable)
   const exact = candidates.filter(n => n.fingerprint === old.fingerprint)
-  if (previous.length === 1 && exact.length === 1) return exact[0]!
-  if (previous.length === 1 && exact.length > 1) return null
-  if (previous.length > 1 && previous.length !== exact.length) return null
-
   const before = selection.files.find(f => f.id === old.source.file)?.text
   const after = files.find(f => f.id === old.source.file)?.text
-  if (before === undefined || after === undefined) return null
+  if (before === undefined || after === undefined) return previous.length === 1 && exact.length === 1 ? exact[0]! : null
   if (before === after) return candidates.find(n => n.source.file === old.source.file && n.source.start === old.source.start && n.fingerprint === old.fingerprint) ?? null
   let prefix = 0
   while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++
@@ -114,6 +113,16 @@ export function reconcileAuthoringSelection(selection: AuthoringSelection, next:
   while (suffix < before.length - prefix && suffix < after.length - prefix && before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix++
   const oldEnd = before.length - suffix
   const delta = after.length - before.length
+  // A change wholly inside this node proves its identity even when its old
+  // fingerprint was shared by a sibling. In particular, editing a row must keep
+  // its template open. Never use this for a replacement or deletion of the node.
+  if (prefix > old.source.start && oldEnd < old.source.end) {
+    const enclosing = candidates.filter(n => n.source.file === old.source.file && n.source.start === old.source.start && n.source.end === old.source.end + delta)
+    if (enclosing.length === 1) return enclosing[0]!
+  }
+  if (previous.length === 1 && exact.length === 1) return exact[0]!
+  if (previous.length === 1 && exact.length > 1) return null
+  if (previous.length > 1 && previous.length !== exact.length) return null
   let start = old.source.start
   let end = old.source.end
   if (oldEnd <= start) { start += delta; end += delta }

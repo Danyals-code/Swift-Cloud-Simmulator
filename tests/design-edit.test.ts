@@ -84,7 +84,7 @@ describe('R03/R04 minimal source recipes', () => {
   it('changes row/column/overlay constructors without moving child code', () => {
     const source = wrap('VStack { Text("A"); Text("B") }.padding(12)')
     expect(edited(source, 'Layout', 'Row', 'VStack')).toBe(source.replace('VStack', 'HStack'))
-    expect(edited(source, 'Layout', 'Overlay', 'VStack')).toBe(source.replace('VStack', 'ZStack'))
+    expect(edited(source, 'Layout', 'Stack', 'VStack')).toBe(source.replace('VStack', 'ZStack'))
     expect(target(wrap('VStack(alignment: .leading) { Text("A") }'), 'VStack').controls?.some(c => c.id === 'layout')).toBe(false)
   })
 })
@@ -291,7 +291,7 @@ it('prepares independent Apple compiler fixtures from the actual writer output',
     ['Text("A").frame(width: 120, height: 60, alignment: .leading)', 'Height sizing', 'Content', 'Text'],
     ['Text("A")', 'Height sizing', 'Fill', 'Text'],
     ['VStack(spacing: 12) { Text("A") }', 'Alignment', 'leading', 'VStack'],
-    ['VStack { Text("A"); Text("B") }', 'Layout', 'Overlay', 'VStack'],
+    ['VStack { Text("A"); Text("B") }', 'Layout', 'Stack', 'VStack'],
     ['ScrollView(.vertical, showsIndicators: true) { Text("A") }', 'Show indicators', 'false', 'ScrollView'],
     ['RoundedRectangle(cornerRadius: 8)', 'Shape corner radius', '12', 'RoundedRectangle'],
     ['Rectangle().fill(Color.blue)', 'fill', 'red', 'Rectangle'],

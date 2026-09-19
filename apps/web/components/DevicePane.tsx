@@ -21,6 +21,7 @@ import { AuthoringInspector } from './AuthoringInspector'
 export interface DevicePaneProps {
   authoringFeatures?: Omit<FeatureProps, 'node'>
   authoringTools?: React.ReactNode
+  previewTools?: React.ReactNode
   onChangeAuthoring?: (control: string, value: string) => Promise<string | null>
   authoringNode?: AuthoringNode
   onRevealAuthoring?: (span: SourceSpan) => void
@@ -149,7 +150,7 @@ const ZOOMS: readonly MenuItem[] = [
  */
 export function DevicePane({
   onChangeAuthoring,
-  authoringFeatures, authoringTools,
+  authoringFeatures, authoringTools, previewTools,
   authoringNode,
   onRevealAuthoring,
   expanded = false,
@@ -736,10 +737,9 @@ export function DevicePane({
         </header>
 
         {inspectorTab === 'settings' ? (
-          <div className={styles.propertySection} data-testid="inspector-settings">
-            <h3>{authoringNode?.name ?? (selection ? selection.name : 'Settings')}</h3>
-            {authoringTools}
+          <div className={styles.designerSettings} data-testid="inspector-settings">
             <AuthoringInspector features={authoringFeatures} onChange={onChangeAuthoring} node={authoringNode} stale={stale} onReveal={onRevealAuthoring} />
+            {authoringTools}
           </div>
         ) : (
           <>
@@ -755,6 +755,7 @@ export function DevicePane({
               <div className={styles.propertyRow}><span>Canvas zoom</span>{zoomPicker}</div>
             </div>
             <div className={styles.propertySection}>
+              {previewTools}
               <h3>iOS 27 preview</h3>
               <p>Tap, scroll, and try your app. Switch to Code to see the SwiftUI behind it.</p>
               <p>Scroll to zoom the canvas, and drag the background to move it.</p>

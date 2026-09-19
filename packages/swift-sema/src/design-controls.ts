@@ -21,13 +21,13 @@ export function swiftString(value: string): string {
 
 /** Recipes are reconstructed from syntax on every request; the UI never supplies offsets. */
 export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = '17.0'): ControlRecipe[] {
-  if (node.kind !== 'view' && node.kind !== 'collection' || node.name === 'WindowGroup') return []
+  if (!['view', 'collection', 'component'].includes(node.kind) || node.name === 'WindowGroup') return []
   const chain = viewCallChain(expr)
   if (!chain || node.properties.some(p => p.name === 'Source')) return []
   const { base, modifiers } = chain
   const targetVersion = Number.parseFloat(deploymentTarget)
   const constructor = authoringCapability(node.name, 'view', base.args.map(a => a.label))
-  if (!constructor || !Number.isFinite(targetVersion) || targetVersion < Number.parseFloat(constructor.minimumIOS)) return []
+  if (!Number.isFinite(targetVersion) || node.kind !== 'component' && (!constructor || targetVersion < Number.parseFloat(constructor.minimumIOS)) || node.kind === 'component' && (!node.definitionId || targetVersion < 13)) return []
   const colors = AUTHORING_COLORS.filter(c => targetVersion >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c))
   const listStyles = targetVersion >= 14 ? ['plain', 'inset', 'grouped', 'insetGrouped', 'sidebar'] : ['plain', 'grouped']
   const recipes: ControlRecipe[] = []
@@ -75,28 +75,28 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       return last ? { start: last.span.end, end: last.span.end, text: `, ${label}${formatted}` } : { start: at, end: at, text: `${label}${formatted}` }
     }, options, min, undefined, 'Sets a constructor argument without changing its children.')
   }
-  if (['HStack', 'VStack', 'ZStack'].includes(node.name)) {
+  if (node.kind !== 'component' && ['HStack', 'VStack', 'ZStack'].includes(node.name)) {
     // Changing an axis with axis-specific alignment could silently change meaning.
     if (!base.args.some(a => a.label === 'alignment') && (node.name !== 'ZStack' || !base.args.length)) {
-      const choices = base.args.some(a => a.label === 'spacing') ? ['Row', 'Column'] : ['Row', 'Column', 'Overlay']
-      const names: Record<string, string> = { Row: 'HStack', Column: 'VStack', Overlay: 'ZStack' }
+      const choices = base.args.some(a => a.label === 'spacing') ? ['Row', 'Column'] : ['Row', 'Column', 'Stack']
+      const names: Record<string, string> = { Row: 'HStack', Column: 'VStack', Stack: 'ZStack' }
       const span = base.callee.kind === 'memberAccess' ? base.callee.memberSpan : base.callee.span
-      add('layout', 'Layout', 'select', node.name === 'HStack' ? 'Row' : node.name === 'VStack' ? 'Column' : 'Overlay', v => ({ ...span, text: names[v]! }), choices, undefined, undefined, 'Changes the layout container; child source and modifiers stay in place. Axis-specific alignment must be edited in Swift before changing axes.')
+      add('layout', 'Layout', 'select', node.name === 'HStack' ? 'Row' : node.name === 'VStack' ? 'Column' : 'Stack', v => ({ ...span, text: names[v]! }), choices, undefined, undefined, 'Changes the layout container; child source and modifiers stay in place. Axis-specific alignment must be edited in Swift before changing axes.')
     }
     if (node.name !== 'ZStack') argument('spacing', 'Spacing', 'spacing', 'number', '', undefined, 0)
     argument('alignment', 'Alignment', 'alignment', 'select', 'center', node.name === 'HStack' ? ['center', 'top', 'bottom', 'firstTextBaseline', 'lastTextBaseline'] : node.name === 'VStack' ? ['center', 'leading', 'trailing'] : ALIGNMENTS)
   }
-  if (node.name === 'ScrollView') {
+  if (node.kind !== 'component' && node.name === 'ScrollView') {
     argument('scroll:axis', 'Scroll direction', null, 'select', 'vertical', ['vertical', 'horizontal'])
     const indicators = base.args.find(a => a.label === 'showsIndicators')
     if (indicators) replace('scroll:indicators', 'Show indicators', indicators.value, 'select', ['true', 'false'], undefined, undefined, '')
   }
-  if (node.name === 'List' && !modifiers.some(m => modName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
-  if (node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'number', '', undefined, 0)
-  if (node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'number', '', undefined, 0)
-  if (node.name === 'Text' && base.args[0]) replace('content', 'Text', base.args[0].value, 'text')
-  if (['TextField', 'Toggle', 'Button'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
-  if (node.name === 'Image' && base.args[0]) replace('image', base.args[0].label === 'systemName' ? 'System symbol' : 'Asset name', base.args[0].value, 'text')
+  if (node.kind !== 'component' && node.name === 'List' && !modifiers.some(m => modName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
+  if (node.kind !== 'component' && node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'number', '', undefined, 0)
+  if (node.kind !== 'component' && node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'number', '', undefined, 0)
+  if (node.kind !== 'component' && node.name === 'Text' && base.args[0]) replace('content', 'Text', base.args[0].value, 'text')
+  if (node.kind !== 'component' && ['TextField', 'Toggle', 'Button'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
+  if (node.kind !== 'component' && node.name === 'Image' && base.args[0]) replace('image', base.args[0].label === 'systemName' ? 'System symbol' : 'Asset name', base.args[0].value, 'text')
   for (const [i, m] of modifiers.entries()) {
     const name = modName(m)
     const capability = authoringCapability(name, 'modifier', m.args.map(a => a.label))

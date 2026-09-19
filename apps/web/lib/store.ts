@@ -239,6 +239,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
    * a naive debounce quietly loses the last few seconds of work.
    */
   function scheduleSave(): void {
+    if (get().lastSavedAt !== null) set({ lastSavedAt: null })
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(() => void get().flush(), AUTOSAVE_MS)
   }
@@ -447,6 +448,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       if (!project) return
 
       const problem = await writeProject(project)
+      // A completed older write says nothing about edits made while it was saving.
+      if (get().project !== project) return
       set(problem ? { saveError: problem } : { lastSavedAt: Date.now(), saveError: null })
     },
 

@@ -1,3 +1,4 @@
+import { modifierModel } from './authoring-modifiers'
 import { enrichAuthoring } from './authoring-features'
 import type { ComponentDescription } from '@studio/shared'
 import {
@@ -14,6 +15,11 @@ interface Binding { kind: PropertyValueKind; source: SourceSpan }
 type Scope = ReadonlyMap<string, Binding>
 
 const READ_ONLY = 'Read-only in this version. Use the source to change this property.'
+
+// Reading view-builder content does not grant a writer for the container overload.
+const CONTENT_VIEWS = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'LazyVGrid', 'LazyHGrid', 'Grid', 'GridRow', 'ViewThatFits', 'GeometryReader', 'ScrollView', 'ForEach', 'List', 'Section', 'Form', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'NavigationLink', 'TabView', 'Tab', 'Group', 'GroupBox', 'DisclosureGroup', 'ControlGroup', 'AnyView', 'WindowGroup', 'ToolbarItem', 'ToolbarItemGroup', 'Picker'])
+const CONTENT_SLOTS: Readonly<Record<string, string>> = { background: 'Background', overlay: 'Overlay', toolbar: 'Toolbar', sheet: 'Sheet', fullScreenCover: 'Full screen cover', navigationDestination: 'Destination', safeAreaInset: 'Safe area inset' }
+
 
 function callName(expr: Expr): string | null {
   if (expr.kind === 'identifier') return expr.name
@@ -165,15 +171,20 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
+    Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget, !!node.controls))
     const closure = chain.base.trailingClosure
-    if (closure && capability?.content) {
+    if (closure && (capability?.content || builtin && (CONTENT_VIEWS.has(name) || name === 'Button' && chain.base.args.some(arg => arg.label === 'action')))) {
       if (node.kind === 'collection') {
         const template = add('template', 'Row template', closure.span, parent.owner, node)
         const locals = new Map(scope)
         const params = closure.params.length ? closure.params : [{ name: '$0', span: closure.span }]
         for (const param of params) locals.set(param.name.replace(/^\$/, ''), { kind: 'data-binding', source: param.span })
         block(closure.body, template, locals)
-      } else block(closure.body, node, scope)
+      } else {
+        const locals = new Map(scope)
+        for (const param of closure.params) locals.set(param.name.replace(/^\$/, ''), { kind: 'computed', source: param.span })
+        block(closure.body, node, locals)
+      }
     }
     // Section headers/footers are content slots, not repeated rows or actions.
     if (name === 'Section' && capability) for (const arg of chain.base.args) {
@@ -182,10 +193,28 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       if (arg.value.kind === 'closure') block(arg.value.body, slot, scope)
       else expression(arg.value, slot, scope)
     }
-    // Only known view-builder slots are traversed. Button actions are never treated as UI.
+    // A visual slot has its own layer; action closures and scalar colors are not views.
     for (const modifier of chain.modifiers) {
       const name = modifier.callee.kind === 'memberAccess' ? modifier.callee.member : ''
-      if (authoringCapability(name, 'modifier', modifier.args.map(a => a.label))?.content && modifier.trailingClosure) block(modifier.trailingClosure.body, node, scope)
+      const label = CONTENT_SLOTS[name]
+      if (!label) continue
+      const closure = modifier.trailingClosure ?? modifier.args.find(arg => arg.label === 'content' && arg.value.kind === 'closure')?.value
+      if (closure?.kind === 'closure') {
+        const slot = add('branch', label, closure.span, parent.owner, node)
+        const locals = new Map(scope)
+        for (const param of closure.params) locals.set(param.name.replace(/^\$/, ''), { kind: 'computed', source: param.span })
+        block(closure.body, slot, locals)
+      } else if (name === 'background' || name === 'overlay') {
+        const argument = modifier.args.find(arg => arg.label === null)?.value
+        const content = argument && viewCallChain(argument)
+        const contentName = content && callName(content.base.callee)
+        // Color styling stays in its modifier. Qualification must not resolve to a local Color component.
+        const builtinColor = contentName === 'Color' && (!definitions.has('Color') || content?.base.callee.kind === 'memberAccess' && content.base.callee.base?.kind === 'identifier' && content.base.callee.base.name === 'SwiftUI')
+        if (argument && contentName && !builtinColor && (SUPPORTED_VIEWS.has(contentName) || definitions.has(contentName))) {
+          const slot = add('branch', label, argument.span, parent.owner, node)
+          expression(argument, slot, scope)
+        }
+      }
     }
   }
 
@@ -206,12 +235,19 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
           if (condition.kind === 'optionalBinding') locals.set(condition.name, { kind: 'computed', source: condition.nameSpan })
         }
         block(stmt.then, branch, locals)
-        if (stmt.else?.kind === 'block') block(stmt.else, branch, scope)
-        else if (stmt.else) block({ kind: 'block', span: stmt.else.span, statements: [stmt.else] }, branch, scope)
+        if (stmt.else) {
+          const otherwise = add('branch', 'Otherwise', stmt.else.span, parent.owner, branch)
+          if (stmt.else.kind === 'block') block(stmt.else, otherwise, scope)
+          else block({ kind: 'block', span: stmt.else.span, statements: [stmt.else] }, otherwise, scope)
+        }
       } else if (stmt.kind === 'switchStmt') {
         const branch = add('branch', 'Switch', stmt.span, parent.owner, parent)
         branch.properties.push(property(branch, 'condition', stmt.subject, scope))
-        for (const item of stmt.cases) block(item.body, branch, scope)
+        for (const item of stmt.cases) {
+          const label = item.isDefault ? 'Otherwise' : 'Case ' + item.patterns.map(pattern => source(pattern.span)).join(', ')
+          const content = add('branch', label, item.span, parent.owner, branch)
+          block(item.body, content, scope)
+        }
       } else add('opaque', stmt.kind, stmt.span, parent.owner, parent)
     }
   }

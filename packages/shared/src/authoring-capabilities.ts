@@ -17,7 +17,7 @@ export interface AuthoringCapability {
 const EDITABLE = new Set(['Text', 'Image', 'RoundedRectangle', 'Spacer', 'HStack', 'VStack', 'ZStack', 'Button', 'TextField', 'Toggle', 'ScrollView', 'fill', 'padding', 'frame', 'font', 'foregroundColor', 'foregroundStyle', 'background', 'cornerRadius', 'opacity', 'lineLimit', 'multilineTextAlignment', 'navigationTitle', 'accessibilityLabel', 'accessibilityIdentifier', 'listStyle', 'List', 'ForEach', 'Picker'])
 
 function capability(name: string, kind: 'view' | 'modifier', forms: AuthoringCapability['forms'], content = false, minimumIOS = '13.0'): AuthoringCapability {
-  return { id: `${kind}.${name}`, name, kind, forms, content, minimumIOS, preview: 'subset', editing: EDITABLE.has(name) ? 'subset' : 'planned', native: 'unverified', fixture: 'authoring-core', writeRule: 'Only discovered design controls authorize writes. See AUTHORING_WRITERS for exact boundaries; validate source ownership, target availability and the complete project revision before atomic commit.' }
+  return { id: `${kind}.${name}`, name, kind, forms, content, minimumIOS, preview: 'subset', editing: EDITABLE.has(name) ? 'subset' : 'planned', native: 'unverified', fixture: 'authoring-core', writeRule: 'Only discovered design controls and operation capabilities authorize writes. See AUTHORING_WRITERS for exact boundaries; validate source ownership, target availability and the complete project revision before atomic commit.' }
 }
 
 export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [

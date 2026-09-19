@@ -45,6 +45,8 @@ test('Layers shows nested pages, selects without activating controls, and follow
   await expect(preview.getByText('Count: 0', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
   await expect(page.getByTestId('editor')).toBeHidden()
+  // Evaluated pages and hover details remain available in developer inspection.
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   const layers = page.getByRole('tree', { name: 'App layers' })
   const overview = layers.getByRole('treeitem', { name: 'Overview, Page', exact: true })
   const profile = layers.getByRole('treeitem', { name: 'Profile, Page', exact: true })
@@ -93,6 +95,8 @@ test('inspecting the preview follows the pointer in Layers and selects what is c
   await page.getByTestId('workspace-design').click()
 
   await page.getByTestId('inspect-toggle').click()
+  // Evaluated pages and hover details remain available in developer inspection.
+  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   const layers = page.getByRole('tree', { name: 'App layers' })
   const button = layers.getByRole('treeitem', { name: 'Increase, Button', exact: true })
   const count = layers.getByRole('treeitem', { name: 'Count: 0, Text', exact: true })

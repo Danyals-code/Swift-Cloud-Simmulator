@@ -275,6 +275,14 @@ export function PopupButton({
           event.preventDefault()
           setAnchor((open) => (open ? null : anchorOf(ref.current)))
         }}
+        onKeyDown={(event) => {
+          if (!['Enter', ' ', 'ArrowDown'].includes(event.key)) return
+          event.preventDefault()
+          event.stopPropagation()
+          // Pointer-down opens mouse menus; prevent the keyboard's synthetic click
+          // from toggling the menu again after opening it here.
+          setAnchor(anchorOf(ref.current))
+        }}
         className={
           className ??
           'flex h-[22px] items-center gap-1.5 rounded-[5px] border border-xc-line bg-xc-line-soft px-2 text-[14px] text-xc-text transition-colors hover:bg-xc-line-soft active:bg-xc-line-soft'
@@ -348,6 +356,14 @@ export function MenuButton({
         onPointerDown={(event) => {
           event.preventDefault()
           setAnchor((open) => (open ? null : anchorOf(ref.current)))
+        }}
+        onKeyDown={(event) => {
+          if (!['Enter', ' ', 'ArrowDown'].includes(event.key)) return
+          event.preventDefault()
+          event.stopPropagation()
+          // Pointer-down opens mouse menus; prevent the keyboard's synthetic click
+          // from toggling the menu again after opening it here.
+          setAnchor(anchorOf(ref.current))
         }}
         className={className}
       >

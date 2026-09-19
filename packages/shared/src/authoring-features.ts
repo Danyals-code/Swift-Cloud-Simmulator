@@ -1,3 +1,4 @@
+import type { ModifierOperation } from './authoring-modifiers'
 import type { ResourceOperation } from './design-resources'
 import type { SourceSpan } from './source'
 import type { DesignControl } from './design-edit'
@@ -72,7 +73,7 @@ export type BehaviorAction =
   | { readonly type: 'dismiss'; readonly state: string }
   | { readonly type: 'append'; readonly collection: string; readonly record: DesignRecord }
   | { readonly type: 'delete'; readonly collection: string; readonly id: DesignValue }
-export type AuthoringOperation = ResourceOperation
+export type AuthoringOperation = ResourceOperation | ModifierOperation
   | { readonly kind: 'records'; readonly records: readonly DesignRecord[] }
   | { readonly kind: 'collection-field'; readonly name: string; readonly type: RecordField['type']; readonly optional: boolean; readonly value: DesignValue }
   | { readonly kind: 'collection-convert'; readonly name: string; readonly recordType: string }

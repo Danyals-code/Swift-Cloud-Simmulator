@@ -119,7 +119,7 @@ export function configureTransition(ctx: FeatureContext, node: AuthoringNode, st
   if (!chain || chain.modifiers.some(m => m.callee.kind === 'memberAccess' && ['animation', 'transition'].includes(m.callee.member))) throw new Error('Existing animation code is developer-owned. Edit it in Swift.')
   let parent = ctx.nodes.find(n => n.id === node.parentId), conditional = false, animationOwner = node
   while (parent && parent.kind !== 'definition') {
-    if (parent.kind === 'branch') conditional = true
+    if (parent.kind === 'branch' && ['Condition', 'Otherwise', 'Switch'].includes(parent.name)) conditional = true
     if (conditional && expressionOf(ctx, parent)) { animationOwner = parent; break }
     parent = ctx.nodes.find(n => n.id === parent!.parentId)
   }

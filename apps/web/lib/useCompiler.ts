@@ -99,6 +99,8 @@ export interface CompilerOptions {
    * after an edit comes back as a gallery rather than silently closing it.
    */
   allPages?: boolean
+  /** Explicit designer commits are complete; they do not need the typing debounce. */
+  committedEditRevision?: number
 }
 
 export function useCompiler({
@@ -113,6 +115,7 @@ export function useCompiler({
   previewTarget,
   paused = false,
   allPages = false,
+  committedEditRevision = 0,
 }: CompilerOptions) {
   const handleRef = useRef<WorkerHandle | null>(null)
   const revisionRef = useRef(0)
@@ -264,11 +267,13 @@ export function useCompiler({
    */
   const first = useRef(true)
   const compiledProject = useRef<string | undefined>(undefined)
+  const compiledEditRevision = useRef(committedEditRevision)
   useEffect(() => {
     const changedProject = compiledProject.current !== projectId
     if (paused && !changedProject) return
     compiledProject.current = projectId
-    const immediate = first.current || changedProject
+    const immediate = first.current || changedProject || compiledEditRevision.current !== committedEditRevision
+    compiledEditRevision.current = committedEditRevision
     first.current = false
 
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -276,7 +281,7 @@ export function useCompiler({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [runCompile, paused, projectId])
+  }, [runCompile, paused, projectId, committedEditRevision])
 
   useEffect(() => {
     return () => {

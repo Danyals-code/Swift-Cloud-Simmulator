@@ -1,50 +1,152 @@
 'use client'
 
-import { useState } from 'react'
-import type { AuthoringNode, AuthoringSnapshot } from '@studio/shared'
-import { Icon } from './ui/Icon'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRequest, HiddenViewInfo, SourceFile } from '@studio/shared'
+import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, type SourceLayerNavigation } from '../lib/sourceLayers'
+import { Icon, type IconName } from './ui/Icon'
+import { MenuButton, type MenuItem } from './ui/Menu'
 import styles from './Layers.module.css'
 
-/** Source hierarchy deliberately includes inactive branches and one copy of each template. */
-export function LogicalLayers({ snapshot, selected, stale, onSelect }: { snapshot: AuthoringSnapshot; selected?: string; stale: boolean; onSelect: (node: AuthoringNode) => void }) {
-  const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
-  const [entered, setEntered] = useState<{ owner: string; fingerprint: string } | null>(null)
+interface Props {
+  snapshot: AuthoringSnapshot
+  files: readonly SourceFile[]
+  selected?: string
+  selection?: AuthoringSelection
+  stale: boolean
+  onSelect: (node: AuthoringNode) => void
+  onEdit?: (node: AuthoringNode, operation: DesignEditRequest['operation']) => Promise<string | null>
+  hidden?: readonly HiddenViewInfo[]
+  onShow?: (view: HiddenViewInfo) => void
+  editable?: boolean
+}
+
+const ICONS: Readonly<Record<string, IconName>> = {
+  VStack: 'stack-v', LazyVStack: 'stack-v', HStack: 'stack-h', LazyHStack: 'stack-h', ZStack: 'stack-z',
+  Text: 'text-lines', Label: 'text-lines', Image: 'image', AsyncImage: 'image', Button: 'button',
+  Toggle: 'button', TextField: 'button', SecureField: 'button', Slider: 'button', Picker: 'button',
+  List: 'list-rows', ForEach: 'rows', ScrollView: 'scroll', NavigationStack: 'nav', NavigationLink: 'nav',
+  TabView: 'screens', Group: 'section', Section: 'section', Grid: 'grid', Spacer: 'spacer',
+}
+const structural = (node: AuthoringNode) => ['view', 'component', 'collection'].includes(node.kind)
+
+/** The designer hierarchy has one copy of a row design, never individual records. */
+export function LogicalLayers({ snapshot, files, selected, selection, stale, onSelect, onEdit, hidden = [], onShow, editable = false }: Props) {
+  const [navigation, setNavigation] = useState<SourceLayerNavigation>({ snapshot, files, closed: new Set() })
   const [query, setQuery] = useState('')
-  const nodes = new Map(snapshot.nodes.map(n => [n.id, n]))
-  const entry = snapshot.nodes.find(n => n.owner === entered?.owner && n.fingerprint === entered.fingerprint)
-  const appRoots = snapshot.roots.filter(id => nodes.get(id)?.children.some(child => nodes.get(child)?.name === 'WindowGroup'))
-  const screens = new Set<string>()
-  const discover = (id: string) => { const node = nodes.get(id); if (node?.definitionId) screens.add(node.definitionId); else node?.children.forEach(discover) }
-  appRoots.forEach(discover)
-  const roots = entry ? [entry.id] : snapshot.roots.filter(id => !appRoots.includes(id)).sort((a, b) => Number(screens.has(b)) - Number(screens.has(a)))
-  const toggle = (id: string) => setClosed(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
-  const enter = (node: AuthoringNode) => { setEntered({ owner: node.owner, fingerprint: node.fingerprint }); onSelect(node); setClosed(new Set()) }
-  const matches = (node: AuthoringNode): boolean => `${node.name} ${node.owner}`.toLowerCase().includes(query.toLowerCase()) || node.children.some(id => { const child = nodes.get(id); return !!child && matches(child) })
-  const rows: { node: AuthoringNode; depth: number }[] = []
-  const visit = (id: string, depth: number) => {
-    const node = nodes.get(id)
-    if (!node || query && !matches(node)) return
-    rows.push({ node, depth })
-    if ((!closed.has(id) || query) && (node.kind !== 'template' || entry?.id === id || query)) node.children.forEach(child => visit(child, depth + 1))
+  const [focused, setFocused] = useState<string>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [drag, setDrag] = useState<{ id: string; over?: string; position?: 'before' | 'after' }>()
+  const tree = useRef<HTMLDivElement>(null)
+  // Reconcile navigation only against the files belonging to a completed snapshot.
+  const current = stale ? navigation : rebaseSourceLayers(navigation, snapshot, files, selection)
+  const { rows, screens, entry, components, componentsExpanded } = sourceLayerRows(snapshot, current, selected, query)
+  const next = !stale && selected && current.entered && !entry ? { ...current, entered: undefined } : current
+  if (next !== navigation) setNavigation(next)
+  const nodes = new Map(snapshot.nodes.map(node => [node.id, node]))
+  const rowIds = rows.map(({ node }) => node.id).join('\n')
+  useEffect(() => {
+    if (!selected || stale) return
+    const row = Array.from(tree.current?.querySelectorAll<HTMLElement>('[data-source-id]') ?? []).find(element => element.dataset.sourceId === selected)
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [selected, stale, rowIds])
+  const disabled = stale || busy
+  const toggle = (id: string, expanded: boolean) => setNavigation(state => {
+    const closed = new Set(state.closed)
+    if (expanded) closed.add(id); else closed.delete(id)
+    return { ...state, closed, dismissed: expanded ? selected : undefined }
+  })
+  const enter = (node: AuthoringNode) => {
+    if (disabled) return
+    const target = node.definitionId ? nodes.get(node.definitionId) : node
+    if (!target) return
+    setNavigation({ snapshot, files, entered: target.id, closed: new Set(), selection })
+    onSelect(target)
   }
-  roots.forEach(id => visit(id, 0))
+  const focusRow = (id?: string) => {
+    const row = Array.from(tree.current?.querySelectorAll<HTMLElement>('[data-source-id]') ?? []).find(element => element.dataset.sourceId === id)
+    row?.focus()
+  }
+  const edit = async (node: AuthoringNode, operation: DesignEditRequest['operation']) => {
+    if (disabled || !editable || !onEdit) return
+    setError(null); setBusy(true)
+    try { setError(await onEdit(node, operation)) }
+    catch { setError('This change could not be completed. Try again.') }
+    finally { setBusy(false) }
+  }
+  const menus = (node: AuthoringNode): MenuItem[] => {
+    const siblings = nodes.get(node.parentId ?? '')?.children ?? []
+    const index = siblings.indexOf(node.id)
+    const canEdit = editable && !!onEdit && !disabled && structural(node)
+    return [
+      ...(node.kind === 'template' ? [{ value: 'enter', label: 'Edit row design' }] : []),
+      ...(node.definitionId ? [{ value: 'enter', label: 'Edit main component' }] : []),
+      ...(structural(node) ? [
+        { value: 'up', label: 'Move up', disabled: !canEdit || index <= 0 },
+        { value: 'down', label: 'Move down', disabled: !canEdit || index < 0 || index >= siblings.length - 1 },
+        { value: 'hide', label: 'Hide', disabled: !canEdit, separated: true },
+        { value: 'delete', label: 'Delete', disabled: !canEdit },
+      ] : []),
+    ]
+  }
+  const action = (node: AuthoringNode, value: string) => {
+    if (value === 'enter') enter(node)
+    else if (value === 'up' || value === 'down') void edit(node, { kind: 'move', direction: value === 'up' ? -1 : 1 })
+    else if (value === 'hide' || value === 'delete') void edit(node, { kind: value })
+  }
+  const tabStop = rows.some(row => row.node.id === focused) ? focused : rows.find(row => row.node.id === selected)?.node.id ?? rows[0]?.node.id
+  const owners = new Map(hidden.map(view => [view, sourceLayerHiddenOwner(snapshot, view)]))
+  const visibleHidden = hidden.filter(view => !entry || view.file === entry.source.file && view.offset >= entry.source.start && view.offset <= entry.source.end)
+  const hiddenRows = (views: readonly HiddenViewInfo[], depth: number) => views.filter(view => !query.trim() || `${view.name} ${sourceLayerType({ name: view.type, kind: 'view' })}`.toLowerCase().includes(query.trim().toLowerCase())).map(view => <div key={`hidden:${view.file}:${view.offset}`} role="treeitem" aria-level={depth + 1} aria-label={`${view.name}, hidden`} aria-selected={false} className={`${styles.row} ${styles.hiddenRow}`} data-testid="hidden-layer" style={{ paddingLeft: 8 + depth * 14 }}>
+    <span className={styles.disclosure} /><span className={styles.icon}><Icon name="eye-off" /></span><span className={styles.name}>{view.name === view.type ? sourceLayerType({ name: view.type, kind: 'view' }) : view.name}</span>
+    <span className={styles.move}><button type="button" data-testid="layer-show" disabled={disabled || !editable || !onShow} aria-label={`Show ${view.name}`} title="Restore this view" onClick={() => onShow?.(view)}><Icon name="eye-off" size={13} /></button></span>
+  </div>)
+  const componentsHeader = !entry && components.length > 0 ? <button type="button" className={styles.groupHeading} role="treeitem" aria-level={1} aria-selected={false} aria-expanded={componentsExpanded} onClick={() => setNavigation(state => ({ ...state, componentsOpen: !componentsExpanded, dismissed: componentsExpanded ? selected : undefined }))}><Icon name={componentsExpanded ? 'chevron-down' : 'chevron-right'} size={12} />Components<span>{components.length}</span></button> : null
   return <section className={styles.panel} aria-label="Design layers" data-testid="logical-layers">
-    <div className={styles.heading}><span>Design structure</span><button type="button" data-testid="collapse-layers" aria-label="Collapse all layers" onClick={() => { setQuery(''); setClosed(new Set(snapshot.nodes.map(n => n.id))) }}><Icon name="collapse" size={13} /></button></div>
-    {entry && <div className={styles.note}><button type="button" onClick={() => setEntered(null)}>All screens</button> / {entry.owner} / {entry.name}<p>{entry.kind === 'template' ? 'All rows using this template' : 'Shared source'}</p></div>}
-    <div className={styles.tree} role="tree" aria-label="Source layers" aria-busy={stale}>
-      {rows.map(({ node, depth }) => <div key={node.id} className={styles.row} style={{ paddingLeft: 8 + depth * 14 }} data-source-name={node.name} data-source-owner={node.owner} data-source-kind={node.kind} role="treeitem" aria-level={depth + 1} aria-selected={selected === node.id} aria-expanded={node.children.length ? !closed.has(node.id) && (node.kind !== 'template' || entry?.id === node.id) : undefined} tabIndex={0}
-        onClick={() => { if (!stale) onSelect(node) }} onDoubleClick={() => { if (!stale && node.kind === 'template') enter(node) }}
-        onKeyDown={event => {
-          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!stale) { if (node.kind === 'template') enter(node); else onSelect(node) } }
-          if (event.key === 'ArrowRight' && node.children.length) { event.preventDefault(); if (node.kind === 'template') enter(node); else if (closed.has(node.id)) toggle(node.id) }
-          if (event.key === 'ArrowLeft' && !closed.has(node.id)) { event.preventDefault(); toggle(node.id) }
-          if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); const rows = Array.from(event.currentTarget.parentElement!.querySelectorAll<HTMLElement>('[role="treeitem"]')); rows[rows.indexOf(event.currentTarget) + (event.key === 'ArrowUp' ? -1 : 1)]?.focus() }
-        }}>
-        <button type="button" tabIndex={-1} className={styles.disclosure} disabled={!node.children.length} aria-label={`Expand ${node.name}`} onClick={event => { event.stopPropagation(); if (node.kind === 'template') enter(node); else toggle(node.id) }}><Icon name={closed.has(node.id) || node.kind === 'template' && entry?.id !== node.id ? 'chevron-right' : 'chevron-down'} size={12} /></button>
-        <span className={styles.name}>{node.kind === 'definition' ? node.owner : node.kind === 'branch' && node.properties[0] ? `If ${node.properties[0].expression}` : node.controls?.find(c => c.id === 'content')?.value || node.name}</span><span className={styles.kind}>{node.kind === 'template' ? 'All rows' : node.kind === 'component' ? 'Instance' : node.kind === 'branch' ? 'Branch' : node.kind === 'definition' ? screens.has(node.id) ? 'Screen' : 'Component' : ''}</span>
-      </div>)}
+    <div className={styles.heading}><span>{entry ? entry.kind === 'template' ? 'Row design' : 'Main component' : 'Layers'}</span><button type="button" data-testid="collapse-layers" aria-label="Collapse all layers" onClick={() => { setQuery(''); setNavigation(state => ({ ...state, componentsOpen: false, closed: new Set(snapshot.nodes.map(n => n.id)), dismissed: selected })) }}><Icon name="collapse" size={13} /></button></div>
+    {entry && <div className={styles.context}><button type="button" onClick={() => setNavigation(state => ({ ...state, entered: undefined }))}>All screens</button><Icon name="chevron-right" size={11} /><span>{entry.kind === 'template' ? 'Row design' : sourceLayerLabel(entry)}</span><p>{entry.kind === 'template' ? 'Changes affect all rows using this design.' : 'Changes affect every instance of this component.'}</p></div>}
+    <div ref={tree} className={styles.tree} role="tree" aria-label="Design layers" aria-busy={disabled}>
+      {rows.map(({ node, depth, expanded: modelExpanded, component }, index) => {
+        const ownHidden = visibleHidden.filter(view => owners.get(view) === node.id)
+        const expandable = node.children.length > 0 || ownHidden.length > 0
+        const expanded = modelExpanded || ownHidden.length > 0 && !current.closed.has(node.id)
+        const actions = menus(node)
+        const displayDepth = depth + (component ? 1 : 0)
+        const notShown = sourceLayerNotShown(snapshot, node)
+        const label = sourceLayerLabel(node), type = sourceLayerType(node)
+        const canDrag = editable && !!onEdit && !disabled && structural(node)
+        return <Fragment key={node.id}>
+          {component && !rows[index - 1]?.component && componentsHeader}
+          <div className={styles.row} style={{ paddingLeft: 8 + displayDepth * 14 }} data-source-id={node.id} data-source-name={node.name} data-source-owner={node.owner} data-source-kind={node.kind} role="treeitem" aria-label={`${label}${label !== type ? `, ${type}` : ''}`} aria-level={displayDepth + 1} aria-selected={selected === node.id} aria-expanded={expandable ? expanded : undefined} tabIndex={tabStop === node.id ? 0 : -1} data-inactive={notShown || undefined} data-dragging={drag?.id === node.id || undefined} data-drop={drag?.over === node.id ? drag.position : undefined} draggable={canDrag}
+            onDragStart={event => { if (!canDrag) { event.preventDefault(); return } event.dataTransfer.setData('text/studio-source-layer', node.id); event.dataTransfer.effectAllowed = 'move'; setDrag({ id: node.id }) }}
+            onDragOver={event => { const from = nodes.get(drag?.id ?? ''); if (!from || !canDrag || from.id === node.id || from.source.file !== node.source.file || from.owner !== node.owner) return; event.preventDefault(); const box = event.currentTarget.getBoundingClientRect(); setDrag({ id: from.id, over: node.id, position: event.clientY < box.top + box.height / 2 ? 'before' : 'after' }) }}
+            onDrop={event => { event.preventDefault(); const from = nodes.get(event.dataTransfer.getData('text/studio-source-layer')); if (from && drag?.over === node.id && drag.position && from.source.file === node.source.file && from.owner === node.owner) void edit(from, { kind: 'moveTo', targetOffset: node.source.start, position: drag.position }); setDrag(undefined) }}
+            onDragEnd={() => setDrag(undefined)}
+            onFocus={() => setFocused(node.id)} onClick={() => { if (!disabled) { setError(null); onSelect(node) } }} onDoubleClick={() => { if (node.kind === 'template' || node.definitionId) enter(node) }}
+            onKeyDown={event => {
+              if (event.target !== event.currentTarget) return
+              if (event.key === 'Escape') { setDrag(undefined); return }
+              if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); if (structural(node)) void edit(node, { kind: 'move', direction: event.key === 'ArrowUp' ? -1 : 1 }); return }
+              if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!disabled) onSelect(node) }
+              if (event.key === 'ArrowRight' && expandable) { event.preventDefault(); if (!expanded) toggle(node.id, false); else focusRow(node.children[0]) }
+              if (event.key === 'ArrowLeft') { event.preventDefault(); if (expanded) toggle(node.id, true); else focusRow(node.parentId) }
+              if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); focusRow(rows[index + (event.key === 'ArrowUp' ? -1 : 1)]?.node.id) }
+              if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); focusRow((event.key === 'Home' ? rows[0] : rows[rows.length - 1])?.node.id) }
+            }}>
+            <button type="button" tabIndex={-1} className={styles.disclosure} disabled={!expandable} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`} onClick={event => { event.stopPropagation(); toggle(node.id, expanded) }}>{expandable && <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />}</button>
+            <span className={styles.icon}><Icon name={node.kind === 'definition' ? screens.has(node.id) ? 'screens' : 'section' : node.kind === 'template' ? 'rows' : ICONS[node.name] ?? (node.children.length ? 'section' : 'shape')} /></span>
+            <span className={styles.name}>{label}</span>
+            <span className={styles.kind}>{notShown ? 'Not shown' : node.kind === 'template' ? 'All rows' : node.kind === 'component' ? 'Instance' : node.kind === 'definition' ? screens.has(node.id) ? 'Screen' : '' : label !== type ? type : ''}</span>
+            {actions.length > 0 && <span className={styles.move} onClick={event => event.stopPropagation()}><MenuButton label={`Actions for ${label}`} items={actions} onSelect={value => action(node, value)} testId="source-layer-actions"><Icon name="ellipsis" size={14} /></MenuButton></span>}
+          </div>
+          {expanded && hiddenRows(ownHidden, displayDepth + 1)}
+        </Fragment>
+      })}
+      {!rows.some(row => row.component) && componentsHeader}
+      {hiddenRows(visibleHidden.filter(view => !owners.get(view)), 0)}
+      {!rows.length && <p className={styles.empty}>{query.trim() ? 'No matching layers.' : stale ? 'Building the view hierarchy…' : 'No views to show.'}</p>}
     </div>
-    <p className={styles.note}>Double-click a row template, or press Enter, to edit all its rows.</p>
-    <label className={styles.filter}><Icon name="search" size={14} /><input aria-label="Filter design layers" value={query} placeholder="Filter design layers" onChange={e => setQuery(e.target.value)} /></label>
+    {error && <p className={styles.error} role="alert">{error}</p>}
+    <label className={styles.filter}><Icon name="search" size={14} /><input aria-label="Filter design layers" value={query} placeholder="Find a layer" onChange={e => setQuery(e.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setQuery('') } }} /></label>
   </section>
 }

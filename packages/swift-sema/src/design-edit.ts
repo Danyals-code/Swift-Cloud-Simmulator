@@ -1,5 +1,6 @@
+import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import type { DesignEditPlan, DesignEditRequest, SourceFile, SourceChange } from '@studio/shared'
+import type { DesignEditPlan, DesignEditRequest, SourceFile, SourceChange, ModifierOperation } from '@studio/shared'
 import { Parser, forEachChild, deleteView, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { designControlRecipes, validateControlValue } from './design-controls'
@@ -21,6 +22,19 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   if (operation.kind !== 'show' && !node) return reject('The source identity changed. Select the view again.')
   if (node && request.scope !== node.owner) return reject('The requested source ownership changed. Select the view again.')
   if (node && diagnostics.some(d => d.severity === 'error' && d.span.file === file.id && d.span.start < node.source.end && d.span.end >= node.source.start)) return reject('Resolve the diagnostics for this view before editing it.')
+  if (node && operation.kind.startsWith('modifier-')) {
+    let expression: Expr | undefined
+    function find(item: Node): void {
+      if (item.kind === 'call' && item.span.file === node!.source.file && item.span.start === node!.source.start && item.span.end === node!.source.end) expression = item
+      else forEachChild(item, find)
+    }
+    ast.forEach(find)
+    if (!expression) return reject('This view no longer has an editable modifier chain.')
+    try {
+      const text = editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget)
+      return finishDesignPlan(request, request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
+    } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
+  }
   if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
     try {
       const result = featureEdit({ deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions }, node, operation as Parameters<typeof featureEdit>[2])

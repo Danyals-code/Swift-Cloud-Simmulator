@@ -124,6 +124,7 @@ export function Studio() {
   const [editNote, setEditNote] = useState<string | null>(null)
   /** Serializes source planning; typing can still invalidate an in-flight plan. */
   const editingRef = useRef(false)
+  const [committedEditRevision, setCommittedEditRevision] = useState(0)
   /** A view copied from Layers or the canvas, as the Swift that draws it. */
   const [clipboard, setClipboard] = useState<string | null>(null)
   const [hidden, setHidden] = useState<{ key: string; views: readonly HiddenViewInfo[] }>({ key: '', views: [] })
@@ -229,6 +230,7 @@ export function Studio() {
     dynamicTypeSize: previewSettings.dynamicTypeSize,
     previewTarget: project?.manifest.previewTarget,
     allPages: showingAllPages && mode === 'design',
+    committedEditRevision,
   })
 
   const activeFile = useMemo(
@@ -587,6 +589,7 @@ export function Studio() {
       const selectionChanged = JSON.stringify(currentSelection) !== JSON.stringify(state.documentSelection)
       const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...plan, selection: undefined } : plan)
       if (problem) { setEditNote(problem); return problem }
+      if (plan.changes.length) setCommittedEditRevision(revision => revision + 1)
       if (plan.changes.length && !selectionChanged && !preserveSelection) {
         const selected = plan.selection
         const snapshot = plan.authoring
@@ -958,7 +961,7 @@ export function Studio() {
         }
         onTogglePane={togglePane}
         onExport={handleExport}
-        onDownloadEditable={() => { void import('@studio/exporter').then(module => module.downloadEditableProject(project)).catch(error => setEditNote(error instanceof Error ? error.message : 'Could not download the editable project.')) }}
+        onDownloadEditable={() => { void import('@studio/exporter').then(async module => { await flush(); module.downloadEditableProject(project) }).catch(error => setEditNote(error instanceof Error ? error.message : 'Could not download the editable project.')) }}
         onShare={handleShare}
       />
 
@@ -969,7 +972,10 @@ export function Studio() {
               <Navigator
                 key={project.id}
                 authoring={result?.authoring}
+                authoringFiles={project.files}
+                authoringSelection={layerSelection?.anchor}
                 selectedAuthoringId={authoringNode?.id}
+                onEditAuthoring={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
                 onSelectAuthoring={selectAuthoring}
                 layers={layers}
                 selectedLayerId={selectedLayerId}
@@ -1107,7 +1113,7 @@ export function Studio() {
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
                   return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
                 }, onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }}
-                authoringTools={<><ProjectResources project={project} snapshot={result?.authoring} stale={stale} onCommand={operation => {
+                authoringTools={<ProjectResources project={project} snapshot={result?.authoring} stale={stale} onCommand={operation => {
                   const node = result?.authoring?.nodes[0]
                   return node ? performDesignEdit(node.source, node.fingerprint, node.owner, operation) : Promise.resolve('Wait for the project to compile.')
                 }} onAssets={async (assets: readonly ImageAsset[], operation) => {
@@ -1122,12 +1128,13 @@ export function Studio() {
                     if (!plan.ok) return plan.reason
                     return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } })
                   } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
-                }} /><PreviewScenarios key={project.id} snapshot={result?.authoring} stale={stale} scenarios={project.studio?.scenarios ?? []} active={scenario?.name ?? ''} onSelect={name => setScenarioSelection({ projectId: project.id, name })} onSave={saveScenario} onReset={run} onDelete={name => {
+                }} />}
+                previewTools={<PreviewScenarios key={project.id} snapshot={result?.authoring} stale={stale} scenarios={project.studio?.scenarios ?? []} active={scenario?.name ?? ''} onSelect={name => setScenarioSelection({ projectId: project.id, name })} onSave={saveScenario} onReset={run} onDelete={name => {
                   const state = useStudio.getState()
                   if (state.project !== project || !project.studio) return
                   const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => s.name !== name) } } })
                   if (error) setEditNote(error); else setScenarioSelection(null)
-                }} /></>}
+                }} />}
                 authoringNode={authoringNode}
                 onChangeAuthoring={changeProperty}
                 onRevealAuthoring={span => revealSpanIn(span.file, span.start)}

@@ -431,7 +431,20 @@ class Resolver {
    * `@State` and its DOM node - when the collection is reordered.
    */
   private stampList(views: readonly ViewValue[], prefix: string, inherited = this.visualStyle): ViewValue[] {
-    return views.map((view, index) => this.stamp(inheritVisualStyle(view, inherited), `${prefix}-${index}`))
+    const transitionOccurrences = new Map<string, number>()
+    return views.map((view, index) => {
+      let segment = String(index)
+      if (view.modifiers.some(modifier => modifier.name === 'transition')) {
+        // An evaluated conditional removes a slot from this list. Its following
+        // sibling must not inherit the disappearing view's identity, or presence
+        // reconciliation cannot retain the old view for its exit transition.
+        const source = `${encodeURIComponent(view.span.file)}-${view.span.start}-${view.span.end}-${encodeURIComponent(view.name)}`
+        const occurrence = transitionOccurrences.get(source) ?? 0
+        transitionOccurrences.set(source, occurrence + 1)
+        segment = `transition-${source}-${occurrence}`
+      }
+      return this.stamp(inheritVisualStyle(view, inherited), `${prefix}-${segment}`)
+    })
   }
 
   private stamp(view: ViewValue, path: string): ViewValue {

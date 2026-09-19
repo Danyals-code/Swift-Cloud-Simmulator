@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 declare global {
-  interface Window { __authoringLatency?: { mode: 'selection' | 'input' | 'edit'; start: number } }
+  interface Window { __authoringLatency?: { mode: 'selection' | 'input' | 'edit'; start: number; expected?: string; painted?: Promise<number> } }
 }
 const records = Array.from({ length: 100 }, (_, i) => `Item(id: "${i}", title: "Record ${i}")`).join(',\n')
 const helpers = Array.from({ length: 180 }, (_, i) => `struct Helper${i}: View {
@@ -44,7 +44,23 @@ test('authoring latency: 100 real UI samples after five warmups, 2,000 lines and
       if (window.__authoringLatency?.mode === 'input' && (event.target as Element).closest('[data-testid="authoring-inspector"]')) window.__authoringLatency.start = performance.now()
     }, true)
     document.addEventListener('keydown', event => {
-      if (window.__authoringLatency?.mode === 'edit' && event.key === 'Enter' && (event.target as Element).closest('[data-testid="authoring-inspector"]')) window.__authoringLatency.start = performance.now()
+      const measurement = window.__authoringLatency
+      if (measurement?.mode !== 'edit' || event.key !== 'Enter' || !(event.target as Element).closest('[data-testid="authoring-inspector"]')) return
+      const start = performance.now()
+      measurement.start = start
+      // Record completion in the browser. Playwright's assertion retries can add
+      // a 500 ms polling gap after the preview is already visibly updated.
+      measurement.painted = new Promise<number>(resolve => {
+        const observer = new MutationObserver(() => {
+          const rendered = [...document.querySelectorAll('[data-testid="render-tree"] [data-kind="text"]')]
+            .some(node => node.textContent === measurement.expected && node.getBoundingClientRect().width > 0)
+          if (!rendered) return
+          observer.disconnect()
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(performance.now() - start)))
+        })
+        // Source edits replace the render-tree root; observe its stable ancestor.
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      })
     }, true)
   })
   const settled = () => page.evaluate(() => new Promise<number>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -65,12 +81,12 @@ test('authoring latency: 100 real UI samples after five warmups, 2,000 lines and
     await page.evaluate(() => { window.__authoringLatency!.mode = 'input'; window.__authoringLatency!.start = 0 })
     await text.fill(`Edited ${i}`); await expect(text).toHaveValue(`Edited ${i}`)
     const input = await settled(); if (i >= 5) samples.input.push(input)
-    await page.evaluate(() => { window.__authoringLatency!.mode = 'edit'; window.__authoringLatency!.start = 0 })
+    await page.evaluate(value => { window.__authoringLatency!.mode = 'edit'; window.__authoringLatency!.start = 0; window.__authoringLatency!.expected = value }, `Edited ${i}`)
     await text.press('Enter')
     await expect(page.getByTestId('render-tree').getByText(`Edited ${i}`, { exact: true })).toBeVisible()
-    const edit = await settled(); if (i >= 5) samples.edit.push(edit)
+    const edit = await page.evaluate(() => window.__authoringLatency!.painted!); if (i >= 5) samples.edit.push(edit)
   }
-  const report = { browser: await page.evaluate(() => navigator.userAgent), lines: source.split('\n').length, records: 100, warmups: 5, samples, p95: { selection: p95(samples.selection), input: p95(samples.input), edit: p95(samples.edit) }, method: 'Browser event timestamp until asserted visible state and two animation frames; includes automation observation overhead.' }
+  const report = { browser: await page.evaluate(() => navigator.userAgent), lines: source.split('\n').length, records: 100, warmups: 5, samples, p95: { selection: p95(samples.selection), input: p95(samples.input), edit: p95(samples.edit) }, method: 'Selection/input: browser event until asserted field state plus two animation frames (includes automation overhead). Edit: browser Enter event until matching visible preview text is observed in the DOM plus two animation frames; the separate Playwright visibility assertion remains required.' }
   await info.attach('authoring-latency.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' })
   expect(report.p95.selection).toBeLessThanOrEqual(100)
   expect(report.p95.input).toBeLessThanOrEqual(100)
