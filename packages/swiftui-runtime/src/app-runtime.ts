@@ -1,4 +1,4 @@
-import type { LogLevel, Size, SourceSpan, UIEvent } from '@studio/shared'
+import type { ComponentSource, LogLevel, Size, SourceSpan, UIEvent } from '@studio/shared'
 import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
@@ -737,14 +737,14 @@ export class AppRuntime {
       if (!body?.accessor) {
         // A `Shape` conformance has `path(in:)` and no `body`, and is a view all the
         // same: `Arc()` in a stack draws, filled with the foreground style.
-        const shape = this.host.shapeAsView(instance, decl.span)
-        return shape ? [shape] : []
+        const shape = this.host.shapeAsView(instance, instance.viewSource ?? decl.span)
+        return shape ? componentViews([shape], instance) : []
       }
 
       const env = this.interpreter.globals.child(instance)
       const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
 
-      return this.viewsFrom(produced)
+      return componentViews(this.viewsFrom(produced), instance)
     } finally {
       this.expandDepth--
       this.identity.pop()
@@ -1232,4 +1232,23 @@ function findPreviewsProperty(files: readonly SourceFileNode[]): Block | null {
     }
   }
   return null
+}
+
+/** Tag all painted descendants because navigation/tabs can unwrap a component root. */
+function componentViews(views: readonly ViewValue[], instance: StructValue): ViewValue[] {
+  if (!instance.viewSource) return [...views]
+  const owner: ComponentSource = { name: instance.typeName, source: instance.viewSource }
+  const annotate = (view: ViewValue): ViewValue => ({
+    ...view,
+    componentSources: [owner, ...(view.componentSources ?? [])],
+    children: view.children.map(annotate),
+    modifiers: view.modifiers.map(modifier => ({
+      ...modifier,
+      args: modifier.args.map(argument => {
+        const child = asView(argument.value)
+        return child ? { ...argument, value: asSwiftValue(annotate(child)) } : argument
+      }),
+    })),
+  })
+  return views.map(annotate)
 }

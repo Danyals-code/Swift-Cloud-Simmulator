@@ -193,8 +193,9 @@ test('List records and button actions live below Modifiers and update actual dat
 test('one row design edits every rendered row without replacing their data bindings', async ({ page }) => {
   await open(page, DATA_SOURCE, 'First')
   const layers = page.getByTestId('logical-layers')
-  await expect(layers.locator('[data-source-kind="template"]')).toHaveCount(1)
-  await layers.locator('[data-source-kind="template"]').dblclick()
+  await expect(layers.locator('[data-source-kind="template"]')).toHaveCount(0)
+  await layers.locator('[data-source-name="List"]').click()
+  await page.getByTestId('settings-data').getByRole('button', { name: 'Edit row design', exact: true }).click()
   await layers.locator('[data-source-name="Text"]').click()
   await expect(page.getByTestId('authoring-inspector')).toContainText('Row design · changes apply to all rows')
   await expandCard(cards(page, 'padding'))

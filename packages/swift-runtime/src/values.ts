@@ -106,6 +106,8 @@ export interface DictionaryValue {
 export interface StructValue {
   readonly kind: 'struct'
   readonly typeName: string
+  /** View constructor provenance survives value copies for designer hit testing. */
+  readonly viewSource?: SourceSpan
   fields: Map<string, SwiftValue>
   /** True for a `class` instance: never copied. */
   readonly reference?: boolean
@@ -505,7 +507,7 @@ export function copyValue(value: SwiftValue): SwiftValue {
       if (value.reference) return value
       const fields = new Map<string, SwiftValue>()
       for (const [k, v] of value.fields) fields.set(k, copyValue(v))
-      return { kind: 'struct', typeName: value.typeName, fields }
+      return { kind: 'struct', typeName: value.typeName, fields, ...(value.viewSource ? { viewSource: value.viewSource } : {}) }
     }
     case 'enum':
       return value.associated.length === 0

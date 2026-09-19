@@ -70,7 +70,7 @@ export function bindAuthoringRuntime(snapshot: AuthoringSnapshot, layers: readon
   }
   const runtimeToSource: Record<string, string> = Object.create(null)
   const runtimeIds = new Map<string, string[]>()
-  const visit = (items: readonly ViewLayer[]): void => {
+  const visit = (items: readonly ViewLayer[], inheritedComponents: ReadonlySet<string> = new Set()): void => {
     for (const item of items) {
       const candidates = item.source ? sites.get(JSON.stringify([item.source.file, item.source.start])) ?? [] : []
       const matching = candidates.filter(n => n.name === item.type)
@@ -79,7 +79,18 @@ export function bindAuthoringRuntime(snapshot: AuthoringSnapshot, layers: readon
         runtimeToSource[item.id] = node.id
         runtimeIds.set(node.id, [...(runtimeIds.get(node.id) ?? []), item.id])
       }
-      visit(item.children)
+      const components = new Set(inheritedComponents)
+      for (const component of item.componentSources ?? []) {
+        const sitesAtCall = sites.get(JSON.stringify([component.source.file, component.source.start])) ?? []
+        const matches = sitesAtCall.filter(candidate => candidate.kind === 'component' && candidate.name === component.name)
+        const owner = matches.length === 1 ? matches[0] : undefined
+        // One root per rendered instance is sufficient; descendants share its painted area.
+        if (owner && !components.has(owner.id)) {
+          if (!(runtimeIds.get(owner.id) ?? []).includes(item.id)) runtimeIds.set(owner.id, [...(runtimeIds.get(owner.id) ?? []), item.id])
+          components.add(owner.id)
+        }
+      }
+      visit(item.children, components)
     }
   }
   visit(layers)

@@ -16,6 +16,7 @@ import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-m
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
+import { authoringRenderIds, hoveredSourceIds } from '../lib/authoringHover'
 import { useCompiler } from '../lib/useCompiler'
 /**
  * Problems, output, timings and coverage, fetched when the panel is opened.
@@ -80,6 +81,7 @@ export function Studio() {
   const [layerSelection, setLayerSelection] = useState<{ projectId: string; id: string; anchor?: AuthoringSelection } | null>(null)
   /** The node the inspector's pointer is over. Null whenever it is over nothing. */
   const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
+  const [hoveredAuthoring, setHoveredAuthoring] = useState<AuthoringNode | null>(null)
   const navigatorTab = useLayout(s => s.navigatorTab)
   const setNavigatorTab = useLayout(s => s.setNavigatorTab)
   const inspectorTab = useLayout(s => s.inspectorTab)
@@ -787,9 +789,17 @@ export function Studio() {
 
   /** The layer under the inspector's pointer, while Layers is there to show it. */
   const hoveredLayerId = useMemo(
-    () => (inspecting && mode === 'design' ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
-    [inspecting, mode, layers, hoveredNode],
+    () => (inspecting && mode === 'design' && !stale && hoveredNode && result?.renderTree?.nodes.includes(hoveredNode) ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
+    [inspecting, mode, stale, result?.renderTree, layers, hoveredNode],
   )
+
+  const selectedSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, selectedLayerId), [result?.authoring, layers, selectedLayerId])
+  const hoveredSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, hoveredLayerId), [result?.authoring, layers, hoveredLayerId])
+  const liveHoveredAuthoring = inspecting && mode === 'design' && navigatorTab === 'layers' && !stale && hoveredAuthoring && result?.authoring?.nodes.includes(hoveredAuthoring) ? hoveredAuthoring : null
+  const hoveredRenderIds = useMemo(() => authoringRenderIds(
+    liveHoveredAuthoring,
+    result?.authoring, layers, result?.renderTree,
+  ), [liveHoveredAuthoring, result?.authoring, layers, result?.renderTree])
 
   /**
    * Clicking a view while inspecting.
@@ -975,6 +985,10 @@ export function Studio() {
                 authoringFiles={project.files}
                 authoringSelection={layerSelection?.anchor}
                 selectedAuthoringId={authoringNode?.id}
+                selectedAuthoringAncestors={selectedSources}
+                hoveredAuthoringId={liveHoveredAuthoring?.id ?? hoveredSources[0]}
+                hoveredAuthoringAncestors={hoveredSources.slice(1)}
+                onHoverAuthoring={setHoveredAuthoring}
                 onEditAuthoring={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
                 onSelectAuthoring={selectAuthoring}
                 layers={layers}
@@ -1112,7 +1126,7 @@ export function Studio() {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
                   return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
-                }, onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }}
+                }, onNodeCommand: (node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation), onNodeChange: (node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }), onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }}
                 authoringTools={<ProjectResources project={project} snapshot={result?.authoring} stale={stale} onCommand={operation => {
                   const node = result?.authoring?.nodes[0]
                   return node ? performDesignEdit(node.source, node.fingerprint, node.owner, operation) : Promise.resolve('Wait for the project to compile.')
@@ -1148,6 +1162,7 @@ export function Studio() {
                 device={device}
                 tree={result?.renderTree ?? null}
                 selectedRenderIds={selectedRenderIds}
+                hoveredRenderIds={hoveredRenderIds}
                 stale={stale}
                 onEvent={handleEvent}
                 inspecting={inspecting}

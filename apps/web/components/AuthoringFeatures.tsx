@@ -5,6 +5,8 @@ import { useState } from 'react'
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, ComponentDescription, BehaviorAction, DesignRecord, DesignValue, RecordField, PreviewInput } from '@studio/shared'
 import { defaultRecord, RecordEditor } from './RecordEditor'
 import { parseRecordDrafts } from '../lib/recordDrafts'
+import { settingsVisualChildren } from '../lib/authoringSettings'
+import { sourceLayerLabel } from '../lib/sourceLayers'
 import styles from './AuthoringInspector.module.css'
 
 export type FeatureChange = (operation: AuthoringOperation | { kind: 'insert'; snippet: string }) => Promise<string | null>
@@ -13,6 +15,8 @@ export interface FeatureProps {
   assets?: readonly { readonly name: string; readonly id: string }[]
   snapshot?: AuthoringSnapshot
   onCommand?: FeatureChange
+  onNodeCommand?: (node: AuthoringNode, operation: Parameters<FeatureChange>[0]) => Promise<string | null>
+  onNodeChange?: (node: AuthoringNode, control: string, value: string) => Promise<string | null>
   onSelect?: (node: AuthoringNode) => void
   descriptions?: readonly ComponentDescription[]
   onDescribe?: (description: ComponentDescription) => string | null
@@ -30,6 +34,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onSelect, onPrevi
   if (!onCommand) return null
   const children = node.children.map(id => snapshot?.nodes.find(n => n.id === id)).filter((n): n is AuthoringNode => !!n)
   const template = children.find(n => n.kind === 'template')
+  const visualChildren = settingsVisualChildren(snapshot, node)
   const callSites = snapshot?.nodes.filter(n => n.definitionId === node.id) ?? []
   return <div className={styles.features}>
     {section === 'basics' && node.name === 'Image' && node.properties.some(p => ['argument 1', 'systemName'].includes(p.name) && p.valueKind === 'literal') && !!assets?.length && <label>Bundled image<select aria-label="Bundled image" disabled={busy} value={node.properties.find(p => p.name === 'argument 1')?.expression.replace(/^"|"$/g, '') ?? ''} onChange={e => void command({ kind: 'asset-use', name: e.target.value })}><option value="" disabled>Choose image</option>{assets.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}</select></label>}
@@ -41,8 +46,8 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onSelect, onPrevi
     </section>}
     {section === 'basics' && node.kind === 'definition' && <section><h3>Shared definition</h3><p>Changes here affect all {callSites.length} source call sites of {node.name}.</p><details><summary>Affected instances</summary><ul>{callSites.map(site => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · {site.source.file}</button></li>)}</ul></details></section>}
     {section === 'data' && (node.name === 'List' || node.kind === 'collection') && <section><h3>List content</h3>
-      <p>{node.kind === 'collection' ? 'Collection · One template renders every record.' : 'Static · Each row keeps its own content and structure.'}</p>
-      {template && <button type="button" onClick={() => onSelect?.(template)}>Edit row template · all rows</button>}
+      <p>{node.kind === 'collection' ? 'Repeat for each item · one design is used by every row.' : 'Each row has its own content and structure.'}</p>
+      {template && <button type="button" onClick={() => onSelect?.(template)}>Edit row design</button>}
       {node.kind !== 'collection' && <><button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("New row")' })}>Add static row</button>
         <details><summary>Use a collection</summary><p>A single Text row can become a typed collection. Mixed rows remain static.</p><label>Collection name<input value={collectionName} onChange={e => setCollectionName(e.target.value)} /></label><label>Record type<input value={recordType} onChange={e => setRecordType(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'collection-convert', name: collectionName, recordType })}>Convert to collection</button></details></>}
       {node.collection ? <><p>{node.collection.recordType} · id identifies each record</p><label>Editing<select aria-label="Record edit scope" value={recordScope} onChange={e => setRecordScope(e.target.value as 'preview' | 'app')}><option value="preview">Preview records only</option><option value="app">App initial data (Swift)</option></select></label>
@@ -52,9 +57,9 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onSelect, onPrevi
         <label>Empty-state message<input aria-label="Empty-state message" value={emptyText} onChange={e => setEmptyText(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'empty-state', text: emptyText })}>Add empty-state branch</button>
       </> : node.kind === 'collection' && <p>Data comes from Swift. Typed local Identifiable records with literal initial data expose a record editor here.</p>}
     </section>}
-    {section === 'basics' && node.kind === 'template' && <section><h3>Row design</h3><p>Select a child to edit the design used by every row.</p>{children.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{child.name}</button>)}<button type="button" disabled={busy} onClick={() => { const collection = snapshot?.nodes.find(n => n.id === node.parentId); if (collection) onSelect?.(collection) }}>List settings</button><button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("New element")' })}>Add element to row template</button><p>Added elements appear in every row.</p></section>}
+    {section === 'basics' && node.kind === 'template' && <section><h3>Row design</h3><p>Select a view to edit the design used by every row.</p>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}<button type="button" disabled={busy} onClick={() => { let parent = snapshot?.nodes.find(n => n.id === node.parentId); const collection = parent; while (parent && parent.name !== 'List') parent = snapshot?.nodes.find(n => n.id === parent!.parentId); if (parent ?? collection) onSelect?.((parent ?? collection)!) }}>List settings</button><button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("New element")' })}>Add element to row template</button><p>Added elements appear in every row.</p></section>}
     {section === 'data' && !!node.fields?.length && <section><h3>Connected field</h3><label>Field<select aria-label="Row field" value={field} onChange={e => setField(e.target.value)}>{node.fields.map(f => <option key={f}>{f}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'bind-field', field })}>Bind to field · all rows</button></section>}
-    {section === 'basics' && !!children.length && node.kind === 'definition' && <section><h3>Shared content</h3>{children.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{child.name}</button>)}</section>}
+    {section === 'basics' && !!children.length && node.kind === 'definition' && <section><h3>Shared content</h3>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}</section>}
     {section === 'behavior' && node.behavior && (node.behavior.canConfigureAction || node.behavior.binding || node.behavior.states.length > 0) && <BehaviorEditor key={node.id} node={node} onCommand={command} busy={busy} />}
     {section === 'advanced' && ['view', 'component'].includes(node.kind) && node.name !== 'WindowGroup' && <details><summary>Extract reusable component</summary><label>Component name<input aria-label="New component name" value={name} onChange={e => setName(e.target.value)} /></label><p>Creates a Swift file and an instance here, in one undo step. Supported dependencies become explicit inputs.</p><button type="button" disabled={busy} onClick={() => void command({ kind: 'extract-component', name })}>Extract component</button></details>}
     {error && <p role="alert" className={styles.error}>{error}</p>}{busy && <p role="status">Preparing source changes…</p>}

@@ -26,6 +26,7 @@ export function viewLayers(views: readonly ViewValue[]): ViewLayer[] {
     name: layerLabel(view) || view.name,
     type: view.name,
     source: view.span,
+    ...(view.componentSources?.length ? { componentSources: view.componentSources } : {}),
     children: [
       ...viewLayers(view.children),
       ...view.modifiers.flatMap(modifier => ['background', 'overlay', 'safeAreaInset'].includes(modifier.name)

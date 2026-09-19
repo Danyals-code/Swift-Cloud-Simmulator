@@ -39,6 +39,7 @@ export interface DevicePaneProps {
   device: DeviceSpec
   tree: RenderTree | null
   selectedRenderIds?: ReadonlySet<string>
+  hoveredRenderIds?: ReadonlySet<string>
   stale: boolean
   onEvent: (event: UIEvent) => void
   inspecting: boolean
@@ -166,6 +167,7 @@ export function DevicePane({
   device,
   tree,
   selectedRenderIds,
+  hoveredRenderIds,
   stale,
   onEvent,
   inspecting,
@@ -206,7 +208,8 @@ export function DevicePane({
   // Derived rather than cleared in an effect: a stale highlight must not survive
   // leaving inspector mode, and "only meaningful while inspecting" is a property of
   // the value, not something to synchronise after the fact.
-  const highlighted = inspecting ? hoveredNode : null
+  const highlighted = inspecting && !stale && hoveredNode && tree?.nodes.includes(hoveredNode) ? hoveredNode : null
+  useEffect(() => () => setHovered(null), [tree, inspecting, projectId, setHovered])
 
   /**
    * The canvas is a viewport onto a world, not a box with scrollbars in it.
@@ -595,6 +598,7 @@ export function DevicePane({
           key={previewIdentity}
           tree={tree ?? EMPTY_RENDER_TREE}
           selectedIds={live ? selectedRenderIds : undefined}
+          hoveredIds={live && inspecting && !stale ? hoveredRenderIds : undefined}
           {...(live ? { onEvent } : {})}
           stale={stale}
           {...(live && inspecting

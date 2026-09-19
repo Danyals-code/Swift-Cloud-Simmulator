@@ -1,4 +1,4 @@
-import type { SourceSpan } from '@studio/shared'
+import type { ComponentSource, SourceSpan } from '@studio/shared'
 import { describe, type ClosureValue, type SwiftValue } from '@studio/swift-runtime'
 
 /**
@@ -23,6 +23,8 @@ export interface ViewValue {
   /** A `Button`'s trailing closure, kept to be run on tap. */
   readonly action: ClosureValue | null
   readonly span: SourceSpan
+  /** Source call sites survive component expansion without adding runtime nodes. */
+  readonly componentSources?: readonly ComponentSource[]
   /**
    * Stable tree address, stamped by the presentation resolver.
    *

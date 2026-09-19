@@ -32,6 +32,8 @@ export interface RenderTreeViewProps {
   tree: RenderTree
   /** Workspace layer selection, without intercepting preview interactions. */
   selectedIds?: ReadonlySet<string>
+  /** Temporary canvas outlines for the source view under the Layers pointer. */
+  hoveredIds?: ReadonlySet<string>
   /** Raised when an interactive node is activated. */
   onEvent?: (event: UIEvent) => void
   /**
@@ -81,6 +83,7 @@ export const RenderTreeView = memo(function RenderTreeView({
   stale = false,
   debugOutlines = false,
   selectedIds,
+  hoveredIds,
   inspect,
 }: RenderTreeViewProps) {
   const reduceMotion = useSyncExternalStore(subscribeMotion, reducedMotion, serverMotion)
@@ -90,9 +93,7 @@ export const RenderTreeView = memo(function RenderTreeView({
     const scroller = tree.chrome && surfaceRef.current.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(tree.chrome.scrollId)}"]`)
     updateChrome(surfaceRef.current, scroller?.scrollTop ?? 0, tree.chrome?.collapseDistance ?? 0)
   }, [tree.chrome])
-  const hoveredNode = inspect?.hovered
-    ? tree.nodes.find((n) => n.id === inspect.hovered)
-    : undefined
+  const hoveredNodes = stale ? [] : tree.nodes.filter(node => node.id === inspect?.hovered || hoveredIds?.has(node.id))
 
   // Nodes grouped by the container they live in. Built once per tree rather than
   // searched per node, so a thousand-row list stays linear.
@@ -132,7 +133,7 @@ export const RenderTreeView = memo(function RenderTreeView({
 
       <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
 
-      {hoveredNode ? <InspectHighlight node={hoveredNode} tree={tree} /> : null}
+      {hoveredNodes.map(node => <InspectHighlight key={node.id} node={node} tree={tree} />)}
     </div>
   )
 })
@@ -230,6 +231,36 @@ function PresentRenderNode({ entry, complete, ...presentation }: NodePresentatio
  * hovering row 40 of a list outlines something near the top of the screen.
  */
 function InspectHighlight({ node, tree }: { node: RenderNode; tree: RenderTree }) {
+  const outline = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const element = outline.current
+    const surface = element?.parentElement
+    const target = surface?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"]`)
+    if (!element || !surface || !target) return
+    // Read painted bounds so scrolling, padding and transforms use the same geometry
+    // in both hover directions. Clip to scrollports, just like the painted content.
+    const update = () => {
+      const root = surface.getBoundingClientRect(), box = target.getBoundingClientRect()
+      const scaleX = root.width / tree.canvas.width, scaleY = root.height / tree.canvas.height
+      if (!scaleX || !scaleY) return
+      let left = box.left, top = box.top, right = box.right, bottom = box.bottom
+      for (let parent = target.parentElement; parent && parent !== surface; parent = parent.parentElement) {
+        const style = getComputedStyle(parent), rect = parent.getBoundingClientRect()
+        if (/auto|scroll|hidden|clip/.test(style.overflowX)) { left = Math.max(left, rect.left); right = Math.min(right, rect.right) }
+        if (/auto|scroll|hidden|clip/.test(style.overflowY)) { top = Math.max(top, rect.top); bottom = Math.min(bottom, rect.bottom) }
+      }
+      Object.assign(element.style, {
+        left: `${(left - root.left) / scaleX}px`, top: `${(top - root.top) / scaleY}px`,
+        width: `${Math.max(0, right - left) / scaleX}px`, height: `${Math.max(0, bottom - top) / scaleY}px`,
+        visibility: right > left && bottom > top ? 'visible' : 'hidden',
+      })
+    }
+    update()
+    surface.addEventListener('scroll', update, true)
+    const observer = new ResizeObserver(update)
+    observer.observe(surface); observer.observe(target)
+    return () => { surface.removeEventListener('scroll', update, true); observer.disconnect() }
+  }, [node, tree])
   let x = node.frame.x
   let y = node.frame.y
   let current = node
@@ -244,7 +275,9 @@ function InspectHighlight({ node, tree }: { node: RenderNode; tree: RenderTree }
 
   return (
     <div
+      ref={outline}
       data-testid="inspect-highlight"
+      data-hovered-node-id={node.id}
       style={{
         position: 'absolute',
         left: x,

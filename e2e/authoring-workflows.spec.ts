@@ -34,13 +34,12 @@ async function open(page: Page, source = SOURCE) {
 const sourceRow = (page: Page, name: string) => page.getByTestId('logical-layers').locator(`[data-source-name="${name}"]`)
 const inspector = (page: Page) => page.getByTestId('authoring-inspector')
 
-test('one logical template, explicit keyboard entry, collapse keeps source selection', async ({ page }) => {
+test('row design opens from List settings, supports keyboard entry and keeps source selection', async ({ page }) => {
   await open(page)
-  await expect(sourceRow(page, 'Row template')).toHaveCount(1)
-  await sourceRow(page, 'Row template').focus(); await page.keyboard.press('Enter')
-  await sourceRow(page, 'Row template').getByRole('button', { name: 'Actions for Row design', exact: true }).press('Enter')
-  await expect(page.getByTestId('source-layer-actions-menu')).toBeFocused()
-  await page.keyboard.press('Enter')
+  await expect(sourceRow(page, 'Row template')).toHaveCount(0)
+  await sourceRow(page, 'List').focus(); await page.keyboard.press('Enter')
+  const enter = page.getByTestId('settings-data').getByRole('button', { name: 'Edit row design', exact: true })
+  await enter.focus(); await enter.press('Enter')
   await expect(page.getByTestId('logical-layers')).toContainText('Changes affect all rows using this design.')
   await inspector(page).getByRole('button', { name: 'Add element to row template', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('New element', { exact: true })).toHaveCount(2)
@@ -135,7 +134,6 @@ test('reduced motion disables preview transitions', async ({ page }) => {
 test('row field binding writes real Swift storage and toggles only the selected record', async ({ page }) => {
   const source = SOURCE.replace('var title: String }', 'var title: String; var featured: Bool = false }').replace('List(items) { item in Text(item.title) }', 'List(items) { item in VStack { Text(item.title); Toggle(item.title, isOn: .constant(false)) } }')
   await open(page, source)
-  await sourceRow(page, 'Row template').dblclick()
   await sourceRow(page, 'Toggle').click()
   await inspector(page).getByLabel('Row field', { exact: true }).selectOption('featured')
   await inspector(page).getByRole('button', { name: 'Bind to field · all rows', exact: true }).click()

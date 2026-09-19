@@ -16,7 +16,11 @@ export interface NavigatorProps {
   authoringFiles: readonly SourceFile[]
   authoringSelection?: AuthoringSelection
   authoring?: AuthoringSnapshot
+  selectedAuthoringAncestors?: readonly string[]
   selectedAuthoringId?: string
+  hoveredAuthoringId?: string
+  hoveredAuthoringAncestors?: readonly string[]
+  onHoverAuthoring?: (node: AuthoringNode | null) => void
   onSelectAuthoring?: (node: AuthoringNode) => void
   onEditAuthoring?: (node: AuthoringNode, operation: DesignEditRequest['operation']) => Promise<string | null>
   layers: readonly ViewLayer[]
@@ -74,7 +78,7 @@ const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text
  */
 export function Navigator({
   tree,
-  authoring, authoringFiles, authoringSelection, selectedAuthoringId, onSelectAuthoring, onEditAuthoring,
+  authoring, authoringFiles, authoringSelection, selectedAuthoringId, selectedAuthoringAncestors, hoveredAuthoringId, hoveredAuthoringAncestors, onHoverAuthoring, onSelectAuthoring, onEditAuthoring,
   layers, selectedLayerId, hoveredLayerId, stale, onSelectLayer, onReorderLayer, hiddenViews, onHideLayer, onShowHidden, layersEditable,
   activeFileId,
   filesWithErrors,
@@ -252,7 +256,7 @@ export function Navigator({
         </>
       ) : tab === 'layers' ? (
         <>
-        {!runtimeLayers && authoring && onSelectAuthoring ? <LogicalLayers snapshot={authoring} files={authoringFiles} selection={authoringSelection} selected={selectedAuthoringId} stale={stale} onSelect={onSelectAuthoring} onEdit={onEditAuthoring} hidden={hiddenViews} onShow={onShowHidden} editable={layersEditable} /> : <Layers pages={layers} selectedId={selectedLayerId} hoveredId={hoveredLayerId} stale={stale} onSelect={onSelectLayer}
+        {!runtimeLayers && authoring && onSelectAuthoring ? <LogicalLayers snapshot={authoring} files={authoringFiles} selection={authoringSelection} selected={selectedAuthoringId} selectedAncestors={selectedAuthoringAncestors} hovered={hoveredAuthoringId} hoveredAncestors={hoveredAuthoringAncestors} onHover={onHoverAuthoring} stale={stale} onSelect={onSelectAuthoring} onEdit={onEditAuthoring} hidden={hiddenViews} onShow={onShowHidden} editable={layersEditable} /> : <Layers pages={layers} selectedId={selectedLayerId} hoveredId={hoveredLayerId} stale={stale} onSelect={onSelectLayer}
           onReorder={onReorderLayer} hidden={hiddenViews} onHide={onHideLayer} onShow={onShowHidden} editable={layersEditable} />}
         <div className="flex shrink-0 items-center justify-between border-t border-xc-line-soft px-3 py-2 text-[11px] text-xc-text-3" aria-label="Developer layer inspection"><span>Developer</span><button type="button" aria-pressed={runtimeLayers} onClick={() => setRuntimeLayers(value => !value)} className="rounded px-1 py-0.5 hover:bg-xc-line-soft">{runtimeLayers ? 'Back to design layers' : 'Runtime detail'}</button></div>
         </>

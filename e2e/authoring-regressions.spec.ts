@@ -26,17 +26,18 @@ async function open(page: Page) {
   await expect(page.getByTestId('logical-layers')).toBeVisible()
 }
 
-test('the second identical template keeps its identity and focused tree across edits', async ({ page }) => {
+test('the second identical repeated view keeps its identity across edits', async ({ page }) => {
   await open(page)
   const layers = page.getByTestId('logical-layers')
-  const templates = layers.locator('[data-source-kind="template"]')
-  await templates.nth(1).dblclick()
-  await layers.locator('[data-source-name="Text"]').click()
+  await expect(layers.locator('[data-source-kind="template"]')).toHaveCount(0)
+  const repeated = layers.locator('[data-source-name="Text"]').filter({ hasText: 'Row' })
+  await expect(repeated).toHaveCount(2)
+  await repeated.nth(1).click()
   const padding = page.getByTestId('authoring-inspector').getByRole('textbox', { name: 'Padding', exact: true })
   await padding.fill('24'); await padding.press('Enter')
   await expect(padding).toHaveValue('24')
-  await expect(layers.getByRole('button', { name: 'All screens', exact: true })).toBeVisible()
-  await expect(layers.locator('[data-source-name="Text"]')).toHaveAttribute('aria-selected', 'true')
+  await expect(repeated.nth(0)).toHaveAttribute('aria-selected', 'false')
+  await expect(repeated.nth(1)).toHaveAttribute('aria-selected', 'true')
   await padding.fill('36'); await padding.press('Enter')
   await expect(padding).toHaveValue('36')
   await page.getByTestId('workspace-develop').click()

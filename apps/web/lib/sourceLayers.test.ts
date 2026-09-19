@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { hiddenViewsIn } from '@studio/swift-syntax'
 import type { AuthoringSnapshot } from '@studio/shared'
-import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, type SourceLayerNavigation } from './sourceLayers'
+import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerIsVisual, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from './sourceLayers'
 
 const collection = 'ForEach(0..<3, id: \\.self) { i in Text("Row").padding(8) }'
 const source = `import SwiftUI
@@ -18,7 +18,7 @@ describe('source layer navigation', () => {
     expect(templates[0]!.fingerprint).toBe(templates[1]!.fingerprint)
     const result = sourceLayerRows(snapshot, navigation(snapshot, templates[1]!.id), templates[1]!.id, '')
     expect(result.entry?.id).toBe(templates[1]!.id)
-    expect(result.rows.map(r => r.node.id)).toEqual([templates[1]!.id, ...templates[1]!.children])
+    expect(result.rows.map(r => r.node.id)).toEqual(templates[1]!.children)
   })
 
   it('keeps the second template entered through successive real property edits and undo', () => {
@@ -61,7 +61,8 @@ describe('source layer navigation', () => {
     const state = { ...navigation(snapshot), closed: new Set(snapshot.nodes.map(n => n.id)) }
     const result = sourceLayerRows(snapshot, state, selected, '')
     expect(result.rows.some(r => r.node.id === selected)).toBe(true)
-    expect(result.rows.find(r => r.node.id === template.id)?.expanded).toBe(true)
+    expect(result.rows.find(r => r.node.name === 'VStack')?.expanded).toBe(true)
+    expect(result.rows.some(r => r.node.id === template.id)).toBe(false)
     expect(sourceLayerRows(snapshot, { ...state, dismissed: selected }, selected, '').rows.some(r => r.node.id === selected)).toBe(false)
   })
 
@@ -75,7 +76,7 @@ describe('source layer navigation', () => {
 
   it('filters the displayed content label, with whitespace and case normalization', () => {
     const snapshot = model(), result = sourceLayerRows(snapshot, navigation(snapshot), undefined, '  cAtAlOg  ')
-    expect(result.rows.map(r => sourceLayerLabel(r.node))).toEqual(['ContentView', 'Column', 'Catalog'])
+    expect(result.rows.map(r => sourceLayerLabel(r.node))).toEqual(['Column', 'Catalog'])
     expect(sourceLayerRows(snapshot, navigation(snapshot), undefined, 'Row').rows.filter(r => r.node.name === 'Text')).toHaveLength(2)
   })
 
@@ -102,7 +103,7 @@ it('reveals the same selected layer when the canvas selects it again after manua
 describe('designer layer structure', () => {
   it('uses friendly layout names and keeps every row design visible once', () => {
     const snapshot = model(), result = sourceLayerRows(snapshot, navigation(snapshot), undefined, '')
-    expect(result.rows.filter(row => row.node.kind === 'template')).toHaveLength(2)
+    expect(result.rows.filter(row => row.node.kind === 'template')).toHaveLength(0)
     expect(result.rows.filter(row => row.node.name === 'Text')).toHaveLength(3)
     expect(sourceLayerType({ name: 'VStack', kind: 'view' })).toBe('Column')
     expect(sourceLayerType({ name: 'HStack', kind: 'view' })).toBe('Row')
@@ -112,29 +113,25 @@ describe('designer layer structure', () => {
     expect(sourceLayerRows(snapshot, navigation(snapshot), undefined, 'column').rows.some(row => row.node.name === 'VStack')).toBe(true)
   })
 
-  it('groups reusable definitions while keeping instances in screen structure', () => {
+  it('keeps component instances as views and opens their design without duplicate definitions', () => {
     const snapshot = model(source.replace('Text("Catalog")', 'Card()') + '\nstruct Card: View { var body: some View { Text("Shared") } }')
     const definition = snapshot.nodes.find(node => node.name === 'Card' && node.kind === 'definition')!
     const instance = snapshot.nodes.find(node => node.kind === 'component' && node.name === 'Card')!
     const state = navigation(snapshot)
-    const collapsed = sourceLayerRows(snapshot, state, undefined, '')
-    expect(collapsed.components).toEqual([definition.id])
-    expect(collapsed.rows.some(row => row.node.id === instance.id)).toBe(true)
-    expect(collapsed.rows.some(row => row.node.id === definition.id)).toBe(false)
-    const selected = sourceLayerRows(snapshot, state, definition.children[0], '')
-    expect(selected.componentsExpanded).toBe(true)
-    expect(selected.rows.some(row => row.node.id === definition.children[0])).toBe(true)
-    const searched = sourceLayerRows(snapshot, state, undefined, 'Shared')
-    expect(searched.rows.some(row => row.node.id === definition.children[0])).toBe(true)
+    const result = sourceLayerRows(snapshot, state, undefined, '')
+    expect(result.rows.some(row => row.node.id === instance.id)).toBe(true)
+    expect(result.rows.some(row => row.node.kind === 'definition')).toBe(false)
+    expect(sourceLayerVisibleId(snapshot, definition.children[0], result.rows)).toBe(instance.id)
     const entered = sourceLayerRows(snapshot, { ...state, entered: definition.id }, definition.children[0], '')
-    expect(entered.rows.map(row => row.node.id)).toEqual([definition.id, ...definition.children])
+    expect(entered.rows.map(row => row.node.id)).toEqual(definition.children)
+    expect(sourceLayerVisibleId(snapshot, definition.id, entered.rows)).toBe(definition.children[0])
   })
 
   it('does not duplicate screens in components when the app references the same screen twice', () => {
     const snapshot = model(source.replace('WindowGroup { ContentView() }', 'WindowGroup { ContentView(); ContentView() }'))
     const result = sourceLayerRows(snapshot, navigation(snapshot), undefined, '')
-    expect(result.rows.filter(row => row.node.name === 'ContentView')).toHaveLength(1)
-    expect(result.components).toHaveLength(0)
+    expect(result.rows.filter(row => row.node.name === 'VStack')).toHaveLength(1)
+    expect(result.rows.some(row => row.node.kind === 'definition')).toBe(false)
   })
 
   it('attaches hidden restore controls to their source container, including empty containers', () => {
@@ -200,5 +197,152 @@ struct ContentView: View {
   refresh(plan.changes[0]!.after)
   expect(text.indexOf('Text("Second")')).toBeLessThan(text.indexOf('Text("First")'))
   refresh(initial)
-  expect(sourceLayerRows(snapshot, state, undefined, '').rows.map(row => sourceLayerLabel(row.node))).toEqual(['Row design', 'First', 'Second'])
+  expect(sourceLayerRows(snapshot, state, undefined, '').rows.map(row => sourceLayerLabel(row.node))).toEqual(['First', 'Second'])
+})
+
+
+describe('visual-only layer projection', () => {
+  const nested = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { RootView() } } }
+struct RootView: View { var body: some View { MainTabs().environmentObject(library).tint(.indigo) } }
+struct MainTabs: View { var body: some View { TabView { LibraryView(); LibraryView() } } }
+struct LibraryView: View {
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(0..<3, id: \\.self) { i in
+                        NavigationLink { BookRow() }
+                    }
+                }
+                if true { Text("Empty") } else { Text("Ready") }
+            }.overlay { Text("Badge") }
+        }
+    }
+}
+struct BookRow: View { var body: some View { HStack { Image(systemName: "book"); Text("Title") } } }
+`
+  it('removes app wiring and duplicate definition collections', () => {
+    const snapshot = model(nested)
+    const result = sourceLayerRows(snapshot, navigation(snapshot), undefined, '')
+    expect(result.rows.map(row => row.node.name)).toEqual(['TabView', 'LibraryView', 'LibraryView'])
+    expect(result.rows.map(row => sourceLayerLabel(row.node))).toEqual(['Tabs', 'Library', 'Library'])
+    expect(result.rows.map(row => row.depth)).toEqual([0, 1, 1])
+  })
+
+  it('flattens repetition, conditions, navigation, and modifier slots into their visual children', () => {
+    const snapshot = model(nested)
+    const definition = snapshot.nodes.find(node => node.kind === 'definition' && node.name === 'LibraryView')!
+    const result = sourceLayerRows(snapshot, navigation(snapshot, definition.id), undefined, '')
+    expect(result.rows.map(row => row.node.name)).toEqual(['List', 'BookRow', 'Text', 'Text', 'Text'])
+    expect(result.rows.map(row => row.depth)).toEqual([0, 1, 1, 1, 1])
+    expect(result.rows.every(row => sourceLayerIsVisual(row.node))).toBe(true)
+    const list = result.rows[0]!
+    expect(list.children).toEqual(result.rows.slice(1).map(row => row.node.id))
+    expect(result.rows.slice(1).every(row => row.parentId === list.node.id)).toBe(true)
+    // Presentation ancestry must never overwrite the Swift source parent used for edits.
+    expect(result.rows[1]!.node.parentId).not.toBe(list.node.id)
+  })
+
+  it('maps hidden contexts and collapsed descendants to their nearest displayed view', () => {
+    const snapshot = model(nested)
+    const definition = snapshot.nodes.find(node => node.kind === 'definition' && node.name === 'LibraryView')!
+    const list = snapshot.nodes.find(node => node.name === 'List')!
+    const template = snapshot.nodes.find(node => node.kind === 'template')!
+    const book = snapshot.nodes.find(node => node.kind === 'component' && node.name === 'BookRow')!
+    const state = navigation(snapshot, definition.id)
+    const expanded = sourceLayerRows(snapshot, state, undefined, '')
+    expect(sourceLayerVisibleId(snapshot, template.id, expanded.rows)).toBe(list.id)
+    const collapsed = sourceLayerRows(snapshot, { ...state, closed: new Set([list.id]) }, undefined, '')
+    expect(sourceLayerVisibleId(snapshot, book.id, collapsed.rows)).toBe(list.id)
+    expect(collapsed.rows.map(row => row.node.id)).toEqual([list.id])
+  })
+
+  it('never guesses which reused component instance owns a source-only selection', () => {
+    const snapshot = model(nested)
+    const rows = sourceLayerRows(snapshot, navigation(snapshot), undefined, '').rows
+    const inner = snapshot.nodes.find(node => node.name === 'List')!
+    expect(sourceLayerVisibleId(snapshot, inner.id, rows)).toBeUndefined()
+    for (const instance of rows.filter(row => row.node.name === 'LibraryView')) expect(sourceLayerVisibleId(snapshot, instance.node.id, rows)).toBe(instance.node.id)
+  })
+
+  it('keeps a title-only navigation link visible when it has no explicit label view', () => {
+    const snapshot = model(source.replace('Text("Catalog")', 'NavigationLink("Details", destination: Text("Detail")).overlay { Text("Badge") }'))
+    const link = snapshot.nodes.find(node => node.name === 'NavigationLink')!
+    expect(sourceLayerIsVisual(link)).toBe(true)
+    expect(sourceLayerLabel(link)).toBe('Details')
+    expect(sourceLayerRows(snapshot, navigation(snapshot), undefined, '').rows.some(row => row.node.id === link.id)).toBe(true)
+  })
+})
+
+
+it('enters design scopes selected from Settings and allows returning to all screens', () => {
+  const snapshot = model(), template = snapshot.nodes.find(node => node.kind === 'template')!
+  const selected = sourceLayerRows(snapshot, navigation(snapshot), template.id, '')
+  expect(selected.entry?.id).toBe(template.id)
+  expect(selected.rows.map(row => row.node.id)).toEqual(template.children)
+  const exited = sourceLayerRows(snapshot, { ...navigation(snapshot), dismissedEntry: template.id }, template.id, '')
+  expect(exited.entry).toBeUndefined()
+  expect(exited.rows[0]!.node.name).toBe('VStack')
+  const selection = { snapshot, nodeId: template.id, files: files(source) }
+  const reentered = rebaseSourceLayers({ ...navigation(snapshot), selection, dismissedEntry: template.id }, snapshot, files(source), { ...selection })
+  expect(sourceLayerRows(snapshot, reentered, template.id, '').entry?.id).toBe(template.id)
+})
+
+
+it('names tab component instances by literal tab labels while preserving identities and computed titles', () => {
+  const text = `import SwiftUI
+struct ContentView: View { var body: some View { TabView {
+  LibraryView().tabItem { Label("Library", systemImage: "books.vertical") }
+  LibraryView().tabItem { Label("Reading list", systemImage: "bookmark") }
+  LibraryView().tabItem { Text(dynamicTitle) }
+} } }
+struct LibraryView: View { var body: some View { Text("Books") } }
+`
+  const snapshot = model(text)
+  const instances = snapshot.nodes.filter(node => node.kind === 'component')
+  expect(instances.map(sourceLayerLabel)).toEqual(['Library', 'Reading list', 'Library'])
+  const rows = sourceLayerRows(snapshot, navigation(snapshot), undefined, '').rows
+  expect(rows.slice(1).map(row => row.node.id)).toEqual(instances.map(node => node.id))
+})
+
+it('preserves additional visual content on a root component instead of forwarding past it', () => {
+  const text = `import SwiftUI
+struct ContentView: View { var body: some View { CardView().overlay { Text("Badge") } } }
+struct CardView: View { var body: some View { Text("Card") } }
+`
+  const snapshot = model(text)
+  expect(sourceLayerRows(snapshot, navigation(snapshot), undefined, '').rows.map(row => sourceLayerLabel(row.node))).toEqual(['Card', 'Badge'])
+})
+
+
+it('maps a hidden navigation link to its label view before List, excluding the destination', () => {
+  const text = `import SwiftUI
+struct ContentView: View { var body: some View { List { NavigationLink(destination: Text("Destination")) { BookRow() } } } }
+struct BookRow: View { var body: some View { Text("Book title") } }
+`
+  const snapshot = model(text)
+  const list = snapshot.nodes.find(node => node.name === 'List')!
+  const link = snapshot.nodes.find(node => node.name === 'NavigationLink')!
+  const label = snapshot.nodes.find(node => node.name === 'BookRow' && node.kind === 'component')!
+  const rows = sourceLayerRows(snapshot, navigation(snapshot), undefined, '').rows
+  expect(rows.map(row => row.node.name)).toEqual(['List', 'BookRow', 'Text'])
+  expect(sourceLayerPrimaryViewId(snapshot, link.id, rows)).toBe(label.id)
+  expect(sourceLayerVisibleId(snapshot, link.id, rows)).toBe(label.id)
+  expect(label.parentId).toBe(link.id)
+  const collapsed = sourceLayerRows(snapshot, { ...navigation(snapshot), closed: new Set([list.id]) }, undefined, '').rows
+  expect(sourceLayerPrimaryViewId(snapshot, link.id, collapsed)).toBeUndefined()
+  expect(sourceLayerVisibleId(snapshot, link.id, collapsed)).toBe(list.id)
+})
+
+it('does not guess a primary view when a hidden wrapper has multiple label views', () => {
+  const text = `import SwiftUI
+struct ContentView: View { var body: some View { List { NavigationLink(destination: Text("Destination")) { Text("First"); Text("Second") } } } }
+`
+  const snapshot = model(text)
+  const link = snapshot.nodes.find(node => node.name === 'NavigationLink')!
+  const list = snapshot.nodes.find(node => node.name === 'List')!
+  const filtered = sourceLayerRows(snapshot, navigation(snapshot), undefined, 'First').rows
+  expect(sourceLayerPrimaryViewId(snapshot, link.id, filtered)).toBeUndefined()
+  expect(sourceLayerVisibleId(snapshot, link.id, filtered)).toBe(list.id)
 })

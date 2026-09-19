@@ -80,3 +80,22 @@ it('keeps builtin color constructors out of visual slots without hiding a compon
   const qualified = model(source('Text("Title").background(SwiftUI.Color(red: 1, green: 0.5, blue: 0)).overlay(SwiftUI.Color("Brand"))') + customColor)
   expect(qualified.nodes.filter(node => node.name === 'Background' || node.name === 'Overlay')).toHaveLength(0)
 })
+
+
+it('reads navigation labels as row content and keeps destinations in their own settings slot', () => {
+  const snapshot = model(source('List { NavigationLink { Text("Details") } label: { HStack { Text("Open row") } } }'))
+  const link = snapshot.nodes.find(node => node.name === 'NavigationLink')!
+  const children = link.children.map(id => snapshot.nodes.find(node => node.id === id)!)
+  expect(children.map(node => node.name)).toEqual(['HStack', 'Destination'])
+  const destination = children[1]!
+  expect(snapshot.nodes.find(node => node.id === destination.children[0])?.properties[0]?.expression).toBe('"Details"')
+  const row = snapshot.nodes.find(node => node.properties.some(property => property.expression === '"Open row"'))!
+  expect(row.parentId).toBe(children[0]!.id)
+})
+
+it('reads explicit Button labels without interpreting their actions as visual children', () => {
+  for (const button of ['Button { Text("Action") } label: { Text("Visible") }', 'Button(action: { Text("Action") }, label: { Text("Visible") })']) {
+    const snapshot = model(source(button))
+    expect(snapshot.nodes.filter(node => node.name === 'Text').map(node => node.properties[0]?.expression)).toEqual(['"Visible"'])
+  }
+})

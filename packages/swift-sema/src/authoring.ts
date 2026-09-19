@@ -172,8 +172,9 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
     Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget, !!node.controls))
-    const closure = chain.base.trailingClosure
-    if (closure && (capability?.content || builtin && (CONTENT_VIEWS.has(name) || name === 'Button' && chain.base.args.some(arg => arg.label === 'action')))) {
+    const explicitLabel = builtin && ['NavigationLink', 'Button'].includes(name) ? chain.base.args.find(argument => argument.label === 'label' && argument.value.kind === 'closure')?.value : undefined
+    const closure = explicitLabel?.kind === 'closure' ? explicitLabel : chain.base.trailingClosure
+    if (closure && (capability?.content || builtin && (CONTENT_VIEWS.has(name) || name === 'Button' && (!!explicitLabel || chain.base.args.some(arg => arg.label === 'action'))))) {
       if (node.kind === 'collection') {
         const template = add('template', 'Row template', closure.span, parent.owner, node)
         const locals = new Map(scope)
@@ -185,6 +186,14 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         for (const param of closure.params) locals.set(param.name.replace(/^\$/, ''), { kind: 'computed', source: param.span })
         block(closure.body, node, locals)
       }
+    }
+    // With multiple trailing closures, NavigationLink's first closure is the
+    // destination; its labeled closure is the visible row. Actions remain excluded.
+    const destination = builtin && name === 'NavigationLink' ? (explicitLabel ? chain.base.trailingClosure : undefined) ?? chain.base.args.find(argument => argument.label === 'destination')?.value : undefined
+    if (destination) {
+      const slot = add('branch', 'Destination', destination.span, parent.owner, node)
+      if (destination.kind === 'closure') block(destination.body, slot, scope)
+      else expression(destination, slot, scope)
     }
     // Section headers/footers are content slots, not repeated rows or actions.
     if (name === 'Section' && capability) for (const arg of chain.base.args) {

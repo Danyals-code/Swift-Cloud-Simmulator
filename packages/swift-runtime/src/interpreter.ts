@@ -301,6 +301,7 @@ export class Interpreter {
       kind: 'struct',
       typeName,
       fields: new Map(),
+      ...(this.conformsTo(typeName, 'View') || this.conformsTo(typeName, 'Shape') ? { viewSource: span } : {}),
       ...(decl.isReference ? { reference: true } : {}),
     }
     const env = this.globals.child(instance)
