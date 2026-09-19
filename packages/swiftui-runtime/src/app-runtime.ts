@@ -92,6 +92,7 @@ export class AppRuntime {
   private readonly seeded = new Map<string, SwiftValue>()
   private readonly ui = new UIState()
 
+  private previewPrefix?: string
   private entryTypeName: string | null = null
   /** `#Preview { … }`'s body, used as the root when nothing is marked `@main`. */
   private previewBody: Block | null = null
@@ -112,7 +113,7 @@ export class AppRuntime {
   private handlers: ReadonlyMap<string, ViewIntent> = new Map()
   /** Identifies the loaded program, so a real edit reloads and a tap does not. */
   private programKey: string | null = null
-  private loadedProgram: { files: readonly SourceFileNode[]; model: SemanticModel; key: string } | null = null
+  private loadedProgram: { files: readonly SourceFileNode[]; model: SemanticModel; key: string; screen?: string } | null = null
 
   /**
    * A failure raised while loading, held over until the next `evaluate`.
@@ -187,10 +188,10 @@ export class AppRuntime {
     this.environmentInputs = inputs
   }
 
-  load(files: readonly SourceFileNode[], model: SemanticModel, programKey: string): void {
+  load(files: readonly SourceFileNode[], model: SemanticModel, programKey: string, screen?: string): void {
     if (programKey === this.programKey && this.entryTypeName) return
 
-    this.loadedProgram = { files, model, key: programKey }
+    this.loadedProgram = { files, model, key: programKey, screen }
     this.interpreter = new Interpreter({ host: this.host })
     this.host.expandStruct = (value) => this.expand(value)
     this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
@@ -208,7 +209,7 @@ export class AppRuntime {
       this.loadFailure = toFailure(error)
     }
 
-    this.entryTypeName = model.entryPoint?.name ?? null
+    this.entryTypeName = screen ?? model.entryPoint?.name ?? null
     // A file with a view and a `#Preview` and no `@main` is an ordinary thing to
     // paste in, and it is what Xcode itself renders. Falling back to the preview's
     // body is the difference between that file showing something and reporting that
@@ -267,7 +268,7 @@ export class AppRuntime {
         build: (closure, args, environment) => this.buildViews(closure, args, environment),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
         animation: this.animation,
-      })
+      }, undefined, this.previewPrefix ? { prefix: this.previewPrefix } : undefined)
       this.handlers = ui.handlers
       // `@Environment(\.dismiss)` is callable at any depth, so it has to resolve to
       // whatever is presented *now* rather than to whatever was when it was read.
@@ -331,11 +332,12 @@ export class AppRuntime {
    * copied, so even an impure destination body cannot write through an environment
    * object into the app being edited. Actions and lifecycle callbacks never run.
    */
-  previewRuntime(): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
+  previewRuntime(screen?: string): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
     const loaded = this.loadedProgram
     if (!loaded) return null
     const preview = new AppRuntime()
-    preview.load(loaded.files, loaded.model, loaded.key)
+    if (screen) preview.previewPrefix = 'design:' + screen
+    preview.load(loaded.files, loaded.model, loaded.key, screen ?? loaded.screen)
     const copied = new Map<object, unknown>()
     const boxes = new Map<string, { value: SwiftValue; initializer: string }>()
     for (const [key, box] of this.state.snapshot()) {
@@ -453,7 +455,7 @@ export class AppRuntime {
     this.host.defaultGeometry = defaultGeometry
     this.host.geometry = this.geometry
     const loaded = this.loadedProgram
-    if (reload && loaded) this.load(loaded.files, loaded.model, loaded.key)
+    if (reload && loaded) this.load(loaded.files, loaded.model, loaded.key, loaded.screen)
   }
 
   /**

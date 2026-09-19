@@ -34,7 +34,7 @@ export function applyProjectTransaction(project: Project, revision: number, tran
   const byId = new Map(changes.map(c => [c.file, c]))
   const files = project.files.map(f => byId.has(f.id) ? { ...f, text: byId.get(f.id)!.after } : f)
   for (const c of changes) if (c.before === null) files.push({ id: c.file, text: c.after })
-  return { ok: true, project: { ...project, files, studio: transaction.studio?.after ?? project.studio, assets: transaction.assets?.after ?? project.assets, updatedAt: Date.now() } }
+  return { ok: true, project: { ...project, files: changes.length ? files : project.files, studio: transaction.studio?.after ?? project.studio, assets: transaction.assets?.after ?? project.assets, updatedAt: Date.now() } }
 }
 
 /** Translate a source selection through typing or an unambiguous file rename. */
@@ -66,6 +66,8 @@ const sameDocument = (a: Project, b: Project) => a.id === b.id && JSON.stringify
 export class DocumentHistory {
   private past: Entry[] = []
   private future: Entry[] = []
+  get canUndo(): boolean { return this.past.length > 0 }
+  get canRedo(): boolean { return this.future.length > 0 }
   clear(): void { this.past = []; this.future = [] }
   record(before: Project | null, after: Project | null, beforeSelection: DocumentSelection | null, afterSelection: DocumentSelection | null, group?: string, time = Date.now()): void {
     if (!before || !after || before.id !== after.id) { this.clear(); return }

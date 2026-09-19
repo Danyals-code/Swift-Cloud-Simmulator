@@ -21,7 +21,7 @@ const PromptCreator = dynamic(() => import('./PromptCreator').then(m => m.Prompt
 
 /** Welcome window and project browser. Template sources load only after selection. */
 
-export type GallerySource = 'open' | 'prompt' | TemplateKind
+export type GallerySource = 'design' | 'open' | 'prompt' | TemplateKind
 
 export interface TemplateGalleryProps {
   currentProject?: Project
@@ -51,6 +51,7 @@ export interface TemplateGalleryProps {
 }
 
 const SOURCES: readonly { key: GallerySource; label: string; icon: IconName; hint: string }[] = [
+  { key: 'design', label: 'Start designing', icon: 'inspect', hint: 'Start with a blank screen or an editable profile card' },
   { key: 'open', label: 'Your projects', icon: 'folder', hint: 'Continue a project or import Swift files' },
   { key: 'prompt', label: 'Agentic Coding', icon: 'new-file', hint: 'Describe an app and generate its first version' },
   { key: 'app', label: 'App templates', icon: 'screens', hint: 'Complete apps with connected screens' },
@@ -77,12 +78,12 @@ export function TemplateGallery({
   const features = useMemo(() => TEMPLATE_CATALOG.filter((t) => t.kind === 'feature'), [])
 
   const [imported, setImported] = useState<{ local: Project; project: Project; handoff: Handoff } | null>(null)
-  const [source, setSource] = useState<GallerySource>('prompt')
+  const [source, setSource] = useState<GallerySource>('design')
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
   const setGenerationBusy = useCallback((busy: boolean) => { creatingRef.current = busy; setCreating(busy) }, [])
-  const [selected, setSelected] = useState<string>(apps[0]?.id ?? '')
+  const [selected, setSelected] = useState<string>('blank')
   const [pending, setPending] = useState<{ what: string; run: () => void } | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -98,7 +99,7 @@ export function TemplateGallery({
   const panelRef = useRef<HTMLDivElement | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
 
-  const candidates = source === 'feature' ? features : source === 'app' ? apps : []
+  const candidates = source === 'design' ? features.filter(item => ['blank', 'card'].includes(item.id)) : source === 'feature' ? features : source === 'app' ? apps : []
   const shown = candidates.filter((item) =>
     [item.name, item.tagline, item.description, ...(item.highlights ?? [])]
       .join(' ').toLowerCase().includes(query.trim().toLowerCase()),
@@ -242,6 +243,7 @@ export function TemplateGallery({
                   setCreateError(null)
                   setQuery('')
                   setSource(item.key)
+                  if (item.key === 'design') setSelected('blank')
                   if (item.key === 'app') setSelected(apps[0]?.id ?? '')
                   if (item.key === 'feature') setSelected(features[0]?.id ?? '')
                 }}
@@ -265,9 +267,9 @@ export function TemplateGallery({
         <div className={styles.main}>
           <header className={styles.header}>
             <div>
-              <h2>{source === 'open' ? 'Your projects' : source === 'app' ? 'App templates' : source === 'prompt' ? 'Agentic Coding' : 'Feature examples'}</h2>
+              <h2>{source === 'design' ? 'Start designing' : source === 'open' ? 'Your projects' : source === 'app' ? 'App templates' : source === 'prompt' ? 'Agentic Coding' : 'Feature examples'}</h2>
               <p className={styles.subtitle}>
-                {source === 'open' ? 'Continue working or import a Swift project.' : source === 'app' ? 'A starting point with connected screens and working interactions.' : source === 'prompt' ? 'Describe your app. Review its first version. Make it yours.' : 'Focused examples you can run, read, and adapt.'}
+                {source === 'design' ? 'Start with a blank screen or make a starter your own.' : source === 'open' ? 'Continue working or import a Swift project.' : source === 'app' ? 'A starting point with connected screens and working interactions.' : source === 'prompt' ? 'Describe your app. Review its first version. Make it yours.' : 'SwiftUI examples to explore. Some advanced behaviors require Code.'}
               </p>
             </div>
             <button type="button" className={styles.close} onClick={onClose} disabled={creating} aria-label="Close welcome screen" data-testid="gallery-dismiss">
@@ -296,15 +298,15 @@ export function TemplateGallery({
           ) : (
             <>
               <div className={styles.catalogBar}>
-                <span>{shown.length} {source === 'app' ? 'app templates' : 'feature examples'}</span>
+                <span>{shown.length} {source === 'design' ? 'design starters' : source === 'app' ? 'app templates' : 'feature examples'}</span>
                 <label className={styles.search}>
                   <Icon name="search" size={15} />
-                  <input aria-label="Search templates" placeholder={source === 'app' ? 'Find an app…' : 'Find a feature…'} value={query} onChange={(event) => setQuery(event.target.value)} />
+                  <input aria-label="Search templates" placeholder={source === 'design' ? 'Find a starter…' : source === 'app' ? 'Find an app…' : 'Find a feature…'} value={query} onChange={(event) => setQuery(event.target.value)} />
                   {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><Icon name="xmark" size={13} /></button>}
                 </label>
               </div>
               <div className={styles.catalog}>
-                <div className={source === 'app' ? styles.appGrid : styles.featureGrid}>
+                <div className={source === 'app' || source === 'design' ? styles.appGrid : styles.featureGrid}>
                   {shown.map((item) => (
                     <TemplateCard key={item.id} template={item} selected={item.id === template?.id}
                       disabled={creating} onSelect={() => setSelected(item.id)} onConfirm={() => choose(item)} />
@@ -323,7 +325,7 @@ export function TemplateGallery({
               <button type="button" className={styles.secondary} onClick={onClose} disabled={creating} data-testid="gallery-cancel">{atLaunch ? 'Not now' : 'Cancel'}</button>
               <button type="button" className={styles.primary} disabled={creating || (source !== 'open' && !template)} data-testid="template-confirm"
                 onClick={source === 'open' ? onClose : () => { if (template) choose(template) }}>
-                {creating ? 'Creating…' : source === 'open' ? 'Continue editing' : source === 'app' ? 'Create app' : 'Open example'}
+                {creating ? 'Creating…' : source === 'design' ? 'Create design' : source === 'open' ? 'Continue editing' : source === 'app' ? 'Create app' : 'Open example'}
                 <Icon name="chevron-right" size={14} />
               </button>
             </div>
@@ -534,6 +536,7 @@ function RecentRow({
 }
 
 const TEMPLATE_ART: Readonly<Record<string, readonly [string, string]>> = {
+  blank: ['phone-portrait', '#7ab8ff'],
   dispatch: ['albums-outline', '#b1aac8'], market: ['bag-handle-outline', '#93bcb6'],
   folio: ['library', '#ab9af5'], trailhead: ['leaf', '#79d6af'], ledger: ['bar-chart', '#7ab8ff'],
   kitchen: ['flame-outline', '#f4bb80'], pulse: ['pulse', '#ee95ad'], counter: ['add-circle-outline', '#7ab8ff'],

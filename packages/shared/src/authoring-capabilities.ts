@@ -14,7 +14,7 @@ export interface AuthoringCapability {
   readonly writeRule: string
 }
 
-const EDITABLE = new Set(['Text', 'Image', 'RoundedRectangle', 'Spacer', 'HStack', 'VStack', 'ZStack', 'Button', 'TextField', 'Toggle', 'ScrollView', 'fill', 'padding', 'frame', 'font', 'foregroundColor', 'foregroundStyle', 'background', 'cornerRadius', 'opacity', 'lineLimit', 'multilineTextAlignment', 'navigationTitle', 'accessibilityLabel', 'accessibilityIdentifier', 'listStyle', 'List', 'ForEach', 'Picker'])
+const EDITABLE = new Set(['Text', 'Image', 'RoundedRectangle', 'Spacer', 'HStack', 'VStack', 'ZStack', 'Button', 'TextField', 'Toggle', 'ScrollView', 'fill', 'padding', 'frame', 'font', 'foregroundColor', 'foregroundStyle', 'background', 'cornerRadius', 'opacity', 'lineLimit', 'multilineTextAlignment', 'navigationTitle', 'accessibilityLabel', 'accessibilityIdentifier', 'listStyle', 'buttonStyle', 'buttonBorderShape', 'controlSize', 'tint', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'DatePicker', 'ColorPicker', 'ProgressView', 'List', 'ForEach', 'Picker'])
 
 function capability(name: string, kind: 'view' | 'modifier', forms: AuthoringCapability['forms'], content = false, minimumIOS = '13.0'): AuthoringCapability {
   return { id: `${kind}.${name}`, name, kind, forms, content, minimumIOS, preview: 'subset', editing: EDITABLE.has(name) ? 'subset' : 'planned', native: 'unverified', fixture: 'authoring-core', writeRule: 'Only discovered design controls and operation capabilities authorize writes. See AUTHORING_WRITERS for exact boundaries; validate source ownership, target availability and the complete project revision before atomic commit.' }
@@ -23,6 +23,19 @@ function capability(name: string, kind: 'view' | 'modifier', forms: AuthoringCap
 export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('Text', 'view', [[null], ['verbatim']]),
   capability('Image', 'view', [[null], ['systemName']]),
+  capability('Label', 'view', [[null, 'systemImage']], false, '14.0'),
+  capability('LabeledContent', 'view', [[null, 'value']], false, '16.0'),
+  capability('Link', 'view', [[null, 'destination']], false, '14.0'),
+  capability('ProgressView', 'view', [[], ['value']], false, '14.0'),
+  capability('GroupBox', 'view', [[], [null]], true, '14.0'),
+  capability('Form', 'view', [[]], true),
+  capability('LazyVGrid', 'view', [['columns']], true, '14.0'),
+  capability('Slider', 'view', [['value']]),
+  capability('Stepper', 'view', [[null, 'value']]),
+  capability('DatePicker', 'view', [[null, 'selection']]),
+  capability('ColorPicker', 'view', [[null, 'selection']], false, '14.0'),
+  capability('TabView', 'view', [[]], true),
+  capability('Capsule', 'view', [[]]),
   capability('Rectangle', 'view', [[]]), capability('Circle', 'view', [[]]),
   capability('RoundedRectangle', 'view', [['cornerRadius'], ['cornerRadius', 'style']]),
   capability('Spacer', 'view', [[], ['minLength']]), capability('Divider', 'view', [[]]),
@@ -37,11 +50,15 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('TextField', 'view', [[null, 'text']]), capability('Toggle', 'view', [[null, 'isOn']]),
   capability('Picker', 'view', [[null, 'selection']], true),
   capability('NavigationStack', 'view', [[]], true, '16.0'),
-  capability('NavigationLink', 'view', [[null, 'destination'], ['destination']], true),
+  capability('NavigationLink', 'view', [[null], [null, 'destination'], ['destination']], true),
   capability('WindowGroup', 'view', [[]], true, '14.0'),
   capability('padding', 'modifier', [[], [null], [null, null]]),
-  capability('frame', 'modifier', [['alignment'], ['width'], ['height'], ['height', 'alignment'], ['width', 'alignment'], ['maxHeight'], ['maxHeight', 'alignment'], ['width', 'height'], ['width', 'height', 'alignment'], ['maxWidth'], ['maxWidth', 'alignment'], ['maxWidth', 'maxHeight']]),
+  capability('frame', 'modifier', [['alignment'], ['width'], ['height'], ['height', 'alignment'], ['width', 'alignment'], ['maxHeight'], ['maxHeight', 'alignment'], ['width', 'height'], ['width', 'height', 'alignment'], ['maxWidth'], ['maxWidth', 'alignment'], ['maxWidth', 'maxHeight'], ['maxWidth', 'maxHeight', 'alignment']]),
   capability('font', 'modifier', [[null]]), capability('foregroundColor', 'modifier', [[null]]),
+  capability('buttonStyle', 'modifier', [[null]]),
+  capability('buttonBorderShape', 'modifier', [[null]], false, '15.0'),
+  capability('controlSize', 'modifier', [[null]], false, '15.0'),
+  capability('tint', 'modifier', [[null]], false, '15.0'),
   capability('foregroundStyle', 'modifier', [[null]], false, '15.0'), capability('background', 'modifier', [[null], []], true),
   capability('fill', 'modifier', [[null]]),
   capability('overlay', 'modifier', [[null], []], true), capability('cornerRadius', 'modifier', [[null]]),

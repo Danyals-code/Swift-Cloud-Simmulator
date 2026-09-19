@@ -139,7 +139,8 @@ function siteFor(ctx: FeatureContext, node: AuthoringNode): Site | undefined {
     if (!call) return undefined
     const direct = call.args.find(arg => arg.label === 'destination')?.value
     const label = call.args.find(arg => arg.label === 'label')
-    const closure = direct?.kind === 'closure' ? direct : label ? call.trailingClosure ?? undefined : undefined
+    const titledDestination = call.args.length === 1 && call.args[0]?.label === null
+    const closure = direct?.kind === 'closure' ? direct : label || titledDestination ? call.trailingClosure ?? undefined : undefined
     if (direct || closure) return { node, call, destination: closure ? singleExpression(closure) : direct, closure, scope: 'link', ...(closure && !singleExpression(closure) ? { reason: 'This destination contains control flow. Edit its Swift to preserve that logic.' } : {}) }
     const value = call.args.find(arg => arg.label === 'value')?.value
     if (value) {

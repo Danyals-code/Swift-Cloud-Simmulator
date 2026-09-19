@@ -18,6 +18,8 @@ export interface ToolbarProps {
   onOpenGallery: () => void
   projectName: string
   onRenameProject: (name: string) => boolean
+  onReview?: () => void
+  reviewDisabled?: boolean
   onShortcuts: () => void
   savedAt: number | null
   saveError: string | null
@@ -48,13 +50,19 @@ interface PreviewToolsProps {
   errors: number
   warnings: number
   workerError: string | null
+  onUndo: () => void
+  onRedo: () => void
+  onReset: () => void
+  canUndo: boolean
+  canRedo: boolean
+  note?: string | null
 }
 
 const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debug area', title: 'Show problems and output' }]
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
 export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, onModeChange, theme, onThemeChange,
-  panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts }: ToolbarProps) {
+  panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onReview, reviewDisabled }: ToolbarProps) {
   return <header data-testid="toolbar" className={styles.toolbar}>
     <div className={styles.project}>
       <button type="button" onClick={onOpenGallery} aria-label="Open a project" title="Projects and templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={21} /></button>
@@ -64,6 +72,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, 
       {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Focus on the app preview' : 'Code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Code'}</button>)}
     </nav>
     <div className={styles.actions}>
+      {mode === 'design' && <button type="button" className={styles.export} data-testid="design-review" onClick={onReview} disabled={reviewDisabled}>Review & export</button>}
       <button type="button" data-testid="workspace-theme" className={styles.themeToggle} aria-label="Workspace dark mode" aria-pressed={theme === 'dark'} title={`Switch workspace to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}><Icon name="appearance" size={17} /></button>
       <span className={styles.paneControls}><PaneToggles options={debugPane} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>
       <span className={styles.share}><ShareButton onShare={onShare} /></span>
@@ -106,7 +115,7 @@ function ProjectName({ name, onRename }: { name: string; onRename: (name: string
  * the phone back to the person using it. They are a switch rather than two toggles
  * because a pointer over a phone has to mean one thing at a time.
  */
-export function PreviewTools({ inspecting, onSetInspecting, showEditActions = false, tool, onSetTool, onAdd, canAdd, mode = 'design' }: PreviewToolsProps) {
+export function PreviewTools({ inspecting, onSetInspecting, showEditActions = false, tool, onSetTool, onAdd, canAdd, mode = 'design', busy, onUndo, onRedo, onReset, canUndo, canRedo, note }: PreviewToolsProps) {
   // The workspace is called Design; what the pointer does inside it is called Edit,
   // so that no word names two different things.
   const designing = mode === 'design' ? 'Edit' : 'Inspect'
@@ -114,9 +123,15 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
   // grids rather than rows of natural-width buttons, so "Delete" and "Live Preview"
   // line up down the edge instead of ending wherever their words happen to.
   return <div className={styles.toolDock} aria-label="Preview tools">
+    {note && <span className={styles.dockFeedback} role="status" data-testid="design-feedback">{note}</span>}
+    <div className={`${styles.dockRow} ${styles.dockHistory}`} role="group" aria-label="History and preview">
+      <button type="button" onClick={onUndo} disabled={busy || !canUndo} aria-label="Undo" title="Undo the last document change (⌘Z)" data-testid="design-undo"><Icon name="undo" size={13} />Undo</button>
+      <button type="button" onClick={onRedo} disabled={busy || !canRedo} aria-label="Redo" title="Redo the last undone change (⌘⇧Z)" data-testid="design-redo"><Icon name="redo" size={13} />Redo</button>
+      <button type="button" onClick={onReset} disabled={busy} aria-label="Reset preview" title="Restart app interactions without changing your design" data-testid="reset-preview"><Icon name="refresh" size={13} />Reset</button>
+    </div>
     {showEditActions && inspecting ? (
       <div className={`${styles.dockRow} ${styles.dockTools}`} role="group" aria-label="Edit actions">
-        <PushButton onClick={() => onSetTool('select')} active={tool === 'select'} label="Arrange views" title="Select a view, and move it among its neighbours (V)" testId="tool-select" icon="inspect">Arrange</PushButton>
+        <PushButton onClick={() => onSetTool('select')} active={tool === 'select'} label="Select views" title="Select a view to change its properties (V)" testId="tool-select" icon="inspect">Select</PushButton>
         <PushButton onClick={onAdd} disabled={!canAdd} label="Add a view" title={canAdd ? 'Add a view to the screen (A)' : 'Waiting for the preview'} testId="add-view" icon="plus">Add</PushButton>
         <span className={styles.destructive}>
           <PushButton onClick={() => onSetTool(tool === 'delete' ? 'select' : 'delete')} active={tool === 'delete'} label="Delete views" title="Click a view on the canvas to delete it (D)" testId="tool-delete" icon="xmark">Delete</PushButton>
@@ -124,8 +139,8 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
       </div>
     ) : null}
     <div className={`${styles.dockRow} ${styles.dockModes}`}>
-      <PushButton onClick={() => onSetInspecting(true)} active={inspecting} label={designing} title={mode === 'design' ? 'Arrange, add and delete views (Tab)' : 'Point at a view to find its code (Tab)'} testId="inspect-toggle" icon="inspect">{designing}</PushButton>
-      <PushButton onClick={() => onSetInspecting(false)} active={!inspecting} label="Preview" title="Tap, scroll and use the app (Tab)" testId="live-toggle" icon="run">Preview</PushButton>
+      <PushButton disabled={busy} onClick={() => onSetInspecting(true)} active={inspecting} label={designing} title={mode === 'design' ? 'Arrange, add and delete views (Tab)' : 'Point at a view to find its code (Tab)'} testId="inspect-toggle" icon="inspect">{designing}</PushButton>
+      <PushButton disabled={busy} onClick={() => onSetInspecting(false)} active={!inspecting} label="Preview" title="Tap, scroll and use the app (Tab)" testId="live-toggle" icon="run">Preview</PushButton>
     </div>
   </div>
 }

@@ -2,19 +2,20 @@
 
 import { useMemo, useState } from 'react'
 import { assetName, imageDataURL, ASSET_LIMITS, type ImageAsset, type Project } from '@studio/project-model'
-import type { AuthoringSnapshot, ResourceOperation, StyleKind } from '@studio/shared'
+import type { AuthoringNode, AuthoringSnapshot, ResourceOperation, StyleKind } from '@studio/shared'
 import { decodeImportedImage } from '../lib/images'
 import { SharedStyleEditor, StyleValue } from './SharedStyles'
 import styles from './AuthoringInspector.module.css'
 
 export interface ProjectResourcesProps {
+  onSelect?: (node: AuthoringNode) => void
   project: Project
   snapshot?: AuthoringSnapshot
   stale: boolean
   onCommand: (operation: ResourceOperation) => Promise<string | null>
   onAssets: (assets: readonly ImageAsset[], operation?: ResourceOperation) => Promise<string | null>
 }
-export function ProjectResources({ project, snapshot, stale, onCommand, onAssets }: ProjectResourcesProps) {
+export function ProjectResources({ project, snapshot, stale, onCommand, onAssets, onSelect }: ProjectResourcesProps) {
   const [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false)
   const [name, setName] = useState('brandColor'), [kind, setKind] = useState<StyleKind>('color'), [value, setValue] = useState('blue')
   async function run(task: () => Promise<string | null>) { if (busy) return; setBusy(true); setError(null); try { setError(await task()) } catch (e) { setError(e instanceof Error ? e.message : 'The resource could not be changed.') } finally { setBusy(false) } }
@@ -31,8 +32,8 @@ export function ProjectResources({ project, snapshot, stale, onCommand, onAssets
       <label>Add image<input aria-label="Add bundled image" type="file" accept="image/png,image/jpeg" disabled={disabled} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void run(() => importFile(file)) }} /></label>
       {(project.assets ?? []).map(asset => <AssetEditor key={`${asset.id}:${asset.name}:${asset.scale}`} asset={asset} assets={project.assets ?? []} disabled={disabled} onEdit={(assets, op) => run(() => onAssets(assets, op))} onFile={(file, dark) => run(() => importFile(file, asset, dark))} />)}
     </section>
-    <section><h3>Shared styles</h3><p>Colors, spacing, and text styles are real Swift declarations. Code edits update these controls.</p>
-      {snapshot?.styles?.map(token => <SharedStyleEditor key={token.name + token.value} token={token} busy={disabled} onCommand={command} />)}
+    <section><h3>Shared styles</h3><p>Update a shared style to restyle every linked use. Select a use below to find it in the design.</p>
+      {snapshot?.styles?.map(token => <SharedStyleEditor key={token.name} token={token} snapshot={snapshot} onSelect={onSelect} busy={disabled} onCommand={command} />)}
       <details><summary>Create shared style</summary><label>Swift name<input aria-label="Shared style name" value={name} onChange={e => setName(e.target.value)} /></label><label>Kind<select aria-label="Shared style kind" value={kind} onChange={e => { const next = e.target.value as StyleKind; setKind(next); setValue(next === 'font' ? 'body' : next === 'color' ? 'blue' : '16') }}><option value="color">Color</option><option value="spacing">Spacing</option><option value="font">Text style</option></select></label>
         <StyleValue kind={kind} value={value} onChange={setValue} /><button type="button" disabled={disabled || !snapshot?.nodes.length} onClick={() => void command({ kind: 'style-create', name, style: kind, value })}>Create Swift style</button>
       </details>

@@ -541,7 +541,7 @@ export function compile(request: CompileRequest): CompileResult {
     lastAnalysis = { request, analysis: failed }; lastEvaluation = null; runtime.reset(false)
     return toResult(request, failed, null, noticeTree(request, 'Preview scenario needs updating', message), startedAt, 0, 0)
   }
-  runtime.load(evaluationFiles, analysis.model, programKeyOf(request))
+  runtime.load(evaluationFiles, analysis.model, programKeyOf(request), request.previewScreen)
   runtime.setEnvironment(environmentFor(request))
   runtime.setDefaultGeometry(contentSizeOf(request))
 
@@ -705,7 +705,28 @@ function renderPages(
     }
     remainingChildren -= nested.length
   }
-  return out
+  const renamedIds = new Map<string, string>()
+  for (const screen of (request.designScreens ?? []).slice(0, GALLERY_LIMIT)) {
+    const definition = lastAnalysis?.analysis.authoring.nodes.find(n => n.kind === 'definition' && n.name === screen.view)
+    if (!definition) continue
+    const existingIndex = out.findIndex(page => page.viewHierarchy?.[0]?.children[0]?.componentSources?.at(-1)?.name === screen.view)
+    if (existingIndex >= 0) {
+      const page = out[existingIndex]!, id = 'screen:' + screen.view
+      renamedIds.set(page.id, id)
+      out[existingIndex] = { ...page, id, name: screen.name, viewHierarchy: page.viewHierarchy?.map(layer => ({ ...layer, id, name: screen.name })) }
+      continue
+    }
+    const detached = runtime.previewRuntime(screen.view)
+    if (!detached?.evaluation.ui) continue
+    const id = 'screen:' + screen.view
+    try {
+      const tree = render(request, detached.evaluation, true, detached.runtime)
+      if (tree.nodes.some(n => !Object.values(n.frame).every(Number.isFinite))) continue
+      out.push({ id, rootId: id, kind: 'root', standalone: true, name: screen.name, active: false, source: definition.source,
+        viewHierarchy: detached.evaluation.ui.viewHierarchy?.map(layer => ({ ...layer, id })), tree })
+    } catch { /* A failed standalone screen does not invalidate the running app. */ }
+  }
+  return out.map(page => ({ ...page, rootId: renamedIds.get(page.rootId ?? '') ?? page.rootId, parentId: renamedIds.get(page.parentId ?? '') ?? page.parentId }))
 }
 
 /** The measured size of every geometry reader in a tree, keyed as it reported. */
@@ -750,7 +771,7 @@ function environmentFor(request: CompileRequest): EnvironmentInputs {
 }
 
 function programKeyOf(request: CompileRequest): string {
-  return request.files.map((f) => `${f.id} ${f.text}`).join('') + JSON.stringify(request.scenario ?? null)
+  return request.files.map((f) => `${f.id} ${f.text}`).join('') + JSON.stringify([request.scenario ?? null, request.previewScreen ?? null])
 }
 
 export type { LayoutElement }

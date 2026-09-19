@@ -12,6 +12,10 @@ const CATALOG: readonly { name: string; label: string; category: ModifierCategor
   { name: 'cornerRadius', label: 'Corner radius', category: 'appearance', source: '.cornerRadius(8)' },
   { name: 'opacity', label: 'Opacity', category: 'appearance', source: '.opacity(1)' },
   { name: 'lineLimit', label: 'Max lines', category: 'text', source: '.lineLimit(3)' },
+  { name: 'buttonStyle', label: 'Button style', category: 'appearance', source: '.buttonStyle(.borderedProminent)' },
+  { name: 'buttonBorderShape', label: 'Button shape', category: 'appearance', source: '.buttonBorderShape(.capsule)' },
+  { name: 'controlSize', label: 'Control size', category: 'appearance', source: '.controlSize(.regular)' },
+  { name: 'tint', label: 'Accent color', category: 'appearance', source: '.tint(Color.blue)' },
 ]
 const BEHAVIOR = new Set(['task', 'onAppear', 'onDisappear', 'onChange', 'onReceive', 'onTapGesture', 'onLongPressGesture', 'onSubmit', 'onDelete', 'onMove', 'gesture', 'simultaneousGesture', 'highPriorityGesture', 'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'popover', 'navigationDestination', 'navigationTitle', 'navigationBarTitleDisplayMode', 'toolbar', 'tabItem', 'tag', 'id', 'environment', 'environmentObject', 'disabled', 'allowsHitTesting', 'animation', 'transition', 'searchable', 'contextMenu', 'accessibilityLabel', 'accessibilityIdentifier', 'accessibilityValue', 'accessibilityHint', 'accessibilityHidden'])
 const LAYOUT = new Set(['offset', 'position', 'fixedSize', 'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame', 'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill', 'ignoresSafeArea'])
@@ -63,12 +67,16 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
     })
     const known = !!authoringCapability(name, 'modifier', call.args.map(a => a.label))
     const reason = !editable ? 'Resolve source diagnostics or edit this view in Code.' : commented ? 'Comments in this modifier chain need to stay attached. Change values here or reorder in Code.' : !movable[index] ? category(name) === 'behavior' ? 'This behavior stays in its source position.' : !known ? 'This modifier is preserved; its structure is edited in Code.' : 'This modifier has type or content requirements. Change its structure in Code.' : undefined
-    const summary = controls.filter(c => !c.id.startsWith('fill:')).map(c => c.value || 'Default').join(' · ') || (category(name) === 'custom' ? 'Custom modifier' : call.trailingClosure ? category(name) === 'behavior' ? 'Configured action' : 'View content' : call.args.length ? 'Linked or advanced value' : 'Default')
+    const linked = node.properties.find(p => p.source && p.source.start >= start && p.source.end <= call.span.end && p.valueKind === 'token')
+    const summary = controls.filter(c => !c.id.startsWith('fill:')).map(c => c.value || 'Default').join(' · ') || (linked ? linked.expression : category(name) === 'custom' ? 'Custom modifier' : call.trailingClosure ? category(name) === 'behavior' ? 'Configured action' : 'View content' : call.args.length ? 'Linked or advanced value' : 'Default')
     return { id: JSON.stringify([source.file, source.start, source.end, expression]), name, label: friendly(name), category: category(name), summary, expression, source, controls, propertyIds: node.properties.filter(p => p.source && p.source.start >= start && p.source.end <= call.span.end).map(p => p.id), capabilities: { edit: editable && controls.length > 0, remove: movable[index]!, duplicate: movable[index]!, moveUp: movable[index]! && index > 0 && movable[index - 1]!, moveDown: movable[index]! && index < calls.length - 1 && movable[index + 1]!, reason } }
   })
   const unknown = calls.some(c => !SUPPORTED_MODIFIERS.has(nameOf(c)))
   const available = editable && !unknown
-  return { modifiers, modifierCatalog: CATALOG.map(entry => ({ name: entry.name, label: entry.label, category: entry.category, available, reason: available ? undefined : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : 'This view cannot be changed until its source is resolved.' })) }
+  return { modifiers, modifierCatalog: CATALOG.filter(entry => !['buttonStyle', 'buttonBorderShape', 'controlSize'].includes(entry.name) || node.name === 'Button').map(entry => {
+    const supported = available && version >= Number.parseFloat(authoringCapability(entry.name, 'modifier', [null])?.minimumIOS ?? '13') && (entry.name !== 'buttonStyle' || version >= 15)
+    return { name: entry.name, label: entry.label, category: entry.category, available: supported, reason: supported ? undefined : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? 'This style requires a newer iOS deployment target.' : 'This view cannot be changed until its source is resolved.' }
+  }) }
 }
 
 /** Move complete suffix slices; never reconstruct an existing modifier or its arguments. */

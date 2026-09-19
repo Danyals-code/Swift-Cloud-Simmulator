@@ -163,8 +163,12 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     const tree = run().renderTree!
     const painted = tree.nodes.filter((n) => n.id !== 'screen')
 
-    expect(painted.length).toBeGreaterThan(2)
-    expect(painted.some((n) => n.kind === 'text')).toBe(true)
+    if (template.id === 'blank') {
+      expect(painted.some(n => n.background?.kind === 'solid' && n.frame.width > 0 && n.frame.height > 0)).toBe(true)
+    } else {
+      expect(painted.length).toBeGreaterThan(2)
+      expect(painted.some((n) => n.kind === 'text')).toBe(true)
+    }
   })
 
   it('places every node inside the screen, with finite geometry', () => {
@@ -426,8 +430,8 @@ describe('the gallery', () => {
     }
   })
 
-  it('starts with the reference app', () => {
-    expect(TEMPLATES[0]!.id).toBe('counter')
+  it('starts with a blank design', () => {
+    expect(TEMPLATES[0]!.id).toBe('blank')
   })
 
   /**

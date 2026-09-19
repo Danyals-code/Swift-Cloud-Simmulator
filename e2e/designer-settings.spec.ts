@@ -175,6 +175,7 @@ test('List records and button actions live below Modifiers and update actual dat
     const behavior = element.querySelector('[data-testid="settings-behavior"]')!
     return !!(stack.compareDocumentPosition(behavior) & Node.DOCUMENT_POSITION_FOLLOWING)
   })).toBe(true)
+  await behavior.getByText('Advanced actions', { exact: true }).click()
   await behavior.getByLabel('Action type').selectOption('toggle')
   await behavior.getByLabel('Behavior state').first().selectOption('done')
   await behavior.getByRole('button', { name: 'Apply action', exact: true }).click()

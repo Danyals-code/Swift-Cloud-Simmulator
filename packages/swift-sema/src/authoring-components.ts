@@ -1,9 +1,11 @@
-import type { AuthoringNode, ComponentSettings, DesignControl, SourceFile } from '@studio/shared'
-import { forEachChild, type FuncDecl, type Node, type VarDecl } from '@studio/swift-syntax'
-import { AUTHORING_COLORS, swiftString } from './design-controls'
-import { allDeclarations, callOf, expressionOf, identifier, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch } from './authoring-context'
+import type { AuthoringNode, ComponentSettings, ComponentVariant, DesignControl, SourceFile } from '@studio/shared'
+import { Parser, insertView, forEachChild, type FuncDecl, type Node, type VarDecl } from '@studio/swift-syntax'
+import { AUTHORING_COLORS, swiftString, validateControlValue, designControlRecipes } from './design-controls'
+import { applyPatches, allDeclarations, callOf, expressionOf, identifier, insertMember, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch } from './authoring-context'
 import { SUPPORTED_VIEWS } from './builtins'
 import { enclosingCollection } from './authoring-collections'
+import { buildAuthoringModel } from './authoring'
+import { Checker } from './checker'
 
 export function namedActions(ctx: FeatureContext, node: AuthoringNode): FuncDecl[] {
   const owner = ownerOf(ctx, node)
@@ -35,7 +37,7 @@ export function emptyComponents(ctx: FeatureContext): string[] {
   return names
 }
 
-export interface ComponentRecipe { control: DesignControl; write(value: string): SourcePatch }
+export interface ComponentRecipe { control: DesignControl; portable: boolean; write(value: string): SourcePatch }
 export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): ComponentRecipe[] {
   if (node.kind !== 'component') return []
   const call = callOf(ctx, node), decl = namedStruct(ctx, node.name)
@@ -84,7 +86,7 @@ export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): Comp
     const probe = insertArgument(ctx, call, field.name, format(value), fields.map(f => f.name))
     if (!probe) continue
     const control: DesignControl = { id: `component:${field.name}`, source: argument?.value.span ?? call.span, group: descriptive?.group, label: descriptive?.label || field.name, description: descriptive?.description || 'Changes this call-site argument. Other component instances and the shared definition remain independent.', kind, value, options, min: descriptive?.min, max: descriptive?.max, scope: 'This component instance' }
-    result.push({ control, write(v) {
+    result.push({ control, portable: type?.kind !== 'functionType', write(v) {
       if (scalar?.type === 'Int' && !Number.isSafeInteger(Number(v))) throw new Error('Use a whole number for this component property.')
       return insertArgument(ctx, call, field.name, format(v), fields.map(f => f.name))!
     } })
@@ -97,7 +99,7 @@ export function componentSettings(ctx: FeatureContext, node: AuthoringNode): Com
   if (!decl) return undefined
   const currentSignature = signature(ctx, decl)
   const desc = ctx.descriptions?.find(d => d.owner === node.name)
-  return { definitionId: node.definitionId, signature: currentSignature, propertyNames: decl.members.filter((m): m is VarDecl => m.kind === 'varDecl' && !m.accessor && !m.modifiers.some(x => ['private', 'fileprivate', 'static'].includes(x.name))).map(m => m.name), callSites: ctx.nodes.filter(n => n.definitionId === node.definitionId).map(n => n.source), controls: componentRecipes(ctx, node).map(r => r.control), descriptionStatus: !desc ? 'Inferred from the Swift interface' : desc.signature === currentSignature ? 'Description matches the Swift interface' : 'Description is outdated; using the Swift interface' }
+  return { reusable: !!reusableComponent(ctx, node), variantControls: componentRecipes(ctx, node).filter(r => r.portable).map(r => r.control.id), definitionId: node.definitionId, signature: currentSignature, propertyNames: decl.members.filter((m): m is VarDecl => m.kind === 'varDecl' && !m.accessor && !m.modifiers.some(x => ['private', 'fileprivate', 'static'].includes(x.name))).map(m => m.name), callSites: ctx.nodes.filter(n => n.definitionId === node.definitionId).map(n => n.source), controls: componentRecipes(ctx, node).map(r => r.control), descriptionStatus: !desc ? 'Inferred from the Swift interface' : desc.signature === currentSignature ? 'Description matches the Swift interface' : 'Description is outdated; using the Swift interface' }
 }
 
 export function extractComponent(ctx: FeatureContext, node: AuthoringNode, name: string): { patches: SourcePatch[]; files: SourceFile[] } {
@@ -144,4 +146,62 @@ export function extractComponent(ctx: FeatureContext, node: AuthoringNode, name:
   const file = `${node.source.file.includes('/') ? node.source.file.slice(0, node.source.file.lastIndexOf('/') + 1) : ''}${name}.swift`
   const text = `import SwiftUI\n\nstruct ${name}: View {\n    ${parameters.join('\n    ')}\n    var body: some View {\n        ${raw(ctx, node.source)}\n    }\n}\n`.replace(/\r?\n/g, eol)
   return { patches: [patch(node.source, `${name}(${arguments_.join(', ')})`)], files: [{ id: file, text }] }
+}
+
+/** Reuse only arguments that mean the same thing in another screen's scope. */
+function reusableComponent(ctx: FeatureContext, node: AuthoringNode): string | undefined {
+  const call = callOf(ctx, node)
+  if (!call || node.kind !== 'component' || call.trailingClosure) return
+  const recipes = componentRecipes(ctx, node).filter(r => r.portable)
+  if (call.args.some(a => !recipes.some(r => r.control.id === `component:${a.label}`))) return
+  return raw(ctx, call.span)
+}
+
+export function insertComponent(ctx: FeatureContext, target: AuthoringNode, name: string) {
+  const instance = ctx.nodes.find(n => n.kind === 'component' && n.name === name && reusableComponent(ctx, n))
+  if (!instance) throw new Error('This component needs values or actions from its original screen. Duplicate it there or expose literal inputs before reusing it.')
+  const dependsOn = (owner: string, seen = new Set<string>()): boolean => {
+    if (owner === target.owner) return true
+    if (seen.has(owner)) return false
+    seen.add(owner)
+    return ctx.nodes.filter(n => n.owner === owner && n.kind === 'component').some(n => dependsOn(n.name, seen))
+  }
+  if (dependsOn(name)) throw new Error('A component cannot contain itself, directly or through another component.')
+  const file = ctx.files.find(f => f.id === target.source.file)!
+  const inserted = insertView(file.text, file.id, target.source.start, reusableComponent(ctx, instance)!)
+  if (!inserted) throw new Error('Select a layout or a layer inside a screen before adding this component.')
+  return { files: ctx.files.map(f => f.id === file.id ? { ...f, text: inserted.text } : f), offset: inserted.offset }
+}
+
+export function applyComponentVariant(ctx: FeatureContext, node: AuthoringNode, variant: ComponentVariant) {
+  const decl = namedStruct(ctx, node.name)
+  if (node.kind !== 'component' || !decl || variant.owner !== node.name || variant.signature !== signature(ctx, decl)) throw new Error('This variant belongs to a different component interface. Save a new variant from the current inputs.')
+  if (!variant.values.length || variant.values.length > 100 || new Set(variant.values.map(v => v.control)).size !== variant.values.length) throw new Error('A variant needs unique editable inputs.')
+  let current = ctx, selected = node
+  // Reparse each argument so missing/default arguments can share one insertion
+  // point without producing malformed commas. The caller commits once, atomically.
+  for (const value of variant.values) {
+    const recipe = componentRecipes(current, selected).find(r => r.portable && r.control.id === value.control)
+    if (!recipe) throw new Error('A saved input is now linked or unavailable. Preserve its connection and save a new variant.')
+    const error = validateControlValue(recipe.control, value.value)
+    if (error) throw new Error(error)
+    const files = applyPatches(current, [recipe.write(value.value)])
+    const ast = files.map(f => Parser.parse(f.text, f.id).sourceFile)
+    const model = buildAuthoringModel({ projectId: 'variant', revision: 0, files, parsed: ast, diagnostics: Checker.check(ast).diagnostics })
+    const next = model.nodes.find(n => n.name === node.name && n.owner === node.owner && n.source.file === node.source.file && n.source.start === node.source.start)
+    if (!next) throw new Error('The component instance changed while applying its variant.')
+    selected = next; current = { ...current, files, ast, nodes: model.nodes }
+  }
+  return { files: [...current.files], offset: node.source.start }
+}
+
+/** Promote a literal label to a defaulted input without changing existing instances. */
+export function exposeComponentInput(ctx: FeatureContext, node: AuthoringNode, control: string, name: string) {
+  const owner = ownerOf(ctx, node), expression = expressionOf(ctx, node)
+  if (!owner || !expression || !ctx.nodes.some(n => n.kind === 'component' && n.name === owner.name)) throw new Error('Select text inside a reusable component’s shared design.')
+  if (!identifier(name) || owner.members.some(m => 'name' in m && m.name === name) || owner.members.some(m => m.kind === 'initDecl')) throw new Error('Choose an unused input name on a component without a custom initializer.')
+  const recipe = designControlRecipes(node, expression, ctx.files.find(f => f.id === node.source.file)!.text, ctx.deploymentTarget).find(r => ['content', 'title'].includes(r.control.id) && r.control.id === control && r.control.kind === 'text')
+  if (!recipe) throw new Error('Only plain text or a plain control title can become a text input here. Linked or conditional text keeps its existing connection.')
+  const patches = [insertMember(ctx, owner, `var ${name}: String = ${swiftString(recipe.control.value)}`), patch(recipe.control.source, `self.${name}`)]
+  return { files: applyPatches(ctx, patches), offset: node.source.start + patches.filter(p => p.file === node.source.file && p.end <= node.source.start).reduce((delta, p) => delta + p.text.length - (p.end - p.start), 0) }
 }

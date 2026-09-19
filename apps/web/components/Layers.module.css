@@ -47,3 +47,11 @@
 .row:focus-within .move { visibility: visible; }
 
 .row[data-inactive] { color: var(--color-xc-text-3); }
+
+.organize { padding: 12px; display: grid; gap: 8px; border-top: 1px solid var(--color-xc-line); font-size: 12px; }
+.organize label { display: grid; gap: 6px; }
+.organize input, .organize select { width: 100%; background: var(--color-xc-bg); border: 1px solid var(--color-xc-line); padding: 7px; border-radius: 5px; }
+.organize div { display: flex; gap: 8px; }
+.organize button { padding: 6px 9px; background: var(--color-xc-select); border-radius: 5px; color: var(--color-xc-accent); }
+.organize p, .selectionHint { color: var(--color-xc-text-3); font-size: 11px; line-height: 1.5; }
+.selectionHint { padding: 4px 12px 8px; margin: 0; }

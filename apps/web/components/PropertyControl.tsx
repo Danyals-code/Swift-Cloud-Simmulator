@@ -5,6 +5,17 @@ import type { DesignControl } from '@studio/shared'
 import styles from './AuthoringInspector.module.css'
 
 const RANGE_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
+const OPTION_LABELS: Record<string, string> = {
+  largeTitle: 'Large title', title: 'Title', title2: 'Title 2', title3: 'Title 3',
+  primary: 'Primary text', secondary: 'Secondary text', clear: 'Transparent', accentColor: 'App accent',
+  systemBackground: 'Screen background', secondarySystemBackground: 'Secondary background', tertiarySystemBackground: 'Tertiary background',
+  systemGroupedBackground: 'Grouped screen background', secondarySystemGroupedBackground: 'Grouped card background', tertiarySystemGroupedBackground: 'Grouped inset background',
+  borderedProminent: 'Filled', bordered: 'Bordered', borderless: 'Borderless', plain: 'Plain',
+  leading: 'Start', trailing: 'End', firstTextBaseline: 'First text baseline', lastTextBaseline: 'Last text baseline',
+}
+export function propertyOptionLabel(value: string): string {
+  return OPTION_LABELS[value] ?? value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, letter => letter.toUpperCase())
+}
 
 export type PropertyChange = (control: string, value: string) => Promise<string | null>
 
@@ -59,9 +70,10 @@ export function PropertyControl({ control, onChange, label = control.label }: { 
     <label><span>{label}</span>
       {control.kind === 'select' ? <select {...input} disabled={pending} onChange={event => { change(event.target.value); void commit() }}>
         {control.value === '' && <option value="" disabled>Use inherited / default</option>}
-        {control.options?.map(option => <option key={option} value={option}>{option}</option>)}
-      </select> : control.kind === 'text' && ['content', 'title'].includes(control.id) ? <textarea {...input} readOnly={pending} rows={2} aria-description="Enter to apply. Shift+Enter for a new line." onChange={event => change(event.target.value)} /> : <input {...input} readOnly={pending} type="text" inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.kind === 'number' ? 'Default' : 'Enter value'} onChange={event => change(event.target.value)} />}
+        {control.options?.map(option => <option key={option} value={option}>{propertyOptionLabel(option)}</option>)}
+      </select> : control.kind === 'text' && /^(content|title)(:|$)/.test(control.id) ? <textarea {...input} readOnly={pending} rows={2} aria-description="Enter to apply. Shift+Enter for a new line." onChange={event => change(event.target.value)} /> : <input {...input} readOnly={pending} type="text" inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.kind === 'number' ? 'Default' : 'Enter value'} onChange={event => change(event.target.value)} />}
     </label>
+    {control.kind === 'number' && /spacing|padding|size|radius|width|height/i.test(label) && <small>Points (pt)</small>}
     {control.min === 0 && control.max === 1 && <input
       type="range" min="0" max="1" step="0.01"
       aria-label={`${label} slider`}
@@ -78,4 +90,3 @@ export function PropertyControl({ control, onChange, label = control.label }: { 
     {pending && <small role="status">Applying…</small>}
   </div>
 }
-

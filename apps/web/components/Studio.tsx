@@ -36,6 +36,11 @@ const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane),
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
 import { JumpBar } from './JumpBar'
+import { reconcileLayerLabel } from '../lib/layerLabels'
+import { Screens } from './Screens'
+import { ComponentLibrary } from './ComponentLibrary'
+const DesignReview = dynamic(() => import('./DesignReview').then(m => m.DesignReview), { ssr: false })
+import { screenCatalog, type ScreenCommand, type DesignScreen } from '../lib/screens'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery } from './TemplateGallery'
@@ -58,6 +63,8 @@ export function Studio() {
   const lastSavedAt = useStudio((s) => s.lastSavedAt)
   const saveError = useStudio((s) => s.saveError)
   const previewSettings = useStudio((s) => s.preview)
+  const canUndo = useStudio((s) => s.canUndo)
+  const canRedo = useStudio((s) => s.canRedo)
 
   const load = useStudio((s) => s.load)
   const flush = useStudio((s) => s.flush)
@@ -109,7 +116,9 @@ export function Studio() {
   const setSize = useLayout((s) => s.setSize)
   const setPane = useLayout((s) => s.setPane)
 
-  const [inspecting, setInspecting] = useState(false)
+  const [inspecting, setInspecting] = useState(true)
+  const [previewFrom, setPreviewFrom] = useState<{ projectId: string; view: string } | null>(null)
+  const focusedDesignPage = useRef<PagePreview | undefined>(undefined)
   /**
    * The page gallery: every page drawn at once, instead of the one that is running.
    *
@@ -122,6 +131,8 @@ export function Studio() {
   const [tool, setToolState] = useState<CanvasTool>('select')
   const [adding, setAdding] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [pageFocusEpoch, setPageFocusEpoch] = useState(0)
   /** What the source says can be done to the selection, which the controls are drawn from. */
   const [siteInfo, setSiteInfo] = useState<{ key: string; info: ViewSiteInfo | null } | null>(null)
   /**
@@ -136,6 +147,7 @@ export function Studio() {
   const [editNote, setEditNote] = useState<string | null>(null)
   /** Serializes source planning; typing can still invalidate an in-flight plan. */
   const editingRef = useRef(false)
+  const [preparingEdit, setPreparingEdit] = useState(false)
   const [committedEditRevision, setCommittedEditRevision] = useState(0)
   /** A view copied from Layers or the canvas, as the Swift that draws it. */
   const [clipboard, setClipboard] = useState<string | null>(null)
@@ -199,10 +211,11 @@ export function Studio() {
    * and pressing one is a decision the switch then leaves alone.
    */
   const setDesigning = useCallback((designing: boolean) => {
+    if (!designing) { const page = focusedDesignPage.current; setPreviewFrom(project && page?.standalone && page.id.startsWith('screen:') ? { projectId: project.id, view: page.id.slice(7) } : null) }
     setInspecting(designing)
     setInspectorTab(designing ? 'settings' : 'preview')
     if (!designing) setTool('select')
-  }, [setInspectorTab, setTool])
+  }, [setInspectorTab, setTool, project])
 
   const toggleInspect = useCallback(() => setDesigning(!inspecting), [setDesigning, inspecting])
 
@@ -228,13 +241,14 @@ export function Studio() {
   const files = project?.files ?? NO_FILES
   const [scenarioSelection, setScenarioSelection] = useState<{ projectId: string; name: string } | null>(null)
   const scenario = scenarioSelection?.projectId === project?.id ? project?.studio?.scenarios.find(s => s.name === scenarioSelection?.name) : undefined
+  const standalonePreview = !inspecting && project?.id === previewFrom?.projectId ? previewFrom?.view : undefined
   const [previewResetEpoch, setPreviewResetEpoch] = useState(0)
   const previewIdentity = useMemo(() => JSON.stringify([project?.id, project?.files, scenario ?? null, previewResetEpoch]), [project?.id, project?.files, scenario, previewResetEpoch])
 
   const { result, stale, workerError, dispatch, reset, language, planDesignEdit, validateResourceRemoval, describeView, copyView, hiddenViews } = useCompiler({
     projectId: project?.id,
     deploymentTarget: project?.manifest.deploymentTarget,
-    images, scenario, componentDescriptions: project?.studio?.components,
+    images, scenario, componentDescriptions: project?.studio?.components, designScreens: project?.studio?.screens, previewScreen: standalonePreview,
     files,
     device,
     colorScheme: previewSettings.colorScheme,
@@ -368,18 +382,12 @@ export function Studio() {
     [revealSpanIn],
   )
 
-  /**
-   * Run: drop the preview's state and evaluate from scratch.
-   *
-   * ⌘R and nothing else now. The dock is a switch between editing the app and using
-   * it, and a third button that silently resets everything you had typed into the
-   * running app did not belong beside those two.
-   */
-  const run = useCallback(() => { void reset().then(() => setPreviewResetEpoch(value => value + 1)) }, [reset])
+  /** Reset interaction state while leaving the document and its undo history intact. */
+  const run = useCallback(() => { void reset().then(() => { setPreviewResetEpoch(value => value + 1); setEditNote('Preview reset. Your design is unchanged.') }).catch(() => setEditNote('Could not reset the preview. Try again.')) }, [reset])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen || adding || shortcutsOpen) return
+      if (galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
       const typing = (e.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"], .cm-editor')
 
       /**
@@ -438,7 +446,7 @@ export function Studio() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePane, run, galleryOpen, switcherOpen, adding, shortcutsOpen, toggleInspect, mode, inspecting, setDesigning, setMode])
+  }, [togglePane, run, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, toggleInspect, mode, inspecting, setDesigning, setMode])
 
 
 
@@ -461,6 +469,7 @@ export function Studio() {
   const designPages = mode === 'design' && inspecting ? result?.pages : undefined
   const designPage = designPages?.find(page => project?.id === designPageSelection?.projectId && page.id === designPageSelection?.id)
     ?? designPages?.find(page => page.active) ?? designPages?.[0]
+  useEffect(() => { if (inspecting) focusedDesignPage.current = designPage }, [inspecting, designPage])
   const livePage = result?.viewHierarchy?.find(layer => layer.type === 'Presentation') ?? result?.viewHierarchy?.find(layer => layer.page?.active)
   const pageHierarchy = useMemo(() => designPage?.viewHierarchy ?? (livePage ? [livePage] : undefined), [designPage?.viewHierarchy, livePage])
   const focusedPage = designPage ?? livePage
@@ -572,6 +581,7 @@ export function Studio() {
   const openPage = useCallback((page: PagePreview) => {
     if (!project) return
     setDesignPageSelection({ projectId: project.id, id: page.id })
+    setPageFocusEpoch(value => value + 1)
     setLayerSelection(null)
     setPendingSelect(null)
     setHoveredNode(null)
@@ -616,11 +626,12 @@ export function Studio() {
    * are real ones (the end of a stack, a body that would be left empty) and a control
    * that quietly did nothing would read as a bug.
    */
-  const performDesignEdit = useCallback(async (target: SourceSpan, fingerprint: string | undefined, scope: string, operation: DesignEditRequest['operation']): Promise<string | null> => {
+  const performDesignEdit = useCallback(async (target: SourceSpan, fingerprint: string | undefined, scope: string, operation: DesignEditRequest['operation'], screenUpdate?: readonly DesignScreen[]): Promise<string | null> => {
     const state = useStudio.getState()
     if (!project || state.project !== project || stale) return 'The source is updating. Try again when the preview is ready.'
     if (editingRef.current) return 'An edit is already being prepared. Try again.'
     editingRef.current = true
+    setPreparingEdit(true)
     try {
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, componentDescriptions: project.studio?.components, target, fingerprint, operation })
       if (!plan.ok) { setEditNote(plan.reason); return plan.reason }
@@ -634,7 +645,16 @@ export function Studio() {
       const preserveSelection = ['style-edit', 'style-create', 'asset-references'].includes(operation.kind)
       const currentSelection = useStudio.getState().documentSelection
       const selectionChanged = JSON.stringify(currentSelection) !== JSON.stringify(state.documentSelection)
-      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...selectedPlan, selection: undefined } : selectedPlan)
+      const before = project.studio, metadata = before ?? emptyStudioMetadata()
+      const screens = screenUpdate ?? (operation.kind === 'guided-action' && operation.createScreen ? [...screenCatalog(result?.authoring, result?.pages, metadata.screens), { view: operation.createScreen.name, name: operation.createScreen.title }] : undefined)
+      const labels = metadata.labels.flatMap(label => {
+        const old = result?.authoring?.nodes.filter(n => n.owner === label.owner && n.fingerprint === label.fingerprint && (label.offset === undefined || label.offset === n.source.start)) ?? []
+        if (old.length !== 1 || !plan.authoring) return [label]
+        const moved = reconcileLayerLabel(old[0]!, result!.authoring!, plan.authoring, project.files, afterFiles, operation, target, plan.selection?.offset)
+        return moved ? [{ ...label, owner: moved.owner, fingerprint: moved.fingerprint, offset: moved.source.start }] : []
+      })
+      const transaction = { ...selectedPlan, ...(screens || JSON.stringify(labels) !== JSON.stringify(metadata.labels) ? { studio: { before, after: { ...metadata, ...(screens ? { screens } : {}), labels } } } : {}) }
+      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction)
       if (problem) { setEditNote(problem); return problem }
       if (plan.changes.length) setCommittedEditRevision(revision => revision + 1)
       if (plan.changes.length && !selectionChanged && !preserveSelection) {
@@ -646,10 +666,44 @@ export function Studio() {
         const text = selected && useStudio.getState().project?.files.find(f => f.id === selected.file)?.text
         setPendingSelect(selected && typeof text === 'string' ? { ...selected, projectId: project.id, text } : null)
       }
-      setEditNote(null)
+      setEditNote(plan.changes.length ? operation.kind === 'insert' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
       return null
-    } finally { editingRef.current = false }
-  }, [project, stale, planDesignEdit, result?.authoring, authoringNode])
+    } finally { editingRef.current = false; setPreparingEdit(false) }
+  }, [project, stale, planDesignEdit, result, authoringNode])
+
+  const screens = screenCatalog(result?.authoring, designPages, project?.studio?.screens)
+  const updateScreens = async (command: ScreenCommand): Promise<string | null> => {
+    if (!project || stale || preparingEdit) return 'Wait for the preview to finish updating.'
+    const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
+    const name = 'name' in command ? command.name.trim() : ''
+    if ('name' in command && (!name || name.length > 100)) return 'Enter a screen name of 1–100 characters.'
+    if (command.kind === 'rename' || command.kind === 'up' || command.kind === 'down') {
+      const next = [...screens], index = next.findIndex(s => s.view === command.view)
+      if (index < 0) return 'Select an existing screen.'
+      if (command.kind === 'rename') next[index] = { ...next[index]!, name }
+      else { const to = index + (command.kind === 'up' ? -1 : 1); if (to < 0 || to >= next.length) return null; [next[index], next[to]] = [next[to]!, next[index]!] }
+      return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, screens: next } } })
+    }
+    const node = command.kind === 'create' ? result?.authoring?.nodes.find(n => n.kind === 'definition') : result?.authoring?.nodes.find(n => n.kind === 'definition' && n.name === command.view)
+    if (!node) return 'Wait for the screen definitions to finish loading.'
+    if (command.kind === 'remove') return performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'screen-remove' }, screens.filter(s => s.view !== command.view))
+    const title = command.kind === 'create' ? name : (screens.find(s => s.view === command.view)?.name ?? 'Screen') + ' copy'
+    const base = (title.replace(/[^a-zA-Z0-9 ]/g, '').split(/ +/).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('').replace(/^[0-9]+/, '') || 'New') + 'Screen'
+    let view = base, suffix = 2
+    while (result?.authoring?.nodes.some(n => n.name === view)) view = base + suffix++
+    const operation: DesignEditRequest['operation'] = command.kind === 'create' ? { kind: 'screen-create', name: view, title, layout: command.layout } : { kind: 'screen-duplicate', name: view }
+    const error = await performDesignEdit(node.source, node.fingerprint, node.owner, operation, [...screens, { view, name: title }])
+    if (!error) { setDesignPageSelection({ projectId: project.id, id: 'screen:' + view }); setCenterOn({ id: 'screen:' + view, nonce: ++centerNonce.current }); setLayerSelection(null); setPendingSelect(null) }
+    return error
+  }
+  const renameLayer = (node: AuthoringNode, label: string): string | null => {
+    if (!project || stale || preparingEdit) return 'Wait for the preview to finish updating.'
+    if (label.trim().length > 100) return 'Use a layer name of 100 characters or fewer.'
+    const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
+    const labels = metadata.labels.filter(l => !(l.owner === node.owner && l.fingerprint === node.fingerprint && (l.offset === undefined || l.offset === node.source.start)))
+    if (label.trim()) labels.push({ owner: node.owner, fingerprint: node.fingerprint, offset: node.source.start, label: label.trim() })
+    return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, labels } } })
+  }
 
   const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
     const target = layer ?? selectedLayer
@@ -760,7 +814,7 @@ export function Studio() {
   useEffect(() => {
     if (mode !== 'design' || !inspecting) return
     const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen || adding || shortcutsOpen) return
+      if (galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
       const target = e.target as HTMLElement | null
       if (target?.closest('input, textarea, [contenteditable="true"], .cm-editor')) return
 
@@ -796,7 +850,7 @@ export function Studio() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
+  }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
       undo, redo, copySelection, pasteClipboard, clipboard])
 
   /**
@@ -1000,12 +1054,12 @@ export function Studio() {
     </>
   ) : null
 
-  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd} mode={mode} busy={stale} errors={errors} warnings={warnings} workerError={workerError} />
-  const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale} errors={errors} warnings={warnings} workerError={workerError} />
+  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={editNote} />
+  const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
 
   return (
     <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
-      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen}>
+      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen}>
       <Toolbar
         mode={mode}
         onModeChange={setMode}
@@ -1014,6 +1068,8 @@ export function Studio() {
         onOpenGallery={openGallery}
         onRenameProject={useStudio.getState().renameProject}
         onShortcuts={() => setShortcutsOpen(true)}
+        onReview={() => { setDesigning(true); setReviewOpen(true) }}
+        reviewDisabled={stale || preparingEdit || !result?.renderTree}
         projectName={project.manifest.name}
         savedAt={lastSavedAt}
         saveError={saveError}
@@ -1035,6 +1091,10 @@ export function Studio() {
             <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
               <Navigator
                 key={project.id}
+                screens={mode === 'design' && inspecting ? <><Screens screens={screens} pages={designPages} snapshot={result?.authoring} selected={designPage?.id} busy={stale || preparingEdit} onOpen={openPage} onCommand={updateScreens} /><ComponentLibrary snapshot={result?.authoring} screenNames={screens.map(s => s.view)} target={authoringNode} busy={stale || preparingEdit} onSelect={selectAuthoring} onInsert={name => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, { kind: 'component-insert', component: name }) : Promise.resolve('Select a layout or layer where the component should be added.')} /></> : undefined}
+                layerLabels={project.studio?.labels}
+                onRenameLayer={renameLayer}
+                pageFocusEpoch={pageFocusEpoch}
                 pageId={focusedPage?.id}
                 pageName={focusedPage?.name}
                 pageSource={focusedPage?.source}
@@ -1057,7 +1117,7 @@ export function Studio() {
                 onHideLayer={(layer) => void applyEdit({ kind: 'hide' }, layer)}
                 onShowHidden={showHidden}
                 layersEditable={mode === 'design' && inspecting}
-                stale={stale}
+                stale={stale || preparingEdit}
                 onSelectLayer={selectLayer}
                 tree={fileTree}
                 activeFileId={activeFileId}
@@ -1189,12 +1249,20 @@ export function Studio() {
                 belowCanvas={mode === 'design' ? debugArea : null}
                 tool={tool}
                 selection={selection}
-                authoringFeatures={{ onPickNavigation: navigationPicker.start, assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
+                authoringFeatures={{ variants: project.studio?.variants, previewInputs: scenario?.inputs, onSaveVariant: variant => {
+                  const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
+                  if (state.project !== project || stale || preparingEdit) return 'Wait for the current design to finish updating.'
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, variants: [...(metadata.variants ?? []).filter(v => v.owner !== variant.owner || v.name !== variant.name), variant] } } })
+                }, onDeleteVariant: (owner, name) => {
+                  const state = useStudio.getState(), before = project.studio
+                  if (state.project !== project || !before || stale || preparingEdit) return 'Wait for the current design to finish updating.'
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...before, variants: before.variants?.filter(v => v.owner !== owner || v.name !== name) } } })
+                }, onPickNavigation: navigationPicker.start, assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
                   return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
                 }, onNodeCommand: (node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation), onNodeChange: (node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }), onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }}
-                authoringTools={<ProjectResources project={project} snapshot={result?.authoring} stale={stale} onCommand={operation => {
+                authoringTools={<ProjectResources onSelect={selectAuthoring} project={project} snapshot={result?.authoring} stale={stale || preparingEdit} onCommand={operation => {
                   const node = result?.authoring?.nodes[0]
                   return node ? performDesignEdit(node.source, node.fingerprint, node.owner, operation) : Promise.resolve('Wait for the project to compile.')
                 }} onAssets={async (assets: readonly ImageAsset[], operation) => {
@@ -1210,7 +1278,7 @@ export function Studio() {
                     return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } })
                   } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
                 }} />}
-                previewTools={<PreviewScenarios key={project.id} snapshot={result?.authoring} stale={stale} scenarios={project.studio?.scenarios ?? []} active={scenario?.name ?? ''} onSelect={name => setScenarioSelection({ projectId: project.id, name })} onSave={saveScenario} onReset={run} onDelete={name => {
+                previewTools={<PreviewScenarios key={project.id} snapshot={result?.authoring} stale={stale || preparingEdit} scenarios={project.studio?.scenarios ?? []} active={scenario?.name ?? ''} onSelect={name => setScenarioSelection({ projectId: project.id, name })} onSave={saveScenario} onReset={run} onDelete={name => {
                   const state = useStudio.getState()
                   if (state.project !== project || !project.studio) return
                   const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => s.name !== name) } } })
@@ -1230,7 +1298,7 @@ export function Studio() {
                 tree={result?.renderTree ?? null}
                 selectedRenderIds={selectedRenderIds}
                 hoveredRenderIds={hoveredRenderIds}
-                stale={stale}
+                stale={stale || preparingEdit}
                 onEvent={handleEvent}
                 inspecting={inspecting}
                 onRevealSource={inspectSelect}
@@ -1245,6 +1313,11 @@ export function Studio() {
       {!layout.showPreview && <div className={styles.codeFooter}>{previewTools}</div>}
 
       </div>
+      {reviewOpen && <DesignReview key={project.id} name={project.manifest.name} pages={designPages ?? []} selectedPageId={designPage?.id} options={{ projectId: project.id, files: project.files, images, scenario, designScreens: project.studio?.screens, componentDescriptions: project.studio?.components, deploymentTarget: project.manifest.deploymentTarget, previewTarget: project.manifest.previewTarget }} onClose={() => setReviewOpen(false)} onInspect={source => {
+        setReviewOpen(false)
+        const node = result?.authoring?.nodes.filter(n => n.kind !== 'definition' && n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end).sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
+        if (node) selectAuthoring(node)
+      }} />}
       {shortcutsOpen ? <ShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}
       {adding ? (
         <AddView
@@ -1285,7 +1358,7 @@ export function Studio() {
             const made = await applyTemplate(templateId)
             // Kept open on failure: the sheet is where the message goes, and closing
             // it would leave somebody looking at a project they did not ask for.
-            if (made) setGalleryOpen(false)
+            if (made) { setGalleryOpen(false); setMode('design'); setDesigning(true) }
             return made
           }}
           onOpenProject={openProject}

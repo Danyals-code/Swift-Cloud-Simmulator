@@ -3,7 +3,7 @@ import { featureEdit } from './authoring-features'
 import type { DesignEditPlan, DesignEditRequest, SourceFile, SourceChange, ModifierOperation } from '@studio/shared'
 import { Parser, forEachChild, deleteView, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
-import { designControlRecipes, validateControlValue } from './design-controls'
+import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
 
 /** Plans against an immutable source revision. Commit must compare the whole project again. */
@@ -65,7 +65,44 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       case 'delete': changed = deleteView(file.text, file.id, offset); break
       case 'move': changed = moveView(file.text, file.id, offset, operation.direction); break
       case 'moveTo': changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position); break
-      case 'insert': changed = insertView(file.text, file.id, offset, operation.snippet); break
+      case 'insert': {
+        // A link offered by the palette must be runnable immediately. If this
+        // screen has no navigation container, wrap its root in the same edit.
+        const snippet = Parser.parse(`struct InsertPreview: View { var body: some View { ${operation.snippet} } }`, '__insert.swift')
+        let isLink = false
+        const inspect = (item: Node, insideNavigation = false) => {
+          if (item.kind === 'call') {
+            const base = viewCallChain(item)?.base
+            const name = base?.callee.kind === 'identifier' ? base.callee.name : ''
+            insideNavigation ||= ['NavigationStack', 'NavigationView'].includes(name)
+            if (name === 'NavigationLink' && !insideNavigation) isLink = true
+          }
+          forEachChild(item, child => inspect(child, insideNavigation))
+        }
+        inspect(snippet.sourceFile)
+        let root = node!, parent = node, branch: typeof node, hasNavigation = false
+        const seen = new Set<string>()
+        while (parent && !seen.has(parent.id)) {
+          seen.add(parent.id)
+          if (['NavigationStack', 'NavigationView'].includes(parent.name)) { hasNavigation = true; break }
+          if (parent.kind === 'definition') break
+          if (parent.kind === 'branch') branch ??= parent
+          if (!branch && parent.kind === 'view' && parent.name !== 'WindowGroup') root = parent
+          parent = model.nodes.find(candidate => candidate.id === parent!.parentId)
+        }
+        if (isLink && !hasNavigation) {
+          if (Number.parseFloat(request.deploymentTarget ?? '17') < 16) return reject('Adding a navigation screen requires iOS 16 or later.')
+          if (root.source.file !== file.id || root.kind !== 'view' || !parent || !['definition', 'branch'].includes(parent.kind)) return reject('Select a view within the screen before adding a navigation link.')
+          const start = root.source.start, end = root.source.end
+          const indent = /^[\t ]*/.exec(file.text.slice(file.text.lastIndexOf('\n', start - 1) + 1, start))?.[0] ?? ''
+          const prefix = `NavigationStack {\n${indent}    `
+          const body = file.text.slice(start, end).replace(/\n/g, '\n    ')
+          const wrapped = file.text.slice(0, start) + prefix + body + `\n${indent}}` + file.text.slice(end)
+          const shifted = offset + prefix.length + (file.text.slice(start, offset).match(/\n/g)?.length ?? 0) * 4
+          changed = insertView(wrapped, file.id, shifted, operation.snippet)
+        } else changed = insertView(file.text, file.id, offset, operation.snippet)
+        break
+      }
       case 'hide': changed = hideView(file.text, file.id, offset); break
       case 'show': changed = showView(file.text, file.id, offset); break
     }

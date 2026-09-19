@@ -57,6 +57,7 @@ export interface RenderTreeViewProps {
     readonly hovered: string | null
     onHover(node: RenderNode | null): void
     onSelect(node: RenderNode): void
+    onEditText?(node: RenderNode, rect: { x: number; y: number; width: number; height: number }): void
   }
 }
 
@@ -131,6 +132,8 @@ export const RenderTreeView = memo(function RenderTreeView({
     <div
       ref={surfaceRef}
       data-testid="render-tree"
+      aria-busy={stale}
+      inert={stale || undefined}
       data-studio-preview=""
       data-calibration={tree.calibration ?? 'provisional'}
       onScrollCapture={event => {
@@ -548,6 +551,7 @@ function RenderNodeView({
       aria-hidden={exiting || node.a11y?.hidden}
       onPointerEnter={inspecting ? () => inspect.onHover(node) : undefined}
       onPointerLeave={() => { setPressed(false); if (inspecting) inspect.onHover(null) }}
+      onDoubleClick={inspecting && inspect.onEditText ? event => { event.preventDefault(); event.stopPropagation(); inspect.onEditText?.(node, event.currentTarget.getBoundingClientRect()) } : undefined}
       onClick={
         inspecting
           ? (e) => {

@@ -1,19 +1,20 @@
 import { expect, test } from '@playwright/test'
 
-test('Agentic Coding is the second source and opens by default on fresh and restored projects', async ({ page }) => {
+test('Start designing is the first source and opens by default on fresh and restored projects', async ({ page }) => {
   await page.goto('/')
   await expect(page).toHaveTitle('Swift Web Studio')
   const sources = page.getByRole('navigation', { name: 'Source', exact: true }).getByRole('button')
-  await expect(sources.nth(0)).toHaveText('Your projects')
-  await expect(sources.nth(1)).toHaveText('Agentic Coding')
-  await expect(sources.nth(2)).toContainText('App templates')
-  await expect(page.getByTestId('gallery-source-prompt')).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByLabel('App description', { exact: true })).toBeVisible()
+  await expect(sources.nth(0)).toHaveText('Start designing')
+  await expect(sources.nth(1)).toHaveText('Your projects')
+  await expect(sources.nth(2)).toHaveText('Agentic Coding')
+  await expect(sources.nth(3)).toContainText('App templates')
+  await expect(page.getByTestId('gallery-source-design')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('template-blank')).toBeVisible()
   await page.getByTestId('gallery-source-app').click()
   await expect(page.getByTestId('template-confirm')).toBeVisible()
   await page.getByTestId('gallery-dismiss').click()
   await page.reload()
-  await expect(page.getByTestId('gallery-source-prompt')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('gallery-source-design')).toHaveAttribute('aria-pressed', 'true')
 })
 
 const source = `import SwiftUI
@@ -57,6 +58,7 @@ test('Layers shows nested pages, selects without activating controls, and follow
   await expect(button).toHaveAttribute('aria-selected', 'true')
   await expect(preview.getByRole('button', { name: 'Increase', exact: true })).toHaveAttribute('data-layer-selected', 'true')
   await expect(preview.getByText('Count: 0', { exact: true })).toBeVisible()
+  await page.getByTestId('live-toggle').click()
   await preview.getByRole('button', { name: 'Increase', exact: true }).click()
   await expect(layers.getByRole('treeitem', { name: 'Count: 1, Text', exact: true })).toBeVisible()
   await profile.click()
@@ -138,6 +140,8 @@ test('Pages draws every page at once, keeps one live, and opens the one that is 
   // The gallery is Edit's: in Live Preview a click hands the phone to the person
   // using it, so the canvas says what the checkbox is for rather than hiding it.
   const showAll = page.getByTestId('show-all-pages')
+  await expect(showAll).toBeEnabled()
+  await page.getByTestId('live-toggle').click()
   await expect(showAll).toBeDisabled()
   await page.getByTestId('inspect-toggle').click()
   await expect(showAll).toBeEnabled()
@@ -147,7 +151,7 @@ test('Pages draws every page at once, keeps one live, and opens the one that is 
   const phones = gallery.getByTestId('gallery-page')
   await expect(phones).toHaveCount(2)
   await expect(phones.first()).toContainText('Overview')
-  await expect(phones.first()).toContainText('Live')
+  await expect(phones.first()).toContainText('Editing')
   await expect(phones.nth(1)).toContainText('Profile')
 
   // Each phone is its own page, composed as that page: the one that is not
@@ -158,15 +162,17 @@ test('Pages draws every page at once, keeps one live, and opens the one that is 
   await testInfo.attach('design-pages', { body: await page.screenshot(), contentType: 'image/png' })
 
   // A phone that is not live is a picture of the app: pressing it opens the page.
-  await phones.nth(1).getByRole('button', { name: 'Open Profile' }).click()
-  await expect(phones.nth(1)).toContainText('Live')
-  await expect(phones.first()).not.toContainText('Live')
+  await phones.nth(1).getByRole('button', { name: 'Edit Profile' }).click()
+  await expect(phones.nth(1)).toContainText('Editing')
+  await expect(phones.first()).not.toContainText('Editing')
 
-  // Live Preview is the app again, on the page the gallery opened - and the
-  // checkbox keeps its setting rather than being cleared behind your back.
+  // Editing a screen does not run the app. Preview resumes its existing tab,
+  // while the design gallery keeps its selected screen and checkbox setting.
   await page.getByTestId('live-toggle').click()
   await expect(gallery).toHaveCount(0)
   await expect(showAll).toBeDisabled()
+  await expect(page.getByTestId('render-tree').getByText('Count: 0', { exact: true })).toBeVisible()
+  await page.getByTestId('render-tree').getByRole('button', { name: 'Profile', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('Taylor', { exact: true })).toBeVisible()
   await page.getByTestId('inspect-toggle').click()
   await expect(showAll).toBeChecked()

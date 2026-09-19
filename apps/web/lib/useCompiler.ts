@@ -3,7 +3,7 @@
 import * as Comlink from 'comlink'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  CompileResult,
+  CompileResult, CompileRequest,
   PreviewScenario, ComponentDescription, PreviewImageAsset,
   PreviewTarget,
   DynamicTypeSize,
@@ -77,6 +77,8 @@ export interface CompilerOptions {
   deploymentTarget?: string
   scenario?: PreviewScenario
   componentDescriptions?: readonly ComponentDescription[]
+  designScreens?: CompileRequest['designScreens']
+  previewScreen?: string
   previewTarget?: PreviewTarget
   files: readonly SourceFile[]
   device: DeviceSpec
@@ -106,7 +108,7 @@ export interface CompilerOptions {
 export function useCompiler({
   projectId,
   deploymentTarget,
-  scenario, componentDescriptions, images,
+  scenario, componentDescriptions, designScreens, previewScreen, images,
   files,
   device,
   colorScheme,
@@ -123,7 +125,7 @@ export function useCompiler({
   const allPagesRef = useRef(allPages)
   useEffect(() => { allPagesRef.current = allPages }, [allPages])
   const revisionRef = useRef(0)
-  const contextKey = JSON.stringify([projectId, scenario ?? null])
+  const contextKey = JSON.stringify([projectId, scenario ?? null, previewScreen ?? null])
   const [compiledContext, setCompiledContext] = useState<string | null>(null)
   // A scenario/project boundary disposes the worker and its pending handler table.
   useEffect(() => () => {
@@ -207,7 +209,7 @@ export function useCompiler({
       const result = await handle.api.compile({
           projectId,
           deploymentTarget,
-          scenario, componentDescriptions, images,
+          scenario, componentDescriptions, designScreens, previewScreen, images,
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
           safeArea: device.safeArea,
@@ -233,7 +235,7 @@ export function useCompiler({
       }))
       handleRef.current = null
     }
-  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, images, contextKey])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, designScreens, previewScreen, images, contextKey])
 
   const latestCompile = useRef(runCompile)
   const latestPaused = useRef(paused)

@@ -13,6 +13,7 @@ export function viewCallChain(expr: Expr): { base: CallExpr; modifiers: CallExpr
 }
 export const AUTHORING_COLORS = ['primary', 'secondary', 'black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown', 'clear']
 export const AUTHORING_FONTS = ['largeTitle', 'title', 'title2', 'title3', 'headline', 'subheadline', 'body', 'callout', 'footnote', 'caption', 'caption2']
+const SYSTEM_COLORS = ['systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground', 'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground']
 const ALIGNMENTS = ['center', 'leading', 'trailing', 'top', 'bottom', 'topLeading', 'topTrailing', 'bottomLeading', 'bottomTrailing']
 /** Swift escaping, including interpolation introducers and control characters. */
 export function swiftString(value: string): string {
@@ -28,7 +29,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const targetVersion = Number.parseFloat(deploymentTarget)
   const constructor = authoringCapability(node.name, 'view', base.args.map(a => a.label))
   if (!Number.isFinite(targetVersion) || node.kind !== 'component' && (!constructor || targetVersion < Number.parseFloat(constructor.minimumIOS)) || node.kind === 'component' && (!node.definitionId || targetVersion < 13)) return []
-  const colors = AUTHORING_COLORS.filter(c => targetVersion >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c))
+  const colors = [...AUTHORING_COLORS.filter(c => targetVersion >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c)), 'accentColor', ...SYSTEM_COLORS]
   const listStyles = targetVersion >= 14 ? ['plain', 'inset', 'grouped', 'insetGrouped', 'sidebar'] : ['plain', 'grouped']
   const recipes: ControlRecipe[] = []
   const scope = node.properties.some(p => p.scope === 'template') ? 'All rows in this template' : `Defined in ${node.owner}`
@@ -38,6 +39,13 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     recipes.push({ control: { id, label, kind, value, options, min, max, scope, description, source: origin }, patch })
   }
   function replace(id: string, label: string, value: Expr, kind: DesignControl['kind'], options?: readonly string[], min?: number, max?: number, prefix = '.'): void {
+    // Edit the literal branches, never erase the condition or replace linked data.
+    if (value.kind === 'ternary' && ['text', 'select'].includes(kind)) {
+      const condition = raw(value.condition.span)
+      replace(id + ':then', `${label} · when ${condition} is true`, value.then, kind, options, min, max, prefix)
+      replace(id + ':else', `${label} · otherwise`, value.else, kind, options, min, max, prefix)
+      return
+    }
     const property = node.properties.find(p => p.source?.start === value.span.start && p.source?.end === value.span.end)
     if (property?.declaration || property && ['unsupported', 'data-binding', 'component-argument', 'token'].includes(property.valueKind)) return
     if (kind === 'text') {
@@ -47,9 +55,11 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       if (!['integerLiteral', 'floatLiteral', 'unary'].includes(value.kind) || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw(value.span))) return
       add(id, label, kind, String(Number(raw(value.span))), v => ({ ...value.span, text: String(Number(v)) }), undefined, min, max, undefined, value.span)
     } else {
-      const current = raw(value.span).replace(/^(?:SwiftUI\.)?(?:Color|Font|Alignment|HorizontalAlignment|VerticalAlignment|TextAlignment)?\./, '')
+      const expression = raw(value.span)
+      const semantic = prefix === 'Color.' ? /^(?:SwiftUI\.)?Color\(\.(\w+)\)$/.exec(expression.replace(/\s/g, ''))?.[1] : undefined
+      const current = semantic ?? expression.replace(/^(?:SwiftUI\.)?(?:Color|Font|Alignment|HorizontalAlignment|VerticalAlignment|TextAlignment)?\./, '')
       if (!options?.includes(current)) return
-      add(id, label, kind, current, v => ({ ...value.span, text: prefix + v }), options, undefined, undefined, undefined, value.span)
+      add(id, label, kind, current, v => ({ ...value.span, text: prefix === 'Color.' && SYSTEM_COLORS.includes(v) ? `Color(.${v})` : prefix + v }), options, undefined, undefined, undefined, value.span)
     }
   }
   function append(id: string, label: string, kind: DesignControl['kind'], value: string, format: (v: string) => string, options?: readonly string[], min?: number, max?: number): void {
@@ -95,8 +105,15 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   if (node.kind !== 'component' && node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'number', '', undefined, 0)
   if (node.kind !== 'component' && node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'number', '', undefined, 0)
   if (node.kind !== 'component' && node.name === 'Text' && base.args[0]) replace('content', 'Text', base.args[0].value, 'text')
-  if (node.kind !== 'component' && ['TextField', 'Toggle', 'Button'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
+  if (node.kind !== 'component' && ['TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
   if (node.kind !== 'component' && node.name === 'Image' && base.args[0]) replace('image', base.args[0].label === 'systemName' ? 'System symbol' : 'Asset name', base.args[0].value, 'text')
+  if (node.kind !== 'component') {
+    const symbol = node.name === 'Label' && base.args.find(arg => arg.label === 'systemImage')
+    if (symbol) replace('image', 'System symbol', symbol.value, 'text')
+    const value = base.args.find(arg => arg.label === 'value')
+    if (value && node.name === 'LabeledContent') replace('value', 'Value', value.value, 'text')
+    if (value && node.name === 'ProgressView') replace('progress', 'Progress', value.value, 'number', undefined, 0, 1)
+  }
   for (const [i, m] of modifiers.entries()) {
     const name = modName(m)
     const capability = authoringCapability(name, 'modifier', m.args.map(a => a.label))
@@ -113,7 +130,10 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       if (name === 'frame' && ['width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'].includes(arg.label ?? '')) replace(id, label, arg.value, 'number', undefined, 0)
       if (name === 'frame' && arg.label === 'alignment') replace(id, label, arg.value, 'select', ALIGNMENTS)
       if (['accessibilityLabel', 'accessibilityIdentifier', 'navigationTitle'].includes(name) && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'text')
-      if (['foregroundColor', 'foregroundStyle', 'background', 'fill'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
+      if (['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
+      if (name === 'buttonStyle') replace(id, 'Button style', arg.value, 'select', targetVersion >= 15 ? ['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent'] : ['automatic', 'plain', 'borderless'])
+      if (name === 'buttonBorderShape') replace(id, 'Button shape', arg.value, 'select', ['automatic', 'capsule', 'roundedRectangle'])
+      if (name === 'controlSize') replace(id, 'Control size', arg.value, 'select', ['mini', 'small', 'regular', 'large'])
       if (name === 'listStyle') replace(id, 'List style', arg.value, 'select', listStyles)
       if (name === 'multilineTextAlignment') replace(id, label, arg.value, 'select', ['leading', 'center', 'trailing'])
       if (name === 'font' && m.args.length === 1 && !arg.label) {
@@ -131,9 +151,9 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   }
   const has = (name: string) => modifiers.some(m => modName(m) === name)
   if (!has('font')) append('add:font', 'Font size', 'number', '', v => `.font(.system(size: ${Number(v)}))`, undefined, 1, 1000)
-  if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.foregroundColor(Color.${v})`, colors)
+  if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.foregroundColor(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)
   if (!has('padding')) append('add:padding', 'Padding', 'number', '', v => `.padding(${Number(v)})`, undefined, 0)
-  if (!has('background')) append('add:background', 'Background', 'select', '', v => `.background(Color.${v})`, colors)
+  if (!has('background')) append('add:background', 'Background', 'select', '', v => `.background(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)
   if (!has('cornerRadius')) append('add:cornerRadius', 'Corner radius', 'number', '', v => `.cornerRadius(${Number(v)})`, undefined, 0)
   if (!has('opacity')) append('add:opacity', 'Opacity', 'number', '', v => `.opacity(${Number(v)})`, undefined, 0, 1)
   if (!has('accessibilityLabel')) append('add:accessibilityLabel', 'Accessibility label', 'text', '', v => `.accessibilityLabel(${swiftString(v)})`)

@@ -15,8 +15,11 @@
 
 /** Stroked paths, on a 16x16 grid. */
 const STROKE: Readonly<Record<string, string>> = {
+  undo: 'M6 3 2.5 6.5 6 10M3 6.5h6a4 4 0 0 1 0 8',
+  redo: 'M10 3 13.5 6.5 10 10M13 6.5H7a4 4 0 0 0 0 8',
   keyboard: 'M2.5 3.5h11v9h-11v-9ZM5 6h.1M8 6h.1M11 6h.1M5 8h.1M8 8h.1M11 8h.1M5 10h6',
   collapse: 'M3 2.5h7v2M6 5.5h7v8H6v-8ZM8 9.5h3',
+  expand: 'M3 2.5h7v2M6 5.5h7v8H6v-8ZM8 9.5h3M9.5 8v3',
   appearance: 'M8 2.25a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5ZM8 2.25v11.5M10 3v10M12 4v8',
   'chevron-down': 'M4 6.25 8 10.25l4-4',
   'chevron-right': 'M6.25 4 10.25 8l-4 4',

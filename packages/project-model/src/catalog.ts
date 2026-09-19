@@ -46,6 +46,14 @@ export interface TemplateInfo {
 
 export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
   {
+    id: 'blank',
+    name: 'Blank screen',
+    kind: 'feature',
+    tagline: 'Start designing with an empty screen.',
+    description: 'Add text, images, buttons, and layouts. Navigation is ready when you add another screen.',
+    files: ['Sources/MyDesignApp.swift'],
+  },
+  {
     id: 'counter',
     name: 'Counter',
     kind: 'feature',

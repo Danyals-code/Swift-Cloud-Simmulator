@@ -232,7 +232,7 @@ const PROFILE_CARD = app(
             Spacer()
 
             VStack(spacing: 12) {
-                Image(systemName: "person.crop.circle.fill")
+                Image(systemName: "person.circle.fill")
                     .font(.system(size: 72))
                     .foregroundStyle(.teal)
 
@@ -505,7 +505,7 @@ const TABS = app(
                 List {
                     Section("Collections") {
                         Label("Weekend ideas", systemImage: "bookmark")
-                        Label("Things to learn", systemImage: "lightbulb")
+                        Label("Things to learn", systemImage: "book")
                         Label("Favorite places", systemImage: "map")
                     }
                 }
@@ -1088,6 +1088,18 @@ const TYPESETTING = app(
  * than producing a template that half exists.
  */
 const SOURCES: Readonly<Record<string, readonly SourceFile[]>> = {
+  blank: single(app('MyDesignApp', 'ContentView', `struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(.systemBackground))
+        }
+    }
+}
+`)),
   counter: single(COUNTER_APP_SOURCE),
   stacks: single(STACKS),
   tasks: single(TOGGLE_LIST),

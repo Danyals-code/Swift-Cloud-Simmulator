@@ -1,0 +1,160 @@
+import { expect, test, type Page } from '@playwright/test'
+import { readFileSync, copyFileSync } from 'node:fs'
+import { cards, expandCard } from './designer-helpers'
+
+async function start(page: Page) {
+  await page.goto('/')
+  await page.getByTestId('template-blank').click()
+  await page.getByTestId('template-confirm').click()
+  await expect(page.getByTestId('template-gallery')).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Add screen', exact: true })).toBeEnabled()
+}
+async function ready(page: Page) { await expect(page.getByTestId('authoring-inspector')).toHaveAttribute('aria-busy', 'false') }
+async function add(page: Page, kind: string) { await page.getByTestId('add-view').click(); await page.getByTestId(`add-view-${kind}`).click(); await expect(page.getByTestId('add-view-palette')).toBeHidden(); await ready(page) }
+async function input(page: Page, name: string, value: string) { const field = page.getByTestId('settings-basics').getByRole('textbox', { name, exact: true }); await field.fill(value); await field.press('Enter'); await ready(page) }
+
+// The acceptance path starts blank and stays in Design throughout.
+test('creates and reuses a component, exposes text, saves variants, and edits the shared design without Code', async ({ page }) => {
+  await start(page); await add(page, 'text'); await input(page, 'Text', 'Club member')
+  await page.getByText('Create reusable component', { exact: true }).click()
+  await page.getByLabel('New component name', { exact: true }).fill('MemberCard')
+  await page.getByRole('button', { name: 'Create component', exact: true }).click()
+  await expect(page.getByTestId('logical-layers').locator('[data-source-name="MemberCard"][data-source-kind="component"]')).toHaveCount(1)
+  const library = page.getByTestId('component-library')
+  await library.locator('summary').click()
+  await library.getByRole('button', { name: 'Edit MemberCard design', exact: true }).click()
+  await page.getByTestId('settings-basics').getByRole('button', { name: 'Club member', exact: true }).click()
+  await page.getByText('Make text an instance input', { exact: true }).click()
+  await page.getByRole('button', { name: 'Create text input', exact: true }).click(); await ready(page)
+  // Shared color applies to all instances of this text's component.
+  await page.getByRole('button', { name: 'Text color +', exact: true }).click()
+  await expandCard(cards(page, 'foregroundColor'))
+  await page.getByRole('textbox', { name: 'foregroundColor hex color', exact: true }).fill('#6D28D9')
+  await page.getByRole('combobox', { name: 'foregroundColor color style', exact: true }).selectOption('__new')
+  await page.getByRole('textbox', { name: 'Shared color name', exact: true }).fill('clubBrand')
+  await page.getByRole('button', { name: 'Create and apply color', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: 'foregroundColor color style', exact: true })).toHaveValue('clubBrand')
+  await page.getByRole('button', { name: 'Open screen Main page', exact: true }).click()
+  await page.getByTestId('logical-layers').locator('[data-source-name="VStack"]').first().click()
+  await library.getByRole('button', { name: 'Insert MemberCard', exact: true }).click()
+  const instances = page.getByTestId('logical-layers').locator('[data-source-name="MemberCard"][data-source-kind="component"]')
+  await expect(instances).toHaveCount(2)
+  await instances.first().click(); await input(page, 'label', 'Featured member')
+  await page.getByText('Variants · saved inputs', { exact: true }).click()
+  await page.getByLabel('Variant name', { exact: true }).fill('Featured')
+  await page.getByRole('button', { name: 'Save variant from this instance', exact: true }).click()
+  await instances.last().click()
+  await page.getByText('Variants · saved inputs', { exact: true }).click()
+  await page.getByRole('button', { name: 'Apply Featured', exact: true }).click()
+  await expect(page.getByTestId('render-tree').getByText('Featured member', { exact: true })).toHaveCount(2)
+  await input(page, 'label', 'Guest')
+  await expect(page.getByTestId('render-tree').getByText('Featured member', { exact: true })).toHaveCount(1)
+  const resources = page.getByTestId('project-resources')
+  await resources.locator('summary').first().click()
+  await resources.getByText(/clubBrand · color/).click()
+  await resources.getByLabel('clubBrand value', { exact: true }).fill('#124abc')
+  await resources.getByRole('button', { name: 'Update shared value · all uses', exact: true }).click()
+  await expect(page.getByTestId('render-tree').getByText('Guest', { exact: true })).toHaveCSS('color', 'rgb(18, 74, 188)')
+  await expect(page.getByTestId('render-tree').getByText('Featured member', { exact: true })).toHaveCSS('color', 'rgb(18, 74, 188)')
+  await expect(resources.getByRole('button', { name: /in MemberCard · use/ })).toBeVisible()
+  await page.getByTestId('design-undo').click()
+  await expect(page.getByTestId('render-tree').getByText('Guest', { exact: true })).toHaveCSS('color', 'rgb(109, 40, 217)')
+  await expect(page.getByTestId('save-indicator')).toContainText('Saved locally')
+  await page.reload(); await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('logical-layers').locator('[data-source-name="MemberCard"][data-source-kind="component"]').first().click()
+  await page.getByText('Variants · saved inputs', { exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Apply Featured', exact: true })).toBeVisible()
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
+})
+
+const SOURCE = `import SwiftUI
+struct Entry: Identifiable { let id: String; var title: String }
+@main struct ReviewApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+ @State var name = "Campus"
+ @State var items: [Entry] = [Entry(id: "one", title: "First"), Entry(id: "two", title: "Second")]
+ var body: some View { NavigationStack { VStack {
+ Image(systemName: "star.fill").foregroundColor(.blue)
+ TextField("Name", text: $name)
+ Text("Club preview").foregroundColor(Color(red: 0.8, green: 0.8, blue: 0.8)).background(Color.white)
+ Button("Small") {}.frame(width: 25, height: 25)
+ List(items) { item in Text(item.title).padding(8) }
+ NavigationLink("Details") { Text("Club details") }
+ } } }
+}`
+async function fixture(page: Page) {
+  await page.goto('/'); await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('workspace-develop').click()
+  const editor = page.getByTestId('editor').locator('.cm-content'); await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(SOURCE)
+  await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click(); await page.getByTestId('inspect-toggle').click(); await page.getByTestId('inspector-tab-settings').click()
+}
+
+test('edits one record, duplicates it, checks empty content and returns to app data', async ({ page }) => {
+  await fixture(page)
+  await page.getByTestId('logical-layers').locator('[data-source-name="List"]').click()
+  const data = page.getByTestId('settings-data')
+  await expect(data).toContainText('Content edits affect one selected item')
+  await data.getByLabel('Record edit scope', { exact: true }).selectOption('app')
+  await data.getByLabel('Selected record', { exact: true }).selectOption('1')
+  await data.getByLabel('Record title', { exact: true }).fill('Workshop')
+  await data.getByRole('button', { name: 'Duplicate record', exact: true }).click()
+  await data.getByLabel('Record title', { exact: true }).fill('Critique')
+  await data.getByRole('button', { name: 'Apply app initial data', exact: true }).click()
+  for (const label of ['First', 'Workshop', 'Critique']) await expect(page.getByTestId('render-tree').getByText(label, { exact: true })).toBeVisible()
+  await data.getByRole('button', { name: 'Preview empty list', exact: true }).click()
+  await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toHaveCount(0)
+  await page.getByTestId('inspector-tab-preview').click()
+  await page.getByTestId('preview-scenarios').locator('summary').first().click()
+  await page.getByLabel('Preview scenario', { exact: true }).selectOption('')
+  await expect(page.getByTestId('render-tree').getByText('Workshop', { exact: true })).toBeVisible()
+  await page.getByTestId('inspector-tab-settings').click()
+  await data.getByRole('button', { name: 'Edit row design', exact: true }).click()
+  await page.getByTestId('logical-layers').locator('[data-source-name="Text"]').click()
+  await expect(page.getByTestId('authoring-inspector')).toContainText('Row design · changes apply to all rows')
+})
+
+test('compares real layouts, finds actionable checks, exports PNGs and presents screens', async ({ page }, info) => {
+  await fixture(page)
+  await page.getByTestId('project-resources').locator('summary').first().click()
+  await page.getByLabel('Add bundled image', { exact: true }).setInputFiles('tests/fixtures/authoring-photo.png')
+  await expect(page.getByTestId('project-resources')).toContainText(/authoring[_-]photo/)
+  await page.getByTestId('logical-layers').locator('[data-source-name="VStack"]').click()
+  await add(page, 'image')
+  await page.getByRole('combobox', { name: 'Bundled image', exact: true }).selectOption({ index: 1 })
+  await expect(page.getByTestId('render-tree').locator('img')).toHaveCount(1)
+  await page.getByTestId('design-review').click()
+  const dialog = page.getByRole('dialog', { name: 'Design review', exact: true })
+  for (const number of [1, 2, 3]) await expect(dialog.getByTestId(`review-condition-${number}`).getByTestId('review-ready')).toHaveAttribute('aria-busy', 'false')
+  const first = dialog.getByTestId('review-condition-1'), third = dialog.getByTestId('review-condition-3')
+  await expect(first.locator('[data-studio-preview] input').first()).toHaveValue('Campus')
+  await expect(first.locator('[data-studio-preview] img').first()).toBeVisible()
+  await expect(first).toContainText('Low text contrast')
+  await expect(first).toContainText('Small touch target')
+  const largeFont = await third.getByText('Club preview', { exact: true }).evaluate(node => parseFloat(getComputedStyle(node).fontSize))
+  const normalFont = await first.getByText('Club preview', { exact: true }).first().evaluate(node => parseFloat(getComputedStyle(node).fontSize))
+  expect(largeFont).toBeGreaterThan(normalFont)
+  await first.getByRole('combobox', { name: 'Comparison 1 device', exact: true }).selectOption('ipad-11')
+  await expect(first.getByTestId('review-ready')).toHaveAttribute('aria-busy', 'false')
+  await first.getByRole('combobox', { name: 'Comparison 1 device', exact: true }).selectOption('iphone-se-3')
+  await expect(first.getByTestId('review-ready')).toHaveAttribute('aria-busy', 'false')
+  const png = page.waitForEvent('download'); await first.getByRole('button', { name: 'Export screen PNG', exact: true }).click()
+  const download = await png, bytes = readFileSync((await download.path())!)
+  expect(bytes.subarray(1, 4).toString()).toBe('PNG'); expect(bytes.readUInt32BE(16)).toBe(750); expect(bytes.readUInt32BE(20)).toBe(1334); expect(bytes.length).toBeGreaterThan(8000)
+  copyFileSync((await download.path())!, info.outputPath('review-screen.png'))
+  const sheet = page.waitForEvent('download'); await first.getByRole('button', { name: 'Export contact sheet', exact: true }).click()
+  const sheetDownload = await sheet, sheetBytes = readFileSync((await sheetDownload.path())!)
+  expect(sheetBytes.readUInt32BE(16)).toBeGreaterThan(1000); expect(sheetBytes.length).toBeGreaterThan(15000)
+  copyFileSync((await sheetDownload.path())!, info.outputPath('review-contact-sheet.png'))
+  await dialog.getByRole('button', { name: 'Present', exact: true }).click()
+  await expect(dialog.getByTestId('review-condition-2')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Next screen', exact: true }).click()
+  await expect(first.getByTestId('review-ready')).toHaveAttribute('aria-busy', 'false')
+  await expect(first.getByText('Club details', { exact: true }).first()).toBeVisible()
+  await dialog.getByRole('button', { name: 'Previous screen', exact: true }).press('ArrowLeft')
+  await expect(first.getByText('Club preview', { exact: true }).first()).toBeVisible()
+  await dialog.getByRole('button', { name: 'Compare', exact: true }).click()
+  await first.getByRole('button', { name: 'Find layer in Design', exact: true }).first().click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByTestId('authoring-inspector')).toBeVisible()
+})

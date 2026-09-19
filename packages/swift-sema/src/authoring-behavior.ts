@@ -1,31 +1,63 @@
+import { Lexer } from '@studio/swift-syntax'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
 import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, literal, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
 import { emptyComponents, enumCases, namedActions } from './authoring-components'
+import { styleExpression } from './authoring-resources'
 import { viewCallChain } from './design-controls'
 
 export function stateInputs(ctx: FeatureContext, node: AuthoringNode): StateInput[] {
   const owner = ownerOf(ctx, node)
   if (!owner) return []
-  return owner.members.flatMap(member => {
+  return owner.members.flatMap((member): StateInput[] => {
     if (member.kind !== 'varDecl' || member.isLet || member.accessor || member.setter || member.observers || member.attributes.length !== 1 || member.attributes[0]?.name !== 'State' || !member.initializer) return []
     const simple = scalarType(member.typeAnnotation, member.initializer)
     const options = member.typeAnnotation?.kind === 'namedType' ? enumCases(ctx, member.typeAnnotation.name) : undefined
     const value = simple ? literal(ctx, member.initializer) : options && member.initializer.kind === 'memberAccess' && options.includes(member.initializer.member) ? member.initializer.member : undefined
+    const special = member.typeAnnotation?.kind === 'namedType' ? member.typeAnnotation.name : undefined
+    if (special === 'Date' || special === 'Color') {
+      const text = raw(ctx, member.initializer.span), date = /^Date\(timeIntervalSince1970: (-?[0-9.]+)\)$/.exec(text)
+      const color = /^Color\.([A-Za-z]+)$/.exec(text), rgb = /^Color\(red: ([0-9.]+), green: ([0-9.]+), blue: ([0-9.]+)\)$/.exec(text)
+      const initial = special === 'Date' && date ? Number(date[1]) : special === 'Color' && color ? color[1] : special === 'Color' && rgb ? '#' + rgb.slice(1).map(v => Math.round(Number(v) * 255).toString(16).padStart(2, '0')).join('') : undefined
+      if (initial !== undefined && !shadowsMember(ctx, node, member.name)) return [{ owner: node.owner, name: member.name, type: special, value: initial, signature: signature(ctx, member), source: member.initializer.span }]
+    }
     const type = simple?.type ?? (member.typeAnnotation?.kind === 'namedType' ? member.typeAnnotation.name : undefined)
     if (shadowsMember(ctx, node, member.name) || !type || value === undefined || simple && !validScalar(value, simple)) return []
     return [{ owner: node.owner, name: member.name, type, value, optional: simple?.optional, signature: signature(ctx, member), options, source: member.initializer.span }]
   })
 }
+const dependencyCache = new WeakMap<FeatureContext, Map<string, Map<string, Set<string>>>>()
+function stateDependencies(ctx: FeatureContext, owner: string, inputs: readonly StateInput[]) {
+  let owners = dependencyCache.get(ctx)
+  if (!owners) {
+    owners = new Map()
+    for (const layer of ctx.nodes) {
+      if (!['view', 'component', 'collection'].includes(layer.kind)) continue
+      const values = owners.get(layer.owner) ?? new Map<string, Set<string>>()
+      for (const property of layer.properties) {
+        if (!['data-binding', 'computed'].includes(property.valueKind) || property.expression.trim().startsWith('{')) continue
+        const tokens = Lexer.tokenize(property.expression, layer.source.file).tokens
+        tokens.forEach((token, index) => {
+          if (token.kind !== 'identifier' || tokens[index - 1]?.text === '.' && tokens[index - 2]?.text !== 'self') return
+          const name = token.text.replace(/^\$/, ''), ids = values.get(name) ?? new Set<string>()
+          ids.add(layer.id); values.set(name, ids)
+        })
+      }
+      owners.set(layer.owner, values)
+    }
+    dependencyCache.set(ctx, owners)
+  }
+  return inputs.map(input => ({ state: input.name, nodeIds: [...(owners.get(owner)?.get(input.name) ?? [])] }))
+}
 export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): BehaviorSettings | undefined {
   const call = callOf(ctx, node)
   if (!call) return undefined
-  const label = node.name === 'Toggle' ? 'isOn' : ['TextField', 'SecureField'].includes(node.name) ? 'text' : node.name === 'Picker' ? 'selection' : undefined
+  const label = node.name === 'Toggle' ? 'isOn' : ['TextField', 'SecureField'].includes(node.name) ? 'text' : ['Picker', 'DatePicker', 'ColorPicker'].includes(node.name) ? 'selection' : ['Slider', 'Stepper'].includes(node.name) ? 'value' : undefined
   const argument = label && call.args.find(a => a.label === label)
   const inputs = stateInputs(ctx, node)
   const bindingState = argument && inputs.find(s => raw(ctx, argument.value.span) === '$' + s.name)
   const collections = node.name === 'Button' ? ctx.nodes.filter(n => n.owner === node.owner && n.kind === 'collection').flatMap(n => { const c = collectionFor(ctx, n); return c ? [c] : [] }).filter((c, i, a) => a.findIndex(other => other.name === c.name) === i) : []
-  return { states: inputs, collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' ? emptyComponents(ctx).filter(n => n !== node.owner) : [], canConfigureAction: node.name === 'Button' && call.args.length === 1 && call.args[0]?.label === null && !!call.trailingClosure && call.trailingClosure.params.length === 0, currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type: label === 'text' ? 'String' : label === 'isOn' ? 'Bool' : bindingState?.type ?? 'Int', current: raw(ctx, argument.value.span) } : undefined }
+  return { states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' ? emptyComponents(ctx).filter(n => n !== node.owner) : [], canConfigureAction: node.name === 'Button' && call.args.length === 1 && call.args[0]?.label === null && !!call.trailingClosure && call.trailingClosure.params.length === 0, currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type: label === 'text' ? 'String' : label === 'isOn' ? 'Bool' : bindingState?.type ?? (node.name === 'Slider' ? 'Double' : node.name === 'DatePicker' ? 'Date' : node.name === 'ColorPicker' ? 'Color' : 'Int'), current: raw(ctx, argument.value.span) } : undefined }
 }
 function namedState(ctx: FeatureContext, node: AuthoringNode, name: string): StateInput {
   const input = stateInputs(ctx, node).find(s => s.name === name)
@@ -45,8 +77,11 @@ export function configureBinding(ctx: FeatureContext, node: AuthoringNode, name:
   if (create) {
     if (shadowsMember(ctx, node, name) || owner.members.some(m => 'name' in m && m.name === name) || allDeclarations(ctx).some(d => 'name' in d && d.name === name)) throw new Error('This state name is already declared.')
     const type = settings.binding.type
-    if (!['String', 'Bool', 'Int', 'Double'].includes(type) || !validScalar(create.value, { type: type as 'String' | 'Bool' | 'Int' | 'Double', optional: false })) throw new Error('The initial value does not match this control’s binding type.')
-    patches.push(insertMember(ctx, owner, `@State private var ${name}: ${type} = ${swiftValue(create.value)}`))
+    let expression: string
+    if (type === 'Date' && typeof create.value === 'number' && Number.isFinite(create.value)) expression = `Date(timeIntervalSince1970: ${create.value})`
+    else if (type === 'Color' && typeof create.value === 'string') expression = styleExpression('color', create.value)
+    else { if (!['String', 'Bool', 'Int', 'Double'].includes(type) || !validScalar(create.value, { type: type as 'String' | 'Bool' | 'Int' | 'Double', optional: false })) throw new Error('The initial value does not match this control’s binding type.'); expression = swiftValue(create.value) }
+    patches.push(insertMember(ctx, owner, `@State private var ${name}: ${type} = ${expression}`))
   } else {
     const state = namedState(ctx, node, name)
     if (state.optional || state.type !== settings.binding.type) throw new Error('The chosen state must be nonoptional and match this control’s type.')

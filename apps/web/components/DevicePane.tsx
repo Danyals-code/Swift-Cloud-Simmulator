@@ -17,6 +17,7 @@ import type { CanvasTool } from './Toolbar'
 import type { AuthoringNode, NavigationDestination, SourceSpan } from '@studio/shared'
 import { pageSlots } from '../lib/pageLayout'
 import type { FeatureProps } from './AuthoringFeatures'
+import { InlineTextEditor } from './InlineTextEditor'
 import { AuthoringInspector } from './AuthoringInspector'
 
 export interface DevicePaneProps {
@@ -617,6 +618,8 @@ export function DevicePane({
     applyView()
   }, [centerOn, expanded, applyView])
 
+  const [inlineText, setInlineText] = useState<{ node: AuthoringNode; control: string; value: string; x: number; y: number; width: number } | null>(null)
+  const inlineEditor = inlineText && inspecting && authoringFeatures?.onNodeChange ? <InlineTextEditor key={`${inlineText.node.id}:${inlineText.control}`} {...inlineText} onClose={() => setInlineText(null)} onSave={value => authoringFeatures.onNodeChange!(inlineText.node, inlineText.control, value)} /> : null
   const screenFor = (tree: RenderTree | null, live: boolean, at: number, page?: PagePreview) => (
     <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${at})`, transformOrigin: 'top left' }}>
       <DeviceFrame device={device}>
@@ -634,6 +637,13 @@ export function DevicePane({
                   hovered: highlighted?.id ?? null,
                   onHover: node => setHovered(node, page?.id),
                   onSelect: node => onRevealSource(node, page?.id),
+                  onEditText: (rendered: RenderNode, rect: { x: number; y: number; width: number }) => {
+                    if (stale || tool !== 'select' || !rendered.origin) return
+                    const source = rendered.origin
+                    const node = authoringFeatures?.snapshot?.nodes.filter(n => n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end && n.controls?.some(c => ['content', 'title'].includes(c.id) && c.kind === 'text')).sort((a, b) => a.source.end - a.source.start - (b.source.end - b.source.start))[0]
+                    const control = node?.controls?.find(c => ['content', 'title'].includes(c.id) && c.kind === 'text')
+                    if (node && control) { onRevealSource(rendered, page?.id); setInlineText({ node, control: control.id, value: control.value, x: rect.x, y: rect.y, width: rect.width }) }
+                  },
                 },
               }
             : {})}
@@ -655,7 +665,8 @@ export function DevicePane({
 
   const collapsePanel = <button type="button" className={styles.panelToggle} data-testid="pane-toggle-preview" aria-pressed="true" aria-label={expanded ? 'Collapse preview settings' : 'Collapse preview'} title={expanded ? 'Collapse preview settings' : 'Collapse preview'} onClick={onToggleSettings}><Icon name="sidebar-right" size={16} /></button>
 
-  return (
+  return (<>
+    {inlineEditor}
     <section className={styles.preview} aria-label="Preview" data-expanded={expanded}>
       <div className={styles.stage}>
       {expanded ? <div className={styles.canvasHeading}>
@@ -675,9 +686,9 @@ export function DevicePane({
           {navigationPicker && <button type="button" className={styles.cancelPick} onClick={navigationPicker.onCancel}>Cancel pick</button>}
           {/* Off in Live Preview, and said so rather than hidden: it is a thing the
               canvas can do, in the mode where a click means "open this page". */}
-          <label className={styles.showAll} data-disabled={!inspecting || undefined} title={inspecting ? 'Show tabs side by side, with their screens underneath (⌘⇧A)' : 'Switch to Edit to explore screens'}>
+          <label className={styles.showAll} data-disabled={!inspecting || undefined} title={inspecting ? 'Show all screens and their connected destinations (⌘⇧A)' : 'Switch to Edit to explore screens'}>
             <input type="checkbox" data-testid="show-all-pages" checked={allPages && inspecting} disabled={!inspecting || !!navigationPicker} onChange={(event) => onToggleAllPages?.(event.target.checked)} />
-            Show all tabs
+            Show all screens
           </label>
         </span>
       </div> : <header className={styles.compactSettings}>{collapsePanel}{devicePicker}{schemePicker}{typePicker}{zoomPicker}</header>}
@@ -721,7 +732,7 @@ export function DevicePane({
                     ><span style={{ fontSize: 12 / Math.max(fitScale, 0.1), padding: `${6 / Math.max(fitScale, 0.1)}px ${8 / Math.max(fitScale, 0.1)}px` }}>{navigationPicker.targets[page.id]?.destination ? `Choose ${page.name}` : navigationPicker.targets[page.id]?.reason}</span></button>}
 
                   </div>
-                  <figcaption><button type="button" onClick={event => { if (navigationPicker) { if (event.detail && skipNavigationPickClick.current) return; if (navigationPicker.targets[page.id]?.destination) navigationPicker.onPick(page) } else onSelectPage?.(page) }} aria-label={`Edit ${page.name}`} title={depth ? `Screen within ${pages!.find(parent => parent.id === page.parentId)?.name ?? 'this tab'}` : 'Tab screen'}>{depth ? '↳ ' : ''}{page.name}</button>{page.id === selectedPageId ? <span className={styles.liveTag}>Editing</span> : null}</figcaption>
+                  <figcaption><button type="button" onClick={event => { if (navigationPicker) { if (event.detail && skipNavigationPickClick.current) return; if (navigationPicker.targets[page.id]?.destination) navigationPicker.onPick(page) } else onSelectPage?.(page) }} aria-label={`Edit ${page.name}`} title={depth ? `Screen within ${pages!.find(parent => parent.id === page.parentId)?.name ?? 'this screen'}` : 'Screen'}>{depth ? '↳ ' : ''}{page.name}</button>{page.id === selectedPageId ? <span className={styles.liveTag}>Editing</span> : null}</figcaption>
                 </figure>
               ))}
             </div>
@@ -761,7 +772,7 @@ export function DevicePane({
           {(['settings', 'preview'] as const).map(tab => (
             <button key={tab} type="button" role="tab" aria-selected={inspectorTab === tab}
               data-testid={`inspector-tab-${tab}`} onClick={() => onInspectorTab?.(tab)}>
-              {tab === 'settings' ? 'Settings' : 'Preview'}
+              {tab === 'settings' ? 'Properties' : 'Device'}
             </button>
           ))}
           {collapsePanel}
@@ -796,7 +807,7 @@ export function DevicePane({
       </aside>}
       {expanded && !showSettings && <div className={styles.panelRail}><button type="button" className={styles.panelToggle} data-testid="pane-toggle-preview" aria-pressed="false" aria-label="Show preview settings" title="Show preview settings" onClick={onToggleSettings}><Icon name="sidebar-right" size={16} /></button></div>}
     </section>
-  )
+  </>)
 }
 
 /**

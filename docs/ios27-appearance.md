@@ -193,18 +193,9 @@ Other relevant Apple references:
 [ListStyle](https://developer.apple.com/documentation/swiftui/liststyle), and
 [presentationCornerRadius](https://developer.apple.com/documentation/swiftui/view/presentationcornerradius(_:)).
 
-## Final cleanup and release checks (follow-up step 10)
+## Known visual differences
 
-The original appearance plan ends at Phase 9. This follow-up covers documentation,
-credit review, build/test gates, and a manual commit handoff; it does not waive the
-remaining native acceptance requirements or publish a release.
-
-- Own source, documentation, hidden configuration, and commit messages were scanned
-  for AI authorship credits and coauthor trailers. None were found. An ignored
-  agent-rule filename and an older commit explaining that ignore are configuration
-  references, not authorship credits. Dependency licenses remain intact.
-- No Git staging, commit, history rewrite, or push is part of this work.
-- The profile remains provisional. The medium sheet is about 3 points taller than
-  the supplied capture; custom inset rows and resulting lower section bounds still
-  differ by about 2 points. Exact material appearance and icon silhouettes are outside
-  the measured match. Do not describe the profile as pixel-perfect.
+The profile remains provisional. The medium sheet is about 3 points taller than
+the supplied capture; custom inset rows and resulting lower section bounds still
+differ by about 2 points. Exact material appearance and icon silhouettes are outside
+the measured match. The profile is not pixel-perfect.

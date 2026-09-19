@@ -38,6 +38,9 @@ export interface CompileRequest {
   readonly deploymentTarget?: string
   readonly scenario?: PreviewScenario
   readonly componentDescriptions?: readonly ComponentDescription[]
+  /** Standalone design screens, including destinations not connected yet. */
+  readonly designScreens?: readonly { readonly view: string; readonly name: string }[]
+  readonly previewScreen?: string
   readonly previewTarget?: PreviewTarget
   readonly files: readonly SourceFile[]
   /** logical point size of the target device, from sim-shell */
@@ -108,6 +111,8 @@ export interface CompileTimings {
  * is what makes a page the live one.
  */
 export interface PagePreview {
+  /** A design-only root that is not reachable from the app entry point yet. */
+  readonly standalone?: boolean
   readonly id: string
   readonly name: string
   readonly active: boolean

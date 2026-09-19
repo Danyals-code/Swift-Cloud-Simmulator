@@ -1,23 +1,25 @@
 'use client'
 
+import { VisualColor } from './VisualColor'
 import { useRef, useState } from 'react'
-import type { AuthoringModifier, AuthoringNode, DesignControl, SourceSpan } from '@studio/shared'
+import type { AuthoringModifier, AuthoringNode, AuthoringSnapshot, DesignControl, SourceSpan } from '@studio/shared'
 import type { FeatureChange } from './AuthoringFeatures'
-import { PropertyControl, type PropertyChange } from './PropertyControl'
+import { PropertyControl, propertyOptionLabel, type PropertyChange } from './PropertyControl'
 import { navigationDestinationEditorId } from './NavigationDestinationEditor'
 import styles from './AuthoringInspector.module.css'
 
 function controlLabel(control: DesignControl, modifier: AuthoringModifier): string {
+  if (/:(then|else)$/.test(control.id)) return `${modifier.label} · ${control.label.split(' · ').slice(1).join(' · ')}`
   if (control.id.startsWith('fill:')) return control.label
   if (modifier.name === 'font') return control.label === 'Typography' ? 'Text style' : control.label
   const name = control.label.split(' · ')[1]
   if (modifier.name === 'frame') return name ? name.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()) : control.label
-  if (['foregroundColor', 'foregroundStyle', 'background', 'fill'].includes(modifier.name)) return 'Color'
+  if (['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint'].includes(modifier.name)) return 'Color'
   if (modifier.name === 'padding') return 'Padding'
   return modifier.label
 }
 
-export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = false, navigationSlots = [] }: { navigationSlots?: readonly AuthoringNode[]; node: AuthoringNode; onChange?: PropertyChange; onCommand?: FeatureChange; onReveal?: (span: SourceSpan) => void; behavior?: boolean }) {
+export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = false, navigationSlots = [], snapshot }: { snapshot?: AuthoringSnapshot; navigationSlots?: readonly AuthoringNode[]; node: AuthoringNode; onChange?: PropertyChange; onCommand?: FeatureChange; onReveal?: (span: SourceSpan) => void; behavior?: boolean }) {
   const modifiers = node.modifiers ?? []
   const entries = modifiers.map((modifier, index) => ({ modifier, index })).filter(({ modifier }) => (modifier.category === 'behavior') === behavior)
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set([0]))
@@ -54,7 +56,11 @@ export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = 
   }
   const catalog = (node.modifierCatalog ?? []).filter(item => item.category !== 'behavior' && `${item.label} ${item.name} ${item.category}`.toLowerCase().includes(query.trim().toLowerCase()))
   return <div className={styles.modifierStack} data-testid={behavior ? 'behavior-modifiers' : 'modifier-stack'} aria-busy={busy}>
-    {!behavior && <div className={styles.sectionHeading}><h3>Modifiers</h3><span>{entries.length}</span></div>}
+    {!behavior && <div className={styles.sectionHeading}><h3>Appearance & layout</h3><span>{entries.length}</span></div>}
+    {!behavior && <div className={styles.quickStyles} aria-label="Common design properties">{[{ name: 'font', label: 'Typography' }, { name: 'foregroundColor', label: 'Text color' }, { name: 'background', label: 'Fill' }, { name: 'frame', label: 'Size & alignment' }, { name: 'padding', label: 'Spacing' }].map(item => {
+      const existing = entries.find(e => e.modifier.name === item.name), available = node.modifierCatalog?.find(c => c.name === item.name)?.available
+      return <button key={item.name} type="button" disabled={busy || !existing && !available} onClick={() => existing ? setExpanded(current => new Set([...current, existing.index])) : void run({ kind: 'modifier-add', name: item.name }, new Set([...expanded, modifiers.length]))}>{item.label}{!existing ? ' +' : ''}</button>
+    })}</div>}
     {!entries.length && !behavior && <p className={styles.note}>Add a modifier to style this view.</p>}
     {entries.map(({ modifier, index }) => {
       const navigation = navigationSlots.find(slot => slot.navigation?.editable && slot.source.file === modifier.source.file && slot.source.start >= modifier.source.start && slot.source.end <= modifier.source.end)
@@ -64,7 +70,7 @@ export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = 
       <div className={styles.modifierHeader}>
         <span className={styles.dragHandle} aria-hidden="true" title="Drag to change order" draggable={!busy && (modifier.capabilities.moveUp || modifier.capabilities.moveDown)} onDragStart={event => { drag.current = { id: modifier.id, index }; event.dataTransfer.setData('application/x-studio-modifier', modifier.id); event.dataTransfer.effectAllowed = 'move' }} onDragEnd={() => { drag.current = null; setDropIndex(null) }}>⠿</span>
         <button type="button" className={styles.modifierToggle} aria-expanded={expanded.has(index)} onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next })}>
-          <span className={styles.chevron}>{expanded.has(index) ? '⌄' : '›'}</span><span><strong>{modifier.label}</strong><small>{navigation?.navigation?.display ?? modifier.summary}</small></span>
+          <span className={styles.chevron}>{expanded.has(index) ? '⌄' : '›'}</span><span><strong>{modifier.label}</strong><small>{navigation?.navigation?.display ?? (modifier.controls.length ? modifier.controls.filter(control => !control.id.startsWith('fill:')).map(control => control.kind === 'select' ? propertyOptionLabel(control.value) : control.value || 'Default').join(' · ') : modifier.summary)}</small></span>
         </button>
         <button type="button" className={styles.modifierMenuButton} aria-label={`${modifier.label} actions`} aria-expanded={menu === modifier.id} onClick={() => setMenu(menu === modifier.id ? null : modifier.id)}>···</button>
       </div>
@@ -76,8 +82,9 @@ export function ModifierStack({ node, onChange, onCommand, onReveal, behavior = 
       </div>}
       {expanded.has(index) && <div className={styles.modifierBody}>
         {modifier.controls.map(control => onChange && <PropertyControl key={`${control.id}:${control.value}`} control={control} label={controlLabel(control, modifier)} onChange={onChange} />)}
+        {node.styles?.filter(p => p.kind === 'color' && modifier.propertyIds.includes(p.property)).map(property => <VisualColor key={property.property + property.token + property.value} property={property} snapshot={snapshot} busy={busy} onCommand={operation => run(operation)} />)}
         {!modifier.controls.length && !navigation && <p className={styles.note}>{modifier.category === 'custom' ? 'Custom modifier' : 'Configured in code'}</p>}
-        {modifier.capabilities.reason && <p className={styles.note}>{modifier.capabilities.reason}</p>}
+        {modifier.capabilities.reason && <p className={styles.note}>{modifier.controls.length && !modifier.capabilities.moveUp && !modifier.capabilities.moveDown ? 'Values are editable. This style stays in place to preserve its layout and behavior.' : modifier.capabilities.reason}</p>}
         {navigation && <button type="button" onClick={() => { const editor = document.getElementById(navigationDestinationEditorId(navigation)); editor?.scrollIntoView({ block: 'nearest' }); editor?.querySelector<HTMLInputElement>('[role="combobox"]')?.focus() }}>Change destination</button>}
         {!navigation && (!modifier.capabilities.edit || !modifier.controls.length) && onReveal && <button type="button" onClick={() => onReveal(modifier.source)}>Edit in Code</button>}
       </div>}

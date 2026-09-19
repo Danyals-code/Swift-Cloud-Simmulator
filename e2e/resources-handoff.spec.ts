@@ -115,7 +115,7 @@ for (const device of ['iphone-15', 'iphone-18-pro']) for (const scheme of ['ligh
     await page.getByTestId('type-scale-select').click(); await page.getByTestId(`type-scale-select-menu-${size}`).click()
     await expect(page.getByTestId('render-tree').getByRole('img', { name: 'Photo', exact: true })).toBeVisible()
     // Capture evidence only; native comparison thresholds remain a separate required gate.
-    await info.attach(`${device}-${scheme}-${size}`, { body: await page.getByTestId('device-frame').screenshot(), contentType: 'image/png' })
+    await info.attach(`${device}-${scheme}-${size}`, { body: await page.getByRole('figure', { name: /^Edit Main page/ }).getByTestId('device-frame').screenshot(), contentType: 'image/png' })
   })
 }
 

@@ -19,6 +19,13 @@ export interface PreviewScenario {
   readonly hook: string
   readonly inputs?: readonly PreviewInput[]
 }
+/** Named instance property presets; applying one writes ordinary Swift arguments. */
+export interface ComponentVariant {
+  readonly owner: string
+  readonly signature: string
+  readonly name: string
+  readonly values: readonly { readonly control: string; readonly value: string }[]
+}
 export interface ComponentDescription {
   readonly owner: string
   readonly signature?: string
@@ -38,6 +45,8 @@ export interface CollectionSettings {
   readonly templateId?: string
 }
 export interface ComponentSettings {
+  readonly reusable: boolean
+  readonly variantControls: readonly string[]
   readonly definitionId: string
   readonly signature: string
   readonly propertyNames: readonly string[]
@@ -75,6 +84,7 @@ export interface NavigationSettings {
   readonly scopeDescription: string
 }
 export interface BehaviorSettings {
+  readonly dependencies?: readonly { readonly state: string; readonly nodeIds: readonly string[] }[]
   readonly states: readonly StateInput[]
   readonly collections: readonly CollectionSettings[]
   readonly actions: readonly string[]
@@ -93,6 +103,16 @@ export type BehaviorAction =
   | { readonly type: 'append'; readonly collection: string; readonly record: DesignRecord }
   | { readonly type: 'delete'; readonly collection: string; readonly id: DesignValue }
 export type AuthoringOperation = ResourceOperation | ModifierOperation
+  | { readonly kind: 'component-expose'; readonly control: string; readonly name: string }
+  | { readonly kind: 'component-insert'; readonly component: string }
+  | { readonly kind: 'component-variant'; readonly variant: ComponentVariant }
+  | { readonly kind: 'screen-create'; readonly name: string; readonly title: string; readonly layout: 'VStack' | 'HStack' | 'ZStack' }
+  | { readonly kind: 'screen-duplicate'; readonly name: string }
+  | { readonly kind: 'screen-remove' }
+  | { readonly kind: 'layer-duplicate' }
+  | { readonly kind: 'layer-wrap'; readonly ids: readonly string[]; readonly layout: 'VStack' | 'HStack' | 'ZStack' }
+  | { readonly kind: 'layer-reparent'; readonly ids: readonly string[]; readonly destination: string }
+  | { readonly kind: 'guided-action'; readonly action: BehaviorAction; readonly replace: boolean; readonly createValue?: { readonly name: string; readonly value: DesignValue; readonly activeTitle?: string }; readonly createScreen?: { readonly name: string; readonly title: string } }
   | { readonly kind: 'navigation-target'; readonly destination: string }
   | { readonly kind: 'records'; readonly records: readonly DesignRecord[] }
   | { readonly kind: 'collection-field'; readonly name: string; readonly type: RecordField['type']; readonly optional: boolean; readonly value: DesignValue }

@@ -128,6 +128,8 @@ export interface PreviewSettings {
 export interface StudioState {
   project: Project | null
   documentRevision: number
+  canUndo: boolean
+  canRedo: boolean
   documentSelection: DocumentSelection | null
   setDocumentSelection: (selection: DocumentSelection | null) => void
   commitTransaction: (expected: Project, transaction: ProjectTransaction) => string | null
@@ -229,7 +231,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       patch = { ...patch, documentRevision: previous.documentRevision + 1 }
       if (patch.project?.id !== previous.project?.id) patch.documentSelection = null
     }
-    rawSet(patch)
+    rawSet({ ...patch, canUndo: history.canUndo, canRedo: history.canRedo })
   }
 
   /**
@@ -415,13 +417,15 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       const current = get().project
       if (!current) return null
       const result = history.take(direction, current)
-      if (!result) return null
+      if (!result) { set({}); return null }
       replaying = true
       try { commit(result.project, result.selection?.file); set({ documentSelection: result.selection }) }
       finally { replaying = false }
       return { selection: result.selection }
     },
     project: null,
+    canUndo: false,
+    canRedo: false,
     activeFileId: null,
     openFileIds: [],
     loaded: false,

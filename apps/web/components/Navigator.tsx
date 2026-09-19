@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { dirname, fileBasename, type TreeNode } from '@studio/project-model'
 import { useLayout } from '../lib/layout'
 import { LogicalLayers } from './LogicalLayers'
@@ -13,6 +13,10 @@ import styles from './Workspace.module.css'
 import { ToolButton } from './ui/Control'
 
 export interface NavigatorProps {
+  pageFocusEpoch?: number
+  screens?: ReactNode
+  layerLabels?: readonly { owner: string; fingerprint: string; label: string; offset?: number }[]
+  onRenameLayer?: (node: AuthoringNode, label: string) => string | null
   authoringFiles: readonly SourceFile[]
   authoringSelection?: AuthoringSelection
   authoring?: AuthoringSnapshot
@@ -81,7 +85,7 @@ const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text
  * out of the way when you are looking for one file by name.
  */
 export function Navigator({
-  tree,
+  tree, screens, pageFocusEpoch, layerLabels, onRenameLayer,
   pageId, pageName, pageSource, pageLayers,
   authoring, authoringFiles, authoringSelection, selectedAuthoringId, selectedAuthoringAncestors, hoveredAuthoringId, hoveredAuthoringAncestors, onHoverAuthoring, onSelectAuthoring, onEditAuthoring,
   layers, selectedLayerId, hoveredLayerId, stale, onSelectLayer, onReorderLayer, hiddenViews, onHideLayer, onShowHidden, layersEditable,
@@ -190,6 +194,7 @@ export function Navigator({
         </span>
       </header>
 
+      {tab === 'layers' && screens}
       {tab === 'project' ? (
         <>
           <div
@@ -261,7 +266,7 @@ export function Navigator({
         </>
       ) : tab === 'layers' ? (
         <>
-        {!runtimeLayers && authoring && onSelectAuthoring ? <LogicalLayers key={pageId} pageId={pageId} pageName={pageName} pageSource={pageSource} runtimeLayers={pageLayers} selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={authoring} files={authoringFiles} selection={authoringSelection} selected={selectedAuthoringId} selectedAncestors={selectedAuthoringAncestors} hovered={hoveredAuthoringId} hoveredAncestors={hoveredAuthoringAncestors} onHover={onHoverAuthoring} stale={stale} onSelect={onSelectAuthoring} onEdit={onEditAuthoring} hidden={hiddenViews} onShow={onShowHidden} editable={layersEditable} /> : <Layers pages={layers} selectedId={selectedLayerId} hoveredId={hoveredLayerId} stale={stale} onSelect={onSelectLayer}
+        {!runtimeLayers && authoring && onSelectAuthoring ? <LogicalLayers labels={layerLabels} onRename={onRenameLayer} key={`${pageId}:${pageFocusEpoch}`} pageId={pageId} pageName={pageName} pageSource={pageSource} runtimeLayers={pageLayers} selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={authoring} files={authoringFiles} selection={authoringSelection} selected={selectedAuthoringId} selectedAncestors={selectedAuthoringAncestors} hovered={hoveredAuthoringId} hoveredAncestors={hoveredAuthoringAncestors} onHover={onHoverAuthoring} stale={stale} onSelect={onSelectAuthoring} onEdit={onEditAuthoring} hidden={hiddenViews} onShow={onShowHidden} editable={layersEditable} /> : <Layers pages={layers} selectedId={selectedLayerId} hoveredId={hoveredLayerId} stale={stale} onSelect={onSelectLayer}
           onReorder={onReorderLayer} hidden={hiddenViews} onHide={onHideLayer} onShow={onShowHidden} editable={layersEditable} />}
         <div className="flex shrink-0 items-center justify-between border-t border-xc-line-soft px-3 py-2 text-[11px] text-xc-text-3" aria-label="Developer layer inspection"><span>Developer</span><button type="button" aria-pressed={runtimeLayers} onClick={() => setRuntimeLayers(value => !value)} className="rounded px-1 py-0.5 hover:bg-xc-line-soft">{runtimeLayers ? 'Back to design layers' : 'Runtime detail'}</button></div>
         </>

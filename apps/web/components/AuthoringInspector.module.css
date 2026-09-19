@@ -132,3 +132,27 @@
 .destinationActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .destinationActions button { padding: 5px 0; }
 .destinationActions .destinationPick { display: inline-flex; align-items: center; gap: 5px; }
+
+.guidedInteraction { display: grid; gap: 9px; padding: 10px; background: var(--color-xc-line-soft); border-radius: 8px; margin-bottom: 12px; }
+.valueFlow { display: flex; justify-content: space-around; align-items: center; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 6px; }
+.dependencies, .quickStyles { display: flex; flex-wrap: wrap; gap: 6px; }
+.dependencies button, .quickStyles button { border: 1px solid var(--color-xc-line); padding: 5px 8px; border-radius: 6px; font-size: 11px; background: var(--color-xc-line-soft); cursor: pointer; }
+.quickStyles { margin: 8px 0 12px; }
+.visualColor { display: grid; gap: 8px; border-top: 1px solid var(--color-xc-line); padding-top: 10px; }
+.swatchValue { display: flex; align-items: end; gap: 8px; }
+.swatchValue > input[type=color] { width: 34px; height: 32px; padding: 2px; flex-shrink: 0; }
+.swatchValue label { flex: 1; min-width: 0; }
+.visualColor label { display: grid; gap: 5px; }
+.visualColor input, .visualColor select { width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; background: var(--color-xc-bg); }
+.layoutGuide { margin: 10px 0; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 7px; }
+.layoutGuide > div { display: flex; align-items: center; justify-content: center; }
+.layoutGuide > div[data-direction=column] { flex-direction: column; }
+.layoutGuide span { display: grid; place-items: center; background: var(--color-xc-select); color: var(--color-xc-accent); border: 1px solid var(--color-xc-accent); border-radius: 3px; width: 28px; height: 15px; font-size: 9px; }
+.layoutGuide > div[data-direction=overlay] span + span { margin-left: -16px; transform: translateY(5px); }
+.layoutGuide p { font-size: 11px; line-height: 1.5; color: var(--color-xc-text-3); margin: 8px 0 0; }
+.symbolPicker { margin-top: 8px; }
+.symbolPicker > input { width: 100%; margin: 8px 0; padding: 7px; border: 1px solid var(--color-xc-line); border-radius: 5px; }
+.symbolPicker > div { display: grid; grid-template-columns: repeat(3, 1fr); max-height: 230px; overflow: auto; gap: 4px; }
+.symbolPicker button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border: 1px solid var(--color-xc-line); border-radius: 5px; }
+.symbolPicker small { font-size: 9px; overflow-wrap: anywhere; }
+.symbolPicker button[aria-pressed=true] { background: var(--color-xc-select); border-color: var(--color-xc-accent); }

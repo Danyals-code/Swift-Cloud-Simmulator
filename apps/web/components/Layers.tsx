@@ -66,6 +66,7 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
   const started = useRef(false)
   const dragRef = useRef<typeof drag>(null)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const [expandNext, setExpandNext] = useState(false)
   /** A selection whose auto-revealed ancestors the user has since collapsed by hand. */
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -229,11 +230,17 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
   }
 
   return <section className={styles.panel} data-testid="layers-panel" aria-label="Layers">
-    <div className={styles.heading}><span>Pages & layers</span><span>{`${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`} <button type="button" data-testid="collapse-layers" title="Collapse all layers" aria-label="Collapse all layers" onClick={() => {
+    <div className={styles.heading}><span>Pages & layers</span><span>{`${pages.length} ${pages.length === 1 ? 'page' : 'pages'}`} <button type="button" data-testid="collapse-layers" title={expandNext ? 'Expand all layers' : 'Collapse all layers'} aria-label={expandNext ? 'Expand all layers' : 'Collapse all layers'} onClick={() => {
       const ids = new Set<string>()
-      const collect = (layer: ViewLayer) => { if (layer.children.length) ids.add(layer.id); layer.children.forEach(collect) }
-      pages.forEach(collect); setQuery(''); setDismissed(selectedId); setCollapsed(ids)
-    }}><Icon name="collapse" size={13} /></button></span></div>
+      if (!expandNext) {
+        const collect = (layer: ViewLayer) => { if (layer.children.length) ids.add(layer.id); layer.children.forEach(collect) }
+        pages.forEach(collect)
+      }
+      setQuery('')
+      setDismissed(expandNext ? null : selectedId)
+      setCollapsed(ids)
+      setExpandNext(value => !value)
+    }}><Icon name={expandNext ? 'expand' : 'collapse'} size={13} /></button></span></div>
     <div ref={tree} className={styles.tree} role="tree" aria-label="App layers" aria-busy={stale}>
       {rows.map(({ layer, page, depth, parent }, index) => {
         const expandable = layer.children.length > 0

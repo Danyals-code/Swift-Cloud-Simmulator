@@ -56,7 +56,7 @@ export function AddView({ target, onChoose, onClose }: Props) {
           <span className={styles.target} data-testid="add-view-target">{target}</span>
         </header>
 
-        <p className={styles.catalogNote}>Starter views. Combine them and edit their state, actions, and modifiers in Code.</p>
+        <p className={styles.catalogNote}>Select an element, then change it in Properties. Navigation links add the navigation setup they need. Inputs with sample values need a connection to become interactive.</p>
         <div className={styles.list} ref={listRef} role="listbox" aria-label="Views">
           {results.map((snippet, index) => (
             <button

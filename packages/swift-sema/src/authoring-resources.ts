@@ -71,13 +71,20 @@ function propertyKind(name: string): StyleKind | undefined {
 export function styleProperties(ctx: FeatureContext, node: AuthoringNode): StyleProperty[] {
   return node.properties.flatMap(p => {
     const kind = propertyKind(p.name)
-    if (!kind || !p.source || p.scope === 'inherited' || !['literal', 'token'].includes(p.valueKind) || hasComments(ctx, p.source)) return []
+    if (!kind || !p.source || p.scope === 'inherited' || !['literal', 'token'].includes(p.valueKind) && !styleValue(p.expression) || hasComments(ctx, p.source)) return []
     const token = recipes(ctx).find(r => r.style.kind === kind && p.declaration && equal(r.declaration.nameSpan, p.declaration))
     if (p.valueKind === 'token' && !token) return []
-    return [{ property: p.id, label: p.name, kind, token: token?.style.name }]
+    return [{ property: p.id, label: p.name, kind, token: token?.style.name, value: token?.style.value ?? styleValue(p.expression)?.value }]
   })
 }
 export function editResource(ctx: FeatureContext, node: AuthoringNode, op: ResourceOperation): { patches: SourcePatch[]; created?: { id: string; text: string }[] } {
+  if (op.kind === 'style-create-link') {
+    const property = styleProperties(ctx, node).find(p => p.property === op.property && p.kind === op.style)
+    const source = node.properties.find(p => p.id === op.property)?.source
+    if (!property || !source || shadowsMember(ctx, node, op.name)) throw new Error('This property cannot use that shared style.')
+    const created = editResource(ctx, node, { kind: 'style-create', name: op.name, style: op.style, value: op.value })
+    return { ...created, patches: [patch(source, op.name)] }
+  }
   if (op.kind === 'style-create') {
     if (!identifier(op.name) || ['_', 'Color', 'Font', 'CGFloat', 'Double', 'SwiftUI', 'Bundle'].includes(op.name) || allDeclarations(ctx).some(d => 'name' in d && d.name === op.name)) throw new Error('Choose a unique Swift identifier that does not shadow a framework type.')
     if (allDeclarations(ctx).some(d => 'name' in d && ['Color', 'Font', 'CGFloat'].includes(d.name ?? ''))) throw new Error('A framework type is shadowed. Define this style in Swift.')

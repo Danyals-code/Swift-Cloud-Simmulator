@@ -1,11 +1,13 @@
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, SourceFile } from '@studio/shared'
 import { collectionFor, addCollectionField, bindField, convertCollection, emptyState, enclosingCollection, recordsSwift, validateRecords } from './authoring-collections'
-import { componentRecipes, componentSettings, extractComponent } from './authoring-components'
+import { componentRecipes, componentSettings, extractComponent, insertComponent, applyComponentVariant, exposeComponentInput } from './authoring-components'
 import { behaviorSettings, configureAction, configureBinding, configureTransition, stateInputs } from './authoring-behavior'
 import { applyPatches, hasComments, patch, type FeatureContext, type SourcePatch } from './authoring-context'
 import { editResource, sharedStyles, styleProperties } from './authoring-resources'
 import { validateControlValue } from './design-controls'
 import { navigationSettings, configureNavigationTarget } from './authoring-navigation'
+import { guidedAction, screenPatches } from './authoring-screens'
+import { structureEdit } from './authoring-structure'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
   if (snapshot.diagnostics.some(d => d.severity === 'error')) return snapshot
@@ -21,8 +23,14 @@ export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot
 export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation: AuthoringOperation | { kind: 'property'; control: string; value: string }): { files: SourceFile[]; offset: number } {
   let patches: SourcePatch[] = [], files: SourceFile[] = []
   switch (operation.kind) {
+    case 'component-expose': return exposeComponentInput(ctx, node, operation.control, operation.name)
+    case 'component-insert': return insertComponent(ctx, node, operation.component)
+    case 'component-variant': return applyComponentVariant(ctx, node, operation.variant)
+    case 'guided-action': return guidedAction(ctx, node, operation)
+    case 'screen-create': case 'screen-duplicate': case 'screen-remove': patches = screenPatches(ctx, node, operation); break
+    case 'layer-duplicate': case 'layer-wrap': case 'layer-reparent': return structureEdit(ctx, node, operation)
     case 'navigation-target': patches = configureNavigationTarget(ctx, node, operation.destination); break
-    case 'style-create': case 'style-edit': case 'style-link': case 'style-local': case 'asset-use': case 'asset-references': { const result = editResource(ctx, node, operation); patches = result.patches; files = result.created ?? []; break }
+    case 'style-create-link': case 'style-create': case 'style-edit': case 'style-link': case 'style-local': case 'asset-use': case 'asset-references': { const result = editResource(ctx, node, operation); patches = result.patches; files = result.created ?? []; break }
     case 'property': {
       const recipe = componentRecipes(ctx, node).find(r => r.control.id === operation.control)
       if (!recipe) throw new Error('This component argument is not a supported literal or its interface has changed.')

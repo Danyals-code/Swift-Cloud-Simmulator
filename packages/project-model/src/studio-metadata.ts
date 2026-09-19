@@ -1,10 +1,12 @@
-import type { ComponentDescription, PreviewScenario } from '@studio/shared'
+import type { ComponentDescription, ComponentVariant, PreviewScenario } from '@studio/shared'
 /** Authoring-only information. No production layout values or application state. */
 export interface StudioMetadata {
   readonly schemaVersion: 1
-  readonly labels: readonly { readonly owner: string; readonly fingerprint: string; readonly label: string }[]
+  readonly labels: readonly { readonly owner: string; readonly fingerprint: string; readonly label: string; readonly offset?: number }[]
+  readonly screens?: readonly { readonly view: string; readonly name: string }[]
   readonly canvas: readonly { readonly screen: string; readonly x: number; readonly y: number }[]
   readonly components: readonly ComponentDescription[]
+  readonly variants?: readonly ComponentVariant[]
   readonly scenarios: readonly PreviewScenario[]
 }
 
@@ -29,7 +31,9 @@ export function readStudioMetadata(value: unknown): MetadataRead {
   if (value === undefined) return { status: 'missing' }
   if (!record(value) || !Number.isInteger(value.schemaVersion)) return { status: 'invalid', reason: 'Studio metadata needs a schema version.' }
   if (value.schemaVersion !== 1) return { status: 'unsupported', version: Number(value.schemaVersion) }
-  if (!entries(value.labels, v => string(v.owner) && string(v.fingerprint) && string(v.label)) ||
+  if (value.variants !== undefined && !entries(value.variants, v => string(v.owner) && string(v.signature) && string(v.name) && v.name.trim().length > 0 && v.name.length <= 80 && entries(v.values, p => string(p.control) && /^component:[A-Za-z_][A-Za-z0-9_]*$/.test(p.control) && string(p.value))) ||
+      value.screens !== undefined && !entries(value.screens, v => string(v.view) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.view) && string(v.name)) ||
+      !entries(value.labels, v => string(v.owner) && string(v.fingerprint) && string(v.label) && (v.offset === undefined || finite(v.offset))) ||
       !entries(value.canvas, v => string(v.screen) && finite(v.x) && finite(v.y)) ||
       !entries(value.components, v => string(v.owner) && (v.signature === undefined || string(v.signature)) && entries(v.properties, p => string(p.name) && string(p.label) && string(p.description) && (p.min === undefined || finite(p.min)) && (p.max === undefined || finite(p.max)) && (p.group === undefined || string(p.group)))) ||
       !entries(value.scenarios, v => string(v.name) && string(v.owner) && string(v.hook) && (v.inputs === undefined || entries(v.inputs, i => string(i.owner) && string(i.name) && string(i.signature) && (scalar(i.value) || entries(i.value, r => Object.keys(r).length <= 32 && Object.entries(r).every(([k, value]) => string(k) && scalar(value)))))))) {

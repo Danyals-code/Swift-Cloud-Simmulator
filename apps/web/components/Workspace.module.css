@@ -87,19 +87,27 @@
 .showAll[data-disabled] { color: var(--color-xc-text-3); cursor: default; }
 .showAll[data-disabled] input { cursor: default; }
 .canvasHeading > span:last-child { display: flex; align-items: center; gap: 14px; }
-/* Bottom-aligned, so the switch is in the same place in both modes and Design's
-   tools appear above it rather than pushing it up. */
-.canvasArea { position: relative; display: flex; flex: 1; min-height: 0; isolation: isolate; }
-.canvasFooter { position: absolute; inset: auto 0 0; z-index: 2; display: flex; align-items: flex-end; justify-content: center; padding: 12px 12px 28px; background: transparent; pointer-events: none; }
+/* Reserve the dock's height so fitted phones and their tab bars stay clickable. */
+.canvasArea { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; isolation: isolate; }
+.canvasFooter { position: relative; flex-shrink: 0; z-index: 2; display: flex; align-items: flex-end; justify-content: center; padding: 8px 12px 16px; background: transparent; pointer-events: none; }
 .canvasFooter button { pointer-events: auto; }
 .canvasFooter .toolDock { background: transparent; border-color: transparent; box-shadow: none; }
 .canvasFooter .dockTools { border-color: transparent; }
-.canvasFooter button[aria-pressed='false'] { background: transparent; }
-.canvasFooter button[aria-pressed='false']:hover { background: var(--color-xc-line-soft); }
+.canvasFooter .dockTools button[aria-pressed='false'] { background: transparent; }
+.canvasFooter .dockTools button[aria-pressed='false']:hover { background: var(--color-xc-line-soft); }
 .toolDock { width: 312px; max-width: 100%; display: inline-flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 12px; box-shadow: 0 4px 16px #2828320b; }
 .dockRow { display: grid; align-items: center; gap: 6px; }
+.toolDock { position: relative; }
+.dockHistory { grid-template-columns: repeat(3, 1fr); }
+.dockHistory > button { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; font-size: 12px; color: var(--color-xc-text-2); background: var(--color-xc-bar-raised); cursor: pointer; }
+.dockHistory > button:hover:not(:disabled) { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.dockHistory > button:disabled { opacity: .4; cursor: default; }
+.dockFeedback { position: absolute; bottom: calc(100% + 4px); left: 8px; right: 8px; padding: 8px 10px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 7px; font-size: 12px; color: var(--color-xc-text); box-shadow: 0 2px 8px #16162012; pointer-events: auto; }
 .dockTools { grid-template-columns: repeat(3, 1fr); padding-bottom: 6px; border-bottom: 1px solid var(--color-xc-line-soft); }
-.dockModes { grid-template-columns: repeat(2, 1fr); }
+.dockModes { grid-template-columns: repeat(2, 1fr); gap: 3px; padding: 4px; border: 1px solid var(--color-xc-line); border-radius: 10px; background: var(--color-xc-bar-raised); }
+.dockModes > button { border: 0; border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-weight: 500; }
+.dockModes > button[aria-pressed='true'] { background: var(--color-xc-bar); color: var(--color-xc-accent); box-shadow: 0 1px 4px #16162020; }
+.dockModes > button[aria-pressed='false']:hover { background: var(--color-xc-line-soft); color: var(--color-xc-text); }
 .dockRow > button, .dockRow > span > button { justify-content: center; height: 30px; width: 100%; }
 /* Armed, and in the colour of what it does. */
 .destructive > button[aria-pressed='true'] { border-color: var(--color-xc-error); background: color-mix(in srgb, var(--color-xc-error) 18%, transparent); color: var(--color-xc-error); }
@@ -157,3 +165,27 @@
 .navigationPickTarget[data-available="true"]:hover, .navigationPickTarget:focus-visible { background: rgb(10 132 255 / 12%); outline: 3px solid var(--color-xc-accent); outline-offset: 4px; }
 .navigationPickTarget > span { padding: 10px 16px; border-radius: 10px; color: var(--color-xc-text); background: var(--color-xc-bar); font-size: 15px; box-shadow: 0 2px 12px rgb(0 0 0 / 15%); }
 .cancelPick { border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 4px 8px; color: var(--color-xc-accent); white-space: nowrap; }
+
+.screens { flex-shrink: 0; border-bottom: 1px solid var(--color-xc-line); padding: 12px 8px; font-size: 12px; }
+.screens header { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 8px; }
+.screens header button { padding: 4px; border-radius: 5px; background: var(--color-xc-line-soft); }
+.screenList { max-height: 220px; overflow: auto; }
+.screenRow { display: flex; align-items: center; border-radius: 6px; }
+.screenRow[data-selected] { background: var(--color-xc-select); }
+.screenRow > button:first-child { flex: 1; display: flex; gap: 8px; align-items: center; padding: 8px; min-width: 0; text-align: left; }
+.screenRow span { overflow: hidden; text-overflow: ellipsis; }
+.screenRow small { display: block; color: var(--color-xc-text-3); font-size: 10px; padding-top: 3px; }
+.screenRow > button:last-child { padding: 6px; }
+.screenForm { display: grid; gap: 8px; padding: 10px 5px 2px; }
+.screenForm label { display: grid; gap: 5px; }
+.screenForm input, .screenForm select { width: 100%; background: var(--color-xc-bg); border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; }
+.screenForm > div { display: flex; gap: 8px; }
+.screenForm button { padding: 6px 8px; background: var(--color-xc-select); color: var(--color-xc-accent); border-radius: 5px; }
+.screens > p { color: var(--color-xc-error); margin: 8px 5px 0; line-height: 1.5; }
+
+.inlineText { position: fixed; z-index: 2147483647; padding: 8px; border: 2px solid var(--color-xc-accent); border-radius: 8px; background: var(--color-xc-bg); box-shadow: 0 8px 24px #0003; color: var(--color-xc-text); }
+.inlineText textarea { display: block; width: 100%; resize: vertical; padding: 8px; background: transparent; color: inherit; font-size: 16px; }
+.inlineText > div { display: flex; gap: 8px; align-items: center; }
+.inlineText small { margin-right: auto; font-size: 10px; color: var(--color-xc-text-3); }
+.inlineText button { padding: 5px 8px; background: var(--color-xc-select); color: var(--color-xc-accent); border-radius: 4px; font-size: 12px; }
+.inlineText p { color: var(--color-xc-error); font-size: 12px; }

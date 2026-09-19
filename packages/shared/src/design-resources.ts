@@ -13,8 +13,10 @@ export interface StyleProperty {
   readonly label: string
   readonly kind: StyleKind
   readonly token?: string
+  readonly value?: string
 }
 export type ResourceOperation =
+  | { readonly kind: 'style-create-link'; readonly property: string; readonly name: string; readonly style: StyleKind; readonly value: string }
   | { readonly kind: 'style-create'; readonly name: string; readonly style: StyleKind; readonly value: string }
   | { readonly kind: 'style-edit'; readonly name: string; readonly value: string }
   | { readonly kind: 'style-link'; readonly property: string; readonly name: string }
