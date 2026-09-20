@@ -153,8 +153,10 @@ export class Interpreter {
   readonly enums = new Map<string, EnumDecl>()
   /** `typealias Num = Int` - the name each alias stands for. */
   private readonly typeAliases = new Map<string, string>()
-  /** `defer` blocks awaiting the exit of each running body. See `runBody`. */
+  /** `defer` blocks awaiting the exit of each lexical block. */
   private readonly deferred: { block: Block; scope: Environment }[][] = []
+  private readonly staticStorage = new Map<VarDecl, SwiftValue>()
+  private readonly initializingStatics = new Set<VarDecl>()
   /**
    * Members merged across extensions, protocol defaults and superclasses.
    *
@@ -174,6 +176,8 @@ export class Interpreter {
 
   /** Registers top-level declarations. Types and functions first, so order is irrelevant. */
   load(files: readonly SourceFileNode[]): void {
+    this.staticStorage.clear()
+    this.initializingStatics.clear()
     // A type declared inside another one is lifted to the top level under a
     // qualified name before anything else looks at the program, so the conformance
     // model, the member tables and instantiation all see it the same way.
@@ -561,10 +565,6 @@ export class Interpreter {
 
     this.frames.push({ name, span })
     this.returnTypes.push(expected)
-    // `defer` blocks registered by this body, innermost last. Run on the way out
-    // whatever the exit was - a return, a throw, or falling off the end - which is
-    // the only behaviour that makes `defer` worth writing.
-    this.deferred.push([])
     try {
       if (isViewBuilder) {
         const built: SwiftValue[] = []
@@ -584,8 +584,6 @@ export class Interpreter {
       if (error instanceof ReturnSignal) return error.value as SwiftValue
       throw error
     } finally {
-      const pending = this.deferred.pop() ?? []
-      for (const { block, scope } of pending.reverse()) this.executeBlock(block, scope)
       this.frames.pop()
       this.returnTypes.pop()
     }
@@ -633,8 +631,16 @@ export class Interpreter {
   }
 
   private collectBuilderValues(block: Block, env: Environment, out: SwiftValue[]): void {
-    for (const statement of block.statements) {
+    this.withDeferScope(() => this.collectBuilderStatements(block, env, out))
+  }
+
+  private collectBuilderStatements(block: Block, env: Environment, out: SwiftValue[]): void {
+    for (const [index, statement] of block.statements.entries()) {
       this.tick(statement.span)
+      const branch = (name: string, build: (values: SwiftValue[]) => void) => {
+        const evaluate = () => { const values: SwiftValue[] = []; build(values); return values }
+        out.push(...(this.host.withBuilderScope?.(`${statement.kind}:${index}`, name, evaluate) ?? evaluate()))
+      }
 
       switch (statement.kind) {
         case 'exprStmt':
@@ -649,13 +655,14 @@ export class Interpreter {
         case 'ifStmt': {
           const taken = env.child()
           if (this.bindConditions(statement.conditions, taken)) {
-            this.collectBuilderValues(statement.then, taken, out)
+            branch('then', values => this.collectBuilderValues(statement.then, taken, values))
           } else if (statement.else?.kind === 'block') {
-            this.collectBuilderValues(statement.else, env.child(), out)
+            const otherwise = statement.else
+            branch('else', values => this.collectBuilderValues(otherwise, env.child(), values))
           } else if (statement.else) {
             const nested: Block = { kind: 'block', span: statement.else.span, statements: [statement.else] }
-            this.collectBuilderValues(nested, env.child(), out)
-          }
+            branch('else', values => this.collectBuilderValues(nested, env.child(), values))
+          } else branch('empty', () => {})
           break
         }
 
@@ -663,7 +670,7 @@ export class Interpreter {
         // how enum-driven views are written.
         case 'switchStmt': {
           const matched = this.matchSwitch(statement, env)
-          if (matched) this.collectBuilderValues(matched.body, matched.scope, out)
+          branch(String(matched?.index ?? 'empty'), values => { if (matched) this.collectBuilderValues(matched.body, matched.scope, values) })
           break
         }
 
@@ -792,11 +799,27 @@ export class Interpreter {
 
   // -------------------------------------------------------------- statements
 
+  private withDeferScope<T>(body: () => T): T {
+    this.deferred.push([])
+    try { return body() }
+    finally {
+      const pending = this.deferred.pop()!
+      for (const { block, scope } of pending.reverse()) this.executeBlock(block, scope)
+    }
+  }
+
   executeBlock(block: Block, env: Environment): void {
-    for (const statement of block.statements) this.execute(statement, env)
+    this.withDeferScope(() => {
+      for (const statement of block.statements) this.execute(statement, env)
+    })
   }
 
   execute(statement: Stmt, env: Environment): void {
+    if ((statement.kind === 'ifStmt' || statement.kind === 'doCatchStmt') && statement.label) {
+      try { this.execute({ ...statement, label: undefined }, env) }
+      catch (error) { if (!(error instanceof BreakSignal) || error.label !== statement.label) throw error }
+      return
+    }
     this.tick(statement.span)
 
     switch (statement.kind) {
@@ -837,7 +860,7 @@ export class Interpreter {
             this.executeBlock(matched.body, matched.scope)
           } catch (error) {
             // `break` inside a switch case leaves the switch, not an enclosing loop.
-            if (error instanceof BreakSignal) return
+            if (error instanceof BreakSignal && (!error.label || error.label === statement.label)) return
             // `fallthrough` runs the *next* case's body, without testing its pattern -
             // which is why it continues the loop rather than re-matching.
             if (error instanceof FallthroughSignal) {
@@ -856,23 +879,23 @@ export class Interpreter {
           this.tick(statement.span)
           const scope = env.child()
           if (!this.bindConditions(statement.conditions, scope)) return
-          if (this.runLoopBody(statement.body, scope)) return
+          if (this.runLoopBody(statement.body, scope, statement.label)) return
         }
       }
 
       case 'repeatStmt': {
         for (;;) {
           this.tick(statement.span)
-          if (this.runLoopBody(statement.body, env.child())) return
+          if (this.runLoopBody(statement.body, env.child(), statement.label)) return
           if (!truthy(this.evaluate(statement.condition, env))) return
         }
       }
 
       case 'breakStmt':
-        throw new BreakSignal()
+        throw new BreakSignal(statement.label)
 
       case 'continueStmt':
-        throw new ContinueSignal()
+        throw new ContinueSignal(statement.label)
 
       case 'forInStmt': {
         const sequence = this.evaluate(statement.sequence, env)
@@ -881,7 +904,7 @@ export class Interpreter {
           const inner = env.child()
           this.bindLoopVariable(statement, element, inner)
           if (statement.where && !truthy(this.evaluate(statement.where, inner))) continue
-          if (this.runLoopBody(statement.body, inner)) return
+          if (this.runLoopBody(statement.body, inner, statement.label)) return
         }
         return
       }
@@ -950,12 +973,12 @@ export class Interpreter {
    * Returns true when the loop should stop. `continue` is absorbed here, `break`
    * reported upward - which keeps every loop's `for` in `execute` identical.
    */
-  private runLoopBody(body: Block, scope: Environment): boolean {
+  private runLoopBody(body: Block, scope: Environment, label?: string): boolean {
     try {
       this.executeBlock(body, scope)
     } catch (error) {
-      if (error instanceof BreakSignal) return true
-      if (!(error instanceof ContinueSignal)) throw error
+      if (error instanceof BreakSignal && (!error.label || error.label === label)) return true
+      if (!(error instanceof ContinueSignal) || error.label && error.label !== label) throw error
     }
     return false
   }
@@ -1057,9 +1080,8 @@ export class Interpreter {
   /**
    * A `static` member of a type, read without an instance.
    *
-   * Evaluated on each access rather than cached. Swift's statics are lazy and stored,
-   * so a cache would be more faithful - but it would also outlive an edit to the
-   * initialiser, which is the one behaviour a live preview must not have.
+   * Stored values initialize once per loaded program. Reloading clears the storage,
+   * so edited initializers are visible without changing singleton identity on reads.
    */
   private staticMember(typeName: string, member: string, span: SourceSpan): SwiftValue | undefined {
     const members = this.membersOf(typeName)
@@ -1080,7 +1102,14 @@ export class Interpreter {
           namedTypeOf(property.typeAnnotation),
         )
       }
-      return property.initializer ? this.evaluate(property.initializer, this.globals) : NIL
+      if (this.staticStorage.has(property)) return this.staticStorage.get(property)!
+      if (this.initializingStatics.has(property)) this.trap(`Recursive initialization of '${typeName}.${member}'`, span)
+      this.initializingStatics.add(property)
+      try {
+        const value = property.initializer ? this.evaluate(property.initializer, this.globals) : NIL
+        this.staticStorage.set(property, value)
+        return value
+      } finally { this.initializingStatics.delete(property) }
     }
 
     const method = members.find(
@@ -1545,14 +1574,23 @@ export class Interpreter {
   }
 
   private makeClosure(expr: ClosureExpr, env: Environment): ClosureValue {
+    let captured = env
+    if (expr.captures?.length) {
+      const values = expr.captures.map(capture => {
+        if (capture.ownership) throw new UnsupportedAtRuntime(`${capture.ownership} closure captures`, capture.span)
+        return { capture, value: copyValue(this.evaluate(capture.value, env)) }
+      })
+      const self = values.find(item => item.capture.name === 'self')?.value
+      captured = env.child(self?.kind === 'struct' || self?.kind === 'enum' ? self : null)
+      for (const { capture, value } of values) captured.define(capture.name, value, true, capture.span)
+    }
     return {
       kind: 'closure',
       params: expr.params,
       hasExplicitParams: expr.hasExplicitParams,
       body: expr.body,
-      // Captured by reference, so mutations inside the closure reach the enclosing
-      // scope. This is what makes `Button { count += 1 }` work.
-      env,
+      // Unlisted variables still reach the original environment by reference.
+      env: captured,
       span: expr.span,
     }
   }
@@ -2059,7 +2097,10 @@ export class Interpreter {
             span,
           )
         }
-        return this.callFunction(bound, allArgs, span)
+        try { return this.callFunction(bound, allArgs, span) }
+        finally {
+          if (isMutating && lvalue?.mutable && !target.reference) lvalue.set(target)
+        }
       }
       if (bound?.kind === 'closure') return this.callClosure(bound, allArgs.map((a) => a.value), span)
     }
@@ -2109,7 +2150,7 @@ export class Interpreter {
       },
     )
     if (builtin !== undefined) {
-      if (lvalue?.mutable) lvalue.set(replacement ?? target)
+      if (lvalue?.mutable && (replacement !== null || isMutatingMember(member))) lvalue.set(replacement ?? target)
       return builtin
     }
 

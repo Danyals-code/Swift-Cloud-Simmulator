@@ -196,6 +196,11 @@ export class AppRuntime {
     this.interpreter = new Interpreter({ host: this.host })
     this.host.expandStruct = (value) => this.expand(value)
     this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
+    this.host.builderIdentity = (slot, branch, fn) => {
+      this.identity.push(`builder:${slot}`)
+      try { return this.identity.scope(branch, fn) }
+      finally { this.identity.pop() }
+    }
     this.host.callMethod = (receiver, name, args) => this.callMethod(receiver, name, args)
     this.host.conformsTo = (typeName, protocolName) =>
       this.interpreter.conformsTo(typeName, protocolName)

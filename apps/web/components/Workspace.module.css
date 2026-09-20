@@ -1,4 +1,4 @@
-.toolbar { height: 64px; flex-shrink: 0; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar); z-index: 30; }
+.toolbar { height: 64px; flex-shrink: 0; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(max-content,1fr); align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar); z-index: 30; }
 .project { display: flex; align-items: center; min-width: 0; gap: 12px; }
 .home { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; color: var(--color-xc-text); cursor: pointer; flex-shrink: 0; }
 .home:hover { background: var(--color-xc-bar-raised); }

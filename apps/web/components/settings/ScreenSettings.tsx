@@ -4,7 +4,7 @@ import { useState } from 'react'
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, DesignValue, PreviewInput, PreviewScenario, ResourceOperation, SharedStyle, SourceSpan, StateInput } from '@studio/shared'
 import type { DesignScreenNode, DesignTree } from '../../lib/designTree'
 import type { ScreenCommand } from '../../lib/screens'
-import { screenRoot, screenTitleControl, scenarioScreen } from '../../lib/screens'
+import { screenRoot, screenTitleControl, scenarioKey, scenarioScreen } from '../../lib/screens'
 import { PropertyControl } from '../PropertyControl'
 import { TokenField, valueFields } from './TokenField'
 import { Icon } from '../ui/Icon'
@@ -148,7 +148,7 @@ function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onS
     if (collection) nextValue = value === 'empty' ? [] : collection.records
     else if (input) nextValue = parse(input, value)
     else { setError('Choose what the state changes.'); return }
-    const current = scenarios.find(scenario => scenario.name === name.trim())
+    const current = own.find(scenario => scenario.name === name.trim())
     const target = input ?? collection!
     const values = [...(current?.inputs ?? []).filter(item => item.owner !== target.owner || item.name !== target.name), { owner: target.owner, name: target.name, signature: target.signature, value: nextValue }]
     const problem = onSave(name, values)
@@ -158,10 +158,10 @@ function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onS
   return <section className={styles.section} aria-label="States" data-testid="screen-states">
     <div className={styles.sectionHeader}><h3>States</h3><span><button type="button" className={styles.iconButton} aria-label="Add state" title="Add a state" aria-expanded={adding} disabled={busy || !screen.view} onClick={() => { setAdding(!adding); setError(null) }}><Icon name="plus" size={13} /></button></span></div>
     <div className={styles.states}>
-      <button type="button" className={styles.stateRow} aria-pressed={!own.some(scenario => scenario.name === active)} onClick={() => onSelect('')}>Default<small>App data</small></button>
+      <button type="button" className={styles.stateRow} aria-pressed={!own.some(scenario => scenarioKey(scenario) === active)} onClick={() => onSelect('')}>Default<small>App data</small></button>
       {own.map(scenario => <div key={scenario.name} className={styles.inline}>
-        <button type="button" className={styles.stateRow} aria-pressed={scenario.name === active} onClick={() => onSelect(scenario.name)}>{scenario.name}<small>{scenario.inputs?.map(item => Array.isArray(item.value) ? `${item.name}: ${item.value.length} items` : `${item.name}: ${String(item.value)}`).join(', ')}</small></button>
-        <button type="button" className={styles.iconButton} aria-label={`Delete state ${scenario.name}`} disabled={busy} onClick={() => onDelete(scenario.name)}><Icon name="xmark" size={11} /></button>
+        <button type="button" className={styles.stateRow} aria-pressed={scenarioKey(scenario) === active} onClick={() => onSelect(scenarioKey(scenario))}>{scenario.name}<small>{scenario.inputs?.map(item => Array.isArray(item.value) ? `${item.name}: ${item.value.length} items` : `${item.name}: ${String(item.value)}`).join(', ')}</small></button>
+        <button type="button" className={styles.iconButton} aria-label={`Delete state ${scenario.name}`} disabled={busy} onClick={() => onDelete(scenarioKey(scenario))}><Icon name="xmark" size={11} /></button>
       </div>)}
     </div>
     {!inputs.length && !collections.length && !adding && <p className={styles.note}>A state shows this screen with different content — loading, empty, signed out. Add one and the screen gets a switch it can read.</p>}

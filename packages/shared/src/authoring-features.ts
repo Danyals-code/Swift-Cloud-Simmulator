@@ -115,7 +115,7 @@ export interface CopyValue {
   /** The source as written, which is what a call site passes. */
   readonly text: string
   /** The Swift type a number takes as a parameter. */
-  readonly unit?: 'CGFloat' | 'Double'
+  readonly unit?: 'CGFloat' | 'Double' | 'Int'
 }
 
 /** Another view with the same shape as the selected one. */

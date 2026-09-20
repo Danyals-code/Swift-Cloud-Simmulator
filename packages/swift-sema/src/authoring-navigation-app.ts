@@ -155,12 +155,19 @@ function tabContainer(ctx: FeatureContext): TabContainer | undefined {
       if (!chain || !item) return { call, sites: [], file: call.span.file }
       const parts = item.trailingClosure ? labelParts(item.trailingClosure) : {}
       const screen = chain.base.callee.kind === 'identifier' ? chain.base.callee.name : ''
+      let content = raw(ctx, statement.expression.span)
+      for (const modifier of [...chain.modifiers].reverse()) {
+        if (modifier.callee.kind !== 'memberAccess' || !modifier.callee.base || !['tabItem', 'tag'].includes(modifier.callee.member)) continue
+        const start = modifier.callee.base.span.end - statement.expression.span.start
+        const end = modifier.span.end - statement.expression.span.start
+        content = content.slice(0, start) + content.slice(end)
+      }
       sites.push({
         tab: {
           name: parts.name?.text ?? '',
           icon: parts.icon?.text ?? '',
           screen,
-          content: raw(ctx, chain.base.span),
+          content,
         },
         span: statement.expression.span,
         ...(parts.name ? { nameSpan: parts.name.span } : {}),
@@ -237,7 +244,9 @@ export function navigationPatches(ctx: FeatureContext, operation: NavigationOper
     }
     if (model.style !== 'tabs') return { patches: [] }
     if (!container || container.sites.length !== 1) throw new Error('Remove the other tabs first; a single stack starts on one screen.')
-    return { patches: [entryPatch(ctx, container.sites[0]!.tab.screen)] }
+    // Keep the original lexical scope, initializer arguments and inline content.
+    // Moving a bare type name into WindowGroup loses all three.
+    return { patches: [patch(container.call.span, container.sites[0]!.tab.content!)] }
   }
   if (operation.kind === 'tab-add' && model.style !== 'tabs') {
     if (!identifier(operation.screen) || !namedStruct(ctx, operation.screen)) throw new Error('Choose a screen for this tab.')
@@ -307,9 +316,21 @@ function useTabs(ctx: FeatureContext, name: string, icon: string, second?: { scr
   const first = model.root
   if (!first) throw new Error(model.reason ?? 'This app’s first screen is built in Swift. Open the code to add tabs.')
   const file = navigationFile(ctx)
-  if (ctx.files.some(existing => existing.id === file) || allDeclarations(ctx).some(d => 'name' in d && d.name === 'AppNavigation')) throw new Error('This project already has an AppNavigation view. Open the code to change the tabs.')
+  if (first === 'AppNavigation') {
+    const body = bodyExpression(namedStruct(ctx, first))
+    if (!body) throw new Error('This navigation view is built in Swift. Open the code to change it.')
+    const lines = [`            ${raw(ctx, body.span)}\n                .tabItem { Label(${swiftString(name)}, systemImage: ${swiftString(icon)}) }`]
+    if (second) { validTab(second.name, second.icon); lines.push(tabLine(second.screen, second.name, second.icon, '            ')) }
+    return { patches: [patch(body.span, `TabView {\n${lines.join('\n')}\n        }`)], created: [] }
+  }
+  let navigationName = 'AppNavigation', destination = file
+  const names = new Set(allDeclarations(ctx).flatMap(d => 'name' in d ? [d.name] : []))
+  for (let suffix = 2; names.has(navigationName) || ctx.files.some(existing => existing.id === destination); suffix++) {
+    navigationName = `AppNavigation${suffix}`
+    destination = file.replace(/AppNavigation\.swift$/, `${navigationName}.swift`)
+  }
   const lines = [tabLine(first, name, icon, '            ')]
   if (second) { validTab(second.name, second.icon); lines.push(tabLine(second.screen, second.name, second.icon, '            ')) }
-  const text = `import SwiftUI\n\n/// The app's tabs. Each tab shows one screen.\nstruct AppNavigation: View {\n    var body: some View {\n        TabView {\n${lines.join('\n')}\n        }\n    }\n}\n`
-  return { patches: [entryPatch(ctx, 'AppNavigation')], created: [{ id: file, text }] }
+  const text = `import SwiftUI\n\n/// The app's tabs. Each tab shows one screen.\nstruct ${navigationName}: View {\n    var body: some View {\n        TabView {\n${lines.join('\n')}\n        }\n    }\n}\n`
+  return { patches: [entryPatch(ctx, navigationName)], created: [{ id: destination, text }] }
 }

@@ -1,5 +1,5 @@
 import type { SourceChange } from '@studio/shared'
-import type { Project } from './types'
+import { sourcePathsConflict, type Project } from './types'
 import { readStudioMetadata, type StudioMetadata } from './studio-metadata'
 import { validateAssets, type ImageAsset } from './assets'
 import { validateColors, type ColorAsset } from './colors'
@@ -43,6 +43,7 @@ export function applyProjectTransaction(project: Project, revision: number, tran
   const files = project.files.filter(f => !byId.get(f.id)?.deleted).map(f => byId.has(f.id) ? { ...f, text: byId.get(f.id)!.after } : f)
   for (const c of changes) if (c.before === null && !c.deleted) files.push({ id: c.file, text: c.after })
   if (!files.length) return { ok: false, reason: 'A project needs at least one Swift file.' }
+  if (sourcePathsConflict(files.map(file => file.id))) return { ok: false, reason: 'Swift file paths must be unique, including letter case and Unicode spelling.' }
   return { ok: true, project: { ...project, files: changes.length ? files : project.files, studio: transaction.studio?.after ?? project.studio, assets: transaction.assets?.after ?? project.assets, colors: colorsChanged ? transaction.colors!.after : project.colors, updatedAt: Date.now() } }
 }
 

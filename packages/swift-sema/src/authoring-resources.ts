@@ -1,7 +1,7 @@
 import type { AuthoringNode, FontTokenValue, PreviewColorAsset, ResourceOperation, ShadowTokenValue, SharedStyle, StyleKind, StyleProperty, SourceSpan, SourceFile, TokenDefinition } from '@studio/shared'
 import { Parser, forEachChild, type Decl, type Expr, type ExtensionDecl, type Node, type VarDecl } from '@studio/swift-syntax'
 import { AUTHORING_COLORS, AUTHORING_FONTS, swiftString } from './design-controls'
-import { allDeclarations, callOf, hasComments, identifier, patch, raw, shadowsMember, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, applyPatches, callOf, hasComments, identifier, patch, raw, shadowsMember, type FeatureContext, type SourcePatch } from './authoring-context'
 
 /**
  * Design tokens and the older shared styles they grew out of.
@@ -441,7 +441,10 @@ export function editResource(ctx: FeatureContext, node: AuthoringNode, op: Resou
           const expression = toSystem ? checkedExpression(ctx, 'color', definition.value) : `Color(${swiftString(recipe.style.name)})`
           if (recipe.companion && !twinExpression) throw new Error(`The ShapeStyle spelling of ${recipe.style.name} is not a single colour. Edit it in Tokens.swift.`)
           const patches = [patch(recipe.style.source, expression), ...(twinExpression ? [patch(twinExpression.span, expression)] : [])]
-          if (toSystem) return { patches, colors: (ctx.colors ?? []).filter(color => color.name !== recipe.colorSet) }
+          if (toSystem) {
+            const used = usesColorSet(applyPatches(ctx, patches), recipe.colorSet!)
+            return { patches, colors: (ctx.colors ?? []).filter(color => used || color.name !== recipe.colorSet) }
+          }
           const light = hex(definition.value), dark = definition.dark ? hex(definition.dark) : undefined
           if (!light || definition.dark && !dark) throw new Error('Use hex values such as #0A84FF.')
           if (ctx.colors?.some(color => color.name.toLowerCase() === recipe.style.name.toLowerCase())) throw new Error(`The asset catalog already has a colour set named ${recipe.style.name}.`)
@@ -574,4 +577,18 @@ export function validateResourceRemoval(files: readonly SourceFile[], removedNam
   const ctx: FeatureContext = { files, ast: parsed.map(p => p.sourceFile), nodes: [] }
   try { for (const from of removedNames) assetReferences(ctx, { kind: 'asset-references', from, to: null }); return null }
   catch (error) { return `The reviewed choices leave an unresolved image reference. ${error instanceof Error ? error.message : 'Keep its resource or change the source choice.'}` }
+}
+
+/** Unknown/dynamic names may still resolve to the set: retain it conservatively. */
+function usesColorSet(files: readonly SourceFile[], name: string): boolean {
+  let used = false
+  const visit = (node: Node) => {
+    if (node.kind === 'call' && (node.callee.kind === 'identifier' && node.callee.name === 'Color' || node.callee.kind === 'memberAccess' && node.callee.member === 'Color')) {
+      const value = node.args.find(arg => arg.label === null)?.value
+      if (value && (value.kind !== 'stringLiteral' || value.segments.some(s => s.kind !== 'text') || value.segments.map(s => s.kind === 'text' ? s.value : '').join('') === name)) used = true
+    }
+    forEachChild(node, visit)
+  }
+  for (const file of files) visit(Parser.parse(file.text, file.id).sourceFile)
+  return used
 }

@@ -174,8 +174,9 @@ describe('changing the navigation style', () => {
     expect(refuse(tabbed(), { kind: 'navigation-style', style: 'stack' })).toContain('Remove the other tabs first')
     const one = edit(tabbed(), { kind: 'tab-remove', index: 1 })
     const stack = edit(one, { kind: 'navigation-style', style: 'stack' })
-    expect(stack[0]!.text).toContain('WindowGroup { HomeScreen() }')
-    expect(model(stack).navigation).toMatchObject({ style: 'stack', root: 'HomeScreen' })
+    // Keep the original lexical scope, including any state the tab content reads.
+    expect(stack[0]!.text).toContain('WindowGroup { RootView() }')
+    expect(model(stack).navigation).toMatchObject({ style: 'stack', root: 'RootView' })
     draws(stack)
   })
 })

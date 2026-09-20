@@ -17,6 +17,7 @@ import { allDeclarations, expressionOf, hasComments, identifier, ownerOf, patch,
 
 /** Modifiers whose number is a length, so a parameter for one is a `CGFloat`. */
 const LENGTHS = new Set(['padding', 'spacing', 'cornerRadius', 'radius', 'width', 'height', 'size', 'offset', 'blur', 'lineSpacing', 'tracking'])
+const INTEGERS = new Set(['lineLimit', 'tag'])
 /** Where an implicit member such as `.accent` is a colour rather than part of the shape. */
 const COLOR_PROPERTIES = new Set(['foregroundStyle', 'foregroundColor', 'background', 'tint', 'fill', 'stroke', 'strokeBorder', 'accentColor', 'shadow', 'border'])
 const SYMBOL_LABELS = new Set(['systemName', 'systemImage'])
@@ -44,8 +45,9 @@ function valueOf(ctx: FeatureContext, expr: Expr, context: { owner: string; labe
     }
     case 'integerLiteral': case 'floatLiteral': {
       const role = LENGTHS.has(context.owner) ? context.owner : context.label ?? context.owner
-      values.push({ kind: 'number', role, span: expr.span, text: raw(ctx, expr.span).trim(), unit: LENGTHS.has(context.owner) || context.label && LENGTHS.has(context.label) ? 'CGFloat' : 'Double' })
-      return '«n»'
+      const unit = INTEGERS.has(context.owner) && expr.kind === 'integerLiteral' ? 'Int' : LENGTHS.has(context.owner) || context.label && LENGTHS.has(context.label) ? 'CGFloat' : 'Double'
+      values.push({ kind: 'number', role, span: expr.span, text: raw(ctx, expr.span).trim(), unit })
+      return `«n:${unit}»`
     }
     case 'memberAccess': {
       // `.accent` in a colour position is a value; `.center` in an alignment is shape.

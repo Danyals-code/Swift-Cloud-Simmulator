@@ -1,5 +1,6 @@
 'use client'
 
+import { scenarioKey } from '../lib/screens'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
 import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
@@ -898,7 +899,7 @@ export function DevicePane({
                       options={canvas.compile}
                       device={device}
                       preview={preview}
-                      active={canvas.activeState === scenario.name}
+                      active={canvas.activeState === scenarioKey(scenario)}
                       {...(canvas.onSelectState ? { onSelect: () => canvas.onSelectState!(page, scenario) } : {})}
                       draw={tree => screenFor(tree, false, 1, page)}
                     />
@@ -924,7 +925,7 @@ export function DevicePane({
                     onSelectPage?.(page)
                     // This phone is the screen with the app's own data, so choosing it
                     // also steps out of whichever state was being shown.
-                    if (canvas?.activeState && statesOf?.(page).some(state => state.name === canvas.activeState)) canvas.onSelectState?.(page, null)
+                    if (canvas?.activeState && statesOf?.(page).some(state => scenarioKey(state) === canvas.activeState)) canvas.onSelectState?.(page, null)
                   }} aria-label={`Edit ${page.name}`} title={page.parentId ? `Reached from ${pages!.find(parent => parent.id === page.parentId)?.name ?? 'another screen'}` : 'Screen'}>{page.name}</button>{page.id === selectedPageId ? <span className={styles.liveTag}>Editing</span> : null}</figcaption>
                 </figure>
               })}

@@ -237,3 +237,17 @@ describe('dirname', () => {
     expect(dirname('A.swift')).toBe('')
   })
 })
+
+it('avoids case and Unicode collisions when importing or moving files', async () => {
+  const { projectFromFiles, moveFile, applyProjectTransaction } = await import('./index')
+  const project = projectFromFiles([
+    { name: 'A/Home.swift', text: '// A' },
+    { name: 'B/home.swift', text: '// B' },
+    { name: 'Café.swift', text: '// composed' },
+    { name: 'Cafe\u0301.swift', text: '// decomposed' },
+  ])!
+  expect(project.files[3]!.id).toBe('Sources/Cafe\u0301 2.swift')
+  const moved = moveFile(project, 'Sources/B/home.swift', 'Sources/A')
+  expect(moved.files[1]!.id).toBe('Sources/A/home 2.swift')
+  expect(applyProjectTransaction(project, 1, { projectId: project.id, baseRevision: 1, changes: [{ file: 'Sources/A/HOME.swift', before: null, after: '// conflict' }] })).toMatchObject({ ok: false })
+})

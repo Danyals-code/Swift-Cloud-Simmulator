@@ -237,8 +237,19 @@ struct ${name}: View {
 `
 }
 
+/** Match the portable archive's rules on case-insensitive, Unicode-normalizing filesystems. */
+export const filePathKey = (path: string): string => path.normalize('NFC').toLowerCase()
+export function sourcePathsConflict(paths: readonly string[]): boolean {
+  const keys = paths.map(filePathKey), unique = new Set(keys)
+  if (unique.size !== keys.length) return true
+  return keys.some(path => {
+    const parts = path.split('/')
+    return parts.some((_, index) => index > 0 && unique.has(parts.slice(0, index).join('/')))
+  })
+}
+
 export function addFile(project: Project, fileId: FileId, text?: string): Project {
-  if (project.files.some((f) => f.id === fileId)) return project
+  if (sourcePathsConflict([...project.files.map(f => f.id), fileId])) return project
   return {
     ...project,
     files: [...project.files, { id: fileId, text: text ?? starterContentFor(fileId) }],
@@ -249,7 +260,7 @@ export function addFile(project: Project, fileId: FileId, text?: string): Projec
 export function renameFile(project: Project, from: FileId, to: FileId): Project {
   if (from === to) return project
   if (!project.files.some((f) => f.id === from)) return project
-  if (project.files.some((f) => f.id === to)) return project
+  if (sourcePathsConflict(project.files.map(f => f.id === from ? to : f.id))) return project
 
   return {
     ...project,
@@ -351,11 +362,12 @@ export function renameFolder(project: Project, from: string, to: string): Projec
 
   const existing = folderPaths(project)
   if (!existing.includes(from)) return project
-  if (existing.includes(to)) return project
+  if (existing.some(path => path !== from && filePathKey(path) === filePathKey(to))) return project
   // Renaming a group into its own descendant would orphan everything under it.
   if (isInFolder(to, from)) return project
 
   const rewrite = (path: string) => (isInFolder(path, from) ? to + path.slice(from.length) : path)
+  if (sourcePathsConflict(project.files.map(file => rewrite(file.id)))) return project
 
   return {
     ...project,
@@ -393,8 +405,8 @@ export function removeFolder(project: Project, path: string): Project {
  * already holds that name succeeds instead of refusing.
  */
 export function uniqueFileId(project: Project, wanted: FileId): FileId {
-  const taken = new Set(project.files.map((f) => f.id))
-  if (!taken.has(wanted)) return wanted
+  const taken = new Set(project.files.map((f) => filePathKey(f.id)))
+  if (!taken.has(filePathKey(wanted))) return wanted
 
   const folder = dirname(wanted)
   const base = fileBasename(wanted).replace(/\.swift$/, '')
@@ -402,7 +414,7 @@ export function uniqueFileId(project: Project, wanted: FileId): FileId {
 
   for (let n = 2; n < 1000; n++) {
     const candidate = `${prefix}${base} ${n}.swift`
-    if (!taken.has(candidate)) return candidate
+    if (!taken.has(filePathKey(candidate))) return candidate
   }
   return `${prefix}${base} ${Date.now()}.swift`
 }
@@ -413,6 +425,7 @@ export function moveFile(project: Project, fileId: FileId, folder: string): Proj
   if (dirname(fileId) === folder) return project
 
   const target = uniqueFileId(project, `${folder}/${fileBasename(fileId)}`)
+  if (sourcePathsConflict(project.files.map(file => file.id === fileId ? target : file.id))) return project
   return {
     ...project,
     files: project.files.map((file) => (file.id === fileId ? { ...file, id: target } : file)),

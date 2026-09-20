@@ -45,7 +45,7 @@ import { FileSwitcher } from './FileSwitcher'
 import { JumpBar } from './JumpBar'
 import { reconcileLayerLabel } from '../lib/layerLabels'
 const DesignReview = dynamic(() => import('./DesignReview').then(m => m.DesignReview), { ssr: false })
-import { scenarioScreen, screenCatalog, screenDefinition, type ScreenCommand, type DesignScreen } from '../lib/screens'
+import { scenarioKey, scenarioScreen, screenCatalog, screenDefinition, type ScreenCommand, type DesignScreen } from '../lib/screens'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery } from './TemplateGallery'
@@ -253,8 +253,8 @@ export function Studio() {
   const images = useMemo(() => project?.assets?.map(asset => ({ name: asset.name, width: asset.light.width / asset.scale, height: asset.light.height / asset.scale, light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined })), [project?.assets])
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
   const files = project?.files ?? NO_FILES
-  const [scenarioSelection, setScenarioSelection] = useState<{ projectId: string; name: string } | null>(null)
-  const scenario = scenarioSelection?.projectId === project?.id ? project?.studio?.scenarios.find(s => s.name === scenarioSelection?.name) : undefined
+  const [scenarioSelection, setScenarioSelection] = useState<{ projectId: string; key: string } | null>(null)
+  const scenario = scenarioSelection?.projectId === project?.id ? project?.studio?.scenarios.find(s => scenarioKey(s) === scenarioSelection?.key) : undefined
   const standalonePreview = !inspecting && project?.id === previewFrom?.projectId ? previewFrom?.view : undefined
   const [previewResetEpoch, setPreviewResetEpoch] = useState(0)
   const previewIdentity = useMemo(() => JSON.stringify([project?.id, project?.files, scenario ?? null, previewResetEpoch]), [project?.id, project?.files, scenario, previewResetEpoch])
@@ -553,9 +553,9 @@ export function Studio() {
     const problem = validatePreviewScenario(snapshot, scenario)
     if (problem) return problem
     const before = project.studio, metadata = before ?? emptyStudioMetadata()
-    const after = { ...metadata, scenarios: [...metadata.scenarios.filter(s => s.name !== scenario.name), scenario] }
+    const after = { ...metadata, scenarios: [...metadata.scenarios.filter(s => scenarioKey(s) !== scenarioKey(scenario)), scenario] }
     const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after } })
-    if (!error) setScenarioSelection({ projectId: project.id, name: scenario.name })
+    if (!error) setScenarioSelection({ projectId: project.id, key: scenarioKey(scenario) })
     return error
   }, [project, stale, result?.authoring])
 
@@ -689,11 +689,11 @@ export function Studio() {
       })
       // A state saved beside the value it switches: one edit, one undo.
       const savedScenario = scenarioFrom?.(plan.authoring) ?? null
-      const scenarios = savedScenario ? [...metadata.scenarios.filter(item => item.name !== savedScenario.name), savedScenario] : undefined
+      const scenarios = savedScenario ? [...metadata.scenarios.filter(item => scenarioKey(item) !== scenarioKey(savedScenario)), savedScenario] : undefined
       const transaction = { ...selectedPlan, ...colorChange, ...(screens || scenarios || JSON.stringify(labels) !== JSON.stringify(metadata.labels) ? { studio: { before, after: { ...metadata, ...(screens ? { screens } : {}), ...(scenarios ? { scenarios } : {}), labels } } } : {}) }
       const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction)
       if (problem) { setEditNote(problem); return problem }
-      if (savedScenario) setScenarioSelection({ projectId: project.id, name: savedScenario.name })
+      if (savedScenario) setScenarioSelection({ projectId: project.id, key: scenarioKey(savedScenario) })
       if (changed) setCommittedEditRevision(revision => revision + 1)
       if (plan.changes.length && !selectionChanged && !preserveSelection) {
         const selected = selectedPlan.selection
@@ -782,7 +782,7 @@ export function Studio() {
    * canvas cannot show a lane the outline does not, or name a screen differently.
    */
   const scenarios = project?.studio?.scenarios ?? NO_FILES
-  const activeState = scenario?.name
+  const activeState = scenario ? scenarioKey(scenario) : undefined
   const canvas = useMemo(() => !designPages || !project ? undefined : {
     laneNames: [...tree.lanes.map(lane => lane.name), ...(tree.detached.length ? ['Not linked yet'] : [])],
     laneIcons: [...tree.lanes.map(lane => lane.root.page.icon), ...(tree.detached.length ? [undefined] : [])],
@@ -795,7 +795,7 @@ export function Studio() {
     ...(activeState ? { activeState } : {}),
     onSelectState: (page: PagePreview, state: PreviewScenario | null) => {
       openPage(page)
-      setScenarioSelection(state ? { projectId: project.id, name: state.name } : null)
+      setScenarioSelection(state ? { projectId: project.id, key: scenarioKey(state) } : null)
     },
     compile: {
       projectId: project.id,
@@ -834,11 +834,11 @@ export function Studio() {
     } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
   }, [project, stale, snapshot, planDesignEdit])
 
-  const deleteScenario = useCallback((name: string) => {
+  const deleteScenario = useCallback((key: string) => {
     const state = useStudio.getState()
     if (!project || state.project !== project || !project.studio) return
-    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => s.name !== name) } } })
-    if (error) setEditNote(error); else setScenarioSelection(null)
+    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => scenarioKey(s) !== key) } } })
+    if (error) setEditNote(error); else setScenarioSelection(current => current?.projectId === project.id && current.key === key ? null : current)
   }, [project])
 
   const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
@@ -1228,8 +1228,8 @@ export function Studio() {
         navigation={<AppNavigationSettings navigation={result?.authoring?.navigation} screens={screens} busy={busy} onCommand={navigationCommand} onReveal={revealSpan} />} />
     : level === 'screen'
       ? focusedScreen
-        ? <ScreenSettings key={focusedScreen.id} screen={focusedScreen} tree={tree} snapshot={result?.authoring} tokens={result?.authoring?.styles ?? NO_FILES} busy={busy} scenarios={project.studio?.scenarios ?? NO_FILES} activeScenario={scenario?.name ?? ''}
-            onSelectScenario={name => setScenarioSelection(name ? { projectId: project.id, name } : null)} onSaveScenario={saveScenario} onDeleteScenario={deleteScenario} onCreateStateValue={createStateValue} onScreenCommand={updateScreens}
+        ? <ScreenSettings key={focusedScreen.id} screen={focusedScreen} tree={tree} snapshot={result?.authoring} tokens={result?.authoring?.styles ?? NO_FILES} busy={busy} scenarios={project.studio?.scenarios ?? NO_FILES} activeScenario={scenario ? scenarioKey(scenario) : ''}
+            onSelectScenario={key => setScenarioSelection(key ? { projectId: project.id, key } : null)} onSaveScenario={saveScenario} onDeleteScenario={deleteScenario} onCreateStateValue={createStateValue} onScreenCommand={updateScreens}
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value })}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)} onSelect={selectAuthoring} onReveal={revealSpan} />
         : <p className="text-[12px] text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>

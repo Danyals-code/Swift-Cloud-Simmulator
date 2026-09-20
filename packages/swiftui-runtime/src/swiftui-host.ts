@@ -240,6 +240,12 @@ export class SwiftUIHost implements InterpreterHost {
    * reordered, rather than staying with the position.
    */
   scopeIdentity: (<T>(key: string, fn: () => T) => T) | null = null
+  builderIdentity: (<T>(slot: string, branch: string, fn: () => T) => T) | null = null
+
+  withBuilderScope(slot: string, branch: string, build: () => SwiftValue[]): readonly SwiftValue[] {
+    const expand = () => this.toViews(build()).map(value => view(value))
+    return this.builderIdentity ? this.builderIdentity(slot, branch, expand) : expand()
+  }
 
   /**
    * Calls a method on a user struct, by name.
