@@ -112,9 +112,9 @@ export class SwiftThrow {
  * return code would have to be checked and propagated at every one of them - which
  * is exactly the kind of bookkeeping that gets missed in one branch.
  */
-export class BreakSignal {}
+export class BreakSignal { constructor(readonly label?: string) {} }
 
-export class ContinueSignal {}
+export class ContinueSignal { constructor(readonly label?: string) {} }
 
 /**
  * `fallthrough` - carry on into the next `switch` case's body.

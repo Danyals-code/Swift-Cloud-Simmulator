@@ -373,6 +373,7 @@ export interface ErrorDecl extends NodeBase {
  * same either way, and an empty `catches` list means nothing is caught here.
  */
 export interface DoCatchStmt extends NodeBase {
+  readonly label?: string
   readonly kind: 'doCatchStmt'
   readonly body: Block
   readonly catches: readonly CatchClause[]
@@ -475,6 +476,7 @@ export type Condition =
   | { readonly kind: 'caseMatch'; readonly pattern: Pattern; readonly value: Expr }
 
 export interface IfStmt extends NodeBase {
+  readonly label?: string
   readonly kind: 'ifStmt'
   readonly conditions: readonly Condition[]
   readonly then: Block
@@ -495,6 +497,7 @@ export interface GuardStmt extends NodeBase {
 }
 
 export interface SwitchStmt extends NodeBase {
+  readonly label?: string
   readonly kind: 'switchStmt'
   readonly subject: Expr
   readonly cases: readonly SwitchCase[]
@@ -543,26 +546,31 @@ export interface PatternBinding extends NodeBase {
 }
 
 export interface WhileStmt extends NodeBase {
+  readonly label?: string
   readonly kind: 'whileStmt'
   readonly conditions: readonly Condition[]
   readonly body: Block
 }
 
 export interface RepeatStmt extends NodeBase {
+  readonly label?: string
   readonly kind: 'repeatStmt'
   readonly body: Block
   readonly condition: Expr
 }
 
 export interface BreakStmt extends NodeBase {
+  readonly label?: string
   readonly kind: 'breakStmt'
 }
 
 export interface ContinueStmt extends NodeBase {
+  readonly label?: string
   readonly kind: 'continueStmt'
 }
 
 export interface ForInStmt extends NodeBase {
+  readonly label?: string
   readonly kind: 'forInStmt'
   readonly variable: string
   readonly variableSpan: SourceSpan
@@ -753,7 +761,14 @@ export interface ClosureParam extends NodeBase {
   readonly type: TypeRef | null
 }
 
+export interface ClosureCapture extends NodeBase {
+  readonly name: string
+  readonly value: Expr
+  readonly ownership?: 'weak' | 'unowned'
+}
+
 export interface ClosureExpr extends NodeBase {
+  readonly captures?: readonly ClosureCapture[]
   readonly kind: 'closure'
   readonly params: readonly ClosureParam[]
   /** false when the closure relies on `$0` shorthand. */
@@ -994,6 +1009,7 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
       node.args.forEach((a) => visit(a.value))
       return
     case 'closure':
+      node.captures?.forEach(capture => visit(capture.value))
       node.params.forEach((p) => {
         if (p.type) visit(p.type)
       })

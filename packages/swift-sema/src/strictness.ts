@@ -336,6 +336,7 @@ class StrictnessLinter {
         return
 
       case 'closure':
+        expr.captures?.forEach(capture => this.expression(capture.value))
         this.block(expr.body)
         return
 

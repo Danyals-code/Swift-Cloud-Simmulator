@@ -144,3 +144,16 @@ describe('projectFromFiles', () => {
     expect(isPristine(reopened!)).toBe(true)
   })
 })
+
+it('retains templates with metadata-only edits, resources, or empty groups', async () => {
+  const { emptyStudioMetadata } = await import('./studio-metadata')
+  const initial = createProjectFromTemplate(TEMPLATES[0]!, 0)
+  const metadata = emptyStudioMetadata()
+  expect(isPristine({ ...initial, studio: metadata })).toBe(true)
+  for (const project of [
+    { ...initial, studio: { ...metadata, screens: [{ view: 'ContentView', name: 'My screen' }] } },
+    { ...initial, studio: { ...metadata, variants: [{ owner: 'Card', name: 'Large', signature: '', values: [] }] } },
+    { ...initial, colors: [{ name: 'brand', light: '#FF0000' }] },
+    { ...initial, folders: ['Sources/Empty'] },
+  ]) expect(isPristine(project)).toBe(false)
+})

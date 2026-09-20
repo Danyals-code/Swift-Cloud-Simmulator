@@ -2,6 +2,7 @@ import { newProjectId, normalizeProject, normalizeProjectName, normalizeFileName
 import { DEVICES } from '@studio/sim-shell'
 import { isPreviewTarget, type SourceFile } from '@studio/shared'
 import { encodeText, type ExportBundle } from './bundle'
+import { importSourceAssets } from './import-assets'
 
 export const PROJECT_DOCUMENT = '.swiftstudio/project.json'
 interface ResourceEntry { id: string; name: string; scale: 1 | 2 | 3; light: string; dark?: string }
@@ -97,12 +98,27 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
   })
   const colors = (Array.isArray(value.colors) ? value.colors : []).flatMap(c => {
     if (!object(c) || typeof c.name !== 'string' || typeof c.path !== 'string') throw new Error('Invalid colour set reference.')
-    // A colour set deleted or renamed in Xcode is a reviewed deletion, exactly like a
-    // removed Swift file; one written with appearances we do not read stays in the
-    // catalog and out of the project. Neither is a reason to refuse the archive.
+    // Missing baseline names are deletions; renamed sets are discovered below.
+    // Unsupported appearances stay out of the project without refusing the archive.
     if (!entries.has(c.path)) return []
     try { return [readColorSet(c.name, decodeText(read(c.path)))] } catch { return [] }
   })
+  // The handoff is a baseline, not an inventory of the developer's current catalog.
+  // Read additions too, while retaining stable IDs for resources in the baseline.
+  const knownDirectories = new Set<string>()
+  for (const resource of value.assets) {
+    const path = (resource as { light: string }).light
+    knownDirectories.add(path.slice(0, path.lastIndexOf('/') + 1))
+  }
+  for (const resource of Array.isArray(value.colors) ? value.colors : []) {
+    const path = (resource as { path: string }).path
+    knownDirectories.add(path.slice(0, path.lastIndexOf('/') + 1))
+  }
+  const directories = [...knownDirectories]
+  const additions = new Map([...entries].filter(([path]) => path.startsWith(root) && path.includes('.xcassets/') && !directories.some(directory => path.startsWith(directory))))
+  const discovered = importSourceAssets(files.map(file => ({ name: file.id, text: file.text })), additions)?.project
+  assets.push(...(discovered?.assets ?? []))
+  colors.push(...(discovered?.colors ?? []))
   const metadata = entries.get(`${root}.swiftstudio/studio.json`)
   const { colors: _ignored, ...identity } = value.project as Record<string, unknown>
   void _ignored

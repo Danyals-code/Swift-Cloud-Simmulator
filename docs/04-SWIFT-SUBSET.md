@@ -59,7 +59,8 @@ this table pretending otherwise:
 | `while`, `repeat-while`, `break`, `continue`, labelled loops | T1 |
 | Optionals: `?`, `!`, `if let`, `guard let`, `??`, optional chaining | T1 |
 | `is`, `as`, `as?`, `as!` | T1 |
-| Closures: trailing, shorthand `$0`, capture lists, `@escaping` | T1 |
+| Closures: trailing, shorthand `$0`, value/alias capture lists, `@escaping` | T1 |
+| `weak` / `unowned` closure captures | ✗ — diagnosed; preview does not model ARC lifetimes |
 | String interpolation, multiline `"""`, raw `#"..."#` | T1 |
 | Array / dictionary / set literals, ranges (`..<`, `...`) | T1 |
 | `throws` / `try` / `try?` / `try!` / `do-catch` / `rethrows` | T1 |

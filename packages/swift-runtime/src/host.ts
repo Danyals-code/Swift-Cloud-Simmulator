@@ -38,6 +38,8 @@ export interface HostCall {
  * through to its own error reporting rather than the host having to guess.
  */
 export interface InterpreterHost {
+  /** Preserve structural branch identity while building and expanding its values. */
+  withBuilderScope?(slot: string, branch: string, build: () => SwiftValue[]): readonly SwiftValue[]
   /** Install a builder environment before evaluating a receiver's children. */
   withMemberScope?(member: string, args: readonly CallArgument[], evaluate: () => SwiftValue): SwiftValue
 

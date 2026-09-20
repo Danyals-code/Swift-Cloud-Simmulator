@@ -293,7 +293,8 @@ struct ContentView: View {
  *
  * Deleting a colour set, renaming one, or letting Xcode add a High Contrast
  * appearance are all ordinary things to do. None of them is a reason to refuse the
- * archive: the colour is a reviewed deletion, exactly as a removed Swift file is.
+ * archive: a removed or unsupported colour is a reviewed deletion, while a renamed
+ * colour is imported under its new name.
  */
 describe('colour sets that changed outside the studio', () => {
   const withColors = (): Project => ({ ...project('Text("Hi").foregroundStyle(Color("accent"))'), assets: undefined, colors: [{ name: 'accent', light: '#0A84FF', dark: '#409CFF' }, { name: 'surface', light: '#FFFFFF' }] })
@@ -307,7 +308,7 @@ describe('colour sets that changed outside the studio', () => {
       else { entries[path.replace('surface.colorset', 'Surface.colorset')] = entries[path]!; delete entries[path] }
       const imported = readProjectArchive(zipSync(entries))
       expect(imported.problem, change).toBeNull()
-      expect(imported.project!.colors?.map(color => color.name), change).toEqual(['accent'])
+      expect(imported.project!.colors?.map(color => color.name), change).toEqual(change === 'rename' ? ['accent', 'Surface'] : ['accent'])
       expect(imported.project!.files.length, change).toBe(source.files.length)
     }
   })

@@ -744,6 +744,10 @@ export class Checker {
 
       case 'closure': {
         const inner = scope.child()
+        for (const capture of expr.captures ?? []) {
+          this.checkExpression(capture.value, scope)
+          inner.declare({ name: capture.name, kind: 'local', span: capture.span })
+        }
         for (const param of expr.params) {
           inner.declare({ name: param.name, kind: 'parameter', span: param.span })
           if (/^\$[A-Za-z_]/.test(param.name)) inner.declare({ name: param.name.slice(1), kind: 'parameter', span: param.span })

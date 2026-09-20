@@ -2,6 +2,9 @@ import { Unzip, UnzipInflate } from 'fflate'
 
 export const MAX_ARCHIVE_BYTES = 48 * 1024 * 1024
 const MAX_EXPANDED_BYTES = 64 * 1024 * 1024
+// 256 sources + 256 colors + 64 light/dark image sets already exceed 512.
+// Leave room for scaffolding and directory entries; byte/inflation limits still apply.
+export const MAX_ARCHIVE_ENTRIES = 2048
 const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
   for (let n = 0; n < 8; n++) value = (value >>> 1) ^ (0xedb88320 & -(value & 1))
   return value >>> 0
@@ -28,7 +31,7 @@ export function readArchiveEntries(bytes: Uint8Array): Map<string, Uint8Array> {
   if (end < Math.max(0, bytes.length - 65557)) return fail()
   if (data.getUint16(end + 4, true) || data.getUint16(end + 6, true) || data.getUint16(end + 8, true) !== data.getUint16(end + 10, true)) return fail()
   const count = data.getUint16(end + 10, true), start = data.getUint32(end + 16, true)
-  if (count > 512) throw new Error('That archive has too many entries.')
+  if (count > MAX_ARCHIVE_ENTRIES) throw new Error('That archive has too many entries.')
   if (start + data.getUint32(end + 12, true) !== end) return fail()
   const headers = new Map<string, { size: number; crc: number; selected: boolean; offset: number }>(), paths = new Set<string>(), offsets = new Set<number>()
   let position = start, declared = 0, swiftBytes = 0

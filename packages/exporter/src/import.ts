@@ -31,6 +31,7 @@ export function readProjectArchive(bytes: Uint8Array): ImportedArchive {
     const portable = readHandoff(entries)
     if (portable) return { files: portable.project.files.map(f => ({ name: f.id, text: f.text })), problem: null, ...portable }
     const files = [...entries].filter(([path]) => path.endsWith('.swift') && !isManifest(path)).map(([path, data]) => ({ name: insideTarget(path), text: decodeText(data) }))
+    if (files.length > 256) throw new Error('That archive contains too many Swift files. The limit is 256.')
     const ids = new Set(files.map(f => f.name.normalize('NFC').toLowerCase()))
     if (ids.size !== files.length) throw new Error('That archive has ambiguous source paths.')
     const withAssets = importSourceAssets(files, entries)

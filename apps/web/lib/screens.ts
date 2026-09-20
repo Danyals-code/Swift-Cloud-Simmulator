@@ -50,3 +50,8 @@ export function screenTitleControl(snapshot: AuthoringSnapshot | undefined, defi
 export function scenarioScreen(scenario: PreviewScenario): string {
   return (scenario.owner || scenario.inputs?.[0]?.owner || '').split('.')[0]!
 }
+
+/** Persisted names remain human-readable; UI identity also includes the owning screen. */
+export function scenarioKey(scenario: PreviewScenario): string {
+  return JSON.stringify([scenarioScreen(scenario), scenario.name])
+}

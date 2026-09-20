@@ -222,6 +222,19 @@ export const useStudio = create<StudioState>((rawSet, get) => {
   let importGuard: { id: string; latest: Project } | null = null
   let replaying = false
   let typingGroup: string | undefined
+  let switchRequest = 0
+
+  /** Save a stable snapshot, including typing that arrives during an IndexedDB write. */
+  async function saveBeforeSwitch(request: number, outgoingId: string | undefined): Promise<boolean> {
+    while (request === switchRequest && get().project?.id === outgoingId) {
+      const snapshot = get().project
+      await get().flush()
+      if (request !== switchRequest || get().project?.id !== outgoingId) return false
+      if (get().project !== snapshot) continue
+      return !get().saveError
+    }
+    return false
+  }
   function set(patch: Partial<StudioState>): void {
     const previous = get()
     if (importGuard && patch.project?.id === importGuard.id) importGuard.latest = patch.project
@@ -254,9 +267,14 @@ export const useStudio = create<StudioState>((rawSet, get) => {
    * a decision, not a keystroke, and a reload half a second later must not bring the
    * old project back.
    */
-  async function replace(project: Project): Promise<void> {
+  async function replace(project: Project): Promise<boolean> {
     // Keep the latest keystrokes in the outgoing project's saved copy.
-    await get().flush()
+    const request = ++switchRequest, outgoingId = get().project?.id
+    if (!await saveBeforeSwitch(request, outgoingId)) return false
+    const problem = await writeProject(project)
+    if (request !== switchRequest) return false
+    if (problem) { set({ saveError: problem }); return false }
+    if (!await saveBeforeSwitch(request, outgoingId)) return false
     const outgoing = get().project
     const first = project.files[0]?.id ?? null
 
@@ -265,9 +283,10 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       activeFileId: first,
       openFileIds: first ? [first] : [],
       origin: 'restored',
+      lastSavedAt: Date.now(),
+      saveError: null,
     })
     rememberLastOpened(project.id)
-    await get().flush()
 
     /**
      * What happens to what was open.
@@ -288,6 +307,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       }
     }
     await refreshRecents()
+    return true
   }
 
   /** Re-reads the list the welcome sheet shows. Failure leaves the old list up. */
@@ -496,9 +516,9 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 
       const fileId = normalizeFileName(name, parentFolder)
       if (!fileId) return null
-      if (project.files.some((f) => f.id === fileId)) return null
-
-      commit(addFile(project, fileId), fileId)
+      const next = addFile(project, fileId)
+      if (next === project) return null
+      commit(next, fileId)
       return fileId
     },
 
@@ -664,8 +684,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       const template = module.templateById(templateId)
       if (!template) return false
 
-      await replace(module.createProjectFromTemplate(template))
-      return true
+      return replace(module.createProjectFromTemplate(template))
     },
 
     async importProject(expected, incoming) {
@@ -692,17 +711,17 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     async openFiles(files) {
       const project = projectFromFiles(files)
       if (!project) return false
-      await replace(project)
-      return true
+      return replace(project)
     },
 
     async openProject(id) {
-      if (get().project?.id === id) return true
+      const request = ++switchRequest, outgoingId = get().project?.id
+      if (outgoingId === id) return true
 
       // The project on screen is written before anything else is read: the debounce
       // may still be holding the last few keystrokes, and they belong to the project
       // being left rather than to the one being opened.
-      await get().flush()
+      if (!await saveBeforeSwitch(request, outgoingId)) return false
 
       let opened: Project | null = null
       try {
@@ -715,6 +734,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         await refreshRecents()
         return false
       }
+      if (!await saveBeforeSwitch(request, outgoingId)) return false
 
       const first = opened.files[0]?.id ?? null
       set({

@@ -18,6 +18,7 @@ import type {
   PropertySetter,
 
   ClosureExpr,
+  ClosureCapture,
   ClosureParam,
   Condition,
   Decl,
@@ -85,7 +86,7 @@ const CONTEXTUAL_KEYWORDS: ReadonlySet<string> = new Set([
 ])
 
 /** Statements a label may precede: `outer: for …`. */
-const LABELLABLE_STATEMENTS: ReadonlySet<string> = new Set(['for', 'while', 'repeat', 'switch', 'do'])
+const LABELLABLE_STATEMENTS: ReadonlySet<string> = new Set(['for', 'while', 'repeat', 'switch', 'do', 'if'])
 
 /** What may follow a modifier: another one, an attribute, or the declaration itself. */
 function continuesDeclaration(token: Token): boolean {
@@ -1183,18 +1184,20 @@ export class Parser {
   private parseStatement(): Stmt {
     const start = this.current
 
-    // `outer: for … { break outer }`. The label names a loop to break out of; the
-    // subset has no nested-loop control beyond `break`, so the name is consumed and
-    // the loop parses as itself. Leaving it unparsed made an ordinary labelled loop a
-    // syntax error.
+    // Keep the label so nested control flow can unwind to the named statement.
     if (
       this.current.kind === 'identifier' &&
       this.peek().text === ':' &&
       LABELLABLE_STATEMENTS.has(this.peek(2).text)
     ) {
+      const label = this.advance().text
       this.advance()
-      this.advance()
-      return this.parseStatement()
+      const statement = this.parseStatement()
+      switch (statement.kind) {
+        case 'ifStmt': case 'switchStmt': case 'forInStmt': case 'whileStmt': case 'repeatStmt': case 'doCatchStmt':
+          return { ...statement, label }
+        default: return statement
+      }
     }
 
     // `async let value = await fetch()`. The preview runs everything synchronously,
@@ -1214,14 +1217,13 @@ export class Parser {
 
     if (this.checkKeyword('break')) {
       const token = this.advance()
-      // `break outer` - the label is consumed; see the labelled-statement note above.
-      if (this.current.kind === 'identifier' && !this.current.newlineBefore) this.advance()
-      return { kind: 'breakStmt', span: token.span }
+      const label = this.current.kind === 'identifier' && !this.current.newlineBefore ? this.advance().text : undefined
+      return { kind: 'breakStmt', span: token.span, ...(label ? { label } : {}) }
     }
     if (this.checkKeyword('continue')) {
       const token = this.advance()
-      if (this.current.kind === 'identifier' && !this.current.newlineBefore) this.advance()
-      return { kind: 'continueStmt', span: token.span }
+      const label = this.current.kind === 'identifier' && !this.current.newlineBefore ? this.advance().text : undefined
+      return { kind: 'continueStmt', span: token.span, ...(label ? { label } : {}) }
     }
 
     if (this.checkKeyword('do')) return this.parseDoCatch()
@@ -2281,11 +2283,28 @@ export class Parser {
     this.expect('{', 'to begin a closure')
 
     const params: ClosureParam[] = []
+    const captures: ClosureCapture[] = []
     let hasExplicitParams = false
 
     if (this.closureHasParameterList()) {
       hasExplicitParams = true
-      if (this.check('[')) this.skipBalanced('[', ']') // capture list
+      if (this.match('[')) {
+        while (!this.atEnd && !this.check(']')) {
+          const start = this.current
+          let ownership: 'weak' | 'unowned' | undefined
+          if (this.check('weak') || this.check('unowned')) {
+            ownership = this.advance().text as 'weak' | 'unowned'
+            if (this.check('(')) this.skipBalanced('(', ')')
+            this.unsupported(start.span, `${ownership} closure captures`)
+          }
+          const token = this.current
+          const name = this.checkKeyword('self') ? this.advance().text : this.expectIdentifier('a capture name').name
+          const value: Expr = this.match('=') ? this.parseExpression(false) : name === 'self' ? { kind: 'selfExpr', span: token.span } : { kind: 'identifier', name, span: token.span }
+          captures.push({ name, value, span: this.spanFrom(start), ...(ownership ? { ownership } : {}) })
+          if (!this.match(',')) break
+        }
+        this.expect(']', 'to close a capture list')
+      }
       const parenthesised = this.match('(')
 
       while (!this.atEnd && !this.checkKeyword('in') && !this.check(')')) {
@@ -2321,6 +2340,7 @@ export class Parser {
       span,
       params,
       hasExplicitParams,
+      ...(captures.length ? { captures } : {}),
       body: { kind: 'block', span, statements },
     }
   }

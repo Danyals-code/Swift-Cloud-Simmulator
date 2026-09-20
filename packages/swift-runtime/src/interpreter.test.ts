@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { LineIndex } from '@studio/shared'
 import { Parser } from '@studio/swift-syntax'
 import { Interpreter, type InterpreterOptions } from './interpreter'
-import { ExecutionBudgetExceeded, SwiftTrap } from './errors'
+import { ExecutionBudgetExceeded, SwiftTrap, UnsupportedAtRuntime } from './errors'
 import { describe as show, type SwiftValue } from './values'
 
 const FILE = 'Test.swift'
@@ -559,5 +559,159 @@ describe('the host seam', () => {
       },
     })
     expect(calls).toBe(1)
+  })
+})
+
+describe('review regressions: storage and lexical scopes', () => {
+  it('initializes static stored references once, but computed properties on every access', () => {
+    expect(output(`Store.shared.count += 1
+      print(Store.shared.count)
+      print(Store.fresh.count)
+      print(Store.fresh.count)`, `class Store {
+        var count = 0
+        static let shared = Store()
+        static var fresh: Store { Store() }
+      }`)).toEqual(['1', '0', '0'])
+  })
+
+  it('invalidates stored statics when a program is reloaded', () => {
+    const logs: string[] = []
+    const interpreter = new Interpreter({ host: { log: text => logs.push(text) } })
+    for (const initial of [1, 2]) {
+      const { sourceFile } = Parser.parse(`struct Config { static let count = ${initial} }\nfunc test() { print(Config.count) }`, FILE)
+      interpreter.load([sourceFile])
+      const fn = interpreter.globals.lookup('test')!.value
+      if (fn.kind !== 'function') throw new Error('missing test')
+      interpreter.callFunction(fn, [], sourceFile.span)
+    }
+    expect(logs).toEqual(['1', '2'])
+  })
+
+  it('does not insert a dictionary default when calling a nonmutating member', () => {
+    expect(output(`var values: [String: [Int]] = [:]
+      print(values["missing", default: []].contains(1))
+      print(values["missing", default: []].isEmpty)
+      print(values.count)`)).toEqual(['false', 'true', '0'])
+  })
+
+  it('writes back default structs after mutating methods, including through a computed property', () => {
+    expect(output(`var values: [String: Counter] = [:]
+      values["missing", default: Counter()].increment()
+      values["missing", default: Counter()].increment()
+      print(values.count)
+      print(values["missing", default: Counter()].value)
+      var box = Box()
+      box.counter.increment()
+      print(box.stored.value)
+      print(box.writes)`, `struct Counter { var value = 0; mutating func increment() { value += 1 } }
+      struct Box {
+        var stored = Counter()
+        var writes = 0
+        var counter: Counter { get { stored } set { writes += 1; stored = newValue } }
+      }`)).toEqual(['1', '2', '1', '1'])
+  })
+
+  it('captures explicit values at creation while leaving other variables captured by reference', () => {
+    expect(output(`var count = 1
+      var live = 1
+      let snapshot = { [count] in print(count); print(live) }
+      count = 2
+      live = 3
+      snapshot()`)).toEqual(['1', '3'])
+  })
+
+  it('writes back mutations completed before a struct method throws', () => {
+    expect(output(`var values: [String: Counter] = [:]
+      do { try values["missing", default: Counter()].increment() } catch {}
+      print(values.count)
+      print(values["missing", default: Counter()].value)`, `enum Failure: Error { case stopped }
+      struct Counter {
+        var value = 0
+        mutating func increment() throws { value += 1; throw Failure.stopped }
+      }`)).toEqual(['1', '1'])
+  })
+
+  it('evaluates aliased captures once and copies captured arrays', () => {
+    expect(output(`var values = [1]
+      var evaluations = 0
+      func next() -> Int { evaluations += 1; return evaluations }
+      let snapshot = { [saved = values, number = next()] in print(saved); print(number) }
+      values.append(2)
+      snapshot()
+      snapshot()
+      print(evaluations)`)).toEqual(['[1]', '1', '[1]', '1', '1'])
+  })
+
+  it('retains class reference semantics in an explicit capture', () => {
+    expect(output(`let counter = Counter()
+      let read = { [counter] in print(counter.value) }
+      counter.value = 7
+      read()`, 'class Counter { var value = 0 }')).toEqual(['7'])
+  })
+
+  it.each(['weak', 'unowned', 'unowned(safe)', 'unowned(unsafe)'])('diagnoses %s captures instead of silently changing their lifetime semantics', ownership => {
+    const { sourceFile, diagnostics } = Parser.parse(`class Box {}\nlet box = Box()\nlet read = { [${ownership} box] in print(box) }`, FILE)
+    expect(diagnostics.some(diagnostic => diagnostic.message.includes('closure captures'))).toBe(true)
+    expect(() => new Interpreter().load([sourceFile])).toThrow(UnsupportedAtRuntime)
+  })
+
+  it('targets the named loop for break and continue, including through a switch', () => {
+    expect(output(`var visits = 0
+      outer: for _ in 0..<3 {
+        for _ in 0..<3 {
+          visits += 1
+          switch visits { default: break outer }
+        }
+      }
+      print(visits)
+      var tails = 0
+      again: for _ in 0..<3 {
+        for _ in 0..<3 { continue again }
+        tails += 1
+      }
+      print(tails)`)).toEqual(['1', '0'])
+  })
+
+  it('supports labelled do and if exits without swallowing an enclosing loop exit', () => {
+    expect(output(`scope: do {
+        if true { break scope }
+        print("unreachable")
+      }
+      condition: if true {
+        for _ in 0..<2 { break condition }
+        print("unreachable")
+      }
+      print("done")`)).toEqual(['done'])
+  })
+
+  it('executes nested defers on lexical scope exit in reverse order', () => {
+    expect(output(`defer { print("function") }
+      if true {
+        defer { print("first") }
+        defer { print("second") }
+        print("inside")
+      }
+      print("after")`)).toEqual(['inside', 'second', 'first', 'after', 'function'])
+  })
+
+  it('drains defers for each loop iteration and on labelled exits', () => {
+    expect(output(`outer: for i in 0..<3 {
+        defer { print(i) }
+        for _ in 0..<2 {
+          defer { print("inner") }
+          if i == 0 { continue outer }
+          break outer
+        }
+      }
+      print("after")`)).toEqual(['inner', '0', 'inner', '1', 'after'])
+  })
+
+  it('runs defers before catch and preserves function return values', () => {
+    expect(output(`do {
+        defer { print("cleanup") }
+        throw Failure.bad
+      } catch { print("caught") }
+      print(value())`, `enum Failure: Error { case bad }
+      func value() -> Int { defer { print("return cleanup") }; return 7 }`)).toEqual(['cleanup', 'caught', 'return cleanup', '7'])
   })
 })

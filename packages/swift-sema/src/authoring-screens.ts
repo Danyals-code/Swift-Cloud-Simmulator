@@ -43,7 +43,19 @@ export function screenEdit(ctx: FeatureContext, node: AuthoringNode, operation: 
     const text = raw(ctx, owner.span)
     const start = owner.nameSpan.start - owner.span.start, end = owner.nameSpan.end - owner.span.start
     const copied = text.slice(0, start) + operation.name + text.slice(end)
-    if (shapedProject(ctx)) {
+    // A file-private declaration or extension may be used indirectly by the view.
+    // Keep the duplicate in that lexical file instead of widening access or copying
+    // shared state. Additional imports are retained by the same fallback.
+    const sourceFile = ctx.ast.find(ast => ast.span.file === owner.span.file)
+    let fileScoped = false
+    const inspect = (item: Node) => {
+      if (item.span.start >= owner.span.start && item.span.end <= owner.span.end) return
+      if ('modifiers' in item && Array.isArray(item.modifiers) && item.modifiers.some(m => m.name === 'private' || m.name === 'fileprivate')) fileScoped = true
+      if (item.kind === 'importDecl' && raw(ctx, item.span).trim() !== 'import SwiftUI') fileScoped = true
+      forEachChild(item, inspect)
+    }
+    if (sourceFile) inspect(sourceFile)
+    if (shapedProject(ctx) && !fileScoped) {
       const id = screenFile(ctx, operation.name)
       if (ctx.files.some(existing => existing.id === id)) throw new Error('A screen file with that name already exists.')
       return { patches: [], files: [{ id, text: `import SwiftUI\n\n${copied}\n\n#Preview {\n    ${operation.name}()\n}\n` }] }
