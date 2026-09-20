@@ -7,6 +7,7 @@ import {
   ROUNDED_FAMILY,
   UI_FONT_FAMILY,
   type Fill,
+  type PreviewColorAsset,
   type ResolvedFont,
   type RGBA,
 } from '@studio/shared'
@@ -103,10 +104,48 @@ export function colorForName(name: string, scheme: ColorScheme = 'light', tint?:
   return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[name] ?? null
 }
 
+/** A colour set from the project's asset catalog: one value per appearance. */
+export type AssetColor = PreviewColorAsset
+
+/**
+ * The colour sets `Color("name")` reads, for the compile in progress.
+ *
+ * Held here rather than threaded through every resolver: a colour is resolved in a
+ * few dozen places, all within one synchronous compile, and every one of them must
+ * answer the same way. The pipeline sets it before evaluation and it stays until the
+ * next compile replaces it.
+ */
+let assetColors: ReadonlyMap<string, AssetColor> = new Map()
+export function setAssetColors(colors: readonly AssetColor[] | undefined): void {
+  assetColors = new Map((colors ?? []).map(color => [color.name, color]))
+}
+
+/** `#RRGGBB` or `#RRGGBBAA`, as the asset catalog stores a colour. */
+export function hexColor(value: string): RGBA | null {
+  const match = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(value.trim())
+  if (!match) return null
+  const channel = (at: number) => parseInt(match[1]!.slice(at, at + 2), 16)
+  return rgba(channel(0), channel(2), channel(4), match[2] ? Math.round(parseInt(match[2], 16) / 255 * 1000) / 1000 : 1)
+}
+
+/**
+ * A named asset colour for one appearance. A missing set is clear, which is what
+ * SwiftUI draws for a name the catalog does not have; `AccentColor` falls back to
+ * the system accent because every Xcode template ships one.
+ */
+function assetColor(name: string, scheme: ColorScheme, tint?: RGBA): RGBA {
+  const set = assetColors.get(name)
+  if (set) return hexColor(scheme === 'dark' && set.dark ? set.dark : set.light) ?? rgba(0, 0, 0, 0)
+  if (name === 'AccentColor') return colorForName('accentColor', scheme, tint) ?? rgba(0, 0, 0, 0)
+  return rgba(0, 0, 0, 0)
+}
+
 /** Turns a `Color` payload - named, or built from components - into an RGBA. */
 export function resolveColorPayload(payload: ColorPayload, scheme: ColorScheme = 'light', tint?: RGBA): RGBA {
   const base =
-    payload.name !== null
+    payload.name !== null && payload.asset
+      ? assetColor(payload.name, scheme, tint)
+      : payload.name !== null
       ? (colorForName(payload.name, scheme, tint) ?? rgba(0, 0, 0, 0))
       : payload.red !== undefined
         ? rgba(

@@ -1,6 +1,6 @@
 import type { AuthoringOperation, ComponentDescription } from './authoring-features'
 import type { AuthoringSnapshot } from './authoring'
-import type { SourceFile, ViewEdit } from './protocol'
+import type { PreviewColorAsset, SourceFile, ViewEdit } from './protocol'
 import type { SourceSpan } from './source'
 
 /** A control is a source recipe, not permission to replace an evaluated value. */
@@ -26,6 +26,8 @@ export interface DesignEditRequest {
   readonly componentDescriptions?: readonly ComponentDescription[]
   readonly authoringRevision?: number
   readonly files: readonly SourceFile[]
+  /** The project's colour sets, which colour tokens read and write. */
+  readonly colors?: readonly PreviewColorAsset[]
   readonly target: SourceSpan
   readonly fingerprint?: string
   readonly operation: { readonly kind: 'property'; readonly control: string; readonly value: string } | ViewEdit | AuthoringOperation
@@ -36,6 +38,8 @@ export interface SourceChange {
   /** null means a newly created file. */
   readonly before: string | null
   readonly after: string
+  /** The file is removed. `after` is then empty and ignored. */
+  readonly deleted?: boolean
 }
 
 export type DesignEditPlan =
@@ -45,6 +49,8 @@ export type DesignEditPlan =
     readonly projectId: string
     readonly baseRevision: number
     readonly changes: readonly SourceChange[]
+    /** The complete new list of colour sets, when the edit changes one. */
+    readonly colorSets?: readonly PreviewColorAsset[]
     readonly authoring?: AuthoringSnapshot
     readonly selection: { readonly file: string; readonly offset: number } | null
   }

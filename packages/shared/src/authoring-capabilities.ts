@@ -14,7 +14,8 @@ export interface AuthoringCapability {
   readonly writeRule: string
 }
 
-const EDITABLE = new Set(['Text', 'Image', 'RoundedRectangle', 'Spacer', 'HStack', 'VStack', 'ZStack', 'Button', 'TextField', 'Toggle', 'ScrollView', 'fill', 'padding', 'frame', 'font', 'foregroundColor', 'foregroundStyle', 'background', 'cornerRadius', 'opacity', 'lineLimit', 'multilineTextAlignment', 'navigationTitle', 'accessibilityLabel', 'accessibilityIdentifier', 'listStyle', 'buttonStyle', 'buttonBorderShape', 'controlSize', 'tint', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'DatePicker', 'ColorPicker', 'ProgressView', 'List', 'ForEach', 'Picker'])
+const EDITABLE = new Set(['Text', 'Image', 'RoundedRectangle', 'Spacer', 'HStack', 'VStack', 'ZStack', 'Button', 'TextField', 'Toggle', 'ScrollView', 'fill', 'padding', 'frame', 'font', 'foregroundColor', 'foregroundStyle', 'background', 'cornerRadius', 'opacity', 'lineLimit', 'multilineTextAlignment', 'navigationTitle', 'accessibilityLabel', 'accessibilityIdentifier', 'listStyle', 'buttonStyle', 'buttonBorderShape', 'controlSize', 'tint', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'DatePicker', 'ColorPicker', 'ProgressView', 'List', 'ForEach', 'Picker',
+  'offset', 'clipShape', 'border', 'shadow', 'blur', 'bold', 'italic', 'underline', 'strikethrough', 'tracking', 'lineSpacing', 'rotationEffect', 'scaleEffect', 'disabled', 'navigationBarTitleDisplayMode'])
 
 function capability(name: string, kind: 'view' | 'modifier', forms: AuthoringCapability['forms'], content = false, minimumIOS = '13.0'): AuthoringCapability {
   return { id: `${kind}.${name}`, name, kind, forms, content, minimumIOS, preview: 'subset', editing: EDITABLE.has(name) ? 'subset' : 'planned', native: 'unverified', fixture: 'authoring-core', writeRule: 'Only discovered design controls and operation capabilities authorize writes. See AUTHORING_WRITERS for exact boundaries; validate source ownership, target availability and the complete project revision before atomic commit.' }
@@ -67,6 +68,17 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('navigationTitle', 'modifier', [[null]], false, '14.0'), capability('listStyle', 'modifier', [[null]]),
   capability('accessibilityLabel', 'modifier', [[null]]), capability('accessibilityIdentifier', 'modifier', [[null]], false, '14.0'),
   capability('sheet', 'modifier', [['isPresented']], true), capability('tag', 'modifier', [[null]]),
+  // The v1 modifier catalog: what the Add menu writes and every card can edit.
+  capability('offset', 'modifier', [['x', 'y'], ['x'], ['y']]),
+  capability('clipShape', 'modifier', [[null]]),
+  capability('border', 'modifier', [[null], [null, 'width']]),
+  capability('shadow', 'modifier', [[null], ['radius'], ['color', 'radius'], ['radius', 'x', 'y'], ['color', 'radius', 'x', 'y']]),
+  capability('blur', 'modifier', [['radius']]),
+  capability('italic', 'modifier', [[]]), capability('underline', 'modifier', [[]]), capability('strikethrough', 'modifier', [[]]),
+  capability('tracking', 'modifier', [[null]], false, '16.0'), capability('lineSpacing', 'modifier', [[null]]),
+  capability('rotationEffect', 'modifier', [[null]]), capability('scaleEffect', 'modifier', [[null]]),
+  capability('disabled', 'modifier', [[null]]),
+  capability('navigationBarTitleDisplayMode', 'modifier', [[null]], false, '14.0'),
 ]
 
 export function authoringCapability(name: string, kind: AuthoringCapability['kind'], labels: readonly (string | null)[]): AuthoringCapability | undefined {

@@ -157,12 +157,15 @@ describe('layer organization', () => {
   })
 })
 
-it('creates and applies a custom shared color in one transaction, then keeps it editable', () => {
+it('creates and applies a custom colour token in one transaction, then keeps it editable', () => {
   const source = wrap('Text("Brand").foregroundColor(.blue)'), node = selected(source, 'Text'), property = node.styles!.find(p => p.kind === 'color')!
   const result = plan(source, node, { kind: 'style-create-link', property: property.property, name: 'brandColor', style: 'color', value: '#6D28D9' })
   if (!result.ok) throw new Error(result.reason)
   expect(result.changes).toHaveLength(2)
-  expect(result.changes.find(c => c.file === 'Sources/App.swift')?.after).toContain('.foregroundColor(brandColor)')
+  // A token is a static member in Tokens.swift, read with dot syntax; its value is a colour set.
+  expect(result.changes.find(c => c.file === 'Sources/App.swift')?.after).toContain('.foregroundColor(.brandColor)')
+  expect(result.changes.find(c => c.file === 'Sources/DesignSystem/Tokens.swift')?.after).toContain('static let brandColor = Color("brandColor")')
+  expect(result.colorSets).toEqual([{ name: 'brandColor', light: '#6D28D9' }])
   const local = edit(source, 'Text', { kind: 'style-local', property: property.property, value: '#6D28D9' })
   expect(selected(local, 'Text').styles?.find(p => p.kind === 'color')?.value).toBe('#6d28d9')
 })

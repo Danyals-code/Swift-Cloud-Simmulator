@@ -1,6 +1,6 @@
 import type { AuthoringModifier, ModifierCatalogEntry } from './authoring-modifiers'
 import type { SharedStyle, StyleProperty } from './design-resources'
-import type { CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, StateInput } from './authoring-features'
+import type { AppNavigationModel, CollectionSettings, ComponentSettings, BehaviorSettings, NavigationSettings, StateInput } from './authoring-features'
 import type { Diagnostic } from './diagnostics'
 import type { SourceFile } from './protocol'
 import type { SourceSpan } from './source'
@@ -57,6 +57,8 @@ export interface AuthoringSnapshot {
   readonly nodes: readonly AuthoringNode[]
   readonly roots: readonly string[]
   readonly inputs?: readonly StateInput[]
+  /** The app's own navigation: its style, and the tabs when it has them. */
+  readonly navigation?: AppNavigationModel
   readonly diagnostics: readonly Diagnostic[]
   readonly runtimeToSource: Readonly<Record<string, string>>
 }

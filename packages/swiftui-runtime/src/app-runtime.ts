@@ -13,6 +13,7 @@ import {
   Interpreter,
   indexSet,
   opaque,
+  pickOverload,
   str,
   SwiftThrow,
   SwiftTrap,
@@ -839,9 +840,14 @@ export class AppRuntime {
     receiver: SwiftValue,
     call: HostCall,
   ): SwiftValue | undefined {
-    const method = this.interpreter
-      .membersOf('View')
-      .find((m): m is FuncDecl => m.kind === 'funcDecl' && m.name === name && m.body !== null)
+    // By labels as well as by name: `func shadow(_ token: ShadowToken)` beside
+    // SwiftUI's `shadow(color:radius:x:y:)` is an overload, and calling the project's
+    // one with the framework's labels ran its body with nothing bound.
+    const labels = [...call.args.map(argument => argument.label), ...(call.trailingClosure ? [null] : [])]
+    const method = pickOverload(
+      this.interpreter.membersOf('View').filter((m): m is FuncDecl => m.kind === 'funcDecl' && m.name === name && m.body !== null),
+      labels,
+    )
     if (!method) return undefined
 
     const env = this.interpreter.globals.child(null)

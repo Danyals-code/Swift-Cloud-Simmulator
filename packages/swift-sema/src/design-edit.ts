@@ -1,6 +1,6 @@
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import type { DesignEditPlan, DesignEditRequest, SourceFile, SourceChange, ModifierOperation } from '@studio/shared'
+import type { DesignEditPlan, DesignEditRequest, PreviewColorAsset, SourceFile, SourceChange, ModifierOperation } from '@studio/shared'
 import { Parser, forEachChild, deleteView, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
@@ -31,14 +31,15 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     ast.forEach(find)
     if (!expression) return reject('This view no longer has an editable modifier chain.')
     try {
-      const text = editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget)
+      const shadowToken = model.styles?.find(style => style.kind === 'shadow' && style.form === 'token')?.name
+      const text = editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken })
       return finishDesignPlan(request, request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
   if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
     try {
-      const result = featureEdit({ deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions }, node, operation as Parameters<typeof featureEdit>[2])
-      return finishDesignPlan(request, result.files, { file: file.id, offset: result.offset })
+      const result = featureEdit({ deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions, colors: request.colors }, node, operation as Parameters<typeof featureEdit>[2])
+      return finishDesignPlan(request, result.files, { file: file.id, offset: result.offset }, result.colors)
     } catch (error) { return reject(error instanceof Error ? error.message : 'The design operation could not be planned.') }
   }
   let changed: { text: string; offset: number } | null = null
@@ -156,7 +157,7 @@ export function planDesignBatch(requests: readonly DesignEditRequest[], newFiles
 }
 
 /** Validate the complete post-edit program before any file is committed. */
-function finishDesignPlan(request: DesignEditRequest, nextFiles: readonly SourceFile[], selection: { file: string; offset: number }): DesignEditPlan {
+function finishDesignPlan(request: DesignEditRequest, nextFiles: readonly SourceFile[], selection: { file: string; offset: number }, colors?: readonly PreviewColorAsset[]): DesignEditPlan {
   const parsed = nextFiles.map(f => Parser.parse(f.text, f.id))
   if (parsed.some(p => p.diagnostics.some(d => d.severity === 'error'))) return { ok: false, reason: 'The proposed design change has a syntax error. No files were changed.' }
   const diagnostics = Checker.check(parsed.map(p => p.sourceFile)).diagnostics
@@ -169,10 +170,12 @@ function finishDesignPlan(request: DesignEditRequest, nextFiles: readonly Source
     if (!remaining) return { ok: false, reason: 'The proposed change introduces a source diagnostic: ' + d.message }
     counts.set(signature(d), remaining - 1)
   }
-  const changes = nextFiles.flatMap(f => {
+  const changes: SourceChange[] = nextFiles.flatMap(f => {
     const before = request.files.find(old => old.id === f.id)?.text ?? null
     return before === f.text ? [] : [{ file: f.id, before, after: f.text }]
   })
-  const authoring = buildAuthoringModel({ ...request, files: nextFiles, parsed: parsed.map(p => p.sourceFile), revision: request.authoringRevision ?? 0, diagnostics })
-  return { ok: true, projectId: request.projectId, baseRevision: request.baseRevision, changes, selection, authoring }
+  // A file an edit emptied out - a style moved to Tokens.swift - goes in the same step.
+  for (const old of request.files) if (!nextFiles.some(f => f.id === old.id)) changes.push({ file: old.id, before: old.text, after: '', deleted: true })
+  const authoring = buildAuthoringModel({ ...request, files: nextFiles, colors: colors ?? request.colors, parsed: parsed.map(p => p.sourceFile), revision: request.authoringRevision ?? 0, diagnostics })
+  return { ok: true, projectId: request.projectId, baseRevision: request.baseRevision, changes, selection, authoring, ...(colors ? { colorSets: colors } : {}) }
 }

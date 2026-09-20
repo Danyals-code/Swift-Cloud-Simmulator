@@ -30,6 +30,15 @@ interface Props {
   hidden?: readonly HiddenViewInfo[]
   onShow?: (view: HiddenViewInfo) => void
   editable?: boolean
+  /**
+   * Drawn inside another outline - the merged Design tree - rather than as a panel
+   * of its own: no heading, no filter field, no scroll area, and rows indented from
+   * `indent` so they sit under the screen that owns them.
+   */
+  embedded?: boolean
+  indent?: number
+  /** A filter typed somewhere else, which then replaces this panel's own. */
+  query?: string
 }
 
 const ICONS: Readonly<Record<string, IconName>> = {
@@ -42,14 +51,15 @@ const ICONS: Readonly<Record<string, IconName>> = {
 const structural = (node: AuthoringNode) => ['view', 'component', 'collection'].includes(node.kind)
 
 /** The designer hierarchy has one copy of a row design, never individual records. */
-export function LogicalLayers({ labels = [], onRename, snapshot, files, selected, selectedAncestors = [], selection, hovered, hoveredAncestors = [], onHover, runtimeLayers, pageSource, pageId, pageName, selectedRuntimeId, stale, onSelect, onEdit, hidden = [], onShow, editable = false }: Props) {
+export function LogicalLayers({ labels = [], onRename, snapshot, files, selected, selectedAncestors = [], selection, hovered, hoveredAncestors = [], onHover, runtimeLayers, pageSource, pageId, pageName, selectedRuntimeId, stale, onSelect, onEdit, hidden = [], onShow, editable = false, embedded = false, indent = 8, query: externalQuery }: Props) {
   const [navigation, setNavigation] = useState<SourceLayerNavigation>({ snapshot, files, pageId, closed: new Set() })
   const [multiple, setMultiple] = useState<{ files: readonly SourceFile[]; ids: string[] }>({ files, ids: [] })
   const [organizing, setOrganizing] = useState<{ node: AuthoringNode; kind: 'rename' | 'reparent' } | null>(null)
   const [draft, setDraft] = useState('')
   const [destination, setDestination] = useState('')
   const labelFor = (node: AuthoringNode) => labels.find(l => l.owner === node.owner && l.fingerprint === node.fingerprint && (l.offset === undefined || l.offset === node.source.start))?.label ?? sourceLayerLabel(node)
-  const [query, setQuery] = useState('')
+  const [ownQuery, setQuery] = useState('')
+  const query = externalQuery ?? ownQuery
   const [expandNext, setExpandNext] = useState(false)
   const [focused, setFocused] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -148,12 +158,12 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     return [view, sourceLayerVisibleId(snapshot, owner?.id, rows)]
   }))
   const visibleHidden = hidden.filter(view => entry ? view.file === entry.source.file && view.offset >= entry.source.start && view.offset <= entry.source.end : sourceLayerHiddenInScope(snapshot, view, scope))
-  const hiddenRows = (views: readonly HiddenViewInfo[], depth: number) => views.filter(view => !query.trim() || `${view.name} ${sourceLayerType({ name: view.type, kind: 'view' })}`.toLowerCase().includes(query.trim().toLowerCase())).map(view => <div key={`hidden:${view.file}:${view.offset}`} role="treeitem" aria-level={depth + 1} aria-label={`${view.name}, hidden`} aria-selected={false} className={`${styles.row} ${styles.hiddenRow}`} data-testid="hidden-layer" style={{ paddingLeft: 8 + depth * 14 }}>
+  const hiddenRows = (views: readonly HiddenViewInfo[], depth: number) => views.filter(view => !query.trim() || `${view.name} ${sourceLayerType({ name: view.type, kind: 'view' })}`.toLowerCase().includes(query.trim().toLowerCase())).map(view => <div key={`hidden:${view.file}:${view.offset}`} role="treeitem" aria-level={depth + 1} aria-label={`${view.name}, hidden`} aria-selected={false} className={`${styles.row} ${styles.hiddenRow}`} data-testid="hidden-layer" style={{ paddingLeft: indent + depth * 14 }}>
     <span className={styles.disclosure} /><span className={styles.icon}><Icon name="eye-off" /></span><span className={styles.name}>{view.name === view.type ? sourceLayerType({ name: view.type, kind: 'view' }) : view.name}</span>
     <span className={styles.move}><button type="button" data-testid="layer-show" disabled={disabled || !editable || !onShow} aria-label={`Show ${view.name}`} title="Restore this view" onClick={() => onShow?.(view)}><Icon name="eye-off" size={13} /></button></span>
   </div>)
-  return <section className={styles.panel} aria-label="Design layers" data-testid="logical-layers">
-    <div className={styles.heading}><span>{entry ? entry.kind === 'template' ? 'Row design' : entry.kind === 'branch' ? 'Page' : 'Main component' : pageName ? `${pageName} layers` : 'Layers'}</span><button type="button" data-testid="collapse-layers" title={expandNext ? 'Expand all layers' : 'Collapse all layers'} aria-label={expandNext ? 'Expand all layers' : 'Collapse all layers'} onClick={() => {
+  return <section className={embedded ? styles.embedded : styles.panel} aria-label="Design layers" data-testid="logical-layers">
+    {!embedded && <div className={styles.heading}><span>{entry ? entry.kind === 'template' ? 'Row design' : entry.kind === 'branch' ? 'Page' : 'The Main' : pageName ? `${pageName} layers` : 'Layers'}</span><button type="button" data-testid="collapse-layers" title={expandNext ? 'Expand all layers' : 'Collapse all layers'} aria-label={expandNext ? 'Expand all layers' : 'Collapse all layers'} onClick={() => {
       const ids = new Set(snapshot.nodes.map(node => node.id))
       setQuery('')
       setNavigation(state => ({
@@ -163,9 +173,9 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
         dismissed: expandNext ? undefined : selected,
       }))
       setExpandNext(value => !value)
-    }}><Icon name={expandNext ? 'expand' : 'collapse'} size={13} /></button></div>
+    }}><Icon name={expandNext ? 'expand' : 'collapse'} size={13} /></button></div>}
     {entry && <div className={styles.context}><button type="button" onClick={() => setNavigation(state => ({ ...state, entered: undefined, dismissedEntry: selected }))}>{pageName || 'All screens'}</button><Icon name="chevron-right" size={11} /><span>{entry.kind === 'template' ? 'Row design' : sourceLayerLabel(entry)}</span>{entry.kind !== 'branch' && <p>{entry.kind === 'template' ? 'Changes affect all rows using this design.' : 'Changes affect every instance of this component.'}</p>}</div>}
-    <div ref={tree} className={styles.tree} role="tree" aria-multiselectable="true" aria-label="Design layers" aria-busy={disabled} inert={disabled || undefined} onMouseLeave={() => onHover?.(null)}>
+    <div ref={tree} className={embedded ? styles.embeddedTree : styles.tree} role={embedded ? 'group' : 'tree'} aria-multiselectable="true" aria-label="Design layers" aria-busy={disabled} inert={disabled || undefined} onMouseLeave={() => onHover?.(null)}>
       {rows.map(({ node, depth, expanded: modelExpanded, parentId, children, shared }, index) => {
         const ownHidden = visibleHidden.filter(view => owners.get(view) === node.id)
         const expandable = children.length > 0 || ownHidden.length > 0
@@ -176,7 +186,7 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
         const label = labelFor(node), type = sourceLayerType(node)
         const canDrag = editable && !!onEdit && !disabled && structural(node)
         return <Fragment key={node.id}>
-          <div className={styles.row} style={{ paddingLeft: 8 + displayDepth * 14 }} data-source-id={node.id} data-source-name={node.name} data-source-owner={node.owner} data-source-kind={node.kind} data-shared-design={shared || undefined} role="treeitem" aria-label={`${label}${label !== type ? `, ${type}` : ''}`} aria-level={displayDepth + 1} aria-selected={selectedIds.length > 1 ? selectedIds.includes(node.id) : selectedRow === node.id} data-hovered={hoveredRow === node.id || undefined} aria-expanded={expandable ? expanded : undefined} tabIndex={tabStop === node.id ? 0 : -1} data-inactive={notShown || undefined} data-dragging={drag?.id === node.id || undefined} data-drop={drag?.over === node.id ? drag.position : undefined} draggable={canDrag}
+          <div className={styles.row} style={{ paddingLeft: indent + displayDepth * 14 }} data-source-id={node.id} data-source-name={node.name} data-source-owner={node.owner} data-source-kind={node.kind} data-shared-design={shared || undefined} role="treeitem" aria-label={`${label}${label !== type ? `, ${type}` : ''}`} aria-level={displayDepth + 1} aria-selected={selectedIds.length > 1 ? selectedIds.includes(node.id) : selectedRow === node.id} data-hovered={hoveredRow === node.id || undefined} aria-expanded={expandable ? expanded : undefined} tabIndex={tabStop === node.id ? 0 : -1} data-inactive={notShown || undefined} data-dragging={drag?.id === node.id || undefined} data-drop={drag?.over === node.id ? drag.position : undefined} draggable={canDrag}
             onMouseEnter={() => { if (!stale) onHover?.(node, shared ? undefined : runtimeFor(node)) }} onMouseLeave={() => onHover?.(null)}
             onDragStart={event => { if (!canDrag) { event.preventDefault(); return } event.dataTransfer.setData('text/studio-source-layer', node.id); event.dataTransfer.effectAllowed = 'move'; setDrag({ id: node.id }) }}
             onDragOver={event => { const from = nodes.get(drag?.id ?? ''); if (!from || !canDrag || from.id === node.id || from.source.file !== node.source.file || from.owner !== node.owner || from.parentId !== node.parentId) return; event.preventDefault(); const box = event.currentTarget.getBoundingClientRect(); setDrag({ id: from.id, over: node.id, position: event.clientY < box.top + box.height / 2 ? 'before' : 'after' }) }}
@@ -204,7 +214,7 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
             <button type="button" tabIndex={-1} className={styles.disclosure} disabled={!expandable} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`} onClick={event => { event.stopPropagation(); toggle(node.id, expanded) }}>{expandable && <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />}</button>
             <span className={styles.icon}><Icon name={ICONS[node.name] ?? (children.length ? 'section' : 'shape')} /></span>
             <span className={styles.name}>{label}</span>
-            <span className={styles.kind}>{notShown ? 'Not shown' : shared ? 'Shared design' : node.kind === 'component' ? 'Component' : label !== type ? type : ''}</span>
+            <span className={styles.kind}>{notShown ? 'Not shown' : shared ? 'One design' : node.kind === 'component' ? 'Component' : label !== type ? type : ''}</span>
             {actions.length > 0 && <span className={styles.move} onClick={event => event.stopPropagation()}><MenuButton label={`Actions for ${label}`} items={actions} onSelect={value => action(node, value)} testId="source-layer-actions"><Icon name="ellipsis" size={14} /></MenuButton></span>}
           </div>
           {expanded && hiddenRows(ownHidden, displayDepth + 1)}
@@ -219,8 +229,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
       if (organizing.kind === 'rename') { const problem = onRename?.(organizing.node, draft) ?? null; setError(problem); if (!problem) setOrganizing(null) }
       else { void edit(organizing.node, { kind: 'layer-reparent', ids: idsFor(organizing.node), destination }); setOrganizing(null) }
     }}><label>{organizing.kind === 'rename' ? 'Layer name' : 'Move selected layers into'}{organizing.kind === 'rename' ? <input autoFocus aria-label="Layer name" maxLength={100} value={draft} onChange={e => setDraft(e.target.value)} /> : <select aria-label="Destination container" value={destination} onChange={e => setDestination(e.target.value)}><option value="" disabled>Choose container</option>{snapshot.nodes.filter(n => n.owner === organizing.node.owner && ['VStack', 'HStack', 'ZStack', 'Group', 'ScrollView'].includes(n.name) && !idsFor(organizing.node).includes(n.id)).map(n => <option key={n.id} value={n.id}>{labelFor(n)} · container {snapshot.nodes.filter(item => item.owner === n.owner && item.name === n.name).indexOf(n) + 1}</option>)}</select>}</label><p>{organizing.kind === 'reparent' ? 'Layers are placed at the end of this container, in selection order.' : 'An empty name restores the content label.'}</p><div><button type="submit" disabled={disabled || organizing.kind === 'reparent' && !destination}>{organizing.kind === 'rename' ? 'Save layer name' : 'Move layers'}</button><button type="button" onClick={() => setOrganizing(null)}>Cancel</button></div></form>}
-    <p className={styles.selectionHint}>Shift-click adjacent layers to group them. ⌘/Ctrl-click adds a layer.</p>
+    {!embedded && <p className={styles.selectionHint}>Shift-click adjacent layers to group them. ⌘/Ctrl-click adds a layer.</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
-    <label className={styles.filter}><Icon name="search" size={14} /><input aria-label="Filter design layers" value={query} placeholder="Find a layer" onChange={e => setQuery(e.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setQuery('') } }} /></label>
+    {!embedded && externalQuery === undefined && <label className={styles.filter}><Icon name="search" size={14} /><input aria-label="Filter design layers" value={query} placeholder="Find a layer" onChange={e => setQuery(e.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setQuery('') } }} /></label>}
   </section>
 }

@@ -21,6 +21,12 @@ export type PaneKey = 'navigator' | 'debug' | 'preview'
 export type SizeKey = PaneKey | 'settings'
 export type WorkspaceMode = 'design' | 'develop'
 export type NavigatorTab = 'project' | 'layers' | 'issues'
+/**
+ * How Design draws its one tree: App > Screens > Views in a single outline, or the
+ * same tree as three stacked panels. Both read the same model, so they cannot
+ * disagree - this only decides how much of it is on screen at once.
+ */
+export type NavigatorLayout = 'merged' | 'split'
 /** The right-hand rail's two halves: what you are making, and how you are looking at it. */
 export type InspectorTab = 'settings' | 'preview'
 export type WorkspaceTheme = 'light' | 'dark'
@@ -36,6 +42,8 @@ export interface LayoutState {
   mode: WorkspaceMode
   navigatorTab: NavigatorTab
   setNavigatorTab: (tab: NavigatorTab) => void
+  navigatorLayout: NavigatorLayout
+  setNavigatorLayout: (layout: NavigatorLayout) => void
   inspectorTab: InspectorTab
   setInspectorTab: (tab: InspectorTab) => void
   setMode: (mode: WorkspaceMode) => void
@@ -72,6 +80,7 @@ export function restoreLayout(persisted: unknown, current: LayoutState): LayoutS
     ...saved,
     mode: 'design',
     navigatorTab: 'layers',
+    navigatorLayout: saved.navigatorLayout === 'split' ? 'split' : 'merged',
     inspectorTab: 'settings',
     theme: saved.theme === 'dark' ? 'dark' : 'light',
     navigatorWidth: clamp('navigator', saved.navigatorWidth ?? current.navigatorWidth),
@@ -88,6 +97,8 @@ export const useLayout = create<LayoutState>()(
       mode: 'design',
       navigatorTab: 'layers',
       setNavigatorTab(navigatorTab) { set({ navigatorTab }) },
+      navigatorLayout: 'merged',
+      setNavigatorLayout(navigatorLayout) { set({ navigatorLayout }) },
       inspectorTab: 'settings',
       setInspectorTab(inspectorTab) { set({ inspectorTab }) },
       theme: 'light',

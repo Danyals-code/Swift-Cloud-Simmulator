@@ -75,6 +75,8 @@ export interface NavigationDestination {
   readonly reason?: string
 }
 export interface NavigationSettings {
+  /** How the screen opens, when this site is a link or a presented screen. */
+  readonly type?: 'push' | 'sheet' | 'cover'
   readonly destination: string
   readonly display: string
   readonly destinations: readonly NavigationDestination[]
@@ -99,10 +101,70 @@ export type BehaviorAction =
   | { readonly type: 'call'; readonly name: string }
   | { readonly type: 'navigate'; readonly destination: string }
   | { readonly type: 'sheet'; readonly destination: string }
+  /** Covers the whole screen: `.fullScreenCover(isPresented:)`. */
+  | { readonly type: 'cover'; readonly destination: string }
   | { readonly type: 'dismiss'; readonly state: string }
   | { readonly type: 'append'; readonly collection: string; readonly record: DesignRecord }
   | { readonly type: 'delete'; readonly collection: string; readonly id: DesignValue }
-export type AuthoringOperation = ResourceOperation | ModifierOperation
+/** A value inside a view that a copy of it may write differently. */
+export interface CopyValue {
+  readonly kind: 'text' | 'symbol' | 'number' | 'color' | 'action'
+  /** The name it would take as a parameter: title, icon, action, padding… */
+  readonly role: string
+  readonly span: SourceSpan
+  /** The source as written, which is what a call site passes. */
+  readonly text: string
+  /** The Swift type a number takes as a parameter. */
+  readonly unit?: 'CGFloat' | 'Double'
+}
+
+/** Another view with the same shape as the selected one. */
+export interface CopyMatch {
+  readonly id: string
+  readonly owner: string
+  readonly source: SourceSpan
+  readonly values: readonly CopyValue[]
+  /** How many values this copy writes differently, which is what becomes a parameter. */
+  readonly differences: number
+  /** Modifiers at the end of this copy's chain that stay on the call. */
+  readonly extraModifiers?: number
+}
+
+/** One tab of the app's tab bar, as the App panel lists it. */
+export interface AppTab {
+  readonly name: string
+  /** The SF Symbol on the tab. */
+  readonly icon: string
+  /** The view the tab shows. */
+  readonly screen: string
+  /** The call as written, including any arguments the screen takes. */
+  readonly content: string
+}
+
+/** How the app is navigated, and whether the studio can write that shape itself. */
+export interface AppNavigationModel {
+  readonly style: 'tabs' | 'stack' | 'none'
+  readonly tabs: readonly AppTab[]
+  /** False when the navigation is built in Swift beyond what the editor writes. */
+  readonly editable: boolean
+  /** Why it cannot be edited here, in the words the panel shows. */
+  readonly reason?: string
+  /** Where it is written, for "Open in Code". */
+  readonly source?: SourceSpan
+  /** The screen a single-stack app starts on. */
+  readonly root?: string
+}
+
+/** Changes to the app's own navigation, made from the App panel. */
+export type NavigationOperation =
+  | { readonly kind: 'navigation-style'; readonly style: 'tabs'; readonly name: string; readonly icon: string }
+  | { readonly kind: 'navigation-style'; readonly style: 'stack' }
+  | { readonly kind: 'tab-add'; readonly screen: string; readonly name: string; readonly icon: string }
+  | { readonly kind: 'tab-update'; readonly index: number; readonly name?: string; readonly icon?: string; readonly screen?: string }
+  | { readonly kind: 'tab-remove'; readonly index: number }
+  | { readonly kind: 'tab-move'; readonly index: number; readonly toIndex: number }
+
+export type AuthoringOperation = ResourceOperation | ModifierOperation | NavigationOperation
   | { readonly kind: 'component-expose'; readonly control: string; readonly name: string }
   | { readonly kind: 'component-insert'; readonly component: string }
   | { readonly kind: 'component-variant'; readonly variant: ComponentVariant }
@@ -114,12 +176,17 @@ export type AuthoringOperation = ResourceOperation | ModifierOperation
   | { readonly kind: 'layer-reparent'; readonly ids: readonly string[]; readonly destination: string }
   | { readonly kind: 'guided-action'; readonly action: BehaviorAction; readonly replace: boolean; readonly createValue?: { readonly name: string; readonly value: DesignValue; readonly activeTitle?: string }; readonly createScreen?: { readonly name: string; readonly title: string } }
   | { readonly kind: 'navigation-target'; readonly destination: string }
+  /** How the screen this view opens arrives: pushed, as a sheet, or covering everything. */
+  | { readonly kind: 'navigation-type'; readonly type: 'push' | 'sheet' | 'cover' }
+  /** A value the screen can be in more than one of - what a state switches. */
+  | { readonly kind: 'value-create'; readonly name: string; readonly value: DesignValue }
   | { readonly kind: 'records'; readonly records: readonly DesignRecord[] }
   | { readonly kind: 'collection-field'; readonly name: string; readonly type: RecordField['type']; readonly optional: boolean; readonly value: DesignValue }
   | { readonly kind: 'collection-convert'; readonly name: string; readonly recordType: string }
   | { readonly kind: 'empty-state'; readonly text: string }
   | { readonly kind: 'bind-field'; readonly field: string }
   | { readonly kind: 'extract-component'; readonly name: string }
+  | { readonly kind: 'make-component'; readonly name: string; readonly copies: readonly string[]; /** Chosen parameter names, keyed by the name the dialog suggested. */ readonly names?: Readonly<Record<string, string>>; /** The views that are screens, so copies inside components are left alone. */ readonly screens?: readonly string[] }
   | { readonly kind: 'behavior'; readonly action: BehaviorAction; readonly replace: boolean }
   | { readonly kind: 'bind-state'; readonly name: string; readonly create?: { readonly value: DesignValue } }
   | { readonly kind: 'transition'; readonly state: string; readonly style: 'opacity' | 'slide' | 'scale'; readonly duration: number }

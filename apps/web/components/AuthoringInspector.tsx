@@ -1,16 +1,32 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { AuthoringNode, PropertyValueKind, SourceSpan } from '@studio/shared'
+import type { AuthoringNode, ResourceOperation, SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { ModifierStack } from './ModifierStack'
+import { NavigationDestinationEditor } from './NavigationDestinationEditor'
+import { TokenField, valueFields } from './settings/TokenField'
 import { sourceLayerIsVisual, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
-import { authoringSettingsContext } from '../lib/authoringSettings'
-import { ContextualSettings } from './ContextualSettings'
+import { authoringSettingsContext, settingsContextLabel, settingsVisualChildren } from '../lib/authoringSettings'
+import { MenuButton } from './ui/Menu'
+import { Icon } from './ui/Icon'
 import styles from './AuthoringInspector.module.css'
 
-const LABELS: Record<PropertyValueKind, string> = { literal: 'Literal', token: 'Shared style', 'data-binding': 'Linked data', 'component-argument': 'Component input', inherited: 'From parent', computed: 'Expression', unsupported: 'Custom code' }
+/**
+ * The View level: what the view is, then how it looks, in the order the code has it.
+ *
+ * Basics are the values the view is created with - what sits inside its parentheses,
+ * like a column's spacing or a button's title and action. The modifier stack is
+ * everything after, top to bottom. Data appears only for a list or a repeat, because
+ * only those have any.
+ */
+/** The three ways a screen can open, in the words the canvas uses for its arrows. */
+const NAVIGATE_TYPES: readonly { type: 'push' | 'sheet' | 'cover'; label: string }[] = [
+  { type: 'push', label: 'Push' },
+  { type: 'sheet', label: 'Sheet' },
+  { type: 'cover', label: 'Full screen' },
+]
 
 export function AuthoringInspector({ node, stale, onReveal, onChange, features }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange }) {
   const root = useRef<HTMLDivElement | null>(null)
@@ -30,22 +46,39 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
     input.focus({ preventScroll: true })
     if ((input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement && input.type === 'text') && previous.caret !== null) input.setSelectionRange(Math.min(previous.caret, input.value.length), Math.min(previous.caret, input.value.length))
   }, [selected, sourceKey, stale])
-  if (!selected) return <p className={styles.empty} role={stale ? 'status' : undefined}>{stale ? 'Updating views…' : 'Select a view in Layers or on the canvas.'}</p>
+  const [navigateError, setNavigateError] = useState<string | null>(null)
+  if (!selected) return <p className={styles.empty} role={stale ? 'status' : undefined}>{stale ? 'Updating views…' : 'Select a view in the tree or on the canvas.'}</p>
   const basics = selected.controls?.filter(control => !/^(modifier:|add:|fill:)/.test(control.id)) ?? []
+  // A value inside a modifier belongs to that modifier's card; the rest are the view's own.
+  const modifierProperties = new Set(selected.modifiers?.flatMap(modifier => modifier.propertyIds) ?? [])
+  const basicProperties = selected.properties.filter(property => !modifierProperties.has(property.id)).map(property => property.id)
   const context = authoringSettingsContext(features?.snapshot, selected)
   const ancestors = context.ancestors
-  const breadcrumbs = ancestors.filter(sourceLayerIsVisual)
+  const breadcrumbs = ancestors.filter(sourceLayerIsVisual).slice(-3)
   const nestedCollections = context.collections.filter(collection => collection.id !== selected.id)
   const forNode = (owner: AuthoringNode): Omit<FeatureProps, 'node'> | undefined => features ? { ...features, onCommand: owner.id === selected.id ? features.onCommand : features.onNodeCommand ? operation => features.onNodeCommand!(owner, operation) : undefined } : undefined
   const template = selected.kind === 'template' || ancestors.some(ancestor => ancestor.kind === 'template')
-  const hasData = selected.name === 'List' || selected.kind === 'collection' || !!selected.fields?.length || !!context.repeatedBy && selected.kind !== 'template' || !!nestedCollections.length
-  const hasContext = !!context.conditions.length || !!context.navigation.length || !!context.slots.length || !!context.surrounding.length
-  const hasBehavior = hasContext || !!selected.modifiers?.some(modifier => modifier.category === 'behavior') || !!selected.behavior && (selected.behavior.canConfigureAction || !!selected.behavior.binding || selected.behavior.states.length > 0)
+  const isList = selected.name === 'List' || selected.kind === 'collection' || selected.kind === 'template'
   const featureKey = `${sourceKey}:${selected.fingerprint}:${selected.collection?.signature}`
   const dataKey = `${featureKey}:${JSON.stringify(features?.previewInputs ?? [])}`
   const stackAlignment = selected.controls?.find(control => control.label === 'Alignment')?.value ?? 'center'
   const title = sourceLayerLabel(selected)
   const type = sourceLayerType(selected)
+  const tokens = features?.snapshot?.styles ?? []
+  const resource = (operation: ResourceOperation) => features?.onCommand ? features.onCommand(operation) : Promise.resolve('Select the view again.')
+  const conditions = context.conditions.filter(condition => condition.name !== 'Otherwise' && !condition.name.startsWith('Case '))
+  const links = context.navigation.filter(owner => owner.name === 'NavigationLink' && owner.navigation)
+  // A button that presents a screen is a Navigate to as much as a link is, and it is
+  // the only place the designer can turn a sheet back into a push.
+  const presented = selected.modifiers?.find(modifier => ['sheet', 'fullScreenCover'].includes(modifier.name) && modifier.enabled !== false)
+  const navigateCards: { node: AuthoringNode; type: 'push' | 'sheet' | 'cover' }[] = [
+    ...links.map(owner => ({ node: owner, type: 'push' as const })),
+    ...(presented && !links.length ? [{ node: selected, type: presented.name === 'sheet' ? 'sheet' as const : 'cover' as const }] : []),
+  ]
+  const interaction = !!selected.behavior && (selected.behavior.canConfigureAction || !!selected.behavior.binding)
+  const advanced = !!selected.behavior && (selected.behavior.canConfigureAction || selected.behavior.states.length > 0) || !!selected.component
+  // Only wrappers with something to set: a bare NavigationStack around every view is not news.
+  const wrappers = context.surrounding.filter(owner => !!owner.modifiers?.length || owner.controls?.some(control => !/^(modifier:|add:|fill:)/.test(control.id)))
   const rememberFocus = (input: EventTarget) => {
     if (input instanceof HTMLInputElement || input instanceof HTMLSelectElement || input instanceof HTMLTextAreaElement) focus.current = { source: sourceKey, owner: input.closest<HTMLElement>('[data-settings-owner]')?.dataset.settingsOwner ?? '', control: input.dataset.controlId ?? '', label: input.getAttribute('aria-label')?.toLowerCase() ?? '', caret: input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement ? input.selectionStart : null }
   }
@@ -53,27 +86,72 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
     onFocusCapture={event => rememberFocus(event.target)} onSelectCapture={event => rememberFocus(event.target)} onInputCapture={event => rememberFocus(event.target)} onKeyDownCapture={event => rememberFocus(event.target)}
     onBlurCapture={event => { rememberFocus(event.target); if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) focus.current = null }}>
     <fieldset disabled={stale} className={styles.inspectorFields}>
-      <header className={styles.selectionHeader}><div><strong>{title}</strong>{title !== type && <small>{type}</small>}</div><button type="button" onClick={() => onReveal?.(selected.source)} aria-label="View source" title="View source">&lt;/&gt;</button></header>
-      {template ? <p className={styles.scope}>Row design · changes apply to all rows</p> : selected.runtimeIds.length > 1 ? <p className={styles.scope}>Shared design · updates {selected.runtimeIds.length} preview instances</p> : null}
+      <header className={styles.selectionHeader}>
+        <div><strong>{title}</strong>{title !== type && <small>{type}</small>}</div>
+        {onReveal && <MenuButton label="View actions" items={[{ value: 'code', label: 'Open in Code', icon: 'code' }, ...(breadcrumbs.length ? [{ value: 'parent', label: `Select ${sourceLayerLabel(breadcrumbs.at(-1)!)}` }] : [])]} onSelect={value => { if (value === 'code') onReveal(selected.source); else if (value === 'parent') features?.onSelect?.(breadcrumbs.at(-1)!) }}><Icon name="ellipsis" size={15} /></MenuButton>}
+      </header>
+      {template ? <p className={styles.scope}>Row design · changes apply to every row</p> : selected.kind === 'definition' && features?.snapshot ? <p className={styles.scope}>The Main · changes apply to every copy ({features.snapshot.nodes.filter(n => n.definitionId === selected.id).length})</p> : selected.runtimeIds.length > 1 ? <p className={styles.scope}>One design · changes apply to {selected.runtimeIds.length} places on screen</p> : null}
       {!!breadcrumbs.length && <nav className={styles.breadcrumbs} aria-label="Selection path">{breadcrumbs.map(ancestor => <button type="button" key={ancestor.id} onClick={() => features?.onSelect?.(ancestor)}>{sourceLayerLabel(ancestor)}</button>)}</nav>}
-      {['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack'].includes(selected.name) && <div className={styles.layoutGuide} aria-label="Layout preview"><div data-direction={selected.name.includes('HStack') ? 'row' : selected.name === 'ZStack' ? 'overlay' : 'column'} style={{ gap: Math.min(24, Math.max(0, Number(selected.controls?.find(c => c.label === 'Spacing')?.value ?? 8))), minHeight: 56, alignItems: ['leading', 'top'].includes(stackAlignment) ? 'flex-start' : ['trailing', 'bottom'].includes(stackAlignment) ? 'flex-end' : stackAlignment.includes('Baseline') ? 'baseline' : 'center' }}>{[1, 2, 3].map(i => <span key={i}>{i}</span>)}</div><p>{selected.name === 'ZStack' ? 'Children overlap, back to front.' : selected.name.includes('HStack') ? 'Children flow left to right. Spacing sets the gap.' : 'Children flow top to bottom. Spacing sets the gap.'} The canvas updates when you apply spacing or alignment.</p></div>}
+      {/* Code the studio does not rewrite is shown as what it is - a locked block -
+          rather than as controls that quietly do nothing. */}
+      {selected.kind === 'opaque' && <p className={styles.locked} data-testid="locked-block">
+        <Icon name="lock" size={12} />
+        <span>Written in Swift. It runs and draws here, and it is kept exactly as written.</span>
+        {onReveal && <button type="button" className={styles.linkButton} onClick={() => onReveal(selected.source)}>Open in Code</button>}
+      </p>}
+
       <section className={styles.settingsSection} data-testid="settings-basics"><h3>Basics</h3>
-        {basics.map(control => onChange && <PropertyControl key={`${selected.id}:${control.id}:${control.value}`} control={control} onChange={onChange} />)}
-        {!basics.length && !selected.component && !['definition', 'template'].includes(selected.kind) && <p className={styles.note}>{selected.properties.some(property => property.valueKind === 'data-binding' || property.valueKind === 'component-argument') ? 'Content is linked to data.' : 'This view has no basic inputs.'}</p>}
+        {['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack'].includes(selected.name) && <div className={styles.layoutGuide} aria-label="Layout preview"><div data-direction={selected.name.includes('HStack') ? 'row' : selected.name === 'ZStack' ? 'overlay' : 'column'} style={{ gap: Math.min(24, Math.max(0, Number(selected.controls?.find(c => c.label === 'Spacing')?.value ?? 8))), minHeight: 44, alignItems: ['leading', 'top'].includes(stackAlignment) ? 'flex-start' : ['trailing', 'bottom'].includes(stackAlignment) ? 'flex-end' : stackAlignment.includes('Baseline') ? 'baseline' : 'center' }}>{[1, 2, 3].map(i => <span key={i}>{i}</span>)}</div><p>{selected.name === 'ZStack' ? 'Children sit on top of each other, back to front.' : selected.name.includes('HStack') ? 'Children flow left to right.' : 'Children flow top to bottom.'}</p></div>}
+        {valueFields(selected, basics, basicProperties).map(field => field.style
+          ? <TokenField key={`${field.style.property}:${field.style.token ?? field.style.value}`} field={field} tokens={tokens} busy={stale} onChange={onChange} onCommand={resource} />
+          : field.control && onChange ? <PropertyControl key={`${selected.id}:${field.control.id}:${field.control.value}`} control={field.control} onChange={onChange} /> : null)}
+        {!basics.length && !selected.component && !['definition', 'template'].includes(selected.kind) && !interaction && <p className={styles.note}>{selected.properties.some(property => property.valueKind === 'data-binding' || property.valueKind === 'component-argument') ? 'Its content comes from data.' : 'Nothing to set when it is created.'}</p>}
         {features && <AuthoringFeatures key={`basics:${featureKey}`} node={selected} {...features} section="basics" />}
+        {interaction && features && <AuthoringFeatures key={`interaction:${featureKey}`} node={selected} {...features} section="interaction" />}
+        {!!selected.fields?.length && features && <AuthoringFeatures key={`field:${dataKey}`} node={selected} {...features} section="field" />}
+        {!!conditions.length && <div className={styles.shownWhen} data-testid="shown-when">{conditions.map(condition => {
+          const expression = condition.properties.map(property => property.expression).join(' and ')
+          const alternate = context.ancestors.find(ancestor => ancestor.parentId === condition.id && (ancestor.name === 'Otherwise' || ancestor.name.startsWith('Case ')))
+          const summary = condition.name === 'Switch' ? alternate?.name.startsWith('Case ') ? `${expression} is ${alternate.name.slice(5)}` : `${expression} has another value` : alternate ? `${expression} is false` : expression
+          return <div key={condition.id} className={styles.row}><span>Shown when</span><span><code>{summary}</code>{onReveal && <button type="button" className={styles.linkButton} onClick={() => onReveal(condition.source)}>Open in Code</button>}</span></div>
+        })}</div>}
       </section>
-      {!['definition', 'template', 'branch'].includes(selected.kind) && <section className={styles.settingsSection}><ModifierStack snapshot={features?.snapshot} key={sourceKey} node={selected} onChange={onChange} onCommand={features?.onCommand} onReveal={onReveal} /></section>}
-      {hasData && <section className={styles.settingsSection} data-testid="settings-data"><h3>Data</h3>
-        {context.repeatedBy && selected.kind !== 'template' && <div className={styles.contextItem}><p>Repeat for each item · this view belongs to the shared row design.</p><button type="button" onClick={() => features?.onSelect?.(context.list ?? context.repeatedBy!)}>List settings</button></div>}
+
+      {!['definition', 'template', 'branch'].includes(selected.kind) && <section className={styles.settingsSection}>
+        <ModifierStack snapshot={features?.snapshot} key={sourceKey} node={selected} onChange={onChange} onCommand={features?.onCommand} onReveal={onReveal} features={features}
+          leading={navigateCards.map(({ node, type }) => <div key={`${node.id}:${type}`} className={styles.navigateCard} data-testid="navigate-to" data-nav-type={type} data-settings-owner={`${node.owner}:${node.name}:${node.source.file}:${node.source.start}`}>
+            <strong>Navigate to · {NAVIGATE_TYPES.find(item => item.type === type)?.label}</strong>
+            {/* How the screen opens is a choice, not a fact of the code: changing it
+                here rewrites the link or the button that presents it. */}
+            <label className={styles.navigateType}>Opens
+              <select aria-label="How it opens" value={type} disabled={stale || !features?.onNodeCommand} onChange={async event => {
+                const next = event.target.value as 'push' | 'sheet' | 'cover'
+                setNavigateError(await features!.onNodeCommand!(node, { kind: 'navigation-type', type: next }))
+              }}>{NAVIGATE_TYPES.map(item => <option key={item.type} value={item.type}>{item.label}</option>)}</select>
+            </label>
+            {node.navigation && <NavigationDestinationEditor key={`${node.id}:${node.navigation.destination}`} owner={node} features={features} onReveal={onReveal} />}
+            {navigateError && <p role="alert" className={styles.error}>{navigateError}</p>}
+          </div>)} />
+      </section>}
+
+      {isList && <section className={styles.settingsSection} data-testid="settings-data"><h3>Data</h3>
         {features && (selected.name !== 'List' || !nestedCollections.length || selected.kind === 'collection') && <AuthoringFeatures key={`data:${dataKey}`} node={selected} {...features} section="data" />}
         {nestedCollections.map(collection => <div key={`collection:${dataKey}:${collection.id}:${collection.fingerprint}:${collection.collection?.signature}`} data-settings-owner={`${collection.owner}:${collection.name}:${collection.source.file}:${collection.source.start}`}><AuthoringFeatures node={collection} {...forNode(collection)} section="data" /></div>)}
       </section>}
-      {hasBehavior && <section className={styles.settingsSection} data-testid="settings-behavior"><h3>Behavior</h3><ModifierStack snapshot={features?.snapshot} key={`behavior:${sourceKey}`} node={selected} onChange={onChange} onCommand={features?.onCommand} onReveal={onReveal} navigationSlots={context.slots} behavior />{features && <AuthoringFeatures key={`behavior:${featureKey}`} node={selected} {...features} section="behavior" />}<ContextualSettings context={context} features={features} onReveal={onReveal} /></section>}
-      {!!selected.styles?.length && features && <details className={styles.settingsSection}><summary>Shared styles</summary><AuthoringFeatures key={`styles:${featureKey}`} node={selected} {...features} section="styles" /></details>}
-      <details className={`${styles.source} ${styles.settingsSection}`}><summary>Code details</summary>
-        {features && <AuthoringFeatures key={`advanced:${featureKey}`} node={selected} {...features} section="advanced" />}
-        <dl className={styles.properties}>{selected.properties.map(property => <div key={property.id} className={styles.property} data-testid="authoring-property"><dt><span>{property.name}</span><span className={styles.badge}>{LABELS[property.valueKind]}</span></dt><dd><code>{property.expression}</code>{property.valueKind !== 'literal' && <p>{property.reason}</p>}{(property.declaration ?? property.source) && <button type="button" aria-label={`Show source for ${property.name}`} onClick={() => onReveal?.((property.declaration ?? property.source)!)}>Show source</button>}</dd></div>)}</dl>
-      </details>
+      {context.repeatedBy && !isList && <p className={styles.note}>Part of a repeated row. <button type="button" className={styles.linkButton} onClick={() => features?.onSelect?.(context.list ?? context.repeatedBy!)}>Edit the list</button></p>}
+
+      {!!wrappers.length && <details className={styles.settingsSection}><summary>Wrapped in · {wrappers.map(settingsContextLabel).join(', ')}</summary>
+        {wrappers.map(owner => <div key={owner.id} className={styles.contextItem} data-settings-owner={`${owner.owner}:${owner.name}:${owner.source.file}:${owner.source.start}`}>
+          <strong>{settingsContextLabel(owner)}</strong><p className={styles.note}>These settings apply to everything inside it.</p>
+          {owner.controls?.filter(control => !/^(modifier:|add:|fill:)/.test(control.id)).map(control => features?.onNodeChange && <PropertyControl key={`${owner.id}:${control.id}:${control.value}`} control={control} onChange={(id, value) => features.onNodeChange!(owner, id, value)} />)}
+          {!!owner.modifiers?.length && <ModifierStack node={owner} snapshot={features?.snapshot} features={features} onChange={features?.onNodeChange ? (id, value) => features.onNodeChange!(owner, id, value) : undefined} onCommand={features?.onNodeCommand ? operation => features.onNodeCommand!(owner, operation) : undefined} onReveal={onReveal} />}
+          {!owner.modifiers?.length && !owner.controls?.length && <div className={styles.contextLinks}>{settingsVisualChildren(features?.snapshot, owner).map(child => <button key={child.id} type="button" onClick={() => features?.onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}</div>}
+        </div>)}
+      </details>}
+
+      {advanced && features && <details className={styles.settingsSection} data-testid="settings-advanced"><summary>Advanced</summary>
+        <AuthoringFeatures key={`advanced:${featureKey}`} node={selected} {...features} section="advanced" />
+      </details>}
     </fieldset>
     {stale && <p className={styles.note} role="status">Updating preview…</p>}
   </div>

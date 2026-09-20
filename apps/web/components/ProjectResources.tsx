@@ -2,24 +2,34 @@
 
 import { useMemo, useState } from 'react'
 import { assetName, imageDataURL, ASSET_LIMITS, type ImageAsset, type Project } from '@studio/project-model'
-import type { AuthoringNode, AuthoringSnapshot, ResourceOperation, StyleKind } from '@studio/shared'
+import type { ResourceOperation } from '@studio/shared'
 import { decodeImportedImage } from '../lib/images'
-import { SharedStyleEditor, StyleValue } from './SharedStyles'
-import styles from './AuthoringInspector.module.css'
+import { Icon } from './ui/Icon'
+import styles from './settings/Settings.module.css'
 
-export interface ProjectResourcesProps {
-  onSelect?: (node: AuthoringNode) => void
+export interface ImageResourcesProps {
   project: Project
-  snapshot?: AuthoringSnapshot
   stale: boolean
-  onCommand: (operation: ResourceOperation) => Promise<string | null>
   onAssets: (assets: readonly ImageAsset[], operation?: ResourceOperation) => Promise<string | null>
 }
-export function ProjectResources({ project, snapshot, stale, onCommand, onAssets, onSelect }: ProjectResourcesProps) {
+
+/**
+ * The App's images: PNG or JPEG files bundled into the asset catalog.
+ *
+ * Renaming or deleting one updates the Swift that names it in the same undo step, so an
+ * image is never left pointing at nothing.
+ */
+/** `LogoCopy`, then `LogoCopy2`: duplicating twice used to fail validation. */
+function unusedAssetName(assets: readonly ImageAsset[], base: string): string {
+  let name = `${base}Copy`, suffix = 2
+  while (assets.some(asset => asset.name === name)) name = `${base}Copy${suffix++}`
+  return name
+}
+
+export function ImageResources({ project, stale, onAssets }: ImageResourcesProps) {
   const [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false)
-  const [name, setName] = useState('brandColor'), [kind, setKind] = useState<StyleKind>('color'), [value, setValue] = useState('blue')
-  async function run(task: () => Promise<string | null>) { if (busy) return; setBusy(true); setError(null); try { setError(await task()) } catch (e) { setError(e instanceof Error ? e.message : 'The resource could not be changed.') } finally { setBusy(false) } }
-  const command = async (operation: ResourceOperation) => { await run(() => onCommand(operation)) }
+  const [open, setOpen] = useState<string | null>(null)
+  async function run(task: () => Promise<string | null>) { if (busy) return; setBusy(true); setError(null); try { setError(await task()) } catch (e) { setError(e instanceof Error ? e.message : 'The image could not be changed.') } finally { setBusy(false) } }
   const disabled = busy || stale
   async function importFile(file: File, asset?: ImageAsset, dark = false): Promise<string | null> {
     if (file.size > ASSET_LIMITS.variantBytes) return 'Each image must be 4 MB or smaller.'
@@ -27,36 +37,34 @@ export function ProjectResources({ project, snapshot, stale, onCommand, onAssets
     const next: ImageAsset = asset ? { ...asset, [dark ? 'dark' : 'light']: variant } : { id: crypto.randomUUID(), name: assetName(file.name.replace(/\.[^.]+$/, '')), scale: 1, light: variant }
     return onAssets([...(project.assets ?? []).filter(a => a.id !== next.id), next])
   }
-  return <details className={`${styles.inspector} ${styles.features}`} data-testid="project-resources"><summary>Project resources</summary>
-    <section><h3>Bundled images</h3><p>PNG or JPEG · up to 4 MB each · 4096 pixels per side · 4 megapixels. Files stay on this device.</p>
-      <label>Add image<input aria-label="Add bundled image" type="file" accept="image/png,image/jpeg" disabled={disabled} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void run(() => importFile(file)) }} /></label>
-      {(project.assets ?? []).map(asset => <AssetEditor key={`${asset.id}:${asset.name}:${asset.scale}`} asset={asset} assets={project.assets ?? []} disabled={disabled} onEdit={(assets, op) => run(() => onAssets(assets, op))} onFile={(file, dark) => run(() => importFile(file, asset, dark))} />)}
-    </section>
-    <section><h3>Shared styles</h3><p>Update a shared style to restyle every linked use. Select a use below to find it in the design.</p>
-      {snapshot?.styles?.map(token => <SharedStyleEditor key={token.name} token={token} snapshot={snapshot} onSelect={onSelect} busy={disabled} onCommand={command} />)}
-      <details><summary>Create shared style</summary><label>Swift name<input aria-label="Shared style name" value={name} onChange={e => setName(e.target.value)} /></label><label>Kind<select aria-label="Shared style kind" value={kind} onChange={e => { const next = e.target.value as StyleKind; setKind(next); setValue(next === 'font' ? 'body' : next === 'color' ? 'blue' : '16') }}><option value="color">Color</option><option value="spacing">Spacing</option><option value="font">Text style</option></select></label>
-        <StyleValue kind={kind} value={value} onChange={setValue} /><button type="button" disabled={disabled || !snapshot?.nodes.length} onClick={() => void command({ kind: 'style-create', name, style: kind, value })}>Create Swift style</button>
-      </details>
-    </section>
-    <p>Symbols, materials, fonts, and browser color rendering can differ from native SwiftUI. Verify the exported app on an Apple device.</p>
-    {busy && <p role="status">Updating resources…</p>}{error && <p className={styles.error} role="alert">{error}</p>}
-  </details>
+  return <section className={styles.section} data-testid="project-resources" aria-label="Images">
+    <div className={styles.sectionHeader}><h3>Images</h3><span><label className={styles.iconButton} title="Add a PNG or JPEG image" aria-label="Add image"><Icon name="plus" size={13} /><input aria-label="Add bundled image" type="file" accept="image/png,image/jpeg" disabled={disabled} hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void run(() => importFile(file)) }} /></label></span></div>
+    {!(project.assets ?? []).length && <p className={styles.note}>PNG or JPEG, up to 4 MB each. Pick one in an Image’s settings once it is added.</p>}
+    {(project.assets ?? []).map(asset => <AssetEditor key={`${asset.id}:${asset.name}:${asset.scale}`} asset={asset} assets={project.assets ?? []} open={open === asset.id} onToggle={() => setOpen(open === asset.id ? null : asset.id)} disabled={disabled} onEdit={(assets, op) => run(() => onAssets(assets, op))} onFile={(file, dark) => run(() => importFile(file, asset, dark))} />)}
+    {busy && <p className={styles.note} role="status">Updating images…</p>}{error && <p className={styles.error} role="alert">{error}</p>}
+  </section>
 }
-function AssetEditor({ asset, assets, disabled, onEdit, onFile }: { asset: ImageAsset; assets: readonly ImageAsset[]; disabled: boolean; onEdit: (assets: readonly ImageAsset[], op?: ResourceOperation) => Promise<void>; onFile: (file: File, dark: boolean) => Promise<void> }) {
-  const [expanded, setExpanded] = useState(false)
-  const previews = useMemo(() => expanded ? { light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined } : null, [asset.light, asset.dark, expanded])
+
+function AssetEditor({ asset, assets, open, onToggle, disabled, onEdit, onFile }: { asset: ImageAsset; assets: readonly ImageAsset[]; open: boolean; onToggle: () => void; disabled: boolean; onEdit: (assets: readonly ImageAsset[], op?: ResourceOperation) => Promise<void>; onFile: (file: File, dark: boolean) => Promise<void> }) {
+  const previews = useMemo(() => ({ light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined }), [asset.light, asset.dark])
   const [name, setName] = useState(asset.name), [replacement, setReplacement] = useState('')
   const replace = (updated: ImageAsset) => assets.map(a => a.id === asset.id ? updated : a)
-  return <details onToggle={event => setExpanded(event.currentTarget.open)}><summary>{asset.name} · {asset.light.width / asset.scale} × {asset.light.height / asset.scale} pt</summary>
-    {expanded && <div className={styles.assetPreviews}>{(['light', 'dark'] as const).map(scheme => <figure key={scheme}>{asset[scheme] ? <img src={previews?.[scheme]} alt={`${asset.name} ${scheme}`} /> : <span>Uses light image</span>}<figcaption>{scheme}</figcaption></figure>)}</div>}
-    <p>Renaming updates literal image references across Swift in the same undo step. Dynamic names require a code review.</p>
-    <label>Asset name<input aria-label={`${asset.name} asset name`} value={name} onChange={e => setName(e.target.value)} /></label>
-    <button type="button" disabled={disabled || name === asset.name} onClick={() => void onEdit(replace({ ...asset, name }), { kind: 'asset-references', from: asset.name, to: name })}>Rename image and references</button>
-    <button type="button" disabled={disabled} onClick={() => void onEdit([...assets, { ...asset, id: crypto.randomUUID(), name }])}>Duplicate as this name</button>
-    <label>Pixel scale<select aria-label={`${asset.name} pixel scale`} value={asset.scale} disabled={disabled} onChange={e => void onEdit(replace({ ...asset, scale: Number(e.target.value) as 1 | 2 | 3 }))}>{[1, 2, 3].map(scale => <option key={scale} value={scale}>{scale}×</option>)}</select></label>
-    {(['light', 'dark'] as const).map(scheme => <label key={scheme}>{scheme === 'light' ? 'Replace image' : 'Dark appearance'}<input aria-label={`${asset.name} ${scheme} image`} type="file" accept="image/png,image/jpeg" disabled={disabled} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void onFile(file, scheme === 'dark') }} /></label>)}
-    {asset.dark && <button type="button" disabled={disabled} onClick={() => void onEdit(replace({ ...asset, dark: undefined }))}>Remove dark variant</button>}
-    <label>Replacement when deleting<select aria-label={`${asset.name} replacement`} value={replacement} onChange={e => setReplacement(e.target.value)}><option value="">Delete only if unused</option>{assets.filter(a => a.id !== asset.id).map(a => <option key={a.id} value={a.name}>{a.name}</option>)}</select></label>
-    <button type="button" disabled={disabled} onClick={() => void onEdit(assets.filter(a => a.id !== asset.id), { kind: 'asset-references', from: asset.name, to: replacement || null })}>Delete image</button>
-  </details>
+  return <div className={styles.tokenRow} data-open={open || undefined}>
+    <button type="button" className={styles.tokenSummary} aria-expanded={open} onClick={onToggle}>
+      <img src={previews.light} alt="" width={16} height={16} style={{ objectFit: 'contain', borderRadius: 3 }} />
+      <strong>{asset.name}</strong><small>{asset.light.width / asset.scale} × {asset.light.height / asset.scale} pt{asset.dark ? ' · dark' : ''}</small>
+    </button>
+    {open && <>
+      <div className={styles.row}><span>Name</span><span className={styles.inline}><input aria-label={`${asset.name} asset name`} value={name} onChange={e => setName(e.target.value)} /><button type="button" className={styles.button} disabled={disabled || name === asset.name} onClick={() => void onEdit(replace({ ...asset, name }), { kind: 'asset-references', from: asset.name, to: name })}>Rename</button></span></div>
+      <p className={styles.note}>Renaming updates every Image that uses it.</p>
+      <div className={styles.row}><span>Pixel scale</span><select aria-label={`${asset.name} pixel scale`} value={asset.scale} disabled={disabled} onChange={e => void onEdit(replace({ ...asset, scale: Number(e.target.value) as 1 | 2 | 3 }))}>{[1, 2, 3].map(scale => <option key={scale} value={scale}>{scale}×</option>)}</select></div>
+      {(['light', 'dark'] as const).map(scheme => <label key={scheme} className={styles.fileInput}>{scheme === 'light' ? 'Replace image' : asset.dark ? 'Replace dark image' : 'Add a dark mode image'}<input aria-label={`${asset.name} ${scheme} image`} type="file" accept="image/png,image/jpeg" disabled={disabled} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void onFile(file, scheme === 'dark') }} /></label>)}
+      <div className={styles.actions}>
+        {asset.dark && <button type="button" className={styles.button} disabled={disabled} onClick={() => void onEdit(replace({ ...asset, dark: undefined }))}>Remove dark image</button>}
+        <button type="button" className={styles.button} disabled={disabled} onClick={() => void onEdit([...assets, { ...asset, id: crypto.randomUUID(), name: unusedAssetName(assets, asset.name) }])}>Duplicate</button>
+      </div>
+      <div className={styles.row}><span>When deleting</span><select aria-label={`${asset.name} replacement`} value={replacement} onChange={e => setReplacement(e.target.value)}><option value="">Only if unused</option>{assets.filter(a => a.id !== asset.id).map(a => <option key={a.id} value={a.name}>Use {a.name} instead</option>)}</select></div>
+      <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled} onClick={() => void onEdit(assets.filter(a => a.id !== asset.id), { kind: 'asset-references', from: asset.name, to: replacement || null })}>Delete image</button></div>
+    </>}
+  </div>
 }

@@ -238,7 +238,10 @@ export class Interpreter {
    * things to write in an app. A name the project declared is the project's.
    */
   declaresType(typeName: string): boolean {
-    return this.conformance.types.has(typeName)
+    // An `extension Color` adds to the framework's type; it does not make `Color` the
+    // project's. Counting it as a declaration used to hand every `Color.blue` in such
+    // a project back to the interpreter, which has no `blue` to give.
+    return !!this.conformance.types.get(typeName)?.decl
   }
 
   /** The superclass of a class, for `super`. */
@@ -1088,6 +1091,29 @@ export class Interpreter {
   }
 
   /**
+   * `.accent`, `.space16`, `.sectionTitle` - a static member a project `extension`
+   * added to one of the framework's value types, written with contextual syntax.
+   *
+   * Swift resolves these against the expected type, which the interpreter does not
+   * track. The host answers the framework's own names by name alone; a name the
+   * project added to `Color`, `Font` or `CGFloat` is looked up here first, in that
+   * order, so `.foregroundStyle(.accent)` draws the accent it declares rather than a
+   * colour token with no meaning. SwiftUI's own contextual names are never
+   * answered here - `.small` means a control size wherever it is written, even in a
+   * project that also has a `CGFloat.small`.
+   */
+  private extensionStatic(member: string, span: SourceSpan): SwiftValue | undefined {
+    if (FRAMEWORK_CONTEXTUAL.has(member)) return undefined
+    for (const typeName of TOKEN_HOSTS) {
+      const type = this.conformance.types.get(typeName)
+      if (!type || type.decl) continue
+      if (!type.members.some(m => (m.kind === 'varDecl' || m.kind === 'funcDecl') && m.name === member && isStaticDecl(m))) continue
+      return this.staticMember(typeName, member, span)
+    }
+    return undefined
+  }
+
+  /**
    * `CaseIterable`'s synthesised `allCases`.
    *
    * `ForEach(Tab.allCases, id: \.self)` is the commonest enum-driven pattern there
@@ -1147,6 +1173,10 @@ export class Interpreter {
 
     const decl = this.enums.get(typeName)
     if (!decl) {
+      // `.low` where a `ShadowToken` is expected: a static member of the expected type,
+      // which the declaration names even though the call site does not.
+      const statik = this.contextualStatic(value, typeName)
+      if (statik !== undefined) return statik
       // Not an enum this project declared. `Color`, `Font` and the rest belong to the
       // host, and only the host can turn `.blue` into one.
       return this.host.coerceToType?.(value, typeName) ?? value
@@ -1166,6 +1196,18 @@ export class Interpreter {
       span: NOWHERE,
     }))
     return this.makeEnumCase(decl, name, args, NOWHERE)
+  }
+
+  /** A contextual token resolved as a static member of the type a declaration expects. */
+  private contextualStatic(value: SwiftValue, typeName: string): SwiftValue | undefined {
+    if (value.kind !== 'opaque' || value.typeName !== 'Token') return undefined
+    const payload = value.payload as { name?: string; args?: readonly SwiftValue[] } | null
+    const name = payload?.name
+    if (typeof name !== 'string' || !this.conformance.types.has(typeName)) return undefined
+    const statik = this.staticMember(typeName, name, NOWHERE)
+    if (statik === undefined) return undefined
+    if (statik.kind !== 'function') return payload?.args?.length ? undefined : statik
+    return this.callFunction(statik, (payload?.args ?? []).map(argument => ({ label: null, value: argument, span: NOWHERE })), NOWHERE)
   }
 
   // ------------------------------------------------------------------ errors
@@ -1596,6 +1638,8 @@ export class Interpreter {
   ): SwiftValue {
     // Implicit member syntax: `.largeTitle`, `.primary`, `.infinity`.
     if (!base) {
+      const extended = this.extensionStatic(member, span)
+      if (extended !== undefined) return extended
       const resolved = this.host.resolveImplicitMember?.(member, span)
       if (resolved !== undefined) return resolved
       this.trap(`Cannot infer contextual base for '.${member}'`, span)
@@ -1704,6 +1748,8 @@ export class Interpreter {
     target: SwiftValue,
     member: string,
     span: SourceSpan,
+    /** The call's labels, when there is a call: a method they cannot match is not it. */
+    labels?: readonly (string | null)[],
   ): SwiftValue | undefined {
     if (target.kind === 'struct' || target.kind === 'enum' || target.kind === 'type') return undefined
 
@@ -1726,8 +1772,9 @@ export class Interpreter {
       )
     }
 
-    const method = members.find(
-      (m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null,
+    const method = pickOverload(
+      members.filter((m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null),
+      labels,
     )
     return method ? { kind: 'function', decl: method, self: null, env: scope } : undefined
   }
@@ -1939,6 +1986,8 @@ export class Interpreter {
     env: Environment,
   ): SwiftValue {
     if (!baseExpr) {
+      const extended = this.extensionStatic(member, memberSpan)
+      if (extended?.kind === 'function') return this.callFunction(extended, allArgs, span)
       const called = this.host.callImplicitMember?.(
         member,
         this.hostCall(args, trailingClosure, span),
@@ -2064,7 +2113,7 @@ export class Interpreter {
       return builtin
     }
 
-    const extended = this.userMember(target, member, memberSpan)
+    const extended = this.userMember(target, member, memberSpan, labelsOf(allArgs))
     if (extended?.kind === 'function') return this.callFunction(extended, allArgs, span)
     if (extended?.kind === 'closure') {
       return this.callClosure(extended, allArgs.map((a) => a.value), span)
@@ -2952,6 +3001,35 @@ export class Interpreter {
  * Matters more than it looks: a `static let` is not a stored property, so counting it
  * as one would shift every memberwise-initialiser argument by a position.
  */
+/**
+ * The framework value types a project extends with named values - design tokens.
+ * Searched in this order, so the colour an `extension Color` declares wins over the
+ * `ShapeStyle` spelling Xcode generates beside it for the same name.
+ */
+const TOKEN_HOSTS = ['Color', 'Font', 'CGFloat', 'Double', 'ShapeStyle'] as const
+
+/**
+ * SwiftUI's own contextual member names, which always keep their framework meaning.
+ *
+ * Swift resolves a contextual member against the expected type, so `.small` is a
+ * `ControlSize` in `.controlSize(.small)` even when the project also declares a
+ * `CGFloat.small`. Without the expected type, the only safe rule is that a name the
+ * framework spells this way is the framework's.
+ */
+const FRAMEWORK_CONTEXTUAL: ReadonlySet<string> = new Set([
+  'leading', 'trailing', 'center', 'top', 'bottom', 'topLeading', 'topTrailing', 'bottomLeading', 'bottomTrailing',
+  'firstTextBaseline', 'lastTextBaseline', 'all', 'horizontal', 'vertical',
+  'mini', 'small', 'regular', 'large', 'extraLarge', 'medium', 'automatic', 'compact', 'inline', 'navigation',
+  'largeTitle', 'title', 'title2', 'title3', 'headline', 'subheadline', 'body', 'callout', 'footnote', 'caption', 'caption2',
+  'ultraLight', 'thin', 'light', 'semibold', 'bold', 'heavy', 'black', 'default', 'serif', 'rounded', 'monospaced', 'italic',
+  'primary', 'secondary', 'tertiary', 'quaternary', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'mint', 'teal',
+  'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown', 'clear', 'accentColor', 'tint', 'background', 'foreground', 'dark',
+  'plain', 'bordered', 'borderedProminent', 'borderless', 'grouped', 'insetGrouped', 'inset', 'sidebar', 'page', 'capsule',
+  'circle', 'rect', 'roundedRectangle', 'continuous', 'circular', 'fill', 'fit', 'infinity', 'zero', 'identity', 'linear',
+  'easeIn', 'easeOut', 'easeInOut', 'spring', 'bouncy', 'snappy', 'smooth', 'opacity', 'slide', 'scale', 'move', 'push',
+  'hidden', 'visible', 'never', 'always', 'destructive', 'cancel', 'sheet', 'popover', 'none', 'some', 'shared', 'main',
+])
+
 function isStaticDecl(decl: { modifiers: readonly { name: string }[] }): boolean {
   return decl.modifiers.some((m) => m.name === 'static' || m.name === 'class')
 }
@@ -3004,12 +3082,29 @@ function memberProjection(outer: ProjectionPayload, field: string): SwiftValue {
  * `sheet(isPresented:)` written the way everybody writes it; the fallback makes an
  * unmatched call behave exactly as it used to.
  */
-function pickOverload<T extends { readonly params: readonly Param[] }>(
+export function pickOverload<T extends { readonly params: readonly Param[] }>(
   candidates: readonly T[],
   labels: readonly (string | null)[] | undefined,
 ): T | undefined {
-  if (candidates.length <= 1 || !labels) return candidates[0]
-  return candidates.find((decl) => labelsMatch(decl.params, labels)) ?? candidates[0]
+  // A declaration that cannot take these labels at all is never the one being called:
+  // `shadow(color:radius:)` inside `func shadow(_ token:)` is SwiftUI's modifier, not
+  // a recursive call with every parameter unbound.
+  const possible = labels ? candidates.filter((decl) => labelsPossible(decl.params, labels)) : candidates
+  if (possible.length <= 1 || !labels) return possible[0]
+  return possible.find((decl) => labelsMatch(decl.params, labels)) ?? possible[0]
+}
+
+/**
+ * Whether a call could be this declaration at all, leniently.
+ *
+ * Every label the call writes has to be one the declaration has, and there cannot be
+ * more arguments than parameters. Unlabelled arguments are always possible, because a
+ * trailing closure arrives unlabelled whatever its parameter is called.
+ */
+function labelsPossible(params: readonly Param[], written: readonly (string | null)[]): boolean {
+  if (written.length > params.length) return false
+  const declared = argumentLabels(params)
+  return written.every((label) => label === null || declared.includes(label))
 }
 
 /**

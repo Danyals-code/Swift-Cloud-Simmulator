@@ -1,5 +1,5 @@
 import { validDesignValue } from '@studio/shared'
-import type { AuthoringNode, ComponentDescription, DesignValue, RecordField, SourceFile, SourceSpan } from '@studio/shared'
+import type { AuthoringNode, ComponentDescription, DesignValue, PreviewColorAsset, RecordField, SourceFile, SourceSpan } from '@studio/shared'
 import { forEachChild, Lexer, type CallExpr, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
 import { swiftString, viewCallChain } from './design-controls'
 
@@ -10,6 +10,8 @@ export interface FeatureContext {
   readonly ast: readonly SourceFileNode[]
   readonly nodes: readonly AuthoringNode[]
   readonly descriptions?: readonly ComponentDescription[]
+  /** The project's colour sets: colour tokens read their light and dark values here. */
+  readonly colors?: readonly PreviewColorAsset[]
 }
 export const raw = (ctx: FeatureContext, span: SourceSpan): string => ctx.files.find(f => f.id === span.file)?.text.slice(span.start, span.end) ?? ''
 const declarationCache = new WeakMap<FeatureContext, Decl[]>()
@@ -19,7 +21,10 @@ export function allDeclarations(ctx: FeatureContext): Decl[] {
   const cached = declarationCache.get(ctx)
   if (cached) return cached
   const result: Decl[] = []
-  function visit(node: Node) { if (node.kind.endsWith('Decl')) result.push(node as Decl); forEachChild(node, visit) }
+  // An `extension Color` adds to a type; it does not declare one. Counting it as a
+  // declaration made every framework type a project extends look shadowed, and made
+  // a struct with an extension look declared twice. Its members are still collected.
+  function visit(node: Node) { if (node.kind.endsWith('Decl') && node.kind !== 'extensionDecl') result.push(node as Decl); forEachChild(node, visit) }
   ctx.ast.forEach(visit)
   declarationCache.set(ctx, result)
   return result
@@ -73,6 +78,42 @@ export function signature(ctx: FeatureContext, decl: StructDecl | VarDecl): stri
   return JSON.stringify(text)
 }
 export function patch(span: SourceSpan, text: string): SourcePatch { return { ...span, text } }
+
+/** The folders a project made here is laid out in. */
+const SHAPE_DIRS = new Set(['App', 'Features', 'DesignSystem'])
+
+/**
+ * Where a project's Swift lives: the folder the shape sits in, or the one every
+ * file already shares.
+ *
+ * New files the studio writes - a screen, a component, `Tokens.swift` - go beside
+ * the ones already there rather than in a folder of their own invention. Taken from
+ * the shape when there is one, so a `Tests/` folder listed first cannot move the
+ * whole design system into it.
+ */
+export function sourceRoot(ctx: FeatureContext): string {
+  for (const file of ctx.files) {
+    const parts = file.id.split('/')
+    const index = parts.findIndex((part, at) => at < parts.length - 1 && SHAPE_DIRS.has(part))
+    if (index >= 0) return parts.slice(0, index).map(part => part + '/').join('')
+  }
+  // No shape yet: the deepest folder every file is inside.
+  let common: string[] | undefined
+  for (const file of ctx.files) {
+    const dir = file.id.split('/').slice(0, -1)
+    if (!common) { common = dir; continue }
+    let shared = 0
+    while (shared < common.length && common[shared] === dir[shared]) shared++
+    common = common.slice(0, shared)
+  }
+  return common?.length ? common.map(part => part + '/').join('') : ''
+}
+
+/** True when the project follows the shape new projects are created in. */
+export function shapedProject(ctx: FeatureContext): boolean {
+  const root = sourceRoot(ctx)
+  return ctx.files.some(file => file.id.startsWith(`${root}Features/`) || file.id.startsWith(`${root}App/`))
+}
 export function insertMember(ctx: FeatureContext, owner: StructDecl, text: string): SourcePatch {
   const member = owner.members.find(m => m.kind === 'varDecl' && m.name === 'body') ?? owner.members[0]
   const at = member?.span.start ?? owner.span.end - 1

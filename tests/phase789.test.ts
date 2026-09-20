@@ -111,15 +111,24 @@ describe('Swift-owned shared styles', () => {
     const property = node.styles!.find(p => p.kind === 'color')!
     const next = updated(files(), { kind: 'style-local', property: property.property, value: '#123456' })
     expect(next[0]!.text).toContain('Text("Two").foregroundStyle(Theme.brand)')
-    expect(next[0]!.text).toContain('Color(red: 0.07058823529411765, green: 0.20392156862745098, blue: 0.33725490196078434)')
+    // Three decimals: short enough to read, and every 8-bit channel still round-trips.
+    expect(next[0]!.text).toContain('Color(red: 0.071, green: 0.204, blue: 0.337)')
+    expect(buildAuthoringModel({ files: next, projectId: 'p', revision: 2 }).nodes.filter(n => n.name === 'Text')[0]!.styles!.find(p => p.kind === 'color')?.value).toBe('#123456')
     const fresh = buildAuthoringModel({ files: next, projectId: 'p', revision: 2 }).nodes.filter(n => n.name === 'Text')[2]!
     expect(updated(next, { kind: 'style-link', property: fresh.styles![0]!.property, name: 'Theme.brand' }, 'Text', 2)[0]!.text).toContain('Text("Local").foregroundStyle(Theme.brand)')
   })
-  it.each([['color', '#2563eb'], ['spacing', '20'], ['font', 'headline']] as const)('creates a typed %s declaration and recognizes later external changes', (style, value) => {
-    const next = updated(files(), { kind: 'style-create', name: 'newStyle', style, value })
+  it.each([
+    ['color', 'brandTone', 'mint', 'static let brandTone = Color.mint', 'static let brandTone = Color.teal', 'teal'],
+    ['spacing', 'space20', '20', 'static let space20: CGFloat = 20', 'static let space20: CGFloat = 24', '24'],
+    ['font', 'lead', 'headline', 'static let lead = Font.system(.headline)', 'static let lead = Font.system(.title3)', 'Title 3'],
+  ] as const)('creates a typed %s token in Tokens.swift and recognizes later external changes', (style, name, value, written, external, recognized) => {
+    const next = updated(files(), { kind: 'style-create', name, style, value })
     expect(next).toHaveLength(2)
-    expect(next[1]!.text).toContain('let newStyle:')
-    expect(buildAuthoringModel({ files: next, projectId: 'p', revision: 1 }).styles?.find(s => s.name === 'newStyle')?.value).toBe(value)
+    expect(next[1]!.id).toBe('Sources/DesignSystem/Tokens.swift')
+    expect(next[1]!.text).toContain(written)
+    expect(buildAuthoringModel({ files: next, projectId: 'p', revision: 1 }).styles?.find(s => s.name === name)).toMatchObject({ form: 'token', kind: style })
+    const edited = [next[0]!, { ...next[1]!, text: next[1]!.text.replaceAll(written, external) }]
+    expect(buildAuthoringModel({ files: edited, projectId: 'p', revision: 2 }).styles?.find(s => s.name === name)?.value).toBe(recognized)
   })
   it('rejects invalid spacing, arbitrary expressions, duplicate names and computed definitions', () => {
     expect(edit(files(), { kind: 'style-edit', name: 'Theme.gap', value: '-1' })).toMatchObject({ ok: false })
@@ -277,4 +286,46 @@ struct ContentView: View {
   expect(plan.changes).toHaveLength(1)
   expect(plan.changes[0]!.after).toContain('Text(name.uppercased()).font(.headline)')
   expect(reopened.files.find(f => f.id.endsWith('Custom.swift'))!.text).toBe(custom)
+})
+
+/**
+ * What a developer does to an archive between export and re-import.
+ *
+ * Deleting a colour set, renaming one, or letting Xcode add a High Contrast
+ * appearance are all ordinary things to do. None of them is a reason to refuse the
+ * archive: the colour is a reviewed deletion, exactly as a removed Swift file is.
+ */
+describe('colour sets that changed outside the studio', () => {
+  const withColors = (): Project => ({ ...project('Text("Hi").foregroundStyle(Color("accent"))'), assets: undefined, colors: [{ name: 'accent', light: '#0A84FF', dark: '#409CFF' }, { name: 'surface', light: '#FFFFFF' }] })
+  const colorPath = (entries: Record<string, Uint8Array>, name: string) => Object.keys(entries).find(path => path.endsWith(`${name}.colorset/Contents.json`))!
+
+  it('imports the rest when a colour set was deleted or renamed', () => {
+    for (const change of ['delete', 'rename'] as const) {
+      const source = withColors(), entries = unzipSync(exportEditableZip(source))
+      const path = colorPath(entries, 'surface')
+      if (change === 'delete') delete entries[path]
+      else { entries[path.replace('surface.colorset', 'Surface.colorset')] = entries[path]!; delete entries[path] }
+      const imported = readProjectArchive(zipSync(entries))
+      expect(imported.problem, change).toBeNull()
+      expect(imported.project!.colors?.map(color => color.name), change).toEqual(['accent'])
+      expect(imported.project!.files.length, change).toBe(source.files.length)
+    }
+  })
+
+  it('imports the rest when Xcode adds an appearance we do not read', () => {
+    const entries = unzipSync(exportEditableZip(withColors()))
+    const path = colorPath(entries, 'accent')
+    const contents = JSON.parse(new TextDecoder().decode(entries[path]!)) as { colors: unknown[] }
+    contents.colors.push({ idiom: 'universal', appearances: [{ appearance: 'contrast', value: 'high' }], color: { 'color-space': 'srgb', components: { red: '0x00', green: '0x00', blue: '0x00', alpha: '1.000' } } })
+    entries[path] = new TextEncoder().encode(JSON.stringify(contents))
+    const imported = readProjectArchive(zipSync(entries))
+    expect(imported.problem).toBeNull()
+    expect(imported.project!.colors?.map(color => color.name)).toEqual(['surface'])
+  })
+
+  it('does not invent a conflict out of two projects that both have no images', () => {
+    const source = withColors()
+    const imported = readProjectArchive(exportEditableZip(source))
+    expect(reviewImport(source, imported.project!, imported.handoff!).conflicts).toEqual([])
+  })
 })

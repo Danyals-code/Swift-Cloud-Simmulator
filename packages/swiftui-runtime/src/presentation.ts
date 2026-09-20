@@ -1,5 +1,5 @@
 import type { SourceSpan, ViewLayer } from '@studio/shared'
-import { layerLabel, viewLayers } from './view-hierarchy'
+import { layerLabel, tabIcon, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
   asDate,
@@ -414,7 +414,7 @@ class Resolver {
       return {
         id: `page:${page.path}`, name: (item && layerLabel(item)) || titleOf([page], `Page ${index + 1}`),
         type: 'Page', source: page.span,
-        page: { active, ...(item?.path ? { handlerId: handlerIdFor(item.path) } : {}) },
+        page: { active, ...(item?.path ? { handlerId: handlerIdFor(item.path) } : {}), ...(item && tabIcon(item) ? { icon: tabIcon(item) } : {}) },
         children: active ? screen.navigationBar?.canGoBack ? [{
           id: `destination:${page.path}`, name: screen.navigationBar.title || 'Details',
           type: 'Destination', children: activeLayers,

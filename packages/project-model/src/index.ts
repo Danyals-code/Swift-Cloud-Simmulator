@@ -18,3 +18,4 @@ export * from './studio-metadata'
 
 export * from './transactions'
 export * from './assets'
+export * from './colors'

@@ -1,0 +1,84 @@
+/* The right-hand settings panel, at all three levels: App, Screen and View. One set of
+   parts - a section, a row of label and control, a token chip - so the three levels
+   read as one panel whose contents change, not three panels. */
+
+.panel { display: grid; gap: 0; min-width: 0; font-size: 12px; color: var(--color-xc-text); }
+.section { display: grid; gap: 8px; padding: 12px 0 14px; border-bottom: 1px solid var(--color-xc-line-soft); min-width: 0; }
+.section:first-child { padding-top: 2px; }
+.section:last-child { border-bottom: 0; }
+.sectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.sectionHeader h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--color-xc-text); }
+.sectionHeader > span { display: inline-flex; align-items: center; gap: 4px; }
+.iconButton { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: var(--color-xc-text-2); cursor: pointer; }
+.iconButton:hover:not(:disabled) { background: var(--color-xc-line-soft); color: var(--color-xc-text); }
+.iconButton[aria-pressed='true'], .iconButton[aria-expanded='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.iconButton:disabled { opacity: .35; cursor: default; }
+
+.row { display: grid; grid-template-columns: minmax(64px, 38%) minmax(0, 1fr); align-items: center; gap: 8px; min-height: 28px; }
+.row > span:first-child, .row > label:first-child { color: var(--color-xc-text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field, .row input, .row select { box-sizing: border-box; width: 100%; min-width: 0; height: 28px; border: 1px solid var(--color-xc-line); border-radius: 6px; padding: 0 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; }
+.row input[type='color'] { padding: 2px; width: 32px; height: 26px; flex-shrink: 0; }
+.row input:focus-visible, .row select:focus-visible, .field:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
+.inline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.inline > input:not([type='color']), .inline > select { flex: 1; }
+.unit { color: var(--color-xc-text-3); font-size: 11px; flex-shrink: 0; }
+
+.note { margin: 0; color: var(--color-xc-text-3); font-size: 11px; line-height: 1.5; }
+.warning { margin: 0; color: var(--color-xc-warn-text, #8a5a00); font-size: 11px; line-height: 1.5; }
+.error { margin: 0; color: var(--color-xc-error); font-size: 11px; line-height: 1.5; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); color: var(--color-xc-text); font-size: 12px; cursor: pointer; }
+.button:hover:not(:disabled) { background: var(--color-xc-line-soft); }
+.button:disabled { opacity: .45; cursor: default; }
+.primary { composes: button; border-color: transparent; background: var(--color-xc-accent); color: #fff; }
+.primary:hover:not(:disabled) { background: var(--workspace-accent-hover, var(--color-xc-accent)); }
+.link { color: var(--color-xc-accent); cursor: pointer; font-size: 12px; text-align: left; padding: 0; }
+.link:disabled { opacity: .45; cursor: default; }
+
+/* Token rows in the App panel. */
+.tokenList { display: grid; gap: 2px; }
+.tokenRow { display: grid; gap: 8px; border-radius: 6px; }
+.tokenRow[data-open] { background: var(--color-xc-bar-raised); padding: 0 8px 10px; margin: 2px -8px; }
+.tokenSummary { display: flex; align-items: center; gap: 8px; min-height: 30px; width: 100%; text-align: left; cursor: pointer; border-radius: 6px; }
+.tokenSummary:hover { background: var(--color-xc-line-soft); }
+.tokenRow[data-open] .tokenSummary:hover { background: transparent; }
+.tokenSummary > strong { font-weight: 500; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tokenSummary > small { margin-left: auto; flex-shrink: 0; color: var(--color-xc-text-3); font-size: 11px; }
+.swatch { width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .14); background-image: linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%), linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%); background-size: 8px 8px; background-position: 0 0, 4px 4px; position: relative; overflow: hidden; }
+.swatch > i { position: absolute; inset: 0; }
+.swatch[data-split] > i:last-child { left: 50%; }
+.glyph { display: grid; place-items: center; width: 16px; height: 16px; flex-shrink: 0; border-radius: 4px; background: var(--color-xc-line-soft); color: var(--color-xc-text-2); font-size: 9px; font-weight: 600; }
+.legacy { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--color-xc-line-soft); color: var(--color-xc-text-3); }
+.uses { display: grid; gap: 2px; max-height: 140px; overflow: auto; }
+.uses button { text-align: left; padding: 3px 6px; border-radius: 4px; color: var(--color-xc-accent); cursor: pointer; font-size: 11px; }
+.uses button:hover { background: var(--color-xc-line-soft); }
+
+/* A value field's token picker: a token first, a raw value only when chosen. */
+.tokenField { display: grid; gap: 6px; min-width: 0; }
+.tokenPicker { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tokenPicker > select { flex: 1; min-width: 0; height: 28px; border: 1px solid var(--color-xc-line); border-radius: 6px; padding: 0 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; }
+.tokenPicker > select[data-linked] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--color-xc-accent); }
+.rawFlag { flex-shrink: 0; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--color-xc-warn) 30%, transparent); color: var(--color-xc-text-2); }
+.override { flex-shrink: 0; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--color-xc-select); color: var(--color-xc-accent); }
+
+/* Screen and App cards. */
+.lede { display: grid; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--color-xc-line-soft); }
+.lede strong { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.lede small { color: var(--color-xc-text-3); font-size: 11px; }
+.tabs { display: grid; gap: 4px; }
+.tabRow { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.tabRow input, .tabRow select { height: 26px; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 0 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; font-size: 11px; }
+.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; border-radius: 7px; background: var(--color-xc-bar-raised); }
+.segmented button { height: 24px; border-radius: 5px; font-size: 11px; color: var(--color-xc-text-2); cursor: pointer; }
+.segmented button[aria-pressed='true'] { background: var(--color-xc-bar); color: var(--color-xc-text); box-shadow: 0 1px 3px #16162018; }
+.segmented button:disabled { opacity: .4; cursor: default; }
+.states { display: grid; gap: 2px; }
+.stateRow { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 6px; border-radius: 6px; cursor: pointer; text-align: left; width: 100%; }
+.stateRow:hover { background: var(--color-xc-line-soft); }
+.stateRow[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.stateRow > small { margin-left: auto; color: var(--color-xc-text-3); font-size: 11px; }
+.imageRow { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.imageRow img { width: 28px; height: 28px; object-fit: contain; border-radius: 4px; background: var(--color-xc-line-soft); }
+.imageRow > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fileInput { font-size: 11px; }
+.fileInput input { display: block; margin-top: 6px; max-width: 100%; font-size: 11px; }

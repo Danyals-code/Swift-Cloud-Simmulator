@@ -32,7 +32,7 @@ import {
 } from '@studio/swiftui-layout'
 import { AppRuntime, type EvaluationResult } from './app-runtime'
 import type { EnvironmentInputs } from './view-environment'
-import { bodyFont, colorForName, labelColor, systemBackground } from './style'
+import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import type { OverlayKind } from './presentation'
@@ -135,7 +135,7 @@ function analyse(request: CompileRequest): Analysis {
   // its inference would be working from a broken tree, and a warning derived from
   // that is exactly the false positive the pass exists to avoid.
   const strict = diagnostics.some((d) => d.severity === 'error') ? [] : lintStrictness(files, model)
-  const authoring = buildAuthoringModel({ deploymentTarget: request.deploymentTarget, componentDescriptions: request.componentDescriptions, files: request.files, parsed: files, diagnostics: [...diagnostics, ...model.diagnostics], projectId: request.projectId ?? '', revision: request.revision })
+  const authoring = buildAuthoringModel({ deploymentTarget: request.deploymentTarget, componentDescriptions: request.componentDescriptions, colors: request.colors, files: request.files, parsed: files, diagnostics: [...diagnostics, ...model.diagnostics], projectId: request.projectId ?? '', revision: request.revision })
   const checkMs = performance.now() - checkStart
 
   return {
@@ -168,6 +168,7 @@ function rootEnvironment(request: CompileRequest): LayoutEnvironment {
  * positioning, which is precisely the concept a proposal-based engine does not have.
  */
 function render(request: CompileRequest, evaluation: EvaluationResult, accumulate = false, drawingRuntime = runtime): RenderTree {
+  setAssetColors(request.colors)
   // The gallery lays out several trees in one pass, and every one of them has text
   // to measure. Only the first clears the pending set: clearing it per tree would
   // hand back the last page's requests and leave every other tree's strings on the
@@ -504,6 +505,7 @@ function toResult(
 }
 
 export function compile(request: CompileRequest): CompileResult {
+  setAssetColors(request.colors)
   if (lastAnalysis?.request.projectId !== request.projectId || JSON.stringify(lastAnalysis?.request.scenario) !== JSON.stringify(request.scenario)) {
     runtime.reset(false)
     lastEvaluation = null
@@ -684,6 +686,7 @@ function renderPages(
       active: isActive,
       ...(page.source ? { source: page.source } : {}),
       ...(page.page?.handlerId ? { handlerId: page.page.handlerId } : {}),
+      ...(page.page?.icon ? { icon: page.page.icon } : {}),
       viewHierarchy: ui.viewHierarchy?.filter(layer => layer.id === page.id) ?? [page],
       tree,
     })

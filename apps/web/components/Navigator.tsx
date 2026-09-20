@@ -338,8 +338,11 @@ function filterTree(nodes: readonly TreeNode[], query: string): readonly TreeNod
     if (node.kind === 'file') {
       return node.name.toLowerCase().includes(needle) ? node : null
     }
+    // A folder that matches keeps everything in it: searching "Features" and being
+    // shown an empty Features folder is not an answer.
+    if (node.name.toLowerCase().includes(needle)) return node
     const children = node.children.map(keep).filter((child): child is TreeNode => child !== null)
-    if (children.length === 0 && !node.name.toLowerCase().includes(needle)) return null
+    if (children.length === 0) return null
     return { ...node, children }
   }
 

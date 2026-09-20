@@ -1,32 +1,33 @@
 'use client'
 
-import { DYNAMIC_TYPE_SIZES, dynamicTypeForScale, type DynamicTypeSize } from '@studio/shared'
-
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { RenderTreeView } from '@studio/swiftui-render-dom'
-import { EMPTY_RENDER_TREE, type PagePreview, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
-import { DEVICE_LIST, type DeviceKey, type DeviceSpec } from '@studio/sim-shell'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
+import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
+import type { DeviceKey, DeviceSpec } from '@studio/sim-shell'
 import styles from './Workspace.module.css'
 import type { PreviewSettings } from '../lib/store'
-import { PopupButton, type MenuItem } from './ui/Menu'
-import { SegmentedControl } from './ui/Control'
 import { Icon } from './ui/Icon'
 import { Splitter } from './ui/Splitter'
-import { PANE_LIMITS, type InspectorTab } from '../lib/layout'
+import { PANE_LIMITS } from '../lib/layout'
+import { AppearancePicker, DevicePicker, TextSizePicker, ZoomPicker } from './PreviewEnvironment'
 import type { CanvasTool } from './Toolbar'
-import type { AuthoringNode, NavigationDestination, SourceSpan } from '@studio/shared'
-import { pageSlots } from '../lib/pageLayout'
+import type { AuthoringNode, NavigationDestination } from '@studio/shared'
+import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../lib/pageLayout'
+import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
 import type { FeatureProps } from './AuthoringFeatures'
 import { InlineTextEditor } from './InlineTextEditor'
-import { AuthoringInspector } from './AuthoringInspector'
 
 export interface DevicePaneProps {
   authoringFeatures?: Omit<FeatureProps, 'node'>
-  authoringTools?: React.ReactNode
-  previewTools?: React.ReactNode
-  onChangeAuthoring?: (control: string, value: string) => Promise<string | null>
-  authoringNode?: AuthoringNode
-  onRevealAuthoring?: (span: SourceSpan) => void
+  /**
+   * Design's right-hand panel: the settings for whatever is selected - the App, a
+   * screen, or a view. Built by the workspace, which is what knows the selection.
+   */
+  settingsPanel?: React.ReactNode
+  /** What the panel is showing, for its header: "App", a screen's name, a view's. */
+  settingsTitle?: React.ReactNode
+  /** A click on empty canvas, which in Design selects the App. */
+  onSelectBackground?: () => void
   expanded?: boolean
   projectId: string
   previewIdentity?: string
@@ -57,6 +58,14 @@ export interface DevicePaneProps {
    * said out loud rather than left as a shorter row.
    */
   pages?: readonly PagePreview[]
+  /**
+   * What the design canvas needs beyond the pages: the lanes' names, the states
+   * saved under each screen, and what to compile to draw one.
+   *
+   * Passed in because the workspace is what knows the app's shape - the canvas only
+   * places what it is given, and every position comes from the navigation.
+   */
+  canvas?: CanvasInputs
   navigationPicker?: {
     targets: Readonly<Record<string, { destination?: NavigationDestination; reason?: string }>>
     onPick: (page: PagePreview) => void
@@ -101,20 +110,38 @@ export interface DevicePaneProps {
   centerOn?: { readonly id: string; readonly nonce: number } | null
   /** What the preview is doing, drawn at the head of the canvas. */
   status?: React.ReactNode
-  /** The right-hand rail's two halves. */
-  inspectorTab?: InspectorTab
-  onInspectorTab?: (tab: InspectorTab) => void
   preview: PreviewSettings
   onPreviewChange: (settings: Partial<PreviewSettings>) => void
+}
+
+/** What the canvas draws besides the screens themselves. */
+export interface CanvasInputs {
+  /** One lane per tab, in tab order; the last lane holds screens nothing links to. */
+  readonly laneNames: readonly string[]
+  /** Which lane header shows which SF Symbol, by lane. */
+  readonly laneIcons?: readonly (string | undefined)[]
+  /** The screen a page draws, so a sheet opened from several screens is drawn once. */
+  readonly sameScreen: (page: PagePreview) => string
+  /** Narrows the canvas to one lane; undefined shows the whole app. */
+  readonly visibleRootId?: string
+  /** The states saved under a screen, drawn below it inside its frame. */
+  readonly statesOf: (page: PagePreview) => readonly PreviewScenario[]
+  /** The state the panel is editing, which is also the one the app is running. */
+  readonly activeState?: string
+  readonly onSelectState?: (page: PagePreview, state: PreviewScenario | null) => void
+  /** Everything a state phone needs to compile, minus what the pane already knows. */
+  readonly compile: Omit<CompilerOptions, 'device' | 'colorScheme' | 'typeScale' | 'dynamicTypeSize' | 'scenario' | 'allPages' | 'previewScreen'>
 }
 
 /** Chrome around the screen: bezel thickness plus breathing room in the pane. */
 const BEZEL = 10
 const PANE_PADDING = 28
 
-/** Space between phones in the gallery, and the room a page's name needs under one. */
-const GALLERY_GAP = 24
-const CAPTION_HEIGHT = 26
+/** How many state phones may be drawn at once, each being its own compile. */
+const STATE_BUDGET = 8
+
+/** How each arrow is drawn and labeled: the wording designers read on the canvas. */
+const ARROWS: Readonly<Record<CanvasArrow['kind'], string>> = { root: 'Start', push: 'Push', sheet: 'Sheet', cover: 'Full screen', popover: 'Popover' }
 
 /**
  * The device's own chrome sits above everything the app can draw.
@@ -126,24 +153,6 @@ const CAPTION_HEIGHT = 26
  * bar, which is why a screen with one showed no clock and no island.
  */
 const DEVICE_Z = 1_000_000
-
-/** Dynamic Type steps, matching the iOS accessibility slider's usable range. */
-const TYPE_SCALES: readonly MenuItem[] = DYNAMIC_TYPE_SIZES.map((value) => ({
-  value,
-  label: ({ xSmall: 'Text XS', small: 'Text S', medium: 'Text M', large: 'Text L',
-    xLarge: 'Text XL', xxLarge: 'Text XXL', xxxLarge: 'Text XXXL',
-    accessibility1: 'Text AX1', accessibility2: 'Text AX2', accessibility3: 'Text AX3',
-    accessibility4: 'Text AX4', accessibility5: 'Text AX5' })[value],
-  ...(value === 'large' ? { detail: 'Default' } : {}),
-}))
-
-const ZOOMS: readonly MenuItem[] = [
-  { value: 'fit', label: 'Fit', detail: 'Auto' },
-  { value: '1', label: '100%' },
-  { value: '0.75', label: '75%' },
-  { value: '0.5', label: '50%' },
-  { value: '0.33', label: '33%' },
-]
 
 /**
  * The simulated device.
@@ -158,10 +167,7 @@ const ZOOMS: readonly MenuItem[] = [
  * gives equal weight to a project setting and a viewing preference.
  */
 export function DevicePane({
-  onChangeAuthoring,
-  authoringFeatures, authoringTools, previewTools,
-  authoringNode,
-  onRevealAuthoring,
+  authoringFeatures, settingsPanel, settingsTitle, onSelectBackground,
   expanded = false,
   projectId,
   previewIdentity = projectId,
@@ -182,6 +188,7 @@ export function DevicePane({
   onRevealSource,
   onHoverNode,
   pages,
+  canvas,
   selectedPageId,
   navigationPicker,
   pageCount,
@@ -194,8 +201,6 @@ export function DevicePane({
   onReorderNodes,
   centerOn,
   status,
-  inspectorTab = 'preview',
-  onInspectorTab,
   preview,
   onPreviewChange,
 }: DevicePaneProps) {
@@ -247,22 +252,120 @@ export function DevicePane({
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
   }, [])
 
-  /** How many phones across, and the size of the world they make. */
-  const arrangement = useMemo(() => {
-    const frameW = device.width + BEZEL * 2
-    const frameH = device.height + BEZEL * 2
-    const count = pages?.length ?? 0
-    if (!gallery || !count) return { columns: 1, width: frameW, height: frameH }
+  /**
+   * The canvas: lanes of screens with each screen's states inside its frame.
+   *
+   * States cost a compile each, so they are drawn only where they are asked for -
+   * one screen opened, or "Show all states" for the lot.
+   */
+  const [openStates, setOpenStates] = useState<ReadonlySet<string>>(() => new Set())
+  const [collapsedLanes, setCollapsedLanes] = useState<ReadonlySet<number>>(() => new Set())
+  const [showAllStates, setShowAllStates] = useState(false)
+  // What is open belongs to the project and to this set of tabs. Carrying it across
+  // leaves a different lane collapsed, or a screen open that no longer exists.
+  const [canvasFor, setCanvasFor] = useState(`${projectId}:${canvas?.laneNames.length ?? 0}`)
+  if (canvasFor !== `${projectId}:${canvas?.laneNames.length ?? 0}`) {
+    setCanvasFor(`${projectId}:${canvas?.laneNames.length ?? 0}`)
+    setOpenStates(new Set()); setCollapsedLanes(new Set()); setShowAllStates(false)
+  }
+  const phoneFrame = useMemo(() => ({ width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }), [device.width, device.height])
+  const statesOf = canvas?.statesOf, laneNames = canvas?.laneNames, visibleRootId = canvas?.visibleRootId, sameScreen = canvas?.sameScreen
 
-    const slots = pageSlots(pages!)
-    const columns = Math.max(...slots.map(slot => slot.column + 1), 1)
-    const rows = Math.max(...slots.map(slot => slot.row + 1), 1)
-    return {
-      columns,
-      width: columns * frameW + (columns - 1) * GALLERY_GAP,
-      height: rows * (frameH + CAPTION_HEIGHT) + (rows - 1) * GALLERY_GAP,
+  /**
+   * How many states are drawn, and where.
+   *
+   * Every state phone is a second compile of the project, so there is a budget: the
+   * screens a designer opened come first, in canvas order, and the rest keep their
+   * badge. Without it, "Show all states" on a real app starts thirty compilers.
+   */
+  const states = useMemo(() => {
+    const drawn = new Map<string, number>()
+    let left = STATE_BUDGET, held = 0
+    for (const page of pages ?? []) {
+      const own = statesOf?.(page).length ?? 0
+      if (!own) continue
+      const open = showAllStates || openStates.has(page.id)
+      if (!open) continue
+      drawn.set(page.id, Math.min(own, left))
+      held += own - Math.min(own, left)
+      left -= Math.min(own, left)
     }
-  }, [gallery, pages, device.width, device.height])
+    return { drawn, held }
+  }, [pages, statesOf, showAllStates, openStates])
+
+  const layout: CanvasLayout | null = useMemo(() => !gallery || !pages?.length ? null : canvasLayout(pages, {
+    frame: phoneFrame,
+    statesOf: page => statesOf?.(page).map(state => state.name) ?? [],
+    expanded: openStates,
+    showAllStates,
+    collapsedLanes,
+    laneNames: laneNames ?? [],
+    budget: states.drawn,
+    ...(visibleRootId ? { visibleRootId } : {}),
+    ...(sameScreen ? { sameScreen } : {}),
+  }), [gallery, pages, phoneFrame, statesOf, openStates, showAllStates, collapsedLanes, laneNames, states, visibleRootId, sameScreen])
+
+  // A screen chosen in the tree cannot be shown while its lane is collapsed, so the
+  // lane opens with it. Done as the request arrives rather than in an effect, so the
+  // canvas is drawn once, already open.
+  const [centredNonce, setCentredNonce] = useState(centerOn?.nonce ?? 0)
+  if (centerOn && centerOn.nonce !== centredNonce) {
+    setCentredNonce(centerOn.nonce)
+    const lane = layout?.slots.find(slot => slot.page.id === centerOn.id)?.lane
+    if (lane !== undefined && collapsedLanes.has(lane)) setCollapsedLanes(previous => {
+      const next = new Set(previous)
+      next.delete(lane)
+      return next
+    })
+  }
+
+  /** Whether the app has a state anywhere, which is what the switch is for. */
+  const hasStates = !!pages?.some(page => statesOf?.(page).length)
+  /** What the canvas is actually drawing, which is what its heading should say. */
+  const drawnScreens = layout?.phones.filter(phone => !phone.state).length ?? pages?.length ?? 0
+
+  /** The size of the world the canvas makes, which is what the zoom fits. */
+  const arrangement = useMemo(
+    () => layout ? { width: layout.width, height: layout.height } : { width: phoneFrame.width, height: phoneFrame.height },
+    [layout, phoneFrame],
+  )
+
+  /**
+   * Each arrow as a curve between two screens, labeled with how it navigates.
+   *
+   * It leaves the right edge of one screen and arrives at the left edge of the
+   * next, curving rather than turning corners so that several arrows out of the
+   * same screen stay apart. Arrows to a screen in a collapsed lane are dropped
+   * with it: a line to nothing is worse than no line.
+   */
+  const arrowId = useId().replaceAll(':', '')
+  const arrows = useMemo(() => {
+    if (!layout) return []
+    const at = new Map(layout.phones.filter(phone => !phone.state).map(phone => [phone.page.id, phone]))
+    return layout.arrows.flatMap(arrow => {
+      const from = at.get(arrow.from), to = at.get(arrow.to)
+      if (!from || !to) return []
+      const id = `${arrow.from}->${arrow.to}`, kind = arrow.kind
+      const x1 = from.x + phoneFrame.width, y1 = from.y + phoneFrame.height / 2
+      const x2 = to.x, y2 = to.y + phoneFrame.height / 2
+      if (x2 >= x1) {
+        const bend = Math.max(56, (x2 - x1) / 2)
+        return [{ id, kind, d: `M${x1} ${y1} C${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`, label: { x: (x1 + 3 * (x1 + bend) + 3 * (x2 - bend) + x2) / 8, y: (y1 + y2) / 2 - 8 } }]
+      }
+      // A shared sheet sits in its own row, which can be back to the left of the
+      // screen that opens it. Those arrows run down the page instead of doubling
+      // back across it, leaving from the edge nearest the screen they point at.
+      const down = to.y > from.y
+      const ax = from.x + phoneFrame.width * 0.72, ay = down ? from.y + phoneFrame.height : from.y
+      const bx = to.x + phoneFrame.width * 0.72, by = down ? to.y : to.y + phoneFrame.height
+      const bend = Math.max(48, Math.abs(by - ay) / 2)
+      return [{
+        id, kind,
+        d: `M${ax} ${ay} C${ax} ${down ? ay + bend : ay - bend}, ${bx} ${down ? by - bend : by + bend}, ${bx} ${by}`,
+        label: { x: (ax + bx) / 2 + 26, y: (ay + by) / 2 },
+      }]
+    })
+  }, [layout, phoneFrame])
 
   /** The zoom that fits the world in the viewport, never magnifying past 1:1. */
   const fitScale = useMemo(() => {
@@ -400,8 +503,9 @@ export function DevicePane({
     }
 
     // Fit re-centres when it is chosen and when the viewport changes shape - but not
-    // when the *content* does.
-    if (preview.zoom === 'fit' && (chosen || resized)) { centreView(); return }
+    // when the *content* does: opening a screen's states makes the world taller, and
+    // re-fitting it there would shrink and slide the screen under the pointer.
+    if (preview.zoom === 'fit') { if (chosen || resized) centreView(); else applyView(); return }
 
     const current = viewRef.current
     if (current.scale === scale) { applyView(); return }
@@ -561,9 +665,12 @@ export function DevicePane({
     }
   }, [])
 
+  /** Where a press on empty canvas began, so a click can be told from a pan. */
+  const backgroundPress = useRef<{ x: number; y: number } | null>(null)
   const onPanStart = useCallback((event: React.PointerEvent) => {
     if (!expanded) return
-    const background = event.target === event.currentTarget || (event.target as HTMLElement).dataset.world !== undefined
+    const background = event.target === event.currentTarget || (event.target as HTMLElement).dataset.world !== undefined || (event.target as HTMLElement).dataset.canvasBackground !== undefined
+    backgroundPress.current = background && event.button === 0 && !spaceRef.current ? { x: event.clientX, y: event.clientY } : null
     // Middle-drag and space-drag work over the phones too, which is the way out of a
     // canvas zoomed in far enough that a phone covers the whole viewport.
     if (event.button === 1 || (event.button === 0 && (background || spaceRef.current))) {
@@ -571,6 +678,12 @@ export function DevicePane({
       setGrabbing(true)
     }
   }, [expanded])
+  const onBackgroundUp = useCallback((event: React.PointerEvent) => {
+    const press = backgroundPress.current
+    backgroundPress.current = null
+    if (!press || !inspecting || navigationPicker || Math.abs(event.clientX - press.x) + Math.abs(event.clientY - press.y) > 4) return
+    onSelectBackground?.()
+  }, [inspecting, navigationPicker, onSelectBackground])
 
   useEffect(() => {
     if (!grabbing) return
@@ -655,13 +768,10 @@ export function DevicePane({
     </div>
   )
 
-  const devicePicker = <PopupButton items={DEVICE_LIST.map(d => ({ value: d.key, label: d.name, detail: `${d.width} × ${d.height}` }))} value={device.key} onChange={value => onDeviceChange(value as DeviceKey)} label="Destination" testId="device-select" />
-  const schemePicker = <SegmentedControl label="Appearance" testId="scheme-toggle" options={[{value:'light',label:'Light'},{value:'dark',label:'Dark'}]} value={preview.colorScheme} onChange={value => onPreviewChange({colorScheme:value as 'light' | 'dark'})} />
-  const typePicker = <PopupButton items={TYPE_SCALES} value={preview.dynamicTypeSize ?? dynamicTypeForScale(preview.typeScale)} onChange={value => onPreviewChange({dynamicTypeSize:value as DynamicTypeSize})} label="Dynamic Type size" testId="type-scale-select" />
-  const zoomItems = ZOOMS.some(item => item.value === preview.zoom)
-    ? ZOOMS
-    : [...ZOOMS, { value: preview.zoom, label: `${Math.round(Number(preview.zoom) * 100)}%` }]
-  const zoomPicker = <PopupButton items={zoomItems} value={preview.zoom} onChange={value => onPreviewChange({zoom:value})} label="Zoom" title={`Zoom — ${Math.round(scale * 100)}%`} testId="zoom-select" />
+  const devicePicker = <DevicePicker device={device} onChange={onDeviceChange} />
+  const schemePicker = <AppearancePicker preview={preview} onChange={onPreviewChange} />
+  const typePicker = <TextSizePicker preview={preview} onChange={onPreviewChange} />
+  const zoomPicker = <ZoomPicker preview={preview} scale={scale} onChange={onPreviewChange} />
 
   const collapsePanel = <button type="button" className={styles.panelToggle} data-testid="pane-toggle-preview" aria-pressed="true" aria-label={expanded ? 'Collapse preview settings' : 'Collapse preview'} title={expanded ? 'Collapse preview settings' : 'Collapse preview'} onClick={onToggleSettings}><Icon name="sidebar-right" size={16} /></button>
 
@@ -678,9 +788,9 @@ export function DevicePane({
               : dragTarget
               ? `Drop ${dragTarget.position} ${dragTarget.name}`
               : gallery
-              ? pageCount && pageCount > pages!.length
-                ? `${pages!.length} of ${pageCount} screens · scroll to explore`
-                : `${pages!.length} ${pages!.length === 1 ? 'screen' : 'screens'} · scroll to explore · ⌘/Ctrl-scroll to zoom`
+              ? drawnScreens < (pageCount ?? pages!.length)
+                ? `${drawnScreens} of ${pageCount ?? pages!.length} screens · scroll to explore`
+                : `${drawnScreens} ${drawnScreens === 1 ? 'screen' : 'screens'} · scroll to explore · ⌘/Ctrl-scroll to zoom`
               : inspecting ? 'Hover to find a view in Layers, click to select it' : 'Interactive preview'
           }</span>
           {navigationPicker && <button type="button" className={styles.cancelPick} onClick={navigationPicker.onCancel}>Cancel pick</button>}
@@ -690,6 +800,14 @@ export function DevicePane({
             <input type="checkbox" data-testid="show-all-pages" checked={allPages && inspecting} disabled={!inspecting || !!navigationPicker} onChange={(event) => onToggleAllPages?.(event.target.checked)} />
             Show all screens
           </label>
+          {/* Every state at once, for a walk through the whole app. Each state is
+              its own compile, so it is a switch rather than the default. */}
+          {canvas && <label className={styles.showAll} data-disabled={!hasStates || undefined} title={hasStates ? 'Draw every saved state under its screen' : 'Add a state to a screen in its settings first'}>
+            <input type="checkbox" data-testid="show-all-states" checked={showAllStates && hasStates} disabled={!hasStates} onChange={event => setShowAllStates(event.target.checked)} />
+            Show all states
+          </label>}
+          {!!states.held && <span title="Each state is drawn by compiling the project again, so the canvas draws a few at a time.">{states.held} more {states.held === 1 ? 'state' : 'states'} not drawn</span>}
+          {zoomPicker}
         </span>
       </div> : <header className={styles.compactSettings}>{collapsePanel}{devicePicker}{schemePicker}{typePicker}{zoomPicker}</header>}
       <div className={styles.canvasArea}>
@@ -702,6 +820,7 @@ export function DevicePane({
         data-tool={inspecting ? tool : undefined}
         data-dragging={dragTarget ? true : undefined}
         onPointerDown={(event) => { skipNavigationPickClick.current = event.button === 1 || spaceRef.current; onPanStart(event); onViewPointerDown(event) }}
+        onPointerUp={onBackgroundUp}
         // The pointer can leave the device without crossing any node's boundary -
         // straight off the bezel - so the pane itself has to clear the highlight.
         onPointerLeave={() => setHovered(null)}
@@ -710,14 +829,82 @@ export function DevicePane({
             transform decides where and how big it appears, which is what lets the
             canvas be panned anywhere and zoomed about the pointer. */}
         <div ref={worldRef} data-world className={styles.world}>
-          {gallery ? (
+          {gallery && layout ? (
             <div
-              className={styles.gallery}
+              className={styles.flow}
+              data-canvas-background
               data-testid="page-gallery"
-              style={{ gridTemplateColumns: `repeat(${arrangement.columns}, ${device.width + BEZEL * 2}px)`, gap: GALLERY_GAP }}
+              style={{ width: layout.width, height: layout.height }}
             >
-              {pageSlots(pages!).map(({ page, column, row, depth }) => (
-                <figure key={page.id} className={styles.pageCard} style={{ gridColumn: column + 1, gridRow: row + 1 }} data-active={page.id === selectedPageId || undefined} data-page-id={page.id} data-parent-page={page.parentId} data-page-kind={page.kind ?? 'root'} data-testid="gallery-page">
+              {/* A lane per tab, in tab order. Collapsing one leaves its header, so an
+                  app with six tabs can be read one tab at a time. */}
+              {layout.lanes.map(lane => {
+                const icon = canvas?.laneIcons?.[lane.index]
+                const asset = icon ? symbolAsset(icon, `lane-${lane.index}`) : null
+                return <div key={lane.index} className={styles.lane} data-canvas-background data-collapsed={lane.collapsed || undefined} style={{ top: lane.y, height: lane.height, width: layout.width }}>
+                  <button
+                    type="button"
+                    className={styles.laneHeader}
+                    data-testid="canvas-lane"
+                    aria-expanded={!lane.collapsed}
+                    title={lane.collapsed ? `Show ${lane.name}` : `Collapse ${lane.name}`}
+                    onClick={() => setCollapsedLanes(previous => {
+                      const next = new Set(previous)
+                      if (!next.delete(lane.index)) next.add(lane.index)
+                      return next
+                    })}
+                  >
+                    <Icon name="chevron-down" size={11} />
+                    {asset && <svg viewBox={asset.viewBox} width="13" height="13" aria-hidden="true" dangerouslySetInnerHTML={{ __html: asset.body }} />}
+                    <span>{lane.name}</span>
+                    <small>{lane.screens} {lane.screens === 1 ? 'screen' : 'screens'}</small>
+                  </button>
+                </div>
+              })}
+              {/* Navigation, drawn: solid for a push, dashed for anything presented
+                  over the screen, and labeled so the line needs no legend. */}
+              <svg className={styles.flowArrows} width={layout.width} height={layout.height} aria-hidden="true">
+                <defs><marker id={`${arrowId}-head`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" stroke="none" /></marker></defs>
+                {arrows.map(arrow => <g key={arrow.id}>
+                  <path d={arrow.d} data-kind={arrow.kind} markerEnd={`url(#${arrowId}-head)`} />
+                  <text x={arrow.label.x} y={arrow.label.y} textAnchor="middle">{ARROWS[arrow.kind]}</text>
+                </g>)}
+              </svg>
+              {/* The screen frame: everything inside it is a state of that screen. */}
+              {layout.frames.filter(frame => frame.states.length).map(frame => (
+                <div key={`frame:${frame.page.id}`} className={styles.screenFrame} style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }}>
+                  <button
+                    type="button"
+                    className={styles.statesBadge}
+                    data-testid="states-badge"
+                    aria-expanded={frame.expanded}
+                    disabled={showAllStates}
+                    title={showAllStates ? 'Every state is shown · turn off “Show all states” to close them' : frame.expanded ? `Hide the states of ${frame.page.name}` : `Show the states of ${frame.page.name}`}
+                    onClick={() => setOpenStates(previous => {
+                      const next = new Set(previous)
+                      if (!next.delete(frame.page.id)) next.add(frame.page.id)
+                      return next
+                    })}
+                  >{frame.expanded && showAllStates ? `${frame.states.length} ${frame.states.length === 1 ? 'state' : 'states'}` : frame.expanded ? 'Hide states' : `+${frame.states.length} ${frame.states.length === 1 ? 'state' : 'states'}`}</button>
+                </div>
+              ))}
+              {layout.phones.map(({ page, state, x, y }) => {
+                const scenario = state ? statesOf?.(page).find(saved => saved.name === state) : undefined
+                return scenario && canvas
+                ? <div key={`${page.id}:${scenario.name}`} className={styles.statePhone} style={{ left: x, top: y, width: phoneFrame.width, height: phoneFrame.height + CANVAS.caption }} data-page-id={page.id} data-state={scenario.name}>
+                    <StatePhone
+                      page={page}
+                      scenario={scenario}
+                      options={canvas.compile}
+                      device={device}
+                      preview={preview}
+                      active={canvas.activeState === scenario.name}
+                      {...(canvas.onSelectState ? { onSelect: () => canvas.onSelectState!(page, scenario) } : {})}
+                      draw={tree => screenFor(tree, false, 1, page)}
+                    />
+                  </div>
+                : state ? null
+                : <figure key={page.id} className={styles.pageCard} style={{ left: x, top: y, width: phoneFrame.width, height: phoneFrame.height + CANVAS.caption }} data-active={page.id === selectedPageId || undefined} data-page-id={page.id} data-parent-page={page.parentId} data-page-kind={page.kind ?? 'root'} data-testid="gallery-page">
                   <div style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }}>
                     {screenFor(page.tree, false, 1, page)}
                     {navigationPicker && <button
@@ -732,9 +919,15 @@ export function DevicePane({
                     ><span style={{ fontSize: 12 / Math.max(fitScale, 0.1), padding: `${6 / Math.max(fitScale, 0.1)}px ${8 / Math.max(fitScale, 0.1)}px` }}>{navigationPicker.targets[page.id]?.destination ? `Choose ${page.name}` : navigationPicker.targets[page.id]?.reason}</span></button>}
 
                   </div>
-                  <figcaption><button type="button" onClick={event => { if (navigationPicker) { if (event.detail && skipNavigationPickClick.current) return; if (navigationPicker.targets[page.id]?.destination) navigationPicker.onPick(page) } else onSelectPage?.(page) }} aria-label={`Edit ${page.name}`} title={depth ? `Screen within ${pages!.find(parent => parent.id === page.parentId)?.name ?? 'this screen'}` : 'Screen'}>{depth ? '↳ ' : ''}{page.name}</button>{page.id === selectedPageId ? <span className={styles.liveTag}>Editing</span> : null}</figcaption>
+                  <figcaption><button type="button" onClick={event => {
+                    if (navigationPicker) { if (event.detail && skipNavigationPickClick.current) return; if (navigationPicker.targets[page.id]?.destination) navigationPicker.onPick(page); return }
+                    onSelectPage?.(page)
+                    // This phone is the screen with the app's own data, so choosing it
+                    // also steps out of whichever state was being shown.
+                    if (canvas?.activeState && statesOf?.(page).some(state => state.name === canvas.activeState)) canvas.onSelectState?.(page, null)
+                  }} aria-label={`Edit ${page.name}`} title={page.parentId ? `Reached from ${pages!.find(parent => parent.id === page.parentId)?.name ?? 'another screen'}` : 'Screen'}>{page.name}</button>{page.id === selectedPageId ? <span className={styles.liveTag}>Editing</span> : null}</figcaption>
                 </figure>
-              ))}
+              })}
             </div>
           ) : (
             <div
@@ -763,51 +956,70 @@ export function DevicePane({
       /></div>}
       {/* The width is a variable rather than a style so the narrow-window rule,
           which stacks the rail above the canvas at full width, can still win. */}
-      {expanded && showSettings && <aside className={styles.properties} style={{ '--settings-width': `${settingsWidth}px` } as React.CSSProperties} aria-label="Preview settings">
-        {/* Two halves: what you are making, and how you are looking at it. The
-            switch under the canvas moves between them on its own, because the
-            question you are asking changes with it - and either tab is still one
-            press away whenever that guess is wrong. */}
-        <header className={styles.propertyTabs} role="tablist" aria-label="Inspector">
-          {(['settings', 'preview'] as const).map(tab => (
-            <button key={tab} type="button" role="tab" aria-selected={inspectorTab === tab}
-              data-testid={`inspector-tab-${tab}`} onClick={() => onInspectorTab?.(tab)}>
-              {tab === 'settings' ? 'Properties' : 'Device'}
-            </button>
-          ))}
+      {expanded && showSettings && <aside className={styles.properties} style={{ '--settings-width': `${settingsWidth}px` } as React.CSSProperties} aria-label="Settings">
+        {/* One panel, for whatever is selected: the App, a screen or a view. What
+            the preview is showing - device, appearance, text size - is the top
+            bar's, because it applies to every screen at once. */}
+        <header className={styles.settingsHeader}>
+          <span data-testid="settings-title">{settingsTitle ?? 'Settings'}</span>
           {collapsePanel}
         </header>
-
-        {inspectorTab === 'settings' ? (
-          <div className={styles.designerSettings} data-testid="inspector-settings">
-            <AuthoringInspector features={authoringFeatures} onChange={onChangeAuthoring} node={authoringNode} stale={stale} onReveal={onRevealAuthoring} />
-            {authoringTools}
-          </div>
-        ) : (
-          <>
-            <div className={styles.propertySection}>
-              <h3>Device</h3>
-              <div className={styles.propertyRow}>{devicePicker}</div>
-              <div className={styles.dimensions}><span><small>W</small>{device.width}</span><span><small>H</small>{device.height}</span></div>
-            </div>
-            <div className={styles.propertySection}>
-              <h3>Display</h3>
-              <div className={styles.propertyRow}><span>Appearance</span>{schemePicker}</div>
-              <div className={styles.propertyRow}><span>Text size</span>{typePicker}</div>
-              <div className={styles.propertyRow}><span>Canvas zoom</span>{zoomPicker}</div>
-            </div>
-            <div className={styles.propertySection}>
-              {previewTools}
-              <h3>iOS 27 preview</h3>
-              <p>Tap, scroll, and try your app. Switch to Code to see the SwiftUI behind it.</p>
-              <p>In Arrange, scroll to explore screens or drag the background. Use ⌘/Ctrl-scroll to zoom.</p>
-            </div>
-          </>
-        )}
+        <div className={styles.designerSettings} data-testid="inspector-settings">
+          {settingsPanel}
+        </div>
       </aside>}
       {expanded && !showSettings && <div className={styles.panelRail}><button type="button" className={styles.panelToggle} data-testid="pane-toggle-preview" aria-pressed="false" aria-label="Show preview settings" title="Show preview settings" onClick={onToggleSettings}><Icon name="sidebar-right" size={16} /></button></div>}
     </section>
   </>)
+}
+
+/**
+ * One saved state, drawn as its own phone under its screen.
+ *
+ * A state is a set of preview inputs rather than a copy of the screen, so it is
+ * drawn by compiling the project again with those values: whatever the code does
+ * with an empty list is what the Empty state shows, and editing the screen's
+ * layout changes every state at once because there is only one screen.
+ */
+function StatePhone({ page, scenario, options, device, preview, active, onSelect, draw }: {
+  page: PagePreview
+  scenario: PreviewScenario
+  options: CanvasInputs['compile']
+  device: DeviceSpec
+  preview: PreviewSettings
+  active: boolean
+  onSelect?: () => void
+  draw: (tree: RenderTree | null) => React.ReactNode
+}) {
+  const { result, stale, workerError } = useCompiler({
+    ...options,
+    device,
+    colorScheme: preview.colorScheme,
+    typeScale: preview.typeScale,
+    ...(preview.dynamicTypeSize ? { dynamicTypeSize: preview.dynamicTypeSize } : {}),
+    scenario,
+    allPages: true,
+  })
+  const tree = result?.pages?.find(item => item.id === page.id)?.tree ?? null
+  // A state is a set of values for this screen. When the screen no longer has them -
+  // renamed, removed, retyped - that is what to say, not that the code is broken.
+  const mismatch = result?.diagnostics.find(d => d.severity === 'error' && d.code === 'invalid_preview_scenario')
+  const problem = workerError
+    ?? (mismatch ? `This state no longer matches ${page.name}. Open Screen \u203a States to change or remove it.` : null)
+    ?? (result?.diagnostics.some(d => d.severity === 'error') ? 'This state cannot be drawn while the code has errors.' : null)
+    ?? (result && !stale && !tree ? `This state no longer matches ${page.name}. Open Screen \u203a States to change or remove it.` : null)
+  return (
+    <figure className={styles.pageCard} data-testid="canvas-state" data-state={scenario.name} data-active={active || undefined}>
+      <div style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }} data-busy={!tree || stale || undefined}>
+        {draw(tree)}
+        {problem ? <p className={styles.stateProblem} role="status">{problem}</p> : null}
+      </div>
+      <figcaption>
+        <button type="button" onClick={onSelect} disabled={!onSelect} title={`Show the ${scenario.name} state in the app and its settings`}>{scenario.name}</button>
+        {active ? <span className={styles.liveTag}>Editing</span> : null}
+      </figcaption>
+    </figure>
+  )
 }
 
 /**

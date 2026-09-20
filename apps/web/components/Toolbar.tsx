@@ -29,6 +29,16 @@ export interface ToolbarProps {
   onExport: (format: ExportFormat) => void
   onDownloadEditable?: () => void
   onShare: () => Promise<'copied' | 'too-large' | 'failed'>
+  /**
+   * Design's preview environment - device, appearance, text size. It applies to
+   * every screen at once, like SwiftUI's environment, so it lives here rather than
+   * beside any one phone.
+   */
+  environment?: React.ReactNode
+  /** Design only: whether the canvas is running the app rather than editing it. */
+  previewing?: boolean
+  onSetPreviewing?: (previewing: boolean) => void
+  previewDisabled?: boolean
 }
 
 /** What a click on the canvas does while designing. */
@@ -40,6 +50,8 @@ interface PreviewToolsProps {
   onSetInspecting: (inspecting: boolean) => void
   /** Design only: the row of editing actions above the switch. */
   showEditActions?: boolean
+  /** Code draws its Inspect/Preview switch here; Design's lives in the top bar. */
+  showModeSwitch?: boolean
   tool: CanvasTool
   onSetTool: (tool: CanvasTool) => void
   /** Code inspects the app; Design designs it. Same switch, honest about each. */
@@ -62,26 +74,44 @@ const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debu
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
 export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, onModeChange, theme, onThemeChange,
-  panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onReview, reviewDisabled }: ToolbarProps) {
-  return <header data-testid="toolbar" className={styles.toolbar}>
+  panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onReview, reviewDisabled,
+  environment, previewing = false, onSetPreviewing, previewDisabled }: ToolbarProps) {
+  const design = mode === 'design'
+  // One Export menu: the four native formats, the editable archive, and - in Design -
+  // the review sheet that exports PNGs. Two buttons that both "save the project
+  // somewhere" were one decision presented as two.
+  const exportItems = [
+    ...EXPORT_FORMATS.map(f => ({ value: f.id, label: f.name, detail: f.shortName, title: f.description })),
+    ...(onDownloadEditable ? [{ value: 'editable', label: 'Editable archive', detail: '.swiftstudio.zip', title: 'Swift, images, app settings and designer metadata, to reopen here later', separated: true }] : []),
+    ...(design && onReview ? [{ value: 'review', label: 'Review & export images…', title: 'Check contrast and touch targets, present screens, or export PNGs', disabled: reviewDisabled, separated: !onDownloadEditable }] : []),
+  ]
+  const chooseExport = (value: string) => {
+    if (value === 'editable') onDownloadEditable?.()
+    else if (value === 'review') onReview?.()
+    else onExport(value as ExportFormat)
+  }
+  return <header data-testid="toolbar" className={styles.toolbar} data-mode={mode}>
     <div className={styles.project}>
       <button type="button" onClick={onOpenGallery} aria-label="Open a project" title="Projects and templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={21} /></button>
-      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} /><span data-testid="save-indicator" className={saveError ? styles.saveError : styles.saveStatus}>Swift Web Studio · {saveError ? 'Could not save' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
+      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} /><span data-testid="save-indicator" className={saveError ? styles.saveError : styles.saveStatus}>{saveError ? 'Could not save' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
     </div>
     <nav className={styles.modes} aria-label="Workspace view">
-      {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Focus on the app preview' : 'Code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Code'}</button>)}
+      {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Design screens visually' : 'Swift code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Code'}</button>)}
     </nav>
     <div className={styles.actions}>
-      {mode === 'design' && <button type="button" className={styles.export} data-testid="design-review" onClick={onReview} disabled={reviewDisabled}>Review & export</button>}
-      <button type="button" data-testid="workspace-theme" className={styles.themeToggle} aria-label="Workspace dark mode" aria-pressed={theme === 'dark'} title={`Switch workspace to ${theme === 'dark' ? 'light' : 'dark'} mode`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}><Icon name="appearance" size={17} /></button>
-      <span className={styles.paneControls}><PaneToggles options={debugPane} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>
+      {design && environment && <div className={styles.environment} role="group" aria-label="Preview environment" data-testid="preview-environment">{environment}</div>}
+      {design && onSetPreviewing && <button type="button" className={styles.previewToggle} data-testid={previewing ? 'inspect-toggle' : 'live-toggle'} aria-pressed={previewing} disabled={previewDisabled} title={previewing ? 'Back to editing (Tab)' : 'Try the app: tap, scroll and navigate (Tab)'} onClick={() => onSetPreviewing(!previewing)}><Icon name={previewing ? 'stop' : 'run'} size={13} />{previewing ? 'Stop preview' : 'Preview'}</button>}
+      {!design && <span className={styles.paneControls}><PaneToggles options={debugPane} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>}
       <span className={styles.share}><ShareButton onShare={onShare} /></span>
-      <button type="button" className={styles.export} data-testid="download-editable" title="Download Swift, images, app settings, and designer metadata" onClick={onDownloadEditable}>Save editable</button>
       <div className={styles.exportGroup}>
         <button type="button" onClick={() => onExport('xcodeproj')} data-testid="export-button" title="Export an Xcode project" className={styles.export}>Export<Icon name="download" size={14} /></button>
-        <MenuButton items={EXPORT_FORMATS.map(f => ({value:f.id,label:f.name,detail:f.shortName,title:f.description}))} onSelect={value => onExport(value as ExportFormat)} label="Export format" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={11} /></MenuButton>
+        <MenuButton items={exportItems} onSelect={chooseExport} label="Export options" title="Other formats, the editable archive, and images" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={11} /></MenuButton>
       </div>
-      <button type="button" data-testid="shortcuts-button" className={styles.themeToggle} aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={onShortcuts}><Icon name="keyboard" size={19} /></button>
+      <MenuButton items={[
+        { value: 'theme', label: theme === 'dark' ? 'Light workspace' : 'Dark workspace', icon: 'appearance' },
+        { value: 'shortcuts', label: 'Keyboard shortcuts', detail: '⌘/', icon: 'keyboard' },
+        ...(design ? [{ value: 'problems', label: 'Problems and output', detail: '⌘⇧Y', separated: true }] : []),
+      ]} onSelect={value => { if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug') }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={17} /></MenuButton>
     </div>
   </header>
 }
@@ -115,7 +145,7 @@ function ProjectName({ name, onRename }: { name: string; onRename: (name: string
  * the phone back to the person using it. They are a switch rather than two toggles
  * because a pointer over a phone has to mean one thing at a time.
  */
-export function PreviewTools({ inspecting, onSetInspecting, showEditActions = false, tool, onSetTool, onAdd, canAdd, mode = 'design', busy, onUndo, onRedo, onReset, canUndo, canRedo, note }: PreviewToolsProps) {
+export function PreviewTools({ inspecting, onSetInspecting, showEditActions = false, showModeSwitch = true, tool, onSetTool, onAdd, canAdd, mode = 'design', busy, onUndo, onRedo, onReset, canUndo, canRedo, note }: PreviewToolsProps) {
   // The workspace is called Design; what the pointer does inside it is called Edit,
   // so that no word names two different things.
   const designing = mode === 'design' ? 'Edit' : 'Inspect'
@@ -138,10 +168,10 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
         </span>
       </div>
     ) : null}
-    <div className={`${styles.dockRow} ${styles.dockModes}`}>
+    {showModeSwitch && <div className={`${styles.dockRow} ${styles.dockModes}`}>
       <PushButton disabled={busy} onClick={() => onSetInspecting(true)} active={inspecting} label={designing} title={mode === 'design' ? 'Arrange, add and delete views (Tab)' : 'Point at a view to find its code (Tab)'} testId="inspect-toggle" icon="inspect">{designing}</PushButton>
       <PushButton disabled={busy} onClick={() => onSetInspecting(false)} active={!inspecting} label="Preview" title="Tap, scroll and use the app (Tab)" testId="live-toggle" icon="run">Preview</PushButton>
-    </div>
+    </div>}
   </div>
 }
 
@@ -172,7 +202,7 @@ function ShareButton({ onShare }: { onShare: ToolbarProps['onShare'] }) {
     result === 'copied'
       ? 'Link copied'
       : result === 'too-large'
-        ? 'Use Save editable'
+        ? 'Use Export › Editable archive'
         : result === 'failed'
           ? 'Copy failed'
           : 'Share'

@@ -18,6 +18,7 @@ const STROKE: Readonly<Record<string, string>> = {
   undo: 'M6 3 2.5 6.5 6 10M3 6.5h6a4 4 0 0 1 0 8',
   redo: 'M10 3 13.5 6.5 10 10M13 6.5H7a4 4 0 0 0 0 8',
   keyboard: 'M2.5 3.5h11v9h-11v-9ZM5 6h.1M8 6h.1M11 6h.1M5 8h.1M8 8h.1M11 8h.1M5 10h6',
+  lock: 'M4.5 7V5.25a3.5 3.5 0 0 1 7 0V7M3.75 7h8.5c.55 0 1 .45 1 1v4.5c0 .55-.45 1-1 1h-8.5c-.55 0-1-.45-1-1V8c0-.55.45-1 1-1Z',
   collapse: 'M3 2.5h7v2M6 5.5h7v8H6v-8ZM8 9.5h3',
   expand: 'M3 2.5h7v2M6 5.5h7v8H6v-8ZM8 9.5h3M9.5 8v3',
   appearance: 'M8 2.25a5.75 5.75 0 1 0 0 11.5 5.75 5.75 0 0 0 0-11.5ZM8 2.25v11.5M10 3v10M12 4v8',
@@ -50,6 +51,30 @@ const STROKE: Readonly<Record<string, string>> = {
   screens:
     'M2.25 3.25h7.5c.55 0 1 .45 1 1v7.5c0 .55-.45 1-1 1h-7.5c-.55 0-1-.45-1-1v-7.5c0-.55.45-1 1-1ZM5.25 3.25V1.75c0-.28.22-.5.5-.5h7c.55 0 1 .45 1 1v7c0 .28-.22.5-.5.5h-1.5M1.25 6.25h9.5',
   grid: 'M2.5 2.5h4.25v4.25H2.5V2.5ZM9.25 2.5h4.25v4.25H9.25V2.5ZM2.5 9.25h4.25v4.25H2.5V9.25ZM9.25 9.25h4.25v4.25H9.25V9.25Z',
+  /** The app itself: an app icon's rounded square. */
+  app: 'M4.5 2.25h7a2.25 2.25 0 0 1 2.25 2.25v7a2.25 2.25 0 0 1-2.25 2.25h-7A2.25 2.25 0 0 1 2.25 11.5v-7A2.25 2.25 0 0 1 4.5 2.25ZM5.5 8h5M8 5.5v5',
+  /** A component's Main, and every copy of it. */
+  component: 'M8 1.75 14.25 8 8 14.25 1.75 8 8 1.75Z',
+  /** A tab bar: the lanes of a tabbed app. */
+  tabs: 'M2.25 3.25h11.5v9.5H2.25v-9.5ZM2.25 10h11.5M5.25 10v2.75M8 10v2.75M10.75 10v2.75',
+  /** A sheet sliding up over a screen. */
+  sheet: 'M3.25 2.25h9.5v11.5h-9.5V2.25ZM3.25 6.25h9.5M6.5 4.25h3',
+  /** A single phone, for a screen. */
+  phone: 'M5 1.75h6c.69 0 1.25.56 1.25 1.25v10c0 .69-.56 1.25-1.25 1.25H5c-.69 0-1.25-.56-1.25-1.25V3c0-.69.56-1.25 1.25-1.25ZM7 12h2',
+  /** Show only what belongs to one screen. */
+  focus: 'M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM2.25 5.5V3.25c0-.55.45-1 1-1H5.5M10.5 2.25h2.25c.55 0 1 .45 1 1V5.5M13.75 10.5v2.25c0 .55-.45 1-1 1H10.5M5.5 13.75H3.25c-.55 0-1-.45-1-1V10.5',
+  /** One outline, top to bottom. */
+  outline: 'M2.5 3.5h11M4.5 6.5h9M6.5 9.5h7M6.5 12.5h7',
+  /** Three stacked panels. */
+  panels: 'M2.5 2.5h11v3h-11v-3ZM2.5 6.5h11v3h-11v-3ZM2.5 10.5h11v3h-11v-3Z',
+  /** A token: a named value picked instead of typed. */
+  token: 'M3.25 5.25 8 2.5l4.75 2.75v5.5L8 13.5l-4.75-2.75v-5.5ZM8 2.5V8M3.25 5.25 8 8l4.75-2.75',
+  /** Detached from its Main, or a raw value that is not a token. */
+  unlink: 'M6.5 9.5 9.5 6.5M5.25 7.25 4 8.5a2.47 2.47 0 0 0 3.5 3.5l1.25-1.25M10.75 8.75 12 7.5A2.47 2.47 0 0 0 8.5 4L7.25 5.25M2.5 2.5l2 2M11.5 11.5l2 2',
+  /** A link between two screens. */
+  arrow: 'M2.5 8h10.5M9.5 4.5 13 8l-3.5 3.5',
+  /** Open the Swift behind something, in Code. */
+  code: 'M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5',
   'new-folder':
     'M2.25 4.75c0-.83.67-1.5 1.5-1.5h2.1c.4 0 .78.16 1.06.44l.9.9h4.94c.83 0 1.5.67 1.5 1.5v5.16c0 .83-.67 1.5-1.5 1.5H3.75c-.83 0-1.5-.67-1.5-1.5V4.75ZM8 7.75v3.5M6.25 9.5h3.5',
 }

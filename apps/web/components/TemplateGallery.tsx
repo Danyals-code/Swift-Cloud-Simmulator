@@ -25,7 +25,7 @@ export type GallerySource = 'design' | 'open' | 'prompt' | TemplateKind
 
 export interface TemplateGalleryProps {
   currentProject?: Project
-  onImport?: (expected: Project, project: Project, removedNames: readonly string[]) => Promise<string | null>
+  onImport?: (expected: Project, project: Project, removedNames: readonly string[], removedColors: readonly string[]) => Promise<string | null>
   /** The project on screen, so the sheet can say what replacing it would cost. */
   projectId: string | null
   projectName: string

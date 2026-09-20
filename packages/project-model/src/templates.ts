@@ -39,6 +39,47 @@ export interface Template extends Omit<TemplateInfo, 'files'> {
 }
 
 /** A one-file template, named after the `App` struct it declares. */
+/**
+ * A new project's folders, which the designer surface is built around.
+ *
+ * `App/` holds the entry point and, once there are tabs, the tab bar; `Features/`
+ * holds one folder per screen; `DesignSystem/` holds `Tokens.swift` and the
+ * components made from copies. Keeping new projects in this shape is what lets the
+ * design panels stay simple - anything outside it still opens, and still works, but
+ * it shows as a locked block rather than pretending to be editable.
+ */
+const BLANK_FILES: readonly SourceFile[] = [
+  { id: 'Sources/App/MyDesignApp.swift', text: `import SwiftUI
+
+@main
+struct MyDesignApp: App {
+    var body: some Scene {
+        WindowGroup {
+            HomeScreen()
+        }
+    }
+}
+` },
+  { id: 'Sources/Features/Home/HomeScreen.swift', text: `import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(.systemBackground))
+        }
+    }
+}
+
+#Preview {
+    HomeScreen()
+}
+` },
+]
+
 function single(source: string): readonly SourceFile[] {
   const appName = /struct (\w+): App/.exec(source)?.[1] ?? 'MyApp'
   return [{ id: `Sources/${appName}.swift`, text: source }]
@@ -181,7 +222,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Today") {
+                Section {
                     ForEach(tasks) { task in
                         Button {
                             toggle(task)
@@ -195,6 +236,8 @@ struct ContentView: View {
                             }
                         }
                     }
+                } header: {
+                    Text("Today")
                 } footer: {
                     Text("\\(complete) of \\(tasks.count) complete. Tap a task to change it.")
                 }
@@ -281,15 +324,10 @@ const GRID = app(
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 10) {
-                for row in 0..<3 {
+                ForEach(0..<3, id: \\.self) { row in
                     HStack(spacing: 10) {
-                        for column in 0..<3 {
-                            Button("") {
-                                selected = row * 3 + column
-                            }
-                            .frame(width: 72, height: 72)
-                            .background(tint(row * 3 + column))
-                            .cornerRadius(12)
+                        ForEach(0..<3, id: \\.self) { column in
+                            swatch(row * 3 + column)
                         }
                     }
                 }
@@ -299,6 +337,17 @@ const GRID = app(
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    func swatch(_ index: Int) -> some View {
+        Button("") {
+            selected = index
+        }
+        .frame(width: 72, height: 72)
+        .background(tint(index))
+        .cornerRadius(12)
+        .accessibilityLabel("Swatch \\(index + 1)")
     }
 
     func tint(_ index: Int) -> Color {
@@ -412,13 +461,15 @@ struct ContentView: View {
                     Label("Signed in", systemImage: "person.circle")
                 }
 
-                Section("Appearance") {
+                Section {
                     Picker("Theme", selection: $theme) {
                         ForEach(Theme.allCases) { option in
                             Text(option.label).tag(option.rawValue)
                         }
                     }
                     .pickerStyle(.segmented)
+                } header: {
+                    Text("Appearance")
                 } footer: {
                     Text("Currently using the \\(chosen.label.lowercased()) appearance.")
                 }
@@ -592,7 +643,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Inbox") {
+                Section {
                     ForEach(messages) { message in
                         HStack(spacing: 10) {
                             Image(systemName: message.read ? "envelope.open" : "envelope")
@@ -608,6 +659,8 @@ struct ContentView: View {
                             Spacer()
                         }
                     }
+                } header: {
+                    Text("Inbox")
                 } footer: {
                     Text("Pull a message aside to file it. Nothing here leaves the device.")
                 }
@@ -1088,18 +1141,7 @@ const TYPESETTING = app(
  * than producing a template that half exists.
  */
 const SOURCES: Readonly<Record<string, readonly SourceFile[]>> = {
-  blank: single(app('MyDesignApp', 'ContentView', `struct ContentView: View {
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(.systemBackground))
-        }
-    }
-}
-`)),
+  blank: BLANK_FILES,
   counter: single(COUNTER_APP_SOURCE),
   stacks: single(STACKS),
   tasks: single(TOGGLE_LIST),

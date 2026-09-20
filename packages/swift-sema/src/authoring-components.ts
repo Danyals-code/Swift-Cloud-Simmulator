@@ -1,7 +1,7 @@
 import type { AuthoringNode, ComponentSettings, ComponentVariant, DesignControl, SourceFile } from '@studio/shared'
 import { Parser, insertView, forEachChild, type FuncDecl, type Node, type VarDecl } from '@studio/swift-syntax'
 import { AUTHORING_COLORS, swiftString, validateControlValue, designControlRecipes } from './design-controls'
-import { applyPatches, allDeclarations, callOf, expressionOf, identifier, insertMember, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch } from './authoring-context'
+import { applyPatches, allDeclarations, callOf, expressionOf, identifier, insertMember, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch, sourceRoot } from './authoring-context'
 import { SUPPORTED_VIEWS } from './builtins'
 import { enclosingCollection } from './authoring-collections'
 import { buildAuthoringModel } from './authoring'
@@ -143,7 +143,7 @@ export function extractComponent(ctx: FeatureContext, node: AuthoringNode, name:
     } else throw new Error(`The dependency “${key}” cannot be parameterized safely. Extract this selection in Swift.`)
   }
   const eol = ctx.files.find(f => f.id === node.source.file)?.text.includes('\r\n') ? '\r\n' : '\n'
-  const file = `${node.source.file.includes('/') ? node.source.file.slice(0, node.source.file.lastIndexOf('/') + 1) : ''}${name}.swift`
+  const file = `${sourceRoot(ctx)}DesignSystem/Components/${name}.swift`
   const text = `import SwiftUI\n\nstruct ${name}: View {\n    ${parameters.join('\n    ')}\n    var body: some View {\n        ${raw(ctx, node.source)}\n    }\n}\n`.replace(/\r?\n/g, eol)
   return { patches: [patch(node.source, `${name}(${arguments_.join(', ')})`)], files: [{ id: file, text }] }
 }

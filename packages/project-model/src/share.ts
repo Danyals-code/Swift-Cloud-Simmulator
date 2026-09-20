@@ -4,6 +4,7 @@ import { newProjectId } from './open'
 import { isPreviewTarget, normalizePreviewTarget, type PreviewTarget, type SourceFile } from '@studio/shared'
 import { DEFAULT_DEVICE, DEVICES } from '@studio/sim-shell'
 import type { Project, ProjectManifest } from './types'
+import { validateColors, type ColorAsset } from './colors'
 import { normalizeFileName, normalizeFolderPath, normalizeProjectName } from './types'
 
 /**
@@ -51,6 +52,13 @@ const MAX_SHARE_FILES = 256
 interface SharePayload {
   readonly s?: StudioMetadata
   readonly p?: PreviewTarget
+  /**
+   * The appearance the project was shared in.
+   *
+   * Only ever written when it is dark, so the common link does not grow, and an
+   * older reader that ignores the key opens in light exactly as it did before.
+   */
+  readonly m?: 'dark'
   readonly v: number
   readonly n: string
   readonly b: string
@@ -66,6 +74,8 @@ interface SharePayload {
    * make every existing link stop opening.
    */
   readonly g?: readonly string[]
+  /** Colour sets, when the project has colour tokens. A handful of hex strings each. */
+  readonly c?: readonly ColorAsset[]
 }
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -98,6 +108,7 @@ export function encodeProject(project: Project): string | null {
   const payload: SharePayload = {
     v: FORMAT_VERSION,
     ...(project.studio ? { s: project.studio } : {}),
+    ...(project.manifest.colorScheme === 'dark' ? { m: 'dark' as const } : {}),
     p: normalizePreviewTarget(project.manifest.previewTarget),
     n: project.manifest.name,
     b: project.manifest.bundleId,
@@ -105,6 +116,7 @@ export function encodeProject(project: Project): string | null {
     t: project.manifest.device,
     f: project.files.map((file) => ({ i: file.id, t: file.text })),
     ...(project.folders?.length ? { g: [...project.folders] } : {}),
+    ...(project.colors?.length ? { c: project.colors.map(color => ({ ...color })) } : {}),
   }
 
   const json = new TextEncoder().encode(JSON.stringify(payload))
@@ -149,6 +161,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
   if (!isSharePayload(payload)) return null
   if (!isSafePayload(payload)) return null
   if (payload.s !== undefined && readStudioMetadata(payload.s).status !== 'valid') return null
+  if (payload.c !== undefined) { try { validateColors(payload.c) } catch { return null } }
 
   const manifest: ProjectManifest = {
     name: payload.n,
@@ -157,7 +170,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
     // Validated rather than cast. The cast was the whole of 8.3: it made a claim the
     // payload had not earned, and every reader downstream then believed it.
     device: payload.t in DEVICES ? (payload.t as ProjectManifest['device']) : DEFAULT_DEVICE,
-    colorScheme: 'light',
+    colorScheme: payload.m === 'dark' ? 'dark' : 'light',
     previewTarget: normalizePreviewTarget(payload.p),
   }
 
@@ -172,6 +185,7 @@ export function decodeProject(encoded: string, now: number): Project | null {
     manifest,
     files,
     ...(payload.s ? { studio: payload.s } : {}),
+    ...(payload.c?.length ? { colors: payload.c } : {}),
     ...(folders.length > 0 ? { folders } : {}),
     createdAt: now,
     updatedAt: now,
@@ -237,7 +251,8 @@ function isSharePayload(value: unknown): value is SharePayload {
     Array.isArray(p.f) &&
     p.f.length > 0 &&
     p.f.every((f) => typeof f?.i === 'string' && typeof f?.t === 'string') &&
-    (p.g === undefined || Array.isArray(p.g))
+    (p.g === undefined || Array.isArray(p.g)) &&
+    (p.c === undefined || Array.isArray(p.c))
   )
 }
 

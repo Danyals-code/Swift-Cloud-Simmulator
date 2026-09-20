@@ -1,12 +1,14 @@
-import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, SourceFile } from '@studio/shared'
+import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, PreviewColorAsset, SourceFile } from '@studio/shared'
 import { collectionFor, addCollectionField, bindField, convertCollection, emptyState, enclosingCollection, recordsSwift, validateRecords } from './authoring-collections'
 import { componentRecipes, componentSettings, extractComponent, insertComponent, applyComponentVariant, exposeComponentInput } from './authoring-components'
 import { behaviorSettings, configureAction, configureBinding, configureTransition, stateInputs } from './authoring-behavior'
 import { applyPatches, hasComments, patch, type FeatureContext, type SourcePatch } from './authoring-context'
 import { editResource, sharedStyles, styleProperties } from './authoring-resources'
 import { validateControlValue } from './design-controls'
-import { navigationSettings, configureNavigationTarget } from './authoring-navigation'
-import { guidedAction, screenPatches } from './authoring-screens'
+import { navigationSettings, configureNavigationTarget, changeNavigationType } from './authoring-navigation'
+import { appNavigation, navigationPatches } from './authoring-navigation-app'
+import { makeComponent } from './authoring-copies'
+import { createScreenValue, guidedAction, screenEdit } from './authoring-screens'
 import { structureEdit } from './authoring-structure'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
@@ -18,19 +20,22 @@ export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot
     return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: component ? [...component.controls, ...(node.controls ?? [])] : node.controls }
   })
   const inputs = snapshot.nodes.filter(n => n.kind === 'definition').flatMap(n => stateInputs(ctx, n))
-  return { ...snapshot, nodes, inputs, styles: sharedStyles(ctx) }
+  return { ...snapshot, nodes, inputs, styles: sharedStyles(ctx), navigation: appNavigation(ctx) }
 }
-export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation: AuthoringOperation | { kind: 'property'; control: string; value: string }): { files: SourceFile[]; offset: number } {
-  let patches: SourcePatch[] = [], files: SourceFile[] = []
+export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation: AuthoringOperation | { kind: 'property'; control: string; value: string }): { files: SourceFile[]; offset: number; colors?: PreviewColorAsset[] } {
+  let patches: SourcePatch[] = [], files: SourceFile[] = [], colors: PreviewColorAsset[] | undefined, removed: readonly string[] = []
   switch (operation.kind) {
     case 'component-expose': return exposeComponentInput(ctx, node, operation.control, operation.name)
     case 'component-insert': return insertComponent(ctx, node, operation.component)
     case 'component-variant': return applyComponentVariant(ctx, node, operation.variant)
     case 'guided-action': return guidedAction(ctx, node, operation)
-    case 'screen-create': case 'screen-duplicate': case 'screen-remove': patches = screenPatches(ctx, node, operation); break
+    case 'screen-create': case 'screen-duplicate': case 'screen-remove': { const result = screenEdit(ctx, node, operation); patches = result.patches; files = result.files ?? []; removed = result.removed ?? []; break }
     case 'layer-duplicate': case 'layer-wrap': case 'layer-reparent': return structureEdit(ctx, node, operation)
     case 'navigation-target': patches = configureNavigationTarget(ctx, node, operation.destination); break
-    case 'style-create-link': case 'style-create': case 'style-edit': case 'style-link': case 'style-local': case 'asset-use': case 'asset-references': { const result = editResource(ctx, node, operation); patches = result.patches; files = result.created ?? []; break }
+    case 'navigation-type': patches = changeNavigationType(ctx, node, operation.type); break
+    case 'value-create': patches = createScreenValue(ctx, node, operation.name, operation.value); break
+    case 'navigation-style': case 'tab-add': case 'tab-update': case 'tab-remove': case 'tab-move': { const result = navigationPatches(ctx, operation); patches = result.patches; files = result.created ?? []; break }
+    case 'style-create-link': case 'style-create': case 'style-edit': case 'style-link': case 'style-local': case 'style-migrate': case 'asset-use': case 'asset-references': { const result = editResource(ctx, node, operation); patches = result.patches; files = result.created ?? []; colors = result.colors; removed = result.removed ?? []; break }
     case 'property': {
       const recipe = componentRecipes(ctx, node).find(r => r.control.id === operation.control)
       if (!recipe) throw new Error('This component argument is not a supported literal or its interface has changed.')
@@ -54,10 +59,19 @@ export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation:
     case 'empty-state': patches = emptyState(ctx, node, operation.text); break
     case 'bind-field': patches = bindField(ctx, node, operation.field); break
     case 'extract-component': { const result = extractComponent(ctx, node, operation.name); patches = result.patches; files = result.files; break }
+    case 'make-component': {
+      const targets = operation.copies.map(id => {
+        const found = ctx.nodes.find(n => n.id === id)
+        if (!found) throw new Error('One of the copies changed. Find the copies again.')
+        return found
+      })
+      const result = makeComponent(ctx, node, operation.name, targets, operation.names, operation.screens ?? [])
+      patches = result.patches; files = result.files; break
+    }
     case 'bind-state': patches = configureBinding(ctx, node, operation.name, operation.create); break
     case 'behavior': patches = configureAction(ctx, node, operation.action, operation.replace); break
     case 'transition': patches = configureTransition(ctx, node, operation.state, operation.style, operation.duration); break
     default: throw new Error('This design command is not supported.')
   }
-  return { files: applyPatches(ctx, patches, files), offset: node.source.start + patches.filter(p => p.file === node.source.file && p.end <= node.source.start).reduce((delta, p) => delta + p.text.length - (p.end - p.start), 0) }
+  return { files: applyPatches(ctx, patches, files).filter(file => !removed.includes(file.id)), offset: node.source.start + patches.filter(p => p.file === node.source.file && p.end <= node.source.start).reduce((delta, p) => delta + p.text.length - (p.end - p.start), 0), ...(colors ? { colors } : {}) }
 }

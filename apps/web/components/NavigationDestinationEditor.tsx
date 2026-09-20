@@ -75,7 +75,7 @@ export function NavigationDestinationEditor({ owner, features, onReveal }: Props
   if (!editable) return <div id={navigationDestinationEditorId(owner)} className={styles.destinationEditor} data-testid="navigation-destination-editor">
     {current && <p>Current destination: <code>{current}</code></p>}
     <p>{info?.reason ?? 'This navigation uses a destination that cannot be edited visually yet.'}</p>
-    {onReveal && <button type="button" onClick={() => onReveal(owner.source)}>Edit navigation in Code</button>}
+    {onReveal && <button type="button" onClick={() => onReveal(owner.source)}>Open in Code</button>}
   </div>
   return <div id={navigationDestinationEditorId(owner)} className={styles.destinationEditor} data-testid="navigation-destination-editor" data-settings-owner={`${owner.owner}:${owner.name}:${owner.source.file}:${owner.source.start}`} aria-busy={!!busy} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false) }}>
     <label htmlFor={`${listId}-input`}>Navigate to</label>

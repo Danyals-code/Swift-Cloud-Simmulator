@@ -479,3 +479,21 @@ describe('the gallery', () => {
     expect(/let id: Int/.test(corpus)).toBe(false)
   })
 })
+
+/**
+ * A colour swatch with no text is a button VoiceOver cannot name.
+ *
+ * The grid is also the one place a starter builds views in a loop, so this pins
+ * both: nine swatches, nine names, and no `for` loop inside a ViewBuilder — which
+ * the browser accepts and Xcode does not.
+ */
+describe('the palette grid', () => {
+  it('draws nine swatches and names every one', () => {
+    resetPipelineState()
+    const result = compile({ projectId: 'palette', revision: 1, files: TEMPLATES.find(template => template.id === 'palette')!.files, canvas: { width: 393, height: 852 }, colorScheme: 'light' })
+    expect(result.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(result.renderTree!.nodes.filter(node => Math.round(node.frame.width) === 72 && Math.round(node.frame.height) === 72).length).toBeGreaterThanOrEqual(9)
+    const named = result.renderTree!.nodes.flatMap(node => /^Swatch \d+$/.test(node.a11y?.label ?? '') ? [node.a11y!.label!] : [])
+    expect(new Set(named).size).toBe(9)
+  })
+})

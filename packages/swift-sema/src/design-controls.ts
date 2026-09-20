@@ -131,6 +131,22 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       if (name === 'frame' && arg.label === 'alignment') replace(id, label, arg.value, 'select', ALIGNMENTS)
       if (['accessibilityLabel', 'accessibilityIdentifier', 'navigationTitle'].includes(name) && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'text')
       if (['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
+      // The v1 catalog's values: each card edits exactly the arguments it wrote.
+      if (name === 'offset' && ['x', 'y'].includes(arg.label ?? '')) replace(id, label, arg.value, 'number')
+      if (name === 'blur' && arg.label === 'radius') replace(id, label, arg.value, 'number', undefined, 0)
+      if (['tracking', 'lineSpacing'].includes(name) && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'number')
+      if (name === 'scaleEffect' && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'number', undefined, 0)
+      if (name === 'disabled' && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'select', ['true', 'false'], undefined, undefined, '')
+      if (name === 'navigationBarTitleDisplayMode' && !arg.label && m.args.length === 1) replace(id, 'Title size', arg.value, 'select', ['automatic', 'large', 'inline'])
+      if (name === 'border' && !arg.label && j === 0) replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
+      if (name === 'border' && arg.label === 'width') replace(id, label, arg.value, 'number', undefined, 0)
+      if (name === 'shadow' && ['radius', 'x', 'y'].includes(arg.label ?? '')) replace(id, label, arg.value, 'number', arg.label === 'radius' ? undefined : undefined, arg.label === 'radius' ? 0 : undefined)
+      // `.rotationEffect(.degrees(15))` and `.clipShape(.rect(cornerRadius: 12))` carry their
+      // number one call deeper; the control edits that number and nothing around it.
+      const inner = arg.value.kind === 'call' && !arg.value.trailingClosure ? arg.value : undefined
+      if (name === 'rotationEffect' && inner?.callee.kind === 'memberAccess' && !inner.callee.base && inner.callee.member === 'degrees' && inner.args.length === 1 && inner.args[0]!.label === null) replace(id + ':degrees', 'rotationEffect · degrees', inner.args[0]!.value, 'number')
+      const corner = name === 'clipShape' && inner && (inner.callee.kind === 'memberAccess' && !inner.callee.base && inner.callee.member === 'rect' || inner.callee.kind === 'identifier' && inner.callee.name === 'RoundedRectangle') ? inner.args.find(a => a.label === 'cornerRadius') : undefined
+      if (corner && inner!.args.length === 1) replace(id + ':cornerRadius', 'clipShape · cornerRadius', corner.value, 'number', undefined, 0)
       if (name === 'buttonStyle') replace(id, 'Button style', arg.value, 'select', targetVersion >= 15 ? ['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent'] : ['automatic', 'plain', 'borderless'])
       if (name === 'buttonBorderShape') replace(id, 'Button shape', arg.value, 'select', ['automatic', 'capsule', 'roundedRectangle'])
       if (name === 'controlSize') replace(id, 'Control size', arg.value, 'select', ['mini', 'small', 'regular', 'large'])

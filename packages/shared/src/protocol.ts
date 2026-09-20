@@ -1,4 +1,4 @@
-import type { PreviewScenario, ComponentDescription } from './authoring-features'
+import type { PreviewScenario, ComponentDescription, CopyMatch, CopyValue } from './authoring-features'
 import type { DesignEditRequest, DesignEditPlan } from './design-edit'
 import type { ViewLayer } from './view-layer'
 import type { AuthoringSnapshot } from './authoring'
@@ -31,8 +31,17 @@ export interface PreviewImageAsset {
   readonly dark?: string
 }
 
+/** A colour set from the asset catalog, as `Color("name")` reads it. Hex, `#RRGGBB[AA]`. */
+export interface PreviewColorAsset {
+  readonly name: string
+  readonly light: string
+  readonly dark?: string
+}
+
 export interface CompileRequest {
   readonly images?: readonly PreviewImageAsset[]
+  /** The project's colour sets, one value per appearance. */
+  readonly colors?: readonly PreviewColorAsset[]
   /** Separates live app state when the IDE opens a different project. */
   readonly projectId?: string
   readonly deploymentTarget?: string
@@ -122,6 +131,8 @@ export interface PagePreview {
   readonly parentId?: string
   readonly rootId?: string
   readonly kind?: 'root' | 'destination' | 'sheet' | 'cover' | 'popover'
+  /** A tab's SF Symbol, for its lane header. */
+  readonly icon?: string
   readonly source?: SourceSpan
   /** Source mapping for views only present in this isolated preview. */
   readonly viewHierarchy?: readonly ViewLayer[]
@@ -238,7 +249,7 @@ export interface ViewSiteInfo {
 
 /** The interface exposed over Comlink. */
 export interface CompilerApi {
-  validateResourceRemoval(files: readonly SourceFile[], removedNames: readonly string[]): Promise<string | null>
+  validateResourceRemoval(files: readonly SourceFile[], removedNames: readonly string[], removedColors?: readonly string[]): Promise<string | null>
   planDesignEdit(request: DesignEditRequest): Promise<DesignEditPlan>
   compile(request: CompileRequest): Promise<CompileResult>
   /**
@@ -274,6 +285,8 @@ export interface CompilerApi {
   describeView(text: string, file: FileId, offset: number): Promise<ViewSiteInfo | null>
   /** The Swift that draws this view, for a copy. */
   copyView(text: string, file: FileId, offset: number): Promise<string | null>
+  /** Views elsewhere in the project with the same shape as the one at this span. */
+  findCopies(files: readonly SourceFile[], target: SourceSpan, options?: { deploymentTarget?: string; screens?: readonly string[] }): Promise<{ copies: readonly CopyMatch[]; values: readonly CopyValue[]; eligible: boolean; reason?: string }>
   /** Every view the given files are hiding. */
   hiddenViews(files: readonly SourceFile[]): Promise<readonly HiddenViewInfo[]>
 

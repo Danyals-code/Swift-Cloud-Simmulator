@@ -93,7 +93,9 @@ describe('source modifier inventory and writers', () => {
       expect(modifiers[1]!.capabilities.moveUp).toBe(false)
       expect(planDesignEdit(request(source, { kind: 'modifier-move', modifier: modifiers[1]!.id, toIndex: 0 }, name))).toMatchObject({ ok: false })
       expect(planDesignEdit(request(source, { kind: 'modifier-add', name: 'padding', before: modifiers[0]!.id }, name))).toMatchObject({ ok: false })
-      expect(edit(source, { kind: 'modifier-add', name: 'background' }, name)).toContain('.opacity(0.8).background(Color.blue)')
+      // A new background lands in its slot - after size and padding, before opacity - so it
+      // fills the sized box and fades with it. Pinned entries stay put.
+      expect(edit(source, { kind: 'modifier-add', name: 'background' }, name)).toContain('.background(Color.blue).opacity(0.8)')
     }
   })
   it('supports visual modifiers on component instances without changing the shared definition', () => {

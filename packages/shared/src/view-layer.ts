@@ -16,5 +16,5 @@ export interface ViewLayer {
   readonly componentSources?: readonly ComponentSource[]
   readonly children: readonly ViewLayer[]
   /** Only page selection has an action; selecting a control never activates it. */
-  readonly page?: { readonly active: boolean; readonly handlerId?: string }
+  readonly page?: { readonly active: boolean; readonly handlerId?: string; /** A tab's SF Symbol. */ readonly icon?: string }
 }

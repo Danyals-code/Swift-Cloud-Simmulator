@@ -68,8 +68,11 @@ describe('editable visual starter properties', () => {
   })
   it('offers a blank editable full-size column with a semantic background', () => {
     const starter = templateById('blank')!
-    expect(starter).toBeDefined()
-    const source = starter.files[0]!.text
+    // A new project is laid out the way the design panels expect: the entry point
+    // in App/, one folder per screen under Features/, each screen previewable.
+    expect(starter.files.map(file => file.id)).toEqual(['Sources/App/MyDesignApp.swift', 'Sources/Features/Home/HomeScreen.swift'])
+    const source = starter.files.find(file => file.id.includes('Features/'))!.text
+    expect(source).toContain('#Preview {\n    HomeScreen()\n}')
     expect(selected(source, 'VStack').controls?.find(c => c.label === 'Spacing')).toBeDefined()
     const changed = edit(source, 'VStack', { kind: 'insert', snippet: 'Text("My first design")' })
     expect(render(changed).renderTree!.nodes.flatMap(n => n.text?.runs.map(r => r.text) ?? [])).toContain('My first design')
