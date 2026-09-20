@@ -2,7 +2,6 @@
 
 import { SymbolPicker } from './SymbolPicker'
 import { GuidedInteraction } from './GuidedInteraction'
-import { SharedStyleProperties } from './SharedStyles'
 import { useState } from 'react'
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, ComponentDescription, ComponentVariant, BehaviorAction, DesignRecord, DesignValue, RecordField, PreviewInput, NavigationDestination } from '@studio/shared'
 import { defaultRecord, RecordEditor } from './RecordEditor'
@@ -11,6 +10,7 @@ import { settingsVisualChildren } from '../lib/authoringSettings'
 import { sourceLayerLabel } from '../lib/sourceLayers'
 import styles from './AuthoringInspector.module.css'
 import { ComponentVariants } from './ComponentVariants'
+import { MakeComponent, type CopySearch } from './MakeComponent'
 
 export type FeatureChange = (operation: AuthoringOperation | { kind: 'insert'; snippet: string }) => Promise<string | null>
 export interface FeatureProps {
@@ -29,8 +29,15 @@ export interface FeatureProps {
   descriptions?: readonly ComponentDescription[]
   onDescribe?: (description: ComponentDescription) => string | null
   onPreview?: (name: string, inputs: readonly PreviewInput[]) => string | null
+  /** Looks for views shaped like this one, for Make component. */
+  onFindCopies?: (node: AuthoringNode) => Promise<CopySearch>
+  /** The views that are screens, so copies inside components are left alone. */
+  screens?: readonly string[]
+  /** True once the same view has been pasted a third time. */
+  pasteNudge?: boolean
+  onDismissNudge?: () => void
 }
-export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onSelect, onPreview, onDescribe, descriptions, variants, onSaveVariant, onDeleteVariant, previewInputs, assets, section = 'basics' }: FeatureProps & { section?: 'basics' | 'data' | 'behavior' | 'styles' | 'advanced' }) {
+export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onSelect, onPreview, onDescribe, onFindCopies, screens = [], pasteNudge, onDismissNudge, descriptions, variants, onSaveVariant, onDeleteVariant, previewInputs, assets, section = 'basics' }: FeatureProps & { section?: 'basics' | 'interaction' | 'field' | 'data' | 'advanced' }) {
   const [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false)
   const [name, setName] = useState('CardView'), [collectionName, setCollectionName] = useState('items'), [recordType, setRecordType] = useState('ItemRecord')
   const [emptyText, setEmptyText] = useState('No items yet'), [field, setField] = useState(node.fields?.[0] ?? '')
@@ -51,15 +58,16 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
     {section === 'basics' && node.controls?.some(c => c.id === 'image' && c.label === 'System symbol') && onNodeChange && <SymbolPicker selected={node.controls.find(c => c.id === 'image')?.value ?? ''} onChoose={value => onNodeChange(node, 'image', value)} />}
 
     {section === 'basics' && node.name === 'Image' && node.properties.some(p => ['argument 1', 'systemName'].includes(p.name) && p.valueKind === 'literal') && !!assets?.length && <label>Bundled image<select aria-label="Bundled image" disabled={busy} value={node.properties.find(p => p.name === 'argument 1')?.expression.replace(/^"|"$/g, '') ?? ''} onChange={e => void command({ kind: 'asset-use', name: e.target.value })}><option value="" disabled>Choose image</option>{assets.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}</select></label>}
-    {section === 'styles' && <SharedStyleProperties node={node} snapshot={snapshot} onSelect={onSelect} onCommand={command} busy={busy} />}
-    {section === 'basics' && node.component && <section><h3>Component instance</h3><p>These inputs change only this instance. Edit the main component to update its shared layout and style.</p>
-      <button type="button" aria-expanded={shared} onClick={() => setShared(!shared)}>Edit main component…</button>
-      {shared && <div><p>Definition edits affect {node.component.callSites.length} source call sites, including repeated rows:</p><ul>{snapshot?.nodes.filter(n => n.definitionId === node.component!.definitionId).map((site, index) => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · instance {index + 1}</button></li>)}</ul><button type="button" onClick={() => { const definition = snapshot?.nodes.find(n => n.id === node.component!.definitionId); if (definition) onSelect?.(definition) }}>Enter main component</button></div>}
+    {section === 'basics' && node.component && <section><h3>Copy of {node.name}</h3><p>The fields above change only this copy. Everything else comes from its Main.</p>
+      <button type="button" aria-expanded={shared} onClick={() => setShared(!shared)}>Edit the Main…</button>
+      {shared && <div><p>Editing the Main changes all {node.component.callSites.length} copies, including repeated rows:</p><ul>{snapshot?.nodes.filter(n => n.definitionId === node.component!.definitionId).map((site, index) => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · copy {index + 1}</button></li>)}</ul><button type="button" onClick={() => { const definition = snapshot?.nodes.find(n => n.id === node.component!.definitionId); if (definition) onSelect?.(definition); else setError('The Main for this copy is not in the project any more. Open it in Code.') }}>Open the Main</button></div>}
+    </section>}
+    {section === 'advanced' && node.component && <section><h3>Saved inputs</h3>
       {onSaveVariant && onDeleteVariant && <ComponentVariants node={node} variants={variants ?? []} onSave={onSaveVariant} onDelete={onDeleteVariant} onApply={variant => command({ kind: 'component-variant', variant })} busy={busy} />}
       {onDescribe && <ComponentDescriptionEditor node={node} descriptions={descriptions} onSave={onDescribe} />}
     </section>}
-    {section === 'basics' && reusableOwner && textInput && <details><summary>Make text an instance input</summary><p>Each instance gets its own text. Existing instances keep “{textInput.value}” as their default.</p><label>Input name<input aria-label="Component input name" value={inputName} onChange={e => setInputName(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'component-expose', control: textInput.id, name: inputName })}>Create text input</button></details>}
-    {section === 'basics' && node.kind === 'definition' && <section><h3>Shared definition</h3><p>Changes here affect all {callSites.length} source call sites of {node.name}.</p><details><summary>Affected instances</summary><ul>{callSites.map(site => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · {site.source.file}</button></li>)}</ul></details></section>}
+    {section === 'basics' && reusableOwner && textInput && <details><summary>Changeable per copy</summary><p>Let each copy set its own text. Copies that exist now keep “{textInput.value}”.</p><label>Field name<input aria-label="Component input name" value={inputName} onChange={e => setInputName(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'component-expose', control: textInput.id, name: inputName })}>Make text changeable per copy</button></details>}
+    {section === 'basics' && node.kind === 'definition' && <section><h3>The Main</h3><p>Changes here reach all {callSites.length} copies of {node.name}.</p><details><summary>Copies</summary><ul>{callSites.map(site => <li key={site.id}><button type="button" onClick={() => onSelect?.(site)}>{site.owner} · {site.source.file}</button></li>)}</ul></details></section>}
     {section === 'data' && (node.name === 'List' || node.kind === 'collection') && <section><h3>List content</h3>
       <p>{node.kind === 'collection' ? 'Repeat for each item · one design is used by every row.' : 'Each row has its own content and structure.'}</p>
       {template && <button type="button" onClick={() => onSelect?.(template)}>Edit row design</button>}
@@ -75,15 +83,24 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
       </> : node.kind === 'collection' && <p>Data comes from Swift. Typed local Identifiable records with literal initial data expose a record editor here.</p>}
     </section>}
     {section === 'basics' && node.kind === 'template' && <section><h3>Row design</h3><p>Select a view to edit the design used by every row.</p>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}<button type="button" disabled={busy} onClick={() => { let parent = snapshot?.nodes.find(n => n.id === node.parentId); const collection = parent; while (parent && parent.name !== 'List') parent = snapshot?.nodes.find(n => n.id === parent!.parentId); if (parent ?? collection) onSelect?.((parent ?? collection)!) }}>List settings</button><button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("New element")' })}>Add element to row template</button><p>Added elements appear in every row.</p></section>}
-    {section === 'data' && !!node.fields?.length && <section><h3>Connected field</h3><label>Field<select aria-label="Row field" value={field} onChange={e => setField(e.target.value)}>{node.fields.map(f => <option key={f}>{f}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'bind-field', field })}>Bind to field · all rows</button></section>}
-    {section === 'basics' && !!children.length && node.kind === 'definition' && <section><h3>Shared content</h3>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}</section>}
-    {section === 'behavior' && node.behavior && (node.behavior.canConfigureAction || node.behavior.binding || node.behavior.states.length > 0) && <BehaviorEditor key={node.id} snapshot={snapshot} onSelect={onSelect} node={node} onCommand={command} busy={busy} />}
-    {section === 'basics' && ['view', 'component'].includes(node.kind) && node.name !== 'WindowGroup' && <details><summary>Create reusable component</summary><label>Component name<input aria-label="New component name" value={name} onChange={e => setName(e.target.value)} /></label><p>Creates a Swift file and an instance here, in one undo step. Supported dependencies become explicit inputs.</p><button type="button" disabled={busy} onClick={() => void command({ kind: 'extract-component', name })}>Create component</button></details>}
+    {section === 'field' && !!node.fields?.length && <section><h3>Shows the field</h3><label>Field<select aria-label="Row field" value={field} onChange={e => setField(e.target.value)}>{node.fields.map(f => <option key={f}>{f}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'bind-field', field })}>Use this field in every row</button></section>}
+    {section === 'basics' && !!children.length && node.kind === 'definition' && <section><h3>Inside the Main</h3>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}</section>}
+    {(section === 'interaction' || section === 'advanced') && node.behavior && (node.behavior.canConfigureAction || node.behavior.binding || node.behavior.states.length > 0) && <BehaviorEditor key={node.id} part={section === 'interaction' ? 'basic' : 'advanced'} snapshot={snapshot} onSelect={onSelect} node={node} onCommand={command} busy={busy} />}
+    {/* Components are made from the copies a designer already has, so the flow
+        starts by finding them rather than by asking for a name. */}
+    {section === 'basics' && ['view', 'component'].includes(node.kind) && node.name !== 'WindowGroup' && (onFindCopies
+      ? <MakeComponent node={node} busy={busy} nudge={pasteNudge} onDismissNudge={onDismissNudge} onFind={onFindCopies} onShow={copy => { const found = snapshot?.nodes.find(n => n.id === copy.id); if (found) onSelect?.(found) }} onMake={async (componentName, copies, names) => {
+          if (!onCommand) return 'Select a view first.'
+          setBusy(true)
+          try { const problem = await onCommand({ kind: 'make-component', name: componentName, copies, names, screens }); setError(problem); return problem }
+          finally { setBusy(false) }
+        }} />
+      : <details><summary>Make component</summary><label>Component name<input aria-label="New component name" value={name} onChange={e => setName(e.target.value)} /></label><p>This view becomes a Main under Components, and this spot becomes its first copy. One undo step.</p><button type="button" disabled={busy} onClick={() => void command({ kind: 'extract-component', name })}>Make component</button></details>)}
     {error && <p role="alert" className={styles.error}>{error}</p>}{busy && <p role="status">Preparing source changes…</p>}
   </div>
 }
 
-function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy }: { snapshot?: AuthoringSnapshot; onSelect?: (node: AuthoringNode) => void; node: AuthoringNode; onCommand: (op: Parameters<FeatureChange>[0]) => Promise<void>; busy: boolean }) {
+function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy, part }: { snapshot?: AuthoringSnapshot; onSelect?: (node: AuthoringNode) => void; node: AuthoringNode; onCommand: (op: Parameters<FeatureChange>[0]) => Promise<void>; busy: boolean; part: 'basic' | 'advanced' }) {
   const info = node.behavior!
   const [recordError, setRecordError] = useState<string | null>(null)
   const [kind, setKind] = useState<BehaviorAction['type']>('toggle'), [state, setState] = useState(info.states[0]?.name ?? '')
@@ -111,9 +128,8 @@ function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy }: { snapsho
     void onCommand({ kind: 'behavior', action, replace })
   }
   const stateSelect = <label>Local state<select aria-label="Behavior state" value={state} onChange={e => setState(e.target.value)}><option value="" disabled>Select state</option>{info.states.map(s => <option key={s.name} value={s.name}>{s.name} · {s.type}</option>)}</select></label>
-  return <section><h3>Interactions</h3><GuidedInteraction node={node} snapshot={snapshot} onSelect={onSelect} onCommand={onCommand} busy={busy} />
-    {info.binding && <><p>Binding: <code>{info.binding.current}</code> · {info.binding.type}</p><label>Bind to existing state<select aria-label="Bind to state" value="" onChange={e => void onCommand({ kind: 'bind-state', name: e.target.value })}><option value="" disabled>Select state</option>{info.states.filter(s => !s.optional && s.type === info.binding!.type).map(s => <option key={s.name}>{s.name}</option>)}</select></label><details><summary>Create interactive state</summary><label>Name<input aria-label="New state name" value={newState} onChange={e => setNewState(e.target.value)} /></label><label>Initial value{info.binding.type === 'Bool' ? <select aria-label="State initial value" value={value || 'false'} onChange={e => setValue(e.target.value)}><option value="false">False</option><option value="true">True</option></select> : <input type={info.binding.type === 'Date' ? 'date' : info.binding.type === 'Color' ? 'color' : 'text'} aria-label="State initial value" value={info.binding.type === 'Color' ? value || '#6D28D9' : value} onChange={e => setValue(e.target.value)} />}</label><button type="button" disabled={busy} onClick={() => void onCommand({ kind: 'bind-state', name: newState, create: { value: parse(info.binding!.type) } })}>Create state and bind</button></details></>}
-    {info.canConfigureAction && <details><summary>Advanced actions</summary><details><summary>Current action source</summary><pre>{info.currentAction}</pre></details><label>Action<select aria-label="Action type" value={kind} onChange={e => setKind(e.target.value as BehaviorAction['type'])}><option value="toggle">Toggle state</option><option value="set">Set / select a value</option><option value="call">Call developer action</option><option value="navigate">Navigate to screen</option><option value="sheet">Present sheet</option><option value="dismiss">Dismiss sheet</option><option value="append">Add local item</option><option value="delete">Delete local item</option></select></label>
+  if (part === 'advanced') return <section>
+    {info.canConfigureAction && <details><summary>Other actions</summary><details><summary>Current action source</summary><pre>{info.currentAction}</pre></details><label>Action<select aria-label="Action type" value={kind} onChange={e => setKind(e.target.value as BehaviorAction['type'])}><option value="toggle">Toggle state</option><option value="set">Set / select a value</option><option value="call">Call developer action</option><option value="navigate">Navigate to screen</option><option value="sheet">Present sheet</option><option value="dismiss">Dismiss sheet</option><option value="append">Add local item</option><option value="delete">Delete local item</option></select></label>
       {['toggle', 'set'].includes(kind) && stateSelect}
       {kind === 'dismiss' && <label>Dismissal<select aria-label="Dismissal target" value={state} onChange={e => setState(e.target.value)}><option value="">Current presentation</option>{info.states.filter(s => !s.optional && s.type === 'Bool').map(s => <option key={s.name}>{s.name}</option>)}</select></label>}
       {kind === 'set' && <label>Value{selected?.options || selected?.type === 'Bool' ? <select aria-label="Action value" value={value} onChange={e => setValue(e.target.value)}><option value="" disabled>Select value</option>{(selected?.options ?? ['true', 'false']).map(o => <option key={o}>{o}</option>)}</select> : <input aria-label="Action value" value={value} onChange={e => setValue(e.target.value)} />}</label>}
@@ -122,7 +138,10 @@ function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy }: { snapsho
       {['append', 'delete'].includes(kind) && <><label>Local collection<select aria-label="Action collection" value={collectionName} onChange={e => { setCollectionName(e.target.value); setItem([]) }}><option value="" disabled>Select collection</option>{info.collections.filter(c => c.mutable).map(c => <option key={c.name}>{c.name}</option>)}</select></label>{collection && (kind === 'append' ? <RecordEditor info={collection} value={item.length ? item : [defaultRecord(collection, collection.records)]} onChange={setItem} /> : <label>Item to delete<select aria-label="Delete item id" value={deleteId} onChange={e => setDeleteId(e.target.value)}><option value="" disabled>Select id</option>{collection.records.map(r => <option key={String(r.id)}>{String(r.id)}</option>)}</select></label>)}</>}
       <label><input type="checkbox" checked={replace} onChange={e => setReplace(e.target.checked)} />Replace the displayed action</label><button type="button" disabled={busy} onClick={configure}>Apply action</button>{recordError && <p role="alert" className={styles.error}>{recordError}</p>}
     </details>}
-    {!!info.states.length && <details><summary>Transition</summary>{stateSelect}<label>Style<select value={transition} onChange={e => setTransition(e.target.value as typeof transition)}><option>opacity</option><option>slide</option><option>scale</option></select></label><label>Duration in seconds<input value={duration} onChange={e => setDuration(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void onCommand({ kind: 'transition', state, style: transition, duration: Number(duration) })}>Add transition</button></details>}
+    {!!info.states.length && <details><summary>Appear animation</summary>{stateSelect}<label>Style<select value={transition} onChange={e => setTransition(e.target.value as typeof transition)}><option>opacity</option><option>slide</option><option>scale</option></select></label><label>Duration in seconds<input value={duration} onChange={e => setDuration(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void onCommand({ kind: 'transition', state, style: transition, duration: Number(duration) })}>Add transition</button></details>}
+  </section>
+  return <section>{info.canConfigureAction && <h3>When tapped</h3>}<GuidedInteraction node={node} snapshot={snapshot} onSelect={onSelect} onCommand={onCommand} busy={busy} />
+    {info.binding && <><h3>Saves to</h3><p>{info.binding.label || 'This control'} keeps its value in <code>{info.binding.current}</code>.</p><label>Save to another value<select aria-label="Bind to state" value="" onChange={e => void onCommand({ kind: 'bind-state', name: e.target.value })}><option value="" disabled>Select state</option>{info.states.filter(s => !s.optional && s.type === info.binding!.type).map(s => <option key={s.name}>{s.name}</option>)}</select></label><details><summary>Save to a new value</summary><label>Name<input aria-label="New state name" value={newState} onChange={e => setNewState(e.target.value)} /></label><label>Initial value{info.binding.type === 'Bool' ? <select aria-label="State initial value" value={value || 'false'} onChange={e => setValue(e.target.value)}><option value="false">False</option><option value="true">True</option></select> : <input type={info.binding.type === 'Date' ? 'date' : info.binding.type === 'Color' ? 'color' : 'text'} aria-label="State initial value" value={info.binding.type === 'Color' ? value || '#6D28D9' : value} onChange={e => setValue(e.target.value)} />}</label><button type="button" disabled={busy} onClick={() => void onCommand({ kind: 'bind-state', name: newState, create: { value: parse(info.binding!.type) } })}>Create value and save to it</button></details></>}
   </section>
 }
 

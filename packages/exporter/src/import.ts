@@ -22,6 +22,9 @@ export interface ImportedArchive {
  * dropped, which recovers the group structure the project had and nothing else. An
  * archive with no `Sources/` at all keeps whatever folders it has below its root.
  */
+/** The folders a project made in the studio owns, which are never a wrapper. */
+const SHAPE_FOLDERS = new Set(['App', 'Features', 'DesignSystem'])
+
 export function readProjectArchive(bytes: Uint8Array): ImportedArchive {
   try {
     const entries = readArchiveEntries(bytes)
@@ -64,8 +67,13 @@ function insideTarget(entry: string): string {
   let rest = segments.slice(1)
   for (let i = 0; i < 3 && rest.length > 1; i++) {
     const head = rest[0]
-    if (head === 'Sources' || head === root || head === bare) rest = rest.slice(1)
-    else break
+    if (head !== 'Sources' && head !== root && head !== bare) break
+    // A project called "App" has both an `App/` wrapper and the project's own `App/`
+    // group, and they look the same. The last one is the group: peeling it would put
+    // the entry point loose at the root, so a folder the project owns is never the
+    // last thing between the wrapper and a file.
+    if (SHAPE_FOLDERS.has(head) && rest.length === 2) break
+    rest = rest.slice(1)
   }
 
   const relative = rest.join('/')

@@ -117,7 +117,7 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
   } else if (action.type === 'call') {
     if (!settings.actions.includes(action.name)) throw new Error('The named action is missing, recursive, async, throwing, or needs parameters. Open its source to adapt its interface.')
     body = action.name + '()'
-  } else if (action.type === 'navigate' || action.type === 'sheet') {
+  } else if (action.type === 'navigate' || action.type === 'sheet' || action.type === 'cover') {
     if (!settings.destinations.includes(action.destination)) throw new Error('Choose a local View that has a supported no-argument initializer.')
     if (action.type === 'navigate') {
       let parent = ctx.nodes.find(n => n.id === node.parentId)
@@ -126,11 +126,11 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
       return [patch(call.span, `NavigationLink(${raw(ctx, call.args[0]!.value.span)}, destination: ${action.destination}())`)]
     }
     const expression = expressionOf(ctx, node)!
-    if (viewCallChain(expression)?.modifiers.some(m => m.callee.kind === 'memberAccess' && ['sheet', 'fullScreenCover'].includes(m.callee.member))) throw new Error('This view already presents a sheet. Edit the existing binding and destination in Swift.')
+    if (viewCallChain(expression)?.modifiers.some(m => m.callee.kind === 'memberAccess' && ['sheet', 'fullScreenCover'].includes(m.callee.member))) throw new Error('This view already presents a screen. Change that Navigate to instead.')
     let name = 'is' + action.destination + 'Presented', suffix = 2
     while (owner.members.some(m => 'name' in m && m.name === name)) name = 'is' + action.destination + 'Presented' + suffix++
     patches.push(insertMember(ctx, owner, `@State private var ${name}: Bool = false`))
-    patches.push({ file: node.source.file, start: node.source.end, end: node.source.end, text: `.sheet(isPresented: $${name}) { ${action.destination}() }` })
+    patches.push({ file: node.source.file, start: node.source.end, end: node.source.end, text: `.${action.type === 'cover' ? 'fullScreenCover' : 'sheet'}(isPresented: $${name}) { ${action.destination}() }` })
     body = `${name} = true`
   } else {
     const info = settings.collections.find(c => c.name === action.collection && c.mutable)

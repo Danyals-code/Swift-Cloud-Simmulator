@@ -19,6 +19,18 @@ export function layerLabel(view: ViewValue): string {
   return ''
 }
 
+/** The SF Symbol a tab item shows, for the tab's lane on the design canvas. */
+export function tabIcon(view: ViewValue): string | undefined {
+  const label = view.name === 'Image' ? 'systemName' : view.name === 'Label' ? 'systemImage' : null
+  const value = label ? view.args.find(a => a.label === label)?.value : undefined
+  if (value?.kind === 'string') return value.value
+  for (const child of view.children) {
+    const found = tabIcon(child)
+    if (found) return found
+  }
+  return undefined
+}
+
 /** Use the resolver's identities, including stable ForEach keys and modifier layers. */
 export function viewLayers(views: readonly ViewValue[]): ViewLayer[] {
   return views.map(view => ({

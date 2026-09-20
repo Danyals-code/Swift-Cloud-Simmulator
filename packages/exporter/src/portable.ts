@@ -1,4 +1,4 @@
-import { newProjectId, normalizeProject, normalizeProjectName, normalizeFileName, normalizeFolderPath, readImage, readStudioMetadata, validateAssets, type Project, type ProjectManifest, type ImageAsset, type StudioMetadata } from '@studio/project-model'
+import { newProjectId, normalizeProject, normalizeProjectName, normalizeFileName, normalizeFolderPath, readColorSet, readImage, readStudioMetadata, validateAssets, validateColors, type ColorAsset, type Project, type ProjectManifest, type ImageAsset, type StudioMetadata } from '@studio/project-model'
 import { DEVICES } from '@studio/sim-shell'
 import { isPreviewTarget, type SourceFile } from '@studio/shared'
 import { encodeText, type ExportBundle } from './bundle'
@@ -8,9 +8,11 @@ interface ResourceEntry { id: string; name: string; scale: 1 | 2 | 3; light: str
 export interface Handoff {
   readonly version: 1
   readonly format: 'swift-web-studio'
-  readonly project: Omit<Project, 'files' | 'assets' | 'studio'>
+  readonly project: Omit<Project, 'files' | 'assets' | 'studio' | 'colors'>
   readonly sources: readonly { readonly id: string; readonly path: string; readonly base: string }[]
   readonly assets: readonly ResourceEntry[]
+  /** Colour sets, read back from the catalog so a developer's edit there returns too. */
+  readonly colors?: readonly { readonly name: string; readonly path: string }[]
   readonly baseManifest: ProjectManifest
   readonly baseStudio?: StudioMetadata
 }
@@ -35,6 +37,7 @@ export function validatePortableProject(value: unknown): asserts value is Projec
   if (value.folders !== undefined && (!Array.isArray(value.folders) || value.folders.length > 256 || value.folders.some(f => typeof f !== 'string' || normalizeFolderPath(f) !== f))) throw new Error('Invalid project groups.')
   if (value.studio !== undefined && readStudioMetadata(value.studio).status !== 'valid') throw new Error('Unsupported or invalid Studio metadata. Use a compatible Studio.')
   validateAssets((value.assets ?? []) as ImageAsset[])
+  validateColors((value.colors ?? []) as ColorAsset[])
 }
 /** Source files and resources stay outside the optional Studio metadata. */
 export function attachHandoff(project: Project, bundle: ExportBundle, root: string, sourcePath: (id: string) => string, catalogPath: string): ExportBundle {
@@ -46,6 +49,7 @@ export function attachHandoff(project: Project, bundle: ExportBundle, root: stri
     project: { schemaVersion: 1, id: project.id, manifest: project.manifest, folders: project.folders, createdAt: project.createdAt, updatedAt: project.updatedAt },
     sources: project.files.map(f => ({ id: f.id, path: sourcePath(f.id), base: f.text })),
     assets: (project.assets ?? []).map(a => ({ id: a.id, name: a.name, scale: a.scale, light: `${catalogPath}/${a.name}.imageset/light.${a.light.mime === 'image/png' ? 'png' : 'jpg'}`, ...(a.dark ? { dark: `${catalogPath}/${a.name}.imageset/dark.${a.dark.mime === 'image/png' ? 'png' : 'jpg'}` } : {}) })),
+    ...(project.colors?.length ? { colors: project.colors.map(color => ({ name: color.name, path: `${catalogPath}/${color.name}.colorset/Contents.json` })) } : {}),
     baseManifest: project.manifest, baseStudio: project.studio,
   }
   const put = (path: string, bytes: Uint8Array) => { if (files.has(path)) throw new Error('The project conflicts with an export metadata path.'); files.set(path, bytes) }
@@ -60,7 +64,7 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
   const documentPath = candidates[0]!, root = documentPath.slice(0, -PROJECT_DOCUMENT.length)
   const value: unknown = JSON.parse(decodeText(entries.get(documentPath)!))
   if (!object(value) || value.format !== 'swift-web-studio' || value.version !== 1) throw new Error('Unsupported editable-project version. Use a compatible Studio.')
-  if (!object(value.project) || !Array.isArray(value.sources) || !Array.isArray(value.assets) || value.assets.length > 64 || value.sources.length > 256) throw new Error('Invalid editable-project manifest.')
+  if (!object(value.project) || !Array.isArray(value.sources) || !Array.isArray(value.assets) || value.assets.length > 64 || value.sources.length > 256 || value.colors !== undefined && (!Array.isArray(value.colors) || value.colors.length > 256)) throw new Error('Invalid editable-project manifest.')
   const used = new Set<string>()
   const read = (path: unknown) => {
     if (!safePath(path) || !path.startsWith(root) || used.has(path)) throw new Error('Invalid or duplicate resource reference.')
@@ -91,8 +95,18 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
     if (!object(a)) throw new Error('Invalid asset reference.')
     return { id: a.id, name: a.name, scale: a.scale, light: readImage(read(a.light)), ...(a.dark === undefined ? {} : { dark: readImage(read(a.dark)) }) }
   })
+  const colors = (Array.isArray(value.colors) ? value.colors : []).flatMap(c => {
+    if (!object(c) || typeof c.name !== 'string' || typeof c.path !== 'string') throw new Error('Invalid colour set reference.')
+    // A colour set deleted or renamed in Xcode is a reviewed deletion, exactly like a
+    // removed Swift file; one written with appearances we do not read stays in the
+    // catalog and out of the project. Neither is a reason to refuse the archive.
+    if (!entries.has(c.path)) return []
+    try { return [readColorSet(c.name, decodeText(read(c.path)))] } catch { return [] }
+  })
   const metadata = entries.get(`${root}.swiftstudio/studio.json`)
-  const project = { ...value.project, files, assets, ...(metadata ? { studio: JSON.parse(decodeText(metadata)) as unknown } : {}) }
+  const { colors: _ignored, ...identity } = value.project as Record<string, unknown>
+  void _ignored
+  const project = { ...identity, files, assets, ...(colors.length ? { colors } : {}), ...(metadata ? { studio: JSON.parse(decodeText(metadata)) as unknown } : {}) }
   validatePortableProject(project)
   // Baselines are untrusted too. They are used only for a visible merge proposal.
   const baseline = { ...project, manifest: value.baseManifest, studio: value.baseStudio, files: value.sources.map(s => ({ id: (s as { id: string }).id, text: (s as { base: string }).base })) }
@@ -119,8 +133,12 @@ export function reviewImport(local: Project, incoming: Project, handoff: Handoff
     changedFiles.push(id)
     if (a !== base && b !== base) conflicts.push({ key: id, label: id, local: a ?? '(deleted)', incoming: b ?? '(deleted)' })
   }
-  for (const [key, label, base] of [['manifest', 'App settings', handoff.baseManifest], ['studio', 'Designer metadata', handoff.baseStudio], ['assets', 'Bundled images', undefined], ['folders', 'Empty groups', undefined]] as const) {
-    if (!same(local[key], incoming[key]) && (key === 'assets' || key === 'folders' || !same(local[key], base) && !same(incoming[key], base))) conflicts.push({ key: `$${key}`, label, local: key === 'assets' ? describeAssets(local) : JSON.stringify(local[key], null, 2) ?? '(none)', incoming: key === 'assets' ? describeAssets(incoming) : JSON.stringify(incoming[key], null, 2) ?? '(none)' })
+  for (const [key, label, base] of [['manifest', 'App settings', handoff.baseManifest], ['studio', 'Designer metadata', handoff.baseStudio], ['assets', 'Bundled images', undefined], ['colors', 'Colour tokens', undefined], ['folders', 'Empty groups', undefined]] as const) {
+    // A list nobody has is the same list, however it is spelled. Without this, every
+    // project with no images conflicted with itself over having none.
+    const list = key === 'assets' || key === 'colors' || key === 'folders'
+    const ours = list ? local[key] ?? [] : local[key], theirs = list ? incoming[key] ?? [] : incoming[key]
+    if (!same(ours, theirs) && (list || !same(ours, base) && !same(theirs, base))) conflicts.push({ key: `$${key}`, label, local: key === 'assets' ? describeAssets(local) : JSON.stringify(local[key], null, 2) ?? '(none)', incoming: key === 'assets' ? describeAssets(incoming) : JSON.stringify(incoming[key], null, 2) ?? '(none)' })
   }
   return { sameIdentity: true, conflicts, changedFiles }
 }
@@ -136,8 +154,8 @@ export function resolveImport(local: Project, incoming: Project, handoff: Handof
     const selected = choices[id] === 'local' ? a : choices[id] === 'incoming' ? b : a?.text === base ? b : a
     if (selected) files.push(selected)
   }
-  const choose = <K extends 'manifest' | 'studio' | 'assets' | 'folders'>(key: K, base: unknown): Project[K] => choices[`$${key}`] === 'local' ? local[key] : choices[`$${key}`] === 'incoming' || same(local[key], base) ? incoming[key] : local[key]
-  const result = { ...local, files, manifest: choose('manifest', handoff.baseManifest), studio: choose('studio', handoff.baseStudio), assets: choose('assets', undefined), folders: choose('folders', undefined), updatedAt: Date.now() }
+  const choose = <K extends 'manifest' | 'studio' | 'assets' | 'colors' | 'folders'>(key: K, base: unknown): Project[K] => choices[`$${key}`] === 'local' ? local[key] : choices[`$${key}`] === 'incoming' || same(local[key], base) ? incoming[key] : local[key]
+  const result = { ...local, files, manifest: choose('manifest', handoff.baseManifest), studio: choose('studio', handoff.baseStudio), assets: choose('assets', undefined), colors: choose('colors', undefined), folders: choose('folders', undefined), updatedAt: Date.now() }
   validatePortableProject(result)
   return result
 }

@@ -196,9 +196,11 @@ struct AddBookView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Book details") {
+                Section {
                     TextField("Title", text: $title)
                     TextField("Author", text: $author)
+                } header: {
+                    Text("Book details")
                 } footer: {
                     Text("Your book will appear in Library. Save it to your reading list whenever you are ready.")
                 }
@@ -233,8 +235,10 @@ struct SettingsView: View {
                 Section("Reader") {
                     TextField("Your name", text: $name)
                 }
-                Section("Reading goal") {
+                Section {
                     Stepper("\(dailyGoal) minutes a day", value: $dailyGoal, in: 5...120, step: 5)
+                } header: {
+                    Text("Reading goal")
                 } footer: {
                     Text("A little time for a good book. Your name and goal are saved on this device.")
                 }

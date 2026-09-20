@@ -1822,11 +1822,16 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private makeSystemFont(call: HostCall): SwiftValue {
+    const weight = tokenNameOf(call.args.find((a) => a.label === 'weight')?.value)
+    const design = tokenNameOf(call.args.find((a) => a.label === 'design')?.value)
+    // `.system(.headline, weight: .bold)` - a text style with a face change, which
+    // keeps the style's Dynamic Type size and leading. Encoded the way `.headline.bold()`
+    // already is, so both spellings of the same font resolve identically.
+    const style = tokenNameOf(call.args.find((a) => a.label === null)?.value)
+    if (style && fontForToken(style)) return token(`style:${style}:${weight ?? ''}:${design ?? ''}:`)
     const size =
       numberOf(call.args.find((a) => a.label === 'size')?.value) ??
       numberOf(call.args.find((a) => a.label === null)?.value)
-    const weight = tokenNameOf(call.args.find((a) => a.label === 'weight')?.value)
-    const design = tokenNameOf(call.args.find((a) => a.label === 'design')?.value)
     return token(`system:${size ?? 17}:${weight ?? 'regular'}:${design ?? 'default'}`)
   }
 
@@ -1843,7 +1848,9 @@ export class SwiftUIHost implements InterpreterHost {
     }
 
     const first = call.args[0]?.value
-    if (first?.kind === 'string') return color({ name: first.value })
+    // `Color("accent")` names a colour set in the asset catalog - never a system colour,
+    // even one spelled the same - so it is marked and resolved against the project.
+    if (first?.kind === 'string') return color({ name: first.value, asset: true })
 
     // `Color(.systemGroupedBackground)` - the UIKit bridge, where the argument is a
     // contextual member rather than a string. This is how idiomatic SwiftUI reaches

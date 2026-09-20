@@ -1,6 +1,6 @@
 import { modifierModel } from './authoring-modifiers'
 import { enrichAuthoring } from './authoring-features'
-import type { ComponentDescription } from '@studio/shared'
+import type { ComponentDescription, PreviewColorAsset } from '@studio/shared'
 import {
   authoringCapability,
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
@@ -37,9 +37,20 @@ function referencePath(expr: Expr): string[] | null {
   return null
 }
 
+/** Framework types whose static members are design tokens, read with contextual `.name`. */
+const TOKEN_HOSTS = new Set(['Color', 'ShapeStyle', 'CGFloat', 'Double', 'Font', 'ShadowToken'])
+
 /** A conservative classification: a runtime value never authorizes a source edit. */
-function classify(expr: Expr, scope: Scope, tokens: ReadonlyMap<string, readonly VarDecl[]>, declaredNames: ReadonlySet<string>): { kind: PropertyValueKind; declaration?: SourceSpan } {
+function classify(expr: Expr, scope: Scope, tokens: ReadonlyMap<string, readonly VarDecl[]>, declaredNames: ReadonlySet<string>, contextual: ReadonlyMap<string, readonly VarDecl[]> = new Map()): { kind: PropertyValueKind; declaration?: SourceSpan } {
   if (['integerLiteral', 'floatLiteral', 'booleanLiteral', 'nilLiteral'].includes(expr.kind)) return { kind: 'literal' }
+  // `.accent`, `.space16`: a token read with dot syntax. Xcode spells a colour twice -
+  // on Color and on ShapeStyle - and the stored member is the token.
+  if (expr.kind === 'memberAccess' && !expr.base) {
+    const candidates = contextual.get(expr.member) ?? []
+    const stored = candidates.filter(declaration => !declaration.accessor)
+    const chosen = stored.length === 1 ? stored[0] : candidates.length === 1 ? candidates[0] : undefined
+    if (chosen) return { kind: chosen.accessor ? 'computed' : 'token', declaration: chosen.nameSpan }
+  }
   if (expr.kind === 'stringLiteral') return { kind: expr.segments.every(s => s.kind === 'text') ? 'literal' : 'computed' }
   if (expr.kind === 'unary' && ['+', '-'].includes(expr.operator) && ['integerLiteral', 'floatLiteral'].includes(expr.operand.kind)) return { kind: 'literal' }
   if (expr.kind === 'errorExpr') return { kind: 'unsupported' }
@@ -70,6 +81,7 @@ export interface AuthoringInput {
   readonly componentDescriptions?: readonly ComponentDescription[]
   readonly parsed?: readonly SourceFileNode[]
   readonly diagnostics?: readonly Diagnostic[]
+  readonly colors?: readonly PreviewColorAsset[]
 }
 
 export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
@@ -88,6 +100,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const definitions = new Map<string, { decl: StructDecl; node: MutableNode }[]>()
   const previews: { body: Block; node: MutableNode }[] = []
   const tokens = new Map<string, VarDecl[]>()
+  const contextual = new Map<string, VarDecl[]>()
   const fingerprint = (span: SourceSpan) => JSON.stringify(Lexer.tokenize(source(span), span.file).tokens.filter(t => t.kind !== 'endOfFile').map(t => [t.kind, t.text]))
 
   function add(kind: AuthoringNode['kind'], name: string, span: SourceSpan, owner: string, parent?: MutableNode): MutableNode {
@@ -102,7 +115,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
 
   function index(decl: Decl, prefix = ''): void {
     // A typealias, function or value can shadow a standard-library type name too.
-    if ('name' in decl && typeof decl.name === 'string') declaredNames.add(decl.name)
+    if ('name' in decl && typeof decl.name === 'string' && decl.kind !== 'extensionDecl') declaredNames.add(decl.name)
     if (decl.kind === 'structDecl' || decl.kind === 'enumDecl') {
       const name = prefix + decl.name
       if (decl.kind === 'structDecl' && decl.inherits.some(t => ['View', 'App', 'SwiftUI.View', 'SwiftUI.App'].includes(t.name))) {
@@ -115,12 +128,22 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     } else if (decl.kind === 'varDecl' && (!prefix || decl.modifiers.some(m => m.name === 'static'))) {
       const key = prefix + decl.name
       tokens.set(key, [...(tokens.get(key) ?? []), decl])
+      if (prefix && TOKEN_HOSTS.has(prefix.slice(0, -1))) contextual.set(decl.name, [...(contextual.get(decl.name) ?? []), decl])
+    } else if (decl.kind === 'extensionDecl' && !prefix) {
+      // `extension Color { static let accent = … }`: indexed as `Color.accent`, and
+      // by bare name for the contextual `.accent` that tokens are written with.
+      for (const member of decl.members) {
+        if (member.kind !== 'varDecl' || !member.modifiers.some(m => m.name === 'static')) continue
+        const key = `${decl.name}.${member.name}`
+        tokens.set(key, [...(tokens.get(key) ?? []), member])
+        if (TOKEN_HOSTS.has(decl.name)) contextual.set(member.name, [...(contextual.get(member.name) ?? []), member])
+      }
     }
   }
   for (const file of parsed) for (const decl of file.declarations) index(decl)
 
   function property(node: MutableNode, name: string, expr: Expr | null, scope: Scope, capability?: string, reason?: string): AuthoringProperty {
-    const value = expr ? classify(expr, scope, tokens, declaredNames) : { kind: 'literal' as const }
+    const value = expr ? classify(expr, scope, tokens, declaredNames, contextual) : { kind: 'literal' as const }
     let parent: MutableNode | undefined = node
     let repeated = false
     while (parent) { if (parent.kind === 'template') repeated = true; parent = parent.parentId ? byId.get(parent.parentId) : undefined }
@@ -155,6 +178,13 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       const supported = authoringCapability(modifierName, 'modifier', modifier.args.map(a => a.label))
       const unsupported = supported ? undefined : 'This modifier overload is outside the authoring subset; preserve its source.'
       for (const arg of modifier.args) node.properties.push(property(node, arg.label ? `${modifierName}.${arg.label}` : modifierName, arg.value, scope, supported?.id, unsupported))
+      // A corner radius written inside its shape - `.clipShape(.rect(cornerRadius: .radiusMedium))` -
+      // is still the view's corner radius, and a radius token field reads it there.
+      const shape = modifierName === 'clipShape' && modifier.args.length === 1 ? modifier.args[0]!.value : undefined
+      if (shape?.kind === 'call' && !shape.trailingClosure && (shape.callee.kind === 'memberAccess' && !shape.callee.base && shape.callee.member === 'rect' || shape.callee.kind === 'identifier' && shape.callee.name === 'RoundedRectangle')) {
+        const corner = shape.args.length === 1 ? shape.args.find(a => a.label === 'cornerRadius') : undefined
+        if (corner) node.properties.push(property(node, 'clipShape.cornerRadius', corner.value, scope, supported?.id, unsupported))
+      }
       if (!modifier.args.length) node.properties.push({ ...property(node, modifierName, null, scope, supported?.id, unsupported), source: modifier.callee.kind === 'memberAccess' ? modifier.callee.memberSpan : modifier.span })
     }
     if (name === 'Text' && !node.properties.some(p => p.name === 'font')) {
@@ -283,5 +313,5 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     forEachChild(node, collectOpaque)
   }
   parsed.forEach(collectOpaque)
-  return enrichAuthoring({ deploymentTarget: input.deploymentTarget, ast: parsed, files: input.files, nodes, descriptions: input.componentDescriptions }, { schemaVersion: 1, projectId: input.projectId, revision: input.revision, nodes, roots, diagnostics, runtimeToSource: {} })
+  return enrichAuthoring({ deploymentTarget: input.deploymentTarget, ast: parsed, files: input.files, nodes, descriptions: input.componentDescriptions, colors: input.colors }, { schemaVersion: 1, projectId: input.projectId, revision: input.revision, nodes, roots, diagnostics, runtimeToSource: {} })
 }

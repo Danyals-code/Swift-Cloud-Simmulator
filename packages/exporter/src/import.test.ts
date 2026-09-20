@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { zipSync } from 'fflate'
 import { projectFromFiles } from '@studio/project-model'
-import { TEMPLATES, createProjectFromTemplate } from '@studio/project-model/templates'
+import { TEMPLATES, createProjectFromTemplate, templateById } from '@studio/project-model/templates'
 import { EXPORT_FORMATS, type ExportFormat } from './formats'
-import { exportProjectZip } from './index'
+import { bundleFor, exportProjectZip, zipBundle } from './index'
 import { readProjectArchive } from './import'
 
 /**
@@ -117,3 +117,19 @@ describe('an archive that is not one of ours', () => {
 function encode(text: string): Uint8Array {
   return new TextEncoder().encode(text)
 }
+
+/** A zip as a developer's repo would hold it: no studio handoff inside. */
+const plainArchive = (name: string, format: 'xcodeproj' | 'swiftpm' | 'xcodegen') => {
+  const project = createProjectFromTemplate(templateById('blank')!)
+  return zipBundle(bundleFor({ ...project, manifest: { ...project.manifest, name } }, format))
+}
+
+it('keeps the project\u2019s own folders when the project is named after one', () => {
+  for (const format of ['xcodeproj', 'swiftpm', 'xcodegen'] as const) {
+    for (const name of ['MyDesignApp', 'App']) {
+      const read = readProjectArchive(plainArchive(name, format))
+      expect(read.problem, `${name} ${format}`).toBeNull()
+      expect(read.files.map(file => file.name).sort(), `${name} ${format}`).toEqual(['App/MyDesignApp.swift', 'Features/Home/HomeScreen.swift'])
+    }
+  }
+})

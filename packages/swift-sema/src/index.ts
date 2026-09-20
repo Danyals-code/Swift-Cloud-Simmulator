@@ -18,3 +18,5 @@ export { planDesignEdit, planDesignBatch } from './design-edit'
 export { scenarioFiles } from './authoring-scenarios'
 
 export { validateResourceRemoval } from './authoring-resources'
+export { NAVIGATION_FILE, TAB_LIMIT } from './authoring-navigation-app'
+export { findViewCopies, parameterNames } from './authoring-copies'

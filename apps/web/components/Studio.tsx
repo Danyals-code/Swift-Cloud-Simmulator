@@ -2,21 +2,19 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AuthoringNode, DesignEditRequest, ExportFormat, PreviewInput } from '@studio/shared'
-import { validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection } from '@studio/shared'
+import type { AuthoringNode, DesignEditRequest, ExportFormat, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
+import { validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
-import type { FileId, PagePreview, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
+import type { FileId, PagePreview, PreviewScenario, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
-import { ProjectResources } from './ProjectResources'
 import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-model'
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
-import { pageSlots } from '../lib/pageLayout'
 import { navigationDestinationForPage } from '../lib/navigationPicker'
 import { useNavigationPicker } from '../lib/useNavigationPicker'
 import { authoringRenderIds, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
@@ -30,17 +28,24 @@ import { useCompiler } from '../lib/useCompiler'
  */
 const ConsolePane = dynamic(() => import('./ConsolePane').then((m) => m.ConsolePane), { ssr: false })
 import { InspectorReadout } from './InspectorReadout'
-import { PreviewScenarios } from './PreviewScenarios'
 import { DevicePane } from './DevicePane'
+import { AuthoringInspector } from './AuthoringInspector'
+import type { FeatureProps } from './AuthoringFeatures'
+import { DesignNavigator, type DesignLevel } from './DesignNavigator'
+import { LogicalLayers } from './LogicalLayers'
+import { AppSettings } from './settings/AppSettings'
+import { AppNavigationSettings } from './settings/AppNavigationSettings'
+import { ScreenSettings } from './settings/ScreenSettings'
+import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
+import { designScreens, designTree, type DesignTree } from '../lib/designTree'
+import { sourceLayerLabel } from '../lib/sourceLayers'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
 import { JumpBar } from './JumpBar'
 import { reconcileLayerLabel } from '../lib/layerLabels'
-import { Screens } from './Screens'
-import { ComponentLibrary } from './ComponentLibrary'
 const DesignReview = dynamic(() => import('./DesignReview').then(m => m.DesignReview), { ssr: false })
-import { screenCatalog, type ScreenCommand, type DesignScreen } from '../lib/screens'
+import { scenarioScreen, screenCatalog, screenDefinition, type ScreenCommand, type DesignScreen } from '../lib/screens'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery } from './TemplateGallery'
@@ -50,6 +55,7 @@ import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
+const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], components: [] }
 
 /** The narrowest the editor is allowed to get before the side panes start yielding. */
 const EDITOR_MIN = 300
@@ -99,8 +105,14 @@ export function Studio() {
     setHoveredNode(node)
     if (node && pageId && hoverProjectId) setDesignPageSelection(previous => previous?.projectId === hoverProjectId && previous.id === pageId ? previous : { projectId: hoverProjectId, id: pageId })
   }, [hoverProjectId])
-  const navigatorTab = useLayout(s => s.navigatorTab)
   const setNavigatorTab = useLayout(s => s.setNavigatorTab)
+  const navigatorLayout = useLayout(s => s.navigatorLayout)
+  const setNavigatorLayout = useLayout(s => s.setNavigatorLayout)
+  /**
+   * Which settings level the right-hand panel shows when no view is selected: the App,
+   * or the focused screen. A selected view always means the View level.
+   */
+  const [focusLevel, setFocusLevel] = useState<{ projectId: string; level: 'app' | 'screen' } | null>(null)
   const inspectorTab = useLayout(s => s.inspectorTab)
   const setInspectorTab = useLayout(s => s.setInspectorTab)
   const mode = useLayout(s => s.mode)
@@ -126,7 +138,9 @@ export function Studio() {
    * phones would each be the width of a word - and the pages would be laid out on
    * every keystroke to draw them.
    */
-  const [allPages, setAllPages] = useState(false)
+  // The canvas is the app's map: every lane, from the start. Narrowing to one lane
+  // is a choice the designer makes, not where they begin.
+  const [allPages, setAllPages] = useState(true)
   /** What a click on the canvas does: choose a view, or take one out. */
   const [tool, setToolState] = useState<CanvasTool>('select')
   const [adding, setAdding] = useState(false)
@@ -245,10 +259,10 @@ export function Studio() {
   const [previewResetEpoch, setPreviewResetEpoch] = useState(0)
   const previewIdentity = useMemo(() => JSON.stringify([project?.id, project?.files, scenario ?? null, previewResetEpoch]), [project?.id, project?.files, scenario, previewResetEpoch])
 
-  const { result, stale, workerError, dispatch, reset, language, planDesignEdit, validateResourceRemoval, describeView, copyView, hiddenViews } = useCompiler({
+  const { result, stale, workerError, dispatch, reset, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews } = useCompiler({
     projectId: project?.id,
     deploymentTarget: project?.manifest.deploymentTarget,
-    images, scenario, componentDescriptions: project?.studio?.components, designScreens: project?.studio?.screens, previewScreen: standalonePreview,
+    images, colors: project?.colors, scenario, componentDescriptions: project?.studio?.components, designScreens: project?.studio?.screens, previewScreen: standalonePreview,
     files,
     device,
     colorScheme: previewSettings.colorScheme,
@@ -258,6 +272,9 @@ export function Studio() {
     allPages: inspecting && mode === 'design',
     committedEditRevision,
   })
+
+  /** The authoring snapshot on its own, so memoized work depends on it and not the whole result. */
+  const snapshot = result?.authoring
 
   const activeFile = useMemo(
     () => (project && activeFileId ? findFile(project, activeFileId) : undefined),
@@ -508,13 +525,13 @@ export function Studio() {
   const navigationPickerIdentity = useMemo(() => ({ projectId: project?.id, files: project?.files, nodeId: authoringNode?.id, inspecting, mode, inspectorTab, showSettings: shown.preview }), [project?.id, project?.files, authoringNode?.id, inspecting, mode, inspectorTab, shown.preview])
   const navigationPicker = useNavigationPicker(navigationPickerIdentity, mode === 'design' && inspecting && shown.preview && !stale)
   const pickingNavigation = !!navigationPicker.destinations
-  const visiblePages = useMemo(() => designPages ? pageSlots(designPages, showingAllPages || pickingNavigation ? undefined : designRootId).map(slot => slot.page) : undefined, [designPages, showingAllPages, pickingNavigation, designRootId])
+  const visibleRootId = showingAllPages || pickingNavigation ? undefined : designRootId
   const navigationPageTargets = useMemo(() => navigationPicker.destinations && designPages ? Object.fromEntries(designPages.map(page => [page.id, navigationDestinationForPage(page, navigationPicker.destinations!, result?.authoring, project?.files ?? NO_FILES)])) : undefined, [navigationPicker.destinations, designPages, result?.authoring, project?.files])
 
   const selectAuthoring = useCallback((node: AuthoringNode, runtimeId?: string) => {
     const snapshot = result?.authoring
     if (!project || stale || !snapshot || snapshot.projectId !== project.id) return
-    setPendingSelect(null); setEditNote(null)
+    setPendingSelect(null); setEditNote(null); setFocusLevel(null)
     useStudio.getState().setDocumentSelection({ file: node.source.file, offset: node.source.start })
     const runtime = runtimeId ?? (node.kind === 'definition' ? layerSelection?.anchor?.runtimeId : undefined)
     setLayerSelection({ projectId: project.id, id: runtime ?? node.runtimeIds[0] ?? '', anchor: { snapshot, nodeId: node.id, files: project.files, ...(runtime ? { runtimeId: runtime } : {}) } })
@@ -544,6 +561,7 @@ export function Studio() {
 
   const captureLayer = useCallback((layer: ViewLayer) => {
     if (!project || stale) return
+    setFocusLevel(null)
     if (layer.source) useStudio.getState().setDocumentSelection({ file: layer.source.file, offset: layer.source.start })
     const snapshot = result?.authoring
     const nodeId = snapshot?.runtimeToSource[layer.id]
@@ -555,13 +573,13 @@ export function Studio() {
     ?? (layerSelection?.anchor ? sourceRuntimeSelection.layer?.id ?? null
       : layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null)
   const selectedRenderIds = useMemo(() => {
-    if (mode !== 'design' || navigatorTab !== 'layers') return new Set<string>()
+    if (mode !== 'design') return new Set<string>()
     const trees = designPages?.map(page => page.tree) ?? [result?.renderTree]
     const exact = sourceRuntimeSelection.exact ? sourceRuntimeSelection.layer?.id : undefined
     return new Set(trees.flatMap(tree => [...(exact
       ? layerRenderIds(findLayer(layers, exact), tree, layers)
       : authoringRenderIds(authoringNode, result?.authoring, pageHierarchy ?? layers, tree))]))
-  }, [mode, navigatorTab, designPages, result?.renderTree, result?.authoring, sourceRuntimeSelection, layers, authoringNode, pageHierarchy])
+  }, [mode, designPages, result?.renderTree, result?.authoring, sourceRuntimeSelection, layers, authoringNode, pageHierarchy])
   const selectLayer = (layer: ViewLayer, page: ViewLayer) => {
     if (stale || !project) return
     setPendingSelect(null)
@@ -580,6 +598,7 @@ export function Studio() {
   /** Focus a design phone without navigating or mutating the running app. */
   const openPage = useCallback((page: PagePreview) => {
     if (!project) return
+    setFocusLevel({ projectId: project.id, level: 'screen' })
     setDesignPageSelection({ projectId: project.id, id: page.id })
     setPageFocusEpoch(value => value + 1)
     setLayerSelection(null)
@@ -587,6 +606,17 @@ export function Studio() {
     setHoveredNode(null)
     setHoveredAuthoring(null)
     setCenterOn({ id: page.id, nonce: ++centerNonce.current })
+  }, [project])
+
+  /** The App level: tokens, navigation and images. Clicking empty canvas lands here too. */
+  const selectApp = useCallback(() => {
+    if (!project) return
+    setFocusLevel({ projectId: project.id, level: 'app' })
+    setLayerSelection(null)
+    setPendingSelect(null)
+    setHoveredNode(null)
+    setHoveredAuthoring(null)
+    setEditNote(null)
   }, [project])
 
   // ------------------------------------------------------------ editing
@@ -626,14 +656,14 @@ export function Studio() {
    * are real ones (the end of a stack, a body that would be left empty) and a control
    * that quietly did nothing would read as a bug.
    */
-  const performDesignEdit = useCallback(async (target: SourceSpan, fingerprint: string | undefined, scope: string, operation: DesignEditRequest['operation'], screenUpdate?: readonly DesignScreen[]): Promise<string | null> => {
+  const performDesignEdit = useCallback(async (target: SourceSpan, fingerprint: string | undefined, scope: string, operation: DesignEditRequest['operation'], screenUpdate?: readonly DesignScreen[], scenarioFrom?: (authoring: AuthoringSnapshot | undefined) => PreviewScenario | null): Promise<string | null> => {
     const state = useStudio.getState()
     if (!project || state.project !== project || stale) return 'The source is updating. Try again when the preview is ready.'
     if (editingRef.current) return 'An edit is already being prepared. Try again.'
     editingRef.current = true
     setPreparingEdit(true)
     try {
-      const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, componentDescriptions: project.studio?.components, target, fingerprint, operation })
+      const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, colors: project.colors, componentDescriptions: project.studio?.components, target, fingerprint, operation })
       if (!plan.ok) { setEditNote(plan.reason); return plan.reason }
       // Context settings edit the navigation owner while the designer keeps the
       // visible label/row selected. Reconcile it against the exact planned source.
@@ -641,8 +671,12 @@ export function Studio() {
       const navigationSelection = operation.kind === 'navigation-target' && authoringNode && result?.authoring && plan.authoring
         ? reconcileAuthoringSelection({ snapshot: result.authoring, nodeId: authoringNode.id, files: project.files }, plan.authoring, afterFiles)
         : undefined
-      const selectedPlan = navigationSelection ? { ...plan, selection: { file: navigationSelection.source.file, offset: navigationSelection.source.start } } : plan
-      const preserveSelection = ['style-edit', 'style-create', 'asset-references'].includes(operation.kind)
+      const { colorSets: planColors, ...planned } = plan
+      const selectedPlan = navigationSelection ? { ...planned, selection: { file: navigationSelection.source.file, offset: navigationSelection.source.start } } : planned
+      const preserveSelection = ['style-edit', 'style-create', 'style-migrate', 'asset-references'].includes(operation.kind)
+      // A colour token's values live in the asset catalog, and change with its Swift.
+      const colorChange = planColors ? { colors: { before: project.colors, after: planColors } } : {}
+      const changed = plan.changes.length > 0 || !!planColors
       const currentSelection = useStudio.getState().documentSelection
       const selectionChanged = JSON.stringify(currentSelection) !== JSON.stringify(state.documentSelection)
       const before = project.studio, metadata = before ?? emptyStudioMetadata()
@@ -653,10 +687,14 @@ export function Studio() {
         const moved = reconcileLayerLabel(old[0]!, result!.authoring!, plan.authoring, project.files, afterFiles, operation, target, plan.selection?.offset)
         return moved ? [{ ...label, owner: moved.owner, fingerprint: moved.fingerprint, offset: moved.source.start }] : []
       })
-      const transaction = { ...selectedPlan, ...(screens || JSON.stringify(labels) !== JSON.stringify(metadata.labels) ? { studio: { before, after: { ...metadata, ...(screens ? { screens } : {}), labels } } } : {}) }
+      // A state saved beside the value it switches: one edit, one undo.
+      const savedScenario = scenarioFrom?.(plan.authoring) ?? null
+      const scenarios = savedScenario ? [...metadata.scenarios.filter(item => item.name !== savedScenario.name), savedScenario] : undefined
+      const transaction = { ...selectedPlan, ...colorChange, ...(screens || scenarios || JSON.stringify(labels) !== JSON.stringify(metadata.labels) ? { studio: { before, after: { ...metadata, ...(screens ? { screens } : {}), ...(scenarios ? { scenarios } : {}), labels } } } : {}) }
       const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction)
       if (problem) { setEditNote(problem); return problem }
-      if (plan.changes.length) setCommittedEditRevision(revision => revision + 1)
+      if (savedScenario) setScenarioSelection({ projectId: project.id, name: savedScenario.name })
+      if (changed) setCommittedEditRevision(revision => revision + 1)
       if (plan.changes.length && !selectionChanged && !preserveSelection) {
         const selected = selectedPlan.selection
         const snapshot = plan.authoring
@@ -666,12 +704,29 @@ export function Studio() {
         const text = selected && useStudio.getState().project?.files.find(f => f.id === selected.file)?.text
         setPendingSelect(selected && typeof text === 'string' ? { ...selected, projectId: project.id, text } : null)
       }
-      setEditNote(plan.changes.length ? operation.kind === 'insert' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
+      setEditNote(changed ? operation.kind === 'insert' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
       return null
     } finally { editingRef.current = false; setPreparingEdit(false) }
   }, [project, stale, planDesignEdit, result, authoringNode])
 
-  const screens = screenCatalog(result?.authoring, designPages, project?.studio?.screens)
+  /**
+   * Giving a screen its first state.
+   *
+   * A state switches a value, and a screen that has none cannot have states. So this
+   * writes the value onto the screen and saves the state that turns it on together:
+   * the designer asked for a state, not for a Swift property.
+   */
+  const createStateValue = useCallback(async (view: string, state: string, value: { name: string; initial: boolean; when: boolean }): Promise<string | null> => {
+    const definition = snapshot?.nodes.find(node => node.kind === 'definition' && node.name === view)
+    if (!definition) return 'Wait for the screen to finish drawing.'
+    if (!state.trim()) return 'Give the state a name.'
+    return performDesignEdit(definition.source, definition.fingerprint, definition.owner, { kind: 'value-create', name: value.name, value: value.initial }, undefined, authoring => {
+      const input = authoring?.inputs?.find(item => item.owner === view && item.name === value.name)
+      return input ? { name: state.trim(), owner: view, hook: '', inputs: [{ owner: view, name: value.name, signature: input.signature, value: value.when }] } : null
+    })
+  }, [snapshot, performDesignEdit])
+
+  const screens = useMemo(() => screenCatalog(result?.authoring, designPages, project?.studio?.screens), [result?.authoring, designPages, project?.studio?.screens])
   const updateScreens = async (command: ScreenCommand): Promise<string | null> => {
     if (!project || stale || preparingEdit) return 'Wait for the preview to finish updating.'
     const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
@@ -704,6 +759,87 @@ export function Studio() {
     if (label.trim()) labels.push({ owner: node.owner, fingerprint: node.fingerprint, offset: node.source.start, label: label.trim() })
     return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, labels } } })
   }
+
+  /**
+   * The one tree the left panel, the settings panel and the canvas all read.
+   *
+   * Pages are only drawn while designing, so the last tree is kept for Preview: the
+   * outline does not empty itself while the app is being tried.
+   */
+  const liveTree = useMemo(() => designPages ? designTree(designPages, result?.authoring, screens) : undefined, [designPages, result?.authoring, screens])
+  const [lastTree, setLastTree] = useState<{ projectId: string; tree: DesignTree } | null>(null)
+  if (liveTree && project && lastTree?.tree !== liveTree) setLastTree({ projectId: project.id, tree: liveTree })
+  const tree = liveTree ?? (lastTree && lastTree.projectId === project?.id ? lastTree.tree : EMPTY_TREE)
+  const treeScreens = useMemo(() => designScreens(tree), [tree])
+  const focusedScreen = treeScreens.find(screen => screen.id === designPage?.id) ?? treeScreens.find(screen => screen.id === focusedPage?.id) ?? treeScreens[0]
+  const level: DesignLevel = authoringNode ? 'view' : focusLevel?.projectId === project?.id && focusLevel?.level === 'app' ? 'app' : 'screen'
+
+  /**
+   * What the canvas needs to draw the app's shape: the lanes, the states, and what
+   * a state costs to draw.
+   *
+   * Every one of these comes from the same design tree the outline reads, so the
+   * canvas cannot show a lane the outline does not, or name a screen differently.
+   */
+  const scenarios = project?.studio?.scenarios ?? NO_FILES
+  const activeState = scenario?.name
+  const canvas = useMemo(() => !designPages || !project ? undefined : {
+    laneNames: [...tree.lanes.map(lane => lane.name), ...(tree.detached.length ? ['Not linked yet'] : [])],
+    laneIcons: [...tree.lanes.map(lane => lane.root.page.icon), ...(tree.detached.length ? [undefined] : [])],
+    sameScreen: (page: PagePreview) => screenDefinition(snapshot, page)?.name ?? page.id,
+    ...(visibleRootId ? { visibleRootId } : {}),
+    statesOf: (page: PagePreview) => {
+      const view = screenDefinition(snapshot, page)?.name
+      return view ? scenarios.filter(saved => scenarioScreen(saved) === view) : NO_FILES
+    },
+    ...(activeState ? { activeState } : {}),
+    onSelectState: (page: PagePreview, state: PreviewScenario | null) => {
+      openPage(page)
+      setScenarioSelection(state ? { projectId: project.id, name: state.name } : null)
+    },
+    compile: {
+      projectId: project.id,
+      files,
+      images,
+      colors: project.colors,
+      designScreens: project.studio?.screens,
+      componentDescriptions: project.studio?.components,
+      deploymentTarget: project.manifest.deploymentTarget,
+      previewTarget: project.manifest.previewTarget,
+    },
+  }, [designPages, project, tree, snapshot, visibleRootId, scenarios, activeState, openPage, files, images])
+
+  /** The App's own navigation is written against the project rather than a view. */
+  const navigationCommand = useCallback((operation: NavigationOperation) => {
+    const node = snapshot?.nodes[0]
+    return node ? performDesignEdit(node.source, node.fingerprint, node.owner, operation) : Promise.resolve('Wait for the project to compile.')
+  }, [snapshot, performDesignEdit])
+
+  const resourceCommand = useCallback((operation: ResourceOperation) => {
+    const node = result?.authoring?.nodes[0]
+    return node ? performDesignEdit(node.source, node.fingerprint, node.owner, operation) : Promise.resolve('Wait for the project to compile.')
+  }, [result?.authoring, performDesignEdit])
+
+  const updateAssets = useCallback(async (assets: readonly ImageAsset[], operation?: ResourceOperation): Promise<string | null> => {
+    const state = useStudio.getState()
+    if (!project || state.project !== project || stale || editingRef.current) return 'The project changed or is still compiling. Try again.'
+    editingRef.current = true
+    try {
+      validateAssets(assets)
+      const node = snapshot?.nodes[0]
+      if (operation && !node) return 'Compile the source before changing image references.'
+      const plan = operation && node ? await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, scope: node.owner, files: project.files, colors: project.colors, target: node.source, fingerprint: node.fingerprint, operation }) : { ok: true as const, projectId: project.id, baseRevision: state.documentRevision, changes: [] }
+      if (!plan.ok) return plan.reason
+      return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } })
+    } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
+  }, [project, stale, snapshot, planDesignEdit])
+
+  const deleteScenario = useCallback((name: string) => {
+    const state = useStudio.getState()
+    if (!project || state.project !== project || !project.studio) return
+    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => s.name !== name) } } })
+    if (error) setEditNote(error); else setScenarioSelection(null)
+  }, [project])
 
   const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
     const target = layer ?? selectedLayer
@@ -773,8 +909,22 @@ export function Studio() {
     try { await navigator.clipboard.writeText(snippet) } catch { /* not granted, or not secure */ }
   }, [copyView, project, selectedLayer])
 
+  /**
+   * Pasting the same view a third time is worth a word, once.
+   *
+   * Counted by what was pasted rather than by where it landed, so three pastes into
+   * three different screens still add up - that is exactly the case a component is
+   * for. Dismissing it stops the hint for that shape.
+   */
+  const pasteCounts = useRef(new Map<string, number>())
+  const [pasteNudge, setPasteNudge] = useState<string | null>(null)
+  const dismissedNudges = useRef(new Set<string>())
   const pasteClipboard = useCallback(() => {
     if (!clipboard) return
+    const shape = clipboard.replace(/\s+/g, ' ').trim()
+    const pastes = (pasteCounts.current.get(shape) ?? 0) + 1
+    pasteCounts.current.set(shape, pastes)
+    if (pastes >= 3 && !dismissedNudges.current.has(shape)) setPasteNudge(shape)
     void applyEdit({ kind: 'insert', snippet: clipboard }, addTargetLayer)
   }, [clipboard, applyEdit, addTargetLayer])
 
@@ -895,11 +1045,11 @@ export function Studio() {
   const selectedSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, selectedLayerId), [result?.authoring, layers, selectedLayerId])
   const hoveredSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, hoveredLayerId), [result?.authoring, layers, hoveredLayerId])
   const liveHoveredAuthoring = useMemo(() => {
-    if (!inspecting || mode !== 'design' || navigatorTab !== 'layers' || stale || !hoveredAuthoring || hoveredAuthoring.projectId !== project?.id) return null
+    if (!inspecting || mode !== 'design' || stale || !hoveredAuthoring || hoveredAuthoring.projectId !== project?.id) return null
     const previous = hoveredAuthoring.node
     const node = result?.authoring?.nodes.find(node => node.id === previous.id && node.fingerprint === previous.fingerprint && node.source.file === previous.source.file && node.source.start === previous.source.start && node.source.end === previous.source.end)
     return node ? { ...hoveredAuthoring, node } : null
-  }, [inspecting, mode, navigatorTab, stale, hoveredAuthoring, project?.id, result?.authoring])
+  }, [inspecting, mode, stale, hoveredAuthoring, project?.id, result?.authoring])
   const hoveredRenderIds = useMemo(() => {
     if (!liveHoveredAuthoring) return new Set<string>()
     const { node, runtimeId } = liveHoveredAuthoring
@@ -1054,7 +1204,43 @@ export function Studio() {
     </>
   ) : null
 
-  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={editNote} />
+  const screenViews = screens.map(screen => screen.view)
+  const authoringFeatures: Omit<FeatureProps, 'node'> = { variants: project.studio?.variants, previewInputs: scenario?.inputs, screens: screenViews,
+                pasteNudge: !!pasteNudge, onDismissNudge: () => { if (pasteNudge) dismissedNudges.current.add(pasteNudge); setPasteNudge(null) },
+                onFindCopies: (node: AuthoringNode) => findCopies(project.files, node.source, { deploymentTarget: project.manifest.deploymentTarget, screens: screenViews }), onSaveVariant: variant => {
+                  const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
+                  if (state.project !== project || stale || preparingEdit) return 'Wait for the current design to finish updating.'
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, variants: [...(metadata.variants ?? []).filter(v => v.owner !== variant.owner || v.name !== variant.name), variant] } } })
+                }, onDeleteVariant: (owner, name) => {
+                  const state = useStudio.getState(), before = project.studio
+                  if (state.project !== project || !before || stale || preparingEdit) return 'Wait for the current design to finish updating.'
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...before, variants: before.variants?.filter(v => v.owner !== owner || v.name !== name) } } })
+                }, onPickNavigation: navigationPicker.start, assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
+                  const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
+                  if (state.project !== project || stale) return 'Wait for the current source to compile.'
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
+                }, onNodeCommand: (node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation), onNodeChange: (node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }), onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }
+  const busy = stale || preparingEdit
+  const revealSpan = (span: SourceSpan) => revealSpanIn(span.file, span.start)
+  /** The right-hand panel shows the App, the focused screen, or the selected view. */
+  const settingsPanel = level === 'app'
+    ? <AppSettings project={project} tree={tree} snapshot={result?.authoring} screenViews={screens.map(screen => screen.view)} busy={busy} onRenameApp={useStudio.getState().renameProject} onResource={resourceCommand} onAssets={updateAssets} onSelect={selectAuthoring}
+        navigation={<AppNavigationSettings navigation={result?.authoring?.navigation} screens={screens} busy={busy} onCommand={navigationCommand} onReveal={revealSpan} />} />
+    : level === 'screen'
+      ? focusedScreen
+        ? <ScreenSettings key={focusedScreen.id} screen={focusedScreen} tree={tree} snapshot={result?.authoring} tokens={result?.authoring?.styles ?? NO_FILES} busy={busy} scenarios={project.studio?.scenarios ?? NO_FILES} activeScenario={scenario?.name ?? ''}
+            onSelectScenario={name => setScenarioSelection(name ? { projectId: project.id, name } : null)} onSaveScenario={saveScenario} onDeleteScenario={deleteScenario} onCreateStateValue={createStateValue} onScreenCommand={updateScreens}
+            onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value })}
+            onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)} onSelect={selectAuthoring} onReveal={revealSpan} />
+        : <p className="text-[12px] text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
+      : <AuthoringInspector features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} />
+  const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
+    <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
+    {level !== 'app' && focusedScreen && <><span aria-hidden>›</span><button type="button" aria-current={level === 'screen' ? 'page' : undefined} onClick={() => openPage(focusedScreen.page)} data-testid="level-screen">{focusedScreen.name}</button></>}
+    {level === 'view' && authoringNode && <><span aria-hidden>›</span><span aria-current="page" data-testid="level-view">{sourceLayerLabel(authoringNode)}</span></>}
+  </nav>
+
+  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={editNote} />
   const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
 
   return (
@@ -1083,15 +1269,40 @@ export function Studio() {
         onExport={handleExport}
         onDownloadEditable={() => { void import('@studio/exporter').then(async module => { await flush(); module.downloadEditableProject(project) }).catch(error => setEditNote(error instanceof Error ? error.message : 'Could not download the editable project.')) }}
         onShare={handleShare}
+        environment={<><DevicePicker device={device} onChange={setDevice} /><AppearancePicker preview={previewSettings} onChange={setPreview} /><TextSizePicker preview={previewSettings} onChange={setPreview} /></>}
+        previewing={!inspecting}
+        onSetPreviewing={previewing => setDesigning(!previewing)}
+        previewDisabled={stale || preparingEdit}
       />
 
       <div ref={splitRef} className="flex min-h-0 flex-1">
         {layout.showNavigator ? (
           <>
             <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
-              <Navigator
+              {mode === 'design' ? <DesignNavigator
                 key={project.id}
-                screens={mode === 'design' && inspecting ? <><Screens screens={screens} pages={designPages} snapshot={result?.authoring} selected={designPage?.id} busy={stale || preparingEdit} onOpen={openPage} onCommand={updateScreens} /><ComponentLibrary snapshot={result?.authoring} screenNames={screens.map(s => s.view)} target={authoringNode} busy={stale || preparingEdit} onSelect={selectAuthoring} onInsert={name => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, { kind: 'component-insert', component: name }) : Promise.resolve('Select a layout or layer where the component should be added.')} /></> : undefined}
+                appName={project.manifest.name}
+                tree={tree}
+                layout={navigatorLayout}
+                onLayoutChange={setNavigatorLayout}
+                level={level}
+                selectedScreenId={focusedScreen?.id}
+                selectedComponent={authoringNode?.kind === 'definition' ? authoringNode.name : undefined}
+                busy={stale || preparingEdit}
+                onTogglePanel={() => togglePane('navigator')}
+                onSelectApp={selectApp}
+                onSelectScreen={openPage}
+                onSelectComponent={component => { if (component.definition) selectAuthoring(component.definition); else setEditNote(`${component.name} is built in Swift the studio does not read. Open it in Code.`) }}
+                onInsertComponent={component => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, { kind: 'component-insert', component: component.name }) : Promise.resolve('Select a layer where the copy should go.')}
+                onScreenCommand={updateScreens}
+                renderLayers={options => result?.authoring ? <LogicalLayers key={`${focusedPage?.id}:${pageFocusEpoch}`} {...options}
+                  labels={project.studio?.labels} onRename={renameLayer} pageId={focusedPage?.id} pageName={focusedPage?.name} pageSource={focusedPage?.source} runtimeLayers={pageHierarchy}
+                  selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={result.authoring} files={project.files} selection={layerSelection?.anchor}
+                  selected={authoringNode?.id} selectedAncestors={selectedSources} hovered={liveHoveredAuthoring?.node.id ?? hoveredSources[0]} hoveredAncestors={hoveredSources.slice(1)}
+                  onHover={hoverAuthoring} stale={stale || preparingEdit} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
+                  hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-2 text-[12px] text-xc-text-3">Building the view hierarchy…</p>}
+              /> : <Navigator
+                key={project.id}
                 layerLabels={project.studio?.labels}
                 onRenameLayer={renameLayer}
                 pageFocusEpoch={pageFocusEpoch}
@@ -1112,11 +1323,10 @@ export function Studio() {
                 layers={layers}
                 selectedLayerId={selectedLayerId}
                 hoveredLayerId={hoveredLayerId}
-                onReorderLayer={mode === 'design' && inspecting ? reorderLayers : undefined}
-                hiddenViews={mode === 'design' ? hidden.views : NO_FILES}
+                hiddenViews={NO_FILES}
                 onHideLayer={(layer) => void applyEdit({ kind: 'hide' }, layer)}
                 onShowHidden={showHidden}
-                layersEditable={mode === 'design' && inspecting}
+                layersEditable={false}
                 stale={stale || preparingEdit}
                 onSelectLayer={selectLayer}
                 tree={fileTree}
@@ -1136,7 +1346,7 @@ export function Studio() {
                 onMoveFile={moveFile}
                 onRevealDiagnostic={revealSpanIn}
                 onOpenTemplates={openGallery}
-              />
+              />}
             </div>
             <Splitter
               orientation="col"
@@ -1232,7 +1442,8 @@ export function Studio() {
                 onSettingsResize={(size) => setSize('settings', size)}
                 onToggleSettings={() => togglePane('preview')}
                 onHoverNode={pickingNavigation ? undefined : hoverPreview}
-                pages={visiblePages}
+                pages={designPages}
+                canvas={canvas}
                 selectedPageId={designPage?.id}
                 pageCount={pageCount}
                 onSelectPage={openPage}
@@ -1249,49 +1460,13 @@ export function Studio() {
                 belowCanvas={mode === 'design' ? debugArea : null}
                 tool={tool}
                 selection={selection}
-                authoringFeatures={{ variants: project.studio?.variants, previewInputs: scenario?.inputs, onSaveVariant: variant => {
-                  const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
-                  if (state.project !== project || stale || preparingEdit) return 'Wait for the current design to finish updating.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, variants: [...(metadata.variants ?? []).filter(v => v.owner !== variant.owner || v.name !== variant.name), variant] } } })
-                }, onDeleteVariant: (owner, name) => {
-                  const state = useStudio.getState(), before = project.studio
-                  if (state.project !== project || !before || stale || preparingEdit) return 'Wait for the current design to finish updating.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...before, variants: before.variants?.filter(v => v.owner !== owner || v.name !== name) } } })
-                }, onPickNavigation: navigationPicker.start, assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
-                  const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
-                  if (state.project !== project || stale) return 'Wait for the current source to compile.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
-                }, onNodeCommand: (node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation), onNodeChange: (node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }), onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }}
-                authoringTools={<ProjectResources onSelect={selectAuthoring} project={project} snapshot={result?.authoring} stale={stale || preparingEdit} onCommand={operation => {
-                  const node = result?.authoring?.nodes[0]
-                  return node ? performDesignEdit(node.source, node.fingerprint, node.owner, operation) : Promise.resolve('Wait for the project to compile.')
-                }} onAssets={async (assets: readonly ImageAsset[], operation) => {
-                  const state = useStudio.getState()
-                  if (state.project !== project || stale || editingRef.current) return 'The project changed or is still compiling. Try again.'
-                  editingRef.current = true
-                  try {
-                    validateAssets(assets)
-                    const node = result?.authoring?.nodes[0]
-                    if (operation && !node) return 'Compile the source before changing image references.'
-                    const plan = operation && node ? await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, scope: node.owner, files: project.files, target: node.source, fingerprint: node.fingerprint, operation }) : { ok: true as const, projectId: project.id, baseRevision: state.documentRevision, changes: [] }
-                    if (!plan.ok) return plan.reason
-                    return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } })
-                  } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
-                }} />}
-                previewTools={<PreviewScenarios key={project.id} snapshot={result?.authoring} stale={stale || preparingEdit} scenarios={project.studio?.scenarios ?? []} active={scenario?.name ?? ''} onSelect={name => setScenarioSelection({ projectId: project.id, name })} onSave={saveScenario} onReset={run} onDelete={name => {
-                  const state = useStudio.getState()
-                  if (state.project !== project || !project.studio) return
-                  const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => s.name !== name) } } })
-                  if (error) setEditNote(error); else setScenarioSelection(null)
-                }} />}
-                authoringNode={authoringNode}
-                onChangeAuthoring={changeProperty}
-                onRevealAuthoring={span => revealSpanIn(span.file, span.start)}
+                authoringFeatures={authoringFeatures}
+                settingsPanel={settingsPanel}
+                settingsTitle={settingsTitle}
+                onSelectBackground={mode === 'design' ? selectApp : undefined}
                 onReorderNodes={reorderNodes}
                 centerOn={centerOn}
                 status={previewStatus}
-                inspectorTab={inspectorTab}
-                onInspectorTab={setInspectorTab}
                 onDeviceChange={setDevice}
                 tools={previewTools}
                 device={device}
@@ -1313,7 +1488,7 @@ export function Studio() {
       {!layout.showPreview && <div className={styles.codeFooter}>{previewTools}</div>}
 
       </div>
-      {reviewOpen && <DesignReview key={project.id} name={project.manifest.name} pages={designPages ?? []} selectedPageId={designPage?.id} options={{ projectId: project.id, files: project.files, images, scenario, designScreens: project.studio?.screens, componentDescriptions: project.studio?.components, deploymentTarget: project.manifest.deploymentTarget, previewTarget: project.manifest.previewTarget }} onClose={() => setReviewOpen(false)} onInspect={source => {
+      {reviewOpen && <DesignReview key={project.id} name={project.manifest.name} pages={designPages ?? []} selectedPageId={designPage?.id} options={{ projectId: project.id, files: project.files, images, colors: project.colors, scenario, designScreens: project.studio?.screens, componentDescriptions: project.studio?.components, deploymentTarget: project.manifest.deploymentTarget, previewTarget: project.manifest.previewTarget }} onClose={() => setReviewOpen(false)} onInspect={source => {
         setReviewOpen(false)
         const node = result?.authoring?.nodes.filter(n => n.kind !== 'definition' && n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end).sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
         if (node) selectAuthoring(node)
@@ -1344,7 +1519,7 @@ export function Studio() {
       {galleryOpen ? (
         <TemplateGallery
           currentProject={project}
-          onImport={async (expected, incoming, removedNames) => { const referenceProblem = await validateResourceRemoval(incoming.files, removedNames); if (referenceProblem) return referenceProblem; const problem = await useStudio.getState().importProject(expected, incoming); if (!problem) setGalleryOpen(false); return problem }}
+          onImport={async (expected, incoming, removedNames, removedColors) => { const referenceProblem = await validateResourceRemoval(incoming.files, removedNames, removedColors); if (referenceProblem) return referenceProblem; const problem = await useStudio.getState().importProject(expected, incoming); if (!problem) setGalleryOpen(false); return problem }}
           projectId={project.id}
           projectName={project.manifest.name}
           fileCount={files.length}

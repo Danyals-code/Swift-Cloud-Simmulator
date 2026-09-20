@@ -57,8 +57,34 @@
 .dimensions small { color: var(--color-xc-text-3); font-size: 12px; }
 /* The world the canvas looks at: laid out at natural size, placed by one transform. */
 .world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
-.gallery { display: grid; }
-.pageCard { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+/**
+ * The design canvas.
+ *
+ * Every position comes from `canvasLayout`, so nothing here decides where a screen
+ * goes: a lane is a tab, a column is a navigation step, and the only thing stacked
+ * under a screen is a state of that same screen, inside its frame.
+ */
+.flow { position: relative; }
+.lane { position: absolute; left: 0; border-top: 1px dashed var(--color-xc-line); }
+.laneHeader { position: absolute; top: 4px; left: 8px; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 9px; border-radius: 7px; font-size: 13px; font-weight: 600; color: var(--color-xc-text-2); cursor: pointer; }
+.laneHeader:hover { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.laneHeader small { font-weight: 400; color: var(--color-xc-text-3); }
+.lane[data-collapsed] .laneHeader > svg:first-child { transform: rotate(-90deg); }
+.flowArrows { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; color: var(--color-xc-text-3); }
+.flowArrows > g path { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0.75; }
+.flowArrows > g path[data-kind='sheet'], .flowArrows > g path[data-kind='cover'], .flowArrows > g path[data-kind='popover'] { stroke-dasharray: 7 5; }
+.flowArrows marker path { fill: currentColor; stroke: none; }
+.flowArrows text { font-size: 11px; fill: var(--color-xc-text-3); paint-order: stroke; stroke: var(--color-xc-canvas); stroke-width: 6px; stroke-linejoin: round; }
+/* The screen frame: a tinted card holding one screen and its states, which is what
+   tells a state apart from the next screen along. */
+.screenFrame { position: absolute; border: 1px solid var(--color-xc-line); border-radius: 20px; background: color-mix(in srgb, var(--color-xc-accent) 5%, transparent); }
+.statesBadge { position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--color-xc-line); background: var(--color-xc-bar); color: var(--color-xc-text-2); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.statesBadge:hover { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.statePhone { position: absolute; }
+.stateProblem { position: absolute; inset: auto 8px 8px; padding: 6px 8px; border-radius: 8px; background: var(--color-xc-bar); color: var(--color-xc-text-2); font-size: 12px; text-align: center; }
+.pageCard { position: absolute; margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.statePhone > .pageCard { position: static; }
+.statePhone [data-busy] { opacity: 0.55; }
 .pageCard > figcaption { display: flex; align-items: center; gap: 7px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-xc-text-3); }
 .pageCard > figcaption > button { cursor: pointer; padding: 3px 6px; border-radius: 5px; }
 .pageCard > figcaption > button:hover { background: var(--color-xc-select); color: var(--color-xc-accent); }
@@ -189,3 +215,25 @@
 .inlineText small { margin-right: auto; font-size: 10px; color: var(--color-xc-text-3); }
 .inlineText button { padding: 5px 8px; background: var(--color-xc-select); color: var(--color-xc-accent); border-radius: 4px; font-size: 12px; }
 .inlineText p { color: var(--color-xc-error); font-size: 12px; }
+
+/* The settings rail's header: what is selected, and the button that hides the rail. */
+.settingsHeader { height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--color-xc-line-soft); }
+.settingsHeader > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+@media(max-width:900px) { .properties > .settingsHeader { display: flex; flex: 0 0 100%; } }
+
+/* Design's preview environment: one group, applying to every screen at once. */
+.environment { display: flex; align-items: center; gap: 6px; padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--color-xc-line-soft); }
+.environment > button, .environment > div { height: 30px; }
+.previewToggle { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--color-xc-line); color: var(--color-xc-text); cursor: pointer; font-size: 14px; }
+.previewToggle:hover:not(:disabled) { background: var(--color-xc-bar-raised); }
+.previewToggle[aria-pressed='true'] { border-color: var(--color-xc-accent); background: var(--color-xc-select); color: var(--color-xc-accent); }
+.previewToggle:disabled { opacity: .45; cursor: default; }
+@media(max-width:1180px) { .environment > :nth-child(3) { display: none; } }
+@media(max-width:1020px) { .environment { display: none; } }
+
+/* Where the settings panel is: App › Screen › View. Each step selects that level. */
+.levelPath { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; font-weight: 500; color: var(--color-xc-text-3); }
+.levelPath > button { flex-shrink: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 5px; border-radius: 5px; cursor: pointer; color: var(--color-xc-text-2); }
+.levelPath > button:hover { background: var(--color-xc-line-soft); color: var(--color-xc-text); }
+.levelPath > [aria-current='page'] { color: var(--color-xc-text); font-weight: 600; }
+.levelPath > span[aria-current] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 5px; }

@@ -12,7 +12,7 @@ import styles from './DesignReview.module.css'
 const ignoreEvent = () => {}
 
 type Condition = { device: DeviceKey; colorScheme: 'light' | 'dark'; dynamicTypeSize: DynamicTypeSize }
-type ReviewOptions = Pick<CompilerOptions, 'projectId' | 'files' | 'images' | 'scenario' | 'designScreens' | 'componentDescriptions' | 'deploymentTarget' | 'previewTarget'>
+type ReviewOptions = Pick<CompilerOptions, 'projectId' | 'files' | 'images' | 'colors' | 'scenario' | 'designScreens' | 'componentDescriptions' | 'deploymentTarget' | 'previewTarget'>
 export function DesignReview({ name, options, pages, selectedPageId, onClose, onInspect }: { name: string; options: ReviewOptions; pages: readonly PagePreview[]; selectedPageId?: string; onClose: () => void; onInspect: (source: SourceSpan) => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [mode, setMode] = useState<'compare' | 'present'>('compare'), [selected, setSelected] = useState(selectedPageId ?? pages[0]?.id ?? '')

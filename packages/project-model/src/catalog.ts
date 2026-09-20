@@ -51,7 +51,7 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     kind: 'feature',
     tagline: 'Start designing with an empty screen.',
     description: 'Add text, images, buttons, and layouts. Navigation is ready when you add another screen.',
-    files: ['Sources/MyDesignApp.swift'],
+    files: ['Sources/App/MyDesignApp.swift', 'Sources/Features/Home/HomeScreen.swift'],
   },
   {
     id: 'counter',
@@ -214,10 +214,10 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
   "description": "Browse and filter products, save favorites, adjust bag quantities, place a local demo order, and review its details. Includes empty states and validated checkout.",
   "highlights": [
     "Discover",
-    "Product details",
+    "Product",
     "Bag",
     "Checkout",
-    "Confirmation",
+    "Thank you",
     "Orders",
     "Order details"
   ],
@@ -275,7 +275,7 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     tagline: 'Keep everyday spending in view.',
     description:
       'Track expenses, search your transactions, and set a monthly budget. Add an expense once and see the summary and remaining budget update together.',
-    highlights: ['Summary', 'Spending', 'Expense details', 'Add expense', 'Budget'],
+    highlights: ['Summary', 'Spending', 'Expense', 'New expense', 'Budget'],
     files: [
       'Sources/LedgerApp.swift',
       'Sources/Models/Expense.swift',
@@ -294,7 +294,7 @@ export const TEMPLATE_CATALOG: readonly TemplateInfo[] = [
     tagline: 'Read a recipe, scale it, tick the steps off.',
     description:
       'Browse recipes by course, save favorites, adjust the servings, and follow a cooking checklist. A focused example of navigation and reusable components.',
-    highlights: ['Recipes', 'Recipe details', 'Cooking steps'],
+    highlights: ['Kitchen', 'Recipe details', 'Method and timings'],
     files: [
       'Sources/KitchenApp.swift',
       'Sources/Models/Recipe.swift',

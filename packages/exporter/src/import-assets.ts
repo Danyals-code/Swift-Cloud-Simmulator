@@ -1,9 +1,26 @@
-import { newProjectId, projectFromFiles, readImage, type ImageAsset, type OpenedFile, type Project } from '@studio/project-model'
+import { newProjectId, projectFromFiles, readColorSet, readImage, validColorName, type ColorAsset, type ImageAsset, type OpenedFile, type Project } from '@studio/project-model'
 import { decodeText, validatePortableProject, type Handoff } from './portable'
 
 /** The same universal PNG/JPEG image-set subset that the Studio exports. */
 export function importSourceAssets(files: readonly OpenedFile[], entries: ReadonlyMap<string, Uint8Array>): { project: Project; handoff: Handoff } | null {
   const catalogs = [...entries.keys()].filter(path => path.endsWith('.imageset/Contents.json'))
+  // Colour sets come along too: a project's colour tokens read them by name. Xcode's
+  // empty AccentColor holds nothing to import. A set the studio cannot represent -
+  // per-device values, system colour references - is left out, as every colour set
+  // was before, rather than arriving flattened into something it is not.
+  const colors: ColorAsset[] = []
+  for (const path of [...entries.keys()].filter(path => path.endsWith('.colorset/Contents.json'))) {
+    const name = path.split('/').at(-2)!.replace(/\.colorset$/, '')
+    if (name === 'AccentColor' || !validColorName(name)) continue
+    try { colors.push(readColorSet(name, decodeText(entries.get(path)!))) } catch { /* unrepresentable; keep the import */ }
+  }
+  if (!catalogs.length && colors.length) {
+    const source = projectFromFiles(files)
+    if (!source) throw new Error('The source archive contains no editable Swift files.')
+    const project: Project = { ...source, schemaVersion: 1, colors }
+    validatePortableProject(project)
+    return { project, handoff: { version: 1, format: 'swift-web-studio', project: { schemaVersion: 1, id: project.id, manifest: project.manifest, createdAt: project.createdAt, updatedAt: project.updatedAt }, sources: project.files.map(file => ({ id: file.id, path: file.id, base: file.text })), assets: [], baseManifest: project.manifest } }
+  }
   if (!catalogs.length) {
     if ([...entries.keys()].some(path => /\.(png|jpe?g)$/i.test(path))) throw new Error('This source archive includes images without image sets. Open its Swift files and import the images through Project resources, or include an asset catalog.')
     return null
@@ -38,7 +55,7 @@ export function importSourceAssets(files: readonly OpenedFile[], entries: Readon
   }
   const source = projectFromFiles(files)
   if (!source) throw new Error('The source archive contains no editable Swift files.')
-  const project: Project = { ...source, schemaVersion: 1, assets }
+  const project: Project = { ...source, schemaVersion: 1, assets, ...(colors.length ? { colors } : {}) }
   validatePortableProject(project)
   return { project, handoff: { version: 1, format: 'swift-web-studio', project: { schemaVersion: 1, id: project.id, manifest: project.manifest, createdAt: project.createdAt, updatedAt: project.updatedAt }, sources: project.files.map(file => ({ id: file.id, path: file.id, base: file.text })), assets: [], baseManifest: project.manifest } }
 }

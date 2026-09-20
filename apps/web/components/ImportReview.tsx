@@ -6,7 +6,7 @@ import { imageDataURL, type Project } from '@studio/project-model'
 import { decodeImportedImage } from '../lib/images'
 import styles from './ImportReview.module.css'
 
-export function ImportReview({ local, incoming, handoff, onApply, onCancel }: { local: Project; incoming: Project; handoff: Handoff; onApply: (expected: Project, project: Project, removedNames: readonly string[]) => Promise<string | null>; onCancel: () => void }) {
+export function ImportReview({ local, incoming, handoff, onApply, onCancel }: { local: Project; incoming: Project; handoff: Handoff; onApply: (expected: Project, project: Project, removedNames: readonly string[], removedColors: readonly string[]) => Promise<string | null>; onCancel: () => void }) {
   const review = reviewImport(local, incoming, handoff)
   const [choices, setChoices] = useState<Record<string, 'local' | 'incoming'>>({}), [error, setError] = useState<string | null>(null), [busy, setBusy] = useState(false)
   async function apply(copy: boolean) {
@@ -16,7 +16,10 @@ export function ImportReview({ local, incoming, handoff, onApply, onCancel }: { 
       const project = resolveImport(local, incoming, handoff, choices, copy)
       for (const asset of project.assets ?? []) for (const variant of [asset.light, asset.dark]) if (variant) await decodeImportedImage(variant.bytes)
       const removed = copy ? [] : [...new Set([...(local.assets ?? []), ...(incoming.assets ?? [])].map(a => a.name))].filter(name => !project.assets?.some(a => a.name === name))
-      setError(await onApply(local, project, removed))
+      // A colour the merge drops is checked the same way an image is: the Swift that
+      // reads it by name would otherwise be left pointing at nothing.
+      const removedColors = copy ? [] : [...new Set([...(local.colors ?? []), ...(incoming.colors ?? [])].map(color => color.name))].filter(name => !project.colors?.some(color => color.name === name))
+      setError(await onApply(local, project, removed, removedColors))
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not import the project.') } finally { setBusy(false) }
   }
   const sourceIds = new Set([...local.files.map(f => f.id), ...incoming.files.map(f => f.id)])

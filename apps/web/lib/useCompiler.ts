@@ -73,6 +73,8 @@ function spawnWorker(onFailure: (error: Error) => void): WorkerHandle {
  */
 export interface CompilerOptions {
   images?: readonly PreviewImageAsset[]
+  /** Colour sets from the asset catalog, which `Color("name")` - a colour token - reads. */
+  colors?: CompileRequest['colors']
   projectId?: string
   deploymentTarget?: string
   scenario?: PreviewScenario
@@ -108,7 +110,7 @@ export interface CompilerOptions {
 export function useCompiler({
   projectId,
   deploymentTarget,
-  scenario, componentDescriptions, designScreens, previewScreen, images,
+  scenario, componentDescriptions, designScreens, previewScreen, images, colors,
   files,
   device,
   colorScheme,
@@ -209,7 +211,7 @@ export function useCompiler({
       const result = await handle.api.compile({
           projectId,
           deploymentTarget,
-          scenario, componentDescriptions, designScreens, previewScreen, images,
+          scenario, componentDescriptions, designScreens, previewScreen, images, colors,
           files: files.map((f) => ({ id: f.id, text: f.text })),
           canvas: { width: device.width, height: device.height },
           safeArea: device.safeArea,
@@ -235,7 +237,7 @@ export function useCompiler({
       }))
       handleRef.current = null
     }
-  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, designScreens, previewScreen, images, contextKey])
+  }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, designScreens, previewScreen, images, colors, contextKey])
 
   const latestCompile = useRef(runCompile)
   const latestPaused = useRef(paused)
@@ -272,13 +274,18 @@ export function useCompiler({
    * there is nothing left to coalesce.
    */
   const first = useRef(true)
+  /** Set when the pause ends, so the first compile after it does not wait. */
+  const resumed = useRef(false)
+  const wasPaused = useRef(paused)
+  if (wasPaused.current !== paused) { resumed.current = wasPaused.current && !paused; wasPaused.current = paused }
   const compiledProject = useRef<string | undefined>(undefined)
   const compiledEditRevision = useRef(committedEditRevision)
   useEffect(() => {
     const changedProject = compiledProject.current !== projectId
     if (paused && !changedProject) return
     compiledProject.current = projectId
-    const immediate = first.current || changedProject || compiledEditRevision.current !== committedEditRevision
+    const immediate = first.current || changedProject || resumed.current || compiledEditRevision.current !== committedEditRevision
+    resumed.current = false
     compiledEditRevision.current = committedEditRevision
     first.current = false
 
@@ -374,8 +381,8 @@ export function useCompiler({
    * half-second stall on a keystroke is more disruptive than a missing list.
    */
   /** Bounded worker planning; failure never mutates the project. */
-  const validateResourceRemoval = useCallback(async (files: readonly SourceFile[], names: readonly string[]): Promise<string | null> => {
-    try { return await ensureWorker().api.validateResourceRemoval(files, names) }
+  const validateResourceRemoval = useCallback(async (files: readonly SourceFile[], names: readonly string[], colors?: readonly string[]): Promise<string | null> => {
+    try { return await ensureWorker().api.validateResourceRemoval(files, names, colors) }
     catch { return 'Image references could not be verified. Retry when the compiler is available.' }
   }, [ensureWorker])
   const planDesignEdit = useCallback(async (request: DesignEditRequest): Promise<DesignEditPlan> => {
@@ -396,6 +403,15 @@ export function useCompiler({
       return await ensureWorker().api.copyView(text, file, offset)
     } catch {
       return null
+    }
+  }, [ensureWorker])
+
+  /** The copies of one view, for the Make component flow. */
+  const findCopies = useCallback(async (files: readonly SourceFile[], target: SourceSpan, options?: { deploymentTarget?: string; screens?: readonly string[] }) => {
+    try {
+      return await ensureWorker().api.findCopies(files.map(f => ({ id: f.id, text: f.text })), target, options)
+    } catch {
+      return { copies: [], values: [], eligible: false, reason: 'The project is still compiling. Try again.' }
     }
   }, [ensureWorker])
 
@@ -446,8 +462,8 @@ export function useCompiler({
 
   const sourceStale = compiledFiles !== files || compiledContext !== contextKey
   return useMemo(
-    () => ({ ...state, stale: state.stale || sourceStale, dispatch, reset, recompile: runCompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, hiddenViews }),
-    [state, sourceStale, dispatch, reset, runCompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, hiddenViews],
+    () => ({ ...state, stale: state.stale || sourceStale, dispatch, reset, recompile: runCompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews }),
+    [state, sourceStale, dispatch, reset, runCompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews],
   )
 }
 

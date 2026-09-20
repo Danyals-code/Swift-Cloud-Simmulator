@@ -1,6 +1,6 @@
 import type { AuthoringNode, NavigationDestination, NavigationSettings, SourceSpan } from '@studio/shared'
 import { forEachChild, Parser, type CallExpr, type ClosureExpr, type Expr, type Node, type StructDecl, type VarDecl } from '@studio/swift-syntax'
-import { callOf, expressionOf, hasComments, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
+import { callOf, expressionOf, hasComments, insertMember, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
 import { viewCallChain } from './design-controls'
 import { enumCases } from './authoring-components'
 
@@ -252,7 +252,8 @@ export function navigationSettings(ctx: FeatureContext, node: AuthoringNode): Na
   if (!site) return undefined
   const destination = currentExpression(ctx, site)
   const name = viewName(parseDestination(destination))
-  return { destination, display: name ? friendly(name) : site.value ? 'Value-based destination' : 'Configured destination', destinations: destinationChoices(ctx, site, destination), editable: !site.reason, reason: site.reason, scope: site.scope, scopeDescription: site.scope === 'shared-route' ? 'Changes every link using this destination rule.' : site.scope === 'presentation' ? 'Changes this presented screen.' : site.value ? 'Changes this link only. Other links keep their destination rule.' : 'Changes this link only.' }
+  const type = site.scope === 'link' ? 'push' as const : site.route && member(site.route) === 'sheet' ? 'sheet' as const : site.route && member(site.route) === 'fullScreenCover' ? 'cover' as const : undefined
+  return { ...(type ? { type } : {}), destination, display: name ? friendly(name) : site.value ? 'Value-based destination' : 'Configured destination', destinations: destinationChoices(ctx, site, destination), editable: !site.reason, reason: site.reason, scope: site.scope, scopeDescription: site.scope === 'shared-route' ? 'Changes every link using this destination rule.' : site.scope === 'presentation' ? 'Changes this presented screen.' : site.value ? 'Changes this link only. Other links keep their destination rule.' : 'Changes this link only.' }
 }
 export function configureNavigationTarget(ctx: FeatureContext, node: AuthoringNode, destination: string): SourcePatch[] {
   const site = siteFor(ctx, node)
@@ -271,4 +272,78 @@ export function configureNavigationTarget(ctx: FeatureContext, node: AuthoringNo
   if (!target) throw new Error('This destination contains custom logic. Edit it in Swift.')
   if (hasComments(ctx, target)) throw new Error('This destination contains comments. Edit it in Swift to preserve them.')
   return [patch(target, text)]
+}
+
+/**
+ * Changing how a screen opens: pushed, as a sheet, or covering everything.
+ *
+ * The three are different Swift, not a setting: a push is a `NavigationLink`, and a
+ * sheet is a button that sets a value with a `.sheet` reading it. So switching one
+ * rewrites the view - and refuses whenever the button does anything else, because
+ * the one thing worse than not offering this is quietly dropping somebody's code.
+ */
+export function changeNavigationType(ctx: FeatureContext, node: AuthoringNode, type: 'push' | 'sheet' | 'cover'): SourcePatch[] {
+  const expression = expressionOf(ctx, node)
+  const chain = expression ? viewCallChain(expression) : null
+  const owner = ownerOf(ctx, node)
+  if (!expression || !chain) throw new Error('Select the button or link that opens the screen.')
+  const call = chain.base
+  const presentation = chain.modifiers.find(item => ['sheet', 'fullScreenCover'].includes(member(item)) && item.trailingClosure && item.args.some(argument => argument.label === 'isPresented'))
+  const current = node.name === 'NavigationLink' ? 'push' : presentation ? member(presentation) === 'sheet' ? 'sheet' : 'cover' : null
+  if (!current) throw new Error('Select the button or link that opens the screen.')
+  if (current === type) return []
+  if (hasComments(ctx, node.source)) throw new Error('This view has comments in it. Change how it opens in Swift, so they stay where they are.')
+  const text = ctx.files.find(file => file.id === node.source.file)?.text ?? ''
+  const own = (span: SourceSpan) => text.slice(span.start, span.end)
+
+  // Between the two presented kinds it is one word.
+  if (presentation && type !== 'push') {
+    const name = presentation.callee.kind === 'memberAccess' ? presentation.callee.memberSpan : undefined
+    if (!name) throw new Error('Change how this screen opens in Swift.')
+    return [patch(name, type === 'cover' ? 'fullScreenCover' : 'sheet')]
+  }
+
+  if (current === 'push') {
+    const title = call.args.find(argument => argument.label === null)?.value
+    const destination = call.args.find(argument => argument.label === 'destination')?.value ?? singleExpression(call.trailingClosure ?? undefined)
+    if (!title || !destination || !owner) throw new Error('This link is built in Swift. Change how it opens there.')
+    const flag = unusedName(owner, `is${viewName(destination) ?? 'Screen'}Presented`)
+    const rest = text.slice(call.span.end, node.source.end)
+    return [
+      insertMember(ctx, owner, `@State private var ${flag}: Bool = false`),
+      patch(node.source, `Button(${own(title.span)}) { ${flag} = true }${rest}.${type === 'cover' ? 'fullScreenCover' : 'sheet'}(isPresented: $${flag}) { ${own(destination.span)} }`),
+    ]
+  }
+
+  // A presented screen becomes a push only when the button does nothing else.
+  const flagExpression = presentation!.args.find(argument => argument.label === 'isPresented')!.value
+  const flag = own(flagExpression.span).replace(/^\$/, '').trim()
+  const destination = singleExpression(presentation!.trailingClosure ?? undefined)
+  const title = call.args.find(argument => argument.label === null)?.value
+  const action = call.trailingClosure
+  if (call.callee.kind !== 'identifier' || call.callee.name !== 'Button' || !title || !destination || !action) throw new Error('Only a plain button that opens a screen can become a push. Change this one in Swift.')
+  const statements = action.body.statements
+  const sets = statements.length === 1 && statements[0]!.kind === 'exprStmt' && own(statements[0]!.expression.span).replace(/\s/g, '') === `${flag}=true`
+  if (!sets) throw new Error('This button does more than open the screen, so it cannot become a push. Change it in Swift.')
+  let parent = ctx.nodes.find(item => item.id === node.parentId)
+  while (parent && !['NavigationStack', 'NavigationView'].includes(parent.name)) parent = ctx.nodes.find(item => item.id === parent!.parentId)
+  if (!parent) throw new Error('A pushed screen needs a navigation container on this screen. Add one, or keep this as a sheet.')
+  const modifierStart = text.lastIndexOf('.', presentation!.callee.kind === 'memberAccess' ? presentation!.callee.memberSpan.start : presentation!.span.end)
+  const rest = text.slice(call.span.end, modifierStart).trimEnd() + text.slice(presentation!.span.end, node.source.end)
+  const patches = [patch(node.source, `NavigationLink(${own(title.span)}, destination: ${own(destination.span)})${rest}`)]
+  // The value only existed to open the screen; a push does not need it.
+  const declaration = owner?.members.find((item): item is VarDecl => item.kind === 'varDecl' && item.name === flag)
+  const elsewhere = ctx.files.some(file => file.id !== node.source.file && file.text.includes(flag))
+  const inside = countName(text.slice(0, node.source.start) + text.slice(node.source.end), flag) - (declaration ? countName(own(declaration.span), flag) : 0)
+  if (declaration && !elsewhere && inside <= 0) patches.push(patch(declaration.span, ''))
+  return patches
+}
+
+/** How many times a name appears as a whole word, for "is this still used?". */
+const countName = (text: string, name: string) => text.split(new RegExp(`\\b${name}\\b`)).length - 1
+
+function unusedName(owner: StructDecl, base: string): string {
+  let name = base, suffix = 2
+  while (owner.members.some(member => 'name' in member && member.name === name)) name = base + suffix++
+  return name
 }

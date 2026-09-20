@@ -29,7 +29,9 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
   const matches = useMemo(() => {
     if (query.trim().length === 0) return files
     return files
-      .map((file) => ({ file, score: subsequenceScore(fileBasename(file.id), query) }))
+      // Matched against the whole path, which is what the row shows: two screens in
+      // different feature folders share a basename and nothing else.
+      .map((file) => ({ file, score: subsequenceScore(fileBasename(file.id), query) ?? subsequenceScore(file.id, query) }))
       .filter((entry) => entry.score !== null)
       .sort((a, b) => a.score! - b.score!)
       .map((entry) => entry.file)

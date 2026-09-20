@@ -184,6 +184,8 @@ export const COLOR_TYPE = 'Color'
 export interface ColorPayload {
   /** A named colour (`red`, `primary`), or null when built from components. */
   readonly name: string | null
+  /** The name is a colour set in the project's asset catalog, as `Color("name")` reads. */
+  readonly asset?: boolean
   readonly white?: number
   readonly red?: number
   readonly green?: number
