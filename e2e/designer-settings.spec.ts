@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { addModifier, assertSource, cardAction, cards, expandCard } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
@@ -35,7 +35,6 @@ async function open(page: Page, source = SOURCE, visible = 'Card') {
   await page.keyboard.insertText(source)
   await expect(page.getByTestId('render-tree').getByText(visible, { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
-  await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('logical-layers')).toBeVisible()
 }
 async function selectText(page: Page, label: string) {
@@ -43,6 +42,13 @@ async function selectText(page: Page, label: string) {
   await expect(page.getByTestId('settings-basics').getByRole('textbox', { name: 'Text', exact: true })).toHaveValue(label)
 }
 const order = (page: Page) => page.getByTestId('modifier-stack').getByTestId('modifier-card').evaluateAll(elements => elements.map(element => element.getAttribute('data-modifier-name')))
+/** Opens a collapsed <details> section by its summary text, leaving an open one open. */
+async function openSection(scope: Locator, summary: string) {
+  const toggle = scope.locator('summary').filter({ hasText: new RegExp(`^${summary}$`) })
+  const details = toggle.locator('xpath=..')
+  if (await details.getAttribute('open') === null) await toggle.click()
+  await expect(details).toHaveAttribute('open', '')
+}
 
 test('Basics edits preview, layer label and Swift while preserving the ordered stack', async ({ page }) => {
   await open(page)
@@ -69,7 +75,7 @@ test('repeated modifier occurrences edit independently, reorder, duplicate, remo
   await open(page)
   await selectText(page, 'Card')
   await expandCard(cards(page, 'padding').nth(1))
-  const value = cards(page, 'padding').nth(1).getByRole('textbox', { name: 'Padding', exact: true })
+  const value = cards(page, 'padding').nth(1).getByRole('textbox', { name: 'Padding value', exact: true })
   await value.fill('24')
   await value.press('Enter')
   let expected = SOURCE.replace('.background(Color.blue).padding(8)', '.background(Color.blue).padding(24)')
@@ -104,7 +110,9 @@ test('dragging a modifier changes Swift order without losing repeated cards', as
   })
   const before = await backgroundWidth()
   expect(before).not.toBeNull()
-  await cards(page, 'background').locator('[title="Drag to change order"]').dragTo(cards(page, 'padding').first())
+  // A drop lands before a card when the pointer is over its upper half, after it
+  // otherwise, so aim at the top edge of the first Padding card.
+  await cards(page, 'background').locator('[title="Drag to reorder"]').dragTo(cards(page, 'padding').first(), { targetPosition: { x: 24, y: 4 } })
   await expect.poll(() => order(page)).toEqual(['background', 'padding', 'padding'])
   await expect.poll(backgroundWidth).toBeCloseTo(before! - 16, 3)
   await assertSource(page, SOURCE.replace('.padding(8).background(Color.blue).padding(8)', '.background(Color.blue).padding(8).padding(8)'))
@@ -139,9 +147,9 @@ test('a custom modifier remains visible and byte-preserved during nearby support
   await selectText(page, 'Card')
   await expect(cards(page, 'reviewStyle')).toHaveCount(1)
   await expandCard(cards(page, 'reviewStyle'))
-  await expect(cards(page, 'reviewStyle')).toContainText('Custom modifier')
+  await expect(cards(page, 'reviewStyle')).toContainText('A custom modifier from your code.')
   await expandCard(cards(page, 'padding'))
-  const padding = cards(page, 'padding').getByRole('textbox', { name: 'Padding', exact: true })
+  const padding = cards(page, 'padding').getByRole('textbox', { name: 'Padding value', exact: true })
   await padding.fill('16')
   await padding.press('Enter')
   await assertSource(page, source.replace('.reviewStyle().padding(8)', '.reviewStyle().padding(16)'))
@@ -168,14 +176,17 @@ test('List records and button actions live below Modifiers and update actual dat
   await expect(page.getByTestId('render-tree').getByText('Edited record', { exact: true })).toBeVisible()
   await expect(page.getByTestId('render-tree').getByText('Second', { exact: true })).toBeVisible()
   await layers.locator('[data-source-name="Button"]').click()
-  const behavior = page.getByTestId('settings-behavior')
+  // The Behavior section was removed: scripted button actions are in the
+  // Advanced section (under "Other actions"), which also sits below Modifiers.
+  const behavior = page.getByTestId('settings-advanced')
   await expect(behavior).toBeVisible()
   expect(await page.getByTestId('authoring-inspector').evaluate(element => {
     const stack = element.querySelector('[data-testid="modifier-stack"]')!
-    const behavior = element.querySelector('[data-testid="settings-behavior"]')!
+    const behavior = element.querySelector('[data-testid="settings-advanced"]')!
     return !!(stack.compareDocumentPosition(behavior) & Node.DOCUMENT_POSITION_FOLLOWING)
   })).toBe(true)
-  await behavior.getByText('Advanced actions', { exact: true }).click()
+  await openSection(behavior, 'Advanced')
+  await openSection(behavior, 'Other actions')
   await behavior.getByLabel('Action type').selectOption('toggle')
   await behavior.getByLabel('Behavior state').first().selectOption('done')
   await behavior.getByRole('button', { name: 'Apply action', exact: true }).click()
@@ -198,9 +209,9 @@ test('one row design edits every rendered row without replacing their data bindi
   await layers.locator('[data-source-name="List"]').click()
   await page.getByTestId('settings-data').getByRole('button', { name: 'Edit row design', exact: true }).click()
   await layers.locator('[data-source-name="Text"]').click()
-  await expect(page.getByTestId('authoring-inspector')).toContainText('Row design · changes apply to all rows')
+  await expect(page.getByTestId('authoring-inspector')).toContainText('Row design · changes apply to every row')
   await expandCard(cards(page, 'padding'))
-  const padding = cards(page, 'padding').getByRole('textbox', { name: 'Padding', exact: true })
+  const padding = cards(page, 'padding').getByRole('textbox', { name: 'Padding value', exact: true })
   await padding.fill('20')
   await padding.press('Enter')
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toBeVisible()
@@ -237,9 +248,12 @@ test('a task modifier appears in Behavior and keeps its source position during a
   await open(page, source)
   await selectText(page, 'Card')
   await expect(page.getByTestId('logical-layers').locator('[data-source-name="task"]')).toHaveCount(0)
-  await expect.poll(() => order(page)).toEqual(['padding', 'opacity'])
-  await expect(page.getByTestId('settings-behavior').locator('[data-modifier-name="task"]')).toHaveCount(1)
-  const padding = cards(page, 'padding').getByRole('textbox', { name: 'Padding', exact: true })
+  // There is no separate Behavior section any more: behavior modifiers are cards in
+  // the one modifier stack, at their real source position.
+  await expect.poll(() => order(page)).toEqual(['padding', 'task', 'opacity'])
+  await expect(page.getByTestId('modifier-stack').locator('[data-modifier-name="task"]')).toHaveCount(1)
+  await expandCard(cards(page, 'padding'))
+  const padding = cards(page, 'padding').getByRole('textbox', { name: 'Padding value', exact: true })
   await padding.fill('12')
   await padding.press('Enter')
   await assertSource(page, source.replace('.padding(8).task', '.padding(12).task'))

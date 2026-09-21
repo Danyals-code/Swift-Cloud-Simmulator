@@ -22,7 +22,6 @@ async function open(page: Page) {
   await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(SOURCE)
   await expect(page.getByTestId('render-tree').getByText('Catalog', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
-  await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('logical-layers')).toBeVisible()
 }
 
@@ -33,7 +32,7 @@ test('the second identical repeated view keeps its identity across edits', async
   const repeated = layers.locator('[data-source-name="Text"]').filter({ hasText: 'Row' })
   await expect(repeated).toHaveCount(2)
   await repeated.nth(1).click()
-  const padding = page.getByTestId('authoring-inspector').getByRole('textbox', { name: 'Padding', exact: true })
+  const padding = page.getByTestId('authoring-inspector').getByRole('textbox', { name: 'Padding value', exact: true })
   await padding.fill('24'); await padding.press('Enter')
   await expect(padding).toHaveValue('24')
   await expect(repeated.nth(0)).toHaveAttribute('aria-selected', 'false')
@@ -47,14 +46,20 @@ test('the second identical repeated view keeps its identity across edits', async
 test('canvas selection reveals collapsed source ancestors and label search finds displayed content', async ({ page }) => {
   await open(page)
   const layers = page.getByTestId('logical-layers')
+  // Collapse all is on the Layers panel of the three-panel navigator layout.
+  await page.getByTestId('navigator-layout-split').click()
   await page.getByTestId('collapse-layers').click()
+  await expect(layers.locator('[data-source-name="Text"]')).toHaveCount(0)
   await page.getByTestId('render-tree').getByText('Catalog', { exact: true }).click()
   await expect(layers.locator('[data-source-name="Text"]').filter({ hasText: 'Catalog' })).toHaveAttribute('aria-selected', 'true')
-  await page.getByLabel('Filter design layers').fill('  cAtAlOg  ')
+  // Layer search is the one-tree navigator's "Find a screen or layer" field.
+  await page.getByTestId('navigator-layout-merged').click()
+  const search = page.getByTestId('design-search')
+  await search.fill('  cAtAlOg  ')
   await expect(layers.locator('[data-source-name="Text"]')).toHaveCount(1)
   await expect(layers).toContainText('Catalog')
-  await page.getByLabel('Filter design layers').press('Escape')
-  await expect(page.getByLabel('Filter design layers')).toHaveValue('')
+  await search.press('Escape')
+  await expect(search).toHaveValue('')
   await page.getByTestId('render-tree').getByText('Row', { exact: true }).last().click()
   await expect(layers.locator('[data-source-name="Text"][aria-selected="true"]')).toContainText('Row')
 })

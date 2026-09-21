@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const SOURCE = `import SwiftUI
 struct Item: Identifiable { let id: String; var title: String }
@@ -28,11 +28,31 @@ async function open(page: Page, source = SOURCE) {
   await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(source)
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true }).first()).toBeVisible()
   await page.getByTestId('workspace-design').click()
-  await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('logical-layers')).toBeVisible()
 }
 const sourceRow = (page: Page, name: string) => page.getByTestId('logical-layers').locator(`[data-source-name="${name}"]`)
 const inspector = (page: Page) => page.getByTestId('authoring-inspector')
+/** Opens a collapsed <details> section by its summary text, leaving an open one open. */
+async function openSection(scope: Locator, summary: string) {
+  const toggle = scope.locator('summary').filter({ hasText: new RegExp(`^${summary}$`) })
+  const details = toggle.locator('xpath=..')
+  if (await details.getAttribute('open') === null) await toggle.click()
+  await expect(details).toHaveAttribute('open', '')
+}
+/** Scripted actions and appear animations sit in the view's collapsed Advanced section. */
+async function advanced(page: Page, part: 'Other actions' | 'Appear animation') {
+  const section = page.getByTestId('settings-advanced')
+  await openSection(section, 'Advanced')
+  await openSection(section, part)
+  return section
+}
+/** Preview scenarios are the screen's States, in Screen settings (nothing selected). */
+async function screenStates(page: Page) {
+  await page.getByTestId('level-screen').click()
+  const states = page.getByTestId('screen-states')
+  await expect(states).toBeVisible()
+  return states
+}
 
 test('row design opens from List settings, supports keyboard entry and keeps source selection', async ({ page }) => {
   await open(page)
@@ -43,6 +63,8 @@ test('row design opens from List settings, supports keyboard entry and keeps sou
   await expect(page.getByTestId('logical-layers')).toContainText('Changes affect all rows using this design.')
   await inspector(page).getByRole('button', { name: 'Add element to row template', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('New element', { exact: true })).toHaveCount(2)
+  // Collapse all is on the Layers panel of the three-panel navigator layout.
+  await page.getByTestId('navigator-layout-split').click()
   await page.getByTestId('collapse-layers').click()
   await expect(inspector(page)).toBeVisible()
 })
@@ -56,11 +78,11 @@ test('preview record edits and production edits have separate effects', async ({
   await page.getByTestId('workspace-develop').click()
   await expect(page.getByTestId('editor').locator('.cm-content')).toHaveText(SOURCE, { useInnerText: true })
   await page.getByTestId('workspace-design').click()
-  await page.getByTestId('inspector-tab-preview').click()
-  await page.getByTestId('preview-scenarios').getByText('Preview scenarios', { exact: true }).click()
-  await page.getByLabel('Preview scenario', { exact: true }).selectOption('')
+  // Back to the app's own data: the "Default" state of the screen.
+  const states = await screenStates(page)
+  await states.getByRole('button', { name: /^Default/ }).click()
+  await expect(states.getByRole('button', { name: /^Default/ })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true }).first()).toBeVisible()
-  await page.getByTestId('inspector-tab-settings').click()
   await sourceRow(page, 'List').click()
   await inspector(page).getByLabel('Record edit scope').selectOption('app')
   await inspector(page).getByLabel('Record title', { exact: true }).fill('App data')
@@ -75,18 +97,22 @@ test('component instance edits stay independent and shared editing names affecte
   await title.fill('Customized'); await title.press('Enter')
   await expect(page.getByTestId('render-tree').getByText('Customized', { exact: true })).toBeVisible()
   await expect(page.getByTestId('render-tree').getByText('Secondary', { exact: true })).toBeVisible()
-  await inspector(page).getByRole('button', { name: 'Edit main component…' }).click()
-  await expect(inspector(page)).toContainText('2 source call sites')
-  await inspector(page).getByRole('button', { name: 'Enter main component' }).click()
-  await expect(inspector(page)).toContainText('Shared definition')
+  // A component's shared definition is now called its Main.
+  await inspector(page).getByRole('button', { name: 'Edit the Main…', exact: true }).click()
+  await expect(inspector(page)).toContainText('Editing the Main changes all 2 copies')
+  await expect(inspector(page).getByRole('button', { name: /^ContentView · copy \d$/ })).toHaveCount(2)
+  await inspector(page).getByRole('button', { name: 'Open the Main', exact: true }).click()
+  await expect(inspector(page).getByRole('heading', { name: 'The Main', exact: true })).toBeVisible()
+  await expect(inspector(page)).toContainText('Changes here reach all 2 copies of Card.')
 })
 
 test('configured actions stay idle in design and execute in live preview', async ({ page }) => {
   await open(page)
   await sourceRow(page, 'Button').click()
-  await inspector(page).getByLabel('Action type').selectOption('toggle')
-  await inspector(page).getByLabel('Behavior state').first().selectOption('on')
-  await inspector(page).getByRole('button', { name: 'Apply action', exact: true }).click()
+  const actions = await advanced(page, 'Other actions')
+  await actions.getByLabel('Action type').selectOption('toggle')
+  await actions.getByLabel('Behavior state').first().selectOption('on')
+  await actions.getByRole('button', { name: 'Apply action', exact: true }).click()
   await expect(inspector(page)).toContainText('on.toggle()')
   await expect(page.getByTestId('render-tree').getByText('Disabled', { exact: true })).toBeVisible()
   await page.getByTestId('render-tree').getByRole('button', { name: 'Change', exact: true }).click()
@@ -98,13 +124,12 @@ test('configured actions stay idle in design and execute in live preview', async
 
 test('scenarios survive reload and source stays unchanged', async ({ page }) => {
   await open(page)
-  await page.getByTestId('inspector-tab-preview').click()
-  const scenarios = page.getByTestId('preview-scenarios')
-  await scenarios.getByText('Preview scenarios', { exact: true }).click()
-  await scenarios.getByLabel('Scenario name', { exact: true }).fill('Loading')
-  await scenarios.getByLabel('Scenario input', { exact: true }).selectOption('ContentView.loading')
-  await scenarios.getByLabel('Scenario value', { exact: true }).selectOption('true')
-  await scenarios.getByRole('button', { name: 'Save and preview scenario' }).click()
+  const states = await screenStates(page)
+  await states.getByRole('button', { name: 'Add state', exact: true }).click()
+  await states.getByLabel('State name', { exact: true }).fill('Loading')
+  await states.getByLabel('State input', { exact: true }).selectOption('ContentView.loading')
+  await states.getByLabel('State value', { exact: true }).selectOption('true')
+  await states.getByRole('button', { name: 'Save state', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('Loading', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-develop').click()
   await expect(page.getByTestId('editor').locator('.cm-content')).toHaveText(SOURCE, { useInnerText: true })
@@ -113,9 +138,7 @@ test('scenarios survive reload and source stays unchanged', async ({ page }) => 
   // Reload starts from app defaults; the saved scenario remains explicitly selectable.
   await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('workspace-design').click()
-  await page.getByTestId('inspector-tab-preview').click()
-  await page.getByTestId('preview-scenarios').getByText('Preview scenarios', { exact: true }).click()
-  await page.getByLabel('Preview scenario', { exact: true }).selectOption('Loading')
+  await (await screenStates(page)).getByRole('button', { name: /^Loading/ }).click()
   await expect(page.getByTestId('render-tree').getByText('Loading', { exact: true })).toBeVisible()
 })
 
@@ -123,9 +146,9 @@ test('reduced motion disables preview transitions', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await open(page)
   await sourceRow(page, 'Button').click()
-  await inspector(page).getByText('Transition', { exact: true }).click()
-  await inspector(page).getByLabel('Behavior state').last().selectOption('on')
-  await inspector(page).getByRole('button', { name: 'Add transition', exact: true }).click()
+  const animation = await advanced(page, 'Appear animation')
+  await animation.getByLabel('Behavior state').last().selectOption('on')
+  await animation.getByRole('button', { name: 'Add transition', exact: true }).click()
   await expect(inspector(page).locator('[data-modifier-name="transition"]')).toHaveCount(1)
   const nodes = page.getByTestId('render-tree').locator('[data-node-id]')
   expect(await nodes.evaluateAll(elements => elements.every(e => getComputedStyle(e).animationName === 'none' && getComputedStyle(e).transitionDuration === '0s'))).toBe(true)
@@ -134,9 +157,13 @@ test('reduced motion disables preview transitions', async ({ page }) => {
 test('row field binding writes real Swift storage and toggles only the selected record', async ({ page }) => {
   const source = SOURCE.replace('var title: String }', 'var title: String; var featured: Bool = false }').replace('List(items) { item in Text(item.title) }', 'List(items) { item in VStack { Text(item.title); Toggle(item.title, isOn: .constant(false)) } }')
   await open(page, source)
+  // Only top-level layers start expanded; the Toggle is inside the List's row design.
+  const layers = page.getByTestId('logical-layers')
+  await layers.getByRole('button', { name: 'Expand List', exact: true }).click()
+  await layers.getByRole('button', { name: 'Expand Vertical Stack', exact: true }).click()
   await sourceRow(page, 'Toggle').click()
   await inspector(page).getByLabel('Row field', { exact: true }).selectOption('featured')
-  await inspector(page).getByRole('button', { name: 'Bind to field · all rows', exact: true }).click()
+  await inspector(page).getByRole('button', { name: 'Use this field in every row', exact: true }).click()
   await expect(inspector(page)).toContainText('$item.featured')
   await page.getByTestId('live-toggle').click()
   const first = page.getByTestId('render-tree').getByRole('switch', { name: 'First', exact: true })
@@ -153,15 +180,16 @@ test('conditional transitions retain exits, cancel on reentry and finish without
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await open(page, SOURCE.replace('Card(title: "Primary")', 'if !on { Text("Animated") }; Card(title: "Primary")'))
   await sourceRow(page, 'Text').filter({ hasText: 'Animated' }).click()
-  await inspector(page).getByText('Transition', { exact: true }).click()
-  await inspector(page).getByLabel('Behavior state').selectOption('on')
-  await inspector(page).getByLabel('Duration in seconds').fill('1')
-  await inspector(page).getByRole('button', { name: 'Add transition', exact: true }).click()
+  const animation = await advanced(page, 'Appear animation')
+  await animation.getByLabel('Behavior state').selectOption('on')
+  await animation.getByLabel('Duration in seconds').fill('1')
+  await animation.getByRole('button', { name: 'Add transition', exact: true }).click()
   await expect(inspector(page).locator('[data-modifier-name="transition"]')).toHaveCount(1)
   await sourceRow(page, 'Button').click()
-  await inspector(page).getByLabel('Action type').selectOption('toggle')
-  await inspector(page).getByLabel('Behavior state').first().selectOption('on')
-  await inspector(page).getByRole('button', { name: 'Apply action', exact: true }).click()
+  const actions = await advanced(page, 'Other actions')
+  await actions.getByLabel('Action type').selectOption('toggle')
+  await actions.getByLabel('Behavior state').first().selectOption('on')
+  await actions.getByRole('button', { name: 'Apply action', exact: true }).click()
   await expect(inspector(page)).toContainText('on.toggle()')
   await page.getByTestId('live-toggle').click()
   const preview = page.getByTestId('render-tree'), change = preview.getByRole('button', { name: 'Change', exact: true })
