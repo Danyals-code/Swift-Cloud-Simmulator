@@ -50,6 +50,7 @@ else if (mode === 'web') {
   if (check('build', 'npm', ['run', 'build'])) {
     check('budget', 'npm', ['run', 'budget'])
     check('e2e', 'npm', ['run', 'e2e', '--', '--workers=2', '--max-failures=3'], 900_000)
+    check('e2e-perf', 'npm', ['run', 'e2e:perf'], 600_000)
   } else blocked('e2e', 'A production build from these sources is required.')
 } else if (mode === 'native') {
   const exported = join(output, 'export')

@@ -89,6 +89,12 @@ jobs:
       - name: Run end-to-end tests
         run: npm run e2e
 
+      # The authoring latency benchmark, alone on one worker. Reported but not
+      # gating: a hosted runner's p95 describes the runner as much as the studio.
+      - name: Authoring latency benchmark
+        run: npm run e2e:perf
+        continue-on-error: true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
