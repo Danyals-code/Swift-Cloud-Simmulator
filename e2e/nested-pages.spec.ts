@@ -34,11 +34,23 @@ const phones = (page: Page) => page.getByTestId('gallery-page')
 const rootPhone = (page: Page) => phones(page).filter({ has: page.getByRole('button', { name: 'Edit Library', exact: true }) })
 const layer = (page: Page, name: string) => page.getByTestId('logical-layers').getByRole('treeitem', { name, exact: true })
 
+/**
+ * Fits the canvas, then parks the pointer on the toolbar: in Edit, the phone under
+ * the pointer becomes the focused screen, and the zoom menu closes over the canvas.
+ */
 async function fit(page: Page) {
-  await page.getByTestId('inspector-tab-preview').click()
   await page.getByTestId('zoom-select').click()
   await page.getByRole('option', { name: /Fit/ }).click()
-  await page.getByTestId('inspector-tab-settings').click()
+  await page.getByTestId('toolbar').hover()
+}
+/**
+ * The left panel as three panels, where Layers is its own panel headed with the
+ * focused screen's name ("Book details layers"). The default one-tree outline nests
+ * the same layers under the screen's row instead.
+ */
+async function threePanels(page: Page) {
+  await page.getByTestId('navigator-layout-split').click()
+  await expect(page.getByTestId('design-navigator')).toHaveAttribute('data-layout', 'split')
 }
 async function open(page: Page) {
   await page.goto('/')
@@ -47,8 +59,10 @@ async function open(page: Page) {
   await page.getByTestId('editor').locator('.cm-content').fill(SOURCE)
   await expect(page.getByTestId('render-tree').getByText('Library heading', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
-  await page.getByTestId('inspect-toggle').click()
-  await expect(phones(page)).toHaveCount(3)
+  // Design opens in Edit with every screen drawn: Library, the detail it pushes and
+  // the sheet it presents, and the Settings tab.
+  await expect(phones(page)).toHaveCount(4)
+  await threePanels(page)
   await fit(page)
 }
 
@@ -58,27 +72,47 @@ test('tabs stay horizontal and related screens stack under their owning tab', as
   await page.getByTestId('gallery-source-app').click()
   await page.getByTestId('template-folio').click()
   await page.getByTestId('template-confirm').click()
-  await expect(page.getByTestId('render-tree').getByText('The Secret Garden', { exact: true })).toBeVisible()
-  await page.getByTestId('inspect-toggle').click()
-  await expect(phones(page)).toHaveCount(3)
+  // Book details draws a sample book too, so the list is read from the Library phone.
+  await expect(rootPhone(page).getByTestId('render-tree').getByText('The Secret Garden', { exact: true })).toBeVisible()
+  await threePanels(page)
+  // Every screen is drawn from the start: the Add a book sheet both lists open is
+  // one screen, drawn once, so six pages are five phones.
+  await expect(phones(page)).toHaveCount(5)
+  await expect(page.getByRole('region', { name: 'Preview', exact: true })).toContainText('5 of 6 screens')
+  await page.getByRole('button', { name: 'Edit Library', exact: true }).click()
+  await expect(page.getByTestId('logical-layers')).toContainText('Library layers')
   await expect(page.getByTestId('logical-layers').getByRole('treeitem')).toHaveCount(3)
-  await expect(layer(page, 'Book row, Component')).toContainText('Shared design')
+  // The row is one design that every book uses.
+  await expect(layer(page, 'Book row, Component')).toContainText('One design')
+  await expect(layer(page, 'Book row, Component')).toHaveAttribute('data-shared-design', 'true')
+  // Narrowing the canvas to the focused lane leaves Library with its two related screens.
+  await page.getByTestId('show-all-pages').uncheck()
+  await expect(phones(page)).toHaveCount(3)
   await page.getByTestId('show-all-pages').check()
-  await expect(phones(page)).toHaveCount(6)
+  await expect(phones(page)).toHaveCount(5)
   await fit(page)
   const slots = await phones(page).evaluateAll(elements => elements.map(element => {
     const rect = element.getBoundingClientRect()
     return { id: element.getAttribute('data-page-id'), parent: element.getAttribute('data-parent-page'), x: rect.x, y: rect.y }
   }))
+  // Each tab is a lane, one under the other in tab order, starting at the same edge.
   const roots = slots.filter(slot => !slot.parent)
   expect(roots).toHaveLength(3)
-  expect(roots[0]!.x).toBeLessThan(roots[1]!.x)
-  expect(roots[1]!.x).toBeLessThan(roots[2]!.x)
-  for (const root of roots) expect(Math.abs(root.y - roots[0]!.y)).toBeLessThan(1)
-  for (const child of slots.filter(slot => slot.parent)) {
+  for (const root of roots) expect(Math.abs(root.x - roots[0]!.x)).toBeLessThan(1)
+  expect(roots[0]!.y).toBeLessThan(roots[1]!.y)
+  expect(roots[1]!.y).toBeLessThan(roots[2]!.y)
+  // A related screen sits a navigation step to the right of the screen it is reached
+  // from, inside its owning tab's lane.
+  const related = slots.filter(slot => slot.parent)
+  expect(related).toHaveLength(2)
+  for (const child of related) {
     const parent = slots.find(slot => slot.id === child.parent)!
-    expect(Math.abs(child.x - parent.x)).toBeLessThan(1)
-    expect(child.y).toBeGreaterThan(parent.y)
+    let owner = parent
+    while (owner.parent) owner = slots.find(slot => slot.id === owner.parent)!
+    const next = roots[roots.indexOf(owner) + 1]
+    expect(child.x).toBeGreaterThan(parent.x)
+    expect(child.y).toBeGreaterThan(parent.y - 1)
+    if (next) expect(child.y).toBeLessThan(next.y)
   }
   const path = testInfo.outputPath('tabs-and-related-screens.png')
   await page.screenshot({ path })
@@ -91,7 +125,7 @@ test('tabs stay horizontal and related screens stack under their owning tab', as
   const settingsAfter = await settingsPhone.boundingBox()
   for (const key of ['x', 'y', 'width', 'height'] as const) expect(settingsAfter![key]).toBeCloseTo(settingsBefore![key], 1)
   await page.getByTestId('show-all-pages').check()
-  await expect(phones(page)).toHaveCount(6)
+  await expect(phones(page)).toHaveCount(5)
   await fit(page)
   await page.getByRole('button', { name: 'Edit Book details', exact: true }).click()
   await expect(page.getByTestId('logical-layers')).toContainText('Book details layers')

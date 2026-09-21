@@ -7,9 +7,11 @@ test('blank design starts in Edit and supports visible recovery without Code', a
   await page.getByTestId('template-blank').click()
   await page.getByTestId('template-confirm').click()
   await expect(page.getByTestId('template-gallery')).toBeHidden()
-  await expect(page.getByTestId('inspect-toggle')).toHaveAttribute('aria-pressed', 'true')
+  // Edit is where Design starts: the one toolbar toggle offers Preview, not yet pressed.
+  await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByTestId('design-undo')).toBeDisabled()
-  await expect(page.getByRole('tab', { name: 'Properties', exact: true })).toBeVisible()
+  // The settings panel is always beside the canvas, with no tab to find first.
+  await expect(page.getByRole('complementary', { name: 'Settings', exact: true }).getByTestId('inspector-settings')).toBeVisible()
   await page.getByTestId('add-view').click()
   await page.getByTestId('add-view-text').click()
   const content = page.getByTestId('settings-basics').getByRole('textbox', { name: 'Text', exact: true })
