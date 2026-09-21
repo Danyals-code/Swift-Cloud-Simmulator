@@ -60,7 +60,8 @@ test('renames the app, navigator file, and open editor tab', async ({ page }) =>
 
 test('searchable shortcuts use an accessible animated dialog', async ({ page }) => {
   await open(page)
-  await page.getByTestId('shortcuts-button').click()
+  await page.getByTestId('workspace-more').click()
+  await page.getByTestId('workspace-more-menu-shortcuts').click()
   const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
   await expect(dialog).toBeVisible()
   await expect(dialog).toHaveAttribute('aria-modal', 'true')
@@ -69,12 +70,13 @@ test('searchable shortcuts use an accessible animated dialog', async ({ page }) 
   await expect(dialog).not.toContainText('Restart preview')
   await page.getByLabel('Search shortcuts').press('Escape')
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByTestId('shortcuts-button')).toBeFocused()
+  await expect(page.getByTestId('workspace-more')).toBeFocused()
 })
 
 test('Add works without a selection and keeps the status label steady', async ({ page }) => {
   await open(page)
-  await page.getByTestId('inspect-toggle').click()
+  // Design opens in Edit. Collapse all is on the Layers panel of the three-panel layout.
+  await page.getByTestId('navigator-layout-split').click()
   await page.getByTestId('collapse-layers').click()
   await expect(page.getByRole('treeitem', { expanded: true })).toHaveCount(0)
   await page.getByTestId('add-view').click()
