@@ -1,27 +1,43 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const phones = (page: Page) => page.getByTestId('gallery-page')
+const libraryPhone = (page: Page) => phones(page).filter({ has: page.getByRole('button', { name: 'Edit Library', exact: true }) })
 const destination = (page: Page) => page.getByRole('combobox', { name: 'Navigate to', exact: true })
+/**
+ * Folio opens in Edit with every screen drawn: three tab lanes, with Book details
+ * and the Add a book sheet beside Library. The sheet Reading list opens is the same
+ * screen, so it is drawn once - five phones for six pages.
+ */
+const DRAWN_SCREENS = 5
 async function folio(page: Page) {
   await page.setViewportSize({ width: 1920, height: 1200 })
   await page.goto('/')
   await page.getByTestId('gallery-source-app').click()
   await page.getByTestId('template-folio').click()
   await page.getByTestId('template-confirm').click()
-  await expect(page.getByTestId('render-tree').getByText('The Secret Garden', { exact: true })).toBeVisible()
-  await page.getByTestId('inspect-toggle').click()
-  await expect(phones(page)).toHaveCount(3)
+  // Book details draws a sample book too, so the list is read from the Library phone.
+  await expect(libraryPhone(page).getByTestId('render-tree').getByText('The Secret Garden', { exact: true })).toBeVisible()
+  await expect(phones(page)).toHaveCount(DRAWN_SCREENS)
+  await page.getByRole('button', { name: 'Edit Library', exact: true }).click()
   await page.getByTestId('logical-layers').getByRole('treeitem', { name: 'Book row, Component', exact: true }).click()
   await expect(destination(page)).toBeVisible()
   await expect(page.getByTestId('navigation-destination-editor')).toContainText('book')
 }
+/** The selected view's own Swift, opened from its settings - what "View source" used to show. */
+async function openSelectionInCode(page: Page) {
+  await page.getByTestId('authoring-inspector').getByRole('button', { name: 'View actions', exact: true }).click()
+  await page.getByRole('option', { name: 'Open in Code', exact: true }).click()
+  await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'develop')
+  return page.getByTestId('editor').locator('.cm-content')
+}
+
 test('canvas eyedropper cancels safely, preserves selection, and applies the chosen tab screen', async ({ page }, testInfo) => {
   await folio(page)
   const original = await destination(page).inputValue()
-  const library = phones(page).filter({ has: page.getByRole('button', { name: 'Edit Library', exact: true }) })
+  const library = libraryPhone(page)
   const originalBounds = await library.boundingBox()
   await page.getByRole('button', { name: 'Pick screen from canvas', exact: true }).click()
-  await expect(page.getByTestId('navigation-pick-target')).toHaveCount(6)
+  await expect(page.getByTestId('navigation-pick-target')).toHaveCount(DRAWN_SCREENS)
   const targetBounds = await page.getByRole('button', { name: 'Navigate to Settings', exact: true }).boundingBox()
   await page.keyboard.down('Space')
   await page.mouse.move(targetBounds!.x + targetBounds!.width / 2, targetBounds!.y + targetBounds!.height / 2)
@@ -29,7 +45,7 @@ test('canvas eyedropper cancels safely, preserves selection, and applies the cho
   await page.mouse.move(targetBounds!.x + targetBounds!.width / 2 + 30, targetBounds!.y + targetBounds!.height / 2 + 25)
   await page.mouse.up()
   await page.keyboard.up('Space')
-  await expect(page.getByTestId('navigation-pick-target')).toHaveCount(6)
+  await expect(page.getByTestId('navigation-pick-target')).toHaveCount(DRAWN_SCREENS)
   const canvas = await page.getByTestId('device-pane').boundingBox()
   await page.mouse.move(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2)
   await page.keyboard.down('Control')
@@ -37,14 +53,17 @@ test('canvas eyedropper cancels safely, preserves selection, and applies the cho
   await page.keyboard.up('Control')
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('navigation-pick-target')).toHaveCount(0)
-  await expect(phones(page)).toHaveCount(3)
+  await expect(phones(page)).toHaveCount(DRAWN_SCREENS)
   await expect(destination(page)).toHaveValue(original)
   const restoredBounds = await library.boundingBox()
   for (const key of ['x', 'y', 'width', 'height'] as const) expect(restoredBounds![key]).toBeCloseTo(originalBounds![key], 1)
+  // Putting the settings panel away mid-pick cancels the pick, as leaving for the
+  // old Preview tab did, and bringing it back finds the destination untouched.
   await page.getByRole('button', { name: 'Pick screen from canvas', exact: true }).click()
-  await page.getByTestId('inspector-tab-preview').click()
+  await expect(page.getByTestId('navigation-pick-target')).toHaveCount(DRAWN_SCREENS)
+  await page.getByTestId('pane-toggle-preview').click()
   await expect(page.getByTestId('navigation-pick-target')).toHaveCount(0)
-  await page.getByTestId('inspector-tab-settings').click()
+  await page.getByTestId('pane-toggle-preview').click()
   await expect(destination(page)).toHaveValue(original)
   await expect(page.getByTestId('logical-layers').locator('[aria-selected="true"]')).toContainText('Book row')
   await page.getByRole('button', { name: 'Pick screen from canvas', exact: true }).click()
@@ -61,11 +80,10 @@ test('canvas eyedropper cancels safely, preserves selection, and applies the cho
   await expect(page.getByTestId('navigation-destination-editor')).toContainText('Current: BookDetailView(book: book)')
   await page.getByRole('button', { name: 'Apply destination', exact: true }).click()
   await expect(page.getByTestId('navigation-destination-editor')).toContainText('Current: SettingsView()')
-  await page.getByRole('button', { name: 'View source', exact: true }).click()
-  const source = await page.getByTestId('editor').locator('.cm-content').innerText()
-  expect(source).toContain('destination: SettingsView()')
-  expect(source).toContain('BookRow(book: book)')
-  expect(source).toContain('BookDetailView(book: book)')
+  const source = await openSelectionInCode(page)
+  await expect(source).toContainText('destination: SettingsView()')
+  await expect(source).toContainText('BookRow(book: book)')
+  await expect(source).toContainText('BookDetailView(book: book)')
   await page.getByTestId('workspace-design').click()
   await page.getByTestId('live-toggle').click()
   await page.getByTestId('render-tree').getByRole('button', { name: 'The Secret Garden, Frances Hodgson Burnett', exact: true }).click()
@@ -82,7 +100,7 @@ test('picking a data-driven detail retains the selected row data rather than its
   await detail.click()
   await expect(destination(page)).toHaveValue(/Book detail/i)
   await expect(page.getByRole('button', { name: 'Apply destination', exact: true })).toBeDisabled()
-  await page.getByRole('button', { name: 'View source', exact: true }).click()
-  await expect(page.getByTestId('editor').locator('.cm-content')).toContainText('NavigationLink(value: book)')
-  await expect(page.getByTestId('editor').locator('.cm-content')).not.toContainText('destination: BookDetailView')
+  const source = await openSelectionInCode(page)
+  await expect(source).toContainText('NavigationLink(value: book)')
+  await expect(source).not.toContainText('destination: BookDetailView')
 })

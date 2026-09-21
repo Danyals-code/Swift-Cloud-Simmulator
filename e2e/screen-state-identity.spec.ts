@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { replaceSource } from './designer-helpers'
 
 const source = `import SwiftUI
 @main struct DemoApp: App {
@@ -20,11 +21,11 @@ test('same-named screen states are saved, selected and deleted independently', a
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('workspace-develop').click()
-  await page.getByTestId('editor').locator('.cm-content').fill(source)
+  await replaceSource(page, source)
   await page.getByTestId('workspace-design').click()
   const states = page.getByRole('region', { name: 'States', exact: true })
   const empty = states.getByRole('button', { name: /^Empty\s*empty: true$/ })
-  const navigator = page.getByRole('navigation', { name: 'Design', exact: true })
+  const navigator = page.getByRole('navigation', { name: 'Layers', exact: true })
 
   for (const screen of ['First', 'Second']) {
     await navigator.getByRole('button', { name: screen, exact: true }).click()

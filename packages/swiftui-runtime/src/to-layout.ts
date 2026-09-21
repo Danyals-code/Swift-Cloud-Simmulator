@@ -3685,13 +3685,10 @@ class Converter {
         }
       }
 
-      // Recognised and deliberately inert: these change behaviour the preview does
-      // not model, and recording them keeps the inspector honest about what was
-      // written rather than dropping it silently.
-      case 'resizable':
-      case 'listStyle':
-      case 'listRowBackground':
-      case 'buttonStyle':
+      // The size category is already scoped to this subtree; re-seeding the body font
+      // makes default text follow it. Only this modifier may do that: the inherited
+      // styling modifiers below are stamped onto every descendant, so a font here
+      // would override the fonts of every container in between.
       case 'dynamicTypeSize':
         return view.modifiers.some((m) => m.name === 'font') ? null : { kind: 'font', font: bodyFont(this.typeScale) }
       case 'environment': {
@@ -3704,6 +3701,13 @@ class Converter {
         return null
       }
 
+      // Recognised and deliberately inert: these change behaviour the preview does
+      // not model, and recording them keeps the inspector honest about what was
+      // written rather than dropping it silently.
+      case 'resizable':
+      case 'listStyle':
+      case 'listRowBackground':
+      case 'buttonStyle':
       case 'imageScale':
       case 'tint':
       case 'accentColor':

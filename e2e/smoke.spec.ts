@@ -24,6 +24,8 @@ async function openStudio(page: Page) {
   await expect(page.getByTestId('template-gallery')).toHaveCount(0)
   await page.getByTestId('workspace-develop').click()
   if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') await page.getByTestId('pane-toggle-debug').click()
+  // Code opens with the preview pointing at views; these tests tap it as an app.
+  await page.getByTestId('live-toggle').click()
 
   await expect(page.getByTestId('editor')).toBeVisible()
   await expect(page.getByTestId('render-tree')).toBeVisible()
@@ -732,7 +734,15 @@ test('Phase 9 - every export format offers a distinct download', async ({ page }
 })
 
 test('Phase 9 - a share link carries the project to a fresh session', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  // The link is read from what the page hands the clipboard rather than from the
+  // system clipboard, whose permissions differ by engine (WebKit has no
+  // clipboard-write permission to grant).
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.clipboard, 'writeText', {
+      configurable: true,
+      value: async (text: string) => { (window as unknown as { copied?: string }).copied = text },
+    })
+  })
   await openStudio(page)
 
   const marker = `// shared-${Date.now()}`
@@ -743,7 +753,7 @@ test('Phase 9 - a share link carries the project to a fresh session', async ({ p
   await page.getByTestId('share-button').click()
   await expect(page.getByTestId('share-button')).toHaveText('Link copied', { timeout: 5_000 })
 
-  const link = await page.evaluate(() => navigator.clipboard.readText())
+  const link = await page.evaluate(() => (window as unknown as { copied?: string }).copied ?? '')
   expect(link).toContain('#p=')
 
   // A different browser context is a genuinely fresh session: no IndexedDB, no

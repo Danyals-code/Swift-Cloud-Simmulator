@@ -1,68 +1,101 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { readFileSync, copyFileSync } from 'node:fs'
-import { cards, expandCard } from './designer-helpers'
 
 async function start(page: Page) {
   await page.goto('/')
   await page.getByTestId('template-blank').click()
   await page.getByTestId('template-confirm').click()
   await expect(page.getByTestId('template-gallery')).toBeHidden()
-  await expect(page.getByRole('button', { name: 'Add screen', exact: true })).toBeEnabled()
+  await expect(page.getByTestId('add-screen')).toBeEnabled()
 }
 async function ready(page: Page) { await expect(page.getByTestId('authoring-inspector')).toHaveAttribute('aria-busy', 'false') }
 async function add(page: Page, kind: string) { await page.getByTestId('add-view').click(); await page.getByTestId(`add-view-${kind}`).click(); await expect(page.getByTestId('add-view-palette')).toBeHidden(); await ready(page) }
 async function input(page: Page, name: string, value: string) { const field = page.getByTestId('settings-basics').getByRole('textbox', { name, exact: true }); await field.fill(value); await field.press('Enter'); await ready(page) }
+/** Design's left panel: App, Components, the screens and the focused screen's layers. */
+const navigator = (page: Page) => page.getByRole('navigation', { name: 'Layers', exact: true })
+/** Adds a modifier from the picker's suggestions for the selected view. */
+async function modifier(page: Page, label: string) {
+  await page.getByTestId('modifier-stack').getByRole('button', { name: 'Add modifier', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Add modifier', exact: true }).getByRole('button', { name: label, exact: true }).first().click()
+  await ready(page)
+}
+/** A component's actions in the navigator's Components group, which shows on hover. */
+async function componentAction(page: Page, name: string, action: 'Edit Main' | 'Insert copy into selection') {
+  const row = navigator(page).getByTestId('design-component').filter({ hasText: name })
+  await row.hover()
+  await row.getByRole('button', { name: `Actions for ${name}`, exact: true }).click()
+  await page.getByRole('option', { name: action, exact: true }).click()
+}
+/** Opens a disclosure section, whichever state the last selection left it in. */
+async function expand(details: Locator) {
+  if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) await details.locator('summary').first().click()
+  await expect(details).toHaveAttribute('open', '')
+}
+/** A copy's saved inputs live under Advanced › Variants. */
+async function variants(page: Page) {
+  await expand(page.getByTestId('settings-advanced'))
+  await expand(page.getByTestId('component-variants'))
+}
 
 // The acceptance path starts blank and stays in Design throughout.
 test('creates and reuses a component, exposes text, saves variants, and edits the shared design without Code', async ({ page }) => {
   await start(page); await add(page, 'text'); await input(page, 'Text', 'Club member')
-  await page.getByText('Create reusable component', { exact: true }).click()
-  await page.getByLabel('New component name', { exact: true }).fill('MemberCard')
-  await page.getByRole('button', { name: 'Create component', exact: true }).click()
+  // One styled line is a component's worth: a bare Text is too small to be one.
+  await page.getByRole('button', { name: '+ Padding', exact: true }).click(); await ready(page)
+  await modifier(page, 'Font')
+  const make = page.getByTestId('make-component')
+  await make.locator('summary').click()
+  await make.getByRole('textbox', { name: 'New component name', exact: true }).fill('MemberCard')
+  await make.getByRole('button', { name: 'Make component', exact: true }).click()
   await expect(page.getByTestId('logical-layers').locator('[data-source-name="MemberCard"][data-source-kind="component"]')).toHaveCount(1)
-  const library = page.getByTestId('component-library')
-  await library.locator('summary').click()
-  await library.getByRole('button', { name: 'Edit MemberCard design', exact: true }).click()
+  await navigator(page).getByRole('button', { name: 'Expand Components', exact: true }).click()
+  await expect(navigator(page).getByTestId('design-component').filter({ hasText: 'MemberCard' })).toContainText('1 copy')
+  await componentAction(page, 'MemberCard', 'Edit Main')
+  await expect(page.getByTestId('authoring-inspector')).toContainText('The Main · changes apply to every copy (1)')
   await page.getByTestId('settings-basics').getByRole('button', { name: 'Club member', exact: true }).click()
-  await page.getByText('Make text an instance input', { exact: true }).click()
-  await page.getByRole('button', { name: 'Create text input', exact: true }).click(); await ready(page)
+  await page.getByTestId('settings-basics').getByText('Changeable per copy', { exact: true }).click()
+  await page.getByRole('button', { name: 'Make text changeable per copy', exact: true }).click(); await ready(page)
   // Shared color applies to all instances of this text's component.
-  await page.getByRole('button', { name: 'Text color +', exact: true }).click()
-  await expandCard(cards(page, 'foregroundColor'))
-  await page.getByRole('textbox', { name: 'foregroundColor hex color', exact: true }).fill('#6D28D9')
-  await page.getByRole('combobox', { name: 'foregroundColor color style', exact: true }).selectOption('__new')
-  await page.getByRole('textbox', { name: 'Shared color name', exact: true }).fill('clubBrand')
-  await page.getByRole('button', { name: 'Create and apply color', exact: true }).click()
-  await expect(page.getByRole('combobox', { name: 'foregroundColor color style', exact: true })).toHaveValue('clubBrand')
-  await page.getByRole('button', { name: 'Open screen Main page', exact: true }).click()
+  await modifier(page, 'Text color')
+  const color = page.locator('[data-testid="modifier-card"][data-modifier-name="foregroundStyle"]')
+  await color.getByRole('textbox', { name: 'Custom color hex', exact: true }).fill('#6D28D9')
+  await color.getByRole('textbox', { name: 'Custom color hex', exact: true }).press('Enter'); await ready(page)
+  await color.getByRole('button', { name: 'Save as token…', exact: true }).click()
+  await color.getByRole('textbox', { name: 'New token name', exact: true }).fill('clubBrand')
+  await color.getByRole('button', { name: 'Save', exact: true }).click(); await ready(page)
+  await expect(color.getByRole('combobox', { name: 'Text color token', exact: true })).toHaveValue('clubBrand')
+  await navigator(page).getByTestId('design-screen').getByRole('button', { name: 'Home', exact: true }).click()
   await page.getByTestId('logical-layers').locator('[data-source-name="VStack"]').first().click()
-  await library.getByRole('button', { name: 'Insert MemberCard', exact: true }).click()
+  await componentAction(page, 'MemberCard', 'Insert copy into selection')
   const instances = page.getByTestId('logical-layers').locator('[data-source-name="MemberCard"][data-source-kind="component"]')
   await expect(instances).toHaveCount(2)
   await instances.first().click(); await input(page, 'label', 'Featured member')
-  await page.getByText('Variants · saved inputs', { exact: true }).click()
+  await variants(page)
   await page.getByLabel('Variant name', { exact: true }).fill('Featured')
   await page.getByRole('button', { name: 'Save variant from this instance', exact: true }).click()
-  await instances.last().click()
-  await page.getByText('Variants · saved inputs', { exact: true }).click()
+  await instances.last().click(); await ready(page)
+  await variants(page)
   await page.getByRole('button', { name: 'Apply Featured', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('Featured member', { exact: true })).toHaveCount(2)
   await input(page, 'label', 'Guest')
   await expect(page.getByTestId('render-tree').getByText('Featured member', { exact: true })).toHaveCount(1)
-  const resources = page.getByTestId('project-resources')
-  await resources.locator('summary').first().click()
-  await resources.getByText(/clubBrand · color/).click()
-  await resources.getByLabel('clubBrand value', { exact: true }).fill('#124abc')
-  await resources.getByRole('button', { name: 'Update shared value · all uses', exact: true }).click()
+  // The shared colour is an App token: editing it once reaches every copy.
+  await page.getByTestId('level-app').click()
+  const token = page.getByTestId('tokens-color').locator('[data-testid="token-row"][data-token="clubBrand"]')
+  await token.getByRole('button', { name: /^clubBrand/ }).click()
+  await token.getByRole('textbox', { name: 'Light value', exact: true }).fill('#124ABC')
+  await token.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('Guest', { exact: true })).toHaveCSS('color', 'rgb(18, 74, 188)')
   await expect(page.getByTestId('render-tree').getByText('Featured member', { exact: true })).toHaveCSS('color', 'rgb(18, 74, 188)')
-  await expect(resources.getByRole('button', { name: /in MemberCard · use/ })).toBeVisible()
+  await expect(token.getByTestId('token-impact')).toContainText('across 1 component')
+  await token.getByTestId('token-impact').getByRole('button', { name: 'Show', exact: true }).click()
+  await expect(token.getByRole('button', { name: /· MemberCard$/ })).toBeVisible()
   await page.getByTestId('design-undo').click()
   await expect(page.getByTestId('render-tree').getByText('Guest', { exact: true })).toHaveCSS('color', 'rgb(109, 40, 217)')
   await expect(page.getByTestId('save-indicator')).toContainText('Saved locally')
   await page.reload(); await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('logical-layers').locator('[data-source-name="MemberCard"][data-source-kind="component"]').first().click()
-  await page.getByText('Variants · saved inputs', { exact: true }).click()
+  await variants(page)
   await expect(page.getByRole('button', { name: 'Apply Featured', exact: true })).toBeVisible()
   await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
 })
@@ -87,7 +120,9 @@ async function fixture(page: Page) {
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content'); await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(SOURCE)
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toBeVisible()
-  await page.getByTestId('workspace-design').click(); await page.getByTestId('inspect-toggle').click(); await page.getByTestId('inspector-tab-settings').click()
+  // Design opens in Edit, with the settings panel beside the canvas.
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
 }
 
 test('edits one record, duplicates it, checks empty content and returns to app data', async ({ page }) => {
@@ -104,26 +139,32 @@ test('edits one record, duplicates it, checks empty content and returns to app d
   for (const label of ['First', 'Workshop', 'Critique']) await expect(page.getByTestId('render-tree').getByText(label, { exact: true })).toBeVisible()
   await data.getByRole('button', { name: 'Preview empty list', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toHaveCount(0)
-  await page.getByTestId('inspector-tab-preview').click()
-  await page.getByTestId('preview-scenarios').locator('summary').first().click()
-  await page.getByLabel('Preview scenario', { exact: true }).selectOption('')
+  // The empty list is a saved state of its screen; the screen's Default state is
+  // the app's own data again.
+  await page.getByTestId('level-screen').click()
+  const states = page.getByRole('region', { name: 'States', exact: true })
+  await expect(states.getByRole('button', { name: /^Collection preview/ })).toHaveAttribute('aria-pressed', 'true')
+  await states.getByRole('button', { name: /^Default/ }).click()
+  await expect(states.getByRole('button', { name: /^Default/ })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('render-tree').getByText('Workshop', { exact: true })).toBeVisible()
-  await page.getByTestId('inspector-tab-settings').click()
+  await page.getByTestId('logical-layers').locator('[data-source-name="List"]').click()
   await data.getByRole('button', { name: 'Edit row design', exact: true }).click()
   await page.getByTestId('logical-layers').locator('[data-source-name="Text"]').click()
-  await expect(page.getByTestId('authoring-inspector')).toContainText('Row design · changes apply to all rows')
+  await expect(page.getByTestId('authoring-inspector')).toContainText('Row design · changes apply to every row')
 })
 
 test('compares real layouts, finds actionable checks, exports PNGs and presents screens', async ({ page }, info) => {
   await fixture(page)
-  await page.getByTestId('project-resources').locator('summary').first().click()
+  // Images belong to the App, whose settings list the bundled ones.
+  await page.getByTestId('level-app').click()
   await page.getByLabel('Add bundled image', { exact: true }).setInputFiles('tests/fixtures/authoring-photo.png')
   await expect(page.getByTestId('project-resources')).toContainText(/authoring[_-]photo/)
   await page.getByTestId('logical-layers').locator('[data-source-name="VStack"]').click()
   await add(page, 'image')
   await page.getByRole('combobox', { name: 'Bundled image', exact: true }).selectOption({ index: 1 })
   await expect(page.getByTestId('render-tree').locator('img')).toHaveCount(1)
-  await page.getByTestId('design-review').click()
+  await page.getByTestId('export-format').click()
+  await page.getByTestId('export-format-menu-review').click()
   const dialog = page.getByRole('dialog', { name: 'Design review', exact: true })
   for (const number of [1, 2, 3]) await expect(dialog.getByTestId(`review-condition-${number}`).getByTestId('review-ready')).toHaveAttribute('aria-busy', 'false')
   const first = dialog.getByTestId('review-condition-1'), third = dialog.getByTestId('review-condition-3')

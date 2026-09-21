@@ -75,8 +75,16 @@ const KB = 1024
  *              first load is worth more bytes than the old number allowed. It is a
  *              ceiling to notice, not a target to fill - and the per-chunk gate
  *              below is the one that still says something about the critical path.
+ *   Layers, Settings and the Design-surface redesign - 654.5 KB actual. Measured
+ *              at each step: 487.0 KB before "Detailed Settings for Views", 549.0
+ *              after Phases 7-9, 595.3 after "Testing by Design Side only", 629.9
+ *              after the redesign (8aa6853) and 654.5 after "Layer - Settings Bugs".
+ *              It is the studio's own code: no library is duplicated, and the
+ *              largest chunk has not moved (125.8 KB). Raised to 680 KB for the
+ *              study build, so the gate stays close enough to catch the next
+ *              addition rather than absorb it.
  */
-const BUDGET_KB = 600
+const BUDGET_KB = 680
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.

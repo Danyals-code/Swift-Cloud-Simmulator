@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 test('Start designing is the first source and opens by default on fresh and restored projects', async ({ page }) => {
   await page.goto('/')
@@ -32,10 +32,13 @@ struct ContentView: View {
   }
 }`
 
+/** The left panel's tabs: Layers in Design, Files in Code, and Prompt Editing. */
+const sidebarTab = (page: Page, name: string) => page.getByRole('tablist', { name: 'Left panel', exact: true }).getByRole('tab', { name, exact: true })
+
 test('Layers shows nested pages, selects without activating controls, and follows workspace modes', async ({ page }, testInfo) => {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
-  await expect(page.getByTestId('navigator-tab-layers')).toHaveAttribute('aria-pressed', 'true')
+  await expect(sidebarTab(page, 'Layers')).toHaveAttribute('aria-selected', 'true')
   await page.getByTestId('workspace-develop').click()
   await expect(page.getByTestId('navigator-tab-project')).toHaveAttribute('aria-pressed', 'true')
   const editor = page.getByTestId('editor').locator('.cm-content')
@@ -43,20 +46,29 @@ test('Layers shows nested pages, selects without activating controls, and follow
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText(source)
   const preview = page.getByTestId('render-tree')
+  await expect(preview.getByRole('button', { name: 'Increase', exact: true })).toBeVisible()
   await expect(preview.getByText('Count: 0', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
   await expect(page.getByTestId('editor')).toBeHidden()
-  // Evaluated pages and hover details remain available in developer inspection.
+  // Design's Layers selects a view without running it.
+  const button = page.getByTestId('logical-layers').getByRole('treeitem', { name: 'Increase, Button', exact: true })
+  await button.click()
+  await expect(button).toHaveAttribute('aria-selected', 'true')
+  await expect(preview.getByRole('button', { name: 'Increase', exact: true })).toHaveAttribute('data-layer-selected', 'true')
+  await expect(preview.getByText('Count: 0', { exact: true })).toBeVisible()
+  // Evaluated pages and hover details remain available in developer inspection,
+  // which is Code's Layers tab now.
+  await page.getByTestId('workspace-develop').click()
+  await page.getByTestId('navigator-tab-layers').click()
   await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
   const layers = page.getByRole('tree', { name: 'App layers' })
   const overview = layers.getByRole('treeitem', { name: 'Overview, Page', exact: true })
   const profile = layers.getByRole('treeitem', { name: 'Profile, Page', exact: true })
   await expect(overview).toBeVisible()
   await expect(profile).toBeVisible()
-  const button = layers.getByRole('treeitem', { name: 'Increase, Button', exact: true })
-  await button.click()
-  await expect(button).toHaveAttribute('aria-selected', 'true')
-  await expect(preview.getByRole('button', { name: 'Increase', exact: true })).toHaveAttribute('data-layer-selected', 'true')
+  const runtimeButton = layers.getByRole('treeitem', { name: 'Increase, Button', exact: true })
+  await runtimeButton.click()
+  await expect(runtimeButton).toHaveAttribute('aria-selected', 'true')
   await expect(preview.getByText('Count: 0', { exact: true })).toBeVisible()
   await page.getByTestId('live-toggle').click()
   await preview.getByRole('button', { name: 'Increase', exact: true }).click()
@@ -72,8 +84,13 @@ test('Layers shows nested pages, selects without activating controls, and follow
   await profile.focus()
   await profile.press('ArrowRight')
   await expect(layers.getByRole('treeitem', { name: 'Taylor, Text', exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+  await expect(sidebarTab(page, 'Layers')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('navigation', { name: 'Layers', exact: true })).toBeVisible()
   await testInfo.attach('design-layers-light', { body: await page.screenshot(), contentType: 'image/png' })
-  await page.getByTestId('workspace-theme').click()
+  await page.getByTestId('workspace-more').click()
+  await page.getByTestId('workspace-more-menu-theme').click()
+  await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'dark')
   await testInfo.attach('design-layers-dark', { body: await page.screenshot(), contentType: 'image/png' })
   await page.getByTestId('workspace-develop').click()
   await expect(page.getByTestId('navigator-tab-project')).toHaveAttribute('aria-pressed', 'true')
@@ -81,7 +98,8 @@ test('Layers shows nested pages, selects without activating controls, and follow
   await expect(preview.getByText('Taylor', { exact: true })).toBeVisible()
   await page.getByTestId('navigator-tab-issues').click()
   await page.getByTestId('workspace-design').click()
-  await expect(page.getByTestId('navigator-tab-layers')).toHaveAttribute('aria-pressed', 'true')
+  await expect(sidebarTab(page, 'Layers')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('navigation', { name: 'Layers', exact: true })).toBeVisible()
 })
 
 test('inspecting the preview follows the pointer in Layers and selects what is clicked', async ({ page }) => {
@@ -96,12 +114,13 @@ test('inspecting the preview follows the pointer in Layers and selects what is c
   await expect(preview.getByText('Count: 0', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
 
-  await page.getByTestId('inspect-toggle').click()
-  // Evaluated pages and hover details remain available in developer inspection.
-  await page.getByRole('button', { name: 'Runtime detail', exact: true }).click()
-  const layers = page.getByRole('tree', { name: 'App layers' })
+  // Design opens in Edit, where the preview points at Design's own Layers: the
+  // source views, so the interpolated count is the Text layer that draws it.
+  await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
+  const layers = page.getByTestId('logical-layers')
   const button = layers.getByRole('treeitem', { name: 'Increase, Button', exact: true })
-  const count = layers.getByRole('treeitem', { name: 'Count: 0, Text', exact: true })
+  const count = layers.getByRole('treeitem', { name: 'Text', exact: true })
+  await expect(button).toBeVisible()
 
   // Hovering names the view without selecting it, and the naming stops when the
   // pointer moves on: it is a pointer, not a choice.

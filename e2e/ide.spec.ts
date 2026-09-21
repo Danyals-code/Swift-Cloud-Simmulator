@@ -28,6 +28,8 @@ async function openStudio(page: Page) {
   await expect(page.getByTestId('template-gallery')).toHaveCount(0)
   await page.getByTestId('workspace-develop').click()
   if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') await page.getByTestId('pane-toggle-debug').click()
+  // Code opens with the preview pointing at views; the inspector gates switch back.
+  await page.getByTestId('live-toggle').click()
 
   await expect(page.getByTestId('editor')).toBeVisible()
   await expect(page.getByTestId('render-tree')).toBeVisible()

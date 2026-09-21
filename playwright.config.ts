@@ -15,10 +15,13 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     trace: 'on-first-retry',
-    // Chrome is the primary target (NFR-2); other engines are checked before launch.
-    ...devices['Desktop Chrome'],
-    viewport: { width: 1440, height: 900 },
   },
+  projects: [
+    // Chrome is the primary target (NFR-2). WebKit stands in for Safari, which the
+    // study's participants use as often as Chrome.
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 } } },
+  ],
   webServer: {
     command: `npm run start --workspace @studio/web -- --port ${PORT}`,
     url: BASE_URL,

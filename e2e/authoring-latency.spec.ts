@@ -26,7 +26,13 @@ struct ContentView: View {
 ${helpers}`
 const p95 = (samples: readonly number[]) => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.95) - 1]!
 
-test('authoring latency: 100 real UI samples after five warmups, 2,000 lines and 100 records', async ({ page }, info) => {
+// A benchmark, not a behaviour check: `npm run e2e:perf` runs it on its own, because
+// a p95 measured beside other workers says more about the machine than the studio.
+test('authoring latency: 100 real UI samples after five warmups, 2,000 lines and 100 records', { tag: '@perf' }, async ({ page, browserName }, info) => {
+  // The budgets are Chrome's (NFR-2). WebKit misses them on the same machine - p95
+  // selection ~130 ms and edit ~670 ms on 2026-09-22 - which the study plan tracks
+  // under F9 rather than hiding here by loosening the numbers.
+  test.skip(browserName !== 'chromium', 'Latency budgets are calibrated for Chromium; WebKit is tracked under F9')
   test.setTimeout(180_000)
   expect(source.split('\n').length).toBeGreaterThan(2000)
   await page.goto('/'); await page.getByTestId('gallery-dismiss').click()
@@ -34,7 +40,9 @@ test('authoring latency: 100 real UI samples after five warmups, 2,000 lines and
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(source)
   await expect(page.getByTestId('render-tree').getByText('Alpha', { exact: true })).toBeVisible()
-  await page.getByTestId('workspace-design').click(); await page.getByTestId('inspect-toggle').click()
+  // Design opens in Edit, so layers and the inspector are ready without a mode switch.
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('logical-layers')).toBeVisible()
   await page.evaluate(() => {
     window.__authoringLatency = { mode: 'selection', start: 0 }
     document.addEventListener('pointerdown', event => {
