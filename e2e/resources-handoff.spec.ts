@@ -27,6 +27,8 @@ struct ContentView: View {
 }`
 const darkPhoto = readFileSync(new URL('../tests/fixtures/authoring-photo-dark.png', import.meta.url))
 const photo = readFileSync(new URL('../tests/fixtures/authoring-photo.png', import.meta.url))
+/** The focused screen's layers, which the default one-tree navigator nests under the screen. */
+const layerTree = (page: Page) => page.getByTestId('logical-layers').getByRole('group', { name: 'Design layers', exact: true })
 async function open(page: Page) {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
@@ -34,19 +36,21 @@ async function open(page: Page) {
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(SOURCE)
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toBeVisible()
-  await page.getByTestId('workspace-design').click(); await page.getByTestId('inspect-toggle').click()
-  await page.getByTestId('inspector-tab-settings').click()
-  await page.getByTestId('project-resources').locator('summary').first().click()
-  await page.getByLabel('Add bundled image').setInputFiles({ name: 'Photo.png', mimeType: 'image/png', buffer: photo })
+  // Design opens in Edit. Images are App settings, the first step of the settings path.
+  await page.getByTestId('workspace-design').click(); await page.getByTestId('level-app').click()
+  const resources = page.getByTestId('project-resources')
+  await resources.getByLabel('Add bundled image').setInputFiles({ name: 'Photo.png', mimeType: 'image/png', buffer: photo })
   await expect(page.getByTestId('render-tree').getByRole('img', { name: 'Photo', exact: true })).toBeVisible()
-  await page.getByTestId('project-resources').getByText('Photo · 2 × 1 pt', { exact: true }).click()
-  await page.getByLabel('Photo dark image').setInputFiles({ name: 'Photo-dark.png', mimeType: 'image/png', buffer: darkPhoto })
-  await expect(page.getByTestId('project-resources').getByRole('img', { name: 'Photo dark', exact: true })).toBeVisible()
-  await expect(page.getByTestId('logical-layers').getByRole('tree')).toHaveAttribute('aria-busy', 'false')
+  const asset = resources.getByRole('button', { name: /^Photo\s*2 × 1 pt/ })
+  await asset.click()
+  await resources.getByLabel('Photo dark image').setInputFiles({ name: 'Photo-dark.png', mimeType: 'image/png', buffer: darkPhoto })
+  await expect(asset).toContainText('2 × 1 pt · dark')
+  await expect(layerTree(page)).toHaveAttribute('aria-busy', 'false')
 }
 async function download(page: Page) {
   const waiting = page.waitForEvent('download')
-  await page.getByTestId('download-editable').click()
+  await page.getByTestId('export-format').click()
+  await page.getByTestId('export-format-menu-editable').click()
   const file = await waiting
   return readFileSync((await file.path())!)
 }
@@ -54,30 +58,35 @@ async function download(page: Page) {
 for (const run of [1, 2]) test(`fresh designer handoff workflow ${run}: edit, export, reload, external edit, review, reopen`, async ({ page }, info) => {
   test.setTimeout(120_000)
   await open(page)
-  const layers = page.getByTestId('logical-layers'), inspector = page.getByTestId('authoring-inspector'), resources = page.getByTestId('project-resources')
+  const layers = page.getByTestId('logical-layers'), inspector = page.getByTestId('authoring-inspector')
   await layers.locator('[data-source-name="List"]').click()
   await inspector.getByRole('button', { name: 'Add record', exact: true }).click()
   await inspector.getByLabel('Record title', { exact: true }).fill('Preview item')
   await inspector.getByRole('button', { name: 'Apply preview records', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('Preview item', { exact: true })).toBeVisible()
-  await page.getByTestId('inspector-tab-preview').click()
-  const scenarios = page.getByTestId('preview-scenarios')
-  await scenarios.locator('summary').first().click(); await page.getByLabel('Preview scenario', { exact: true }).selectOption('')
+  // Preview records are a state of the screen; its Default state is the app's own data.
+  await page.getByTestId('level-screen').click()
+  const appData = page.getByTestId('screen-states').getByRole('button', { name: /^Default/ })
+  await appData.click()
+  await expect(appData).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toBeVisible()
-  await page.getByTestId('inspector-tab-settings').click()
-  await expect(layers.getByRole('tree')).toHaveAttribute('aria-busy', 'false')
+  await expect(page.getByTestId('render-tree').getByText('Preview item', { exact: true })).toHaveCount(0)
+  await expect(layerTree(page)).toHaveAttribute('aria-busy', 'false')
   await layers.locator('[data-source-name="Card"][data-source-kind="component"]').first().click()
   const title = inspector.getByRole('textbox', { name: 'title', exact: true })
   await title.fill('Custom primary'); await title.press('Enter')
   await expect(page.getByTestId('render-tree').getByText('Custom primary', { exact: true })).toBeVisible()
   await expect(page.getByTestId('render-tree').getByText('Secondary', { exact: true })).toBeVisible()
-  // Settings remounts after visiting Preview, so reopen its resource disclosure.
-  await resources.locator('summary').first().click()
-  await resources.getByText('Theme.brand · color · blue', { exact: true }).click()
-  await resources.getByLabel('Theme.brand value').fill('#2468ac')
-  await resources.getByRole('button', { name: 'Update shared value · all uses', exact: true }).click()
-  await expect(resources).toContainText('#2468ac')
-  await expect(layers.getByRole('tree')).toHaveAttribute('aria-busy', 'false')
+  // Shared values are the App's tokens: Theme.brand is a color token used by both cards.
+  await page.getByTestId('level-app').click()
+  const brand = page.getByTestId('tokens-color').locator('[data-testid="token-row"][data-token="Theme.brand"]')
+  await brand.getByRole('button', { name: /^Theme\.brand/ }).click()
+  await brand.getByLabel('Color source', { exact: true }).selectOption('#custom')
+  await brand.getByLabel('Light value', { exact: true }).fill('#2468ac')
+  await brand.getByRole('button', { name: 'Update everywhere', exact: true }).click()
+  await expect(brand.getByRole('button', { name: 'Revert', exact: true })).toHaveCount(0)
+  await expect(brand.getByLabel('Light value', { exact: true })).toHaveValue(/^#2468ac$/i)
+  await expect(layerTree(page)).toHaveAttribute('aria-busy', 'false')
   await page.getByTestId('live-toggle').click()
   await page.getByTestId('render-tree').getByRole('button', { name: 'Increment', exact: true }).click()
   await expect(page.getByTestId('render-tree').getByText('Count 1', { exact: true })).toBeVisible()
@@ -109,7 +118,7 @@ for (const run of [1, 2]) test(`fresh designer handoff workflow ${run}: edit, ex
 for (const device of ['iphone-15', 'iphone-18-pro']) for (const scheme of ['light', 'dark']) for (const size of ['large', 'accessibility3']) {
   test(`resource review capture: ${device}, ${scheme}, ${size}`, async ({ page }, info) => {
     await open(page)
-    await page.getByTestId('inspector-tab-preview').click()
+    // Device, appearance and text size are the toolbar's preview environment in Design.
     await page.getByTestId('device-select').click(); await page.getByTestId(`device-select-menu-${device}`).click()
     await page.getByTestId('scheme-toggle').getByRole('button', { name: scheme === 'dark' ? 'Dark' : 'Light', exact: true }).click()
     await page.getByTestId('type-scale-select').click(); await page.getByTestId(`type-scale-select-menu-${size}`).click()
