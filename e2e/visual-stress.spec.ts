@@ -7,6 +7,8 @@ test('visual stress fixture: alert editing and fixed-height colored sheet', asyn
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('workspace-develop').click()
+  // Code opens with the preview pointing at views; this test taps it as an app.
+  await page.getByTestId('live-toggle').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
   await page.keyboard.press('ControlOrMeta+a')
@@ -41,6 +43,8 @@ test('context-menu gestures preserve button actions and text fields submit', asy
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('workspace-develop').click()
+  // Code opens with the preview pointing at views; this test taps it as an app.
+  await page.getByTestId('live-toggle').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
   await page.keyboard.press('ControlOrMeta+a')
