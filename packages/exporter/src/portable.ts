@@ -3,6 +3,7 @@ import { DEVICES } from '@studio/sim-shell'
 import { isPreviewTarget, type SourceFile } from '@studio/shared'
 import { encodeText, type ExportBundle } from './bundle'
 import { importSourceAssets } from './import-assets'
+import { validatePromptHistory } from '@studio/project-model'
 
 export const PROJECT_DOCUMENT = '.swiftstudio/project.json'
 interface ResourceEntry { id: string; name: string; scale: 1 | 2 | 3; light: string; dark?: string }
@@ -23,6 +24,7 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 const safePath = (value: unknown): value is string => typeof value === 'string' && value.length <= 512 && !(/[\\:]/.test(value) || Array.from(value).some(c => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) && value.split('/').every(p => p.length > 0 && p !== '.' && p !== '..')
 export function validatePortableProject(value: unknown): asserts value is Project {
   if (!object(value) || value.schemaVersion !== 1) throw new Error('Unsupported editable-project version. Use a compatible Studio; nothing was imported.')
+  if (value.chatHistory !== undefined) validatePromptHistory(value.chatHistory)
   const m = value.manifest
   if (typeof value.id !== 'string' || value.id.length < 1 || value.id.length > 128 || !Number.isFinite(value.createdAt) || !Number.isFinite(value.updatedAt) || !object(m) || typeof m.name !== 'string' || normalizeProjectName(m.name) !== m.name || typeof m.bundleId !== 'string' || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(m.bundleId) || typeof m.deploymentTarget !== 'string' || !/^\d{1,2}\.\d{1,2}(?:\.\d{1,2})?$/.test(m.deploymentTarget) || !Object.hasOwn(DEVICES, String(m.device)) || !['light', 'dark'].includes(String(m.colorScheme))) throw new Error('Invalid project identity or app settings.')
   if (!Array.isArray(value.files) || !value.files.length || value.files.length > 256) throw new Error('A project must contain 1–256 Swift files.')
@@ -47,7 +49,7 @@ export function attachHandoff(project: Project, bundle: ExportBundle, root: stri
   const files = new Map(bundle)
   const document: Handoff = {
     version: 1, format: 'swift-web-studio',
-    project: { schemaVersion: 1, id: project.id, manifest: project.manifest, folders: project.folders, createdAt: project.createdAt, updatedAt: project.updatedAt },
+    project: { schemaVersion: 1, id: project.id, manifest: project.manifest, folders: project.folders, createdAt: project.createdAt, updatedAt: project.updatedAt, ...(project.chatHistory ? { chatHistory: project.chatHistory } : {}) },
     sources: project.files.map(f => ({ id: f.id, path: sourcePath(f.id), base: f.text })),
     assets: (project.assets ?? []).map(a => ({ id: a.id, name: a.name, scale: a.scale, light: `${catalogPath}/${a.name}.imageset/light.${a.light.mime === 'image/png' ? 'png' : 'jpg'}`, ...(a.dark ? { dark: `${catalogPath}/${a.name}.imageset/dark.${a.dark.mime === 'image/png' ? 'png' : 'jpg'}` } : {}) })),
     ...(project.colors?.length ? { colors: project.colors.map(color => ({ name: color.name, path: `${catalogPath}/${color.name}.colorset/Contents.json` })) } : {}),
@@ -149,10 +151,10 @@ export function reviewImport(local: Project, incoming: Project, handoff: Handoff
     changedFiles.push(id)
     if (a !== base && b !== base) conflicts.push({ key: id, label: id, local: a ?? '(deleted)', incoming: b ?? '(deleted)' })
   }
-  for (const [key, label, base] of [['manifest', 'App settings', handoff.baseManifest], ['studio', 'Designer metadata', handoff.baseStudio], ['assets', 'Bundled images', undefined], ['colors', 'Colour tokens', undefined], ['folders', 'Empty groups', undefined]] as const) {
+  for (const [key, label, base] of [['manifest', 'App settings', handoff.baseManifest], ['studio', 'Designer metadata', handoff.baseStudio], ['assets', 'Bundled images', undefined], ['colors', 'Colour tokens', undefined], ['folders', 'Empty groups', undefined], ['chatHistory', 'Prompt conversation', undefined]] as const) {
     // A list nobody has is the same list, however it is spelled. Without this, every
     // project with no images conflicted with itself over having none.
-    const list = key === 'assets' || key === 'colors' || key === 'folders'
+    const list = key === 'assets' || key === 'colors' || key === 'folders' || key === 'chatHistory'
     const ours = list ? local[key] ?? [] : local[key], theirs = list ? incoming[key] ?? [] : incoming[key]
     if (!same(ours, theirs) && (list || !same(ours, base) && !same(theirs, base))) conflicts.push({ key: `$${key}`, label, local: key === 'assets' ? describeAssets(local) : JSON.stringify(local[key], null, 2) ?? '(none)', incoming: key === 'assets' ? describeAssets(incoming) : JSON.stringify(incoming[key], null, 2) ?? '(none)' })
   }
@@ -170,8 +172,8 @@ export function resolveImport(local: Project, incoming: Project, handoff: Handof
     const selected = choices[id] === 'local' ? a : choices[id] === 'incoming' ? b : a?.text === base ? b : a
     if (selected) files.push(selected)
   }
-  const choose = <K extends 'manifest' | 'studio' | 'assets' | 'colors' | 'folders'>(key: K, base: unknown): Project[K] => choices[`$${key}`] === 'local' ? local[key] : choices[`$${key}`] === 'incoming' || same(local[key], base) ? incoming[key] : local[key]
-  const result = { ...local, files, manifest: choose('manifest', handoff.baseManifest), studio: choose('studio', handoff.baseStudio), assets: choose('assets', undefined), colors: choose('colors', undefined), folders: choose('folders', undefined), updatedAt: Date.now() }
+  const choose = <K extends 'manifest' | 'studio' | 'assets' | 'colors' | 'folders' | 'chatHistory'>(key: K, base: unknown): Project[K] => choices[`$${key}`] === 'local' ? local[key] : choices[`$${key}`] === 'incoming' || same(local[key], base) ? incoming[key] : local[key]
+  const result = { ...local, files, manifest: choose('manifest', handoff.baseManifest), studio: choose('studio', handoff.baseStudio), assets: choose('assets', undefined), colors: choose('colors', undefined), folders: choose('folders', undefined), chatHistory: choose('chatHistory', undefined), updatedAt: Date.now() }
   validatePortableProject(result)
   return result
 }

@@ -2,7 +2,21 @@
 
 Open **the project menu (top left) → From a prompt**, choose OpenAI or Anthropic, enter a model ID and API key, and describe the app. Choose 1–6 pages (including details/forms/settings), navigation, accent color, sample content, and an optional settings page. Generate, review the files and preview check, then open the draft as a separate project.
 
-The result is ordinary SwiftUI source. It can be edited, previewed, shared, and exported with the existing tools. No attribution or watermark is appended. Simulator visual editing is not implemented in this release.
+The result is ordinary SwiftUI source. It can be edited visually or in code, previewed, shared, and exported with the existing tools. The creation prompt, options and AI summary are saved when the draft is opened.
+
+## Prompt Editing
+
+The left panel has **Layers** and **Prompt Editing** tabs (Files in the Code workspace). Select a view on the canvas to attach its source context above the composer; remove the tag to request an app-wide change. Open the connection settings to choose a provider/model and enter a key. Enter sends; Shift+Enter inserts a new line. Replies describe the changes in one short sentence.
+
+Each request sends current Swift files, resource names, the last 24 successful conversation messages, and the optional selected source range. The `/api/edit` endpoint returns complete changed files and explicit deletions. File paths and project size are validated, then a disposable preview worker checks the candidate before any source is changed. A successful edit is one Undo step. Typing, switching projects, or otherwise changing the document while the request runs invalidates the result instead of overwriting newer work. Stop cancels the request.
+
+The conversation is saved locally with the project, survives Undo/Redo, and reopens with an exported archive. Failed/cancelled attempts stay visible but are excluded from the next request's context. Keys stay only in component memory and clear when the panel is closed or the project changes. No provider request is made until Send. Prompt editing supports up to 256 input files / 600,000 source characters and 32 changed files per response; history is limited to 1,000 messages / 2 MB without silent truncation. Browser preview checks do not replace an Xcode build.
+
+## Default export
+
+**Export** downloads a complete Xcode ZIP with the original Swift files, project/scheme/assets, individual screen PNGs, and a **Studio Report** folder containing `report.md`, `settings.json`, `screens.json`, `chat-history.md`, and `chat-history.json`. The report records deployment/signing defaults, preview settings, resources, designer metadata, capture diagnostics and limitations. It includes only conversation history actually saved in this project; earlier unsaved prompts cannot be recovered.
+
+Screenshots are fresh 2× browser previews at the current device, appearance and text size, using starting app content. They include discoverable destinations/presentations and saved standalone screens, beyond the normal twelve-screen gallery cap. The export refuses a missing saved screen, failed preview, oversized image, or screen-count limit rather than silently omitting it. Data-dependent routes still need native review. Code-only formats and separate image review remain in **Export options**.
 
 ## Data and credentials
 

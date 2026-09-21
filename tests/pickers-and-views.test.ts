@@ -1,3 +1,4 @@
+import { surfaceRadius } from './render-geometry'
 import { describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
@@ -110,9 +111,11 @@ describe('DatePicker', () => {
     const after = texts(chosen).find((t) => t.startsWith('at '))!
     expect(after).not.toBe(before)
 
-    // Five days on from the 15th, to the second: the time of day is untouched.
+    // The calendar follows the same local timezone as the displayed date.
     const seconds = (label: string) => Number(label.slice(3))
-    expect(seconds(after) - seconds(before)).toBe(5 * 86_400)
+    const expected = new Date(seconds(before) * 1000)
+    expected.setDate(20)
+    expect(seconds(after)).toBe(expected.getTime() / 1000)
   })
 
   it('closes when a day is chosen', () => {
@@ -164,7 +167,7 @@ describe('ColorPicker', () => {
     const blue = nodes(before).find((n) => n.shape?.shape === 'rectangle')?.shape?.fill
 
     const opened = press(before, 'Tint')
-    const target = nodes(opened).filter((n) => n.hitTarget).at(-1)!
+    const target = nodes(opened).find(n => n.hitTarget?.handlerId.includes('/colour-red'))!
     applyEvent({ kind: 'tap', handlerId: target.hitTarget!.handlerId, location: { x: 0, y: 0 } })
     const after = rerender(revision++)
 
@@ -241,7 +244,7 @@ describe('list styles', () => {
   })
 
   it('a sidebar lays its rows out flat, on the grouped background', () => {
-    const cards = (r: CompileResult) => nodes(r).filter((n) => n.background && n.cornerRadius).length
+    const cards = (r: CompileResult) => nodes(r).filter((n) => n.background && surfaceRadius(nodes(r), n)).length
     expect(cards(run(list('.listStyle(.sidebar)')))).toBe(0)
     expect(cards(run(list()))).toBeGreaterThan(0)
   })

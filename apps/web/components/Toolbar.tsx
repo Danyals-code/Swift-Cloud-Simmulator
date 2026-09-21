@@ -26,7 +26,8 @@ export interface ToolbarProps {
   panes: ReadonlySet<PaneKey>
   suppressed: ReadonlySet<PaneKey>
   onTogglePane: (pane: PaneKey) => void
-  onExport: (format: ExportFormat) => void
+  onExport: (format: ExportFormat | 'complete') => void
+  exporting?: boolean
   onDownloadEditable?: () => void
   onShare: () => Promise<'copied' | 'too-large' | 'failed'>
   /**
@@ -75,20 +76,21 @@ const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debu
 /** Project actions stay in the header; preview tools live beside the canvas. */
 export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, onModeChange, theme, onThemeChange,
   panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onReview, reviewDisabled,
-  environment, previewing = false, onSetPreviewing, previewDisabled }: ToolbarProps) {
+  environment, previewing = false, onSetPreviewing, previewDisabled, exporting = false }: ToolbarProps) {
   const design = mode === 'design'
   // One Export menu: the four native formats, the editable archive, and - in Design -
   // the review sheet that exports PNGs. Two buttons that both "save the project
   // somewhere" were one decision presented as two.
   const exportItems = [
-    ...EXPORT_FORMATS.map(f => ({ value: f.id, label: f.name, detail: f.shortName, title: f.description })),
+    { value: 'complete', label: 'Complete Xcode bundle', detail: 'Default', title: 'Xcode project, every screen PNG, settings report, prompts and chat history', disabled: exporting },
+    ...EXPORT_FORMATS.map((f, index) => ({ value: f.id, label: f.id === 'xcodeproj' ? 'Xcode project only' : f.name, detail: f.shortName, title: f.description, separated: index === 0, disabled: exporting })),
     ...(onDownloadEditable ? [{ value: 'editable', label: 'Editable archive', detail: '.swiftstudio.zip', title: 'Swift, images, app settings and designer metadata, to reopen here later', separated: true }] : []),
     ...(design && onReview ? [{ value: 'review', label: 'Review & export images…', title: 'Check contrast and touch targets, present screens, or export PNGs', disabled: reviewDisabled, separated: !onDownloadEditable }] : []),
   ]
   const chooseExport = (value: string) => {
     if (value === 'editable') onDownloadEditable?.()
     else if (value === 'review') onReview?.()
-    else onExport(value as ExportFormat)
+    else onExport(value as ExportFormat | 'complete')
   }
   return <header data-testid="toolbar" className={styles.toolbar} data-mode={mode}>
     <div className={styles.project}>
@@ -104,7 +106,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, 
       {!design && <span className={styles.paneControls}><PaneToggles options={debugPane} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>}
       <span className={styles.share}><ShareButton onShare={onShare} /></span>
       <div className={styles.exportGroup}>
-        <button type="button" onClick={() => onExport('xcodeproj')} data-testid="export-button" title="Export an Xcode project" className={styles.export}>Export<Icon name="download" size={14} /></button>
+        <button type="button" onClick={() => onExport('complete')} disabled={exporting} aria-busy={exporting} data-testid="export-button" title="Export Xcode project, screen PNGs, settings report and AI conversation" className={styles.export}>{exporting ? 'Exporting…' : 'Export'}<Icon name="download" size={14} /></button>
         <MenuButton items={exportItems} onSelect={chooseExport} label="Export options" title="Other formats, the editable archive, and images" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={11} /></MenuButton>
       </div>
       <MenuButton items={[

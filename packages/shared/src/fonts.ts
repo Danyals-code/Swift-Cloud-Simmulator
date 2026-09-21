@@ -39,9 +39,13 @@ export const ROUNDED_FAMILY =
 export const MONO_FAMILY =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, "JetBrains Mono", "Cascadia Mono", Consolas, monospace'
 
+/** SwiftUI's serif design resolves to New York on Apple platforms. */
+export const SERIF_FAMILY = 'ui-serif, "New York", Georgia, "Times New Roman", serif'
+
 /** Every stack the layout engine can be asked to measure. */
 export const MEASURED_FAMILIES: readonly string[] = [
   UI_FONT_FAMILY,
   ROUNDED_FAMILY,
   MONO_FAMILY,
+  SERIF_FAMILY,
 ]

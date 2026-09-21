@@ -5,6 +5,7 @@ import {
   MONO_FAMILY,
   rgba,
   ROUNDED_FAMILY,
+  SERIF_FAMILY,
   UI_FONT_FAMILY,
   type Fill,
   type PreviewColorAsset,
@@ -184,15 +185,14 @@ export function resolveFillArg(
 
   if (value.typeName === STYLE_TYPE) {
     const gradient = value.payload as GradientPayload
-    const colors = gradient.colors
-      .map((c) => resolveColorArg(c, scheme, tint))
-      .filter((c): c is RGBA => c !== null)
-    if (colors.length === 0) return null
-
-    const stops = colors.map((color, index) => ({
-      color,
-      location: colors.length === 1 ? 0 : index / (colors.length - 1),
-    }))
+    const values = gradient.stops ?? gradient.colors.map((color, index) => ({ color, location: gradient.colors.length < 2 ? 0 : index / (gradient.colors.length - 1) }))
+    const stops = values.flatMap(stop => {
+      const color = resolveColorArg(stop.color, scheme, tint)
+      return color ? [{ color: { ...color, a: color.a * (gradient.opacity ?? 1) }, location: stop.location }] : []
+    })
+    if (!stops.length) return null
+    if (gradient.kind === 'radial') return { kind: 'radialGradient', stops, center: unitPoint(gradient.center ?? 'center'), startRadius: gradient.startRadius ?? 0, endRadius: gradient.endRadius ?? 100 }
+    if (gradient.kind === 'angular') return { kind: 'angularGradient', stops, center: unitPoint(gradient.center ?? 'center'), startAngle: gradient.startAngle ?? 0, endAngle: gradient.endAngle ?? 360 }
     return {
       kind: 'linearGradient',
       stops,
@@ -206,7 +206,8 @@ export function resolveFillArg(
 }
 
 /** SwiftUI's named unit points, in the (0,0) top-leading space the render tree uses. */
-export function unitPoint(name: string): { x: number; y: number } {
+export function unitPoint(name: string | { x: number; y: number }): { x: number; y: number } {
+  if (typeof name !== 'string') return name
   const points: Readonly<Record<string, { x: number; y: number }>> = {
     topLeading: { x: 0, y: 0 },
     top: { x: 0.5, y: 0 },
@@ -292,7 +293,7 @@ export function resolveFontArg(value: SwiftValue | undefined, scale: number | Dy
     return {
       ...base,
       family:
-        design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : base.family,
+        design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : design === 'serif' ? SERIF_FAMILY : base.family,
       weight: FONT_WEIGHTS[weight ?? ''] ?? base.weight,
       italic: italic === 'italic',
     }
@@ -302,7 +303,7 @@ export function resolveFontArg(value: SwiftValue | undefined, scale: number | Dy
     const [, size, weight, design] = name.split(':')
     const points = Number(size) || 17
     return {
-      family: design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : UI_FONT_FAMILY,
+      family: design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : design === 'serif' ? SERIF_FAMILY : UI_FONT_FAMILY,
       size: points,
       weight: FONT_WEIGHTS[weight ?? 'regular'] ?? 400,
       italic: false,

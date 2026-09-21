@@ -1,3 +1,4 @@
+import { ancestors } from './render-geometry'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, RenderNode, RenderTree } from '@studio/shared'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
@@ -190,7 +191,7 @@ struct RootView: View {
     expect(field).toBeDefined()
     expect(field!.hitTarget!.placeholder).toBe('Search')
 
-    expect(field!.parent).toBe(result.renderTree!.chrome!.scrollId)
+    expect(ancestors(result.renderTree!.nodes, field!).map(node => node.id)).toContain(result.renderTree!.chrome!.scrollId)
     expect(field!.frame.y).toBeLessThan(100)
   })
 

@@ -55,6 +55,12 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
   const reusableOwner = snapshot?.nodes.some(n => n.kind === 'component' && n.name === node.owner && snapshot.nodes.find(parent => parent.id === n.parentId)?.name !== 'WindowGroup')
   const textInput = node.controls?.find(c => ['content', 'title'].includes(c.id) && c.kind === 'text')
   return <div className={styles.features}>
+    {section === 'basics' && node.kind === 'view' && node.name === 'GroupBox' && <section aria-label="Card layout">
+      <h3>Card layout</h3>
+      <p>The standard card includes 16 pt of inner padding. Customize it to align the title and content together.</p>
+      <button type="button" disabled={busy} onClick={() => void command({ kind: 'card-customize' })}>Customize card layout</button>
+      <p>Creates a left-aligned Vertical Stack with editable title, content, spacing and padding. Undo restores the original card.</p>
+    </section>}
     {section === 'basics' && node.controls?.some(c => c.id === 'image' && c.label === 'System symbol') && onNodeChange && <SymbolPicker selected={node.controls.find(c => c.id === 'image')?.value ?? ''} onChoose={value => onNodeChange(node, 'image', value)} />}
 
     {section === 'basics' && node.name === 'Image' && node.properties.some(p => ['argument 1', 'systemName'].includes(p.name) && p.valueKind === 'literal') && !!assets?.length && <label>Bundled image<select aria-label="Bundled image" disabled={busy} value={node.properties.find(p => p.name === 'argument 1')?.expression.replace(/^"|"$/g, '') ?? ''} onChange={e => void command({ kind: 'asset-use', name: e.target.value })}><option value="" disabled>Choose image</option>{assets.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}</select></label>}

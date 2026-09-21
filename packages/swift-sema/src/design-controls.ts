@@ -1,4 +1,6 @@
 import { authoringCapability, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { advancedControls } from './design-advanced-controls'
+import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
 
 interface Patch { readonly start: number; readonly end: number; readonly text: string }
@@ -13,7 +15,14 @@ export function viewCallChain(expr: Expr): { base: CallExpr; modifiers: CallExpr
 }
 export const AUTHORING_COLORS = ['primary', 'secondary', 'black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown', 'clear']
 export const AUTHORING_FONTS = ['largeTitle', 'title', 'title2', 'title3', 'headline', 'subheadline', 'body', 'callout', 'footnote', 'caption', 'caption2']
-const SYSTEM_COLORS = ['systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground', 'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground']
+export const SYSTEM_COLORS = ['systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground', 'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground']
+/** Only the color's opacity wrapper; the returned spans leave its expression intact. */
+export function colorOpacityParts(value: Expr): { color: Expr; opacity: Expr } | undefined {
+  if (value.kind !== 'call' || value.trailingClosure || value.callee.kind !== 'memberAccess' || value.callee.member !== 'opacity' || !value.callee.base || value.args.length !== 1 || value.args[0]!.label !== null) return undefined
+  const color = value.callee.base
+  if (color.kind !== 'memberAccess' && !(color.kind === 'call' && color.callee.kind === 'identifier' && color.callee.name === 'Color')) return undefined
+  return { color, opacity: value.args[0]!.value }
+}
 const ALIGNMENTS = ['center', 'leading', 'trailing', 'top', 'bottom', 'topLeading', 'topTrailing', 'bottomLeading', 'bottomTrailing']
 /** Swift escaping, including interpolation introducers and control characters. */
 export function swiftString(value: string): string {
@@ -28,7 +37,9 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const { base, modifiers } = chain
   const targetVersion = Number.parseFloat(deploymentTarget)
   const constructor = authoringCapability(node.name, 'view', base.args.map(a => a.label))
-  if (!Number.isFinite(targetVersion) || node.kind !== 'component' && (!constructor || targetVersion < Number.parseFloat(constructor.minimumIOS)) || node.kind === 'component' && (!node.definitionId || targetVersion < 13)) return []
+  const constructorEditable = !!constructor && targetVersion >= Number.parseFloat(constructor.minimumIOS)
+  const minimum = authoringViewMinimum(node)
+  if (!Number.isFinite(targetVersion) || minimum === undefined || targetVersion < minimum) return []
   const colors = [...AUTHORING_COLORS.filter(c => targetVersion >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c)), 'accentColor', ...SYSTEM_COLORS]
   const listStyles = targetVersion >= 14 ? ['plain', 'inset', 'grouped', 'insetGrouped', 'sidebar'] : ['plain', 'grouped']
   const recipes: ControlRecipe[] = []
@@ -80,39 +91,52 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       const at = base.callee.span.end + closing.span.start
       // Insert after the last argument, ahead of trailing comments/trivia.
       const first = base.args[0]
-      if (name === 'alignment' && first) return { start: first.span.start, end: first.span.start, text: `${name}: ${formatted}, ` }
+      if ((name === 'alignment' || name === null) && first) return { start: first.span.start, end: first.span.start, text: `${label}${formatted}, ` }
       const last = base.args.at(-1)
       return last ? { start: last.span.end, end: last.span.end, text: `, ${label}${formatted}` } : { start: at, end: at, text: `${label}${formatted}` }
     }, options, min, undefined, 'Sets a constructor argument without changing its children.')
   }
-  if (node.kind !== 'component' && ['HStack', 'VStack', 'ZStack'].includes(node.name)) {
-    // Changing an axis with axis-specific alignment could silently change meaning.
-    if (!base.args.some(a => a.label === 'alignment') && (node.name !== 'ZStack' || !base.args.length)) {
-      const choices = base.args.some(a => a.label === 'spacing') ? ['Row', 'Column'] : ['Row', 'Column', 'Stack']
-      const names: Record<string, string> = { Row: 'HStack', Column: 'VStack', Stack: 'ZStack' }
-      const span = base.callee.kind === 'memberAccess' ? base.callee.memberSpan : base.callee.span
-      add('layout', 'Layout', 'select', node.name === 'HStack' ? 'Row' : node.name === 'VStack' ? 'Column' : 'Stack', v => ({ ...span, text: names[v]! }), choices, undefined, undefined, 'Changes the layout container; child source and modifiers stay in place. Axis-specific alignment must be edited in Swift before changing axes.')
+  if (node.kind !== 'component' && constructorEditable && ['HStack', 'VStack', 'ZStack'].includes(node.name)) {
+    const alignment = base.args.find(a => a.label === 'alignment')
+    const centered = !alignment || /^(?:(?:SwiftUI\.)?(?:Alignment|HorizontalAlignment|VerticalAlignment))?\.center$/.test(raw(alignment.value.span).trim())
+    const choices = base.args.some(a => a.label === 'spacing') ? ['Row', 'Column'] : ['Row', 'Column', 'Stack']
+    const names: Record<string, string> = { Row: 'HStack', Column: 'VStack', Stack: 'ZStack' }
+    const span = base.callee.kind === 'memberAccess' ? base.callee.memberSpan : base.callee.span
+    add('layout', 'Layout', 'select', node.name === 'HStack' ? 'Row' : node.name === 'VStack' ? 'Column' : 'Stack', v => alignment
+      ? { start: span.start, end: alignment.value.span.end, text: names[v]! + text.slice(span.end, alignment.value.span.start) + '.center' }
+      : { ...span, text: names[v]! }, choices)
+    if (!centered) {
+      const recipe = recipes.at(-1)!
+      recipes[recipes.length - 1] = { ...recipe, control: { ...recipe.control, disabledReason: 'Set Alignment to Center to change the layout.' } }
     }
     if (node.name !== 'ZStack') argument('spacing', 'Spacing', 'spacing', 'number', '', undefined, 0)
     argument('alignment', 'Alignment', 'alignment', 'select', 'center', node.name === 'HStack' ? ['center', 'top', 'bottom', 'firstTextBaseline', 'lastTextBaseline'] : node.name === 'VStack' ? ['center', 'leading', 'trailing'] : ALIGNMENTS)
   }
-  if (node.kind !== 'component' && node.name === 'ScrollView') {
+  if (node.kind !== 'component' && constructorEditable && ['LazyHStack', 'LazyVStack'].includes(node.name)) {
+    argument('spacing', 'Spacing', 'spacing', 'number', '', undefined, 0)
+    argument('alignment', 'Alignment', 'alignment', 'select', 'center', node.name === 'LazyHStack' ? ['center', 'top', 'bottom', 'firstTextBaseline', 'lastTextBaseline'] : ['center', 'leading', 'trailing'])
+  }
+  if (node.kind !== 'component' && constructorEditable && node.name === 'ScrollView') {
     argument('scroll:axis', 'Scroll direction', null, 'select', 'vertical', ['vertical', 'horizontal'])
     const indicators = base.args.find(a => a.label === 'showsIndicators')
     if (indicators) replace('scroll:indicators', 'Show indicators', indicators.value, 'select', ['true', 'false'], undefined, undefined, '')
   }
-  if (node.kind !== 'component' && node.name === 'List' && !modifiers.some(m => modName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
-  if (node.kind !== 'component' && node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'number', '', undefined, 0)
-  if (node.kind !== 'component' && node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'number', '', undefined, 0)
-  if (node.kind !== 'component' && node.name === 'Text' && base.args[0]) replace('content', 'Text', base.args[0].value, 'text')
-  if (node.kind !== 'component' && ['TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
-  if (node.kind !== 'component' && node.name === 'Image' && base.args[0]) replace('image', base.args[0].label === 'systemName' ? 'System symbol' : 'Asset name', base.args[0].value, 'text')
-  if (node.kind !== 'component') {
+  if (node.kind !== 'component' && constructorEditable && node.name === 'List' && !modifiers.some(m => modName(m) === 'listStyle')) append('add:listStyle', 'List style', 'select', '', v => `.listStyle(.${v})`, listStyles)
+  if (node.kind !== 'component' && constructorEditable && node.name === 'RoundedRectangle') argument('shape:radius', 'Shape corner radius', 'cornerRadius', 'number', '', undefined, 0)
+  if (node.kind !== 'component' && constructorEditable && node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'number', '', undefined, 0)
+  if (node.kind !== 'component' && constructorEditable && node.name === 'Text' && base.args[0]) replace('content', 'Text', base.args[0].value, 'text')
+  if (node.kind !== 'component' && constructorEditable && ['SecureField', 'Menu', 'DisclosureGroup', 'ContentUnavailableView', 'ProgressView', 'TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
+  if (node.kind !== 'component' && constructorEditable && node.name === 'Image' && base.args[0]) replace('image', base.args[0].label === 'systemName' ? 'System symbol' : 'Asset name', base.args[0].value, 'text')
+  if (node.kind !== 'component' && constructorEditable) {
     const symbol = node.name === 'Label' && base.args.find(arg => arg.label === 'systemImage')
     if (symbol) replace('image', 'System symbol', symbol.value, 'text')
     const value = base.args.find(arg => arg.label === 'value')
     if (value && node.name === 'LabeledContent') replace('value', 'Value', value.value, 'text')
-    if (value && node.name === 'ProgressView') replace('progress', 'Progress', value.value, 'number', undefined, 0, 1)
+    if (value && node.name === 'ProgressView') {
+      const total = base.args.find(a => a.label === 'total')?.value
+      const maximum = total ? Number(raw(total.span)) : 1
+      replace('progress', 'Progress', value.value, 'number', undefined, 0, Number.isFinite(maximum) ? maximum : undefined)
+    }
   }
   for (const [i, m] of modifiers.entries()) {
     const name = modName(m)
@@ -127,15 +151,21 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       const label = `${name}${arg.label ? ' · ' + arg.label : ''}${modifiers.filter(v => modName(v) === name).length > 1 ? ' · ' + (i + 1) : ''}`
       if (['opacity', 'cornerRadius', 'lineLimit'].includes(name) && m.args.length === 1 && !arg.label) replace(id, label, arg.value, 'number', undefined, 0, name === 'opacity' ? 1 : undefined)
       if (name === 'padding' && !arg.label && (m.args.length === 1 || j === 1)) replace(id, label, arg.value, 'number', undefined, 0)
-      if (name === 'frame' && ['width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'].includes(arg.label ?? '')) replace(id, label, arg.value, 'number', undefined, 0)
+      if (name === 'frame' && ['width', 'height', 'minWidth', 'idealWidth', 'maxWidth', 'minHeight', 'idealHeight', 'maxHeight'].includes(arg.label ?? '')) replace(id, label, arg.value, 'number', undefined, 0)
       if (name === 'frame' && arg.label === 'alignment') replace(id, label, arg.value, 'select', ALIGNMENTS)
       if (['accessibilityLabel', 'accessibilityIdentifier', 'navigationTitle'].includes(name) && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'text')
       if (['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
+      const colorArgument = ['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint', 'border'].includes(name) && j === 0 && !arg.label || name === 'shadow' && arg.label === 'color'
+      const translucent = colorArgument && colorOpacityParts(arg.value)
+      if (translucent) {
+        replace(id + ':color', `${name} · color`, translucent.color, 'select', colors, undefined, undefined, 'Color.')
+        replace(id + ':opacity', `${name} · opacity`, translucent.opacity, 'number', undefined, 0, 1)
+      } else if (name === 'shadow' && arg.label === 'color') replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
       // The v1 catalog's values: each card edits exactly the arguments it wrote.
       if (name === 'offset' && ['x', 'y'].includes(arg.label ?? '')) replace(id, label, arg.value, 'number')
       if (name === 'blur' && arg.label === 'radius') replace(id, label, arg.value, 'number', undefined, 0)
       if (['tracking', 'lineSpacing'].includes(name) && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'number')
-      if (name === 'scaleEffect' && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'number', undefined, 0)
+      if (name === 'scaleEffect' && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'number')
       if (name === 'disabled' && !arg.label && m.args.length === 1) replace(id, label, arg.value, 'select', ['true', 'false'], undefined, undefined, '')
       if (name === 'navigationBarTitleDisplayMode' && !arg.label && m.args.length === 1) replace(id, 'Title size', arg.value, 'select', ['automatic', 'large', 'inline'])
       if (name === 'border' && !arg.label && j === 0) replace(id, label, arg.value, 'select', colors, undefined, undefined, 'Color.')
@@ -146,7 +176,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       const inner = arg.value.kind === 'call' && !arg.value.trailingClosure ? arg.value : undefined
       if (name === 'rotationEffect' && inner?.callee.kind === 'memberAccess' && !inner.callee.base && inner.callee.member === 'degrees' && inner.args.length === 1 && inner.args[0]!.label === null) replace(id + ':degrees', 'rotationEffect · degrees', inner.args[0]!.value, 'number')
       const corner = name === 'clipShape' && inner && (inner.callee.kind === 'memberAccess' && !inner.callee.base && inner.callee.member === 'rect' || inner.callee.kind === 'identifier' && inner.callee.name === 'RoundedRectangle') ? inner.args.find(a => a.label === 'cornerRadius') : undefined
-      if (corner && inner!.args.length === 1) replace(id + ':cornerRadius', 'clipShape · cornerRadius', corner.value, 'number', undefined, 0)
+      if (corner && inner!.args.every(argument => ['cornerRadius', 'style'].includes(argument.label ?? ''))) replace(id + ':cornerRadius', 'clipShape · cornerRadius', corner.value, 'number', undefined, 0)
       if (name === 'buttonStyle') replace(id, 'Button style', arg.value, 'select', targetVersion >= 15 ? ['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent'] : ['automatic', 'plain', 'borderless'])
       if (name === 'buttonBorderShape') replace(id, 'Button shape', arg.value, 'select', ['automatic', 'capsule', 'roundedRectangle'])
       if (name === 'controlSize') replace(id, 'Control size', arg.value, 'select', ['mini', 'small', 'regular', 'large'])
@@ -165,6 +195,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       }
     }
   }
+  advancedControls(node, base, modifiers, text, targetVersion, colors, add, replace)
   const has = (name: string) => modifiers.some(m => modName(m) === name)
   if (!has('font')) append('add:font', 'Font size', 'number', '', v => `.font(.system(size: ${Number(v)}))`, undefined, 1, 1000)
   if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.foregroundColor(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)
@@ -212,15 +243,27 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       }, ['Content', 'Fill', 'Fixed'], undefined, undefined, 'Content removes this axis constraint. Fill accepts the parent’s available size. Fixed starts at 100 points; edit the dimension to choose another size. Other frame arguments and surrounding modifiers are preserved.')
     }
   }
-  return recipes
+  return recipes.map(recipe => ({ ...recipe, control: constrainNumericControl(recipe.control, node.name, node.behavior?.binding?.type) })).filter((recipe, index) => !recipes.slice(0, index).some(prior => prior.control.source.start === recipe.control.source.start && prior.control.source.end === recipe.control.source.end && prior.control.kind === recipe.control.kind && prior.control.value === recipe.control.value && prior.control.source !== node.source))
+}
+
+export function constrainNumericControl(control: DesignControl, view: string, type?: string): DesignControl {
+  return view === 'Stepper' && ['stepper:min', 'stepper:max', 'range:step'].includes(control.id)
+    ? { ...control, integer: !type || type === 'Int' } : control
 }
 
 export function validateControlValue(control: DesignControl, value: string): string | null {
+  if (control.disabledReason) return control.disabledReason
+  if (/^date:(from|through)$/.test(control.id)) {
+    const seconds = Date.parse(value + 'Z') / 1000
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value) || !Number.isFinite(seconds)) return 'Choose a valid date and time.'
+    if (control.min !== undefined && seconds < control.min || control.max !== undefined && seconds > control.max) return 'The earliest date must not be after the latest date.'
+  }
+  if (control.id.endsWith(':detail:dash') && value.trim() && (!/^\s*\d+(?:\.\d+)?(?:\s*,\s*\d+(?:\.\d+)?)*\s*$/.test(value) || !value.split(',').some(n => Number(n) > 0) || value.split(',').some(n => Number(n) > 1000000))) return 'Enter positive dash and gap lengths separated by commas.'
   if (control.kind === 'number') {
     if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value.trim())) return 'Enter a finite number.'
     const number = Number(value)
     if (!Number.isFinite(number) || Math.abs(number) > 1_000_000 || control.min !== undefined && number < control.min || control.max !== undefined && number > control.max) return `Value is outside the supported range${control.min !== undefined ? ' (minimum ' + control.min + ')' : ''}${control.max !== undefined ? ' (maximum ' + control.max + ')' : ''}.`
-    if (control.label.startsWith('lineLimit') && !Number.isInteger(number)) return 'Line limit must be a whole number.'
+    if ((control.integer || control.label.startsWith('lineLimit') || control.id.endsWith(':detail:limit') || control.id === 'grid:count') && !Number.isInteger(number)) return 'Enter a whole number.'
   }
   if (control.kind === 'select' && !control.options?.includes(value)) return 'Choose a supported value.'
   if (value.length > 16_384) return 'This value is too long.'

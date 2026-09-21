@@ -1,14 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import type { AuthoringNode, DesignControl, ResourceOperation, SharedStyle, StyleKind, StyleProperty } from '@studio/shared'
+import type { AuthoringNode, DesignControl, ResourceOperation, SharedStyle, StyleProperty } from '@studio/shared'
 import { PropertyControl, type PropertyChange } from '../PropertyControl'
 import { SYSTEM_COLOR_SWATCHES, suggestedName, nameHint } from '../../lib/tokens'
-import { TokenSwatch } from './TokenLibrary'
 import styles from './Settings.module.css'
 
 const CUSTOM = '__custom'
-const KIND_LABEL: Readonly<Record<StyleKind, string>> = { color: 'color', spacing: 'spacing', radius: 'corner radius', font: 'text style', shadow: 'shadow' }
 
 /** A field is one value in the source: its raw control, its token linkage, or both. */
 export interface ValueField { readonly control?: DesignControl; readonly style?: StyleProperty }
@@ -72,8 +70,7 @@ export function TokenField({ field, label, tokens, busy = false, onChange, onCom
     <div className={styles.row}>
       <span title={title}>{title}</span>
       <span className={styles.tokenPicker}>
-        <TokenSwatch token={linked} kind={kind} value={linked ? linked.value : rawValue} />
-        <select aria-label={`${title} token`} data-linked={linked ? true : undefined} value={linked ? linked.name : CUSTOM} disabled={busy || pending || !onCommand}
+        <select title={linked ? `${linked.name}: ${linked.value}` : `Custom: ${rawValue || 'default'}`} aria-label={`${title} token`} data-linked={linked ? true : undefined} value={linked ? linked.name : CUSTOM} disabled={busy || pending || !onCommand}
           onChange={event => {
             const value = event.target.value
             if (value === CUSTOM) { if (linked) void run({ kind: 'style-local', property: style.property, value: kind === 'color' ? (linked.light ?? linked.value) : kind === 'font' ? (linked.font?.style ?? linked.value) : linked.value }) }
@@ -81,12 +78,11 @@ export function TokenField({ field, label, tokens, busy = false, onChange, onCom
           }}>
           {choices.map(token => <option key={token.name} value={token.name}>{token.form === 'token' ? '.' : ''}{token.name}{kind === 'color' ? '' : ` · ${token.value}`}</option>)}
           {!!choices.length && <option disabled>──────────</option>}
-          <option value={CUSTOM}>{linked ? 'Custom value…' : `Custom: ${rawValue || 'default'}`}</option>
+          <option value={CUSTOM}>Custom</option>
         </select>
-        {!linked && <span className={styles.rawFlag} title={`Not a token. Pick a ${KIND_LABEL[kind]} token to keep the design consistent.`}>Custom</span>}
-        {override && <span className={styles.override} title="Set on this screen, overriding the App's value">Override</span>}
       </span>
     </div>
+    {override && <span className={styles.note}>Overrides the App value</span>}
     {!linked && control && onChange && <PropertyControl control={control} label={`${title} value`} onChange={onChange} />}
     {!linked && kind === 'color' && onCommand && <CustomColor value={tokenValue} disabled={busy || pending} onApply={hex => void run({ kind: 'style-local', property: style.property, value: hex })} />}
     {!linked && onCommand && kind !== 'shadow' && (saving

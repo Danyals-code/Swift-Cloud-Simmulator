@@ -1,9 +1,8 @@
-import type { AuthoringNode, AuthoringOperation } from '@studio/shared'
+import { layerMoveProblem, type AuthoringNode, type AuthoringOperation } from '@studio/shared'
 import { forEachChild, insertView, viewSiteAt, type Node } from '@studio/swift-syntax'
 import { applyPatches, callOf, type FeatureContext } from './authoring-context'
 
 type StructureOperation = Extract<AuthoringOperation, { kind: 'layer-duplicate' | 'layer-wrap' | 'layer-reparent' }>
-const layouts = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'Group', 'ScrollView'])
 const structural = (node: AuthoringNode) => ['view', 'component', 'collection'].includes(node.kind) && node.name !== 'WindowGroup'
 export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operation: StructureOperation) {
   const file = ctx.files.find(f => f.id === node.source.file)!
@@ -22,20 +21,15 @@ export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operatio
   const first = sites[0]!, last = sites.at(-1)!
   const original = file.text.slice(first.start, last.end)
   if (operation.kind === 'layer-wrap') {
-    if (!['VStack', 'HStack', 'ZStack'].includes(operation.layout)) throw new Error('Choose Column, Row or Overlay.')
+    if (!['VStack', 'HStack', 'ZStack'].includes(operation.layout)) throw new Error('Choose Column, Row or Stack.')
     const constructor = operation.layout === 'ZStack' ? 'ZStack' : `${operation.layout}(spacing: 16)`
     const text = `${constructor} {${eol}${first.indent}    ${original.replaceAll(eol, eol + '    ')}${eol}${first.indent}}`
     return { files: applyPatches(ctx, [{ file: file.id, start: first.start, end: last.end, text }]), offset: first.start }
   }
   const destination = ctx.nodes.find(n => n.id === operation.destination)
-  if (!destination || destination.owner !== node.owner || destination.source.file !== file.id || !layouts.has(destination.name) || !callOf(ctx, destination)?.trailingClosure) throw new Error('Choose a Column, Row, Overlay or Scroll container on this screen.')
-  if (selected.some(n => destination.source.start >= n.source.start && destination.source.end <= n.source.end)) throw new Error('A layer cannot be moved inside itself or its children.')
-  const scope = (n: AuthoringNode) => {
-    let parent = ctx.nodes.find(p => p.id === n.parentId)
-    while (parent && !['definition', 'template', 'branch'].includes(parent.kind)) parent = ctx.nodes.find(p => p.id === parent!.parentId)
-    return parent?.id
-  }
-  if (scope(node) !== scope(destination)) throw new Error('Move within the same screen or repeated row to preserve its values and conditions.')
+  if (!destination || !callOf(ctx, destination)?.trailingClosure) throw new Error('Choose a layout container on this screen.')
+  const problem = layerMoveProblem(ctx.nodes, operation.ids, destination)
+  if (problem) throw new Error(problem)
   // The same identifier can name different local values in two containers.
   // A valid parse alone would not catch that silent change in meaning.
   const localsAt = (offset: number) => {

@@ -27,8 +27,8 @@ export const FONT_WEIGHTS = ['ultraLight', 'thin', 'light', 'regular', 'medium',
 /** The system colours a token or a raw field can name, with their light sRGB value for swatches. */
 export const SYSTEM_COLOR_SWATCHES: Readonly<Record<string, string>> = {
   primary: '#000000', secondary: '#3C3C4399', black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF3B30', orange: '#FF9500',
-  yellow: '#FFCC00', green: '#34C759', mint: '#00C7BE', teal: '#30B0C7', cyan: '#32ADE6', blue: '#007AFF', indigo: '#5856D6',
-  purple: '#AF52DE', pink: '#FF2D55', brown: '#A2845E', clear: '#00000000', accentColor: '#007AFF', systemBackground: '#FFFFFF',
+  yellow: '#FFCC00', green: '#34C759', mint: '#00C7BE', teal: '#30B0C7', cyan: '#32ADE6', blue: '#0088FF', indigo: '#5856D6',
+  purple: '#CB30E0', pink: '#FF2D55', brown: '#A2845E', clear: '#00000000', accentColor: '#0088FF', systemBackground: '#FFFFFF',
   secondarySystemBackground: '#F2F2F7', tertiarySystemBackground: '#FFFFFF', systemGroupedBackground: '#F2F2F7',
   secondarySystemGroupedBackground: '#FFFFFF', tertiarySystemGroupedBackground: '#F2F2F7',
 }

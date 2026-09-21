@@ -35,7 +35,7 @@ export const PANE_LIMITS = {
   navigator: { min: 240, max: 420, initial: 260 },
   preview: { min: 300, max: 720, initial: 420 },
   debug: { min: 90, max: 520, initial: 196 },
-  settings: { min: 200, max: 480, initial: 236 },
+  settings: { min: 280, max: 480, initial: 300 },
 } as const
 
 export interface LayoutState {

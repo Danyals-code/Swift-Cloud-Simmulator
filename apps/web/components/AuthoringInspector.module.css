@@ -13,8 +13,8 @@
 .property small, .property p { font-size: 10px; line-height: 1.5; opacity: .8; margin: 0; }
 .controls { display: grid; gap: 14px; margin: 12px 0 20px; }
 .control { display: grid; gap: 5px; min-width: 0; }
-.control label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(75px, 1fr); gap: 8px; align-items: center; font-size: 12px; }
-.control input, .control select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 6px 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; }
+.controlLabel { composes: row from "./ui/Field.module.css"; font-size: 12px; }
+.control input, .control select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; height: 28px; padding: 0 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; }
 .control input:focus-visible, .control select:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
 .control input[aria-invalid="true"] { border-color: var(--color-xc-error); }
 .control small { font-size: 10px; color: var(--color-xc-text-3); }
@@ -50,7 +50,7 @@
 
 /* The selection reads as one inspector: content, appearance, data, behavior. */
 .inspectorFields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 0; }
-.inspectorFields:disabled { opacity: .72; }
+.inspectorFields:disabled { cursor: progress; }
 .selectionHeader { padding: 3px 0 12px; }
 .selectionHeader > div { display: grid; gap: 4px; min-width: 0; }
 .selectionHeader strong { font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
@@ -67,7 +67,7 @@
 .settingsSection .features:empty { display: none; }
 .sectionHeading { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; }
 .sectionHeading > span { font-size: 10px; color: var(--color-xc-text-3); background: var(--color-xc-line-soft); border-radius: 4px; padding: 2px 5px; }
-.modifierStack { display: grid; gap: 8px; min-width: 0; }
+.modifierStack { position: relative; isolation: isolate; overflow-anchor: none; display: grid; gap: 8px; min-width: 0; }
 .modifierCard { border: 1px solid var(--color-xc-line); border-radius: 7px; background: var(--color-xc-bar-raised); min-width: 0; overflow: hidden; }
 .modifierHeader { display: flex; align-items: stretch; min-height: 44px; }
 .dragHandle { display: grid; place-items: center; width: 21px; flex-shrink: 0; color: var(--color-xc-text-3); font-size: 18px; cursor: default; user-select: none; }
@@ -83,7 +83,7 @@
 .modifierActions button:disabled, .inspector button:disabled { opacity: .4; cursor: default; }
 .modifierBody { border-top: 1px solid var(--color-xc-line); padding: 12px; display: grid; gap: 12px; min-width: 0; }
 .modifierBody .note { margin: 0; line-height: 1.5; }
-.modifierBody .control label { grid-template-columns: minmax(60px, 1fr) minmax(65px, 1fr); }
+
 .inspector .addModifier { width: 100%; padding: 9px 10px; border: 1px dashed var(--color-xc-line); border-radius: 6px; text-align: center; color: var(--color-xc-text-2); font-size: 12px; }
 .inspector .addModifier:hover { border-color: var(--color-xc-accent); color: var(--color-xc-accent); }
 .modifierPicker { border: 1px solid var(--color-xc-line); padding: 12px; border-radius: 8px; background: var(--color-xc-panel); box-shadow: 0 5px 18px rgb(0 0 0 / .12); display: grid; gap: 10px; min-width: 0; }
@@ -95,7 +95,9 @@
 .catalog small { font-size: 10px; color: var(--color-xc-text-3); text-transform: capitalize; }
 .catalog button:disabled { opacity: .55; }
 .dropBefore { box-shadow: 0 -3px 0 var(--color-xc-accent); }
-.dropEnd { height: 4px; }
+.dropAfter { box-shadow: 0 3px 0 var(--color-xc-accent); }
+.modifierStatus { min-height: 28px; margin: 0; color: var(--color-xc-text-3); font-size: 10px; line-height: 1.4; }
+.dropEnd { height: 10px; margin-top: -4px; }
 
 .control textarea { box-sizing: border-box; width: 100%; min-width: 0; resize: vertical; min-height: 62px; border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; line-height: 1.5; }
 .control label:has(textarea) { grid-template-columns: minmax(0, 1fr); gap: 7px; }
@@ -143,12 +145,14 @@
 .swatchValue > input[type=color] { width: 34px; height: 32px; padding: 2px; flex-shrink: 0; }
 .swatchValue label { flex: 1; min-width: 0; }
 .visualColor label { display: grid; gap: 5px; }
-.visualColor input, .visualColor select { width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; background: var(--color-xc-bg); }
+.visualColor input, .visualColor select { width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; background: var(--color-xc-bar-raised); }
 .layoutGuide { margin: 10px 0; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 7px; }
-.layoutGuide > div { display: flex; align-items: center; justify-content: center; }
+.layoutGuide > div { display: flex; align-items: center; justify-content: center; min-height: 60px; }
 .layoutGuide > div[data-direction=column] { flex-direction: column; }
 .layoutGuide span { display: grid; place-items: center; background: var(--color-xc-select); color: var(--color-xc-accent); border: 1px solid var(--color-xc-accent); border-radius: 3px; width: 28px; height: 15px; font-size: 9px; }
-.layoutGuide > div[data-direction=overlay] span + span { margin-left: -16px; transform: translateY(5px); }
+.layoutGuide > div[data-direction=overlay] { display: grid; }
+.layoutGuide > div[data-direction=overlay] span { grid-area: 1 / 1; background: var(--color-xc-select); }
+.layoutGuide small { color: var(--color-xc-text-3); font-size: 10px; }
 .layoutGuide p { font-size: 11px; line-height: 1.5; color: var(--color-xc-text-3); margin: 8px 0 0; }
 .symbolPicker { margin-top: 8px; }
 .symbolPicker > input { width: 100%; margin: 8px 0; padding: 7px; border: 1px solid var(--color-xc-line); border-radius: 5px; }
@@ -208,3 +212,9 @@
 /* The "opens as" picker on a Navigate to card. */
 .navigateType { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; font-size: 12px; color: var(--color-xc-text-2); }
 .navigateType select { flex: 1; max-width: 160px; height: 26px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; font-size: 12px; padding: 0 6px; }
+
+.modifierHint { padding: 9px 10px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-line-soft); }
+.modifierHint p { margin: 0; font-size: 11px; line-height: 1.5; color: var(--color-xc-text-2); }
+.modifierHint button { margin-top: 7px; }
+.modifierCard:has(.dragHandle:active) { box-shadow: 0 4px 12px #00000018; }
+.dragHandle[draggable='true']:active { cursor: grabbing; }

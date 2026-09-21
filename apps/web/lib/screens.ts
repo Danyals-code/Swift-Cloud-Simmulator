@@ -29,6 +29,12 @@ export function screenCatalog(snapshot: AuthoringSnapshot | undefined, pages: re
   return [...found.values()]
 }
 
+/** The first local occurrence wins SwiftUI's inherited font/foreground precedence. */
+export function screenOverrideModifier(root: AuthoringNode, name: string) {
+  const names = name === 'foregroundColor' ? ['foregroundColor', 'foregroundStyle'] : name === 'tint' ? ['tint', 'accentColor'] : [name]
+  return root.modifiers?.find(modifier => modifier.enabled && names.includes(modifier.name))
+}
+
 /** The first visible view a screen draws - what screen-level values are written on. */
 export function screenRoot(snapshot: AuthoringSnapshot | undefined, definition: AuthoringNode | undefined): AuthoringNode | undefined {
   if (!snapshot || !definition) return undefined

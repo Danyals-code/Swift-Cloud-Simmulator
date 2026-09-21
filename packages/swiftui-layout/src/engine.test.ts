@@ -373,7 +373,7 @@ describe('inherited environment', () => {
       kind: 'opacity',
       value: 0.5,
     })
-    expect(layout(element)[0]!.opacity).toBeCloseTo(0.25, 5)
+    expect(layout(element).find(node => node.paint.kind === 'text')!.opacity).toBeCloseTo(0.25, 5)
   })
 })
 

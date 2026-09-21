@@ -8,7 +8,7 @@ import {
 } from '@studio/shared'
 import { Lexer, Parser, forEachChild, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
 import { SUPPORTED_VIEWS } from './builtins'
-import { designControlRecipes, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
+import { colorOpacityParts, designControlRecipes, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
 
 type MutableNode = Omit<AuthoringNode, 'children' | 'properties'> & { children: string[]; properties: AuthoringProperty[] }
 interface Binding { kind: PropertyValueKind; source: SourceSpan }
@@ -172,17 +172,25 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     for (const [i, arg] of chain.base.args.entries()) {
       node.properties.push(property(node, arg.label ?? (name === 'Text' ? 'content' : `argument ${i + 1}`), arg.value, scope, capability?.id, reason))
     }
-    if (reason && !chain.base.args.length) node.properties.push(property(node, 'Source', expr, scope, undefined, reason))
+    if (reason && !builtin && !chain.base.args.length) node.properties.push(property(node, 'Source', expr, scope, undefined, reason))
     for (const modifier of chain.modifiers) {
       const modifierName = modifier.callee.kind === 'memberAccess' ? modifier.callee.member : 'unknown'
       const supported = authoringCapability(modifierName, 'modifier', modifier.args.map(a => a.label))
       const unsupported = supported ? undefined : 'This modifier overload is outside the authoring subset; preserve its source.'
-      for (const arg of modifier.args) node.properties.push(property(node, arg.label ? `${modifierName}.${arg.label}` : modifierName, arg.value, scope, supported?.id, unsupported))
+      for (const [index, arg] of modifier.args.entries()) {
+        const colorArgument = ['foregroundColor', 'foregroundStyle', 'background', 'fill', 'tint', 'border'].includes(modifierName) && index === 0 && !arg.label || modifierName === 'shadow' && arg.label === 'color'
+        const translucent = colorArgument && colorOpacityParts(arg.value)
+        const propertyName = arg.label ? `${modifierName}.${arg.label}` : modifierName
+        if (translucent) {
+          node.properties.push(property(node, propertyName, translucent.color, scope, supported?.id, unsupported))
+          node.properties.push(property(node, `${modifierName}.opacity`, translucent.opacity, scope, supported?.id, unsupported))
+        } else node.properties.push(property(node, propertyName, arg.value, scope, supported?.id, unsupported))
+      }
       // A corner radius written inside its shape - `.clipShape(.rect(cornerRadius: .radiusMedium))` -
       // is still the view's corner radius, and a radius token field reads it there.
       const shape = modifierName === 'clipShape' && modifier.args.length === 1 ? modifier.args[0]!.value : undefined
       if (shape?.kind === 'call' && !shape.trailingClosure && (shape.callee.kind === 'memberAccess' && !shape.callee.base && shape.callee.member === 'rect' || shape.callee.kind === 'identifier' && shape.callee.name === 'RoundedRectangle')) {
-        const corner = shape.args.length === 1 ? shape.args.find(a => a.label === 'cornerRadius') : undefined
+        const corner = shape.args.every(argument => ['cornerRadius', 'style'].includes(argument.label ?? '')) ? shape.args.find(a => a.label === 'cornerRadius') : undefined
         if (corner) node.properties.push(property(node, 'clipShape.cornerRadius', corner.value, scope, supported?.id, unsupported))
       }
       if (!modifier.args.length) node.properties.push({ ...property(node, modifierName, null, scope, supported?.id, unsupported), source: modifier.callee.kind === 'memberAccess' ? modifier.callee.memberSpan : modifier.span })

@@ -33,6 +33,8 @@ import {
   type Project,
   type ProjectStore,
   type ProjectSummary,
+  type PromptMessage,
+  validatePromptHistory,
 } from '@studio/project-model'
 import type { DeviceKey } from '@studio/sim-shell'
 import type { FileId, SourceSpan } from '@studio/shared'
@@ -133,6 +135,7 @@ export interface StudioState {
   documentSelection: DocumentSelection | null
   setDocumentSelection: (selection: DocumentSelection | null) => void
   commitTransaction: (expected: Project, transaction: ProjectTransaction) => string | null
+  appendPromptMessages: (projectId: string, messages: readonly PromptMessage[]) => string | null
   replayDocument: (direction: 'undo' | 'redo') => { selection: DocumentSelection | null } | null
   activeFileId: FileId | null
   /** Files the user has opened, in tab order. */
@@ -431,6 +434,15 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         set({ project: result.project, ...(transaction.selection === undefined ? {} : { documentSelection: transaction.selection }) })
         scheduleSave()
       }
+      return null
+    },
+    appendPromptMessages(projectId, messages) {
+      const project = get().project
+      if (!project || project.id !== projectId) return 'The project changed. Open the original project to continue.'
+      const chatHistory = [...(project.chatHistory ?? []), ...messages]
+      try { validatePromptHistory(chatHistory) } catch (error) { return error instanceof Error ? error.message : 'Could not save the conversation.' }
+      set({ project: { ...project, chatHistory, updatedAt: Date.now() } })
+      scheduleSave()
       return null
     },
     replayDocument(direction) {

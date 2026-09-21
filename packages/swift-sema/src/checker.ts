@@ -988,6 +988,10 @@ export class Checker {
     if (!onAView) return
     if (SUPPORTED_MODIFIERS.has(member)) return
     if (this.declaredModifiers.has(member)) return
+    if (member === 'placeholder') {
+      this.report(span, 'error', 'unsupported_swiftui_modifier', 'SwiftUI has no .placeholder modifier. Set the TextField initializer title or prompt, or define a custom View extension.', '.placeholder')
+      return
+    }
     // A modifier's argument is often built by a call on a helper the preview does
     // know - `.frame(width: size.rounded())` - but those sit under an argument, not
     // on the chain, so they never reach here.

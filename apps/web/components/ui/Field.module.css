@@ -1,0 +1,2 @@
+.row { display: grid; grid-template-columns: minmax(80px, 38%) minmax(0, 1fr); align-items: center; gap: 8px; min-height: 28px; min-width: 0; }
+.row > span:first-child, .row > label:first-child { color: var(--color-xc-text-2); font-size: 12px; overflow-wrap: normal; word-break: normal; }

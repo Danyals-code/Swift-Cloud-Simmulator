@@ -406,7 +406,8 @@ export class AppRuntime {
         wasOpen !== null &&
         this.ui.openMenu() === wasOpen &&
         intent.kind !== 'openMenu' &&
-        intent.kind !== 'stepMonth'
+        intent.kind !== 'stepMonth' &&
+        !(intent.kind === 'write' && (event.kind === 'textChange' || event.kind === 'slide'))
       ) {
         this.ui.setOpenMenu(null)
       }

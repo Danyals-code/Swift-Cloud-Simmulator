@@ -159,6 +159,8 @@ export interface FunctionValue {
 
 export interface RangeValue {
   readonly kind: 'range'
+  /** Date endpoints are epoch seconds, retaining their comparable type. */
+  readonly boundType?: 'Date'
   readonly lower: number
   readonly upper: number
   /** `...` includes the upper bound; `..<` does not. */
@@ -764,7 +766,7 @@ export function valuesEqual(a: SwiftValue, b: SwiftValue): boolean {
     }
     case 'range': {
       const other = b as RangeValue
-      return a.lower === other.lower && a.upper === other.upper && a.closed === other.closed
+      return a.boundType === other.boundType && a.lower === other.lower && a.upper === other.upper && a.closed === other.closed
     }
     case 'nil':
     case 'void':

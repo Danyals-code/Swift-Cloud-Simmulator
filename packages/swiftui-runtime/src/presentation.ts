@@ -5,8 +5,11 @@ import {
   asDate,
   asProjection,
   dateValue,
+  double,
   describe,
   opaque,
+  projection as makeProjection,
+  str,
   truthy,
   type ClosureValue,
   type SwiftValue,
@@ -18,6 +21,7 @@ import {
   ANIMATION_TYPE,
   COLOR_TYPE,
   type AnimationPayload,
+  type ColorPayload,
   type EnvironmentFrame,
   type ModifierValue,
   type ViewArg,
@@ -902,80 +906,74 @@ class Resolver {
     dismissId: string,
   ): Overlay {
     const selection = labelled(control.args, 'selection')
-    const projection = asProjection(selection)
-    const seconds = asDate(projection?.get() ?? { kind: 'nil' })?.epochSeconds ?? Date.now() / 1000
+    const binding = asProjection(selection)
+    const seconds = asDate(binding?.get() ?? { kind: 'nil' })?.epochSeconds ?? Date.now() / 1000
     const chosen = new Date(seconds * 1000)
+    const range = labelled(control.args, 'in')
+    const lower = range?.kind === 'range' ? range.lower : -Infinity
+    const upper = range?.kind === 'range' ? range.upper : Infinity
+    const valid = (date: Date) => date.getTime() / 1000 >= lower && date.getTime() / 1000 <= upper
+    const components = labelled(control.args, 'displayedComponents')
+    const names = components ? (components.kind === 'array' ? components.elements : [components]).map(tokenName) : ['date', 'hourAndMinute']
+    const dateVisible = names.includes('date'), timeVisible = names.includes('hourAndMinute')
+    const views: ViewValue[] = []
 
-    const shown = new Date(chosen)
-    shown.setUTCDate(1)
-    shown.setUTCMonth(shown.getUTCMonth() + this.ctx.state.monthOffset(open))
-
-    const year = shown.getUTCFullYear()
-    const month = shown.getUTCMonth()
-    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
-    const leading = new Date(Date.UTC(year, month, 1)).getUTCDay()
-
-    const cells: ViewValue[] = []
-    for (let i = 0; i < leading; i++) {
-      cells.push(this.editorCell(`${open}/pad-${i}`, '', false, null))
+    if (dateVisible) {
+      // Calendar and time editor use the same local timezone as the collapsed label.
+      const shown = new Date(Math.max(lower, Math.min(upper, seconds)) * 1000)
+      shown.setDate(1)
+      shown.setMonth(shown.getMonth() + this.ctx.state.monthOffset(open))
+      const year = shown.getFullYear(), month = shown.getMonth()
+      const daysInMonth = new Date(year, month + 1, 0).getDate()
+      const leading = new Date(year, month, 1).getDay()
+      const cells: ViewValue[] = []
+      for (let i = 0; i < leading; i++) cells.push(this.editorCell(`${open}/pad-${i}`, '', false, null))
+      for (let day = 1; day <= daysInMonth; day++) {
+        const path = `${open}/day-${day}`, value = new Date(chosen)
+        value.setFullYear(year, month, day)
+        const selected = chosen.getFullYear() === year && chosen.getMonth() === month && chosen.getDate() === day
+        const bounded = new Date(Math.max(lower, Math.min(upper, value.getTime() / 1000)) * 1000)
+        const allowed = bounded.getFullYear() === year && bounded.getMonth() === month && bounded.getDate() === day
+        const write: ViewIntent | null = selection && allowed ? { kind: 'choose', binding: selection, value: dateValue(bounded.getTime() / 1000) } : null
+        if (write) this.register(path, write)
+        cells.push(this.editorCell(path, String(day), selected, write))
+      }
+      const step = (delta: number, label: string): ViewValue => {
+        const path = `${open}/month-${delta}`
+        const start = new Date(year, month + delta, 1).getTime() / 1000
+        const end = new Date(year, month + delta + 1, 1).getTime() / 1000
+        const intent: ViewIntent | null = end > lower && start <= upper ? { kind: 'stepMonth', control: open, by: delta } : null
+        if (intent) this.register(path, intent)
+        return this.editorCell(path, label, false, intent)
+      }
+      views.push({ name: DATE_EDITOR, args: [{ label: 'title', value: str(MONTHS[month]! + ' ' + year) }], children: [step(-1, '‹'), step(1, '›'), ...cells], modifiers: [], action: null, span: control.span, path: `${open}/editor` })
     }
-
-    for (let day = 1; day <= daysInMonth; day++) {
-      const path = `${open}/day-${day}`
-      // The time of day is the binding's own, so choosing a date does not silently
-      // move an appointment to midnight.
-      const value = new Date(chosen)
-      value.setUTCFullYear(year, month, day)
-
-      const selected =
-        chosen.getUTCFullYear() === year &&
-        chosen.getUTCMonth() === month &&
-        chosen.getUTCDate() === day
-
-      const write: ViewIntent | null = selection
-        ? { kind: 'choose', binding: selection, value: dateValue(value.getTime() / 1000) }
-        : null
-      if (write) this.register(path, write)
-      cells.push(this.editorCell(path, String(day), selected, write))
-    }
-
-    const step = (delta: number, label: string): ViewValue => {
-      const path = `${open}/month-${delta}`
-      const intent: ViewIntent = { kind: 'stepMonth', control: open, by: delta }
-      this.register(path, intent)
-      return this.editorCell(path, label, false, intent)
-    }
-
-    return {
-      kind: 'menu',
-      views: [
-        {
-          name: DATE_EDITOR,
-          args: [
-            { label: 'title', value: { kind: 'string', value: MONTHS[month]! + ' ' + year } },
-          ],
-          children: [step(-1, '\u2039'), step(1, '\u203a'), ...cells],
-          modifiers: [],
-          action: null,
-          span: control.span,
-          path: `${open}/editor`,
+    if (timeVisible) {
+      const path = `${open}/time`
+      const timeText = () => {
+        const date = new Date((asDate(binding?.get() ?? { kind: 'nil' })?.epochSeconds ?? seconds) * 1000)
+        return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+      }
+      const timeBinding = makeProjection({
+        description: 'DatePicker time', get: () => str(timeText()),
+        set: value => {
+          if (value.kind !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.value)) return
+          const date = new Date((asDate(binding?.get() ?? { kind: 'nil' })?.epochSeconds ?? seconds) * 1000)
+          const [hour, minute] = value.value.split(':').map(Number)
+          date.setHours(hour!, minute!)
+          if (valid(date)) binding?.set(dateValue(date.getTime() / 1000))
         },
-      ],
-      detent: 0,
-      title: stringArg(control.args.find((a) => a.label === null)?.value) ?? '',
-      message: '',
-      dismiss,
-      dismissId,
+      })
+      const intent: ViewIntent = { kind: 'write', binding: timeBinding, value: str(timeText()) }
+      this.register(path, intent)
+      views.push({ name: 'TextField', args: [{ label: null, value: str('Time') }, { label: 'text', value: timeBinding }, { label: '_inputType', value: str('time') }], children: [], modifiers: [], action: null, span: control.span, path, intent })
     }
+    return { kind: 'menu', views, detent: 0, title: stringArg(control.args.find(a => a.label === null)?.value) ?? '', message: '', dismiss, dismissId }
   }
 
   /**
-   * A `ColorPicker`'s editor: the system palette as swatches.
-   *
-   * Not a continuous colour surface. A gradient wheel needs a drag with a colour
-   * model behind it, and a preview that let you land on a colour the exported code
-   * cannot name would be worse than one that offers the colours SwiftUI itself names
-   * - which is what almost every `ColorPicker` in app code is used to pick.
+   * Named color swatches with an alpha slider when supportsOpacity is enabled.
+   * Arbitrary RGB selection remains outside the preview palette's scope.
    */
   private colourEditor(
     control: ViewValue,
@@ -985,11 +983,13 @@ class Resolver {
   ): Overlay {
     const selection = labelled(control.args, 'selection')
     const projection = asProjection(selection)
-    const current = projection ? describe(projection.get(), true) : null
+    const current = payloadOf<ColorPayload>(projection?.get(), COLOR_TYPE)
 
+    const supportsOpacity = labelled(control.args, 'supportsOpacity')?.kind !== 'bool' || truthy(labelled(control.args, 'supportsOpacity')!)
+    const alpha = () => payloadOf<ColorPayload>(projection?.get(), COLOR_TYPE)?.opacity ?? 1
     const swatches = SWATCHES.map((name) => {
       const path = `${open}/colour-${name}`
-      const value = opaque(COLOR_TYPE, { name })
+      const value = opaque(COLOR_TYPE, { name, ...(supportsOpacity ? { opacity: alpha() } : {}) })
       const intent: ViewIntent | null = selection
         ? { kind: 'choose', binding: selection, value }
         : null
@@ -999,7 +999,7 @@ class Resolver {
         name: COLOUR_SWATCH,
         args: [
           { label: 'colour', value },
-          { label: 'selected', value: { kind: 'bool' as const, value: current === describe(value, true) } },
+          { label: 'selected', value: { kind: 'bool' as const, value: current?.name === name && !current.asset } },
         ],
         children: [],
         modifiers: [],
@@ -1010,6 +1010,18 @@ class Resolver {
       } satisfies ViewValue
     })
 
+    const opacityViews: ViewValue[] = []
+    if (supportsOpacity && projection) {
+      const path = `${open}/opacity`
+      const binding = makeProjection({ description: 'ColorPicker opacity', get: () => double(alpha()), set: value => {
+        const color = payloadOf<ColorPayload>(projection.get(), COLOR_TYPE)
+        if (color && (value.kind === 'double' || value.kind === 'int')) projection.set(opaque(COLOR_TYPE, { ...color, opacity: Math.max(0, Math.min(1, value.value)) }))
+      } })
+      const intent: ViewIntent = { kind: 'write', binding, value: double(alpha()) }
+      this.register(path, intent)
+      opacityViews.push({ name: 'Text', args: [{ label: null, value: str('Opacity') }], children: [], modifiers: [], action: null, path: `${path}-label`, span: control.span })
+      opacityViews.push({ name: 'Slider', args: [{ label: null, value: str('Opacity') }, { label: 'value', value: binding }, { label: 'step', value: double(0.01) }], children: [], modifiers: [], action: null, path, span: control.span, intent })
+    }
     return {
       kind: 'menu',
       views: [
@@ -1022,6 +1034,7 @@ class Resolver {
           span: control.span,
           path: `${open}/editor`,
         },
+        ...opacityViews,
       ],
       detent: 0,
       title: stringArg(control.args.find((a) => a.label === null)?.value) ?? '',
@@ -1043,6 +1056,7 @@ class Resolver {
       args: [
         { label: 'label', value: { kind: 'string', value: label } },
         { label: 'selected', value: { kind: 'bool', value: selected } },
+        { label: 'enabled', value: { kind: 'bool', value: !!intent } },
       ],
       children: [],
       modifiers: [],

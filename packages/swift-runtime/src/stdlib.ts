@@ -132,9 +132,9 @@ export function getBuiltinProperty(target: SwiftValue, member: string): SwiftVal
     case 'range':
       switch (member) {
         case 'lowerBound':
-          return int(target.lower)
+          return target.boundType === 'Date' ? dateValue(target.lower) : int(target.lower)
         case 'upperBound':
-          return int(target.upper)
+          return target.boundType === 'Date' ? dateValue(target.upper) : int(target.upper)
         case 'count':
           return int(Math.max(0, target.upper - target.lower + (target.closed ? 1 : 0)))
         case 'isEmpty':
@@ -443,7 +443,7 @@ export function callBuiltinMember(
         case 'contains': {
           const value = arg(0)
           if (!value) return undefined
-          const n = numericValue(value)
+          const n = target.boundType === 'Date' ? asDate(value)?.epochSeconds ?? NaN : numericValue(value)
           return bool(n >= target.lower && (target.closed ? n <= target.upper : n < target.upper))
         }
         default:

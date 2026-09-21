@@ -22,7 +22,7 @@ export async function addModifier(page: Page, label: string, name: string) {
 
 export async function cardAction(card: Locator, label: string, action: 'Move up' | 'Move down' | 'Duplicate' | 'Remove') {
   await card.getByRole('button', { name: `${label} actions`, exact: true }).click()
-  await card.getByRole('button', { name: action, exact: true }).click()
+  await card.page().getByRole('option', { name: action, exact: true }).click()
 }
 
 export async function assertSource(page: Page, source: string, returnToDesign = true) {

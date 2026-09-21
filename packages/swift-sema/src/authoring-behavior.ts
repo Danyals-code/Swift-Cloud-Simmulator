@@ -14,12 +14,46 @@ export function stateInputs(ctx: FeatureContext, node: AuthoringNode): StateInpu
     const simple = scalarType(member.typeAnnotation, member.initializer)
     const options = member.typeAnnotation?.kind === 'namedType' ? enumCases(ctx, member.typeAnnotation.name) : undefined
     const value = simple ? literal(ctx, member.initializer) : options && member.initializer.kind === 'memberAccess' && options.includes(member.initializer.member) ? member.initializer.member : undefined
-    const special = member.typeAnnotation?.kind === 'namedType' ? member.typeAnnotation.name : undefined
-    if (special === 'Date' || special === 'Color') {
-      const text = raw(ctx, member.initializer.span), date = /^Date\(timeIntervalSince1970: (-?[0-9.]+)\)$/.exec(text)
-      const color = /^Color\.([A-Za-z]+)$/.exec(text), rgb = /^Color\(red: ([0-9.]+), green: ([0-9.]+), blue: ([0-9.]+)\)$/.exec(text)
-      const initial = special === 'Date' && date ? Number(date[1]) : special === 'Color' && color ? color[1] : special === 'Color' && rgb ? '#' + rgb.slice(1).map(v => Math.round(Number(v) * 255).toString(16).padStart(2, '0')).join('') : undefined
-      if (initial !== undefined && !shadowsMember(ctx, node, member.name)) return [{ owner: node.owner, name: member.name, type: special, value: initial, signature: signature(ctx, member), source: member.initializer.span }]
+    const annotation = member.typeAnnotation?.kind === 'namedType' ? member.typeAnnotation.name : undefined
+    const initializer = member.initializer
+    const nameOf = (e: typeof initializer): string | undefined => e.kind === 'identifier' ? e.name : e.kind === 'memberAccess' ? e.member : undefined
+    const inferredType = (expr: typeof initializer): string | undefined => {
+      if (expr.kind === 'call') {
+        if (expr.callee.kind === 'identifier') return expr.callee.name
+        if (expr.callee.kind === 'memberAccess' && expr.callee.base) {
+          if (['opacity', 'addingTimeInterval'].includes(expr.callee.member)) return inferredType(expr.callee.base)
+          if (expr.callee.base.kind === 'identifier' && ['Foundation', 'SwiftUI'].includes(expr.callee.base.name)) return expr.callee.member
+        }
+      }
+      if (expr.kind === 'memberAccess' && expr.base) return nameOf(expr.base)
+      return undefined
+    }
+    const inferred = inferredType(initializer)
+    const special = annotation ?? inferred
+    if ((special === 'Date' || special === 'Color') && !allDeclarations(ctx).some(d => 'name' in d && d.name === special)) {
+      // The type makes a direct state binding safe. Evaluating its initial value is
+      // a separate capability: null keeps computed defaults owned by the source.
+      const number = (expr: typeof initializer): number | undefined => {
+        const value = raw(ctx, expr.span).replace(/\s/g, '')
+        return ['integerLiteral', 'floatLiteral', 'unary'].includes(expr.kind) && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) && Number.isFinite(Number(value)) ? Number(value) : undefined
+      }
+      let initial: DesignValue = null
+      if (special === 'Date' && initializer.kind === 'call') {
+        const timestamp = initializer.args.find(a => a.label === 'timeIntervalSince1970')?.value
+        if (timestamp) initial = number(timestamp) ?? null
+      } else if (special === 'Color') {
+        const expression = raw(ctx, initializer.span).replace(/\s/g, '')
+        const named = /^(?:(?:SwiftUI\.)?Color)?\.([A-Za-z]+)$/.exec(expression)
+        if (named) initial = named[1]!
+        else if (initializer.kind === 'call' && ['Color', 'SwiftUI.Color'].includes(raw(ctx, initializer.callee.span))) {
+          const components = ['red', 'green', 'blue', 'opacity'].map(label => {
+            const arg = initializer.args.find(a => a.label === label)?.value
+            return arg ? number(arg) : label === 'opacity' ? 1 : undefined
+          })
+          if (components.every((v): v is number => v !== undefined && v >= 0 && v <= 1)) initial = '#' + (components[3] === 1 ? components.slice(0, 3) : components).map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('')
+        }
+      }
+      if (!shadowsMember(ctx, node, member.name)) return [{ owner: node.owner, name: member.name, type: special, value: initial, signature: signature(ctx, member), source: member.initializer.span }]
     }
     const type = simple?.type ?? (member.typeAnnotation?.kind === 'namedType' ? member.typeAnnotation.name : undefined)
     if (shadowsMember(ctx, node, member.name) || !type || value === undefined || simple && !validScalar(value, simple)) return []
@@ -52,7 +86,7 @@ function stateDependencies(ctx: FeatureContext, owner: string, inputs: readonly 
 export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): BehaviorSettings | undefined {
   const call = callOf(ctx, node)
   if (!call) return undefined
-  const label = node.name === 'Toggle' ? 'isOn' : ['TextField', 'SecureField'].includes(node.name) ? 'text' : ['Picker', 'DatePicker', 'ColorPicker'].includes(node.name) ? 'selection' : ['Slider', 'Stepper'].includes(node.name) ? 'value' : undefined
+  const label = node.name === 'Toggle' ? 'isOn' : ['TextField', 'SecureField', 'TextEditor'].includes(node.name) ? 'text' : ['Picker', 'DatePicker', 'ColorPicker'].includes(node.name) ? 'selection' : ['Slider', 'Stepper'].includes(node.name) ? 'value' : undefined
   const argument = label && call.args.find(a => a.label === label)
   const inputs = stateInputs(ctx, node)
   const bindingState = argument && inputs.find(s => raw(ctx, argument.value.span) === '$' + s.name)

@@ -13,6 +13,7 @@ import styles from './Workspace.module.css'
 import { ToolButton } from './ui/Control'
 
 export interface NavigatorProps {
+  tabbed?: boolean
   pageFocusEpoch?: number
   screens?: ReactNode
   layerLabels?: readonly { owner: string; fingerprint: string; label: string; offset?: number }[]
@@ -85,7 +86,7 @@ const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text
  * out of the way when you are looking for one file by name.
  */
 export function Navigator({
-  tree, screens, pageFocusEpoch, layerLabels, onRenameLayer,
+  tree, screens, pageFocusEpoch, layerLabels, onRenameLayer, tabbed = false,
   pageId, pageName, pageSource, pageLayers,
   authoring, authoringFiles, authoringSelection, selectedAuthoringId, selectedAuthoringAncestors, hoveredAuthoringId, hoveredAuthoringAncestors, onHoverAuthoring, onSelectAuthoring, onEditAuthoring,
   layers, selectedLayerId, hoveredLayerId, stale, onSelectLayer, onReorderLayer, hiddenViews, onHideLayer, onShowHidden, layersEditable,
@@ -160,7 +161,7 @@ export function Navigator({
       aria-label="Project navigator"
     >
       <header className={`${styles.tabs} ${styles.navigatorTabs} h-[46px] shrink-0 border-b border-xc-line px-1.5`}>
-        <button type="button" data-testid="pane-toggle-navigator" aria-pressed="true" title="Collapse left panel (⌘0)" aria-label="Collapse left panel" onClick={onTogglePanel}><Icon name="sidebar-left" size={15} /></button>
+        {!tabbed && <button type="button" data-testid="pane-toggle-navigator" aria-pressed="true" title="Collapse left panel (⌘0)" aria-label="Collapse left panel" onClick={onTogglePanel}><Icon name="sidebar-left" size={15} /></button>}
         <NavTab active={tab === 'project'} onClick={() => setTab('project')} label="Project">
           <span className="text-[14px] font-medium">Files</span>
         </NavTab>

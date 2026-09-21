@@ -58,11 +58,11 @@ describe('supplied native phone reference', () => {
     tap('A quiet place'); dump('details')
     tap('Show alert'); dump('alert')
     const panel = nodes().find(n => n.id === 'ov-bg-material')!
-    expect(panel.frame).toEqual({ x: measurements.alertApprox.x, y: measurements.alertApprox.y, width: measurements.alertApprox.width, height: measurements.alertApprox.height })
+    expect(world(r.renderTree!, panel)).toEqual({ x: measurements.alertApprox.x, y: measurements.alertApprox.y, width: measurements.alertApprox.width, height: measurements.alertApprox.height })
     const pills = nodes().filter(n => /^ov-btn\d-pillf$/.test(n.id))
     expect(pills).toHaveLength(2)
     expect(pills[0]!.frame.width).toBe(140)
-    expect(pills[1]!.frame.x - pills[0]!.frame.x - pills[0]!.frame.width).toBe(8)
+    expect(world(r.renderTree!, pills[1]!).x - world(r.renderTree!, pills[0]!).x - pills[0]!.frame.width).toBe(8)
     tap('Cancel')
     expect(nodes().some(n => n.id === 'overlay-dim')).toBe(false)
     tap('Library')

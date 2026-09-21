@@ -39,8 +39,8 @@ describe('source modifier inventory and writers', () => {
   })
   it('associates controls with each occurrence and existing frame sizing with its Size card', () => {
     const selected = node(wrap('Text("Hello").padding(8).frame(width: 100, height: 50).padding(8)'))
-    expect(selected.modifiers![0]!.controls.map(c => c.id)).toEqual(['modifier:0:0'])
-    expect(selected.modifiers![2]!.controls.map(c => c.id)).toEqual(['modifier:2:0'])
+    expect(selected.modifiers![0]!.controls.map(c => c.id)).toEqual(['modifier:0:0', 'modifier:0:advanced:edges'])
+    expect(selected.modifiers![2]!.controls.map(c => c.id)).toEqual(['modifier:2:0', 'modifier:2:advanced:edges'])
     expect(selected.modifiers![1]!.controls.map(c => c.id)).toEqual(['modifier:1:0', 'modifier:1:1', 'fill:width', 'fill:height'])
     expect(selected.modifiers!.flatMap(m => m.controls).some(c => c.id.startsWith('add:'))).toBe(false)
   })

@@ -29,7 +29,7 @@
 .compactSettings { min-height: 44px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); padding: 6px 12px; }
 .compactSettings > strong { font-size: 13px; font-weight: 500; margin-right: auto; }
 .settingsSplit { display: contents; }
-.properties { width: var(--settings-width, 236px); flex-shrink: 0; background: var(--color-xc-bar); border-left: 1px solid var(--color-xc-line); overflow-y: auto; }
+.properties { width: var(--settings-width, 300px); flex-shrink: 0; background: var(--color-xc-bar); border-left: 1px solid var(--color-xc-line); overflow-y: auto; }
 .properties > header { height: 46px; display: flex; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--color-xc-line-soft); font-size: 14px; font-weight: 600; }
 /**
  * One tab strip, used by both panels.
@@ -204,15 +204,16 @@
 .screenRow > button:last-child { padding: 6px; }
 .screenForm { display: grid; gap: 8px; padding: 10px 5px 2px; }
 .screenForm label { display: grid; gap: 5px; }
-.screenForm input, .screenForm select { width: 100%; background: var(--color-xc-bg); border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; }
+.screenForm input, .screenForm select { width: 100%; background: var(--color-xc-bar-raised); border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; }
 .screenForm > div { display: flex; gap: 8px; }
 .screenForm button { padding: 6px 8px; background: var(--color-xc-select); color: var(--color-xc-accent); border-radius: 5px; }
 .screens > p { color: var(--color-xc-error); margin: 8px 5px 0; line-height: 1.5; }
 
-.inlineText { position: fixed; z-index: 2147483647; padding: 8px; border: 2px solid var(--color-xc-accent); border-radius: 8px; background: var(--color-xc-bg); box-shadow: 0 8px 24px #0003; color: var(--color-xc-text); }
+.inlineText { position: fixed; z-index: 2147483647; padding: 8px; border: 2px solid var(--color-xc-accent); border-radius: 8px; background: var(--color-xc-panel); box-shadow: 0 8px 24px #0003; color: var(--color-xc-text); }
 .inlineText textarea { display: block; width: 100%; resize: vertical; padding: 8px; background: transparent; color: inherit; font-size: 16px; }
-.inlineText > div { display: flex; gap: 8px; align-items: center; }
-.inlineText small { margin-right: auto; font-size: 10px; color: var(--color-xc-text-3); }
+.inlineText > div { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding-top: 8px; }
+.inlineText small { grid-column: 1 / -1; font-size: 10px; color: var(--color-xc-text-3); }
+.inlineText button[type="button"] { grid-column: 2; }
 .inlineText button { padding: 5px 8px; background: var(--color-xc-select); color: var(--color-xc-accent); border-radius: 4px; font-size: 12px; }
 .inlineText p { color: var(--color-xc-error); font-size: 12px; }
 
@@ -237,3 +238,12 @@
 .levelPath > button:hover { background: var(--color-xc-line-soft); color: var(--color-xc-text); }
 .levelPath > [aria-current='page'] { color: var(--color-xc-text); font-weight: 600; }
 .levelPath > span[aria-current] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 5px; }
+.sidebar { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--color-xc-sidebar); }
+.sidebarHeader { display: flex; align-items: center; gap: 5px; min-height: 46px; padding: 0 6px; border-bottom: 1px solid var(--color-xc-line); flex-shrink: 0; }
+.sidebarHeader > button { width: 25px; height: 28px; display: grid; place-items: center; color: var(--color-xc-text-3); border-radius: 5px; cursor: pointer; }
+.sidebarTabs { display: flex; flex: 1; min-width: 0; gap: 2px; padding: 3px; border-radius: 7px; background: var(--color-xc-bar-raised); }
+.sidebarTabs > button { flex: 1; min-width: 0; padding: 6px 4px; border-radius: 5px; white-space: nowrap; font-size: 11px; color: var(--color-xc-text-2); cursor: pointer; }
+.sidebarTabs > button[aria-selected="true"] { background: var(--color-xc-panel); color: var(--color-xc-text); box-shadow: 0 1px 3px #0001; }
+.sidebarHeader button:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
+.sidebarContent { flex: 1; min-height: 0; overflow: hidden; }
+.sidebarContent[hidden] { display: none; }

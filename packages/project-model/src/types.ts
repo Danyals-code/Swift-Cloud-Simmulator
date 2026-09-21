@@ -3,6 +3,7 @@ import type { DeviceKey } from '@studio/sim-shell'
 import { readStudioMetadata, type StudioMetadata } from './studio-metadata'
 import { validateAssets, type ImageAsset } from './assets'
 import { validateColors, type ColorAsset } from './colors'
+import { validatePromptHistory, type PromptMessage } from './prompt-history'
 
 export interface ProjectManifest {
   readonly previewTarget?: PreviewTarget
@@ -32,6 +33,7 @@ export interface ProjectManifest {
 }
 
 export interface Project {
+  readonly chatHistory?: readonly PromptMessage[]
   readonly schemaVersion?: 1
   readonly assets?: readonly ImageAsset[]
   /** Colour sets for colour tokens: the asset-catalog half of `Color("name")`. */
@@ -79,6 +81,7 @@ export interface ProjectStore {
 }
 
 export function normalizeProject(project: Project): Project {
+  if (project.chatHistory !== undefined) validatePromptHistory(project.chatHistory)
   if (project.schemaVersion !== undefined && project.schemaVersion !== 1) throw new Error('This project uses a newer storage version. Open it with a newer Studio; the saved project has not been changed.')
   if (project.studio !== undefined && readStudioMetadata(project.studio).status !== 'valid') throw new Error('This project contains unsupported or invalid Studio metadata. Its saved copy has not been changed.')
   if (project.assets) validateAssets(project.assets)

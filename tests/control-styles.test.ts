@@ -1,3 +1,4 @@
+import { surfaceRadius, worldFrame } from './render-geometry'
 import { describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
@@ -152,7 +153,7 @@ describe('.pickerStyle', () => {
     expect(texts(result)).toContain('One')
     expect(texts(result)).toContain('Two')
     expect(node(result, 'One').frame.x).toBeLessThan(node(result, 'Two').frame.x)
-    expect(node(result, 'One').frame.y).toBeCloseTo(node(result, 'Two').frame.y, 1)
+    expect(worldFrame(nodes(result), node(result, 'One')).y).toBeCloseTo(worldFrame(nodes(result), node(result, 'Two')).y, 1)
   })
 
   it('.segmented gives every segment a target of its own', () => {
@@ -362,7 +363,7 @@ describe('.controlSize and .buttonBorderShape', () => {
     // It was not. The radius was applied *inside* the background rather than around
     // it, and a fill only takes a radius from the inherited environment - so every
     // bordered button drew square corners, which nothing asserted either way.
-    const filled = nodes(run(button(''))).filter((n) => n.background)
-    expect(filled.some((n) => (n.cornerRadius ?? 0) > 0)).toBe(true)
+    const drawn = nodes(run(button('')))
+    expect(drawn.some(n => n.background && surfaceRadius(drawn, n) > 0)).toBe(true)
   })
 })

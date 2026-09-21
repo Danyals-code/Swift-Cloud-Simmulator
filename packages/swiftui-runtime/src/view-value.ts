@@ -147,6 +147,8 @@ export const VIEW_TYPE = 'View'
 export const TOKEN_TYPE = 'Token'
 
 export interface TokenPayload {
+  /** Alpha for a material ShapeStyle, preserving its backdrop. */
+  readonly opacity?: number
   readonly name: string
   /**
    * The arguments the contextual call was written with, where it had any.
@@ -206,10 +208,17 @@ export interface ColorPayload {
 export const STYLE_TYPE = 'ShapeStyle'
 
 export interface GradientPayload {
+  readonly opacity?: number
   readonly kind: 'linear' | 'radial' | 'angular'
+  readonly center?: string | { x: number; y: number } | null
+  readonly startRadius?: number
+  readonly endRadius?: number
+  readonly startAngle?: number
+  readonly endAngle?: number
   readonly colors: readonly SwiftValue[]
-  readonly startPoint: string | null
-  readonly endPoint: string | null
+  readonly stops?: readonly { color: SwiftValue; location: number }[]
+  readonly startPoint: string | { x: number; y: number } | null
+  readonly endPoint: string | { x: number; y: number } | null
 }
 
 /** A `GeometryProxy`, as `GeometryReader`'s closure receives it. */
@@ -272,7 +281,10 @@ export const STROKE_STYLE_TYPE = 'StrokeStyle'
 
 export interface StrokeStylePayload {
   readonly lineWidth: number
-  readonly lineCap: string | null
+  readonly lineCap: 'butt' | 'round' | 'square'
+  readonly lineJoin: 'miter' | 'round' | 'bevel'
+  readonly miterLimit: number
+  readonly dashPhase: number
   readonly dash: readonly number[]
 }
 

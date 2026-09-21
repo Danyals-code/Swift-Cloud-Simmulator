@@ -20,16 +20,17 @@ export function rebaseSourceLayers(state: SourceLayerNavigation, snapshot: Autho
 }
 
 const VIEW_NAMES: Readonly<Record<string, string>> = {
-  VStack: 'Column', LazyVStack: 'Lazy column', HStack: 'Row', LazyHStack: 'Lazy row', ZStack: 'Stack',
+  VStack: 'Vertical Stack', LazyVStack: 'Lazy Vertical Stack', HStack: 'Horizontal Stack', LazyHStack: 'Lazy Horizontal Stack', ZStack: 'ZStack',
   ForEach: 'Repeat', ScrollView: 'Scroll', NavigationStack: 'Navigation', NavigationView: 'Navigation',
   NavigationSplitView: 'Split navigation', NavigationLink: 'Link', TabView: 'Tabs',
   TextField: 'Text field', SecureField: 'Password field', DatePicker: 'Date picker', ColorPicker: 'Color picker',
-  ProgressView: 'Progress', AsyncImage: 'Remote image', GroupBox: 'Group box', GridRow: 'Grid row',
+  ProgressView: 'Progress', AsyncImage: 'Remote image', GroupBox: 'Card', GridRow: 'Grid row',
   LazyVGrid: 'Column grid', LazyHGrid: 'Row grid', RoundedRectangle: 'Rounded rectangle',
 }
 
 /** Friendly labels are presentation only; the Swift identity stays intact. */
-export function sourceLayerType(node: Pick<AuthoringNode, 'name' | 'kind'>): string {
+export function sourceLayerType(node: Pick<AuthoringNode, 'name' | 'kind'> & Partial<Pick<AuthoringNode, 'properties' | 'controls'>>): string {
+  if (node.name === 'Image' && (node.properties?.some(property => property.name === 'systemName') || node.controls?.some(control => control.id === 'image' && control.label === 'System symbol'))) return 'Symbols'
   if (node.kind === 'template') return 'Row design'
   if (node.kind === 'component') return 'Component'
   return VIEW_NAMES[node.name] ?? node.name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(' ').map((word, index) => index ? word.toLowerCase() : word).join(' ')
@@ -92,7 +93,7 @@ export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: Authoring
   return !shown(node)
 }
 
-const STRUCTURAL_VIEWS = new Set(['ForEach', 'Group', 'Section', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'WindowGroup', 'Window', 'ToolbarItem', 'ToolbarItemGroup', 'ViewThatFits', 'EmptyView'])
+const STRUCTURAL_VIEWS = new Set(['ForEach', 'Group', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'WindowGroup', 'Window', 'ToolbarItem', 'ToolbarItemGroup', 'ViewThatFits', 'EmptyView'])
 
 const friendlyComponentName = (name: string) => name.replace(/View$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/\b[A-Z]\w*/g, (word, offset: number) => offset ? word.toLowerCase() : word)
 
@@ -100,6 +101,7 @@ const friendlyComponentName = (name: string) => name.replace(/View$/, '').replac
 export function sourceLayerIsVisual(node: AuthoringNode): boolean {
   if (node.kind === 'component') return true
   if (!['view', 'collection', 'opaque'].includes(node.kind)) return false
+  if (node.name === 'Section') return node.controls?.some(control => control.id === 'title') === true
   if (STRUCTURAL_VIEWS.has(node.name)) return false
   // A titled link is itself visible. A link with a label builder contributes its label views.
   if (node.name === 'NavigationLink') return node.children.length === 0 || node.controls?.some(control => control.id === 'title') === true || node.properties.some(property => property.name === 'argument 1')

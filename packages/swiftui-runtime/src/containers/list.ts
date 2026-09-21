@@ -7,6 +7,7 @@ import { numberArg, resolveFillArg, stringArg, type ColorScheme } from '../style
 import { inheritVisualStyle, visualModifiers } from '../inherited-style'
 
 interface Context {
+  readonly showsIndicators?: boolean
   readonly width: number
   readonly scheme: ColorScheme
   readonly tint?: RGBA
@@ -30,7 +31,7 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
   const m = SURFACES.list
   const style = listAppearance(token(arg(view, 'listStyle')), view.name === 'Form', c.width)
   const grouped = style === 'grouped' || style === 'insetGrouped'
-  const inset = style === 'insetGrouped' ? Math.max(m.inset, (c.width - m.regularMaxWidth) / 2) : style === 'sidebar' ? m.inset : 0
+  const inset = style === 'insetGrouped' ? Math.max(m.inset, (c.width - m.regularMaxWidth) / 2) : style === 'sidebar' || style === 'inset' ? m.inset : 0
   const spacing = numberArg(arg(view, 'listRowSpacing')) ?? 0
   const sectionGap = numberArg(arg(view, 'listSectionSpacing')) ?? m.sectionGap
   const flatten = (children: readonly ViewValue[]): ViewValue[] => children.flatMap(child =>
@@ -120,6 +121,6 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
     previousHadFooter = !!footer
   })
   const content = pad(`${path}margins`, column(`${path}rows`, blocks), insets(grouped || style === 'sidebar' ? m.top : 0, 0, m.bottom, 0))
-  const scroll: LayoutElement = { kind: 'scroll', id: path, axis: 'vertical', showsIndicators: token(arg(view, 'scrollIndicators')) !== 'hidden', content, ...origin }
+  const scroll: LayoutElement = { kind: 'scroll', id: path, axis: 'vertical', showsIndicators: c.showsIndicators ?? token(arg(view, 'scrollIndicators')) !== 'hidden', content, ...origin }
   return token(arg(view, 'scrollContentBackground')) === 'hidden' ? scroll : c.background(scroll, `${path}bg`, c.color(grouped || style === 'sidebar' ? 'systemGroupedBackground' : 'systemBackground'))
 }

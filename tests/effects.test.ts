@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { rotationProjection } from '@studio/shared'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
 import { DEVICES } from '@studio/sim-shell'
@@ -8,9 +9,7 @@ import { DEVICES } from '@studio/sim-shell'
  *
  * Most of these are CSS operations with the same definition as the SwiftUI ones, so
  * the work was plumbing rather than approximation: a hue rotation is a hue rotation.
- * The two that are not are noted where they are tested - `.colorMultiply` is an
- * overlay rather than a filter because no filter function multiplies by a colour, and
- * `.rotation3DEffect` needs a perspective or the browser draws a flat squash.
+ * Pixel multiplication preserves alpha; 3D rotation uses an axis-angle projection.
  *
  * `.animation(_:value:)` is the interesting one. The gate needs the *previous*
  * render's value to compare against, which no stage but the resolver has - so a
@@ -93,31 +92,22 @@ describe('colour effects', () => {
 })
 
 describe('.rotation3DEffect', () => {
-  it('splits the angle across the axis it was given', () => {
-    const y = run(view('Text("a").rotation3DEffect(.degrees(60), axis: (x: 0, y: 1, z: 0))'))
-    const rotated = nodes(y).find((n) => n.transform?.rotateY)
-    expect(rotated?.transform?.rotateY).toBeCloseTo(60, 3)
-    expect(rotated?.transform?.rotateX ?? 0).toBeCloseTo(0, 3)
+  it('retains the supplied axis and angle for a single axis-angle projection', () => {
+    const result = run(view('Text("a").rotation3DEffect(.degrees(60), axis: (x: 0, y: 1, z: 0))'))
+    expect(nodes(result).find(n => n.transform)?.transform?.rotation3D).toMatchObject({ degrees: 60, x: 0, y: 1, z: 0 })
   })
-
-  it('an x axis rotates about x', () => {
-    const x = run(view('Text("a").rotation3DEffect(.degrees(30), axis: (x: 1, y: 0, z: 0))'))
-    expect(nodes(x).find((n) => n.transform?.rotateX)?.transform?.rotateX).toBeCloseTo(30, 3)
+  it('a z axis has the same projected corners as a flat rotation', () => {
+    const result = run(view('Text("a").rotation3DEffect(.degrees(45), axis: (x: 0, y: 0, z: 1), anchor: .topLeading)'))
+    const node = nodes(result).find(n => n.transform)!
+    const [a,b,c,d,e,f] = rotationProjection(node.transform!, node.frame)
+    expect([a,b,c,d,e,f]).toEqual([Math.SQRT1_2, Math.sin(Math.PI/4), -0, -Math.sin(Math.PI/4), Math.SQRT1_2, -0])
   })
-
-  it('a z axis is the same as a flat rotation', () => {
-    const z = run(view('Text("a").rotation3DEffect(.degrees(45), axis: (x: 0, y: 0, z: 1))'))
-    const flat = run(view('Text("a").rotationEffect(.degrees(45))'))
-    const zr = nodes(z).find((n) => n.transform)?.transform
-    const fr = nodes(flat).find((n) => n.transform)?.transform
-    expect(zr?.rotate).toBeCloseTo(fr?.rotate ?? 0, 3)
-  })
-
-  it('normalises the axis, so (1,1,0) is not 60 degrees about each', () => {
-    const result = run(view('Text("a").rotation3DEffect(.degrees(90), axis: (x: 1, y: 1, z: 0))'))
-    const t = nodes(result).find((n) => n.transform)?.transform
-    expect(t?.rotateX).toBeCloseTo(90 / Math.SQRT2, 3)
-    expect(t?.rotateY).toBeCloseTo(90 / Math.SQRT2, 3)
+  it('normalises arbitrary axes without converting them to Euler angles', () => {
+    const projection = (axis: string) => { const n = nodes(run(view(`Text("a").rotation3DEffect(.degrees(90), axis: ${axis}, perspective: 0)`))).find(n => n.transform)!; return rotationProjection(n.transform!, {width:100,height:100}) }
+    const a = projection('(x: 1, y: 1, z: 0)'), b = projection('(x: 10, y: 10, z: 0)')
+    a.forEach((value,i) => expect(value).toBeCloseTo(b[i]!, 10))
+    expect(a[0]).toBeCloseTo(0.5)
+    expect(a[1]).toBeCloseTo(0.5)
   })
 
   it('does not change layout, because it is paint-time', () => {

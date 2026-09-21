@@ -13,6 +13,7 @@ import {
   MONO_FAMILY,
   rgba,
   ROUNDED_FAMILY,
+  SERIF_FAMILY,
   UI_FONT_FAMILY,
   type Fill,
   type RGBA,
@@ -63,6 +64,7 @@ import {
 import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
 import { resolveSymbol } from './sf-symbols'
 import {
+  unitPoint,
   bodyFont,
   colorForName,
   fontForToken,
@@ -301,19 +303,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   }
 }
 
-/**
- * The colour the screen is, decided by what the content is.
- *
- * Two rules, in order. A root view with its own `.background(…)` means it: writing
- * `.background(Color(.systemGroupedBackground))` on the outermost view is how most
- * people set a screen colour, and until now that painted the content's frame and
- * left the navigation bar above it a different colour. Otherwise a grouped `List`
- * or `Form` implies `systemGroupedBackground`, which is what iOS puts behind one.
- *
- * The walk skips wrappers that contribute nothing of their own - a
- * `NavigationStack` around a `List` is still a list screen. Returns null when
- * nothing says otherwise, so the caller can apply the plain system background.
- */
+/** Grouped lists supply a screen surface. Other backgrounds paint only their view's bounds. */
 function screenBackground(views: readonly ViewValue[], scheme: ColorScheme, width = 393, sheetSurface = false): RGBA | null {
   for (const view of views) {
     if (TRANSPARENT_VIEWS.has(view.name)) {
@@ -321,11 +311,6 @@ function screenBackground(views: readonly ViewValue[], scheme: ColorScheme, widt
       if (inner) return inner
       continue
     }
-
-    const explicit = resolveFillArg(modifierArg(view, 'background', 0), scheme)
-    // Only a flat colour. A gradient or a material behind the content does not
-    // extend under the bar on iOS either, so matching it would be inventing.
-    if (explicit?.kind === 'solid' && explicit.color.a > 0.95) return explicit.color
 
     if (view.name === 'List' || view.name === 'Form') {
       if (tokenName(modifierArg(view, 'scrollContentBackground', 0)) === 'hidden') continue
@@ -361,6 +346,7 @@ interface ControlStyles {
   readonly colorScheme?: ColorScheme
   readonly dynamicTypeSize?: DynamicTypeSize
   readonly container?: 'content' | 'toolbar' | 'list' | 'form'
+  readonly scrollIndicators?: string
   readonly imageScale?: string
   readonly button?: string
   readonly textField?: string
@@ -375,6 +361,7 @@ interface ControlStyles {
 }
 
 const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
+  ['scrollIndicators', 'scrollIndicators'],
   ['imageScale', 'imageScale'],
   ['buttonStyle', 'button'],
   ['textFieldStyle', 'textField'],
@@ -417,7 +404,23 @@ function axisVector(value: SwiftValue | undefined): { x: number; y: number; z: n
   }
 
   const vector = { x: component('x', 0), y: component('y', 1), z: component('z', 2) }
-  return vector.x === 0 && vector.y === 0 && vector.z === 0 ? fallback : vector
+  return vector
+}
+
+function transformAnchor(value: SwiftValue | undefined): { x: number; y: number } {
+  const point = payloadOf<{ x: number; y: number }>(value, 'CGPoint')
+  return point ?? unitPoint(tokenName(value) ?? 'center')
+}
+
+/** Outside a List/Form, Section contributes siblings to its enclosing layout. */
+function sectionChildren(view: ViewValue, path: string): ViewValue[] {
+  const accessory = (name: 'header' | 'footer'): ViewValue[] => {
+    const value = labelled(view.args, name) ?? (name === 'header' ? positional(view.args, 0) : undefined)
+    const custom = value && asView(value)
+    if (custom) return [{ ...custom, path: custom.path ?? `${path}-${name}` }]
+    return stringArg(value) === null ? [] : [{ ...view, name: 'Text', args: [{ label: null, value: value! }], children: [], modifiers: [], action: null, path: `${path}-${name}` }]
+  }
+  return [...accessory('header'), ...view.children, ...accessory('footer')].map(child => ({ ...child, modifiers: [...child.modifiers, ...view.modifiers] }))
 }
 
 /** The weekday initials over a calendar. Not localised; neither is the rest of the chrome. */
@@ -991,6 +994,10 @@ class Converter {
     const out: LayoutElement[] = []
     views.forEach((view, index) => {
       const path = view.path ?? `${prefix}-${index}`
+      if (view.name === 'Section') {
+        out.push(...this.convertList(sectionChildren(view, path), path, axis))
+        return
+      }
       // A `Group` is not a container - it exists so a builder can exceed its child
       // limit, and its children belong to the enclosing stack. `ForEach` is the same:
       // its rows are siblings of whatever surrounds it, never a nested stack.
@@ -1069,7 +1076,7 @@ class Converter {
     // Segments own their hit areas. A full-size picker target would cover them.
     const segmented = view.name === 'Picker' && this.styles.picker === 'segmented'
     if (view.intent) {
-      if (boolArg(modifierArg(view, 'disabled', 0))) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
+      if (isDisabled(view)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
       if (!segmented) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
     }
     // A passive context target sits behind descendant controls. Those controls
@@ -1132,6 +1139,7 @@ class Converter {
     const capitalization = tokenName(modifierArg(view, 'textInputAutocapitalization', 0))
     const correction = view.modifiers.find(m => m.name === 'autocorrectionDisabled')
     return { inputMode, enterKeyHint,
+      ...(stringArg(labelled(view.args, '_inputType')) === 'time' ? { inputType: 'time' as const } : {}),
       ...(view.modifiers.some(m => m.name === 'onSubmit' && m.closure) ? { submitHandlerId: handlerIdFor(`${path}/submit`) } : {}),
       ...(capitalization ? { autocapitalization: capitalization === 'never' ? 'none' : capitalization } : {}),
       ...(correction ? { autocorrection: correction.args[0] ? !boolArg(correction.args[0].value) : false } : {}),
@@ -1249,11 +1257,11 @@ class Converter {
         if (!payload) return { kind: 'empty', id: path, ...origin }
 
         const fill = resolveFillArg(modifierArg(view, 'fill', 0), this.scheme, this.styles.tint)
-        const strokeColor = resolveColorArg(modifierArg(view, 'stroke', 0), this.scheme, this.styles.tint)
+        const strokeColor = view.modifiers.some(m => m.name === 'stroke') ? resolveColorArg(modifierArg(view, 'stroke', 0), this.scheme, this.styles.tint) ?? this.color('primary') : null
         const strokeWidth =
           numberArg(modifierNamedArg(view, 'stroke', 'lineWidth')) ??
           numberArg(modifierArg(view, 'stroke', 1)) ??
-          strokeStyleWidth(view) ??
+          strokeStyle(view)?.lineWidth ??
           1
 
         const trimmed = trimOf(view) ?? payload.trim
@@ -1262,7 +1270,7 @@ class Converter {
           id: path,
           d: toSVGPath(applyTrim({ commands: payload.commands, trim: trimmed })),
           fill: fill ?? null,
-          stroke: strokeColor ? { color: strokeColor, width: strokeWidth } : null,
+          stroke: strokeColor ? { ...strokeStyle(view), color: strokeColor, width: strokeWidth, usesForeground: !resolveColorArg(modifierArg(view, 'stroke', 0), this.scheme, this.styles.tint) } : null,
           fillRule: tokenName(modifierNamedArg(view, 'fill', 'style')) === 'evenOdd'
             ? 'evenodd'
             : 'nonzero',
@@ -1313,17 +1321,8 @@ class Converter {
         return this.list(view, path, origin)
 
       case 'Section':
-        // A bare `Section` outside a `List` is just its content, which is what
-        // SwiftUI does with one too.
-        return {
-          kind: 'stack',
-          id: path,
-          axis: 'vertical',
-          spacing: 0,
-          alignment: { horizontal: 'leading', vertical: 'center' },
-          children: this.convertList(view.children, path, 'vertical'),
-          ...origin,
-        }
+        return { kind: 'stack', id: path, axis: parentAxis, spacing: null, alignment: CENTER,
+          children: this.convertList(sectionChildren({ ...view, modifiers: [] }, path), path, parentAxis), ...origin }
 
       case 'Form':
         return this.list({ ...view, name: 'Form' }, path, origin)
@@ -1495,7 +1494,7 @@ class Converter {
       const strokeWidth =
         numberArg(modifierNamedArg(view, strokeName, 'lineWidth')) ??
         numberArg(modifierArg(view, strokeName, 1)) ??
-        strokeStyleWidth(view) ??
+        strokeStyle(view)?.lineWidth ??
         1
 
       return {
@@ -1505,7 +1504,7 @@ class Converter {
         cornerStyle: tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular',
         ...(radius !== null ? { cornerRadius: radius } : {}),
         ...(fill ? { fill } : {}),
-        ...(strokeColor ? { stroke: { color: strokeColor, width: Math.max(0, strokeWidth), usesForeground: !resolveColorArg(modifierArg(view, strokeName, 0), this.scheme, this.styles.tint), placement: strokeName === 'strokeBorder' ? 'inside' as const : 'center' as const } } : {}),
+        ...(strokeColor ? { stroke: { ...strokeStyle(view), color: strokeColor, width: Math.max(0, strokeWidth), usesForeground: !resolveColorArg(modifierArg(view, strokeName, 0), this.scheme, this.styles.tint), placement: strokeName === 'strokeBorder' ? 'inside' as const : 'center' as const } } : {}),
         ...origin,
       }
     }
@@ -1565,8 +1564,11 @@ class Converter {
   private runAttributes(view: ViewValue): Omit<TextRunSpec, 'text'> {
     let font: { family?: string; size?: number; lineHeight?: number; weight?: number; italic?: boolean } | undefined
     let color: RGBA | undefined
+    let foregroundFill: Fill | undefined
     let underline: boolean | undefined
+    let underlineColor: RGBA | null | undefined
     let strikethrough: boolean | undefined
+    let strikethroughColor: RGBA | null | undefined
     let tracking: number | undefined
     let baselineOffset: number | undefined
 
@@ -1610,20 +1612,23 @@ class Converter {
                 ? ROUNDED_FAMILY
                 : design === 'monospaced'
                   ? MONO_FAMILY
-                  : UI_FONT_FAMILY,
+                  : design === 'serif' ? SERIF_FAMILY : UI_FONT_FAMILY,
           })
           break
         }
         case 'foregroundColor':
         case 'foregroundStyle': {
-          const resolved = resolveColorArg(first, this.scheme, this.styles.tint)
-          if (resolved) color = resolved
+          const resolved = resolveFillArg(first, this.scheme, this.styles.tint)
+          if (resolved?.kind === 'solid') { color = resolved.color; foregroundFill = undefined }
+          else if (resolved) { foregroundFill = resolved; color = undefined }
           break
         }
         case 'underline':
+          underlineColor = resolveColorArg(labelled(modifier.args, 'color'), this.scheme, this.styles.tint)
           underline = first === undefined ? true : first.kind === 'bool' ? first.value : true
           break
         case 'strikethrough':
+          strikethroughColor = resolveColorArg(labelled(modifier.args, 'color'), this.scheme, this.styles.tint)
           strikethrough = first === undefined ? true : first.kind === 'bool' ? first.value : true
           break
         case 'kerning':
@@ -1645,8 +1650,9 @@ class Converter {
     return {
       ...(font ? { font } : {}),
       ...(color ? { color } : {}),
-      ...(underline !== undefined ? { underline } : {}),
-      ...(strikethrough !== undefined ? { strikethrough } : {}),
+      ...(foregroundFill ? { foregroundFill } : {}),
+      ...(underline !== undefined ? { underline, underlineColor } : {}),
+      ...(strikethrough !== undefined ? { strikethrough, strikethroughColor } : {}),
       ...(tracking !== undefined ? { tracking } : {}),
       ...(baselineOffset !== undefined ? { baselineOffset } : {}),
     }
@@ -1749,7 +1755,7 @@ class Converter {
       spacing: 8,
       alignment: CENTER,
       children: [
-        this.styledText(`${path}month`, title, 'headline', 'label'),
+        { kind: 'modified', id: `${path}month-fit`, modifier: { kind: 'fixedSize', horizontal: true, vertical: false }, child: this.styledText(`${path}month`, title, 'headline', 'label') },
         { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
         ...(back ? [this.convert(back, `${path}back`, 'horizontal')] : []),
         ...(forward ? [this.convert(forward, `${path}fwd`, 'horizontal')] : []),
@@ -1817,7 +1823,7 @@ class Converter {
       `${path}t`,
       label,
       'body',
-      selected ? 'systemBackground' : 'label',
+      selected ? 'systemBackground' : truthyBinding(labelled(view.args, 'enabled')) ? 'label' : 'tertiaryLabel',
     )
 
     const box: LayoutElement = {
@@ -1835,8 +1841,8 @@ class Converter {
   /** A `ColorPicker`'s palette: the named colours, four to a row. */
   private colourEditor(view: ViewValue, path: string, origin: object): LayoutElement {
     const rows: LayoutElement[] = []
-    for (let start = 0; start < view.children.length; start += 6) {
-      const row = view.children.slice(start, start + 6)
+    for (let start = 0; start < view.children.length; start += 4) {
+      const row = view.children.slice(start, start + 4)
       rows.push({
         kind: 'stack',
         id: `${path}r${start}`,
@@ -1924,7 +1930,7 @@ class Converter {
   private scrollView(view: ViewValue, path: string, origin: object): LayoutElement {
     const axisToken = tokenName(positional(view.args, 0))
     const axis: Axis = axisToken === 'horizontal' ? 'horizontal' : 'vertical'
-    const indicators = boolArg(labelled(view.args, 'showsIndicators')) ?? true
+    const indicators = this.styles.scrollIndicators === 'hidden' ? false : this.styles.scrollIndicators === 'visible' ? true : boolArg(labelled(view.args, 'showsIndicators')) ?? true
 
     const children = this.convertList(view.children, path, axis)
     const content: LayoutElement =
@@ -1962,7 +1968,7 @@ class Converter {
 
   private listBody(view: ViewValue, path: string, origin: object): LayoutElement {
     return buildList(view, path, origin, {
-      width: this.viewportWidth, scheme: this.scheme, tint: this.styles.tint,
+      width: this.viewportWidth, scheme: this.scheme, tint: this.styles.tint, showsIndicators: this.styles.scrollIndicators !== 'hidden',
       captionFont: fontForToken('footnote', this.typeScale)!,
       headerFont: fontForToken('headline', this.typeScale)!,
       separatorHeight: 1,
@@ -1991,6 +1997,7 @@ class Converter {
       id: path,
       rows,
       spacing: numberArg(labelled(view.args, 'horizontalSpacing')) ?? defaultSpacing(),
+      rowAlignments: flattened.map(row => labelled(row.args, 'alignment') ? stackAlignment(row.args, 'horizontal').vertical : stackAlignment(view.args, 'vertical').vertical),
       rowSpacing: numberArg(labelled(view.args, 'verticalSpacing')) ?? (flattened.every(row => row.name === 'GridRow' && row.children.every(cell => cell.name === 'Text')) ? 0 : defaultSpacing()),
       alignment: stackAlignment(view.args, 'vertical'),
       ...origin,
@@ -2060,8 +2067,8 @@ class Converter {
       axis: vertical ? 'vertical' : 'horizontal',
       tracks,
       spacing,
-      trackSpacing: tracks[0]?.kind === 'adaptive' ? spacing : spacing,
-      alignment: CENTER,
+      trackSpacing: 8,
+      alignment: alignmentFromToken(labelled(view.args, 'alignment')) ?? CENTER,
       children: this.convertList(view.children, path, vertical ? 'vertical' : 'horizontal'),
       ...origin,
     }
@@ -2487,7 +2494,7 @@ class Converter {
     const side = (symbol: string, title: string, atLimit: boolean): LayoutElement => {
       let glyph = this.glyphButton(`${path}${symbol}`, symbol)
       const disabled = disabledBy(view) || atLimit
-      if (atLimit || boolArg(modifierArg(view, 'disabled', 0))) glyph = {
+      if (atLimit || isDisabled(view)) glyph = {
         kind: 'modified', id: `${path}${symbol}dim`, modifier: { kind: 'opacity', value: 0.35 }, child: glyph,
       }
       return this.withHitTarget(glyph, `${path}/${symbol}`, 'button', title, view, disabled)
@@ -2882,6 +2889,13 @@ class Converter {
    */
   private menuSurface(overlay: Overlay): LayoutElement {
     const rows = overlay.views.map((option, index) => {
+      if (option.name === DATE_EDITOR || option.name === COLOUR_EDITOR) return this.convert(option, `ov-${index}`, 'vertical')
+      // Embedded editors keep their own text/range event role and binding.
+      if (['TextField', 'SecureField', 'Slider'].includes(option.name) && option.intent?.kind === 'write') return {
+        kind: 'modified' as const, id: `ov-${index}-editor-pad`,
+        modifier: { kind: 'padding' as const, insets: insets(12, 16, 12, 16) },
+        child: this.convert(option, `ov-${index}`, 'horizontal'),
+      }
       const selected = boolArg(labelled(option.args, 'selected'))
 
       // The hit target goes around the whole row rather than around the label, so
@@ -3268,7 +3282,7 @@ class Converter {
         // set higher up would be impossible to turn off.
         const design = tokenName(args[0]?.value)
         const family =
-          design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : UI_FONT_FAMILY
+          design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : design === 'serif' ? SERIF_FAMILY : UI_FONT_FAMILY
         return { kind: 'fontTrait', family }
       }
 
@@ -3281,8 +3295,8 @@ class Converter {
 
       case 'foregroundStyle':
       case 'foregroundColor': {
-        const color = resolveColorArg(args[0]?.value, this.scheme, this.styles.tint)
-        return color ? { kind: 'foregroundStyle', color } : null
+        const fill = resolveFillArg(args[0]?.value, this.scheme, this.styles.tint)
+        return fill ? { kind: 'foregroundStyle', color: fill.kind === 'solid' ? fill.color : this.color('primary'), ...(fill.kind !== 'solid' ? { fill } : {}) } : null
       }
 
       case 'opacity': {
@@ -3343,16 +3357,18 @@ class Converter {
 
       case 'scaleEffect': {
         const uniform = numberArg(positional(args, 0))
+        const size = payloadOf<{ width: number; height: number }>(positional(args, 0), 'CGSize')
         return {
           kind: 'scale',
-          x: uniform ?? numberArg(labelled(args, 'x')) ?? 1,
-          y: uniform ?? numberArg(labelled(args, 'y')) ?? 1,
+          anchor: transformAnchor(labelled(args, 'anchor')),
+          x: uniform ?? size?.width ?? numberArg(labelled(args, 'x')) ?? 1,
+          y: uniform ?? size?.height ?? numberArg(labelled(args, 'y')) ?? 1,
         }
       }
 
       case 'rotationEffect': {
         const degrees = angleDegrees(positional(args, 0) ?? labelled(args, 'angle'))
-        return degrees === null ? null : { kind: 'rotate', degrees }
+        return degrees === null ? null : { kind: 'rotate', degrees, anchor: transformAnchor(labelled(args, 'anchor')) }
       }
 
       case 'blur':
@@ -3383,7 +3399,7 @@ class Converter {
         if (degrees === null) return null
         const axis = labelled(args, 'axis')
         const vector = axisVector(axis)
-        return { kind: 'rotate3D', degrees, ...vector }
+        return { kind: 'rotate3D', degrees, ...vector, anchor: transformAnchor(labelled(args, 'anchor')), anchorZ: numberArg(labelled(args, 'anchorZ')) ?? 0, perspective: numberArg(labelled(args, 'perspective')) ?? 1 }
       }
 
       case 'blendMode': {
@@ -3463,7 +3479,6 @@ class Converter {
       case 'gaugeStyle':
       case 'controlSize':
       case 'buttonBorderShape':
-      case 'placeholder':
       case 'contextMenu':
       case 'badge':
         // Recognised, and either read elsewhere or deliberately inert. Recorded as
@@ -3515,7 +3530,7 @@ class Converter {
         }
 
         const limit = numberArg(first)
-        return { kind: 'textStyle', lineLimit: limit === null ? null : Math.max(0, limit) }
+        return { kind: 'textStyle', lineLimit: limit === null ? null : Math.max(0, limit), minimumLines: boolArg(labelled(args, 'reservesSpace')) && limit !== null ? Math.max(0, limit) : 0 }
       }
 
       case 'allowsTightening': {
@@ -3553,8 +3568,8 @@ class Converter {
         const first = positional(args, 0)
         const on = first === undefined ? true : first.kind === 'bool' ? first.value : true
         return modifier.name === 'underline'
-          ? { kind: 'textStyle', underline: on }
-          : { kind: 'textStyle', strikethrough: on }
+          ? { kind: 'textStyle', underline: on, underlineColor: resolveColorArg(labelled(args, 'color'), this.scheme, this.styles.tint) }
+          : { kind: 'textStyle', strikethrough: on, strikethroughColor: resolveColorArg(labelled(args, 'color'), this.scheme, this.styles.tint) }
       }
 
       case 'kerning':
@@ -3626,13 +3641,16 @@ class Converter {
       }
 
       case 'containerRelativeFrame': {
-        const axes = tokenName(positional(args, 0)) ?? 'horizontal'
+        const axisValue = positional(args, 0)
+        const axes = axisValue?.kind === 'array' ? axisValue.elements.map(tokenName) : [tokenName(axisValue) ?? 'horizontal']
         const count = numberArg(labelled(args, 'count')) ?? 1
         return {
           kind: 'containerRelativeFrame',
-          horizontal: axes !== 'vertical',
-          vertical: axes !== 'horizontal',
+          horizontal: axes.includes('horizontal'),
+          vertical: axes.includes('vertical'),
           count: Math.max(1, Math.round(count)),
+          span: Math.max(1, Math.round(numberArg(labelled(args, 'span')) ?? 1)),
+          alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER,
           spacing: numberArg(labelled(args, 'spacing')) ?? 0,
         }
       }
@@ -3748,7 +3766,7 @@ class Converter {
       // backdrop, and drawing it as flat grey is the approximation this refuses.
       const material = MATERIALS[tokenName(value) ?? '']
       if (material) {
-        return {
+        const panel: LayoutElement = {
           kind: 'modified',
           id: `${id}mat`,
           modifier: {
@@ -3758,6 +3776,8 @@ class Converter {
           },
           child: { kind: 'empty', id: `${id}matbox` },
         }
+        const opacity = value.kind === 'opaque' ? (value.payload as TokenPayload).opacity : undefined
+        return opacity === undefined ? panel : { kind: 'modified', id: `${id}matAlpha`, modifier: { kind: 'opacity', value: opacity }, child: panel }
       }
 
       const fill = resolveFillArg(value, this.scheme, this.styles.tint)
@@ -4081,6 +4101,12 @@ function angleDegrees(value: SwiftValue | undefined): number | null {
 }
 
 function shapeOf(value: SwiftValue | undefined): { kind: ShapeKind; cornerRadius: number; style?: 'continuous' | 'circular' } {
+  if (value?.kind === 'opaque' && value.typeName === TOKEN_TYPE) {
+    const { name, args = [] } = value.payload as TokenPayload
+    const style = args.some(argument => tokenName(argument) === 'continuous') ? 'continuous' : 'circular'
+    if (name === 'rect') return { kind: args.length ? 'roundedRectangle' : 'rectangle', cornerRadius: numberArg(args[0]) ?? 0, style }
+    if (name === 'circle' || name === 'capsule' || name === 'ellipse') return { kind: name, cornerRadius: 0, style }
+  }
   if (value?.kind === 'opaque' && value.typeName === 'View') {
     const view = value.payload as ViewValue
     const shape = SHAPES[view.name]
@@ -4101,10 +4127,11 @@ function gridTracks(value: SwiftValue | undefined): GridTrack[] {
 
   const tracks = value.elements.map((element): GridTrack => {
     if (element.kind === 'opaque' && element.typeName === 'GridItem') {
-      const payload = element.payload as { kind: string; size: number | null }
+      const payload = element.payload as { kind: string; size: number | null; maximum?: number; spacing?: number; alignment?: string }
       const kind =
         payload.kind === 'fixed' ? 'fixed' : payload.kind === 'adaptive' ? 'adaptive' : 'flexible'
-      return { kind, size: payload.size }
+      const point = payload.alignment ? unitPoint(payload.alignment) : undefined
+      return { kind, size: payload.size, maximum: payload.maximum, spacing: payload.spacing, ...(point ? { alignment: { horizontal: point.x === 0 ? 'leading' : point.x === 1 ? 'trailing' : 'center', vertical: point.y === 0 ? 'top' : point.y === 1 ? 'bottom' : 'center' } as Alignment } : {}) }
     }
     return { kind: 'flexible', size: null }
   })
@@ -4112,21 +4139,15 @@ function gridTracks(value: SwiftValue | undefined): GridTrack[] {
   return tracks.length > 0 ? tracks : [{ kind: 'flexible', size: null }]
 }
 
-/**
- * The width of a `.stroke(style: StrokeStyle(lineWidth:))`.
- *
- * The dash pattern the same value may carry is not drawn: the render tree has no
- * field for it, and adding one is a render change rather than a value one. Recorded
- * in the coverage matrix rather than dropped silently.
- */
-function strokeStyleWidth(view: ViewValue): number | null {
+/** Full StrokeStyle values pass through layout to the shared SVG painter. */
+function strokeStyle(view: ViewValue): StrokeStylePayload | undefined {
   const name = view.modifiers.some((m) => m.name === 'strokeBorder') ? 'strokeBorder' : 'stroke'
   const style = payloadOf<StrokeStylePayload>(
     modifierNamedArg(view, name, 'style') ?? modifierArg(view, name, 0),
     STROKE_STYLE_TYPE,
   )
 
-  return style ? style.lineWidth : null
+  return style ?? undefined
 }
 
 function paddingInsets(args: readonly ViewArg[], defaultLength = IOS_27.metrics.padding): EdgeInsets {
@@ -4181,8 +4202,10 @@ function frameModifier(args: readonly ViewArg[]): LayoutModifier {
     kind: 'frame',
     ...(pick('width') !== undefined ? { width: pick('width')! } : {}),
     ...(pick('height') !== undefined ? { height: pick('height')! } : {}),
+    ...(pick('idealWidth') !== undefined ? { idealWidth: pick('idealWidth')! } : {}),
     ...(pick('minWidth') !== undefined ? { minWidth: pick('minWidth')! } : {}),
     ...(pick('maxWidth') !== undefined ? { maxWidth: pick('maxWidth')! } : {}),
+    ...(pick('idealHeight') !== undefined ? { idealHeight: pick('idealHeight')! } : {}),
     ...(pick('minHeight') !== undefined ? { minHeight: pick('minHeight')! } : {}),
     ...(pick('maxHeight') !== undefined ? { maxHeight: pick('maxHeight')! } : {}),
     alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER,
@@ -4322,20 +4345,14 @@ function roleOf(view: ViewValue): HitRole {
  * already been emitted. The environment still carries the flag, for the case where
  * the modifier is written on a container and the buttons are inside it.
  */
+function isDisabled(view: ViewValue): boolean {
+  return view.modifiers.some(modifier => modifier.name === 'disabled' &&
+    (positional(modifier.args, 0) === undefined || truthy(positional(modifier.args, 0)!)))
+}
+
 function disabledBy(view: ViewValue): boolean {
-  const disabled = view.modifiers.find((m) => m.name === 'disabled')
-  if (disabled) {
-    const value = positional(disabled.args, 0)
-    if (value === undefined || truthy(value)) return true
-  }
-
-  const hitTestable = view.modifiers.find((m) => m.name === 'allowsHitTesting')
-  if (hitTestable) {
-    const value = positional(hitTestable.args, 0)
-    if (value !== undefined && !truthy(value)) return true
-  }
-
-  return false
+  return isDisabled(view) || view.modifiers.some(modifier => modifier.name === 'allowsHitTesting' &&
+    positional(modifier.args, 0) !== undefined && !truthy(positional(modifier.args, 0)!))
 }
 
 export type { RGBA }

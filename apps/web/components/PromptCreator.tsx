@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { OpenedFile } from '@studio/project-model'
+import type { OpenedFile, PromptMessage } from '@studio/project-model'
 import { DEFAULT_MODELS, parseGeneratedApp, parseOptions, type GeneratedApp, type GenerationOptions, type Provider } from '../lib/generation/schema'
 import { checkPreview } from '../lib/generation/validate'
 import { Icon } from './ui/Icon'
@@ -9,13 +9,14 @@ import styles from './PromptCreator.module.css'
 
 const INITIAL: GenerationOptions = { provider: 'openai', model: DEFAULT_MODELS.openai, prompt: '', pageCount: 4, navigation: 'tabs', accent: 'indigo', sampleData: true, includeSettings: false }
 
-export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: readonly OpenedFile[]) => Promise<boolean>; onBusy: (busy: boolean) => void }) {
+export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[]) => Promise<boolean>; onBusy: (busy: boolean) => void }) {
   const [options, setOptions] = useState(INITIAL)
   const [apiKey, setApiKey] = useState('')
   const [revealKey, setRevealKey] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'generating' | 'checking' | 'opening'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<GeneratedApp | null>(null)
+  const [history, setHistory] = useState<readonly PromptMessage[]>([])
   const [issues, setIssues] = useState<string[]>([])
   const [selectedFile, setSelectedFile] = useState(0)
   const controller = useRef<AbortController | null>(null)
@@ -44,6 +45,11 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
       setPhase('checking')
       const found = await checkPreview(app, request.signal)
       if (request.signal.aborted) return
+      const common = { provider: input.provider, model: input.model, kind: 'create' as const }
+      setHistory([
+        { ...common, id: crypto.randomUUID(), role: 'user', content: `${input.prompt}\n\nGeneration settings: ${JSON.stringify({ pageCount: input.pageCount, navigation: input.navigation, accent: input.accent, sampleData: input.sampleData, includeSettings: input.includeSettings })}`, createdAt: Date.now() },
+        { ...common, id: crypto.randomUUID(), role: 'assistant', content: app.summary, status: 'applied', changedFiles: app.files.map(file => file.path), createdAt: Date.now() },
+      ])
       setDraft(app); setIssues(found); setSelectedFile(0)
     } catch (e) {
       if (!request.signal.aborted) setError(e instanceof Error ? e.message : 'Could not connect. Please try again.')
@@ -56,7 +62,7 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
     if (!draft || busy) return
     setPhase('opening'); onBusy(true); setError(null)
     try {
-      if (!await onOpenFiles(draft.files.map(f => ({ name: f.path, text: f.code })))) throw new Error('The generated files could not be opened.')
+      if (!await onOpenFiles(draft.files.map(f => ({ name: f.path, text: f.code })), history)) throw new Error('The generated files could not be opened.')
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open this project.') }
     finally { setPhase('idle'); onBusy(false) }
   }

@@ -1,3 +1,4 @@
+import { worldFrame } from './render-geometry'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -199,7 +200,7 @@ describe('control geometry and input semantics', () => {
     const circle = hit(run('Button("Long label") {}.buttonStyle(.bordered).buttonBorderShape(.circle)'), 'Long label')
     const capsule = hit(run('Button("Long label") {}.buttonStyle(.bordered).buttonBorderShape(.capsule)'), 'Long label')
     expect(circle.frame.width).toBeCloseTo(circle.frame.height)
-    expect(nodes(run('Button("+") {}.buttonStyle(.bordered).buttonBorderShape(.circle)')).find((n) => n.background && n.cornerRadius)?.cornerStyle).toBe('circular')
+    expect(nodes(run('Button("+") {}.buttonStyle(.bordered).buttonBorderShape(.circle)')).find((n) => n.clip && n.cornerRadius)?.clipShape?.cornerStyle).toBe('circular')
     expect(capsule.frame.width).toBeGreaterThan(capsule.frame.height)
   })
   it('uses separate control-size metrics and respects explicit fonts', () => {
@@ -234,10 +235,10 @@ describe('control geometry and input semantics', () => {
     const shapes = nodes(r).filter((n) => n.shape)
     expect(shapes.find((n) => n.shape!.shape === 'capsule')!.frame).toMatchObject({ width: 64, height: 28 })
     expect(shapes.find((n) => n.id.endsWith('knob'))!.frame).toMatchObject({ width: 38, height: 24 })
-    const before = shapes.find((n) => n.id.endsWith('knob'))!.frame.x
+    const before = worldFrame(nodes(r), shapes.find((n) => n.id.endsWith('knob'))!).x
     applyEvent({ kind: 'toggle', handlerId: hit(r, 'On').hitTarget!.handlerId, value: false })
     r = rerender(2)
-    expect(nodes(r).find((n) => n.id.endsWith('knob'))!.frame.x).toBeLessThan(before)
+    expect(worldFrame(nodes(r), nodes(r).find((n) => n.id.endsWith('knob'))!).x).toBeLessThan(before)
     expect(markup(r)).toContain('aria-checked="false"')
   })
   it('paints a slider while retaining the source range and step in its native input', () => {

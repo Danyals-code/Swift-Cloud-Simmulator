@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   TEMPLATE_CATALOG,
-  type OpenedFile, type Project,
+  type OpenedFile, type Project, type PromptMessage,
   type ProjectSummary,
   type TemplateInfo,
   type TemplateKind,
@@ -42,7 +42,7 @@ export interface TemplateGalleryProps {
   /** Returns false when the template's sources could not be fetched. */
   onChoose: (templateId: string) => Promise<boolean>
   /** Returns false when nothing usable was in the selection. */
-  onOpenFiles: (files: readonly OpenedFile[]) => Promise<boolean>
+  onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[]) => Promise<boolean>
   /** Reopens a project already in this browser. */
   onOpenProject: (id: string) => Promise<boolean>
   /** Deletes one. Never the one that is open. */

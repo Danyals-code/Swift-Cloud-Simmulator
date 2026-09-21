@@ -1,6 +1,7 @@
 import { stackGaps } from './spacing'
 import { symbolMetrics } from '@studio/shared'
 import type {
+  TransformSpec,
   CornerStyle,
   ShapeStroke,
   SliderPayload,
@@ -15,6 +16,7 @@ import type {
 } from '@studio/shared'
 import {
   childEnvironment,
+  CENTER,
   type Alignment,
   type EdgeInsets,
   type Axis,
@@ -45,11 +47,14 @@ import type { ProposedDimension, ProposedSize } from './proposal'
 
 /** One attributed span of painted text, with every attribute already resolved. */
 export interface PaintedRun {
+  readonly foregroundFill?: Fill
   readonly text: string
   readonly font: ResolvedFont
   readonly color: RGBA
   readonly underline?: boolean
+  readonly underlineColor?: RGBA | null
   readonly strikethrough?: boolean
+  readonly strikethroughColor?: RGBA | null
   readonly tracking?: number
   readonly baselineOffset?: number
   readonly tabularNumbers?: boolean
@@ -92,6 +97,7 @@ export type PaintSpec =
   | {
       readonly bitmap?: { readonly url: string; readonly name: string }
       readonly kind: 'image'
+      readonly foregroundFill?: Fill
       readonly glyph: string
       readonly font: ResolvedFont
       readonly color: RGBA
@@ -121,12 +127,14 @@ export interface PlacedNode {
   readonly paint: PaintSpec
   readonly origin?: SourceSpan
   readonly hitTarget?: {
+    readonly textAlign?: 'leading' | 'center' | 'trailing'
     readonly step?: number
     readonly secure?: boolean
     readonly multiline?: boolean
     readonly inputInset?: number
     readonly submitHandlerId?: string
     readonly contextMenuHandlerId?: string
+    readonly inputType?: 'time'
     readonly inputMode?: 'text' | 'email' | 'tel' | 'url' | 'numeric' | 'decimal' | 'search'
     readonly enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send'
     readonly autocapitalization?: string
@@ -164,13 +172,7 @@ export interface PlacedNode {
     readonly x: number
     readonly y: number
   }
-  readonly transform?: {
-    readonly scaleX: number
-    readonly scaleY: number
-    readonly rotate: number
-    readonly rotateX?: number
-    readonly rotateY?: number
-  }
+  readonly transform?: TransformSpec
   readonly animation?: AnimationHint
   readonly transition?: TransitionHint
   readonly filter?: FilterSpec
@@ -235,6 +237,7 @@ export class LayoutEngine {
   ): PlacedNode[] {
     this.cache = new Map()
 
+    env = { ...env, containerSize: { width: bounds.width, height: bounds.height } }
     const nodes: PlacedNode[] = []
     const size = this.measure(root, { width: bounds.width, height: bounds.height }, env)
 
@@ -245,13 +248,13 @@ export class LayoutEngine {
   /** Exposed for tests and the inspector: what size would this element report? */
   measureElement(element: LayoutElement, proposal: ProposedSize, env: LayoutEnvironment): Size {
     this.cache = new Map()
-    return this.measure(element, proposal, env)
+    return this.measure(element, proposal, { ...env, containerSize: env.containerSize ?? finiteContainer(proposal) })
   }
 
   // ----------------------------------------------------------------- measure
 
   private measure(element: LayoutElement, proposal: ProposedSize, env: LayoutEnvironment): Size {
-    const key = `${describeDimension(proposal.width)}x${describeDimension(proposal.height)}|${env.font.size}|${env.font.weight}`
+    const key = `${describeDimension(proposal.width)}x${describeDimension(proposal.height)}|${env.font.size}|${env.font.weight}|${env.containerSize?.width ?? '?'}x${env.containerSize?.height ?? '?'}`
     let perElement = this.cache.get(element)
     if (!perElement) {
       perElement = new Map()
@@ -323,7 +326,7 @@ export class LayoutEngine {
 
       case 'scroll': {
         const vertical = element.axis === 'vertical'
-        const content = this.measure(element.content, scrollProposal(element, proposal), env)
+        const content = this.measure(element.content, scrollProposal(element, proposal), { ...env, containerSize: finiteContainer(proposal, env.containerSize) })
         // A scroll view takes all the space offered along its axis and hugs its
         // content across it - the opposite of what its content just reported.
         const along = vertical ? proposal.height : proposal.width
@@ -511,9 +514,9 @@ export class LayoutEngine {
 
       case 'frame': {
         const childProposal: ProposedSize = {
-          width: modifier.width ?? clampProposal(proposal.width, modifier.minWidth, modifier.maxWidth),
+          width: modifier.width ?? clampProposal(proposal.width === null ? modifier.idealWidth ?? null : proposal.width, modifier.minWidth, modifier.maxWidth),
           height:
-            modifier.height ?? clampProposal(proposal.height, modifier.minHeight, modifier.maxHeight),
+            modifier.height ?? clampProposal(proposal.height === null ? modifier.idealHeight ?? null : proposal.height, modifier.minHeight, modifier.maxHeight),
         }
         const size = this.measure(element.child, childProposal, inner)
 
@@ -556,19 +559,11 @@ export class LayoutEngine {
       }
 
       case 'containerRelativeFrame': {
-        // The container's own size along the named axis, divided into `count` parts.
-        // The proposal *is* that size: a scroll view proposes its visible width, and
-        // a stack proposes what is left, which is what the modifier asks for.
-        const inner_ = this.measure(element.child, proposal, inner)
-        const across = resolve(proposal.width, inner_.width, inner_.width)
-        const down = resolve(proposal.height, inner_.height, inner_.height)
+        const framed = relativeContainerProposal(modifier, proposal, inner)
+        const child = this.measure(element.child, framed, inner)
         return {
-          width: modifier.horizontal
-            ? (across - modifier.spacing * (modifier.count - 1)) / modifier.count
-            : inner_.width,
-          height: modifier.vertical
-            ? (down - modifier.spacing * (modifier.count - 1)) / modifier.count
-            : inner_.height,
+          width: modifier.horizontal && typeof framed.width === 'number' ? framed.width : child.width,
+          height: modifier.vertical && typeof framed.height === 'number' ? framed.height : child.height,
         }
       }
 
@@ -636,7 +631,7 @@ export class LayoutEngine {
     element: GridElement,
     proposal: ProposedSize,
     env: LayoutEnvironment,
-  ): { size: Size; cells: Rect[] } {
+  ): { size: Size; cells: Rect[]; alignments: Alignment[] } {
     const vertical = element.axis === 'vertical'
     const crossAvailable = resolve(vertical ? proposal.width : proposal.height, 320, 320)
 
@@ -647,13 +642,13 @@ export class LayoutEngine {
     let running = 0
     for (const lane of lanes) {
       laneOffsets.push(running)
-      running += lane + element.trackSpacing
+      running += lane.size + lane.spacing
     }
 
     // Measure every child first, then size each row to its tallest member - a grid
     // row is uniform, so a cell cannot be laid out until its siblings are known.
     const sizes = element.children.map((child, index) => {
-      const laneSize = lanes[index % columns] ?? crossAvailable
+      const laneSize = lanes[index % columns]?.size ?? crossAvailable
       return this.measure(
         child,
         vertical ? { width: laneSize, height: null } : { width: null, height: laneSize },
@@ -683,19 +678,20 @@ export class LayoutEngine {
     const cells: Rect[] = sizes.map((_, index) => {
       const row = Math.floor(index / columns)
       const column = index % columns
-      const lane = lanes[column] ?? crossAvailable
+      const lane = lanes[column]?.size ?? crossAvailable
       const extent = rowExtents[row] ?? 0
       return vertical
         ? { x: laneOffsets[column] ?? 0, y: rowOffsets[row] ?? 0, width: lane, height: extent }
         : { x: rowOffsets[row] ?? 0, y: laneOffsets[column] ?? 0, width: extent, height: lane }
     })
 
-    const crossExtent = lanes.reduce((a, b) => a + b, 0) + element.trackSpacing * (columns - 1)
+    const crossExtent = lanes.reduce((a, lane, index) => a + lane.size + (index < lanes.length - 1 ? lane.spacing : 0), 0)
     return {
       size: vertical
         ? { width: Math.max(0, crossExtent), height: mainExtent }
         : { width: mainExtent, height: Math.max(0, crossExtent) },
       cells,
+      alignments: sizes.map((_, index) => lanes[index % columns]?.alignment ?? element.alignment),
     }
   }
 
@@ -745,6 +741,7 @@ export class LayoutEngine {
             lines: measured.lines,
             font: lineFont,
             color: env.foregroundColor,
+    ...(env.foregroundFill ? { foregroundFill: env.foregroundFill } : {}),
             runs: painted,
             ...(env.textAlign ? { align: env.textAlign } : {}),
             ...(env.lineSpacing ? { lineSpacing: env.lineSpacing } : {}),
@@ -774,6 +771,7 @@ export class LayoutEngine {
             bitmap: element.bitmap,
             font: env.font,
             color: env.foregroundColor,
+    ...(env.foregroundFill ? { foregroundFill: env.foregroundFill } : {}),
             approximated: element.approximated,
             resizable: element.resizable,
             symbolScale: element.symbolScale,
@@ -822,8 +820,8 @@ export class LayoutEngine {
               ? { fill: element.fill }
               : element.stroke
                 ? {}
-                : { fill: { kind: 'solid' as const, color: env.foregroundColor } }),
-            ...(element.stroke ? { stroke: element.stroke } : {}),
+                : { fill: env.foregroundFill ?? { kind: 'solid' as const, color: env.foregroundColor } }),
+            ...(element.stroke ? { stroke: { ...element.stroke, color: element.stroke.usesForeground ? env.foregroundColor : element.stroke.color } } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -848,7 +846,7 @@ export class LayoutEngine {
               ? { fill: element.fill }
               : element.stroke
                 ? {}
-                : { fill: { kind: 'solid' as const, color: env.foregroundColor } }),
+                : { fill: env.foregroundFill ?? { kind: 'solid' as const, color: env.foregroundColor } }),
             ...(element.stroke ? { stroke: { ...element.stroke, color: element.stroke.usesForeground ? env.foregroundColor : element.stroke.color } } : {}),
           },
           ...debugInfo(element),
@@ -924,6 +922,7 @@ export class LayoutEngine {
     parent: string | null,
   ): number {
     const vertical = element.axis === 'vertical'
+    env = { ...env, containerSize: { width: bounds.width, height: bounds.height } }
     const proposal: ProposedSize = { width: bounds.width, height: bounds.height }
     const content = this.measure(element.content, scrollProposal(element, proposal), env)
 
@@ -981,13 +980,20 @@ export class LayoutEngine {
     const columns = new Array<number>(columnCount).fill(0)
     const rows: number[] = []
 
-    for (const row of element.rows) {
+    for (const [rowIndex, row] of element.rows.entries()) {
       let height = 0
+      const sizes: Size[] = []
       row.forEach((cell, index) => {
         const size = this.measure(cell, { width: null, height: null }, env)
+        sizes.push(size)
         columns[index] = Math.max(columns[index] ?? 0, size.width)
         height = Math.max(height, size.height)
       })
+      const alignment = element.rowAlignments?.[rowIndex] ?? element.alignment.vertical
+      if (alignment === 'firstTextBaseline' || alignment === 'lastTextBaseline') {
+        const guides = row.map((cell, i) => this.baselineOf(cell, sizes[i]!, env, alignment === 'lastTextBaseline'))
+        height = Math.max(0, ...guides) + Math.max(0, ...sizes.map((size, i) => size.height - guides[i]!))
+      }
       rows.push(height)
     }
 
@@ -1018,13 +1024,20 @@ export class LayoutEngine {
 
     element.rows.forEach((row, rowIndex) => {
       let x = bounds.x
+      const alignment = { ...element.alignment, vertical: element.rowAlignments?.[rowIndex] ?? element.alignment.vertical }
+      const baseline = alignment.vertical === 'firstTextBaseline' || alignment.vertical === 'lastTextBaseline'
+      const sizes = row.map((cell, i) => this.measure(cell, { width: columns[i] ?? 0, height: rows[rowIndex] ?? 0 }, env))
+      const guides = baseline ? row.map((cell, i) => this.baselineOf(cell, sizes[i]!, env, alignment.vertical === 'lastTextBaseline')) : []
+      const guide = Math.max(0, ...guides)
       row.forEach((cell, columnIndex) => {
         const width = columns[columnIndex] ?? 0
         const height = rows[rowIndex] ?? 0
-        const size = this.measure(cell, { width, height }, env)
+        const size = sizes[columnIndex]!
+        const aligned = alignedRect({ x, y, width, height }, size, alignment)
+        const rect = baseline ? { ...aligned, y: y + guide - guides[columnIndex]! } : aligned
         next = this.place(
           cell,
-          alignedRect({ x, y, width, height }, size, element.alignment),
+          rect,
           env,
           out,
           next,
@@ -1076,7 +1089,7 @@ export class LayoutEngine {
     z: number,
     parent: string | null,
   ): number {
-    const { cells } = this.measureGrid(element, { width: bounds.width, height: bounds.height }, env)
+    const { cells, alignments } = this.measureGrid(element, { width: bounds.width, height: bounds.height }, env)
 
     let next = z
     element.children.forEach((child, index) => {
@@ -1087,7 +1100,7 @@ export class LayoutEngine {
       const rect = alignedRect(
         { x: bounds.x + cell.x, y: bounds.y + cell.y, width: cell.width, height: cell.height },
         size,
-        element.alignment,
+        alignments[index] ?? element.alignment,
       )
       next = this.place(child, rect, env, out, next, parent)
     })
@@ -1355,22 +1368,29 @@ export class LayoutEngine {
       }
 
       case 'shadow': {
-        // Emitted before the child so it sits underneath. A transparent box still
-        // casts a CSS box-shadow, which is what lets this be one flat node instead of
-        // a duplicate of the whole subtree beneath it.
+        // Shadow the painted subtree, including its clips and transparent areas.
+        const shadowId = `${element.id}-shadow`
         out.push({
-          id: `${element.id}-shadow`,
+          id: shadowId,
           frame: bounds,
           z,
           opacity: env.opacity,
-          cornerRadius: env.cornerRadius,
+          cornerRadius: 0,
           paint: { kind: 'hit' },
           shadow: modifier,
           ...(parent ? { parent } : {}),
         })
-        return this.place(element.child, bounds, inner, out, z + 1, parent)
+        return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, inner, out, z + 1, shadowId)
       }
 
+      case 'opacity': {
+        // Composite once after drawing the whole view, including overlapping children.
+        const opacityId = `${element.id}-opacity`
+        out.push({ id: opacityId, frame: bounds, z, opacity: inner.opacity, cornerRadius: 0, paint: { kind: 'hit' }, ...(parent ? { parent } : {}) })
+        return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, inner, out, z + 1, opacityId)
+      }
+
+      case 'cornerRadius':
       case 'clip': {
         // Real clipping needs a container, for the same reason scrolling does.
         const clipId = `${element.id}-clip`
@@ -1379,12 +1399,12 @@ export class LayoutEngine {
           frame: bounds,
           z,
           opacity: env.opacity,
-          cornerRadius:
+          cornerRadius: modifier.kind === 'cornerRadius' ? modifier.radius :
             modifier.shape === 'circle' || modifier.shape === 'capsule'
               ? Math.min(bounds.width, bounds.height) / 2
               : modifier.cornerRadius,
           clip: true,
-          clipShape: { kind: modifier.shape, cornerStyle: modifier.style },
+          clipShape: { kind: modifier.kind === 'cornerRadius' ? 'roundedRectangle' : modifier.shape, cornerStyle: modifier.style },
           paint: { kind: 'hit' },
           ...(parent ? { parent } : {}),
         })
@@ -1540,31 +1560,9 @@ export class LayoutEngine {
       }
 
       case 'containerRelativeFrame': {
-        // The container is the bounds this was offered, so the fraction is taken from
-        // them here rather than from whatever the parent chose to hand down: a view
-        // asking for a third of the container must get a third even when its parent
-        // placed it across the whole width.
-        const width = modifier.horizontal
-          ? (bounds.width - modifier.spacing * (modifier.count - 1)) / modifier.count
-          : bounds.width
-        const height = modifier.vertical
-          ? (bounds.height - modifier.spacing * (modifier.count - 1)) / modifier.count
-          : bounds.height
-
-        const inner_ = this.measure(element.child, { width, height }, inner)
-        return this.place(
-          element.child,
-          {
-            x: bounds.x,
-            y: bounds.y,
-            width: modifier.horizontal ? width : inner_.width,
-            height: modifier.vertical ? height : inner_.height,
-          },
-          inner,
-          out,
-          z,
-          parent,
-        )
+        const proposal = relativeContainerProposal(modifier, bounds, inner)
+        const size = this.measure(element.child, proposal, inner)
+        return this.place(element.child, alignedRect(bounds, size, modifier.alignment ?? CENTER), inner, out, z, parent)
       }
 
       case 'safeAreaInset': {
@@ -1635,6 +1633,7 @@ export class LayoutEngine {
             role: modifier.role,
             enabled: modifier.enabled && !inner.hitTestingDisabled,
             font: controlEnv.font,
+            textAlign: controlEnv.textAlign,
             color: modifier.color ?? controlEnv.foregroundColor,
             step: modifier.step,
             secure: modifier.secure,
@@ -1642,6 +1641,7 @@ export class LayoutEngine {
             inputInset: modifier.inputInset,
             submitHandlerId: modifier.submitHandlerId,
             contextMenuHandlerId: modifier.contextMenuHandlerId,
+            inputType: modifier.inputType,
             inputMode: modifier.inputMode,
             enterKeyHint: modifier.enterKeyHint,
             autocapitalization: modifier.autocapitalization,
@@ -1686,26 +1686,12 @@ function debugInfo(element: LayoutElement): {
  * The three share one node because they share one CSS property, and emitting one node
  * per axis would stack transform origins that SwiftUI applies about a single centre.
  */
-function transformFor(
-  modifier:
-    | { readonly kind: 'scale'; readonly x: number; readonly y: number }
-    | { readonly kind: 'rotate'; readonly degrees: number }
-    | { readonly kind: 'rotate3D'; readonly degrees: number; readonly x: number; readonly y: number; readonly z: number },
-): { scaleX: number; scaleY: number; rotate: number; rotateX?: number; rotateY?: number } {
-  if (modifier.kind === 'scale') return { scaleX: modifier.x, scaleY: modifier.y, rotate: 0 }
-  if (modifier.kind === 'rotate') return { scaleX: 1, scaleY: 1, rotate: modifier.degrees }
-
-  // The axis is a vector, so a rotation about (1, 1, 0) is half about each. Splitting
-  // it by component is what SwiftUI's own projection does.
-  const { degrees, x, y, z } = modifier
-  const length = Math.sqrt(x * x + y * y + z * z) || 1
-  return {
-    scaleX: 1,
-    scaleY: 1,
-    rotate: (degrees * z) / length,
-    rotateX: (degrees * x) / length,
-    rotateY: (degrees * y) / length,
-  }
+function transformFor(modifier: Extract<LayoutModifier, { kind: 'scale' | 'rotate' | 'rotate3D' }>): TransformSpec {
+  const anchor = modifier.anchor
+  if (modifier.kind === 'scale') return { scaleX: modifier.x, scaleY: modifier.y, rotate: 0, anchor }
+  if (modifier.kind === 'rotate') return { scaleX: 1, scaleY: 1, rotate: modifier.degrees, anchor }
+  const { degrees, x, y, z, anchorZ = 0, perspective = 1 } = modifier
+  return { scaleX: 1, scaleY: 1, rotate: 0, anchor, rotation3D: { degrees, x, y, z, anchorZ, perspective } }
 }
 
 function decorations(
@@ -1747,28 +1733,27 @@ function scrollProposal(element: ScrollElement, proposal: ProposedSize): Propose
  * as will go, then shares the remainder between them - so the same grid shows two
  * columns on a phone and four on a tablet without the code changing.
  */
-function resolveTracks(
-  tracks: readonly GridTrack[],
-  available: number,
-  spacing: number,
-): number[] {
-  if (tracks.length === 0) return [available]
-
-  const adaptive = tracks.find((t) => t.kind === 'adaptive')
-  if (adaptive && tracks.length === 1) {
-    const minimum = Math.max(1, adaptive.size ?? 80)
-    const count = Math.max(1, Math.floor((available + spacing) / (minimum + spacing)))
-    const each = (available - spacing * (count - 1)) / count
-    return new Array(count).fill(Math.max(0, each))
-  }
-
-  const fixed = tracks.filter((t) => t.kind === 'fixed')
-  const fixedTotal = fixed.reduce((sum, t) => sum + (t.size ?? 0), 0)
-  const flexibleCount = tracks.length - fixed.length
-  const remaining = available - fixedTotal - spacing * (tracks.length - 1)
-  const share = flexibleCount > 0 ? Math.max(0, remaining / flexibleCount) : 0
-
-  return tracks.map((track) => (track.kind === 'fixed' ? (track.size ?? 0) : share))
+function resolveTracks(tracks: readonly GridTrack[], available: number, spacing: number): { size: number; spacing: number; alignment?: Alignment }[] {
+  if (!tracks.length) return [{ size: available, spacing }]
+  let remaining = available - tracks.slice(0, -1).reduce((sum, t) => sum + (t.spacing ?? spacing), 0)
+  let flexible = tracks.filter(t => t.kind !== 'fixed').length
+  const sizes = tracks.map(t => t.kind === 'fixed' ? Math.max(0, t.size ?? 0) : 0)
+  remaining -= sizes.reduce((sum, size) => sum + size, 0)
+  tracks.forEach((track, index) => {
+    if (track.kind === 'fixed') return
+    const offered = Math.max(0, remaining / flexible--)
+    const size = track.kind === 'flexible' ? Math.max(track.size ?? 10, Math.min(track.maximum ?? Infinity, offered)) : offered
+    sizes[index] = size
+    remaining -= size
+  })
+  return tracks.flatMap((track, index) => {
+    const gap = track.spacing ?? spacing, size = sizes[index]!
+    if (track.kind !== 'adaptive') return [{ size, spacing: gap, alignment: track.alignment }]
+    const minimum = Math.max(1, track.size ?? 80)
+    const count = Math.max(1, Math.floor((size + gap) / (minimum + gap)))
+    const each = Math.max(0, Math.min(track.maximum ?? Infinity, (size - gap * (count - 1)) / count))
+    return Array.from({ length: count }, () => ({ size: each, spacing: gap, alignment: track.alignment }))
+  })
 }
 
 function describeDimension(d: ProposedDimension): string {
@@ -1904,6 +1889,9 @@ function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly Pai
     text: displayText(text, env),
     font: env.font,
     color: env.foregroundColor,
+    ...(env.foregroundFill ? { foregroundFill: env.foregroundFill } : {}),
+    ...(env.strikethroughColor !== undefined ? { strikethroughColor: env.strikethroughColor } : {}),
+    ...(env.underlineColor !== undefined ? { underlineColor: env.underlineColor } : {}),
     ...(env.underline ? { underline: true } : {}),
     ...(env.strikethrough ? { strikethrough: true } : {}),
     ...(env.tracking ? { tracking: env.tracking } : {}),
@@ -1915,7 +1903,7 @@ function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly Pai
 
   return element.runs.map((run) => {
     const base = inherited(run.text)
-    if (!run.font && run.color === undefined) {
+    if (!run.font && run.color === undefined && !run.foregroundFill) {
       return applyRunAttributes(base, run)
     }
     // A run that names a size is a different face, so its line height comes from the
@@ -1930,7 +1918,7 @@ function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly Pai
       ...(run.font?.italic !== undefined ? { italic: run.font.italic } : {}),
     }
     return applyRunAttributes(
-      { ...base, font, ...(run.color ? { color: run.color } : {}) },
+      { ...base, font, ...(run.color ? { color: run.color, foregroundFill: undefined } : {}), ...(run.foregroundFill ? { foregroundFill: run.foregroundFill } : {}) },
       run,
     )
   })
@@ -1940,6 +1928,8 @@ function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly Pai
 function applyRunAttributes(base: PaintedRun, run: TextRunSpec): PaintedRun {
   return {
     ...base,
+    ...(run.strikethroughColor !== undefined ? { strikethroughColor: run.strikethroughColor } : {}),
+    ...(run.underlineColor !== undefined ? { underlineColor: run.underlineColor } : {}),
     ...(run.underline !== undefined ? { underline: run.underline } : {}),
     ...(run.strikethrough !== undefined ? { strikethrough: run.strikethrough } : {}),
     ...(run.tracking !== undefined ? { tracking: run.tracking } : {}),
@@ -2055,4 +2045,24 @@ function layoutPriorityOf(element: LayoutElement): number {
  */
 function stripHitTargets(env: LayoutEnvironment): LayoutEnvironment {
   return { ...env, hitTestingDisabled: true }
+}
+
+/** Layout stacks and padding do not establish a new container. */
+function finiteContainer(proposal: ProposedSize, fallback?: LayoutEnvironment['containerSize']): NonNullable<LayoutEnvironment['containerSize']> {
+  const finite = (value: ProposedSize['width'], fallback: number | null | undefined) =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback ?? null
+  return { width: finite(proposal.width, fallback?.width), height: finite(proposal.height, fallback?.height) }
+}
+
+function relativeContainerProposal(modifier: Extract<LayoutModifier, { kind: 'containerRelativeFrame' }>, proposal: ProposedSize, env: LayoutEnvironment): ProposedSize {
+  const dimension = (container: number | null | undefined, proposed: ProposedSize['width']) => {
+    const available = container ?? (typeof proposed === 'number' ? proposed : null)
+    if (available === null) return proposed
+    const count = Math.max(1, modifier.count), span = Math.max(1, modifier.span ?? 1)
+    return Math.max(0, (available - modifier.spacing * (count - 1)) / count * span + modifier.spacing * (span - 1))
+  }
+  return {
+    width: modifier.horizontal ? dimension(env.containerSize?.width, proposal.width) : proposal.width,
+    height: modifier.vertical ? dimension(env.containerSize?.height, proposal.height) : proposal.height,
+  }
 }
