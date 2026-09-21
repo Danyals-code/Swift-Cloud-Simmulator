@@ -6,6 +6,7 @@ import styles from './AuthoringInspector.module.css'
 
 const RANGE_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
 const OPTION_LABELS: Record<string, string> = {
+  Row: 'Horizontal Stack', Column: 'Vertical Stack', Stack: 'ZStack',
   largeTitle: 'Large title', title: 'Title', title2: 'Title 2', title3: 'Title 3',
   primary: 'Primary text', secondary: 'Secondary text', clear: 'Transparent', accentColor: 'App accent',
   systemBackground: 'Screen background', secondarySystemBackground: 'Secondary background', tertiarySystemBackground: 'Tertiary background',
@@ -67,17 +68,17 @@ export function PropertyControl({ control, onChange, label = control.label }: { 
   }
   return <div className={styles.control} data-testid="design-control">
     {control.group && <small>{control.group}</small>}
-    <label><span>{label}</span>
-      {control.kind === 'select' ? <select {...input} disabled={pending} onChange={event => { change(event.target.value); void commit() }}>
+    <label className={styles.controlLabel}><span>{label}</span>
+      {control.kind === 'select' ? <select {...input} disabled={pending || !!control.disabledReason} onChange={event => { change(event.target.value); void commit() }}>
         {control.value === '' && <option value="" disabled>Use inherited / default</option>}
         {control.options?.map(option => <option key={option} value={option}>{propertyOptionLabel(option)}</option>)}
-      </select> : control.kind === 'text' && /^(content|title)(:|$)/.test(control.id) ? <textarea {...input} readOnly={pending} rows={2} aria-description="Enter to apply. Shift+Enter for a new line." onChange={event => change(event.target.value)} /> : <input {...input} readOnly={pending} type="text" inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.kind === 'number' ? 'Default' : 'Enter value'} onChange={event => change(event.target.value)} />}
+      </select> : control.kind === 'text' && /^(content|title)(:|$)/.test(control.id) ? <textarea {...input} readOnly={pending || !!control.disabledReason} rows={2} aria-description="Enter to apply. Shift+Enter for a new line." onChange={event => change(event.target.value)} /> : <input {...input} readOnly={pending || !!control.disabledReason} type={/^date:(from|through)$/.test(control.id) ? "datetime-local" : "text"} inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.kind === 'number' ? 'Default' : 'Enter value'} onChange={event => change(event.target.value)} />}
     </label>
     {control.kind === 'number' && /spacing|padding|size|radius|width|height/i.test(label) && <small>Points (pt)</small>}
     {control.min === 0 && control.max === 1 && <input
       type="range" min="0" max="1" step="0.01"
       aria-label={`${label} slider`}
-      value={draft || '1'} disabled={pending}
+      value={draft || '1'} disabled={pending || !!control.disabledReason}
       onPointerDown={() => { cancelledGesture.current = false }}
       onChange={event => { if (!cancelledGesture.current) change(event.target.value) }}
       onPointerUp={finishDrag}
@@ -86,6 +87,7 @@ export function PropertyControl({ control, onChange, label = control.label }: { 
       onKeyDown={keyDown}
       onKeyUp={event => { if (RANGE_KEYS.includes(event.key)) void commit() }}
     />}
+    {control.disabledReason && <p className={styles.note}>{control.disabledReason}</p>}
     {error && <p role="alert" className={styles.error}>{error}</p>}
     {pending && <small role="status">Applying…</small>}
   </div>

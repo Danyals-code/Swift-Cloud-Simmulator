@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon, type IconName } from './Icon'
 
 /**
@@ -44,7 +45,7 @@ interface Anchor {
   readonly top: number
 }
 
-const ROW_HEIGHT = 22
+const ROW_HEIGHT = 28
 
 /**
  * The floating list.
@@ -71,6 +72,7 @@ export function MenuPanel({
   onDismiss: () => void
 }) {
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const id = useId()
   const enabled = items.filter((item) => !item.disabled)
   const [active, setActive] = useState(() => {
     const index = items.findIndex((item) => item.value === selected && !item.disabled)
@@ -107,9 +109,12 @@ export function MenuPanel({
         return
       }
 
+      if (event.key === 'Tab') { onDismiss(); return }
+
       const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
       if (step !== 0) {
         event.preventDefault()
+        event.stopPropagation()
         setActive((current) => {
           // Walks past disabled rows rather than stopping on them, so holding an
           // arrow key never appears to jam.
@@ -124,6 +129,7 @@ export function MenuPanel({
 
       if (event.key === 'Home' || event.key === 'End') {
         event.preventDefault()
+        event.stopPropagation()
         const target = event.key === 'Home' ? enabled[0] : enabled[enabled.length - 1]
         if (target) setActive(items.indexOf(target))
         return
@@ -131,6 +137,7 @@ export function MenuPanel({
 
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault()
+        event.stopPropagation()
         const item = items[active]
         if (item && !item.disabled) onChoose(item.value)
       }
@@ -144,7 +151,23 @@ export function MenuPanel({
     panelRef.current?.focus()
   }, [])
 
-  return (
+  useEffect(() => {
+    panelRef.current?.querySelector(`[data-menu-index="${active}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [active])
+
+  useEffect(() => {
+    const dismiss = (event: Event) => {
+      if (event.target instanceof Node && panelRef.current?.contains(event.target)) return
+      onDismiss()
+    }
+    window.addEventListener('resize', dismiss)
+    window.addEventListener('scroll', dismiss, true)
+    return () => { window.removeEventListener('resize', dismiss); window.removeEventListener('scroll', dismiss, true) }
+  }, [onDismiss])
+
+  // Portals keep panel-specific button rules and clipping out of the menu.
+  // React events still bubble through the trigger's tree, so stop them here.
+  return createPortal(
     <>
       {/*
         The dismissal surface. A transparent fixed layer rather than a document
@@ -152,15 +175,18 @@ export function MenuPanel({
         was behind it - closing a menu and activating a button in one press is a
         misfire every time.
       */}
-      <div className="fixed inset-0 z-[900]" onPointerDown={onDismiss} />
+      <div className="fixed inset-0 z-[900]" onPointerDown={event => { event.stopPropagation(); onDismiss() }} onClick={event => event.stopPropagation()} />
 
       <div
         ref={panelRef}
         role="listbox"
+        aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
+        onClick={event => event.stopPropagation()}
+        onPointerDown={event => event.stopPropagation()}
         tabIndex={-1}
         data-testid={testId}
         style={{ left: placement.left, top: placement.top, minWidth: placement.width }}
-        className="fixed z-[901] max-h-[60vh] min-w-[160px] overflow-auto rounded-md border border-xc-line bg-xc-panel py-[5px] shadow-[0_8px_30px_rgb(0_0_0/0.12)]"
+        className="fixed z-[901] max-h-[60vh] min-w-[180px] max-w-[calc(100vw-16px)] overflow-auto rounded-md border border-xc-line bg-xc-panel py-[5px] shadow-[0_8px_30px_rgb(0_0_0/0.12)]"
       >
         {items.map((item, index) => {
           const isSelected = item.value === selected
@@ -175,6 +201,9 @@ export function MenuPanel({
               <button
                 type="button"
                 role="option"
+                id={`${id}-${index}`}
+                data-menu-index={index}
+                tabIndex={-1}
                 aria-selected={isSelected}
                 disabled={item.disabled}
                 data-testid={testId ? `${testId}-${item.value}` : undefined}
@@ -187,8 +216,8 @@ export function MenuPanel({
                 }}
                 onPointerEnter={() => !item.disabled && setActive(index)}
                 title={item.title}
-                className={`flex w-full items-center gap-2 px-2 text-left text-[14px] leading-none disabled:opacity-40 ${
-                  isActive && !item.disabled ? 'bg-xc-accent text-xc-text' : 'text-xc-text'
+                className={`flex w-full items-center gap-2 px-2 text-left text-[12px] leading-none disabled:opacity-40 ${
+                  isActive && !item.disabled ? 'bg-xc-select text-xc-text' : 'text-xc-text'
                 }`}
                 style={{ height: ROW_HEIGHT, borderRadius: 4 }}
               >
@@ -211,7 +240,7 @@ export function MenuPanel({
           )
         })}
       </div>
-    </>
+    </>, document.body
   )
 }
 
@@ -258,7 +287,7 @@ export function PopupButton({
 
   const close = useCallback(() => {
     setAnchor(null)
-    ref.current?.focus()
+    ref.current?.focus({ preventScroll: true })
   }, [])
 
   return (
@@ -340,7 +369,7 @@ export function MenuButton({
 
   const close = useCallback(() => {
     setAnchor(null)
-    ref.current?.focus()
+    ref.current?.focus({ preventScroll: true })
   }, [])
 
   return (

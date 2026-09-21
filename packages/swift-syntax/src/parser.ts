@@ -1791,7 +1791,7 @@ export class Parser {
 
     if (
       start.kind === 'operator' &&
-      (start.text === '-' || start.text === '!' || start.text === '+') &&
+      (['-', '!', '+', '...', '..<'].includes(start.text)) &&
       // Prefix operators have no space between themselves and their operand.
       !start.spaceAfter
     ) {
@@ -1842,6 +1842,13 @@ export class Parser {
       ) {
         this.advance()
         expr = { kind: 'optionalChain', span: this.spanFrom(start), operand: expr }
+        continue
+      }
+
+      // A lower-bounded range ends where an operand would otherwise begin.
+      if (this.check('...') && !this.current.spaceBefore && (this.current.spaceAfter || [',', ')', ']', '}', ';'].includes(this.peek().text) || this.peek().kind === 'endOfFile')) {
+        this.advance()
+        expr = { kind: 'unary', span: this.spanFrom(start), operator: 'partialFrom', operand: expr }
         continue
       }
 

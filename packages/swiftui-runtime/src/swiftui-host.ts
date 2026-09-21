@@ -125,7 +125,7 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
   'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material',
-  'Task', 'MainActor',
+  'Task', 'MainActor', 'Gradient', 'StrokeStyle',
 ])
 
 /**
@@ -740,7 +740,13 @@ export class SwiftUIHost implements InterpreterHost {
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
     if (name === 'GridItem') return this.makeGridItem(call)
+    if (name === 'Gradient') return opaque('Gradient', this.gradientStops(call))
+    if (name === 'Gradient.Stop') return this.gradientStop(call)
 
+    if (name === 'Angle') {
+      const arg = call.args.find(a => a.label === 'degrees' || a.label === 'radians')
+      return token(`${arg?.label ?? 'degrees'}:${numberOf(arg?.value) ?? 0}`)
+    }
     if (name === 'CGSize') {
       return size(
         numberOf(call.args.find((a) => a.label === 'width')?.value) ?? 0,
@@ -748,7 +754,7 @@ export class SwiftUIHost implements InterpreterHost {
       )
     }
 
-    if (name === 'CGPoint') {
+    if (name === 'CGPoint' || name === 'UnitPoint') {
       return point(
         numberOf(call.args.find((a) => a.label === 'x')?.value) ?? 0,
         numberOf(call.args.find((a) => a.label === 'y')?.value) ?? 0,
@@ -773,10 +779,13 @@ export class SwiftUIHost implements InterpreterHost {
       const dash = call.args.find((a) => a.label === 'dash')?.value
       return opaque(STROKE_STYLE_TYPE, {
         lineWidth: numberOf(call.args.find((a) => a.label === 'lineWidth')?.value) ?? 1,
-        lineCap: tokenNameOf(call.args.find((a) => a.label === 'lineCap')?.value),
+        lineCap: (tokenNameOf(call.args.find(a => a.label === 'lineCap')?.value) ?? 'butt') as StrokeStylePayload['lineCap'],
+        lineJoin: (tokenNameOf(call.args.find(a => a.label === 'lineJoin')?.value) ?? 'miter') as StrokeStylePayload['lineJoin'],
+        miterLimit: numberOf(call.args.find(a => a.label === 'miterLimit')?.value) ?? 10,
+        dashPhase: numberOf(call.args.find(a => a.label === 'dashPhase')?.value) ?? 0,
         dash:
           dash?.kind === 'array'
-            ? dash.elements.map((e) => numberOf(e) ?? 0).filter((n) => n > 0)
+            ? dash.elements.map((e) => numberOf(e) ?? 0).filter((n) => n >= 0)
             : [],
       } satisfies StrokeStylePayload)
     }
@@ -966,6 +975,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
+    if (target.kind === 'type' && (target.name === 'Gradient' && member === 'Stop' || target.name === 'Gradient.Stop' && member === 'init')) return this.gradientStop(call)
     // `.modifier(Shadowed())` - a custom `ViewModifier`. Its `body(content:)` takes
     // the view it is applied to and returns a new one, so the content is handed over
     // as a value: inside the modifier, `content.padding()` is then an ordinary
@@ -1048,6 +1058,9 @@ export class SwiftUIHost implements InterpreterHost {
 
     const base = asView(target) ?? this.expandForModifier(target, call.span)
     if (base) {
+      if (base.name === 'Tab' && ['font', 'foregroundStyle', 'foregroundColor', 'background', 'padding', 'frame', 'cornerRadius', 'clipShape', 'opacity', 'offset', 'border', 'shadow', 'blur', 'bold', 'italic', 'underline', 'strikethrough', 'tracking', 'lineSpacing', 'lineLimit', 'multilineTextAlignment', 'rotationEffect', 'scaleEffect'].includes(member)) {
+        throw new SwiftTrap(`Tab is TabContent, not a View. Apply .${member} to the view inside the tab.`, call.span)
+      }
       return view({ ...base, modifiers: [...base.modifiers, this.makeModifier(member, call)] })
     }
 
@@ -1112,6 +1125,15 @@ export class SwiftUIHost implements InterpreterHost {
       return target
     }
 
+    // ShapeStyle opacity must remain a value: it can be passed to fill/background
+    // as well as used on a gradient view.
+    if (member === 'opacity' && target.kind === 'opaque' &&
+      (target.typeName === STYLE_TYPE || target.typeName === TOKEN_TYPE && Object.values(MATERIAL_MEMBERS).includes((target.payload as TokenPayload).name))) {
+      const payload = target.payload as GradientPayload | TokenPayload
+      const amount = Math.max(0, Math.min(1, numberOf(call.args[0]?.value) ?? 1))
+      return opaque(target.typeName, { ...payload, opacity: (payload.opacity ?? 1) * amount })
+    }
+
     // `.red.opacity(0.5)` - a contextual colour asked for one of `Color`'s members.
     const promoted = this.colorFromToken(target, member)
     if (promoted) return this.callMember(promoted, member, call)
@@ -1135,7 +1157,7 @@ export class SwiftUIHost implements InterpreterHost {
       const payload = target.payload as ColorPayload
       if (member === 'opacity') {
         const amount = numberOf(call.args[0]?.value)
-        return color({ ...payload, opacity: amount ?? 1 })
+        return color({ ...payload, opacity: (payload.opacity ?? 1) * Math.max(0, Math.min(1, amount ?? 1)) })
       }
       if (member === 'gradient') {
         return opaque(STYLE_TYPE, {
@@ -1377,6 +1399,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callImplicitMember(member: string, call: HostCall): SwiftValue | undefined {
+    if (member === 'init' && call.args.length === 2 && call.args[0]?.label === 'color' && call.args[1]?.label === 'location') return this.gradientStop(call)
     if (ANIMATION_CURVES[member] || member === 'spring' || member === 'interpolatingSpring') {
       return this.makeAnimation(member, call)
     }
@@ -1490,6 +1513,7 @@ export class SwiftUIHost implements InterpreterHost {
     if (target.kind === 'type' && this.declaresType?.(target.name)) return undefined
 
     if (target.kind === 'type') {
+      if (target.name === 'Gradient' && member === 'Stop') return { kind: 'type', name: 'Gradient.Stop' }
       if (target.name === 'Color') return color({ name: member })
       if (target.name === 'Animation') return this.animationToken(member)
       if (target.name === 'AnyTransition') return this.transitionToken(member)
@@ -1533,8 +1557,8 @@ export class SwiftUIHost implements InterpreterHost {
    * trap takes the whole preview down rather than the one view that caused it.
    *
    * Narrow in both directions on purpose: only the members `Color` itself answers,
-   * and only names the palette knows. `.ultraThinMaterial.opacity(0.5)` is declined
-   * and still reports honestly, because promoting any token that was asked for any
+   * and only names the palette knows. Materials keep their own ShapeStyle opacity
+   * path, because promoting any token that was asked for any
    * member would replace a value the user built with one the host invented - which is
    * the rule `coerceToType` is written to.
    */
@@ -1783,21 +1807,38 @@ export class SwiftUIHost implements InterpreterHost {
     } satisfies GradientPayload)
   }
 
-  private makeGradient(kind: GradientPayload['kind'], call: HostCall): SwiftValue {
-    const colors = call.args.find((a) => a.label === 'colors')?.value
-    const stops = call.args.find((a) => a.label === 'stops')?.value
-    const list =
-      colors?.kind === 'array'
-        ? colors.elements
-        : stops?.kind === 'array'
-          ? stops.elements
-          : call.args.filter((a) => a.label === null).map((a) => a.value)
+  private gradientStop(call: HostCall): SwiftValue {
+    return opaque('Gradient.Stop', { color: call.args.find(a => a.label === 'color')?.value, location: numberOf(call.args.find(a => a.label === 'location')?.value) ?? 0 })
+  }
 
+  private gradientStops(call: HostCall): { color: SwiftValue; location: number }[] {
+    const gradient = call.args.find(a => a.label === 'gradient')?.value
+    if (gradient?.kind === 'opaque' && gradient.typeName === 'Gradient') return gradient.payload as { color: SwiftValue; location: number }[]
+    const stops = call.args.find(a => a.label === 'stops')?.value
+    if (stops?.kind === 'array') return stops.elements.flatMap(stop => {
+      if (stop.kind !== 'opaque' || stop.typeName !== 'Gradient.Stop') return []
+      const value = stop.payload as { color: SwiftValue; location: number }
+      return value.color ? [value] : []
+    })
+    const colors = call.args.find(a => a.label === 'colors')?.value
+    const list = colors?.kind === 'array' ? colors.elements : call.args.filter(a => a.label === null).map(a => a.value)
+    return list.map((color, index) => ({ color, location: list.length < 2 ? 0 : index / (list.length - 1) }))
+  }
+
+  private makeGradient(kind: GradientPayload['kind'], call: HostCall): SwiftValue {
+    const stops = this.gradientStops(call)
+    const pointValue = (label: string) => {
+      const value = call.args.find(a => a.label === label)?.value
+      return pointOf(value) ?? tokenNameOf(value)
+    }
     return opaque(STYLE_TYPE, {
-      kind,
-      colors: list,
-      startPoint: tokenNameOf(call.args.find((a) => a.label === 'startPoint')?.value),
-      endPoint: tokenNameOf(call.args.find((a) => a.label === 'endPoint')?.value),
+      kind, stops, colors: stops.map(stop => stop.color),
+      center: pointValue('center'),
+      startRadius: numberOf(call.args.find(a => a.label === 'startRadius')?.value) ?? 0,
+      endRadius: numberOf(call.args.find(a => a.label === 'endRadius')?.value) ?? 100,
+      startAngle: angleOf(call.args.find(a => a.label === 'startAngle' || a.label === 'angle')?.value),
+      endAngle: call.args.some(a => a.label === 'endAngle') ? angleOf(call.args.find(a => a.label === 'endAngle')?.value) : angleOf(call.args.find(a => a.label === 'angle')?.value) + 360,
+      startPoint: pointValue('startPoint'), endPoint: pointValue('endPoint'),
     } satisfies GradientPayload)
   }
 
@@ -1813,7 +1854,9 @@ export class SwiftUIHost implements InterpreterHost {
   private makeGridItem(call: HostCall, kind?: string): SwiftValue {
     const inner = call.args.find((a) => a.label === null)?.value
     if (kind === undefined && inner?.kind === 'opaque' && inner.typeName === 'GridItem') {
-      return inner
+      return opaque('GridItem', { ...(inner.payload as object),
+        spacing: numberOf(call.args.find(a => a.label === 'spacing')?.value) ?? undefined,
+        alignment: tokenNameOf(call.args.find(a => a.label === 'alignment')?.value) ?? undefined })
     }
 
     const size = numberOf(inner)
@@ -1823,7 +1866,9 @@ export class SwiftUIHost implements InterpreterHost {
     return opaque('GridItem', {
       kind: kind ?? tokenNameOf(inner) ?? 'flexible',
       size: size ?? minimum ?? null,
-      spacing,
+      maximum: numberOf(call.args.find(a => a.label === 'maximum')?.value) ?? undefined,
+      spacing: spacing ?? undefined,
+      alignment: tokenNameOf(call.args.find(a => a.label === 'alignment')?.value) ?? undefined,
     })
   }
 

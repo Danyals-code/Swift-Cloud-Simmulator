@@ -1,6 +1,7 @@
 import { authoringCapability, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
 import { Lexer, Parser, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { viewCallChain } from './design-controls'
+import { authoringViewMinimum } from './authoring-view'
 import { SUPPORTED_MODIFIERS } from './builtins'
 
 /**
@@ -38,6 +39,44 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'lineLimit', label: 'Max lines', category: 'text', slot: 1, description: 'Cut long text after some lines', source: () => '.lineLimit(3)' },
   { name: 'tracking', label: 'Letter spacing', category: 'text', slot: 1, description: 'Space between letters', minimumIOS: 16, source: () => '.tracking(1)' },
   { name: 'lineSpacing', label: 'Line spacing', category: 'text', slot: 1, description: 'Space between lines', source: () => '.lineSpacing(4)' },
+  { name: 'frameFlexible', label: 'Flexible size', category: 'layout', slot: 3, description: 'Flexible size', minimumIOS: 13, source: () => '.frame(minWidth: 0, idealWidth: 160, maxWidth: .infinity, minHeight: 0, idealHeight: 80, maxHeight: .infinity)' },
+  { name: 'fixedSize', label: 'Ideal size', category: 'layout', slot: 3, description: 'Ideal size', minimumIOS: 13, source: () => '.fixedSize(horizontal: true, vertical: true)' },
+  { name: 'aspectRatio', label: 'Aspect ratio', category: 'layout', slot: 3, description: 'Aspect ratio', minimumIOS: 13, source: () => '.aspectRatio(1, contentMode: .fit)' },
+  { name: 'clipped', label: 'Clip to bounds', category: 'appearance', slot: 5, description: 'Clip to bounds', minimumIOS: 13, source: () => '.clipped()' },
+  { name: 'rotation3DEffect', label: '3D rotation', category: 'layout', slot: 8, description: '3D rotation', minimumIOS: 13, source: () => '.rotation3DEffect(.degrees(30), axis: (x: 0, y: 1, z: 0), anchor: .center, anchorZ: 0, perspective: 1)' },
+  { name: 'saturation', label: 'Saturation', category: 'appearance', slot: 9, description: 'Saturation', minimumIOS: 13, source: () => '.saturation(1)' },
+  { name: 'brightness', label: 'Brightness', category: 'appearance', slot: 9, description: 'Brightness', minimumIOS: 13, source: () => '.brightness(0)' },
+  { name: 'contrast', label: 'Contrast', category: 'appearance', slot: 9, description: 'Contrast', minimumIOS: 13, source: () => '.contrast(1)' },
+  { name: 'grayscale', label: 'Grayscale', category: 'appearance', slot: 9, description: 'Grayscale', minimumIOS: 13, source: () => '.grayscale(0.5)' },
+  { name: 'colorMultiply', label: 'Multiply color', category: 'appearance', slot: 9, description: 'Multiply color', minimumIOS: 13, source: () => '.colorMultiply(Color.white)' },
+  { name: 'hueRotation', label: 'Hue rotation', category: 'appearance', slot: 9, description: 'Hue rotation', minimumIOS: 13, source: () => '.hueRotation(.degrees(30))' },
+  { name: 'blendMode', label: 'Blend mode', category: 'appearance', slot: 9, description: 'Blend mode', minimumIOS: 13, source: () => '.blendMode(.normal)' },
+  { name: 'layoutPriority', label: 'Layout priority', category: 'layout', slot: 3, description: 'Layout priority', minimumIOS: 13, source: () => '.layoutPriority(1)' },
+  { name: 'fontWeight', label: 'Font weight', category: 'text', slot: 1, description: 'Font weight', minimumIOS: 13, source: () => '.fontWeight(.semibold)' },
+  { name: 'fontDesign', label: 'Font design', category: 'text', slot: 1, description: 'Font design', minimumIOS: 16, source: () => '.fontDesign(.default)' },
+  { name: 'kerning', label: 'Kerning', category: 'text', slot: 1, description: 'Kerning', minimumIOS: 16, source: () => '.kerning(1)' },
+  { name: 'baselineOffset', label: 'Baseline offset', category: 'text', slot: 1, description: 'Baseline offset', minimumIOS: 16, source: () => '.baselineOffset(2)' },
+  { name: 'textCase', label: 'Text case', category: 'text', slot: 1, description: 'Text case', minimumIOS: 13, source: () => '.textCase(.uppercase)' },
+  { name: 'minimumScaleFactor', label: 'Minimum text scale', category: 'text', slot: 1, description: 'Minimum text scale', minimumIOS: 13, source: () => '.minimumScaleFactor(0.5)' },
+  { name: 'truncationMode', label: 'Truncation', category: 'text', slot: 1, description: 'Truncation', minimumIOS: 13, source: () => '.truncationMode(.tail)' },
+  { name: 'allowsTightening', label: 'Tighten text', category: 'text', slot: 1, description: 'Tighten text', minimumIOS: 13, source: () => '.allowsTightening(true)' },
+  { name: 'allowsHitTesting', label: 'Allow interaction', category: 'behavior', slot: 10, description: 'Allow interaction', minimumIOS: 13, source: () => '.allowsHitTesting(true)' },
+  { name: 'accessibilityHidden', label: 'Hide from accessibility', category: 'behavior', slot: 10, description: 'Hide from accessibility', minimumIOS: 13, source: () => '.accessibilityHidden(true)' },
+  { name: 'accessibilityValue', label: 'Accessibility value', category: 'behavior', slot: 10, description: 'Accessibility value', minimumIOS: 13, source: () => '.accessibilityValue("Value")' },
+  { name: 'accessibilityHint', label: 'Accessibility hint', category: 'behavior', slot: 10, description: 'Accessibility hint', minimumIOS: 13, source: () => '.accessibilityHint("Hint")' },
+  { name: 'toggleStyle', label: 'Toggle style', category: 'appearance', slot: 10, description: 'Toggle style', minimumIOS: 13, only: ['Toggle'], source: () => '.toggleStyle(.switch)' },
+  { name: 'pickerStyle', label: 'Picker style', category: 'appearance', slot: 10, description: 'Picker style', minimumIOS: 14, only: ['Picker'], source: () => '.pickerStyle(.menu)' },
+  { name: 'progressViewStyle', label: 'Progress style', category: 'appearance', slot: 10, description: 'Progress style', minimumIOS: 14, only: ['ProgressView'], source: () => '.progressViewStyle(.linear)' },
+  { name: 'gaugeStyle', label: 'Gauge style', category: 'appearance', slot: 10, description: 'Gauge style', minimumIOS: 16, only: ['Gauge'], source: () => '.gaugeStyle(.linearCapacity)' },
+  { name: 'labelStyle', label: 'Label style', category: 'appearance', slot: 10, description: 'Label style', minimumIOS: 14, only: ['Label'], source: () => '.labelStyle(.titleAndIcon)' },
+  { name: 'textFieldStyle', label: 'Input style', category: 'appearance', slot: 10, description: 'Input style', minimumIOS: 13, only: ['TextField', 'SecureField'], source: () => '.textFieldStyle(.roundedBorder)' },
+  { name: 'listStyle', label: 'List style', category: 'appearance', slot: 10, description: 'List style', minimumIOS: 14, only: ['List', 'Form'], source: () => '.listStyle(.insetGrouped)' },
+  { name: 'scrollIndicators', label: 'Scroll indicators', category: 'appearance', slot: 10, description: 'Scroll indicators', minimumIOS: 16, only: ['ScrollView', 'List', 'Form'], source: () => '.scrollIndicators(.visible)' },
+  { name: 'scrollContentBackground', label: 'Scroll background', category: 'appearance', slot: 10, description: 'Scroll background', minimumIOS: 16, only: ['ScrollView', 'List', 'Form'], source: () => '.scrollContentBackground(.hidden)' },
+  { name: 'imageScale', label: 'Symbol size', category: 'appearance', slot: 10, description: 'Symbol size', minimumIOS: 13, only: ['Image', 'Label'], source: () => '.imageScale(.large)' },
+  { name: 'listRowSeparator', label: 'Row separator', category: 'appearance', slot: 10, description: 'Row separator', minimumIOS: 15, source: () => '.listRowSeparator(.hidden)' },
+  { name: 'listRowSpacing', label: 'Row spacing', category: 'appearance', slot: 10, description: 'Row spacing', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listRowSpacing(8)' },
+  { name: 'listSectionSpacing', label: 'Section spacing', category: 'appearance', slot: 10, description: 'Section spacing', minimumIOS: 17, only: ['List', 'Form'], source: () => '.listSectionSpacing(24)' },
   { name: 'padding', label: 'Padding', category: 'layout', slot: 2, description: 'Space around it', source: () => '.padding(16)' },
   { name: 'frame', label: 'Size', category: 'layout', slot: 3, description: 'Width and height', source: () => '.frame(width: 100, height: 100)' },
   { name: 'background', label: 'Background', category: 'appearance', slot: 4, description: 'A color behind it', source: () => '.background(Color.blue)' },
@@ -52,7 +91,7 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'blur', label: 'Blur', category: 'appearance', slot: 9, description: 'Soften it', source: () => '.blur(radius: 4)' },
   { name: 'buttonStyle', label: 'Button style', category: 'appearance', slot: 10, description: 'Filled, bordered or plain', minimumIOS: 15, only: ['Button'], source: () => '.buttonStyle(.borderedProminent)' },
   { name: 'buttonBorderShape', label: 'Button shape', category: 'appearance', slot: 10, description: 'Capsule or rounded', minimumIOS: 15, only: ['Button'], source: () => '.buttonBorderShape(.capsule)' },
-  { name: 'controlSize', label: 'Control size', category: 'appearance', slot: 10, description: 'Small to large', minimumIOS: 15, only: ['Button'], source: () => '.controlSize(.regular)' },
+  { name: 'controlSize', label: 'Control size', category: 'appearance', slot: 10, description: 'Small to large', minimumIOS: 15, source: () => '.controlSize(.regular)' },
   { name: 'tint', label: 'Accent color', category: 'appearance', slot: 10, description: 'Color of buttons and controls inside', minimumIOS: 15, source: () => '.tint(Color.blue)' },
   { name: 'disabled', label: 'Disabled', category: 'behavior', slot: 10, description: 'Cannot be tapped', source: () => '.disabled(true)' },
   { name: 'accessibilityLabel', label: 'Accessibility label', category: 'behavior', slot: 10, description: 'What VoiceOver reads', source: () => '.accessibilityLabel("Label")' },
@@ -173,6 +212,8 @@ function pure(expr: Expr, depth = 0): boolean {
   if (depth > 6) return false
   return ['integerLiteral', 'floatLiteral', 'booleanLiteral', 'nilLiteral', 'identifier', 'stringLiteral'].includes(expr.kind) && (expr.kind !== 'stringLiteral' || expr.segments.every(s => s.kind === 'text'))
     || expr.kind === 'memberAccess' && (!expr.base || pure(expr.base, depth + 1))
+    || expr.kind === 'tuple' && expr.elements.every(e => pure(e, depth + 1))
+    || expr.kind === 'arrayLiteral' && expr.elements.every(e => pure(e, depth + 1))
     || expr.kind === 'unary' && ['+', '-'].includes(expr.operator) && pure(expr.operand, depth + 1)
     // `.rect(cornerRadius: 12)`, `.degrees(15)`, `Color.black.opacity(0.15)`, `Color(red:green:blue:)`:
     // plain values built from plain values, with no closure to capture anything.
@@ -185,11 +226,10 @@ function structural(call: CallExpr): boolean {
   // A view-producing background overload carries content ownership, unlike a color.
   if (name === 'background') {
     const value = call.args.length === 1 ? call.args[0]!.value : undefined
-    return !!value && (value.kind === 'memberAccess' || value.kind === 'call' && value.callee.kind === 'identifier' && value.callee.name === 'Color' || value.kind === 'call' && value.callee.kind === 'memberAccess' && value.callee.member === 'opacity')
+    return !!value && (value.kind === 'memberAccess' || value.kind === 'call' && value.callee.kind === 'identifier' && ['Color', 'LinearGradient', 'RadialGradient', 'AngularGradient'].includes(value.callee.name) || value.kind === 'call' && value.callee.kind === 'memberAccess' && value.callee.member === 'opacity')
   }
   return true
 }
-function eligible(node: AuthoringNode): boolean { return ['view', 'collection', 'component'].includes(node.kind) && node.name !== 'WindowGroup' && !node.properties.some(p => p.name === 'Source') }
 
 function offCall(original: string): CallExpr | undefined {
   const parsed = Parser.parse(`let __off = Color.clear${original}`, '__off.swift')
@@ -204,7 +244,8 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
   if (!parsed) return { modifiers: [], modifierCatalog: [] }
   const { segments } = parsed
   const version = Number.parseFloat(deploymentTarget)
-  const editable = allowEdits && eligible(node) && Number.isFinite(version) && version >= 13
+  const minimumViewVersion = authoringViewMinimum(node)
+  const editable = allowEdits && minimumViewVersion !== undefined && Number.isFinite(version) && version >= minimumViewVersion
   // Only comments a person wrote pin the chain; the studio's own off markers never do.
   const commented = hasHumanComment(text.slice(parsed.base.span.end, parsed.end), node.source.file) || /^[^\S\r\n]*(?:\/\/|\/\*)/.test(withoutMarkers(text.slice(parsed.end)))
   const movable = segments.map(segment => editable && !commented && (segment.off !== undefined || !!segment.call && structural(segment.call)))
@@ -241,7 +282,7 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
   return { modifiers, modifierCatalog: CATALOG.filter(entry => !entry.only || entry.only.includes(node.name)).map(entry => {
     const minimum = Math.max(entry.minimumIOS ?? 13, Number.parseFloat(authoringCapability(entry.name, 'modifier', [null])?.minimumIOS ?? '13'))
     const supported = available && version >= minimum
-    return { name: entry.name, label: entry.label, category: entry.category, description: entry.description, ...(entry.hidden ? { hidden: true } : {}), available: supported, reason: supported ? undefined : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : 'This view cannot be changed until its source is resolved.' }
+    return { name: entry.name, label: entry.label, category: entry.category, description: entry.description, ...(entry.hidden ? { hidden: true } : {}), available: supported, reason: supported ? undefined : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : node.name === 'Tab' && node.kind !== 'component' ? 'Select the view inside this tab to style its content.' : 'This view cannot be changed until its source is resolved.' }
   }) }
 }
 

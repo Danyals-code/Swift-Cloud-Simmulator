@@ -1,9 +1,11 @@
 import { useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type UIEvent as ReactUIEvent } from 'react'
-import { ShapeView } from './ShapeView'
+import { ScrollIndicator } from './ScrollIndicator'
+import { ShapeView, VectorPathView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
 import { symbolMetrics, shapePath } from '@studio/shared'
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
+  cssTransform,
   cssColor,
   cssFill,
   cssFilter,
@@ -119,7 +121,11 @@ export const RenderTreeView = memo(function RenderTreeView({
   // searched per node, so a thousand-row list stays linear.
   const byParent = useMemo(() => {
     const groups = new Map<string, RenderNode[]>()
-    for (const node of tree.nodes) {
+    const opacities = new Map(tree.nodes.map(node => [node.id, node.opacity]))
+    for (const original of tree.nodes) {
+      // Render nodes carry cumulative opacity; nested CSS carries it implicitly.
+      const parentOpacity = original.parent ? opacities.get(original.parent) ?? 1 : 1
+      const node = { ...original, opacity: parentOpacity > 0 ? Math.min(1, Math.max(0, original.opacity / parentOpacity)) : 1 }
       const key = node.parent ?? ''
       const bucket = groups.get(key)
       if (bucket) bucket.push(node)
@@ -338,6 +344,7 @@ function RenderNodeView({
   animate: boolean
   exiting?: boolean
 }) {
+  const multiplyId = `multiply-${useId().replace(/:/g, '')}`
   const panelRef = useRef<HTMLDivElement>(null)
   const cancelContextPress = useRef<(() => void) | null>(null)
   useLayoutEffect(() => () => cancelContextPress.current?.(), [])
@@ -393,7 +400,7 @@ function RenderNodeView({
     // hittable, which is the whole point.
     pointerEvents: inspecting || interactive || scroll || node.blocksPointer ? 'auto' : 'none',
     cursor: inspecting ? 'crosshair' : interactive ? 'pointer' : 'default',
-    ...(node.background && node.cornerStyle !== 'continuous' ? { background: cssFill(node.background) } : {}),
+    ...(node.background && node.cornerStyle !== 'continuous' ? { background: cssFill(node.background, node.frame) } : {}),
     ...(node.chromeRole === 'navigationSurface' && node.background?.kind === 'solid' ? {
       background: `rgb(${node.background.color.r} ${node.background.color.g} ${node.background.color.b} / calc(1 - 0.28 * var(--chrome-progress, 0)))`,
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
@@ -406,16 +413,6 @@ function RenderNodeView({
       ? {
           overflowX: scroll.axis === 'horizontal' ? 'auto' : 'hidden',
           overflowY: scroll.axis === 'vertical' ? 'auto' : 'hidden',
-          /**
-           * Never a bar, whatever `showsIndicators` says.
-           *
-           * iOS draws a scroll indicator while a finger is moving and nothing at
-           * all when it stops; a desktop scrollbar is a permanent grey rail down
-           * the side of the phone, which is furniture the device does not have.
-           * The flag is still read and still carried - it is what the source says -
-           * and what it selects between is an indicator that fades and one that
-           * never appears, neither of which is a rail.
-           */
           scrollbarWidth: 'none',
           // iOS scrollers do not capture a page scroll once they hit their end.
           overscrollBehavior: 'contain',
@@ -430,20 +427,16 @@ function RenderNodeView({
       : {}),
     ...(node.shadow
       ? {
-          boxShadow: `${node.shadow.x}px ${node.shadow.y}px ${node.shadow.radius * 2}px ${cssColor(node.shadow.color)}`,
+          filter: `drop-shadow(${node.shadow.x}px ${node.shadow.y}px ${node.shadow.radius}px ${cssColor(node.shadow.color)})`,
         }
       : {}),
     ...(node.transform
       ? {
-          transform: cssTransform(node.transform),
-          // A rotation about x or y is a projection, and without a perspective the
-          // browser draws it as a flat squash - which is not what SwiftUI shows.
-          ...(node.transform.rotateX || node.transform.rotateY
-            ? { transformStyle: 'preserve-3d' as const, perspective: '640px' }
-            : {}),
+          transform: cssTransform(node.transform, node.frame),
+          transformOrigin: node.transform.rotation3D ? '0 0' : `${(node.transform.anchor?.x ?? 0.5) * 100}% ${(node.transform.anchor?.y ?? 0.5) * 100}%`,
         }
       : {}),
-    ...(node.filter ? { filter: cssFilter(node.filter) } : {}),
+    ...(node.filter ? { filter: [cssFilter(node.filter), node.filter.multiply ? `url(#${multiplyId})` : ''].filter(Boolean).join(' ') || undefined } : {}),
     ...(node.blendMode ? { mixBlendMode: node.blendMode as CSSProperties['mixBlendMode'] } : {}),
     ...(node.transition && animate ? { animation: transitionAnimation(node, exiting) } : {}),
     ...(node.material
@@ -476,7 +469,7 @@ function RenderNodeView({
   // A control the browser owns. Its frame was still decided by the layout engine;
   // what the DOM supplies is the interaction the engine has no way to model.
   const nativeControl =
-    handlerId && onEvent && (role === 'textField' || role === 'slider')
+    handlerId && (role === 'textField' || onEvent && role === 'slider')
       ? renderControl(node, handlerId, onEvent)
       : null
 
@@ -495,7 +488,7 @@ function RenderNodeView({
       {node.kind === 'shape' && node.shape ? <ShapeContent node={node} /> : null}
       {node.kind === 'path' && node.path ? <PathContent node={node} /> : null}
       {node.kind === 'placeholder' && node.placeholder ? <PlaceholderContent node={node} /> : null}
-      {node.filter?.multiply ? <ColorMultiply color={node.filter.multiply} /> : null}
+      {node.filter?.multiply ? <ColorMultiply color={node.filter.multiply} id={multiplyId} /> : null}
       {nativeControl}
       <ScrollContent node={node}>
         <RenderNodeGroup nodes={children ?? EMPTY_NODES} byParent={byParent} animate={animate && !exiting} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
@@ -597,6 +590,7 @@ function RenderNodeView({
       }
     >
       {content}
+      {scroll?.showsIndicators && <ScrollIndicator node={node} />}
     </div>
   )
 }
@@ -681,7 +675,7 @@ function ScrollContent({ node, children }: { node: RenderNode; children: ReactNo
 function renderControl(
   node: RenderNode,
   handlerId: string,
-  onEvent: (event: UIEvent) => void,
+  onEvent: ((event: UIEvent) => void) | undefined,
 ): ReactNode {
   const hit = node.hitTarget!
   const font = hit.font
@@ -691,8 +685,11 @@ function renderControl(
     return (
       <Field
         className="swiftui-field"
-        type={hit.multiline ? undefined : hit.secure ? 'password' : 'text'}
+        type={hit.multiline ? undefined : hit.inputType ?? (hit.secure ? 'password' : 'text')}
+        step={hit.inputType === 'time' ? 60 : undefined}
         disabled={!hit.enabled}
+        readOnly={!onEvent}
+        tabIndex={onEvent ? undefined : -1}
         value={hit.value ?? ''}
         placeholder={hit.placeholder ?? ''}
         inputMode={hit.inputMode}
@@ -703,10 +700,10 @@ function renderControl(
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.shiftKey || hit.multiline || !hit.submitHandlerId) return
           event.preventDefault()
-          onEvent({ kind: 'tap', handlerId: hit.submitHandlerId, location: { x: 0, y: 0 } })
+          onEvent?.({ kind: 'tap', handlerId: hit.submitHandlerId, location: { x: 0, y: 0 } })
         }}
         aria-label={node.a11y?.label}
-        onChange={(e) => onEvent({ kind: 'textChange', handlerId, value: e.target.value })}
+        onChange={(e) => onEvent?.({ kind: 'textChange', handlerId, value: e.target.value })}
         style={{
           position: 'absolute',
           inset: 0,
@@ -717,6 +714,7 @@ function renderControl(
           background: 'transparent',
           padding: `${hit.multiline ? 8 : 0}px ${hit.multiline ? 5 : hit.inputInset ?? 0}px`,
           resize: 'none',
+          textAlign: hit.textAlign === 'center' ? 'center' : hit.textAlign === 'trailing' ? 'end' : 'start',
           '--field-placeholder': hit.placeholderColor ? cssColor(hit.placeholderColor) : 'GrayText',
           boxSizing: 'border-box',
           ...(font
@@ -724,6 +722,7 @@ function renderControl(
                 fontFamily: font.family,
                 fontSize: font.size,
                 fontWeight: font.weight,
+                fontStyle: font.italic ? 'italic' : 'normal',
                 lineHeight: `${font.lineHeight}px`,
               }
             : {}),
@@ -743,7 +742,7 @@ function renderControl(
       max={hit.max ?? 1}
       step={hit.step && hit.step > 0 ? hit.step : 'any'}
       aria-label={node.a11y?.label}
-      onChange={(e) => onEvent({ kind: 'slide', handlerId, value: Number(e.target.value) })}
+      onChange={(e) => onEvent?.({ kind: 'slide', handlerId, value: Number(e.target.value) })}
       style={{
         position: 'absolute',
         inset: 0,
@@ -779,25 +778,13 @@ function RedactedBar() {
   )
 }
 
-/**
- * `.colorMultiply` - every channel of the subtree multiplied by a colour.
- *
- * Drawn as an overlay in multiply blend mode, which is that operation exactly rather
- * than an approximation of it. It cannot be a CSS filter because there is no filter
- * function that multiplies by an arbitrary colour.
- */
-function ColorMultiply({ color }: { color: RGBA }) {
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        background: cssColor(color),
-        mixBlendMode: 'multiply',
-        pointerEvents: 'none',
-      }}
-    />
-  )
+/** Multiplication preserves the subtree alpha and transparent corners. */
+function ColorMultiply({ color, id }: { color: RGBA; id: string }) {
+  return <svg width="0" height="0" aria-hidden style={{ position: 'absolute', pointerEvents: 'none' }}><defs>
+    <filter id={id} x="-100%" y="-100%" width="300%" height="300%" colorInterpolationFilters="sRGB">
+      <feColorMatrix type="matrix" values={`${color.r/255} 0 0 0 0 0 ${color.g/255} 0 0 0 0 0 ${color.b/255} 0 0 0 0 0 ${color.a} 0`} />
+    </filter>
+  </defs></svg>
 }
 
 /**
@@ -807,12 +794,6 @@ function ColorMultiply({ color }: { color: RGBA }) {
  * origin and SwiftUI applies its own about the view's centre - so splitting them
  * across nodes would rotate about a point the user did not write.
  */
-function cssTransform(t: NonNullable<RenderNode['transform']>): string {
-  const parts = [`scale(${t.scaleX}, ${t.scaleY})`, `rotate(${t.rotate}deg)`]
-  if (t.rotateX) parts.push(`rotateX(${t.rotateX}deg)`)
-  if (t.rotateY) parts.push(`rotateY(${t.rotateY}deg)`)
-  return parts.join(' ')
-}
 
 /**
  * Paints text.
@@ -842,7 +823,7 @@ function TextContent({ node }: { node: RenderNode }) {
   // line is made of more than one. Single-run text is almost all text, so this is the
   // path that has to stay cheap - and it keeps the colour on the element the line *is*
   // rather than on a child, which is what anything reading the painted colour expects.
-  const typography: CSSProperties = { ...runStyle(first), whiteSpace: 'pre' }
+  const typography: CSSProperties = { ...runStyle(first, node.frame), ...(payload.runs.length > 1 ? { textDecoration: undefined, textDecorationColor: undefined, backgroundImage: undefined, backgroundClip: undefined, WebkitBackgroundClip: undefined } : {}), whiteSpace: 'pre' }
 
   if (payload.lines && payload.lines.length > 0) {
     return (
@@ -865,10 +846,10 @@ function TextContent({ node }: { node: RenderNode }) {
             {line.slices
               ? line.slices.map((slice, j) => {
                   const run = payload.runs[slice.run] ?? first
-                  return <span key={j} dir="auto" style={{ ...runStyle(run), position: 'relative',
-                    top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{slice.text}</span>
+                  return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
+                    top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
                 })
-              : <span dir="auto" style={{ position: 'relative', top: line.baseline - (line.fontBaseline ?? line.baseline) - (first.baselineOffset ?? 0) }}>{line.text}</span>}
+              : <span dir="auto" style={{ position: 'relative', top: line.baseline - (line.fontBaseline ?? line.baseline) - (first.baselineOffset ?? 0) }}>{decoratedText(first, line.text)}</span>}
           </div>
         ))}
       </>
@@ -887,7 +868,7 @@ function TextContent({ node }: { node: RenderNode }) {
     >
       {payload.runs.length > 1
         ? payload.runs.map((run, i) => <RunSpan key={i} run={run} text={run.text} />)
-        : first.text}
+        : decoratedText(first, first.text)}
     </div>
   )
 }
@@ -901,13 +882,19 @@ function TextContent({ node }: { node: RenderNode }) {
  * CSS has one property for both and a span may have either or both.
  */
 function RunSpan({ run, text }: { run: TextRun; text: string }) {
-  return <span style={runStyle(run)}>{text}</span>
+  return <span style={runStyle(run)}>{decoratedText(run, text)}</span>
+}
+
+function decoratedText(run: TextRun, text: string): ReactNode {
+  if (!run.underline || !run.strikethrough || cssColor(run.underlineColor ?? run.color) === cssColor(run.strikethroughColor ?? run.color)) return text
+  return <span style={{ textDecoration: 'underline', textDecorationColor: cssColor(run.underlineColor ?? run.color) }}><span style={{ textDecoration: 'line-through', textDecorationColor: cssColor(run.strikethroughColor ?? run.color) }}>{text}</span></span>
 }
 
 /** Everything one run says about how its characters are drawn. */
-function runStyle(run: TextRun): CSSProperties {
+function runStyle(run: TextRun, size?: {width:number;height:number}): CSSProperties {
   // CSS has one property for both, and a run may carry either or both.
-  const decoration = [
+  const separate = run.underline && run.strikethrough && cssColor(run.underlineColor ?? run.color) !== cssColor(run.strikethroughColor ?? run.color)
+  const decoration = separate ? '' : [
     run.underline ? 'underline' : null,
     run.strikethrough ? 'line-through' : null,
   ]
@@ -922,7 +909,8 @@ function runStyle(run: TextRun): CSSProperties {
     fontKerning: 'normal',
     lineHeight: `${run.font.lineHeight}px`,
     color: cssColor(run.color),
-    ...(decoration ? { textDecoration: decoration } : {}),
+    ...(run.foregroundFill ? { backgroundImage: cssFill(run.foregroundFill, size), backgroundClip: 'text', WebkitBackgroundClip: 'text', color: 'transparent' } : {}),
+    ...(decoration ? { textDecoration: decoration, textDecorationColor: cssColor((run.underline ? run.underlineColor : run.strikethroughColor) ?? run.color) } : {}),
     // The paint half of tracking; the measurement half already happened in the worker,
     // so the two agree by construction rather than by both guessing.
     ...(run.tracking ? { letterSpacing: run.tracking } : {}),
@@ -939,6 +927,17 @@ function ImageContent({ node }: { node: RenderNode }) {
   if (image.bitmap) return <img src={image.bitmap.url} alt={image.bitmap.name} draggable={false} style={{ display: 'block', width: '100%', height: '100%', objectFit: 'fill', userSelect: 'none' }} />
   const metrics = symbolMetrics(image.symbol)
   const title = image.symbol ? `${image.symbol} — ${asset?.source === 'ionicons' ? 'Ionicons approximation' : asset ? 'vector approximation' : 'unsupported symbol'}` : undefined
+  if (image.foregroundFill && asset) {
+    const viewWidth = node.frame.width, viewHeight = node.frame.height
+    return <svg width="100%" height="100%" viewBox={`0 0 ${viewWidth} ${viewHeight}`} aria-hidden>
+      <defs><mask id={`${maskId}-foreground`} maskUnits="userSpaceOnUse" x="0" y="0" width={viewWidth} height={viewHeight}>
+        <svg width={viewWidth} height={viewHeight} viewBox={asset.viewBox} fill="white" color="white" style={{ '--symbol-weight': symbolStrokeScale(image.font.weight) } as CSSProperties} dangerouslySetInnerHTML={{ __html: asset.body }} />
+      </mask></defs>
+      <foreignObject width={viewWidth} height={viewHeight} mask={`url(#${maskId}-foreground)`}>
+        <div title={title} style={{ width: '100%', height: '100%', background: cssFill(image.foregroundFill, node.frame) }} />
+      </foreignObject>
+    </svg>
+  }
   const height = image.resizable ? node.frame.height : image.font.size * metrics.heightEm * (image.symbolScale ?? 1)
   const width = image.resizable ? node.frame.width : image.font.size * metrics.widthEm * (image.symbolScale ?? 1)
   return (
@@ -967,27 +966,7 @@ function ImageContent({ node }: { node: RenderNode }) {
  * that strays outside should be visible rather than quietly clipped.
  */
 function PathContent({ node }: { node: RenderNode }) {
-  const path = node.path!
-
-  return (
-    <svg
-      width="100%"
-      height="100%"
-      viewBox={`0 0 ${node.frame.width} ${node.frame.height}`}
-      style={{ overflow: 'visible', display: 'block' }}
-      aria-hidden
-    >
-      <path
-        d={path.d}
-        fill={path.fill ? cssFill(path.fill) : 'none'}
-        fillRule={path.fillRule ?? 'nonzero'}
-        stroke={path.stroke ? cssColor(path.stroke.color) : 'none'}
-        strokeWidth={path.stroke?.width ?? 0}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
+  return <VectorPathView path={node.path!} width={node.frame.width} height={node.frame.height} />
 }
 
 /**

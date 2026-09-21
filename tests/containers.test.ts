@@ -1,3 +1,4 @@
+import { surfaceRadius } from './render-geometry'
 import { describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
@@ -75,7 +76,7 @@ describe('GroupBox', () => {
 
   it('draws a card behind the contents', () => {
     const result = run(view('GroupBox("Totals") { Text("42 items") }'))
-    const card = nodes(result).find((n) => n.cornerRadius === 8 && n.background)
+    const card = nodes(result).find((n) => n.background && surfaceRadius(nodes(result), n) === 8)
     expect(card, 'expected a rounded panel behind the contents').toBeDefined()
   })
 

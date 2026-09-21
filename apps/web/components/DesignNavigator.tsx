@@ -13,6 +13,7 @@ import styles from './DesignNavigator.module.css'
 export type DesignLevel = 'app' | 'screen' | 'view'
 
 export interface DesignNavigatorProps {
+  tabbed?: boolean
   appName: string
   tree: DesignTree
   layout: NavigatorLayout
@@ -124,8 +125,8 @@ export function DesignNavigator(props: DesignNavigatorProps) {
   </form>
 
   const header = <header className={styles.header}>
-    <button type="button" className={styles.icon} data-testid="pane-toggle-navigator" aria-pressed="true" title="Collapse left panel (⌘0)" aria-label="Collapse left panel" onClick={onTogglePanel}><Icon name="sidebar-left" size={15} /></button>
-    <strong>Design</strong>
+    {!props.tabbed && <button type="button" className={styles.icon} data-testid="pane-toggle-navigator" aria-pressed="true" title="Collapse left panel (⌘0)" aria-label="Collapse left panel" onClick={onTogglePanel}><Icon name="sidebar-left" size={15} /></button>}
+    <strong>{props.tabbed ? 'View hierarchy' : 'Layers'}</strong>
     <span className={styles.switch} role="group" aria-label="Panel layout">
       <button type="button" aria-pressed={layout === 'merged'} title="One tree: App, screens and views together" aria-label="One tree" data-testid="navigator-layout-merged" onClick={() => onLayoutChange('merged')}><Icon name="outline" size={13} /></button>
       <button type="button" aria-pressed={layout === 'split'} title="Three panels: App, Screens and Layers" aria-label="Three panels" data-testid="navigator-layout-split" onClick={() => onLayoutChange('split')}><Icon name="panels" size={13} /></button>
@@ -135,7 +136,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
   const appRow = <Row id="app" depth={0} icon="app" label={appName} detail="App" selected={level === 'app'} expandable={layout === 'merged'} expanded={layout === 'merged' && isOpen('app')} onToggle={() => toggle('app')} onClick={onSelectApp} testId="design-app" title="App settings: tokens, navigation and images" />
   const feedback = <>{form}{error && <p className={styles.error} role="alert">{error}</p>}</>
 
-  if (layout === 'split') return <nav className={styles.navigator} aria-label="Design" data-testid="design-navigator" data-layout="split">
+  if (layout === 'split') return <nav className={styles.navigator} aria-label="Layers" data-testid="design-navigator" data-layout="split">
     {header}
     <section className={styles.panel} aria-label="App" data-panel="app">
       <h2>App</h2>
@@ -151,7 +152,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
     </section>
   </nav>
 
-  return <nav className={styles.navigator} aria-label="Design" data-testid="design-navigator" data-layout="merged">
+  return <nav className={styles.navigator} aria-label="Layers" data-testid="design-navigator" data-layout="merged">
     {header}
     <div className={styles.outline} role="tree" aria-label="App, screens and views" onKeyDown={moveFocus}>
       {appRow}
@@ -184,7 +185,7 @@ function Row({ id, depth, icon, label, detail, selected, current, expandable, ex
   expandable?: boolean; expanded?: boolean; onToggle?: () => void; onClick: () => void
   actions?: readonly MenuItem[]; onAction?: (value: string) => void; testId?: string; title?: string
 }) {
-  return <div className={styles.row} role="treeitem" aria-level={depth + 1} aria-selected={!!selected} aria-expanded={expandable ? !!expanded : undefined} data-current={current || undefined} data-row-id={id} data-testid={testId} style={{ paddingLeft: BASE + depth * INDENT }}>
+  return <div className={styles.row} role="treeitem" aria-level={depth + 1} aria-selected={!!selected} aria-expanded={expandable ? !!expanded : undefined} data-current={current || undefined} data-row-id={id} data-testid={testId} style={{ paddingLeft: `min(${BASE + depth * INDENT}px, 35%)` }}>
     <button type="button" tabIndex={-1} className={styles.disclosure} disabled={!expandable} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`} onClick={onToggle}>{expandable && <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />}</button>
     <button type="button" className={styles.label} data-outline-row="true" title={title} onClick={onClick}
       onKeyDown={event => { if (event.key === 'ArrowRight' && expandable && !expanded) { event.preventDefault(); onToggle?.() } else if (event.key === 'ArrowLeft' && expandable && expanded) { event.preventDefault(); onToggle?.() } }}>
@@ -195,7 +196,7 @@ function Row({ id, depth, icon, label, detail, selected, current, expandable, ex
 }
 
 function GroupRow({ id, depth, label, icon = 'section', count, expanded, onToggle, action, title }: { id: string; depth: number; label: string; icon?: IconName; count?: number; expanded: boolean; onToggle: () => void; action?: ReactNode; title?: string }) {
-  return <div className={styles.group} role="treeitem" aria-level={depth + 1} aria-expanded={expanded} aria-selected={false} data-row-id={id} style={{ paddingLeft: BASE + depth * INDENT }} title={title}>
+  return <div className={styles.group} role="treeitem" aria-level={depth + 1} aria-expanded={expanded} aria-selected={false} data-row-id={id} style={{ paddingLeft: `min(${BASE + depth * INDENT}px, 35%)` }} title={title}>
     <button type="button" className={styles.groupToggle} data-outline-row="true" onClick={onToggle} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`}>
       <span className={styles.disclosure}><Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} /></span>
       <Icon name={icon} size={13} /><span>{label}</span>{count !== undefined && <small>{count}</small>}

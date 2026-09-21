@@ -11,9 +11,9 @@ export const SURFACES = {
   menu: { width: 280, radius: 24, row: 44, margin: 12 },
 } as const
 
-export type ListAppearance = 'plain' | 'grouped' | 'insetGrouped' | 'sidebar'
+export type ListAppearance = 'plain' | 'inset' | 'grouped' | 'insetGrouped' | 'sidebar'
 export function listAppearance(style: string | null, form: boolean, width: number): ListAppearance {
-  if (style === 'plain' || style === 'grouped' || style === 'insetGrouped' || style === 'sidebar') return style
+  if (style === 'plain' || style === 'inset' || style === 'grouped' || style === 'insetGrouped' || style === 'sidebar') return style
   // A regular-width ordinary list uses inset rows; forms remain grouped.
   return !form && width >= 600 ? 'sidebar' : 'insetGrouped'
 }

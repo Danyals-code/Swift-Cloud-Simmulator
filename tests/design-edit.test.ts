@@ -85,7 +85,7 @@ describe('R03/R04 minimal source recipes', () => {
     const source = wrap('VStack { Text("A"); Text("B") }.padding(12)')
     expect(edited(source, 'Layout', 'Row', 'VStack')).toBe(source.replace('VStack', 'HStack'))
     expect(edited(source, 'Layout', 'Stack', 'VStack')).toBe(source.replace('VStack', 'ZStack'))
-    expect(target(wrap('VStack(alignment: .leading) { Text("A") }'), 'VStack').controls?.some(c => c.id === 'layout')).toBe(false)
+    expect(target(wrap('VStack(alignment: .leading) { Text("A") }'), 'VStack').controls?.find(c => c.id === 'layout')?.disabledReason).toContain('Center')
   })
 })
 

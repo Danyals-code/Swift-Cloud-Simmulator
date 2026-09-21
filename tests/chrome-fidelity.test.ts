@@ -1,3 +1,4 @@
+import { surfaceRadius, worldFrame } from './render-geometry'
 import { describe, expect, it } from 'vitest'
 import type { CompileRequest, RenderNode } from '@studio/shared'
 import { symbolCandidates } from '@studio/shared'
@@ -128,7 +129,7 @@ describe('the tab bar', () => {
 
     const panel = tree.nodes.find(n => n.id === 'tabbar-surface-material')!
     expect(panel.material).toBeDefined()
-    expect(panel.cornerRadius).toBeGreaterThanOrEqual(panel.frame.height / 2)
+    expect(surfaceRadius(tree.nodes, panel)).toBeGreaterThanOrEqual(panel.frame.height / 2)
     expect(panel.frame.width).toBeLessThan(device.width)
     expect(tree.nodes.some(n => n.id === 'tab-0-selectedf')).toBe(true)
   })
@@ -332,7 +333,7 @@ describe('a determinate progress bar', () => {
     const fill = nodes.find((n) => n.id.endsWith('fill') || n.id.endsWith('-fillf'))
     expect(track, 'no track').toBeDefined()
     expect(fill, 'no fill').toBeDefined()
-    return { track: track!, fill: fill! }
+    return { track: { ...track!, frame: worldFrame(nodes, track!) }, fill: { ...fill!, frame: worldFrame(nodes, fill!) } }
   }
 
   /**
@@ -639,7 +640,7 @@ ${buttons}
     expect(pills).toHaveLength(2)
     expect(nodes.some(n => n.id.startsWith('ov-btnrule'))).toBe(false)
     expect(pills[0]!.frame).toMatchObject({ width: 140, height: 48 })
-    expect(pills[1]!.frame.x - pills[0]!.frame.x - pills[0]!.frame.width).toBe(8)
+    expect(worldFrame(nodes, pills[1]!).x - worldFrame(nodes, pills[0]!).x - pills[0]!.frame.width).toBe(8)
   })
 
   /**
@@ -703,8 +704,8 @@ describe('a segmented picker', () => {
     const track = nodes.find(n => n.id.endsWith('segtrackf'))!
     const selected = nodes.find(n => n.id.endsWith('seg0bgf'))!
     expect(track.frame.height).toBe(32)
-    expect(track.cornerRadius).toBeGreaterThanOrEqual(16)
-    expect(selected.cornerRadius).toBeGreaterThanOrEqual(selected.frame.height / 2)
+    expect(surfaceRadius(nodes, track)).toBeGreaterThanOrEqual(16)
+    expect(surfaceRadius(nodes, selected)).toBeGreaterThanOrEqual(selected.frame.height / 2)
     expect(nodes.filter(n => /seg\ddivl$/.test(n.id))).toHaveLength(0)
     expect(track.background).toEqual({ kind: 'solid', color: { r: 238, g: 238, b: 239, a: 1 } })
   })
@@ -763,7 +764,7 @@ describe('the search field', () => {
 describe('inset grouped sections', () => {
   function sectionCards(source: string) {
     const nodes = compileSource(source).renderTree!.nodes
-    return nodes.filter(n => /s\dbg/.test(n.id)).map(n => {
+    return nodes.filter(n => /s\dbg/.test(n.id) && n.background).map(n => {
       let y = n.frame.y, parent = n.parent
       while (parent) { const p = nodes.find(n => n.id === parent)!; y += p.frame.y; parent = p.parent }
       return { ...n, frame: { ...n.frame, y } }

@@ -10,8 +10,11 @@ export interface DesignControl {
   readonly label: string
   readonly group?: string
   readonly kind: 'text' | 'number' | 'select'
+  readonly integer?: boolean
   readonly value: string
   readonly options?: readonly string[]
+  /** A visible control that cannot currently be changed safely. */
+  readonly disabledReason?: string
   readonly min?: number
   readonly max?: number
   readonly scope: string

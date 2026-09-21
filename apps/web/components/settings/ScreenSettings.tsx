@@ -4,7 +4,7 @@ import { useState } from 'react'
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, DesignValue, PreviewInput, PreviewScenario, ResourceOperation, SharedStyle, SourceSpan, StateInput } from '@studio/shared'
 import type { DesignScreenNode, DesignTree } from '../../lib/designTree'
 import type { ScreenCommand } from '../../lib/screens'
-import { screenRoot, screenTitleControl, scenarioKey, scenarioScreen } from '../../lib/screens'
+import { screenOverrideModifier, screenRoot, screenTitleControl, scenarioKey, scenarioScreen } from '../../lib/screens'
 import { PropertyControl } from '../PropertyControl'
 import { TokenField, valueFields } from './TokenField'
 import { Icon } from '../ui/Icon'
@@ -40,10 +40,10 @@ function suggestValueName(state: string): string {
   return /^[a-z]/.test(name) ? name : `is${name.charAt(0).toUpperCase()}${name.slice(1)}`
 }
 
-const OVERRIDES: readonly { modifier: string; label: string; property: string }[] = [
-  { modifier: 'tint', label: 'Accent color', property: 'tint' },
-  { modifier: 'foregroundColor', label: 'Text color', property: 'foregroundColor' },
-  { modifier: 'font', label: 'Text style', property: 'font' },
+const OVERRIDES: readonly { modifier: string; label: string }[] = [
+  { modifier: 'tint', label: 'Accent color' },
+  { modifier: 'foregroundColor', label: 'Text color' },
+  { modifier: 'font', label: 'Text style' },
 ]
 
 /**
@@ -76,8 +76,15 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
       <div className={styles.sectionHeader}><h3>Overrides</h3></div>
       <p className={styles.note}>Replace an App value on this screen only. Everything on the screen inherits it.</p>
       {OVERRIDES.map(item => {
-        const field = valueFields(root, root.controls ?? []).find(candidate => candidate.style?.label === item.property)
-        if (field) return <TokenField key={item.modifier} field={field} label={item.label} tokens={tokens} busy={busy} override onChange={(id, value) => onNodeChange(root, id, value)} onCommand={resource(root)} />
+        const existing = screenOverrideModifier(root, item.modifier)
+        if (existing) {
+          const fields = valueFields(root, existing.controls, existing.propertyIds)
+          return <div key={item.modifier} data-testid={`screen-override-${item.modifier}`}>
+            {fields.length > 1 && <div className={styles.sectionHeader}><h3>{item.label}</h3></div>}
+            {fields.map((field, index) => <TokenField key={field.control?.id ?? field.style?.property ?? index} field={field} label={fields.length === 1 ? item.label : undefined} tokens={tokens} busy={busy} override onChange={(id, value) => onNodeChange(root, id, value)} onCommand={resource(root)} />)}
+            {!fields.length && <div className={styles.row}><span>{item.label} · Set on this screen</span><button type="button" className={styles.link} onClick={() => onReveal(existing.source)}>Open in Code</button></div>}
+          </div>
+        }
         const available = root.modifierCatalog?.find(entry => entry.name === item.modifier)?.available
         return <div key={item.modifier} className={styles.row}><span>{item.label}</span><button type="button" className={styles.link} disabled={busy || !available} title={available ? undefined : 'This screen’s first view cannot take this override yet.'} onClick={() => void run(onNodeCommand(root, { kind: 'modifier-add', name: item.modifier }))}>From App · Override</button></div>
       })}
@@ -95,7 +102,7 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
 }
 
 function rootLabel(node: AuthoringNode): string {
-  return ({ VStack: 'column', HStack: 'row', ZStack: 'layers', List: 'list', ScrollView: 'scroll area', Form: 'form' } as Record<string, string>)[node.name] ?? 'first view'
+  return ({ VStack: 'Vertical Stack', HStack: 'Horizontal Stack', ZStack: 'ZStack', List: 'list', ScrollView: 'scroll area', Form: 'form' } as Record<string, string>)[node.name] ?? 'first view'
 }
 
 function describePresentation(screen: DesignScreenNode, tree: DesignTree): string {
@@ -168,12 +175,12 @@ function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onS
     {adding && <div className={styles.tokenRow} data-open>
       <div className={styles.row}><label htmlFor="state-name">Name</label><input id="state-name" aria-label="State name" list="state-names" value={name} onChange={event => setName(event.target.value)} /></div>
       <datalist id="state-names"><option>Loading</option><option>Empty</option><option>Error</option><option>Signed out</option></datalist>
-      {!!(inputs.length || collections.length) && <div className={styles.row}><label htmlFor="state-input">Changes</label><select id="state-input" aria-label="State input" value={inputKey} onChange={event => { setInputKey(event.target.value); const chosen = inputs.find(item => `${item.owner}.${item.name}` === event.target.value); setValue(chosen ? String(chosen.value ?? '') : 'empty') }}><option value="" disabled>Choose…</option>{inputs.map(item => <option key={`${item.owner}.${item.name}`} value={`${item.owner}.${item.name}`}>{item.name}</option>)}{collections.map(item => <option key={`${item.owner}.${item.name}`} value={`${item.owner}.${item.name}`}>{item.name} (list)</option>)}<option value={NEW_VALUE}>A new on/off switch…</option></select></div>}
+      {!!(inputs.length || collections.length) && <div className={styles.row}><label htmlFor="state-input">Changes</label><select id="state-input" aria-label="State input" value={inputKey} onChange={event => { setInputKey(event.target.value); const chosen = inputs.find(item => `${item.owner}.${item.name}` === event.target.value); setValue(chosen?.type === 'Date' ? typeof chosen.value === 'number' ? new Date(chosen.value * 1000).toISOString().slice(0, 16) : '' : chosen ? String(chosen.value ?? '') : 'empty') }}><option value="" disabled>Choose…</option>{inputs.map(item => <option key={`${item.owner}.${item.name}`} value={`${item.owner}.${item.name}`}>{item.name}</option>)}{collections.map(item => <option key={`${item.owner}.${item.name}`} value={`${item.owner}.${item.name}`}>{item.name} (list)</option>)}<option value={NEW_VALUE}>A new on/off switch…</option></select></div>}
       {creating && <>
         <div className={styles.row}><label htmlFor="state-new-value">Switch</label><input id="state-new-value" aria-label="New value name" value={valueName} placeholder={suggestValueName(name)} onChange={event => setValueName(event.target.value)} /></div>
         <p className={styles.note}>The screen gets a switch called “{suggested}”, off to start with and on in this state. Use it with Shown when, or in any value field, to change what the screen shows.</p>
       </>}
-      {input && <div className={styles.row}><label htmlFor="state-value">To</label>{input.type === 'Bool' || input.options ? <select id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)}>{(input.options ?? ['true', 'false']).map(option => <option key={option}>{option}</option>)}</select> : <input id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)} />}</div>}
+      {input && <div className={styles.row}><label htmlFor="state-value">{input.type === 'Date' ? 'To (UTC)' : 'To'}</label>{input.type === 'Bool' || input.options ? <select id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)}>{(input.options ?? ['true', 'false']).map(option => <option key={option}>{option}</option>)}</select> : <input type={input.type === 'Date' ? 'datetime-local' : 'text'} id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)} />}</div>}
       {collection && <div className={styles.row}><label htmlFor="state-records">To</label><select id="state-records" aria-label="State records" value={value} onChange={event => setValue(event.target.value)}><option value="empty">No items</option><option value="app">The app’s items</option></select></div>}
       <p className={styles.note}>Only the preview changes. The app still starts from its own values.</p>
       <div className={styles.actions}><button type="button" className={styles.primary} disabled={busy || saving || !name.trim() || (!creating && !inputKey)} onClick={() => creating ? void createState() : save()}>Save state</button><button type="button" className={styles.button} onClick={() => setAdding(false)}>Cancel</button></div>
@@ -184,6 +191,7 @@ function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onS
 
 function parse(input: StateInput, value: string): DesignValue {
   if (input.options) return value
+  if (input.type === 'Date') return Date.parse(value + 'Z') / 1000
   if (input.type === 'Bool') return value === 'true'
   if (['Int', 'Double'].includes(input.type)) return value === '' ? null : Number(value)
   return value

@@ -92,7 +92,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'listRowSeparator', 'listRowInsets', 'scrollIndicators',
   // control styles, each of which changes what is drawn
   'toggleStyle', 'pickerStyle', 'labelStyle', 'progressViewStyle', 'gaugeStyle',
-  'controlSize', 'buttonBorderShape', 'monospaced', 'placeholder',
+  'controlSize', 'buttonBorderShape', 'monospaced',
   // device edges
   'ignoresSafeArea', 'id',
   // Environment injection.
@@ -291,8 +291,7 @@ export const BLEND_MODES: ReadonlyMap<string, string> = new Map([
  *
  * The rule for membership, applied token by token against the converter: it takes a
  * branch of its own, or it is a spelling of the default. `.pickerStyle(.navigationLink)`
- * and `.listStyle(.inset)` are neither - both fall through to a drawing that is not
- * what they mean - so both warn.
+ * falls through to a drawing that is not what it means, so it warns.
  */
 export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['buttonStyle', new Set(['automatic', 'plain', 'borderless', 'bordered', 'borderedProminent', 'glass', 'glassProminent'])],
@@ -314,7 +313,7 @@ export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
       'linear',
     ]),
   ],
-  ['listStyle', new Set(['automatic', 'plain', 'grouped', 'insetGrouped', 'sidebar'])],
+  ['listStyle', new Set(['automatic', 'plain', 'inset', 'grouped', 'insetGrouped', 'sidebar'])],
   ['controlSize', new Set(['mini', 'small', 'regular', 'large'])],
   ['buttonBorderShape', new Set(['automatic', 'capsule', 'circle', 'roundedRectangle'])],
   ['textFieldStyle', new Set(['automatic', 'plain', 'roundedBorder'])],

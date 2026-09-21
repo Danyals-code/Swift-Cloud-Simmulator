@@ -368,7 +368,7 @@ test('Add puts a view inside the container that is selected', async ({ page }) =
   await page.getByRole('tree', { name: 'App layers' }).getByRole('treeitem', { name: 'VStack, VStack' }).click()
 
   await page.getByTestId('add-view').click()
-  await expect(page.getByTestId('add-view-target')).toHaveText('Into VStack')
+  await expect(page.getByTestId('add-view-target')).toHaveText('Into Column')
   await page.getByTestId('add-view-search').fill('divider')
   await page.keyboard.press('Enter')
 

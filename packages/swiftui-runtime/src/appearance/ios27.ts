@@ -73,6 +73,7 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
   tertiarySystemBackground: rgba(255, 255, 255),
   systemGroupedBackground: rgba(242, 242, 247),
   secondarySystemGroupedBackground: rgba(255, 255, 255),
+  tertiarySystemGroupedBackground: rgba(242, 242, 247),
   systemFill: rgba(120, 120, 128, 0.2),
   secondarySystemFill: rgba(120, 120, 128, 0.16),
   // The two lighter fills. A search field and a segmented track are both
@@ -112,6 +113,7 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   tertiarySystemBackground: rgba(44, 44, 46),
   systemGroupedBackground: rgba(0, 0, 0),
   secondarySystemGroupedBackground: rgba(28, 28, 30),
+  tertiarySystemGroupedBackground: rgba(44, 44, 46),
   systemFill: rgba(120, 120, 128, 0.36),
   secondarySystemFill: rgba(120, 120, 128, 0.32),
   tertiarySystemFill: rgba(118, 118, 128, 0.24),

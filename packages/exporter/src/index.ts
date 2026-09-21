@@ -3,6 +3,7 @@ import { attachHandoff } from './portable'
 import { targetRelativePath } from './pbxproj'
 import { assetCatalog } from './resources'
 import { encodeText } from './bundle'
+import { attachExportReview, type ExportReview } from './handoff-report'
 import type { Project } from '@studio/project-model'
 import { buildExportBundle, type ExportBundle } from './bundle'
 import {
@@ -21,6 +22,7 @@ export * from './formats'
 export { generatePbxproj, IdAllocator, targetRelativePath, type XcodeProjectPlan } from './pbxproj'
 export { parsePlist, serializePlist, type PlistDict, type PlistValue } from './plist'
 export * from './xcode-files'
+export * from './handoff-report'
 
 /** Zip an already-built bundle. Separated from `buildExportBundle` so tests can assert on file contents without unzipping. */
 /**
@@ -43,11 +45,13 @@ export function zipBundle(bundle: ExportBundle): Uint8Array {
   return zipSync(entries, { level: 6, mtime: FIXED_MTIME })
 }
 
-export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj'): Uint8Array {
+export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', review?: ExportReview): Uint8Array {
   const name = project.manifest.name, root = format === 'swiftpm' ? `${name}.swiftpm` : name
   const sourceRoot = format === 'xcodeproj' ? `${root}/${name}` : format === 'xcodegen' ? `${root}/Sources` : `${root}/Sources/${name}`
   const catalog = `${sourceRoot}/${format === 'spm' || format === 'swiftpm' ? 'Resources/' : ''}Assets.xcassets`
-  return zipBundle(attachHandoff(project, bundleFor(project, format), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog))
+  const bundle = attachHandoff(project, bundleFor(project, format), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog)
+  if (review && format !== 'xcodeproj') throw new Error('The complete bundle uses the Xcode project format.')
+  return zipBundle(review ? attachExportReview(project, bundle, review) : bundle)
 }
 
 /** The file set for a format. One switch, so a new format cannot be half-wired. */
@@ -74,8 +78,8 @@ export function zipFileName(project: Project, format: ExportFormat = 'xcodeproj'
  * Trigger a browser download. Kept here rather than in the UI so the export path is
  * one call from a button handler.
  */
-export function downloadProjectZip(project: Project, format: ExportFormat = 'xcodeproj'): void {
-  const bytes = exportProjectZip(project, format)
+export function downloadProjectZip(project: Project, format: ExportFormat = 'xcodeproj', review?: ExportReview): void {
+  const bytes = exportProjectZip(project, format, review)
   // Copy into a fresh ArrayBuffer - the fflate output may be a view over a larger pooled buffer.
   const blob = new Blob([bytes.slice()], { type: 'application/zip' })
   const url = URL.createObjectURL(blob)

@@ -1,6 +1,6 @@
 import type { AuthoringNode, FontTokenValue, PreviewColorAsset, ResourceOperation, ShadowTokenValue, SharedStyle, StyleKind, StyleProperty, SourceSpan, SourceFile, TokenDefinition } from '@studio/shared'
 import { Parser, forEachChild, type Decl, type Expr, type ExtensionDecl, type Node, type VarDecl } from '@studio/swift-syntax'
-import { AUTHORING_COLORS, AUTHORING_FONTS, swiftString } from './design-controls'
+import { AUTHORING_COLORS, SYSTEM_COLORS, AUTHORING_FONTS, swiftString } from './design-controls'
 import { allDeclarations, applyPatches, callOf, hasComments, identifier, patch, raw, shadowsMember, type FeatureContext, type SourcePatch } from './authoring-context'
 
 /**
@@ -45,14 +45,16 @@ export function styleExpression(kind: StyleKind, value: string): string {
   if ((kind === 'spacing' || kind === 'radius') && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) && Number(value) <= 1024) return String(Number(value))
   if (kind === 'font' && AUTHORING_FONTS.includes(value)) return `Font.${value}`
   if (kind === 'color') {
+    if (SYSTEM_COLORS.includes(value)) return `Color(.${value})`
+    if (value === 'accentColor') return 'Color.accentColor'
     if (AUTHORING_COLORS.includes(value)) return `Color.${value}`
-    if (/^#[\da-fA-F]{6}$/.test(value)) return rgbExpression(value)
+    if (/^#[\da-fA-F]{6}(?:[\da-fA-F]{2})?$/.test(value)) return rgbExpression(value)
   }
-  throw new Error(kind === 'color' ? 'Choose a system color or a six-digit hex color.' : kind === 'font' ? 'Choose a supported text style.' : kind === 'shadow' ? 'Choose a shadow token.' : `${kind === 'radius' ? 'Corner radius' : 'Spacing'} must be a number from 0 to 1024.`)
+  throw new Error(kind === 'color' ? 'Choose a system color or an RGB/RGBA hex color.' : kind === 'font' ? 'Choose a supported text style.' : kind === 'shadow' ? 'Choose a shadow token.' : `${kind === 'radius' ? 'Corner radius' : 'Spacing'} must be a number from 0 to 1024.`)
 }
 function rgbExpression(hex: string): string {
   const components = [1, 3, 5].map(i => String(Math.round(parseInt(hex.slice(i, i + 2), 16) / 255 * 1000) / 1000))
-  return `Color(red: ${components[0]}, green: ${components[1]}, blue: ${components[2]})`
+  return `Color(red: ${components[0]}, green: ${components[1]}, blue: ${components[2]}${hex.length === 9 ? ', opacity: ' + String(parseInt(hex.slice(7, 9), 16) / 255) : ''})`
 }
 function minimumFor(kind: StyleKind, value: string): number {
   return kind === 'color' && ['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(value) ? 15 : kind === 'font' && ['title2', 'title3', 'caption2'].includes(value) ? 14 : 13
@@ -64,11 +66,13 @@ function checkedExpression(ctx: FeatureContext, kind: StyleKind, value: string):
 }
 function styleValue(text: string, type?: string): { kind: StyleKind; value: string } | undefined {
   if (type && ['Color', 'Font', 'SwiftUI.Color', 'SwiftUI.Font'].includes(type) && /^\.[A-Za-z0-9]+$/.test(text)) text = type + text
+  const system = /^(?:SwiftUI\.)?Color\(\.(\w+)\)$/.exec(text.replace(/\s/g, ''))
+  if (system && SYSTEM_COLORS.includes(system[1]!)) return { kind: 'color', value: system[1]! }
   const color = /^(?:SwiftUI\.)?Color\.([A-Za-z]+)$/.exec(text)
-  if (color && AUTHORING_COLORS.includes(color[1]!)) return { kind: 'color', value: color[1]! }
+  if (color && [...AUTHORING_COLORS, 'accentColor'].includes(color[1]!)) return { kind: 'color', value: color[1]! }
   const font = /^(?:SwiftUI\.)?Font\.([A-Za-z0-9]+)$/.exec(text)
   if (font && AUTHORING_FONTS.includes(font[1]!)) return { kind: 'font', value: font[1]! }
-  const rgb = /^Color\(red: ([\d.]+), green: ([\d.]+), blue: ([\d.]+)\)$/.exec(text)
+  const rgb = /^(?:SwiftUI\.)?Color\(\s*red:\s*([\d.]+)\s*,\s*green:\s*([\d.]+)\s*,\s*blue:\s*([\d.]+)\s*\)$/.exec(text)
   if (rgb && rgb.slice(1).every(v => Number(v) >= 0 && Number(v) <= 1)) return { kind: 'color', value: '#' + rgb.slice(1).map(v => Math.round(Number(v) * 255).toString(16).padStart(2, '0')).join('') }
   // Untyped integer constants cannot be passed to CGFloat parameters in native Swift.
   if (type && ['CGFloat', 'Double'].includes(type) && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text) && Number(text) <= 1024) return { kind: 'spacing', value: String(Number(text)) }
@@ -248,7 +252,7 @@ function recipes(ctx: FeatureContext): Recipe[] {
 export const sharedStyles = (ctx: FeatureContext): readonly SharedStyle[] => recipes(ctx).map(r => r.style)
 
 function propertyKind(name: string): StyleKind | undefined {
-  if (['foregroundStyle', 'foregroundColor', 'background', 'tint', 'fill', 'stroke', 'strokeBorder', 'border'].includes(name)) return 'color'
+  if (['foregroundStyle', 'foregroundColor', 'background', 'tint', 'fill', 'stroke', 'strokeBorder', 'border', 'shadow.color'].includes(name)) return 'color'
   if (name === 'font') return 'font'
   if (['cornerRadius', 'clipShape.cornerRadius'].includes(name)) return 'radius'
   if (['spacing', 'padding', 'frame.width', 'frame.height', 'minLength'].includes(name)) return 'spacing'

@@ -137,7 +137,7 @@ it('recognizes navigation containers outside a conditional branch', () => {
   expect(changed.match(/NavigationStack/g)).toHaveLength(1)
 })
 
-it.each(VIEW_CATALOG)('inserts, styles, renders, and undoes the $name starter', item => {
+it.each(VIEW_CATALOG.filter(item => !item.action))('inserts, styles, renders, and undoes the $name starter', item => {
   const source = wrap('VStack { Text("Existing") }')
   const inserted = plan(source, 'VStack', { kind: 'insert', snippet: item.snippet })
   if (!inserted.ok) throw new Error(inserted.reason)

@@ -1,3 +1,4 @@
+import { surfaceRadius } from './render-geometry'
 import { describe, expect, it } from 'vitest'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -47,7 +48,7 @@ describe('native iPhone control references', () => {
     expect([slider.thumbDiameter, slider.thumbHeight, slider.trackHeight]).toEqual([m.sliderThumbWidth, m.sliderThumbHeight, m.sliderTrackHeight])
     expect([slider.tint.r, slider.tint.g, slider.tint.b]).toEqual(m[`${scheme}Blue`])
     const track = nodes(r).find(n => n.id.endsWith('segtrackf'))!
-    expect(track.cornerRadius).toBeGreaterThanOrEqual(16)
+    expect(surfaceRadius(nodes(r), track)).toBeGreaterThanOrEqual(16)
     expect(track.frame.height).toBe(m.segmentHeight)
     const selected = nodes(r).find(n => n.id.endsWith('seg0bgf'))!
     if (scheme === 'dark') expect(selected.background).toEqual({ kind: 'solid', color: { r: 105, g: 105, b: 111, a: 1 } })
@@ -57,7 +58,7 @@ describe('native iPhone control references', () => {
     near(frame.y + frame.height, m.controlsCardBottom, 3)
     const bordered = nodes(r).find(n => n.id.endsWith('btnf'))!
     near(bordered.frame.height, m.buttonHeight)
-    expect(bordered.cornerRadius).toBeGreaterThanOrEqual(m.buttonHeight / 2)
+    expect(surfaceRadius(nodes(r), bordered)).toBeGreaterThanOrEqual(m.buttonHeight / 2)
     const rings = nodes(r).filter(n => n.path && n.id.endsWith('-track'))
     expect(rings).toHaveLength(2)
     expect(rings.every(n => n.frame.width === m.gaugeDiameter && n.path!.stroke?.width === m.gaugeStroke)).toBe(true)

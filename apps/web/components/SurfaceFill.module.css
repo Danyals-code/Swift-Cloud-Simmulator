@@ -1,0 +1,15 @@
+.surface { display: grid; gap: 10px; min-width: 0; padding: 14px 0; border-top: 1px solid var(--color-xc-line); }
+.surface h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--color-xc-text); }
+.palette { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.palette button { height: 28px; min-width: 0; border: 1px solid #00000018; border-radius: 6px; cursor: pointer; }
+.palette button:hover { box-shadow: 0 0 0 2px var(--color-xc-bar), 0 0 0 3px var(--color-xc-text-3); }
+.palette button[aria-pressed='true'] { box-shadow: 0 0 0 2px var(--color-xc-bar), 0 0 0 4px var(--color-xc-accent); }
+.custom { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.custom input { width: 100%; min-width: 0; height: 30px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); padding: 0 8px; font-size: 12px; }
+.custom input[type='color'] { padding: 3px; cursor: pointer; }
+.custom input[aria-invalid='true'] { border-color: var(--color-xc-error); }
+.custom button { padding: 6px 9px; border-radius: 6px; background: var(--color-xc-select); color: var(--color-xc-accent); }
+.surface button:disabled { opacity: .45; cursor: default; }
+.surface input:focus-visible, .surface button:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 2px; }
+.surface p { margin: 0; font-size: 11px; line-height: 1.5; color: var(--color-xc-text-3); }
+.surface .error { color: var(--color-xc-error); }

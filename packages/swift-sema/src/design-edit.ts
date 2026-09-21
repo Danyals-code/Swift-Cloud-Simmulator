@@ -1,3 +1,4 @@
+import { customizeCard, editsCardSurface } from './authoring-card'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
 import type { DesignEditPlan, DesignEditRequest, PreviewColorAsset, SourceFile, SourceChange, ModifierOperation } from '@studio/shared'
@@ -22,6 +23,19 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   if (operation.kind !== 'show' && !node) return reject('The source identity changed. Select the view again.')
   if (node && request.scope !== node.owner) return reject('The requested source ownership changed. Select the view again.')
   if (node && diagnostics.some(d => d.severity === 'error' && d.span.file === file.id && d.span.start < node.source.end && d.span.end >= node.source.start)) return reject('Resolve the diagnostics for this view before editing it.')
+  const materializeCard = node && editsCardSurface(node, operation)
+  const finish = (files: readonly SourceFile[], selection: { file: string; offset: number }, colors?: readonly PreviewColorAsset[]): DesignEditPlan => {
+    if (materializeCard) {
+      try {
+        const ast = files.map(file => Parser.parse(file.text, file.id).sourceFile)
+        const snapshot = buildAuthoringModel({ ...request, files, colors: colors ?? request.colors, parsed: ast, revision: request.baseRevision })
+        const card = snapshot.nodes.find(candidate => candidate.name === 'GroupBox' && candidate.source.file === selection.file && candidate.source.start === selection.offset)
+        if (!card) return reject('The card surface changed. Select it again.')
+        files = customizeCard({ files, ast, nodes: snapshot.nodes, deploymentTarget: request.deploymentTarget, colors: colors ?? request.colors }, card).files
+      } catch (error) { return reject(error instanceof Error ? error.message : 'Could not update the card surface.') }
+    }
+    return finishDesignPlan(request, files, selection, colors)
+  }
   if (node && operation.kind.startsWith('modifier-')) {
     let expression: Expr | undefined
     function find(item: Node): void {
@@ -33,13 +47,13 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     try {
       const shadowToken = model.styles?.find(style => style.kind === 'shadow' && style.form === 'token')?.name
       const text = editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken })
-      return finishDesignPlan(request, request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
+      return finish(request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
   if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
     try {
       const result = featureEdit({ deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions, colors: request.colors }, node, operation as Parameters<typeof featureEdit>[2])
-      return finishDesignPlan(request, result.files, { file: file.id, offset: result.offset }, result.colors)
+      return finish(result.files, { file: file.id, offset: result.offset }, result.colors)
     } catch (error) { return reject(error instanceof Error ? error.message : 'The design operation could not be planned.') }
   }
   let changed: { text: string; offset: number } | null = null
@@ -56,7 +70,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     const invalid = validateControlValue(recipe.control, operation.value)
     if (invalid) return reject(invalid)
     if (operation.value === recipe.control.value || recipe.control.kind === 'number' && recipe.control.value !== '' && Number(operation.value) === Number(recipe.control.value)) {
-      return { ok: true, projectId: request.projectId, baseRevision: request.baseRevision, changes: [], selection: { file: file.id, offset: node.source.start } }
+      return materializeCard ? finish(request.files, { file: file.id, offset: node.source.start }) : { ok: true, projectId: request.projectId, baseRevision: request.baseRevision, changes: [], selection: { file: file.id, offset: node.source.start } }
     }
     const patch = recipe.patch(operation.value)
     changed = { text: file.text.slice(0, patch.start) + patch.text + file.text.slice(patch.end), offset: node.source.start }
@@ -122,6 +136,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     remaining.set(key, count - 1)
   }
   const nextFiles = request.files.map(f => f.id === file.id ? { ...f, text: changed.text } : f)
+  if (materializeCard) return finish(nextFiles, { file: file.id, offset: changed.offset })
   const authoring = buildAuthoringModel({ projectId: request.projectId, revision: request.authoringRevision ?? 0, files: nextFiles, parsed: ast.map(f => f.span.file === file.id ? next.sourceFile : f), diagnostics: nextDiagnostics, componentDescriptions: request.componentDescriptions, deploymentTarget: request.deploymentTarget })
   return { ok: true, authoring, projectId: request.projectId, baseRevision: request.baseRevision, changes: changed.text === file.text ? [] : [{ file: file.id, before: file.text, after: changed.text }], selection: operation.kind === 'delete' || operation.kind === 'hide' ? null : { file: file.id, offset: changed.offset } }
 }

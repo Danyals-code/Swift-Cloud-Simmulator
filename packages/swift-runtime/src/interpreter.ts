@@ -1407,6 +1407,7 @@ export class Interpreter {
 
   private *iterate(value: SwiftValue, span: SourceSpan, materializing = false): Generator<SwiftValue> {
     if (value.kind === 'range') {
+      if (value.boundType === 'Date' || !Number.isFinite(value.lower) || !Number.isFinite(value.upper)) this.trap('This range is not an iterable integer sequence', span)
       const end = value.closed ? value.upper : value.upper - 1
       if (materializing) checkPreviewSize(Math.max(0, end - value.lower + 1), PREVIEW_LIMITS.collectionElements, 'Range element count', span)
       for (let i = value.lower; i <= end; i++) { this.tick(span); yield int(i) }
@@ -2862,13 +2863,14 @@ export class Interpreter {
         return bool(operator === '==' ? equal : !equal)
       }
       case '..<':
-      case '...':
-        return {
-          kind: 'range',
-          lower: this.requireNumber(left, span),
-          upper: this.requireNumber(right, span),
-          closed: operator === '...',
-        }
+      case '...': {
+        const start = asDate(left), end = asDate(right)
+        if (!!start !== !!end) this.trap('Range endpoints must have the same comparable type', span)
+        const lower = start?.epochSeconds ?? this.requireNumber(left, span)
+        const upper = end?.epochSeconds ?? this.requireNumber(right, span)
+        if (lower > upper) this.trap('Range lower bound must not exceed upper bound', span)
+        return { kind: 'range', lower, upper, closed: operator === '...', ...(start ? { boundType: 'Date' as const } : {}) }
+      }
       default:
         break
     }
@@ -3022,6 +3024,13 @@ export class Interpreter {
 
   private evaluateUnary(operator: string, operand: SwiftValue, span: SourceSpan): SwiftValue {
     switch (operator) {
+      case '...':
+      case '..<':
+      case 'partialFrom': {
+        const date = asDate(operand)
+        const bound = date?.epochSeconds ?? this.requireNumber(operand, span)
+        return { kind: 'range', lower: operator === 'partialFrom' ? bound : -Infinity, upper: operator === 'partialFrom' ? Infinity : bound, closed: operator !== '..<', ...(date ? { boundType: 'Date' as const } : {}) }
+      }
       case '-': {
         const n = this.requireNumber(operand, span)
         return operand.kind === 'int' ? int(-n) : double(-n)

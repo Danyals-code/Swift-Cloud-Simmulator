@@ -22,6 +22,14 @@ export function validatePreviewScenario(snapshot: AuthoringSnapshot, scenario: P
     if (state && !Array.isArray(input.value)) {
       if (typeof input.value === 'string') characters += input.value.length
       if (characters > 1_000_000) return 'Preview inputs exceed the 1 MB text limit.'
+      if (state.type === 'Date') {
+        if (typeof input.value !== 'number' || !Number.isFinite(input.value) || Math.abs(input.value) > 8.64e12) return `${input.name} needs a valid date.`
+        continue
+      }
+      if (state.type === 'Color') {
+        if (typeof input.value !== 'string' || !/^(?:#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?|primary|secondary|black|white|gray|red|orange|yellow|green|mint|teal|cyan|blue|indigo|purple|pink|brown|clear|accentColor)$/.test(input.value)) return `${input.name} needs a named color or a hex color.`
+        continue
+      }
       if (state.options ? typeof input.value !== 'string' || !state.options.includes(input.value) : !validDesignValue(input.value, { type: state.type as RecordField['type'], optional: state.optional ?? false })) return `${input.name} needs a ${state.type} value.`
     } else if (collection && Array.isArray(input.value) && input.value.length <= 1000) {
       const ids = new Set<string>()

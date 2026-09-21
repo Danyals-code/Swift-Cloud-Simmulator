@@ -4,7 +4,9 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import type { AuthoringNode, ResourceOperation, SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
+import { LayoutGuide } from './LayoutGuide'
 import { ModifierStack } from './ModifierStack'
+import { SurfaceFill } from './SurfaceFill'
 import { NavigationDestinationEditor } from './NavigationDestinationEditor'
 import { TokenField, valueFields } from './settings/TokenField'
 import { sourceLayerIsVisual, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
@@ -30,7 +32,7 @@ const NAVIGATE_TYPES: readonly { type: 'push' | 'sheet' | 'cover'; label: string
 
 export function AuthoringInspector({ node, stale, onReveal, onChange, features }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange }) {
   const root = useRef<HTMLDivElement | null>(null)
-  const focus = useRef<{ source: string; owner: string; control: string; label: string; caret: number | null } | null>(null)
+  const focus = useRef<{ source: string; owner: string; control: string; label: string; caret: number | null; modifier?: string; button?: string } | null>(null)
   const [retained, setRetained] = useState(node)
   if (node && node !== retained) setRetained(node)
   // Keep card expansion and draft focus while the worker updates the preview.
@@ -41,6 +43,11 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
     const previous = focus.current
     if (!previous || previous.source !== sourceKey) { focus.current = null; return }
     if (document.activeElement !== document.body) return
+    if (previous.modifier !== undefined) {
+      const card = Array.from(root.current?.querySelectorAll<HTMLElement>('[data-modifier-key]') ?? []).find(element => element.dataset.modifierKey === previous.modifier && (element.closest<HTMLElement>('[data-settings-owner]')?.dataset.settingsOwner ?? '') === previous.owner)
+      const button = Array.from(card?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(element => (element.getAttribute('aria-label') ?? 'toggle') === previous.button)
+      if (button) { button.focus({ preventScroll: true }); return }
+    }
     const input = Array.from(root.current?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea') ?? []).find(element => (element.closest<HTMLElement>('[data-settings-owner]')?.dataset.settingsOwner ?? '') === previous.owner && (previous.control ? element.dataset.controlId === previous.control : element.getAttribute('aria-label')?.toLowerCase() === previous.label))
     if (!input) return
     input.focus({ preventScroll: true })
@@ -48,7 +55,8 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
   }, [selected, sourceKey, stale])
   const [navigateError, setNavigateError] = useState<string | null>(null)
   if (!selected) return <p className={styles.empty} role={stale ? 'status' : undefined}>{stale ? 'Updating views…' : 'Select a view in the tree or on the canvas.'}</p>
-  const basics = selected.controls?.filter(control => !/^(modifier:|add:|fill:)/.test(control.id)) ?? []
+  const modifierControlIds = new Set(selected.modifiers?.flatMap(modifier => modifier.controls.map(control => control.id)) ?? [])
+  const basics = selected.controls?.filter(control => !control.id.startsWith('modifier:') && !modifierControlIds.has(control.id) && (!control.id.startsWith('add:') || control.id === 'add:listStyle')) ?? []
   // A value inside a modifier belongs to that modifier's card; the rest are the view's own.
   const modifierProperties = new Set(selected.modifiers?.flatMap(modifier => modifier.propertyIds) ?? [])
   const basicProperties = selected.properties.filter(property => !modifierProperties.has(property.id)).map(property => property.id)
@@ -61,7 +69,6 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
   const isList = selected.name === 'List' || selected.kind === 'collection' || selected.kind === 'template'
   const featureKey = `${sourceKey}:${selected.fingerprint}:${selected.collection?.signature}`
   const dataKey = `${featureKey}:${JSON.stringify(features?.previewInputs ?? [])}`
-  const stackAlignment = selected.controls?.find(control => control.label === 'Alignment')?.value ?? 'center'
   const title = sourceLayerLabel(selected)
   const type = sourceLayerType(selected)
   const tokens = features?.snapshot?.styles ?? []
@@ -80,6 +87,10 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
   // Only wrappers with something to set: a bare NavigationStack around every view is not news.
   const wrappers = context.surrounding.filter(owner => !!owner.modifiers?.length || owner.controls?.some(control => !/^(modifier:|add:|fill:)/.test(control.id)))
   const rememberFocus = (input: EventTarget) => {
+    if (input instanceof HTMLButtonElement) {
+      const modifier = input.closest<HTMLElement>('[data-modifier-key]')?.dataset.modifierKey
+      if (modifier !== undefined) focus.current = { source: sourceKey, owner: input.closest<HTMLElement>('[data-settings-owner]')?.dataset.settingsOwner ?? '', modifier, button: input.getAttribute('aria-label') ?? 'toggle', control: '', label: '', caret: null }
+    }
     if (input instanceof HTMLInputElement || input instanceof HTMLSelectElement || input instanceof HTMLTextAreaElement) focus.current = { source: sourceKey, owner: input.closest<HTMLElement>('[data-settings-owner]')?.dataset.settingsOwner ?? '', control: input.dataset.controlId ?? '', label: input.getAttribute('aria-label')?.toLowerCase() ?? '', caret: input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement ? input.selectionStart : null }
   }
   return <div ref={root} className={styles.inspector} data-testid="authoring-inspector" aria-busy={stale}
@@ -100,8 +111,9 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
         {onReveal && <button type="button" className={styles.linkButton} onClick={() => onReveal(selected.source)}>Open in Code</button>}
       </p>}
 
+      <SurfaceFill key={sourceKey} node={selected} onCommand={features?.onCommand} />
       <section className={styles.settingsSection} data-testid="settings-basics"><h3>Basics</h3>
-        {['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack'].includes(selected.name) && <div className={styles.layoutGuide} aria-label="Layout preview"><div data-direction={selected.name.includes('HStack') ? 'row' : selected.name === 'ZStack' ? 'overlay' : 'column'} style={{ gap: Math.min(24, Math.max(0, Number(selected.controls?.find(c => c.label === 'Spacing')?.value ?? 8))), minHeight: 44, alignItems: ['leading', 'top'].includes(stackAlignment) ? 'flex-start' : ['trailing', 'bottom'].includes(stackAlignment) ? 'flex-end' : stackAlignment.includes('Baseline') ? 'baseline' : 'center' }}>{[1, 2, 3].map(i => <span key={i}>{i}</span>)}</div><p>{selected.name === 'ZStack' ? 'Children sit on top of each other, back to front.' : selected.name.includes('HStack') ? 'Children flow left to right.' : 'Children flow top to bottom.'}</p></div>}
+        {['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack'].includes(selected.name) && <LayoutGuide node={selected} />}
         {valueFields(selected, basics, basicProperties).map(field => field.style
           ? <TokenField key={`${field.style.property}:${field.style.token ?? field.style.value}`} field={field} tokens={tokens} busy={stale} onChange={onChange} onCommand={resource} />
           : field.control && onChange ? <PropertyControl key={`${selected.id}:${field.control.id}:${field.control.value}`} control={field.control} onChange={onChange} /> : null)}
@@ -118,7 +130,7 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
       </section>
 
       {!['definition', 'template', 'branch'].includes(selected.kind) && <section className={styles.settingsSection}>
-        <ModifierStack snapshot={features?.snapshot} key={sourceKey} node={selected} onChange={onChange} onCommand={features?.onCommand} onReveal={onReveal} features={features}
+        <ModifierStack disabled={stale} snapshot={features?.snapshot} key={sourceKey} node={selected} onChange={onChange} onCommand={features?.onCommand} onReveal={onReveal} features={features}
           leading={navigateCards.map(({ node, type }) => <div key={`${node.id}:${type}`} className={styles.navigateCard} data-testid="navigate-to" data-nav-type={type} data-settings-owner={`${node.owner}:${node.name}:${node.source.file}:${node.source.start}`}>
             <strong>Navigate to · {NAVIGATE_TYPES.find(item => item.type === type)?.label}</strong>
             {/* How the screen opens is a choice, not a fact of the code: changing it
@@ -141,10 +153,10 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
       {context.repeatedBy && !isList && <p className={styles.note}>Part of a repeated row. <button type="button" className={styles.linkButton} onClick={() => features?.onSelect?.(context.list ?? context.repeatedBy!)}>Edit the list</button></p>}
 
       {!!wrappers.length && <details className={styles.settingsSection}><summary>Wrapped in · {wrappers.map(settingsContextLabel).join(', ')}</summary>
-        {wrappers.map(owner => <div key={owner.id} className={styles.contextItem} data-settings-owner={`${owner.owner}:${owner.name}:${owner.source.file}:${owner.source.start}`}>
+        {wrappers.map(owner => <div key={`${owner.owner}:${owner.name}:${owner.source.file}:${owner.source.start}`} className={styles.contextItem} data-settings-owner={`${owner.owner}:${owner.name}:${owner.source.file}:${owner.source.start}`}>
           <strong>{settingsContextLabel(owner)}</strong><p className={styles.note}>These settings apply to everything inside it.</p>
           {owner.controls?.filter(control => !/^(modifier:|add:|fill:)/.test(control.id)).map(control => features?.onNodeChange && <PropertyControl key={`${owner.id}:${control.id}:${control.value}`} control={control} onChange={(id, value) => features.onNodeChange!(owner, id, value)} />)}
-          {!!owner.modifiers?.length && <ModifierStack node={owner} snapshot={features?.snapshot} features={features} onChange={features?.onNodeChange ? (id, value) => features.onNodeChange!(owner, id, value) : undefined} onCommand={features?.onNodeCommand ? operation => features.onNodeCommand!(owner, operation) : undefined} onReveal={onReveal} />}
+          {!!owner.modifiers?.length && <ModifierStack disabled={stale} node={owner} snapshot={features?.snapshot} features={features} onChange={features?.onNodeChange ? (id, value) => features.onNodeChange!(owner, id, value) : undefined} onCommand={features?.onNodeCommand ? operation => features.onNodeCommand!(owner, operation) : undefined} onReveal={onReveal} />}
           {!owner.modifiers?.length && !owner.controls?.length && <div className={styles.contextLinks}>{settingsVisualChildren(features?.snapshot, owner).map(child => <button key={child.id} type="button" onClick={() => features?.onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}</div>}
         </div>)}
       </details>}

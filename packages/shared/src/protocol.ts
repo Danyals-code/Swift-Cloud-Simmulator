@@ -85,6 +85,8 @@ export interface CompileRequest {
    * Main tabs remain root pages; related screens carry their owning page id.
    */
   readonly allPages?: boolean
+  /** Snapshot exports may request more pages than the interactive gallery. Maximum 128 per category. */
+  readonly galleryLimit?: number
   /**
    * Bumped by the caller on every request; echoed back so a slow response for an
    * older revision can be discarded rather than flashing stale output.

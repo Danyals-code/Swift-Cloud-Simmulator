@@ -44,6 +44,8 @@ export interface GradientStop {
 }
 
 export type Fill =
+  | { readonly kind: 'radialGradient'; readonly stops: readonly GradientStop[]; readonly center: Point; readonly startRadius: number; readonly endRadius: number }
+  | { readonly kind: 'angularGradient'; readonly stops: readonly GradientStop[]; readonly center: Point; readonly startAngle: number; readonly endAngle: number }
   | { readonly kind: 'solid'; readonly color: RGBA }
   | {
       readonly kind: 'linearGradient'
@@ -74,13 +76,16 @@ export type TextAlignment = 'leading' | 'center' | 'trailing'
  * are attached to, because SwiftUI lets each half of a concatenation carry its own.
  */
 export interface TextRun {
+  readonly foregroundFill?: Fill
   readonly text: string
   readonly font: ResolvedFont
   readonly color: RGBA
   /** `.underline()` */
   readonly underline?: boolean
+  readonly underlineColor?: RGBA | null
   /** `.strikethrough()` */
   readonly strikethrough?: boolean
+  readonly strikethroughColor?: RGBA | null
   /** `.kerning` / `.tracking`: extra points between characters. Changes measured width. */
   readonly tracking?: number
   /** `.baselineOffset`: points above the baseline, negative for below. */
@@ -155,7 +160,8 @@ export type ShapeKind =
   | 'spinner'
 
 export type CornerStyle = 'circular' | 'continuous'
-export interface ShapeStroke { readonly color: RGBA; readonly width: number; readonly placement?: 'center' | 'inside'; readonly usesForeground?: boolean }
+export interface StrokeOptions { readonly lineCap?: 'butt' | 'round' | 'square'; readonly lineJoin?: 'miter' | 'round' | 'bevel'; readonly miterLimit?: number; readonly dash?: readonly number[]; readonly dashPhase?: number }
+export interface ShapeStroke extends StrokeOptions { readonly color: RGBA; readonly width: number; readonly placement?: 'center' | 'inside'; readonly usesForeground?: boolean }
 
 export interface SliderPayload {
   readonly fraction: number
@@ -214,12 +220,14 @@ export interface PlaceholderPayload {
 }
 
 export interface HitTarget {
+  readonly textAlign?: 'leading' | 'center' | 'trailing'
   readonly step?: number
   readonly secure?: boolean
   readonly multiline?: boolean
   readonly inputInset?: number
   readonly submitHandlerId?: string
   readonly contextMenuHandlerId?: string
+  readonly inputType?: 'time'
   readonly inputMode?: 'text' | 'email' | 'tel' | 'url' | 'numeric' | 'decimal' | 'search'
   readonly enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send'
   readonly autocapitalization?: string
@@ -278,18 +286,13 @@ export interface TransformSpec {
   readonly scaleY: number
   /** degrees, clockwise */
   readonly rotate: number
-  /**
-   * `.rotation3DEffect(_:axis:)` - degrees about the x and y axes.
-   *
-   * A real rotation in CSS, with the perspective the browser needs to make it look
-   * like one. SwiftUI's own is a projection with a fixed perspective too, so this is
-   * the same *kind* of drawing rather than a flat approximation of a 3D one.
-   */
-  readonly rotateX?: number
-  readonly rotateY?: number
+  readonly anchor?: Point
+  readonly rotation3D?: { readonly degrees: number; readonly x: number; readonly y: number; readonly z: number; readonly anchorZ: number; readonly perspective: number }
+
 }
 
 export interface ImagePayload {
+  readonly foregroundFill?: Fill
   readonly bitmap?: { readonly url: string; readonly name: string }
   /**
    * The Unicode substitute.
@@ -455,12 +458,19 @@ export function cssColor(c: RGBA): string {
   return c.a >= 1 ? `rgb(${c.r} ${c.g} ${c.b})` : `rgb(${c.r} ${c.g} ${c.b} / ${c.a})`
 }
 
-export function cssFill(f: Fill): string {
+export function cssFill(f: Fill, size?: Size): string {
   if (f.kind === 'solid') return cssColor(f.color)
   const stops = f.stops.map((s) => `${cssColor(s.color)} ${(s.location * 100).toFixed(2)}%`).join(', ')
-  // SwiftUI unit space has y pointing down, which matches CSS gradient angle maths here.
-  const angle = (Math.atan2(f.end.x - f.start.x, f.start.y - f.end.y) * 180) / Math.PI
-  return `linear-gradient(${angle.toFixed(2)}deg, ${stops})`
+  if (f.kind === 'radialGradient') return `radial-gradient(circle ${f.endRadius}px at ${f.center.x * 100}% ${f.center.y * 100}%, ${f.stops.map(s => `${cssColor(s.color)} ${f.startRadius + s.location * (f.endRadius - f.startRadius)}px`).join(', ')})`
+  if (f.kind === 'angularGradient') return `conic-gradient(from ${f.startAngle + 90}deg at ${f.center.x * 100}% ${f.center.y * 100}%, ${f.stops.map(s => `${cssColor(s.color)} ${s.location * (f.endAngle - f.startAngle)}deg`).join(', ')})`
+  const width = size?.width ?? 1, height = size?.height ?? 1
+  const dx = (f.end.x - f.start.x) * width, dy = (f.end.y - f.start.y) * height
+  const length = Math.hypot(dx, dy) || 1, ux = dx / length, uy = dy / length
+  const extent = Math.abs(width * ux) + Math.abs(height * uy) || 1
+  const start = (f.start.x - 0.5) * width * ux + (f.start.y - 0.5) * height * uy + extent / 2
+  const angle = Math.atan2(dx, -dy) * 180 / Math.PI
+  const positioned = size ? f.stops.map(s => `${cssColor(s.color)} ${((start + s.location * length) / extent * 100).toFixed(2)}%`).join(', ') : stops
+  return `linear-gradient(${angle.toFixed(2)}deg, ${positioned})`
 }
 
 /** The CSS `filter` value for a node's filter spec, or undefined when it has none. */
@@ -510,4 +520,29 @@ export function cssTransition(spec: AnimationSpec, properties: string): string {
     .split(',')
     .map((p) => `${p.trim()} ${Math.round(spec.duration * 1000)}ms ${cssEasing(spec)}${delay}`)
     .join(', ')
+}
+
+/** SwiftUI's axis-angle projection. Verified against _Rotation3DEffect.effectValue(size:).
+ * Perspective is relative to the larger dimension. anchorZ offsets the input plane;
+ * SwiftUI restores the x/y anchor after projection, without restoring z.
+ */
+export function rotationProjection(t: TransformSpec, size: Size): readonly number[] {
+  const r = t.rotation3D!
+  const length = Math.hypot(r.x, r.y, r.z)
+  if (!length) return [1, 0, 0, 0, 1, 0, 0, 0, 1]
+  const x = r.x / length, y = r.y / length, z = r.z / length
+  const c = Math.cos(r.degrees * Math.PI / 180), s = Math.sin(r.degrees * Math.PI / 180), v = 1 - c
+  const xx = x*x*v+c, xy = x*y*v-z*s, xz = x*z*v+y*s
+  const yx = y*x*v+z*s, yy = y*y*v+c, yz = y*z*v-x*s
+  const zx = z*x*v-y*s, zy = z*y*v+x*s, zz = z*z*v+c
+  const ax = (t.anchor?.x ?? 0.5) * size.width, ay = (t.anchor?.y ?? 0.5) * size.height
+  const p = r.perspective / (Math.max(size.width, size.height) || 1)
+  const tx = -xx*ax-xy*ay-xz*r.anchorZ, ty = -yx*ax-yy*ay-yz*r.anchorZ
+  const w = 1+p*(zx*ax+zy*ay+zz*r.anchorZ)
+  return [xx-ax*p*zx, yx-ay*p*zx, -p*zx, xy-ax*p*zy, yy-ay*p*zy, -p*zy, tx+ax*w, ty+ay*w, w]
+}
+export function cssTransform(t: TransformSpec, size: Size): string {
+  if (!t.rotation3D) return `scale(${t.scaleX}, ${t.scaleY}) rotate(${t.rotate}deg)`
+  const [a,b,c,d,e,f,g,h,i] = rotationProjection(t, size)
+  return `matrix3d(${[a,b,0,c,d,e,0,f,0,0,1,0,g,h,0,i].join(', ')})`
 }

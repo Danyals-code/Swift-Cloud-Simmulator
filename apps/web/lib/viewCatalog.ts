@@ -13,13 +13,14 @@ export interface ViewSnippet {
   /** Extra words the search should match, for the names people reach for. */
   readonly keywords?: string
   readonly snippet: string
+  readonly action?: 'image'
 }
 
 export const VIEW_CATALOG: readonly ViewSnippet[] = [
   // --------------------------------------------------------------- Layout
-  { id: 'vstack', name: 'Column', swiftName: 'VStack', group: 'Layout', hint: 'Stack views top to bottom', keywords: 'column vertical', snippet: 'VStack {\n    Text("Item")\n}' },
-  { id: 'hstack', name: 'Row', swiftName: 'HStack', group: 'Layout', hint: 'Stack views side by side', keywords: 'row horizontal', snippet: 'HStack {\n    Text("Item")\n}' },
-  { id: 'zstack', name: 'Stack', swiftName: 'ZStack', group: 'Layout', hint: 'Stack views front to back', keywords: 'overlay depth layer', snippet: 'ZStack {\n    Text("Item")\n}' },
+  { id: 'vstack', name: 'Vertical Stack', swiftName: 'VStack', group: 'Layout', hint: 'Stack views top to bottom', keywords: 'column vertical', snippet: 'VStack {\n    Text("Item")\n}' },
+  { id: 'hstack', name: 'Horizontal Stack', swiftName: 'HStack', group: 'Layout', hint: 'Stack views side by side', keywords: 'row horizontal', snippet: 'HStack {\n    Text("Item")\n}' },
+  { id: 'zstack', name: 'ZStack', swiftName: 'ZStack', group: 'Layout', hint: 'Stack views front to back', keywords: 'overlay depth layer', snippet: 'ZStack {\n    Text("Item")\n}' },
   { id: 'spacer', name: 'Spacer', group: 'Layout', hint: 'Push the others apart', keywords: 'gap flexible', snippet: 'Spacer()' },
   { id: 'divider', name: 'Divider', group: 'Layout', hint: 'A hairline between views', keywords: 'line rule separator', snippet: 'Divider()' },
   { id: 'group', name: 'Group', group: 'Layout', hint: 'Treat several views as one', snippet: 'Group {\n    Text("Item")\n}' },
@@ -32,12 +33,13 @@ export const VIEW_CATALOG: readonly ViewSnippet[] = [
 
   // -------------------------------------------------------------- Content
   { id: 'text', name: 'Text', group: 'Content', hint: 'A run of text', keywords: 'label string title', snippet: 'Text("Text")' },
-  { id: 'image', name: 'Image', group: 'Content', hint: 'An SF Symbol', keywords: 'icon symbol picture', snippet: 'Image(systemName: "star")' },
+  { id: 'image', name: 'Symbols', group: 'Content', hint: 'An SF Symbol', keywords: 'icon symbol picture', snippet: 'Image(systemName: "star")' },
+  { id: 'asset-image', name: 'Images', group: 'Content', hint: 'Upload a photo or choose a bundled image', keywords: 'picture photo upload png jpeg asset', snippet: '', action: 'image' },
   { id: 'label', name: 'Label', group: 'Content', hint: 'A symbol beside a title', keywords: 'icon row', snippet: 'Label("Label", systemImage: "star")' },
   { id: 'labeledcontent', name: 'Title and value', swiftName: 'LabeledContent', group: 'Content', hint: 'A title with a value', keywords: 'row detail value', snippet: 'LabeledContent("Title", value: "Value")' },
   { id: 'link', name: 'Link', group: 'Content', hint: 'Opens a URL', keywords: 'url web', snippet: 'Link("Link", destination: URL(string: "https://example.com")!)' },
   { id: 'progress', name: 'Progress', swiftName: 'ProgressView', group: 'Content', hint: 'A bar or a spinner', keywords: 'loading spinner bar', snippet: 'ProgressView(value: 0.5)' },
-  { id: 'groupbox', name: 'Card', swiftName: 'GroupBox', group: 'Content', hint: 'A titled card', keywords: 'card panel', snippet: 'GroupBox("Title") {\n    Text("Content")\n}' },
+  { id: 'groupbox', name: 'Card', swiftName: 'GroupBox', group: 'Content', hint: 'A titled card', keywords: 'card panel', snippet: 'GroupBox("Title") {\n    Text("Content")\n        .frame(maxWidth: .infinity, alignment: .leading)\n}' },
 
   // ------------------------------------------------------------- Controls
   { id: 'button', name: 'Button', group: 'Controls', hint: 'Runs an action when pressed', keywords: 'tap press action', snippet: 'Button("Button") { }' },

@@ -669,9 +669,10 @@ function renderPages(
   if (!pages.length) return undefined
 
   const out: PagePreview[] = []
+  const limit = Number.isFinite(request.galleryLimit) ? Math.max(1, Math.min(128, Math.floor(request.galleryLimit!))) : GALLERY_LIMIT
   const preview = runtime.previewRuntime()
-  let remainingChildren = GALLERY_LIMIT
-  for (const [index, page] of pages.slice(0, GALLERY_LIMIT).entries()) {
+  let remainingChildren = limit
+  for (const [index, page] of pages.slice(0, limit).entries()) {
     const isActive = page.page?.active === true
     const ui = preview?.runtime.resolvePage(preview.evaluation.views, index, true)
       ?? (isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index))
@@ -709,7 +710,7 @@ function renderPages(
     remainingChildren -= nested.length
   }
   const renamedIds = new Map<string, string>()
-  for (const screen of (request.designScreens ?? []).slice(0, GALLERY_LIMIT)) {
+  for (const screen of (request.designScreens ?? []).slice(0, limit)) {
     const definition = lastAnalysis?.analysis.authoring.nodes.find(n => n.kind === 'definition' && n.name === screen.view)
     if (!definition) continue
     const existingIndex = out.findIndex(page => page.viewHierarchy?.[0]?.children[0]?.componentSources?.at(-1)?.name === screen.view)

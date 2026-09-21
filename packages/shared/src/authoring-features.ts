@@ -171,6 +171,7 @@ export type AuthoringOperation = ResourceOperation | ModifierOperation | Navigat
   | { readonly kind: 'screen-create'; readonly name: string; readonly title: string; readonly layout: 'VStack' | 'HStack' | 'ZStack' }
   | { readonly kind: 'screen-duplicate'; readonly name: string }
   | { readonly kind: 'screen-remove' }
+  | { readonly kind: 'card-customize'; readonly color?: string }
   | { readonly kind: 'layer-duplicate' }
   | { readonly kind: 'layer-wrap'; readonly ids: readonly string[]; readonly layout: 'VStack' | 'HStack' | 'ZStack' }
   | { readonly kind: 'layer-reparent'; readonly ids: readonly string[]; readonly destination: string }

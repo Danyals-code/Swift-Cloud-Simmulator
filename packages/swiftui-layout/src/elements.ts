@@ -1,4 +1,4 @@
-import type { CornerStyle, ShapeStroke, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type { Point, CornerStyle, ShapeStroke, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -91,6 +91,7 @@ export interface ZStackElement extends ElementBase {
  * size and colour their surroundings gave them.
  */
 export interface TextRunSpec {
+  readonly foregroundFill?: Fill
   readonly text: string
   /** Absent fields inherit; `size` recomputes the line height from the metrics. */
   readonly font?: {
@@ -102,7 +103,9 @@ export interface TextRunSpec {
   }
   readonly color?: RGBA
   readonly underline?: boolean
+  readonly underlineColor?: RGBA | null
   readonly strikethrough?: boolean
+  readonly strikethroughColor?: RGBA | null
   readonly tracking?: number
   readonly baselineOffset?: number
 }
@@ -217,6 +220,9 @@ export interface GridElement extends ElementBase {
 }
 
 export interface GridTrack {
+  readonly maximum?: number
+  readonly spacing?: number
+  readonly alignment?: Alignment
   readonly kind: 'fixed' | 'flexible' | 'adaptive'
   /** Fixed size, or the minimum for flexible and adaptive tracks. */
   readonly size: number | null
@@ -232,6 +238,7 @@ export interface GridTrack {
  */
 export interface TableElement extends ElementBase {
   readonly kind: 'table'
+  readonly rowAlignments?: readonly Alignment['vertical'][]
   readonly rows: readonly (readonly LayoutElement[])[]
   readonly spacing: number
   readonly rowSpacing: number
@@ -262,7 +269,7 @@ export interface PathElement extends ElementBase {
   /** SVG path data, in the element's own coordinate space. */
   readonly d: string
   readonly fill: Fill | null
-  readonly stroke: { readonly color: RGBA; readonly width: number } | null
+  readonly stroke: ShapeStroke | null
   readonly fillRule: 'nonzero' | 'evenodd'
 }
 
@@ -298,8 +305,10 @@ export type LayoutModifier =
       readonly width?: number
       readonly height?: number
       readonly minWidth?: number
+      readonly idealWidth?: number
       readonly maxWidth?: number
       readonly minHeight?: number
+      readonly idealHeight?: number
       readonly maxHeight?: number
       readonly alignment: Alignment
     }
@@ -327,7 +336,9 @@ export type LayoutModifier =
       readonly alignment?: TextAlign
       readonly textCase?: 'upper' | 'lower' | null
       readonly underline?: boolean
+      readonly underlineColor?: RGBA | null
       readonly strikethrough?: boolean
+      readonly strikethroughColor?: RGBA | null
       readonly tracking?: number
       readonly baselineOffset?: number
       readonly lineSpacing?: number
@@ -342,7 +353,7 @@ export type LayoutModifier =
       /** `.monospacedDigit` - every digit takes the widest one's advance. */
       readonly tabularNumbers?: boolean
     }
-  | { readonly kind: 'foregroundStyle'; readonly color: RGBA }
+  | { readonly kind: 'foregroundStyle'; readonly color: RGBA; readonly fill?: Fill }
   | { readonly kind: 'opacity'; readonly value: number }
   | { readonly kind: 'cornerRadius'; readonly radius: number; readonly style?: CornerStyle }
   | { readonly kind: 'square' }
@@ -387,11 +398,14 @@ export type LayoutModifier =
   /** `.fixedSize()` - take the ideal size and ignore the proposal on that axis. */
   | { readonly kind: 'fixedSize'; readonly horizontal: boolean; readonly vertical: boolean }
   | { readonly kind: 'clip'; readonly shape: ShapeKind; readonly cornerRadius: number; readonly style?: CornerStyle }
-  | { readonly kind: 'scale'; readonly x: number; readonly y: number }
-  | { readonly kind: 'rotate'; readonly degrees: number }
+  | { readonly kind: 'scale'; readonly x: number; readonly y: number; readonly anchor?: Point }
+  | { readonly kind: 'rotate'; readonly degrees: number; readonly anchor?: Point }
   /** `.rotation3DEffect(_:axis:)` - the same paint-time transform, about an axis. */
   | {
       readonly kind: 'rotate3D'
+      readonly anchor?: Point
+      readonly anchorZ?: number
+      readonly perspective?: number
       readonly degrees: number
       readonly x: number
       readonly y: number
@@ -436,6 +450,8 @@ export type LayoutModifier =
   /** `.containerRelativeFrame(_:)` - take the container's full size along an axis. */
   | {
       readonly kind: 'containerRelativeFrame'
+      readonly span?: number
+      readonly alignment?: Alignment
       readonly horizontal: boolean
       readonly vertical: boolean
       readonly count: number
@@ -481,6 +497,7 @@ export type LayoutModifier =
       readonly inputInset?: number
       readonly submitHandlerId?: string
       readonly contextMenuHandlerId?: string
+      readonly inputType?: 'time'
       readonly inputMode?: 'text' | 'email' | 'tel' | 'url' | 'numeric' | 'decimal' | 'search'
       readonly enterKeyHint?: 'enter' | 'done' | 'go' | 'next' | 'previous' | 'search' | 'send'
       readonly autocapitalization?: string
@@ -543,10 +560,13 @@ export interface TransitionHint {
  * `VStack { Text(…) }.font(.largeTitle)` size its text correctly.
  */
 export interface LayoutEnvironment {
+  /** Nearest window/scroll viewport, independent of intervening layout proposals. */
+  readonly containerSize?: { readonly width: number | null; readonly height: number | null }
   readonly fontExplicit?: boolean
   readonly cornerStyle?: CornerStyle
   readonly displayScale?: number
   readonly font: ResolvedFont
+  readonly foregroundFill?: Fill
   readonly foregroundColor: RGBA
   readonly opacity: number
   /**
@@ -597,7 +617,9 @@ export interface LayoutEnvironment {
    * pass rather than only by the painter.
    */
   readonly underline?: boolean
+  readonly underlineColor?: RGBA | null
   readonly strikethrough?: boolean
+  readonly strikethroughColor?: RGBA | null
   readonly tracking?: number
   readonly baselineOffset?: number
   readonly lineSpacing?: number
@@ -665,13 +687,9 @@ export function childEnvironment(
         },
       }
     case 'foregroundStyle':
-      return { ...env, foregroundColor: modifier.color }
+      return { ...env, foregroundColor: modifier.color, foregroundFill: modifier.fill }
     case 'opacity':
       return { ...env, opacity: env.opacity * modifier.value }
-    case 'cornerRadius':
-      return { ...env, cornerRadius: modifier.radius, cornerStyle: modifier.style ?? env.cornerStyle }
-    case 'clip':
-      return { ...env, cornerRadius: modifier.cornerRadius }
     case 'animate':
       return { ...env, animation: modifier.hint, transitionTiming: modifier.hint }
     case 'transitionTiming':
@@ -690,6 +708,8 @@ export function childEnvironment(
         ...(modifier.lineLimit !== undefined ? { lineLimit: modifier.lineLimit } : {}),
         ...(modifier.alignment !== undefined ? { textAlign: modifier.alignment } : {}),
         ...(modifier.textCase !== undefined ? { textCase: modifier.textCase } : {}),
+        ...(modifier.strikethroughColor !== undefined ? { strikethroughColor: modifier.strikethroughColor } : {}),
+        ...(modifier.underlineColor !== undefined ? { underlineColor: modifier.underlineColor } : {}),
         ...(modifier.underline !== undefined ? { underline: modifier.underline } : {}),
         ...(modifier.strikethrough !== undefined
           ? { strikethrough: modifier.strikethrough }

@@ -1,0 +1,42 @@
+.panel { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--color-xc-text); background: var(--color-xc-sidebar); font-size: 12px; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 12px; border-bottom: 1px solid var(--color-xc-line); }
+.header > div { display: grid; gap: 4px; }
+.header strong { font-size: 13px; }
+.header small { color: var(--color-xc-text-3); font-size: 11px; }
+.header button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 5px; color: var(--color-xc-text-2); }
+.header button:hover { background: var(--color-xc-line-soft); }
+.connection { display: grid; gap: 10px; flex-shrink: 0; max-height: 50%; overflow: auto; margin: 0; padding: 12px; border: 0; border-bottom: 1px solid var(--color-xc-line); }
+.connection legend { padding-top: 12px; font-weight: 600; }
+.connection label { display: grid; gap: 5px; color: var(--color-xc-text-2); }
+.connection input, .connection select { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--color-xc-line); border-radius: 5px; background: var(--color-xc-panel); color: var(--color-xc-text); font: inherit; }
+.connection p, .empty p { font-size: 11px; color: var(--color-xc-text-3); line-height: 1.6; margin: 0; }
+.conversation { flex: 1; min-height: 80px; overflow: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 14px; }
+.empty { margin: auto 0; display: grid; gap: 12px; padding: 16px 2px; }
+.empty > svg { color: var(--color-xc-accent); }
+.empty h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
+.message { min-width: 0; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 8px; background: var(--color-xc-panel); }
+.message[data-role="user"] { background: var(--color-xc-select); border-color: transparent; }
+.message > div { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.message strong { font-size: 11px; }
+.message > div > span { font-size: 10px; color: var(--color-xc-text-3); }
+.message p { margin: 6px 0 0; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message[data-status="failed"] { border-color: var(--color-xc-error); }
+.message small { display: block; font-size: 10px; overflow-wrap: anywhere; color: var(--color-xc-text-3); }
+.messageContext { margin-top: 6px; }
+.message details { margin-top: 8px; font-size: 10px; color: var(--color-xc-text-3); }
+.message summary { cursor: pointer; }
+.message details small { padding-top: 4px; }
+.progress { display: flex; align-items: center; gap: 7px; color: var(--color-xc-text-2); font-size: 11px; }
+.composer { display: grid; flex-shrink: 0; gap: 8px; padding: 12px; border-top: 1px solid var(--color-xc-line); background: var(--color-xc-sidebar); }
+.promptLabel { font-size: 11px; color: var(--color-xc-text-2); }
+.composer textarea { width: 100%; min-height: 80px; max-height: 200px; resize: vertical; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 8px; background: var(--color-xc-panel); color: var(--color-xc-text); font: inherit; line-height: 1.5; }
+.selection { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 7px; border-radius: 5px; color: var(--color-xc-accent); background: var(--color-xc-select); }
+.selection > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection button { margin-left: auto; font-size: 16px; flex-shrink: 0; width: 20px; height: 20px; }
+.composerActions { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.composerActions small, .saved { color: var(--color-xc-text-3); font-size: 10px; line-height: 1.4; }
+.composerActions button { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 7px 10px; background: var(--color-xc-accent); color: #fff; font-size: 12px; }
+.panel button { cursor: pointer; }
+.panel button:disabled { opacity: .45; cursor: default; }
+.panel input:focus-visible, .panel select:focus-visible, .panel textarea:focus-visible, .panel button:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 2px; }
+.error { font-size: 11px; line-height: 1.5; color: var(--color-xc-error); margin: 0; }
