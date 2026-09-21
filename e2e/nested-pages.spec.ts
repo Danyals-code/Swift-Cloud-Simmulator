@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { assertSource } from './designer-helpers'
+import { assertSource, replaceSource } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 @main struct PagesApp: App { var body: some Scene { WindowGroup { ContentView() } } }
@@ -56,7 +56,7 @@ async function open(page: Page) {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('workspace-develop').click()
-  await page.getByTestId('editor').locator('.cm-content').fill(SOURCE)
+  await replaceSource(page, SOURCE)
   await expect(page.getByTestId('render-tree').getByText('Library heading', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
   // Design opens in Edit with every screen drawn: Library, the detail it pushes and

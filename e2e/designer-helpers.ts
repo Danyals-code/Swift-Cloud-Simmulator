@@ -1,5 +1,18 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 
+/**
+ * Replaces the whole open file through CodeMirror's own select-all.
+ *
+ * `fill()` selects with the DOM, which only covers the lines CodeMirror has drawn -
+ * and while the Code pane is still being laid out that can be a few of them, leaving
+ * the rest of the old file beside the new one.
+ */
+export async function replaceSource(page: Page, source: string) {
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.insertText(source)
+}
+
 export function cards(page: Page, name: string): Locator {
   return page.getByTestId('authoring-inspector').locator(`[data-testid="modifier-card"][data-modifier-name="${name}"]`)
 }

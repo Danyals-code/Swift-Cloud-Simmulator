@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { assertSource } from './designer-helpers'
+import { assertSource, replaceSource } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 struct Book: Identifiable { let id: String; let title: String }
@@ -43,8 +43,7 @@ async function open(page: Page, source = SOURCE, expandList = true) {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
   await page.getByTestId('workspace-develop').click()
-  const editor = page.getByTestId('editor').locator('.cm-content')
-  await editor.fill(source)
+  await replaceSource(page, source)
   await expect(mainPreview(page).getByText('First book', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
   await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true')
@@ -225,7 +224,7 @@ test('navigation and source replacement discard hover targets from the previous 
   await expect(layers(page)).toContainText('Book detail')
   await expect(highlights(page)).toHaveCount(0)
   await page.getByTestId('workspace-develop').click()
-  await page.getByTestId('editor').locator('.cm-content').fill(SOURCE.replace('Library heading', 'Updated heading'))
+  await replaceSource(page, SOURCE.replace('Library heading', 'Updated heading'))
   await page.getByTestId('workspace-design').click()
   await expect(highlights(page)).toHaveCount(0)
   await expect(hovered(page)).toHaveCount(0)
