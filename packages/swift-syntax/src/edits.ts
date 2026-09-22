@@ -313,7 +313,10 @@ export function insertView(text: string, file: FileId, offset: number, snippet: 
     const inner = outer + indentUnit(text)
     const closeLine = lineStartAt(text, close)
     if (closeLine > open && /^[ \t]*$/.test(text.slice(closeLine, close))) {
-      return { text: text.slice(0, closeLine) + `${indentSnippet(snippet, inner)}\n` + text.slice(closeLine), offset: closeLine + inner.length }
+      // Lined up with what is already inside, when a line of it comes before the brace.
+      const lastLine = lineStartAt(text, closeLine - 1)
+      const indent = (lastLine > open ? /^[ \t]*(?=\S)/.exec(text.slice(lastLine, closeLine))?.[0] : undefined) ?? inner
+      return { text: text.slice(0, closeLine) + `${indentSnippet(snippet, indent)}\n` + text.slice(closeLine), offset: closeLine + indent.length }
     }
     // A brace on a shared line - `VStack { }` - opens onto its own lines, which is
     // where nested content stays readable.

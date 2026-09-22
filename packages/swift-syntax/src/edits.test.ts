@@ -306,6 +306,13 @@ describe('C1: adding into a container with no views keeps what is inside it', ()
     expect(added.text.slice(added.offset)).toMatch(/^Text\("New"\)/)
     expect(parses(added.text)).toBe(true)
   })
+
+  it('lines the new view up with what is already inside', () => {
+    const text = 'import SwiftUI\n\nstruct ContentView: View {\n  var body: some View {\n    HStack {\n      // A note\n    }\n  }\n}\n'
+    const added = insertView(text, FILE, offsetOf(text, 'HStack'), 'Text("New")')!
+    expect(added.text).toContain('    HStack {\n      // A note\n      Text("New")\n    }')
+    expect(added.text.slice(added.offset)).toMatch(/^Text\("New"\)/)
+  })
 })
 
 describe('C2: a view written as an argument has no statement of its own', () => {
