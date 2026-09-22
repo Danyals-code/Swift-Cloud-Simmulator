@@ -84,6 +84,18 @@ describe('A6: a long print run keeps its start and end', () => {
     expect(lines).toHaveLength(2003)
   })
 
+  it('keeps only the first hundred errors from the middle, so repeated failures cannot undo the cap', () => {
+    const r = run(`ForEach(0..<60, id: \\.self) { row in
+      ForEach(0..<50, id: \\.self) { column in
+        Text("x").onAppear { let empty: [Int] = []; print(empty[row * 50 + column]) }
+      }
+    }`)
+    const lines = messages(r)
+    expect(r.logs.filter(log => log.level === 'error')).toHaveLength(2100)
+    expect(lines).toHaveLength(2101)
+    expect(lines[1100]).toBe('900 lines not shown')
+  })
+
   it('shortens one enormous line, and says by how much', () => {
     const r = run('Text("x").onAppear { print(String(repeating: "x", count: 100_000)) }')
     expect(messages(r)).toEqual([`${'x'.repeat(2000)} … 98,000 more characters`])

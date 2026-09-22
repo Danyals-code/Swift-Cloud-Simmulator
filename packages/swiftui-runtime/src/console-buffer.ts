@@ -16,8 +16,10 @@ const NOWHERE: SourceSpan = { file: '', start: 0, end: 0 }
  * them used to be cloned to the page - several times per result - and drawn as its
  * own list item, which is how one loop could hang the tab. The first lines and the
  * last are the ones a person reads, so those are kept and the rest are counted -
- * except errors. "Action failed" is what explains a broken tap, and the AI checks
- * and exports read error lines too, so every error stays where it happened.
+ * except the first errors among them. "Action failed" is what explains a broken tap,
+ * and the AI checks and exports read error lines too, so those errors stay where they
+ * happened. Only the first hundred do: a failure repeated down a long list would
+ * otherwise keep thousands of copies of itself.
  */
 export class ConsoleBuffer {
   private readonly keep = PREVIEW_LIMITS.consoleLines / 2
@@ -27,6 +29,7 @@ export class ConsoleBuffer {
   private start = 0
   /** What left the tail: errors, and counts of the lines between them. */
   private middle: (ConsoleLine | number)[] = []
+  private middleErrors = 0
 
   write(line: ConsoleLine): void {
     const extra = line.message.length - PREVIEW_LIMITS.consoleLineLength
@@ -36,17 +39,23 @@ export class ConsoleBuffer {
     } else if (this.tail.length < this.keep) {
       this.tail.push(line)
     } else {
-      this.leave(this.tail[this.start]!)
+      this.evict(this.tail[this.start]!)
       this.tail[this.start] = line
       this.start = (this.start + 1) % this.keep
     }
   }
 
-  private leave(line: ConsoleLine): void {
+  /** Moves the oldest line of the tail into the middle, where most lines are only counted. */
+  private evict(line: ConsoleLine): void {
     const last = this.middle.length - 1
-    if (line.level === 'error') this.middle.push(line)
-    else if (typeof this.middle[last] === 'number') this.middle[last]++
-    else this.middle.push(1)
+    if (line.level === 'error' && this.middleErrors < PREVIEW_LIMITS.consoleErrors) {
+      this.middle.push(line)
+      this.middleErrors++
+    } else if (typeof this.middle[last] === 'number') {
+      this.middle[last]++
+    } else {
+      this.middle.push(1)
+    }
   }
 
   /** Everything written since the last drain, in order, and a fresh start. */
@@ -60,6 +69,7 @@ export class ConsoleBuffer {
     this.tail = []
     this.start = 0
     this.middle = []
+    this.middleErrors = 0
     return lines
   }
 }
