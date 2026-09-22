@@ -22,6 +22,7 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
+import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
 import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
@@ -219,7 +220,7 @@ function tokenNameOf(value: SwiftValue | undefined): string | null {
  * means the coverage matrix has exactly one place to be wrong.
  */
 export class SwiftUIHost implements InterpreterHost {
-  private readonly logs: { message: string; span: SourceSpan; level: LogLevel }[] = []
+  private readonly console = new ConsoleBuffer()
 
   /**
    * Expands a user-declared `View` struct into its evaluated body.
@@ -707,8 +708,8 @@ export class SwiftUIHost implements InterpreterHost {
     }
   }
 
-  takeLogs(): { message: string; span: SourceSpan; level: LogLevel }[] {
-    return this.logs.splice(0, this.logs.length)
+  takeLogs(): ConsoleLine[] {
+    return this.console.drain()
   }
 
   /**
@@ -720,7 +721,7 @@ export class SwiftUIHost implements InterpreterHost {
    * something. The console already styles errors; it had nothing to style.
    */
   log(message: string, span: SourceSpan, level: LogLevel = 'log'): void {
-    this.logs.push({ message, span, level })
+    this.console.write({ message, span, level })
   }
 
   resolveGlobal(name: string): SwiftValue | undefined {

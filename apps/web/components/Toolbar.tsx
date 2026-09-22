@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { EXPORT_FORMATS, type ExportFormat } from '@studio/shared'
+import { BUILD_DATE, BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import type { WorkspaceMode, WorkspaceTheme } from '../lib/layout'
 import { Icon } from './ui/Icon'
 import { MenuButton } from './ui/Menu'
@@ -21,6 +22,8 @@ export interface ToolbarProps {
   onReview?: () => void
   reviewDisabled?: boolean
   onShortcuts: () => void
+  /** Copies which build this is, for a report or a question. */
+  onCopyBuild: () => void
   savedAt: number | null
   saveError: string | null
   panes: ReadonlySet<PaneKey>
@@ -75,7 +78,7 @@ const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debu
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
 export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, onModeChange, theme, onThemeChange,
-  panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onReview, reviewDisabled,
+  panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onCopyBuild, onReview, reviewDisabled,
   environment, previewing = false, onSetPreviewing, previewDisabled, exporting = false }: ToolbarProps) {
   const design = mode === 'design'
   // One Export menu: the four native formats, the editable archive, and - in Design -
@@ -113,7 +116,8 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, 
         { value: 'theme', label: theme === 'dark' ? 'Light workspace' : 'Dark workspace', icon: 'appearance' },
         { value: 'shortcuts', label: 'Keyboard shortcuts', detail: '⌘/', icon: 'keyboard' },
         ...(design ? [{ value: 'problems', label: 'Problems and output', detail: '⌘⇧Y', separated: true }] : []),
-      ]} onSelect={value => { if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug') }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={17} /></MenuButton>
+        { value: 'build', label: BUILD_NAME, detail: BUILD_DATE, title: `${BUILD_DETAILS}. Choose to copy it.`, icon: 'info' as const, separated: true },
+      ]} onSelect={value => { if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug'); else if (value === 'build') onCopyBuild() }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={17} /></MenuButton>
     </div>
   </header>
 }

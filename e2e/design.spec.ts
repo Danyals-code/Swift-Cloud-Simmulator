@@ -298,7 +298,7 @@ test('undo and redo walk back through the canvas edits', async ({ page }) => {
 
   await page.keyboard.press('ControlOrMeta+z')
   await expect.poll(() => order(page)).toEqual(['Alpha', 'Beta', 'Gamma'])
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.keyboard.press('ControlOrMeta+Shift+Z')
   await expect.poll(() => order(page)).toEqual(['Beta', 'Alpha', 'Gamma'])
 
   // A delete comes back too, with the text it took away.

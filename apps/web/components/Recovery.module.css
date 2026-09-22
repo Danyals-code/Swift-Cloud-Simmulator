@@ -1,0 +1,133 @@
+/*
+ * The recovery surfaces. Colours fall back to literals because the whole-page screen
+ * (global-error) renders without the app's stylesheet and its variables.
+ */
+.screen {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--color-xc-editor, #fafafa);
+  color: var(--color-xc-text, #26262b);
+  font: 14px/1.45 var(--font-ui, -apple-system), system-ui, sans-serif;
+}
+
+.card {
+  width: min(460px, 100%);
+  padding: 24px;
+  border: 1px solid var(--color-xc-line, #e5e5e8);
+  border-radius: 12px;
+  background: var(--color-xc-panel, #ffffff);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.08);
+}
+
+.card h1 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.card p {
+  margin: 0 0 16px;
+  color: var(--color-xc-text-2, #66666e);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--color-xc-line, #e5e5e8);
+  border-radius: 7px;
+  background: var(--color-xc-bar, #ffffff);
+  color: var(--color-xc-text, #26262b);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.actions button[data-primary] {
+  border-color: var(--color-xc-accent, #0d78f2);
+  background: var(--color-xc-accent, #0d78f2);
+  color: #ffffff;
+}
+
+.actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status {
+  margin: 12px 0 0 !important;
+  font-size: 13px;
+}
+
+.details {
+  margin-top: 16px;
+  color: var(--color-xc-text-3, #777780);
+  font-size: 12px;
+}
+
+.details code {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+/* A panel that stopped: fills the panel it replaces, whatever its size. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 160px;
+  padding: 16px;
+  overflow: auto;
+  background: var(--color-xc-editor, #fafafa);
+  color: var(--color-xc-text, #26262b);
+  font-size: 13px;
+}
+
+.panel p {
+  margin: 0;
+  color: var(--color-xc-text-2, #66666e);
+}
+
+.keep {
+  margin-top: auto;
+}
+
+/*
+ * Something failed outside any panel: a note in the bottom-left corner, over the end
+ * of the layer list rather than the canvas dock's Add and Undo, and above the layer
+ * search.
+ */
+.banner {
+  position: fixed;
+  z-index: 1000;
+  bottom: 56px;
+  left: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: min(440px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--color-xc-line, #e5e5e8);
+  border-radius: 10px;
+  background: var(--color-xc-panel, #ffffff);
+  color: var(--color-xc-text, #26262b);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  font-size: 13px;
+}
+
+.banner p {
+  flex: 1 1 260px;
+  margin: 0;
+}

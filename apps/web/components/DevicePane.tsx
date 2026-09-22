@@ -17,6 +17,7 @@ import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../li
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
 import type { FeatureProps } from './AuthoringFeatures'
 import { InlineTextEditor } from './InlineTextEditor'
+import { PaneBoundary } from './PaneBoundary'
 
 export interface DevicePaneProps {
   authoringFeatures?: Omit<FeatureProps, 'node'>
@@ -42,6 +43,8 @@ export interface DevicePaneProps {
   tools?: React.ReactNode
   device: DeviceSpec
   tree: RenderTree | null
+  /** The compile the canvas draws; a canvas that crashed tries again when it changes. */
+  revision?: number
   selectedRenderIds?: ReadonlySet<string>
   hoveredRenderIds?: ReadonlySet<string>
   stale: boolean
@@ -181,6 +184,7 @@ export function DevicePane({
   tools,
   device,
   tree,
+  revision,
   selectedRenderIds,
   hoveredRenderIds,
   stale,
@@ -252,6 +256,11 @@ export function DevicePane({
     const { x, y, scale } = viewRef.current
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
   }, [])
+  /** A world drawn again after a crash picks up the view where the old one left it. */
+  const attachWorld = useCallback((world: HTMLDivElement | null) => {
+    worldRef.current = world
+    applyView()
+  }, [applyView])
 
   /**
    * The canvas: lanes of screens with each screen's states inside its frame.
@@ -829,7 +838,8 @@ export function DevicePane({
         {/* The world. Everything in it is laid out at its natural size and this one
             transform decides where and how big it appears, which is what lets the
             canvas be panned anywhere and zoomed about the pointer. */}
-        <div ref={worldRef} data-world className={styles.world}>
+        <PaneBoundary area="canvas" resetKeys={[revision, inspecting]}>
+        <div ref={attachWorld} data-world className={styles.world}>
           {gallery && layout ? (
             <div
               className={styles.flow}
@@ -939,6 +949,7 @@ export function DevicePane({
             </div>
           )}
         </div>
+        </PaneBoundary>
       </div>
 
       <footer className={styles.canvasFooter}>{tools}</footer>

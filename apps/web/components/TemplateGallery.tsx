@@ -9,6 +9,7 @@ import {
   type TemplateKind,
 } from '@studio/project-model'
 import type { Handoff } from '@studio/exporter'
+import type { ProjectOrigin } from '../lib/store'
 import { readSwiftFiles } from '../lib/importSourceFiles'
 import { Icon, type IconName } from './ui/Icon'
 import { PushButton } from './ui/Control'
@@ -35,7 +36,7 @@ export interface TemplateGalleryProps {
   /** Nothing has been typed since this project was laid down, so nothing is at risk. */
   pristine: boolean
   /** What the first load found. `null` before it resolves. */
-  origin: 'restored' | 'shared' | 'fresh' | null
+  origin: ProjectOrigin | null
   savedAt: number | null
   /** True when the sheet opened by itself at launch rather than being asked for. */
   atLaunch?: boolean
@@ -78,7 +79,8 @@ export function TemplateGallery({
   const features = useMemo(() => TEMPLATE_CATALOG.filter((t) => t.kind === 'feature'), [])
 
   const [imported, setImported] = useState<{ local: Project; project: Project; handoff: Handoff } | null>(null)
-  const [source, setSource] = useState<GallerySource>('design')
+  // After a crash the saved projects come first, so the next one opened is a choice.
+  const [source, setSource] = useState<GallerySource>(atLaunch && origin === 'recovered' ? 'open' : 'design')
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
@@ -407,7 +409,7 @@ function OpenPane({
 }: {
   projectId: string | null
   recents: readonly ProjectSummary[]
-  origin: 'restored' | 'shared' | 'fresh' | null
+  origin: ProjectOrigin | null
   savedAt: number | null
   error: string | null
   onOpen: (id: string) => void
@@ -434,7 +436,9 @@ function OpenPane({
       </ul>
 
       <p className="mt-1.5 text-[11px] leading-relaxed text-xc-text-3">
-        {origin === 'shared'
+        {origin === 'recovered'
+          ? 'Swift Web Studio closed unexpectedly, so nothing was reopened. Choose a project to open, or start a new one.'
+          : origin === 'shared'
           ? 'The project open now arrived in a link. It is yours once you edit it.'
           : recents.length > 1
             ? 'Imported and generated projects are kept. Untouched catalog templates can be recreated from App templates.'

@@ -15,7 +15,7 @@ const review: ExportReview = { device: 'iPhone 15', colorScheme: 'dark', dynamic
 ] }
 
 it('exports untouched native sources, distinct screen images, defaults and complete conversation', () => {
-  const zip = exportProjectZip(project, 'xcodeproj', review), entries = unzipSync(zip), root = project.manifest.name
+  const zip = exportProjectZip(project, 'xcodeproj', { review }), entries = unzipSync(zip), root = project.manifest.name
   const text = (path: string) => new TextDecoder().decode(entries[`${root}/${path}`])
   expect(entries[`${root}/${root}.xcodeproj/project.pbxproj`]).toBeDefined()
   for (const file of project.files) expect(text(`${root}/${file.id.replace(/^Sources\//, '')}`)).toBe(file.text)
@@ -47,8 +47,8 @@ it('keeps chat in native and editable metadata and resolves conflicting imported
 })
 
 it('does not silently download an incomplete or oversized set of screenshots', () => {
-  expect(() => exportProjectZip(project, 'xcodeproj', { ...review, screens: [] })).toThrow('No screen images')
-  expect(() => exportProjectZip(project, 'xcodeproj', { ...review, screens: [{ ...review.screens[0]!, png: new Uint8Array(4 * 1024 * 1024 + 1) }] })).toThrow('4 MB')
+  expect(() => exportProjectZip(project, 'xcodeproj', { review: { ...review, screens: [] } })).toThrow('No screen images')
+  expect(() => exportProjectZip(project, 'xcodeproj', { review: { ...review, screens: [{ ...review.screens[0]!, png: new Uint8Array(4 * 1024 * 1024 + 1) }] } })).toThrow('4 MB')
 })
 
 it('captures standalone screens beyond the interactive gallery’s twelve-screen limit', () => {

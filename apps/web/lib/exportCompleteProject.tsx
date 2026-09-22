@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
 import { getDevice } from '@studio/sim-shell'
 import { downloadProjectZip, type ScreenSnapshot } from '@studio/exporter'
+import { STUDIO_BUILD } from './build'
 import type { Project } from '@studio/project-model'
 import type { PagePreview } from '@studio/shared'
 import { compileSnapshot } from './compileSnapshot'
@@ -39,7 +40,7 @@ export async function exportCompleteProject(project: Project, preview: PreviewSe
       screens.push({ id: page.id, name, kind: page.kind ?? 'root', width, height, png: new Uint8Array(await blob.arrayBuffer()) })
     }
     signal.throwIfAborted()
-    downloadProjectZip(project, 'xcodeproj', { device: getDevice(project.manifest.device).name, colorScheme: preview.colorScheme, dynamicTypeSize: preview.dynamicTypeSize ?? 'large', typeScale: preview.typeScale, screens, diagnostics: [...result.diagnostics.map(item => `${item.severity}: ${item.message}`), ...result.logs.filter(item => item.level !== 'log').map(item => `${item.level}: ${item.message}`)] })
+    downloadProjectZip(project, 'xcodeproj', { review: { device: getDevice(project.manifest.device).name, colorScheme: preview.colorScheme, dynamicTypeSize: preview.dynamicTypeSize ?? 'large', typeScale: preview.typeScale, screens, diagnostics: [...result.diagnostics.map(item => `${item.severity}: ${item.message}`), ...result.logs.filter(item => item.level !== 'log').map(item => `${item.level}: ${item.message}`)] }, build: STUDIO_BUILD })
     return screens.length
   } finally { root.unmount(); host.remove() }
 }

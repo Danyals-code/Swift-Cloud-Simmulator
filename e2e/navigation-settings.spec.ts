@@ -140,7 +140,7 @@ test('a visual destination change is one undoable and redoable Swift edit', asyn
   await sourceEditor.click()
   await page.keyboard.press('ControlOrMeta+z')
   await expect(sourceEditor).toHaveText(SOURCE, { useInnerText: true })
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.keyboard.press('ControlOrMeta+Shift+Z')
   await expect(sourceEditor).toHaveText(expected, { useInnerText: true })
   await page.getByTestId('workspace-design').click()
   await openLiveDestination(page, 'Another screen')

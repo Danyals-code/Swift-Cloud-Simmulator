@@ -1,5 +1,6 @@
 import { openDB, type IDBPDatabase } from 'idb'
 import { normalizeProject, summarize, type Project, type ProjectStore, type ProjectSummary } from './types'
+import { PROJECT_DATABASE, PROJECTS, PROJECTS_BY_UPDATE } from './storage-names'
 
 /**
  * The key every project used to be written to.
@@ -23,9 +24,7 @@ function byRecency(a: Project, b: Project): number {
   return b.updatedAt - a.updatedAt || b.createdAt - a.createdAt || a.id.localeCompare(b.id)
 }
 
-const DB_NAME = 'swiftui-web-studio'
 const DB_VERSION = 1
-const STORE = 'projects'
 
 /** In-memory store. Used by unit tests and as the fallback when IndexedDB is unavailable. */
 export class MemoryProjectStore implements ProjectStore {
@@ -62,11 +61,11 @@ export class IndexedDbProjectStore implements ProjectStore {
    * on screen to say so.
    */
   private connect(): Promise<IDBPDatabase> {
-    this.db ??= openDB(DB_NAME, DB_VERSION, {
+    this.db ??= openDB(PROJECT_DATABASE, DB_VERSION, {
       upgrade(db) {
-        if (!db.objectStoreNames.contains(STORE)) {
-          const store = db.createObjectStore(STORE, { keyPath: 'id' })
-          store.createIndex('updatedAt', 'updatedAt')
+        if (!db.objectStoreNames.contains(PROJECTS)) {
+          const store = db.createObjectStore(PROJECTS, { keyPath: 'id' })
+          store.createIndex(PROJECTS_BY_UPDATE, 'updatedAt')
         }
       },
     }).catch((error: unknown) => {
@@ -78,25 +77,25 @@ export class IndexedDbProjectStore implements ProjectStore {
 
   async list(): Promise<readonly ProjectSummary[]> {
     const db = await this.connect()
-    const all = (await db.getAll(STORE)) as Project[]
+    const all = (await db.getAll(PROJECTS)) as Project[]
     return all.sort(byRecency).map(summarize)
   }
 
   async load(id: string): Promise<Project | null> {
     const db = await this.connect()
-    const project = (await db.get(STORE, id)) as Project | undefined
+    const project = (await db.get(PROJECTS, id)) as Project | undefined
     return project ? normalizeProject(project) : null
   }
 
   async save(project: Project): Promise<void> {
     const db = await this.connect()
     // structuredClone strips the readonly-ness IDB cannot serialise around.
-    await db.put(STORE, structuredClone(normalizeProject(project)))
+    await db.put(PROJECTS, structuredClone(normalizeProject(project)))
   }
 
   async remove(id: string): Promise<void> {
     const db = await this.connect()
-    await db.delete(STORE, id)
+    await db.delete(PROJECTS, id)
   }
 }
 

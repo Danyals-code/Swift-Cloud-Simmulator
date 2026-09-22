@@ -96,7 +96,7 @@ test('repeated modifier occurrences edit independently, reorder, duplicate, remo
   await editor.click()
   await page.keyboard.press('ControlOrMeta+z')
   await expect(editor).toHaveText(beforeRemove, { useInnerText: true })
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.keyboard.press('ControlOrMeta+Shift+Z')
   await expect(editor).toHaveText(expected, { useInnerText: true })
   await expect(page.getByTestId('render-tree').getByText('Unchanged', { exact: true })).toBeVisible()
 })

@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { basicSetup } from 'codemirror'
 import { Annotation, Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { EditorView, keymap, tooltips } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { StreamLanguage } from '@codemirror/language'
 import { swift } from '@codemirror/legacy-modes/mode/swift'
@@ -17,6 +17,7 @@ import {
 import { hoverTooltip } from '@codemirror/view'
 import { search, searchKeymap } from '@codemirror/search'
 import type { Diagnostic, SourceSpan, SymbolInfo } from '@studio/shared'
+import { EditorEchoes } from '../lib/editorEchoes'
 import { editorTheme } from '../lib/editorTheme'
 import { useLayout } from '../lib/layout'
 
@@ -104,6 +105,8 @@ export function EditorPane({
   const viewRef = useRef<EditorView | null>(null)
   const theme = useLayout(s => s.theme)
   const appearance = useRef(new Compartment())
+  /** What the editor has typed that the store has not handed back yet. */
+  const echoes = useRef(new EditorEchoes())
   /**
    * Latest callbacks, so the CodeMirror extensions below never need rebuilding on
    * re-render - tearing down the view would lose the cursor and the undo history.
@@ -231,6 +234,10 @@ export function EditorPane({
         const { from, to } = wordRangeAt(view.state.doc.toString(), pos)
         return { pos: from, end: to, above: true, create: () => ({ dom: tooltipFor(symbol) }) }
       }),
+      // Room for a tooltip is measured against the editor, not the window. Over the
+      // first lines "above" reached up behind the jump bar, which then took the click
+      // meant for a problem's fix; measured here, CodeMirror opens it below instead.
+      tooltips({ tooltipSpace: view => view.dom.getBoundingClientRect() }),
       // In-file find and replace, from CodeMirror's own implementation. Project-wide
       // rename is F2 below; these two answer different questions and neither
       // substitutes for the other.
@@ -287,7 +294,11 @@ export function EditorPane({
         },
       ]),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged && !update.transactions.some(t => t.annotation(externalDocument))) onChangeRef.current(update.state.doc.toString())
+        if (update.docChanged && !update.transactions.some(t => t.annotation(externalDocument))) {
+          const typed = update.state.doc.toString()
+          echoes.current.sent(typed)
+          onChangeRef.current(typed)
+        }
         // Reported on document changes too: typing moves the caret without
         // producing a selection event of its own.
         if (update.docChanged || update.selectionSet) {
@@ -315,13 +326,14 @@ export function EditorPane({
     viewRef.current?.dispatch({ effects: appearance.current.reconfigure(EditorView.darkTheme.of(theme === 'dark')) })
   }, [theme])
 
-  // Push external document changes in (template reset, project load) without
-  // clobbering the cursor when the incoming text is what the user just typed.
+  // Push external document changes in (template reset, project load, Undo) without
+  // clobbering the cursor when the incoming text is what the user just typed - or
+  // newer typing, when the store hands one of the editor's own texts back late.
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
     const current = view.state.doc.toString()
-    if (current === text) return
+    if (!echoes.current.isNews(text, current)) return
     view.dispatch({
       annotations: externalDocument.of(true),
       changes: { from: 0, to: current.length, insert: text },

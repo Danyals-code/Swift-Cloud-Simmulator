@@ -168,6 +168,8 @@ export function useCompiler({
       if (fonts.length > 0) await handle.api.setFontMetrics(fonts)
     })
     handle.worker.addEventListener('error', (event) => {
+      // Handled here, as the worker error the preview shows; not re-reported on the page.
+      event.preventDefault()
       handle.requests.stop(new Error(event.message || 'The compiler worker stopped unexpectedly.'))
     })
     handleRef.current = handle

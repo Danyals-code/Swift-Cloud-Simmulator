@@ -1,6 +1,7 @@
 import { validatePromptHistory, type Project } from '@studio/project-model'
 import { normalizePreviewTarget } from '@studio/shared'
 import { encodeText, newBundle, type ExportBundle } from './bundle'
+import type { StudioBuild } from './portable'
 
 export interface ScreenSnapshot {
   readonly id: string
@@ -20,7 +21,7 @@ export interface ExportReview {
 }
 
 /** Human-readable handoff plus lossless settings and conversation records. No credentials. */
-export function attachExportReview(project: Project, bundle: ExportBundle, review: ExportReview): ExportBundle {
+export function attachExportReview(project: Project, bundle: ExportBundle, review: ExportReview, build?: StudioBuild): ExportBundle {
   validatePromptHistory(project.chatHistory ?? [])
   if (!review.screens.length) throw new Error('No screen images were captured. Use a code-only export or resolve the preview errors.')
   const root = project.manifest.name, output = newBundle(root), base = `${root}/Studio Report`
@@ -49,8 +50,9 @@ export function attachExportReview(project: Project, bundle: ExportBundle, revie
   const chat = history.map(message => `## ${message.role === 'user' ? 'You' : 'AI'} · ${new Date(message.createdAt).toISOString()}\n\n${message.provider} / ${message.model} · ${message.kind}${message.status ? ` · ${message.status}` : ''}\n\n${message.selection ? `Selected: ${JSON.stringify(message.selection)}\n\n` : ''}${quote(message.content)}${message.changedFiles?.length ? `\n\nFiles: ${message.changedFiles.join(', ')}` : ''}`).join('\n\n')
   output.put(`${base}/chat-history.md`, encodeText(`# Prompts and AI conversation\n\n${chat || 'No prompts or AI messages have been saved in this project.'}\n`))
   const line = (value: string) => value.replace(/[\r\n]/g, ' ')
+  const made = build ? `\nExported by Swift Web Studio build ${line(build.commit).slice(0, 7)} (commit ${line(build.commit)}, built ${line(build.builtAt)}).\n` : ''
   const report = `# ${line(project.manifest.name)} — project report
-
+${made}
 ## Contents
 
 - Full Xcode project, shared scheme, asset catalog and original Swift source.

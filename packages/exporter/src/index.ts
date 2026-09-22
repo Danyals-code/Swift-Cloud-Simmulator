@@ -1,5 +1,5 @@
 import { zipSync } from 'fflate'
-import { attachHandoff } from './portable'
+import { attachHandoff, type StudioBuild } from './portable'
 import { targetRelativePath } from './pbxproj'
 import { assetCatalog } from './resources'
 import { encodeText } from './bundle'
@@ -45,13 +45,21 @@ export function zipBundle(bundle: ExportBundle): Uint8Array {
   return zipSync(entries, { level: 6, mtime: FIXED_MTIME })
 }
 
-export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', review?: ExportReview): Uint8Array {
+/** What an export can carry besides the project. */
+export interface ExportOptions {
+  /** The review screens and report; only the complete bundle has them. */
+  readonly review?: ExportReview
+  /** The Studio build making the export, written into it. */
+  readonly build?: StudioBuild
+}
+
+export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', { review, build }: ExportOptions = {}): Uint8Array {
   const name = project.manifest.name, root = format === 'swiftpm' ? `${name}.swiftpm` : name
   const sourceRoot = format === 'xcodeproj' ? `${root}/${name}` : format === 'xcodegen' ? `${root}/Sources` : `${root}/Sources/${name}`
   const catalog = `${sourceRoot}/${format === 'spm' || format === 'swiftpm' ? 'Resources/' : ''}Assets.xcassets`
-  const bundle = attachHandoff(project, bundleFor(project, format), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog)
+  const bundle = attachHandoff(project, bundleFor(project, format), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog, build)
   if (review && format !== 'xcodeproj') throw new Error('The complete bundle uses the Xcode project format.')
-  return zipBundle(review ? attachExportReview(project, bundle, review) : bundle)
+  return zipBundle(review ? attachExportReview(project, bundle, review, build) : bundle)
 }
 
 /** The file set for a format. One switch, so a new format cannot be half-wired. */
@@ -78,8 +86,8 @@ export function zipFileName(project: Project, format: ExportFormat = 'xcodeproj'
  * Trigger a browser download. Kept here rather than in the UI so the export path is
  * one call from a button handler.
  */
-export function downloadProjectZip(project: Project, format: ExportFormat = 'xcodeproj', review?: ExportReview): void {
-  const bytes = exportProjectZip(project, format, review)
+export function downloadProjectZip(project: Project, format: ExportFormat = 'xcodeproj', options: ExportOptions = {}): void {
+  const bytes = exportProjectZip(project, format, options)
   // Copy into a fresh ArrayBuffer - the fflate output may be a view over a larger pooled buffer.
   const blob = new Blob([bytes.slice()], { type: 'application/zip' })
   const url = URL.createObjectURL(blob)
@@ -93,14 +101,14 @@ export function downloadProjectZip(project: Project, format: ExportFormat = 'xco
 }
 
 /** Portable designer document, kept separate from the four native export choices. */
-export function exportEditableZip(project: Project): Uint8Array {
+export function exportEditableZip(project: Project, build?: StudioBuild): Uint8Array {
   const root = project.manifest.name
   const files = assetCatalog(project, `${root}/Assets.xcassets`)
   for (const file of project.files) files.set(`${root}/${file.id}`, encodeText(file.text))
-  return zipBundle(attachHandoff(project, files, root, id => `${root}/${id}`, `${root}/Assets.xcassets`))
+  return zipBundle(attachHandoff(project, files, root, id => `${root}/${id}`, `${root}/Assets.xcassets`, build))
 }
-export function downloadEditableProject(project: Project): void {
-  const url = URL.createObjectURL(new Blob([exportEditableZip(project).slice()], { type: 'application/zip' }))
+export function downloadEditableProject(project: Project, build?: StudioBuild): void {
+  const url = URL.createObjectURL(new Blob([exportEditableZip(project, build).slice()], { type: 'application/zip' }))
   const a = document.createElement('a')
   a.href = url; a.download = `${project.manifest.name}.swiftstudio.zip`
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
