@@ -130,22 +130,24 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     const writable = editable && !!onEdit && !disabled
     const canEdit = writable && isStructuralLayer(node)
     // A view written as an argument keeps its name; the rest is off, and says why.
-    const argument = argumentLayerProblem(snapshot.nodes, node)
-    const why = argument ? { title: argument } : {}
+    const slotProblem = argumentLayerProblem(snapshot.nodes, node)
+    const structure: MenuItem[] = [
+      { value: 'duplicate', label: 'Duplicate', disabled: !canEdit },
+      { value: 'VStack', label: 'Wrap in Vertical Stack', disabled: !canEdit },
+      { value: 'HStack', label: 'Wrap in Horizontal Stack', disabled: !canEdit },
+      { value: 'ZStack', label: 'Wrap in ZStack', disabled: !canEdit },
+      { value: 'reparent', label: 'Move into…', disabled: !canEdit },
+      { value: 'up', label: 'Move up', disabled: !canEdit || index <= 0 || !rows.some(row => row.node.id === siblings[index - 1]) },
+      { value: 'down', label: 'Move down', disabled: !canEdit || index < 0 || index >= siblings.length - 1 || !rows.some(row => row.node.id === siblings[index + 1]) },
+      { value: 'hide', label: 'Hide', disabled: !canEdit, separated: true },
+      { value: 'delete', label: 'Delete', disabled: !canEdit },
+    ]
     return [
       ...(node.kind === 'template' ? [{ value: 'enter', label: 'Edit row design' }] : []),
       ...(node.definitionId ? [{ value: 'enter', label: 'Edit main component' }] : []),
-      ...(isStructuralLayer(node) || argument ? [
+      ...(isStructuralLayer(node) || slotProblem ? [
         { value: 'rename', label: 'Rename layer…', disabled: !writable || !onRename },
-        { value: 'duplicate', label: 'Duplicate', disabled: !canEdit, ...why },
-        { value: 'VStack', label: 'Wrap in Vertical Stack', disabled: !canEdit, ...why },
-        { value: 'HStack', label: 'Wrap in Horizontal Stack', disabled: !canEdit, ...why },
-        { value: 'ZStack', label: 'Wrap in ZStack', disabled: !canEdit, ...why },
-        { value: 'reparent', label: 'Move into…', disabled: !canEdit, ...why },
-        { value: 'up', label: 'Move up', disabled: !canEdit || index <= 0 || !rows.some(row => row.node.id === siblings[index - 1]), ...why },
-        { value: 'down', label: 'Move down', disabled: !canEdit || index < 0 || index >= siblings.length - 1 || !rows.some(row => row.node.id === siblings[index + 1]), ...why },
-        { value: 'hide', label: 'Hide', disabled: !canEdit, separated: true, ...why },
-        { value: 'delete', label: 'Delete', disabled: !canEdit, ...why },
+        ...structure.map(item => slotProblem ? { ...item, title: slotProblem } : item),
       ] : []),
     ]
   }

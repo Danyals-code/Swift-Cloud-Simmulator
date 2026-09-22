@@ -8,7 +8,7 @@ import { designControlRecipes, validateControlValue, viewCallChain } from './des
 import { Checker } from './checker'
 
 /** The operations that act on a view's whole statement: its place, its copies, and whether it is there at all. */
-const STRUCTURAL = new Set(['delete', 'move', 'moveTo', 'insert', 'hide', 'layer-duplicate', 'layer-wrap', 'layer-reparent'])
+const STRUCTURAL: ReadonlySet<DesignEditRequest['operation']['kind']> = new Set(['delete', 'move', 'moveTo', 'insert', 'hide', 'layer-duplicate', 'layer-wrap', 'layer-reparent'])
 
 /** Plans against an immutable source revision. Commit must compare the whole project again. */
 export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
@@ -29,8 +29,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   if (node && request.scope !== node.owner) return reject('The requested source ownership changed. Select the view again.')
   if (node && diagnostics.some(d => d.severity === 'error' && d.span.file === file.id && d.span.start < node.source.end && d.span.end >= node.source.start)) return reject('Resolve the diagnostics for this view before editing it.')
   // A view written as an argument has no statement of its own, so any of these would land on the view that takes it.
-  const argument = node && STRUCTURAL.has(operation.kind) ? argumentLayerProblem(model.nodes, node) : null
-  if (argument) return reject(argument)
+  const slotProblem = node && STRUCTURAL.has(operation.kind) ? argumentLayerProblem(model.nodes, node) : null
+  if (slotProblem) return reject(slotProblem)
   const materializeCard = node && editsCardSurface(node, operation)
   const finish = (files: readonly SourceFile[], selection: { file: string; offset: number }, colors?: readonly PreviewColorAsset[]): DesignEditPlan => {
     if (materializeCard) {

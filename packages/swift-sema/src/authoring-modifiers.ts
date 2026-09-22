@@ -1,5 +1,5 @@
 import { authoringCapability, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
-import { Lexer, OFF_MARKER_HEAD, OFF_MARKER_SOURCE, Parser, afterOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
+import { Lexer, Parser, afterOffMarkers, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { viewCallChain } from './design-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { SUPPORTED_MODIFIERS } from './builtins'
@@ -111,27 +111,7 @@ function category(name: string): ModifierCategory {
 }
 
 // ---------------------------------------------------------------- the off marker
-
-const MARKER = new RegExp(OFF_MARKER_SOURCE, 'g')
-const ONE_MARKER = new RegExp(`^${OFF_MARKER_SOURCE}$`)
-
-/**
- * A switched-off modifier: `studio-off:1 ".background(Color.blue)"` in a block comment.
- *
- * JSON keeps the text exact, and every asterisk is written as `\u002a`, so nothing
- * inside can open or close a Swift block comment - which nest, so a stray opener in a
- * string literal would otherwise swallow the rest of the file. The version is in the
- * marker so a later format can still read this one.
- */
-export function offMarker(text: string): string {
-  return `${OFF_MARKER_HEAD}${JSON.stringify(text).replace(/\*/g, '\\u002a')}*/`
-}
-function markerText(marker: string): string | undefined {
-  const match = ONE_MARKER.exec(marker)
-  if (!match) return undefined
-  try { const value: unknown = JSON.parse(match[1]!); return typeof value === 'string' ? value : undefined } catch { return undefined }
-}
-const withoutMarkers = (text: string) => text.replace(MARKER, '')
+// The format - `/*studio-off:1 "…"*/` - lives in swift-syntax's off-markers.ts, because the edits need it too.
 
 /**
  * Whether a person's comment sits in this stretch of source.
@@ -143,10 +123,10 @@ function hasHumanComment(text: string, file: string): boolean {
   const tokens = Lexer.tokenize(text, file).tokens
   let at = 0
   for (const token of tokens) {
-    if (/\/\/|\/\*/.test(withoutMarkers(text.slice(at, token.span.start)))) return true
+    if (/\/\/|\/\*/.test(withoutOffMarkers(text.slice(at, token.span.start)))) return true
     at = token.span.end
   }
-  return /\/\/|\/\*/.test(withoutMarkers(text.slice(at)))
+  return /\/\/|\/\*/.test(withoutOffMarkers(text.slice(at)))
 }
 
 // ---------------------------------------------------------------- chain segments
@@ -174,9 +154,9 @@ function segmentsOf(expr: Expr, text: string): { base: CallExpr; segments: Segme
   const markersIn = (from: number, to: number) => {
     const found: Segment[] = []
     const region = text.slice(from, to)
-    for (const match of region.matchAll(MARKER)) {
+    for (const match of offMarkersIn(region)) {
       const textStart = from + match.index!
-      const original = markerText(match[0])
+      const original = offMarkerText(match[0])
       if (original === undefined) continue
       const previousEnd = found.at(-1)?.end ?? from
       found.push({ start: previousEnd, textStart, end: textStart + match[0].length, off: original })
@@ -246,7 +226,7 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
   const minimumViewVersion = authoringViewMinimum(node)
   const editable = allowEdits && minimumViewVersion !== undefined && Number.isFinite(version) && version >= minimumViewVersion
   // Only comments a person wrote pin the chain; the studio's own off markers never do.
-  const commented = hasHumanComment(text.slice(parsed.base.span.end, parsed.end), node.source.file) || /^[^\S\r\n]*(?:\/\/|\/\*)/.test(withoutMarkers(text.slice(parsed.end)))
+  const commented = hasHumanComment(text.slice(parsed.base.span.end, parsed.end), node.source.file) || /^[^\S\r\n]*(?:\/\/|\/\*)/.test(withoutOffMarkers(text.slice(parsed.end)))
   const movable = segments.map(segment => editable && !commented && (segment.off !== undefined || !!segment.call && structural(segment.call)))
   let callIndex = -1
   const modifiers: AuthoringModifier[] = segments.map((segment, index) => {

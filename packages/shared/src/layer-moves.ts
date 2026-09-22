@@ -2,7 +2,7 @@ import type { AuthoringNode } from './authoring'
 
 export const LAYER_MOVE_CONTAINERS: ReadonlySet<string> = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'Group', 'ScrollView'])
 
-/** A layer that the structural actions - move, duplicate, wrap, hide, delete - take as a whole. */
+/** A layer that the structural actions - move, copy, duplicate, wrap, hide, delete, add beside - take as a whole. */
 export function isStructuralLayer(node: AuthoringNode): boolean {
   return ['view', 'component', 'collection'].includes(node.kind) && node.name !== 'WindowGroup' && !node.argument
 }
@@ -11,7 +11,7 @@ export function isStructuralLayer(node: AuthoringNode): boolean {
 export function argumentLayerProblem(nodes: readonly AuthoringNode[], node: AuthoringNode): string | null {
   if (!node.argument) return null
   const slot = nodes.find(item => item.id === node.parentId)?.name.toLowerCase() ?? 'view'
-  return `The ${slot} is part of the view it is attached to, so it can’t be moved, copied, hidden or deleted on its own. Select that view instead.`
+  return `The ${slot} is part of the view it is attached to, so it can’t be moved, wrapped, copied, hidden or deleted on its own. Select that view instead.`
 }
 
 /** Structural eligibility shared by the picker, drag targets, and source writer.

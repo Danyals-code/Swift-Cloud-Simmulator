@@ -70,7 +70,7 @@ export interface SourceEdit {
  * answers the innermost statement containing `offset` instead, for a drop target: a
  * drop onto an overlay means beside the view it belongs to.
  */
-function siteAt(text: string, file: FileId, offset: number, near = false): { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null {
+function siteAt(text: string, file: FileId, offset: number, { near = false } = {}): { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null {
   const { sourceFile } = Parser.parse(text, file)
 
   let best: { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null = null
@@ -82,8 +82,8 @@ function siteAt(text: string, file: FileId, offset: number, near = false): { stm
     if (node.kind !== 'block') return
     node.statements.forEach((stmt, index) => {
       if (near ? offset < stmt.span.start || offset >= stmt.span.end : viewStartOf(stmt) !== offset) return
-      // Deeper blocks are visited after shallower ones, and the deepest statement
-      // containing the offset is the view that was actually pointed at.
+      // At most one statement starts at an offset. Near it, deeper blocks are visited
+      // after shallower ones, so the innermost statement containing it wins.
       if (!best || stmt.span.start >= best.stmt.span.start) {
         best = { stmt, block: node, index, blockOwner: owners.get(node) ?? null }
       }
@@ -407,7 +407,7 @@ export function moveViewTo(
   position: 'before' | 'after',
 ): SourceEdit | null {
   const source = siteAt(text, file, offset)
-  const target = siteAt(text, file, targetOffset, true)
+  const target = siteAt(text, file, targetOffset, { near: true })
   if (!source || !target) return null
   if (source.stmt === target.stmt) return null
 

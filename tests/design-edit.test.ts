@@ -375,6 +375,10 @@ describe('C1: adding into a container keeps what is already inside it', () => {
     const added = restructured(emptied, { kind: 'insert', snippet: 'Text("New")' }, 'ForEach')
     expect(added).toContain('ForEach(items, id: \\.self) { item in\n        Text("New")\n    }')
   })
+  it('keeps a comment that is all a container holds, and adds the new view after it', () => {
+    const added = restructured(wrap('VStack {\n    // A header goes here\n}'), { kind: 'insert', snippet: 'Text("New")' }, 'VStack')
+    expect(added).toContain('VStack {\n    // A header goes here\n    Text("New")\n}')
+  })
   it('keeps a hidden only child when another layer is moved into its container', () => {
     const hidden = restructured(wrap('VStack {\n    Text("Title")\n    HStack {\n        Text("Secret")\n    }\n}'), { kind: 'hide' }, 'Text', 1)
     const moved = restructured(hidden, { kind: 'layer-reparent', ids: [target(hidden, 'Text').id], destination: target(hidden, 'HStack').id }, 'Text')
@@ -384,7 +388,7 @@ describe('C1: adding into a container keeps what is already inside it', () => {
 
 describe('C2: a view written as an argument is part of the view that takes it', () => {
   const card = wrap('VStack {\n    Text("Card")\n        .padding()\n        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray))\n    Text("Other")\n}')
-  const refusal = (slot: string) => `The ${slot} is part of the view it is attached to, so it can’t be moved, copied, hidden or deleted on its own. Select that view instead.`
+  const refusal = (slot: string) => `The ${slot} is part of the view it is attached to, so it can’t be moved, wrapped, copied, hidden or deleted on its own. Select that view instead.`
 
   it.each<[string, DesignEditRequest['operation']]>([
     ['delete', { kind: 'delete' }],
@@ -407,6 +411,12 @@ describe('C2: a view written as an argument is part of the view that takes it', 
   const section = wrap('List {\n    Section(header: Text("Header")) {\n        Text("Row")\n    }\n}')
   it('refuses to delete a section header written as an argument, and says why', () => {
     expect(restructure(section, { kind: 'delete' }, 'Text', 1)).toEqual({ ok: false, reason: refusal('header') })
+  })
+
+  it('refuses to delete a navigation link’s destination written as an argument, and says why', () => {
+    const link = wrap('NavigationStack {\n    NavigationLink(destination: Text("Detail")) {\n        Text("Go")\n    }\n}')
+    const detail = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(link) }).nodes.filter(n => n.name === 'Text' && n.kind !== 'definition').findIndex(n => n.source.start === link.indexOf('Text("Detail")'))
+    expect(restructure(link, { kind: 'delete' }, 'Text', detail)).toEqual({ ok: false, reason: refusal('destination') })
   })
 
   it('edits a section header’s own text', () => {
@@ -448,6 +458,13 @@ describe('C3: a switched-off last modifier stays with its view', () => {
   it('stays inside the empty state its collection is wrapped in', () => {
     const source = switchOffLast(wrap('List(products) { item in Text(item.title) }\n    .padding()', '@State private var products: [Product] = [Product(id: "p1", title: "First")]') + '\nstruct Product: Identifiable { let id: String; var title: String }\n', 'List')
     expect(restructured(source, { kind: 'empty-state', text: 'Nothing here' }, 'List')).toContain('    /*studio-off:1 ".padding()"*/\n    }\n}')
+  })
+
+  it('stays inside the navigation stack its screen is wrapped in when a button opens a new screen', () => {
+    const source = switchOffLast(wrap('VStack {\n    Button("Details") {}\n}\n.padding(12)'), 'VStack')
+    const result = restructure(source, { kind: 'guided-action', action: { type: 'navigate', destination: 'DetailsScreen' }, replace: false, createScreen: { name: 'DetailsScreen', title: 'Club details' } }, 'Button')
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.changes.find(change => change.file === 'Sources/App.swift')!.after).toContain('/*studio-off:1 ".padding(12)"*/\n}')
   })
 
   it('stays inside the navigation stack its screen is wrapped in for a new link', () => {

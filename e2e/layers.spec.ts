@@ -226,7 +226,7 @@ struct ContentView: View {
   for (const action of ['duplicate', 'VStack', 'HStack', 'ZStack', 'reparent', 'hide', 'delete']) {
     const item = page.getByTestId(`source-layer-actions-menu-${action}`)
     await expect(item).toBeDisabled()
-    await expect(item).toHaveAttribute('title', 'The overlay is part of the view it is attached to, so it can’t be moved, copied, hidden or deleted on its own. Select that view instead.')
+    await expect(item).toHaveAttribute('title', 'The overlay is part of the view it is attached to, so it can’t be moved, wrapped, copied, hidden or deleted on its own. Select that view instead.')
   }
   await expect(page.getByTestId('source-layer-actions-menu-rename')).toBeEnabled()
 })

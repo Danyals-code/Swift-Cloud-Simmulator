@@ -158,7 +158,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
   }
 
-  function expression(expr: Expr, parent: MutableNode, scope: Scope, argument = false): void {
+  function expression(expr: Expr, parent: MutableNode, scope: Scope, { argument = false } = {}): void {
     const chain = viewCallChain(expr)
     if (!chain) { add('opaque', 'Custom expression', expr.span, parent.owner, parent); return }
     const name = callName(chain.base.callee)
@@ -232,14 +232,14 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     if (destination) {
       const slot = add('branch', 'Destination', destination.span, parent.owner, node)
       if (destination.kind === 'closure') block(destination.body, slot, scope)
-      else expression(destination, slot, scope)
+      else expression(destination, slot, scope, { argument: true })
     }
     // Section headers/footers are content slots, not repeated rows or actions.
     if (name === 'Section' && capability) for (const arg of chain.base.args) {
       if (!['header', 'footer'].includes(arg.label ?? '')) continue
       const slot = add('branch', arg.label === 'header' ? 'Header' : 'Footer', arg.value.span, parent.owner, node)
       if (arg.value.kind === 'closure') block(arg.value.body, slot, scope)
-      else expression(arg.value, slot, scope, true)
+      else expression(arg.value, slot, scope, { argument: true })
     }
     // A visual slot has its own layer; action closures and scalar colors are not views.
     for (const modifier of chain.modifiers) {
@@ -260,7 +260,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         const builtinColor = contentName === 'Color' && (!definitions.has('Color') || content?.base.callee.kind === 'memberAccess' && content.base.callee.base?.kind === 'identifier' && content.base.callee.base.name === 'SwiftUI')
         if (argument && contentName && !builtinColor && (SUPPORTED_VIEWS.has(contentName) || definitions.has(contentName))) {
           const slot = add('branch', label, argument.span, parent.owner, node)
-          expression(argument, slot, scope, true)
+          expression(argument, slot, scope, { argument: true })
         }
       }
     }
