@@ -4,7 +4,7 @@ import { Parser } from '@studio/swift-syntax'
 import { applyProjectTransaction, DocumentHistory, emptyStudioMetadata, projectFromFiles } from '@studio/project-model'
 import { buildExportBundle } from '@studio/exporter'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
-import type { AuthoringNode, DesignEditPlan, SourceFile } from '@studio/shared'
+import type { AuthoringNode, DesignEditPlan, DesignEditRequest, SourceFile } from '@studio/shared'
 
 const wrap = (body: string, declarations = '') => `import SwiftUI\n@main struct TestApp: App { var body: some Scene { WindowGroup { ContentView() } } }\nstruct ContentView: View { ${declarations}\nvar body: some View { ${body} } }`
 const files = (text: string): SourceFile[] => [{ id: 'Sources/App.swift', text }]
@@ -349,4 +349,35 @@ it('retains a frame’s alignment when switching its width to Fill', () => {
   expect(result.diagnostics.filter(d => d.severity === 'error')).toEqual([])
   const text = result.renderTree!.nodes.find(n => n.text?.runs.some(r => r.text === 'A'))!
   expect(text.frame.x).toBeCloseTo(0, 3)
+})
+
+/** A structural edit - Add, Delete, Hide, Move - planned the way Layers and the canvas plan one. */
+function restructure(text: string, operation: DesignEditRequest['operation'], name: string, index = 0): DesignEditPlan {
+  const node = target(text, name, index)
+  return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation })
+}
+function restructured(text: string, operation: DesignEditRequest['operation'], name: string, index = 0): string {
+  const result = restructure(text, operation, name, index)
+  if (!result.ok) throw new Error(result.reason)
+  const next = result.changes[0]?.after ?? text
+  expect(Parser.parse(next, 'Sources/App.swift').diagnostics).toEqual([])
+  return next
+}
+
+describe('C1: adding into a container keeps what is already inside it', () => {
+  it('keeps a hidden only child, and adds the new view after it', () => {
+    const hidden = restructured(wrap('VStack {\n    Text("Secret")\n}'), { kind: 'hide' }, 'Text')
+    const added = restructured(hidden, { kind: 'insert', snippet: 'Text("New")' }, 'VStack')
+    expect(added).toContain('VStack {\n    // hidden by Swift Web Studio\n    // Text("Secret")\n    // end hidden view\n    Text("New")\n}')
+  })
+  it('keeps a ForEach’s parameter when its last row is deleted and another is added', () => {
+    const emptied = restructured(wrap('List {\n    ForEach(items, id: \\.self) { item in\n        Text(item)\n    }\n}', 'let items = ["A", "B"]'), { kind: 'delete' }, 'Text')
+    const added = restructured(emptied, { kind: 'insert', snippet: 'Text("New")' }, 'ForEach')
+    expect(added).toContain('ForEach(items, id: \\.self) { item in\n        Text("New")\n    }')
+  })
+  it('keeps a hidden only child when another layer is moved into its container', () => {
+    const hidden = restructured(wrap('VStack {\n    Text("Title")\n    HStack {\n        Text("Secret")\n    }\n}'), { kind: 'hide' }, 'Text', 1)
+    const moved = restructured(hidden, { kind: 'layer-reparent', ids: [target(hidden, 'Text').id], destination: target(hidden, 'HStack').id }, 'Text')
+    expect(moved).toContain('HStack {\n        // hidden by Swift Web Studio\n        // Text("Secret")\n        // end hidden view\n        Text("Title")\n    }')
+  })
 })

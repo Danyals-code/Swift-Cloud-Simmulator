@@ -285,17 +285,24 @@ export function insertView(text: string, file: FileId, offset: number, snippet: 
   }
 
   if (content) {
-    // An empty container: open it onto its own lines rather than inlining a child
-    // into `VStack { }`, which is where nested content stops being readable.
+    // A container with no statements can still hold text the parser does not turn
+    // into one - a hidden view, a comment, a ForEach's `item in` - so the new view
+    // goes in front of the closing brace and everything before it stays.
     const open = content.span.start
     const close = content.span.end - 1
     if (open === -1 || close === -1 || close < open) return null
     const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, found.stmt.span.start), found.stmt.span.start))?.[0] ?? ''
     const inner = outer + indentUnit(text)
-    const body = `\n${indentSnippet(snippet, inner)}\n${outer}`
+    const closeLine = lineStartAt(text, close)
+    if (closeLine > open && /^[ \t]*$/.test(text.slice(closeLine, close))) {
+      return { text: text.slice(0, closeLine) + `${indentSnippet(snippet, inner)}\n` + text.slice(closeLine), offset: closeLine + inner.length }
+    }
+    // A brace on a shared line - `VStack { }` - opens onto its own lines, which is
+    // where nested content stays readable.
+    const end = open + 1 + text.slice(open + 1, close).trimEnd().length
     return {
-      text: text.slice(0, open + 1) + body + text.slice(close),
-      offset: open + 1 + 1 + inner.length,
+      text: text.slice(0, end) + `\n${indentSnippet(snippet, inner)}\n${outer}` + text.slice(close),
+      offset: end + 1 + inner.length,
     }
   }
 

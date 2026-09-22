@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Parser } from './parser'
-import { deleteView, insertView, moveView, viewSiteAt } from './edits'
+import { deleteView, HIDDEN_MARKER, insertView, moveView, viewSiteAt } from './edits'
 
 /**
  * The canvas's edits, at the level they actually happen: text in, text out.
@@ -288,5 +288,22 @@ describe('what it declines to touch', () => {
     expect(deleteView(APP, FILE, 2)).toBeNull()
     expect(moveView(APP, FILE, 2, 1)).toBeNull()
     expect(insertView(APP, FILE, 2, 'Text("x")')).toBeNull()
+  })
+})
+
+describe('C1: adding into a container with no views keeps what is inside it', () => {
+  const screen = (content: string) => `import SwiftUI\n\nstruct ContentView: View {\n    let items = ["A", "B"]\n    var body: some View {\n${content}\n    }\n}\n`
+
+  it.each([
+    ['a hidden view', `        VStack {\n            ${HIDDEN_MARKER}\n            // Text("Secret")\n            // end hidden view\n        }`, `            // end hidden view\n            Text("New")\n        }`],
+    ['a comment', '        VStack {\n            // A header goes here\n        }', '            // A header goes here\n            Text("New")\n        }'],
+    ['a ForEach’s parameter', '        ForEach(items, id: \\.self) { item in\n        }', 'ForEach(items, id: \\.self) { item in\n            Text("New")\n        }'],
+    ['a ForEach’s parameter on one line', '        ForEach(items, id: \\.self) { item in }', 'ForEach(items, id: \\.self) { item in\n            Text("New")\n        }'],
+  ])('keeps %s, and adds the view after it', (_, content, expected) => {
+    const text = screen(content)
+    const added = insertView(text, FILE, offsetOf(text, content.trim()), 'Text("New")')!
+    expect(added.text).toContain(expected)
+    expect(added.text.slice(added.offset)).toMatch(/^Text\("New"\)/)
+    expect(parses(added.text)).toBe(true)
   })
 })
