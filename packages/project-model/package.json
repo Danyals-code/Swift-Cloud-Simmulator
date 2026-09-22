@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./templates": "./src/templates.ts"
+    "./templates": "./src/templates.ts",
+    "./storage-names": "./src/storage-names.ts"
   },
   "types": "./src/index.ts",
   "scripts": {

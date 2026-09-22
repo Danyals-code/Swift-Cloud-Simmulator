@@ -1,5 +1,7 @@
 import type { Project } from '@studio/project-model'
+import { PROJECT_DATABASE, PROJECTS, PROJECTS_BY_UPDATE } from '@studio/project-model/storage-names'
 import { STUDIO_BUILD } from './build'
+import { lastOpenedId } from './lastOpened'
 
 /**
  * What the studio can still do for somebody once part of it has crashed.
@@ -9,6 +11,12 @@ import { STUDIO_BUILD } from './build'
  * when it loads (`registerLiveWork`), so a crash that happens before - or instead of -
  * that still finds whatever the browser has saved.
  */
+
+/** The parts of the studio that keep a crash to themselves. */
+export type PaneArea = 'canvas' | 'preview' | 'settings' | 'navigator' | 'editor'
+
+/** Where somebody goes from a crash: the same project again, or a start without it. */
+export type Destination = 'reload' | 'another'
 
 /** The work a running studio holds, including edits the autosave has not written yet. */
 export interface LiveWork {
@@ -37,6 +45,7 @@ export type DownloadOutcome = 'archive' | 'backup' | 'nothing'
  * The editable archive is the file to reopen later. If it cannot be built - the
  * studio's code never loaded, or the project does not validate - the same project goes
  * out as a plain JSON backup instead, because a copy in the wrong format beats none.
+ * The backup holds the record exactly as stored; nothing in the studio opens it again.
  */
 export async function downloadLatestWork(): Promise<DownloadOutcome> {
   const project = live?.project() ?? await savedProject().catch(() => null)
@@ -51,15 +60,6 @@ export async function downloadLatestWork(): Promise<DownloadOutcome> {
   }
 }
 
-/*
- * Where the store keeps projects - packages/project-model/src/stores.ts and
- * apps/web/lib/store.ts. Repeated rather than imported: importing either would load
- * the code whose failure this file exists to survive.
- */
-const DATABASE = 'swiftui-web-studio'
-const PROJECTS = 'projects'
-const LAST_OPENED = 'studio.lastOpened'
-
 /**
  * The saved project, read straight from IndexedDB, for when the store never loaded:
  * the one open last, or else the newest.
@@ -70,11 +70,10 @@ async function savedProject(): Promise<Project | null> {
   try {
     if (!db.objectStoreNames.contains(PROJECTS)) return null
     const projects = db.transaction(PROJECTS, 'readonly').objectStore(PROJECTS)
-    let wanted: string | null = null
-    try { wanted = localStorage.getItem(LAST_OPENED) } catch { /* blocked storage: fall through to the newest */ }
-    const last = wanted ? await settled(projects.get(wanted)) : undefined
+    const wanted = lastOpenedId()
+    const last = wanted ? await resultOf(projects.get(wanted)) : undefined
     if (last) return last as Project
-    const newest = await settled(projects.index('updatedAt').openCursor(null, 'prev'))
+    const newest = await resultOf(projects.index(PROJECTS_BY_UPDATE).openCursor(null, 'prev'))
     return (newest?.value as Project | undefined) ?? null
   } finally {
     db.close()
@@ -91,7 +90,7 @@ async function savedProject(): Promise<Project | null> {
 function openExisting(): Promise<IDBDatabase | null> {
   return new Promise(resolve => {
     let request: IDBOpenDBRequest
-    try { request = indexedDB.open(DATABASE) } catch { return resolve(null) }
+    try { request = indexedDB.open(PROJECT_DATABASE) } catch { return resolve(null) }
     request.onupgradeneeded = () => request.transaction?.abort()
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => resolve(null)
@@ -99,7 +98,7 @@ function openExisting(): Promise<IDBDatabase | null> {
   })
 }
 
-function settled<T>(request: IDBRequest<T>): Promise<T> {
+function resultOf<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -118,7 +117,7 @@ export type LeaveOutcome = 'left' | 'unsaved'
  * `another` starts the next load without the project that was open, for a crash that
  * project's own content causes: reloading into it would only crash again.
  */
-export async function leave(to: 'reload' | 'another', force = false): Promise<LeaveOutcome> {
+export async function leave(to: Destination, force = false): Promise<LeaveOutcome> {
   if (to === 'another') {
     try { sessionStorage.setItem(SAFE_START_KEY, String(Date.now())) } catch { /* then this is a plain reload */ }
   }
@@ -165,9 +164,9 @@ function bytesAsBase64(_key: string, value: unknown): unknown {
 /**
  * Saves a file through the browser's download.
  *
- * The object URL is revoked a minute later rather than at once: Safari can still be
- * reading it after `click()` returns, and a revoked URL is a download that never
- * arrives.
+ * The object URL is freed a minute later rather than at once. Freeing it at once works
+ * for the exporter's downloads in the browsers the tests run, but this is the one
+ * download that has to work, and waiting costs nothing.
  */
 function save(name: string, type: string, bytes: Uint8Array): void {
   const url = URL.createObjectURL(new Blob([bytes.slice()], { type }))
@@ -200,12 +199,12 @@ export const TEST_CRASH_KEY = 'studio.test.crash'
 /**
  * Throws while rendering when a test asked this part of the studio to crash.
  *
- * The value names parts - `canvas`, `settings`, `app`, `document` for the error
- * screen itself - separated by commas, each optionally for one project only
+ * The value names parts - a panel, `app` for the whole studio, `document` for the
+ * error screen itself - separated by commas, each optionally for one project only
  * (`app@p-…`). Nothing sets it outside the recovery tests, so for everybody else this
  * is one sessionStorage read per render.
  */
-export function crashIfTesting(part: string, projectId?: string): void {
+export function crashIfTesting(part: PaneArea | 'app' | 'document', projectId?: string): void {
   let wanted: string | null = null
   try { wanted = sessionStorage.getItem(TEST_CRASH_KEY) } catch { return }
   if (!wanted) return

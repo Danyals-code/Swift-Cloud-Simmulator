@@ -9,6 +9,7 @@ import {
   type TemplateKind,
 } from '@studio/project-model'
 import type { Handoff } from '@studio/exporter'
+import type { ProjectOrigin } from '../lib/store'
 import { readSwiftFiles } from '../lib/importSourceFiles'
 import { Icon, type IconName } from './ui/Icon'
 import { PushButton } from './ui/Control'
@@ -35,7 +36,7 @@ export interface TemplateGalleryProps {
   /** Nothing has been typed since this project was laid down, so nothing is at risk. */
   pristine: boolean
   /** What the first load found. `null` before it resolves. */
-  origin: 'restored' | 'shared' | 'fresh' | 'recovered' | null
+  origin: ProjectOrigin | null
   savedAt: number | null
   /** True when the sheet opened by itself at launch rather than being asked for. */
   atLaunch?: boolean
@@ -408,7 +409,7 @@ function OpenPane({
 }: {
   projectId: string | null
   recents: readonly ProjectSummary[]
-  origin: 'restored' | 'shared' | 'fresh' | 'recovered' | null
+  origin: ProjectOrigin | null
   savedAt: number | null
   error: string | null
   onOpen: (id: string) => void

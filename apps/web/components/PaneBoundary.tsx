@@ -1,18 +1,9 @@
 'use client'
 
-import { Component, useState, type ReactNode } from 'react'
-import { crashIfTesting, downloadLatestWork, leave } from '../lib/recovery'
+import { Component, type ReactNode } from 'react'
+import { crashIfTesting, type PaneArea } from '../lib/recovery'
+import { RecoveryButtons, useRecoveryActions } from './Recovery'
 import styles from './Recovery.module.css'
-
-export type PaneArea = 'canvas' | 'preview' | 'settings' | 'navigator' | 'editor'
-
-const NAMES: Record<PaneArea, string> = {
-  canvas: 'The canvas',
-  preview: 'The preview',
-  settings: 'Settings',
-  navigator: 'The left panel',
-  editor: 'The code editor',
-}
 
 interface PaneBoundaryProps {
   area: PaneArea
@@ -46,6 +37,11 @@ const BURST_MS = 1_000
  * stopped, the rest of the studio keeps working, and the next change to what the
  * panel draws brings it back. The panel is never remounted while it is healthy: keys
  * only matter once it has failed.
+ *
+ * A class of its own rather than `catchError` from next/error, which has no way to
+ * retry when what the panel draws changes, and whose module also brings in the Pages
+ * Router's error page. What catchError adds is letting `notFound()` and `redirect()`
+ * through to Next, and nothing inside these panels navigates.
  */
 export class PaneBoundary extends Component<PaneBoundaryProps, PaneBoundaryState> {
   override state: PaneBoundaryState = { error: null }
@@ -95,25 +91,26 @@ function CrashProbe({ area }: { area: PaneArea }) {
   return null
 }
 
+const PANEL_NAMES: Record<PaneArea, string> = {
+  canvas: 'The canvas',
+  preview: 'The preview',
+  settings: 'Settings',
+  navigator: 'The left panel',
+  editor: 'The code editor',
+}
+
+/** What a panel shows in place of itself once it has crashed. */
 function PaneFallback({ area, keep, onRetry }: { area: PaneArea; keep?: ReactNode; onRetry: () => void }) {
-  const [status, setStatus] = useState<string | null>(null)
-  const download = () => void downloadLatestWork()
-    .then(outcome => setStatus(outcome === 'nothing' ? 'No saved project was found in this browser.' : 'Downloaded a copy of your project.'))
-    .catch(() => setStatus('The download could not be made.'))
-  const go = (to: 'reload' | 'another') => void leave(to).then(outcome => {
-    if (outcome === 'unsaved') setStatus('Your latest changes could not be saved. Download a copy first.')
-  })
+  const actions = useRecoveryActions()
   return (
     <section className={styles.panel} data-testid="recovery-panel" data-area={area} role="alert">
-      <strong>{NAMES[area]} stopped working</strong>
+      <strong>{PANEL_NAMES[area]} stopped working</strong>
       <p>The rest of the studio still works. Undo your last change, or try again.</p>
       <div className={styles.actions}>
         <button type="button" data-primary onClick={onRetry}>Try again</button>
-        <button type="button" onClick={download}>Download my project</button>
-        <button type="button" onClick={() => go('reload')}>Reload</button>
-        <button type="button" onClick={() => go('another')}>Open another project</button>
+        <RecoveryButtons actions={actions} />
       </div>
-      {status && <p className={styles.status} role="status">{status}</p>}
+      {actions.status && <p className={styles.status} role="status">{actions.status}</p>}
       {keep && <div className={styles.keep}>{keep}</div>}
     </section>
   )

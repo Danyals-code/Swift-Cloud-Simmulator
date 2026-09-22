@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { unzipSync } from 'fflate'
-import { expect, test, type Download, type Page } from '@playwright/test'
+import { expect, test, type Download, type Page, type Route } from '@playwright/test'
 
 /**
  * A4: one exception must not leave a participant looking at a blank page.
@@ -24,6 +24,14 @@ async function typeAtTop(page: Page, text: string) {
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+Home')
   await page.keyboard.insertText(text)
+}
+
+/** Keeps the studio's own code from arriving, as a deploy that removed it would. */
+async function blockStudio(route: Route) {
+  const response = await route.fetch()
+  const body = await response.text()
+  if (body.includes('Loading project…')) return route.abort()
+  return route.fulfill({ response, body })
 }
 
 /** Every Swift file in a downloaded project, whether it came as a zip or a JSON backup. */
@@ -99,7 +107,7 @@ const PANELS = [
 ] as const
 
 for (const { area, mode } of PANELS) {
-  test(`a crash in the ${area} panel stays there, and Undo brings it back`, async ({ page }) => {
+  test(`a crash in the ${area} panel stays there, and ${mode === 'develop' ? 'Try again' : 'Undo'} brings it back`, async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('gallery-dismiss').click()
     await addText(page)
@@ -127,15 +135,30 @@ for (const { area, mode } of PANELS) {
   })
 }
 
+test('when the latest changes cannot be saved, leaving from a panel asks first, and then goes', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+  await addText(page)
+  await expect(page.getByTestId('save-indicator')).toContainText('Saved locally')
+  // The browser stops taking writes, so the next edit is not saved.
+  await page.evaluate(() => { IDBObjectStore.prototype.put = () => { throw new DOMException('The disk is full.', 'QuotaExceededError') } })
+  await addText(page)
+  await expect(page.getByTestId('save-indicator')).toContainText('Could not save')
+
+  await page.evaluate(([key, value]) => sessionStorage.setItem(key!, value!), [CRASH, 'settings'])
+  await page.getByTestId('workspace-more').click()
+  await page.getByTestId('workspace-more-menu-theme').click()
+  const panel = page.getByTestId('recovery-panel')
+  await panel.getByRole('button', { name: 'Reload', exact: true }).click()
+  await expect(panel.getByRole('status')).toContainText('could not be saved')
+  await page.evaluate(key => sessionStorage.removeItem(key), CRASH)
+  await Promise.all([page.waitForEvent('load'), panel.getByRole('button', { name: 'Continue without them', exact: true }).click()])
+})
+
 test('an error outside any panel shows a banner and the studio keeps working; browser noise does not', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
   const banner = page.getByTestId('recovery-banner')
-
-  // Chrome reports a ResizeObserver loop as an error with no error in it: noise.
-  await page.evaluate(() => window.dispatchEvent(new ErrorEvent('error', { message: 'ResizeObserver loop completed with undelivered notifications.' })))
-  await page.waitForTimeout(300)
-  await expect(banner).toHaveCount(0)
 
   // A failure in a timer or event handler is caught by no panel.
   await page.evaluate(() => { setTimeout(() => { throw new Error('Background failure') }) })
@@ -145,6 +168,14 @@ test('an error outside any panel shows a banner and the studio keeps working; br
   // The studio behind it still edits.
   await addText(page)
   await expect(page.getByTestId('design-undo')).toBeEnabled()
+
+  // Chrome reports a ResizeObserver loop as an error with no error in it: noise. Sent
+  // in the same moment as a second real failure, it would be counted as a third.
+  await page.evaluate(() => {
+    window.dispatchEvent(new ErrorEvent('error', { message: 'ResizeObserver loop completed with undelivered notifications.' }))
+    window.dispatchEvent(new ErrorEvent('error', { message: 'Second failure', error: new Error('Second failure') }))
+  })
+  await expect(banner).toContainText('(2 times)')
   await banner.getByRole('button', { name: 'Dismiss', exact: true }).click()
   await expect(banner).toHaveCount(0)
 
@@ -160,12 +191,7 @@ test('if the studio’s code cannot load, Download my project still hands over t
   await expect(page.getByTestId('save-indicator')).toContainText('Saved locally')
 
   // On the next load the studio's own code never arrives.
-  await page.route('**/_next/static/chunks/*.js', async route => {
-    const response = await route.fetch()
-    const body = await response.text()
-    if (body.includes('Loading project…')) return route.abort()
-    return route.fulfill({ response, body })
-  })
+  await page.route('**/_next/static/chunks/*.js', blockStudio)
   await page.reload()
   const screen = page.getByTestId('recovery-screen')
   await expect(screen).toContainText('did not finish loading')
@@ -177,12 +203,6 @@ test('if the studio’s code cannot load, Download my project still hands over t
 })
 
 test('looking for saved work in a new browser leaves its storage as it was, so saving still works', async ({ page }) => {
-  const blockStudio = async (route: Parameters<Parameters<Page['route']>[1]>[0]) => {
-    const response = await route.fetch()
-    const body = await response.text()
-    if (body.includes('Loading project…')) return route.abort()
-    return route.fulfill({ response, body })
-  }
   await page.route('**/_next/static/chunks/*.js', blockStudio)
   await page.goto('/')
   const screen = page.getByTestId('recovery-screen')
