@@ -17,6 +17,7 @@ import {
 import { hoverTooltip } from '@codemirror/view'
 import { search, searchKeymap } from '@codemirror/search'
 import type { Diagnostic, SourceSpan, SymbolInfo } from '@studio/shared'
+import { EditorEchoes } from '../lib/editorEchoes'
 import { editorTheme } from '../lib/editorTheme'
 import { useLayout } from '../lib/layout'
 
@@ -104,6 +105,8 @@ export function EditorPane({
   const viewRef = useRef<EditorView | null>(null)
   const theme = useLayout(s => s.theme)
   const appearance = useRef(new Compartment())
+  /** What the editor has typed that the store has not handed back yet. */
+  const echoes = useRef(new EditorEchoes())
   /**
    * Latest callbacks, so the CodeMirror extensions below never need rebuilding on
    * re-render - tearing down the view would lose the cursor and the undo history.
@@ -287,7 +290,11 @@ export function EditorPane({
         },
       ]),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged && !update.transactions.some(t => t.annotation(externalDocument))) onChangeRef.current(update.state.doc.toString())
+        if (update.docChanged && !update.transactions.some(t => t.annotation(externalDocument))) {
+          const typed = update.state.doc.toString()
+          echoes.current.sent(typed)
+          onChangeRef.current(typed)
+        }
         // Reported on document changes too: typing moves the caret without
         // producing a selection event of its own.
         if (update.docChanged || update.selectionSet) {
@@ -315,13 +322,14 @@ export function EditorPane({
     viewRef.current?.dispatch({ effects: appearance.current.reconfigure(EditorView.darkTheme.of(theme === 'dark')) })
   }, [theme])
 
-  // Push external document changes in (template reset, project load) without
-  // clobbering the cursor when the incoming text is what the user just typed.
+  // Push external document changes in (template reset, project load, Undo) without
+  // clobbering the cursor when the incoming text is what the user just typed - or
+  // newer typing, when the store hands one of the editor's own texts back late.
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
     const current = view.state.doc.toString()
-    if (current === text) return
+    if (!echoes.current.isNews(text, current)) return
     view.dispatch({
       annotations: externalDocument.of(true),
       changes: { from: 0, to: current.length, insert: text },
