@@ -55,3 +55,37 @@ describe('E1: styling modifiers do not replace inherited fonts', () => {
     expect(fontOf(r, 'Default').size).toBe(fontForToken('body', 'large')!.size)
   })
 })
+
+describe('A6: a long print run keeps its start and end', () => {
+  const messages = (r: CompileResult) => r.logs.map(log => log.message)
+
+  it('keeps the first and last thousand lines of a print loop, and says how many it left out', () => {
+    const r = run('Text("x").onAppear { for i in 0..<5000 { print(i) } }')
+    const lines = messages(r)
+    expect(lines).toHaveLength(2001)
+    expect(lines.slice(0, 3)).toEqual(['0', '1', '2'])
+    expect(lines[999]).toBe('999')
+    expect(lines[1000]).toBe('3,000 lines not shown')
+    expect(lines[1001]).toBe('4000')
+    expect(lines[2000]).toBe('4999')
+    expect(r.logs[1000]!.level).toBe('log')
+  })
+
+  it('keeps an error from the middle of the run, where it happened', () => {
+    const r = run(`VStack {
+      Text("a").onAppear { for i in 0..<1500 { print("a\\(i)") }; let empty: [Int] = []; print(empty[1]) }
+      Text("b").onAppear { for i in 0..<1500 { print("b\\(i)") } }
+    }`)
+    const lines = messages(r)
+    expect(lines.slice(998, 1004)).toEqual(['a998', 'a999', '500 lines not shown', lines[1001], '500 lines not shown', 'b500'])
+    expect(r.logs[1001]!.level).toBe('error')
+    expect(lines[1001]).toContain('Index out of range')
+    expect(lines.at(-1)).toBe('b1499')
+    expect(lines).toHaveLength(2003)
+  })
+
+  it('shortens one enormous line, and says by how much', () => {
+    const r = run('Text("x").onAppear { print(String(repeating: "x", count: 100_000)) }')
+    expect(messages(r)).toEqual([`${'x'.repeat(2000)} … 98,000 more characters`])
+  })
+})
