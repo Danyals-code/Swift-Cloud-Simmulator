@@ -413,3 +413,45 @@ describe('C2: a view written as an argument is part of the view that takes it', 
     expect(edited(section, 'Text', 'Title', 'Text', 1)).toBe(section.replace('"Header"', '"Title"'))
   })
 })
+
+describe('C3: a switched-off last modifier stays with its view', () => {
+  /** Switches off a view's last modifier, the way the switch on its card does. */
+  function switchOffLast(text: string, name: string, index = 0): string {
+    const modifier = target(text, name, index).modifiers!.at(-1)!
+    return restructured(text, { kind: 'modifier-toggle', modifier: modifier.id, enabled: false }, name, index)
+  }
+  const stack = switchOffLast(wrap('VStack {\n    Text("A")\n        .bold()\n        .padding()\n    Text("B")\n}'), 'Text')
+
+  it('moves with its view', () => {
+    expect(restructured(stack, { kind: 'move', direction: 1 }, 'Text')).toContain('VStack {\n    Text("B")\n    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n}')
+  })
+
+  it('stays with its view when a view is added after it', () => {
+    expect(restructured(stack, { kind: 'insert', snippet: 'Text("New")' }, 'Text')).toContain('    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("New")\n    Text("B")\n')
+  })
+
+  it('goes with its view when the view is deleted', () => {
+    expect(restructured(stack, { kind: 'delete' }, 'Text')).toContain('VStack {\n    Text("B")\n}')
+  })
+
+  it('is copied with its view when the view is duplicated', () => {
+    expect(restructured(stack, { kind: 'layer-duplicate' }, 'Text')).toContain('    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("B")\n')
+  })
+
+  it('comes back with its view when the view is hidden and shown again', () => {
+    const hidden = restructured(stack, { kind: 'hide' }, 'Text')
+    const marker = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(hidden) }).nodes.find(n => n.name === 'VStack')!
+    const shown = planDesignEdit({ projectId: 'p', baseRevision: 1, scope: marker.owner, files: files(hidden), target: { file: 'Sources/App.swift', start: hidden.indexOf('    // hidden by'), end: hidden.indexOf('    // hidden by') }, fingerprint: '', operation: { kind: 'show' } })
+    expect(shown.ok && shown.changes[0]!.after).toBe(stack)
+  })
+
+  it('stays inside the empty state its collection is wrapped in', () => {
+    const source = switchOffLast(wrap('List(products) { item in Text(item.title) }\n    .padding()', '@State private var products: [Product] = [Product(id: "p1", title: "First")]') + '\nstruct Product: Identifiable { let id: String; var title: String }\n', 'List')
+    expect(restructured(source, { kind: 'empty-state', text: 'Nothing here' }, 'List')).toContain('    /*studio-off:1 ".padding()"*/\n    }\n}')
+  })
+
+  it('stays inside the navigation stack its screen is wrapped in for a new link', () => {
+    const source = switchOffLast(wrap('VStack {\n    Text("A")\n}\n.padding()'), 'VStack')
+    expect(restructured(source, { kind: 'insert', snippet: 'NavigationLink("Next") { Text("Detail") }' }, 'Text')).toContain('    /*studio-off:1 ".padding()"*/\n}')
+  })
+})

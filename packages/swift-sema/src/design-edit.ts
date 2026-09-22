@@ -2,7 +2,7 @@ import { customizeCard, editsCardSurface } from './authoring-card'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
 import { argumentLayerProblem, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
-import { Parser, forEachChild, deleteView, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
+import { Parser, afterOffMarkers, forEachChild, deleteView, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
@@ -116,7 +116,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
         if (isLink && !hasNavigation) {
           if (Number.parseFloat(request.deploymentTarget ?? '17') < 16) return reject('Adding a navigation screen requires iOS 16 or later.')
           if (root.source.file !== file.id || root.kind !== 'view' || !parent || !['definition', 'branch'].includes(parent.kind)) return reject('Select a view within the screen before adding a navigation link.')
-          const start = root.source.start, end = root.source.end
+          // A modifier switched off at the end of the root's chain is written after it, and goes inside with it.
+          const start = root.source.start, end = afterOffMarkers(file.text, root.source.end)
           const indent = /^[\t ]*/.exec(file.text.slice(file.text.lastIndexOf('\n', start - 1) + 1, start))?.[0] ?? ''
           const prefix = `NavigationStack {\n${indent}    `
           const body = file.text.slice(start, end).replace(/\n/g, '\n    ')

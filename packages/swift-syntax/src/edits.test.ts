@@ -340,3 +340,29 @@ struct ContentView: View {
     expect(moved.text).toContain('        VStack {\n            Text("Other")\n            Text("Card")\n')
   })
 })
+
+describe('C3: a switched-off last modifier is part of its view', () => {
+  const OFF = '/*studio-off:1 ".padding()"*/'
+  const screen = (content: string) => `import SwiftUI\n\nstruct ContentView: View {\n    var body: some View {\n        VStack {\n${content}\n        }\n    }\n}\n`
+  const own = screen(`            Text("A")\n                .bold()\n                ${OFF}\n            Text("B")`)
+
+  it('is inside the text the view is', () => {
+    const site = viewSiteAt(own, FILE, offsetOf(own, 'Text("A")'))!
+    expect(own.slice(site.start, site.end)).toBe(`Text("A")\n                .bold()\n                ${OFF}`)
+  })
+
+  it('is copied with it', () => {
+    expect(copyView(own, FILE, offsetOf(own, 'Text("A")'))).toBe(`Text("A")\n    .bold()\n    ${OFF}`)
+  })
+
+  it('moves with it past a neighbour', () => {
+    expect(moveView(own, FILE, offsetOf(own, 'Text("A")'), 1)!.text).toBe(screen(`            Text("B")\n            Text("A")\n                .bold()\n                ${OFF}`))
+  })
+
+  it('moves with it on a line shared with a neighbour', () => {
+    const shared = screen(`            Text("A").bold()${OFF}; Text("B")`)
+    const moved = moveView(shared, FILE, offsetOf(shared, 'Text("A")'), 1)!.text
+    expect(moved).toBe(screen(`            Text("B"); Text("A").bold()${OFF}`))
+    expect(parses(moved)).toBe(true)
+  })
+})

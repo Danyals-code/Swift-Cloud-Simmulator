@@ -1,6 +1,7 @@
 import type { FileId } from '@studio/shared'
 import { Parser } from './parser'
 import { walk, type Block, type Expr, type Node, type Stmt } from './ast'
+import { afterOffMarkers } from './off-markers'
 
 /**
  * Editing the source from the canvas.
@@ -159,7 +160,9 @@ function contentBlockOf(stmt: Stmt): Block | null {
 function extentOf(text: string, stmt: Stmt): { start: number; end: number } {
   let end = stmt.span.end
   while (end > stmt.span.start && /[\s;]/.test(text[end - 1]!)) end--
-  return { start: stmt.span.start, end }
+  // A modifier switched off at the end of the chain is a comment after the statement,
+  // not part of it, but it is still this view's: it moves, copies and goes with it.
+  return { start: stmt.span.start, end: afterOffMarkers(text, end) }
 }
 
 function lineStartAt(text: string, offset: number): number {

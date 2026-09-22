@@ -1,5 +1,5 @@
 import { authoringCapability, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
-import { Lexer, Parser, type CallExpr, type Expr } from '@studio/swift-syntax'
+import { Lexer, OFF_MARKER_HEAD, OFF_MARKER_SOURCE, Parser, afterOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { viewCallChain } from './design-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { SUPPORTED_MODIFIERS } from './builtins'
@@ -112,8 +112,8 @@ function category(name: string): ModifierCategory {
 
 // ---------------------------------------------------------------- the off marker
 
-const MARKER_HEAD = '/*studio-off:1 '
-const MARKER = /\/\*studio-off:1 ("(?:[^"\\]|\\.)*")\*\//g
+const MARKER = new RegExp(OFF_MARKER_SOURCE, 'g')
+const ONE_MARKER = new RegExp(`^${OFF_MARKER_SOURCE}$`)
 
 /**
  * A switched-off modifier: `studio-off:1 ".background(Color.blue)"` in a block comment.
@@ -124,10 +124,10 @@ const MARKER = /\/\*studio-off:1 ("(?:[^"\\]|\\.)*")\*\//g
  * marker so a later format can still read this one.
  */
 export function offMarker(text: string): string {
-  return `${MARKER_HEAD}${JSON.stringify(text).replace(/\*/g, '\\u002a')}*/`
+  return `${OFF_MARKER_HEAD}${JSON.stringify(text).replace(/\*/g, '\\u002a')}*/`
 }
 function markerText(marker: string): string | undefined {
-  const match = /^\/\*studio-off:1 ("(?:[^"\\]|\\.)*")\*\/$/.exec(marker)
+  const match = ONE_MARKER.exec(marker)
   if (!match) return undefined
   try { const value: unknown = JSON.parse(match[1]!); return typeof value === 'string' ? value : undefined } catch { return undefined }
 }
@@ -193,11 +193,10 @@ function segmentsOf(expr: Expr, text: string): { base: CallExpr; segments: Segme
   }
   // Switched-off entries after the last call: whitespace and markers only.
   let end = expr.span.end
-  const trailing = /^(?:\s*\/\*studio-off:1 "(?:[^"\\]|\\.)*"\*\/)+/.exec(text.slice(end))
-  if (trailing) {
-    const markers = markersIn(end, end + trailing[0].length)
-    segments.push(...markers)
-    end += trailing[0].length
+  const after = afterOffMarkers(text, end)
+  if (after > end) {
+    segments.push(...markersIn(end, after))
+    end = after
   }
   return { base: chain.base, segments, end }
 }

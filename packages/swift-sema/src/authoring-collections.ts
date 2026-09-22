@@ -1,6 +1,6 @@
 import { SUPPORTED_VIEWS } from './builtins'
 import type { AuthoringNode, CollectionSettings, DesignValue, DesignRecord, RecordField } from '@studio/shared'
-import type { VarDecl } from '@studio/swift-syntax'
+import { afterOffMarkers, type VarDecl } from '@studio/swift-syntax'
 import { callOf, hasComments, shadowsMember, identifier, insertMember, literal, namedStruct, ownerOf, patch, raw, scalarType, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { swiftString } from './design-controls'
 
@@ -133,7 +133,9 @@ export function emptyState(ctx: FeatureContext, node: AuthoringNode, message: st
   if (!info || message.length > 16_384) throw new Error('Select a supported collection to add its empty state.')
   let parent = ctx.nodes.find(n => n.id === node.parentId)
   while (parent) { if (parent.kind === 'branch' && parent.properties.some(p => p.expression.includes(`${info.name}.isEmpty`))) throw new Error('This collection already has an empty-state branch. Edit its Text layer.'); parent = ctx.nodes.find(n => n.id === parent!.parentId) }
-  return [patch(node.source, `Group {\n    if ${info.name}.isEmpty {\n        Text(${swiftString(message)})\n    } else {\n        ${raw(ctx, node.source)}\n    }\n}`)]
+  // A modifier switched off at the end of the collection's chain is written after it, and goes inside with it.
+  const source = { ...node.source, end: afterOffMarkers(ctx.files.find(f => f.id === node.source.file)?.text ?? '', node.source.end) }
+  return [patch(source, `Group {\n    if ${info.name}.isEmpty {\n        Text(${swiftString(message)})\n    } else {\n        ${raw(ctx, source)}\n    }\n}`)]
 }
 
 
