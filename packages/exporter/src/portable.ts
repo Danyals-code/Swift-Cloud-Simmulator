@@ -7,9 +7,13 @@ import { validatePromptHistory } from '@studio/project-model'
 
 export const PROJECT_DOCUMENT = '.swiftstudio/project.json'
 interface ResourceEntry { id: string; name: string; scale: 1 | 2 | 3; light: string; dark?: string }
+/** The Studio build an export came from: the commit it was built from, and when. */
+export interface StudioBuild { readonly commit: string; readonly builtAt: string }
 export interface Handoff {
   readonly version: 1
   readonly format: 'swift-web-studio'
+  /** Which build wrote the archive. Informational: reading ignores it, so older and newer builds open it alike. */
+  readonly generator?: { readonly name: 'Swift Web Studio'; readonly build: StudioBuild }
   readonly project: Omit<Project, 'files' | 'assets' | 'studio' | 'colors'>
   readonly sources: readonly { readonly id: string; readonly path: string; readonly base: string }[]
   readonly assets: readonly ResourceEntry[]
@@ -43,12 +47,13 @@ export function validatePortableProject(value: unknown): asserts value is Projec
   validateColors((value.colors ?? []) as ColorAsset[])
 }
 /** Source files and resources stay outside the optional Studio metadata. */
-export function attachHandoff(project: Project, bundle: ExportBundle, root: string, sourcePath: (id: string) => string, catalogPath: string): ExportBundle {
+export function attachHandoff(project: Project, bundle: ExportBundle, root: string, sourcePath: (id: string) => string, catalogPath: string, build?: StudioBuild): ExportBundle {
   const normalized = normalizeProject(project)
   validatePortableProject(normalized)
   const files = new Map(bundle)
   const document: Handoff = {
     version: 1, format: 'swift-web-studio',
+    ...(build ? { generator: { name: 'Swift Web Studio', build: { commit: build.commit, builtAt: build.builtAt } } } : {}),
     project: { schemaVersion: 1, id: project.id, manifest: project.manifest, folders: project.folders, createdAt: project.createdAt, updatedAt: project.updatedAt, ...(project.chatHistory ? { chatHistory: project.chatHistory } : {}) },
     sources: project.files.map(f => ({ id: f.id, path: sourcePath(f.id), base: f.text })),
     assets: (project.assets ?? []).map(a => ({ id: a.id, name: a.name, scale: a.scale, light: `${catalogPath}/${a.name}.imageset/light.${a.light.mime === 'image/png' ? 'png' : 'jpg'}`, ...(a.dark ? { dark: `${catalogPath}/${a.name}.imageset/dark.${a.dark.mime === 'image/png' ? 'png' : 'jpg'}` } : {}) })),
