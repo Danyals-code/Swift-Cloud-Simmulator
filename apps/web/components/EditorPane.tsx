@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { basicSetup } from 'codemirror'
 import { Annotation, Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
-import { EditorView, keymap } from '@codemirror/view'
+import { EditorView, keymap, tooltips } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { StreamLanguage } from '@codemirror/language'
 import { swift } from '@codemirror/legacy-modes/mode/swift'
@@ -234,6 +234,10 @@ export function EditorPane({
         const { from, to } = wordRangeAt(view.state.doc.toString(), pos)
         return { pos: from, end: to, above: true, create: () => ({ dom: tooltipFor(symbol) }) }
       }),
+      // Room for a tooltip is measured against the editor, not the window. Over the
+      // first lines "above" reached up behind the jump bar, which then took the click
+      // meant for a problem's fix; measured here, CodeMirror opens it below instead.
+      tooltips({ tooltipSpace: view => view.dom.getBoundingClientRect() }),
       // In-file find and replace, from CodeMirror's own implementation. Project-wide
       // rename is F2 below; these two answer different questions and neither
       // substitutes for the other.
