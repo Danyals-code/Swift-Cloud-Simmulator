@@ -53,6 +53,9 @@ import { TabBar } from './TabBar'
 import { TemplateGallery } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
 import { BUILD_NAME, STUDIO_BUILD } from '../lib/build'
+import { crashIfTesting } from '../lib/recovery'
+import { PaneBoundary } from './PaneBoundary'
+import { ErrorBanner } from './Recovery'
 import styles from './Workspace.module.css'
 import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
@@ -1167,6 +1170,7 @@ export function Studio() {
       </main>
     )
   }
+  crashIfTesting('app', project.id)
 
   const errors = allDiagnostics.filter((d) => d.severity === 'error').length
   const warnings = allDiagnostics.filter((d) => d.severity === 'warning').length
@@ -1240,8 +1244,15 @@ export function Studio() {
                 }, onNodeCommand: (node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation), onNodeChange: (node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }), onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }
   const busy = stale || preparingEdit
   const revealSpan = (span: SourceSpan) => revealSpanIn(span.file, span.start)
+  /**
+   * What each panel is drawn from. A panel that crashed tries again when one of these
+   * changes. Panels drawn from the compiler key on the compile's revision: it changes
+   * once the Undo or edit has been compiled, which is when a retry can succeed, and
+   * not for each text measurement that refines the same compile.
+   */
+  const drawnFrom = { navigator: [result?.revision, mode], settings: [result?.revision, mode, level, authoringNode?.id], editor: [project, activeFileId, mode], preview: [result?.revision, mode] }
   /** The right-hand panel shows the App, the focused screen, or the selected view. */
-  const settingsPanel = level === 'app'
+  const settingsPanel = <PaneBoundary area="settings" resetKeys={drawnFrom.settings}>{level === 'app'
     ? <AppSettings project={project} tree={tree} snapshot={result?.authoring} screenViews={screens.map(screen => screen.view)} busy={busy} onRenameApp={useStudio.getState().renameProject} onResource={resourceCommand} onAssets={updateAssets} onSelect={selectAuthoring}
         navigation={<AppNavigationSettings navigation={result?.authoring?.navigation} screens={screens} busy={busy} onCommand={navigationCommand} onReveal={revealSpan} />} />
     : level === 'screen'
@@ -1251,7 +1262,7 @@ export function Studio() {
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }, undefined, undefined, undefined, true)}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, true)} onSelect={selectAuthoring} onReveal={revealSpan} />
         : <p className="text-[12px] text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
-      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} />
+      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} />}</PaneBoundary>
   const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
     <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
     {level !== 'app' && focusedScreen && <><span aria-hidden>›</span><button type="button" aria-current={level === 'screen' ? 'page' : undefined} onClick={() => openPage(focusedScreen.page)} data-testid="level-screen">{focusedScreen.name}</button></>}
@@ -1302,6 +1313,7 @@ export function Studio() {
         {layout.showNavigator ? (
           <>
             <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
+              <PaneBoundary area="navigator" resetKeys={drawnFrom.navigator}>
               <StudioSidebar key={project.id} design={mode === 'design'} stale={stale || preparingEdit} onCollapse={() => togglePane('navigator')} onApplied={() => { setCommittedEditRevision(value => value + 1); setEditNote('Prompt edits applied. Use Undo to reverse them.') }} selection={authoringNode && !stale ? { label: sourceLayerLabel(authoringNode), file: authoringNode.source.file, start: authoringNode.source.start, end: authoringNode.source.end, owner: authoringNode.owner } : null}>
               {mode === 'design' ? <DesignNavigator
                 tabbed
@@ -1373,6 +1385,7 @@ export function Studio() {
                 onOpenTemplates={openGallery}
               />}
               </StudioSidebar>
+              </PaneBoundary>
             </div>
             <Splitter
               orientation="col"
@@ -1419,6 +1432,7 @@ export function Studio() {
           ) : null}
 
           <div className="min-h-0 flex-1">
+            <PaneBoundary area="editor" resetKeys={drawnFrom.editor}>
             {activeFile ? (
               <EditorPane
                 // Remount editor selection per file; undo belongs to the project timeline.
@@ -1439,6 +1453,7 @@ export function Studio() {
             ) : (
               <p className="p-4 text-[12px] text-xc-text-3">No file selected.</p>
             )}
+            </PaneBoundary>
           </div>
 
           {mode !== 'design' ? debugArea : null}
@@ -1458,6 +1473,7 @@ export function Studio() {
             />}
             <div style={mode === 'design' ? { flex: 1, minWidth: 0 } : { width: layout.preview }} className="flex shrink-0 flex-col overflow-hidden">
               <div className="min-h-0 flex-1">
+              <PaneBoundary area="preview" resetKeys={drawnFrom.preview} keep={previewTools}>
               <DevicePane
                 expanded={mode === 'design'}
                 projectId={project.id}
@@ -1497,6 +1513,7 @@ export function Studio() {
                 tools={previewTools}
                 device={device}
                 tree={result?.renderTree ?? null}
+                revision={result?.revision}
                 selectedRenderIds={selectedRenderIds}
                 hoveredRenderIds={hoveredRenderIds}
                 stale={stale || preparingEdit}
@@ -1506,6 +1523,7 @@ export function Studio() {
                 preview={previewSettings}
                 onPreviewChange={(settings: Partial<PreviewSettings>) => setPreview(settings)}
               />
+              </PaneBoundary>
               </div>
             </div>
           </>
@@ -1520,6 +1538,9 @@ export function Studio() {
         if (node) selectAuthoring(node)
       }} />}
       {shortcutsOpen ? <ShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}
+      {/* Failures outside any panel. Outside the inert workspace, so it stays usable
+          while a sheet is open. */}
+      <ErrorBanner />
       {adding ? (
         <AddView
           target={addTarget}

@@ -37,6 +37,8 @@ import {
   validatePromptHistory,
 } from '@studio/project-model'
 import type { DeviceKey } from '@studio/sim-shell'
+import { STUDIO_BUILD } from './build'
+import { registerLiveWork, takeSafeStart } from './recovery'
 import type { FileId, SourceSpan } from '@studio/shared'
 
 const AUTOSAVE_MS = 500
@@ -148,12 +150,14 @@ export interface StudioState {
    * `'restored'` - work was already in this browser and is what you are looking at.
    * `'shared'`   - the page was opened with a link carrying a project.
    * `'fresh'`    - nothing was saved, so the starter project was laid down.
+   * `'recovered'` - after a crash, the saved project was skipped on purpose.
    *
-   * The sheet needs all three: it offers to continue only in the first case, and it
-   * does not open at all in the second, because following a link is already an
-   * explicit request to see *that* project.
+   * The sheet needs all four: it offers to continue only in the first case, it does
+   * not open at all in the second, because following a link is already an explicit
+   * request to see *that* project, and in the last it opens on the saved projects so
+   * choosing one is the participant's decision rather than a repeat of the crash.
    */
-  origin: 'restored' | 'shared' | 'fresh' | null
+  origin: 'restored' | 'shared' | 'fresh' | 'recovered' | null
   /**
    * Every project in this browser, newest first.
    *
@@ -362,6 +366,10 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       return
     }
 
+    // After a crash, "Open another project" starts here without the project that was
+    // open, so a crash its content causes does not repeat on every reload.
+    const recovering = takeSafeStart()
+
     // A failed load must not leave the studio waiting forever on `loaded`. Falling
     // back to the starter project loses nothing that was not already unreachable.
     let existing: Project | null = null
@@ -370,15 +378,17 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 
     try {
       summaries = await persistence().list()
-      // Whatever was open last, then the most recently touched, then the key every
-      // project used to share - which is how an install from before projects had
-      // their own ids still finds its work.
-      const wanted = lastOpenedId()
-      const id =
-        (wanted && summaries.some((p) => p.id === wanted) ? wanted : null) ??
-        summaries[0]?.id ??
-        LEGACY_PROJECT_ID
-      existing = await persistence().load(id)
+      if (!recovering) {
+        // Whatever was open last, then the most recently touched, then the key every
+        // project used to share - which is how an install from before projects had
+        // their own ids still finds its work.
+        const wanted = lastOpenedId()
+        const id =
+          (wanted && summaries.some((p) => p.id === wanted) ? wanted : null) ??
+          summaries[0]?.id ??
+          LEGACY_PROJECT_ID
+        existing = await persistence().load(id)
+      }
     } catch (error) {
       failure = error instanceof Error && error.message
         ? `Could not open saved work: ${error.message}`
@@ -404,7 +414,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       activeFileId: first,
       openFileIds: first ? [first] : [],
       loaded: true,
-      origin: existing ? 'restored' : 'fresh',
+      origin: recovering ? 'recovered' : existing ? 'restored' : 'fresh',
       recents: summaries,
       saveError: failure,
     })
@@ -774,6 +784,14 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       await refreshRecents()
     },
   }
+})
+
+// The recovery screen reads the open project from here - edits the autosave has not
+// written yet included - without importing the store itself.
+registerLiveWork({
+  project: () => useStudio.getState().project,
+  flush: async () => { await useStudio.getState().flush(); return useStudio.getState().saveError },
+  archive: async project => (await import('@studio/exporter')).exportEditableZip(project, STUDIO_BUILD),
 })
 
 /**
