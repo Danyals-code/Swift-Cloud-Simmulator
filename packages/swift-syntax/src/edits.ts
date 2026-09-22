@@ -60,8 +60,16 @@ export interface SourceEdit {
   readonly offset: number
 }
 
-/** The innermost statement containing `offset`, with the block it belongs to. */
-function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null {
+/**
+ * The statement whose view starts at `offset`, with the block it belongs to.
+ *
+ * Exact on purpose. A view written as an argument - `.overlay(Circle())`,
+ * `Section(header: Text("A"))` - sits inside a statement without being one, and taking
+ * the statement around it would move, hide or delete the view that takes it. `near`
+ * answers the innermost statement containing `offset` instead, for a drop target: a
+ * drop onto an overlay means beside the view it belongs to.
+ */
+function siteAt(text: string, file: FileId, offset: number, near = false): { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null {
   const { sourceFile } = Parser.parse(text, file)
 
   let best: { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null = null
@@ -72,7 +80,7 @@ function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block
     if (node.kind === 'call' && node.trailingClosure) owners.set(node.trailingClosure.body, node)
     if (node.kind !== 'block') return
     node.statements.forEach((stmt, index) => {
-      if (offset < stmt.span.start || offset >= stmt.span.end) return
+      if (near ? offset < stmt.span.start || offset >= stmt.span.end : viewStartOf(stmt) !== offset) return
       // Deeper blocks are visited after shallower ones, and the deepest statement
       // containing the offset is the view that was actually pointed at.
       if (!best || stmt.span.start >= best.stmt.span.start) {
@@ -82,6 +90,13 @@ function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block
   })
 
   return best
+}
+
+/** Where the view a statement produces is written: past a `return`, where its expression starts. */
+function viewStartOf(stmt: Stmt): number | null {
+  if (stmt.kind === 'exprStmt') return stmt.expression.span.start
+  if (stmt.kind === 'returnStmt') return stmt.value?.span.start ?? null
+  return null
 }
 
 /** The name a call expression invokes, for `Text(…)` and `SwiftUI.Text(…)` alike. */
@@ -386,7 +401,7 @@ export function moveViewTo(
   position: 'before' | 'after',
 ): SourceEdit | null {
   const source = siteAt(text, file, offset)
-  const target = siteAt(text, file, targetOffset)
+  const target = siteAt(text, file, targetOffset, true)
   if (!source || !target) return null
   if (source.stmt === target.stmt) return null
 

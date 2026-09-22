@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Parser } from './parser'
-import { deleteView, HIDDEN_MARKER, insertView, moveView, viewSiteAt } from './edits'
+import { copyView, deleteView, HIDDEN_MARKER, hideView, insertView, moveView, moveViewTo, viewSiteAt } from './edits'
 
 /**
  * The canvas's edits, at the level they actually happen: text in, text out.
@@ -305,5 +305,38 @@ describe('C1: adding into a container with no views keeps what is inside it', ()
     expect(added.text).toContain(expected)
     expect(added.text.slice(added.offset)).toMatch(/^Text\("New"\)/)
     expect(parses(added.text)).toBe(true)
+  })
+})
+
+describe('C2: a view written as an argument has no statement of its own', () => {
+  const card = `import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Text("Card")
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray))
+            Text("Other")
+        }
+    }
+}
+`
+  const shape = () => offsetOf(card, 'RoundedRectangle')
+
+  it.each([
+    ['delete', () => deleteView(card, FILE, shape())],
+    ['hide', () => hideView(card, FILE, shape())],
+    ['move', () => moveView(card, FILE, shape(), 1)],
+    ['add beside', () => insertView(card, FILE, shape(), 'Text("New")')],
+    ['copy', () => copyView(card, FILE, shape())],
+    ['drag', () => moveViewTo(card, FILE, shape(), offsetOf(card, 'Text("Other")'), 'after')],
+    ['describe', () => viewSiteAt(card, FILE, shape())],
+  ])('does not %s the view that takes it', (_, edit) => {
+    expect(edit()).toBeNull()
+  })
+
+  it('takes a drop onto it as a drop beside the view it belongs to', () => {
+    const moved = moveViewTo(card, FILE, offsetOf(card, 'Text("Other")'), shape(), 'before')!
+    expect(moved.text).toContain('        VStack {\n            Text("Other")\n            Text("Card")\n')
   })
 })

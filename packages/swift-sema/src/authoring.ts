@@ -158,7 +158,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
   }
 
-  function expression(expr: Expr, parent: MutableNode, scope: Scope): void {
+  function expression(expr: Expr, parent: MutableNode, scope: Scope, argument = false): void {
     const chain = viewCallChain(expr)
     if (!chain) { add('opaque', 'Custom expression', expr.span, parent.owner, parent); return }
     const name = callName(chain.base.callee)
@@ -168,6 +168,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     const capability = builtin ? authoringCapability(name, 'view', chain.base.args.map(a => a.label)) : undefined
     const node = add(custom.length === 1 ? 'component' : name === 'ForEach' || name === 'List' && chain.base.args.length > 0 ? 'collection' : builtin ? 'view' : 'opaque', name, expr.span, parent.owner, parent)
     if (custom.length === 1) Object.assign(node, { definitionId: custom[0]!.node.id })
+    if (argument) Object.assign(node, { argument: true })
     const reason = custom.length > 1 ? 'More than one matching component declaration; ownership is ambiguous.' : !custom.length && !capability ? 'This constructor overload is outside the authoring subset.' : undefined
     for (const [i, arg] of chain.base.args.entries()) {
       node.properties.push(property(node, arg.label ?? (name === 'Text' ? 'content' : `argument ${i + 1}`), arg.value, scope, capability?.id, reason))
@@ -238,7 +239,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       if (!['header', 'footer'].includes(arg.label ?? '')) continue
       const slot = add('branch', arg.label === 'header' ? 'Header' : 'Footer', arg.value.span, parent.owner, node)
       if (arg.value.kind === 'closure') block(arg.value.body, slot, scope)
-      else expression(arg.value, slot, scope)
+      else expression(arg.value, slot, scope, true)
     }
     // A visual slot has its own layer; action closures and scalar colors are not views.
     for (const modifier of chain.modifiers) {
@@ -259,7 +260,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         const builtinColor = contentName === 'Color' && (!definitions.has('Color') || content?.base.callee.kind === 'memberAccess' && content.base.callee.base?.kind === 'identifier' && content.base.callee.base.name === 'SwiftUI')
         if (argument && contentName && !builtinColor && (SUPPORTED_VIEWS.has(contentName) || definitions.has(contentName))) {
           const slot = add('branch', label, argument.span, parent.owner, node)
-          expression(argument, slot, scope)
+          expression(argument, slot, scope, true)
         }
       }
     }

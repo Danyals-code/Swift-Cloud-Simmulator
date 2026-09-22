@@ -381,3 +381,35 @@ describe('C1: adding into a container keeps what is already inside it', () => {
     expect(moved).toContain('HStack {\n        // hidden by Swift Web Studio\n        // Text("Secret")\n        // end hidden view\n        Text("Title")\n    }')
   })
 })
+
+describe('C2: a view written as an argument is part of the view that takes it', () => {
+  const card = wrap('VStack {\n    Text("Card")\n        .padding()\n        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray))\n    Text("Other")\n}')
+  const refusal = (slot: string) => `The ${slot} is part of the view it is attached to, so it can’t be moved, copied, hidden or deleted on its own. Select that view instead.`
+
+  it.each<[string, DesignEditRequest['operation']]>([
+    ['delete', { kind: 'delete' }],
+    ['hide', { kind: 'hide' }],
+    ['move', { kind: 'move', direction: 1 }],
+    ['drag', { kind: 'moveTo', targetOffset: card.indexOf('Text("Other")'), position: 'after' }],
+    ['add beside', { kind: 'insert', snippet: 'Text("New")' }],
+    ['duplicate', { kind: 'layer-duplicate' }],
+    ['wrap', { kind: 'layer-wrap', ids: [target(card, 'RoundedRectangle').id], layout: 'VStack' }],
+    ['move into', { kind: 'layer-reparent', ids: [target(card, 'RoundedRectangle').id], destination: target(card, 'VStack').id }],
+  ])('refuses to %s an overlay’s shape on its own, and says why', (_, operation) => {
+    expect(restructure(card, operation, 'RoundedRectangle')).toEqual({ ok: false, reason: refusal('overlay') })
+  })
+
+  it('edits an overlay shape’s own settings', () => {
+    expect(edited(card, 'Shape corner radius', '20', 'RoundedRectangle')).toBe(card.replace('cornerRadius: 12', 'cornerRadius: 20'))
+  })
+
+  // The row is the first Text in the model; the header is the second.
+  const section = wrap('List {\n    Section(header: Text("Header")) {\n        Text("Row")\n    }\n}')
+  it('refuses to delete a section header written as an argument, and says why', () => {
+    expect(restructure(section, { kind: 'delete' }, 'Text', 1)).toEqual({ ok: false, reason: refusal('header') })
+  })
+
+  it('edits a section header’s own text', () => {
+    expect(edited(section, 'Text', 'Title', 'Text', 1)).toBe(section.replace('"Header"', '"Title"'))
+  })
+})

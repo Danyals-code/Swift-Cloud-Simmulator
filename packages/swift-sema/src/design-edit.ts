@@ -1,11 +1,14 @@
 import { customizeCard, editsCardSurface } from './authoring-card'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import type { DesignEditPlan, DesignEditRequest, PreviewColorAsset, SourceFile, SourceChange, ModifierOperation } from '@studio/shared'
+import { argumentLayerProblem, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, forEachChild, deleteView, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
+
+/** The operations that act on a view's whole statement: its place, its copies, and whether it is there at all. */
+const STRUCTURAL = new Set(['delete', 'move', 'moveTo', 'insert', 'hide', 'layer-duplicate', 'layer-wrap', 'layer-reparent'])
 
 /** Plans against an immutable source revision. Commit must compare the whole project again. */
 export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
@@ -18,11 +21,16 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   const ast = parsed.map(p => p.sourceFile)
   const diagnostics = Checker.check(ast).diagnostics
   const model = buildAuthoringModel({ ...request, revision: request.baseRevision, parsed: ast, diagnostics })
-  const node = model.nodes.find(n => n.source.file === file.id && n.source.start === request.target.start && n.source.end === request.target.end && n.fingerprint === request.fingerprint)
+  const matches = model.nodes.filter(n => n.source.file === file.id && n.source.start === request.target.start && n.source.end === request.target.end && n.fingerprint === request.fingerprint)
+  // A slot written as an argument - `.overlay(Circle())` - has exactly the span of the view in it, and the view is what was selected.
+  const node = matches.find(n => n.kind !== 'branch') ?? matches[0]
   const operation = request.operation
   if (operation.kind !== 'show' && !node) return reject('The source identity changed. Select the view again.')
   if (node && request.scope !== node.owner) return reject('The requested source ownership changed. Select the view again.')
   if (node && diagnostics.some(d => d.severity === 'error' && d.span.file === file.id && d.span.start < node.source.end && d.span.end >= node.source.start)) return reject('Resolve the diagnostics for this view before editing it.')
+  // A view written as an argument has no statement of its own, so any of these would land on the view that takes it.
+  const argument = node && STRUCTURAL.has(operation.kind) ? argumentLayerProblem(model.nodes, node) : null
+  if (argument) return reject(argument)
   const materializeCard = node && editsCardSurface(node, operation)
   const finish = (files: readonly SourceFile[], selection: { file: string; offset: number }, colors?: readonly PreviewColorAsset[]): DesignEditPlan => {
     if (materializeCard) {
