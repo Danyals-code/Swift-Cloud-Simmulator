@@ -52,6 +52,7 @@ import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
+import { BUILD_NAME, STUDIO_BUILD } from '../lib/build'
 import styles from './Workspace.module.css'
 import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
@@ -1151,7 +1152,7 @@ export function Studio() {
           setEditNote(`Xcode bundle downloaded with ${count} screen ${count === 1 ? 'image' : 'images'}, report and chat history.`)
         } else {
           const { downloadProjectZip } = await import('@studio/exporter')
-          downloadProjectZip(project, format)
+          downloadProjectZip(project, format, undefined, STUDIO_BUILD)
           setEditNote('Project downloaded.')
         }
       })().catch(error => setEditNote(error instanceof Error ? error.message : 'Could not export this project.')).finally(() => { exportInProgress.current = false; setExporting(false) })
@@ -1271,6 +1272,10 @@ export function Studio() {
         onOpenGallery={openGallery}
         onRenameProject={useStudio.getState().renameProject}
         onShortcuts={() => setShortcutsOpen(true)}
+        onCopyBuild={() => {
+          const details = `Swift Web Studio build ${STUDIO_BUILD.commit}, built ${STUDIO_BUILD.builtAt || 'at an unknown time'}`
+          void navigator.clipboard.writeText(details).then(() => setEditNote(`${BUILD_NAME} copied.`), () => setEditNote(`${BUILD_NAME} · commit ${STUDIO_BUILD.commit}`))
+        }}
         onReview={() => { setDesigning(true); setReviewOpen(true) }}
         reviewDisabled={stale || preparingEdit || !result?.renderTree}
         projectName={project.manifest.name}
@@ -1285,7 +1290,7 @@ export function Studio() {
         onTogglePane={togglePane}
         onExport={handleExport}
         exporting={exporting}
-        onDownloadEditable={() => { void import('@studio/exporter').then(async module => { await flush(); module.downloadEditableProject(project) }).catch(error => setEditNote(error instanceof Error ? error.message : 'Could not download the editable project.')) }}
+        onDownloadEditable={() => { void import('@studio/exporter').then(async module => { await flush(); module.downloadEditableProject(project, STUDIO_BUILD) }).catch(error => setEditNote(error instanceof Error ? error.message : 'Could not download the editable project.')) }}
         onShare={handleShare}
         environment={<><DevicePicker device={device} onChange={setDevice} /><AppearancePicker preview={previewSettings} onChange={setPreview} /><TextSizePicker preview={previewSettings} onChange={setPreview} /></>}
         previewing={!inspecting}
