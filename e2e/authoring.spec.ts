@@ -139,9 +139,9 @@ test('visual and code edits share undo and redo, including after a mode switch',
   await expect(editor).not.toContainText('// code edit')
   await page.keyboard.press('ControlOrMeta+z')
   await expect(editor).toHaveText(SOURCE, { useInnerText: true })
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.keyboard.press('ControlOrMeta+Shift+Z')
   await expect(editor).toContainText('Design edit')
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.keyboard.press('ControlOrMeta+Shift+Z')
   await expect(editor).toContainText('// code edit')
 })
 
