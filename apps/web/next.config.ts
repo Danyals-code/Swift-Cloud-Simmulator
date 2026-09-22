@@ -19,6 +19,9 @@ function buildCommit(): string {
 
 const config: NextConfig = {
   reactStrictMode: true,
+  // `env` rather than NEXT_PUBLIC_ variables, which the docs now prefer: those are
+  // read from the environment as it stands, and the commit is sometimes only known
+  // by asking git here.
   env: {
     STUDIO_BUILD_COMMIT: buildCommit(),
     STUDIO_BUILD_TIME: new Date().toISOString(),

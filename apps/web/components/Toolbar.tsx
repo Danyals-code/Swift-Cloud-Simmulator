@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { EXPORT_FORMATS, type ExportFormat } from '@studio/shared'
-import { BUILD_DATE, BUILD_NAME, STUDIO_BUILD } from '../lib/build'
+import { BUILD_DATE, BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import type { WorkspaceMode, WorkspaceTheme } from '../lib/layout'
 import { Icon } from './ui/Icon'
 import { MenuButton } from './ui/Menu'
@@ -116,7 +116,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, 
         { value: 'theme', label: theme === 'dark' ? 'Light workspace' : 'Dark workspace', icon: 'appearance' },
         { value: 'shortcuts', label: 'Keyboard shortcuts', detail: '⌘/', icon: 'keyboard' },
         ...(design ? [{ value: 'problems', label: 'Problems and output', detail: '⌘⇧Y', separated: true }] : []),
-        { value: 'build', label: BUILD_NAME, detail: BUILD_DATE, title: `Swift Web Studio, commit ${STUDIO_BUILD.commit}. Choose to copy it.`, icon: 'info' as const, separated: true },
+        { value: 'build', label: BUILD_NAME, detail: BUILD_DATE, title: `${BUILD_DETAILS}. Choose to copy it.`, icon: 'info' as const, separated: true },
       ]} onSelect={value => { if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug'); else if (value === 'build') onCopyBuild() }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={17} /></MenuButton>
     </div>
   </header>

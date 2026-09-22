@@ -24,13 +24,13 @@ describe('A5: exports name the build that made them', () => {
   })
 
   it.each(EXPORT_FORMATS.map(format => format.id))('the %s export records the commit and build time', (format) => {
-    expect(documentIn(exportProjectZip(project, format, undefined, BUILD)).generator).toEqual({ name: 'Swift Web Studio', build: BUILD })
+    expect(documentIn(exportProjectZip(project, format, { build: BUILD })).generator).toEqual({ name: 'Swift Web Studio', build: BUILD })
   })
 
   it('the complete export’s report names the build for the people reviewing it', () => {
     const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDOkAAAAASUVORK5CYII=', 'base64'))
     const review: ExportReview = { device: 'iPhone 18 Pro', colorScheme: 'light', dynamicTypeSize: 'large', typeScale: 1, diagnostics: [], screens: [{ id: 'one', name: 'Home', kind: 'root', width: 1, height: 1, png }] }
-    const entries = unzipSync(exportProjectZip(project, 'xcodeproj', review, BUILD))
+    const entries = unzipSync(exportProjectZip(project, 'xcodeproj', { review, build: BUILD }))
     const report = decoder.decode(entries[`${project.manifest.name}/Studio Report/report.md`]!)
     expect(report.split('\n').slice(0, 3)).toEqual([
       `# ${project.manifest.name} — project report`,
@@ -39,10 +39,11 @@ describe('A5: exports name the build that made them', () => {
     ])
   })
 
-  it('reopens an archive that names its build, without carrying the build into the project', () => {
-    const reopened = readProjectArchive(exportEditableZip(project, BUILD)).project!
-    expect(reopened.files).toEqual(project.files)
-    expect(reopened.manifest).toEqual(project.manifest)
+  it('reopens an archive that names its build, and leaves the build behind', () => {
+    const { project: reopened, handoff } = readProjectArchive(exportEditableZip(project, BUILD))
+    expect(reopened!.files).toEqual(project.files)
+    expect(reopened!.manifest).toEqual(project.manifest)
     expect(JSON.stringify(reopened)).not.toContain(BUILD.commit)
+    expect(JSON.stringify(handoff)).not.toContain(BUILD.commit)
   })
 })

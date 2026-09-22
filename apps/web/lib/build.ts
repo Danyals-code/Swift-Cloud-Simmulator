@@ -18,3 +18,6 @@ export const BUILD_NAME = `Build ${STUDIO_BUILD.commit.slice(0, 7)}`
 export const BUILD_DATE = STUDIO_BUILD.builtAt
   ? new Date(STUDIO_BUILD.builtAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
   : ''
+
+/** The full commit and build time in one line, for somebody writing a report. */
+export const BUILD_DETAILS = `Swift Web Studio build ${STUDIO_BUILD.commit}, built ${STUDIO_BUILD.builtAt || 'at an unknown time'}`

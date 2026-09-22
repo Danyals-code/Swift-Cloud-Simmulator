@@ -12,7 +12,10 @@ export interface StudioBuild { readonly commit: string; readonly builtAt: string
 export interface Handoff {
   readonly version: 1
   readonly format: 'swift-web-studio'
-  /** Which build wrote the archive. Informational: reading ignores it, so older and newer builds open it alike. */
+  /**
+   * Which build wrote the archive, for the people who look inside it. Reading drops it
+   * unchecked, so older and newer builds open each other's archives alike.
+   */
   readonly generator?: { readonly name: 'Swift Web Studio'; readonly build: StudioBuild }
   readonly project: Omit<Project, 'files' | 'assets' | 'studio' | 'colors'>
   readonly sources: readonly { readonly id: string; readonly path: string; readonly base: string }[]
@@ -134,7 +137,9 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
   // Baselines are untrusted too. They are used only for a visible merge proposal.
   const baseline = { ...project, manifest: value.baseManifest, studio: value.baseStudio, files: value.sources.map(s => ({ id: (s as { id: string }).id, text: (s as { base: string }).base })) }
   validatePortableProject(baseline)
-  return { project, handoff: value as unknown as Handoff }
+  const { generator: _written, ...handoff } = value
+  void _written
+  return { project, handoff: handoff as unknown as Handoff }
 }
 
 export interface ImportConflict { readonly key: string; readonly label: string; readonly local: string; readonly incoming: string }

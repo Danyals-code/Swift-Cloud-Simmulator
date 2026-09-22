@@ -13,7 +13,7 @@ test('the More menu names this build, and an export carries the same commit', as
   await page.getByTestId('workspace-more').click()
   const item = page.getByTestId('workspace-more-menu-build')
   await expect(item).toHaveAccessibleName(/^Build [0-9a-f]{7}\b/)
-  const commit = /commit ([0-9a-f]{40})\b/.exec(await item.getAttribute('title') ?? '')?.[1]
+  const commit = /build ([0-9a-f]{40})\b/.exec(await item.getAttribute('title') ?? '')?.[1]
   expect(commit).toBeDefined()
   await page.keyboard.press('Escape')
 

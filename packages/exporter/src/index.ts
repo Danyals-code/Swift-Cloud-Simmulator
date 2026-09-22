@@ -45,7 +45,15 @@ export function zipBundle(bundle: ExportBundle): Uint8Array {
   return zipSync(entries, { level: 6, mtime: FIXED_MTIME })
 }
 
-export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', review?: ExportReview, build?: StudioBuild): Uint8Array {
+/** What an export can carry besides the project. */
+export interface ExportOptions {
+  /** The review screens and report; only the complete bundle has them. */
+  readonly review?: ExportReview
+  /** The Studio build making the export, written into it. */
+  readonly build?: StudioBuild
+}
+
+export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', { review, build }: ExportOptions = {}): Uint8Array {
   const name = project.manifest.name, root = format === 'swiftpm' ? `${name}.swiftpm` : name
   const sourceRoot = format === 'xcodeproj' ? `${root}/${name}` : format === 'xcodegen' ? `${root}/Sources` : `${root}/Sources/${name}`
   const catalog = `${sourceRoot}/${format === 'spm' || format === 'swiftpm' ? 'Resources/' : ''}Assets.xcassets`
@@ -78,8 +86,8 @@ export function zipFileName(project: Project, format: ExportFormat = 'xcodeproj'
  * Trigger a browser download. Kept here rather than in the UI so the export path is
  * one call from a button handler.
  */
-export function downloadProjectZip(project: Project, format: ExportFormat = 'xcodeproj', review?: ExportReview, build?: StudioBuild): void {
-  const bytes = exportProjectZip(project, format, review, build)
+export function downloadProjectZip(project: Project, format: ExportFormat = 'xcodeproj', options: ExportOptions = {}): void {
+  const bytes = exportProjectZip(project, format, options)
   // Copy into a fresh ArrayBuffer - the fflate output may be a view over a larger pooled buffer.
   const blob = new Blob([bytes.slice()], { type: 'application/zip' })
   const url = URL.createObjectURL(blob)

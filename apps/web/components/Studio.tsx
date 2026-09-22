@@ -52,7 +52,7 @@ import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
-import { BUILD_NAME, STUDIO_BUILD } from '../lib/build'
+import { BUILD_DETAILS, BUILD_NAME, STUDIO_BUILD } from '../lib/build'
 import { crashIfTesting } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './Recovery'
@@ -1155,7 +1155,7 @@ export function Studio() {
           setEditNote(`Xcode bundle downloaded with ${count} screen ${count === 1 ? 'image' : 'images'}, report and chat history.`)
         } else {
           const { downloadProjectZip } = await import('@studio/exporter')
-          downloadProjectZip(project, format, undefined, STUDIO_BUILD)
+          downloadProjectZip(project, format, { build: STUDIO_BUILD })
           setEditNote('Project downloaded.')
         }
       })().catch(error => setEditNote(error instanceof Error ? error.message : 'Could not export this project.')).finally(() => { exportInProgress.current = false; setExporting(false) })
@@ -1284,8 +1284,7 @@ export function Studio() {
         onRenameProject={useStudio.getState().renameProject}
         onShortcuts={() => setShortcutsOpen(true)}
         onCopyBuild={() => {
-          const details = `Swift Web Studio build ${STUDIO_BUILD.commit}, built ${STUDIO_BUILD.builtAt || 'at an unknown time'}`
-          void navigator.clipboard.writeText(details).then(() => setEditNote(`${BUILD_NAME} copied.`), () => setEditNote(`${BUILD_NAME} · commit ${STUDIO_BUILD.commit}`))
+          void navigator.clipboard.writeText(BUILD_DETAILS).then(() => setEditNote(`${BUILD_NAME} copied.`), () => setEditNote(BUILD_DETAILS))
         }}
         onReview={() => { setDesigning(true); setReviewOpen(true) }}
         reviewDisabled={stale || preparingEdit || !result?.renderTree}
