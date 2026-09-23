@@ -226,6 +226,8 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   const bottomTabs = regular ? 0 : tabHeight
   const bottomSearch = screen.search?.placement === 'bottom' ? screen.search.height : 0
   const topSearch = screen.search?.placement === 'top' ? screen.search.height : 0
+  // The bars at the bottom stop short of the screen's edge, over the home indicator.
+  const bottomBarsEnd = canvas.height - Math.max(0, safeArea.bottom - SURFACES.tab.safeAreaOverlap)
   const scroll = primaryScroll(screen.content)
   const collapseDistance = scroll && screen.navigationBar?.large ? Math.max(0, barHeight - NAV_BAR_HEIGHT) : 0
   const content = scroll ? scrollInsets(screen.content, { top: collapseDistance, leading: 0, bottom: bottomTabs + bottomSearch + safeArea.bottom, trailing: 0 }) : screen.content
@@ -261,11 +263,12 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     }) }
   }
   if (screen.tabBar) {
-    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : canvas.height - Math.max(0, safeArea.bottom - SURFACES.tab.safeAreaOverlap) - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER)
+    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : bottomBarsEnd - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER)
     tree = appendPlaced(tree, bar, BAR_Z + 1000)
   }
   if (screen.search) {
-    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? canvas.height - safeArea.bottom - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
+    // At the bottom it sits where a tab bar would.
+    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? bottomBarsEnd - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
     tree = appendPlaced(tree, search, BAR_Z + 2000)
   }
   if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }

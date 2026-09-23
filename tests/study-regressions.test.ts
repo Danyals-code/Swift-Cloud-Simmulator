@@ -9,7 +9,7 @@ import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
 import { AUTHORING_COLOR_HEX } from '../packages/swift-sema/src/authoring-resources'
 import { DEVICES } from '@studio/sim-shell'
-import { worldFrame } from './render-geometry'
+import { ancestors, worldFrame } from './render-geometry'
 
 /**
  * Regressions named after the study-build plan's items (feasibility-revised.md), so
@@ -50,6 +50,12 @@ function runView(members: string, declarations = '', options: Partial<CompileReq
   expect(result.renderTree).not.toBeNull()
   return result
 }
+
+/** What the iOS 27 simulator drew on iPhone 18 Pro, light (docs/parity/native/iphone18pro-misrenders). */
+const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
+
+/** A `runView` on the iPhone 18 Pro the native values were measured on, with its safe area. */
+const screen = (members: string, declarations = '') => runView(members, declarations, { safeArea: DEVICES['iphone-18-pro'].safeArea })
 
 const nodes = (r: CompileResult): readonly RenderNode[] => r.renderTree?.nodes ?? []
 const texts = (r: CompileResult): string[] => nodes(r).flatMap(n => n.text?.runs.map(run => run.text) ?? [])
@@ -417,10 +423,56 @@ describe('E3: presentations and search written on a NavigationStack or a TabView
       }`)
     expect(controls(r)).not.toContain('Find things')
   })
-})
 
-/** What the iOS 27 simulator drew on iPhone 18 Pro, light (docs/parity/native/iphone18pro-misrenders). */
-const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
+  /** Where a person types into the search field. */
+  const searchBox = (r: CompileResult) => worldFrame(nodes(r), nodes(r).find(n => n.hitTarget?.role === 'textField')!)
+  /** The rounded surface the search field is drawn on. */
+  function searchCapsule(r: CompileResult) {
+    const field = nodes(r).find(n => n.hitTarget?.role === 'textField')!
+    return worldFrame(nodes(r), ancestors(nodes(r), field).find(n => n.clip && n.cornerRadius)!)
+  }
+  /** Each edge within a point of the measured [left, top, right, bottom], which take in the antialiased rim. */
+  function expectEdges(frame: { x: number; y: number; width: number; height: number }, measured: readonly number[]) {
+    const edges = [frame.x, frame.y, frame.x + frame.width, frame.y + frame.height]
+    expect(Math.max(...edges.map((edge, i) => Math.abs(edge - measured[i]!))), `drawn at ${edges.join(', ')}`).toBeLessThanOrEqual(1)
+  }
+
+  // Measured in the iOS 27 simulator on iPhone 18 Pro.
+  it.each([
+    ['the NavigationStack', 'search-root', 'NavigationStack { List { Text("Row") }.navigationTitle("Home") }.searchable(text: .constant(""))'],
+    ['the List inside it', 'search-content', 'NavigationStack { List { Text("Row") }.navigationTitle("Home").searchable(text: .constant("")) }'],
+  ])('puts a search field written on %s at the bottom of the screen when there is no tab bar', (_, capture, body) => {
+    const measured = native.presentations[capture].searchField
+    const r = screen(`var body: some View { ${body} }`)
+    expectEdges(searchCapsule(r), [measured.leftXPt, measured.topYPt, measured.rightXPt, measured.bottomYPt])
+    const box = searchBox(r), [, placeholderTop, , placeholderBottom] = measured.placeholderGlyphs
+    expect(box.y + box.height / 2).toBeCloseTo((placeholderTop + placeholderBottom) / 2, 0)
+    const magnifier = nodes(r).find(n => n.image?.symbol === 'magnifyingglass')!
+    expect(Math.abs(worldFrame(nodes(r), magnifier).x - measured.magnifierGlyph[0])).toBeLessThanOrEqual(1)
+  })
+
+  // iOS 27 folds it away at launch until the list is pulled down (search-tab-content), and
+  // the preview draws it shown, as it was measured in a tab app on 2026-09-16.
+  it("keeps a tab page's search field under its title, where iOS 27 shows it once pulled down", () => {
+    const r = screen(`var body: some View {
+        TabView {
+          NavigationStack { List { Text("Row") }.navigationTitle("Library").searchable(text: .constant("")) }
+            .tabItem { Label("Home", systemImage: "house") }
+        }
+      }`)
+    expectEdges(searchCapsule(r), native.presentations['search-tab-content'].afterPullingDown.searchFieldBoundsPt)
+  })
+
+  it("keeps a tab page's search field above its list when the stack has no title", () => {
+    const r = screen(`var body: some View {
+        TabView {
+          NavigationStack { List { Text("Row") } }.searchable(text: .constant(""))
+            .tabItem { Label("Home", systemImage: "house") }
+        }
+      }`)
+    expect(searchBox(r).y).toBeLessThan(placed(r, 'Row').y)
+  })
+})
 
 describe('E5: colours match the iOS 27 simulator', () => {
   /** The swatch's colour as it shows on the white page, as the simulator was measured. */
@@ -584,8 +636,6 @@ describe('E6: trim draws the part of the path iOS 27 draws', () => {
 // What reaches under the safe area, as the iOS 27 simulator draws it on iPhone 18 Pro
 // (docs/parity/native/iphone18pro-misrenders): the safe area runs from 62 to 840.
 describe('E4: what reaches under the safe area, and what stays inside it', () => {
-  const phone = DEVICES['iphone-18-pro']
-  const screen = (members: string, declarations = '') => runView(members, declarations, { safeArea: phone.safeArea })
   const full = (content: string) => `VStack { Text("Top"); Spacer(); Text("Bottom") }.frame(maxWidth: .infinity, maxHeight: .infinity)${content}`
 
   /** The colour a designer sees at a point: the topmost opaque paint there. */

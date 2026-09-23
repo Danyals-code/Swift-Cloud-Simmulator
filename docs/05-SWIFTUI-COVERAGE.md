@@ -94,7 +94,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included; `perform:` takes a closure or a named function, as do `.onAppear`, `.task` and `.onTapGesture` |
 | `.onMove` | ⬜ | - | warns; no reorder UI or modifier callback. The array move helper is separate |
 | `.swipeActions` | ⬜ | - | warns; custom actions are ignored. Standard delete requires `.onDelete` |
-| `.searchable` | ✅ | 7 | a field above the content, with its magnifying glass, writing its binding. Written on the NavigationStack, it searches the stack's root screen only, and on a TabView without a search tab it draws nothing, as in iOS 27 |
+| `.searchable` | ✅ | 7 | a field with its magnifying glass, writing its binding. On a phone it is at the bottom of the screen, or under the title in a tab app, and on iPad in the toolbar. Written on the NavigationStack, it searches the stack's root screen only, and on a TabView without a search tab it draws nothing, as in iOS 27 |
 | `.refreshable` | ⬜ | - | pull-to-refresh callback is not implemented |
 | `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |
 | `Table` / `OutlineGroup` | ⬜ | - | a labelled placeholder. The closure of a view the preview does not draw is no longer run, so a `TableColumn`'s row parameter cannot trap |
@@ -447,6 +447,11 @@ Listed in the exported README so nothing is a surprise on the Mac:
 23. **Gradients blend in sRGB.** Measured in the iOS 27 simulator, a gradient blends in Oklab,
     which keeps a red-to-blue gradient from greying in the middle. The end colours and their
     positions are the same.
+24. **A tab app's search field shows from the start.** iOS 27 keeps it folded under the title
+    until the list is pulled down, and the preview draws it as it is then.
+25. **A search drawer shown always keeps a large title.** With
+    `.navigationBarDrawer(displayMode: .always)`, iOS 27 makes the title inline, and the
+    preview keeps it large.
 
 ## The strictness pass (R5)
 

@@ -5,7 +5,9 @@ export const SURFACES = {
     top: 10, bottom: 24, sectionGap: 24, unheadedGap: 35, afterFooterGap: 10, headerTop: 4, headerBottom: 8, footerTop: 8 },
   navigation: { height: 54, largeTitle: 48, inset: 16, titleInset: 16, buttonGap: 8 },
   tab: { height: 62, margin: 12, bottom: 8, inset: 4, itemWidth: 90, safeAreaOverlap: 21, selectedRadius: 999, regularWidth: 520 },
-  search: { height: 44, radius: 22, margin: 16, bottom: 6 },
+  // The capsule is a phone's search at the bottom of the screen, measured in the iOS 27
+  // simulator (docs/parity/native/iphone18pro-misrenders).
+  search: { height: 44, radius: 22, margin: 16, bottom: 6, capsuleHeight: 48, capsuleMargin: 28 },
   sheet: { radius: 34, margin: 8, top: 10, maxWidth: 640, grabberWidth: 58, grabberHeight: 4 },
   alert: { width: 320, radius: 34, buttonHeight: 48, margin: 24 },
   menu: { width: 280, radius: 24, row: 44, margin: 12 },

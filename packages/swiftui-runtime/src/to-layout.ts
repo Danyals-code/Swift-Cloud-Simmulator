@@ -61,6 +61,7 @@ import {
   TAB_ITEM,
   type Overlay,
   type ResolvedUI,
+  type SearchField,
 } from './presentation'
 import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
 import { resolveSymbol } from './sf-symbols'
@@ -116,6 +117,13 @@ export interface ConversionResult {
   /** Handler id -> the view path it belongs to, for the inspector. */
   readonly hitTargets: ReadonlyMap<string, string>
 }
+
+/**
+ * Where a search field is drawn: at the top of the content, as in the drawer under the
+ * title; in an iPad's toolbar; or at the bottom of a phone's screen, in a glass capsule
+ * on the tab bar's line.
+ */
+type SearchPlacement = 'top' | 'toolbar' | 'bottom'
 
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
@@ -251,13 +259,18 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
-  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && (options.viewportWidth ?? 393) < 600 && !!ui.navigationBar)
-  const toolbarSearch = ui.search && !drawerSearch && (options.viewportWidth ?? 393) >= 600 && ui.navigationBar
-    ? converter.searchField(ui.search.text, ui.search.prompt, ui.search.path, true) : null
+  // On a phone, iOS 27 puts the search field at the bottom of the screen, where a tab
+  // bar would be. Where there is one, it goes in the drawer under the title instead.
+  const compact = (options.viewportWidth ?? 393) < 600
+  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && compact && !!ui.tabBar)
+  const toolbarSearch = ui.search && !drawerSearch && !compact && ui.navigationBar ? converter.searchField(ui.search, 'toolbar') : null
   const search = ui.search && !drawerSearch && !toolbarSearch
-    ? { element: converter.searchField(ui.search.text, ui.search.prompt, ui.search.path), placement: ((options.viewportWidth ?? 393) >= 600 ? 'top' : 'bottom') as 'top' | 'bottom', height: SURFACES.search.height + 12 } : undefined
+    ? compact
+      ? { element: converter.searchField(ui.search, 'bottom'), placement: 'bottom' as const, height: TAB_BAR_HEIGHT }
+      : { element: converter.searchField(ui.search, 'top'), placement: 'top' as const, height: SURFACES.search.height + 12 }
+    : undefined
   const content = ui.search && drawerSearch
-    ? prependSearch(joinRoot(body, 'vertical'), converter.searchField(ui.search.text, ui.search.prompt, ui.search.path))
+    ? prependSearch(joinRoot(body, 'vertical'), converter.searchField(ui.search, 'top'))
     : joinRoot(body, 'vertical')
 
   const navigationBar = ui.navigationBar
@@ -515,6 +528,14 @@ class Converter {
   /** A simple outline keeps translucent system controls visible on a flat background. */
   private chromeOutline(child: LayoutElement, id: string, radius: number): LayoutElement {
     return { kind: 'modified', id, modifier: { kind: 'border', width: 0.5, cornerRadius: radius, color: { ...this.color('label'), a: 0.15 } }, child }
+  }
+
+  /** The outlined glass capsule of iOS 27's floating bars: the tab bar, and a phone's search. */
+  private glassCapsule(content: LayoutElement, id: string, outlineId: string): LayoutElement {
+    return this.chromeOutline({
+      kind: 'modified', id: `${id}-radius`, modifier: { kind: 'cornerRadius', radius: 999 },
+      child: { kind: 'modified', id, modifier: { kind: 'material', ...this.appearance.materials.regularMaterial!, light: this.scheme === 'light' }, child: content },
+    }, outlineId, 999)
   }
 
   private symbolImage(id: string, name: string): LayoutElement {
@@ -815,14 +836,10 @@ class Converter {
       },
     }
 
-    const surface: LayoutElement = {
-      kind: 'modified', id: 'tabbar-surface-radius', modifier: { kind: 'cornerRadius', radius: 999 },
-      child: { kind: 'modified', id: 'tabbar-surface', modifier: { kind: 'material', ...this.appearance.materials.regularMaterial!, light: this.scheme === 'light' },
-        child: { kind: 'modified', id: 'tabbar-inset', modifier: { kind: 'padding', insets: uniformInsets(SURFACES.tab.inset) }, child: row } },
-    }
+    const surface = this.glassCapsule({ kind: 'modified', id: 'tabbar-inset', modifier: { kind: 'padding', insets: uniformInsets(SURFACES.tab.inset) }, child: row }, 'tabbar-surface', 'tabbar-outline')
     return {
       kind: 'modified', id: 'tabbar-margin', modifier: { kind: 'padding', insets: insets(0, SURFACES.tab.margin, SURFACES.tab.bottom, SURFACES.tab.margin) },
-      child: { kind: 'modified', id: 'tabbar-width', modifier: { kind: 'frame', maxWidth: Math.min(this.viewportWidth >= 600 ? SURFACES.tab.regularWidth : this.viewportWidth - SURFACES.tab.margin * 2, bar.items.length * SURFACES.tab.itemWidth + SURFACES.tab.inset * 2), height: SURFACES.tab.height, alignment: CENTER }, child: this.chromeOutline(surface, 'tabbar-outline', 999) },
+      child: { kind: 'modified', id: 'tabbar-width', modifier: { kind: 'frame', maxWidth: Math.min(this.viewportWidth >= 600 ? SURFACES.tab.regularWidth : this.viewportWidth - SURFACES.tab.margin * 2, bar.items.length * SURFACES.tab.itemWidth + SURFACES.tab.inset * 2), height: SURFACES.tab.height, alignment: CENTER }, child: surface },
     }
   }
 
@@ -3157,12 +3174,12 @@ class Converter {
     ] }
   }
 
-  /** Search geometry shared by the bottom bar, toolbar, and explicit drawer. */
-  searchField(text: string, placeholder: string, path: string, compact = false): LayoutElement {
-    return this.chromeContent(`${path}font`, () => this.searchFieldContent(text, placeholder, path, compact))
+  /** Search geometry shared by the bottom capsule, toolbar, and drawer. */
+  searchField(search: SearchField, placement: SearchPlacement): LayoutElement {
+    return this.chromeContent(`${search.path}font`, () => this.searchFieldContent(search, placement))
   }
 
-  private searchFieldContent(text: string, placeholder: string, path: string, compact: boolean): LayoutElement {
+  private searchFieldContent({ text, prompt: placeholder, path }: SearchField, placement: SearchPlacement): LayoutElement {
     const row: LayoutElement = {
       kind: 'stack',
       id: `${path}row`,
@@ -3216,6 +3233,17 @@ class Converter {
       child: row,
     }
 
+    if (placement === 'bottom') {
+      const capsule = this.glassCapsule({ kind: 'modified', id: `${path}height`, modifier: { kind: 'frame', minHeight: SURFACES.search.capsuleHeight, alignment: CENTER }, child: padded }, `${path}surface`, `${path}outline`)
+      // Centred on the tab bar's line, in the space a tab bar takes.
+      const centring = (SURFACES.tab.height - SURFACES.search.capsuleHeight) / 2
+      return {
+        kind: 'modified', id: `${path}outer`,
+        modifier: { kind: 'padding', insets: insets(centring, SURFACES.search.capsuleMargin, centring + SURFACES.tab.bottom, SURFACES.search.capsuleMargin) },
+        child: capsule,
+      }
+    }
+
     const surface: LayoutElement = {
       kind: 'modified', id: `${path}surface`,
       modifier: { kind: 'background', content: { kind: 'fill', id: `${path}surface-fill`, fill: { kind: 'solid', color: this.color('tertiarySystemFill') } } },
@@ -3223,7 +3251,7 @@ class Converter {
     }
     return {
       kind: 'modified', id: `${path}outer`,
-      modifier: { kind: 'padding', insets: compact ? ZERO_INSETS : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
+      modifier: { kind: 'padding', insets: placement === 'toolbar' ? ZERO_INSETS : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
       child: { kind: 'modified', id: `${path}round`, modifier: { kind: 'cornerRadius', radius: SURFACES.search.radius, style: 'circular' }, child: surface },
     }
   }
