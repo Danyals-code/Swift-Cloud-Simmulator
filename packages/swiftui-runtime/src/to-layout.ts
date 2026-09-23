@@ -43,6 +43,7 @@ import {
   type HorizontalAlignment,
   type LayoutElement,
   type LayoutModifier,
+  type SafeAreaEdges,
   type TextRunSpec,
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
@@ -128,8 +129,6 @@ export interface ScreenLayout {
    * under the bar on every navigation-plus-list screen.
    */
   readonly background: RGBA
-  /** True when the content extends under the device's edges. */
-  readonly ignoresSafeArea: boolean
   readonly navigationBar: { readonly element: LayoutElement; readonly height: number; readonly large: boolean } | null
   readonly tabBar: LayoutElement | null
   readonly search?: { readonly element: LayoutElement; readonly placement: 'top' | 'bottom'; readonly height: number }
@@ -295,7 +294,6 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     content,
     search,
     background,
-    ignoresSafeArea: ui.ignoresSafeArea,
     navigationBar,
     tabBar,
     overlay,
@@ -3259,7 +3257,16 @@ class Converter {
       case 'background': {
         const content = this.backgroundContent(args, modifier, `${id}bg`)
         const hasView = args.some((arg) => (arg.label === null || arg.label === 'content') && asView(arg.value))
-        return content ? { kind: 'background', content, ...(hasView ? { alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER } : {}) } : null
+        // `.background(.red)` and `.background(Color.red)` are the ShapeStyle form, which
+        // reaches into the safe area its view touches; a view given as the background,
+        // `.background { Color.red }`, doesn't. Both measured in the iOS 27 simulator.
+        const style = !hasView && !labelled(args, 'in') && args.some((arg) => arg.label === null)
+        return content ? {
+          kind: 'background',
+          content,
+          ...(hasView ? { alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER } : {}),
+          ...(style ? { ignoresSafeAreaEdges: safeAreaEdges(labelled(args, 'ignoresSafeAreaEdges')) } : {}),
+        } : null
       }
 
       case 'overlay': {
@@ -3454,10 +3461,14 @@ class Converter {
         return null
 
       case 'ignoresSafeArea':
-        // Read by the pipeline, which owns the device's edges. `.safeAreaInset` was
-        // grouped here and is not: nothing read it, and it was in the unimplemented
-        // list at the same time - so it both warned and was claimed to be handled.
-        return null
+      case 'edgesIgnoringSafeArea': {
+        // `.ignoresSafeArea(.keyboard)` is about a keyboard the preview never shows, so
+        // it changes nothing; it used to make the whole screen full-bleed.
+        const regions = modifier.name === 'ignoresSafeArea' ? tokenName(positional(args, 0)) : null
+        if (regions === 'keyboard') return null
+        const edges = modifier.name === 'ignoresSafeArea' ? labelled(args, 'edges') : positional(args, 0)
+        return { kind: 'ignoresSafeArea', edges: safeAreaEdges(edges) }
+      }
 
       case 'zIndex':
       case 'id':
@@ -4095,6 +4106,14 @@ function bindingValue(value: SwiftValue | undefined): SwiftValue | null {
 function truthyBinding(value: SwiftValue | undefined): boolean {
   const resolved = bindingValue(value)
   return resolved !== null && truthy(resolved)
+}
+
+/** An `Edge.Set`: `.all` when none is given, one edge, `.horizontal`, `.vertical`, or a list. */
+function safeAreaEdges(value: SwiftValue | undefined): SafeAreaEdges {
+  if (value === undefined) return { top: true, bottom: true, leading: true, trailing: true }
+  const names = value.kind === 'array' ? value.elements.map(tokenName) : [tokenName(value)]
+  const has = (edge: string, axis: string) => names.some((name) => name === edge || name === axis || name === 'all')
+  return { top: has('top', 'vertical'), bottom: has('bottom', 'vertical'), leading: has('leading', 'horizontal'), trailing: has('trailing', 'horizontal') }
 }
 
 function tokenName(value: SwiftValue | undefined): string | null {

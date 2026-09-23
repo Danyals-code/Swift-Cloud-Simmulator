@@ -7,6 +7,7 @@ import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
+import { DEVICES } from '@studio/sim-shell'
 import { worldFrame } from './render-geometry'
 
 /**
@@ -489,5 +490,80 @@ describe('E6: trim draws the part of the path iOS 27 draws', () => {
     const warnings = (body: string) => compileView(viewSource(`var body: some View { ${body} }`)).diagnostics.map(d => `${d.severity}: ${d.message}`)
     expect(warnings('Circle().trim(from: 0, to: 0.5).fill(Color.red)')).toEqual([expect.stringMatching(/^warning: .*trim/)])
     expect(warnings('Circle().trim(from: 0, to: 0.5).offset(x: 2, y: 0).stroke(Color.red)')).toEqual([])
+  })
+})
+
+// What reaches under the safe area, as the iOS 27 simulator draws it on iPhone 18 Pro
+// (docs/parity/native/iphone18pro-misrenders): the safe area runs from 62 to 840.
+describe('E4: what reaches under the safe area, and what stays inside it', () => {
+  const phone = DEVICES['iphone-18-pro']
+  const screen = (members: string, declarations = '') => runView(members, declarations, { safeArea: phone.safeArea })
+  const full = (content: string) => `VStack { Text("Top"); Spacer(); Text("Bottom") }.frame(maxWidth: .infinity, maxHeight: .infinity)${content}`
+
+  /** The colour a designer sees at a point: the topmost opaque paint there. */
+  function colourAt(r: CompileResult, x: number, y: number) {
+    const all = nodes(r)
+    const seen = all
+      .filter(n => { const f = worldFrame(all, n); return x >= f.x && x < f.x + f.width && y >= f.y && y < f.y + f.height })
+      .filter(n => { const paint = n.background ?? n.shape?.fill; return paint?.kind === 'solid' && paint.color.a === 1 })
+      .sort((a, b) => b.z - a.z)[0]
+    const paint = seen?.background ?? seen?.shape?.fill
+    return paint?.kind === 'solid' ? `${paint.color.r},${paint.color.g},${paint.color.b}` : 'nothing'
+  }
+  const { r: rr, g: rg, b: rb } = colorForName('red')!
+  const RED = `${rr},${rg},${rb}`
+  const { r: br, g: bg, b: bb } = colorForName('blue')!
+  const BLUE = `${br},${bg},${bb}`
+  /** Where the colour reaches down the middle of the screen, top and bottom. */
+  const reach = (r: CompileResult, colour: string) => ({ top: colourAt(r, 201, 5) === colour, bottom: colourAt(r, 201, 870) === colour })
+
+  it.each(['.background(Color.red)', '.background(.red)', '.background(Color.red.ignoresSafeArea())'])(
+    'paints %s on a full-screen view to both screen edges, and leaves its text inside', (background) => {
+      const r = screen(`var body: some View { ${full(background)} }`)
+      expect(reach(r, RED)).toEqual({ top: true, bottom: true })
+      expect(placed(r, 'Top').y).toBeGreaterThanOrEqual(62)
+      expect(placed(r, 'Bottom').y + placed(r, 'Bottom').height).toBeLessThanOrEqual(840)
+    })
+
+  it('keeps a background written as a closure inside the safe area', () => {
+    const r = screen(`var body: some View { ${full('.background { Color.red }')} }`)
+    expect(reach(r, RED)).toEqual({ top: false, bottom: false })
+    expect(colourAt(r, 201, 70)).toBe(RED)
+  })
+
+  it('leaves content where it is under .ignoresSafeArea(.keyboard)', () => {
+    const r = screen(`var body: some View { ${full('.background { Color.red }.ignoresSafeArea(.keyboard)')} }`)
+    expect(placed(r, 'Top').y).toBeGreaterThanOrEqual(62)
+    expect(reach(r, RED)).toEqual({ top: false, bottom: false })
+  })
+
+  it.each(['.ignoresSafeArea()', '.edgesIgnoringSafeArea(.all)'])(
+    'draws a colour with %s under the whole screen, and the stack beside it inside', (ignoring) => {
+      const r = screen(`var body: some View { ZStack { Color.blue${ignoring}; VStack { Text("Title"); Spacer(); Text("Footer") } } }`)
+      expect(reach(r, BLUE)).toEqual({ top: true, bottom: true })
+      expect(placed(r, 'Title').y).toBeGreaterThanOrEqual(62)
+      expect(placed(r, 'Footer').y + placed(r, 'Footer').height).toBeLessThanOrEqual(840)
+    })
+
+  it('moves a fixed-height view that ignores the top safe area up, without growing it', () => {
+    const r = screen('var body: some View { VStack(spacing: 0) { Color.red.frame(height: 200).ignoresSafeArea(edges: .top); Spacer() } }')
+    expect([colourAt(r, 201, 1), colourAt(r, 201, 199), colourAt(r, 201, 201)]).toEqual([RED, RED, colourAt(r, 201, 400)])
+  })
+
+  it('shows a background that reaches under the navigation bar through it', () => {
+    const r = screen(`var body: some View { NavigationStack { ${full('.background(Color.red)')}.navigationTitle("Title") } }`)
+    expect([colourAt(r, 201, 30), colourAt(r, 201, 100), colourAt(r, 201, 870)]).toEqual([RED, RED, RED])
+  })
+
+  it('shows it behind a large title over a scroll view too, the way the AI writes a list screen', () => {
+    const r = screen(`var body: some View {
+        NavigationStack {
+          ScrollView { VStack { ForEach(0..<30, id: \\.self) { Text("Row \\($0)") } } }
+            .frame(maxWidth: .infinity)
+            .background(Color.red)
+            .navigationTitle("Title")
+        }
+      }`)
+    expect([colourAt(r, 201, 30), colourAt(r, 201, 100)]).toEqual([RED, RED])
   })
 })

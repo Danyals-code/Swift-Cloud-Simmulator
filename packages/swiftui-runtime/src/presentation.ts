@@ -119,7 +119,7 @@ export interface Overlay {
   /** Omitted disables interaction; a number enables it through that encoded detent. */
   readonly backgroundInteraction?: number
   readonly showsDragIndicator?: boolean
-  readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'search' | 'ignoresSafeArea' | 'overlay'>
+  readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'search' | 'overlay'>
   readonly title: string
   readonly message: string
   /** Tapping outside dismisses, unless the presentation is non-interactive. */
@@ -157,8 +157,6 @@ export interface ResolvedUI {
   readonly viewHierarchy?: readonly ViewLayer[]
   readonly content: readonly ViewValue[]
   readonly search: SearchField | null
-  /** True when the content asked to extend under the device's edges. */
-  readonly ignoresSafeArea: boolean
   readonly navigationBar: NavigationBar | null
   readonly tabBar: TabBar | null
   readonly overlay: Overlay | null
@@ -461,7 +459,6 @@ class Resolver {
       viewHierarchy: pageLayers,
       content: screen.content,
       search: this.findSearchField(screen.content, searchAround),
-      ignoresSafeArea: collectModifier(screen.content, 'ignoresSafeArea') !== null,
       navigationBar: screen.navigationBar,
       tabBar: withTabs.tabBar,
       overlay,
@@ -1521,7 +1518,7 @@ class Resolver {
         background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
-        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
+        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround) },
         title: kind === 'dialog' && tokenName(labelled(modifier.args, 'titleVisibility')) !== 'visible' ? '' : stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
         message: this.messageOf(modifier),
         dismiss,

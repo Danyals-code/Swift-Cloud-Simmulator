@@ -29,6 +29,7 @@ import {
   type LayoutEnvironment,
   type LayoutModifier,
   type ModifiedElement,
+  type SafeAreaEdges,
   type ScrollElement,
   type StackElement,
   type TableElement,
@@ -590,8 +591,10 @@ export class LayoutEngine {
       case 'blendMode':
       case 'redacted':
       case 'unredacted':
+      case 'ignoresSafeArea':
         // Paint-time: layout still reserves the untransformed size, which is why a
         // scaled view overlaps its neighbours and a redacted one keeps its shape.
+        // Reaching into the safe area is decided where the view is placed too.
         return this.measure(element.child, proposal, inner)
 
       case 'position':
@@ -925,7 +928,7 @@ export class LayoutEngine {
     parent: string | null,
   ): number {
     const vertical = element.axis === 'vertical'
-    env = { ...env, containerSize: { width: bounds.width, height: bounds.height } }
+    env = { ...env, containerSize: { width: bounds.width, height: bounds.height }, safeArea: undefined }
     const proposal: ProposedSize = { width: bounds.width, height: bounds.height }
     const content = this.measure(element.content, scrollProposal(element, proposal), env)
 
@@ -1297,7 +1300,8 @@ export class LayoutEngine {
         // makes `.padding().background()` cover the padding and
         // `.background().padding()` not.
         const size = this.measure(modifier.content, { width: bounds.width, height: bounds.height }, inner)
-        const next = this.place(modifier.content, modifier.alignment ? alignedRect(bounds, size, modifier.alignment) : bounds, inner, out, z, parent)
+        const behind = modifier.ignoresSafeAreaEdges ? reachIntoSafeArea(bounds, env, modifier.ignoresSafeAreaEdges).rect : bounds
+        const next = this.place(modifier.content, modifier.alignment ? alignedRect(behind, size, modifier.alignment) : behind, inner, out, z, parent)
         return this.place(element.child, bounds, inner, out, next, parent)
       }
 
@@ -1616,6 +1620,15 @@ export class LayoutEngine {
         // These are inherited paint facts rather than boxes of their own, so they
         // travel in the environment and every node below carries them out.
         return this.place(element.child, bounds, inner, out, z, parent)
+
+      case 'ignoresSafeArea': {
+        // The view is proposed the room it reaches to, and keeps to the edge it
+        // reached: `.frame(height: 200).ignoresSafeArea(edges: .top)` at the top of
+        // the screen moves up to 0-200, as in the simulator, rather than growing.
+        const { rect, reached } = reachIntoSafeArea(bounds, env, modifier.edges)
+        const size = this.measure(element.child, { width: rect.width, height: rect.height }, inner)
+        return this.place(element.child, keptToReachedEdges(bounds, rect, size, reached), inner, out, z, parent)
+      }
 
       case 'hitTarget': {
         let controlEnv = inner
@@ -2068,4 +2081,44 @@ function relativeContainerProposal(modifier: Extract<LayoutModifier, { kind: 'co
     width: modifier.horizontal ? dimension(env.containerSize?.width, proposal.width) : proposal.width,
     height: modifier.vertical ? dimension(env.containerSize?.height, proposal.height) : proposal.height,
   }
+}
+
+/**
+ * Where a view reaches into the safe area: on each edge it is allowed to, and only if
+ * its bounds already touch that edge of the safe area. That is SwiftUI's rule, and it
+ * is why a full-screen background reaches under the status bar and a card in the
+ * middle of the screen doesn't.
+ */
+function reachIntoSafeArea(bounds: Rect, env: LayoutEnvironment, edges: SafeAreaEdges): { rect: Rect; reached: SafeAreaEdges } {
+  const area = env.safeArea
+  const none = { top: false, bottom: false, leading: false, trailing: false }
+  if (!area) return { rect: bounds, reached: none }
+  const touching = 0.5
+  const reached = {
+    top: edges.top && bounds.y <= area.inner.y + touching && area.outer.y < bounds.y,
+    bottom: edges.bottom && bounds.y + bounds.height >= area.inner.y + area.inner.height - touching && area.outer.y + area.outer.height > bounds.y + bounds.height,
+    leading: edges.leading && bounds.x <= area.inner.x + touching && area.outer.x < bounds.x,
+    trailing: edges.trailing && bounds.x + bounds.width >= area.inner.x + area.inner.width - touching && area.outer.x + area.outer.width > bounds.x + bounds.width,
+  }
+  const x = reached.leading ? area.outer.x : bounds.x
+  const y = reached.top ? area.outer.y : bounds.y
+  const right = reached.trailing ? area.outer.x + area.outer.width : bounds.x + bounds.width
+  const bottom = reached.bottom ? area.outer.y + area.outer.height : bounds.y + bounds.height
+  return { rect: { x, y, width: right - x, height: bottom - y }, reached }
+}
+
+/**
+ * A view's rect once it has reached into the safe area: across the whole of an axis
+ * where it reached both edges, against the one edge it reached, and where it was on
+ * an axis where it reached neither.
+ */
+function keptToReachedEdges(bounds: Rect, rect: Rect, size: Size, reached: SafeAreaEdges): Rect {
+  const along = (start: number, extent: number, own: number, towardStart: boolean, towardEnd: boolean, was: number, wasExtent: number) =>
+    towardStart && towardEnd ? { at: start, length: extent }
+    : towardStart ? { at: start, length: Math.min(own, extent) }
+    : towardEnd ? { at: start + extent - Math.min(own, extent), length: Math.min(own, extent) }
+    : { at: was, length: wasExtent }
+  const horizontal = along(rect.x, rect.width, size.width, reached.leading, reached.trailing, bounds.x, bounds.width)
+  const vertical = along(rect.y, rect.height, size.height, reached.top, reached.bottom, bounds.y, bounds.height)
+  return { x: horizontal.at, y: vertical.at, width: horizontal.length, height: vertical.length }
 }

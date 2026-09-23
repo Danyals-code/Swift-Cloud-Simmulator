@@ -209,7 +209,6 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
           callGuide,
         }).element,
         background: systemBackground(scheme),
-        ignoresSafeArea: false,
         navigationBar: null,
         tabBar: null,
         overlay: null,
@@ -227,18 +226,32 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   const bottomTabs = regular ? 0 : tabHeight
   const bottomSearch = screen.search?.placement === 'bottom' ? screen.search.height : 0
   const topSearch = screen.search?.placement === 'top' ? screen.search.height : 0
-  const scroll = !screen.ignoresSafeArea ? primaryScroll(screen.content) : null
+  const scroll = primaryScroll(screen.content)
   const collapseDistance = scroll && screen.navigationBar?.large ? Math.max(0, barHeight - NAV_BAR_HEIGHT) : 0
   const content = scroll ? scrollInsets(screen.content, { top: collapseDistance, leading: 0, bottom: bottomTabs + bottomSearch + safeArea.bottom, trailing: 0 }) : screen.content
-  const contentBounds: Rect = screen.ignoresSafeArea
-    ? { x: 0, y: 0, width: canvas.width, height: canvas.height }
-    : { x: safeArea.leading, y: safeArea.top + topTabs + topSearch + barHeight - collapseDistance,
-        width: canvas.width - safeArea.leading - safeArea.trailing,
-        height: Math.max(0, canvas.height - safeArea.top - topTabs - topSearch - barHeight + collapseDistance - (scroll ? 0 : safeArea.bottom + bottomTabs + bottomSearch)) }
-  const placed = engine.layout(content, contentBounds, env, CENTER)
+  const contentBounds: Rect = {
+    x: safeArea.leading, y: safeArea.top + topTabs + topSearch + barHeight - collapseDistance,
+    width: canvas.width - safeArea.leading - safeArea.trailing,
+    height: Math.max(0, canvas.height - safeArea.top - topTabs - topSearch - barHeight + collapseDistance - (scroll ? 0 : safeArea.bottom + bottomTabs + bottomSearch)),
+  }
+  // A view reaches out of the safe area on its own, where it touches an edge, and
+  // `.ignoresSafeArea()` on one view no longer makes the whole screen full-bleed.
+  const screenRect: Rect = { x: 0, y: 0, width: canvas.width, height: canvas.height }
+  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER)
   let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
+  // At rest the bar has no colour of its own in iOS 27, so what reaches under it shows
+  // through. Where nothing does, it keeps the screen's colour, which looks the same.
+  // A collapsing title keeps its surface for when the content scrolls beneath it, in
+  // the colour of what is under it.
+  const underBar = tree.nodes
+    .filter((node) => !node.parent && node.id !== 'screen' && node.frame.y < contentBounds.y - 0.5)
+    .sort((a, b) => b.z - a.z)
+  const beneath = underBar.find((node) => node.background?.kind === 'solid')?.background
   if (screen.navigationBar) {
-    const bar = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
+    const laidOut = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
+    const bar = !underBar.length ? laidOut
+      : collapseDistance && beneath ? laidOut.map((node) => node.id === 'navbar-bgf' && node.paint.kind === 'fill' ? { ...node, paint: { ...node.paint, fill: beneath } } : node)
+      : laidOut.filter((node) => node.id !== 'navbar-bgf')
     tree = appendPlaced(tree, bar, BAR_Z)
     tree = { ...tree, nodes: tree.nodes.map(node => {
       if (node.id === 'navbar-title') return { ...node, ...(collapseDistance ? { chromeRole: 'inlineTitle' as const } : {}), opacity: screen.navigationBar!.large ? 0 : node.opacity }
