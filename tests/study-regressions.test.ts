@@ -1524,3 +1524,32 @@ describe('F12: containers that hand their content a value draw it', () => {
     expect(texts(tap(r, 'Two'))).toContain('Tab two')
   })
 })
+
+describe("F6: the Design gallery draws the screens it can, and says which it couldn't", () => {
+  /** Four tabs whose toolbars each take about a million steps: each screen draws alone, and together they outrun one budget. */
+  const heavyTabs = viewSource(`var body: some View {
+      TabView {
+        ForEach(1...4, id: \\.self) { tab in
+          NavigationStack { List { NavigationLink("Go") { Text("Detail \\(tab)") } }.navigationTitle("Tab \\(tab)").toolbar { ToolbarItem { Text(heavy(tab)) } } }
+            .tabItem { Label("Tab \\(tab)", systemImage: "star") }
+        }
+      }
+    }`, 'func heavy(_ tag: Int) -> String { var total = 0; for i in 0..<150000 { total += i % 7 }; return "Busy \\(tag)" }')
+
+  it('draws the live screen alone', () => {
+    expect(texts(compileView(heavyTabs))).toContain('Busy 1')
+  })
+
+  it('draws the gallery up to its budget, and warns at each screen it could not draw', () => {
+    const r = compileView(heavyTabs, { allPages: true })
+    expect(r.renderTree).not.toBeNull()
+    expect(texts(r)).toContain('Busy 1')
+    const drawn = (r.pages ?? []).map(page => page.name)
+    const skipped = r.diagnostics.filter(d => d.severity === 'warning' && d.message.includes("isn't drawn on the Design canvas"))
+    expect(drawn.length).toBeGreaterThan(0)
+    // The tabs share the ForEach's source, and each one missing is still said.
+    expect(skipped.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(skipped.map(d => d.message)).size).toBe(skipped.length)
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+  })
+})

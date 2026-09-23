@@ -311,26 +311,23 @@ export class AppRuntime {
    * page's, because a press belongs to the app that is running, not to a picture of
    * one beside it.
    *
-   * Returns null when the pass cannot be composed that way, so a gallery of six
-   * pages is never the reason the preview goes blank.
+   * A page that can't be composed throws, and the gallery reports that page and
+   * draws the rest, so a gallery of six pages is never the reason the preview goes
+   * blank.
    */
-  resolvePage(views: readonly ViewValue[], tab: number, basePage = false): ResolvedUI | null {
-    try {
-      return resolveUI(
-        views,
-        {
-          state: this.ui,
-          includeViewHierarchy: basePage,
-          build: (closure, args, environment) => this.buildViews(closure, args, environment),
-          styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
-          animation: this.animation,
-        },
-        tab,
-        { basePage },
-      )
-    } catch {
-      return null
-    }
+  resolvePage(views: readonly ViewValue[], tab: number, basePage = false): ResolvedUI {
+    return resolveUI(
+      views,
+      {
+        state: this.ui,
+        includeViewHierarchy: basePage,
+        build: (closure, args, environment) => this.buildViews(closure, args, environment),
+        styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
+        animation: this.animation,
+      },
+      tab,
+      { basePage },
+    )
   }
 
   /**
