@@ -796,7 +796,19 @@ export class Interpreter {
       span,
       invoke: (closure, closureArgs = []) => this.callClosure(closure, closureArgs, span),
       invokeBuilder: (closure, closureArgs = []) => this.runViewBuilder(closure, closureArgs),
+      member: (value, name) => this.readMember(value, name, span),
     }
+  }
+
+  /** `value.name` for a value already in hand, tried in the order `evaluateMemberAccess` tries. */
+  private readMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
+    if (member === 'self') return target
+    const own = target.kind === 'enum' ? this.memberOfEnum(target, member, span) : target.kind === 'struct' ? this.memberOfStruct(target, member, span) : undefined
+    if (own !== undefined) return unwrapProjection(own)
+    const builtin = getBuiltinProperty(target, member)
+    if (builtin !== undefined) return builtin
+    const extended = this.userMember(target, member, span)
+    return extended === undefined ? undefined : unwrapProjection(extended)
   }
 
   // -------------------------------------------------------------- statements
@@ -2530,7 +2542,9 @@ export class Interpreter {
     if (self?.kind === 'struct' && self.fields.has(name)) {
       const current = self.fields.get(name)
       if (asProjection(current)) return current!
-      return projection(fieldLValue(self, name, `self.${name}`))
+      const field = fieldLValue(self, name, `self.${name}`)
+      const optional = this.membersOf(self.typeName).some((m) => m.kind === 'varDecl' && m.name === name && m.typeAnnotation?.kind === 'optionalType')
+      return projection(optional ? { get: field.get, set: field.set, description: field.description, optional } : field)
     }
 
     return null

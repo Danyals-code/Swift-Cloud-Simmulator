@@ -1107,3 +1107,105 @@ describe('E12: .id, links and a timeline, as iOS 27 draws them', () => {
     expect(texts(r).some(text => /^\d{1,2}:\d{2}/.test(text))).toBe(true)
   })
 })
+
+describe("E7: a Picker or TabView over ForEach selects by its rows' own tags, as iOS 27 does", () => {
+  const tags = nativeII.pickerTags
+  const types = `enum FlavorSelf: String, CaseIterable, Identifiable { case vanilla, chocolate, strawberry; var id: Self { self } }
+enum FlavorRaw: String, CaseIterable, Identifiable { case vanilla, chocolate, strawberry; var id: String { rawValue } }
+enum Plain: String, CaseIterable { case vanilla, chocolate, strawberry }
+struct Scoop: Identifiable { let id: Int; let name: String }`
+  const scoops = 'let scoops = [Scoop(id: 1, name: "vanilla"), Scoop(id: 2, name: "chocolate"), Scoop(id: 3, name: "strawberry")]'
+  /** Each case of the simulator's tags screens: the selection's type and start, and the rows. */
+  const cases: Record<string, [string, string]> = {
+    A: ['FlavorSelf = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue) }'],
+    B: ['FlavorRaw = .chocolate', 'ForEach(FlavorRaw.allCases) { Text($0.rawValue) }'],
+    C: ['Plain = .chocolate', 'ForEach(Plain.allCases, id: \\.self) { Text($0.rawValue) }'],
+    D: ['Plain = .chocolate', 'ForEach(Plain.allCases, id: \\.rawValue) { Text($0.rawValue) }'],
+    E: ['String = "chocolate"', 'ForEach(Plain.allCases, id: \\.rawValue) { Text($0.rawValue) }'],
+    H: ['Int = 2', 'ForEach(scoops) { Text($0.name) }'],
+    I: ['Int = 1', 'ForEach(0..<3) { Text(Plain.allCases[$0].rawValue) }'],
+    G1: ['FlavorSelf? = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue) }'],
+    G2: ['Plain? = .chocolate', 'ForEach(Plain.allCases, id: \\.self) { Text($0.rawValue) }'],
+    G3: ['String? = "chocolate"', 'ForEach(Plain.allCases, id: \\.rawValue) { Text($0.rawValue) }'],
+    K1: ['FlavorSelf? = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue).tag($0) }'],
+    K2: ['FlavorSelf? = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue).tag($0, includeOptional: false) }'],
+    L: ['FlavorSelf? = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue).tag(Optional($0)) }'],
+  }
+  /** What the simulator drew for a case: 'middle' when its middle row was selected, 'none' when none was. */
+  const measuredFor = (letter: string): string => Object.entries({ ...tags.segmented, ...tags.optional } as Record<string, string>).find(([caption]) => caption.startsWith(`${letter} `))![1]
+  const pickerSource = (letter: string, style = '.pickerStyle(.segmented)') => {
+    const [type, rows] = cases[letter]!
+    return compileView(viewSource(`@State private var choice: ${type}\n ${scoops}\n var body: some View { Picker("Flavor", selection: $choice) { ${rows} }${style} }`, types))
+  }
+  /** The option a segmented picker draws on its selected pill, or null when none is selected. */
+  function selectedSegment(r: CompileResult): string | null {
+    const all = nodes(r)
+    const pills = all.filter(n => n.id !== 'screen' && n.background?.kind === 'solid' && n.background.color.r === 255 && n.background.color.g === 255 && n.background.color.b === 255).map(n => worldFrame(all, n))
+    const option = all.filter(n => n.text).find(n => {
+      const f = worldFrame(all, n), x = f.x + f.width / 2, y = f.y + f.height / 2
+      return pills.some(p => x >= p.x && x <= p.x + p.width && y >= p.y && y <= p.y + p.height)
+    })
+    return option?.text?.runs.map(run => run.text).join('') ?? null
+  }
+
+  it.each(Object.keys(cases))('selects what the simulator selects for case %s', (letter) => {
+    const r = pickerSource(letter)
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(selectedSegment(r)).toBe(measuredFor(letter) === 'middle' ? 'chocolate' : null)
+  })
+
+  it('selects a row by tapping it only where its tag fits the selection', () => {
+    expect(selectedSegment(tap(pickerSource('A'), 'strawberry'))).toBe('strawberry')
+    expect(selectedSegment(tap(pickerSource('B'), 'strawberry'))).toBe(null)
+  })
+
+  it.each(Object.entries(tags.menuLabels as Record<string, string>).filter(([caption]) => caption !== 'note'))(
+    "shows what the simulator shows beside the menu picker %s", (caption, shown) => {
+      const rows: Record<string, [string, string]> = {
+        'A match': cases.A!, 'B String id': cases.B!, 'H Int id': cases.H!, 'G Optional': cases.G1!,
+        'S no such row': ['String = "mint"', 'ForEach(Plain.allCases, id: \\.rawValue) { Text($0.rawValue) }'],
+        'M String tag': ['Plain = .chocolate', 'ForEach(Plain.allCases, id: \\.self) { Text($0.rawValue).tag($0.rawValue) }'],
+      }
+      const [type, options] = rows[caption]!
+      const r = compileView(viewSource(`@State private var choice: ${type}\n ${scoops}\n var body: some View { Form { Picker("Flavor", selection: $choice) { ${options} } } }`, types))
+      expect(texts(r).filter(text => text && text !== 'Flavor')).toEqual(shown ? [shown] : [])
+    })
+
+  it('opens a TabView over ForEach pages on the page of its selection', () => {
+    const r = runView(`@State private var tab: FlavorSelf = .chocolate
+      var body: some View {
+        TabView(selection: $tab) {
+          ForEach(FlavorSelf.allCases) { flavor in
+            Text("Page \\(flavor.rawValue)").tabItem { Label(flavor.rawValue, systemImage: "circle") }
+          }
+        }
+      }`, types)
+    expect(texts(r)).toContain(tags.tabView.shownPage)
+  })
+
+  it('warns at a Picker none of whose rows its selection can match', () => {
+    const [warning, ...rest] = reported('@State private var choice: FlavorRaw = .chocolate\n var body: some View { Picker("Flavor", selection: $choice) { ForEach(FlavorRaw.allCases) { Text($0.rawValue) } } }', types)
+    expect(rest).toEqual([])
+    expect(warning).toMatchObject({ severity: 'warning', message: expect.stringContaining("can't select any of its rows") })
+  })
+
+  it('says nothing about a Picker whose rows its selection matches', () => {
+    expect(reported('@State private var choice: FlavorSelf = .chocolate\n var body: some View { Picker("Flavor", selection: $choice) { ForEach(FlavorSelf.allCases) { Text($0.rawValue) } } }', types)).toEqual([])
+  })
+
+  it("gives each row of ForEach(…, id: \\.rawValue) its own action", () => {
+    const r = runView(`@State private var picked = "none"
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(Plain.allCases, id: \\.rawValue) { flavor in Button(flavor.rawValue) { picked = flavor.rawValue } }
+        }
+      }`, types)
+    expect(texts(tap(r, 'vanilla'))).toContain('Picked vanilla')
+  })
+
+  it('opens a Menu over ForEach onto its rows', () => {
+    const r = runView('var body: some View { Menu("Flavours") { ForEach(Plain.allCases, id: \\.self) { flavor in Button(flavor.rawValue) { } } } }', types)
+    expect(controls(tap(r, 'Flavours'))).toEqual(expect.arrayContaining(['vanilla', 'chocolate', 'strawberry']))
+  })
+})

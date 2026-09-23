@@ -35,7 +35,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
 | `Divider` | ✅ | 6 | hairline across its stack's axis |
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
-| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths; binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
+| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths, a computed `id` and `\.rawValue` included; each row is tagged with its id, as SwiftUI tags it. Binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
 | `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's |
 | `GeometryReader` | ✅ | 7 | reports its real size through `size`, where it is on the screen through `frame(in: .global)`, and through `safeAreaInsets` the insets of the edges it touches, bars included, as iOS 27 does. It is its own coordinate space. A named coordinate space is read as the screen |
 | `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks: correct, and not virtualised. A 200-row stack measures in 7.6 ms against a 120 ms budget, so the cost is real and not yet worth the identity complexity |
@@ -79,10 +79,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Stepper` | ✅ | 6 | each half is its own target; `step:` and `in:` are both honoured |
 | `TextField` / `SecureField` | 🟡 | 6 | String-backed inputs with a caret; `SecureField` masks using a password input. Numeric value/format/formatter bindings and axis-based multiline fields warn as unsupported |
 | `TextEditor` | 🟡 | 7 | editable multiline textarea with String binding, wrapping and scrolling; native selection, keyboard and advanced TextEditor APIs remain incomplete |
-| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. The popup is drawn at the bottom rather than anchored to the control |
+| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. A row selects by its `.tag`, or over `ForEach` by its id, when that has the selection's type, as measured in iOS 27: an enum whose `id` is a `String` selects nothing, and nor do `ForEach`'s own tags for an Optional selection. Where no row can be selected it warns, and a menu picker shows no value. The popup is drawn at the bottom rather than anchored to the control |
 | `DatePicker` | 🟡 | 7 | a formatted row that opens onto a calendar: pick a day, page the month. `displayedComponents:` chooses date, time or both. No time-of-day editor, so the row's time is the binding's own |
 | `ColorPicker` | 🟡 | 7 | opens onto SwiftUI's named colours as swatches. Not a continuous surface - see approximations |
-| `Menu` | 🟡 | 7 | opens onto its buttons; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
+| `Menu` | 🟡 | 7 | opens onto its buttons, over `ForEach` too; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
 
 ## Collections and navigation
 
@@ -102,7 +102,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
 | `.toolbar` | 🟡 | 6 | leading/trailing items work; keyboard, bottomBar and principal placements warn and are omitted |
-| `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, and `.page`, whose dots are also the way through - a preview has no swipe |
+| `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, pages from `ForEach` selected by their ids, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
 

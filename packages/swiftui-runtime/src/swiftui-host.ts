@@ -1,6 +1,5 @@
 import type { LogLevel, SourceSpan } from '@studio/shared'
 import {
-  applyKeyPath,
   asKeyPath,
   bool,
   describe,
@@ -9,6 +8,7 @@ import {
   asProjection,
   copyValue,
   dateValue,
+  NIL,
   opaque,
   projection,
   str,
@@ -1783,21 +1783,40 @@ export class SwiftUIHost implements InterpreterHost {
     const children: ViewValue[] = []
     const childKeys: string[] = []
 
+    // A row's id, read as Swift reads it: a key path can name a computed property or an
+    // enum's `rawValue`, which walking stored fields can't see, and then every row had
+    // the same key and the same action.
+    const read = (value: SwiftValue, name: string): SwiftValue => name === 'self' ? value : call.member?.(value, name) ?? NIL
+    const idOf = (element: SwiftValue): SwiftValue | undefined => {
+      if (idPath) return idPath.components.reduce(read, element)
+      if (element.kind === 'struct' || element.kind === 'enum') {
+        const id = read(element, 'id')
+        return id.kind === 'nil' ? undefined : id
+      }
+      return element.kind === 'string' || element.kind === 'int' || element.kind === 'double' ? element : undefined
+    }
+    // Its identity is its id, else its place, which is what SwiftUI falls back to too.
+    const identityKey = (element: SwiftValue, index: number): string => {
+      const id = idOf(element)
+      return id === undefined ? `#${index}` : describe(id, true)
+    }
+
     elements.forEach((element, index) => {
-      const key = identityKey(element, idPath?.components ?? null, index)
+      const key = identityKey(element, index)
+      const implicitTag = idOf(element)
       // A row binding follows stable identity even if a pending handler outlives a reorder.
       const row = binding ? projection({
         description: `${binding.description}[${key}]`,
         get: () => {
           const current = binding.get()
           if (current.kind !== 'array') return { kind: 'nil' }
-          const at = current.elements[index] && identityKey(current.elements[index]!, idPath?.components ?? null, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, idPath?.components ?? null, i) === key)
+          const at = current.elements[index] && identityKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, i) === key)
           return at < 0 ? { kind: 'nil' } : copyValue(current.elements[at]!)
         },
         set: value => {
           const current = binding.get()
           if (current.kind !== 'array') return
-          const at = current.elements[index] && identityKey(current.elements[index]!, idPath?.components ?? null, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, idPath?.components ?? null, i) === key)
+          const at = current.elements[index] && identityKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, i) === key)
           if (at < 0) return
           const elements = [...current.elements]; elements[at] = copyValue(value)
           binding.set({ ...current, elements })
@@ -1807,7 +1826,7 @@ export class SwiftUIHost implements InterpreterHost {
       const rows = this.scopeIdentity ? this.scopeIdentity(key, build) : build()
 
       for (const row of rows) {
-        children.push(row)
+        children.push(implicitTag === undefined ? row : { ...row, implicitTag })
         childKeys.push(key)
       }
     })
@@ -2121,31 +2140,6 @@ function rangeElements(lower: number, upper: number, closed: boolean): SwiftValu
   // The caller checks the count before expanding, so no rows are silently lost.
   for (let i = lower; i <= end; i++) out.push(int(i))
   return out
-}
-
-/**
- * The identity of one `ForEach` element.
- *
- * Explicit `id:` wins; then a stored `id` property, which is what `Identifiable`
- * means in practice; then the index, which is what `ForEach(0..<n)` needs and what
- * SwiftUI itself falls back to.
- */
-function identityKey(
-  element: SwiftValue,
-  idComponents: readonly string[] | null,
-  index: number,
-): string {
-  if (idComponents) {
-    return describe(applyKeyPath({ components: idComponents }, element), true)
-  }
-  if (element.kind === 'struct') {
-    const id = element.fields.get('id')
-    if (id !== undefined) return describe(id, true)
-  }
-  if (element.kind === 'string' || element.kind === 'int' || element.kind === 'double') {
-    return describe(element, true)
-  }
-  return `#${index}`
 }
 
 function pointOf(value: SwiftValue | undefined): PathPoint | null {

@@ -49,6 +49,13 @@ export interface ViewValue {
    */
   readonly childKeys?: readonly string[]
   /**
+   * The tag `ForEach` gives each of its rows: the row's id, a value of its own type.
+   *
+   * SwiftUI tags every row with its `id:` key path's value, or its `Identifiable.id`,
+   * and a `Picker` or a `TabView` selects a row by it when it has the selection's type.
+   */
+  readonly implicitTag?: SwiftValue
+  /**
    * The key a `GeometryReader` reports its resolved size under.
    *
    * Assigned by the host at the moment the reader's content is built, and used again

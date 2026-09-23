@@ -2651,9 +2651,11 @@ class Converter {
     // which halves of it to draw.
     const date = view.name === 'DatePicker' ? asDate(selection ?? undefined) : null
     const selectedOption = view.name === 'Picker' ? view.children.find(child => boolArg(labelled(child.args, 'selected'))) : undefined
+    // A Picker shows the chosen row's content, and nothing when no row's tag matches
+    // its selection, as iOS 27 does: never the raw value, which isn't what iOS draws.
     const value = selectedOption ? textIn(selectedOption).join(' ') : date
       ? dateText(date.epochSeconds, datePickerStyleFor(view))
-      : selection
+      : selection && view.name !== 'Picker'
         ? displayValue(selection)
         : ''
 

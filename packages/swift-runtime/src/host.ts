@@ -20,6 +20,8 @@ export interface HostCall {
    * contributes only the taken branch. This is what `@ViewBuilder` means.
    */
   invokeBuilder(closure: ClosureValue, args?: readonly SwiftValue[]): readonly SwiftValue[]
+  /** Reads `value.name` as Swift would: a stored or computed property, `rawValue`, or a built-in one. */
+  member?(value: SwiftValue, name: string): SwiftValue | undefined
 }
 
 /**

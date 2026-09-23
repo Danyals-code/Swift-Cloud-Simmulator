@@ -509,8 +509,8 @@ function toResult(
   }))
 
   // A sheet can be resolved more than once in a pass, so each place is said once.
-  const notDrawn = [...new Map((evaluation?.ui?.notDrawn ?? []).map((item) => [`${item.span.file}:${item.span.start}:${item.span.end}`, item])).values()]
-  const diagnostics = [...analysis.diagnostics, ...notDrawn.map(notDrawnWarning)]
+  const resolved = [...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning), ...(evaluation?.ui?.warnings ?? [])]
+  const diagnostics = [...analysis.diagnostics, ...new Map(resolved.map((warning) => [`${warning.span.file}:${warning.span.start}:${warning.span.end}`, warning])).values()]
   if (evaluation?.failure) {
     diagnostics.push({
       span: evaluation.failure.span,

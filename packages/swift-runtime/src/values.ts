@@ -458,6 +458,12 @@ export interface ProjectionPayload {
   set(value: SwiftValue): void
   /** For diagnostics: `count`, `self.isOn`. */
   readonly description: string
+  /**
+   * The property is declared Optional: `@State var choice: Flavor?`. Its value alone
+   * can't say so, because a present optional is held as the value itself, and a
+   * `Picker` over `ForEach` needs to know: its rows' own tags are not Optional.
+   */
+  readonly optional?: boolean
 }
 
 export function projection(payload: ProjectionPayload): OpaqueValue {
