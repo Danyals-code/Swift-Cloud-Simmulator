@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createProjectStore } from '@studio/project-model'
+import { createProjectStore, StaleProjectError } from '@studio/project-model'
 import { useStudio } from './store'
 
 /**
@@ -15,7 +15,7 @@ const firstFile = () => studio().project!.files[0]!.id
 
 beforeEach(async () => {
   for (const summary of await persistence.list()) await persistence.remove(summary.id)
-  useStudio.setState({ project: null, activeFileId: null, openFileIds: [], loaded: false, origin: null, recents: [], lastSavedAt: null, saveError: null, loadError: null })
+  useStudio.setState({ project: null, activeFileId: null, openFileIds: [], loaded: false, origin: null, recents: [], lastSavedAt: null, saveError: null, saveOutdated: false, loadError: null })
 })
 afterEach(() => {
   vi.restoreAllMocks()
@@ -42,6 +42,17 @@ describe('saving only what changed (B1)', () => {
     expect(save).toHaveBeenCalledTimes(1)
   })
 
+  it('counts a project just switched to as saved, and does not write the one left again', async () => {
+    await studio().load()
+    useStudio.setState({ durable: true })
+    const save = vi.spyOn(persistence, 'save')
+
+    expect(await studio().applyTemplate('tasks')).toBe('opened')
+
+    expect(save.mock.calls.map(([project]) => project.manifest.name)).toEqual(['TasksApp'])
+    expect(studio().unsavedWork()).toBe(false)
+  })
+
   it('tries again after a save failed, though nothing has changed since', async () => {
     await studio().load()
     studio().setFileText(firstFile(), '// edited')
@@ -53,6 +64,32 @@ describe('saving only what changed (B1)', () => {
     await studio().flush()
     expect(studio().saveError).toBeNull()
     expect((await persistence.load(studio().project!.id))!.files[0]!.text).toBe('// edited')
+  })
+})
+
+describe('a save refused because another tab saved since (B1, B3)', () => {
+  it('is told apart from a failing save: trying again cannot work, only a reload can', async () => {
+    await studio().load()
+    studio().setFileText(firstFile(), '// older than what is stored')
+    vi.spyOn(persistence, 'save').mockRejectedValue(new StaleProjectError())
+
+    await studio().flush()
+
+    expect(studio().saveOutdated).toBe(true)
+    expect(studio().saveError).toBe(new StaleProjectError().message)
+  })
+
+  it('is forgotten once a save works again', async () => {
+    await studio().load()
+    studio().setFileText(firstFile(), '// refused')
+    vi.spyOn(persistence, 'save').mockRejectedValueOnce(new StaleProjectError())
+    await studio().flush()
+
+    studio().setFileText(firstFile(), '// saved')
+    await studio().flush()
+
+    expect(studio().saveOutdated).toBe(false)
+    expect(studio().saveError).toBeNull()
   })
 })
 
@@ -115,6 +152,15 @@ describe('a first load that fails (B3)', () => {
     expect(studio().loadError).toContain('The database is locked')
     expect(studio().saveError).toBeNull()
     expect(values.get('studio.lastOpened')).toBe('p-last')
+  })
+
+  it('does not count the starter it opens instead as work to lose, so Reload is not asked about', async () => {
+    vi.spyOn(persistence, 'list').mockRejectedValue(new Error('The database is locked'))
+
+    await studio().load()
+    useStudio.setState({ durable: true })
+
+    expect(studio().unsavedWork()).toBe(false)
   })
 })
 

@@ -26,6 +26,11 @@ const PromptCreator = dynamic(() => import('./PromptCreator').then(m => m.Prompt
 
 export type GallerySource = 'design' | 'open' | 'prompt' | TemplateKind
 
+/** Opening files: the switch's own options, and the conversation that made them, if any. */
+export interface OpenFilesOptions extends SwitchOptions {
+  readonly history?: readonly PromptMessage[]
+}
+
 export interface TemplateGalleryProps {
   currentProject?: Project
   onImport?: (expected: Project, project: Project, removedNames: readonly string[], removedColors: readonly string[]) => Promise<string | null>
@@ -42,12 +47,12 @@ export interface TemplateGalleryProps {
   savedAt: number | null
   /** True when the sheet opened by itself at launch rather than being asked for. */
   atLaunch?: boolean
-  /** Where to open when somebody asked for the sheet. At launch it opens on the saved work, if there is any. */
+  /** Where the sheet opens: the saved projects, or starting something new when not given. */
   initialSource?: GallerySource
   /** Fails when the template's sources could not be fetched. */
   onChoose: (templateId: string, options?: SwitchOptions) => Promise<SwitchResult>
   /** Fails when nothing usable was in the selection. */
-  onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[], options?: SwitchOptions) => Promise<SwitchResult>
+  onOpenFiles: (files: readonly OpenedFile[], options?: OpenFilesOptions) => Promise<SwitchResult>
   /** Reopens a project already in this browser. */
   onOpenProject: (id: string, options?: SwitchOptions) => Promise<SwitchResult>
   /** Deletes one. Never the one that is open. */
@@ -84,10 +89,7 @@ export function TemplateGallery({
   const features = useMemo(() => TEMPLATE_CATALOG.filter((t) => t.kind === 'feature'), [])
 
   const [imported, setImported] = useState<{ local: Project; project: Project; handoff: Handoff } | null>(null)
-  // With work saved - or after a crash, when the next project opened should be a
-  // choice - the saved projects come first, so coming back leads to the work rather
-  // than to a new project (B6).
-  const [source, setSource] = useState<GallerySource>(initialSource ?? (atLaunch && (origin === 'restored' || origin === 'recovered') ? 'open' : 'design'))
+  const [source, setSource] = useState<GallerySource>(initialSource ?? 'design')
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
@@ -104,8 +106,8 @@ export function TemplateGallery({
    * recovered at all. It gets the same interruption, for the same reason.
    */
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null)
-  /** A switch waiting on an answer, because the project being left could not be saved. */
-  const [unsaved, setUnsaved] = useState<((go: boolean) => void) | null>(null)
+  /** Answers the switch waiting on the participant, because the project being left could not be saved. */
+  const [answerUnsaved, setAnswerUnsaved] = useState<((answer: 'switch' | 'stay') => void) | null>(null)
 
   /**
    * Runs a switch, and when the project being left could not be saved, asks first:
@@ -115,9 +117,9 @@ export function TemplateGallery({
   const switching = useCallback(async (run: (options?: SwitchOptions) => Promise<SwitchResult>): Promise<SwitchResult> => {
     const result = await run()
     if (result !== 'unsaved') return result
-    const go = await new Promise<boolean>(answer => setUnsaved(() => answer))
-    setUnsaved(null)
-    return go ? run({ leaveUnsaved: true }) : 'unsaved'
+    const answer = await new Promise<'switch' | 'stay'>(resolve => setAnswerUnsaved(() => resolve))
+    setAnswerUnsaved(null)
+    return answer === 'switch' ? run({ leaveUnsaved: true }) : 'unsaved'
   }, [])
 
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -140,7 +142,7 @@ export function TemplateGallery({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        if (unsaved) return unsaved(false)
+        if (answerUnsaved) return answerUnsaved('stay')
         if (creatingRef.current) return
         if (deleting) setDeleting(null)
         else if (pending) setPending(null)
@@ -165,7 +167,7 @@ export function TemplateGallery({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, pending, deleting, unsaved])
+  }, [onClose, pending, deleting, answerUnsaved])
 
   /** Confirm before leaving an edited project; the saved copy remains in recents. */
   const replacing = useCallback(
@@ -221,7 +223,7 @@ export function TemplateGallery({
         if (project && handoff && currentProject && onImport) { setImported({ local: currentProject, project, handoff }); return }
         setOpenError(null)
         replacing(`${archive.name}`, () => {
-          void switching(options => onOpenFiles(files, undefined, options)).then((opened) => { if (opened === 'failed') setOpenError('Nothing in that archive could be opened.') })
+          void switching(options => onOpenFiles(files, options)).then((opened) => { if (opened === 'failed') setOpenError('Nothing in that archive could be opened.') })
         })
         return
       }
@@ -232,7 +234,7 @@ export function TemplateGallery({
 
       setOpenError(null)
       replacing(`${swift.length} file${swift.length === 1 ? '' : 's'}`, () => {
-        void switching(options => onOpenFiles(swift, undefined, options)).then((opened) => { if (opened === 'failed') setOpenError('Those files could not be opened.') })
+        void switching(options => onOpenFiles(swift, options)).then((opened) => { if (opened === 'failed') setOpenError('Those files could not be opened.') })
       })
     },
     [onOpenFiles, replacing, switching, currentProject, onImport],
@@ -301,7 +303,7 @@ export function TemplateGallery({
               <Icon name="xmark" size={17} />
             </button>
           </header>
-          {imported && onImport ? <ImportReview {...imported} incoming={imported.project} onCancel={() => setImported(null)} onApply={onImport} /> : source === 'prompt' ? <PromptCreator onOpenFiles={(files, history) => switching(options => onOpenFiles(files, history, options))} onBusy={setGenerationBusy} /> : source === 'open' ? (
+          {imported && onImport ? <ImportReview {...imported} incoming={imported.project} onCancel={() => setImported(null)} onApply={onImport} /> : source === 'prompt' ? <PromptCreator onOpenFiles={(files, history) => switching(options => onOpenFiles(files, { ...options, history }))} onBusy={setGenerationBusy} /> : source === 'open' ? (
             <OpenPane
               projectId={projectId}
               recents={recents}
@@ -380,7 +382,7 @@ export function TemplateGallery({
         />
       ) : null}
 
-      {unsaved ? <UnsavedConfirm projectName={projectName} onStay={() => unsaved(false)} onSwitch={() => unsaved(true)} /> : null}
+      {answerUnsaved ? <UnsavedConfirm projectName={projectName} onStay={() => answerUnsaved('stay')} onSwitch={() => answerUnsaved('switch')} /> : null}
 
       {pending ? (
         <ReplaceConfirm
@@ -615,7 +617,7 @@ function TemplateCard({ template, selected, disabled, onSelect, onConfirm }: {
 }
 
 /**
- * The two dialogs in here that are allowed to interrupt.
+ * The two confirmations in here - replacing a project and deleting one.
  *
  * Both name the thing and the count rather than saying "unsaved changes", because
  * the number is what makes somebody stop and read: "Ledger, 8 files" is checkable and
@@ -658,27 +660,15 @@ function ReplaceConfirm({
 function UnsavedConfirm({ projectName, onStay, onSwitch }: { projectName: string; onStay: () => void; onSwitch: () => void }) {
   const { status, busy, download } = useRecoveryActions()
   return (
-    <div className="fixed inset-0 z-[960] grid place-items-center bg-black/40" onPointerDown={(event) => { event.stopPropagation(); onStay() }} data-testid="unsaved-confirm">
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-label={`“${projectName}” is not saved`}
-        onPointerDown={(event) => event.stopPropagation()}
-        className="w-[min(420px,90vw)] rounded-[10px] border border-xc-line bg-xc-bar p-5 text-center shadow-[0_28px_80px_rgb(0_0_0/0.65)]"
-      >
-        <span className="mx-auto grid h-[34px] w-[34px] place-items-center rounded-full bg-xc-error/15 text-xc-error">
-          <Icon name="error" size={17} />
-        </span>
-        <h3 className="mt-3 text-[13px] font-semibold text-xc-text">“{projectName}” is not saved</h3>
-        <p className="mt-1.5 text-[11.5px] leading-relaxed text-xc-text-2">This browser could not save your latest changes to it. Download a copy before you switch, or those changes will be lost.</p>
-        {status ? <p className="mt-2 text-[11px] text-xc-text-3" role="status">{status}</p> : null}
-        <span className={`${recovery.actions} mt-4 justify-center`}>
-          <button type="button" onClick={onStay}>Stay here</button>
-          <button type="button" onClick={onSwitch}>Switch anyway</button>
-          <button type="button" data-primary disabled={busy} onClick={download}>Download this project</button>
-        </span>
-      </div>
-    </div>
+    <Dialog icon="error" title={`“${projectName}” is not saved`} testId="unsaved-confirm" wide onDismiss={onStay}>
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-xc-text-2">This browser could not save your latest changes to it. Download a copy before you switch, or those changes will be lost.</p>
+      {status ? <p className="mt-2 text-[11px] text-xc-text-3" role="status">{status}</p> : null}
+      <span className={`${recovery.actions} mt-4 justify-center`}>
+        <button type="button" onClick={onStay}>Stay here</button>
+        <button type="button" onClick={onSwitch}>Switch anyway</button>
+        <button type="button" data-primary disabled={busy} onClick={download}>Download this project</button>
+      </span>
+    </Dialog>
   )
 }
 
@@ -704,9 +694,39 @@ function Confirm({
   onConfirm: () => void
 }) {
   return (
+    <Dialog icon={icon} title={title} testId={testId} onDismiss={onCancel}>
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-xc-text-2">{body}</p>
+      <p className="mt-2 text-[11px] text-xc-text-3">{note}</p>
+      <span className="mt-4 flex items-center justify-center gap-2">
+        <PushButton onClick={onCancel} testId={`${testId}-cancel`}>
+          {cancel}
+        </PushButton>
+        <PushButton onClick={onConfirm} active testId={`${testId}-button`}>
+          {confirm}
+        </PushButton>
+      </span>
+    </Dialog>
+  )
+}
+
+/**
+ * What the sheet's interruptions share: an icon, a title, and a scrim that takes a
+ * click outside as "no". Only as that - it used to reach the sheet behind as well, and
+ * close it along with the question.
+ */
+function Dialog({ icon, title, testId, wide = false, onDismiss, children }: {
+  icon: IconName
+  title: string
+  testId: string
+  /** Room for three buttons rather than two. */
+  wide?: boolean
+  onDismiss: () => void
+  children: React.ReactNode
+}) {
+  return (
     <div
       className="fixed inset-0 z-[960] grid place-items-center bg-black/40"
-      onPointerDown={onCancel}
+      onPointerDown={(event) => { event.stopPropagation(); onDismiss() }}
       data-testid={testId}
     >
       <div
@@ -714,7 +734,7 @@ function Confirm({
         aria-modal="true"
         aria-label={title}
         onPointerDown={(event) => event.stopPropagation()}
-        className="w-[min(380px,90vw)] rounded-[10px] border border-xc-line bg-xc-bar p-5 text-center shadow-[0_28px_80px_rgb(0_0_0/0.65)]"
+        className={`${wide ? 'w-[min(420px,90vw)]' : 'w-[min(380px,90vw)]'} rounded-[10px] border border-xc-line bg-xc-bar p-5 text-center shadow-[0_28px_80px_rgb(0_0_0/0.65)]`}
       >
         <span
           className={`mx-auto grid h-[34px] w-[34px] place-items-center rounded-full ${
@@ -724,16 +744,7 @@ function Confirm({
           <Icon name={icon} size={17} />
         </span>
         <h3 className="mt-3 text-[13px] font-semibold text-xc-text">{title}</h3>
-        <p className="mt-1.5 text-[11.5px] leading-relaxed text-xc-text-2">{body}</p>
-        <p className="mt-2 text-[11px] text-xc-text-3">{note}</p>
-        <span className="mt-4 flex items-center justify-center gap-2">
-          <PushButton onClick={onCancel} testId={`${testId}-cancel`}>
-            {cancel}
-          </PushButton>
-          <PushButton onClick={onConfirm} active testId={`${testId}-button`}>
-            {confirm}
-          </PushButton>
-        </span>
+        {children}
       </div>
     </div>
   )

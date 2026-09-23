@@ -32,6 +32,7 @@ import {
   type OpenedFile,
   type Project,
   type ProjectStore,
+  StaleProjectError,
   type ProjectSummary,
   type PromptMessage,
   validatePromptHistory,
@@ -86,24 +87,39 @@ let loading: Promise<void> | null = null
  * being written needs to be told, not to find out on the next reload.
  */
 let saveQueue: Promise<unknown> = Promise.resolve()
-function writeProject(project: Project): Promise<string | null> {
-  const write = saveQueue.then(async () => {
-    if (handedOver) return 'Swift Web Studio is open in another tab, so this tab no longer saves.'
-    try { await persistence().save(project); saved = project; return null }
-    catch (error) { return error instanceof Error && error.message ? `Could not save: ${error.message}` : 'Could not save to this browser’s storage.' }
+function writeProject(project: Project): Promise<SaveProblem | null> {
+  const write = saveQueue.then(async (): Promise<SaveProblem | null> => {
+    if (handedOver) return { message: 'Swift Web Studio is open in another tab, so this tab no longer saves.', outdated: true }
+    try { await persistence().save(project); saved.set(project.id, project); return null }
+    catch (error) {
+      if (error instanceof StaleProjectError) return { message: error.message, outdated: true }
+      return { message: error instanceof Error && error.message ? `Could not save: ${error.message}` : 'Could not save to this browser’s storage.', outdated: false }
+    }
   })
   saveQueue = write
   return write
 }
 
 /**
- * The project as storage last had it from this tab: the object last written, or read.
+ * Why a write failed. `outdated` when another tab has saved the project since this one
+ * last read it: trying again cannot work then, and only a reload brings the newer copy.
+ */
+interface SaveProblem { readonly message: string; readonly outdated: boolean }
+
+/** What a write puts on screen: its failure, or - when it worked - nothing. */
+function saveState(problem: SaveProblem | null): Pick<StudioState, 'saveError' | 'saveOutdated'> {
+  return { saveError: problem?.message ?? null, saveOutdated: problem?.outdated ?? false }
+}
+
+/**
+ * Each project as storage last had it from this tab: the object last written, or read.
  *
  * A flush of that same object has nothing to add, and it used to be written anyway -
  * each time the tab was hidden *or shown* - which is how looking at an old tab put its
- * copy back over the newer work of another.
+ * copy back over the newer work of another. By project, because a switch writes the
+ * project it opens before it lets go of the one it leaves.
  */
-let saved: Project | null = null
+const saved = new Map<string, Project>()
 
 /** Set once another tab has the studio: from then on this one writes nothing. */
 let handedOver = false
@@ -195,6 +211,8 @@ export interface StudioState {
    * private window in more than one browser.
    */
   saveError: string | null
+  /** Whether that failure is another tab having saved since: only a reload helps then, not trying again. */
+  saveOutdated: boolean
   /**
    * Set when the saved projects could not be read at launch.
    *
@@ -213,7 +231,7 @@ export interface StudioState {
    * first unless `save` is false - when the studio was taken from a tab that did not
    * answer, its copy is the old one. A reload replaces it.
    */
-  handOver: (save?: boolean) => Promise<void>
+  handOver: (options: { readonly save: boolean }) => Promise<void>
   /**
    * Whether closing the page now would lose work: an edit not yet written, a save
    * that failed, or storage that keeps nothing past the page.
@@ -338,7 +356,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       openFileIds: first ? [first] : [],
       origin: 'restored',
       lastSavedAt: problem ? null : Date.now(),
-      saveError: problem,
+      ...saveState(problem),
     })
     rememberLastOpened(project.id)
 
@@ -413,7 +431,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         durable,
       })
       const problem = await writeProject(shared)
-      if (problem) set({ saveError: problem })
+      if (problem) set(saveState(problem))
       return
     }
 
@@ -459,7 +477,9 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       }
     }
     const first = project.files[0]?.id ?? null
-    if (existing) saved = existing
+    // What was read is what is stored. After a failed read the starter is not written,
+    // but nothing has been typed into it either, so leaving it loses nothing.
+    if (existing || failure) saved.set(project.id, project)
 
     set({
       project,
@@ -483,7 +503,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     // project that crashed.
     if (!existing && !failure) {
       const problem = await writeProject(project)
-      if (problem) set({ saveError: problem })
+      if (problem) set(saveState(problem))
       else await refreshRecents()
     }
   }
@@ -532,6 +552,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     recents: [],
     lastSavedAt: null,
     saveError: null,
+    saveOutdated: false,
     loadError: null,
     durable: true,
     preview: { colorScheme: 'light', typeScale: 1, zoom: 'fit' },
@@ -544,13 +565,13 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       })
       return loading
     },
-    async handOver(save = true) {
+    async handOver({ save }) {
       if (save) await get().flush()
       handedOver = true
     },
     unsavedWork() {
       const { project, saveError, durable } = get()
-      return !handedOver && project !== null && (!durable || saveError !== null || project !== saved)
+      return !handedOver && project !== null && (!durable || saveError !== null || saved.get(project.id) !== project)
     },
     async flush() {
       if (saveTimer) {
@@ -558,12 +579,12 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         saveTimer = null
       }
       const { project } = get()
-      if (!project || project === saved || handedOver) return
+      if (!project || saved.get(project.id) === project || handedOver) return
 
       const problem = await writeProject(project)
       // A completed older write says nothing about edits made while it was saving.
       if (get().project !== project) return
-      set(problem ? { saveError: problem } : { lastSavedAt: Date.now(), saveError: null })
+      set(problem ? saveState(problem) : { lastSavedAt: Date.now(), ...saveState(null) })
     },
 
     setFileText(fileId, text) {
@@ -763,6 +784,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     async applyTemplate(templateId, options) {
+      if (handedOver) return 'failed'
       // What this template makes is already open, untouched: making it again would
       // swap it for an identical copy and redraw everything, and for that moment the
       // canvas showed one project while edits went to the other (B6).
@@ -783,6 +805,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     async importProject(expected, incoming) {
+      if (handedOver) return 'Swift Web Studio is open in another tab. Use it there, or choose Use it here.'
       if (importGuard || get().project !== expected) return 'The current project changed. Reopen the archive to review it again.'
       await get().flush()
       if (get().saveError) return get().saveError
@@ -790,13 +813,13 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       importGuard = { id: expected.id, latest: expected }
       try {
         const problem = await writeProject(incoming)
-        if (problem) return problem
+        if (problem) return problem.message
         if (get().project !== expected) {
           if (incoming.id === expected.id) await writeProject(importGuard.latest)
           return 'The project changed during import. Its current work was preserved. Reopen the archive.'
         }
         const first = incoming.files[0]?.id ?? null
-        set({ project: incoming, activeFileId: first, openFileIds: first ? [first] : [], lastSavedAt: Date.now(), saveError: null, origin: 'restored' })
+        set({ project: incoming, activeFileId: first, openFileIds: first ? [first] : [], lastSavedAt: Date.now(), ...saveState(null), origin: 'restored' })
         rememberLastOpened(incoming.id)
         await refreshRecents()
         return null
@@ -804,12 +827,17 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     async openFiles(files, options) {
+      if (handedOver) return 'failed'
       const project = projectFromFiles(files)
       if (!project) return 'failed'
       return replace(project, options)
     },
 
     async openProject(id, { leaveUnsaved = false } = {}) {
+      // What this tab holds is out of date once another has the studio. Switching from
+      // it used to delete the project left behind when it looked untouched - the very
+      // record the other tab was editing - and moved which project a reload opens.
+      if (handedOver) return 'failed'
       const request = ++switchRequest, outgoingId = get().project?.id
       if (outgoingId === id) return 'opened'
 
@@ -835,7 +863,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 
       // What was just read is what is stored, so nothing about it is unsaved - even
       // when the project left behind could not be.
-      saved = opened
+      saved.set(opened.id, opened)
       const first = opened.files[0]?.id ?? null
       set({
         project: opened,
@@ -843,7 +871,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         openFileIds: first ? [first] : [],
         origin: 'restored',
         lastSavedAt: null,
-        saveError: null,
+        ...saveState(null),
       })
       rememberLastOpened(id)
       await refreshRecents()
@@ -851,6 +879,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     async removeProject(id) {
+      if (handedOver) return
       // Deleting what is on screen would leave the studio holding a project that no
       // longer exists, and the next autosave would write it straight back.
       if (get().project?.id === id) return

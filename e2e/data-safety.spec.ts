@@ -58,6 +58,35 @@ test('a second tab asks before taking over, and the first cannot write over its 
   await expect(second.getByTestId('project-name')).toHaveText('Second tab')
 })
 
+test('without Web Locks, an out-of-date tab cannot save over newer work, and says so (B1)', async ({ context }) => {
+  // An older browser, or one that refuses the lock: both tabs have the studio, and the
+  // revision storage checks inside each write is what stands between them.
+  await context.addInitScript(() => { Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true }) })
+  const first = await context.newPage()
+  await first.goto('/')
+  await first.getByTestId('gallery-dismiss').click()
+  await renameApp(first, 'First tab')
+  await expect(first.getByTestId('save-indicator')).toHaveText('Saved locally')
+
+  const second = await context.newPage()
+  await second.goto('/')
+  await second.getByTestId('gallery-dismiss').click()
+  await renameApp(second, 'Second tab')
+  await expect(second.getByTestId('save-indicator')).toHaveText('Saved locally')
+
+  // The first tab's copy is older now, and its next save is refused rather than kept.
+  await renameApp(first, 'Stale tab')
+  const banner = first.getByTestId('save-banner')
+  await expect(banner).toContainText('This project was changed in another tab.')
+  await expect(banner.getByRole('button', { name: 'Reload', exact: true })).toBeVisible()
+  await expect(banner.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0)
+  await first.close()
+
+  await second.reload()
+  await second.getByTestId('gallery-dismiss').click()
+  await expect(second.getByTestId('project-name')).toHaveText('Second tab')
+})
+
 test('when saves fail, the studio says why, offers the work as a file, and asks before switching or leaving (B3)', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()

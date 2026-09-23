@@ -29,7 +29,7 @@ let started = false
 let hadStudio = false
 let letGo: (() => void) | null = null
 let takeOver: () => Promise<void> = async () => {}
-let stepAside: (save: boolean) => Promise<void> = async () => {}
+let stepAside: (options: { readonly save: boolean }) => Promise<void> = async () => {}
 const listeners = new Set<() => void>()
 
 function become(next: TabState): void {
@@ -54,7 +54,7 @@ export function studioTabState(): TabState {
  * not when the lock was taken from it, because by then its copy is the old one. Without
  * Web Locks - an old browser, an insecure origin - every tab has the studio, as before.
  */
-export function startStudioTab(handOver: (save: boolean) => Promise<void>): void {
+export function startStudioTab(handOver: (options: { readonly save: boolean }) => Promise<void>): void {
   if (started) return
   started = true
   stepAside = handOver
@@ -68,7 +68,7 @@ export function startStudioTab(handOver: (save: boolean) => Promise<void>): void
     letGo = null
     // The overlay goes up before the save, so nothing more is typed here meanwhile.
     become('elsewhere')
-    void handOver(true).finally(release)
+    void handOver({ save: true }).finally(release)
   })
   takeOver = async () => {
     // What a tab that had the studio holds is older than what the other tab has saved
@@ -111,7 +111,7 @@ function hold(locks: LockManager, options: LockOptions): Promise<boolean> {
       if (state !== 'active') return
       letGo = null
       become('elsewhere')
-      void stepAside(false)
+      void stepAside({ save: false })
     })
   })
 }

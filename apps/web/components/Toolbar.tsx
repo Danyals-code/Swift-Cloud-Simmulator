@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { EXPORT_FORMATS, type ExportFormat } from '@studio/shared'
 import { BUILD_DATE, BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import type { WorkspaceMode, WorkspaceTheme } from '../lib/layout'
+import { unsaved, type StorageProblem } from '../lib/storageProblem'
+import type { GallerySource } from './TemplateGallery'
 import { Icon } from './ui/Icon'
 import { MenuButton } from './ui/Menu'
 import { PaneToggles, PushButton } from './ui/Control'
@@ -17,7 +19,7 @@ export interface ToolbarProps {
   theme: WorkspaceTheme
   onThemeChange: (theme: WorkspaceTheme) => void
   /** Opens the project sheet, on the projects in this browser or on starting a new one. */
-  onOpenGallery: (source: 'open' | 'design') => void
+  onOpenGallery: (source: GallerySource) => void
   projectName: string
   onRenameProject: (name: string) => boolean
   onReview?: () => void
@@ -26,9 +28,8 @@ export interface ToolbarProps {
   /** Copies which build this is, for a report or a question. */
   onCopyBuild: () => void
   savedAt: number | null
-  saveError: string | null
-  /** False when the browser keeps nothing past the page, which the label must not hide (B2). */
-  durable?: boolean
+  /** What stands between the work and storage, which the label must not hide (B2, B3). */
+  storage?: StorageProblem | null
   panes: ReadonlySet<PaneKey>
   suppressed: ReadonlySet<PaneKey>
   onTogglePane: (pane: PaneKey) => void
@@ -82,7 +83,7 @@ interface PreviewToolsProps {
 const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debug area', title: 'Show problems and output' }]
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
-export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, durable = true, mode, onModeChange, theme, onThemeChange,
+export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, mode, onModeChange, theme, onThemeChange,
   panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onCopyBuild, onReview, reviewDisabled,
   environment, previewing = false, onSetPreviewing, previewDisabled, exporting = false }: ToolbarProps) {
   const design = mode === 'design'
@@ -103,7 +104,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, durabl
   return <header data-testid="toolbar" className={styles.toolbar} data-mode={mode}>
     <div className={styles.project}>
       <button type="button" onClick={() => onOpenGallery('open')} title="Your projects, and new ones from templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={19} /><span>Projects</span></button>
-      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} /><span data-testid="save-indicator" title={saveError ?? (durable ? undefined : 'This browser keeps nothing once the tab closes.')} className={saveError || !durable ? styles.saveError : styles.saveStatus}>{saveError ? 'Could not save' : !durable ? 'Not saved' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
+      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} /><SaveIndicator storage={storage} savedAt={savedAt} /></div>
     </div>
     <nav className={styles.modes} aria-label="Workspace view">
       {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Design screens visually' : 'Swift code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Code'}</button>)}
@@ -127,6 +128,14 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, durabl
       ]} onSelect={value => { if (value === 'new') onOpenGallery('design'); else if (value === 'projects') onOpenGallery('open'); else if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug'); else if (value === 'build') onCopyBuild() }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={17} /></MenuButton>
     </div>
   </header>
+}
+
+/** Beside the project name: whether what is on screen is in this browser's storage. */
+function SaveIndicator({ storage, savedAt }: { storage: StorageProblem | null; savedAt: number | null }) {
+  const [label, title] = unsaved(storage) ? ['Could not save', storage?.kind === 'failing' ? storage.detail : 'Another tab has saved this project since.']
+    : storage?.kind === 'memory' ? ['Not saved', 'This browser keeps nothing once the tab closes.']
+    : [savedAt ? 'Saved locally' : 'Local project', undefined]
+  return <span data-testid="save-indicator" title={title} className={title ? styles.saveError : styles.saveStatus}>{label}</span>
 }
 
 function ProjectName({ name, onRename }: { name: string; onRename: (name: string) => boolean }) {

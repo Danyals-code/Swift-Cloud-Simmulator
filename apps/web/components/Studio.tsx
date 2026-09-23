@@ -50,14 +50,14 @@ const DesignReview = dynamic(() => import('./DesignReview').then(m => m.DesignRe
 import { scenarioKey, scenarioScreen, screenCatalog, screenDefinition, type ScreenCommand, type DesignScreen } from '../lib/screens'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
-import { TemplateGallery } from './TemplateGallery'
+import { TemplateGallery, type GallerySource } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
 import { BUILD_DETAILS, BUILD_NAME, STUDIO_BUILD } from '../lib/build'
-import { crashIfTesting } from '../lib/recovery'
+import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
 import { StorageBanner } from './StorageBanner'
-import { leavingOnPurpose } from '../lib/recovery'
+import { storageProblem } from '../lib/storageProblem'
 import { OpenElsewhere } from './OpenElsewhere'
 import { startStudioTab, studioTabState, subscribeStudioTab } from '../lib/activeTab'
 import styles from './Workspace.module.css'
@@ -78,8 +78,10 @@ export function Studio() {
   const origin = useStudio((s) => s.origin)
   const lastSavedAt = useStudio((s) => s.lastSavedAt)
   const saveError = useStudio((s) => s.saveError)
+  const saveOutdated = useStudio((s) => s.saveOutdated)
   const loadError = useStudio((s) => s.loadError)
   const durable = useStudio((s) => s.durable)
+  const storage = useMemo(() => storageProblem({ saveError, saveOutdated, durable, loadError }), [saveError, saveOutdated, durable, loadError])
   const previewSettings = useStudio((s) => s.preview)
   const canUndo = useStudio((s) => s.canUndo)
   const canRedo = useStudio((s) => s.canRedo)
@@ -198,7 +200,7 @@ export function Studio() {
    */
   const [galleryAtLaunch, setGalleryAtLaunch] = useState(false)
   /** Where the sheet opens when it was asked for: the projects, or a new one. */
-  const [gallerySource, setGallerySource] = useState<'open' | 'design' | undefined>(undefined)
+  const [gallerySource, setGallerySource] = useState<GallerySource | undefined>(undefined)
   const greeted = useRef(false)
   const [caret, setCaret] = useState(0)
   const splitRef = useRef<HTMLDivElement | null>(null)
@@ -208,7 +210,7 @@ export function Studio() {
 
   /** Whether this tab has the studio, or another tab does (B1). Nothing loads until it is this one. */
   const tab = useSyncExternalStore(subscribeStudioTab, studioTabState, () => 'checking' as const)
-  useEffect(() => { startStudioTab(save => useStudio.getState().handOver(save)) }, [])
+  useEffect(() => { startStudioTab(options => useStudio.getState().handOver(options)) }, [])
   useEffect(() => {
     if (tab === 'active') void load()
   }, [tab, load])
@@ -224,7 +226,12 @@ export function Studio() {
   useEffect(() => {
     if (!loaded || greeted.current || origin === 'shared') return
     greeted.current = true
-    setGallerySource(undefined)
+    // Coming back to saved work - or after a crash, when the next project opened should
+    // be a choice - leads to the projects rather than to a new one (B6). The untouched
+    // starter on its own is not work yet; a rename is, as it is everywhere else.
+    const { project: opened, recents: saved } = useStudio.getState()
+    const untouched = !!opened && opened.manifest.templateId !== undefined && isPristine(opened)
+    setGallerySource(origin === 'recovered' || (origin === 'restored' && (!untouched || saved.length > 1)) ? 'open' : 'design')
     setGalleryAtLaunch(true)
     setGalleryOpen(true)
   }, [loaded, origin])
@@ -256,7 +263,7 @@ export function Studio() {
 
   const toggleInspect = useCallback(() => setDesigning(!inspecting), [setDesigning, inspecting])
 
-  const openGallery = useCallback((source: 'open' | 'design') => {
+  const openGallery = useCallback((source: GallerySource) => {
     setGallerySource(source)
     setGalleryAtLaunch(false)
     setGalleryOpen(true)
@@ -1202,8 +1209,10 @@ export function Studio() {
     [project, flush, previewSettings],
   )
 
+  // Nothing of the studio is left to use in a tab without it: what it holds is out of
+  // date, and the sheets behind an overlay could still be reached from the keyboard.
+  if (tab === 'elsewhere') return <OpenElsewhere />
   if (!loaded || !project) {
-    if (tab === 'elsewhere') return <OpenElsewhere />
     return (
       <main className="grid h-dvh place-items-center bg-xc-editor text-[12px] text-xc-text-3">
         Loading project…
@@ -1314,7 +1323,7 @@ export function Studio() {
 
   return (
     <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
-      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen || tab === 'elsewhere'}>
+      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen}>
       <Toolbar
         mode={mode}
         onModeChange={setMode}
@@ -1330,8 +1339,7 @@ export function Studio() {
         reviewDisabled={stale || preparingEdit || !result?.renderTree}
         projectName={project.manifest.name}
         savedAt={lastSavedAt}
-        saveError={saveError}
-        durable={durable}
+        storage={storage}
         // The toggles report the preference, so each is a switch that always
         // responds; `suppressed` is how a pane that is on but has no room says so.
         panes={new Set((Object.keys(shown) as PaneKey[]).filter((key) => shown[key]))}
@@ -1348,7 +1356,7 @@ export function Studio() {
         onSetPreviewing={previewing => setDesigning(!previewing)}
         previewDisabled={stale || preparingEdit}
       />
-      <StorageBanner saveError={saveError} loadError={loadError} durable={durable} onRetry={() => void flush()} />
+      <StorageBanner problem={storage} onRetry={() => void flush()} />
 
       <div ref={splitRef} className="flex min-h-0 flex-1">
         {layout.showNavigator ? (
@@ -1637,7 +1645,7 @@ export function Studio() {
           }}
           onOpenProject={openProject}
           onRemoveProject={(id) => void removeProject(id)}
-          onOpenFiles={async (picked, history, options) => {
+          onOpenFiles={async (picked, { history, ...options } = {}) => {
             const result = await openFiles(picked, options)
             const opened = result === 'opened'
             if (opened && history?.length) {
@@ -1650,7 +1658,6 @@ export function Studio() {
           }}
         />
       ) : null}
-      {tab === 'elsewhere' ? <OpenElsewhere /> : null}
     </main>
   )
 }
