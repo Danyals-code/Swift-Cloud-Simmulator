@@ -393,6 +393,8 @@ class Resolver {
   private previewScope: readonly ViewValue[] = []
   /** The containers the screen was cut out of (see `containersAbove`). */
   private around: readonly ViewValue[] = []
+  /** What each screen cut out of its containers leaves out, the root's and any sheet's. */
+  private readonly notDrawn: NotDrawn[] = []
 
   constructor(
     private readonly ctx: ResolveContext,
@@ -416,10 +418,10 @@ class Resolver {
     const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
     this.around = containersAbove(stamped, tabs, withTabs.content, nav)
     const searchAround = searchContainers(withTabs.content, nav, screen.navigationBar)
-    const notDrawn = [
+    this.notDrawn.push(
       ...(tabs ? notDrawnAround(stamped, tabs) : []),
       ...(nav ? notDrawnAround(withTabs.content, nav) : []),
-    ]
+    )
 
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
@@ -465,7 +467,7 @@ class Resolver {
       handlers: this.handlers,
       animation: this.ctx.animation,
       lifecycle: this.lifecycle,
-      ...(notDrawn.length ? { notDrawn } : {}),
+      ...(this.notDrawn.length ? { notDrawn: this.notDrawn } : {}),
     }
   }
 
@@ -1506,6 +1508,10 @@ class Resolver {
       const nav = findView(tabbed.content, 'NavigationStack') ?? findView(tabbed.content, 'NavigationView')
       const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null }
       const around = containersAbove(overlayViews, tabs, tabbed.content, nav)
+      this.notDrawn.push(
+        ...(tabs ? notDrawnAround(overlayViews, tabs) : []),
+        ...(nav ? notDrawnAround(tabbed.content, nav) : []),
+      )
       const searchAround = searchContainers(tabbed.content, nav, resolved.navigationBar)
       const cornerRadius = numberOf(collectModifier(overlayViews, 'presentationCornerRadius')?.args[0]?.value)
 

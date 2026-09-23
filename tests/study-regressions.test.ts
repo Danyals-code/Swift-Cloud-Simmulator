@@ -362,6 +362,14 @@ describe('E3: presentations and search written on a NavigationStack or a TabView
       }`)).toEqual([{ severity: 'warning', at: 'Text("Offline banner")', message: expect.stringContaining('beside the TabView') }])
   })
 
+  it('warns about a view beside a NavigationStack inside a sheet too', () => {
+    expect(warned(`var body: some View {
+        Text("Home").sheet(isPresented: .constant(true)) {
+          ZStack { NavigationStack { Text("Sheet") }; Button("New") { } }
+        }
+      }`)).toEqual([{ severity: 'warning', at: 'Button("New") { }', message: expect.stringContaining('beside the NavigationStack') }])
+  })
+
   it('warns that an overlay written on a NavigationStack is not drawn', () => {
     expect(warned('var body: some View { NavigationStack { Text("Home") }.overlay(Text("Badge")) }'))
       .toEqual([{ severity: 'warning', at: '.overlay(Text("Badge"))', message: expect.stringContaining('.overlay') }])

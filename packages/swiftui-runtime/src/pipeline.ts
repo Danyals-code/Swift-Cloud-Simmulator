@@ -504,7 +504,9 @@ function toResult(
     at: total,
   }))
 
-  const diagnostics = [...analysis.diagnostics, ...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning)]
+  // A sheet can be resolved more than once in a pass, so each place is said once.
+  const notDrawn = [...new Map((evaluation?.ui?.notDrawn ?? []).map((item) => [`${item.span.file}:${item.span.start}:${item.span.end}`, item])).values()]
+  const diagnostics = [...analysis.diagnostics, ...notDrawn.map(notDrawnWarning)]
   if (evaluation?.failure) {
     diagnostics.push({
       span: evaluation.failure.span,
