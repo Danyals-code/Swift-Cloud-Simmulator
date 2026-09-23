@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
+import { worldFrame } from './render-geometry'
 
 /**
  * Regressions named after the study-build plan's items (feasibility-revised.md), so
@@ -40,6 +41,9 @@ ${members}
 const nodes = (r: CompileResult): readonly RenderNode[] => r.renderTree?.nodes ?? []
 const texts = (r: CompileResult): string[] => nodes(r).flatMap(n => n.text?.runs.map(run => run.text) ?? [])
 const controls = (r: CompileResult) => nodes(r).filter(n => n.hitTarget).map(n => n.a11y?.label)
+/** Where the text is drawn on the screen, following any containers it is placed inside. */
+const placed = (r: CompileResult, value: string) =>
+  worldFrame(nodes(r), nodes(r).find(n => n.text?.runs.some(run => run.text === value))!)
 
 /** Presses the control with this accessible name, as a person finds it, and draws the result. */
 function tap(r: CompileResult, label: string): CompileResult {
@@ -218,5 +222,21 @@ describe('E2: modifiers given a function or a closure argument to run', () => {
     const after = tap(rerender(revision++), 'Delete')
     expect(texts(after)).toEqual(expect.arrayContaining(['One', 'Three']))
     expect(texts(after)).not.toContain('Two')
+  })
+})
+
+describe('E8: offset and position take a size or a point', () => {
+  it('moves a view by a CGSize offset, as a drag writes it', () => {
+    const still = placed(runView('var body: some View { Text("Moved") }'), 'Moved')
+    const moved = placed(runView(`@State private var dragOffset = CGSize(width: 10, height: 20)
+      var body: some View { Text("Moved").offset(dragOffset) }`), 'Moved')
+    expect({ x: moved.x - still.x, y: moved.y - still.y }).toEqual({ x: 10, y: 20 })
+  })
+
+  it('places a view at a CGPoint where the x: y: form places it', () => {
+    const byNumbers = placed(runView('var body: some View { Text("Here").position(x: 100, y: 120) }'), 'Here')
+    const byPoint = placed(runView('var body: some View { Text("Here").position(CGPoint(x: 100, y: 120)) }'), 'Here')
+    expect(byPoint).toEqual(byNumbers)
+    expect(byPoint.x + byPoint.width / 2).toBeCloseTo(100, 0)
   })
 })

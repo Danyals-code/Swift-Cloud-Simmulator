@@ -3340,12 +3340,15 @@ class Converter {
         }
       }
 
-      case 'offset':
+      case 'offset': {
+        // `.offset(dragOffset)` - a CGSize, which is how every drag writes it.
+        const size = payloadOf<{ width: number; height: number }>(positional(args, 0), 'CGSize')
         return {
           kind: 'offset',
-          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? 0,
-          y: numberArg(labelled(args, 'y')) ?? 0,
+          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? size?.width ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? size?.height ?? 0,
         }
+      }
 
       case 'fixedSize': {
         const horizontal = boolArg(labelled(args, 'horizontal'))
@@ -3491,12 +3494,14 @@ class Converter {
 
 
 
-      case 'position':
+      case 'position': {
+        const point = payloadOf<{ x: number; y: number }>(positional(args, 0), 'CGPoint')
         return {
           kind: 'position',
-          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? 0,
-          y: numberArg(labelled(args, 'y')) ?? numberArg(positional(args, 1)) ?? 0,
+          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? point?.x ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? numberArg(positional(args, 1)) ?? point?.y ?? 0,
         }
+      }
 
       case 'layoutPriority': {
         const value = numberArg(positional(args, 0))
