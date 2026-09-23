@@ -45,12 +45,15 @@ export interface SourceChange {
   readonly deleted?: boolean
 }
 
+/** A place in the source: a file and an offset in it. */
+export interface SourcePoint { readonly file: string; readonly offset: number }
+
 export type DesignEditPlan =
   | {
     readonly ok: false
     readonly reason: string
     /** Where the reason is, when it is somewhere in the source: a syntax error, which Code can show. */
-    readonly location?: { readonly file: string; readonly offset: number }
+    readonly location?: SourcePoint
   }
   | {
     readonly ok: true
@@ -60,5 +63,5 @@ export type DesignEditPlan =
     /** The complete new list of colour sets, when the edit changes one. */
     readonly colorSets?: readonly PreviewColorAsset[]
     readonly authoring?: AuthoringSnapshot
-    readonly selection: { readonly file: string; readonly offset: number } | null
+    readonly selection: SourcePoint | null
   }

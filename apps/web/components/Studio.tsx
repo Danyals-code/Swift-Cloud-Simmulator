@@ -7,7 +7,7 @@ import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelec
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
-import type { FileId, PagePreview, PreviewScenario, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
+import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, SourcePoint, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
@@ -164,9 +164,10 @@ export function Studio() {
    */
   const [pendingSelect, setPendingSelect] = useState<{ projectId: string; file: FileId; offset: number; text: string } | null>(null)
   /** Raised when an edit could not be made, so the canvas can say why. */
-  const [editNote, setEditNote] = useState<string | null>(null)
-  /** Where a refusal points in the source, while its note is the one showing: a syntax error Code can show. */
-  const [refusedAt, setRefusedAt] = useState<{ note: string; file: FileId; offset: number } | null>(null)
+  /** What the last edit said; a refusal that points into the source - a syntax error Code can show - carries where. */
+  const [editNote, setEditNote] = useState<string | { readonly text: string; readonly location: SourcePoint } | null>(null)
+  const noteText = typeof editNote === 'string' ? editNote : editNote?.text
+  const noteLocation = typeof editNote === 'string' ? undefined : editNote?.location
   const [exporting, setExporting] = useState(false)
   const exportInProgress = useRef(false)
   /** Serializes source planning; typing can still invalidate an in-flight plan. */
@@ -675,7 +676,7 @@ export function Studio() {
     try {
       if (assets) validateAssets(assets)
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, colors: project.colors, componentDescriptions: project.studio?.components, target, fingerprint, operation })
-      if (!plan.ok) { setEditNote(plan.reason); setRefusedAt(plan.location ? { note: plan.reason, ...plan.location } : null); return plan.reason }
+      if (!plan.ok) { setEditNote(plan.location ? { text: plan.reason, location: plan.location } : plan.reason); return plan.reason }
       // Context settings edit the navigation owner while the designer keeps the
       // visible label/row selected. Reconcile it against the exact planned source.
       const afterFiles = project.files.map(file => ({ ...file, text: plan.changes.find(change => change.file === file.id)?.after ?? file.text }))
@@ -1032,7 +1033,7 @@ export function Studio() {
    * needs, and it is the parser that decides whether the result is a file that
    * still compiles.
    */
-  const reorderLayers = useCallback((layer: ViewLayer, target: ViewLayer, position: 'before' | 'after' | 'inside') => {
+  const reorderLayers = useCallback((layer: ViewLayer, target: ViewLayer, position: DropPosition) => {
     const from = layer.source
     const to = target.source
     if (!from || !to || from.file !== to.file) {
@@ -1043,13 +1044,13 @@ export function Studio() {
   }, [applyEdit])
 
   /** The stack a canvas drop onto this node goes into - its own empty space, usually its background - or null. */
-  const containerAt = useCallback((node: RenderNode) => {
+  const containerNameAt = useCallback((node: RenderNode) => {
     const layer = layerForRenderNode(layers, node)
     return layer && LAYER_MOVE_CONTAINERS.has(layer.type) ? layer.type : null
   }, [layers])
 
   /** A drop on the canvas, named in the terms the file understands. */
-  const reorderNodes = useCallback((source: RenderNode | 'selection', target: RenderNode, position: 'before' | 'after' | 'inside') => {
+  const reorderNodes = useCallback((source: RenderNode | 'selection', target: RenderNode, position: DropPosition) => {
     const from = source === 'selection' ? selectedLayer : layerForRenderNode(layers, source)
     const to = layerForRenderNode(layers, target)
     if (!from || !to || from.id === to.id) return
@@ -1214,7 +1215,7 @@ export function Studio() {
                 the same thing there - what the pointer is over, and what a click on
                 it will do, which in Code is open its source. */}
             <InspectorReadout node={hoveredNode} active action={mode === 'design' ? 'select' : 'reveal'} />
-            {editNote ? <span className={styles.note} role="status" data-testid="edit-note">{editNote}</span> : null}
+            {noteText ? <span className={styles.note} role="status" data-testid="edit-note">{noteText}</span> : null}
             {selection && mode === 'design' ? (
               <div className={styles.selection} data-testid="selection-controls">
                 <span className={styles.selectionName}>{selection.name}</span>
@@ -1277,7 +1278,7 @@ export function Studio() {
     {level === 'view' && authoringNode && <><span aria-hidden>›</span><span aria-current="page" data-testid="level-view">{sourceLayerLabel(authoringNode)}</span></>}
   </nav>
 
-  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={editNote} noteAction={refusedAt && refusedAt.note === editNote ? { label: 'Show in Code', onClick: () => revealSpanIn(refusedAt.file, refusedAt.offset) } : null} />
+  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={noteText} noteAction={noteLocation ? { label: 'Show in Code', onClick: () => revealSpanIn(noteLocation.file, noteLocation.offset) } : null} />
   const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
 
   return (
@@ -1514,7 +1515,7 @@ export function Studio() {
                 settingsTitle={settingsTitle}
                 onSelectBackground={mode === 'design' ? selectApp : undefined}
                 onReorderNodes={reorderNodes}
-                containerAt={containerAt}
+                containerNameAt={containerNameAt}
                 centerOn={centerOn}
                 status={previewStatus}
                 onDeviceChange={setDevice}

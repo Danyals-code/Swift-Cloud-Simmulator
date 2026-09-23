@@ -4,7 +4,7 @@ import { Parser } from '@studio/swift-syntax'
 import { applyProjectTransaction, DocumentHistory, emptyStudioMetadata, projectFromFiles } from '@studio/project-model'
 import { buildExportBundle } from '@studio/exporter'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
-import type { AuthoringNode, DesignEditPlan, DesignEditRequest, SourceFile } from '@studio/shared'
+import type { AuthoringNode, DesignEditPlan, DesignEditRequest, DropPosition, SourceFile } from '@studio/shared'
 
 const wrap = (body: string, declarations = '') => `import SwiftUI\n@main struct TestApp: App { var body: some Scene { WindowGroup { ContentView() } } }\nstruct ContentView: View { ${declarations}\nvar body: some View { ${body} } }`
 const files = (text: string): SourceFile[] => [{ id: 'Sources/App.swift', text }]
@@ -493,7 +493,7 @@ struct HomeScreen: View {
     HomeScreen()
 }
 `
-  const drag = (position: 'before' | 'after' | 'inside', name = 'Text', index = 0) =>
+  const drag = (position: DropPosition, name = 'Text', index = 0) =>
     restructured(blank, { kind: 'moveTo', targetOffset: blank.indexOf('VStack(spacing'), position }, name, index)
 
   it('moves a view dropped after its own container out, to just after it', () => {
@@ -535,6 +535,21 @@ describe('C10: a syntax error stops edits only to the file it is in', () => {
 
   it('plans a batch on a screen while another file does not parse', () => {
     expect(changedFiles(planDesignBatch([request([home, draft], 'VStack', { kind: 'insert', snippet: 'Text("New")' })]))).toEqual([HOME])
+  })
+
+  it('offers and changes a component’s input while another file does not parse', () => {
+    const screens: SourceFile = { id: HOME, text: 'import SwiftUI\nstruct HomeScreen: View {\n    var body: some View {\n        Badge(title: "New")\n    }\n}\nstruct Badge: View {\n    let title: String\n    var body: some View { Text(title) }\n}\n' }
+    const badge = buildAuthoringModel({ projectId: 'p', revision: 1, files: [screens, draft] }).nodes.find(n => n.name === 'Badge' && n.kind === 'component')!
+    expect(badge.controls?.some(control => control.id === 'component:title')).toBe(true)
+    const plan = planDesignEdit(request([screens, draft], 'Badge', { kind: 'property', control: 'component:title', value: 'Sale' }))
+    expect(plan.ok && plan.changes[0]!.after).toBe(screens.text.replace('Badge(title: "New")', 'Badge(title: "Sale")'))
+  })
+
+  it('points at the error already in a file a change also writes, where it is before the change', () => {
+    // A spacing token is written into Tokens.swift, above a line still being typed at its end.
+    const tokens: SourceFile = { id: 'Sources/DesignSystem/Tokens.swift', text: 'import SwiftUI\n\nextension CGFloat {\n    static let space8: CGFloat = 8\n}\n\nlet draft = (\n' }
+    expect(planDesignEdit(request([home, tokens], 'Text', { kind: 'style-create', name: 'space24', style: 'spacing', value: '24' })))
+      .toEqual({ ok: false, reason: 'Tokens.swift has an error on line 8, so its design can’t be changed until it’s fixed in Code.', location: { file: tokens.id, offset: tokens.text.length } })
   })
 
   it('refuses to change a file that does not parse, naming it and the line, and says where', () => {

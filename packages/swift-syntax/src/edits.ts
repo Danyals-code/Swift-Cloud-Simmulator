@@ -1,4 +1,4 @@
-import type { FileId } from '@studio/shared'
+import type { DropPosition, FileId } from '@studio/shared'
 import { Parser } from './parser'
 import { walk, type Block, type Expr, type Node, type Stmt } from './ast'
 import { afterOffMarkers } from './off-markers'
@@ -405,7 +405,7 @@ export function moveViewTo(
   file: FileId,
   offset: number,
   targetOffset: number,
-  position: 'before' | 'after' | 'inside',
+  position: DropPosition,
 ): SourceEdit | null {
   const source = siteAt(text, file, offset)
   const target = siteAt(text, file, targetOffset, { near: true })
@@ -428,10 +428,10 @@ export function moveViewTo(
   // worked out from before the cut: a target that held the view got shorter rather
   // than moving, so its end and its lines are read from the new text.
   const without = text.slice(0, from.start) + text.slice(from.end)
-  const moved = targetStart >= from.end ? targetStart - (from.end - from.start) : targetStart
-  const again = siteAt(without, file, moved)
+  const targetAfterCut = targetStart >= from.end ? targetStart - (from.end - from.start) : targetStart
+  const again = siteAt(without, file, targetAfterCut)
   if (!again) return null
-  if (position === 'inside') return contentBlockOf(again.stmt) ? insertView(without, file, moved, body) : null
+  if (position === 'inside') return contentBlockOf(again.stmt) ? insertView(without, file, targetAfterCut, body) : null
   const anchor = cutOf(without, again.stmt)
 
   if (anchor.ownLine) {

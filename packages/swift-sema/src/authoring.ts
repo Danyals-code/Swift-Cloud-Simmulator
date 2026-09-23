@@ -6,7 +6,7 @@ import {
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
-import { Lexer, Parser, forEachChild, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
+import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
 import { SUPPORTED_VIEWS } from './builtins'
 import { colorOpacityParts, designControlRecipes, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
 
@@ -204,7 +204,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
     // A syntax error takes the controls of its own file's views, not every file's: a half-typed draft elsewhere
     // is no reason to lock the design, and the planner refuses only changes to the file that does not parse.
-    if (!diagnostics.some(d => d.severity === 'error' && d.span.file === node.source.file && (['expected_token', 'unexpected_token', 'unterminated_string', 'unterminated_block'].includes(d.code) || d.span.start < node.source.end && d.span.end >= node.source.start))) {
+    if (!diagnostics.some(d => d.span.file === node.source.file && (isSyntaxError(d) || d.severity === 'error' && d.span.start < node.source.end && d.span.end >= node.source.start))) {
       let ancestor: MutableNode | undefined = parent
       let template = false
       while (ancestor) { if (ancestor.kind === 'template') template = true; ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }

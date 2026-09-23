@@ -14,7 +14,7 @@
 export * from './ast'
 export * from './tokens'
 export { Lexer, type LexResult } from './lexer'
-export { Parser, typeName, type ParseResult } from './parser'
+export { Parser, isSyntaxError, typeName, type ParseResult } from './parser'
 
 export * from './conformance'
 export * from './off-markers'

@@ -108,6 +108,13 @@ function continuesDeclaration(token: Token): boolean {
  * skips to the next declaration or statement boundary. Between them, a broken
  * region costs one diagnostic and the rest of the file still yields a usable tree.
  */
+/** The codes the lexer and parser report. A file with one of these does not parse, and nothing rewrites it. */
+const SYNTAX_ERRORS: ReadonlySet<string> = new Set(['expected_token', 'unexpected_token', 'unterminated_string', 'unterminated_block'])
+
+export function isSyntaxError(diagnostic: Diagnostic): boolean {
+  return diagnostic.severity === 'error' && SYNTAX_ERRORS.has(diagnostic.code)
+}
+
 export class Parser {
   private index = 0
   private readonly diagnostics: Diagnostic[] = []

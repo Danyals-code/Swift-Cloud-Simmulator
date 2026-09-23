@@ -3,6 +3,11 @@ import { forEachChild, insertView, viewSiteAt, type Node } from '@studio/swift-s
 import { applyPatches, callOf, type FeatureContext } from './authoring-context'
 
 type StructureOperation = Extract<AuthoringOperation, { kind: 'layer-duplicate' | 'layer-wrap' | 'layer-reparent' }>
+/** The stack Wrap writes around the selected layers, before its `{`. */
+export function wrapperOf(layout: 'VStack' | 'HStack' | 'ZStack'): string {
+  return layout === 'ZStack' ? 'ZStack' : `${layout}(spacing: 16)`
+}
+
 export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operation: StructureOperation) {
   const file = ctx.files.find(f => f.id === node.source.file)!
   const site = viewSiteAt(file.text, file.id, node.source.start)
@@ -21,7 +26,7 @@ export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operatio
   const original = file.text.slice(first.start, last.end)
   if (operation.kind === 'layer-wrap') {
     if (!['VStack', 'HStack', 'ZStack'].includes(operation.layout)) throw new Error('Choose Column, Row or Stack.')
-    const constructor = operation.layout === 'ZStack' ? 'ZStack' : `${operation.layout}(spacing: 16)`
+    const constructor = wrapperOf(operation.layout)
     const text = `${constructor} {${eol}${first.indent}    ${original.replaceAll(eol, eol + '    ')}${eol}${first.indent}}`
     return { files: applyPatches(ctx, [{ file: file.id, start: first.start, end: last.end, text }]), offset: first.start }
   }

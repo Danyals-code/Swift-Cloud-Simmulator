@@ -39,6 +39,13 @@ describe('changes that do what they say', () => {
     expect(structuralEditProblem({ file: FILE, before, after, kind: 'insert', view: span(before, 'VStack'), adds: 'Text("New")', landed: at(after, 'Text("New")') })).toBeNull()
   })
 
+  it('accepts a move that re-indents a note and a text written over several lines inside the view', () => {
+    const stack = (indent: string) => `${indent}HStack {\n${indent}    Text("""\n${indent}        Two lines\n${indent}        """)\n${indent}    /* A note\n${indent}       over two lines */\n${indent}}`
+    const before = screen(`            Group {\n${stack('                ')}\n            }\n            Text("B")`)
+    const after = screen(`            Group {\n            }\n            Text("B")\n${stack('            ')}`)
+    expect(structuralEditProblem({ file: FILE, before, after, kind: 'moveTo', view: span(before, 'HStack'), toward: at(before, 'Text("B")'), landed: at(after, '            HStack') + 12 })).toBeNull()
+  })
+
   it('accepts a delete that takes only the view, with its switched-off modifier', () => {
     const before = screen('            Text("A")\n                /*studio-off:1 ".padding()"*/\n            Text("B")')
     const after = screen('            Text("B")')
@@ -66,6 +73,19 @@ describe('changes that do something else', () => {
       .toBe('This change would put the view somewhere other than where it was dropped. Nothing was changed.')
   })
 
+  it('refuses a move that leaves the view’s switched-off modifier on its neighbour', () => {
+    const before = screen('            Text("A")\n                .bold()\n                /*studio-off:1 ".padding()"*/\n            Text("B")')
+    const after = screen('            Text("B")\n                /*studio-off:1 ".padding()"*/\n            Text("A")\n                .bold()')
+    expect(structuralEditProblem({ file: FILE, before, after, kind: 'move', view: span(before, 'Text("A")\n                .bold()'), landed: at(after, 'Text("A")') })).toBe(LOST)
+  })
+
+  it('refuses a move that lands the view in the wrong container', () => {
+    const before = screen('            Text("A")\n            HStack {\n                Text("Inner")\n            }\n            Text("B")')
+    const after = screen('            HStack {\n                Text("Inner")\n                Text("A")\n            }\n            Text("B")')
+    expect(structuralEditProblem({ file: FILE, before, after, kind: 'moveTo', view: span(before, 'Text("A")'), toward: at(before, 'Text("B")'), landed: at(after, 'Text("A")') }))
+      .toBe('This change would put the view somewhere other than where it was dropped. Nothing was changed.')
+  })
+
   it('refuses a change that gives a helper, which holds one view, a second one', () => {
     const helper = (content: string) => `    var header: some View {\n${content}\n    }\n`
     const before = screen('            header\n            Text("Body")', helper('        Text("Header")'))
@@ -80,6 +100,20 @@ describe('changes that do something else', () => {
     const after = screen('            Card()\n            Text("Other")\n            Text("Card")') + card('')
     expect(structuralEditProblem({ file: FILE, before, after, kind: 'moveTo', view: span(before, 'Text("Card")'), toward: at(before, 'Text("Other")'), landed: at(after, '            Text("Card")') + 12 }))
       .toBe('This change would leave `Card` with nothing to show. Nothing was changed.')
+  })
+
+  it('refuses a feature’s rewrite that gives a helper a second view', () => {
+    const helper = (content: string) => `    var header: some View {\n${content}\n    }\n`
+    const before = screen('            header', helper('        Text("Header")'))
+    const after = screen('            header', helper('        Text("Header")\n        Badge(title: "New")'))
+    expect(structuralEditProblem({ file: FILE, before, after, kind: 'restructure', view: span(before, 'header') }))
+      .toBe('`header` can hold only one view, so this change would stop the app from building. Nothing was changed.')
+  })
+
+  it('leaves the rest of a feature’s rewrite to the feature', () => {
+    const before = screen('            Text("A")')
+    const after = screen('            Group {\n                if items.isEmpty {\n                    Text("Nothing here")\n                } else {\n                    Text("A")\n                }\n            }')
+    expect(structuralEditProblem({ file: FILE, before, after, kind: 'restructure', view: span(before, 'Text("A")') })).toBeNull()
   })
 
   it('does not blame a change for a helper that already held two views', () => {
