@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 /**
  * Designing on the canvas.
@@ -239,8 +240,8 @@ struct HomeScreen: View {
 }`
 
 test('a view dropped in its stack’s empty space becomes the stack’s last view (C4)', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  // One file to paste the whole app into.
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { replaceSource } from './designer-helpers'
 
-test('Start designing is the first source and opens by default on fresh and restored projects', async ({ page }) => {
+test('Start designing is the first source and opens a fresh browser; saved work opens on Your projects (B6)', async ({ page }) => {
   await page.goto('/')
   await expect(page).toHaveTitle('Swift Web Studio')
   const sources = page.getByRole('navigation', { name: 'Source', exact: true }).getByRole('button')
@@ -15,7 +15,8 @@ test('Start designing is the first source and opens by default on fresh and rest
   await expect(page.getByTestId('template-confirm')).toBeVisible()
   await page.getByTestId('gallery-dismiss').click()
   await page.reload()
-  await expect(page.getByTestId('gallery-source-design')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('gallery-source-open')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('template-confirm')).toHaveText('Continue editing')
 })
 
 const source = `import SwiftUI

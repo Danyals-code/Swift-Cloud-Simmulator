@@ -40,7 +40,7 @@ test('provider errors keep the prompt and existing project intact', async ({ pag
   await page.getByRole('button', { name: 'Generate app', exact: true }).click()
   await expect(page.getByTestId('prompt-creator').getByRole('alert')).toHaveText('Check your API key.')
   await expect(page.getByLabel('App description', { exact: true })).toHaveValue('A project planner with tasks and weekly summaries.')
-  await expect(page.getByTestId('project-name')).toHaveText('CounterApp')
+  await expect(page.getByTestId('project-name')).toHaveText('MyDesignApp')
 })
 
 test('generation can be cancelled without opening a project', async ({ page }) => {

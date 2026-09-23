@@ -13,6 +13,21 @@ export async function replaceSource(page: Page, source: string) {
   await page.keyboard.insertText(source)
 }
 
+/**
+ * Opens the studio on the Counter example: one file, with state and two buttons.
+ *
+ * A fresh browser starts on the blank screen (B6). Tests written against the Counter
+ * choose it from Features, the way anybody would.
+ */
+export async function openCounter(page: Page) {
+  await page.goto('/')
+  await page.getByTestId('gallery-source-feature').click()
+  await page.getByTestId('template-counter').click()
+  await page.getByTestId('template-confirm').click()
+  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await expect(page.getByTestId('project-name')).toHaveText('CounterApp')
+}
+
 export function cards(page: Page, name: string): Locator {
   return page.getByTestId('authoring-inspector').locator(`[data-testid="modifier-card"][data-modifier-name="${name}"]`)
 }

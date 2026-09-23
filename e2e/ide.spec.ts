@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 /**
  * Phase 4 gates - the IDE experience.
@@ -22,10 +23,7 @@ import { expect, test, type Page } from '@playwright/test'
  * what is already open.
  */
 async function openStudio(page: Page) {
-  await page.goto('/')
-  await expect(page.getByTestId('template-gallery')).toBeVisible()
-  await page.getByTestId('gallery-dismiss').click()
-  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') await page.getByTestId('pane-toggle-debug').click()
   // Code opens with the preview pointing at views; the inspector gates switch back.

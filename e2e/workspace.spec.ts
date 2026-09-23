@@ -28,11 +28,11 @@ test('opening a source file from Design reveals code, and a reload comes back to
   await page.getByTestId('gallery-dismiss').click()
   // Design's navigator lists screens rather than files, so a file opens from Go to file.
   await page.keyboard.press('ControlOrMeta+p')
-  await page.getByTestId('file-switcher-input').fill('CounterApp')
+  await page.getByTestId('file-switcher-input').fill('HomeScreen')
   await page.getByTestId('file-switcher-input').press('Enter')
   await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'develop')
   await expect(page.getByTestId('editor')).toBeVisible()
-  await expect(page.getByTestId('tab-bar').getByRole('tab', { name: 'CounterApp.swift' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('tab-bar').getByRole('tab', { name: 'HomeScreen.swift' })).toHaveAttribute('aria-selected', 'true')
   await page.reload()
   await page.getByTestId('gallery-dismiss').click()
   await expect(page.getByTestId('workspace')).toHaveAttribute('data-mode', 'design')
