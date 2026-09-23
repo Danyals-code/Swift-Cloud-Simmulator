@@ -1432,3 +1432,54 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
     expect(texts(tap(pushed, 'Home'))).toContain('Home')
   })
 })
+
+describe('F3: every ForEach row keeps its own identity', () => {
+  /** Swipes a row open, as a person drags it leftwards, and draws the result. */
+  const swipeOpen = (row: RenderNode) => {
+    applyEvent({ kind: 'drag', handlerId: row.hitTarget!.handlerId, phase: 'ended', location: { x: -90, y: 0 }, startLocation: { x: 0, y: 0 }, translation: { x: -90, y: 0 } })
+    return rerender(revision++)
+  }
+
+  it('gives rows whose ids differ only in punctuation their own actions', () => {
+    const r = runView(`@State private var picked = "none"
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(["C", "C++", "C#"], id: \\.self) { language in Button(language) { picked = language } }
+        }
+      }`)
+    expect(texts(tap(r, 'C++'))).toContain('Picked C++')
+    expect(texts(tap(r, 'C'))).toContain('Picked C')
+  })
+
+  it('deletes the element a swiped row belongs to when each element draws two rows', () => {
+    const r = runView(`@State private var items = ["A", "B", "C"]
+      var body: some View {
+        List {
+          ForEach(items, id: \\.self) { item in Text(item); Text(item + " detail") }
+            .onDelete { offsets in items.remove(atOffsets: offsets) }
+        }
+      }`)
+    const rows = nodes(r).filter(n => n.hitTarget?.role === 'drag')
+    expect(new Set(rows.map(row => row.hitTarget!.handlerId)).size).toBe(6)
+    const after = tap(swipeOpen(rows[3]!), 'Delete')
+    expect(texts(after).filter(t => t !== 'Delete')).toEqual(['A', 'A detail', 'C', 'C detail'])
+  })
+
+  it('warns at a ForEach whose rows share an id, and still keeps their actions apart', () => {
+    const members = `@State private var picked = "none"
+      let pets = [Pet(id: 1, name: "Rex"), Pet(id: 1, name: "Tom")]
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(pets) { pet in Button(pet.name) { picked = pet.name } }
+        }
+      }`
+    const pet = 'struct Pet: Identifiable { let id: Int; let name: String }'
+    const [warning, ...others] = reported(members, pet)
+    expect(others).toEqual([])
+    expect(warning).toMatchObject({ severity: 'warning', message: expect.stringContaining('have the id 1') })
+    expect(warning!.at.startsWith('ForEach(pets)')).toBe(true)
+    expect(texts(tap(compileView(viewSource(members, pet)), 'Rex'))).toContain('Picked Rex')
+  })
+})

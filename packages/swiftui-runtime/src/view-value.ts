@@ -48,6 +48,8 @@ export interface ViewValue {
    * the observable difference between keying by identity and keying by index.
    */
   readonly childKeys?: readonly string[]
+  /** For each `ForEach` child, the place in the collection of the element it was drawn for. */
+  readonly childOffsets?: readonly number[]
   /**
    * The tag `ForEach` gives each of its rows: the row's id, a value of its own type.
    *

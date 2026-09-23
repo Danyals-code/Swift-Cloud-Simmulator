@@ -636,9 +636,7 @@ class Resolver {
       const restyled = view.name === 'Button' ? this.applyButtonStyle(view, path) : view
 
       const children = restyled.childKeys
-        ? restyled.children.map((child, i) =>
-            this.stampRow(child, `${path}-${keySegment(restyled.childKeys![i], i)}`, onDelete, i),
-          )
+        ? this.stampRows(restyled, path, onDelete)
         : this.stampList(restyled.children, path)
 
       const intent = this.intentFor(restyled)
@@ -732,6 +730,43 @@ class Resolver {
         })
       }
     }
+  }
+
+  /**
+   * Stamps a `ForEach`'s rows by their ids.
+   *
+   * An element's first row is at its id, a second row it draws at the id and its place
+   * (`B.1`), and an element whose id an earlier one already has is counted (`A~2`), so
+   * every row has a path and a handler of its own, and a swipe deletes the element its
+   * row was drawn for. SwiftUI warns about a shared id at run time, and so does this.
+   */
+  private stampRows(view: ViewValue, path: string, onDelete: ActionValue | null): ViewValue[] {
+    const keys = view.childKeys!
+    const holders = new Map<string, number[]>()
+    const firstRow = new Map<number, number>()
+    let shared: string | undefined
+    const rows = view.children.map((child, i) => {
+      const key = keys[i]!
+      const offset = view.childOffsets?.[i] ?? i
+      if (!firstRow.has(offset)) firstRow.set(offset, i)
+      const place = i - firstRow.get(offset)!
+      const holding = holders.get(key) ?? []
+      if (!holding.includes(offset)) holding.push(offset)
+      holders.set(key, holding)
+      const repeat = holding.indexOf(offset)
+      if (repeat > 0) shared ??= key
+      const segment = `${keySegment(key, i)}${repeat > 0 ? `~${repeat + 1}` : ''}${place > 0 ? `.${place}` : ''}`
+      return this.stampRow(child, `${path}-${segment}`, onDelete, offset)
+    })
+    if (shared !== undefined) {
+      this.warnings.push({
+        span: view.span,
+        severity: 'warning',
+        code: 'type_mismatch',
+        message: `Two rows of this ForEach have the id ${shared}. SwiftUI needs every row's id to be different, or it can draw or update the wrong row.`,
+      })
+    }
+    return rows
   }
 
   /**
@@ -1724,10 +1759,21 @@ function clamp(value: number, min: number, max: number): number {
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : max
 }
 
+/**
+ * A row's id as a path segment.
+ *
+ * Paths end up in DOM ids and test selectors, so a segment keeps to letters, digits
+ * and `_`. Every other character is written out rather than dropped, or "C", "C++"
+ * and "C#" would be one row and the last registered would take every tap: `_` is
+ * doubled, and anything else becomes its code in hex between two, so no two ids share
+ * a segment. A string id's quotes and a place's `#` are left off, as before, so an id
+ * of letters and digits keeps the path it always had.
+ */
 function keySegment(key: string | undefined, index: number): string {
   if (!key) return String(index)
-  // Paths end up in DOM ids and test selectors, so keep them to safe characters.
-  return key.replace(/[^A-Za-z0-9_]+/g, '') || String(index)
+  const bare = key.startsWith('#') ? key.slice(1) : /^".*"$/s.test(key) ? key.slice(1, -1) : key
+  const segment = [...bare].map((c) => (/[A-Za-z0-9]/.test(c) ? c : c === '_' ? '__' : `_${c.codePointAt(0)!.toString(16)}_`)).join('')
+  return segment || String(index)
 }
 
 function labelled(args: readonly ViewArg[], label: string): SwiftValue | undefined {

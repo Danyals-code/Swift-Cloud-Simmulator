@@ -1822,6 +1822,7 @@ export class SwiftUIHost implements InterpreterHost {
 
     const children: ViewValue[] = []
     const childKeys: string[] = []
+    const childOffsets: number[] = []
 
     // A row's id, read as Swift reads it: a key path can name a computed property or an
     // enum's `rawValue`, which walking stored fields can't see, and then every row had
@@ -1867,10 +1868,11 @@ export class SwiftUIHost implements InterpreterHost {
       for (const row of rows) {
         children.push(implicitTag === undefined ? row : { ...row, implicitTag })
         childKeys.push(key)
+        childOffsets.push(index)
       }
     })
 
-    return view({ name, args, children, modifiers: [], action: null, span: call.span, childKeys })
+    return view({ name, args, children, modifiers: [], action: null, span: call.span, childKeys, childOffsets })
   }
 
   /**
