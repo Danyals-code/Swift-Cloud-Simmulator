@@ -167,6 +167,13 @@ const SHAPES: Readonly<Record<string, ShapeKind>> = {
   Capsule: 'capsule',
 }
 
+/**
+ * Views that stand for their content, like a `Group`: a modifier on one applies to
+ * each thing it holds. A reader or an animator hands its content a value and adds no
+ * box of its own.
+ */
+const PASS_THROUGH_VIEWS: ReadonlySet<string> = new Set(['Group', 'ScrollViewReader', 'PhaseAnimator', 'KeyframeAnimator'])
+
 /** Views that contribute their children to the enclosing stack rather than nesting. */
 const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
   'Group',
@@ -178,8 +185,9 @@ const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
   // detail is pushed onto it. The multi-column form needs a width an iPhone has not
   // got, so collapsing is the real behaviour rather than an approximation of it.
   'NavigationSplitView',
-  'TabView', 'Tab',
+  'TabView', 'Tab', 'TabSection',
   'AnyView',
+  ...PASS_THROUGH_VIEWS,
 ])
 
 /** iOS metrics the chrome is built from. Points, at the default Dynamic Type size. */
@@ -1040,7 +1048,7 @@ class Converter {
        * drew a placeholder - which is what `Group { … }.font(…)` did, and what every
        * `@ViewBuilder` helper of more than one statement now produces.
        */
-      if (view.name === 'Group' && view.children.length > 0) {
+      if (PASS_THROUGH_VIEWS.has(view.name) && view.children.length > 0) {
         out.push(
           ...this.convertList(
             view.children.map((child, i) => ({

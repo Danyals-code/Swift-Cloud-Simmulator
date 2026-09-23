@@ -61,6 +61,7 @@ import {
   EDGE_INSETS_TYPE,
   DIMENSIONS_TYPE,
   GEOMETRY_TYPE,
+  SCROLL_PROXY_TYPE,
   isView,
   STROKE_STYLE_TYPE,
   STYLE_TYPE,
@@ -917,6 +918,15 @@ export class SwiftUIHost implements InterpreterHost {
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
+    // Content handed one value, drawn at rest: a reader's proxy, an animator's first
+    // phase, a keyframe animator's initial value. What would move them never runs.
+    const handed = name === 'ScrollViewReader' ? opaque(SCROLL_PROXY_TYPE, null)
+      : name === 'PhaseAnimator' ? firstPhase(call.args.find((a) => a.label === null)?.value)
+      : name === 'KeyframeAnimator' ? call.args.find((a) => a.label === 'initialValue')?.value
+      : undefined
+    if (handed !== undefined && call.trailingClosure) {
+      return view({ name, args: [], children: this.toViews(call.invokeBuilder(call.trailingClosure, [handed])), modifiers: [], action: null, span: call.span })
+    }
     // `TimelineView(...) { context in ... }`: drawn once, for the moment of the render.
     if (name === 'TimelineView' && call.trailingClosure) {
       const context: SwiftValue = { kind: 'struct', typeName: 'TimelineViewDefaultContext', fields: new Map<string, SwiftValue>([['date', dateValue(Date.now() / 1000)], ['cadence', token('live')]]) }
@@ -1047,6 +1057,10 @@ export class SwiftUIHost implements InterpreterHost {
       const applied = this.applyViewModifier(target, call)
       if (applied !== undefined) return applied
     }
+
+    // `proxy.scrollTo(id)`: there is no channel from the worker to the browser's scroll
+    // position, so it does nothing, and the checker says so at the reader.
+    if (target.kind === 'opaque' && target.typeName === SCROLL_PROXY_TYPE && member === 'scrollTo') return { kind: 'void' }
 
     // `geo.frame(in: .local)` is the proxy's own rectangle, and `.global` where it is on
     // the screen, as the last layout pass placed it. A named space is read as the
@@ -2219,3 +2233,9 @@ function asClosure(value: SwiftValue | undefined): ClosureValue | null {
 
 export { isView, asView, str }
 export type { ClosureValue }
+
+/** The phase a `PhaseAnimator` rests at: the first of those it was given. */
+function firstPhase(phases: SwiftValue | undefined): SwiftValue {
+  const given = asProjection(phases)?.get() ?? phases
+  return given?.kind === 'array' ? given.elements[0] ?? NIL : NIL
+}

@@ -905,6 +905,9 @@ export class Checker {
         if (placement?.kind === 'memberAccess' && ['keyboard', 'bottomBar', 'principal'].includes(placement.member)) reason = `the .${placement.member} placement is not implemented; its controls are omitted`
       }
       if (callee.name === 'TimelineView') reason = 'the timeline runs only once, for the moment it is drawn, and does not advance its schedule'
+      if (callee.name === 'ScrollViewReader') reason = 'what it holds is drawn, and scrollTo does not scroll the preview'
+      if (callee.name === 'PhaseAnimator') reason = 'its content is drawn at the first phase, and does not animate through the others'
+      if (callee.name === 'KeyframeAnimator') reason = 'its content is drawn at the initial value, and the keyframes do not run'
       if (callee.name === 'AsyncImage') reason = 'remote loading and image phases are not implemented; only the placeholder is previewed'
     } else if (callee.kind === 'memberAccess' && rootsInAView(callee.base)) {
       feature = `.${callee.member}`

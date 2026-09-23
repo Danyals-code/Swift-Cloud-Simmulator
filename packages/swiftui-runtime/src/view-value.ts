@@ -282,6 +282,9 @@ export interface GradientPayload {
 /** A `GeometryProxy`, as `GeometryReader`'s closure receives it. */
 export const GEOMETRY_TYPE = 'GeometryProxy'
 
+/** A `ScrollViewProxy`, as `ScrollViewReader`'s closure receives it. Its `scrollTo` does nothing. */
+export const SCROLL_PROXY_TYPE = 'ScrollViewProxy'
+
 /**
  * `ViewDimensions` - what an `.alignmentGuide` closure is handed.
  *

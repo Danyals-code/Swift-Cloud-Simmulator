@@ -34,7 +34,9 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'List', 'Section', 'Form',
   'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView', 'Tab',
   'DisclosureGroup', 'AnyView', 'GroupBox', 'LabeledContent', 'ControlGroup',
-  'NavigationSplitView', 'TimelineView',
+  'NavigationSplitView', 'TimelineView', 'TabSection',
+  // content handed one value: a proxy, a first phase, an initial value
+  'ScrollViewReader', 'PhaseAnimator', 'KeyframeAnimator',
   // controls drawn plainly
   'DatePicker', 'ColorPicker', 'TextEditor', 'Menu', 'ShareLink', 'Gauge', 'AsyncImage',
   'ContentUnavailableView',
@@ -177,7 +179,7 @@ export function isViewRoot(name: string): boolean {
  */
 export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // containers
-  'ScrollViewReader', 'EquatableView',
+  'EquatableView',
   // data-driven
   'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
   // charts
@@ -191,11 +193,10 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // in a file blanked the whole preview. `ContentUnavailableView` is the one that
   // found this: an empty-state view is written on the way to a first screen, not after
   // it.
-  'PhaseAnimator', 'KeyframeAnimator',
   'EditButton', 'PasteButton', 'RenameButton',
   'UnevenRoundedRectangle', 'AnyShape',
   // iOS 18
-  'TabSection', 'MeshGradient',
+  'MeshGradient',
 ])
 
 /**
@@ -372,7 +373,7 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Color', 'UIColor', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
-  'Material', 'StrokeStyle', 'GeometryProxy', 'Gradient', 'AnyShapeStyle',
+  'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle',
   'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',

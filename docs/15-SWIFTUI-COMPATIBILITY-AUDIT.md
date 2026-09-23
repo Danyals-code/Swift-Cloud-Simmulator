@@ -76,12 +76,12 @@ user's Swift source.
 
 The registry explicitly lists:
 
-- `ScrollViewReader`, `EquatableView`, `Table`, `TableColumn`, `OutlineGroup`, `MultiDatePicker`.
+- `EquatableView`, `Table`, `TableColumn`, `OutlineGroup`, `MultiDatePicker`.
 - `Chart`, `BarMark`, `LineMark`, `PointMark`, `AreaMark`, `RuleMark`.
 - `Map`, `Marker`, `Annotation`, `VideoPlayer`, `SceneView`, `PhotosPicker`.
 - `Settings`, `MenuBarExtra`, `DocumentGroup`.
-- `PhaseAnimator`, `KeyframeAnimator`, `EditButton`, `PasteButton`, `RenameButton`.
-- `UnevenRoundedRectangle`, `AnyShape`, `TabSection`, `MeshGradient`.
+- `EditButton`, `PasteButton`, `RenameButton`.
+- `UnevenRoundedRectangle`, `AnyShape`, `MeshGradient`.
 
 This list includes framework helpers as well as views. It is not an exhaustive list of
 Apple APIs missing from the preview. The full in-repo registries live in

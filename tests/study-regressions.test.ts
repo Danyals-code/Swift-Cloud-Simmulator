@@ -1483,3 +1483,44 @@ describe('F3: every ForEach row keeps its own identity', () => {
     expect(texts(tap(compileView(viewSource(members, pet)), 'Rex'))).toContain('Picked Rex')
   })
 })
+
+describe('F12: containers that hand their content a value draw it', () => {
+  const placeholders = (r: CompileResult) => nodes(r).filter(n => n.placeholder).map(n => n.placeholder!.feature)
+  const warnings = (r: CompileResult) => r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)
+
+  it('draws what a ScrollViewReader holds, and says scrollTo does not scroll the preview', () => {
+    const r = compileView(viewSource('var body: some View { ScrollViewReader { proxy in ScrollView { Text("Inside reader"); Button("Top") { proxy.scrollTo(0) } } } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toContain('Inside reader')
+    expect(warnings(r)).toEqual([expect.stringContaining('scrollTo')])
+    expect(tap(r, 'Top').logs.filter(log => log.level === 'error')).toEqual([])
+  })
+
+  it('draws a PhaseAnimator at its first phase', () => {
+    const r = compileView(viewSource('var body: some View { PhaseAnimator([false, true]) { on in Text(on ? "On" : "Off") } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toEqual(['Off'])
+    expect(warnings(r)).toEqual([expect.stringContaining('first phase')])
+  })
+
+  it('draws a KeyframeAnimator at its initial value', () => {
+    const r = compileView(viewSource('var body: some View { KeyframeAnimator(initialValue: 1.0) { value in Text("Scale \\(value)") } keyframes: { _ in LinearKeyframe(2.0, duration: 1) } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toEqual(['Scale 1.0'])
+    expect(warnings(r)).toEqual([expect.stringContaining('initial value')])
+  })
+
+  it("puts a TabSection's tabs in the tab bar", () => {
+    const r = runView(`var body: some View {
+        TabView {
+          Tab("Home", systemImage: "house") { Text("Home page") }
+          TabSection("More") {
+            Tab("One", systemImage: "star") { Text("Tab one") }
+            Tab("Two", systemImage: "heart") { Text("Tab two") }
+          }
+        }
+      }`)
+    expect(controls(r)).toEqual(expect.arrayContaining(['Home', 'One', 'Two']))
+    expect(texts(tap(r, 'Two'))).toContain('Tab two')
+  })
+})

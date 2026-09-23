@@ -1454,7 +1454,8 @@ class Resolver {
     const selection = labelled(tabs.args, 'selection')
     const binding = asProjection(selection)
 
-    const flatten = (views: readonly ViewValue[]): readonly ViewValue[] => views.flatMap(v => ['Group', 'ForEach'].includes(v.name) ? flatten(v.children) : [v])
+    // On a phone a `TabSection`'s tabs are tabs like any other; its title heads them only in a sidebar.
+    const flatten = (views: readonly ViewValue[]): readonly ViewValue[] => views.flatMap(v => ['Group', 'ForEach', 'TabSection'].includes(v.name) ? flatten(v.children) : [v])
     const pages = flatten(tabs.children)
     if (pages.length === 0) return { content: [], tabBar: null, pages, selected: 0 }
 
