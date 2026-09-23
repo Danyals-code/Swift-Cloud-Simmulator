@@ -1,4 +1,5 @@
 import type { Diagnostic, DiagnosticCode, FixIt, SourceSpan } from '@studio/shared'
+import { SYMBOL_MAP, symbolDefinition } from '@studio/shared'
 import type {
   Block,
   ConformanceModel,
@@ -752,6 +753,7 @@ export class Checker {
           this.checkColorName(only.value.member, only.value.memberSpan, 'uikit')
         }
         if (expr.callee.kind === 'memberAccess' && STYLE_MODIFIERS.has(expr.callee.member)) this.checkStyleColor(expr.args)
+        if (expr.callee.kind === 'identifier' && !scope.has(expr.callee.name) && !this.types.has(expr.callee.name)) this.checkSymbolNames(expr.args)
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
         return
@@ -954,34 +956,9 @@ export class Checker {
     )
   }
 
-  /**
-   * The nearest name that is actually in scope, or null.
-   *
-   * Offered only when the edit distance is small relative to the name's length, so a
-   * three-letter typo does not suggest an unrelated three-letter name. A fix the user
-   * has to undo costs more than no fix, which is the same rule the rest of this file
-   * follows.
-   */
+  /** The nearest name that is actually in scope, or null. */
   private closestName(name: string, scope: Scope): string | null {
-    const budget = name.length <= 4 ? 1 : 2
-    let best: string | null = null
-    let bestDistance = budget + 1
-
-    const consider = (candidate: string): void => {
-      if (candidate === name || Math.abs(candidate.length - name.length) > budget) return
-      const distance = editDistance(name.toLowerCase(), candidate.toLowerCase())
-      if (distance < bestDistance) {
-        bestDistance = distance
-        best = candidate
-      }
-    }
-
-    for (const candidate of scope.allNames()) consider(candidate)
-    for (const candidate of this.types.keys()) consider(candidate)
-    for (const candidate of this.enums.keys()) consider(candidate)
-    for (const candidate of SUPPORTED_VIEWS) consider(candidate)
-
-    return bestDistance <= budget ? best : null
+    return nearestName(name, [...scope.allNames(), ...this.types.keys(), ...this.enums.keys(), ...SUPPORTED_VIEWS])
   }
 
   /**
@@ -1137,8 +1114,7 @@ export class Checker {
     if (value?.kind !== 'memberAccess' || value.base !== null) return
     const name = value.member
     if (KNOWN_COLOR_NAMES.has(name) || this.declaredExtensionProperties.has(name)) return
-    const budget = name.length <= 4 ? 1 : 2
-    const near = [...KNOWN_COLOR_NAMES].find((known) => editDistance(name.toLowerCase(), known.toLowerCase()) <= budget)
+    const near = nearestName(name, KNOWN_COLOR_NAMES)
     if (!near) return
     this.report(
       value.memberSpan,
@@ -1148,6 +1124,33 @@ export class Checker {
       undefined,
       [{ title: `Use .${near}`, edits: [{ span: value.memberSpan, newText: near }] }],
     )
+  }
+
+  /**
+   * Warns on an SF Symbol name the preview has no drawing for: it draws a question mark
+   * there. Only a literal name, given as `systemName:` or `systemImage:` to a call the
+   * project doesn't declare. Some real symbols are missing from the preview's set too,
+   * so the warning never says the name is wrong unless it is a letter or two from one
+   * the preview draws.
+   */
+  private checkSymbolNames(args: readonly { label: string | null; value: Expr }[]): void {
+    for (const arg of args) {
+      if (arg.label !== 'systemName' && arg.label !== 'systemImage') continue
+      const literal = arg.value
+      if (literal.kind !== 'stringLiteral' || literal.segments.some((segment) => segment.kind !== 'text')) continue
+      const name = literal.segments.map((segment) => (segment.kind === 'text' ? segment.value : '')).join('')
+      if (symbolDefinition(name)) continue
+      const near = nearestName(name, Object.keys(SYMBOL_MAP))
+      this.report(
+        literal.span,
+        'warning',
+        'unresolved_member',
+        `The preview has no drawing for the symbol '${name}' and shows a question mark. ` +
+          (near ? `Did you mean '${near}'? If '${name}' is right, it still shows in the app.` : 'If the name is right, it still shows in the app.'),
+        undefined,
+        near ? [{ title: `Use '${near}'`, edits: [{ span: literal.span, newText: JSON.stringify(near) }] }] : undefined,
+      )
+    }
   }
 
   /**
@@ -1232,6 +1235,29 @@ export class Checker {
       ...(fixIts && fixIts.length > 0 ? { fixIts } : {}),
     })
   }
+}
+
+/**
+ * The candidate nearest to a misspelt name, or null.
+ *
+ * Offered only when the edit distance is small relative to the name's length, so a
+ * three-letter typo does not suggest an unrelated three-letter name. A fix the user
+ * has to undo costs more than no fix, which is the same rule the rest of this file
+ * follows.
+ */
+function nearestName(name: string, candidates: Iterable<string>): string | null {
+  const budget = name.length <= 4 ? 1 : 2
+  let best: string | null = null
+  let bestDistance = budget + 1
+  for (const candidate of candidates) {
+    if (candidate === name || Math.abs(candidate.length - name.length) > budget) continue
+    const distance = editDistance(name.toLowerCase(), candidate.toLowerCase())
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = candidate
+    }
+  }
+  return best
 }
 
 /**

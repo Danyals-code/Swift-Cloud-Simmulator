@@ -11,6 +11,7 @@ import { AUTHORING_COLOR_HEX } from '../packages/swift-sema/src/authoring-resour
 import { DEVICES } from '@studio/sim-shell'
 import { normalizeProject, projectFromFiles } from '@studio/project-model'
 import { TEMPLATES, createProjectFromTemplate } from '@studio/project-model/templates'
+import { VIEW_CATALOG } from '../apps/web/lib/viewCatalog'
 import { ancestors, worldFrame } from './render-geometry'
 
 /**
@@ -821,5 +822,41 @@ describe('E15: new projects start on the iPhone 18 Pro, targeting iOS 27', () =>
     const saved = createProjectFromTemplate(TEMPLATES[0]!)
     const old = normalizeProject({ ...saved, manifest: { ...saved.manifest, device: 'iphone-15', deploymentTarget: '17.0' } })
     expect([old.manifest.device, old.manifest.deploymentTarget]).toEqual(['iphone-15', '17.0'])
+  })
+})
+
+describe('E16a: an SF Symbol name the preview has no drawing for warns at the name', () => {
+  /** The diagnostics, each with the source it points at and the replacement it offers. */
+  function reported(members: string, declarations = '') {
+    const source = viewSource(members, declarations)
+    const result = compileView(source)
+    expect(result.renderTree).not.toBeNull()
+    return result.diagnostics.map(d => ({ severity: d.severity, message: d.message, at: source.slice(d.span.start, d.span.end), fix: d.fixIts?.[0]?.edits[0]?.newText }))
+  }
+
+  it.each(['Image(systemName: "hose")', 'Label("Home", systemImage: "hose")', 'Button("Home", systemImage: "hose") { }'])(
+    'warns at the name in %s, offering the nearest one it draws', (view) => {
+      expect(reported(`var body: some View { ${view} }`)).toEqual([{ severity: 'warning', message: expect.stringContaining("If 'hose' is right, it still shows in the app."), at: '"hose"', fix: '"house"' }])
+    })
+
+  it('says a name nothing is near may still be a real symbol', () => {
+    const [warning, ...rest] = reported('var body: some View { Image(systemName: "figure.climbing.rope") }')
+    expect(rest).toEqual([])
+    expect(warning).toMatchObject({ severity: 'warning', at: '"figure.climbing.rope"', fix: undefined })
+    expect(warning!.message).toContain('the app')
+  })
+
+  it('does not warn for a name it draws, or one it can only know by running', () => {
+    expect(reported('var body: some View { Image(systemName: "house") }')).toEqual([])
+    expect(reported('let name = "nope"\n var body: some View { Image(systemName: name) }')).toEqual([])
+    expect(reported('let n = 1\n var body: some View { Image(systemName: "\\(n).circle") }')).toEqual([])
+    expect(reported('var body: some View { Icon(systemName: "nope") }', 'struct Icon: View { let systemName: String; var body: some View { Text(systemName) } }')).toEqual([])
+  })
+
+  it('draws both icons of the Library\'s Tabs snippet', () => {
+    const snippet = VIEW_CATALOG.find(item => item.id === 'tabview')!.snippet
+    expect(reported(`var body: some View { ${snippet} }`)).toEqual([])
+    const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: runView(`var body: some View { ${snippet} }`).renderTree! }))
+    expect(markup).not.toContain('unsupported symbol')
   })
 })
