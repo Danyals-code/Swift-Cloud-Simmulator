@@ -658,7 +658,7 @@ function ReplaceConfirm({
 function UnsavedConfirm({ projectName, onStay, onSwitch }: { projectName: string; onStay: () => void; onSwitch: () => void }) {
   const { status, busy, download } = useRecoveryActions()
   return (
-    <div className="fixed inset-0 z-[960] grid place-items-center bg-black/40" onPointerDown={onStay} data-testid="unsaved-confirm">
+    <div className="fixed inset-0 z-[960] grid place-items-center bg-black/40" onPointerDown={(event) => { event.stopPropagation(); onStay() }} data-testid="unsaved-confirm">
       <div
         role="alertdialog"
         aria-modal="true"
