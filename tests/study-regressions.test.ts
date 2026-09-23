@@ -41,6 +41,7 @@ ${members}
 const nodes = (r: CompileResult): readonly RenderNode[] => r.renderTree?.nodes ?? []
 const texts = (r: CompileResult): string[] => nodes(r).flatMap(n => n.text?.runs.map(run => run.text) ?? [])
 const controls = (r: CompileResult) => nodes(r).filter(n => n.hitTarget).map(n => n.a11y?.label)
+const symbols = (r: CompileResult): string[] => nodes(r).flatMap(n => (n.image?.symbol ? [n.image.symbol] : []))
 /** Where the text is drawn on the screen, following any containers it is placed inside. */
 const placed = (r: CompileResult, value: string) =>
   worldFrame(nodes(r), nodes(r).find(n => n.text?.runs.some(run => run.text === value))!)
@@ -261,6 +262,21 @@ describe('backgrounds and overlays given as a closure or a custom view', () => {
     for (const overlay of ['.overlay(Badge())', '.overlay { Badge() }', '.overlay(Badge(), alignment: .topTrailing)']) {
       const r = runView(`var body: some View { Color.blue.frame(width: 100, height: 100)${overlay} }`, badge)
       expect(texts(r), overlay).toContain('New')
+    }
+  })
+})
+
+describe('controls written with a title and systemImage:', () => {
+  it('draw the icon beside the title, as a Label does', () => {
+    const controls = [
+      'Button("Add", systemImage: "plus") { }',
+      'Menu("Add", systemImage: "plus") { Button("One") { } }',
+      'Toggle("Add", systemImage: "plus", isOn: .constant(true))',
+    ]
+    for (const control of controls) {
+      const r = runView(`var body: some View { ${control} }`)
+      expect(symbols(r), control).toEqual(['plus'])
+      expect(texts(r), control).toContain('Add')
     }
   })
 })

@@ -2153,10 +2153,11 @@ class Converter {
   }
 
   private button(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0))
+    const iconLabel = titleAndIconLabel(view)
+    const title = iconLabel ? null : stringArg(positional(view.args, 0))
     // `Button { save() } label: { … }` puts the content in a labelled argument,
     // because the unlabelled trailing closure is already the action.
-    const content = view.children.length > 0 ? view.children : argViews(view, 'label')
+    const content = iconLabel ? [iconLabel] : view.children.length > 0 ? view.children : argViews(view, 'label')
     const label: LayoutElement =
       title !== null
         ? { kind: 'text', id: `${path}label`, text: title, ...origin }
@@ -2344,7 +2345,8 @@ class Converter {
 
   private toggle(view: ViewValue, path: string, origin: object): LayoutElement {
     const on = truthyBinding(labelled(view.args, 'isOn'))
-    const title = stringArg(positional(view.args, 0))
+    const iconLabel = titleAndIconLabel(view)
+    const title = iconLabel ? null : stringArg(positional(view.args, 0))
     const style = this.styles.toggle
 
     const label: LayoutElement =
@@ -2356,7 +2358,7 @@ class Converter {
             axis: 'horizontal',
             spacing: 6,
             alignment: CENTER,
-            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+            children: this.convertList(iconLabel ? [iconLabel] : view.children, `${path}label`, 'horizontal'),
           }
 
     const track = switchControl(path, on, this.styles.tint ?? this.color('green'), this.color('tertiarySystemFill'))
@@ -4265,6 +4267,22 @@ function zstackAlignment(args: readonly ViewArg[]): Alignment {
  * `Button { … } label: { Text("Save") }` hands its label over as an argument rather
  * than as a child, because the unlabelled trailing closure is already the action.
  */
+
+/**
+ * `Button("Add", systemImage: "plus")`, and `Menu` and `Toggle` written the same way:
+ * shorthand for a `Label` as the control's label. Without it only the title was drawn.
+ */
+function titleAndIconLabel(view: ViewValue): ViewValue | null {
+  if (!labelled(view.args, 'systemImage') || stringArg(positional(view.args, 0)) === null) return null
+  return {
+    name: 'Label',
+    args: view.args.filter((arg) => arg.label === null || arg.label === 'systemImage'),
+    children: [],
+    modifiers: [],
+    action: null,
+    span: view.span,
+  }
+}
 function argViews(view: ViewValue, label: string): ViewValue[] {
   return view.args
     .filter((a) => a.label === label)
