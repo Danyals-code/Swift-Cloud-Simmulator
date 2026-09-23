@@ -383,6 +383,8 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'LayoutDirection', 'UserInterfaceSizeClass', 'Locale',
   'View', 'App', 'Scene', 'Identifiable', 'Equatable', 'Hashable', 'Comparable', 'Codable',
   'Void', 'Any', 'AnyObject', 'Never',
+  // Foundation around dates: a timer never fires in the preview, and the checker says so.
+  'Timer', 'Calendar',
 ])
 
 /**

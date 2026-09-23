@@ -37,7 +37,7 @@ const gaps: Record<string, string> = {
   'grid-cell-span': 'gridCellColumns', 'safe-area-padding': 'safeAreaPadding',
   'preferred-scheme': 'preferredColorScheme', 'symbol-effects': 'symbolEffect',
   'scroll-reader': 'ScrollViewReader', 'custom-environment': '@Environment(featureEnabled)',
-  'dateformatter': 'DateFormatter', 'calendar': 'Calendar', 'timeline-context': 'timeline runs only once',
+  'dateformatter': 'DateFormatter', 'timeline-context': 'timeline runs only once',
   'async-phase': 'remote loading and image phases', 'map-placeholder': 'Map',
   'chart-placeholder': 'Chart', 'uneven-shape': 'UnevenRoundedRectangle',
 }

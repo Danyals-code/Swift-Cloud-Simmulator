@@ -754,6 +754,12 @@ export class Checker {
         }
         if (expr.callee.kind === 'memberAccess' && STYLE_MODIFIERS.has(expr.callee.member)) this.checkStyleColor(expr.args)
         if (expr.callee.kind === 'identifier' && !scope.has(expr.callee.name) && !this.types.has(expr.callee.name)) this.checkSymbolNames(expr.args)
+        if (
+          expr.callee.kind === 'memberAccess' && expr.callee.base?.kind === 'identifier' && expr.callee.base.name === 'Timer' &&
+          !scope.has('Timer') && !this.types.has('Timer') && (expr.callee.member === 'publish' || expr.callee.member === 'scheduledTimer')
+        ) {
+          this.report(expr.span, 'warning', 'unsupported_language_feature', "The preview doesn't run timers, so this one never fires here. It runs in the app.", 'Timer')
+        }
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
         return

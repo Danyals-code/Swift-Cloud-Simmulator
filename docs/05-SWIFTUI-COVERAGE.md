@@ -344,10 +344,12 @@ missing without anything saying so.
 | `type(of:)`, `fatalError`, `assert`, `precondition` | ✅ | - | a failed assertion is a trap reported on its line |
 | Bitwise `&`, `\|`, `^`, `<<`, `>>` | ✅ | - | computed in `BigInt`, so a shift past 32 bits is not truncated |
 | `UUID` | ✅ | - | random, and prints as its `uuidString` |
-| `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, `formatted()`, comparison, `Date.now`. No calendar: there is no `Calendar`, no `DateComponents` and no `DateFormatter` |
+| `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, comparison, `Date.now`. `formatted()` is a numeric date and a short time, as in iOS, and `formatted(date:time:)` takes the parts it is given. No `DateFormatter` |
+| `Calendar` | 🟡 | - | `Calendar.current`, in the preview's time zone: `component(_:from:)`, `date(byAdding:value:to:)`, `startOfDay(for:)`, `isDateInToday` and its neighbours, `isDate(_:inSameDayAs:)`, and `dateComponents` from one date or between two, largest unit first |
+| `Timer` | 🟡 | - | `Timer.publish(every:on:in:).autoconnect()` with `.onReceive`, and `Timer.scheduledTimer`, are accepted and never fire: the preview draws one moment, and warns where a timer is made |
 | `URL` | 🟡 | - | `URL(string:)` is failable and the string is kept as written; `absoluteString`, `path`, `host`, `scheme`, `query`, `lastPathComponent`, `pathExtension`, `appendingPathComponent`. Nothing is fetched |
 | `Codable` over JSON | ⬜ | - | listed in Phase 2's scope and never built |
-| `Calendar`, `DateFormatter`, `NumberFormatter`, `Measurement` | ⬜ | - | `Text`'s `format:` styles cover what view code usually needs |
+| `DateFormatter`, `NumberFormatter`, `Measurement` | ⬜ | - | `Text`'s `format:` styles cover what view code usually needs |
 
 ## Known approximations
 
@@ -397,10 +399,9 @@ Listed in the exported README so nothing is a surprise on the Mac:
     bound would hand back a value that prints plausibly and traps on the first arithmetic done
     with it. `Int.max` is written almost exclusively as the starting point for a minimum, where
     either bound behaves identically. The same limit is why `1 << 60` traps rather than rounding.
-13. **A `Date` has no calendar.** Intervals, comparison and formatting work; there is no
-    `Calendar`, `DateComponents` or `DateFormatter`, so "the start of this month" cannot be
-    computed. `Text(date, style: .relative)` and `.timer` are computed once, at render, because
-    the preview has no clock to tick them with.
+13. **Time stands still.** `Text(date, style: .relative)` and `.timer` are computed once, at
+    render, because the preview has no clock to tick them with, and a `Timer` never fires for
+    the same reason. The common `Calendar` members work; there is no `DateFormatter`.
 14. **Locale-formatted output is the browser's.** `Date.formatted()`, `Text(date, style:)` and
     `Text(_, format:)` go through `Intl`, so the separators, the order and the currency symbols
     are the platform's real ones rather than a transcription - and two machines in different

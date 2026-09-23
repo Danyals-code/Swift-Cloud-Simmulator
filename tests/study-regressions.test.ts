@@ -973,3 +973,59 @@ describe("E11a: a view the preview doesn't know draws a placeholder, not a blank
     expect(r.renderTree).not.toBeNull()
   })
 })
+
+describe('E11a: the Foundation the AI writes around its views: Timer, Calendar and formatted dates', () => {
+  /** Noon UTC on 9 September 2001: the same calendar day in every time zone from UTC-11 to UTC+11. */
+  const noon = 'Date(timeIntervalSince1970: 1_000_036_800)'
+
+  it('draws a view driven by a timer as it first draws, and says the timer does not fire here', () => {
+    const r = compileView(viewSource(`@State private var seconds = 0
+      let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+      var body: some View { Text("\\(seconds) s").onReceive(timer) { _ in seconds += 1 } }`))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(r.diagnostics.map(d => d.message)).toContainEqual(expect.stringContaining("doesn't run timers"))
+    expect(texts(r)).toContain('0 s')
+  })
+
+  it('schedules a timer that never fires here, and invalidates it', () => {
+    const r = compileView(viewSource(`@State private var count = 0
+      @State private var timer: Timer?
+      var body: some View {
+        Text("\\(count) ticks")
+          .onAppear { timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in count += 1 } }
+          .onDisappear { timer?.invalidate() }
+      }`))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(r)).toContain('0 ticks')
+  })
+
+  it("reads a date's parts, adds to it and counts days between two with Calendar.current", () => {
+    const r = runView(`let date = ${noon}
+      var body: some View {
+        VStack {
+          Text("\\(Calendar.current.component(.year, from: date))-\\(Calendar.current.component(.month, from: date))-\\(Calendar.current.component(.day, from: date))")
+          Text("\\(Calendar.current.dateComponents([.day], from: date, to: Calendar.current.date(byAdding: .day, value: 3, to: date)!).day ?? 0) days")
+          Text(Calendar.current.isDateInToday(Date()) ? "today" : "not today")
+          Text(Calendar.current.isDate(date, inSameDayAs: Calendar.current.startOfDay(for: date)) ? "same day" : "other day")
+        }
+      }`)
+    expect(texts(r)).toEqual(expect.arrayContaining(['2001-9-9', '3 days', 'today', 'same day']))
+  })
+
+  it('formats a date with the parts it is asked for', () => {
+    const r = runView(`let date = ${noon}
+      var body: some View {
+        VStack {
+          Text(date.formatted(date: .abbreviated, time: .omitted))
+          Text(date.formatted(date: .long, time: .omitted))
+          Text(date.formatted(date: .numeric, time: .omitted))
+        }
+      }`)
+    expect(texts(r)).toEqual(['Sep 9, 2001', 'September 9, 2001', '9/9/2001'])
+  })
+
+  it('formats a date given no arguments as a numeric date and a short time, as iOS does', () => {
+    const [text] = texts(runView(`let date = ${noon}\n var body: some View { Text(date.formatted()) }`))
+    expect(text).toMatch(/^9\/9\/2001, \d{1,2}:00[\s\u202f][AP]M$/)
+  })
+})

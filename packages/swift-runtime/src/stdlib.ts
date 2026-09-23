@@ -1,5 +1,6 @@
 import type { CallArgument } from './host'
 import { PREVIEW_LIMITS } from './limits'
+import { CALENDAR_TYPE, TIMER_TYPE, calendarValue, callCalendarMember, callTimerMember, formatDate, timerValue, tokenNameOf } from './calendar'
 import {
   applyKeyPath,
   array,
@@ -404,9 +405,7 @@ export function callBuiltinMember(
         case 'rounded': {
           // `.rounded(.up)` and friends. The bare form rounds halves away from zero,
           // which is Swift's rule and not `Math.round`'s.
-          const rule = arg(0)
-          const name = rule?.kind === 'opaque' ? String((rule.payload as { name?: string }).name ?? '') : ''
-          switch (name) {
+          switch (tokenNameOf(arg(0))) {
             case 'up':
               return double(Math.ceil(target.value))
             case 'down':
@@ -451,6 +450,8 @@ export function callBuiltinMember(
       }
 
     case 'opaque': {
+      if (target.typeName === TIMER_TYPE) return callTimerMember(target, member)
+      if (target.typeName === CALENDAR_TYPE) return callCalendarMember(member, args)
       const date = asDate(target)
       if (date) {
         switch (member) {
@@ -466,11 +467,7 @@ export function callBuiltinMember(
             // The locale-formatted form, which is what `formatted()` is for. The
             // locale is the browser's, so this is the only member of `Date` whose
             // answer legitimately differs between two machines.
-            return str(
-              new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-                new Date(date.epochSeconds * 1000),
-              ),
-            )
+            return formatDate(date.epochSeconds, args)
           case 'description':
             return str(dateDescription(date.epochSeconds))
           default:
@@ -1043,7 +1040,7 @@ const INT_MIN = -Number.MAX_SAFE_INTEGER
  */
 export const BUILTIN_TYPE_NAMES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'CGFloat', 'Bool', 'String', 'Character',
-  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL',
+  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL', 'Timer', 'Calendar',
 ])
 
 /** `Int.max`, `Double.pi`, `Date.now` - a static read on a built-in type. */
@@ -1068,6 +1065,9 @@ export function staticBuiltinProperty(typeName: string, member: string): SwiftVa
       return double(0)
     case 'Date.now':
       return dateValue(Date.now() / 1000)
+    case 'Calendar.current':
+    case 'Calendar.autoupdatingCurrent':
+      return calendarValue()
     case 'Date.distantPast':
       return dateValue(-62_135_596_800)
     case 'Date.distantFuture':
@@ -1084,6 +1084,8 @@ export function callStaticBuiltin(
   args: readonly CallArgument[],
   trap: Trap,
 ): SwiftValue | undefined {
+  // `Timer.publish(every:on:in:)` and `Timer.scheduledTimer(...)`: a timer that never fires here.
+  if (typeName === 'Timer' && (member === 'publish' || member === 'scheduledTimer')) return timerValue()
   if (member !== 'random') return undefined
 
   if (typeName === 'Bool') return bool(Math.random() < 0.5)
