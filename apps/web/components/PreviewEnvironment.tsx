@@ -45,5 +45,5 @@ export function TextSizePicker({ preview, onChange, className }: { preview: Prev
 
 export function ZoomPicker({ preview, scale, onChange, className }: { preview: PreviewSettings; scale: number; onChange: (settings: Partial<PreviewSettings>) => void; className?: string }) {
   const items = ZOOMS.some(item => item.value === preview.zoom) ? ZOOMS : [...ZOOMS, { value: preview.zoom, label: `${Math.round(Number(preview.zoom) * 100)}%` }]
-  return <PopupButton items={items} value={preview.zoom} onChange={value => onChange({ zoom: value })} label="Zoom" title={`Zoom — ${Math.round(scale * 100)}%`} testId="zoom-select" className={className} />
+  return <PopupButton items={items} value={preview.zoom} onChange={value => onChange({ zoom: value })} label="Zoom" title={`Zoom: ${Math.round(scale * 100)}%`} testId="zoom-select" className={className} />
 }

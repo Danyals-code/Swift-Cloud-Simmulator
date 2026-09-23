@@ -33,7 +33,7 @@ describe('A5: exports name the build that made them', () => {
     const entries = unzipSync(exportProjectZip(project, 'xcodeproj', { review, build: BUILD }))
     const report = decoder.decode(entries[`${project.manifest.name}/Studio Report/report.md`]!)
     expect(report.split('\n').slice(0, 3)).toEqual([
-      `# ${project.manifest.name} — project report`,
+      `# ${project.manifest.name}: project report`,
       '',
       'Exported by Swift Web Studio build 0f1e2d3 (commit 0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c, built 2026-10-01T09:00:00.000Z).',
     ])

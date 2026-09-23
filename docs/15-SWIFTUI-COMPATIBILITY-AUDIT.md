@@ -1,4 +1,4 @@
-# SwiftUI compatibility audit — 2026-09-17
+# SwiftUI compatibility audit, 2026-09-17
 
 Follow-up: [visual and interaction checklist](16-SWIFTUI-VISUAL-CHECKLIST.md), including
 new control/presentation fixes and the limits of native comparison.
@@ -11,7 +11,7 @@ source builds in Xcode, and a recognized view name is not proof that all its ove
 
 - 48 independent snippets, composed without the app templates, in light and dark mode.
 - Actual render content, finite layout bounds, input values, button actions, tabs,
-  sheets, bindings, and lifecycle callbacks—not just successful parsing.
+  sheets, bindings, and lifecycle callbacks, not just successful parsing.
 - Focused regressions for layers, shapes, multiline editing, mixed navigation/alert
   flows, malformed source, runtime traps, large allocations, nested collections, and recovery.
 - Worker deadline tests for successful calls, hangs, queued requests, crashes,
@@ -68,7 +68,7 @@ limits, not claims about what native Swift supports.
 | Effects and animation | Common transforms, opacity, blur, basic CSS animations | Many masks/compositing/symbol effects; matched geometry; keyframe/phase animators; native spring/transition semantics |
 | Swift language checking | Many declarations, expressions, control flow and basic Foundation shims | Real Swift type checking, generic constraints, complete overload resolution, actors, general macros, arbitrary packages/frameworks |
 
-Some valid Swift still receives an unresolved-name error—for example binding-collection
+Some valid Swift still receives an unresolved-name error, for example binding-collection
 closure aliases and wrapper backing storage. Those are preview gaps, not mistakes in the
 user's Swift source.
 

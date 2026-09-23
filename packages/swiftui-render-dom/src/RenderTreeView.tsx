@@ -926,7 +926,7 @@ function ImageContent({ node }: { node: RenderNode }) {
   const asset = image.symbol ? symbolAsset(image.symbol, maskId) : null
   if (image.bitmap) return <img src={image.bitmap.url} alt={image.bitmap.name} draggable={false} style={{ display: 'block', width: '100%', height: '100%', objectFit: 'fill', userSelect: 'none' }} />
   const metrics = symbolMetrics(image.symbol)
-  const title = image.symbol ? `${image.symbol} — ${asset?.source === 'ionicons' ? 'Ionicons approximation' : asset ? 'vector approximation' : 'unsupported symbol'}` : undefined
+  const title = image.symbol ? `${image.symbol} (${asset?.source === 'ionicons' ? 'Ionicons approximation' : asset ? 'vector approximation' : 'unsupported symbol'})` : undefined
   if (image.foregroundFill && asset) {
     const viewWidth = node.frame.width, viewHeight = node.frame.height
     return <svg width="100%" height="100%" viewBox={`0 0 ${viewWidth} ${viewHeight}`} aria-hidden>

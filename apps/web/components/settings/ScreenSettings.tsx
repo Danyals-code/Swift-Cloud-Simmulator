@@ -171,7 +171,7 @@ function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onS
         <button type="button" className={styles.iconButton} aria-label={`Delete state ${scenario.name}`} disabled={busy} onClick={() => onDelete(scenarioKey(scenario))}><Icon name="xmark" size={11} /></button>
       </div>)}
     </div>
-    {!inputs.length && !collections.length && !adding && <p className={styles.note}>A state shows this screen with different content — loading, empty, signed out. Add one and the screen gets a switch it can read.</p>}
+    {!inputs.length && !collections.length && !adding && <p className={styles.note}>A state shows this screen with different content: loading, empty, signed out. Add one and the screen gets a switch it can read.</p>}
     {adding && <div className={styles.tokenRow} data-open>
       <div className={styles.row}><label htmlFor="state-name">Name</label><input id="state-name" aria-label="State name" list="state-names" value={name} onChange={event => setName(event.target.value)} /></div>
       <datalist id="state-names"><option>Loading</option><option>Empty</option><option>Error</option><option>Signed out</option></datalist>

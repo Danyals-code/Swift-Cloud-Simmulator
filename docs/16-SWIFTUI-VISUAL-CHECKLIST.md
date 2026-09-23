@@ -1,4 +1,4 @@
-# SwiftUI visual and interaction audit — 2026-09-17
+# SwiftUI visual and interaction audit, 2026-09-17
 
 **No: the preview does not implement this entire checklist correctly.** It is a browser
 implementation of a SwiftUI subset. Several common controls work; others are simplified,

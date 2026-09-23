@@ -6,9 +6,9 @@ Swift and bundled images are the app. Every design action writes one SwiftUI con
 
 Design has one panel on the right, and it shows whatever is selected.
 
-1. **App** — the app's name, its navigation, and the design tokens every screen reads. Click empty canvas, or the App row in the tree.
-2. **Screen** — how the screen is reached, its title, values it overrides for everything inside it, and its states.
-3. **View** — Basics, then the modifier stack, in the order the code runs.
+1. **App**: the app's name, its navigation, and the design tokens every screen reads. Click empty canvas, or the App row in the tree.
+2. **Screen**: how the screen is reached, its title, values it overrides for everything inside it, and its states.
+3. **View**: Basics, then the modifier stack, in the order the code runs.
 
 The tree on the left shows the same app: the App, its Components, one lane per tab, the sheets, and screens nothing links to yet. Files appear in Code mode only.
 
@@ -24,12 +24,12 @@ Open **App → Design tokens**. A token is a Swift member in `DesignSystem/Token
 
 ## The modifier stack
 
-The stack is the code. Cards are listed in source order, top to bottom, and reordering one moves it in the file — `.padding()` then `.background()` colours the padding; the other way round colours only the text.
+The stack is the code. Cards are listed in source order, top to bottom, and reordering one moves it in the file: `.padding()` then `.background()` colours the padding; the other way round colours only the text.
 
 - **Add** offers a searchable list, grouped by what the modifier does. A new modifier lands where it belongs in the order rather than at the end.
 - The switch on a card turns a modifier **off**: the line is commented out in place and restored exactly as written when it is switched back on.
 - A chain that contains a comment somebody wrote, or a modifier the studio does not recognise, is left alone and says so.
-- **Navigate to** is a card in the same stack: pick the screen, and pick how it opens — push, sheet, or full screen. Changing that later rewrites the view: a push is a `NavigationLink`, a sheet is a button that sets a value with a `.sheet` reading it, and switching between them carries the label and the modifiers across. A button that does more than open the screen is left alone and says so.
+- **Navigate to** is a card in the same stack: pick the screen, and pick how it opens: push, sheet, or full screen. Changing that later rewrites the view: a push is a `NavigationLink`, a sheet is a button that sets a value with a `.sheet` reading it, and switching between them carries the label and the modifiers across. A button that does more than open the screen is left alone and says so.
 
 ## The canvas
 
@@ -40,14 +40,14 @@ The canvas is laid out from the navigation, never by hand, so it always matches 
 - Arrows are labeled with how they navigate: solid for a push, dashed for a sheet or full-screen cover. A sheet opened from several screens is drawn once, with an arrow from each opener.
 - **States** stack below a screen inside its tinted frame. Anything inside the frame is a state of that screen; anything outside it is a different screen. A frame shows "+2 states" until it is opened, and **Show all states** in the canvas heading opens every one.
 
-A state is a set of preview inputs — no app data changes, and the screen's layout is shared by every state. Add one in **Screen → States**. A screen with nothing to switch yet gets its first switch from the same form: name the state "Loading" and the screen gains a `loading` value, off by default and on in that state, in one step you can undo. Use it in **Shown when**, or in any value field, to change what the screen shows.
+A state is a set of preview inputs: no app data changes, and the screen's layout is shared by every state. Add one in **Screen → States**. A screen with nothing to switch yet gets its first switch from the same form: name the state "Loading" and the screen gains a `loading` value, off by default and on in that state, in one step you can undo. Use it in **Shown when**, or in any value field, to change what the screen shows.
 
 ## Components from copies
 
 Copy freely, then promote one copy.
 
 1. Select the view and open **Make component**. The studio looks for views with the same shape elsewhere in the project and lists them, pre-ticked; untick any you do not want.
-2. Values the ticked copies disagree on become parameters, named after their role — `title`, `icon`, `action` — and you can rename them before anything is written.
+2. Values the ticked copies disagree on become parameters, named after their role (`title`, `icon`, `action`), and you can rename them before anything is written.
 3. Every ticked copy becomes a call to the new component in one undo step. The Main goes to `DesignSystem/Components/`.
 4. Extra modifiers at the end of a copy's chain stay on the call, so `RowView(icon:title:).opacity(0.5)` keeps its own opacity.
 
@@ -55,7 +55,7 @@ Two views are copies only when their shape matches exactly: the same views neste
 
 ## Navigation and tabs
 
-**App → Navigation** sets the shape: one screen, or tabs. Tabs are a list of rows — name, symbol, screen — written as `TabView` with one `.tabItem` per tab in `App/AppNavigation.swift`. Above five tabs the panel says what iPhone does with the rest. Tabs written in Swift in a way the studio cannot reproduce are shown read-only with **Open in Code**.
+**App → Navigation** sets the shape: one screen, or tabs. Tabs are a list of rows (name, symbol, screen), written as `TabView` with one `.tabItem` per tab in `App/AppNavigation.swift`. Above five tabs the panel says what iPhone does with the rest. Tabs written in Swift in a way the studio cannot reproduce are shown read-only with **Open in Code**.
 
 ## Project shape
 
@@ -67,7 +67,7 @@ DesignSystem/  Tokens.swift, Components/
 Features/      one folder per screen, each with its own #Preview
 ```
 
-New screens get their own folder under `Features/`; components go to `DesignSystem/Components/`; tokens go to `DesignSystem/Tokens.swift`. An imported project keeps its own layout and is edited where it stands. Code the studio does not rewrite — custom expressions, unsupported constructs — appears as a locked block with **Open in Code**; it still runs and still draws.
+New screens get their own folder under `Features/`; components go to `DesignSystem/Components/`; tokens go to `DesignSystem/Tokens.swift`. An imported project keeps its own layout and is edited where it stands. Code the studio does not rewrite (custom expressions, unsupported constructs) appears as a locked block with **Open in Code**; it still runs and still draws.
 
 ## Images
 

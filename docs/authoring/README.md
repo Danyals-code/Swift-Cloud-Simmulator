@@ -19,7 +19,7 @@ Phases 2–8 have implementations for the documented subset. Phase 9 evidence an
 
 ## Supported controls
 
-Text and image names; font presets and literal system-font arguments; named colors; spacing, padding and alignment; fixed/content/fill sizing; corner radius, opacity and line limits; basic accessibility; scroll axes and existing indicator arguments. Existing structural operations—insert, delete, move, reparent, hide and restore—use the same planner.
+Text and image names; font presets and literal system-font arguments; named colors; spacing, padding and alignment; fixed/content/fill sizing; corner radius, opacity and line limits; basic accessibility; scroll axes and existing indicator arguments. Existing structural operations (insert, delete, move, reparent, hide and restore) use the same planner.
 
 Collections expose separate operations for a static row, a template element, a preview record and Swift initial data. Records use stable String/Int IDs and typed String/Int/Double/Bool fields, including optional values and defaults. Adding a field preserves existing constructors through a default. Editable row controls write through real collection bindings.
 

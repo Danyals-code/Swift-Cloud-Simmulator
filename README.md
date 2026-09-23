@@ -73,8 +73,8 @@ The compiler, interpreter, and layout packages are independent of React and the 
 
 ## Documentation
 
-- [Designer guide](docs/authoring/DESIGNER-GUIDE.md) — visual editing, resources, saving, and developer handoff.
-- [Extension guide](docs/authoring/EXTENSION-GUIDE.md) — extending the authoring system.
-- [Architecture](docs/02-ARCHITECTURE.md) and [requirements](docs/01-REQUIREMENTS.md) — system design and product scope.
-- [Roadmap](docs/03-ROADMAP.md) and [defect register](docs/07-DEFECT-REGISTER.md) — planned work and known gaps.
-- [Release acceptance](docs/authoring/RELEASE-ACCEPTANCE.md) — validation requirements and remaining gates.
+- [Designer guide](docs/authoring/DESIGNER-GUIDE.md): visual editing, resources, saving, and developer handoff.
+- [Extension guide](docs/authoring/EXTENSION-GUIDE.md): extending the authoring system.
+- [Architecture](docs/02-ARCHITECTURE.md) and [requirements](docs/01-REQUIREMENTS.md): system design and product scope.
+- [Roadmap](docs/03-ROADMAP.md) and [defect register](docs/07-DEFECT-REGISTER.md): planned work and known gaps.
+- [Release acceptance](docs/authoring/RELEASE-ACCEPTANCE.md): validation requirements and remaining gates.
