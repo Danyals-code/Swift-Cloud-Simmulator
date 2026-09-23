@@ -1609,6 +1609,13 @@ describe('F7: with a syntax error, every redraw shows the errors, never a blank 
     resetPipelineState()
     expect(notice(rerender(revision++))).toEqual(notice(broken))
   })
+
+  it('marks a tree that only carries a message, so the phone can keep the last one that ran', () => {
+    const good = compileView(viewSource('var body: some View { Text("Hello") }'))
+    expect(good.renderTree!.notice).toBeUndefined()
+    const broken = compileView(viewSource('var body: some View { Text("Hello" }'))
+    expect(broken.renderTree!.notice).toEqual({ title: '1 error', detail: "Expected ')' to close an argument list, found '}'." })
+  })
 })
 
 describe('functions that share a name run the one Swift runs', () => {

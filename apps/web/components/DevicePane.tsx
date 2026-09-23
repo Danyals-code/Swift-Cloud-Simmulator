@@ -3,6 +3,7 @@
 import { scenarioKey } from '../lib/screens'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
+import { stateProblem } from '../lib/stateProblem'
 import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
 import type { DeviceKey, DeviceSpec } from '@studio/sim-shell'
 import styles from './Workspace.module.css'
@@ -43,6 +44,8 @@ export interface DevicePaneProps {
   tools?: React.ReactNode
   device: DeviceSpec
   tree: RenderTree | null
+  /** Why the phone is dimmed: the code has errors or stopped, and `tree` is the last screen that ran. */
+  notice?: NonNullable<RenderTree['notice']>
   /** Why each screen the gallery couldn't draw isn't drawn, as its warning says. */
   pagesNotDrawn?: readonly string[]
   /** The compile the canvas draws; a canvas that crashed tries again when it changes. */
@@ -192,6 +195,7 @@ export function DevicePane({
   tools,
   device,
   tree,
+  notice,
   pagesNotDrawn,
   revision,
   selectedRenderIds,
@@ -784,6 +788,7 @@ export function DevicePane({
               }
             : {})}
         />
+        {live && notice ? <p className={styles.stateProblem} role="status">{notice.title}: {notice.detail}</p> : null}
         <StatusBar device={device} colorScheme={preview.colorScheme} />
         {device.hasDynamicIsland ? <DynamicIsland device={device} /> : null}
         {device.homeIndicator ? <HomeIndicator device={device} colorScheme={preview.colorScheme} /> : null}
@@ -1029,13 +1034,7 @@ function StatePhone({ page, scenario, options, device, preview, active, onSelect
     allPages: true,
   })
   const tree = result?.pages?.find(item => item.id === page.id)?.tree ?? null
-  // A state is a set of values for this screen. When the screen no longer has them -
-  // renamed, removed, retyped - that is what to say, not that the code is broken.
-  const mismatch = result?.diagnostics.find(d => d.severity === 'error' && d.code === 'invalid_preview_scenario')
-  const problem = workerError
-    ?? (mismatch ? `This state no longer matches ${page.name}. Open Screen \u203a States to change or remove it.` : null)
-    ?? (result?.diagnostics.some(d => d.severity === 'error') ? 'This state cannot be drawn while the code has errors.' : null)
-    ?? (result && !stale && !tree ? `This state no longer matches ${page.name}. Open Screen \u203a States to change or remove it.` : null)
+  const problem = stateProblem({ page: page.name, compiled: !!result, diagnostics: result?.diagnostics ?? [], drawn: !!tree, stale, workerError })
   return (
     <figure className={styles.pageCard} data-testid="canvas-state" data-state={scenario.name} data-active={active || undefined}>
       <div style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }} data-busy={!tree || stale || undefined}>

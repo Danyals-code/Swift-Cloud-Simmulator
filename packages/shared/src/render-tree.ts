@@ -455,6 +455,11 @@ export interface RenderTree {
   readonly nodes: readonly RenderNode[]
   /** monotonic; lets the renderer cheaply skip an unchanged tree */
   readonly revision: number
+  /**
+   * Set on a tree that only carries a message, because the code has errors or stopped
+   * running. The phone keeps showing the last tree that ran, dimmed, with this over it.
+   */
+  readonly notice?: { readonly title: string; readonly detail: string }
 }
 
 export const EMPTY_RENDER_TREE: RenderTree = {

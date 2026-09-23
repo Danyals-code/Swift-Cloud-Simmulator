@@ -467,7 +467,7 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
       placeholder: { feature: title, reason: detail },
     },
   ]
-  return { canvas: request.canvas, nodes, revision: ++revision }
+  return { canvas: request.canvas, nodes, revision: ++revision, notice: { title, detail } }
 }
 
 /**
