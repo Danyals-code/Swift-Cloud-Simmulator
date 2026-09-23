@@ -6,7 +6,7 @@ import type { AuthoringNode, DesignEditRequest, ExportFormat, NavigationOperatio
 import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
-import { getDevice } from '@studio/sim-shell'
+import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
 import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, SourcePoint, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
@@ -299,7 +299,7 @@ export function Studio() {
   }, [tab, flush])
 
   const images = useMemo(() => project?.assets?.map(asset => ({ name: asset.name, width: asset.light.width / asset.scale, height: asset.light.height / asset.scale, light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined })), [project?.assets])
-  const device = getDevice(project?.manifest.device ?? 'iphone-15')
+  const device = getDevice(project?.manifest.device ?? DEFAULT_DEVICE)
   const files = project?.files ?? NO_FILES
   const [scenarioSelection, setScenarioSelection] = useState<{ projectId: string; key: string } | null>(null)
   const scenario = scenarioSelection?.projectId === project?.id ? project?.studio?.scenarios.find(s => scenarioKey(s) === scenarioSelection?.key) : undefined

@@ -1,4 +1,4 @@
-import { authoringCapability, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
 import { Lexer, Parser, afterOffMarkers, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { viewCallChain } from './design-controls'
 import { authoringViewMinimum } from './authoring-view'
@@ -218,7 +218,7 @@ function offCall(original: string): CallExpr | undefined {
 }
 
 /** The UI receives all source occurrences, including ones it cannot change. */
-export function modifierModel(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = '17.0', allowEdits = true): { modifiers: AuthoringModifier[]; modifierCatalog: ModifierCatalogEntry[] } {
+export function modifierModel(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, allowEdits = true): { modifiers: AuthoringModifier[]; modifierCatalog: ModifierCatalogEntry[] } {
   const parsed = segmentsOf(expr, text)
   if (!parsed) return { modifiers: [], modifierCatalog: [] }
   const { segments } = parsed
@@ -290,7 +290,7 @@ export function editModifier(node: AuthoringNode, expr: Expr, text: string, oper
     const at = index < segments.length ? segments[index]!.start : parsed.end
     const lastPrefix = slices.at(-1)?.match(/^\s*/)?.[0] ?? ''
     const prefix = /\r?\n/.test(lastPrefix) ? lastPrefix : ''
-    const version = Number.parseFloat(deploymentTarget ?? '17.0')
+    const version = Number.parseFloat(deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET)
     return text.slice(0, at) + prefix + entry.source({ target: Number.isFinite(version) ? version : 17, shadowToken: options.shadowToken }) + text.slice(at)
   }
   const index = model.modifiers.findIndex(m => m.id === operation.modifier)

@@ -9,6 +9,9 @@ export const DEFAULT_PREVIEW_TARGET: PreviewTarget = Object.freeze({
   runtime: 'ios-27', sdk: 'ios-27', appearance: 'ios-27',
 })
 
+/** The iOS version a new project targets: the one the preview draws. A saved project keeps its own. */
+export const DEFAULT_DEPLOYMENT_TARGET = '27.0'
+
 export function isPreviewTarget(value: unknown): value is PreviewTarget {
   if (!value || typeof value !== 'object') return false
   const target = value as Record<string, unknown>

@@ -1,4 +1,4 @@
-import { authoringCapability, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
@@ -30,7 +30,7 @@ export function swiftString(value: string): string {
 }
 
 /** Recipes are reconstructed from syntax on every request; the UI never supplies offsets. */
-export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = '17.0'): ControlRecipe[] {
+export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET): ControlRecipe[] {
   if (!['view', 'collection', 'component'].includes(node.kind) || node.name === 'WindowGroup') return []
   const chain = viewCallChain(expr)
   if (!chain || node.properties.some(p => p.name === 'Source')) return []

@@ -1,3 +1,4 @@
+import { DEFAULT_DEPLOYMENT_TARGET } from '@studio/shared'
 import type { AuthoringNode, AuthoringOperation, DesignValue, SourceFile, SourceSpan } from '@studio/shared'
 import { afterOffMarkers, forEachChild, Lexer, Parser, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
@@ -158,7 +159,7 @@ export function guidedAction(ctx: FeatureContext, node: AuthoringNode, operation
       root = ancestor; ancestor = context.nodes.find(n => n.id === ancestor!.parentId)
     }
     if (!hasNavigation) {
-      if (root.kind !== 'view' || Number.parseFloat(ctx.deploymentTarget ?? '17.0') < 16) throw new Error('This screen needs a navigation container, which this project’s iOS version is too old for. Ask a developer to raise it to iOS 16 or newer.')
+      if (root.kind !== 'view' || Number.parseFloat(ctx.deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET) < 16) throw new Error('This screen needs a navigation container, which this project’s iOS version is too old for. Ask a developer to raise it to iOS 16 or newer.')
       // Insert at either boundary so the selected node remains identifiable. A modifier
       // switched off at the end of the root's chain is written after it, and goes inside with it.
       const end = afterOffMarkers(context.files.find(f => f.id === root.source.file)?.text ?? '', root.source.end)

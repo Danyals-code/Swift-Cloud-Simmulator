@@ -221,8 +221,8 @@ test('Phase 3 gate 1 - tapping a rendered Button runs its Swift closure', async 
 
 test('Phase 3 gate 2 - Spacer pushes the buttons to opposite edges', async ({ page }) => {
   // The case that exposes a wrong layout engine. The row is inset by the VStack's
-  // 16pt padding plus the HStack's own 24pt, so the buttons sit at 40 and end at 353
-  // on a 393pt screen.
+  // 16pt padding plus the HStack's own 24pt, so the buttons sit at 40 and end at 362
+  // on the iPhone 18 Pro's 402pt screen.
   await openStudio(page)
   await expect(preview(page)).toContainText('Count: 0')
 
@@ -236,7 +236,7 @@ test('Phase 3 gate 2 - Spacer pushes the buttons to opposite edges', async ({ pa
   const last = backgrounds[backgrounds.length - 1]!
 
   expect(first.x).toBe(40)
-  expect(last.x + last.width).toBe(353)
+  expect(last.x + last.width).toBe(362)
   // They are on the same row.
   expect(first.y).toBe(last.y)
 })
@@ -249,11 +249,11 @@ test('Phase 3 - text is centred by the VStack and sized by its font', async ({ p
   const title = painted.find((n) => n.text === 'Hello, World!')!
   const count = painted.find((n) => n.text === 'Count: 0')!
 
-  // Both centred on a 393pt screen.
-  expect(title.x + title.width / 2).toBeGreaterThan(190)
-  expect(title.x + title.width / 2).toBeLessThan(203)
-  expect(count.x + count.width / 2).toBeGreaterThan(190)
-  expect(count.x + count.width / 2).toBeLessThan(203)
+  // Both centred on a 402pt screen.
+  expect(title.x + title.width / 2).toBeGreaterThan(194)
+  expect(title.x + title.width / 2).toBeLessThan(208)
+  expect(count.x + count.width / 2).toBeGreaterThan(194)
+  expect(count.x + count.width / 2).toBeLessThan(208)
 
   // `.largeTitle` is 41pt tall, `.title2` is 28pt.
   expect(title.height).toBe(41)

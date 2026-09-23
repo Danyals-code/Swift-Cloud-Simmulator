@@ -9,6 +9,8 @@ import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
 import { AUTHORING_COLOR_HEX } from '../packages/swift-sema/src/authoring-resources'
 import { DEVICES } from '@studio/sim-shell'
+import { normalizeProject, projectFromFiles } from '@studio/project-model'
+import { TEMPLATES, createProjectFromTemplate } from '@studio/project-model/templates'
 import { ancestors, worldFrame } from './render-geometry'
 
 /**
@@ -804,5 +806,20 @@ describe('E10: every appear hook on a view runs, and .task(id:) runs again for a
     const before = texts(runView(source('')))[0]!
     expect(before.split(',').sort()).toEqual(['appear', 'change'])
     expect(texts(runView(source('.padding()')))[0]).toBe(before)
+  })
+})
+
+describe('E15: new projects start on the iPhone 18 Pro, targeting iOS 27', () => {
+  it('starts every template, and every set of files opened as a project, there', () => {
+    const opened = projectFromFiles([{ name: 'App.swift', text: viewSource('var body: some View { Text("Hi") }') }])!
+    for (const project of [...TEMPLATES.map(template => createProjectFromTemplate(template)), opened]) {
+      expect([project.manifest.device, project.manifest.deploymentTarget], project.manifest.name).toEqual(['iphone-18-pro', '27.0'])
+    }
+  })
+
+  it('leaves a saved project on the device and iOS version it has', () => {
+    const saved = createProjectFromTemplate(TEMPLATES[0]!)
+    const old = normalizeProject({ ...saved, manifest: { ...saved.manifest, device: 'iphone-15', deploymentTarget: '17.0' } })
+    expect([old.manifest.device, old.manifest.deploymentTarget]).toEqual(['iphone-15', '17.0'])
   })
 })
