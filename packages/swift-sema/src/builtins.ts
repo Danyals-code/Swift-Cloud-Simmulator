@@ -319,11 +319,32 @@ export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['textFieldStyle', new Set(['automatic', 'plain', 'roundedBorder'])],
 ])
 
+/**
+ * The colour names the preview draws, as `Color.name`, `Color(.name)` or `UIColor.name`.
+ *
+ * Any other name draws clear, so the checker warns on it. The runtime's palette holds
+ * exactly these (a test keeps the two equal): the SwiftUI colours, UIKit's names for
+ * them, and the semantic colours, all as the iOS 27 simulator draws them.
+ */
+export const KNOWN_COLOR_NAMES: ReadonlySet<string> = new Set([
+  'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown',
+  'gray', 'black', 'white', 'clear', 'primary', 'secondary', 'tertiary', 'quaternary', 'quinary',
+  'accentColor', 'accent', 'tint',
+  'systemRed', 'systemOrange', 'systemYellow', 'systemGreen', 'systemMint', 'systemTeal', 'systemCyan',
+  'systemBlue', 'systemIndigo', 'systemPurple', 'systemPink', 'systemBrown',
+  'systemGray', 'systemGray2', 'systemGray3', 'systemGray4', 'systemGray5', 'systemGray6',
+  'label', 'secondaryLabel', 'tertiaryLabel', 'quaternaryLabel', 'placeholderText', 'link',
+  'separator', 'opaqueSeparator',
+  'systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground',
+  'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground',
+  'systemFill', 'secondarySystemFill', 'tertiarySystemFill', 'quaternarySystemFill',
+])
+
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */
 export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'String', 'Bool', 'Character',
   'Array', 'Dictionary', 'Set', 'Optional', 'Range', 'ClosedRange',
-  'Color', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
+  'Color', 'UIColor', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
   'Material', 'StrokeStyle', 'GeometryProxy', 'Gradient', 'AnyShapeStyle',

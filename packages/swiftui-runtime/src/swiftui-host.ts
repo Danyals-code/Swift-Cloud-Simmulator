@@ -128,6 +128,8 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
   'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material',
   'Task', 'MainActor', 'Gradient', 'StrokeStyle',
+  // `Color(UIColor.systemGray6)`: UIKit's colours, bridged by name like `Color(.systemGray6)`.
+  'UIColor',
 ])
 
 /**

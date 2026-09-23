@@ -22,6 +22,7 @@ import {
   isViewRoot,
   EXTENSIBLE_BUILTIN_TYPES,
   KNOWN_ATTRIBUTES,
+  KNOWN_COLOR_NAMES,
   KNOWN_TYPES,
   MODIFIER_LABELS,
   NON_MODIFIER_MEMBERS,
@@ -77,6 +78,8 @@ export class Checker {
 
   /** Method names the project adds in an extension - its own modifiers. */
   private readonly declaredModifiers = new Set<string>()
+  /** Property names the project adds in an extension - `Color.brand` among them. */
+  private readonly declaredExtensionProperties = new Set<string>()
   /** `typealias` names, which resolve as types anywhere the target would. */
   private readonly typeAliases = new Set<string>()
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
@@ -174,6 +177,7 @@ export class Checker {
         // before the extension that gives it the modifier.
         for (const member of decl.members) {
           if (member.kind === 'funcDecl') this.declaredModifiers.add(member.name)
+          if (member.kind === 'varDecl') this.declaredExtensionProperties.add(member.name)
         }
       }
     }
@@ -731,6 +735,15 @@ export class Checker {
             this.checkStyleToken(expr.callee.member, expr.args)
           }
         }
+        // `Color(.systemGray6)` and `Color(uiColor: .systemGray6)`, UIKit's colour by name.
+        const only = expr.args.length === 1 ? expr.args[0]! : null
+        if (
+          expr.callee.kind === 'identifier' && expr.callee.name === 'Color' &&
+          only && (only.label === null || only.label === 'uiColor') &&
+          only.value.kind === 'memberAccess' && only.value.base === null
+        ) {
+          this.checkColorName(only.value.member, only.value.memberSpan)
+        }
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
         return
@@ -738,7 +751,11 @@ export class Checker {
 
       case 'memberAccess':
         // Only the base is resolved. Member existence needs real type information,
-        // and guessing produces false positives - see the class comment.
+        // and guessing produces false positives - see the class comment. Colours are
+        // the exception: `Color.name` is a name the preview draws, or it draws clear.
+        if (expr.base?.kind === 'identifier' && (expr.base.name === 'Color' || expr.base.name === 'UIColor')) {
+          this.checkColorName(expr.member, expr.memberSpan)
+        }
         if (expr.base) this.checkExpression(expr.base, scope)
         return
 
@@ -1047,6 +1064,26 @@ export class Checker {
    * Only a literal `.token`. A style held in a variable or returned from a function
    * has no value here, and guessing would put a warning on correct code.
    */
+  /**
+   * Warns on a colour name the preview doesn't know, which it draws as clear.
+   *
+   * Narrow on purpose, because a warning on correct code is worse than none: a name the
+   * project declares in an extension (`Color.brand`, how Tokens.swift writes a colour)
+   * is its own, a project type called `Color` is its own, and a capitalised member is a
+   * nested type (`Color.Resolved`), not a colour.
+   */
+  private checkColorName(name: string, span: SourceSpan): void {
+    if (KNOWN_COLOR_NAMES.has(name) || name === 'init' || /^[A-Z]/.test(name)) return
+    if (this.declaredExtensionProperties.has(name) || this.types.has('Color') || this.types.has('UIColor')) return
+    this.report(
+      span,
+      'warning',
+      'unresolved_member',
+      `The preview doesn't know the colour '${name}', so it draws nothing there. ` +
+        'Check the spelling: Xcode uses the name as written.',
+    )
+  }
+
   private checkStyleToken(
     member: string,
     args: readonly { label: string | null; value: Expr }[],

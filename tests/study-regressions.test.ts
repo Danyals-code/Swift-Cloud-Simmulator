@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
-import { applyEvent, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
+import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
+import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
+import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
 import { worldFrame } from './render-geometry'
 
 /**
@@ -403,5 +405,31 @@ describe('E5: colours match the iOS 27 simulator', () => {
   it.each(Object.entries(native.colors.onWhite as Record<string, number[]>))('draws %s as the simulator does', (style, measured) => {
     const drawn = onWhite(style)
     drawn.forEach((channel, i) => expect(Math.abs(channel - measured[i]!), `${style}: drew ${drawn}, measured ${measured}`).toBeLessThanOrEqual(1))
+  })
+
+  it('warns where a colour name is one the preview does not know, and nowhere else', () => {
+    const warnings = (body: string, declarations = '') =>
+      compileView(viewSource(`var body: some View { ${body} }`, declarations)).diagnostics.map(d => `${d.severity}: ${d.message}`)
+    for (const typo of ['Color(.systemGrey6)', 'Color.systemGrey6', 'Color(UIColor.systemGrey6)', 'Color(uiColor: .systemGrey6)']) {
+      expect(warnings(`Rectangle().fill(${typo})`), typo).toEqual([expect.stringMatching(/^warning: .*'systemGrey6'/)])
+    }
+    expect(warnings('Rectangle().fill(Color(.systemGray6))')).toEqual([])
+    expect(warnings('Rectangle().fill(Color.brand)', 'extension Color { static let brand = Color.blue }')).toEqual([])
+    expect(warnings('Rectangle().fill(Color(.sRGB, red: 1, green: 0, blue: 0))')).toEqual([])
+  })
+
+  it('warns on exactly the colour names the preview cannot draw', () => {
+    for (const name of KNOWN_COLOR_NAMES) {
+      expect(colorForName(name, 'light'), name).not.toBeNull()
+      expect(colorForName(name, 'dark'), name).not.toBeNull()
+    }
+    expect([...Object.keys(IOS_27.colors.light)].filter(name => !KNOWN_COLOR_NAMES.has(name))).toEqual([])
+  })
+
+  it('draws a UIKit colour written with UIColor as the Color it names', () => {
+    const expected = onWhite('Color(.systemGray6)')
+    expect(onWhite('Color(UIColor.systemGray6)')).toEqual(expected)
+    expect(onWhite('Color(uiColor: .systemGray6)')).toEqual(expected)
+    expect(onWhite('Color(uiColor: UIColor.systemGray6)')).toEqual(expected)
   })
 })
