@@ -99,6 +99,19 @@ function continuesDeclaration(token: Token): boolean {
   )
 }
 
+/** The last step of a postfix expression that contains a `?` (see `OptionalChainEnd`). */
+function endOptionalChain(expr: Expr): Expr {
+  switch (expr.kind) {
+    case 'memberAccess':
+    case 'call':
+    case 'subscript':
+    case 'forceUnwrap':
+      return { ...expr, endsOptionalChain: true }
+    default:
+      return expr
+  }
+}
+
 /**
  * Recursive-descent parser for the supported Swift subset.
  *
@@ -1813,6 +1826,7 @@ export class Parser {
   private parsePostfix(allowTrailing: boolean): Expr {
     const start = this.current
     let expr = this.parsePrimary(allowTrailing)
+    let chained = false
 
     for (;;) {
       // Member access continues across newlines - this is what makes SwiftUI's
@@ -1833,7 +1847,9 @@ export class Parser {
       }
 
       /**
-       * Optional chaining: `?` immediately followed by `.`, with no space between.
+       * Optional chaining: `?` immediately followed by `.`, `[` or `(`, with no space
+       * between - `a?.b`, `list?[0]`, and `onDismiss?()`, which is how a component
+       * calls a callback it may not have been given.
        *
        * The whitespace is what tells `a?.b` from `a ? .b : c`, and Swift reads it the
        * same way. Without the check, the ternary's then-branch is swallowed as a
@@ -1845,10 +1861,11 @@ export class Parser {
         this.current.text === '?' &&
         !this.current.spaceBefore &&
         !this.current.spaceAfter &&
-        this.peek().text === '.'
+        ['.', '[', '('].includes(this.peek().text)
       ) {
         this.advance()
         expr = { kind: 'optionalChain', span: this.spanFrom(start), operand: expr }
+        chained = true
         continue
       }
 
@@ -1921,7 +1938,7 @@ export class Parser {
         continue
       }
 
-      return expr
+      return chained ? endOptionalChain(expr) : expr
     }
   }
 

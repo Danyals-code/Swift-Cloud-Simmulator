@@ -422,6 +422,122 @@ func main() {
   })
 })
 
+describe('optional chaining', () => {
+  it('gives nil for the whole chain when the optional is nil', () => {
+    // `items.first?.name` on an empty list is how every empty state is written, and
+    // it stopped the preview with "Value of type 'Optional' has no member 'name'".
+    expect(
+      run(`
+struct Item {
+    var name: String
+}
+
+func main() {
+    let items: [Item] = []
+    print(items.first?.name ?? "none")
+    let text: String? = nil
+    print(text?.uppercased() ?? "empty")
+    print("\\(text?.count ?? 0)")
+    let full = [Item(name: "A")]
+    print(full.first?.name ?? "none")
+}`),
+    ).toEqual(['none', 'empty', '0', 'A'])
+  })
+
+  it('runs nothing after a nil, not even the arguments', () => {
+    expect(
+      run(`
+class Node {
+    var next: Node? = nil
+    var name = "node"
+    func tag(_ label: String) -> String { return label + name }
+}
+
+func label() -> String {
+    print("evaluated")
+    return "x"
+}
+
+func main() {
+    let empty: Node? = nil
+    print(empty?.tag(label()) ?? "skipped")
+    print(empty?.next?.name.count ?? -1)
+    let one = Node()
+    print(one.next?.name ?? "no next")
+    one.next = Node()
+    print(one.next?.tag(label()) ?? "no next")
+}`),
+    ).toEqual(['skipped', '-1', 'no next', 'evaluated', 'xnode'])
+  })
+
+  it('subscripts and calls through a chain', () => {
+    // `onDismiss?()` is how a component calls a callback it may not have been given.
+    expect(
+      run(`
+func main() {
+    let none: [Int]? = nil
+    print(none?[0] ?? -1)
+    let some: [Int]? = [7, 8]
+    print(some?[1] ?? -1)
+    let lists: [String: [Int]] = [:]
+    print(lists["k"]?[0] ?? -2)
+    var action: (() -> Void)? = nil
+    action?()
+    action = { print("called") }
+    action?()
+}`),
+    ).toEqual(['-1', '8', '-2', 'called'])
+  })
+
+  it('skips the arguments of a callback that is nil', () => {
+    expect(
+      run(`
+func label() -> String {
+    print("evaluated")
+    return "x"
+}
+
+func main() {
+    var onPick: ((String) -> Void)? = nil
+    onPick?(label())
+    onPick = { print("picked " + $0) }
+    onPick?(label())
+}`),
+    ).toEqual(['evaluated', 'picked x'])
+  })
+
+  it('writes through a chain into the stored value, and does nothing when it is nil', () => {
+    expect(
+      run(`
+struct Point {
+    var x = 0
+}
+
+class Counter {
+    var value = 0
+}
+
+func main() {
+    var point: Point? = Point()
+    point?.x = 5
+    print(point?.x ?? -1)
+    var none: Point? = nil
+    none?.x = 5
+    print(none?.x ?? -1)
+    var items: [Int]? = [1]
+    items?.append(2)
+    print(items?.count ?? -1)
+    let counter: Counter? = Counter()
+    counter?.value += 3
+    print(counter?.value ?? -1)
+    var forced: Point? = Point()
+    forced!.x = 9
+    print(forced!.x)
+}`),
+    ).toEqual(['5', '-1', '2', '3', '9'])
+  })
+})
+
 describe('loops', () => {
   it('runs a while loop', () => {
     expect(

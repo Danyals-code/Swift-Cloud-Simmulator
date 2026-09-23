@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { CompileRequest, CompileResult } from '@studio/shared'
-import { compile, fontForToken, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
+import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
+import { applyEvent, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 
 /**
  * Regressions named after the study-build plan's items (feasibility-revised.md), so
@@ -19,6 +19,34 @@ struct ContentView: View {
   expect(result.diagnostics).toEqual([])
   expect(result.renderTree).not.toBeNull()
   return result
+}
+
+let revision = 1
+
+/** A whole `ContentView` - its state and helpers as well as `body` - and the declarations it uses. */
+function runView(members: string, declarations = '', options: Partial<CompileRequest> = {}): CompileResult {
+  const source = `import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
+${declarations}
+struct ContentView: View {
+${members}
+}`
+  const result = compile({ files: [{ id: 'App.swift', text: source }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: revision++, ...options })
+  expect(result.diagnostics).toEqual([])
+  expect(result.renderTree).not.toBeNull()
+  return result
+}
+
+const nodes = (r: CompileResult): readonly RenderNode[] => r.renderTree?.nodes ?? []
+const texts = (r: CompileResult): string[] => nodes(r).flatMap(n => n.text?.runs.map(run => run.text) ?? [])
+const controls = (r: CompileResult) => nodes(r).filter(n => n.hitTarget).map(n => n.a11y?.label)
+
+/** Presses the control with this accessible name, as a person finds it, and draws the result. */
+function tap(r: CompileResult, label: string): CompileResult {
+  const target = nodes(r).find(n => n.hitTarget && n.a11y?.label === label)
+  expect(target, `no control named "${label}"; the screen has ${JSON.stringify(controls(r))}`).toBeDefined()
+  applyEvent({ kind: 'tap', handlerId: target!.hitTarget!.handlerId, location: { x: 0, y: 0 } })
+  return rerender(revision++)
 }
 
 const fontOf = (r: CompileResult, value: string) =>
@@ -99,5 +127,28 @@ describe('A6: a long print run keeps its start and end', () => {
   it('shortens one enormous line, and says by how much', () => {
     const r = run('Text("x").onAppear { print(String(repeating: "x", count: 100_000)) }')
     expect(messages(r)).toEqual([`${'x'.repeat(2000)} … 98,000 more characters`])
+  })
+})
+
+describe('optional chaining in the preview', () => {
+  it('draws an empty state written with ?. instead of stopping', () => {
+    const r = runView(`let items: [Item] = []
+      var body: some View { Text(items.first?.name ?? "No items yet") }`, 'struct Item { var name: String }')
+    expect(texts(r)).toEqual(['No items yet'])
+  })
+
+  it('writes through ?. into state when there is a value, and does nothing when there is none', () => {
+    const r = runView(`@State private var selected: Task? = nil
+      var body: some View {
+        VStack {
+          Text(selected?.done == true ? "Done" : "Open")
+          Button("Finish") { selected?.done = true }
+          Button("New") { selected = Task() }
+        }
+      }`, 'struct Task { var done = false }')
+    const untouched = tap(r, 'Finish')
+    expect(untouched.diagnostics).toEqual([])
+    expect(texts(untouched)).toContain('Open')
+    expect(texts(tap(tap(untouched, 'New'), 'Finish'))).toContain('Done')
   })
 })
