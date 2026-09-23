@@ -1542,6 +1542,14 @@ export class SwiftUIHost implements InterpreterHost {
       return this.colorGradient(target, target.payload as ColorPayload)
     }
 
+    // `.blue.secondary` - the colour at a lower level of the hierarchy. It stopped the
+    // whole preview as an unknown member.
+    const level = HIERARCHY_OPACITY[member]
+    if (level !== undefined && target.kind === 'opaque' && target.typeName === COLOR_TYPE) {
+      const payload = target.payload as ColorPayload
+      return color({ ...payload, opacity: (payload.opacity ?? 1) * level })
+    }
+
     // Every branch below answers on the strength of a type's *name*, so a name the
     // project declared belongs to the project. Declining sends the member back to the
     // interpreter, which reports against the real declaration.
@@ -1922,15 +1930,25 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private makeColor(call: HostCall): SwiftValue {
+    const opacity = numberOf(call.args.find((a) => a.label === 'opacity')?.value)
+    const alpha = opacity !== null ? { opacity } : {}
     const white = numberOf(call.args.find((a) => a.label === 'white')?.value)
-    if (white !== null) return color({ name: null, white })
+    if (white !== null) return color({ name: null, white, ...alpha })
+
+    // `Color(hue:saturation:brightness:)` was drawn clear.
+    const hue = numberOf(call.args.find((a) => a.label === 'hue')?.value)
+    const saturation = numberOf(call.args.find((a) => a.label === 'saturation')?.value)
+    const brightness = numberOf(call.args.find((a) => a.label === 'brightness')?.value)
+    if (hue !== null && saturation !== null && brightness !== null) {
+      const [r, g, b] = hsbToRgb(hue, saturation, brightness)
+      return color({ name: null, red: r, green: g, blue: b, ...alpha })
+    }
 
     const red = numberOf(call.args.find((a) => a.label === 'red')?.value)
     const green = numberOf(call.args.find((a) => a.label === 'green')?.value)
     const blue = numberOf(call.args.find((a) => a.label === 'blue')?.value)
     if (red !== null && green !== null && blue !== null) {
-      const opacity = numberOf(call.args.find((a) => a.label === 'opacity')?.value)
-      return color({ name: null, red, green, blue, ...(opacity !== null ? { opacity } : {}) })
+      return color({ name: null, red, green, blue, ...alpha })
     }
 
     const first = call.args[0]?.value
@@ -1948,6 +1966,26 @@ export class SwiftUIHost implements InterpreterHost {
 }
 
 // -------------------------------------------------------------------- helpers
+
+/**
+ * A colour's hierarchical levels, as opacity. `.secondary` and `.tertiary` are measured
+ * in the iOS 27 simulator (0.5 and 0.25); the two lower levels take the label's.
+ */
+const HIERARCHY_OPACITY: Readonly<Record<string, number>> = { secondary: 0.5, tertiary: 0.25, quaternary: 0.18, quinary: 0.086 }
+
+/** HSB to sRGB components, each 0 to 1, as `Color(hue:saturation:brightness:)` means them. */
+function hsbToRgb(hue: number, saturation: number, brightness: number): [number, number, number] {
+  const h = ((hue % 1) + 1) % 1 * 6
+  const s = Math.max(0, Math.min(1, saturation))
+  const v = Math.max(0, Math.min(1, brightness))
+  const chroma = v * s
+  const x = chroma * (1 - Math.abs((h % 2) - 1))
+  const [r, g, b] =
+    h < 1 ? [chroma, x, 0] : h < 2 ? [x, chroma, 0] : h < 3 ? [0, chroma, x]
+    : h < 4 ? [0, x, chroma] : h < 5 ? [x, 0, chroma] : [chroma, 0, x]
+  const m = v - chroma
+  return [r + m, g + m, b + m]
+}
 
 /** The gesture constructors, mapped to the kind of event each responds to. */
 const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {

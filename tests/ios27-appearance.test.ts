@@ -30,7 +30,7 @@ const nodes = (result: CompileResult) => result.renderTree!.nodes
 const textNode = (result: CompileResult, text: string) => nodes(result).find((n) => n.text?.runs.some((r) => r.text === text))!
 const color = (result: CompileResult, text: string) => textNode(result, text).text!.runs[0]!.color
 const purple = { r: 203, g: 48, b: 224, a: 1 }
-const red = { r: 255, g: 59, b: 48, a: 1 }
+const red = { r: 255, g: 56, b: 60, a: 1 }
 function tap(result: CompileResult, label: string) {
   const hit = nodes(result).find((n) => n.hitTarget && n.a11y?.label === label)!.hitTarget!
   expect(applyEvent({ kind: 'tap', handlerId: hit.handlerId, location: { x: 0, y: 0 } })).toBe(true)

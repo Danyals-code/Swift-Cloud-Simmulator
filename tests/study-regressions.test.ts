@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { worldFrame } from './render-geometry'
@@ -382,5 +383,25 @@ describe('E3: presentations and search written on a NavigationStack or a TabView
           .searchable(text: .constant(""), prompt: "Find things")
       }`)
     expect(controls(r)).not.toContain('Find things')
+  })
+})
+
+/** What the iOS 27 simulator drew on iPhone 18 Pro, light (docs/parity/native/iphone18pro-misrenders). */
+const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
+
+describe('E5: colours match the iOS 27 simulator', () => {
+  /** The swatch's colour as it shows on the white page, as the simulator was measured. */
+  function onWhite(style: string): number[] {
+    const r = runView(`var body: some View { Rectangle().fill(${style}).frame(width: 50, height: 50) }`)
+    const swatch = nodes(r).find(n => n.frame.width === 50 && n.frame.height === 50)!
+    const paint = swatch.shape?.fill ?? swatch.background
+    expect(paint?.kind, style).toBe('solid')
+    const { r: red, g, b, a } = (paint as { color: { r: number; g: number; b: number; a: number } }).color
+    return [red, g, b].map(channel => Math.round(channel * a + 255 * (1 - a)))
+  }
+
+  it.each(Object.entries(native.colors.onWhite as Record<string, number[]>))('draws %s as the simulator does', (style, measured) => {
+    const drawn = onWhite(style)
+    drawn.forEach((channel, i) => expect(Math.abs(channel - measured[i]!), `${style}: drew ${drawn}, measured ${measured}`).toBeLessThanOrEqual(1))
   })
 })

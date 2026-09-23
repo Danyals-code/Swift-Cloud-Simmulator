@@ -265,7 +265,7 @@ it('F23 preserves trim geometry and inherited foreground for styled Path strokes
  const original = render(source(path + '.stroke(style: StrokeStyle(lineWidth: 4, dash: [10, 5])).foregroundStyle(.red)')).nodes.find(n => n.path)?.path
  const trimmed = render(source(path + '.trim(from: 0, to: 0.5).stroke(style: StrokeStyle(lineWidth: 4, dash: [10, 5])).foregroundStyle(.red)')).nodes.find(n => n.path)?.path
  expect(original?.d.match(/ A /g)).toHaveLength(2); expect(trimmed?.d.match(/ A /g)).toHaveLength(1); expect(trimmed?.d).not.toBe(original?.d)
- expect(trimmed?.stroke?.color).toMatchObject({r:255,g:59,b:48}); expect(trimmed?.stroke?.dash).toEqual([10,5])
+ expect(trimmed?.stroke?.color).toMatchObject({r:255,g:56,b:60}); expect(trimmed?.stroke?.dash).toEqual([10,5])
 })
 it('F27 previews changed Stepper increments and ProgressView fractions', () => {
  const stepper = control(source('Stepper("Count \\(count)", value: $count, in: 0...10, step: 2)'), 'Stepper', 'range:step', '3')
