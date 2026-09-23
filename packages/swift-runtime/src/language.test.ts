@@ -688,6 +688,20 @@ func main() {
 }`),
     ).toEqual(['Node', 'child: Node', '[Node, Node]'])
   })
+
+  it('stops a class that builds another of itself as it is built, at a depth, not by running out of stack', () => {
+    expect(() =>
+      run(`
+final class Tree {
+    var next = Tree()
+}
+
+func main() {
+    let tree = Tree()
+    print(tree)
+}`),
+    ).toThrow('Call depth exceeded')
+  })
 })
 
 describe('collections the AI writes around its lists', () => {

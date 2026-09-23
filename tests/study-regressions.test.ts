@@ -1383,6 +1383,12 @@ describe('F4: an internal error is reported where it happened, and never stops t
     expect(error!.span.start).toBe(source.indexOf(declaration) + declaration.indexOf('Tree()'))
   })
 
+  it('reports a type alias loop that runs through optionals too', () => {
+    expect(reported('var body: some View { Text("x") }', 'typealias Count = Total?\ntypealias Total = Count?').map(d => [d.severity, d.message, d.at])).toEqual([
+      ['error', "Type alias 'Count' references itself.", 'Count'],
+    ])
+  })
+
   it('reports a type alias that names itself as Xcode does, at the alias', () => {
     // swiftc: "type alias 'Count' references itself", once, at the first of the two.
     expect(reported('var body: some View { Text("\\(Count.self)") }', 'typealias Count = Total\ntypealias Total = Count')).toEqual([
@@ -1472,6 +1478,13 @@ describe('F3: every ForEach row keeps its own identity', () => {
       }`)
     expect(texts(tap(r, 'C++'))).toContain('Picked C++')
     expect(texts(tap(r, 'C'))).toContain('Picked C')
+  })
+
+  it('keeps an empty id apart from the id "0"', () => {
+    const r = runView(`@State private var picked = "none"
+      var body: some View { VStack { Text("Picked [\\(picked)]"); ForEach(["", "0"], id: \\.self) { value in Button("Pick \\(value)") { picked = value } } } }`)
+    expect(texts(tap(r, 'Pick 0'))).toContain('Picked [0]')
+    expect(texts(tap(r, 'Pick '))).toContain('Picked []')
   })
 
   it('deletes the element a swiped row belongs to when each element draws two rows', () => {

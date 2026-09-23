@@ -54,7 +54,7 @@ export function toFailure(error: unknown, at: SourceSpan): RuntimeFailure {
   // Recursion runs out of JavaScript stack before it reaches the interpreter's own
   // depth limit when each call nests a few expressions, so it is the same failure.
   if (isStackOverflow(error)) {
-    return { message: 'Call depth exceeded. This usually means recursion that never ends.', span: at, frames: [], kind: 'budget' }
+    return { message: new ExecutionBudgetExceeded(at, 0, [], 'depth').message, span: at, frames: [], kind: 'budget' }
   }
   const reason = error instanceof Error ? error.message : String(error)
   return { message: `The preview stopped on an internal error here: ${reason}. It may still run in Xcode.`, span: at, frames: [], kind: 'unsupported' }

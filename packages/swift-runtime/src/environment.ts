@@ -96,13 +96,22 @@ export function bindingLValue(binding: Binding, name: string): LValue {
   }
 }
 
-export function fieldLValue(owner: StructValue, field: string, description: string): LValue {
+/**
+ * A stored property as an assignable location.
+ *
+ * `description` may be a function, for a name that costs something to write out -
+ * the receiver's value, when the path to it has no name - and is only needed if a
+ * message about the assignment is: it runs when the description is read.
+ */
+export function fieldLValue(owner: StructValue, field: string, description: string | (() => string)): LValue {
   return {
     get: () => owner.fields.get(field) ?? { kind: 'nil' },
     set: (value) => {
       owner.fields.set(field, value)
     },
-    description,
+    get description() {
+      return typeof description === 'function' ? description() : description
+    },
     mutable: true,
   }
 }

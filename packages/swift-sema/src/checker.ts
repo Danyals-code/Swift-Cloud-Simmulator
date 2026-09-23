@@ -204,23 +204,29 @@ export class Checker {
 
   /**
    * `typealias Count = Total` beside `typealias Total = Count` names no type at all,
-   * and Xcode refuses it. Said once per loop, at the alias declared first, where
-   * swiftc says it.
+   * and Xcode refuses it, however the loop runs: `Total?` or `[Total]` loops as
+   * surely. Said once per loop, at the alias declared first, where swiftc says it.
    */
   private reportAliasCycles(files: readonly SourceFileNode[]): void {
     const aliases = files.flatMap((file) => file.declarations.filter((decl): decl is TypealiasDecl => decl.kind === 'typealiasDecl'))
-    const targets = new Map(aliases.flatMap((alias) => (alias.target.kind === 'namedType' ? [[alias.name, alias.target.name] as const] : [])))
+    const declared = new Set(aliases.map((alias) => alias.name))
+    const names = new Map(aliases.map((alias) => [alias.name, namedIn(alias.target).filter((name) => declared.has(name))] as const))
+    const reaches = (from: string, to: string): boolean => {
+      const seen = new Set<string>()
+      const next = [...(names.get(from) ?? [])]
+      while (next.length) {
+        const name = next.pop()!
+        if (name === to) return true
+        if (seen.has(name)) continue
+        seen.add(name)
+        next.push(...(names.get(name) ?? []))
+      }
+      return false
+    }
     const looped = new Set<string>()
     for (const alias of aliases) {
-      if (looped.has(alias.name)) continue
-      const chain: string[] = []
-      let name: string | undefined = alias.name
-      while (name !== undefined && !chain.includes(name)) {
-        chain.push(name)
-        name = targets.get(name)
-      }
-      if (name !== alias.name) continue
-      for (const member of chain) looped.add(member)
+      if (looped.has(alias.name) || !reaches(alias.name, alias.name)) continue
+      for (const other of aliases) if (reaches(alias.name, other.name) && reaches(other.name, alias.name)) looped.add(other.name)
       this.report(alias.nameSpan, 'error', 'unresolved_identifier', `Type alias '${alias.name}' references itself.`)
     }
   }
@@ -1466,3 +1472,26 @@ function isDashed(stroke: Expr & { kind: 'call' }): boolean {
 
 /** Modifiers whose first argument is a colour or another style, as `.foregroundStyle(.gray)`. */
 const STYLE_MODIFIERS: ReadonlySet<string> = new Set(['foregroundStyle', 'foregroundColor', 'fill', 'stroke', 'strokeBorder', 'tint', 'background', 'border'])
+
+/** Every type name a type refers to, through optionals, collections, generics, tuples and functions. */
+function namedIn(type: TypeRef | null): string[] {
+  if (!type) return []
+  switch (type.kind) {
+    case 'namedType':
+      return [type.name, ...type.generics.flatMap(namedIn)]
+    case 'optionalType':
+      return namedIn(type.wrapped)
+    case 'arrayType':
+      return namedIn(type.element)
+    case 'dictionaryType':
+      return [...namedIn(type.key), ...namedIn(type.value)]
+    case 'someType':
+      return namedIn(type.constraint)
+    case 'functionType':
+      return [...type.params.flatMap(namedIn), ...namedIn(type.result)]
+    case 'tupleType':
+      return type.elements.flatMap(namedIn)
+    default:
+      return []
+  }
+}

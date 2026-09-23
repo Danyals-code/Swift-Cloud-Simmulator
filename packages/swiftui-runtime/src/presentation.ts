@@ -774,7 +774,7 @@ class Resolver {
       this.warnings.push({
         span: view.span,
         severity: 'warning',
-        code: 'type_mismatch',
+        code: 'runtime_trap',
         message: `Two rows of this ForEach have the id ${shared}. SwiftUI needs every row's id to be different, or it can draw or update the wrong row.`,
       })
     }
@@ -1780,14 +1780,17 @@ function clamp(value: number, min: number, max: number): number {
  * and `_`. Every other character is written out rather than dropped, or "C", "C++"
  * and "C#" would be one row and the last registered would take every tap: `_` is
  * doubled, and anything else becomes its code in hex between two, so no two ids share
- * a segment. A string id's quotes and a place's `#` are left off, as before, so an id
- * of letters and digits keeps the path it always had.
+ * a segment; the empty id is a lone `_`. A string id's quotes and a place's `#` are
+ * left off, as before, so an id of letters and digits keeps the path it always had.
  */
 function keySegment(key: string | undefined, index: number): string {
   if (!key) return String(index)
-  const bare = key.startsWith('#') ? key.slice(1) : /^".*"$/s.test(key) ? key.slice(1, -1) : key
-  const segment = [...bare].map((c) => (/[A-Za-z0-9]/.test(c) ? c : c === '_' ? '__' : `_${c.codePointAt(0)!.toString(16)}_`)).join('')
-  return segment || String(index)
+  if (key.startsWith('#')) return key.slice(1)
+  const bare = /^".*"$/s.test(key) ? key.slice(1, -1) : key
+  if (/^[A-Za-z0-9]+$/.test(bare)) return bare
+  // The empty string is an id too, and a lone `_` is what no other id writes.
+  if (bare === '') return '_'
+  return [...bare].map((c) => (/[A-Za-z0-9]/.test(c) ? c : c === '_' ? '__' : `_${c.codePointAt(0)!.toString(16)}_`)).join('')
 }
 
 function labelled(args: readonly ViewArg[], label: string): SwiftValue | undefined {

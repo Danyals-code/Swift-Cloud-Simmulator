@@ -129,6 +129,13 @@ export const DEFAULT_STEP_BUDGET = 5_000_000
  */
 const MAX_CALL_DEPTH = 512
 
+/**
+ * How many instances may be built inside one another. Each costs the interpreter more
+ * JavaScript stack than a call, which ran out at about 200 in Node; a program nesting
+ * construction this deep is building itself forever.
+ */
+const MAX_INSTANCE_DEPTH = 100
+
 /** Swift's Int is 64-bit; JS numbers are exact only to 2^53. */
 const MAX_SAFE_INT = Number.MAX_SAFE_INTEGER
 
@@ -147,6 +154,8 @@ const MAX_SAFE_INT = Number.MAX_SAFE_INTEGER
  */
 export class Interpreter {
   private steps = 0
+  /** How many instances are being built inside one another. See `instantiate`. */
+  private instantiating = 0
   /** The last place a step was taken, for a failure that carries no place of its own. */
   private reached: SourceSpan = { file: '', start: 0, end: 0 }
   private readonly frames: StackFrame[] = []
@@ -390,6 +399,7 @@ export class Interpreter {
 
   resetSteps(): void {
     this.steps = 0
+    this.instantiating = 0
     this.frames.length = 0
   }
 
@@ -434,6 +444,21 @@ export class Interpreter {
   instantiate(typeName: string, args: readonly CallArgument[], span: SourceSpan): StructValue {
     const decl = this.types.get(typeName)
     if (!decl) throw new UnsupportedAtRuntime(typeName, span)
+    // `class Tree { var next = Tree() }` builds another as it is built, forever. The
+    // property initialisers run outside any call frame, so the call-depth limit never
+    // sees them: count the nesting here, and stop it as that limit does.
+    if (this.instantiating >= MAX_INSTANCE_DEPTH) {
+      throw new ExecutionBudgetExceeded(span, this.steps, [...this.frames].reverse().slice(0, 12), 'depth')
+    }
+    this.instantiating++
+    try {
+      return this.build(decl, typeName, args, span)
+    } finally {
+      this.instantiating--
+    }
+  }
+
+  private build(decl: StructDecl, typeName: string, args: readonly CallArgument[], span: SourceSpan): StructValue {
 
     const instance: StructValue = {
       kind: 'struct',
@@ -2686,9 +2711,8 @@ export class Interpreter {
 
         // Named by the path the user wrote - `bag.items` - rather than by the
         // receiver's value, which rendered a whole struct literal into the middle of
-        // a sentence about a constant.
-        const base = owner ? owner.description : describe(target, true)
-        const field = fieldLValue(target, expr.member, `${base}.${expr.member}`)
+        // a sentence about a constant. Written out only if a message needs it.
+        const field = fieldLValue(target, expr.member, () => `${owner ? owner.description : describe(target, true)}.${expr.member}`)
         const projected = throughProjection(field)
 
         // A projection is storage somewhere else reached through a nonmutating
