@@ -121,9 +121,17 @@ const CONTENT_CLOSURE_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
   ['Gauge', new Set(['currentValueLabel', 'minimumValueLabel', 'maximumValueLabel'])],
 ])
 
+const EDGE_LABELS: ReadonlySet<string> = new Set(['top', 'leading', 'bottom', 'trailing'])
+
+/** `EdgeInsets(top:leading:bottom:trailing:)`, any edge left out being 0. */
+function edgeInsets(call: HostCall): SwiftValue {
+  const edge = (label: string): number => numberOf(call.args.find((a) => a.label === label)?.value) ?? 0
+  return opaque(EDGE_INSETS_TYPE, { top: edge('top'), leading: edge('leading'), bottom: edge('bottom'), trailing: edge('trailing') } satisfies EdgeInsetsPayload)
+}
+
 /** Names that are types rather than views: `Color.red`, `Font.title`. */
 const NAMESPACES: ReadonlySet<string> = new Set([
-  'Color', 'Font', 'Alignment', 'Edge', 'Angle', 'UnitPoint', 'Axis',
+  'Color', 'Font', 'Alignment', 'Edge', 'Edge.Set', 'Angle', 'UnitPoint', 'Axis',
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
   'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material',
@@ -798,16 +806,7 @@ export class SwiftUIHost implements InterpreterHost {
     // `.padding(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))` - the form
     // that sets all four edges to different lengths, and the only one `.padding` has
     // no shorthand for.
-    if (name === 'EdgeInsets') {
-      const edge = (label: string): number =>
-        numberOf(call.args.find((a) => a.label === label)?.value) ?? 0
-      return opaque(EDGE_INSETS_TYPE, {
-        top: edge('top'),
-        leading: edge('leading'),
-        bottom: edge('bottom'),
-        trailing: edge('trailing'),
-      } satisfies EdgeInsetsPayload)
-    }
+    if (name === 'EdgeInsets') return edgeInsets(call)
 
     if (name === 'StrokeStyle') {
       const dash = call.args.find((a) => a.label === 'dash')?.value
@@ -1010,6 +1009,8 @@ export class SwiftUIHost implements InterpreterHost {
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
     if (target.kind === 'type' && (target.name === 'Gradient' && member === 'Stop' || target.name === 'Gradient.Stop' && member === 'init')) return this.gradientStop(call)
+    // `Edge.Set([.top, .leading])` and `Edge.Set(.top)` are the set they are given.
+    if (target.kind === 'type' && (target.name === 'Edge' && member === 'Set' || target.name === 'Edge.Set' && member === 'init')) return call.args[0]?.value ?? { kind: 'array', elements: [] }
     // `.modifier(Shadowed())` - a custom `ViewModifier`. Its `body(content:)` takes
     // the view it is applied to and returns a new one, so the content is handed over
     // as a value: inside the modifier, `content.padding()` is then an ordinary
@@ -1440,6 +1441,8 @@ export class SwiftUIHost implements InterpreterHost {
 
   callImplicitMember(member: string, call: HostCall): SwiftValue | undefined {
     if (member === 'init' && call.args.length === 2 && call.args[0]?.label === 'color' && call.args[1]?.label === 'location') return this.gradientStop(call)
+    // `.padding(.init(top: 8, leading: 16, bottom: 8, trailing: 16))`, where the type is `EdgeInsets`.
+    if (member === 'init' && call.args.length > 0 && call.args.every((a) => a.label && EDGE_LABELS.has(a.label))) return edgeInsets(call)
     if (ANIMATION_CURVES[member] || member === 'spring' || member === 'interpolatingSpring') {
       return this.makeAnimation(member, call)
     }
@@ -1562,6 +1565,7 @@ export class SwiftUIHost implements InterpreterHost {
 
     if (target.kind === 'type') {
       if (target.name === 'Gradient' && member === 'Stop') return { kind: 'type', name: 'Gradient.Stop' }
+      if (target.name === 'Edge' && member === 'Set') return { kind: 'type', name: 'Edge.Set' }
       if (target.name === 'Color') return color({ name: member })
       if (target.name === 'Animation') return this.animationToken(member)
       if (target.name === 'AnyTransition') return this.transitionToken(member)

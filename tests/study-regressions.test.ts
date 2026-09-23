@@ -717,3 +717,27 @@ describe('E4: what reaches under the safe area, and what stays inside it', () =>
     expect([colourAt(r, 201, 30), colourAt(r, 201, 100)]).toEqual([RED, RED])
   })
 })
+
+describe('E9: padding on the edges it names', () => {
+  /** The padding around a 100-point square, read off the background drawn around both. */
+  function paddingOf(padding: string) {
+    const r = runView(`var body: some View { Color.red.frame(width: 100, height: 100)${padding}.background(Color.blue) }`)
+    const painted = nodes(r).filter(n => n.id !== 'screen' && n.background?.kind === 'solid').map(n => worldFrame(nodes(r), n))
+    const square = painted.find(f => f.width === 100 && f.height === 100)!
+    const around = painted.find(f => f !== square)!
+    return { top: square.y - around.y, leading: square.x - around.x, bottom: around.y + around.height - square.y - square.height, trailing: around.x + around.width - square.x - square.width }
+  }
+
+  it.each([
+    ['[.horizontal, .top], 20', { top: 20, leading: 20, bottom: 0, trailing: 20 }],
+    ['[.leading, .trailing, .top, .bottom], 8', { top: 8, leading: 8, bottom: 8, trailing: 8 }],
+    ['[.leading, .bottom]', { top: 0, leading: 16, bottom: 16, trailing: 0 }],
+    ['[], 20', { top: 0, leading: 0, bottom: 0, trailing: 0 }],
+    ['Edge.Set.top, 8', { top: 8, leading: 0, bottom: 0, trailing: 0 }],
+    ['Edge.Set([.top, .leading]), 8', { top: 8, leading: 8, bottom: 0, trailing: 0 }],
+    ['.init(top: 1, leading: 2, bottom: 3, trailing: 4)', { top: 1, leading: 2, bottom: 3, trailing: 4 }],
+    ['.horizontal, 10', { top: 0, leading: 10, bottom: 0, trailing: 10 }],
+  ])('pads .padding(%s) on the edges it names', (args, expected) => {
+    expect(paddingOf(`.padding(${args})`)).toEqual(expected)
+  })
+})
