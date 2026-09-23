@@ -16,8 +16,10 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   const file = request.files.find(f => f.id === request.target.file)
   if (!file) return reject('The target file is no longer available.')
   const parsed = request.files.map(f => Parser.parse(f.text, f.id))
-  // Deliberately conservative: recovery ASTs are useful for reading, never for rewriting.
-  if (parsed.some(p => p.diagnostics.some(d => d.severity === 'error'))) return reject('Resolve syntax errors before changing the design.')
+  // Deliberately conservative: recovery ASTs are useful for reading, never for rewriting. Only the file
+  // being changed has to parse - a half-typed draft somewhere else is no reason to stop designing.
+  const broken = parsed.find(p => p.sourceFile.span.file === file.id)?.diagnostics.find(d => d.severity === 'error')
+  if (broken) return syntaxRefusal(file, broken.span.start)
   const ast = parsed.map(p => p.sourceFile)
   const diagnostics = Checker.check(ast).diagnostics
   const model = buildAuthoringModel({ ...request, revision: request.baseRevision, parsed: ast, diagnostics })
@@ -173,7 +175,7 @@ export function planDesignBatch(requests: readonly DesignEditRequest[], newFiles
   }
   const nextFiles = first.files.map(f => ({ ...f, text: changes.find(c => c.file === f.id)?.after ?? f.text })).concat(newFiles)
   const parsed = nextFiles.map(f => Parser.parse(f.text, f.id))
-  if (parsed.some(p => p.diagnostics.some(d => d.severity === 'error'))) return { ok: false, reason: 'A proposed source file has syntax errors. No files were changed.' }
+  if (parsed.some(p => affected.has(p.sourceFile.span.file) && p.diagnostics.some(d => d.severity === 'error'))) return { ok: false, reason: 'A proposed source file has syntax errors. No files were changed.' }
   const beforeErrors = Checker.check(first.files.map(f => Parser.parse(f.text, f.id).sourceFile)).diagnostics.filter(d => d.severity === 'error')
   const afterErrors = Checker.check(parsed.map(p => p.sourceFile)).diagnostics.filter(d => d.severity === 'error')
   if (afterErrors.some(d => !beforeErrors.some(old => old.code === d.code && old.message === d.message && old.span.file === d.span.file)) || afterErrors.length > beforeErrors.length) return { ok: false, reason: 'The combined sources introduce a semantic error. No files were changed.' }
@@ -183,7 +185,13 @@ export function planDesignBatch(requests: readonly DesignEditRequest[], newFiles
 /** Validate the complete post-edit program before any file is committed. */
 function finishDesignPlan(request: DesignEditRequest, nextFiles: readonly SourceFile[], selection: { file: string; offset: number }, colors?: readonly PreviewColorAsset[]): DesignEditPlan {
   const parsed = nextFiles.map(f => Parser.parse(f.text, f.id))
-  if (parsed.some(p => p.diagnostics.some(d => d.severity === 'error'))) return { ok: false, reason: 'The proposed design change has a syntax error. No files were changed.' }
+  // A file the change leaves alone may stay broken; one it writes must parse afterwards.
+  for (const [i, next] of nextFiles.entries()) {
+    const old = request.files.find(f => f.id === next.id)
+    const error = old?.text !== next.text && parsed[i]!.diagnostics.find(d => d.severity === 'error')
+    if (!error) continue
+    return old && Parser.parse(old.text, old.id).diagnostics.some(d => d.severity === 'error') ? syntaxRefusal(old, error.span.start) : { ok: false, reason: 'The proposed design change has a syntax error. No files were changed.' }
+  }
   const diagnostics = Checker.check(parsed.map(p => p.sourceFile)).diagnostics
   const before = Checker.check(request.files.map(f => Parser.parse(f.text, f.id).sourceFile)).diagnostics
   const signature = (d: (typeof diagnostics)[number]) => JSON.stringify([d.code, d.message, d.span.file])
@@ -202,4 +210,11 @@ function finishDesignPlan(request: DesignEditRequest, nextFiles: readonly Source
   for (const old of request.files) if (!nextFiles.some(f => f.id === old.id)) changes.push({ file: old.id, before: old.text, after: '', deleted: true })
   const authoring = buildAuthoringModel({ ...request, files: nextFiles, colors: colors ?? request.colors, parsed: parsed.map(p => p.sourceFile), revision: request.authoringRevision ?? 0, diagnostics })
   return { ok: true, projectId: request.projectId, baseRevision: request.baseRevision, changes, selection, authoring, ...(colors ? { colorSets: colors } : {}) }
+}
+
+/** Refuses a change to a file that does not parse, naming it and the line so the designer can find it in Code. */
+function syntaxRefusal(file: SourceFile, offset: number): DesignEditPlan {
+  const name = file.id.slice(file.id.lastIndexOf('/') + 1)
+  const line = file.text.slice(0, offset).split('\n').length
+  return { ok: false, reason: `${name} has an error on line ${line}, so its design can’t be changed until it’s fixed in Code.`, location: { file: file.id, offset } }
 }

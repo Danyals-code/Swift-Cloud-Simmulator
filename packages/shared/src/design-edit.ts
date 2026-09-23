@@ -46,7 +46,12 @@ export interface SourceChange {
 }
 
 export type DesignEditPlan =
-  | { readonly ok: false; readonly reason: string }
+  | {
+    readonly ok: false
+    readonly reason: string
+    /** Where the reason is, when it is somewhere in the source: a syntax error, which Code can show. */
+    readonly location?: { readonly file: string; readonly offset: number }
+  }
   | {
     readonly ok: true
     readonly projectId: string

@@ -202,7 +202,9 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       while (ancestor && !origin) { origin = [...ancestor.properties].reverse().find(p => p.name === 'font'); ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }
       node.properties.push({ id: `${node.id}:inherited-font`, name: 'font', expression: origin?.expression ?? 'Environment / call site', valueKind: 'inherited', source: origin?.source, ownerId: origin?.ownerId ?? parent.id, scope: 'inherited', writable: false, reason: origin ? 'Inherited from an enclosing source view; it affects its descendants.' : 'No local font is declared; the environment supplies it.' })
     }
-    if (!diagnostics.some(d => d.severity === 'error' && (['expected_token', 'unexpected_token', 'unterminated_string', 'unterminated_block'].includes(d.code) || d.span.file === node.source.file && d.span.start < node.source.end && d.span.end >= node.source.start))) {
+    // A syntax error takes the controls of its own file's views, not every file's: a half-typed draft elsewhere
+    // is no reason to lock the design, and the planner refuses only changes to the file that does not parse.
+    if (!diagnostics.some(d => d.severity === 'error' && d.span.file === node.source.file && (['expected_token', 'unexpected_token', 'unterminated_string', 'unterminated_block'].includes(d.code) || d.span.start < node.source.end && d.span.end >= node.source.start))) {
       let ancestor: MutableNode | undefined = parent
       let template = false
       while (ancestor) { if (ancestor.kind === 'template') template = true; ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }

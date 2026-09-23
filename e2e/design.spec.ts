@@ -270,6 +270,44 @@ test('a view dropped in its stack’s empty space becomes the stack’s last vie
   expect(await source(page)).toMatch(/#Preview \{\n\s*HomeScreen\(\)\n\}/)
 })
 
+test('a refused edit to a file that does not parse offers to show the error in Code (C10)', async ({ page }) => {
+  // A designer's project: the app in one file, the Home screen in another.
+  await page.goto('/')
+  await page.getByTestId('template-blank').click()
+  await page.getByTestId('template-confirm').click()
+  await expect(page.getByTestId('template-gallery')).toBeHidden()
+  // Designing Home first, as a designer does before visiting Code: its page is drawn.
+  await expect(page.getByTestId('design-screen').getByRole('button', { name: 'Home', exact: true })).toBeVisible()
+  await page.getByTestId('workspace-develop').click()
+  await page.getByTestId('file-rail').getByText('HomeScreen.swift').click()
+  const editor = page.getByTestId('editor').locator('.cm-content')
+  await expect(editor).toContainText('struct HomeScreen')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  // "Oops" is still missing its closing parenthesis, which the parser notices on line 8.
+  await page.keyboard.insertText(`import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        VStack {
+            Text("Hello")
+            Text("Oops"
+        }
+    }
+}`)
+  await page.getByTestId('workspace-design').click()
+  // While a file does not parse, its layers are named by type alone.
+  const hello = layer(page, 'Text').first()
+  await hello.click()
+  await hello.getByRole('button', { name: 'Actions for Text', exact: true }).click()
+  await page.getByTestId('source-layer-actions-menu-delete').click()
+
+  await expect(page.getByTestId('design-feedback')).toHaveText('HomeScreen.swift has an error on line 8, so its design can’t be changed until it’s fixed in Code.')
+  await page.getByRole('button', { name: 'Show in Code', exact: true }).click()
+  await expect(page.getByTestId('editor')).toBeVisible()
+  await expect(page.getByTestId('editor').locator('.cm-lineNumbers .cm-activeLineGutter')).toHaveText('8')
+})
+
 test('a drag can carry a view into another container', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()

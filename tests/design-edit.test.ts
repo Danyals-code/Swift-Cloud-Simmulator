@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
+import { buildAuthoringModel, planDesignBatch, planDesignEdit } from '@studio/swift-sema'
 import { Parser } from '@studio/swift-syntax'
 import { applyProjectTransaction, DocumentHistory, emptyStudioMetadata, projectFromFiles } from '@studio/project-model'
 import { buildExportBundle } from '@studio/exporter'
@@ -506,5 +506,43 @@ struct HomeScreen: View {
 
   it('moves a view dropped before its own container out, to just before it', () => {
     expect(drag('before', 'Text', 1)).toBe(blank.replace('                Text("Subtitle")\n', '').replace('            VStack(spacing: 16) {\n', '            Text("Subtitle")\n            VStack(spacing: 16) {\n'))
+  })
+})
+
+describe('C10: a syntax error stops edits only to the file it is in', () => {
+  const HOME = 'Sources/Features/Home/HomeScreen.swift'
+  const home: SourceFile = { id: HOME, text: 'import SwiftUI\nstruct HomeScreen: View {\n    var body: some View {\n        VStack {\n            Text("Hello")\n        }\n    }\n}\n' }
+  // Half-typed code in a draft: `Text("x"` with its parenthesis still open.
+  const draft: SourceFile = { id: 'Sources/Features/Draft/Draft.swift', text: 'import SwiftUI\nstruct Draft: View {\n    var body: some View {\n        Text("x"\n    }\n}\n' }
+  const request = (project: SourceFile[], name: string, operation: DesignEditRequest['operation']): DesignEditRequest => {
+    const node = buildAuthoringModel({ projectId: 'p', revision: 1, files: project }).nodes.find(n => n.name === name && n.kind !== 'definition' && n.source.file === HOME)!
+    return { projectId: 'p', baseRevision: 1, scope: node.owner, files: project, target: node.source, fingerprint: node.fingerprint, operation }
+  }
+  const changedFiles = (plan: DesignEditPlan) => plan.ok ? plan.changes.map(change => change.file) : plan.reason
+
+  it('adds a view to a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignEdit(request([home, draft], 'VStack', { kind: 'insert', snippet: 'Text("New")' })))).toEqual([HOME])
+  })
+
+  it('changes a setting on a screen while another file does not parse', () => {
+    const text = buildAuthoringModel({ projectId: 'p', revision: 1, files: [home, draft] }).nodes.find(n => n.name === 'Text' && n.source.file === HOME)!.controls!.find(c => c.label === 'Text')!
+    expect(changedFiles(planDesignEdit(request([home, draft], 'Text', { kind: 'property', control: text.id, value: 'Hi' })))).toEqual([HOME])
+  })
+
+  it('adds a modifier on a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignEdit(request([home, draft], 'Text', { kind: 'modifier-add', name: 'padding' })))).toEqual([HOME])
+  })
+
+  it('plans a batch on a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignBatch([request([home, draft], 'VStack', { kind: 'insert', snippet: 'Text("New")' })]))).toEqual([HOME])
+  })
+
+  it('refuses to change a file that does not parse, naming it and the line, and says where', () => {
+    const broken: SourceFile = { id: HOME, text: home.text.replace('Text("Hello")', 'Text("Hello"') }
+    expect(planDesignEdit(request([broken], 'VStack', { kind: 'insert', snippet: 'Text("New")' }))).toEqual({
+      ok: false,
+      reason: 'HomeScreen.swift has an error on line 6, so its design can’t be changed until it’s fixed in Code.',
+      location: { file: HOME, offset: broken.text.indexOf('}', broken.text.indexOf('Text("Hello"')) },
+    })
   })
 })

@@ -165,6 +165,8 @@ export function Studio() {
   const [pendingSelect, setPendingSelect] = useState<{ projectId: string; file: FileId; offset: number; text: string } | null>(null)
   /** Raised when an edit could not be made, so the canvas can say why. */
   const [editNote, setEditNote] = useState<string | null>(null)
+  /** Where a refusal points in the source, while its note is the one showing: a syntax error Code can show. */
+  const [refusedAt, setRefusedAt] = useState<{ note: string; file: FileId; offset: number } | null>(null)
   const [exporting, setExporting] = useState(false)
   const exportInProgress = useRef(false)
   /** Serializes source planning; typing can still invalidate an in-flight plan. */
@@ -673,7 +675,7 @@ export function Studio() {
     try {
       if (assets) validateAssets(assets)
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, colors: project.colors, componentDescriptions: project.studio?.components, target, fingerprint, operation })
-      if (!plan.ok) { setEditNote(plan.reason); return plan.reason }
+      if (!plan.ok) { setEditNote(plan.reason); setRefusedAt(plan.location ? { note: plan.reason, ...plan.location } : null); return plan.reason }
       // Context settings edit the navigation owner while the designer keeps the
       // visible label/row selected. Reconcile it against the exact planned source.
       const afterFiles = project.files.map(file => ({ ...file, text: plan.changes.find(change => change.file === file.id)?.after ?? file.text }))
@@ -1275,7 +1277,7 @@ export function Studio() {
     {level === 'view' && authoringNode && <><span aria-hidden>›</span><span aria-current="page" data-testid="level-view">{sourceLayerLabel(authoringNode)}</span></>}
   </nav>
 
-  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={editNote} />
+  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={editNote} noteAction={refusedAt && refusedAt.note === editNote ? { label: 'Show in Code', onClick: () => revealSpanIn(refusedAt.file, refusedAt.offset) } : null} />
   const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
 
   return (
