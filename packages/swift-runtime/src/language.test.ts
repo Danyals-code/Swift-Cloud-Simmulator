@@ -665,6 +665,29 @@ describe('describing values', () => {
   it('is still a string-valued helper', () => {
     expect(value('print("x")').kind).toBe('string')
   })
+
+  // Swift prints a class instance as `MyApp.Node`. The module is the exported
+  // target's name, which the preview never sees, so the type name stands alone.
+  it('prints a class instance by its type name, even when two objects point at each other', () => {
+    expect(
+      run(`
+final class Node {
+    var name = ""
+    var parent: Node?
+    var child: Node?
+}
+
+func main() {
+    let root = Node()
+    let leaf = Node()
+    root.child = leaf
+    leaf.parent = root
+    print(root)
+    print("child: \\(leaf)")
+    print([root, leaf])
+}`),
+    ).toEqual(['Node', 'child: Node', '[Node, Node]'])
+  })
 })
 
 describe('collections the AI writes around its lists', () => {

@@ -217,7 +217,7 @@ export class AppRuntime {
     try {
       this.interpreter.load(files)
     } catch (error) {
-      this.loadFailure = toFailure(error)
+      this.loadFailure = toFailure(error, this.interpreter.position)
     }
 
     this.entryTypeName = screen ?? model.entryPoint?.name ?? null
@@ -300,7 +300,7 @@ export class AppRuntime {
         views: [],
         ui: null,
         logs: this.host.takeLogs(),
-        failure: toFailure(error),
+        failure: toFailure(error, this.interpreter.position),
         rootTypeName: this.rootTypeName,
       }
     }
@@ -419,7 +419,7 @@ export class AppRuntime {
     } catch (error) {
       // A trap inside an action is surfaced as a log rather than thrown, so one bad
       // tap cannot tear down the preview.
-      this.host.log(`Action failed: ${toFailure(error).message}`, spanOf(intent), 'error')
+      this.host.log(`Action failed: ${toFailure(error, this.interpreter.position).message}`, spanOf(intent), 'error')
     }
 
     this.animation = this.host.pendingAnimation
@@ -443,7 +443,7 @@ export class AppRuntime {
         const result = this.interpreter.callClosure(closure, [dimensions], closure.span)
         return result.kind === 'int' || result.kind === 'double' ? result.value : 0
       } catch (error) {
-        this.host.log(`Alignment guide failed: ${toFailure(error).message}`, closure.span, 'error')
+        this.host.log(`Alignment guide failed: ${toFailure(error, this.interpreter.position).message}`, closure.span, 'error')
         return 0
       }
     }
@@ -552,7 +552,7 @@ export class AppRuntime {
     } catch (error) {
       // A failing lifecycle callback is reported, not fatal: the screen it was about
       // to decorate is still worth showing.
-      this.host.log(`Lifecycle callback failed: ${toFailure(error).message}`, actionSpan(action), 'error')
+      this.host.log(`Lifecycle callback failed: ${toFailure(error, this.interpreter.position).message}`, actionSpan(action), 'error')
     }
   }
 
@@ -1236,7 +1236,15 @@ export function actionId(path: string): string {
   return handlerIdFor(path)
 }
 
-function toFailure(error: unknown): RuntimeFailure {
+/**
+ * What went wrong, as the preview reports it.
+ *
+ * Total: nothing thrown while running the user's code may escape a pass, because an
+ * error that escapes takes the worker with it - the studio says the compiler stopped,
+ * every `@State` is gone, and the line that failed is never marked. What the
+ * interpreter did not raise itself, it is reported at `at`, where execution last was.
+ */
+function toFailure(error: unknown, at: SourceSpan): RuntimeFailure {
   if (error instanceof SwiftTrap) {
     return {
       message: `Swift runtime failure: ${error.reason}`,
@@ -1270,7 +1278,18 @@ function toFailure(error: unknown): RuntimeFailure {
       kind: 'trap',
     }
   }
-  throw error
+  // Recursion runs out of JavaScript stack before it reaches the interpreter's own
+  // depth limit when each call nests a few expressions, so it is the same failure.
+  if (isStackOverflow(error)) {
+    return { message: 'Call depth exceeded. This usually means recursion that never ends.', span: at, frames: [], kind: 'budget' }
+  }
+  const reason = error instanceof Error ? error.message : String(error)
+  return { message: `The preview stopped on an internal error here: ${reason}. It may still run in Xcode.`, span: at, frames: [], kind: 'unsupported' }
+}
+
+/** A JavaScript stack overflow: a RangeError in Chrome and Safari, "too much recursion" in Firefox. */
+function isStackOverflow(error: unknown): boolean {
+  return error instanceof Error && /call stack|too much recursion/i.test(error.message)
 }
 
 export { describe }

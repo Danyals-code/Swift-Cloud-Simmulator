@@ -1322,3 +1322,68 @@ describe('Text interpolated into Text', () => {
     expect(texts(r)).toContain('Home screen')
   })
 })
+
+describe('F4: an internal error is reported where it happened, and never stops the worker', () => {
+  const tagClass = `final class Tag: Hashable {
+    let name: String
+    init(_ name: String) { self.name = name }
+    static func == (a: Tag, b: Tag) -> Bool { a.name == b.name }
+    func hash(into hasher: inout Hasher) { hasher.combine(name) }
+  }`
+
+  it('keeps class instances apart as ForEach rows, though each prints as its type', () => {
+    const r = compileView(viewSource(`@State private var picked = "none"
+      let tags = [Tag("Nuts"), Tag("Fudge")]
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(tags, id: \\.self) { tag in Button(tag.name) { picked = tag.name } }
+        }
+      }`, tagClass))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(tap(r, 'Nuts'))).toContain('Picked Nuts')
+  })
+
+  it('writes through a force-unwrapped object whose parent points back at it', () => {
+    const r = runView(`var body: some View { Text(rename()) }
+      func rename() -> String {
+        let root = Node()
+        let leaf: Node? = Node()
+        root.child = leaf
+        leaf!.parent = root
+        leaf!.name = "Renamed"
+        return root.child!.name
+      }`, 'final class Node { var name = ""; var parent: Node?; var child: Node? }')
+    expect(texts(r)).toEqual(['Renamed'])
+  })
+
+  it('reports recursion that never ends where it recurses, instead of stopping the worker', () => {
+    const body = 'n == 0 ? 0 : 1 + steps(n - 1)'
+    const source = viewSource(`var body: some View { Text("\\(steps(-1))") }
+      func steps(_ n: Int) -> Int { ${body} }`)
+    const r = compileView(source)
+    const [error, ...others] = r.diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('recursion that never ends')
+    const at = source.indexOf(body)
+    expect(error!.span.start).toBeGreaterThanOrEqual(at)
+    expect(error!.span.end).toBeLessThanOrEqual(at + body.length)
+  })
+
+  it('reports a class that builds another of itself as it is built, where it does', () => {
+    const declaration = 'final class Tree { var next = Tree() }'
+    const source = viewSource('var body: some View { Text("\\(Tree().next === nil)") }', declaration)
+    const [error, ...others] = compileView(source).diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('recursion that never ends')
+    expect(source.slice(error!.span.start, error!.span.end)).toBe('Tree()')
+    expect(error!.span.start).toBe(source.indexOf(declaration) + declaration.indexOf('Tree()'))
+  })
+
+  it('reports a type alias that names itself as Xcode does, at the alias', () => {
+    // swiftc: "type alias 'Count' references itself", once, at the first of the two.
+    expect(reported('var body: some View { Text("\\(Count.self)") }', 'typealias Count = Total\ntypealias Total = Count')).toEqual([
+      { severity: 'error', message: "Type alias 'Count' references itself.", at: 'Count', fix: undefined },
+    ])
+  })
+})

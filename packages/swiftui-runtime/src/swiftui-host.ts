@@ -4,6 +4,7 @@ import {
   readKeyPath,
   bool,
   describe,
+  identityKey,
   double,
   int,
   asProjection,
@@ -391,7 +392,7 @@ export class SwiftUIHost implements InterpreterHost {
     const first = args[0]?.value
     // `.id(x)`: what the receiver builds is a different view for each x, so its state
     // starts over when x changes, as SwiftUI's does.
-    if (member === 'id' && first && args.length === 1 && this.scopeIdentity) return this.scopeIdentity(`id:${describe(first, false)}`, evaluate)
+    if (member === 'id' && first && args.length === 1 && this.scopeIdentity) return this.scopeIdentity(`id:${identityKey(first)}`, evaluate)
     const { values, objects } = injectedEnvironment(member, args)
     if (member === 'disabled' && first) {
       values.push(['isEnabled', bool(!truthy(first) && truthy(this.environment.value('isEnabled') ?? bool(true)))])
@@ -1833,13 +1834,13 @@ export class SwiftUIHost implements InterpreterHost {
       return element.kind === 'string' || element.kind === 'int' || element.kind === 'double' ? element : undefined
     }
     // Its identity is its id, else its place, which is what SwiftUI falls back to too.
-    const identityKey = (element: SwiftValue, index: number): string => {
+    const rowKey = (element: SwiftValue, index: number): string => {
       const id = idOf(element)
-      return id === undefined ? `#${index}` : describe(id, true)
+      return id === undefined ? `#${index}` : identityKey(id, true)
     }
 
     elements.forEach((element, index) => {
-      const key = identityKey(element, index)
+      const key = rowKey(element, index)
       const implicitTag = idOf(element)
       // A row binding follows stable identity even if a pending handler outlives a reorder.
       const row = binding ? projection({
@@ -1847,13 +1848,13 @@ export class SwiftUIHost implements InterpreterHost {
         get: () => {
           const current = binding.get()
           if (current.kind !== 'array') return { kind: 'nil' }
-          const at = current.elements[index] && identityKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, i) === key)
+          const at = current.elements[index] && rowKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => rowKey(value, i) === key)
           return at < 0 ? { kind: 'nil' } : copyValue(current.elements[at]!)
         },
         set: value => {
           const current = binding.get()
           if (current.kind !== 'array') return
-          const at = current.elements[index] && identityKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, i) === key)
+          const at = current.elements[index] && rowKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => rowKey(value, i) === key)
           if (at < 0) return
           const elements = [...current.elements]; elements[at] = copyValue(value)
           binding.set({ ...current, elements })

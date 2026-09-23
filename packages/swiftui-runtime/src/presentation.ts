@@ -6,7 +6,7 @@ import {
   asProjection,
   dateValue,
   double,
-  describe,
+  identityKey,
   opaque,
   projection as makeProjection,
   str,
@@ -577,7 +577,7 @@ class Resolver {
       // `.id(x)`: a new x is a new view, so its hooks run as it appears and the old one's
       // as it goes, and the framework state kept by path starts over.
       const identity = view.modifiers.find((modifier) => modifier.name === 'id')?.args[0]?.value
-      if (identity !== undefined) segment = `${segment}@${encodeURIComponent(describe(identity, true))}`
+      if (identity !== undefined) segment = `${segment}@${encodeURIComponent(identityKey(identity, true))}`
       return this.stamp(inheritVisualStyle(view, inherited), `${prefix}-${segment}`)
     })
   }
@@ -816,7 +816,7 @@ class Resolver {
 
     const modifier = view.modifiers[index]!
     const gate = modifier.args.find((a) => a.label === 'value')!.value
-    const open = this.ctx.state.animationGateOpen(`${path}m${index}`, describe(gate, true))
+    const open = this.ctx.state.animationGateOpen(`${path}m${index}`, identityKey(gate, true))
 
     const modifiers = [...view.modifiers]
     modifiers[index] = {
@@ -870,7 +870,7 @@ class Resolver {
       const selection = labelled(view.args, 'selection')
       if (view.name === 'Picker' && selection) {
         const binding = asProjection(selection)
-        const current = binding ? describe(binding.get(), true) : null
+        const current = binding ? identityKey(binding.get(), true) : null
 
         // `Picker { ForEach(options) { … } }` is how a picker over a collection is
         // written, and its options are a level down. Flattened once, here, so the
@@ -1148,7 +1148,7 @@ class Resolver {
 
     const selection = isContextMenu ? undefined : labelled(control.args, 'selection')
     const binding = asProjection(selection)
-    const current = binding ? describe(binding.get(), true) : null
+    const current = binding ? identityKey(binding.get(), true) : null
 
     const contextMenu = control.modifiers.find(m => m.name === 'contextMenu')
     // A menu over `ForEach` shows its rows, as a Picker over one does.
@@ -1395,7 +1395,7 @@ class Resolver {
 
     const valueOf = (page: ViewValue) => page.name === 'Tab' ? labelled(page.args, 'value') : rowTag(page, binding)
     const tagged = pages.map((page) => tokenOrValue(valueOf(page)))
-    const current = binding ? describe(binding.get(), true) : null
+    const current = binding ? identityKey(binding.get(), true) : null
     const index = this.forceTab ?? (current !== null ? Math.max(0, tagged.indexOf(current)) : this.ctx.state.selectedTab(tabId))
     const selected = Math.max(0, Math.min(index, pages.length - 1))
 
@@ -1725,7 +1725,7 @@ function tokenName(value: SwiftValue | undefined): string | null {
  */
 function tokenOrValue(value: SwiftValue | undefined): string | null {
   if (value === undefined) return null
-  return tokenName(value) ?? describe(value, true)
+  return tokenName(value) ?? identityKey(value, true)
 }
 
 /** A modifier written on this view itself, rather than anywhere in its subtree. */

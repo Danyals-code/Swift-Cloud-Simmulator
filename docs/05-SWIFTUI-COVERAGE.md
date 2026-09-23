@@ -458,6 +458,12 @@ Listed in the exported README so nothing is a surprise on the Mac:
 25. **A search drawer shown always keeps a large title.** With
     `.navigationBarDrawer(displayMode: .always)`, iOS 27 makes the title inline, and the
     preview keeps it large.
+26. **A class instance prints without its module.** `print(node)` shows `Node` where the
+    app shows `MyApp.Node`: the module is the exported target's name, which the preview
+    never sees. Its properties are never printed, as in Swift.
+27. **Recursion stops sooner than on a device.** Each Swift call costs the interpreter
+    several JavaScript frames, so a recursion a few hundred calls deep stops the preview
+    with "Call depth exceeded" at the line it reached, where an iPhone would go deeper.
 
 ## The strictness pass (R5)
 

@@ -143,6 +143,8 @@ const MAX_SAFE_INT = Number.MAX_SAFE_INTEGER
  */
 export class Interpreter {
   private steps = 0
+  /** The last place a step was taken, for a failure that carries no place of its own. */
+  private reached: SourceSpan = { file: '', start: 0, end: 0 }
   private readonly frames: StackFrame[] = []
   /** Declared result types, innermost last, so `return .case` knows its own type. */
   private readonly returnTypes: (string | null)[] = []
@@ -281,9 +283,21 @@ export class Interpreter {
     return this.steps
   }
 
+  /**
+   * Where execution last was.
+   *
+   * What an engine error - the JavaScript stack running out on recursion - is
+   * reported at: it is raised by the interpreter itself, not by the user's code, so
+   * it has no span of its own, and this is the line that was running.
+   */
+  get position(): SourceSpan {
+    return this.reached
+  }
+
   // ---------------------------------------------------------------- budgeting
 
   private tick(span: SourceSpan): void {
+    this.reached = span
     if (++this.steps > this.stepBudget) {
       throw new ExecutionBudgetExceeded(span, this.steps, [...this.frames].reverse())
     }

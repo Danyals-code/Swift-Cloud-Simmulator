@@ -13,6 +13,7 @@ import type {
   SourceFileNode,
   Stmt,
   StructDecl,
+  TypealiasDecl,
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
@@ -121,6 +122,7 @@ export class Checker {
     const expanded = hoistNestedTypes(files)
     this.conformance = collectConformance(expanded)
     for (const file of expanded) this.collectDeclarations(file)
+    this.reportAliasCycles(files)
 
     const entryPoint = this.resolveEntryPoint(files)
 
@@ -193,6 +195,29 @@ export class Checker {
           if (member.kind === 'varDecl') this.declaredExtensionProperties.add(member.name)
         }
       }
+    }
+  }
+
+  /**
+   * `typealias Count = Total` beside `typealias Total = Count` names no type at all,
+   * and Xcode refuses it. Said once per loop, at the alias declared first, where
+   * swiftc says it.
+   */
+  private reportAliasCycles(files: readonly SourceFileNode[]): void {
+    const aliases = files.flatMap((file) => file.declarations.filter((decl): decl is TypealiasDecl => decl.kind === 'typealiasDecl'))
+    const targets = new Map(aliases.flatMap((alias) => (alias.target.kind === 'namedType' ? [[alias.name, alias.target.name] as const] : [])))
+    const looped = new Set<string>()
+    for (const alias of aliases) {
+      if (looped.has(alias.name)) continue
+      const chain: string[] = []
+      let name: string | undefined = alias.name
+      while (name !== undefined && !chain.includes(name)) {
+        chain.push(name)
+        name = targets.get(name)
+      }
+      if (name !== alias.name) continue
+      for (const member of chain) looped.add(member)
+      this.report(alias.nameSpan, 'error', 'unresolved_identifier', `Type alias '${alias.name}' references itself.`)
     }
   }
 
