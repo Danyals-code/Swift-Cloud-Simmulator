@@ -104,7 +104,7 @@ describe('export byte-identity (FR-7.8)', () => {
 
 describe('zipFileName', () => {
   it('uses the project name', () => {
-    expect(zipFileName(createDefaultProject(0))).toBe('CounterApp.zip')
+    expect(zipFileName(createDefaultProject(0))).toBe('MyDesignApp.zip')
   })
 
   it('strips characters that are illegal in filenames', () => {
