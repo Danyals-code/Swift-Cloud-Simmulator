@@ -327,7 +327,7 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
   'Material', 'StrokeStyle', 'GeometryProxy', 'Gradient', 'AnyShapeStyle',
-  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval',
+  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
   'ViewModifier', 'ButtonStyle', 'LabelStyle', 'ToggleStyle', 'Configuration',

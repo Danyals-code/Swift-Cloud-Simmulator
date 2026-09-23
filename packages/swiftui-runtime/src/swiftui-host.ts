@@ -61,6 +61,7 @@ import {
   TOKEN_TYPE,
   TRANSITION_TYPE,
   VIEW_TYPE,
+  type ActionValue,
   type AnimationPayload,
   type ButtonConfigurationPayload,
   type ColorPayload,
@@ -190,6 +191,35 @@ function token(name: string): SwiftValue {
 
 function color(payload: ColorPayload): SwiftValue {
   return opaque(COLOR_TYPE, payload)
+}
+
+/**
+ * A `Button`'s `action:` argument: `Button("Save", action: save)`, and Xcode's own
+ * `Button(action: { … }) { Label(…) }`, whose trailing closure is then the label. A
+ * function named as a value arrives as a function rather than a closure.
+ */
+function actionArgument(name: string, call: HostCall): ActionValue | null {
+  if (!ACTION_VIEWS.has(name)) return null
+  const value = call.args.find((a) => a.label === 'action')?.value
+  return value?.kind === 'closure' || value?.kind === 'function' ? value : null
+}
+
+/** Modifiers that run something when an event happens, rather than drawing anything. */
+const EVENT_MODIFIERS: ReadonlySet<string> = new Set([
+  'onAppear', 'onDisappear', 'task', 'onChange', 'onDelete', 'onTapGesture', 'onLongPressGesture', 'onSubmit',
+])
+
+/**
+ * What an event modifier was given to run when no trailing closure was written:
+ * `perform:` or `action:`, or the unlabelled argument of `.task(load)` and
+ * `.onSubmit(save)`, as a closure or as a function named as a value.
+ */
+function eventArgument(call: HostCall): ActionValue | null {
+  const argument =
+    call.args.find((a) => a.label === 'perform' || a.label === 'action') ??
+    call.args.find((a) => a.label === null && (a.value.kind === 'closure' || a.value.kind === 'function'))
+  const value = argument?.value
+  return value?.kind === 'closure' || value?.kind === 'function' ? value : null
 }
 
 function toArgs(call: HostCall): ViewArg[] {
@@ -913,7 +943,7 @@ export class SwiftUIHost implements InterpreterHost {
       args,
       children,
       modifiers: [],
-      action: isAction ? call.trailingClosure : null,
+      action: actionArgument(name, call) ?? (isAction ? call.trailingClosure : null),
       span: call.span,
     })
   }
@@ -970,7 +1000,7 @@ export class SwiftUIHost implements InterpreterHost {
       args: [...args.filter((a) => !named.some((n) => n.label === a.label)), ...labelled],
       children,
       modifiers: [],
-      action: isAction ? call.trailingClosure : null,
+      action: actionArgument(name, call) ?? (isAction ? call.trailingClosure : null),
       span: call.span,
     })
   }
@@ -1328,12 +1358,14 @@ export class SwiftUIHost implements InterpreterHost {
       ? call.args.some(arg => arg.label === 'forSelectionType') ? null
         : call.trailingClosure ?? asClosure(call.args.find(arg => arg.label === 'menuItems')?.value)
       : call.trailingClosure
+    const action = EVENT_MODIFIERS.has(member) ? (call.trailingClosure ?? eventArgument(call)) : null
     return {
       name: member,
       args: [...toArgs(call), ...this.eagerContent(member, call)],
       span: call.span,
       // Unevaluated on purpose: a sheet's content must not run while it is down.
       closure: deferred,
+      ...(action ? { action } : {}),
       // Only where there is something deferred to run later. Every other modifier
       // resolves inside the scope it was written in and has no use for this.
       ...(deferred ? { environment: this.environment.snapshot() } : {}),

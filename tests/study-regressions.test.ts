@@ -152,3 +152,71 @@ describe('optional chaining in the preview', () => {
     expect(texts(tap(tap(untouched, 'New'), 'Finish'))).toContain('Done')
   })
 })
+
+describe('E2: every way of writing a Button action fires', () => {
+  const forms: Record<string, string> = {
+    'a trailing closure': 'Button("Go") { n += 1 }',
+    'an action closure': 'Button("Go", action: { n += 1 })',
+    'a method as the action': 'Button("Go", action: bump)',
+    "Xcode's template form": 'Button(action: { n += 1 }) { Text("Go") }',
+    'action and label': 'Button(action: bump, label: { Text("Go") })',
+    'a role and an action': 'Button("Go", role: .destructive, action: bump)',
+    'a symbol and an action': 'Button("Go", systemImage: "plus", action: bump)',
+  }
+
+  it.each(Object.entries(forms))('with %s', (_, button) => {
+    const r = runView(`@State private var n = 0
+      func bump() { n += 1 }
+      var body: some View { VStack { Text("n=\\(n)"); ${button} } }`)
+    expect(texts(tap(r, 'Go'))).toContain('n=1')
+  })
+
+  it('closes an alert whose only button is written with action:', () => {
+    // An alert can't be dismissed any other way, so a button that doesn't fire traps
+    // the participant under it.
+    const r = runView(`@State private var showing = true
+      var body: some View {
+        Text("Home").alert("Saved", isPresented: $showing) {
+          Button("OK", role: .cancel, action: {})
+        }
+      }`)
+    expect(texts(r)).toContain('Saved')
+    expect(texts(tap(r, 'OK'))).not.toContain('Saved')
+  })
+})
+
+describe('E2: modifiers given a function or a closure argument to run', () => {
+  it('runs .onAppear(perform:), .task(_:) and .onTapGesture(perform:)', () => {
+    const r = runView(`@State private var log: [String] = []
+      func appeared() { log.append("appear") }
+      func load() { log.append("task") }
+      func tapped() { log.append("tap") }
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Text("A").onAppear(perform: appeared)
+          Text("B").onAppear(perform: { log.append("closure") })
+          Text("C").task(load)
+          Text("Tap me").onTapGesture(perform: tapped)
+        }
+      }`)
+    expect(texts(r)).toContain('appear,closure,task')
+    expect(texts(tap(r, 'Tap me'))).toContain('appear,closure,task,tap')
+  })
+
+  it('deletes the swiped row with .onDelete(perform:), as Xcode writes it', () => {
+    const r = runView(`@State private var items = ["One", "Two", "Three"]
+      func deleteItems(at offsets: IndexSet) { items.remove(atOffsets: offsets) }
+      var body: some View {
+        List {
+          ForEach(items, id: \\.self) { item in Text(item) }
+            .onDelete(perform: deleteItems)
+        }
+      }`)
+    const row = nodes(r).filter(n => n.hitTarget?.role === 'drag')[1]!
+    applyEvent({ kind: 'drag', handlerId: row.hitTarget!.handlerId, phase: 'ended', location: { x: -90, y: 0 }, startLocation: { x: 0, y: 0 }, translation: { x: -90, y: 0 } })
+    const after = tap(rerender(revision++), 'Delete')
+    expect(texts(after)).toEqual(expect.arrayContaining(['One', 'Three']))
+    expect(texts(after)).not.toContain('Two')
+  })
+})

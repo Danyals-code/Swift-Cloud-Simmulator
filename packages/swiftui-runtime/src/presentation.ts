@@ -20,6 +20,7 @@ import {
   payloadOf,
   ANIMATION_TYPE,
   COLOR_TYPE,
+  type ActionValue,
   type AnimationPayload,
   type ColorPayload,
   type EnvironmentFrame,
@@ -138,7 +139,7 @@ export interface LifecycleHook {
   readonly kind: 'appear' | 'disappear' | 'change'
   /** The view's path - how "has this appeared before?" is answered. */
   readonly path: string
-  readonly closure: ClosureValue
+  readonly action: ActionValue
   /** For `.onChange(of:)`: the value being watched, compared against last pass. */
   readonly watched?: SwiftValue
   readonly initial?: boolean
@@ -553,7 +554,7 @@ class Resolver {
       this.register(`${path}/context-menu`, { kind: 'openMenu', menu: `${path}/context-menu` })
     }
     this.visualStyle = visualModifiers(view)
-    const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.closure ?? null
+    const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.action ?? null
 
     // A custom style written on this view is in scope for its whole subtree, and for
     // this view itself when it is the button.
@@ -633,14 +634,15 @@ class Resolver {
   /** Records `.onAppear`, `.onDisappear`, `.task` and `.onChange` for this view. */
   private collectLifecycle(view: ViewValue, path: string): void {
     for (const [index, modifier] of view.modifiers.entries()) {
-      if (!modifier.closure) continue
+      const action = modifier.action
+      if (!action) continue
 
       if (modifier.name === 'onAppear' || modifier.name === 'task') {
-        this.lifecycle.push({ kind: 'appear', path, closure: modifier.closure })
+        this.lifecycle.push({ kind: 'appear', path, action })
         continue
       }
       if (modifier.name === 'onDisappear') {
-        this.lifecycle.push({ kind: 'disappear', path, closure: modifier.closure })
+        this.lifecycle.push({ kind: 'disappear', path, action })
         continue
       }
       if (modifier.name === 'onChange') {
@@ -649,7 +651,7 @@ class Resolver {
           kind: 'change',
           path: `${path}/${modifier.name}-${index}`,
           initial: truthy(labelled(modifier.args, 'initial') ?? { kind: 'bool', value: false }),
-          closure: modifier.closure,
+          action,
           ...(watched !== undefined ? { watched } : {}),
         })
       }
@@ -666,14 +668,14 @@ class Resolver {
   private stampRow(
     view: ViewValue,
     path: string,
-    onDelete: ClosureValue | null,
+    onDelete: ActionValue | null,
     offset: number,
   ): ViewValue {
     const stamped = this.stamp(view, path)
     if (!onDelete) return stamped
 
     this.register(`${path}/swipe`, { kind: 'swipe', row: path })
-    this.register(`${path}/delete`, { kind: 'delete', closure: onDelete, offset, row: path })
+    this.register(`${path}/delete`, { kind: 'delete', action: onDelete, offset, row: path })
     return { ...stamped, swipe: { offset: this.ctx.state.swipeOffset(path), path } }
   }
 
@@ -687,7 +689,7 @@ class Resolver {
    */
   private intentFor(view: ViewValue): ViewIntent | null {
     if (view.intent) return view.intent
-    if (view.action) return { kind: 'run', closure: view.action }
+    if (view.action) return { kind: 'run', action: view.action }
 
     // Controls the user gave a binding need no closure of their own: writing the
     // binding *is* the behaviour, and it is the framework's job to do it. The value
@@ -714,7 +716,7 @@ class Resolver {
     const tap = view.modifiers.find(
       (m) => m.name === 'onTapGesture' || m.name === 'onLongPressGesture',
     )
-    if (tap?.closure) return { kind: 'run', closure: tap.closure }
+    if (tap?.action) return { kind: 'run', action: tap.action }
 
     return null
   }
@@ -784,7 +786,7 @@ class Resolver {
 
   private operable(view: ViewValue, path: string): ViewValue {
     const submit = view.modifiers.find(m => m.name === 'onSubmit')
-    if (submit?.closure && ['TextField', 'SecureField', 'TextEditor'].includes(view.name)) this.register(`${path}/submit`, { kind: 'run', closure: submit.closure })
+    if (submit?.action && ['TextField', 'SecureField', 'TextEditor'].includes(view.name)) this.register(`${path}/submit`, { kind: 'run', action: submit.action })
     if (view.name === 'Stepper') {
       const binding = labelled(view.args, 'value')
       if (!binding || !asProjection(binding)) return view
