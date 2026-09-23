@@ -1485,14 +1485,10 @@ export class Interpreter {
         return NIL
 
       case 'stringLiteral': {
-        let out = ''
-        for (const segment of expr.segments) {
-          out +=
-            segment.kind === 'text'
-              ? segment.value
-              : describe(this.evaluate(segment.expression, env), false)
-        }
-        return str(out)
+        const parts = expr.segments.map((segment) => segment.kind === 'text' ? segment.value : this.evaluate(segment.expression, env))
+        const hosted = parts.some((part) => typeof part !== 'string' && part.kind !== 'string') ? this.host.interpolate?.(parts, expr.span) : undefined
+        if (hosted !== undefined) return hosted
+        return str(parts.map((part) => typeof part === 'string' ? part : describe(part, false)).join(''))
       }
 
       case 'arrayLiteral':

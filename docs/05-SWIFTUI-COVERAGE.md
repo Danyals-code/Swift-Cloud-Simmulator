@@ -50,7 +50,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes |
+| `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text` |
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations; unknown names use an explicit fallback, not Apple artwork |
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |

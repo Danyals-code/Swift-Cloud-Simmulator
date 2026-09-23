@@ -208,8 +208,8 @@ function view(v: ViewValue): SwiftValue {
  * quietly draw nothing, which is the kind of silent wrong the preview exists to
  * avoid - so it declines and the operator reports itself instead.
  */
-function isTextLike(v: ViewValue): boolean {
-  return v.name === 'Text'
+function isTextLike(v: ViewValue | null): boolean {
+  return v?.name === 'Text'
 }
 
 function token(name: string): SwiftValue {
@@ -898,6 +898,9 @@ export class SwiftUIHost implements InterpreterHost {
       })
     }
 
+    // `Text("\(Text("Bold").bold()) and plain")` arrives already joined, as a Text.
+    const given = call.args[0]
+    if (name === 'Text' && given?.label === null && isTextLike(asView(given.value))) return given.value
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
@@ -1266,6 +1269,20 @@ export class SwiftUIHost implements InterpreterHost {
    * Anything else opaque is left alone and traps as it did, because inventing a
    * meaning for `Color.red + 1` would be a worse answer than the error.
    */
+  /**
+   * `Text("\(Text("Bold").bold()) and plain")`: a `Text` interpolated into a `Text` keeps
+   * its own styling, as `+` does, so the result is the same kind of joined `Text`.
+   */
+  interpolate(parts: readonly (string | SwiftValue)[], span: SourceSpan): SwiftValue | undefined {
+    if (!parts.some((part) => typeof part !== 'string' && isTextLike(asView(part)))) return undefined
+    const children = parts.flatMap((part): ViewValue[] => {
+      const text = typeof part === 'string' ? part : asView(part) && isTextLike(asView(part)) ? null : describe(part, false)
+      if (text === '') return []
+      return text === null ? [asView(part as SwiftValue)!] : [{ name: 'Text', args: [{ label: null, value: str(text) }], children: [], modifiers: [], action: null, span }]
+    })
+    return view({ name: 'Text', args: [], children, modifiers: [], action: null, span })
+  }
+
   applyOperator(operator: string, left: SwiftValue, right: SwiftValue, span: SourceSpan): SwiftValue | undefined {
     if (operator !== '+') return undefined
 

@@ -102,6 +102,13 @@ export interface InterpreterHost {
   groupValues?(values: readonly SwiftValue[], span: SourceSpan): SwiftValue | undefined
 
   /**
+   * A string interpolation with a part the host knows better than by its description:
+   * `Text("\(Text("Bold").bold()) and plain")` is styled text, not "View and plain".
+   * Asked only when an interpolated value isn't a string, and undefined declines.
+   */
+  interpolate?(parts: readonly (string | SwiftValue)[], span: SourceSpan): SwiftValue | undefined
+
+  /**
    * A binary operator applied to a value the interpreter does not own.
    *
    * `Text("a") + Text("b")` is the whole reason this exists: both operands are

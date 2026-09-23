@@ -1245,3 +1245,13 @@ describe('a ScrollView puts a lone child at its top, as iOS 27 does', () => {
     expect(text.height).toBeLessThan(40)
   })
 })
+
+describe('Text interpolated into Text', () => {
+  // Measured in the iOS 27 simulator (docs/parity/native/iphone18pro-misrenders-ii, textInText).
+  it('draws the inner Text as part of the sentence, with its own styling', () => {
+    const r = runView('var body: some View { Text("\\(Text("Bold").bold()) and plain") }')
+    const runs = nodes(r).find(n => n.text)!.text!.runs
+    expect(runs.map(run => run.text).join('')).toBe('Bold and plain')
+    expect(runs.map(run => [run.text, run.font.weight >= 600])).toEqual([['Bold', true], [' and plain', false]])
+  })
+})
