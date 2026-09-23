@@ -1,6 +1,6 @@
 .toolbar { height: 64px; flex-shrink: 0; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(max-content,1fr); align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar); z-index: 30; }
 .project { display: flex; align-items: center; min-width: 0; gap: 12px; }
-.home { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; color: var(--color-xc-text); cursor: pointer; flex-shrink: 0; }
+.home { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px 0 8px; border-radius: 8px; color: var(--color-xc-text); font-size: 13px; font-weight: 500; cursor: pointer; flex-shrink: 0; }
 .home:hover { background: var(--color-xc-bar-raised); }
 .projectCopy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .projectName { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

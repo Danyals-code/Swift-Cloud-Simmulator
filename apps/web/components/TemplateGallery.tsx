@@ -42,6 +42,8 @@ export interface TemplateGalleryProps {
   savedAt: number | null
   /** True when the sheet opened by itself at launch rather than being asked for. */
   atLaunch?: boolean
+  /** Where to open when somebody asked for the sheet. At launch it opens on the saved work, if there is any. */
+  initialSource?: GallerySource
   /** Fails when the template's sources could not be fetched. */
   onChoose: (templateId: string, options?: SwitchOptions) => Promise<SwitchResult>
   /** Fails when nothing usable was in the selection. */
@@ -71,6 +73,7 @@ export function TemplateGallery({
   origin,
   savedAt,
   atLaunch = false,
+  initialSource,
   onChoose,
   onOpenFiles,
   onOpenProject,
@@ -81,8 +84,10 @@ export function TemplateGallery({
   const features = useMemo(() => TEMPLATE_CATALOG.filter((t) => t.kind === 'feature'), [])
 
   const [imported, setImported] = useState<{ local: Project; project: Project; handoff: Handoff } | null>(null)
-  // After a crash the saved projects come first, so the next one opened is a choice.
-  const [source, setSource] = useState<GallerySource>(atLaunch && origin === 'recovered' ? 'open' : 'design')
+  // With work saved - or after a crash, when the next project opened should be a
+  // choice - the saved projects come first, so coming back leads to the work rather
+  // than to a new project (B6).
+  const [source, setSource] = useState<GallerySource>(initialSource ?? (atLaunch && (origin === 'restored' || origin === 'recovered') ? 'open' : 'design'))
   const [query, setQuery] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)

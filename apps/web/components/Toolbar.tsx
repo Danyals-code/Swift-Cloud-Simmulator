@@ -16,7 +16,8 @@ export interface ToolbarProps {
   onModeChange: (mode: WorkspaceMode) => void
   theme: WorkspaceTheme
   onThemeChange: (theme: WorkspaceTheme) => void
-  onOpenGallery: () => void
+  /** Opens the project sheet, on the projects in this browser or on starting a new one. */
+  onOpenGallery: (source: 'open' | 'design') => void
   projectName: string
   onRenameProject: (name: string) => boolean
   onReview?: () => void
@@ -26,6 +27,8 @@ export interface ToolbarProps {
   onCopyBuild: () => void
   savedAt: number | null
   saveError: string | null
+  /** False when the browser keeps nothing past the page, which the label must not hide (B2). */
+  durable?: boolean
   panes: ReadonlySet<PaneKey>
   suppressed: ReadonlySet<PaneKey>
   onTogglePane: (pane: PaneKey) => void
@@ -79,7 +82,7 @@ interface PreviewToolsProps {
 const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debug area', title: 'Show problems and output' }]
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
-export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, onModeChange, theme, onThemeChange,
+export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, durable = true, mode, onModeChange, theme, onThemeChange,
   panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onCopyBuild, onReview, reviewDisabled,
   environment, previewing = false, onSetPreviewing, previewDisabled, exporting = false }: ToolbarProps) {
   const design = mode === 'design'
@@ -99,8 +102,8 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, 
   }
   return <header data-testid="toolbar" className={styles.toolbar} data-mode={mode}>
     <div className={styles.project}>
-      <button type="button" onClick={onOpenGallery} aria-label="Open a project" title="Projects and templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={21} /></button>
-      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} /><span data-testid="save-indicator" title={saveError ?? undefined} className={saveError ? styles.saveError : styles.saveStatus}>{saveError ? 'Could not save' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
+      <button type="button" onClick={() => onOpenGallery('open')} title="Your projects, and new ones from templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={19} /><span>Projects</span></button>
+      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} /><span data-testid="save-indicator" title={saveError ?? (durable ? undefined : 'This browser keeps nothing once the tab closes.')} className={saveError || !durable ? styles.saveError : styles.saveStatus}>{saveError ? 'Could not save' : !durable ? 'Not saved' : savedAt ? 'Saved locally' : 'Local project'}</span></div>
     </div>
     <nav className={styles.modes} aria-label="Workspace view">
       {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Design screens visually' : 'Swift code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Code'}</button>)}
@@ -115,11 +118,13 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, saveError, mode, 
         <MenuButton items={exportItems} onSelect={chooseExport} label="Export options" title="Other formats, the editable archive, and images" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={11} /></MenuButton>
       </div>
       <MenuButton items={[
-        { value: 'theme', label: theme === 'dark' ? 'Light workspace' : 'Dark workspace', icon: 'appearance' },
+        { value: 'new', label: 'New project…', icon: 'plus' },
+        { value: 'projects', label: 'Your projects…', icon: 'folder' },
+        { value: 'theme', label: theme === 'dark' ? 'Light workspace' : 'Dark workspace', icon: 'appearance', separated: true },
         { value: 'shortcuts', label: 'Keyboard shortcuts', detail: '⌘/', icon: 'keyboard' },
         ...(design ? [{ value: 'problems', label: 'Problems and output', detail: '⌘⇧Y', separated: true }] : []),
         { value: 'build', label: BUILD_NAME, detail: BUILD_DATE, title: `${BUILD_DETAILS}. Choose to copy it.`, icon: 'info' as const, separated: true },
-      ]} onSelect={value => { if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug'); else if (value === 'build') onCopyBuild() }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={17} /></MenuButton>
+      ]} onSelect={value => { if (value === 'new') onOpenGallery('design'); else if (value === 'projects') onOpenGallery('open'); else if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug'); else if (value === 'build') onCopyBuild() }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={17} /></MenuButton>
     </div>
   </header>
 }

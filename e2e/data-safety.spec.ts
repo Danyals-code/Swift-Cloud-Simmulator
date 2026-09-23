@@ -83,7 +83,8 @@ test('when saves fail, the studio says why, offers the work as a file, and asks 
 
   // So does switching project, which offers the download before going on without it.
   // (A rename alone leaves the files as they were made, so there is no "Open …?" first.)
-  await page.getByTestId('app-icon').click()
+  await page.getByTestId('workspace-more').click()
+  await page.getByTestId('workspace-more-menu-new').click()
   await page.getByTestId('template-confirm').click()
   const unsaved = page.getByTestId('unsaved-confirm')
   await expect(unsaved).toContainText('Unsaved work')
@@ -92,4 +93,47 @@ test('when saves fail, the studio says why, offers the work as a file, and asks 
   await expect(page.getByTestId('template-gallery')).toHaveCount(0)
   await expect(page.getByTestId('project-name')).toHaveText('MyDesignApp')
   await expect(page.getByTestId('save-banner')).toBeVisible()
+})
+
+test('coming back finds the work: the sheet opens on Your projects, and More leads to both (B6)', async ({ page }) => {
+  await page.goto('/')
+  // A fresh browser starts with a blank screen, and offers to start designing.
+  await expect(page.getByTestId('gallery-source-design')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('gallery-dismiss').click()
+  await expect(page.getByTestId('project-name')).toHaveText('MyDesignApp')
+  await renameApp(page, 'My work')
+  await expect(page.getByTestId('save-indicator')).toHaveText('Saved locally')
+
+  // With work saved, the sheet leads back to it rather than to a new project.
+  await page.reload()
+  await expect(page.getByTestId('gallery-source-open')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('gallery-continue')).toContainText('My work')
+  await expect(page.getByTestId('template-confirm')).toHaveText('Continue editing')
+  await page.getByTestId('template-confirm').click()
+  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await expect(page.getByTestId('project-name')).toHaveText('My work')
+
+  // The toolbar says what its icon opens, and More leads to the list and to a new project.
+  await expect(page.getByTestId('app-icon')).toHaveAccessibleName('Projects')
+  await page.getByTestId('workspace-more').click()
+  await page.getByTestId('workspace-more-menu-projects').click()
+  await expect(page.getByTestId('gallery-source-open')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('gallery-cancel').click()
+  await page.getByTestId('workspace-more').click()
+  await expect(page.getByTestId('workspace-more-menu-new')).toHaveText(/New project…/)
+  await page.getByTestId('workspace-more-menu-new').click()
+  await expect(page.getByTestId('gallery-source-design')).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('a browser that keeps nothing says so, and does not claim to have saved (B2)', async ({ page }) => {
+  // With no IndexedDB at all, the studio keeps the work in the page and nowhere else.
+  await page.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { value: undefined, configurable: true }) })
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+
+  await expect(page.getByTestId('save-banner')).toContainText('This browser is not saving your work.')
+  await expect(page.getByTestId('save-indicator')).toHaveText('Not saved')
+  await renameApp(page, 'Only in this tab')
+  await expect(page.getByTestId('save-indicator')).toHaveText('Not saved')
+  await expect(page.getByTestId('save-banner').getByRole('button', { name: 'Download my project' })).toBeVisible()
 })

@@ -197,6 +197,8 @@ export function Studio() {
    * looking at a project they did not pick.
    */
   const [galleryAtLaunch, setGalleryAtLaunch] = useState(false)
+  /** Where the sheet opens when it was asked for: the projects, or a new one. */
+  const [gallerySource, setGallerySource] = useState<'open' | 'design' | undefined>(undefined)
   const greeted = useRef(false)
   const [caret, setCaret] = useState(0)
   const splitRef = useRef<HTMLDivElement | null>(null)
@@ -222,6 +224,7 @@ export function Studio() {
   useEffect(() => {
     if (!loaded || greeted.current || origin === 'shared') return
     greeted.current = true
+    setGallerySource(undefined)
     setGalleryAtLaunch(true)
     setGalleryOpen(true)
   }, [loaded, origin])
@@ -253,7 +256,8 @@ export function Studio() {
 
   const toggleInspect = useCallback(() => setDesigning(!inspecting), [setDesigning, inspecting])
 
-  const openGallery = useCallback(() => {
+  const openGallery = useCallback((source: 'open' | 'design') => {
+    setGallerySource(source)
     setGalleryAtLaunch(false)
     setGalleryOpen(true)
   }, [])
@@ -1327,6 +1331,7 @@ export function Studio() {
         projectName={project.manifest.name}
         savedAt={lastSavedAt}
         saveError={saveError}
+        durable={durable}
         // The toggles report the preference, so each is a switch that always
         // responds; `suppressed` is how a pane that is on but has no room says so.
         panes={new Set((Object.keys(shown) as PaneKey[]).filter((key) => shown[key]))}
@@ -1418,7 +1423,7 @@ export function Studio() {
                 onDuplicateFile={duplicateFile}
                 onMoveFile={moveFile}
                 onRevealDiagnostic={revealSpanIn}
-                onOpenTemplates={openGallery}
+                onOpenTemplates={() => openGallery('design')}
               />}
               </StudioSidebar>
               </PaneBoundary>
@@ -1621,6 +1626,7 @@ export function Studio() {
           origin={origin}
           savedAt={lastSavedAt}
           atLaunch={galleryAtLaunch}
+          initialSource={gallerySource}
           onClose={() => setGalleryOpen(false)}
           onChoose={async (templateId, options) => {
             const made = await applyTemplate(templateId, options)
