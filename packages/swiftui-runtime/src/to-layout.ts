@@ -4283,13 +4283,6 @@ function zstackAlignment(args: readonly ViewArg[]): Alignment {
 }
 
 /**
- * The views a labelled argument produced.
- *
- * `Button { … } label: { Text("Save") }` hands its label over as an argument rather
- * than as a child, because the unlabelled trailing closure is already the action.
- */
-
-/**
  * `Button("Add", systemImage: "plus")`, and `Menu` and `Toggle` written the same way:
  * shorthand for a `Label` as the control's label. Without it only the title was drawn.
  */
@@ -4304,6 +4297,13 @@ function titleAndIconLabel(view: ViewValue): ViewValue | null {
     span: view.span,
   }
 }
+
+/**
+ * The views a labelled argument produced.
+ *
+ * `Button { … } label: { Text("Save") }` hands its label over as an argument rather
+ * than as a child, because the unlabelled trailing closure is already the action.
+ */
 function argViews(view: ViewValue, label: string): ViewValue[] {
   return view.args
     .filter((a) => a.label === label)

@@ -67,7 +67,6 @@ function pt(p: PathPoint): string {
   return `${fmt(p.x)} ${fmt(p.y)}`
 }
 
-/** A point on an ellipse arc, for the SVG `A` command's endpoints. */
 /**
  * How far an `addArc` turns, in degrees: from its start to its end in its own direction,
  * up to one full turn. Measured in the iOS 27 simulator: from -90 to 0, `clockwise:
@@ -84,6 +83,7 @@ function arcSweep(arc: { startDegrees: number; endDegrees: number; clockwise: bo
   return sweep <= 0 ? sweep + 360 : sweep
 }
 
+/** A point on an ellipse arc, for the SVG `A` command's endpoints. */
 function onCircle(centre: PathPoint, radius: number, degrees: number): PathPoint {
   const radians = (degrees * Math.PI) / 180
   return { x: centre.x + radius * Math.cos(radians), y: centre.y + radius * Math.sin(radians) }

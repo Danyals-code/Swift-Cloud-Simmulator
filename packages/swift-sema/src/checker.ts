@@ -1062,20 +1062,9 @@ export class Checker {
   }
 
   /**
-   * Warns on a style token the preview does not apply.
-   *
-   * The same rule as `checkBlendMode` above, generalised to every style modifier with
-   * a closed set of tokens. `.buttonStyle(.glass)` used to compile clean and draw a
-   * plain label, which is the worst of the three possible outcomes: not drawn, not
-   * reported, and indistinguishable from a style that *is* applied.
-   *
-   * Only a literal `.token`. A style held in a variable or returned from a function
-   * has no value here, and guessing would put a warning on correct code.
-   */
-  /**
    * Warns on a `.trim` that isn't stroked: a filled shape, which the preview fills whole.
    *
-   * The stroke is written after the trim - `.trim(…).rotation(…).stroke(…)` - so the
+   * The stroke is written after the trim - `.trim(…).offset(…).stroke(…)` - so the
    * outer call marks the shape calls under it before they are checked.
    */
   private checkTrim(call: Expr & { kind: 'call' }): void {
@@ -1161,6 +1150,17 @@ export class Checker {
     )
   }
 
+  /**
+   * Warns on a style token the preview does not apply.
+   *
+   * The same rule as `checkBlendMode` above, generalised to every style modifier with
+   * a closed set of tokens. `.buttonStyle(.glass)` used to compile clean and draw a
+   * plain label, which is the worst of the three possible outcomes: not drawn, not
+   * reported, and indistinguishable from a style that *is* applied.
+   *
+   * Only a literal `.token`. A style held in a variable or returned from a function
+   * has no value here, and guessing would put a warning on correct code.
+   */
   private checkStyleToken(
     member: string,
     args: readonly { label: string | null; value: Expr }[],

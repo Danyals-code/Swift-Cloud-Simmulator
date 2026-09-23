@@ -2115,14 +2115,24 @@ function reachIntoSafeArea(bounds: Rect, env: LayoutEnvironment, edges: SafeArea
  * an axis where it reached neither.
  */
 function keptToReachedEdges(bounds: Rect, rect: Rect, size: Size, reached: SafeAreaEdges): Rect {
-  const along = (start: number, extent: number, own: number, towardStart: boolean, towardEnd: boolean, was: number, wasExtent: number) =>
-    towardStart && towardEnd ? { at: start, length: extent }
-    : towardStart ? { at: start, length: Math.min(own, extent) }
-    : towardEnd ? { at: start + extent - Math.min(own, extent), length: Math.min(own, extent) }
-    : { at: was, length: wasExtent }
-  const horizontal = along(rect.x, rect.width, size.width, reached.leading, reached.trailing, bounds.x, bounds.width)
-  const vertical = along(rect.y, rect.height, size.height, reached.top, reached.bottom, bounds.y, bounds.height)
-  return { x: horizontal.at, y: vertical.at, width: horizontal.length, height: vertical.length }
+  const x = keptOnAxis({ start: bounds.x, length: bounds.width }, { start: rect.x, length: rect.width }, size.width, reached.leading, reached.trailing)
+  const y = keptOnAxis({ start: bounds.y, length: bounds.height }, { start: rect.y, length: rect.height }, size.height, reached.top, reached.bottom)
+  return { x: x.start, y: y.start, width: x.length, height: y.length }
+}
+
+/** One axis of a view that reached into the safe area; `own` is the length it asked for. */
+function keptOnAxis(was: Span, reach: Span, own: number, reachedStart: boolean, reachedEnd: boolean): Span {
+  if (reachedStart && reachedEnd) return reach
+  const length = Math.min(own, reach.length)
+  if (reachedStart) return { start: reach.start, length }
+  if (reachedEnd) return { start: reach.start + reach.length - length, length }
+  return was
+}
+
+/** A stretch along one axis. */
+interface Span {
+  readonly start: number
+  readonly length: number
 }
 
 /**

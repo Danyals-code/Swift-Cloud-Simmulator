@@ -527,7 +527,7 @@ class Resolver {
       }
       const toolbar = [...(current.ui.navigationBar?.leading ?? []), ...(current.ui.navigationBar?.trailing ?? [])]
       visitLinks([...current.ui.content, ...toolbar])
-      for (const { view, modifier } of [...allModifiers([...current.scope, ...toolbar]), ...ownModifiers(current.around)]) {
+      for (const { view, modifier } of modifiersFor([...current.scope, ...toolbar], current.around)) {
         const kind = OVERLAY_KINDS[modifier.name]
         if (!modifier.closure || (kind !== 'sheet' && kind !== 'cover' && kind !== 'popover')) continue
         const item = labelled(modifier.args, 'item')
@@ -1413,7 +1413,7 @@ class Resolver {
    * that is all `.searchable` is. Placement is resolved later from device context.
    */
   private findSearchField(views: readonly ViewValue[], around: readonly ViewValue[] = []): SearchField | null {
-    for (const { view, modifier } of [...allModifiers(views), ...ownModifiers(around)]) {
+    for (const { view, modifier } of modifiersFor(views, around)) {
       if (modifier.name !== 'searchable') continue
 
       const binding = labelled(modifier.args, 'text') ?? modifier.args[0]?.value
@@ -1446,7 +1446,7 @@ class Resolver {
    */
   private findOverlay(views: readonly ViewValue[], depth = 0, around: readonly ViewValue[] = []): Overlay | null {
     if (depth >= 4) return null
-    for (const { view, modifier } of [...allModifiers(views), ...ownModifiers(around)]) {
+    for (const { view, modifier } of modifiersFor(views, around)) {
       const kind = OVERLAY_KINDS[modifier.name]
       if (!kind) continue
 
@@ -1790,9 +1790,12 @@ function pathTo(views: readonly ViewValue[], target: ViewValue): ViewValue[] {
   return []
 }
 
-/** The modifiers written on these views themselves, and not on anything inside them. */
-function ownModifiers(views: readonly ViewValue[]): { view: ViewValue; modifier: ModifierValue }[] {
-  return views.flatMap((view) => view.modifiers.map((modifier) => ({ view, modifier })))
+/**
+ * Every modifier in a screen's views, and the modifiers written on the containers it was
+ * cut out of (see `containersAbove`) - on the containers themselves, not inside them.
+ */
+function modifiersFor(views: readonly ViewValue[], around: readonly ViewValue[]): { view: ViewValue; modifier: ModifierValue }[] {
+  return [...allModifiers(views), ...around.flatMap((view) => view.modifiers.map((modifier) => ({ view, modifier })))]
 }
 
 function* allModifiers(

@@ -722,13 +722,6 @@ export interface SelfExpr extends NodeBase {
 }
 
 /**
- * `base.member`, or `.member` with a null base.
- *
- * The null-base form is implicit member syntax - `.largeTitle`, `.infinity`,
- * `.primary` - which is pervasive in SwiftUI and resolves against the expected
- * type rather than against a value.
- */
-/**
  * The step where an optional chain ends.
  *
  * `a?.b.c()` is one chain: when `a` is nil the whole expression is nil, not just
@@ -741,6 +734,13 @@ export interface OptionalChainEnd {
   readonly endsOptionalChain?: true
 }
 
+/**
+ * `base.member`, or `.member` with a null base.
+ *
+ * The null-base form is implicit member syntax - `.largeTitle`, `.infinity`,
+ * `.primary` - which is pervasive in SwiftUI and resolves against the expected
+ * type rather than against a value.
+ */
 export interface MemberAccessExpr extends NodeBase, OptionalChainEnd {
   readonly kind: 'memberAccess'
   readonly base: Expr | null

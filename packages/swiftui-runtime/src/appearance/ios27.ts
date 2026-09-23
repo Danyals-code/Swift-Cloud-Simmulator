@@ -117,6 +117,7 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   purple: rgba(191, 90, 242),
   pink: rgba(255, 55, 95),
   brown: rgba(172, 142, 104),
+  // UIKit's published dark values, not measured: the study verifies light mode only.
   systemGray2: rgba(99, 99, 102),
   systemGray3: rgba(72, 72, 74),
   systemGray4: rgba(58, 58, 60),

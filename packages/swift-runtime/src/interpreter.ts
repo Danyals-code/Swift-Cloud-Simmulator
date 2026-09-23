@@ -1441,15 +1441,17 @@ export class Interpreter {
   // ------------------------------------------------------------- expressions
 
   evaluate(expr: Expr, env: Environment): SwiftValue {
-    return (expr as OptionalChainEnd).endsOptionalChain ? this.evaluateChain(expr, env) : this.evaluateNode(expr, env)
+    return (expr as OptionalChainEnd).endsOptionalChain
+      ? this.throughChain(() => this.evaluateNode(expr, env), NIL)
+      : this.evaluateNode(expr, env)
   }
 
-  /** A whole optional chain: a `?` that met nil anywhere inside makes all of it nil. */
-  private evaluateChain(expr: Expr, env: Environment): SwiftValue {
+  /** Runs a whole optional chain: a `?` that meets nil anywhere inside gives `stopped` instead. */
+  private throughChain(run: () => SwiftValue, stopped: SwiftValue): SwiftValue {
     try {
-      return this.evaluateNode(expr, env)
+      return run()
     } catch (error) {
-      if (error instanceof NilChainSignal) return NIL
+      if (error instanceof NilChainSignal) return stopped
       throw error
     }
   }
@@ -1538,15 +1540,9 @@ export class Interpreter {
       case 'assign':
         // `selected?.done = true` writes nothing when `selected` is nil. The target is
         // resolved as storage rather than evaluated, so it ends its chain here.
-        if ((expr.target as OptionalChainEnd).endsOptionalChain) {
-          try {
-            return this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env)
-          } catch (error) {
-            if (error instanceof NilChainSignal) return VOID
-            throw error
-          }
-        }
-        return this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env)
+        return (expr.target as OptionalChainEnd).endsOptionalChain
+          ? this.throughChain(() => this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env), VOID)
+          : this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env)
 
       case 'ternary':
         return truthy(this.evaluate(expr.condition, env))

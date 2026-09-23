@@ -7,6 +7,7 @@ import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
+import { AUTHORING_COLOR_HEX } from '../packages/swift-sema/src/authoring-resources'
 import { DEVICES } from '@studio/sim-shell'
 import { worldFrame } from './render-geometry'
 
@@ -449,12 +450,19 @@ describe('E5: colours match the iOS 27 simulator', () => {
     expect(warnings('Rectangle().fill(Color(.sRGB, red: 1, green: 0, blue: 0))')).toEqual([])
   })
 
-  it('warns on exactly the colour names the preview cannot draw', () => {
+  it('knows exactly the colour names the palette draws', () => {
     for (const name of KNOWN_COLOR_NAMES) {
       expect(colorForName(name, 'light'), name).not.toBeNull()
       expect(colorForName(name, 'dark'), name).not.toBeNull()
     }
     expect([...Object.keys(IOS_27.colors.light)].filter(name => !KNOWN_COLOR_NAMES.has(name))).toEqual([])
+  })
+
+  it('moves a system colour into the asset catalog as the colour it draws', () => {
+    for (const [name, hex] of Object.entries(AUTHORING_COLOR_HEX)) {
+      const { r, g, b } = colorForName(name)!
+      expect(hex, name).toBe('#' + [r, g, b].map(channel => channel.toString(16).padStart(2, '0')).join('').toUpperCase())
+    }
   })
 
   it('reads a level written on a leading-dot colour, `.blue.secondary`, as on Color.blue', () => {
@@ -515,7 +523,13 @@ describe('E6: trim draws the part of the path iOS 27 draws', () => {
   ])('starts %s, and strokes only the trimmed part', (_, shape, width, height, start) => {
     const trimmed = drawn(`${shape}.trim(from: 0.25, to: 0.5).stroke(Color.red, lineWidth: 8).frame(width: ${width}, height: ${height})`)
     expect(trimmed.start).toEqual(start)
-    expect([trimmed.pathLength, trimmed.dash, trimmed.offset]).toEqual(['1', '0.25 2', '-0.25'])
+    // What SVG draws: one dash, starting at minus the offset along a path measured as 1,
+    // with a gap too long for a second dash to start within it.
+    const [dash, gap] = (trimmed.dash ?? '').split(' ').map(Number)
+    const from = -Number(trimmed.offset)
+    expect(Number(trimmed.pathLength)).toBe(1)
+    expect([from, from + dash!]).toEqual([0.25, 0.5])
+    expect(from + dash! + gap!).toBeGreaterThanOrEqual(1)
   })
 
   it('draws nothing for an empty trim', () => {
@@ -584,10 +598,10 @@ describe('E4: what reaches under the safe area, and what stays inside it', () =>
     const paint = seen?.background ?? seen?.shape?.fill
     return paint?.kind === 'solid' ? `${paint.color.r},${paint.color.g},${paint.color.b}` : 'nothing'
   }
-  const { r: rr, g: rg, b: rb } = colorForName('red')!
-  const RED = `${rr},${rg},${rb}`
-  const { r: br, g: bg, b: bb } = colorForName('blue')!
-  const BLUE = `${br},${bg},${bb}`
+  const measured = native.colors.onWhite as Record<string, number[]>
+  const RED = measured['Color.red']!.join(',')
+  const BLUE = measured['Color.blue']!.join(',')
+  const WHITE = measured['Color(.systemBackground)']!.join(',')
   /** Where the colour reaches down the middle of the screen, top and bottom. */
   const reach = (r: CompileResult, colour: string) => ({ top: colourAt(r, 201, 5) === colour, bottom: colourAt(r, 201, 870) === colour })
 
@@ -632,7 +646,8 @@ describe('E4: what reaches under the safe area, and what stays inside it', () =>
 
   it('moves a fixed-height view that ignores the top safe area up, without growing it', () => {
     const r = screen('var body: some View { VStack(spacing: 0) { Color.red.frame(height: 200).ignoresSafeArea(edges: .top); Spacer() } }')
-    expect([colourAt(r, 201, 1), colourAt(r, 201, 199), colourAt(r, 201, 201)]).toEqual([RED, RED, colourAt(r, 201, 400)])
+    // Measured: red from 0 to 200, and the white page below.
+    expect([colourAt(r, 201, 1), colourAt(r, 201, 199), colourAt(r, 201, 201)]).toEqual([RED, RED, WHITE])
   })
 
   it('shows a background that reaches under the navigation bar through it', () => {

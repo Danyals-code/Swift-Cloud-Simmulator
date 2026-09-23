@@ -535,13 +535,12 @@ function migrateStyle(ctx: FeatureContext, name: string): ResourceEdit {
   return { patches: [...otherPatches, ...created.patches], created: created.created, colors: created.colors, ...(empty && declarationFile.id !== TOKENS_FILE ? { removed: [declarationFile.id] } : {}) }
 }
 
-/** The system colours a legacy style can name, as the sRGB value a colour set holds. */
 /**
- * A system colour's light value, written into the asset catalog when a style moves to
- * `Tokens.swift`. The iOS 27 simulator's, so the colour doesn't change as it moves:
- * `Color.blue` became #007AFF, the blue from before iOS 26.
+ * The system colours a legacy style can name, as the sRGB value a colour set holds: the
+ * iOS 27 simulator's light values, so a colour doesn't change as it moves to
+ * `Tokens.swift`. `Color.blue` used to move as #007AFF, the blue from before iOS 26.
  */
-const AUTHORING_COLOR_HEX: Readonly<Record<string, string>> = { black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF383C', orange: '#FF8D28', yellow: '#FFCC00', green: '#34C759', mint: '#00C8B3', teal: '#00C3D0', cyan: '#00C0E8', blue: '#0088FF', indigo: '#6155F5', purple: '#CB30E0', pink: '#FF2D55', brown: '#AC7F5E' }
+export const AUTHORING_COLOR_HEX: Readonly<Record<string, string>> = { black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF383C', orange: '#FF8D28', yellow: '#FFCC00', green: '#34C759', mint: '#00C8B3', teal: '#00C3D0', cyan: '#00C0E8', blue: '#0088FF', indigo: '#6155F5', purple: '#CB30E0', pink: '#FF2D55', brown: '#AC7F5E' }
 
 function assetReferences(ctx: FeatureContext, op: Extract<ResourceOperation, { kind: 'asset-references' }>): SourcePatch[] {
   const patches: SourcePatch[] = []
