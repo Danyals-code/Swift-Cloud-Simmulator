@@ -340,6 +340,31 @@ export const KNOWN_COLOR_NAMES: ReadonlySet<string> = new Set([
   'systemFill', 'secondarySystemFill', 'tertiarySystemFill', 'quaternarySystemFill',
 ])
 
+/** The colours `Color` itself has: `Color.red`, and `.red` wherever a colour is expected. */
+export const SWIFTUI_COLOR_NAMES: ReadonlySet<string> = new Set([
+  'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown',
+  'gray', 'black', 'white', 'clear', 'primary', 'secondary', 'accentColor',
+])
+
+/**
+ * The colours `UIColor` has, which SwiftUI reaches through the bridge: `Color(.systemGray6)`,
+ * `Color(uiColor: .label)`, `UIColor.darkGray`. Written as `Color.systemGray6` they don't
+ * exist, and Xcode rejects them. UIKit's fixed colours are its own: `Color(.red)` is
+ * `UIColor.red`, pure red, not `Color.red`.
+ */
+export const UIKIT_COLOR_NAMES: ReadonlySet<string> = new Set([
+  'systemRed', 'systemOrange', 'systemYellow', 'systemGreen', 'systemMint', 'systemTeal', 'systemCyan',
+  'systemBlue', 'systemIndigo', 'systemPurple', 'systemPink', 'systemBrown',
+  'systemGray', 'systemGray2', 'systemGray3', 'systemGray4', 'systemGray5', 'systemGray6',
+  'label', 'secondaryLabel', 'tertiaryLabel', 'quaternaryLabel', 'placeholderText', 'link',
+  'separator', 'opaqueSeparator',
+  'systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground',
+  'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground',
+  'systemFill', 'secondarySystemFill', 'tertiarySystemFill', 'quaternarySystemFill',
+  'black', 'darkGray', 'lightGray', 'white', 'gray', 'red', 'green', 'blue', 'cyan', 'yellow',
+  'magenta', 'orange', 'purple', 'brown', 'clear', 'tintColor',
+])
+
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */
 export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'String', 'Bool', 'Character',

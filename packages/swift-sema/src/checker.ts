@@ -24,6 +24,8 @@ import {
   KNOWN_ATTRIBUTES,
   KNOWN_COLOR_NAMES,
   KNOWN_TYPES,
+  SWIFTUI_COLOR_NAMES,
+  UIKIT_COLOR_NAMES,
   MODIFIER_LABELS,
   NON_MODIFIER_MEMBERS,
   PROPERTY_WRAPPERS,
@@ -747,8 +749,9 @@ export class Checker {
           only && (only.label === null || only.label === 'uiColor') &&
           only.value.kind === 'memberAccess' && only.value.base === null
         ) {
-          this.checkColorName(only.value.member, only.value.memberSpan)
+          this.checkColorName(only.value.member, only.value.memberSpan, 'uikit')
         }
+        if (expr.callee.kind === 'memberAccess' && STYLE_MODIFIERS.has(expr.callee.member)) this.checkStyleColor(expr.args)
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
         return
@@ -759,7 +762,7 @@ export class Checker {
         // and guessing produces false positives - see the class comment. Colours are
         // the exception: `Color.name` is a name the preview draws, or it draws clear.
         if (expr.base?.kind === 'identifier' && (expr.base.name === 'Color' || expr.base.name === 'UIColor')) {
-          this.checkColorName(expr.member, expr.memberSpan)
+          this.checkColorName(expr.member, expr.memberSpan, expr.base.name === 'Color' ? 'swiftui' : 'uikit')
         }
         if (expr.base) this.checkExpression(expr.base, scope)
         return
@@ -1108,16 +1111,53 @@ export class Checker {
    * writes a colour, or `Color.hex(…)`) is its own, a project type called `Color` is its
    * own, and a capitalised member is a nested type (`Color.Resolved`), not a colour.
    */
-  private checkColorName(name: string, span: SourceSpan): void {
-    if (KNOWN_COLOR_NAMES.has(name) || name === 'init' || /^[A-Z]/.test(name)) return
+  private checkColorName(name: string, span: SourceSpan, namespace: 'swiftui' | 'uikit'): void {
+    if (name === 'init' || /^[A-Z]/.test(name)) return
     if (this.declaredExtensionProperties.has(name) || this.declaredModifiers.has(name)) return
     if (this.types.has('Color') || this.types.has('UIColor')) return
+    if (namespace === 'uikit' ? UIKIT_COLOR_NAMES.has(name) || KNOWN_COLOR_NAMES.has(name) : SWIFTUI_COLOR_NAMES.has(name)) return
+    // `Color.systemGray6` draws here, from the same palette, and doesn't compile in Xcode.
+    if (namespace === 'swiftui' && UIKIT_COLOR_NAMES.has(name)) {
+      this.report(
+        span,
+        'warning',
+        'may_not_compile_in_xcode',
+        `Xcode has no Color.${name}: UIKit's colours are written Color(.${name}).`,
+        undefined,
+        [{ title: `Use Color(.${name})`, edits: [{ span: { ...span, start: span.start - 'Color.'.length }, newText: `Color(.${name})` }] }],
+      )
+      return
+    }
+    if (KNOWN_COLOR_NAMES.has(name)) return
     this.report(
       span,
       'warning',
       'unresolved_member',
       `The preview doesn't know the colour '${name}', so it draws nothing there. ` +
         'Check the spelling: Xcode uses the name as written.',
+    )
+  }
+
+  /**
+   * Warns on a leading-dot colour spelt wrong - `.foregroundStyle(.grey)` - which draws
+   * nothing. Only a name a letter or two from a colour is taken for one: the styles these
+   * modifiers take are too many to list, and a warning on one would be on correct code.
+   */
+  private checkStyleColor(args: readonly { label: string | null; value: Expr }[]): void {
+    const value = args[0]?.value
+    if (value?.kind !== 'memberAccess' || value.base !== null) return
+    const name = value.member
+    if (KNOWN_COLOR_NAMES.has(name) || this.declaredExtensionProperties.has(name)) return
+    const budget = name.length <= 4 ? 1 : 2
+    const near = [...KNOWN_COLOR_NAMES].find((known) => editDistance(name.toLowerCase(), known.toLowerCase()) <= budget)
+    if (!near) return
+    this.report(
+      value.memberSpan,
+      'warning',
+      'unresolved_member',
+      `The preview doesn't know the colour '${name}', so it draws nothing there. Did you mean '${near}'?`,
+      undefined,
+      [{ title: `Use .${near}`, edits: [{ span: value.memberSpan, newText: near }] }],
     )
   }
 
@@ -1278,3 +1318,6 @@ function isDashed(stroke: Expr & { kind: 'call' }): boolean {
   const dash = style.args.find((arg) => arg.label === 'dash')?.value
   return dash !== undefined && !(dash.kind === 'arrayLiteral' && dash.elements.length === 0)
 }
+
+/** Modifiers whose first argument is a colour or another style, as `.foregroundStyle(.gray)`. */
+const STYLE_MODIFIERS: ReadonlySet<string> = new Set(['foregroundStyle', 'foregroundColor', 'fill', 'stroke', 'strokeBorder', 'tint', 'background', 'border'])

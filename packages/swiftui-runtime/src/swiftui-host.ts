@@ -769,7 +769,8 @@ export class SwiftUIHost implements InterpreterHost {
     // "is this a view name?" guard below rejects them.
     if (name === 'Task') return this.runTask(call)
     if (name === 'Binding') return this.makeBinding(call)
-    if (name === 'Color') return this.makeColor(call)
+    // `UIColor(red:green:blue:alpha:)` is a colour like any other, bridged by `Color(uiColor:)`.
+    if (name === 'Color' || name === 'UIColor') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
     if (name === 'GridItem') return this.makeGridItem(call)
@@ -1932,7 +1933,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private makeColor(call: HostCall): SwiftValue {
-    const opacity = numberOf(call.args.find((a) => a.label === 'opacity')?.value)
+    const opacity = numberOf(call.args.find((a) => a.label === 'opacity' || a.label === 'alpha')?.value)
     const alpha = opacity !== null ? { opacity } : {}
     const white = numberOf(call.args.find((a) => a.label === 'white')?.value)
     if (white !== null) return color({ name: null, white, ...alpha })
@@ -1957,17 +1958,37 @@ export class SwiftUIHost implements InterpreterHost {
     // `Color("accent")` names a colour set in the asset catalog - never a system colour,
     // even one spelled the same - so it is marked and resolved against the project.
     if (first?.kind === 'string') return color({ name: first.value, asset: true })
+    // `Color(uiColor: UIColor(red: …))`: a colour already built.
+    if (first?.kind === 'opaque' && first.typeName === COLOR_TYPE) return first
 
     // `Color(.systemGroupedBackground)` - the UIKit bridge, where the argument is a
     // contextual member rather than a string. This is how idiomatic SwiftUI reaches
     // the adaptive backgrounds, so it has to work for dark mode to be usable at all.
     const named = tokenNameOf(first)
-    if (named) return color({ name: named })
+    if (named) return uikitColor(named)
     return color({ name: 'clear' })
   }
 }
 
 // -------------------------------------------------------------------- helpers
+
+/**
+ * UIKit's fixed colours, as it defines them. Through the bridge `Color(.red)` is
+ * `UIColor.red`, which is pure red, and `Color(.gray)` is half white, not SwiftUI's
+ * system red and grey. Every other name is a system or semantic colour the palette has.
+ */
+const UIKIT_FIXED: Readonly<Record<string, readonly [number, number, number]>> = {
+  black: [0, 0, 0], darkGray: [1 / 3, 1 / 3, 1 / 3], lightGray: [2 / 3, 2 / 3, 2 / 3], white: [1, 1, 1],
+  gray: [0.5, 0.5, 0.5], red: [1, 0, 0], green: [0, 1, 0], blue: [0, 0, 1], cyan: [0, 1, 1], yellow: [1, 1, 0],
+  magenta: [1, 0, 1], orange: [1, 0.5, 0], purple: [0.5, 0, 0.5], brown: [0.6, 0.4, 0.2],
+}
+
+/** A `UIColor` by name, as the bridge reads it. `tintColor` is the app's accent. */
+function uikitColor(name: string): SwiftValue {
+  const fixed = UIKIT_FIXED[name]
+  if (fixed) return color({ name: null, red: fixed[0], green: fixed[1], blue: fixed[2] })
+  return color({ name: name === 'tintColor' ? 'accentColor' : name })
+}
 
 /**
  * A colour's hierarchical levels, as opacity. `.secondary` and `.tertiary` are measured
@@ -2011,7 +2032,8 @@ const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {
  */
 const SHAPE_MEMBERS = new Set(['fill', 'stroke', 'strokeBorder', 'trim', 'inset', 'offset', 'size'])
 
-const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init'])
+/** Members of a colour, which `.blue.secondary` reaches through its leading-dot `.blue`. */
+const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init', ...Object.keys(HIERARCHY_OPACITY)])
 
 const GRADIENTS: Readonly<Record<string, GradientPayload['kind']>> = {
   LinearGradient: 'linear',

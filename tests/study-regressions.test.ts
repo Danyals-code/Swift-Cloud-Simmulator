@@ -431,6 +431,36 @@ describe('E5: colours match the iOS 27 simulator', () => {
     expect([...Object.keys(IOS_27.colors.light)].filter(name => !KNOWN_COLOR_NAMES.has(name))).toEqual([])
   })
 
+  it('reads a level written on a leading-dot colour, `.blue.secondary`, as on Color.blue', () => {
+    expect(onWhite('.blue.secondary')).toEqual(onWhite('Color.blue.secondary'))
+    expect(onWhite('.blue.tertiary')).toEqual(onWhite('Color.blue.tertiary'))
+  })
+
+  const warningsFor = (body: string) =>
+    compileView(viewSource(`var body: some View { ${body} }`)).diagnostics.map(d => `${d.severity}: ${d.message}`)
+
+  it("draws UIKit's own colours through the bridge, as UIKit defines them", () => {
+    expect(onWhite('Color(.red)')).toEqual([255, 0, 0])
+    expect(onWhite('Color(.magenta)')).toEqual([255, 0, 255])
+    expect(onWhite('Color(uiColor: .darkGray)')).toEqual([85, 85, 85])
+    expect(onWhite('Color(UIColor.lightGray)')).toEqual([170, 170, 170])
+    expect(onWhite('Color(uiColor: UIColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))')).toEqual([51, 102, 153])
+    expect(onWhite('Color(uiColor: .tintColor)')).toEqual(onWhite('Color.accentColor'))
+  })
+
+  it('warns that Xcode has no Color.systemGray6 or Color.label, which the preview still draws', () => {
+    expect(warningsFor('Rectangle().fill(Color.systemGray6)')).toEqual([expect.stringMatching(/^warning: .*Color\(\.systemGray6\)/)])
+    expect(warningsFor('Text("x").foregroundStyle(Color.label)')).toEqual([expect.stringMatching(/^warning: .*Color\(\.label\)/)])
+  })
+
+  it('warns on a leading-dot colour spelt wrong, and not on the styles it could be mistaken for', () => {
+    expect(warningsFor('Text("x").foregroundStyle(.grey)')).toEqual([expect.stringMatching(/^warning: .*'grey'.*'gray'/)])
+    expect(warningsFor('Rectangle().fill(.gren)')).toEqual([expect.stringMatching(/^warning: .*'gren'.*'green'/)])
+    for (const style of ['.tint', '.ultraThinMaterial', '.bar', '.link', '.primary']) {
+      expect(warningsFor(`Text("x").foregroundStyle(${style})`), style).toEqual([])
+    }
+  })
+
   it('draws a UIKit colour written with UIColor as the Color it names', () => {
     const expected = onWhite('Color(.systemGray6)')
     expect(onWhite('Color(UIColor.systemGray6)')).toEqual(expected)
