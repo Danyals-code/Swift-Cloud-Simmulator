@@ -473,9 +473,10 @@ export class AppRuntime {
    * the state the view is about to draw from, and rendering the pass that discovered
    * it would show the screen as it was one instant before the app started.
    *
-   * A callback runs at most once per appearance, tracked by path - so a re-render
+   * A callback runs at most once per appearance, tracked by its key - so a re-render
    * does not re-fire it, and a view that leaves the tree and comes back does fire
-   * again, which is what SwiftUI does too.
+   * again, which is what SwiftUI does too. A `.task(id:)` also runs again when its id
+   * changes.
    */
   runLifecycle(hooks: readonly LifecycleHook[]): boolean {
     const seen = new Set<string>()
@@ -484,18 +485,21 @@ export class AppRuntime {
 
     for (const hook of hooks) {
       if (hook.kind === 'appear') {
-        seen.add(hook.path)
-        if (this.appeared.has(hook.path)) continue
-        this.appeared.add(hook.path)
+        seen.add(hook.key)
+        const previous = this.watched.get(hook.key)
+        if (hook.watched !== undefined) this.watched.set(hook.key, copyValue(hook.watched))
+        const sameId = hook.watched === undefined || previous === undefined || valuesEqual(previous, hook.watched)
+        if (this.appeared.has(hook.key) && sameId) continue
+        this.appeared.add(hook.key)
         this.invokeHook(hook.action, [])
         ran = true
         continue
       }
 
       if (hook.kind === 'change' && hook.watched !== undefined) {
-        seen.add(hook.path)
-        const previous = this.watched.get(hook.path)
-        this.watched.set(hook.path, copyValue(hook.watched))
+        seen.add(hook.key)
+        const previous = this.watched.get(hook.key)
+        this.watched.set(hook.key, copyValue(hook.watched))
         if (previous === undefined ? !hook.initial : valuesEqual(previous, hook.watched)) continue
         const args = parameterCount(hook.action) >= 2
           ? [previous ?? hook.watched, hook.watched] : [hook.watched]
@@ -509,27 +513,27 @@ export class AppRuntime {
     // this pass's hooks. It is kept from the pass that last saw the view.
     for (const hook of hooks) {
       if (hook.kind !== 'disappear') continue
-      seen.add(hook.path)
+      seen.add(hook.key)
       // Also counted as present: a view may have `.onDisappear` without `.onAppear`,
       // and something has to record that it was here in order to notice it leaving.
-      this.appeared.add(hook.path)
-      this.disappearing.set(hook.path, hook.action)
+      this.appeared.add(hook.key)
+      this.disappearing.set(hook.key, hook.action)
     }
 
-    for (const path of [...this.appeared]) {
-      if (seen.has(path)) continue
-      this.appeared.delete(path)
+    for (const key of [...this.appeared]) {
+      if (seen.has(key)) continue
+      this.appeared.delete(key)
 
-      const gone = this.disappearing.get(path)
+      const gone = this.disappearing.get(key)
       if (gone) {
-        this.disappearing.delete(path)
+        this.disappearing.delete(key)
         this.invokeHook(gone, [])
         ranDisappear = true
         ran = true
       }
     }
 
-    for (const path of this.watched.keys()) if (!seen.has(path)) this.watched.delete(path)
+    for (const key of this.watched.keys()) if (!seen.has(key)) this.watched.delete(key)
 
     if (ran) this.harvest(this.live)
     // A disappear closure wrote into the previous pass's instance - the one that

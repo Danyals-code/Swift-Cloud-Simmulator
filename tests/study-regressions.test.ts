@@ -54,6 +54,9 @@ function runView(members: string, declarations = '', options: Partial<CompileReq
 /** What the iOS 27 simulator drew on iPhone 18 Pro, light (docs/parity/native/iphone18pro-misrenders). */
 const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
 
+/** What it drew for the second set of fixes (docs/parity/native/iphone18pro-misrenders-ii). */
+const nativeII = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders-ii/measurements.json', import.meta.url), 'utf8')).measured
+
 /** A `runView` on the iPhone 18 Pro the native values were measured on, with its safe area. */
 const screen = (members: string, declarations = '') => runView(members, declarations, { safeArea: DEVICES['iphone-18-pro'].safeArea })
 
@@ -739,5 +742,67 @@ describe('E9: padding on the edges it names', () => {
     ['.horizontal, 10', { top: 0, leading: 10, bottom: 0, trailing: 10 }],
   ])('pads .padding(%s) on the edges it names', (args, expected) => {
     expect(paddingOf(`.padding(${args})`)).toEqual(expected)
+  })
+})
+
+describe('E10: every appear hook on a view runs, and .task(id:) runs again for a new id', () => {
+  const printed: string[] = nativeII.hooks.printed
+  /** What the simulator printed for one view of the fixture's hooks screen, in its order. */
+  const ranOn = (view: string) => printed.filter(line => line.startsWith(`HOOK ${view} `)).map(line => line.slice(`HOOK ${view} `.length)).join(',')
+
+  it.each([
+    ['A', '.onAppear { log.append("appear") }.task { log.append("task") }'],
+    ['B', '.task { log.append("task") }.onAppear { log.append("appear") }'],
+    ['C', '.onAppear { log.append("appear 1") }.onAppear { log.append("appear 2") }'],
+    ['D', '.task { log.append("task 1") }.task { log.append("task 2") }'],
+  ])('runs every hook of view %s on the simulator\'s hooks screen, in the order it ran them', (view, hooks) => {
+    const r = runView(`@State private var log: [String] = []
+      var body: some View { VStack { Text(log.joined(separator: ",")); Text("${view}")${hooks} } }`)
+    expect(texts(r)).toContain(ranOn(view))
+  })
+
+  it('runs .task(id:) again when its id changes, and not for another change', () => {
+    const r = runView(`@State private var value = 0
+      @State private var other = 0
+      @State private var log: [String] = []
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Button("Next") { value += 1 }
+          Button("Other") { other += 1 }
+          Text("\\(other)").task(id: value) { log.append("task \\(value)") }
+        }
+      }`)
+    expect(texts(r)).toContain('task 0')
+    const next = tap(r, 'Next')
+    expect(texts(next)).toContain('task 0,task 1')
+    expect(texts(tap(next, 'Other'))).toContain('task 0,task 1')
+  })
+
+  it('runs both of two .onDisappear hooks when the view goes', () => {
+    const r = runView(`@State private var shown = true
+      @State private var log: [String] = []
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Button("Hide") { shown = false }
+          if shown { Text("A").onDisappear { log.append("gone 1") }.onDisappear { log.append("gone 2") } }
+        }
+      }`)
+    expect(texts(tap(r, 'Hide'))).toContain('gone 1,gone 2')
+  })
+
+  it('runs no hook again when an edit adds a modifier before them', () => {
+    const source = (extra: string) => `@State private var log: [String] = []
+      @State private var value = 0
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Text("A")${extra}.onChange(of: value, initial: true) { log.append("change") }.onAppear { log.append("appear") }
+        }
+      }`
+    const before = texts(runView(source('')))[0]!
+    expect(before.split(',').sort()).toEqual(['appear', 'change'])
+    expect(texts(runView(source('.padding()')))[0]).toBe(before)
   })
 })

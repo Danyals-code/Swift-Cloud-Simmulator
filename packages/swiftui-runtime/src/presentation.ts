@@ -137,10 +137,14 @@ export interface Overlay {
  */
 export interface LifecycleHook {
   readonly kind: 'appear' | 'disappear' | 'change'
-  /** The view's path - how "has this appeared before?" is answered. */
-  readonly path: string
+  /**
+   * The view's path, the hook's name and its place among the view's modifiers of that
+   * name - how "has this run before?" is answered. Not the raw modifier index, so
+   * adding or removing an unrelated modifier doesn't run a hook again.
+   */
+  readonly key: string
   readonly action: ActionValue
-  /** For `.onChange(of:)`: the value being watched, compared against last pass. */
+  /** For `.onChange(of:)` and `.task(id:)`: the value watched, compared against last pass. */
   readonly watched?: SwiftValue
   readonly initial?: boolean
 }
@@ -655,23 +659,28 @@ class Resolver {
 
   /** Records `.onAppear`, `.onDisappear`, `.task` and `.onChange` for this view. */
   private collectLifecycle(view: ViewValue, path: string): void {
-    for (const [index, modifier] of view.modifiers.entries()) {
+    const seen = new Map<string, number>()
+    for (const modifier of view.modifiers) {
+      const place = seen.get(modifier.name) ?? 0
+      seen.set(modifier.name, place + 1)
       const action = modifier.action
       if (!action) continue
+      const key = `${path}/${modifier.name}-${place}`
 
       if (modifier.name === 'onAppear' || modifier.name === 'task') {
-        this.lifecycle.push({ kind: 'appear', path, action })
+        const id = modifier.name === 'task' ? labelled(modifier.args, 'id') : undefined
+        this.lifecycle.push({ kind: 'appear', key, action, ...(id !== undefined ? { watched: id } : {}) })
         continue
       }
       if (modifier.name === 'onDisappear') {
-        this.lifecycle.push({ kind: 'disappear', path, action })
+        this.lifecycle.push({ kind: 'disappear', key, action })
         continue
       }
       if (modifier.name === 'onChange') {
         const watched = modifier.args.find((a) => a.label === 'of')?.value ?? modifier.args[0]?.value
         this.lifecycle.push({
           kind: 'change',
-          path: `${path}/${modifier.name}-${index}`,
+          key,
           initial: truthy(labelled(modifier.args, 'initial') ?? { kind: 'bool', value: false }),
           action,
           ...(watched !== undefined ? { watched } : {}),
