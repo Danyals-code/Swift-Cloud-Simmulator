@@ -6,7 +6,7 @@ import {
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
-import { Lexer, Parser, forEachChild, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
+import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
 import { SUPPORTED_VIEWS } from './builtins'
 import { colorOpacityParts, designControlRecipes, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
 
@@ -158,7 +158,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
   }
 
-  function expression(expr: Expr, parent: MutableNode, scope: Scope): void {
+  function expression(expr: Expr, parent: MutableNode, scope: Scope, { argument = false } = {}): void {
     const chain = viewCallChain(expr)
     if (!chain) { add('opaque', 'Custom expression', expr.span, parent.owner, parent); return }
     const name = callName(chain.base.callee)
@@ -168,6 +168,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     const capability = builtin ? authoringCapability(name, 'view', chain.base.args.map(a => a.label)) : undefined
     const node = add(custom.length === 1 ? 'component' : name === 'ForEach' || name === 'List' && chain.base.args.length > 0 ? 'collection' : builtin ? 'view' : 'opaque', name, expr.span, parent.owner, parent)
     if (custom.length === 1) Object.assign(node, { definitionId: custom[0]!.node.id })
+    if (argument) Object.assign(node, { argument: true })
     const reason = custom.length > 1 ? 'More than one matching component declaration; ownership is ambiguous.' : !custom.length && !capability ? 'This constructor overload is outside the authoring subset.' : undefined
     for (const [i, arg] of chain.base.args.entries()) {
       node.properties.push(property(node, arg.label ?? (name === 'Text' ? 'content' : `argument ${i + 1}`), arg.value, scope, capability?.id, reason))
@@ -201,7 +202,9 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       while (ancestor && !origin) { origin = [...ancestor.properties].reverse().find(p => p.name === 'font'); ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }
       node.properties.push({ id: `${node.id}:inherited-font`, name: 'font', expression: origin?.expression ?? 'Environment / call site', valueKind: 'inherited', source: origin?.source, ownerId: origin?.ownerId ?? parent.id, scope: 'inherited', writable: false, reason: origin ? 'Inherited from an enclosing source view; it affects its descendants.' : 'No local font is declared; the environment supplies it.' })
     }
-    if (!diagnostics.some(d => d.severity === 'error' && (['expected_token', 'unexpected_token', 'unterminated_string', 'unterminated_block'].includes(d.code) || d.span.file === node.source.file && d.span.start < node.source.end && d.span.end >= node.source.start))) {
+    // A syntax error takes the controls of its own file's views, not every file's: a half-typed draft elsewhere
+    // is no reason to lock the design, and the planner refuses only changes to the file that does not parse.
+    if (!diagnostics.some(d => d.span.file === node.source.file && (isSyntaxError(d) || d.severity === 'error' && d.span.start < node.source.end && d.span.end >= node.source.start))) {
       let ancestor: MutableNode | undefined = parent
       let template = false
       while (ancestor) { if (ancestor.kind === 'template') template = true; ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }
@@ -231,14 +234,14 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     if (destination) {
       const slot = add('branch', 'Destination', destination.span, parent.owner, node)
       if (destination.kind === 'closure') block(destination.body, slot, scope)
-      else expression(destination, slot, scope)
+      else expression(destination, slot, scope, { argument: true })
     }
     // Section headers/footers are content slots, not repeated rows or actions.
     if (name === 'Section' && capability) for (const arg of chain.base.args) {
       if (!['header', 'footer'].includes(arg.label ?? '')) continue
       const slot = add('branch', arg.label === 'header' ? 'Header' : 'Footer', arg.value.span, parent.owner, node)
       if (arg.value.kind === 'closure') block(arg.value.body, slot, scope)
-      else expression(arg.value, slot, scope)
+      else expression(arg.value, slot, scope, { argument: true })
     }
     // A visual slot has its own layer; action closures and scalar colors are not views.
     for (const modifier of chain.modifiers) {
@@ -259,7 +262,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         const builtinColor = contentName === 'Color' && (!definitions.has('Color') || content?.base.callee.kind === 'memberAccess' && content.base.callee.base?.kind === 'identifier' && content.base.callee.base.name === 'SwiftUI')
         if (argument && contentName && !builtinColor && (SUPPORTED_VIEWS.has(contentName) || definitions.has(contentName))) {
           const slot = add('branch', label, argument.span, parent.owner, node)
-          expression(argument, slot, scope)
+          expression(argument, slot, scope, { argument: true })
         }
       }
     }

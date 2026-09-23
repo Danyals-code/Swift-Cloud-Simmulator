@@ -217,6 +217,97 @@ test('dragging a view on the canvas moves it in the file', async ({ page }) => {
   expect(text).toMatch(/Text\("Alpha"\)\s*\n\s*\.font\(\.title\)/)
 })
 
+/** The blank screen, once two lines of text have been added to it. */
+const BLANK = `import SwiftUI
+@main struct BlankApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }
+struct HomeScreen: View {
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Title")
+                Text("Subtitle")
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(.systemBackground))
+        }
+    }
+}
+
+#Preview {
+    HomeScreen()
+}`
+
+test('a view dropped in its stack’s empty space becomes the stack’s last view (C4)', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('workspace-develop').click()
+  const editor = page.getByTestId('editor').locator('.cm-content')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.insertText(BLANK)
+  const preview = page.getByTestId('render-tree')
+  await expect(preview.getByText('Subtitle', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+  // Design redraws the phone for editing; measure it once it has.
+  await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true')
+  await expect(preview.getByText('Title', { exact: true })).toBeVisible()
+  await expect(preview.getByText('Subtitle', { exact: true })).toBeVisible()
+
+  const title = (await preview.getByText('Title', { exact: true }).boundingBox())!
+  const subtitle = (await preview.getByText('Subtitle', { exact: true }).boundingBox())!
+  // Well below the last line: the stack's own empty space, which fills the screen.
+  const x = subtitle.x + subtitle.width / 2, y = subtitle.y + subtitle.height * 8
+  await page.mouse.move(title.x + title.width / 2, title.y + title.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(x, y, { steps: 5 })
+  await page.mouse.move(x, y + 1)
+  // The canvas says what the drop will do before it happens.
+  await expect(page.getByRole('region', { name: 'Preview', exact: true })).toContainText('Drop inside VStack')
+  await page.mouse.up()
+
+  await expect.poll(() => source(page)).toMatch(/VStack\(spacing: 16\) \{\n\s*Text\("Subtitle"\)\n\s*Text\("Title"\)\n\s*\}/)
+  expect(await source(page)).toMatch(/#Preview \{\n\s*HomeScreen\(\)\n\}/)
+})
+
+test('a refused edit to a file that does not parse offers to show the error in Code (C10)', async ({ page }) => {
+  // A designer's project: the app in one file, the Home screen in another.
+  await page.goto('/')
+  await page.getByTestId('template-blank').click()
+  await page.getByTestId('template-confirm').click()
+  await expect(page.getByTestId('template-gallery')).toBeHidden()
+  // Designing Home first, as a designer does before visiting Code: its page is drawn.
+  await expect(page.getByTestId('design-screen').getByRole('button', { name: 'Home', exact: true })).toBeVisible()
+  await page.getByTestId('workspace-develop').click()
+  await page.getByTestId('file-rail').getByText('HomeScreen.swift').click()
+  const editor = page.getByTestId('editor').locator('.cm-content')
+  await expect(editor).toContainText('struct HomeScreen')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  // "Oops" is still missing its closing parenthesis, which the parser notices on line 8.
+  await page.keyboard.insertText(`import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        VStack {
+            Text("Hello")
+            Text("Oops"
+        }
+    }
+}`)
+  await page.getByTestId('workspace-design').click()
+  // While a file does not parse, its layers are named by type alone.
+  const hello = layer(page, 'Text').first()
+  await hello.click()
+  await hello.getByRole('button', { name: 'Actions for Text', exact: true }).click()
+  await page.getByTestId('source-layer-actions-menu-delete').click()
+
+  await expect(page.getByTestId('design-feedback')).toHaveText('HomeScreen.swift has an error on line 8, so its design can’t be changed until it’s fixed in Code.')
+  await page.getByRole('button', { name: 'Show in Code', exact: true }).click()
+  await expect(page.getByTestId('editor')).toBeVisible()
+  await expect(page.getByTestId('editor').locator('.cm-lineNumbers .cm-activeLineGutter')).toHaveText('8')
+})
+
 test('a drag can carry a view into another container', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()

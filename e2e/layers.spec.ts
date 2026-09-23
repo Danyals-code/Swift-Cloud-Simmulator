@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { replaceSource } from './designer-helpers'
 
 test('Start designing is the first source and opens by default on fresh and restored projects', async ({ page }) => {
   await page.goto('/')
@@ -196,4 +197,36 @@ test('Pages draws every page at once, keeps one live, and opens the one that is 
   await page.getByTestId('inspect-toggle').click()
   await expect(showAll).toBeChecked()
   await expect(page.getByTestId('page-gallery')).toBeVisible()
+})
+
+test('a view written as an argument offers only what it can do on its own (C2)', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, `import SwiftUI
+@main struct CardApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+  var body: some View {
+    VStack {
+      Text("Card")
+        .padding()
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray))
+      Text("Other")
+    }
+  }
+}`)
+  await expect(page.getByTestId('render-tree').getByText('Card', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+  const layers = page.getByTestId('logical-layers')
+  await layers.getByRole('button', { name: 'Expand Card', exact: true }).click()
+  const shape = layers.getByRole('treeitem', { name: 'Rounded rectangle', exact: true })
+  await shape.click()
+  await shape.getByRole('button', { name: 'Actions for Rounded rectangle', exact: true }).click()
+  // Everything that would act on its statement is off, and says why; a name is its own.
+  for (const action of ['duplicate', 'VStack', 'HStack', 'ZStack', 'reparent', 'hide', 'delete']) {
+    const item = page.getByTestId(`source-layer-actions-menu-${action}`)
+    await expect(item).toBeDisabled()
+    await expect(item).toHaveAttribute('title', 'The overlay is part of the view it is attached to, so it can’t be moved, wrapped, copied, hidden or deleted on its own. Select that view instead.')
+  }
+  await expect(page.getByTestId('source-layer-actions-menu-rename')).toBeEnabled()
 })

@@ -1,6 +1,7 @@
-import type { FileId } from '@studio/shared'
+import type { DropPosition, FileId } from '@studio/shared'
 import { Parser } from './parser'
 import { walk, type Block, type Expr, type Node, type Stmt } from './ast'
+import { afterOffMarkers } from './off-markers'
 
 /**
  * Editing the source from the canvas.
@@ -60,8 +61,16 @@ export interface SourceEdit {
   readonly offset: number
 }
 
-/** The innermost statement containing `offset`, with the block it belongs to. */
-function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null {
+/**
+ * The statement whose view starts at `offset`, with the block it belongs to.
+ *
+ * Exact on purpose. A view written as an argument - `.overlay(Circle())`,
+ * `Section(header: Text("A"))` - sits inside a statement without being one, and taking
+ * the statement around it would move, hide or delete the view that takes it. `near`
+ * answers the innermost statement containing `offset` instead, for a drop target: a
+ * drop onto an overlay means beside the view it belongs to.
+ */
+function siteAt(text: string, file: FileId, offset: number, { near = false } = {}): { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null {
   const { sourceFile } = Parser.parse(text, file)
 
   let best: { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null = null
@@ -72,9 +81,9 @@ function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block
     if (node.kind === 'call' && node.trailingClosure) owners.set(node.trailingClosure.body, node)
     if (node.kind !== 'block') return
     node.statements.forEach((stmt, index) => {
-      if (offset < stmt.span.start || offset >= stmt.span.end) return
-      // Deeper blocks are visited after shallower ones, and the deepest statement
-      // containing the offset is the view that was actually pointed at.
+      if (near ? offset < stmt.span.start || offset >= stmt.span.end : viewStartOf(stmt) !== offset) return
+      // At most one statement starts at an offset. Near it, deeper blocks are visited
+      // after shallower ones, so the innermost statement containing it wins.
       if (!best || stmt.span.start >= best.stmt.span.start) {
         best = { stmt, block: node, index, blockOwner: owners.get(node) ?? null }
       }
@@ -82,6 +91,13 @@ function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block
   })
 
   return best
+}
+
+/** Where the view a statement produces is written: past a `return`, where its expression starts. */
+function viewStartOf(stmt: Stmt): number | null {
+  if (stmt.kind === 'exprStmt') return stmt.expression.span.start
+  if (stmt.kind === 'returnStmt') return stmt.value?.span.start ?? null
+  return null
 }
 
 /** The name a call expression invokes, for `Text(…)` and `SwiftUI.Text(…)` alike. */
@@ -144,7 +160,9 @@ function contentBlockOf(stmt: Stmt): Block | null {
 function extentOf(text: string, stmt: Stmt): { start: number; end: number } {
   let end = stmt.span.end
   while (end > stmt.span.start && /[\s;]/.test(text[end - 1]!)) end--
-  return { start: stmt.span.start, end }
+  // A modifier switched off at the end of the chain is a comment after the statement,
+  // not part of it, but it is still this view's: it moves, copies and goes with it.
+  return { start: stmt.span.start, end: afterOffMarkers(text, end) }
 }
 
 function lineStartAt(text: string, offset: number): number {
@@ -285,17 +303,27 @@ export function insertView(text: string, file: FileId, offset: number, snippet: 
   }
 
   if (content) {
-    // An empty container: open it onto its own lines rather than inlining a child
-    // into `VStack { }`, which is where nested content stops being readable.
+    // A container with no statements can still hold text the parser does not turn
+    // into one - a hidden view, a comment, a ForEach's `item in` - so the new view
+    // goes in front of the closing brace and everything before it stays.
     const open = content.span.start
     const close = content.span.end - 1
     if (open === -1 || close === -1 || close < open) return null
     const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, found.stmt.span.start), found.stmt.span.start))?.[0] ?? ''
     const inner = outer + indentUnit(text)
-    const body = `\n${indentSnippet(snippet, inner)}\n${outer}`
+    const closeLine = lineStartAt(text, close)
+    if (closeLine > open && /^[ \t]*$/.test(text.slice(closeLine, close))) {
+      // Lined up with what is already inside, when a line of it comes before the brace.
+      const lastLine = lineStartAt(text, closeLine - 1)
+      const indent = (lastLine > open ? /^[ \t]*(?=\S)/.exec(text.slice(lastLine, closeLine))?.[0] : undefined) ?? inner
+      return { text: text.slice(0, closeLine) + `${indentSnippet(snippet, indent)}\n` + text.slice(closeLine), offset: closeLine + indent.length }
+    }
+    // A brace on a shared line - `VStack { }` - opens onto its own lines, which is
+    // where nested content stays readable.
+    const end = open + 1 + text.slice(open + 1, close).trimEnd().length
     return {
-      text: text.slice(0, open + 1) + body + text.slice(close),
-      offset: open + 1 + 1 + inner.length,
+      text: text.slice(0, end) + `\n${indentSnippet(snippet, inner)}\n${outer}` + text.slice(close),
+      offset: end + 1 + inner.length,
     }
   }
 
@@ -364,7 +392,8 @@ export interface HiddenView {
 }
 
 /**
- * Moves the view at `offset` to sit before or after another one.
+ * Moves the view at `offset` to sit before or after another one, or inside it as its
+ * last child.
  *
  * The general form of a move: the statement's text is cut and put back at the
  * target, so it works between siblings, into a different container and out of one -
@@ -376,12 +405,14 @@ export function moveViewTo(
   file: FileId,
   offset: number,
   targetOffset: number,
-  position: 'before' | 'after',
+  position: DropPosition,
 ): SourceEdit | null {
   const source = siteAt(text, file, offset)
-  const target = siteAt(text, file, targetOffset)
+  const target = siteAt(text, file, targetOffset, { near: true })
   if (!source || !target) return null
   if (source.stmt === target.stmt) return null
+  const targetStart = viewStartOf(target.stmt)
+  if (targetStart === null) return null
 
   const from = cutOf(text, source.stmt)
   const to = cutOf(text, target.stmt)
@@ -393,17 +424,15 @@ export function moveViewTo(
     ? stripIndent(text.slice(from.start, from.end).replace(/\r?\n$/, ''), from.indent)
     : text.slice(extent.start, extent.end)
 
-  // Cut first, then place: with the source gone, everything after it has moved left
-  // by the length of the cut.
+  // Cut first, then find the target again in what is left. Only its start can be
+  // worked out from before the cut: a target that held the view got shorter rather
+  // than moving, so its end and its lines are read from the new text.
   const without = text.slice(0, from.start) + text.slice(from.end)
-  const shift = from.start < to.start ? from.end - from.start : 0
-  const anchor = {
-    start: to.start - shift,
-    end: to.end - shift,
-    after: to.after - shift,
-    indent: to.indent,
-    ownLine: to.ownLine,
-  }
+  const targetAfterCut = targetStart >= from.end ? targetStart - (from.end - from.start) : targetStart
+  const again = siteAt(without, file, targetAfterCut)
+  if (!again) return null
+  if (position === 'inside') return contentBlockOf(again.stmt) ? insertView(without, file, targetAfterCut, body) : null
+  const anchor = cutOf(without, again.stmt)
 
   if (anchor.ownLine) {
     const at = position === 'before' ? anchor.start : anchor.end

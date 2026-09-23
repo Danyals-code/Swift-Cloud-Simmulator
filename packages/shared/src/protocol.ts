@@ -216,12 +216,15 @@ export function handlerOf(event: UIEvent): string {
  * render tree both carry - so "this view" means the same thing to the canvas, to
  * Layers and to the parser that performs the edit.
  */
+/** Where a dragged view goes: beside the target, or inside it as its last child. */
+export type DropPosition = 'before' | 'after' | 'inside'
+
 export type ViewEdit =
   | { readonly kind: 'delete' }
   | { readonly kind: 'move'; readonly direction: -1 | 1 }
   | { readonly kind: 'insert'; readonly snippet: string }
-  /** A drag: put this view before or after another one, wherever that one is. */
-  | { readonly kind: 'moveTo'; readonly targetOffset: number; readonly position: 'before' | 'after' }
+  /** A drag: put this view before or after another one, wherever that one is, or inside it as its last child. */
+  | { readonly kind: 'moveTo'; readonly targetOffset: number; readonly position: DropPosition }
   | { readonly kind: 'hide' }
   | { readonly kind: 'show' }
 

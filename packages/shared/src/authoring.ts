@@ -47,6 +47,12 @@ export interface AuthoringNode {
   readonly navigation?: NavigationSettings
   readonly fields?: readonly string[]
   readonly extraction?: { readonly allowed: boolean; readonly reason: string }
+  /**
+   * Set on a view written as an argument - `.overlay(Circle())`, `Section(header: Text("A"))` -
+   * rather than as a statement of its own. It is part of the view that takes it, so it
+   * cannot be moved, copied, hidden or deleted on its own.
+   */
+  readonly argument?: true
 }
 
 export interface AuthoringSnapshot {

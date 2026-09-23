@@ -129,6 +129,8 @@
 .dockHistory > button:hover:not(:disabled) { background: var(--color-xc-select); color: var(--color-xc-accent); }
 .dockHistory > button:disabled { opacity: .4; cursor: default; }
 .dockFeedback { position: absolute; bottom: calc(100% + 4px); left: 8px; right: 8px; padding: 8px 10px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 7px; font-size: 12px; color: var(--color-xc-text); box-shadow: 0 2px 8px #16162012; pointer-events: auto; }
+.dockFeedbackAction { display: block; margin-top: 6px; padding: 0; border: 0; background: transparent; color: var(--color-xc-accent); font: inherit; font-weight: 600; cursor: pointer; }
+.dockFeedbackAction:hover { text-decoration: underline; }
 .dockTools { grid-template-columns: repeat(3, 1fr); padding-bottom: 6px; border-bottom: 1px solid var(--color-xc-line-soft); }
 .dockModes { grid-template-columns: repeat(2, 1fr); gap: 3px; padding: 4px; border: 1px solid var(--color-xc-line); border-radius: 10px; background: var(--color-xc-bar-raised); }
 .dockModes > button { border: 0; border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-weight: 500; }

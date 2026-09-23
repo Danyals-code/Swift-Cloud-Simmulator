@@ -1,4 +1,5 @@
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, PreviewColorAsset, SourceFile } from '@studio/shared'
+import { isSyntaxError } from '@studio/swift-syntax'
 import { collectionFor, addCollectionField, bindField, convertCollection, emptyState, enclosingCollection, recordsSwift, validateRecords } from './authoring-collections'
 import { componentRecipes, componentSettings, extractComponent, insertComponent, applyComponentVariant, exposeComponentInput } from './authoring-components'
 import { behaviorSettings, configureAction, configureBinding, configureTransition, stateInputs } from './authoring-behavior'
@@ -13,15 +14,22 @@ import { customizeCard } from './authoring-card'
 import { structureEdit } from './authoring-structure'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
-  if (snapshot.diagnostics.some(d => d.severity === 'error')) return snapshot
-  const nodes = snapshot.nodes.map(node => {
+  // A file that does not parse keeps its own views plain - its design cannot be changed anyway - and
+  // the rest keep their settings. An error in a file that parses still turns them off everywhere.
+  const unparsed = new Set(snapshot.diagnostics.filter(isSyntaxError).map(d => d.span.file))
+  if (snapshot.diagnostics.some(d => d.severity === 'error' && !unparsed.has(d.span.file))) return snapshot
+  // These have only ever read projects that parse; with part of one missing, a surprise costs a view its settings, not the snapshot.
+  const read = <T>(settings: () => T): T | undefined => { if (!unparsed.size) return settings(); try { return settings() } catch { return undefined } }
+  const nodes = snapshot.nodes.map(node => unparsed.has(node.source.file) ? node : read(() => enrich(node)) ?? node)
+  const inputs = snapshot.nodes.filter(n => n.kind === 'definition' && !unparsed.has(n.source.file)).flatMap(n => read(() => stateInputs(ctx, n)) ?? [])
+  return { ...snapshot, nodes, inputs, styles: read(() => sharedStyles(ctx)), navigation: read(() => appNavigation(ctx)) }
+
+  function enrich(node: AuthoringNode): AuthoringNode {
     const collection = collectionFor(ctx, node), component = componentSettings(ctx, node)
     const parent = enclosingCollection(ctx, node)
     const behavior = ['view', 'collection'].includes(node.kind) && node.name !== 'WindowGroup' ? behaviorSettings(ctx, node) : undefined
     return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: (component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type)) }
-  })
-  const inputs = snapshot.nodes.filter(n => n.kind === 'definition').flatMap(n => stateInputs(ctx, n))
-  return { ...snapshot, nodes, inputs, styles: sharedStyles(ctx), navigation: appNavigation(ctx) }
+  }
 }
 export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation: AuthoringOperation | { kind: 'property'; control: string; value: string }): { files: SourceFile[]; offset: number; colors?: PreviewColorAsset[] } {
   let patches: SourcePatch[] = [], files: SourceFile[] = [], colors: PreviewColorAsset[] | undefined, removed: readonly string[] = []

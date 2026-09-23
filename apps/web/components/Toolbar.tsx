@@ -72,6 +72,8 @@ interface PreviewToolsProps {
   canUndo: boolean
   canRedo: boolean
   note?: string | null
+  /** A way out of what the note reports - Show in Code, for a file that does not parse. */
+  noteAction?: { readonly label: string; readonly onClick: () => void } | null
 }
 
 const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debug area', title: 'Show problems and output' }]
@@ -151,7 +153,7 @@ function ProjectName({ name, onRename }: { name: string; onRename: (name: string
  * the phone back to the person using it. They are a switch rather than two toggles
  * because a pointer over a phone has to mean one thing at a time.
  */
-export function PreviewTools({ inspecting, onSetInspecting, showEditActions = false, showModeSwitch = true, tool, onSetTool, onAdd, canAdd, mode = 'design', busy, onUndo, onRedo, onReset, canUndo, canRedo, note }: PreviewToolsProps) {
+export function PreviewTools({ inspecting, onSetInspecting, showEditActions = false, showModeSwitch = true, tool, onSetTool, onAdd, canAdd, mode = 'design', busy, onUndo, onRedo, onReset, canUndo, canRedo, note, noteAction }: PreviewToolsProps) {
   // The workspace is called Design; what the pointer does inside it is called Edit,
   // so that no word names two different things.
   const designing = mode === 'design' ? 'Edit' : 'Inspect'
@@ -159,7 +161,10 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
   // grids rather than rows of natural-width buttons, so "Delete" and "Live Preview"
   // line up down the edge instead of ending wherever their words happen to.
   return <div className={styles.toolDock} aria-label="Preview tools">
-    {note && <span className={styles.dockFeedback} role="status" data-testid="design-feedback">{note}</span>}
+    {note && <div className={styles.dockFeedback}>
+      <span role="status" data-testid="design-feedback">{note}</span>
+      {noteAction && <button type="button" className={styles.dockFeedbackAction} onClick={noteAction.onClick}>{noteAction.label}</button>}
+    </div>}
     <div className={`${styles.dockRow} ${styles.dockHistory}`} role="group" aria-label="History and preview">
       <button type="button" onClick={onUndo} disabled={busy || !canUndo} aria-label="Undo" title="Undo the last document change (⌘Z)" data-testid="design-undo"><Icon name="undo" size={13} />Undo</button>
       <button type="button" onClick={onRedo} disabled={busy || !canRedo} aria-label="Redo" title="Redo the last undone change (⌘⇧Z)" data-testid="design-redo"><Icon name="redo" size={13} />Redo</button>

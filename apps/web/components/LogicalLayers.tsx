@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { layerMoveProblem, LAYER_MOVE_CONTAINERS } from '@studio/shared'
+import { argumentLayerProblem, isStructuralLayer, layerMoveProblem, LAYER_MOVE_CONTAINERS } from '@studio/shared'
 import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRequest, HiddenViewInfo, SourceFile, SourceSpan, ViewLayer } from '@studio/shared'
 import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerIsVisual, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from '../lib/sourceLayers'
 import { Icon, type IconName } from './ui/Icon'
@@ -49,7 +49,6 @@ const ICONS: Readonly<Record<string, IconName>> = {
   List: 'list-rows', ForEach: 'rows', ScrollView: 'scroll', NavigationStack: 'nav', NavigationLink: 'nav',
   TabView: 'screens', Group: 'section', Section: 'section', Grid: 'grid', Spacer: 'spacer',
 }
-const structural = (node: AuthoringNode) => ['view', 'component', 'collection'].includes(node.kind) && node.name !== 'WindowGroup'
 
 /** The designer hierarchy has one copy of a row design, never individual records. */
 export function LogicalLayers({ labels = [], onRename, snapshot, files, selected, selectedAncestors = [], selection, hovered, hoveredAncestors = [], onHover, runtimeLayers, pageSource, pageId, pageName, selectedRuntimeId, stale, onSelect, onEdit, hidden = [], onShow, editable = false, embedded = false, indent = 8, query: externalQuery }: Props) {
@@ -128,21 +127,27 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
   const menus = (node: AuthoringNode): MenuItem[] => {
     const siblings = nodes.get(node.parentId ?? '')?.children ?? []
     const index = siblings.indexOf(node.id)
-    const canEdit = editable && !!onEdit && !disabled && structural(node)
+    const writable = editable && !!onEdit && !disabled
+    const canEdit = writable && isStructuralLayer(node)
+    // A view written as an argument keeps its name; the rest is off, and says why.
+    const slotProblem = argumentLayerProblem(snapshot.nodes, node)
+    const structure: MenuItem[] = [
+      { value: 'duplicate', label: 'Duplicate', disabled: !canEdit },
+      { value: 'VStack', label: 'Wrap in Vertical Stack', disabled: !canEdit },
+      { value: 'HStack', label: 'Wrap in Horizontal Stack', disabled: !canEdit },
+      { value: 'ZStack', label: 'Wrap in ZStack', disabled: !canEdit },
+      { value: 'reparent', label: 'Move into…', disabled: !canEdit },
+      { value: 'up', label: 'Move up', disabled: !canEdit || index <= 0 || !rows.some(row => row.node.id === siblings[index - 1]) },
+      { value: 'down', label: 'Move down', disabled: !canEdit || index < 0 || index >= siblings.length - 1 || !rows.some(row => row.node.id === siblings[index + 1]) },
+      { value: 'hide', label: 'Hide', disabled: !canEdit, separated: true },
+      { value: 'delete', label: 'Delete', disabled: !canEdit },
+    ]
     return [
       ...(node.kind === 'template' ? [{ value: 'enter', label: 'Edit row design' }] : []),
       ...(node.definitionId ? [{ value: 'enter', label: 'Edit main component' }] : []),
-      ...(structural(node) ? [
-        { value: 'rename', label: 'Rename layer…', disabled: !canEdit || !onRename },
-        { value: 'duplicate', label: 'Duplicate', disabled: !canEdit },
-        { value: 'VStack', label: 'Wrap in Vertical Stack', disabled: !canEdit },
-        { value: 'HStack', label: 'Wrap in Horizontal Stack', disabled: !canEdit },
-        { value: 'ZStack', label: 'Wrap in ZStack', disabled: !canEdit },
-        { value: 'reparent', label: 'Move into…', disabled: !canEdit },
-        { value: 'up', label: 'Move up', disabled: !canEdit || index <= 0 || !rows.some(row => row.node.id === siblings[index - 1]) },
-        { value: 'down', label: 'Move down', disabled: !canEdit || index < 0 || index >= siblings.length - 1 || !rows.some(row => row.node.id === siblings[index + 1]) },
-        { value: 'hide', label: 'Hide', disabled: !canEdit, separated: true },
-        { value: 'delete', label: 'Delete', disabled: !canEdit },
+      ...(isStructuralLayer(node) || slotProblem ? [
+        { value: 'rename', label: 'Rename layer…', disabled: !writable || !onRename },
+        ...structure.map(item => slotProblem ? { ...item, title: slotProblem } : item),
       ] : []),
     ]
   }
@@ -187,7 +192,7 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
         const displayDepth = depth
         const notShown = sourceLayerNotShown(snapshot, node)
         const label = labelFor(node), type = sourceLayerType(node)
-        const canDrag = editable && !!onEdit && !disabled && structural(node)
+        const canDrag = editable && !!onEdit && !disabled && isStructuralLayer(node)
         return <Fragment key={node.id}>
           <div className={styles.row} style={{ paddingLeft: `min(${indent + displayDepth * 14}px, 35%)` }} data-source-id={node.id} data-source-name={node.name} data-source-owner={node.owner} data-source-kind={node.kind} data-shared-design={shared || undefined} role="treeitem" aria-label={`${label}${label !== type ? `, ${type}` : ''}`} aria-level={displayDepth + 1} aria-selected={selectedIds.length > 1 ? selectedIds.includes(node.id) : selectedRow === node.id} data-hovered={hoveredRow === node.id || undefined} aria-expanded={expandable ? expanded : undefined} tabIndex={tabStop === node.id ? 0 : -1} data-inactive={notShown || undefined} data-dragging={drag?.id === node.id || undefined} data-drop={drag?.over === node.id ? drag.position : undefined} draggable={canDrag}
             onMouseEnter={() => { if (!stale) onHover?.(node, shared ? undefined : runtimeFor(node)) }} onMouseLeave={() => onHover?.(null)}
@@ -242,7 +247,7 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
             onKeyDown={event => {
               if (event.target !== event.currentTarget) return
               if (event.key === 'Escape') { setDrag(undefined); return }
-              if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); if (structural(node)) action(node, event.key === 'ArrowUp' ? 'up' : 'down'); return }
+              if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); if (isStructuralLayer(node)) action(node, event.key === 'ArrowUp' ? 'up' : 'down'); return }
               if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!disabled) onSelect(node, shared ? undefined : runtimeFor(node)) }
               if (event.key === 'ArrowRight' && expandable) { event.preventDefault(); if (!expanded) toggle(node.id, false); else focusRow(children.find(id => rows.some(row => row.node.id === id))) }
               if (event.key === 'ArrowLeft') { event.preventDefault(); if (expanded) toggle(node.id, true); else focusRow(parentId) }

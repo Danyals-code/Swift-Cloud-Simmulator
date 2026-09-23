@@ -1,10 +1,10 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
+import { buildAuthoringModel, planDesignBatch, planDesignEdit } from '@studio/swift-sema'
 import { Parser } from '@studio/swift-syntax'
 import { applyProjectTransaction, DocumentHistory, emptyStudioMetadata, projectFromFiles } from '@studio/project-model'
 import { buildExportBundle } from '@studio/exporter'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
-import type { AuthoringNode, DesignEditPlan, SourceFile } from '@studio/shared'
+import type { AuthoringNode, DesignEditPlan, DesignEditRequest, DropPosition, SourceFile } from '@studio/shared'
 
 const wrap = (body: string, declarations = '') => `import SwiftUI\n@main struct TestApp: App { var body: some Scene { WindowGroup { ContentView() } } }\nstruct ContentView: View { ${declarations}\nvar body: some View { ${body} } }`
 const files = (text: string): SourceFile[] => [{ id: 'Sources/App.swift', text }]
@@ -349,4 +349,236 @@ it('retains a frame’s alignment when switching its width to Fill', () => {
   expect(result.diagnostics.filter(d => d.severity === 'error')).toEqual([])
   const text = result.renderTree!.nodes.find(n => n.text?.runs.some(r => r.text === 'A'))!
   expect(text.frame.x).toBeCloseTo(0, 3)
+})
+
+/** A structural edit - Add, Delete, Hide, Move - planned the way Layers and the canvas plan one. */
+function restructure(text: string, operation: DesignEditRequest['operation'], name: string, index = 0): DesignEditPlan {
+  const node = target(text, name, index)
+  return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation })
+}
+function restructured(text: string, operation: DesignEditRequest['operation'], name: string, index = 0): string {
+  const result = restructure(text, operation, name, index)
+  if (!result.ok) throw new Error(result.reason)
+  const next = result.changes[0]?.after ?? text
+  expect(Parser.parse(next, 'Sources/App.swift').diagnostics).toEqual([])
+  return next
+}
+
+describe('C1: adding into a container keeps what is already inside it', () => {
+  it('keeps a hidden only child, and adds the new view after it', () => {
+    const hidden = restructured(wrap('VStack {\n    Text("Secret")\n}'), { kind: 'hide' }, 'Text')
+    const added = restructured(hidden, { kind: 'insert', snippet: 'Text("New")' }, 'VStack')
+    expect(added).toContain('VStack {\n    // hidden by Swift Web Studio\n    // Text("Secret")\n    // end hidden view\n    Text("New")\n}')
+  })
+  it('keeps a ForEach’s parameter when its last row is deleted and another is added', () => {
+    const emptied = restructured(wrap('List {\n    ForEach(items, id: \\.self) { item in\n        Text(item)\n    }\n}', 'let items = ["A", "B"]'), { kind: 'delete' }, 'Text')
+    const added = restructured(emptied, { kind: 'insert', snippet: 'Text("New")' }, 'ForEach')
+    expect(added).toContain('ForEach(items, id: \\.self) { item in\n        Text("New")\n    }')
+  })
+  it('keeps a comment that is all a container holds, and adds the new view after it', () => {
+    const added = restructured(wrap('VStack {\n    // A header goes here\n}'), { kind: 'insert', snippet: 'Text("New")' }, 'VStack')
+    expect(added).toContain('VStack {\n    // A header goes here\n    Text("New")\n}')
+  })
+  it('keeps a hidden only child when another layer is moved into its container', () => {
+    const hidden = restructured(wrap('VStack {\n    Text("Title")\n    HStack {\n        Text("Secret")\n    }\n}'), { kind: 'hide' }, 'Text', 1)
+    const moved = restructured(hidden, { kind: 'layer-reparent', ids: [target(hidden, 'Text').id], destination: target(hidden, 'HStack').id }, 'Text')
+    expect(moved).toContain('HStack {\n        // hidden by Swift Web Studio\n        // Text("Secret")\n        // end hidden view\n        Text("Title")\n    }')
+  })
+})
+
+describe('C2: a view written as an argument is part of the view that takes it', () => {
+  const card = wrap('VStack {\n    Text("Card")\n        .padding()\n        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray))\n    Text("Other")\n}')
+  const refusal = (slot: string) => `The ${slot} is part of the view it is attached to, so it can’t be moved, wrapped, copied, hidden or deleted on its own. Select that view instead.`
+
+  it.each<[string, DesignEditRequest['operation']]>([
+    ['delete', { kind: 'delete' }],
+    ['hide', { kind: 'hide' }],
+    ['move', { kind: 'move', direction: 1 }],
+    ['drag', { kind: 'moveTo', targetOffset: card.indexOf('Text("Other")'), position: 'after' }],
+    ['add beside', { kind: 'insert', snippet: 'Text("New")' }],
+    ['duplicate', { kind: 'layer-duplicate' }],
+    ['wrap', { kind: 'layer-wrap', ids: [target(card, 'RoundedRectangle').id], layout: 'VStack' }],
+    ['move into', { kind: 'layer-reparent', ids: [target(card, 'RoundedRectangle').id], destination: target(card, 'VStack').id }],
+  ])('refuses to %s an overlay’s shape on its own, and says why', (_, operation) => {
+    expect(restructure(card, operation, 'RoundedRectangle')).toEqual({ ok: false, reason: refusal('overlay') })
+  })
+
+  it('edits an overlay shape’s own settings', () => {
+    expect(edited(card, 'Shape corner radius', '20', 'RoundedRectangle')).toBe(card.replace('cornerRadius: 12', 'cornerRadius: 20'))
+  })
+
+  // The row is the first Text in the model; the header is the second.
+  const section = wrap('List {\n    Section(header: Text("Header")) {\n        Text("Row")\n    }\n}')
+  it('refuses to delete a section header written as an argument, and says why', () => {
+    expect(restructure(section, { kind: 'delete' }, 'Text', 1)).toEqual({ ok: false, reason: refusal('header') })
+  })
+
+  it('refuses to delete a navigation link’s destination written as an argument, and says why', () => {
+    const link = wrap('NavigationStack {\n    NavigationLink(destination: Text("Detail")) {\n        Text("Go")\n    }\n}')
+    const detail = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(link) }).nodes.filter(n => n.name === 'Text' && n.kind !== 'definition').findIndex(n => n.source.start === link.indexOf('Text("Detail")'))
+    expect(restructure(link, { kind: 'delete' }, 'Text', detail)).toEqual({ ok: false, reason: refusal('destination') })
+  })
+
+  it('edits a section header’s own text', () => {
+    expect(edited(section, 'Text', 'Title', 'Text', 1)).toBe(section.replace('"Header"', '"Title"'))
+  })
+})
+
+describe('C3: a switched-off last modifier stays with its view', () => {
+  /** Switches off a view's last modifier, the way the switch on its card does. */
+  function switchOffLast(text: string, name: string, index = 0): string {
+    const modifier = target(text, name, index).modifiers!.at(-1)!
+    return restructured(text, { kind: 'modifier-toggle', modifier: modifier.id, enabled: false }, name, index)
+  }
+  const stack = switchOffLast(wrap('VStack {\n    Text("A")\n        .bold()\n        .padding()\n    Text("B")\n}'), 'Text')
+
+  it('moves with its view', () => {
+    expect(restructured(stack, { kind: 'move', direction: 1 }, 'Text')).toContain('VStack {\n    Text("B")\n    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n}')
+  })
+
+  it('stays with its view when a view is added after it', () => {
+    expect(restructured(stack, { kind: 'insert', snippet: 'Text("New")' }, 'Text')).toContain('    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("New")\n    Text("B")\n')
+  })
+
+  it('goes with its view when the view is deleted', () => {
+    expect(restructured(stack, { kind: 'delete' }, 'Text')).toContain('VStack {\n    Text("B")\n}')
+  })
+
+  it('is copied with its view when the view is duplicated', () => {
+    expect(restructured(stack, { kind: 'layer-duplicate' }, 'Text')).toContain('    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("B")\n')
+  })
+
+  it('comes back with its view when the view is hidden and shown again', () => {
+    const hidden = restructured(stack, { kind: 'hide' }, 'Text')
+    const marker = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(hidden) }).nodes.find(n => n.name === 'VStack')!
+    const shown = planDesignEdit({ projectId: 'p', baseRevision: 1, scope: marker.owner, files: files(hidden), target: { file: 'Sources/App.swift', start: hidden.indexOf('    // hidden by'), end: hidden.indexOf('    // hidden by') }, fingerprint: '', operation: { kind: 'show' } })
+    expect(shown.ok && shown.changes[0]!.after).toBe(stack)
+  })
+
+  it('stays inside the empty state its collection is wrapped in', () => {
+    const source = switchOffLast(wrap('List(products) { item in Text(item.title) }\n    .padding()', '@State private var products: [Product] = [Product(id: "p1", title: "First")]') + '\nstruct Product: Identifiable { let id: String; var title: String }\n', 'List')
+    expect(restructured(source, { kind: 'empty-state', text: 'Nothing here' }, 'List')).toContain('    /*studio-off:1 ".padding()"*/\n    }\n}')
+  })
+
+  it('stays inside the navigation stack its screen is wrapped in when a button opens a new screen', () => {
+    const source = switchOffLast(wrap('VStack {\n    Button("Details") {}\n}\n.padding(12)'), 'VStack')
+    const result = restructure(source, { kind: 'guided-action', action: { type: 'navigate', destination: 'DetailsScreen' }, replace: false, createScreen: { name: 'DetailsScreen', title: 'Club details' } }, 'Button')
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.changes.find(change => change.file === 'Sources/App.swift')!.after).toContain('/*studio-off:1 ".padding(12)"*/\n}')
+  })
+
+  it('stays inside the navigation stack its screen is wrapped in for a new link', () => {
+    const source = switchOffLast(wrap('VStack {\n    Text("A")\n}\n.padding()'), 'VStack')
+    expect(restructured(source, { kind: 'insert', snippet: 'NavigationLink("Next") { Text("Detail") }' }, 'Text')).toContain('    /*studio-off:1 ".padding()"*/\n}')
+  })
+})
+
+describe('C4: dragging a view after, or into, its own container', () => {
+  // The blank screen once a designer has added two lines of text, with the #Preview that follows it.
+  const blank = `import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Title")
+                Text("Subtitle")
+            }
+            .padding(24)
+        }
+    }
+}
+
+#Preview {
+    HomeScreen()
+}
+`
+  const drag = (position: DropPosition, name = 'Text', index = 0) =>
+    restructured(blank, { kind: 'moveTo', targetOffset: blank.indexOf('VStack(spacing'), position }, name, index)
+
+  it('moves a view dropped after its own container out, to just after it', () => {
+    expect(drag('after')).toBe(blank.replace('                Text("Title")\n', '').replace('            .padding(24)\n', '            .padding(24)\n            Text("Title")\n'))
+  })
+
+  it('makes a view dropped into its own container that container’s last child', () => {
+    expect(drag('inside')).toBe(blank.replace('                Text("Title")\n                Text("Subtitle")\n', '                Text("Subtitle")\n                Text("Title")\n'))
+  })
+
+  it('moves a view dropped before its own container out, to just before it', () => {
+    expect(drag('before', 'Text', 1)).toBe(blank.replace('                Text("Subtitle")\n', '').replace('            VStack(spacing: 16) {\n', '            Text("Subtitle")\n            VStack(spacing: 16) {\n'))
+  })
+})
+
+describe('C10: a syntax error stops edits only to the file it is in', () => {
+  const HOME = 'Sources/Features/Home/HomeScreen.swift'
+  const home: SourceFile = { id: HOME, text: 'import SwiftUI\nstruct HomeScreen: View {\n    var body: some View {\n        VStack {\n            Text("Hello")\n        }\n    }\n}\n' }
+  // Half-typed code in a draft: `Text("x"` with its parenthesis still open.
+  const draft: SourceFile = { id: 'Sources/Features/Draft/Draft.swift', text: 'import SwiftUI\nstruct Draft: View {\n    var body: some View {\n        Text("x"\n    }\n}\n' }
+  const request = (project: SourceFile[], name: string, operation: DesignEditRequest['operation']): DesignEditRequest => {
+    const node = buildAuthoringModel({ projectId: 'p', revision: 1, files: project }).nodes.find(n => n.name === name && n.kind !== 'definition' && n.source.file === HOME)!
+    return { projectId: 'p', baseRevision: 1, scope: node.owner, files: project, target: node.source, fingerprint: node.fingerprint, operation }
+  }
+  const changedFiles = (plan: DesignEditPlan) => plan.ok ? plan.changes.map(change => change.file) : plan.reason
+
+  it('adds a view to a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignEdit(request([home, draft], 'VStack', { kind: 'insert', snippet: 'Text("New")' })))).toEqual([HOME])
+  })
+
+  it('changes a setting on a screen while another file does not parse', () => {
+    const text = buildAuthoringModel({ projectId: 'p', revision: 1, files: [home, draft] }).nodes.find(n => n.name === 'Text' && n.source.file === HOME)!.controls!.find(c => c.label === 'Text')!
+    expect(changedFiles(planDesignEdit(request([home, draft], 'Text', { kind: 'property', control: text.id, value: 'Hi' })))).toEqual([HOME])
+  })
+
+  it('adds a modifier on a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignEdit(request([home, draft], 'Text', { kind: 'modifier-add', name: 'padding' })))).toEqual([HOME])
+  })
+
+  it('plans a batch on a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignBatch([request([home, draft], 'VStack', { kind: 'insert', snippet: 'Text("New")' })]))).toEqual([HOME])
+  })
+
+  it('offers and changes a component’s input while another file does not parse', () => {
+    const screens: SourceFile = { id: HOME, text: 'import SwiftUI\nstruct HomeScreen: View {\n    var body: some View {\n        Badge(title: "New")\n    }\n}\nstruct Badge: View {\n    let title: String\n    var body: some View { Text(title) }\n}\n' }
+    const badge = buildAuthoringModel({ projectId: 'p', revision: 1, files: [screens, draft] }).nodes.find(n => n.name === 'Badge' && n.kind === 'component')!
+    expect(badge.controls?.some(control => control.id === 'component:title')).toBe(true)
+    const plan = planDesignEdit(request([screens, draft], 'Badge', { kind: 'property', control: 'component:title', value: 'Sale' }))
+    expect(plan.ok && plan.changes[0]!.after).toBe(screens.text.replace('Badge(title: "New")', 'Badge(title: "Sale")'))
+  })
+
+  it('points at the error already in a file a change also writes, where it is before the change', () => {
+    // A spacing token is written into Tokens.swift, above a line still being typed at its end.
+    const tokens: SourceFile = { id: 'Sources/DesignSystem/Tokens.swift', text: 'import SwiftUI\n\nextension CGFloat {\n    static let space8: CGFloat = 8\n}\n\nlet draft = (\n' }
+    expect(planDesignEdit(request([home, tokens], 'Text', { kind: 'style-create', name: 'space24', style: 'spacing', value: '24' })))
+      .toEqual({ ok: false, reason: 'Tokens.swift has an error on line 8, so its design can’t be changed until it’s fixed in Code.', location: { file: tokens.id, offset: tokens.text.length } })
+  })
+
+  it('refuses to change a file that does not parse, naming it and the line, and says where', () => {
+    const broken: SourceFile = { id: HOME, text: home.text.replace('Text("Hello")', 'Text("Hello"') }
+    expect(planDesignEdit(request([broken], 'VStack', { kind: 'insert', snippet: 'Text("New")' }))).toEqual({
+      ok: false,
+      reason: 'HomeScreen.swift has an error on line 6, so its design can’t be changed until it’s fixed in Code.',
+      location: { file: HOME, offset: broken.text.indexOf('}', broken.text.indexOf('Text("Hello"')) },
+    })
+  })
+})
+
+describe('C11: a structural change is checked before it is kept', () => {
+  /** The view written at `needle`, planned for the way Layers and the canvas plan one. */
+  function restructureAt(text: string, needle: string, operation: DesignEditRequest['operation']): DesignEditPlan {
+    const node = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(text) }).nodes.find(n => n.source.start === text.indexOf(needle) && n.kind !== 'branch')!
+    return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation })
+  }
+
+  it('refuses a drop that would give a helper, which holds one view, a second one', () => {
+    // The canvas drops onto what it draws; "Header" is drawn by `header`, not by `body`.
+    const source = wrap('VStack {\n    header\n    Text("Body")\n}', 'var header: some View {\n    Text("Header")\n}')
+    expect(restructureAt(source, 'Text("Body")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Header")'), position: 'after' }))
+      .toEqual({ ok: false, reason: '`header` can hold only one view, so this change would stop the app from building. Nothing was changed.' })
+  })
+
+  it('refuses a move that would leave a component with nothing to show', () => {
+    const source = wrap('VStack {\n    Card()\n    Text("Other")\n}') + '\nstruct Card: View {\n    var body: some View {\n        Text("Card")\n    }\n}\n'
+    expect(restructureAt(source, 'Text("Card")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Other")'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'This change would leave `Card` with nothing to show. Nothing was changed.' })
+  })
 })

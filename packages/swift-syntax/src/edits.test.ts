@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Parser } from './parser'
-import { deleteView, insertView, moveView, viewSiteAt } from './edits'
+import { copyView, deleteView, HIDDEN_MARKER, hideView, insertView, moveView, moveViewTo, viewSiteAt } from './edits'
 
 /**
  * The canvas's edits, at the level they actually happen: text in, text out.
@@ -288,5 +288,140 @@ describe('what it declines to touch', () => {
     expect(deleteView(APP, FILE, 2)).toBeNull()
     expect(moveView(APP, FILE, 2, 1)).toBeNull()
     expect(insertView(APP, FILE, 2, 'Text("x")')).toBeNull()
+  })
+})
+
+describe('C1: adding into a container with no views keeps what is inside it', () => {
+  const screen = (content: string) => `import SwiftUI\n\nstruct ContentView: View {\n    let items = ["A", "B"]\n    var body: some View {\n${content}\n    }\n}\n`
+
+  it.each([
+    ['a hidden view', `        VStack {\n            ${HIDDEN_MARKER}\n            // Text("Secret")\n            // end hidden view\n        }`, `            // end hidden view\n            Text("New")\n        }`],
+    ['a comment', '        VStack {\n            // A header goes here\n        }', '            // A header goes here\n            Text("New")\n        }'],
+    ['a ForEach’s parameter', '        ForEach(items, id: \\.self) { item in\n        }', 'ForEach(items, id: \\.self) { item in\n            Text("New")\n        }'],
+    ['a ForEach’s parameter on one line', '        ForEach(items, id: \\.self) { item in }', 'ForEach(items, id: \\.self) { item in\n            Text("New")\n        }'],
+  ])('keeps %s, and adds the view after it', (_, content, expected) => {
+    const text = screen(content)
+    const added = insertView(text, FILE, offsetOf(text, content.trim()), 'Text("New")')!
+    expect(added.text).toContain(expected)
+    expect(added.text.slice(added.offset)).toMatch(/^Text\("New"\)/)
+    expect(parses(added.text)).toBe(true)
+  })
+
+  it('lines the new view up with what is already inside', () => {
+    const text = 'import SwiftUI\n\nstruct ContentView: View {\n  var body: some View {\n    HStack {\n      // A note\n    }\n  }\n}\n'
+    const added = insertView(text, FILE, offsetOf(text, 'HStack'), 'Text("New")')!
+    expect(added.text).toContain('    HStack {\n      // A note\n      Text("New")\n    }')
+    expect(added.text.slice(added.offset)).toMatch(/^Text\("New"\)/)
+  })
+})
+
+describe('C2: a view written as an argument has no statement of its own', () => {
+  const card = `import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Text("Card")
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray))
+            Text("Other")
+        }
+    }
+}
+`
+  const shape = () => offsetOf(card, 'RoundedRectangle')
+
+  it.each([
+    ['delete', () => deleteView(card, FILE, shape())],
+    ['hide', () => hideView(card, FILE, shape())],
+    ['move', () => moveView(card, FILE, shape(), 1)],
+    ['add beside', () => insertView(card, FILE, shape(), 'Text("New")')],
+    ['copy', () => copyView(card, FILE, shape())],
+    ['drag', () => moveViewTo(card, FILE, shape(), offsetOf(card, 'Text("Other")'), 'after')],
+    ['describe', () => viewSiteAt(card, FILE, shape())],
+  ])('does not %s the view that takes it', (_, edit) => {
+    expect(edit()).toBeNull()
+  })
+
+  it('takes a drop onto it as a drop beside the view it belongs to', () => {
+    const moved = moveViewTo(card, FILE, offsetOf(card, 'Text("Other")'), shape(), 'before')!
+    expect(moved.text).toContain('        VStack {\n            Text("Other")\n            Text("Card")\n')
+  })
+})
+
+describe('C3: a switched-off last modifier is part of its view', () => {
+  const OFF = '/*studio-off:1 ".padding()"*/'
+  const screen = (content: string) => `import SwiftUI\n\nstruct ContentView: View {\n    var body: some View {\n        VStack {\n${content}\n        }\n    }\n}\n`
+  const own = screen(`            Text("A")\n                .bold()\n                ${OFF}\n            Text("B")`)
+
+  it('is inside the text the view is', () => {
+    const site = viewSiteAt(own, FILE, offsetOf(own, 'Text("A")'))!
+    expect(own.slice(site.start, site.end)).toBe(`Text("A")\n                .bold()\n                ${OFF}`)
+  })
+
+  it('is copied with it', () => {
+    expect(copyView(own, FILE, offsetOf(own, 'Text("A")'))).toBe(`Text("A")\n    .bold()\n    ${OFF}`)
+  })
+
+  it('moves with it past a neighbour', () => {
+    expect(moveView(own, FILE, offsetOf(own, 'Text("A")'), 1)!.text).toBe(screen(`            Text("B")\n            Text("A")\n                .bold()\n                ${OFF}`))
+  })
+
+  it('moves with it on a line shared with a neighbour', () => {
+    const shared = screen(`            Text("A").bold()${OFF}; Text("B")`)
+    const moved = moveView(shared, FILE, offsetOf(shared, 'Text("A")'), 1)!.text
+    expect(moved).toBe(screen(`            Text("B"); Text("A").bold()${OFF}`))
+    expect(parses(moved)).toBe(true)
+  })
+})
+
+describe('C4: a drop onto the container a view is in', () => {
+  const screen = `import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            HStack {
+                Text("A")
+                Text("B")
+            }
+            Text("C")
+        }
+    }
+}
+`
+
+  it('takes a view dropped after its own container out, to just after it', () => {
+    const moved = moveViewTo(screen, FILE, offsetOf(screen, 'Text("A")'), offsetOf(screen, 'HStack'), 'after')!
+    expect(moved.text).toContain('            HStack {\n                Text("B")\n            }\n            Text("A")\n            Text("C")\n')
+    expect(moved.text.slice(moved.offset)).toMatch(/^Text\("A"\)/)
+  })
+
+  it('makes a view dropped inside a container its last child', () => {
+    const moved = moveViewTo(screen, FILE, offsetOf(screen, 'Text("C")'), offsetOf(screen, 'HStack'), 'inside')!
+    expect(moved.text).toContain('            HStack {\n                Text("A")\n                Text("B")\n                Text("C")\n            }\n        }')
+    expect(moved.text.slice(moved.offset)).toMatch(/^Text\("C"\)/)
+  })
+
+  it('refuses to drop a view inside something that is not a container', () => {
+    expect(moveViewTo(screen, FILE, offsetOf(screen, 'Text("A")'), offsetOf(screen, 'Text("C")'), 'inside')).toBeNull()
+  })
+
+  it('takes a drop onto its own section’s header as a drop after that section', () => {
+    const list = `import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        List {
+            Section(header: Text("Header")) {
+                Text("Row")
+                Text("Next")
+            }
+        }
+    }
+}
+`
+    const moved = moveViewTo(list, FILE, offsetOf(list, 'Text("Row")'), offsetOf(list, 'Text("Header")'), 'after')!
+    expect(moved.text).toContain('            Section(header: Text("Header")) {\n                Text("Next")\n            }\n            Text("Row")\n        }')
+    expect(parses(moved.text)).toBe(true)
   })
 })

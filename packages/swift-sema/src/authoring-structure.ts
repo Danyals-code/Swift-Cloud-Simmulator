@@ -1,13 +1,17 @@
-import { layerMoveProblem, type AuthoringNode, type AuthoringOperation } from '@studio/shared'
+import { isStructuralLayer, layerMoveProblem, type AuthoringNode, type AuthoringOperation } from '@studio/shared'
 import { forEachChild, insertView, viewSiteAt, type Node } from '@studio/swift-syntax'
 import { applyPatches, callOf, type FeatureContext } from './authoring-context'
 
 type StructureOperation = Extract<AuthoringOperation, { kind: 'layer-duplicate' | 'layer-wrap' | 'layer-reparent' }>
-const structural = (node: AuthoringNode) => ['view', 'component', 'collection'].includes(node.kind) && node.name !== 'WindowGroup'
+/** The stack Wrap writes around the selected layers, before its `{`. */
+export function wrapperOf(layout: 'VStack' | 'HStack' | 'ZStack'): string {
+  return layout === 'ZStack' ? 'ZStack' : `${layout}(spacing: 16)`
+}
+
 export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operation: StructureOperation) {
   const file = ctx.files.find(f => f.id === node.source.file)!
   const site = viewSiteAt(file.text, file.id, node.source.start)
-  if (!structural(node) || !site) throw new Error('Select a visual layer in a screen.')
+  if (!isStructuralLayer(node) || !site) throw new Error('Select a visual layer in a screen.')
   const eol = file.text.includes('\r\n') ? '\r\n' : '\n'
   if (operation.kind === 'layer-duplicate') {
     if (!site.inContent && site.siblings === 1) throw new Error('Wrap this screen’s root in a Column or Row before duplicating it.')
@@ -15,14 +19,14 @@ export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operatio
     return { files: applyPatches(ctx, [{ file: file.id, start: site.end, end: site.end, text }]), offset: site.end + eol.length + site.indent.length }
   }
   const selected = operation.ids.map(id => ctx.nodes.find(n => n.id === id)).filter((n): n is AuthoringNode => !!n).sort((a, b) => a.source.start - b.source.start)
-  if (!selected.length || selected.length !== new Set(operation.ids).size || selected.some(n => !structural(n) || n.parentId !== node.parentId || n.owner !== node.owner || n.source.file !== file.id)) throw new Error('Select layers with the same parent. Nested and repeated row designs are edited separately.')
+  if (!selected.length || selected.length !== new Set(operation.ids).size || selected.some(n => !isStructuralLayer(n) || n.parentId !== node.parentId || n.owner !== node.owner || n.source.file !== file.id)) throw new Error('Select layers with the same parent. Nested and repeated row designs are edited separately.')
   const sites = selected.map(n => viewSiteAt(file.text, file.id, n.source.start)!)
   if (sites.some((s, i) => !s || i > 0 && s.index !== sites[i - 1]!.index + 1)) throw new Error('Select adjacent layers to keep their layout order predictable.')
   const first = sites[0]!, last = sites.at(-1)!
   const original = file.text.slice(first.start, last.end)
   if (operation.kind === 'layer-wrap') {
     if (!['VStack', 'HStack', 'ZStack'].includes(operation.layout)) throw new Error('Choose Column, Row or Stack.')
-    const constructor = operation.layout === 'ZStack' ? 'ZStack' : `${operation.layout}(spacing: 16)`
+    const constructor = wrapperOf(operation.layout)
     const text = `${constructor} {${eol}${first.indent}    ${original.replaceAll(eol, eol + '    ')}${eol}${first.indent}}`
     return { files: applyPatches(ctx, [{ file: file.id, start: first.start, end: last.end, text }]), offset: first.start }
   }

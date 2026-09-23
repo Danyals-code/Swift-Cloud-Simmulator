@@ -12,7 +12,7 @@ import { Splitter } from './ui/Splitter'
 import { PANE_LIMITS } from '../lib/layout'
 import { AppearancePicker, DevicePicker, TextSizePicker, ZoomPicker } from './PreviewEnvironment'
 import type { CanvasTool } from './Toolbar'
-import type { AuthoringNode, NavigationDestination } from '@studio/shared'
+import type { AuthoringNode, NavigationDestination, DropPosition } from '@studio/shared'
 import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../lib/pageLayout'
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
 import type { FeatureProps } from './AuthoringFeatures'
@@ -109,7 +109,13 @@ export interface DevicePaneProps {
    * container paints through its children, so the node under the pointer is never
    * the container itself, and dragging a stack has to mean the stack.
    */
-  onReorderNodes?: (source: RenderNode | 'selection', target: RenderNode, position: 'before' | 'after') => void
+  onReorderNodes?: (source: RenderNode | 'selection', target: RenderNode, position: DropPosition) => void
+  /**
+   * The layout container a drop onto this node goes into, by name, or null for a node
+   * that is not one. A stack's own empty space - usually its background - is where a
+   * drop means "put it in here, at the end", which is what the canvas then offers.
+   */
+  containerNameAt?: (node: RenderNode) => string | null
   /** The page to bring into view, when Layers picks one. */
   centerOn?: { readonly id: string; readonly nonce: number } | null
   /** What the preview is doing, drawn at the head of the canvas. */
@@ -204,6 +210,7 @@ export function DevicePane({
   tool = 'select',
   selection,
   onReorderNodes,
+  containerNameAt,
   centerOn,
   status,
   preview,
@@ -583,7 +590,7 @@ export function DevicePane({
    * the pointer having to find its edge.
    */
   const viewDrag = useRef<{ node: RenderNode | 'selection'; x: number; y: number } | null>(null)
-  const [dragTarget, setDragTarget] = useState<{ name: string; position: 'before' | 'after' } | null>(null)
+  const [dragTarget, setDragTarget] = useState<{ name: string; position: DropPosition } | null>(null)
 
   const onViewPointerDown = useCallback((event: React.PointerEvent) => {
     if (navigationPicker || !expanded || stale || !inspecting || tool !== 'select' || !onReorderNodes || event.button !== 0) return
@@ -607,10 +614,13 @@ export function DevicePane({
     const dropAt = (event: PointerEvent, source: RenderNode | 'selection') => {
       const over = hoverRef.current
       if (!over || (source !== 'selection' && over.id === source.id)) return null
+      const container = containerNameAt?.(over)
+      if (container) return { node: over, name: container, position: 'inside' as const }
       const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(over.id)}"]`)
       const box = element?.getBoundingClientRect()
       return {
         node: over,
+        name: over.inspect?.name ?? over.kind,
         position: (box && event.clientY > box.top + box.height / 2 ? 'after' : 'before') as 'before' | 'after',
       }
     }
@@ -622,7 +632,7 @@ export function DevicePane({
       const drag = viewDrag.current
       if (!drag || !moved(event, drag)) return
       const drop = dropAt(event, drag.node)
-      setDragTarget(drop ? { name: drop.node.inspect?.name ?? drop.node.kind, position: drop.position } : null)
+      setDragTarget(drop ? { name: drop.name, position: drop.position } : null)
     }
 
     const up = (event: PointerEvent) => {
@@ -642,7 +652,7 @@ export function DevicePane({
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
     }
-  }, [onReorderNodes])
+  }, [onReorderNodes, containerNameAt])
 
   /**
    * Dragging the canvas moves it, from anywhere that is not a phone.
