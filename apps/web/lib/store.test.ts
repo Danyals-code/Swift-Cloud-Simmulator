@@ -120,6 +120,19 @@ describe('creating a project from a template', () => {
     expect(kept.map((p) => p.name)).toEqual(['TasksApp'])
   })
 
+  it('keeps the untouched project when its own template is chosen again (B6)', async () => {
+    // A fresh browser opens on the blank screen, so "Create design" is most people's
+    // first click. Swapping the starter for an identical copy redrew everything, and
+    // for a moment the canvas showed one project while edits went to the other.
+    await useStudio.getState().load()
+    const starter = useStudio.getState().project!
+
+    expect(await useStudio.getState().applyTemplate('blank')).toBe('opened')
+
+    expect(useStudio.getState().project).toBe(starter)
+    expect(await persistence.list()).toHaveLength(1)
+  })
+
   it('gives the new project its own id', async () => {
     await useStudio.getState().load()
     const before = useStudio.getState().project!.id

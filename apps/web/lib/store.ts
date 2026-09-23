@@ -763,6 +763,12 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     async applyTemplate(templateId, options) {
+      // What this template makes is already open, untouched: making it again would
+      // swap it for an identical copy and redraw everything, and for that moment the
+      // canvas showed one project while edits went to the other (B6).
+      const open = get().project
+      if (open?.manifest.templateId === templateId && isPristine(open)) return 'opened'
+
       let module: Awaited<ReturnType<typeof templates>>
       try {
         module = await templates()
