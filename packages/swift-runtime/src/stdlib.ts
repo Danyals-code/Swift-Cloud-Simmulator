@@ -1,8 +1,7 @@
 import type { CallArgument } from './host'
 import { PREVIEW_LIMITS } from './limits'
-import { CALENDAR_TYPE, TIMER_TYPE, calendarValue, callCalendarMember, callTimerMember, formatDate, timerValue, tokenNameOf } from './calendar'
+import { CALENDAR_TYPE, TIMER_TYPE, calendarValue, callCalendarMember, callTimerMember, formatDate, timerValue, leadingDotName } from './calendar'
 import {
-  applyKeyPath,
   array,
   asDate,
   asIndexSet,
@@ -30,6 +29,7 @@ import {
   VOID,
   type ClosureValue,
   type SwiftValue,
+  readKeyPath,
   type KeyPathPayload,
 } from './values'
 
@@ -45,7 +45,7 @@ type Trap = (reason: string) => never
  * traps when the receiver is not assignable.
  */
 type ReplaceSelf = (value: SwiftValue) => void
-/** Reads `value.name` as the interpreter does, where one is at hand. */
+/** Reads `value.name` as the interpreter does. */
 type ReadMember = (value: SwiftValue, name: string) => SwiftValue | undefined
 
 /** What a range of integers does as the collection of them: `(0..<3).map { … }`. */
@@ -276,12 +276,11 @@ export function callBuiltinMember(
   invoke: Invoke,
   trap: Trap,
   replaceSelf: ReplaceSelf,
-  read?: ReadMember,
+  read: ReadMember,
 ): SwiftValue | undefined {
   const arg = (i: number): SwiftValue | undefined => args[i]?.value
-  /** A key path as a function, read as Swift reads it where the interpreter can: computed properties and `rawValue` too. */
-  const keyPathFunction = (path: KeyPathPayload) => (element: SwiftValue): SwiftValue =>
-    read ? path.components.reduce<SwiftValue>((value, component) => component === 'self' ? value : read(value, component) ?? NIL, element) : applyKeyPath(path, element)
+  /** A key path as a function, read as Swift reads it: computed properties and `rawValue` too. */
+  const keyPathFunction = (path: KeyPathPayload) => (element: SwiftValue): SwiftValue => readKeyPath(path, element, read)
   const labelled = (name: string): SwiftValue | undefined =>
     args.find((a) => a.label === name)?.value
 
@@ -418,7 +417,7 @@ export function callBuiltinMember(
         case 'rounded': {
           // `.rounded(.up)` and friends. The bare form rounds halves away from zero,
           // which is Swift's rule and not `Math.round`'s.
-          switch (tokenNameOf(arg(0))) {
+          switch (leadingDotName(arg(0))) {
             case 'up':
               return double(Math.ceil(target.value))
             case 'down':

@@ -1779,21 +1779,8 @@ export class Interpreter {
       if (builtinStatic !== undefined) return builtinStatic
     }
 
-    if (target.kind === 'enum') {
-      const value = this.memberOfEnum(target, member, span)
-      if (value !== undefined) return unwrapProjection(value)
-    }
-
-    if (target.kind === 'struct') {
-      const value = this.memberOfStruct(target, member, span)
-      if (value !== undefined) return unwrapProjection(value)
-    }
-
-    const builtin = getBuiltinProperty(target, member)
-    if (builtin !== undefined) return builtin
-
-    const extended = this.userMember(target, member, span)
-    if (extended !== undefined) return unwrapProjection(extended)
+    const read = this.readMember(target, member, span)
+    if (read !== undefined) return read
 
     const fromHost = this.host.getMember?.(target, member, span)
     if (fromHost !== undefined) return fromHost
@@ -3247,7 +3234,6 @@ function labelsMatch(params: readonly Param[], written: readonly (string | null)
   return next === written.length
 }
 
-/** A method call's receiver: its storage when it has one, and its value. */
 /**
  * `{ index, item in }` given one `(offset, element)` tuple, as `enumerated()` and `zip`
  * hand their elements over: Swift spreads a lone tuple across a closure's parameters.
@@ -3257,6 +3243,7 @@ function spreadTuple(closure: ClosureValue, args: readonly SwiftValue[]): readon
   return closure.params.length > 1 && only?.kind === 'tuple' && only.elements.length === closure.params.length ? only.elements : args
 }
 
+/** A method call's receiver: its storage when it has one, and its value. */
 interface Receiver {
   readonly lvalue: LValue | null
   readonly target: SwiftValue

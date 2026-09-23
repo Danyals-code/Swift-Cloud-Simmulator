@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_TARGET } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, FontTokenValue, PreviewColorAsset, ResourceOperation, ShadowTokenValue, SharedStyle, StyleKind, StyleProperty, SourceSpan, SourceFile, TokenDefinition } from '@studio/shared'
 import { Parser, forEachChild, type Decl, type Expr, type ExtensionDecl, type Node, type VarDecl } from '@studio/swift-syntax'
 import { AUTHORING_COLORS, SYSTEM_COLORS, AUTHORING_FONTS, swiftString } from './design-controls'
@@ -62,7 +62,7 @@ function minimumFor(kind: StyleKind, value: string): number {
 }
 function checkedExpression(ctx: FeatureContext, kind: StyleKind, value: string): string {
   const minimum = minimumFor(kind, value)
-  if (Number.parseFloat(ctx.deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET) < minimum) throw new Error(`This needs iOS ${minimum}, which is newer than this project’s iOS version. Choose another style, or ask a developer to raise it.`)
+  if (deploymentVersion(ctx.deploymentTarget) < minimum) throw new Error(`This needs iOS ${minimum}, which is newer than this project’s iOS version. Choose another style, or ask a developer to raise it.`)
   return styleExpression(kind, value)
 }
 function styleValue(text: string, type?: string): { kind: StyleKind; value: string } | undefined {
@@ -125,7 +125,7 @@ export function fontExpression(font: FontTokenValue, deploymentTarget = DEFAULT_
   if (font.weight && !FONT_WEIGHTS.includes(font.weight)) throw new Error('Choose a supported weight.')
   if (!font.weight) return `Font.system(.${font.style})`
   // `system(_:design:weight:)` is iOS 16; `.weight(_:)` spells the same font everywhere.
-  return Number.parseFloat(deploymentTarget) >= 16 ? `Font.system(.${font.style}, weight: .${font.weight})` : `Font.${font.style}.weight(.${font.weight})`
+  return deploymentVersion(deploymentTarget) >= 16 ? `Font.system(.${font.style}, weight: .${font.weight})` : `Font.${font.style}.weight(.${font.weight})`
 }
 
 function colorAndOpacity(ctx: FeatureContext, expr: Expr): { color: string; opacity: number } | undefined {

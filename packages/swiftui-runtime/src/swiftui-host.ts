@@ -1,6 +1,7 @@
 import type { LogLevel, SourceSpan } from '@studio/shared'
 import {
   asKeyPath,
+  readKeyPath,
   bool,
   describe,
   double,
@@ -23,6 +24,7 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
+import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
 import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
@@ -370,7 +372,8 @@ export class SwiftUIHost implements InterpreterHost {
   dismissAction: (() => void) | null = null
 
   /**
-   * Sizes measured for each `GeometryReader` on the previous layout pass.
+   * What each `GeometryReader` was measured at on the previous layout pass: its size,
+   * where it is on the screen and its safe area.
    *
    * Empty on the first pass of a new screen, which is why `defaultGeometry` exists:
    * a reader has to report *something* the first time, and the content rect is the
@@ -424,7 +427,7 @@ export class SwiftUIHost implements InterpreterHost {
    */
   private makeGeometryReader(call: HostCall): SwiftValue {
     const key = this.measuredSite(`g${call.span.start}`)
-    const measured: GeometryPayload = this.geometry.get(key) ?? { ...this.defaultGeometry, x: 0, y: 0, insets: { top: 0, leading: 0, bottom: 0, trailing: 0 } }
+    const measured: GeometryPayload = this.geometry.get(key) ?? { ...this.defaultGeometry, x: 0, y: 0, insets: ZERO_INSETS }
     const proxy = opaque(GEOMETRY_TYPE, measured)
 
     return view({
@@ -1821,11 +1824,10 @@ export class SwiftUIHost implements InterpreterHost {
     // A row's id, read as Swift reads it: a key path can name a computed property or an
     // enum's `rawValue`, which walking stored fields can't see, and then every row had
     // the same key and the same action.
-    const read = (value: SwiftValue, name: string): SwiftValue => name === 'self' ? value : call.member?.(value, name) ?? NIL
     const idOf = (element: SwiftValue): SwiftValue | undefined => {
-      if (idPath) return idPath.components.reduce(read, element)
+      if (idPath) return readKeyPath(idPath, element, call.member)
       if (element.kind === 'struct' || element.kind === 'enum') {
-        const id = read(element, 'id')
+        const id = call.member(element, 'id') ?? NIL
         return id.kind === 'nil' ? undefined : id
       }
       return element.kind === 'string' || element.kind === 'int' || element.kind === 'double' ? element : undefined

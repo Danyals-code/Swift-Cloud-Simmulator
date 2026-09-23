@@ -1,7 +1,7 @@
 import { customizeCard, editsCardSurface } from './authoring-card'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import { DEFAULT_DEPLOYMENT_TARGET, argumentLayerProblem, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
+import { argumentLayerProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { structuralEditProblem, type StructuralKind } from './structural-check'
@@ -133,7 +133,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           parent = model.nodes.find(candidate => candidate.id === parent!.parentId)
         }
         if (isLink && !hasNavigation) {
-          if (Number.parseFloat(request.deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET) < 16) return reject('Adding a navigation screen requires iOS 16 or later.')
+          if (deploymentVersion(request.deploymentTarget) < 16) return reject('Adding a navigation screen requires iOS 16 or later.')
           if (root.source.file !== file.id || root.kind !== 'view' || !parent || !['definition', 'branch'].includes(parent.kind)) return reject('Select a view within the screen before adding a navigation link.')
           // A modifier switched off at the end of the root's chain is written after it, and goes inside with it.
           const start = root.source.start, end = afterOffMarkers(file.text, root.source.end)

@@ -776,7 +776,7 @@ function renderPages(
   return out.map(page => ({ ...page, rootId: renamedIds.get(page.rootId ?? '') ?? page.rootId, parentId: renamedIds.get(page.parentId ?? '') ?? page.parentId }))
 }
 
-/** The measured size of every geometry reader in a tree, keyed as it reported. */
+/** What every geometry reader in a tree was measured at, its size, place on the screen and safe area, keyed as it reported. */
 function geometryFrom(tree: RenderTree): Map<string, GeometryPayload> {
   const measured = new Map<string, GeometryPayload>()
   // A sheet's nodes are prefixed with `overlay/`, and its readers are measured too.

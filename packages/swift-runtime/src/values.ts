@@ -430,20 +430,15 @@ export function asKeyPath(value: SwiftValue | undefined): KeyPathPayload | null 
 }
 
 /**
- * Applies a key path to a value.
+ * Applies a key path to a value, reading each member as `read` does.
  *
  * `\.self` is the identity path, which is why it is the idiomatic `ForEach(_:id:)`
- * argument for an array of plain strings. Anything else walks stored fields.
+ * argument for an array of plain strings. Anything else is read as Swift reads it:
+ * the interpreter's reader takes a stored or computed property, a `rawValue` or a
+ * tuple's element alike.
  */
-export function applyKeyPath(path: KeyPathPayload, value: SwiftValue): SwiftValue {
-  let current = value
-  for (const component of path.components) {
-    if (component === 'self') continue
-    if (current.kind === 'tuple') current = tupleElement(current, component) ?? NIL
-    else if (current.kind === 'struct') current = current.fields.get(component) ?? NIL
-    else return NIL
-  }
-  return current
+export function readKeyPath(path: KeyPathPayload, value: SwiftValue, read: (value: SwiftValue, member: string) => SwiftValue | undefined): SwiftValue {
+  return path.components.reduce<SwiftValue>((current, component) => component === 'self' ? current : read(current, component) ?? NIL, value)
 }
 
 // --------------------------------------------------------------- projections

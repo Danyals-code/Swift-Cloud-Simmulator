@@ -12,6 +12,12 @@ export const DEFAULT_PREVIEW_TARGET: PreviewTarget = Object.freeze({
 /** The iOS version a new project targets: the one the preview draws. A saved project keeps its own. */
 export const DEFAULT_DEPLOYMENT_TARGET = '27.0'
 
+/** The iOS version a deployment target names, as a number: '17.0' is 17. A missing or unreadable one is the default. */
+export function deploymentVersion(target: string | undefined): number {
+  const version = Number.parseFloat(target ?? DEFAULT_DEPLOYMENT_TARGET)
+  return Number.isFinite(version) ? version : Number.parseFloat(DEFAULT_DEPLOYMENT_TARGET)
+}
+
 export function isPreviewTarget(value: unknown): value is PreviewTarget {
   if (!value || typeof value !== 'object') return false
   const target = value as Record<string, unknown>

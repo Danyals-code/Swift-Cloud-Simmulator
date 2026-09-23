@@ -21,7 +21,7 @@ export interface HostCall {
    */
   invokeBuilder(closure: ClosureValue, args?: readonly SwiftValue[]): readonly SwiftValue[]
   /** Reads `value.name` as Swift would: a stored or computed property, `rawValue`, or a built-in one. */
-  member?(value: SwiftValue, name: string): SwiftValue | undefined
+  member(value: SwiftValue, name: string): SwiftValue | undefined
 }
 
 /**

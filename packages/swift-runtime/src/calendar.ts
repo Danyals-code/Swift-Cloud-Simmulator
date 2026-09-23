@@ -21,8 +21,8 @@ export function timerValue(): OpaqueValue {
   return { kind: 'opaque', typeName: TIMER_TYPE, payload: {} }
 }
 
-/** The name of a leading-dot member such as `.day`, which the host answers as a token. */
-export function tokenNameOf(value: SwiftValue | undefined): string {
+/** The name of a leading-dot member such as `.day`, which the host answers as a token; '' for anything else. */
+export function leadingDotName(value: SwiftValue | undefined): string {
   return value?.kind === 'opaque' ? String((value.payload as { name?: string }).name ?? '') : ''
 }
 
@@ -42,14 +42,14 @@ export function callCalendarMember(member: string, args: readonly CallArgument[]
   switch (member) {
     case 'component': {
       const date = seconds(labelled('from'))
-      const part = date === null ? undefined : localParts(date)[tokenNameOf(arg(0)) as keyof LocalParts]
+      const part = date === null ? undefined : localParts(date)[leadingDotName(arg(0)) as keyof LocalParts]
       return part === undefined ? undefined : int(part)
     }
     case 'date': {
       const date = seconds(labelled('to'))
       const value = labelled('value')
       if (date === null || value?.kind !== 'int') return undefined
-      const added = adding(date, tokenNameOf(labelled('byAdding')), value.value)
+      const added = adding(date, leadingDotName(labelled('byAdding')), value.value)
       return added === null ? NIL : dateValue(added)
     }
     case 'startOfDay': {
@@ -69,7 +69,7 @@ export function callCalendarMember(member: string, args: readonly CallArgument[]
       return a === null || b === null ? undefined : bool(startOfDay(a) === startOfDay(b))
     }
     case 'dateComponents': {
-      const units = arg(0)?.kind === 'array' ? (arg(0) as { elements: readonly SwiftValue[] }).elements.map(tokenNameOf) : []
+      const units = arg(0)?.kind === 'array' ? (arg(0) as { elements: readonly SwiftValue[] }).elements.map(leadingDotName) : []
       const from = seconds(labelled('from'))
       const to = seconds(labelled('to'))
       if (from === null) return undefined
@@ -82,13 +82,13 @@ export function callCalendarMember(member: string, args: readonly CallArgument[]
 }
 
 /**
- * `date.formatted()` and `date.formatted(date:time:)`. With no arguments it is a
- * numeric date and a short time, as in iOS: "9/23/2026, 9:41 PM".
+ * `date.formatted()` and `date.formatted(date:time:)`. With no arguments it is
+ * Foundation's default, a numeric date and a short time: "9/23/2026, 9:41 PM".
  */
 export function formatDate(epochSeconds: number, args: readonly CallArgument[]): SwiftValue {
   const style = (label: string): string | null => {
     const given = args.find((a) => a.label === label)
-    return given ? tokenNameOf(given.value) : null
+    return given ? leadingDotName(given.value) : null
   }
   const labelled = args.some((a) => a.label === 'date' || a.label === 'time')
   const date = labelled ? style('date') ?? 'omitted' : 'numeric'

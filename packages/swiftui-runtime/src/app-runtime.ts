@@ -138,12 +138,12 @@ export class AppRuntime {
   /** Device and preview state the SwiftUI environment exposes to user code. */
   private environmentInputs: EnvironmentInputs = DEFAULT_ENVIRONMENT
 
-  /** Sizes each `GeometryReader` was measured at, from the last layout pass. */
+  /** What each `GeometryReader` was measured at in the last layout pass: its size, place and safe area. */
   private geometry = new Map<string, GeometryPayload>()
 
-  /** Paths whose `.onAppear` has already run, so it does not run every pass. */
+  /** The hooks, `.onAppear` and `.task` alike, that have run for this appearance, by key, so they don't run every pass. */
   private appeared = new Set<string>()
-  /** Values `.onChange(of:)` is watching, as of the last pass. */
+  /** Values `.onChange(of:)` and `.task(id:)` are watching, as of the last pass. */
   private watched = new Map<string, SwiftValue>()
   /** `.onDisappear` closures, kept from the pass that last saw each view. */
   private disappearing = new Map<string, ActionValue>()
@@ -1158,12 +1158,13 @@ function storageKey(property: VarDecl): string | null {
   return literal ? first.segments.map((segment) => (segment.kind === 'text' ? segment.value : '')).join('') : null
 }
 
-/** `@Environment(\.colorScheme)` - the key path the attribute was given. */
 /** `@Environment(Model.self)`: the type it asks for, where the environment holds an `@Observable` object. */
 function environmentType(attribute: { args: readonly { value: unknown }[] }): string | undefined {
   const first = attribute.args[0]?.value as { kind?: string; member?: string; base?: { kind?: string; name?: string } | null } | undefined
   return first?.kind === 'memberAccess' && first.member === 'self' && first.base?.kind === 'identifier' ? first.base.name : undefined
 }
+
+/** `@Environment(\.colorScheme)` - the key path the attribute was given. */
 
 function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): SwiftValue | undefined {
   const first = attribute.args[0]?.value as { kind?: string; components?: readonly string[] } | undefined

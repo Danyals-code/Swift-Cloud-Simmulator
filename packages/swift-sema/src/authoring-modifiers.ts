@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
 import { Lexer, Parser, afterOffMarkers, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { viewCallChain } from './design-controls'
 import { authoringViewMinimum } from './authoring-view'
@@ -222,7 +222,7 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
   const parsed = segmentsOf(expr, text)
   if (!parsed) return { modifiers: [], modifierCatalog: [] }
   const { segments } = parsed
-  const version = Number.parseFloat(deploymentTarget)
+  const version = deploymentVersion(deploymentTarget)
   const minimumViewVersion = authoringViewMinimum(node)
   const editable = allowEdits && minimumViewVersion !== undefined && Number.isFinite(version) && version >= minimumViewVersion
   // Only comments a person wrote pin the chain; the studio's own off markers never do.
@@ -290,8 +290,7 @@ export function editModifier(node: AuthoringNode, expr: Expr, text: string, oper
     const at = index < segments.length ? segments[index]!.start : parsed.end
     const lastPrefix = slices.at(-1)?.match(/^\s*/)?.[0] ?? ''
     const prefix = /\r?\n/.test(lastPrefix) ? lastPrefix : ''
-    const version = Number.parseFloat(deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET)
-    return text.slice(0, at) + prefix + entry.source({ target: Number.isFinite(version) ? version : 17, shadowToken: options.shadowToken }) + text.slice(at)
+    return text.slice(0, at) + prefix + entry.source({ target: deploymentVersion(deploymentTarget), shadowToken: options.shadowToken }) + text.slice(at)
   }
   const index = model.modifiers.findIndex(m => m.id === operation.modifier)
   if (index < 0) throw new Error('The modifier identity changed. Select the view again.')

@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_TARGET } from '@studio/shared'
+import { deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, ComponentSettings, ComponentVariant, DesignControl, SourceFile } from '@studio/shared'
 import { Parser, insertView, forEachChild, type FuncDecl, type Node, type VarDecl } from '@studio/swift-syntax'
 import { AUTHORING_COLORS, swiftString, validateControlValue, designControlRecipes } from './design-controls'
@@ -63,7 +63,7 @@ export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): Comp
       options = scalar.type === 'Bool' ? ['true', 'false'] : undefined
       format = v => scalar.type === 'String' ? swiftString(v) : scalar.type === 'Bool' ? v : String(Number(v))
     } else if (type?.kind === 'namedType') {
-      options = type.name === 'Color' && !allDeclarations(ctx).some(d => 'name' in d && d.name === 'Color') ? AUTHORING_COLORS.filter(c => Number.parseFloat(ctx.deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET) >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c)) : enumCases(ctx, type.name)
+      options = type.name === 'Color' && !allDeclarations(ctx).some(d => 'name' in d && d.name === 'Color') ? AUTHORING_COLORS.filter(c => deploymentVersion(ctx.deploymentTarget) >= 15 || !['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(c)) : enumCases(ctx, type.name)
       if (options && expr?.kind === 'memberAccess' && (!expr.base || expr.base.kind === 'identifier' && expr.base.name === type.name) && options.includes(expr.member)) {
         value = expr.member; kind = 'select'; format = v => `${type.name}.${v}`
       }

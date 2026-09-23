@@ -54,16 +54,15 @@ function runView(members: string, declarations = '', options: Partial<CompileReq
   return result
 }
 
-/** What the iOS 27 simulator drew on iPhone 18 Pro, light (docs/parity/native/iphone18pro-misrenders). */
-const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
-
 /** What a view reports: each diagnostic, with the source it points at and the replacement it offers. */
 function reported(members: string, declarations = '') {
   const source = viewSource(members, declarations)
   return compileView(source).diagnostics.map(d => ({ severity: d.severity, message: d.message, at: source.slice(d.span.start, d.span.end), fix: d.fixIts?.[0]?.edits[0]?.newText }))
 }
 
-/** What it drew for the second set of fixes (docs/parity/native/iphone18pro-misrenders-ii). */
+/** What the iOS 27 simulator drew on iPhone 18 Pro, light (docs/parity/native/iphone18pro-misrenders). */
+const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
+/** What the same simulator drew for the second set of fixes (docs/parity/native/iphone18pro-misrenders-ii). */
 const nativeII = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders-ii/measurements.json', import.meta.url), 'utf8')).measured
 
 /** A `runView` on the iPhone 18 Pro the native values were measured on, with its safe area. */
@@ -1299,11 +1298,12 @@ describe('a ScrollView puts a lone child at its top, as iOS 27 does', () => {
 
   it('draws a lone Text at the top, centred across, and its own height', () => {
     const r = screen('var body: some View { ScrollView { Text("Hi") } }')
-    const [x, y, width] = measured['scroll-text']
+    const [x, y, width, height] = measured['scroll-text']
     const text = placed(r, 'Hi')
     expect(Math.abs(text.y - y)).toBeLessThanOrEqual(1)
     expect(Math.abs(text.x + text.width / 2 - (x + width / 2))).toBeLessThanOrEqual(1)
-    expect(text.height).toBeLessThan(40)
+    // The preview's body line is 22 points to iOS's 20, the same in every view.
+    expect(Math.abs(text.height - height)).toBeLessThanOrEqual(2)
   })
 })
 

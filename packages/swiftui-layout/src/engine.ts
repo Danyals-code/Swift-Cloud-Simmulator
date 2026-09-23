@@ -37,6 +37,7 @@ import {
   type TextElement,
   type TextRunSpec,
   type TransitionHint,
+  ZERO_INSETS,
 } from './elements'
 import {
   FontMetricsTable,
@@ -209,7 +210,7 @@ const UNBOUNDED = 100_000
  * has none.
  */
 function readerInsets(bounds: Rect, area: LayoutEnvironment['safeArea']): EdgeInsets {
-  if (!area) return { top: 0, leading: 0, bottom: 0, trailing: 0 }
+  if (!area) return ZERO_INSETS
   const { inner, outer } = area
   const touches = (edge: number, safe: number) => Math.abs(edge - safe) <= 0.5
   return {

@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
@@ -35,7 +35,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const chain = viewCallChain(expr)
   if (!chain || node.properties.some(p => p.name === 'Source')) return []
   const { base, modifiers } = chain
-  const targetVersion = Number.parseFloat(deploymentTarget)
+  const targetVersion = deploymentVersion(deploymentTarget)
   const constructor = authoringCapability(node.name, 'view', base.args.map(a => a.label))
   const constructorEditable = !!constructor && targetVersion >= Number.parseFloat(constructor.minimumIOS)
   const minimum = authoringViewMinimum(node)

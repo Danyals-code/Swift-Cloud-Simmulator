@@ -1,5 +1,5 @@
 import { Lexer } from '@studio/swift-syntax'
-import { DEFAULT_DEPLOYMENT_TARGET } from '@studio/shared'
+import { deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
 import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, literal, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
@@ -130,7 +130,7 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
   const patches: SourcePatch[] = []
   let body = ''
   if (action.type === 'dismiss' && !action.state) {
-    if (Number.parseFloat(ctx.deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET) < 15) throw new Error('Environment dismissal requires an iOS 15 deployment target.')
+    if (deploymentVersion(ctx.deploymentTarget) < 15) throw new Error('Environment dismissal requires an iOS 15 deployment target.')
     const existing = owner.members.find(m => m.kind === 'varDecl' && m.attributes.some(a => a.name === 'Environment' && a.args.some(arg => raw(ctx, arg.value.span) === '\\.dismiss')))
     let name = existing?.kind === 'varDecl' ? existing.name : 'dismissPresentedView'
     if (!existing) {
@@ -182,7 +182,7 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
   return patches
 }
 export function configureTransition(ctx: FeatureContext, node: AuthoringNode, state: string, style: 'opacity' | 'slide' | 'scale', duration: number): SourcePatch[] {
-  if (Number.parseFloat(ctx.deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET) < 15) throw new Error('Value-driven animation requires an iOS 15 deployment target.')
+  if (deploymentVersion(ctx.deploymentTarget) < 15) throw new Error('Value-driven animation requires an iOS 15 deployment target.')
   if (!['opacity', 'slide', 'scale'].includes(style) || !Number.isFinite(duration) || duration < 0 || duration > 2) throw new Error('Use a supported transition and a duration from 0 to 2 seconds.')
   namedState(ctx, node, state)
   const expression = expressionOf(ctx, node), chain = expression && viewCallChain(expression)
