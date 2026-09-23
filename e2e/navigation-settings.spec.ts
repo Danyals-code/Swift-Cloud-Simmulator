@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { assertSource, replaceSource } from './designer-helpers'
+import { assertSource, openCounter, replaceSource } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 @main struct NavigationApp: App { var body: some Scene { WindowGroup { ContentView() } } }
@@ -40,8 +40,7 @@ const expectedDestination = (expression: string) => SOURCE.replace('NavigationLi
 
 async function open(page: Page, source = SOURCE, label = 'Open details') {
   await page.setViewportSize({ width: 1920, height: 1200 })
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   await replaceSource(page, source)
   await expect(page.getByTestId('render-tree').first().getByRole('button', { name: label, exact: true })).toBeVisible()

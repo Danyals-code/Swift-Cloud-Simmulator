@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { cards, expandCard } from './designer-helpers'
+import { cards, expandCard, openCounter } from './designer-helpers'
 
 /**
  * Adds a modifier from the catalog by its exact label. Entries are named
@@ -33,8 +33,7 @@ struct ContentView: View {
 }`
 
 async function openSource(page: Page, source = SOURCE) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()

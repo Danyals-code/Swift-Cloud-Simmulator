@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 /**
  * Designing on the canvas.
@@ -76,8 +77,7 @@ async function openProblems(page: Page) {
 
 /** Opens the studio on a known screen, in Design with the Edit tool. */
 async function openDesign(page: Page) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -95,6 +95,21 @@ async function openDesign(page: Page) {
 }
 
 /** Design's Layers: the focused screen's views, inside the left panel's outline. */
+/**
+ * Where a view is once the canvas has stopped redrawing it: two reads in a row that
+ * agree. A single read can land mid-redraw, when the view is briefly not there at all.
+ */
+async function settledBox(locator: Locator) {
+  let box = await locator.boundingBox()
+  await expect.poll(async () => {
+    const next = await locator.boundingBox()
+    const settled = !!box && !!next && box.x === next.x && box.y === next.y && box.width === next.width && box.height === next.height
+    box = next
+    return settled
+  }).toBe(true)
+  return box!
+}
+
 const layers = (page: Page) => page.getByTestId('logical-layers')
 
 /** A row in Layers by the name it reads as: "Beta, Text", or "Vertical Stack". */
@@ -239,8 +254,8 @@ struct HomeScreen: View {
 }`
 
 test('a view dropped in its stack’s empty space becomes the stack’s last view (C4)', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  // One file to paste the whole app into.
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -254,8 +269,8 @@ test('a view dropped in its stack’s empty space becomes the stack’s last vie
   await expect(preview.getByText('Title', { exact: true })).toBeVisible()
   await expect(preview.getByText('Subtitle', { exact: true })).toBeVisible()
 
-  const title = (await preview.getByText('Title', { exact: true }).boundingBox())!
-  const subtitle = (await preview.getByText('Subtitle', { exact: true }).boundingBox())!
+  const title = await settledBox(preview.getByText('Title', { exact: true }))
+  const subtitle = await settledBox(preview.getByText('Subtitle', { exact: true }))
   // Well below the last line: the stack's own empty space, which fills the screen.
   const x = subtitle.x + subtitle.width / 2, y = subtitle.y + subtitle.height * 8
   await page.mouse.move(title.x + title.width / 2, title.y + title.height / 2)
@@ -309,8 +324,7 @@ struct HomeScreen: View {
 })
 
 test('a drag can carry a view into another container', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -335,8 +349,7 @@ test('a drag can carry a view into another container', async ({ page }) => {
 })
 
 test('a selected container is dragged from anywhere inside it', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -520,8 +533,7 @@ test('the Delete tool takes out the view that is clicked', async ({ page }) => {
 })
 
 test('an edit that cannot be made says so and changes nothing', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -586,8 +598,7 @@ test('choosing a page in Layers brings it into view', async ({ page }) => {
   // Product bug: the outline and the lane headers read "One" three times, while the phones
   // read One, Two, Three. Chosen by position, the third row does centre the right page.
   test.fixme(true, 'Layers names every inline TabView tab after the first ("One"), so "Three" cannot be chosen (designTree.ts:66-69, screens.ts:27)')
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -676,8 +687,7 @@ test('the canvas bar is one line, inside the panel that reports on the app', asy
 })
 
 test('the wheel belongs to the canvas while designing and to the app while previewing', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -740,8 +750,7 @@ struct ContentView: View {
 })
 
 test('leaving Edit with the gallery open leaves the live page exactly where it was', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -766,8 +775,7 @@ test('leaving Edit with the gallery open leaves the live page exactly where it w
 })
 
 test('the simulated app scrolls without a scrollbar down the side of the phone', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()

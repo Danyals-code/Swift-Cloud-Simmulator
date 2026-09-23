@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
-import { replaceSource } from './designer-helpers'
+import { openCounter, replaceSource } from './designer-helpers'
 
-test('Start designing is the first source and opens by default on fresh and restored projects', async ({ page }) => {
+test('Start designing is the first source, and where a browser with no work yet opens (B6)', async ({ page }) => {
   await page.goto('/')
   await expect(page).toHaveTitle('Swift Web Studio')
   const sources = page.getByRole('navigation', { name: 'Source', exact: true }).getByRole('button')
@@ -14,6 +14,8 @@ test('Start designing is the first source and opens by default on fresh and rest
   await page.getByTestId('gallery-source-app').click()
   await expect(page.getByTestId('template-confirm')).toBeVisible()
   await page.getByTestId('gallery-dismiss').click()
+  // The untouched starter is not work yet, so a reload still offers to start designing.
+  // With work saved it opens on Your projects (data-safety.spec.ts).
   await page.reload()
   await expect(page.getByTestId('gallery-source-design')).toHaveAttribute('aria-pressed', 'true')
 })
@@ -37,8 +39,7 @@ struct ContentView: View {
 const sidebarTab = (page: Page, name: string) => page.getByRole('tablist', { name: 'Left panel', exact: true }).getByRole('tab', { name, exact: true })
 
 test('Layers shows nested pages, selects without activating controls, and follows workspace modes', async ({ page }, testInfo) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await expect(sidebarTab(page, 'Layers')).toHaveAttribute('aria-selected', 'true')
   await page.getByTestId('workspace-develop').click()
   await expect(page.getByTestId('navigator-tab-project')).toHaveAttribute('aria-pressed', 'true')
@@ -104,8 +105,7 @@ test('Layers shows nested pages, selects without activating controls, and follow
 })
 
 test('inspecting the preview follows the pointer in Layers and selects what is clicked', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -147,8 +147,7 @@ test('inspecting the preview follows the pointer in Layers and selects what is c
 })
 
 test('Pages draws every page at once, keeps one live, and opens the one that is clicked', async ({ page }, testInfo) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -200,8 +199,7 @@ test('Pages draws every page at once, keeps one live, and opens the one that is 
 })
 
 test('a view written as an argument offers only what it can do on its own (C2)', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   await replaceSource(page, `import SwiftUI
 @main struct CardApp: App { var body: some Scene { WindowGroup { ContentView() } } }

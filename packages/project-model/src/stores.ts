@@ -26,30 +26,81 @@ function byRecency(a: Project, b: Project): number {
 
 const DB_VERSION = 1
 
-/** In-memory store. Used by unit tests and as the fallback when IndexedDB is unavailable. */
-export class MemoryProjectStore implements ProjectStore {
-  private readonly projects = new Map<string, Project>()
+/** A project as storage keeps it: with the number of times it has been written. */
+type Stored = Project & { readonly revision?: number }
 
-  async list(): Promise<readonly ProjectSummary[]> {
-    return [...this.projects.values()].sort(byRecency).map(summarize)
-  }
-
-  async load(id: string): Promise<Project | null> {
-    const project = this.projects.get(id)
-    return project ? structuredClone(normalizeProject(project)) : null
-  }
-
-  async save(project: Project): Promise<void> {
-    this.projects.set(project.id, structuredClone(normalizeProject(project)))
-  }
-
-  async remove(id: string): Promise<void> {
-    this.projects.delete(id)
+/** Why a save was refused: somebody else's copy is newer than this one. */
+export class StaleProjectError extends Error {
+  constructor() {
+    super('This project was changed in another tab, so this tab’s copy was not saved. Reload to open the newer version.')
+    this.name = 'StaleProjectError'
   }
 }
 
+/**
+ * The revision a save writes, or a refusal.
+ *
+ * Every tab used to write its whole copy over whatever was stored, so two tabs on one
+ * project took turns destroying each other's work - the one somebody merely looked at
+ * last won. Each store now remembers the revision it last read or wrote, and a save
+ * goes through only if that is still the one stored. A project gone from storage is
+ * written back: it is open here, and deleting it elsewhere must not lose it.
+ */
+function nextRevision(stored: Stored | undefined, seen: number | undefined): number {
+  if (!stored) return (seen ?? 0) + 1
+  const current = stored.revision ?? 0
+  if (seen !== current) throw new StaleProjectError()
+  return current + 1
+}
+
+function withoutRevision(stored: Stored): Project {
+  const { revision: _revision, ...project } = stored
+  return project
+}
+
+/** In-memory store. Used by unit tests and as the fallback when IndexedDB is unavailable. */
+export class MemoryProjectStore implements ProjectStore {
+  readonly durable = false
+  /** The revision of each project this store last read or wrote. */
+  private readonly seen = new Map<string, number>()
+
+  /** Two stores given the same map behave as two tabs over one browser's storage. */
+  constructor(private readonly records: Map<string, Stored> = new Map()) {}
+
+  async list(): Promise<readonly ProjectSummary[]> {
+    return [...this.records.values()].sort(byRecency).map(summarize)
+  }
+
+  async load(id: string): Promise<Project | null> {
+    const stored = this.records.get(id)
+    if (!stored) return null
+    this.seen.set(id, stored.revision ?? 0)
+    return structuredClone(normalizeProject(withoutRevision(stored)))
+  }
+
+  async save(project: Project): Promise<void> {
+    const record = structuredClone(normalizeProject(project))
+    const revision = nextRevision(this.records.get(project.id), this.seen.get(project.id))
+    this.records.set(project.id, { ...record, revision })
+    this.seen.set(project.id, revision)
+  }
+
+  async remove(id: string): Promise<void> {
+    this.records.delete(id)
+    this.seen.delete(id)
+  }
+}
+
+/** How the store opens its database: `idb`'s `openDB`, or a stand-in for a test. */
+export type OpenDatabase = typeof openDB
+
 export class IndexedDbProjectStore implements ProjectStore {
+  readonly durable = true
   private db: Promise<IDBPDatabase> | null = null
+  /** The revision of each project this store last read or wrote. */
+  private readonly seen = new Map<string, number>()
+
+  constructor(private readonly open: OpenDatabase = openDB) {}
 
   /**
    * Opens the database, and forgets a failed attempt.
@@ -58,44 +109,79 @@ export class IndexedDbProjectStore implements ProjectStore {
    * open - a version upgrade held by another tab, a browser that turns IndexedDB off
    * mid-session - used to be remembered for the life of the page, so every later save
    * reused the same rejection and the user's work stopped being written with nothing
-   * on screen to say so.
+   * on screen to say so. A connection the browser closes later is forgotten the same way.
    */
   private connect(): Promise<IDBPDatabase> {
-    this.db ??= openDB(PROJECT_DATABASE, DB_VERSION, {
+    const connection = this.db ??= this.open(PROJECT_DATABASE, DB_VERSION, {
       upgrade(db) {
         if (!db.objectStoreNames.contains(PROJECTS)) {
           const store = db.createObjectStore(PROJECTS, { keyPath: 'id' })
           store.createIndex(PROJECTS_BY_UPDATE, 'updatedAt')
         }
       },
+      terminated: () => { if (this.db === connection) this.db = null },
     }).catch((error: unknown) => {
       this.db = null
       throw error
     })
-    return this.db
+    return connection
+  }
+
+  /**
+   * Runs a request, and runs it once more on a new connection if it fails.
+   *
+   * Safari drops a connection after a tab has sat in the background - "Connection to
+   * Indexed Database server lost" - without closing it, and every request on it fails
+   * from then on, so the work stopped being written until the page was reloaded. A
+   * refused save is an answer rather than a lost connection, and is not tried again.
+   */
+  private async request<T>(work: (db: IDBPDatabase) => Promise<T>): Promise<T> {
+    const connection = this.connect()
+    try {
+      return await work(await connection)
+    } catch (error) {
+      if (error instanceof StaleProjectError) throw error
+      if (this.db === connection) this.db = null
+      void connection.then((db) => db.close(), () => {})
+      return work(await this.connect())
+    }
   }
 
   async list(): Promise<readonly ProjectSummary[]> {
-    const db = await this.connect()
-    const all = (await db.getAll(PROJECTS)) as Project[]
+    const all = await this.request(async (db) => (await db.getAll(PROJECTS)) as Stored[])
     return all.sort(byRecency).map(summarize)
   }
 
   async load(id: string): Promise<Project | null> {
-    const db = await this.connect()
-    const project = (await db.get(PROJECTS, id)) as Project | undefined
-    return project ? normalizeProject(project) : null
+    const stored = await this.request(async (db) => (await db.get(PROJECTS, id)) as Stored | undefined)
+    if (!stored) return null
+    this.seen.set(id, stored.revision ?? 0)
+    return normalizeProject(withoutRevision(stored))
   }
 
   async save(project: Project): Promise<void> {
-    const db = await this.connect()
     // structuredClone strips the readonly-ness IDB cannot serialise around.
-    await db.put(PROJECTS, structuredClone(normalizeProject(project)))
+    const record = structuredClone(normalizeProject(project))
+    const revision = await this.request(async (db) => {
+      // One transaction, so no other tab can write between the check and the write.
+      const transaction = db.transaction(PROJECTS, 'readwrite')
+      let next: number
+      try {
+        next = nextRevision((await transaction.store.get(project.id)) as Stored | undefined, this.seen.get(project.id))
+      } catch (error) {
+        try { transaction.abort() } catch { /* already finished */ }
+        await transaction.done.catch(() => {})
+        throw error
+      }
+      await Promise.all([transaction.store.put({ ...record, revision: next }), transaction.done])
+      return next
+    })
+    this.seen.set(project.id, revision)
   }
 
   async remove(id: string): Promise<void> {
-    const db = await this.connect()
-    await db.delete(PROJECTS, id)
+    await this.request((db) => db.delete(PROJECTS, id))
+    this.seen.delete(id)
   }
 }
 

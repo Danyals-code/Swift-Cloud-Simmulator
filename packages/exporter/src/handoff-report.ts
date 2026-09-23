@@ -51,7 +51,7 @@ export function attachExportReview(project: Project, bundle: ExportBundle, revie
   output.put(`${base}/chat-history.md`, encodeText(`# Prompts and AI conversation\n\n${chat || 'No prompts or AI messages have been saved in this project.'}\n`))
   const line = (value: string) => value.replace(/[\r\n]/g, ' ')
   const made = build ? `\nExported by Swift Web Studio build ${line(build.commit).slice(0, 7)} (commit ${line(build.commit)}, built ${line(build.builtAt)}).\n` : ''
-  const report = `# ${line(project.manifest.name)} — project report
+  const report = `# ${line(project.manifest.name)}: project report
 ${made}
 ## Contents
 
@@ -77,7 +77,7 @@ Device: ${line(review.device)}. Appearance: ${review.colorScheme}. Dynamic Type:
 
 Screens are fresh browser previews of app starting content, including discoverable navigation destinations, presentations and saved standalone screens. Runtime interactions and preview scenarios are not replayed. Data-dependent destinations that cannot be discovered from starting content need manual review in Xcode.
 
-${screens.map(screen => `- ${line(screen.name)} (${screen.kind}): ${screen.path} — ${screen.width * 2} × ${screen.height * 2} pixels`).join('\n')}
+${screens.map(screen => `- ${line(screen.name)} (${screen.kind}): ${screen.path}, ${screen.width * 2} × ${screen.height * 2} pixels`).join('\n')}
 
 ## Sources and resources
 

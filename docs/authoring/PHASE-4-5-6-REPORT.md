@@ -8,7 +8,7 @@ Date: 2026-09-18. Baseline: `5e11a2b43c4b08c6512ef5feb1a141fd92e77882`. Changes 
 
 The existing device/appearance/text-size matrix, image thresholds and performance limits were not relaxed. An unavailable test is not counted as passing.
 
-## Phase 4 — Logical layers and editable collections
+## Phase 4: Logical layers and editable collections
 
 **Goal demonstrated:** a collection has one editable source template, regardless of the number of rendered records. Heterogeneous static rows stay separate.
 
@@ -22,7 +22,7 @@ The existing device/appearance/text-size matrix, image thresholds and performanc
 
 **Requirement coverage:** implementation and automated evidence for R02–R10 and R16; browser/native proof for R10/R13–R15 remains open.
 
-## Phase 5 — Components and explicit edit scope
+## Phase 5: Components and explicit edit scope
 
 **Goal demonstrated:** two component instances can differ through explicit inputs while sharing one definition.
 
@@ -35,7 +35,7 @@ The existing device/appearance/text-size matrix, image thresholds and performanc
 
 **Requirement coverage:** implementation and automated evidence for R02–R07/R09/R12/R16; browser/native proof for R10/R13–R15 remains open.
 
-## Phase 6 — State, actions and scenarios
+## Phase 6: State, actions and scenarios
 
 **Goal demonstrated:** designer commands generate executable local Swift behavior, and preview scenarios do not become production data.
 

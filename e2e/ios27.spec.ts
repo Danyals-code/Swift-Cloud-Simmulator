@@ -1,11 +1,11 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 import { readFileSync } from 'node:fs'
 
 const source = readFileSync(new URL('../tests/fixtures/ios27-screens.swift', import.meta.url), 'utf8')
 const preview = (page: Page) => page.getByTestId('render-tree')
 async function openFixture(page: Page) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   // Code opens with the preview pointing at views; the matrix taps it as an app.
   await page.getByTestId('live-toggle').click()

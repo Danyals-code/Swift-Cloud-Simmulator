@@ -1,4 +1,4 @@
-# Designer Layers and Modifiers — implementation and roadmap
+# Designer Layers and Modifiers: implementation and roadmap
 
 19 September 2026 · The first implementation is in place: designer Layers and **Basics → Modifiers → Data → Behavior** in Settings, with a supported core modifier editor. This document describes the current product and the remaining work. The original `LAYERS-AND-MODIFIERS-PLAN.md` remains an unchanged reference.
 

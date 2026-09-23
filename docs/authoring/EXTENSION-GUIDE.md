@@ -22,7 +22,7 @@
 6. Expose a labeled control with an explicit scope, a pending state, an actionable failure, and keyboard behavior.
 7. Test semantic effects, wrong-target/stale rejection, source preservation, undo/redo, native source validity, and actual browser behavior independently.
 
-`authoring-resources.ts` is the example for shared styles: immutable global/static Swift declarations are the values; metadata does not duplicate them. The three operations—shared update, link, and local override—stay distinct. Unsupported expressions remain source-owned.
+`authoring-resources.ts` is the example for shared styles: immutable global/static Swift declarations are the values; metadata does not duplicate them. The three operations (shared update, link, and local override) stay distinct. Unsupported expressions remain source-owned.
 
 ## Resources and persistence
 

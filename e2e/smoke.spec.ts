@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { replaceSource } from './designer-helpers'
+import { openCounter, replaceSource } from './designer-helpers'
 
 /**
  * Gates from every phase, kept together.
@@ -19,10 +19,7 @@ import { replaceSource } from './designer-helpers'
  * what is already open.
  */
 async function openStudio(page: Page) {
-  await page.goto('/')
-  await expect(page.getByTestId('template-gallery')).toBeVisible()
-  await page.getByTestId('gallery-dismiss').click()
-  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') await page.getByTestId('pane-toggle-debug').click()
   // Code opens with the preview pointing at views; these tests tap it as an app.
@@ -90,12 +87,15 @@ async function frames(page: Page) {
 
 // ---------------------------------------------------------------- Phase 0
 
-test('loads the studio with the starter project', async ({ page }) => {
-  await openStudio(page)
+test('loads the studio with the starter project: the blank screen (B6)', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByTestId('template-gallery')).toBeVisible()
+  await page.getByTestId('gallery-dismiss').click()
 
-  await expect(page.getByTestId('project-name')).toHaveText('CounterApp')
-  await expect(page.getByTestId('file-rail')).toContainText('CounterApp.swift')
-  expect(await editorText(page)).toContain('struct ContentView: View')
+  await expect(page.getByTestId('project-name')).toHaveText('MyDesignApp')
+  await page.getByTestId('workspace-develop').click()
+  await expect(page.getByTestId('file-rail')).toContainText('MyDesignApp.swift')
+  await expect(page.getByTestId('file-rail')).toContainText('HomeScreen.swift')
 })
 
 test('gate 1 - edits persist across a reload', async ({ page }) => {

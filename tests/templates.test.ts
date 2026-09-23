@@ -484,7 +484,7 @@ describe('the gallery', () => {
  * A colour swatch with no text is a button VoiceOver cannot name.
  *
  * The grid is also the one place a starter builds views in a loop, so this pins
- * both: nine swatches, nine names, and no `for` loop inside a ViewBuilder — which
+ * both: nine swatches, nine names, and no `for` loop inside a ViewBuilder, which
  * the browser accepts and Xcode does not.
  */
 describe('the palette grid', () => {

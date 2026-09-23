@@ -6,8 +6,8 @@ Baseline: `d9c283b379fd48071606d03cea39227ed37da455`. Changes are in the working
 
 | Phase | Implementation | Acceptance |
 |---|---|---|
-| 0 — requirements and verification | Toolchain pinning, capability contract, baseline checks, native export/UI-test harness, evidence recording, and comparison detector implemented | **Blocked**: native execution/calibration and automated browser verification remain open |
-| 1 — source-aware authoring | Source model, ownership, runtime mapping, selection reconciliation, metadata schema, and read-only inspector implemented | **Pending**: code checks pass; actual UI verification and the Phase 0 gate are outstanding |
+| 0: requirements and verification | Toolchain pinning, capability contract, baseline checks, native export/UI-test harness, evidence recording, and comparison detector implemented | **Blocked**: native execution/calibration and automated browser verification remain open |
+| 1: source-aware authoring | Source model, ownership, runtime mapping, selection reconciliation, metadata schema, and read-only inspector implemented | **Pending**: code checks pass; actual UI verification and the Phase 0 gate are outstanding |
 
 These are not completed phase sign-offs. No native visual parity is claimed.
 

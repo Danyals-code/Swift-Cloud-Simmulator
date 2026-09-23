@@ -1,7 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { AuthoringNode, DesignEditRequest, ExportFormat, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
 import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
@@ -50,12 +50,16 @@ const DesignReview = dynamic(() => import('./DesignReview').then(m => m.DesignRe
 import { scenarioKey, scenarioScreen, screenCatalog, screenDefinition, type ScreenCommand, type DesignScreen } from '../lib/screens'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
-import { TemplateGallery } from './TemplateGallery'
+import { TemplateGallery, type GallerySource } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
 import { BUILD_DETAILS, BUILD_NAME, STUDIO_BUILD } from '../lib/build'
-import { crashIfTesting } from '../lib/recovery'
+import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
+import { StorageBanner } from './StorageBanner'
+import { storageProblem } from '../lib/storageProblem'
+import { OpenElsewhere } from './OpenElsewhere'
+import { startStudioTab, studioTabState, subscribeStudioTab } from '../lib/activeTab'
 import styles from './Workspace.module.css'
 import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
@@ -74,6 +78,10 @@ export function Studio() {
   const origin = useStudio((s) => s.origin)
   const lastSavedAt = useStudio((s) => s.lastSavedAt)
   const saveError = useStudio((s) => s.saveError)
+  const saveOutdated = useStudio((s) => s.saveOutdated)
+  const loadError = useStudio((s) => s.loadError)
+  const durable = useStudio((s) => s.durable)
+  const storage = useMemo(() => storageProblem({ saveError, saveOutdated, durable, loadError }), [saveError, saveOutdated, durable, loadError])
   const previewSettings = useStudio((s) => s.preview)
   const canUndo = useStudio((s) => s.canUndo)
   const canRedo = useStudio((s) => s.canRedo)
@@ -191,6 +199,8 @@ export function Studio() {
    * looking at a project they did not pick.
    */
   const [galleryAtLaunch, setGalleryAtLaunch] = useState(false)
+  /** Where the sheet opens when it was asked for: the projects, or a new one. */
+  const [gallerySource, setGallerySource] = useState<GallerySource | undefined>(undefined)
   const greeted = useRef(false)
   const [caret, setCaret] = useState(0)
   const splitRef = useRef<HTMLDivElement | null>(null)
@@ -198,9 +208,12 @@ export function Studio() {
   const [reveal, setReveal] = useState<{ offset: number; nonce: number } | null>(null)
   const revealNonce = useRef(0)
 
+  /** Whether this tab has the studio, or another tab does (B1). Nothing loads until it is this one. */
+  const tab = useSyncExternalStore(subscribeStudioTab, studioTabState, () => 'checking' as const)
+  useEffect(() => { startStudioTab(options => useStudio.getState().handOver(options)) }, [])
   useEffect(() => {
-    void load()
-  }, [load])
+    if (tab === 'active') void load()
+  }, [tab, load])
 
   /**
    * The sheet at launch.
@@ -213,6 +226,12 @@ export function Studio() {
   useEffect(() => {
     if (!loaded || greeted.current || origin === 'shared') return
     greeted.current = true
+    // Coming back to saved work - or after a crash, when the next project opened should
+    // be a choice - leads to the projects rather than to a new one (B6). The untouched
+    // starter on its own is not work yet; a rename is, as it is everywhere else.
+    const { project: opened, recents: saved } = useStudio.getState()
+    const untouched = !!opened && opened.manifest.templateId !== undefined && isPristine(opened)
+    setGallerySource(origin === 'recovered' || (origin === 'restored' && (!untouched || saved.length > 1)) ? 'open' : 'design')
     setGalleryAtLaunch(true)
     setGalleryOpen(true)
   }, [loaded, origin])
@@ -244,22 +263,40 @@ export function Studio() {
 
   const toggleInspect = useCallback(() => setDesigning(!inspecting), [setDesigning, inspecting])
 
-  const openGallery = useCallback(() => {
+  const openGallery = useCallback((source: GallerySource) => {
+    setGallerySource(source)
     setGalleryAtLaunch(false)
     setGalleryOpen(true)
   }, [])
 
   // Debounced autosave can lose the last edit when a tab is closed or backgrounded,
-  // so force the pending write at both of the points the browser gives us.
+  // so force the pending write at both of the points the browser gives us. Only when
+  // the tab is hidden: coming back to one has nothing new to write, and used to put
+  // this tab's copy back over whatever another tab had saved meanwhile (B1).
   useEffect(() => {
-    const onHide = () => void flush()
-    document.addEventListener('visibilitychange', onHide)
-    window.addEventListener('pagehide', onHide)
+    const onVisibility = () => { if (document.visibilityState === 'hidden') void flush() }
+    const onPageHide = () => void flush()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
     return () => {
-      document.removeEventListener('visibilitychange', onHide)
-      window.removeEventListener('pagehide', onHide)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
     }
   }, [flush])
+
+  // Closing or reloading while work is not saved asks first (B3): a pending save may
+  // not finish as the page goes, and a failing one never will. Not when a recovery
+  // surface is reloading because somebody chose to there - they have been asked.
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (tab !== 'active' || leavingOnPurpose() || !useStudio.getState().unsavedWork()) return
+      void flush()
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [tab, flush])
 
   const images = useMemo(() => project?.assets?.map(asset => ({ name: asset.name, width: asset.light.width / asset.scale, height: asset.light.height / asset.scale, light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined })), [project?.assets])
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
@@ -1172,6 +1209,9 @@ export function Studio() {
     [project, flush, previewSettings],
   )
 
+  // Nothing of the studio is left to use in a tab without it: what it holds is out of
+  // date, and the sheets behind an overlay could still be reached from the keyboard.
+  if (tab === 'elsewhere') return <OpenElsewhere />
   if (!loaded || !project) {
     return (
       <main className="grid h-dvh place-items-center bg-xc-editor text-[12px] text-xc-text-3">
@@ -1299,7 +1339,7 @@ export function Studio() {
         reviewDisabled={stale || preparingEdit || !result?.renderTree}
         projectName={project.manifest.name}
         savedAt={lastSavedAt}
-        saveError={saveError}
+        storage={storage}
         // The toggles report the preference, so each is a switch that always
         // responds; `suppressed` is how a pane that is on but has no room says so.
         panes={new Set((Object.keys(shown) as PaneKey[]).filter((key) => shown[key]))}
@@ -1316,6 +1356,7 @@ export function Studio() {
         onSetPreviewing={previewing => setDesigning(!previewing)}
         previewDisabled={stale || preparingEdit}
       />
+      <StorageBanner problem={storage} onRetry={() => void flush()} />
 
       <div ref={splitRef} className="flex min-h-0 flex-1">
         {layout.showNavigator ? (
@@ -1390,7 +1431,7 @@ export function Studio() {
                 onDuplicateFile={duplicateFile}
                 onMoveFile={moveFile}
                 onRevealDiagnostic={revealSpanIn}
-                onOpenTemplates={openGallery}
+                onOpenTemplates={() => openGallery('design')}
               />}
               </StudioSidebar>
               </PaneBoundary>
@@ -1593,25 +1634,27 @@ export function Studio() {
           origin={origin}
           savedAt={lastSavedAt}
           atLaunch={galleryAtLaunch}
+          initialSource={gallerySource}
           onClose={() => setGalleryOpen(false)}
-          onChoose={async (templateId) => {
-            const made = await applyTemplate(templateId)
-            // Kept open on failure: the sheet is where the message goes, and closing
-            // it would leave somebody looking at a project they did not ask for.
-            if (made) { setGalleryOpen(false); setMode('design'); setDesigning(true) }
+          onChoose={async (templateId, options) => {
+            const made = await applyTemplate(templateId, options)
+            // Kept open otherwise: the sheet is where the message goes, and closing it
+            // would leave somebody looking at a project they did not ask for.
+            if (made === 'opened') { setGalleryOpen(false); setMode('design'); setDesigning(true) }
             return made
           }}
           onOpenProject={openProject}
           onRemoveProject={(id) => void removeProject(id)}
-          onOpenFiles={async (picked, history) => {
-            const opened = await openFiles(picked)
+          onOpenFiles={async (picked, { history, ...options } = {}) => {
+            const result = await openFiles(picked, options)
+            const opened = result === 'opened'
             if (opened && history?.length) {
               const current = useStudio.getState()
               if (current.project) current.appendPromptMessages(current.project.id, history)
               await flush()
             }
             if (opened) setGalleryOpen(false)
-            return opened
+            return result
           }}
         />
       ) : null}

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 import { readFileSync, copyFileSync } from 'node:fs'
 
 async function start(page: Page) {
@@ -7,9 +8,13 @@ async function start(page: Page) {
   await page.getByTestId('template-confirm').click()
   await expect(page.getByTestId('template-gallery')).toBeHidden()
   await expect(page.getByTestId('add-screen')).toBeEnabled()
+  // The canvas redraws for editing once Design opens; buttons pressed meanwhile are off.
+  await idle(page)
 }
 async function ready(page: Page) { await expect(page.getByTestId('authoring-inspector')).toHaveAttribute('aria-busy', 'false') }
-async function add(page: Page, kind: string) { await page.getByTestId('add-view').click(); await page.getByTestId(`add-view-${kind}`).click(); await expect(page.getByTestId('add-view-palette')).toBeHidden(); await ready(page) }
+/** Nothing compiling or being prepared: the Add button and the menus are live. */
+async function idle(page: Page) { await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false') }
+async function add(page: Page, kind: string) { await idle(page); await expect(page.getByTestId('add-view')).toBeEnabled(); await page.getByTestId('add-view').click(); await page.getByTestId(`add-view-${kind}`).click(); await expect(page.getByTestId('add-view-palette')).toBeHidden(); await ready(page) }
 async function input(page: Page, name: string, value: string) { const field = page.getByTestId('settings-basics').getByRole('textbox', { name, exact: true }); await field.fill(value); await field.press('Enter'); await ready(page) }
 /** Design's left panel: App, Components, the screens and the focused screen's layers. */
 const navigator = (page: Page) => page.getByRole('navigation', { name: 'Layers', exact: true })
@@ -116,7 +121,7 @@ struct ContentView: View {
  } } }
 }`
 async function fixture(page: Page) {
-  await page.goto('/'); await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content'); await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(SOURCE)
   await expect(page.getByTestId('render-tree').getByText('First', { exact: true })).toBeVisible()
