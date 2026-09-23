@@ -417,6 +417,7 @@ class Resolver {
       findView(withTabs.content, 'NavigationSplitView')
     const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
     this.around = containersAbove(stamped, tabs, withTabs.content, nav)
+    const searchAround = searchContainers(withTabs.content, nav, screen.navigationBar)
     const notDrawn = [
       ...(tabs ? notDrawnAround(stamped, tabs) : []),
       ...(nav ? notDrawnAround(withTabs.content, nav) : []),
@@ -459,7 +460,7 @@ class Resolver {
     return {
       viewHierarchy: pageLayers,
       content: screen.content,
-      search: this.findSearchField(screen.content, this.around),
+      search: this.findSearchField(screen.content, searchAround),
       ignoresSafeArea: collectModifier(screen.content, 'ignoresSafeArea') !== null,
       navigationBar: screen.navigationBar,
       tabBar: withTabs.tabBar,
@@ -1508,6 +1509,7 @@ class Resolver {
       const nav = findView(tabbed.content, 'NavigationStack') ?? findView(tabbed.content, 'NavigationView')
       const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null }
       const around = containersAbove(overlayViews, tabs, tabbed.content, nav)
+      const searchAround = searchContainers(tabbed.content, nav, resolved.navigationBar)
       const cornerRadius = numberOf(collectModifier(overlayViews, 'presentationCornerRadius')?.args[0]?.value)
 
       return {
@@ -1519,7 +1521,7 @@ class Resolver {
         background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
-        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, around), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
+        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
         title: kind === 'dialog' && tokenName(labelled(modifier.args, 'titleVisibility')) !== 'visible' ? '' : stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
         message: this.messageOf(modifier),
         dismiss,
@@ -1727,11 +1729,11 @@ function collectModifier(views: readonly ViewValue[], name: string): ModifierVal
  * The containers a screen was cut out of: the views from the root down to its
  * `TabView`, and from the tab page down to its `NavigationStack`, both inclusive.
  *
- * The screen is the stack's content, but a sheet, an alert or `.searchable` written on
- * the stack - or on the TabView, or on the view around either - belongs to it too.
- * That is where a toolbar's "Add" button's sheet is most often written, and where
- * every tab of a tab app puts its own. Only their own modifiers count: their other
- * content is what the screen already is, or isn't drawn at all.
+ * The screen is the stack's content, but a sheet or an alert written on the stack -
+ * or on the TabView, or on the view around either - belongs to it too. That is where
+ * a toolbar's "Add" button's sheet is most often written, and where every tab of a
+ * tab app puts its own. Only their own modifiers count: their other content is what
+ * the screen already is, or isn't drawn at all.
  */
 function containersAbove(
   root: readonly ViewValue[],
@@ -1764,6 +1766,15 @@ function notDrawnAround(views: readonly ViewValue[], container: ViewValue): NotD
       return [{ span: { ...modifier.span, start }, container: container.name, modifier: modifier.name }]
     })),
   ]
+}
+
+/**
+ * The containers whose `.searchable` searches this screen: the stack's, and only on
+ * its root screen. In iOS 27 a pushed screen has no search field, and a TabView's
+ * `.searchable` draws none without a search tab (both checked in the simulator).
+ */
+function searchContainers(page: readonly ViewValue[], nav: ViewValue | null, bar: NavigationBar | null): ViewValue[] {
+  return nav && !bar?.canGoBack ? pathTo(page, nav) : []
 }
 
 /** The views from a list down to `target`, both inclusive, or none when it isn't there. */

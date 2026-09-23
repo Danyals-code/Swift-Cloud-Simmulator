@@ -360,10 +360,27 @@ describe('E3: presentations and search written on a NavigationStack or a TabView
       .toEqual([{ severity: 'warning', at: '.overlay(Text("Badge"))', message: expect.stringContaining('.overlay') }])
   })
 
-  // What iOS 27 does with `.searchable` on a TabView itself is still to be checked.
   const stacks = Object.entries(placements).filter(([where]) => where !== 'the TabView')
   it.each(stacks)('shows a search field written on %s', (_, build) => {
     const r = runView(`var body: some View { ${build('.searchable(text: .constant(""), prompt: "Find things")')} }`)
     expect(controls(r)).toContain('Find things')
+  })
+
+  // Both checked in the iOS 27 simulator on iPhone 18 Pro (docs/parity/native).
+  it('searches only the root screen of the stack it is written on, not a pushed one', () => {
+    const r = runView(`var body: some View {
+        NavigationStack { NavigationLink("Open") { Text("Detail") } }
+          .searchable(text: .constant(""), prompt: "Find things")
+      }`)
+    expect(controls(r)).toContain('Find things')
+    expect(controls(tap(r, 'Open'))).not.toContain('Find things')
+  })
+
+  it('draws no search field for a TabView without a search tab', () => {
+    const r = runView(`var body: some View {
+        TabView { Text("Home").tabItem { Label("Home", systemImage: "house") } }
+          .searchable(text: .constant(""), prompt: "Find things")
+      }`)
+    expect(controls(r)).not.toContain('Find things')
   })
 })
