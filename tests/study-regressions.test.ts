@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { RenderTreeView } from '@studio/swiftui-render-dom'
 import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
@@ -431,5 +434,60 @@ describe('E5: colours match the iOS 27 simulator', () => {
     expect(onWhite('Color(UIColor.systemGray6)')).toEqual(expected)
     expect(onWhite('Color(uiColor: .systemGray6)')).toEqual(expected)
     expect(onWhite('Color(uiColor: UIColor.systemGray6)')).toEqual(expected)
+  })
+})
+
+// Where each shape's path starts and which way it runs, and what a trimmed fill draws,
+// are measured in the iOS 27 simulator (docs/parity/native/iphone18pro-misrenders).
+describe('E6: trim draws the part of the path iOS 27 draws', () => {
+  /** The first SVG path drawn, with the attributes that decide which part of it shows. */
+  function drawn(body: string) {
+    const html = renderToStaticMarkup(createElement(RenderTreeView, { tree: runView(`var body: some View { ${body} }`).renderTree!, onEvent: () => {} }))
+    const path = /<path [^>]*>/.exec(html)?.[0]
+    const attribute = (name: string) => path && new RegExp(`${name}="([^"]*)"`).exec(path)?.[1]
+    return { path, start: attribute('d')?.match(/^M ([-\d.]+) ([-\d.]+)/)?.slice(1).map(Number), pathLength: attribute('pathLength'), dash: attribute('stroke-dasharray'), offset: attribute('stroke-dashoffset') }
+  }
+
+  it.each([
+    ['a circle, at 3 o\'clock', 'Circle()', 110, 110, [110, 55]],
+    ['an ellipse, at 3 o\'clock', 'Ellipse()', 110, 60, [110, 30]],
+    ['a rounded rectangle, halfway down its right side', 'RoundedRectangle(cornerRadius: 24)', 110, 110, [110, 55]],
+    ['a capsule, halfway down its right side', 'Capsule()', 110, 60, [110, 30]],
+    ['a rectangle, at its top-left corner', 'Rectangle()', 110, 60, [0, 0]],
+  ])('starts %s, and strokes only the trimmed part', (_, shape, width, height, start) => {
+    const trimmed = drawn(`${shape}.trim(from: 0.25, to: 0.5).stroke(Color.red, lineWidth: 8).frame(width: ${width}, height: ${height})`)
+    expect(trimmed.start).toEqual(start)
+    expect([trimmed.pathLength, trimmed.dash, trimmed.offset]).toEqual(['1', '0.25 2', '-0.25'])
+  })
+
+  it('draws nothing for an empty trim', () => {
+    expect(drawn('Circle().trim(from: 0, to: 0).stroke(Color.red, lineWidth: 8).frame(width: 110, height: 110)').path).toBeUndefined()
+  })
+
+  const arc = (clockwise: boolean) =>
+    `Path { p in p.addArc(center: CGPoint(x: 55, y: 55), radius: 45, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: ${clockwise}) }.stroke(Color.red, lineWidth: 8)`
+  const pathOf = (body: string) => nodes(runView(`var body: some View { ${body} }`)).find(n => n.path)!.path!.d
+
+  it('draws addArc(clockwise: false) as the quarter from 12 to 3 o\'clock, clockwise on screen', () => {
+    expect(pathOf(arc(false))).toBe('M 55 10 A 45 45 0 0 1 100 55')
+  })
+
+  it('draws addArc(clockwise: true) as the other three quarters, counterclockwise on screen', () => {
+    expect(pathOf(arc(true))).toBe('M 55 10 A 45 45 0 1 0 100 55')
+  })
+
+  it("draws the Drawing template's ring counterclockwise from 12 o'clock, ending at 36 degrees at 65%", () => {
+    const ring = `Path { path in
+        path.addArc(center: CGPoint(x: 70, y: 70), radius: 63, startAngle: .degrees(-90), endAngle: .degrees(270), clockwise: true)
+      }
+      .trim(from: 0, to: 0.65)
+      .stroke(Color.accentColor, lineWidth: 14)`
+    expect(pathOf(ring)).toBe('M 70 7 A 63 63 0 1 0 120.97 107.03')
+  })
+
+  it('warns that a trimmed fill is drawn whole, and not a trimmed stroke', () => {
+    const warnings = (body: string) => compileView(viewSource(`var body: some View { ${body} }`)).diagnostics.map(d => `${d.severity}: ${d.message}`)
+    expect(warnings('Circle().trim(from: 0, to: 0.5).fill(Color.red)')).toEqual([expect.stringMatching(/^warning: .*trim/)])
+    expect(warnings('Circle().trim(from: 0, to: 0.5).offset(x: 2, y: 0).stroke(Color.red)')).toEqual([])
   })
 })

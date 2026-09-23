@@ -80,6 +80,8 @@ export class Checker {
   private readonly declaredModifiers = new Set<string>()
   /** Property names the project adds in an extension - `Color.brand` among them. */
   private readonly declaredExtensionProperties = new Set<string>()
+  /** Shape calls a `.stroke` or `.strokeBorder` is written on, so a `.trim` among them is a trimmed stroke. */
+  private readonly stroked = new WeakSet<Expr>()
   /** `typealias` names, which resolve as types anywhere the target would. */
   private readonly typeAliases = new Set<string>()
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
@@ -720,6 +722,7 @@ export class Checker {
         return
 
       case 'call': {
+        this.checkTrim(expr)
         this.checkCallee(expr.callee, scope)
         this.checkOverloadCoverage(expr, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
@@ -1064,6 +1067,29 @@ export class Checker {
    * Only a literal `.token`. A style held in a variable or returned from a function
    * has no value here, and guessing would put a warning on correct code.
    */
+  /**
+   * Warns on a `.trim` that isn't stroked: a filled shape, which the preview fills whole.
+   *
+   * The stroke is written after the trim - `.trim(…).rotation(…).stroke(…)` - so the
+   * outer call marks the shape calls under it before they are checked.
+   */
+  private checkTrim(call: Expr & { kind: 'call' }): void {
+    if (call.callee.kind !== 'memberAccess') return
+    if (call.callee.member === 'stroke' || call.callee.member === 'strokeBorder') {
+      for (let base = call.callee.base; base?.kind === 'call' && base.callee.kind === 'memberAccess'; base = base.callee.base) {
+        this.stroked.add(base)
+      }
+    }
+    if (call.callee.member !== 'trim' || this.stroked.has(call)) return
+    this.report(
+      call.callee.memberSpan,
+      'warning',
+      'unsupported_swiftui_modifier',
+      "The preview fills the whole shape here: it trims only strokes. Xcode fills just the trimmed part, closed by a straight line.",
+      '.trim on a filled shape',
+    )
+  }
+
   /**
    * Warns on a colour name the preview doesn't know, which it draws as clear.
    *

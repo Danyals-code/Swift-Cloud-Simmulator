@@ -1,4 +1,4 @@
-import type { Point, CornerStyle, ShapeStroke, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type { Point, CornerStyle, ShapeStroke, ShapeTrim, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -147,6 +147,7 @@ export interface ShapeElement extends ElementBase {
   /** `.fill(…)`; without one the shape takes the inherited foreground colour. */
   readonly fill?: Fill
   readonly stroke?: ShapeStroke
+  readonly trim?: ShapeTrim
 }
 
 export interface SliderElement extends ElementBase {

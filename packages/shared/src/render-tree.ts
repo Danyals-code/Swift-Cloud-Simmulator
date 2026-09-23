@@ -180,6 +180,17 @@ export interface ShapePayload {
   readonly cornerRadius?: number
   readonly fill?: Fill
   readonly stroke?: ShapeStroke
+  readonly trim?: ShapeTrim
+}
+
+/**
+ * `.trim(from:to:)` on a shape: the part of its outline to draw, as fractions of the
+ * outline's length from where SwiftUI's path starts. Applied when the shape is drawn,
+ * because its outline isn't known until its size is.
+ */
+export interface ShapeTrim {
+  readonly from: number
+  readonly to: number
 }
 
 /**

@@ -4,6 +4,7 @@ import type {
   TransformSpec,
   CornerStyle,
   ShapeStroke,
+  ShapeTrim,
   SliderPayload,
   FilterSpec,
   Fill,
@@ -86,6 +87,7 @@ export type PaintSpec =
       readonly cornerStyle?: CornerStyle
       readonly fill?: Fill
       readonly stroke?: ShapeStroke
+      readonly trim?: ShapeTrim
     }
   | {
       readonly kind: 'path'
@@ -848,6 +850,7 @@ export class LayoutEngine {
                 ? {}
                 : { fill: env.foregroundFill ?? { kind: 'solid' as const, color: env.foregroundColor } }),
             ...(element.stroke ? { stroke: { ...element.stroke, color: element.stroke.usesForeground ? env.foregroundColor : element.stroke.color } } : {}),
+            ...(element.trim ? { trim: element.trim } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),

@@ -1497,6 +1497,7 @@ class Converter {
         strokeStyle(view)?.lineWidth ??
         1
 
+      const trim = trimOf(view)
       return {
         kind: 'shape',
         id: path,
@@ -1504,6 +1505,7 @@ class Converter {
         cornerStyle: tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular',
         ...(radius !== null ? { cornerRadius: radius } : {}),
         ...(fill ? { fill } : {}),
+        ...(trim ? { trim } : {}),
         ...(strokeColor ? { stroke: { ...strokeStyle(view), color: strokeColor, width: Math.max(0, strokeWidth), usesForeground: !resolveColorArg(modifierArg(view, strokeName, 0), this.scheme, this.styles.tint), placement: strokeName === 'strokeBorder' ? 'inside' as const : 'center' as const } } : {}),
         ...origin,
       }
