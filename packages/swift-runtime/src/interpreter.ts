@@ -91,6 +91,7 @@ import {
   type DictionaryValue,
   type EnumValue,
   type FunctionValue,
+  type DeclaredType,
   type ProjectionPayload,
   type StructValue,
   type SwiftValue,
@@ -603,8 +604,9 @@ export class Interpreter {
   runViewBuilder(closure: ClosureValue, args: readonly SwiftValue[] = []): SwiftValue[] {
     const env = (closure.env as Environment).child()
     if (closure.hasExplicitParams) {
+      const given = spreadTuple(closure, args)
       closure.params.forEach((param, i) => {
-        const value = args[i] ?? NIL
+        const value = given[i] ?? NIL
         const name = param.name.startsWith('$') && asProjection(value) ? param.name.slice(1) : param.name
         env.define(name, copyValue(value), true, param.span)
       })
@@ -776,8 +778,9 @@ export class Interpreter {
     const env = (closure.env as Environment).child()
 
     if (closure.hasExplicitParams) {
+      const given = spreadTuple(closure, args)
       closure.params.forEach((param, i) => {
-        const value = args[i] ?? NIL
+        const value = given[i] ?? NIL
         const name = param.name.startsWith('$') && asProjection(value) ? param.name.slice(1) : param.name
         env.define(name, copyValue(value), true, param.span)
       })
@@ -796,7 +799,33 @@ export class Interpreter {
       span,
       invoke: (closure, closureArgs = []) => this.callClosure(closure, closureArgs, span),
       invokeBuilder: (closure, closureArgs = []) => this.runViewBuilder(closure, closureArgs),
+      member: (value, name) => this.readMember(value, name, span),
     }
+  }
+
+  /** What a type's stored property was declared as, where the declaration wrote a type. */
+  private declaredTypeOf(typeName: string, property: string): DeclaredType | undefined {
+    const annotation = this.membersOf(typeName).find((m): m is VarDecl => m.kind === 'varDecl' && m.name === property)?.typeAnnotation
+    if (!annotation) return undefined
+    const optional = annotation.kind === 'optionalType'
+    const named = optional ? annotation.wrapped : annotation
+    return { optional, ...(named.kind === 'namedType' ? { name: named.name } : {}) }
+  }
+
+  /**
+   * `value.name` for a value already in hand: a tuple's element, a property, stored or
+   * computed, an enum's `rawValue`, or a built-in one. Member access asks this before
+   * the host, and a key path or a `ForEach` id reads through it too.
+   */
+  private readMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
+    if (member === 'self') return target
+    if (target.kind === 'tuple') return tupleElement(target, member)
+    const own = target.kind === 'enum' ? this.memberOfEnum(target, member, span) : target.kind === 'struct' ? this.memberOfStruct(target, member, span) : undefined
+    if (own !== undefined) return unwrapProjection(own)
+    const builtin = getBuiltinProperty(target, member)
+    if (builtin !== undefined) return builtin
+    const extended = this.userMember(target, member, span)
+    return extended === undefined ? undefined : unwrapProjection(extended)
   }
 
   // -------------------------------------------------------------- statements
@@ -1470,14 +1499,10 @@ export class Interpreter {
         return NIL
 
       case 'stringLiteral': {
-        let out = ''
-        for (const segment of expr.segments) {
-          out +=
-            segment.kind === 'text'
-              ? segment.value
-              : describe(this.evaluate(segment.expression, env), false)
-        }
-        return str(out)
+        const parts = expr.segments.map((segment) => segment.kind === 'text' ? segment.value : this.evaluate(segment.expression, env))
+        const hosted = parts.some((part) => typeof part !== 'string' && part.kind !== 'string') ? this.host.interpolate?.(parts, expr.span) : undefined
+        if (hosted !== undefined) return { kind: 'string', value: hosted.text, styled: hosted.styled }
+        return str(parts.map((part) => typeof part === 'string' ? part : describe(part, false)).join(''))
       }
 
       case 'arrayLiteral':
@@ -1754,21 +1779,8 @@ export class Interpreter {
       if (builtinStatic !== undefined) return builtinStatic
     }
 
-    if (target.kind === 'enum') {
-      const value = this.memberOfEnum(target, member, span)
-      if (value !== undefined) return unwrapProjection(value)
-    }
-
-    if (target.kind === 'struct') {
-      const value = this.memberOfStruct(target, member, span)
-      if (value !== undefined) return unwrapProjection(value)
-    }
-
-    const builtin = getBuiltinProperty(target, member)
-    if (builtin !== undefined) return builtin
-
-    const extended = this.userMember(target, member, span)
-    if (extended !== undefined) return unwrapProjection(extended)
+    const read = this.readMember(target, member, span)
+    if (read !== undefined) return read
 
     const fromHost = this.host.getMember?.(target, member, span)
     if (fromHost !== undefined) return fromHost
@@ -1789,7 +1801,7 @@ export class Interpreter {
     if (projected) {
       const owner = projected.get()
       if (owner.kind === 'struct' && owner.fields.has(member)) {
-        return memberProjection(projected, member)
+        return memberProjection(projected, member, this.declaredTypeOf(owner.typeName, member))
       }
     }
 
@@ -2010,6 +2022,7 @@ export class Interpreter {
               `Cannot use mutating member on immutable value: 'self' is a 'let' constant`,
               span,
             ),
+          (value, name) => this.readMember(value, name, span),
         )
         if (onBuiltin !== undefined) return onBuiltin
 
@@ -2188,6 +2201,7 @@ export class Interpreter {
         }
         replacement = value
       },
+      (value, name) => this.readMember(value, name, span),
     )
     if (builtin !== undefined) {
       if (lvalue?.mutable && (replacement !== null || isMutatingMember(member))) lvalue.set(replacement ?? target)
@@ -2530,7 +2544,9 @@ export class Interpreter {
     if (self?.kind === 'struct' && self.fields.has(name)) {
       const current = self.fields.get(name)
       if (asProjection(current)) return current!
-      return projection(fieldLValue(self, name, `self.${name}`))
+      const field = fieldLValue(self, name, `self.${name}`)
+      const declared = this.declaredTypeOf(self.typeName, name)
+      return projection(declared ? { get: field.get, set: field.set, description: field.description, declared } : field)
     }
 
     return null
@@ -3141,8 +3157,9 @@ function isStaticDecl(decl: { modifiers: readonly { name: string }[] }): boolean
  * on every access rather than capturing it keeps a computed `Binding(get:set:)`
  * behaving like the storage it stands for.
  */
-function memberProjection(outer: ProjectionPayload, field: string): SwiftValue {
+function memberProjection(outer: ProjectionPayload, field: string, declared: DeclaredType | undefined): SwiftValue {
   return projection({
+    ...(declared ? { declared } : {}),
     get: () => {
       const owner = outer.get()
       return owner.kind === 'struct' ? (owner.fields.get(field) ?? { kind: 'nil' }) : { kind: 'nil' }
@@ -3215,6 +3232,15 @@ function labelsMatch(params: readonly Param[], written: readonly (string | null)
     if (!params[i]!.defaultValue) return false
   }
   return next === written.length
+}
+
+/**
+ * `{ index, item in }` given one `(offset, element)` tuple, as `enumerated()` and `zip`
+ * hand their elements over: Swift spreads a lone tuple across a closure's parameters.
+ */
+function spreadTuple(closure: ClosureValue, args: readonly SwiftValue[]): readonly SwiftValue[] {
+  const only = args.length === 1 ? args[0] : undefined
+  return closure.params.length > 1 && only?.kind === 'tuple' && only.elements.length === closure.params.length ? only.elements : args
 }
 
 /** A method call's receiver: its storage when it has one, and its value. */

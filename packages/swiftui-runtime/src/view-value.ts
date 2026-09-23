@@ -49,6 +49,13 @@ export interface ViewValue {
    */
   readonly childKeys?: readonly string[]
   /**
+   * The tag `ForEach` gives each of its rows: the row's id, a value of its own type.
+   *
+   * SwiftUI tags every row with its `id:` key path's value, or its `Identifiable.id`,
+   * and a `Picker` or a `TabView` selects a row by it when it has the selection's type.
+   */
+  readonly implicitTag?: SwiftValue
+  /**
    * The key a `GeometryReader` reports its resolved size under.
    *
    * Assigned by the host at the moment the reader's content is built, and used again
@@ -153,6 +160,14 @@ export interface ModifierValue {
 
 export const VIEW_TYPE = 'View'
 
+/**
+ * A trap in building a `NavigationLink`'s destination, kept as that destination until
+ * the link is pushed; the payload is the trap. SwiftUI runs a destination's body only
+ * when it is pushed, so a trap there, such as a model no ancestor gave, crashes iOS on
+ * the push and not before.
+ */
+export const DESTINATION_TRAP_TYPE = 'DestinationTrap'
+
 /** A contextual member with no base: `.largeTitle`, `.primary`, `.infinity`. */
 export const TOKEN_TYPE = 'Token'
 
@@ -246,6 +261,11 @@ export const DIMENSIONS_TYPE = 'ViewDimensions'
 export interface GeometryPayload {
   readonly width: number
   readonly height: number
+  /** Where the reader is on the screen, as `frame(in: .global)` reports it. */
+  readonly x: number
+  readonly y: number
+  /** What `safeAreaInsets` reports. */
+  readonly insets: EdgeInsetsPayload
 }
 
 /** An animation curve, as `.animation()` and `withAnimation` take it. */

@@ -1,5 +1,5 @@
 import * as Comlink from 'comlink'
-import { DEVICES } from '@studio/sim-shell'
+import { DEFAULT_DEVICE, DEVICES } from '@studio/sim-shell'
 import type { CompileResult, CompilerApi } from '@studio/shared'
 import type { GeneratedApp } from './schema'
 
@@ -16,7 +16,7 @@ export function checkPreview(app: GeneratedApp, signal: AbortSignal): Promise<st
     function cleanup() { settled = true; clearTimeout(timer); signal.removeEventListener('abort', abort); api[Comlink.releaseProxy](); worker.terminate() }
     signal.addEventListener('abort', abort, { once: true })
     worker.onerror = () => finish(['Preview validation is unavailable. Review the code after opening.'])
-    const device = DEVICES['iphone-15']
+    const device = DEVICES[DEFAULT_DEVICE]
     void api.compile({ files: app.files.map(f => ({ id: f.path, text: f.code })), canvas: { width: device.width, height: device.height }, safeArea: device.safeArea, colorScheme: 'light', revision: 1 }).then(result => {
       finish(previewIssues(result))
     }).catch(() => finish(['The preview could not evaluate this project. Review its code after opening.']))

@@ -1461,9 +1461,7 @@ class Converter {
 
       case 'TimelineView':
         // The schedule is a clock the preview does not run, so the content is drawn
-        // once, at the moment of the render. Its `context` is not supplied - a
-        // closure that reads `context.date` has nothing to read - so what is drawn is
-        // whatever the body produces without one. See the coverage matrix.
+        // once, for the moment of the render: its `context.date` is now.
         return {
           kind: 'stack',
           id: path,
@@ -2653,9 +2651,11 @@ class Converter {
     // which halves of it to draw.
     const date = view.name === 'DatePicker' ? asDate(selection ?? undefined) : null
     const selectedOption = view.name === 'Picker' ? view.children.find(child => boolArg(labelled(child.args, 'selected'))) : undefined
+    // A Picker shows the chosen row's content, and nothing when no row's tag matches
+    // its selection, as iOS 27 does: never the raw value, which isn't what iOS draws.
     const value = selectedOption ? textIn(selectedOption).join(' ') : date
       ? dateText(date.epochSeconds, datePickerStyleFor(view))
-      : selection
+      : selection && view.name !== 'Picker'
         ? displayValue(selection)
         : ''
 
@@ -3256,13 +3256,24 @@ class Converter {
     }
   }
 
+  /**
+   * `Link` and `ShareLink`, in the accent colour, as the iOS 27 simulator draws them: the
+   * label they were given, or their title. A share link with no label of its own is the
+   * share icon and its title, "Share…" when it has none.
+   */
   private link(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0)) ?? ''
+    const title = stringArg(positional(view.args, 0))
+    const content = view.children.length > 0 ? view.children
+      : view.name === 'ShareLink' ? [{ name: 'Label', args: [{ label: null, value: { kind: 'string', value: title ?? 'Share…' } }, { label: 'systemImage', value: { kind: 'string', value: 'square.and.arrow.up' } }], children: [], modifiers: [], action: null, span: view.span } satisfies ViewValue]
+      : []
+    const label: LayoutElement = content.length === 0
+      ? { kind: 'text', id: path, text: title ?? '', ...origin }
+      : { kind: 'stack', id: `${path}label`, axis: 'horizontal', spacing: 4, alignment: CENTER, children: content.map((child, index) => this.convert(child, `${path}l${index}`, 'horizontal')), ...origin }
     return {
       kind: 'modified',
       id: `${path}tint`,
       modifier: { kind: 'foregroundStyle', color: this.color('accentColor') },
-      child: { kind: 'text', id: path, text: title, ...origin },
+      child: label,
     }
   }
 
@@ -3293,7 +3304,7 @@ class Converter {
           kind: 'background',
           content,
           ...(hasView ? { alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER } : {}),
-          ...(style ? { ignoresSafeAreaEdges: safeAreaEdges(labelled(args, 'ignoresSafeAreaEdges')) } : {}),
+          ...(style ? { ignoresSafeAreaEdges: edgeSet(labelled(args, 'ignoresSafeAreaEdges')) } : {}),
         } : null
       }
 
@@ -3495,7 +3506,7 @@ class Converter {
         const regions = modifier.name === 'ignoresSafeArea' ? tokenName(positional(args, 0)) : null
         if (regions === 'keyboard') return null
         const edges = modifier.name === 'ignoresSafeArea' ? labelled(args, 'edges') : positional(args, 0)
-        return { kind: 'ignoresSafeArea', edges: safeAreaEdges(edges) }
+        return { kind: 'ignoresSafeArea', edges: edgeSet(edges) }
       }
 
       case 'zIndex':
@@ -4136,8 +4147,10 @@ function truthyBinding(value: SwiftValue | undefined): boolean {
   return resolved !== null && truthy(resolved)
 }
 
+const EDGE_SET_NAMES: ReadonlySet<string> = new Set(['top', 'bottom', 'leading', 'trailing', 'horizontal', 'vertical', 'all'])
+
 /** An `Edge.Set`: `.all` when none is given, one edge, `.horizontal`, `.vertical`, or a list. */
-function safeAreaEdges(value: SwiftValue | undefined): SafeAreaEdges {
+function edgeSet(value: SwiftValue | undefined): SafeAreaEdges {
   if (value === undefined) return { top: true, bottom: true, leading: true, trailing: true }
   const names = value.kind === 'array' ? value.elements.map(tokenName) : [tokenName(value)]
   const has = (edge: string, axis: string) => names.some((name) => name === edge || name === axis || name === 'all')
@@ -4223,31 +4236,15 @@ function paddingInsets(args: readonly ViewArg[], defaultLength = IOS_27.metrics.
   const bare = numberArg(positional(args, 0))
   if (bare !== null && args.length === 1) return uniformInsets(bare)
 
-  // `.padding(.horizontal, 24)` - an edge set plus a length.
+  // `.padding(.horizontal, 24)` or `.padding([.horizontal, .top], 20)` - an edge set
+  // plus a length. A list is a set too, and an empty one pads nothing.
   const edgeToken = positional(args, 0)
   const length = numberArg(positional(args, 1)) ?? numberArg(labelled(args, 'length')) ?? defaultLength
-
-  if (edgeToken?.kind === 'opaque' && edgeToken.typeName === TOKEN_TYPE) {
-    const edge = (edgeToken.payload as TokenPayload).name
-    switch (edge) {
-      case 'horizontal':
-        return insets(0, length, 0, length)
-      case 'vertical':
-        return insets(length, 0, length, 0)
-      case 'top':
-        return insets(length, 0, 0, 0)
-      case 'bottom':
-        return insets(0, 0, length, 0)
-      case 'leading':
-        return insets(0, length, 0, 0)
-      case 'trailing':
-        return insets(0, 0, 0, length)
-      case 'all':
-        return uniformInsets(length)
-      default:
-        return uniformInsets(length)
-    }
+  if (edgeToken?.kind === 'array' || EDGE_SET_NAMES.has(tokenName(edgeToken) ?? '')) {
+    const edges = edgeSet(edgeToken)
+    return insets(edges.top ? length : 0, edges.leading ? length : 0, edges.bottom ? length : 0, edges.trailing ? length : 0)
   }
+  if (tokenName(edgeToken) !== null) return uniformInsets(length)
 
   return uniformInsets(defaultLength)
 }

@@ -657,6 +657,16 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
     "container": "circle",
     "filled": false
   },
+  "1.circle": {
+    "icon": "#digit1",
+    "container": "circle",
+    "filled": false
+  },
+  "2.circle": {
+    "icon": "#digit2",
+    "container": "circle",
+    "filled": false
+  },
   "star.circle.fill": {
     "icon": "star",
     "container": "circle",

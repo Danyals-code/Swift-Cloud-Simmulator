@@ -17,6 +17,7 @@ import {
   str,
   SwiftThrow,
   SwiftTrap,
+  NIL,
   UnsupportedAtRuntime,
   valuesEqual,
   type ClosureValue,
@@ -45,6 +46,7 @@ import {
   type ActionValue,
   type AnimationPayload,
   type EnvironmentFrame,
+  type GeometryPayload,
   type ViewIntent,
   type ViewValue,
 } from './view-value'
@@ -136,12 +138,12 @@ export class AppRuntime {
   /** Device and preview state the SwiftUI environment exposes to user code. */
   private environmentInputs: EnvironmentInputs = DEFAULT_ENVIRONMENT
 
-  /** Sizes each `GeometryReader` was measured at, from the last layout pass. */
-  private geometry = new Map<string, { width: number; height: number }>()
+  /** What each `GeometryReader` was measured at in the last layout pass: its size, place and safe area. */
+  private geometry = new Map<string, GeometryPayload>()
 
-  /** Paths whose `.onAppear` has already run, so it does not run every pass. */
+  /** The hooks, `.onAppear` and `.task` alike, that have run for this appearance, by key, so they don't run every pass. */
   private appeared = new Set<string>()
-  /** Values `.onChange(of:)` is watching, as of the last pass. */
+  /** Values `.onChange(of:)` and `.task(id:)` are watching, as of the last pass. */
   private watched = new Map<string, SwiftValue>()
   /** `.onDisappear` closures, kept from the pass that last saw each view. */
   private disappearing = new Map<string, ActionValue>()
@@ -150,25 +152,27 @@ export class AppRuntime {
   /**
    * Records what the layout pass actually measured, and says whether it moved.
    *
-   * A true answer means the sizes a `GeometryReader` reported to its closure were
-   * wrong, so the caller runs one more pass with the corrected ones. Two passes are
-   * enough because a reader is greedy: its size is whatever it was proposed, and the
-   * proposal does not depend on what its closure produced. The half-point tolerance
-   * stops sub-pixel jitter from looping forever.
+   * A true answer means what a `GeometryReader` reported to its closure - its size,
+   * where it is, its safe area - was wrong, so the caller runs one more pass with the
+   * corrected values. Two passes are enough because a reader is greedy: its size is
+   * whatever it was proposed, and the proposal does not depend on what its closure
+   * produced. The half-point tolerance stops sub-pixel jitter from looping forever.
    */
-  updateGeometry(measured: ReadonlyMap<string, { width: number; height: number }>): boolean {
+  updateGeometry(measured: ReadonlyMap<string, GeometryPayload>): boolean {
     let changed = false
+    const moved = (a: number, b: number) => Math.abs(a - b) > 0.5
 
-    for (const [key, size] of measured) {
+    for (const [key, next] of measured) {
       const previous = this.geometry.get(key)
       if (
         !previous ||
-        Math.abs(previous.width - size.width) > 0.5 ||
-        Math.abs(previous.height - size.height) > 0.5
+        moved(previous.width, next.width) || moved(previous.height, next.height) ||
+        moved(previous.x, next.x) || moved(previous.y, next.y) ||
+        (['top', 'leading', 'bottom', 'trailing'] as const).some((edge) => moved(previous.insets[edge], next.insets[edge]))
       ) {
         changed = true
       }
-      this.geometry.set(key, size)
+      this.geometry.set(key, next)
     }
 
     this.host.geometry = this.geometry
@@ -473,9 +477,10 @@ export class AppRuntime {
    * the state the view is about to draw from, and rendering the pass that discovered
    * it would show the screen as it was one instant before the app started.
    *
-   * A callback runs at most once per appearance, tracked by path - so a re-render
+   * A callback runs at most once per appearance, tracked by its key - so a re-render
    * does not re-fire it, and a view that leaves the tree and comes back does fire
-   * again, which is what SwiftUI does too.
+   * again, which is what SwiftUI does too. A `.task(id:)` also runs again when its id
+   * changes.
    */
   runLifecycle(hooks: readonly LifecycleHook[]): boolean {
     const seen = new Set<string>()
@@ -484,18 +489,21 @@ export class AppRuntime {
 
     for (const hook of hooks) {
       if (hook.kind === 'appear') {
-        seen.add(hook.path)
-        if (this.appeared.has(hook.path)) continue
-        this.appeared.add(hook.path)
+        seen.add(hook.key)
+        const previous = this.watched.get(hook.key)
+        if (hook.watched !== undefined) this.watched.set(hook.key, copyValue(hook.watched))
+        const sameId = hook.watched === undefined || previous === undefined || valuesEqual(previous, hook.watched)
+        if (this.appeared.has(hook.key) && sameId) continue
+        this.appeared.add(hook.key)
         this.invokeHook(hook.action, [])
         ran = true
         continue
       }
 
       if (hook.kind === 'change' && hook.watched !== undefined) {
-        seen.add(hook.path)
-        const previous = this.watched.get(hook.path)
-        this.watched.set(hook.path, copyValue(hook.watched))
+        seen.add(hook.key)
+        const previous = this.watched.get(hook.key)
+        this.watched.set(hook.key, copyValue(hook.watched))
         if (previous === undefined ? !hook.initial : valuesEqual(previous, hook.watched)) continue
         const args = parameterCount(hook.action) >= 2
           ? [previous ?? hook.watched, hook.watched] : [hook.watched]
@@ -509,27 +517,27 @@ export class AppRuntime {
     // this pass's hooks. It is kept from the pass that last saw the view.
     for (const hook of hooks) {
       if (hook.kind !== 'disappear') continue
-      seen.add(hook.path)
+      seen.add(hook.key)
       // Also counted as present: a view may have `.onDisappear` without `.onAppear`,
       // and something has to record that it was here in order to notice it leaving.
-      this.appeared.add(hook.path)
-      this.disappearing.set(hook.path, hook.action)
+      this.appeared.add(hook.key)
+      this.disappearing.set(hook.key, hook.action)
     }
 
-    for (const path of [...this.appeared]) {
-      if (seen.has(path)) continue
-      this.appeared.delete(path)
+    for (const key of [...this.appeared]) {
+      if (seen.has(key)) continue
+      this.appeared.delete(key)
 
-      const gone = this.disappearing.get(path)
+      const gone = this.disappearing.get(key)
       if (gone) {
-        this.disappearing.delete(path)
+        this.disappearing.delete(key)
         this.invokeHook(gone, [])
         ranDisappear = true
         ran = true
       }
     }
 
-    for (const path of this.watched.keys()) if (!seen.has(path)) this.watched.delete(path)
+    for (const key of this.watched.keys()) if (!seen.has(key)) this.watched.delete(key)
 
     if (ran) this.harvest(this.live)
     // A disappear closure wrote into the previous pass's instance - the one that
@@ -1021,6 +1029,15 @@ export class AppRuntime {
 
       const environment = member.attributes.find((a) => a.name === 'Environment')
       if (environment) {
+        // `@Environment(Model.self)`: the object an ancestor gave with `.environment(model)`.
+        const type = environmentType(environment)
+        if (type) {
+          const object = this.host.environment.object(type)
+          if (object !== undefined) instance.fields.set(member.name, object)
+          else if (member.typeAnnotation?.kind === 'optionalType') instance.fields.set(member.name, NIL)
+          else throw new SwiftTrap(`No Observable object of type ${type} found. A View.environment(_:) for ${type} may be missing as an ancestor of this view.`, member.span, [])
+          continue
+        }
         const key = asKeyPath(keyPathArgument(environment))?.components[0]
         const value = key ? this.host.environment.value(key) : undefined
         if (value === undefined) throw new UnsupportedAtRuntime(`@Environment(${key ?? 'type-based lookup'})`, member.span)
@@ -1141,7 +1158,14 @@ function storageKey(property: VarDecl): string | null {
   return literal ? first.segments.map((segment) => (segment.kind === 'text' ? segment.value : '')).join('') : null
 }
 
+/** `@Environment(Model.self)`: the type it asks for, where the environment holds an `@Observable` object. */
+function environmentType(attribute: { args: readonly { value: unknown }[] }): string | undefined {
+  const first = attribute.args[0]?.value as { kind?: string; member?: string; base?: { kind?: string; name?: string } | null } | undefined
+  return first?.kind === 'memberAccess' && first.member === 'self' && first.base?.kind === 'identifier' ? first.base.name : undefined
+}
+
 /** `@Environment(\.colorScheme)` - the key path the attribute was given. */
+
 function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): SwiftValue | undefined {
   const first = attribute.args[0]?.value as { kind?: string; components?: readonly string[] } | undefined
   if (first?.kind !== 'keyPath' || !first.components) return undefined

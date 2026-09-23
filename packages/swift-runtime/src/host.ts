@@ -20,6 +20,8 @@ export interface HostCall {
    * contributes only the taken branch. This is what `@ViewBuilder` means.
    */
   invokeBuilder(closure: ClosureValue, args?: readonly SwiftValue[]): readonly SwiftValue[]
+  /** Reads `value.name` as Swift would: a stored or computed property, `rawValue`, or a built-in one. */
+  member(value: SwiftValue, name: string): SwiftValue | undefined
 }
 
 /**
@@ -98,6 +100,14 @@ export interface InterpreterHost {
    * undefined leaves the first value, which is what happened before this existed.
    */
   groupValues?(values: readonly SwiftValue[], span: SourceSpan): SwiftValue | undefined
+
+  /**
+   * A string interpolation with a part the host knows better than by its description:
+   * `Text("\(Text("Bold").bold()) and plain")` is styled text, not "View and plain".
+   * The answer is the plain text and the styled value it stands for. Asked only when an
+   * interpolated value isn't a string, and undefined declines.
+   */
+  interpolate?(parts: readonly (string | SwiftValue)[], span: SourceSpan): { readonly text: string; readonly styled: SwiftValue } | undefined
 
   /**
    * A binary operator applied to a value the interpreter does not own.

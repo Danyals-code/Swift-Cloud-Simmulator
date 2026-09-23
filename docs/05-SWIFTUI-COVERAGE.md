@@ -14,8 +14,11 @@ containers and system APIs item by item, with native comparison limitations.
 name does not guarantee every overload, modifier combination, or Swift language feature.
 The status rows are a feature inventory, not a measured percentage of SwiftUI compatibility.
 
-Known unsupported view names produce placeholders and diagnostics. Unknown framework names can
-still produce unresolved-identifier errors. Recognized unsupported modifiers warn; unknown
+Known unsupported view names produce placeholders and diagnostics. So does a capitalised name the
+preview doesn't know, written where a view goes: it draws a labelled placeholder with a warning, and
+what it was given is not run. A name close to a type the project or SwiftUI declares stays an error
+that offers that type, and elsewhere, as in `let formatter = DateFormatter()`, an unknown name is
+still an unresolved-identifier error. Recognized unsupported modifiers warn; unknown
 modifiers warn when the checker can establish that the receiver is a view. The Coverage panel
 records these reports locally. It cannot detect all silent semantic differences.
 
@@ -35,9 +38,9 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
 | `Divider` | ✅ | 6 | hairline across its stack's axis |
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
-| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths; binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
-| `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's |
-| `GeometryReader` | ✅ | 7 | reports its real size through `size` and `frame(in:)`, and is its own coordinate space |
+| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths, a computed `id` and `\.rawValue` included; each row is tagged with its id, as SwiftUI tags it. Binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
+| `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's. Vertical content keeps its own height at the top, centred across, as in iOS 27 |
+| `GeometryReader` | ✅ | 7 | reports its real size through `size` and where it is on the screen through `frame(in: .global)`, in a sheet too, and through `safeAreaInsets` the insets of the edges it touches, bars included, as iOS 27 does. A reader inside another reader reads no insets. It is its own coordinate space. A named coordinate space is read as the screen |
 | `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks: correct, and not virtualised. A 200-row stack measures in 7.6 ms against a 120 ms budget, so the cost is real and not yet worth the identity complexity |
 | `LazyVGrid` / `LazyHGrid` | ✅ | 6 | fixed, flexible and adaptive columns |
 | `Grid` / `GridRow` | ✅ | 7 | columns align across rows |
@@ -50,7 +53,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes |
+| `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling |
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations; unknown names use an explicit fallback, not Apple artwork |
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
@@ -60,11 +63,11 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
 | `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
-| `Link` / `ShareLink` | 🟡 | 6 | label only, with an explicit warning; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
+| `Link` / `ShareLink` | 🟡 | 6 | drawn as iOS 27 draws them: the title or the label given, in the accent colour, and a share link without a label is the share icon and "Share…". Tapping opens nothing, and says so. `URL(string:)` exists, so the `destination:` can be written |
 | `ProgressView` | ✅ | 6 | determinate bar filling from its leading edge; `.circular` and the indeterminate form are the turning activity indicator |
 | `Gauge` | 🟡 | 7 | linear labelled bars and value-dependent circular arcs/markers; native metrics and all label/style arrangements remain approximate |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
-| `TimelineView` | 🟡 | - | its content is drawn once, at the moment of the render. The schedule is a clock the preview does not run, and the `context` is not supplied |
+| `TimelineView` | 🟡 | - | its content is drawn once, for the moment of the render: `context.date` is now. The schedule is a clock the preview does not run |
 | `Chart` (Swift Charts) | ⬜ | - | needs a mark model and a plottable-value protocol of its own, which is a package rather than a view |
 | `Map` (MapKit) | ✗ | - | Needs a licensed tile source; placeholder with a note |
 | `UIViewRepresentable` | ✗ | - | Cannot run UIKit; labelled placeholder |
@@ -79,10 +82,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Stepper` | ✅ | 6 | each half is its own target; `step:` and `in:` are both honoured |
 | `TextField` / `SecureField` | 🟡 | 6 | String-backed inputs with a caret; `SecureField` masks using a password input. Numeric value/format/formatter bindings and axis-based multiline fields warn as unsupported |
 | `TextEditor` | 🟡 | 7 | editable multiline textarea with String binding, wrapping and scrolling; native selection, keyboard and advanced TextEditor APIs remain incomplete |
-| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. The popup is drawn at the bottom rather than anchored to the control |
+| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. A row selects by its `.tag`, or over `ForEach` by its id, when that has the selection's type, as measured in iOS 27: an enum whose `id` is a `String` selects nothing, and nor do `ForEach`'s own tags for an Optional selection. Where no row can be selected it warns, and a menu picker shows no value. The popup is drawn at the bottom rather than anchored to the control |
 | `DatePicker` | 🟡 | 7 | a formatted row that opens onto a calendar: pick a day, page the month. `displayedComponents:` chooses date, time or both. No time-of-day editor, so the row's time is the binding's own |
 | `ColorPicker` | 🟡 | 7 | opens onto SwiftUI's named colours as swatches. Not a continuous surface - see approximations |
-| `Menu` | 🟡 | 7 | opens onto its buttons; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
+| `Menu` | 🟡 | 7 | opens onto its buttons, over `ForEach` too; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
 
 ## Collections and navigation
 
@@ -102,7 +105,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
 | `.toolbar` | 🟡 | 6 | leading/trailing items work; keyboard, bottomBar and principal placements warn and are omitted |
-| `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, and `.page`, whose dots are also the way through - a preview has no swipe |
+| `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, pages from `ForEach` selected by their ids, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
 
@@ -207,8 +210,9 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `@GestureState` / `.updating` | ✅ | 7 | transient, reverting when the gesture ends |
 | `.simultaneously(with:)` | ✅ | 7 | each gesture responds to its own kind of input |
 | `.sequenced` / `.exclusively` | 🟡 | 7 | accepted; treated as simultaneous |
-| `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render |
-| `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency |
+| `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render. Several on one view all run, in the order written |
+| `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency. `.task(id:)` runs again when its id changes |
+| `.id(_:)` | ✅ | - | a new id is a new view: its state starts over, and its appear and disappear hooks run, when the id changes |
 | `.onChange(of:)` | ✅ | 7 | one-value and explicit zero/two-parameter callbacks; `initial: true` runs on first appearance. Independent modifiers track independent previous values |
 | `.onReceive` | ⬜ | - | needs Combine, which needs publishers and a scheduler the preview does not have |
 | `.disabled` / `.allowsHitTesting` | ✅ | 7 |
@@ -246,13 +250,14 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Scene` phases | 🟡 | - | `scenePhase` reads `.active`, because the preview's one window is always on screen |
 | `@State` | 🟡 | 3 | declaration initialization works; `_value = State(initialValue:)` in a custom initializer is unsupported |
 | `@Binding` (and `$value` projections) | 🟡 | 6 | ordinary control/custom-view projections work; collection binding closures do not |
-| Key paths (`\.self`, `\.id`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`); **not where a closure is expected**, so `map(\.name)` is rejected |
+| Key paths (`\.self`, `\.id`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`) and as a function (`map(\.name)`), reading computed properties, `rawValue` and tuple labels as Swift does. Not writable key paths |
 | `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere. `$store.property` projects a `Binding` into the model, so `Slider(value: $ledger.monthlyBudget)` writes where it reads - the dynamic member lookup SwiftUI puts on the wrapper |
 | `@AppStorage` / `@SceneStorage` | 🟡 | - | keyed by the string, so views sharing a key share a value and it outlives the view that wrote it. Held for the session rather than on disk - see approximations |
 | `@FocusState` | 🟡 | - | storage the code reads and writes |
 | `Binding(get:set:)` / `.constant` | ✅ | - | a projection built from the user's closures, or one that reads a value and swallows writes; a control cannot tell either from `$value` |
 | `.environmentObject` / `@EnvironmentObject` | ✅ | 11 | reaches views expanded while the modifier is in scope, *and* the deferred ones - a pushed `navigationDestination`, a presented `.sheet`, a `.toolbar` - which capture the frame they were written in and restore it when they run. Before that, a detail screen reading an `@EnvironmentObject` trapped |
 | `.environment(\.key, …)` | ✅ | 7 | same scoping rule |
+| `@Observable` / `@Bindable` / `.environment(model)` / `@Environment(Model.self)` | ✅ | - | an `@Observable` class is a reference, so a change is seen everywhere, and `@Bindable` projects `$model.name`, `@Bindable var model = model` in a body included. `.environment(model)` hands the model down by its type, by the same scoping rule. A view asking for a type no ancestor gave stops, as the app does, unless its property is optional. On a screen a link pushes, it stops when that screen is pushed, as the app does |
 | `colorScheme`, `dynamicTypeSize` | ✅ | 4 |
 | `locale`, `layoutDirection` | 🟡 | 7 | reported; there is no RTL layout or localisation yet |
 | `horizontalSizeClass` / `verticalSizeClass` | ✅ | 7 | derived from the device size |
@@ -326,7 +331,7 @@ missing without anything saying so.
 | `String` - `count`, `uppercased`, `hasPrefix`, `contains`, `split`, `replacingOccurrences`, `trimmingCharacters` | ✅ | 2 | counted and sliced by grapheme cluster, so `"👋🏽".count` is 1 |
 | `String` - `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `starts(with:)`, `append` | ✅ | - | |
 | `String` - `unicodeScalars` | ✅ | - | code points, which is the whole difference from `count` |
-| `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | `reduce(into:)` too, whose closure takes the accumulator `inout` - the standard way to build a dictionary from a sequence |
+| `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | `reduce(into:)` too, whose closure takes the accumulator `inout` - the standard way to build a dictionary from a sequence. `enumerated()` gives `(offset:element:)` tuples, and a closure with a parameter for each takes one apart, as `{ index, item in }` does. A range of integers answers the same methods: `(0..<3).map { … }` |
 | `Array` - `allSatisfy`, `flatMap`, `dropFirst`, `dropLast`, `first(where:)`, `last(where:)`, `lastIndex`, `randomElement`, `shuffled` | ✅ | - | `shuffled` is Fisher-Yates, not the biased one-line sort |
 | `Array` - `append`, `insert`, `remove`, `removeAll`, `removeFirst`, `removeLast`, `popLast`, `sort`, `reverse`, `shuffle`, `swapAt`, `replaceSubrange`, `removeSubrange` | ✅ | - | mutating, and refused on a `let` as Xcode refuses them |
 | `Dictionary` - subscript, `default:`, `keys`, `values`, `updateValue`, `removeValue` | ✅ | 2 | |
@@ -343,10 +348,12 @@ missing without anything saying so.
 | `type(of:)`, `fatalError`, `assert`, `precondition` | ✅ | - | a failed assertion is a trap reported on its line |
 | Bitwise `&`, `\|`, `^`, `<<`, `>>` | ✅ | - | computed in `BigInt`, so a shift past 32 bits is not truncated |
 | `UUID` | ✅ | - | random, and prints as its `uuidString` |
-| `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, `formatted()`, comparison, `Date.now`. No calendar: there is no `Calendar`, no `DateComponents` and no `DateFormatter` |
+| `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, comparison, `Date.now`. `formatted()` is Foundation's default, a numeric date and a short time, and `formatted(date:time:)` takes the parts it is given. No `DateFormatter` |
+| `Calendar` | 🟡 | - | `Calendar.current`, in the preview's time zone: `component(_:from:)`, `date(byAdding:value:to:)`, `startOfDay(for:)`, `isDateInToday` and its neighbours, `isDate(_:inSameDayAs:)`, and `dateComponents` from one date or between two, largest unit first |
+| `Timer` | 🟡 | - | `Timer.publish(every:on:in:).autoconnect()` with `.onReceive`, and `Timer.scheduledTimer`, are accepted and never fire: the preview draws one moment, and warns where a timer is made |
 | `URL` | 🟡 | - | `URL(string:)` is failable and the string is kept as written; `absoluteString`, `path`, `host`, `scheme`, `query`, `lastPathComponent`, `pathExtension`, `appendingPathComponent`. Nothing is fetched |
 | `Codable` over JSON | ⬜ | - | listed in Phase 2's scope and never built |
-| `Calendar`, `DateFormatter`, `NumberFormatter`, `Measurement` | ⬜ | - | `Text`'s `format:` styles cover what view code usually needs |
+| `DateFormatter`, `NumberFormatter`, `Measurement` | ⬜ | - | `Text`'s `format:` styles cover what view code usually needs |
 
 ## Known approximations
 
@@ -396,10 +403,9 @@ Listed in the exported README so nothing is a surprise on the Mac:
     bound would hand back a value that prints plausibly and traps on the first arithmetic done
     with it. `Int.max` is written almost exclusively as the starting point for a minimum, where
     either bound behaves identically. The same limit is why `1 << 60` traps rather than rounding.
-13. **A `Date` has no calendar.** Intervals, comparison and formatting work; there is no
-    `Calendar`, `DateComponents` or `DateFormatter`, so "the start of this month" cannot be
-    computed. `Text(date, style: .relative)` and `.timer` are computed once, at render, because
-    the preview has no clock to tick them with.
+13. **Time stands still.** `Text(date, style: .relative)` and `.timer` are computed once, at
+    render, because the preview has no clock to tick them with, and a `Timer` never fires for
+    the same reason. The common `Calendar` members work; there is no `DateFormatter`.
 14. **Locale-formatted output is the browser's.** `Date.formatted()`, `Text(date, style:)` and
     `Text(_, format:)` go through `Intl`, so the separators, the order and the currency symbols
     are the platform's real ones rather than a transcription - and two machines in different
@@ -478,8 +484,7 @@ the commonest shape in SwiftUI and offered a fix-it that broke the file it was a
 
 ## Additional confirmed gaps from the September 2026 audit
 
-- `@Bindable` is not implemented as a property wrapper.
-- Custom `EnvironmentKey.defaultValue` and type-based environment lookup are not implemented.
+- Custom `EnvironmentKey.defaultValue` is not implemented.
   Missing environment values now stop with an unsupported-runtime diagnostic instead of `nil`.
 - `.safeAreaPadding`, `.gridCellColumns`, and `.symbolEffect` are explicitly recognized as unsupported.
 - `AsyncImage` and `TimelineView` now warn about their existing partial behavior.

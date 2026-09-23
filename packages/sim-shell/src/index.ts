@@ -93,8 +93,8 @@ export const DEVICES: Readonly<Record<DeviceKey, DeviceSpec>> = {
   },
 }
 
-/** Phase 0 and the vertical slice target exactly one device. */
-export const DEFAULT_DEVICE: DeviceKey = 'iphone-15'
+/** The device a new project starts on: the iPhone 18 Pro, whose iOS 27 simulator the preview is measured against. */
+export const DEFAULT_DEVICE: DeviceKey = 'iphone-18-pro'
 
 /**
  * The device for a key, falling back rather than returning undefined.

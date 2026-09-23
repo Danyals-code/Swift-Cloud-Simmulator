@@ -1,4 +1,4 @@
-import type { SourceSpan, ViewLayer } from '@studio/shared'
+import type { Diagnostic, SourceSpan, ViewLayer } from '@studio/shared'
 import { layerLabel, tabIcon, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
@@ -11,7 +11,9 @@ import {
   projection as makeProjection,
   str,
   truthy,
+  typeNameOf,
   type ClosureValue,
+  type ProjectionPayload,
   type SwiftValue,
 } from '@studio/swift-runtime'
 import {
@@ -20,6 +22,7 @@ import {
   payloadOf,
   ANIMATION_TYPE,
   COLOR_TYPE,
+  DESTINATION_TRAP_TYPE,
   type ActionValue,
   type AnimationPayload,
   type ColorPayload,
@@ -137,10 +140,14 @@ export interface Overlay {
  */
 export interface LifecycleHook {
   readonly kind: 'appear' | 'disappear' | 'change'
-  /** The view's path - how "has this appeared before?" is answered. */
-  readonly path: string
+  /**
+   * The view's path, the hook's name and its place among the view's modifiers of that
+   * name - how "has this run before?" is answered. Not the raw modifier index, so
+   * adding or removing an unrelated modifier doesn't run a hook again.
+   */
+  readonly key: string
   readonly action: ActionValue
-  /** For `.onChange(of:)`: the value being watched, compared against last pass. */
+  /** For `.onChange(of:)` and `.task(id:)`: the value watched, compared against last pass. */
   readonly watched?: SwiftValue
   readonly initial?: boolean
 }
@@ -166,6 +173,8 @@ export interface ResolvedUI {
   readonly lifecycle: readonly LifecycleHook[]
   /** What was written around the screen's containers and isn't drawn (see `notDrawn`). */
   readonly notDrawn?: readonly NotDrawn[]
+  /** What resolving the screen found that the checker can't see, such as a Picker that can't select. */
+  readonly warnings?: readonly Diagnostic[]
 }
 
 /**
@@ -395,6 +404,7 @@ class Resolver {
   private around: readonly ViewValue[] = []
   /** What each screen cut out of its containers leaves out, the root's and any sheet's. */
   private readonly notDrawn: NotDrawn[] = []
+  private readonly warnings: Diagnostic[] = []
 
   constructor(
     private readonly ctx: ResolveContext,
@@ -468,6 +478,7 @@ class Resolver {
       animation: this.ctx.animation,
       lifecycle: this.lifecycle,
       ...(this.notDrawn.length ? { notDrawn: this.notDrawn } : {}),
+      ...(this.warnings.length ? { warnings: this.warnings } : {}),
     }
   }
 
@@ -563,6 +574,10 @@ class Resolver {
         transitionOccurrences.set(source, occurrence + 1)
         segment = `transition-${source}-${occurrence}`
       }
+      // `.id(x)`: a new x is a new view, so its hooks run as it appears and the old one's
+      // as it goes, and the framework state kept by path starts over.
+      const identity = view.modifiers.find((modifier) => modifier.name === 'id')?.args[0]?.value
+      if (identity !== undefined) segment = `${segment}@${encodeURIComponent(describe(identity, true))}`
       return this.stamp(inheritVisualStyle(view, inherited), `${prefix}-${segment}`)
     })
   }
@@ -655,23 +670,28 @@ class Resolver {
 
   /** Records `.onAppear`, `.onDisappear`, `.task` and `.onChange` for this view. */
   private collectLifecycle(view: ViewValue, path: string): void {
-    for (const [index, modifier] of view.modifiers.entries()) {
+    const seen = new Map<string, number>()
+    for (const modifier of view.modifiers) {
+      const place = seen.get(modifier.name) ?? 0
+      seen.set(modifier.name, place + 1)
       const action = modifier.action
       if (!action) continue
+      const key = `${path}/${modifier.name}-${place}`
 
       if (modifier.name === 'onAppear' || modifier.name === 'task') {
-        this.lifecycle.push({ kind: 'appear', path, action })
+        const id = modifier.name === 'task' ? labelled(modifier.args, 'id') : undefined
+        this.lifecycle.push({ kind: 'appear', key, action, ...(id !== undefined ? { watched: id } : {}) })
         continue
       }
       if (modifier.name === 'onDisappear') {
-        this.lifecycle.push({ kind: 'disappear', path, action })
+        this.lifecycle.push({ kind: 'disappear', key, action })
         continue
       }
       if (modifier.name === 'onChange') {
         const watched = modifier.args.find((a) => a.label === 'of')?.value ?? modifier.args[0]?.value
         this.lifecycle.push({
           kind: 'change',
-          path: `${path}/${modifier.name}-${index}`,
+          key,
           initial: truthy(labelled(modifier.args, 'initial') ?? { kind: 'bool', value: false }),
           action,
           ...(watched !== undefined ? { watched } : {}),
@@ -857,14 +877,16 @@ class Resolver {
         // overlay and the segmented drawing both see options rather than a container -
         // otherwise each has to know, and one of them will not.
         const options = flattenForEach(view.children)
+        this.warnIfUnselectable(view, options, binding)
 
         const children = options.map((child, index) => {
-          const tag = tokenOrValue(collectModifier([child], 'tag')?.args[0]?.value)
-          if (tag !== null) {
+          const value = rowTag(child, binding)
+          const tag = tokenOrValue(value)
+          if (value !== undefined) {
             this.register(`${path}/seg-${index}`, {
               kind: 'choose',
               binding: selection,
-              value: tagValue(child),
+              value,
             })
           }
           return {
@@ -1129,18 +1151,20 @@ class Resolver {
     const current = binding ? describe(binding.get(), true) : null
 
     const contextMenu = control.modifiers.find(m => m.name === 'contextMenu')
-    const items = isContextMenu && contextMenu?.closure
+    // A menu over `ForEach` shows its rows, as a Picker over one does.
+    const items = flattenForEach(isContextMenu && contextMenu?.closure
       ? this.ctx.build(contextMenu.closure, [], contextMenu.environment)
-      : control.children
+      : control.children)
     const rows = items.map((child, index) => {
       const path = `${open}/opt-${index}`
-      const tag = tokenOrValue(collectModifier([child], 'tag')?.args[0]?.value)
+      const value = selection ? rowTag(child, binding) : undefined
+      const tag = tokenOrValue(value)
 
       // A Picker's row selects; a Menu's row is already a Button and keeps its own
       // action. Either way the menu closes, which the runtime does for any press
       // made while one is open.
-      if (selection && tag !== null) {
-        this.register(path, { kind: 'choose', binding: selection, value: tagValue(child) })
+      if (selection && value !== undefined) {
+        this.register(path, { kind: 'choose', binding: selection, value })
       }
 
       const stamped = this.stamp(child, path)
@@ -1150,8 +1174,8 @@ class Resolver {
           ...stamped.args,
           { label: 'selected', value: { kind: 'bool' as const, value: tag !== null && tag === current } },
         ],
-        ...(selection && tag !== null
-          ? { intent: { kind: 'choose' as const, binding: selection, value: tagValue(child) } }
+        ...(selection && value !== undefined
+          ? { intent: { kind: 'choose' as const, binding: selection, value } }
           : {}),
       } satisfies ViewValue
     })
@@ -1166,6 +1190,26 @@ class Resolver {
       dismiss,
       dismissId,
     }
+  }
+
+  /**
+   * A Picker none of whose rows its selection can match selects nothing, on a device
+   * too, and nothing says why. The preview says so where it is written.
+   */
+  private warnIfUnselectable(picker: ViewValue, rows: readonly ViewValue[], binding: ProjectionPayload | null): void {
+    if (!binding || rows.length === 0 || rows.some((row) => rowTag(row, binding) !== undefined)) return
+    const selected = binding.get()
+    const written = collectModifier(rows, 'tag')?.args[0]?.value
+    const tag = written ?? rows.find((row) => row.implicitTag !== undefined)?.implicitTag
+    const reason = tag === undefined ? 'its rows have no .tag'
+      : binding.declared?.optional && written === undefined ? "its selection is Optional, and the tag a ForEach row gets is not"
+      : `its rows are tagged ${typeNameOf(tag)}, and its selection is ${selected.kind === 'nil' ? binding.declared?.name ?? 'nil' : typeNameOf(selected)}`
+    this.warnings.push({
+      span: picker.span,
+      severity: 'warning',
+      code: 'type_mismatch',
+      message: `This Picker can't select any of its rows: ${reason}. Tag each row with .tag(value) of the selection's type.`,
+    })
   }
 
   // ----------------------------------------------------------- navigation
@@ -1277,9 +1321,13 @@ class Resolver {
    * resolved by finding the matching destination builder on the current screen and
    * running it with the link's value - which is also why destination content is not
    * built until a push actually happens.
+   *
+   * A trap in building an eager destination was held for this moment, and is thrown
+   * now, as iOS crashes on the push.
    */
   private destinationFor(link: ViewValue, screen: readonly ViewValue[]): readonly ViewValue[] | null {
     const direct = link.args.filter((a) => a.label === 'destination')
+    for (const { value } of direct) if (value.kind === 'opaque' && value.typeName === DESTINATION_TRAP_TYPE) throw value.payload
     if (direct.length > 0) {
       const views = direct.map((a) => asView(a.value)).filter((v): v is ViewValue => v !== null)
       if (views.length > 0) return views
@@ -1345,8 +1393,8 @@ class Resolver {
     const pages = flatten(tabs.children)
     if (pages.length === 0) return { content: [], tabBar: null, pages, selected: 0 }
 
-    const valueOf = (page: ViewValue) => page.name === 'Tab' ? labelled(page.args, 'value') : tagValue(page)
-    const tagged = pages.map((page) => page.name === 'Tab' ? tokenOrValue(valueOf(page)) : tokenOrValue(collectModifier([page], 'tag')?.args[0]?.value))
+    const valueOf = (page: ViewValue) => page.name === 'Tab' ? labelled(page.args, 'value') : rowTag(page, binding)
+    const tagged = pages.map((page) => tokenOrValue(valueOf(page)))
     const current = binding ? describe(binding.get(), true) : null
     const index = this.forceTab ?? (current !== null ? Math.max(0, tagged.indexOf(current)) : this.ctx.state.selectedTab(tabId))
     const selected = Math.max(0, Math.min(index, pages.length - 1))
@@ -1685,13 +1733,41 @@ function modifierOn(view: ViewValue, name: string): ModifierValue | null {
   return view.modifiers.find((m) => m.name === name) ?? null
 }
 
+/**
+ * The tag a row answers a selection with, by SwiftUI's rule as measured in the iOS 27
+ * simulator (docs/parity/native/iphone18pro-misrenders-ii): a row carries the `.tag`
+ * written on it and the one its `ForEach` gave it, its id, and a selection takes the
+ * one of its own type. `ForEach`'s tag is never Optional, so it never answers an
+ * Optional selection; a written `.tag` does, unless it says `includeOptional: false`.
+ */
+function rowTag(row: ViewValue, binding: ProjectionPayload | null): SwiftValue | undefined {
+  const optional = binding?.declared?.optional === true
+  const written = collectModifier([row], 'tag')
+  const tag = written?.args[0]?.value
+  const include = written ? labelled(written.args, 'includeOptional') : undefined
+  if (tag !== undefined && tagFits(tag, binding) && !(optional && include !== undefined && !truthy(include))) return tag
+  if (row.implicitTag !== undefined && !optional && tagFits(row.implicitTag, binding)) return row.implicitTag
+  return undefined
+}
+
+/**
+ * Whether a tag has the selection's type: the type of its value, or, while it is nil,
+ * the type it was declared with. A leading-dot name carries no type to compare.
+ */
+function tagFits(tag: SwiftValue, binding: ProjectionPayload | null): boolean {
+  const selected = binding?.get()
+  if (tokenName(tag) !== null || (selected !== undefined && tokenName(selected) !== null)) return true
+  if (selected !== undefined && selected.kind !== 'nil') return typeNameOf(tag) === typeNameOf(selected)
+  const declared = binding?.declared?.name
+  return declared === undefined || typeNameOf(tag) === (DECLARED_AS_RUNTIME[declared] ?? declared)
+}
+
+/** Declared names the preview holds as another type: a `CGFloat` is a `Double` here. */
+const DECLARED_AS_RUNTIME: Readonly<Record<string, string>> = { CGFloat: 'Double', Float: 'Double' }
+
 /** A `ForEach`'s rows are siblings of whatever surrounds it, never a nested container. */
 function flattenForEach(views: readonly ViewValue[]): ViewValue[] {
   return views.flatMap((v) => (v.name === 'ForEach' ? flattenForEach(v.children) : [v]))
-}
-
-function tagValue(page: ViewValue): SwiftValue {
-  return collectModifier([page], 'tag')?.args[0]?.value ?? { kind: 'nil' }
 }
 
 /** Depth-first search for the first view with a given name. */

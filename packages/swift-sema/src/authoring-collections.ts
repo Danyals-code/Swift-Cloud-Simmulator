@@ -1,4 +1,5 @@
 import { SUPPORTED_VIEWS } from './builtins'
+import { deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, CollectionSettings, DesignValue, DesignRecord, RecordField } from '@studio/shared'
 import { afterOffMarkers, type VarDecl } from '@studio/swift-syntax'
 import { callOf, hasComments, shadowsMember, identifier, insertMember, literal, namedStruct, ownerOf, patch, raw, scalarType, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
@@ -87,7 +88,7 @@ export function bindField(ctx: FeatureContext, node: AuthoringNode, fieldName: s
   const field = info?.fields.find(f => f.name === fieldName)
   if (!info || !field || !call) throw new Error('Select a Text or Image inside a supported row template.')
   if (['Toggle', 'TextField', 'SecureField'].includes(node.name)) {
-    if (Number.parseFloat(ctx.deploymentTarget ?? '17.0') < 15) throw new Error('Editable collection rows require iOS 15 or later.')
+    if (deploymentVersion(ctx.deploymentTarget) < 15) throw new Error('Editable collection rows require iOS 15 or later.')
     const type = node.name === 'Toggle' ? 'Bool' : 'String', label = node.name === 'Toggle' ? 'isOn' : 'text'
     const argument = call.args.find(a => a.label === label)
     if (!argument || !info.mutable || !field.mutable || field.optional || field.type !== type) throw new Error(`This control needs a mutable, nonoptional ${type} field in a local @State collection.`)

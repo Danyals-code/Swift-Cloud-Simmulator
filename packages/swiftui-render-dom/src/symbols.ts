@@ -13,7 +13,9 @@ const PRIMITIVES: Readonly<Record<string, string>> = {
   "equal": "<path d=\"M80 176H432M80 336H432\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"32\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "chevrons": "<path d=\"M128 176 256 48 384 176M128 336 256 464 384 336\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"32\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "arrowupright": "<path d=\"M96 416 416 96M160 96H416V352\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"32\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
-  "arrowdownleft": "<path d=\"M416 96 96 416M96 160V416H352\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"32\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
+  "arrowdownleft": "<path d=\"M416 96 96 416M96 160V416H352\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"32\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+  "digit1": "<path d=\"M200 144 272 96V416M200 416H344\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"32\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+  "digit2": "<path d=\"M168 176a88 88 0 0 1 176 0c0 64-72 112-176 240h176\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"32\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"
 }
 
 export interface SymbolAsset {

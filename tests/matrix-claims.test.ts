@@ -94,7 +94,7 @@ describe('Link and AsyncImage, which needed a URL to be constructible at all', (
     const result = run(
       view('Link("Docs", destination: URL(string: "https://example.com")!)'),
     )
-    expect(diagnostics(result).join(' ')).toContain('only the label is drawn')
+    expect(diagnostics(result).join(' ')).toContain('tapping it opens nothing')
     expect(texts(result)).toContain('Docs')
   })
 

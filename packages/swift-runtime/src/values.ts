@@ -54,6 +54,12 @@ export interface BoolValue {
 export interface StringValue {
   readonly kind: 'string'
   readonly value: string
+  /**
+   * The styled text an interpolation of a `Text` stands for:
+   * `"\(Text("Bold").bold()) go"`. `Text` draws that, and everything else, a Button's
+   * title or a navigation title, reads the plain `value`.
+   */
+  readonly styled?: SwiftValue
 }
 
 /** Mutable in place; copied at every assignment and argument boundary. */
@@ -424,19 +430,15 @@ export function asKeyPath(value: SwiftValue | undefined): KeyPathPayload | null 
 }
 
 /**
- * Applies a key path to a value.
+ * Applies a key path to a value, reading each member as `read` does.
  *
  * `\.self` is the identity path, which is why it is the idiomatic `ForEach(_:id:)`
- * argument for an array of plain strings. Anything else walks stored fields.
+ * argument for an array of plain strings. Anything else is read as Swift reads it:
+ * the interpreter's reader takes a stored or computed property, a `rawValue` or a
+ * tuple's element alike.
  */
-export function applyKeyPath(path: KeyPathPayload, value: SwiftValue): SwiftValue {
-  let current = value
-  for (const component of path.components) {
-    if (component === 'self') continue
-    if (current.kind !== 'struct') return NIL
-    current = current.fields.get(component) ?? NIL
-  }
-  return current
+export function readKeyPath(path: KeyPathPayload, value: SwiftValue, read: (value: SwiftValue, member: string) => SwiftValue | undefined): SwiftValue {
+  return path.components.reduce<SwiftValue>((current, component) => component === 'self' ? current : read(current, component) ?? NIL, value)
 }
 
 // --------------------------------------------------------------- projections
@@ -458,6 +460,21 @@ export interface ProjectionPayload {
   set(value: SwiftValue): void
   /** For diagnostics: `count`, `self.isOn`. */
   readonly description: string
+  /** What the bound property was declared as, where its declaration wrote a type. */
+  readonly declared?: DeclaredType
+}
+
+/**
+ * A property's declared type: `var choice: Flavor?` is an Optional `Flavor`.
+ *
+ * Its value alone can't say so. A present optional is held as the value itself, and a
+ * nil one has no type at all, while a `Picker` needs both: its rows' own tags answer
+ * only a selection of their own type, and never an Optional one.
+ */
+export interface DeclaredType {
+  readonly optional: boolean
+  /** The type's name, Optional or not, where it is a plain name: `Flavor`. */
+  readonly name?: string
 }
 
 export function projection(payload: ProjectionPayload): OpaqueValue {

@@ -1,4 +1,5 @@
-import { DEFAULT_PREVIEW_TARGET } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, DEFAULT_PREVIEW_TARGET } from '@studio/shared'
+import { DEFAULT_DEVICE } from '@studio/sim-shell'
 import type { SourceFile } from '@studio/shared'
 import { STARTER_TEMPLATE_ID, TEMPLATE_CATALOG, type TemplateInfo } from './catalog'
 import { fingerprintFiles, newProjectId } from './open'
@@ -1201,9 +1202,9 @@ export function createProjectFromTemplate(template: Template, now: number = Date
     manifest: {
       name: appName,
       bundleId: `com.example.${appName}`,
-      deploymentTarget: '17.0',
+      deploymentTarget: DEFAULT_DEPLOYMENT_TARGET,
       previewTarget: DEFAULT_PREVIEW_TARGET,
-      device: 'iphone-15',
+      device: DEFAULT_DEVICE,
       colorScheme: 'light',
       // What `isPristine` compares against later, so the confirmation before a
       // replacement can tell "untouched" from "worked on" without the corpus.

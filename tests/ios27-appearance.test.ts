@@ -39,14 +39,14 @@ function tap(result: CompileResult, label: string) {
 
 describe('iOS 27 target persistence', () => {
   const project = () => projectFromFiles([{ name: 'App.swift', text: 'import SwiftUI\nstruct A: View { var body: some View { Text("Hello") } }' }])!
-  it('uses iOS 27 without changing the exported deployment target or source', async () => {
+  it('keeps iOS 27, as preview and as deployment target, through a save and a share link', async () => {
     const original = project()
     const store = new MemoryProjectStore()
     await store.save(original)
     const loaded = (await store.load(original.id))!
     const decoded = decodeProject(encodeProject(loaded)!, 0)!
     expect(decoded.manifest.previewTarget).toEqual(DEFAULT_PREVIEW_TARGET)
-    expect(decoded.manifest.deploymentTarget).toBe('17.0')
+    expect(decoded.manifest.deploymentTarget).toBe('27.0')
     expect(decoded.files).toEqual(original.files)
   })
   it('migrates old stored projects without modifying their source', async () => {

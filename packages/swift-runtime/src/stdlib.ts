@@ -1,7 +1,7 @@
 import type { CallArgument } from './host'
 import { PREVIEW_LIMITS } from './limits'
+import { CALENDAR_TYPE, TIMER_TYPE, calendarValue, callCalendarMember, callTimerMember, formatDate, timerValue, leadingDotName } from './calendar'
 import {
-  applyKeyPath,
   array,
   asDate,
   asIndexSet,
@@ -29,6 +29,8 @@ import {
   VOID,
   type ClosureValue,
   type SwiftValue,
+  readKeyPath,
+  type KeyPathPayload,
 } from './values'
 
 type Invoke = (closure: ClosureValue, args: readonly SwiftValue[]) => SwiftValue
@@ -43,6 +45,14 @@ type Trap = (reason: string) => never
  * traps when the receiver is not assignable.
  */
 type ReplaceSelf = (value: SwiftValue) => void
+/** Reads `value.name` as the interpreter does. */
+type ReadMember = (value: SwiftValue, name: string) => SwiftValue | undefined
+
+/** What a range of integers does as the collection of them: `(0..<3).map { … }`. */
+const RANGE_SEQUENCE_MEMBERS: ReadonlySet<string> = new Set([
+  'map', 'compactMap', 'flatMap', 'filter', 'forEach', 'reduce', 'first', 'allSatisfy', 'sorted', 'reversed',
+  'shuffled', 'randomElement', 'enumerated', 'min', 'max', 'prefix', 'suffix', 'dropFirst', 'dropLast',
+])
 
 /**
  * Swift's rounding rule: halves go away from zero.
@@ -266,8 +276,11 @@ export function callBuiltinMember(
   invoke: Invoke,
   trap: Trap,
   replaceSelf: ReplaceSelf,
+  read: ReadMember,
 ): SwiftValue | undefined {
   const arg = (i: number): SwiftValue | undefined => args[i]?.value
+  /** A key path as a function, read as Swift reads it: computed properties and `rawValue` too. */
+  const keyPathFunction = (path: KeyPathPayload) => (element: SwiftValue): SwiftValue => readKeyPath(path, element, read)
   const labelled = (name: string): SwiftValue | undefined =>
     args.find((a) => a.label === name)?.value
 
@@ -285,7 +298,7 @@ export function callBuiltinMember(
     if (value?.kind === 'closure') return (element) => invoke(value, [element])
 
     const path = asKeyPath(value)
-    if (path) return (element) => applyKeyPath(path, element)
+    if (path) return keyPathFunction(path)
 
     trap(`'${member}' requires a closure or key path argument`)
   }
@@ -301,7 +314,7 @@ export function callBuiltinMember(
       return stringMethod(target.value, member, arg, labelled, replaceSelf, trap)
 
     case 'array':
-      return arrayMethod(target, member, args, arg, labelled, closureArg, unaryArg, invoke, trap)
+      return arrayMethod(target, member, args, arg, labelled, closureArg, unaryArg, keyPathFunction, invoke, trap)
 
     case 'dictionary':
       switch (member) {
@@ -404,9 +417,7 @@ export function callBuiltinMember(
         case 'rounded': {
           // `.rounded(.up)` and friends. The bare form rounds halves away from zero,
           // which is Swift's rule and not `Math.round`'s.
-          const rule = arg(0)
-          const name = rule?.kind === 'opaque' ? String((rule.payload as { name?: string }).name ?? '') : ''
-          switch (name) {
+          switch (leadingDotName(arg(0))) {
             case 'up':
               return double(Math.ceil(target.value))
             case 'down':
@@ -446,11 +457,18 @@ export function callBuiltinMember(
           const n = target.boundType === 'Date' ? asDate(value)?.epochSeconds ?? NaN : numericValue(value)
           return bool(n >= target.lower && (target.closed ? n <= target.upper : n < target.upper))
         }
-        default:
-          return undefined
+        default: {
+          // `(0..<3).map { … }`: for everything else a range of integers is the collection of them.
+          if (target.boundType === 'Date' || !RANGE_SEQUENCE_MEMBERS.has(member)) return undefined
+          const count = Math.max(0, target.upper - target.lower + (target.closed ? 1 : 0))
+          if (!Number.isSafeInteger(count) || count > PREVIEW_LIMITS.collectionElements) trap(`A range of ${count.toLocaleString()} elements exceeds the preview limit of ${PREVIEW_LIMITS.collectionElements.toLocaleString()}`)
+          return callBuiltinMember(array(Array.from({ length: count }, (_, i) => int(target.lower + i))), member, args, invoke, trap, replaceSelf, read)
+        }
       }
 
     case 'opaque': {
+      if (target.typeName === TIMER_TYPE) return callTimerMember(target, member)
+      if (target.typeName === CALENDAR_TYPE) return callCalendarMember(member, args)
       const date = asDate(target)
       if (date) {
         switch (member) {
@@ -466,11 +484,7 @@ export function callBuiltinMember(
             // The locale-formatted form, which is what `formatted()` is for. The
             // locale is the browser's, so this is the only member of `Date` whose
             // answer legitimately differs between two machines.
-            return str(
-              new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-                new Date(date.epochSeconds * 1000),
-              ),
-            )
+            return formatDate(date.epochSeconds, args)
           case 'description':
             return str(dateDescription(date.epochSeconds))
           default:
@@ -618,6 +632,7 @@ function arrayMethod(
   labelled: (name: string) => SwiftValue | undefined,
   closureArg: (i?: number) => ClosureValue,
   unaryArg: (i?: number) => (value: SwiftValue) => SwiftValue,
+  keyPathFunction: (path: KeyPathPayload) => (value: SwiftValue) => SwiftValue,
   invoke: Invoke,
   trap: Trap,
 ): SwiftValue | undefined {
@@ -637,7 +652,7 @@ function arrayMethod(
     if (named?.kind === 'closure') return (element) => invoke(named, [element])
 
     const path = asKeyPath(named)
-    if (path) return (element) => applyKeyPath(path, element)
+    if (path) return keyPathFunction(path)
 
     const last = args[args.length - 1]
     if (last && !last.label && last.value.kind === 'closure') {
@@ -980,16 +995,8 @@ function arrayMethod(
         ? NIL
         : [...target.elements].sort(compareValues)[target.elements.length - 1]!
     case 'enumerated':
-      return array(
-        target.elements.map((e, i) => ({
-          kind: 'struct' as const,
-          typeName: 'EnumeratedElement',
-          fields: new Map<string, SwiftValue>([
-            ['offset', int(i)],
-            ['element', e],
-          ]),
-        })),
-      )
+      // `(offset:element:)` tuples, as Swift's are, so `{ index, item in }` takes them apart.
+      return array(target.elements.map((e, i) => tuple([int(i), e], ['offset', 'element'])))
     default:
       return undefined
   }
@@ -1043,7 +1050,7 @@ const INT_MIN = -Number.MAX_SAFE_INTEGER
  */
 export const BUILTIN_TYPE_NAMES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'CGFloat', 'Bool', 'String', 'Character',
-  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL',
+  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL', 'Timer', 'Calendar',
 ])
 
 /** `Int.max`, `Double.pi`, `Date.now` - a static read on a built-in type. */
@@ -1068,6 +1075,9 @@ export function staticBuiltinProperty(typeName: string, member: string): SwiftVa
       return double(0)
     case 'Date.now':
       return dateValue(Date.now() / 1000)
+    case 'Calendar.current':
+    case 'Calendar.autoupdatingCurrent':
+      return calendarValue()
     case 'Date.distantPast':
       return dateValue(-62_135_596_800)
     case 'Date.distantFuture':
@@ -1084,6 +1094,8 @@ export function callStaticBuiltin(
   args: readonly CallArgument[],
   trap: Trap,
 ): SwiftValue | undefined {
+  // `Timer.publish(every:on:in:)` and `Timer.scheduledTimer(...)`: a timer that never fires here.
+  if (typeName === 'Timer' && (member === 'publish' || member === 'scheduledTimer')) return timerValue()
   if (member !== 'random') return undefined
 
   if (typeName === 'Bool') return bool(Math.random() < 0.5)

@@ -24,6 +24,7 @@ import {
   CENTER,
   FontMetricsTable,
   LayoutEngine,
+  ZERO_INSETS,
   type LayoutElement,
   type LayoutEnvironment,
   type MeasuredFont,
@@ -36,6 +37,7 @@ import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } 
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import type { NotDrawn, OverlayKind } from './presentation'
+import type { GeometryPayload } from './view-value'
 
 /**
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
@@ -508,8 +510,8 @@ function toResult(
   }))
 
   // A sheet can be resolved more than once in a pass, so each place is said once.
-  const notDrawn = [...new Map((evaluation?.ui?.notDrawn ?? []).map((item) => [`${item.span.file}:${item.span.start}:${item.span.end}`, item])).values()]
-  const diagnostics = [...analysis.diagnostics, ...notDrawn.map(notDrawnWarning)]
+  const resolved = [...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning), ...(evaluation?.ui?.warnings ?? [])]
+  const diagnostics = [...analysis.diagnostics, ...new Map(resolved.map((warning) => [`${warning.span.file}:${warning.span.start}:${warning.span.end}`, warning])).values()]
   if (evaluation?.failure) {
     diagnostics.push({
       span: evaluation.failure.span,
@@ -774,15 +776,25 @@ function renderPages(
   return out.map(page => ({ ...page, rootId: renamedIds.get(page.rootId ?? '') ?? page.rootId, parentId: renamedIds.get(page.parentId ?? '') ?? page.parentId }))
 }
 
-/** The measured size of every geometry reader in a tree, keyed as it reported. */
-function geometryFrom(tree: RenderTree): Map<string, { width: number; height: number }> {
-  const sizes = new Map<string, { width: number; height: number }>()
-  for (const node of tree.nodes) {
-    if (!node.id.startsWith('geo:')) continue
-    sizes.set(node.id.slice(4), { width: node.frame.width, height: node.frame.height })
+/** What every geometry reader in a tree was measured at, its size, place on the screen and safe area, keyed as it reported. */
+function geometryFrom(tree: RenderTree): Map<string, GeometryPayload> {
+  const measured = new Map<string, GeometryPayload>()
+  // A sheet's nodes are prefixed with `overlay/`, and its readers are measured too.
+  const readers = tree.nodes.filter((node) => node.id.includes('geo:'))
+  if (readers.length === 0) return measured
+  const byId = new Map(tree.nodes.map((node) => [node.id, node]))
+  for (const node of readers) {
+    // Where it is on the screen: its frame is in its parent's space, and so on up.
+    let { x, y } = node.frame
+    for (let up = node.parent ? byId.get(node.parent) : undefined; up; up = up.parent ? byId.get(up.parent) : undefined) {
+      x += up.frame.x
+      y += up.frame.y
+    }
+    measured.set(node.id.slice(node.id.indexOf('geo:') + 4), { width: node.frame.width, height: node.frame.height, x, y, insets: node.geometryInsets ?? ZERO_INSETS })
   }
-  return sizes
+  return measured
 }
+
 
 /**
  * What `@Environment` reports, from what the preview controls are set to.

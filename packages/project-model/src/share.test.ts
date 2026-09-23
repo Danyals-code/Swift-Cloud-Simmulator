@@ -9,6 +9,7 @@ import {
   shareLink,
   type TemplateKind,
 } from './index'
+import { DEFAULT_DEVICE } from '@studio/sim-shell'
 import { createProjectFromTemplate, TEMPLATES } from './templates'
 import type { Project } from './types'
 
@@ -223,7 +224,7 @@ describe('a payload that would escape the archive', () => {
     // trade. Everything that reaches a *path* is refused instead.
     const decoded = decodeProject(payload({ t: 'nope' }), 0)
     expect(decoded).not.toBeNull()
-    expect(decoded?.manifest.device).toBe('iphone-15')
+    expect(decoded?.manifest.device).toBe(DEFAULT_DEVICE)
   })
 })
 
