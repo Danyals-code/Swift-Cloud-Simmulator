@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { assertSource, replaceSource } from './designer-helpers'
+import { assertSource, openCounter, replaceSource } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 @main struct PagesApp: App { var body: some Scene { WindowGroup { ContentView() } } }
@@ -53,8 +53,7 @@ async function threePanels(page: Page) {
   await expect(page.getByTestId('design-navigator')).toHaveAttribute('data-layout', 'split')
 }
 async function open(page: Page) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   await replaceSource(page, SOURCE)
   await expect(page.getByTestId('render-tree').getByText('Library heading', { exact: true })).toBeVisible()

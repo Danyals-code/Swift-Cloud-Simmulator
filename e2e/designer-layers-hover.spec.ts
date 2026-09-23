@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { assertSource, replaceSource } from './designer-helpers'
+import { assertSource, openCounter, replaceSource } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 struct Book: Identifiable { let id: String; let title: String }
@@ -40,8 +40,7 @@ struct BookRow: View {
 }`
 
 async function open(page: Page, source = SOURCE, expandList = true) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   await replaceSource(page, source)
   await expect(mainPreview(page).getByText('First book', { exact: true })).toBeVisible()

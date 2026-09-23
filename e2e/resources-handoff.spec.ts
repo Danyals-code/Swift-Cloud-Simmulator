@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { unzipSync, zipSync } from 'fflate'
 
@@ -30,8 +31,7 @@ const photo = readFileSync(new URL('../tests/fixtures/authoring-photo.png', impo
 /** The focused screen's layers, which the default one-tree navigator nests under the screen. */
 const layerTree = (page: Page) => page.getByTestId('logical-layers').getByRole('group', { name: 'Design layers', exact: true })
 async function open(page: Page) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(SOURCE)

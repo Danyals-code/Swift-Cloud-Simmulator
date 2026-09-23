@@ -8,8 +8,11 @@ async function start(page: Page) {
   await expect(page.getByTestId('add-screen')).toBeEnabled()
   // The blank template's one screen is already called Home.
   await expect(screenButton(page, 'Home')).toBeVisible()
+  // The canvas redraws for editing once Design opens; buttons pressed meanwhile are off.
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
 }
 async function add(page: Page, kind: string) {
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
   await expect(page.getByTestId('add-view')).toBeEnabled()
   await page.getByTestId('add-view').click()
   await page.getByTestId(`add-view-${kind}`).click()

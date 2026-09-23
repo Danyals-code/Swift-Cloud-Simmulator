@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { replaceSource } from './designer-helpers'
+import { openCounter, replaceSource } from './designer-helpers'
 
 const source = `import SwiftUI
 @main struct DemoApp: App {
@@ -18,8 +18,7 @@ struct SecondScreen: View {
 }`
 
 test('same-named screen states are saved, selected and deleted independently', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   await replaceSource(page, source)
   await page.getByTestId('workspace-design').click()

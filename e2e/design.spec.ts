@@ -77,8 +77,7 @@ async function openProblems(page: Page) {
 
 /** Opens the studio on a known screen, in Design with the Edit tool. */
 async function openDesign(page: Page) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -325,8 +324,7 @@ struct HomeScreen: View {
 })
 
 test('a drag can carry a view into another container', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -351,8 +349,7 @@ test('a drag can carry a view into another container', async ({ page }) => {
 })
 
 test('a selected container is dragged from anywhere inside it', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -536,8 +533,7 @@ test('the Delete tool takes out the view that is clicked', async ({ page }) => {
 })
 
 test('an edit that cannot be made says so and changes nothing', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -602,8 +598,7 @@ test('choosing a page in Layers brings it into view', async ({ page }) => {
   // Product bug: the outline and the lane headers read "One" three times, while the phones
   // read One, Two, Three. Chosen by position, the third row does centre the right page.
   test.fixme(true, 'Layers names every inline TabView tab after the first ("One"), so "Three" cannot be chosen (designTree.ts:66-69, screens.ts:27)')
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -692,8 +687,7 @@ test('the canvas bar is one line, inside the panel that reports on the app', asy
 })
 
 test('the wheel belongs to the canvas while designing and to the app while previewing', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -756,8 +750,7 @@ struct ContentView: View {
 })
 
 test('leaving Edit with the gallery open leaves the live page exactly where it was', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -782,8 +775,7 @@ test('leaving Edit with the gallery open leaves the live page exactly where it w
 })
 
 test('the simulated app scrolls without a scrollbar down the side of the phone', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
