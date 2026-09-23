@@ -373,3 +373,55 @@ describe('C3: a switched-off last modifier is part of its view', () => {
     expect(parses(moved)).toBe(true)
   })
 })
+
+describe('C4: a drop onto the container a view is in', () => {
+  const screen = `import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            HStack {
+                Text("A")
+                Text("B")
+            }
+            Text("C")
+        }
+    }
+}
+`
+
+  it('takes a view dropped after its own container out, to just after it', () => {
+    const moved = moveViewTo(screen, FILE, offsetOf(screen, 'Text("A")'), offsetOf(screen, 'HStack'), 'after')!
+    expect(moved.text).toContain('            HStack {\n                Text("B")\n            }\n            Text("A")\n            Text("C")\n')
+    expect(moved.text.slice(moved.offset)).toMatch(/^Text\("A"\)/)
+  })
+
+  it('makes a view dropped inside a container its last child', () => {
+    const moved = moveViewTo(screen, FILE, offsetOf(screen, 'Text("C")'), offsetOf(screen, 'HStack'), 'inside')!
+    expect(moved.text).toContain('            HStack {\n                Text("A")\n                Text("B")\n                Text("C")\n            }\n        }')
+    expect(moved.text.slice(moved.offset)).toMatch(/^Text\("C"\)/)
+  })
+
+  it('refuses to drop a view inside something that is not a container', () => {
+    expect(moveViewTo(screen, FILE, offsetOf(screen, 'Text("A")'), offsetOf(screen, 'Text("C")'), 'inside')).toBeNull()
+  })
+
+  it('takes a drop onto its own section’s header as a drop after that section', () => {
+    const list = `import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        List {
+            Section(header: Text("Header")) {
+                Text("Row")
+                Text("Next")
+            }
+        }
+    }
+}
+`
+    const moved = moveViewTo(list, FILE, offsetOf(list, 'Text("Row")'), offsetOf(list, 'Text("Header")'), 'after')!
+    expect(moved.text).toContain('            Section(header: Text("Header")) {\n                Text("Next")\n            }\n            Text("Row")\n        }')
+    expect(parses(moved.text)).toBe(true)
+  })
+})

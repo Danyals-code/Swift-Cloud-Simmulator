@@ -472,3 +472,39 @@ describe('C3: a switched-off last modifier stays with its view', () => {
     expect(restructured(source, { kind: 'insert', snippet: 'NavigationLink("Next") { Text("Detail") }' }, 'Text')).toContain('    /*studio-off:1 ".padding()"*/\n}')
   })
 })
+
+describe('C4: dragging a view after, or into, its own container', () => {
+  // The blank screen once a designer has added two lines of text, with the #Preview that follows it.
+  const blank = `import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Title")
+                Text("Subtitle")
+            }
+            .padding(24)
+        }
+    }
+}
+
+#Preview {
+    HomeScreen()
+}
+`
+  const drag = (position: 'before' | 'after' | 'inside', name = 'Text', index = 0) =>
+    restructured(blank, { kind: 'moveTo', targetOffset: blank.indexOf('VStack(spacing'), position }, name, index)
+
+  it('moves a view dropped after its own container out, to just after it', () => {
+    expect(drag('after')).toBe(blank.replace('                Text("Title")\n', '').replace('            .padding(24)\n', '            .padding(24)\n            Text("Title")\n'))
+  })
+
+  it('makes a view dropped into its own container that container’s last child', () => {
+    expect(drag('inside')).toBe(blank.replace('                Text("Title")\n                Text("Subtitle")\n', '                Text("Subtitle")\n                Text("Title")\n'))
+  })
+
+  it('moves a view dropped before its own container out, to just before it', () => {
+    expect(drag('before', 'Text', 1)).toBe(blank.replace('                Text("Subtitle")\n', '').replace('            VStack(spacing: 16) {\n', '            Text("Subtitle")\n            VStack(spacing: 16) {\n'))
+  })
+})

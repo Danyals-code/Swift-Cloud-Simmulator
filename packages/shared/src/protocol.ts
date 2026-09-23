@@ -221,7 +221,8 @@ export type ViewEdit =
   | { readonly kind: 'move'; readonly direction: -1 | 1 }
   | { readonly kind: 'insert'; readonly snippet: string }
   /** A drag: put this view before or after another one, wherever that one is. */
-  | { readonly kind: 'moveTo'; readonly targetOffset: number; readonly position: 'before' | 'after' }
+  /** `inside` makes the view the target container's last child. */
+  | { readonly kind: 'moveTo'; readonly targetOffset: number; readonly position: 'before' | 'after' | 'inside' }
   | { readonly kind: 'hide' }
   | { readonly kind: 'show' }
 

@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthoringNode, DesignEditRequest, ExportFormat, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
-import { validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
+import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
@@ -1030,7 +1030,7 @@ export function Studio() {
    * needs, and it is the parser that decides whether the result is a file that
    * still compiles.
    */
-  const reorderLayers = useCallback((layer: ViewLayer, target: ViewLayer, position: 'before' | 'after') => {
+  const reorderLayers = useCallback((layer: ViewLayer, target: ViewLayer, position: 'before' | 'after' | 'inside') => {
     const from = layer.source
     const to = target.source
     if (!from || !to || from.file !== to.file) {
@@ -1040,8 +1040,14 @@ export function Studio() {
     void applyEdit({ kind: 'moveTo', targetOffset: to.start, position }, layer)
   }, [applyEdit])
 
+  /** The stack a canvas drop onto this node goes into - its own empty space, usually its background - or null. */
+  const containerAt = useCallback((node: RenderNode) => {
+    const layer = layerForRenderNode(layers, node)
+    return layer && LAYER_MOVE_CONTAINERS.has(layer.type) ? layer.type : null
+  }, [layers])
+
   /** A drop on the canvas, named in the terms the file understands. */
-  const reorderNodes = useCallback((source: RenderNode | 'selection', target: RenderNode, position: 'before' | 'after') => {
+  const reorderNodes = useCallback((source: RenderNode | 'selection', target: RenderNode, position: 'before' | 'after' | 'inside') => {
     const from = source === 'selection' ? selectedLayer : layerForRenderNode(layers, source)
     const to = layerForRenderNode(layers, target)
     if (!from || !to || from.id === to.id) return
@@ -1506,6 +1512,7 @@ export function Studio() {
                 settingsTitle={settingsTitle}
                 onSelectBackground={mode === 'design' ? selectApp : undefined}
                 onReorderNodes={reorderNodes}
+                containerAt={containerAt}
                 centerOn={centerOn}
                 status={previewStatus}
                 onDeviceChange={setDevice}

@@ -392,7 +392,8 @@ export interface HiddenView {
 }
 
 /**
- * Moves the view at `offset` to sit before or after another one.
+ * Moves the view at `offset` to sit before or after another one, or inside it as its
+ * last child.
  *
  * The general form of a move: the statement's text is cut and put back at the
  * target, so it works between siblings, into a different container and out of one -
@@ -404,12 +405,14 @@ export function moveViewTo(
   file: FileId,
   offset: number,
   targetOffset: number,
-  position: 'before' | 'after',
+  position: 'before' | 'after' | 'inside',
 ): SourceEdit | null {
   const source = siteAt(text, file, offset)
   const target = siteAt(text, file, targetOffset, { near: true })
   if (!source || !target) return null
   if (source.stmt === target.stmt) return null
+  const targetStart = viewStartOf(target.stmt)
+  if (targetStart === null) return null
 
   const from = cutOf(text, source.stmt)
   const to = cutOf(text, target.stmt)
@@ -421,17 +424,15 @@ export function moveViewTo(
     ? stripIndent(text.slice(from.start, from.end).replace(/\r?\n$/, ''), from.indent)
     : text.slice(extent.start, extent.end)
 
-  // Cut first, then place: with the source gone, everything after it has moved left
-  // by the length of the cut.
+  // Cut first, then find the target again in what is left. Only its start can be
+  // worked out from before the cut: a target that held the view got shorter rather
+  // than moving, so its end and its lines are read from the new text.
   const without = text.slice(0, from.start) + text.slice(from.end)
-  const shift = from.start < to.start ? from.end - from.start : 0
-  const anchor = {
-    start: to.start - shift,
-    end: to.end - shift,
-    after: to.after - shift,
-    indent: to.indent,
-    ownLine: to.ownLine,
-  }
+  const moved = targetStart >= from.end ? targetStart - (from.end - from.start) : targetStart
+  const again = siteAt(without, file, moved)
+  if (!again) return null
+  if (position === 'inside') return contentBlockOf(again.stmt) ? insertView(without, file, moved, body) : null
+  const anchor = cutOf(without, again.stmt)
 
   if (anchor.ownLine) {
     const at = position === 'before' ? anchor.start : anchor.end
