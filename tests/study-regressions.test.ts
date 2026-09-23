@@ -419,6 +419,7 @@ describe('E5: colours match the iOS 27 simulator', () => {
     }
     expect(warnings('Rectangle().fill(Color(.systemGray6))')).toEqual([])
     expect(warnings('Rectangle().fill(Color.brand)', 'extension Color { static let brand = Color.blue }')).toEqual([])
+    expect(warnings('Rectangle().fill(Color.hex("#FF0000"))', 'extension Color { static func hex(_ value: String) -> Color { Color.red } }')).toEqual([])
     expect(warnings('Rectangle().fill(Color(.sRGB, red: 1, green: 0, blue: 0))')).toEqual([])
   })
 
@@ -497,10 +498,16 @@ describe('E6: trim draws the part of the path iOS 27 draws', () => {
     expect(pathOf(ring)).toBe('M 70 7 A 63 63 0 1 0 120.97 107.03')
   })
 
-  it('warns that a trimmed fill is drawn whole, and not a trimmed stroke', () => {
-    const warnings = (body: string) => compileView(viewSource(`var body: some View { ${body} }`)).diagnostics.map(d => `${d.severity}: ${d.message}`)
+  it('warns where a trim is drawn whole, on a filled or dashed shape, and nowhere else', () => {
+    const warnings = (body: string, declarations = '') =>
+      compileView(viewSource(`var body: some View { ${body} }`, declarations)).diagnostics.map(d => `${d.severity}: ${d.message}`)
     expect(warnings('Circle().trim(from: 0, to: 0.5).fill(Color.red)')).toEqual([expect.stringMatching(/^warning: .*trim/)])
+    expect(warnings('Circle().trim(from: 0, to: 0.5).stroke(Color.red, style: StrokeStyle(lineWidth: 4, dash: [4, 2]))'))
+      .toEqual([expect.stringMatching(/^warning: .*dash/)])
     expect(warnings('Circle().trim(from: 0, to: 0.5).offset(x: 2, y: 0).stroke(Color.red)')).toEqual([])
+    // A path is trimmed, filled or not, and a project's own `trim()` is its own.
+    expect(warnings('Path { p in p.addArc(center: CGPoint(x: 50, y: 50), radius: 40, startAngle: .degrees(0), endAngle: .degrees(360), clockwise: false) }.trim(from: 0, to: 0.5).fill(Color.red)')).toEqual([])
+    expect(warnings('Text("  name ".trim())', 'extension String { func trim() -> String { self } }')).toEqual([])
   })
 })
 

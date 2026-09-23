@@ -82,6 +82,8 @@ export class Checker {
   private readonly declaredExtensionProperties = new Set<string>()
   /** Shape calls a `.stroke` or `.strokeBorder` is written on, so a `.trim` among them is a trimmed stroke. */
   private readonly stroked = new WeakSet<Expr>()
+  /** The same, for a dashed stroke, which the preview draws untrimmed. */
+  private readonly dashStroked = new WeakSet<Expr>()
   /** `typealias` names, which resolve as types anywhere the target would. */
   private readonly typeAliases = new Set<string>()
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
@@ -1076,31 +1078,40 @@ export class Checker {
   private checkTrim(call: Expr & { kind: 'call' }): void {
     if (call.callee.kind !== 'memberAccess') return
     if (call.callee.member === 'stroke' || call.callee.member === 'strokeBorder') {
+      const marks = isDashed(call) ? this.dashStroked : this.stroked
       for (let base = call.callee.base; base?.kind === 'call' && base.callee.kind === 'memberAccess'; base = base.callee.base) {
-        this.stroked.add(base)
+        marks.add(base)
       }
     }
+    // A Path and a custom shape trim their own path, and `trim()` on anything else is
+    // the project's own method: only the shapes the preview draws itself are drawn whole.
     if (call.callee.member !== 'trim' || this.stroked.has(call)) return
+    const shape = shapeAtRoot(call.callee.base)
+    if (!shape || !BUILT_IN_SHAPES.has(shape) || this.types.has(shape)) return
+    const dashed = this.dashStroked.has(call)
     this.report(
       call.callee.memberSpan,
       'warning',
       'unsupported_swiftui_modifier',
-      "The preview fills the whole shape here: it trims only strokes. Xcode fills just the trimmed part, closed by a straight line.",
-      '.trim on a filled shape',
+      dashed
+        ? 'The preview draws this dashed outline whole: it trims only strokes without a dash pattern. Xcode dashes just the trimmed part.'
+        : 'The preview fills the whole shape here: it trims only strokes. Xcode fills just the trimmed part, closed by a straight line.',
+      dashed ? '.trim on a dashed stroke' : '.trim on a filled shape',
     )
   }
 
   /**
    * Warns on a colour name the preview doesn't know, which it draws as clear.
    *
-   * Narrow on purpose, because a warning on correct code is worse than none: a name the
-   * project declares in an extension (`Color.brand`, how Tokens.swift writes a colour)
-   * is its own, a project type called `Color` is its own, and a capitalised member is a
-   * nested type (`Color.Resolved`), not a colour.
+   * Narrow on purpose, because a warning on correct code is worse than none: a property
+   * or function the project declares in an extension (`Color.brand`, how Tokens.swift
+   * writes a colour, or `Color.hex(…)`) is its own, a project type called `Color` is its
+   * own, and a capitalised member is a nested type (`Color.Resolved`), not a colour.
    */
   private checkColorName(name: string, span: SourceSpan): void {
     if (KNOWN_COLOR_NAMES.has(name) || name === 'init' || /^[A-Z]/.test(name)) return
-    if (this.declaredExtensionProperties.has(name) || this.types.has('Color') || this.types.has('UIColor')) return
+    if (this.declaredExtensionProperties.has(name) || this.declaredModifiers.has(name)) return
+    if (this.types.has('Color') || this.types.has('UIColor')) return
     this.report(
       span,
       'warning',
@@ -1249,3 +1260,21 @@ export function checkSourceFiles(files: readonly SourceFileNode[]): SemanticMode
 }
 
 export { SUPPORTED_VIEWS }
+
+/** The shapes the preview draws itself, rather than through a path. */
+const BUILT_IN_SHAPES: ReadonlySet<string> = new Set(['Circle', 'Ellipse', 'Rectangle', 'RoundedRectangle', 'Capsule'])
+
+/** `Circle` in `Circle().inset(by: 4)`: the call a chain of shape modifiers starts from. */
+function shapeAtRoot(expr: Expr | null): string | null {
+  let node = expr
+  while (node?.kind === 'call' && node.callee.kind === 'memberAccess') node = node.callee.base
+  return node?.kind === 'call' && node.callee.kind === 'identifier' ? node.callee.name : null
+}
+
+/** A stroke given `StrokeStyle(…, dash: […])` with at least one length. */
+function isDashed(stroke: Expr & { kind: 'call' }): boolean {
+  const style = stroke.args.find((arg) => arg.label === 'style')?.value
+  if (style?.kind !== 'call' || style.callee.kind !== 'identifier' || style.callee.name !== 'StrokeStyle') return false
+  const dash = style.args.find((arg) => arg.label === 'dash')?.value
+  return dash !== undefined && !(dash.kind === 'arrayLiteral' && dash.elements.length === 0)
+}
