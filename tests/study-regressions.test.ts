@@ -952,6 +952,16 @@ describe("E11a: a view the preview doesn't know draws a placeholder, not a blank
     expect(reported('var body: some View { Buton("Save") { } }')).toEqual([{ severity: 'error', message: expect.stringContaining("Did you mean 'Button'?"), at: 'Buton', fix: 'Button' }])
   })
 
+  it('offers a type, not a variable, for a misspelt type', () => {
+    expect(reported('@State private var counter = 0\n var body: some View { Countr(value: counter) }', 'struct Counter: View { let value: Int; var body: some View { Text("\\(value)") } }'))
+      .toEqual([{ severity: 'error', message: expect.stringContaining("Did you mean 'Counter'?"), at: 'Countr', fix: 'Counter' }])
+  })
+
+  it('keeps a capitalised call that is not written as a view an error, as it was', () => {
+    expect(reported('@State private var store = PantryStore()\n var body: some View { Text("Pantry") }')).toEqual([{ severity: 'error', message: "Cannot find 'PantryStore' in scope.", at: 'PantryStore', fix: undefined }])
+    expect(reported('var body: some View { Text(DateFormatter().string(from: Date())) }')).toMatchObject([{ severity: 'error', at: 'DateFormatter' }])
+  })
+
   it.each([
     ['Button("Save") { }', '.buttonStyle(PlainButtonStyle())', '.buttonStyle(.plain)'],
     ['Button("Save") { }', '.buttonStyle(BorderedProminentButtonStyle())', '.buttonStyle(.borderedProminent)'],

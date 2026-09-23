@@ -78,6 +78,12 @@ export class Checker {
   private inViewExtension = 0
   /** Non-zero inside an extension on a built-in type, whose members are not listed here. */
   private inBuiltinExtension = 0
+  /**
+   * The callee a statement is rooted at: `RatingView(rating: 3).padding()` on a line of
+   * its own. In SwiftUI code only a view stands there, so only there is a capitalised
+   * call nothing declares taken for one.
+   */
+  private viewCallee: Expr | null = null
 
   /** Method names the project adds in an extension - its own modifiers. */
   private readonly declaredModifiers = new Set<string>()
@@ -579,9 +585,13 @@ export class Checker {
 
   private checkStatement(statement: Stmt, scope: Scope): void {
     switch (statement.kind) {
-      case 'exprStmt':
+      case 'exprStmt': {
+        const outer = this.viewCallee
+        this.viewCallee = rootCallee(statement.expression)
         this.checkExpression(statement.expression, scope)
+        this.viewCallee = outer
         return
+      }
 
       case 'declStmt': {
         const decl = statement.declaration
@@ -905,7 +915,7 @@ export class Checker {
       // doesn't know, draws a placeholder rather than blanking the screen. A name a
       // letter or two from a type or view is a typo instead, and stays an error.
       const name = callee.name
-      if (!shadowed && /^[A-Z]/.test(name) && name !== 'Self' && !isKnownGlobal(name) && !this.typeAliases.has(name) && this.inBuiltinExtension === 0 && !this.nearestTypeName(name)) {
+      if (callee === this.viewCallee && !shadowed && /^[A-Z]/.test(name) && name !== 'Self' && !isKnownGlobal(name) && !this.typeAliases.has(name) && this.inBuiltinExtension === 0 && !this.nearestTypeName(name)) {
         this.report(
           callee.span,
           'warning',
@@ -964,7 +974,8 @@ export class Checker {
       return
     }
 
-    const suggestion = this.closestName(name, scope)
+    // A capitalised name is a type's, so a type is offered first: `Countr` is `Counter`, not a `counter`.
+    const suggestion = (/^[A-Z]/.test(name) ? this.nearestTypeName(name) : null) ?? this.nearestInScope(name, scope)
     this.report(
       span,
       'error',
@@ -976,7 +987,7 @@ export class Checker {
   }
 
   /** The nearest name that is actually in scope, or null. */
-  private closestName(name: string, scope: Scope): string | null {
+  private nearestInScope(name: string, scope: Scope): string | null {
     return nearestName(name, [...scope.allNames(), ...this.types.keys(), ...this.enums.keys(), ...SUPPORTED_VIEWS])
   }
 
@@ -1259,6 +1270,13 @@ export class Checker {
       ...(fixIts && fixIts.length > 0 ? { fixIts } : {}),
     })
   }
+}
+
+/** The callee of the call a chain of modifiers is rooted at: `RatingView` in `RatingView().padding()`. */
+function rootCallee(expr: Expr): Expr | null {
+  let current: Expr = expr
+  while (current.kind === 'call' && current.callee.kind === 'memberAccess' && current.callee.base) current = current.callee.base
+  return current.kind === 'call' && current.callee.kind === 'identifier' ? current.callee : null
 }
 
 /**

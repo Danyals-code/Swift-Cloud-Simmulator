@@ -14,8 +14,11 @@ containers and system APIs item by item, with native comparison limitations.
 name does not guarantee every overload, modifier combination, or Swift language feature.
 The status rows are a feature inventory, not a measured percentage of SwiftUI compatibility.
 
-Known unsupported view names produce placeholders and diagnostics. Unknown framework names can
-still produce unresolved-identifier errors. Recognized unsupported modifiers warn; unknown
+Known unsupported view names produce placeholders and diagnostics. So does a capitalised name the
+preview doesn't know, written where a view goes: it draws a labelled placeholder with a warning, and
+what it was given is not run. A name close to a type the project or SwiftUI declares stays an error
+that offers that type, and elsewhere, as in `let formatter = DateFormatter()`, an unknown name is
+still an unresolved-identifier error. Recognized unsupported modifiers warn; unknown
 modifiers warn when the checker can establish that the receiver is a view. The Coverage panel
 records these reports locally. It cannot detect all silent semantic differences.
 
