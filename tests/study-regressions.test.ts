@@ -1051,9 +1051,12 @@ describe('E12: what a GeometryReader reports, where it is placed', () => {
     expect(reads(place)).toEqual(expected(name))
   })
 
+  it('reports what the simulator reports on its geo-scroll screen', () => {
+    expect(reads((reader) => `ScrollView { ${reader}.frame(height: 200) }`)).toEqual(expected('geo-scroll'))
+  })
+
   it.each([
     ['geo-header', (reader: string) => `VStack { Text("Header").frame(height: 100); ${reader} }.padding()`],
-    ['geo-scroll', (reader: string) => `ScrollView { ${reader}.frame(height: 200) }`],
   ])('reports the insets the simulator reports on its %s screen', (name, place) => {
     expect(reads(place).insets).toEqual(expected(name).insets)
   })
@@ -1220,5 +1223,25 @@ describe('lists written over enumerated() and zip', () => {
         }
       }`)
     expect(texts(r)).toEqual(['1. Ada', '2. Grace', 'Ada at 0', 'Grace at 1'])
+  })
+})
+
+describe('a ScrollView puts a lone child at its top, as iOS 27 does', () => {
+  const measured = nativeII.scrollView.frames
+  const at = (r: CompileResult, node: RenderNode) => { const f = worldFrame(nodes(r), node); return [f.x, f.y, f.width, f.height] }
+
+  it('draws a fixed-height view where the simulator draws it', () => {
+    const r = screen('var body: some View { ScrollView { Color.red.frame(height: 200) } }')
+    const red = nodes(r).find(n => n.id !== 'screen' && n.background?.kind === 'solid' && n.frame.height === 200)!
+    expect(at(r, red)).toEqual(measured['scroll-fixed'])
+  })
+
+  it('draws a lone Text at the top, centred across, and its own height', () => {
+    const r = screen('var body: some View { ScrollView { Text("Hi") } }')
+    const [x, y, width] = measured['scroll-text']
+    const text = placed(r, 'Hi')
+    expect(Math.abs(text.y - y)).toBeLessThanOrEqual(1)
+    expect(Math.abs(text.x + text.width / 2 - (x + width / 2))).toBeLessThanOrEqual(1)
+    expect(text.height).toBeLessThan(40)
   })
 })

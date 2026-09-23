@@ -978,12 +978,14 @@ export class LayoutEngine {
 
     return this.place(
       element.content,
-      // The scroll extent can fill the viewport, while an intrinsic child keeps
-      // its measured cross-axis size and is centered (for example a padded VStack).
+      // An intrinsic child keeps its measured cross-axis size and is centred across (a
+      // padded VStack, for one). Along the axis it keeps its own length at the top, as
+      // measured in the iOS 27 simulator: a lone Text or a 200-point colour sits at the
+      // top, where given the whole viewport it was centred, or stretched, in it.
       { x: vertical ? Math.max(0, (bounds.width - content.width) / 2) : 0,
         y: vertical ? 0 : Math.max(0, (bounds.height - content.height) / 2),
         width: vertical ? content.width : contentSize.width,
-        height: vertical ? contentSize.height : content.height },
+        height: content.height },
       env,
       out,
       z + 1,
