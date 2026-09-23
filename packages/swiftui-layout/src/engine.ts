@@ -1301,7 +1301,8 @@ export class LayoutEngine {
         // `.background().padding()` not.
         const size = this.measure(modifier.content, { width: bounds.width, height: bounds.height }, inner)
         const behind = modifier.ignoresSafeAreaEdges ? reachIntoSafeArea(bounds, env, modifier.ignoresSafeAreaEdges).rect : bounds
-        const next = this.place(modifier.content, modifier.alignment ? alignedRect(behind, size, modifier.alignment) : behind, inner, out, z, parent)
+        const content = behind === bounds ? modifier.content : gradientKeptTo(modifier.content, bounds, behind)
+        const next = this.place(content, modifier.alignment ? alignedRect(behind, size, modifier.alignment) : behind, inner, out, z, parent)
         return this.place(element.child, bounds, inner, out, next, parent)
       }
 
@@ -2100,6 +2101,7 @@ function reachIntoSafeArea(bounds: Rect, env: LayoutEnvironment, edges: SafeArea
     leading: edges.leading && bounds.x <= area.inner.x + touching && area.outer.x < bounds.x,
     trailing: edges.trailing && bounds.x + bounds.width >= area.inner.x + area.inner.width - touching && area.outer.x + area.outer.width > bounds.x + bounds.width,
   }
+  if (!reached.top && !reached.bottom && !reached.leading && !reached.trailing) return { rect: bounds, reached }
   const x = reached.leading ? area.outer.x : bounds.x
   const y = reached.top ? area.outer.y : bounds.y
   const right = reached.trailing ? area.outer.x + area.outer.width : bounds.x + bounds.width
@@ -2121,4 +2123,22 @@ function keptToReachedEdges(bounds: Rect, rect: Rect, size: Size, reached: SafeA
   const horizontal = along(rect.x, rect.width, size.width, reached.leading, reached.trailing, bounds.x, bounds.width)
   const vertical = along(rect.y, rect.height, size.height, reached.top, reached.bottom, bounds.y, bounds.height)
   return { x: horizontal.at, y: vertical.at, width: horizontal.length, height: vertical.length }
+}
+
+/**
+ * A gradient background that reaches into the safe area still blends across its own
+ * view, and holds its end colours beyond it: measured in the iOS 27 simulator, a
+ * full-screen gradient changes colour only between the safe area's edges. Its points
+ * are moved into the rect it now fills, so they land where they did.
+ */
+function gradientKeptTo(content: LayoutElement, view: Rect, reach: Rect): LayoutElement {
+  if (content.kind !== 'fill') return content
+  const point = (p: { x: number; y: number }) => ({
+    x: reach.width ? (view.x + p.x * view.width - reach.x) / reach.width : p.x,
+    y: reach.height ? (view.y + p.y * view.height - reach.y) / reach.height : p.y,
+  })
+  const fill = content.fill
+  if (fill.kind === 'linearGradient') return { ...content, fill: { ...fill, start: point(fill.start), end: point(fill.end) } }
+  if (fill.kind === 'radialGradient' || fill.kind === 'angularGradient') return { ...content, fill: { ...fill, center: point(fill.center) } }
+  return content
 }

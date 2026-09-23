@@ -573,6 +573,17 @@ describe('E4: what reaches under the safe area, and what stays inside it', () =>
       expect(placed(r, 'Bottom').y + placed(r, 'Bottom').height).toBeLessThanOrEqual(840)
     })
 
+  it('blends a gradient that reaches the edges across its own view, as the simulator does', () => {
+    const r = screen(`var body: some View { ${full('.background(LinearGradient(colors: [.red, .blue], startPoint: .top, endPoint: .bottom))')} }`)
+    const layer = nodes(r).find(n => n.background?.kind === 'linearGradient')!
+    const frame = worldFrame(nodes(r), layer)
+    const gradient = layer.background as { start: { y: number }; end: { y: number } }
+    // Measured: the colour changes only between 62 and 840, and holds its ends beyond.
+    expect([frame.y, frame.y + frame.height]).toEqual([0, 874])
+    expect(frame.y + gradient.start.y * frame.height).toBeCloseTo(62, 5)
+    expect(frame.y + gradient.end.y * frame.height).toBeCloseTo(840, 5)
+  })
+
   it('keeps a background written as a closure inside the safe area', () => {
     const r = screen(`var body: some View { ${full('.background { Color.red }')} }`)
     expect(reach(r, RED)).toEqual({ top: false, bottom: false })
