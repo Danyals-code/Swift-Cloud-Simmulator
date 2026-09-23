@@ -9,10 +9,12 @@ import {
   type TemplateKind,
 } from '@studio/project-model'
 import type { Handoff } from '@studio/exporter'
-import type { ProjectOrigin } from '../lib/store'
+import type { ProjectOrigin, SwitchOptions, SwitchResult } from '../lib/store'
 import { readSwiftFiles } from '../lib/importSourceFiles'
 import { Icon, type IconName } from './ui/Icon'
 import { PushButton } from './ui/Control'
+import { useRecoveryActions } from './Recovery'
+import recovery from './Recovery.module.css'
 import dynamic from 'next/dynamic'
 import styles from './TemplateGallery.module.css'
 
@@ -40,12 +42,12 @@ export interface TemplateGalleryProps {
   savedAt: number | null
   /** True when the sheet opened by itself at launch rather than being asked for. */
   atLaunch?: boolean
-  /** Returns false when the template's sources could not be fetched. */
-  onChoose: (templateId: string) => Promise<boolean>
-  /** Returns false when nothing usable was in the selection. */
-  onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[]) => Promise<boolean>
+  /** Fails when the template's sources could not be fetched. */
+  onChoose: (templateId: string, options?: SwitchOptions) => Promise<SwitchResult>
+  /** Fails when nothing usable was in the selection. */
+  onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[], options?: SwitchOptions) => Promise<SwitchResult>
   /** Reopens a project already in this browser. */
-  onOpenProject: (id: string) => Promise<boolean>
+  onOpenProject: (id: string, options?: SwitchOptions) => Promise<SwitchResult>
   /** Deletes one. Never the one that is open. */
   onRemoveProject: (id: string) => void
   onClose: () => void
@@ -97,6 +99,21 @@ export function TemplateGallery({
    * recovered at all. It gets the same interruption, for the same reason.
    */
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null)
+  /** A switch waiting on an answer, because the project being left could not be saved. */
+  const [unsaved, setUnsaved] = useState<((go: boolean) => void) | null>(null)
+
+  /**
+   * Runs a switch, and when the project being left could not be saved, asks first:
+   * download it, go on without it, or stay (B3). Switching used to be refused outright,
+   * so a participant whose storage failed could not start the next task.
+   */
+  const switching = useCallback(async (run: (options?: SwitchOptions) => Promise<SwitchResult>): Promise<SwitchResult> => {
+    const result = await run()
+    if (result !== 'unsaved') return result
+    const go = await new Promise<boolean>(answer => setUnsaved(() => answer))
+    setUnsaved(null)
+    return go ? run({ leaveUnsaved: true }) : 'unsaved'
+  }, [])
 
   const panelRef = useRef<HTMLDivElement | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
@@ -118,6 +135,7 @@ export function TemplateGallery({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
+        if (unsaved) return unsaved(false)
         if (creatingRef.current) return
         if (deleting) setDeleting(null)
         else if (pending) setPending(null)
@@ -142,7 +160,7 @@ export function TemplateGallery({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, pending, deleting])
+  }, [onClose, pending, deleting, unsaved])
 
   /** Confirm before leaving an edited project; the saved copy remains in recents. */
   const replacing = useCallback(
@@ -159,9 +177,9 @@ export function TemplateGallery({
       creatingRef.current = true
       setCreating(true)
       setCreateError(null)
-      void onChoose(item.id)
+      void switching(options => onChoose(item.id, options))
         .then((made) => {
-          if (!made) setCreateError(`${item.name} could not be loaded. Please try again.`)
+          if (made === 'failed') setCreateError(`${item.name} could not be loaded. Please try again.`)
         })
         .catch(() => setCreateError(`${item.name} could not be loaded. Please try again.`))
         .finally(() => {
@@ -169,7 +187,7 @@ export function TemplateGallery({
           setCreating(false)
         })
     })
-  }, [replacing, onChoose])
+  }, [replacing, onChoose, switching])
 
   /**
    * What came out of the picker, whichever of the two shapes it was.
@@ -198,7 +216,7 @@ export function TemplateGallery({
         if (project && handoff && currentProject && onImport) { setImported({ local: currentProject, project, handoff }); return }
         setOpenError(null)
         replacing(`${archive.name}`, () => {
-          void onOpenFiles(files).then((opened) => { if (!opened) setOpenError('Nothing in that archive could be opened.') })
+          void switching(options => onOpenFiles(files, undefined, options)).then((opened) => { if (opened === 'failed') setOpenError('Nothing in that archive could be opened.') })
         })
         return
       }
@@ -209,10 +227,10 @@ export function TemplateGallery({
 
       setOpenError(null)
       replacing(`${swift.length} file${swift.length === 1 ? '' : 's'}`, () => {
-        void onOpenFiles(swift).then((opened) => { if (!opened) setOpenError('Those files could not be opened.') })
+        void switching(options => onOpenFiles(swift, undefined, options)).then((opened) => { if (opened === 'failed') setOpenError('Those files could not be opened.') })
       })
     },
-    [onOpenFiles, replacing, currentProject, onImport],
+    [onOpenFiles, replacing, switching, currentProject, onImport],
   )
 
   return (
@@ -278,7 +296,7 @@ export function TemplateGallery({
               <Icon name="xmark" size={17} />
             </button>
           </header>
-          {imported && onImport ? <ImportReview {...imported} incoming={imported.project} onCancel={() => setImported(null)} onApply={onImport} /> : source === 'prompt' ? <PromptCreator onOpenFiles={onOpenFiles} onBusy={setGenerationBusy} /> : source === 'open' ? (
+          {imported && onImport ? <ImportReview {...imported} incoming={imported.project} onCancel={() => setImported(null)} onApply={onImport} /> : source === 'prompt' ? <PromptCreator onOpenFiles={(files, history) => switching(options => onOpenFiles(files, history, options))} onBusy={setGenerationBusy} /> : source === 'open' ? (
             <OpenPane
               projectId={projectId}
               recents={recents}
@@ -286,9 +304,9 @@ export function TemplateGallery({
               savedAt={savedAt}
               error={openError}
               onOpen={(id) => {
-                void onOpenProject(id).then((opened) => {
-                  if (opened) onClose()
-                  else setOpenError('This project is no longer available. It may have been removed in another tab.')
+                void switching(options => onOpenProject(id, options)).then((opened) => {
+                  if (opened === 'opened') onClose()
+                  else if (opened === 'failed') setOpenError('This project is no longer available. It may have been removed in another tab.')
                 })
               }}
               onRemove={(id) => {
@@ -356,6 +374,8 @@ export function TemplateGallery({
           }}
         />
       ) : null}
+
+      {unsaved ? <UnsavedConfirm projectName={projectName} onStay={() => unsaved(false)} onSwitch={() => unsaved(true)} /> : null}
 
       {pending ? (
         <ReplaceConfirm
@@ -621,6 +641,39 @@ function ReplaceConfirm({
       onCancel={onCancel}
       onConfirm={onConfirm}
     />
+  )
+}
+
+/**
+ * The project being left could not be saved (B3).
+ *
+ * Downloading comes first, as everywhere work is at risk: the dialog stays after it,
+ * so going on is still a separate choice.
+ */
+function UnsavedConfirm({ projectName, onStay, onSwitch }: { projectName: string; onStay: () => void; onSwitch: () => void }) {
+  const { status, busy, download } = useRecoveryActions()
+  return (
+    <div className="fixed inset-0 z-[960] grid place-items-center bg-black/40" onPointerDown={onStay} data-testid="unsaved-confirm">
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={`“${projectName}” is not saved`}
+        onPointerDown={(event) => event.stopPropagation()}
+        className="w-[min(420px,90vw)] rounded-[10px] border border-xc-line bg-xc-bar p-5 text-center shadow-[0_28px_80px_rgb(0_0_0/0.65)]"
+      >
+        <span className="mx-auto grid h-[34px] w-[34px] place-items-center rounded-full bg-xc-error/15 text-xc-error">
+          <Icon name="error" size={17} />
+        </span>
+        <h3 className="mt-3 text-[13px] font-semibold text-xc-text">“{projectName}” is not saved</h3>
+        <p className="mt-1.5 text-[11.5px] leading-relaxed text-xc-text-2">This browser could not save your latest changes to it. Download a copy before you switch, or those changes will be lost.</p>
+        {status ? <p className="mt-2 text-[11px] text-xc-text-3" role="status">{status}</p> : null}
+        <span className={`${recovery.actions} mt-4 justify-center`}>
+          <button type="button" onClick={onStay}>Stay here</button>
+          <button type="button" onClick={onSwitch}>Switch anyway</button>
+          <button type="button" data-primary disabled={busy} onClick={download}>Download this project</button>
+        </span>
+      </div>
+    </div>
   )
 }
 

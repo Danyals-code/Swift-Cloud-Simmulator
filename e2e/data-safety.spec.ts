@@ -57,3 +57,39 @@ test('a second tab asks before taking over, and the first cannot write over its 
   await second.getByTestId('gallery-dismiss').click()
   await expect(second.getByTestId('project-name')).toHaveText('Second tab')
 })
+
+test('when saves fail, the studio says why, offers the work as a file, and asks before switching or leaving (B3)', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-dismiss').click()
+  await renameApp(page, 'Kept work')
+  await expect(page.getByTestId('save-indicator')).toHaveText('Saved locally')
+  // The browser stops taking writes, as it does when the disk is full.
+  await page.evaluate(() => { IDBObjectStore.prototype.put = () => { throw new DOMException('The disk is full.', 'QuotaExceededError') } })
+  await renameApp(page, 'Unsaved work')
+
+  const banner = page.getByTestId('save-banner')
+  await expect(banner).toContainText('The disk is full.')
+  await expect(page.getByTestId('save-indicator')).toHaveText('Could not save')
+  const downloading = page.waitForEvent('download')
+  await banner.getByRole('button', { name: 'Download my project' }).click()
+  expect((await downloading).suggestedFilename()).toMatch(/\.swiftstudio\.zip$/)
+
+  // Closing the tab asks first.
+  const asked = page.waitForEvent('dialog')
+  await page.close({ runBeforeUnload: true })
+  const leaving = await asked
+  expect(leaving.type()).toBe('beforeunload')
+  await leaving.dismiss()
+
+  // So does switching project, which offers the download before going on without it.
+  // (A rename alone leaves the files as they were made, so there is no "Open …?" first.)
+  await page.getByTestId('app-icon').click()
+  await page.getByTestId('template-confirm').click()
+  const unsaved = page.getByTestId('unsaved-confirm')
+  await expect(unsaved).toContainText('Unsaved work')
+  await expect(unsaved.getByRole('button', { name: 'Download this project' })).toBeVisible()
+  await unsaved.getByRole('button', { name: 'Switch anyway' }).click()
+  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await expect(page.getByTestId('project-name')).toHaveText('MyDesignApp')
+  await expect(page.getByTestId('save-banner')).toBeVisible()
+})

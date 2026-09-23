@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { OpenedFile, PromptMessage } from '@studio/project-model'
+import type { SwitchResult } from '../lib/store'
 import { DEFAULT_MODELS, parseGeneratedApp, parseOptions, type GeneratedApp, type GenerationOptions, type Provider } from '../lib/generation/schema'
 import { checkPreview } from '../lib/generation/validate'
 import { Icon } from './ui/Icon'
@@ -9,7 +10,7 @@ import styles from './PromptCreator.module.css'
 
 const INITIAL: GenerationOptions = { provider: 'openai', model: DEFAULT_MODELS.openai, prompt: '', pageCount: 4, navigation: 'tabs', accent: 'indigo', sampleData: true, includeSettings: false }
 
-export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[]) => Promise<boolean>; onBusy: (busy: boolean) => void }) {
+export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[]) => Promise<SwitchResult>; onBusy: (busy: boolean) => void }) {
   const [options, setOptions] = useState(INITIAL)
   const [apiKey, setApiKey] = useState('')
   const [revealKey, setRevealKey] = useState(false)
@@ -62,7 +63,8 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
     if (!draft || busy) return
     setPhase('opening'); onBusy(true); setError(null)
     try {
-      if (!await onOpenFiles(draft.files.map(f => ({ name: f.path, text: f.code })), history)) throw new Error('The generated files could not be opened.')
+      // Staying with an unsaved project is a choice, not a failure: the draft waits here.
+      if (await onOpenFiles(draft.files.map(f => ({ name: f.path, text: f.code })), history) === 'failed') throw new Error('The generated files could not be opened.')
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open this project.') }
     finally { setPhase('idle'); onBusy(false) }
   }

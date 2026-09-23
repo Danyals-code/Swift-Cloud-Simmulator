@@ -126,8 +126,16 @@ export async function leave(to: Destination, force = false): Promise<LeaveOutcom
     try { sessionStorage.removeItem(SAFE_START_KEY) } catch { /* nothing was set */ }
     return 'unsaved'
   }
+  leaving = true
   location.reload()
   return 'left'
+}
+
+let leaving = false
+
+/** Whether this page is reloading because somebody chose to here - so the browser need not ask again. */
+export function leavingOnPurpose(): boolean {
+  return leaving
 }
 
 const SAFE_START_KEY = 'studio.safeStart'

@@ -56,6 +56,8 @@ import { BUILD_DETAILS, BUILD_NAME, STUDIO_BUILD } from '../lib/build'
 import { crashIfTesting } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
+import { StorageBanner } from './StorageBanner'
+import { leavingOnPurpose } from '../lib/recovery'
 import { OpenElsewhere } from './OpenElsewhere'
 import { startStudioTab, studioTabState, subscribeStudioTab } from '../lib/activeTab'
 import styles from './Workspace.module.css'
@@ -76,6 +78,8 @@ export function Studio() {
   const origin = useStudio((s) => s.origin)
   const lastSavedAt = useStudio((s) => s.lastSavedAt)
   const saveError = useStudio((s) => s.saveError)
+  const loadError = useStudio((s) => s.loadError)
+  const durable = useStudio((s) => s.durable)
   const previewSettings = useStudio((s) => s.preview)
   const canUndo = useStudio((s) => s.canUndo)
   const canRedo = useStudio((s) => s.canRedo)
@@ -268,6 +272,20 @@ export function Studio() {
       window.removeEventListener('pagehide', onPageHide)
     }
   }, [flush])
+
+  // Closing or reloading while work is not saved asks first (B3): a pending save may
+  // not finish as the page goes, and a failing one never will. Not when a recovery
+  // surface is reloading because somebody chose to there - they have been asked.
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (tab !== 'active' || leavingOnPurpose() || !useStudio.getState().unsavedWork()) return
+      void flush()
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [tab, flush])
 
   const images = useMemo(() => project?.assets?.map(asset => ({ name: asset.name, width: asset.light.width / asset.scale, height: asset.light.height / asset.scale, light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined })), [project?.assets])
   const device = getDevice(project?.manifest.device ?? 'iphone-15')
@@ -1325,6 +1343,7 @@ export function Studio() {
         onSetPreviewing={previewing => setDesigning(!previewing)}
         previewDisabled={stale || preparingEdit}
       />
+      <StorageBanner saveError={saveError} loadError={loadError} durable={durable} onRetry={() => void flush()} />
 
       <div ref={splitRef} className="flex min-h-0 flex-1">
         {layout.showNavigator ? (
@@ -1603,24 +1622,25 @@ export function Studio() {
           savedAt={lastSavedAt}
           atLaunch={galleryAtLaunch}
           onClose={() => setGalleryOpen(false)}
-          onChoose={async (templateId) => {
-            const made = await applyTemplate(templateId) === 'opened'
-            // Kept open on failure: the sheet is where the message goes, and closing
-            // it would leave somebody looking at a project they did not ask for.
-            if (made) { setGalleryOpen(false); setMode('design'); setDesigning(true) }
+          onChoose={async (templateId, options) => {
+            const made = await applyTemplate(templateId, options)
+            // Kept open otherwise: the sheet is where the message goes, and closing it
+            // would leave somebody looking at a project they did not ask for.
+            if (made === 'opened') { setGalleryOpen(false); setMode('design'); setDesigning(true) }
             return made
           }}
-          onOpenProject={async (id) => await openProject(id) === 'opened'}
+          onOpenProject={openProject}
           onRemoveProject={(id) => void removeProject(id)}
-          onOpenFiles={async (picked, history) => {
-            const opened = await openFiles(picked) === 'opened'
+          onOpenFiles={async (picked, history, options) => {
+            const result = await openFiles(picked, options)
+            const opened = result === 'opened'
             if (opened && history?.length) {
               const current = useStudio.getState()
               if (current.project) current.appendPromptMessages(current.project.id, history)
               await flush()
             }
             if (opened) setGalleryOpen(false)
-            return opened
+            return result
           }}
         />
       ) : null}

@@ -214,6 +214,11 @@ export interface StudioState {
    * answer, its copy is the old one. A reload replaces it.
    */
   handOver: (save?: boolean) => Promise<void>
+  /**
+   * Whether closing the page now would lose work: an edit not yet written, a save
+   * that failed, or storage that keeps nothing past the page.
+   */
+  unsavedWork: () => boolean
   setFileText: (fileId: FileId, text: string) => void
   setActiveFile: (fileId: FileId) => void
   closeFile: (fileId: FileId) => void
@@ -542,6 +547,10 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     async handOver(save = true) {
       if (save) await get().flush()
       handedOver = true
+    },
+    unsavedWork() {
+      const { project, saveError, durable } = get()
+      return !handedOver && project !== null && (!durable || saveError !== null || project !== saved)
     },
     async flush() {
       if (saveTimer) {

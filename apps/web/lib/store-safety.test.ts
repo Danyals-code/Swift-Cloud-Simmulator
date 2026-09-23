@@ -134,3 +134,28 @@ describe('storage that keeps nothing (B2)', () => {
     expect(persist).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('whether leaving now would lose work (B3)', () => {
+  it('is so while an edit waits to be written, or a save has failed', async () => {
+    await studio().load()
+    useStudio.setState({ durable: true })
+    expect(studio().unsavedWork()).toBe(false)
+
+    studio().setFileText(firstFile(), '// edited')
+    expect(studio().unsavedWork()).toBe(true)
+    await studio().flush()
+    expect(studio().unsavedWork()).toBe(false)
+
+    studio().setFileText(firstFile(), '// edited again')
+    failSaves()
+    await studio().flush()
+    expect(studio().unsavedWork()).toBe(true)
+  })
+
+  it('is always so when the browser keeps nothing past the page (B2)', async () => {
+    await studio().load()
+
+    expect(studio().durable).toBe(false)
+    expect(studio().unsavedWork()).toBe(true)
+  })
+})
