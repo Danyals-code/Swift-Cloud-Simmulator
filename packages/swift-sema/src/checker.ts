@@ -8,6 +8,7 @@ import type {
   EnumDecl,
   Expr,
   ExtensionDecl,
+  FuncDecl,
   Pattern,
   ProtocolDecl,
   SourceFileNode,
@@ -17,7 +18,7 @@ import type {
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
-import { collectConformance, hoistNestedTypes } from '@studio/swift-syntax'
+import { argumentLabels, collectConformance, hoistNestedTypes } from '@studio/swift-syntax'
 import {
   isKnownGlobal,
   isKnownModifier,
@@ -59,6 +60,12 @@ import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './m
  * Those need the real type checker, which arrives with the interpreter in Phase 2 -
  * guessing at them now would produce exactly the false positives the gate forbids.
  */
+/** The integer and decimal types, each of which the preview's values can't tell from the others of its kind. */
+const INTEGER_TYPE_NAMES: ReadonlySet<string> = new Set(['Int', 'Int8', 'Int16', 'Int32', 'Int64', 'UInt', 'UInt8', 'UInt16', 'UInt32', 'UInt64'])
+const DECIMAL_TYPE_NAMES: ReadonlySet<string> = new Set(['Double', 'Float', 'CGFloat', 'Float32', 'Float64', 'Float80', 'TimeInterval'])
+/** Types a value of any kind may be passed as. */
+const OPEN_TYPE_NAMES: ReadonlySet<string> = new Set(['Any', 'AnyObject', 'AnyHashable', 'Equatable', 'Hashable', 'Comparable', 'Identifiable', 'CustomStringConvertible', 'Codable', 'Encodable', 'Decodable', 'Sendable', 'Error', 'View', 'Shape', 'ShapeStyle', 'StringProtocol', 'Numeric', 'BinaryInteger', 'BinaryFloatingPoint', 'Sequence', 'Collection'])
+
 export class Checker {
   private readonly diagnostics: Diagnostic[] = []
   private readonly types = new Map<string, TypeInfo>()
@@ -123,6 +130,7 @@ export class Checker {
     this.conformance = collectConformance(expanded)
     for (const file of expanded) this.collectDeclarations(file)
     this.reportAliasCycles(files)
+    this.reportIndistinctOverloads(files)
 
     const entryPoint = this.resolveEntryPoint(files)
 
@@ -218,6 +226,77 @@ export class Checker {
       if (name !== alias.name) continue
       for (const member of chain) looped.add(member)
       this.report(alias.nameSpan, 'error', 'unresolved_identifier', `Type alias '${alias.name}' references itself.`)
+    }
+  }
+
+  /**
+   * Two overloads the preview can't choose between by what they are called with.
+   *
+   * The preview has no types to go on, so it chooses between functions sharing a name
+   * and labels by the values they are given: `label(1)` calls `label(_: Int)`. That
+   * can't tell `size(_: Double)` from `size(_: CGFloat)`, both handed a number, so it
+   * runs the first; said at the second, where Xcode chooses by type. Only where
+   * every parameter takes the same kind of value: `show(_: Int)` beside
+   * `show<T>(_: T)` is told apart, as a whole number suits the first better.
+   */
+  private reportIndistinctOverloads(files: readonly SourceFileNode[]): void {
+    const aliases = new Map(files.flatMap((file) => file.declarations.flatMap((decl) => (decl.kind === 'typealiasDecl' ? [[decl.name, decl.target] as const] : []))))
+    const scopes: FuncDecl[][] = [files.flatMap((file) => file.declarations.filter((decl): decl is FuncDecl => decl.kind === 'funcDecl'))]
+    for (const [name, type] of this.conformance.types) {
+      scopes.push(type.members.filter((member): member is FuncDecl => member.kind === 'funcDecl' && type.origin.get(member) === name))
+    }
+    const kinds = (fn: FuncDecl) => fn.params.map((param) => this.valueKind(param.type, aliases))
+    for (const scope of scopes) {
+      const named = new Map<string, FuncDecl[]>()
+      for (const fn of scope) named.set(fn.name, [...(named.get(fn.name) ?? []), fn])
+      for (const group of named.values()) {
+        group.forEach((later, index) => {
+          const labels = argumentLabels(later.params)
+          const same = group.slice(0, index).some((earlier) => {
+            const theirs = argumentLabels(earlier.params)
+            if (theirs.length !== labels.length || theirs.some((label, i) => label !== labels[i])) return false
+            const a = kinds(earlier), b = kinds(later)
+            return a.every((kind, i) => kind === b[i])
+          })
+          if (!same) return
+          const signature = `${later.name}(${labels.map((label) => `${label ?? '_'}:`).join('')})`
+          this.report(later.nameSpan, 'warning', 'unsupported_language_feature', `The preview can't tell ${signature} from the one before it by what it is called with, so it runs that one. Xcode chooses by the argument's type.`, signature)
+        })
+      }
+    }
+  }
+
+  /**
+   * The kind of value a parameter's type takes, as the preview tells overloads apart:
+   * a number, text, a type the project declared and the like, or `any` for a generic,
+   * a protocol or `some View`, which could be given anything.
+   */
+  private valueKind(type: TypeRef | null, aliases: ReadonlyMap<string, TypeRef>, depth = 0): string {
+    if (!type || depth > 8) return 'any'
+    switch (type.kind) {
+      case 'optionalType': {
+        const wrapped = this.valueKind(type.wrapped, aliases, depth + 1)
+        return wrapped === 'any' ? 'any' : `${wrapped}?`
+      }
+      case 'arrayType': return 'array'
+      case 'dictionaryType': return 'dictionary'
+      case 'functionType': return 'function'
+      case 'tupleType': return `tuple${type.elements.length}`
+      case 'namedType': {
+        const alias = aliases.get(type.name)
+        if (alias) return this.valueKind(alias, aliases, depth + 1)
+        if (INTEGER_TYPE_NAMES.has(type.name)) return 'int'
+        if (DECIMAL_TYPE_NAMES.has(type.name)) return 'double'
+        if (type.name === 'String' || type.name === 'Character' || type.name === 'Substring') return 'string'
+        if (type.name === 'Bool') return 'bool'
+        if (type.name === 'Array' || type.name === 'Set') return 'array'
+        if (type.name === 'Dictionary') return 'dictionary'
+        if (type.name === 'Optional') return type.generics[0] ? this.valueKind({ kind: 'optionalType', wrapped: type.generics[0], implicitlyUnwrapped: false, span: type.span }, aliases, depth + 1) : 'any'
+        if (this.typeParameterNames.has(type.name) || this.conformance.protocols.has(type.name) || OPEN_TYPE_NAMES.has(type.name)) return 'any'
+        return `type:${type.name}`
+      }
+      default:
+        return 'any'
     }
   }
 

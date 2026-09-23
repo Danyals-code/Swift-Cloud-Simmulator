@@ -39,6 +39,11 @@ export class Environment {
     this.bindings.set(name, { value, isLet, span })
   }
 
+  /** The binding for `name` in this scope alone, not the ones around it. */
+  own(name: string): Binding | undefined {
+    return this.bindings.get(name)
+  }
+
   /** The binding for `name`, searching outward. */
   lookup(name: string): Binding | undefined {
     return this.bindings.get(name) ?? this.parent?.lookup(name)

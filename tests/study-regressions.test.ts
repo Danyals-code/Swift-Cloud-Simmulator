@@ -1567,3 +1567,33 @@ describe('F7: with a syntax error, every redraw shows the errors, never a blank 
     expect(notice(rerender(revision++))).toEqual(notice(broken))
   })
 })
+
+describe('functions that share a name run the one Swift runs', () => {
+  it('runs the overload the argument types choose, top level and in the view, with nothing to report', () => {
+    const r = runView(`var body: some View { VStack { Text(label(1)); Text(label("one")); Text(badge(2)); Text(badge(true)) } }
+      func badge(_ count: Int) -> String { "count \\(count)" }
+      func badge(_ on: Bool) -> String { on ? "on" : "off" }`,
+      'func label(_ value: Int) -> String { "whole \\(value)" }\nfunc label(_ value: String) -> String { "text \\(value)" }')
+    expect(texts(r)).toEqual(['whole 1', 'text one', 'count 2', 'on'])
+  })
+
+  it("warns where two overloads differ only in types the preview can't tell apart, and runs the first", () => {
+    // Xcode calls the CGFloat one: the argument is declared a CGFloat.
+    const members = 'let side: CGFloat = 2\n var body: some View { Text(size(side)) }'
+    const declarations = 'func size(_ value: Double) -> String { "double" }\nfunc size(_ value: CGFloat) -> String { "cgfloat" }'
+    expect(reported(members, declarations)).toEqual([{
+      severity: 'warning',
+      message: "The preview can't tell size(_:) from the one before it by what it is called with, so it runs that one. Xcode chooses by the argument's type.",
+      at: 'size',
+      fix: undefined,
+    }])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['double'])
+  })
+
+  it('tells a concrete parameter from a generic one, and says nothing', () => {
+    const members = 'var body: some View { VStack { Text(show(1)); Text(show("one")) } }'
+    const declarations = 'func show(_ value: Int) -> String { "whole" }\nfunc show<T>(_ value: T) -> String { "anything" }'
+    expect(reported(members, declarations)).toEqual([])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['whole', 'anything'])
+  })
+})

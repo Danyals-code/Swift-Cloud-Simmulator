@@ -148,6 +148,12 @@ export interface ClosureValue {
 export interface FunctionValue {
   readonly kind: 'function'
   readonly decl: FuncDecl
+  /**
+   * Every function this name stands for where it was declared, `decl` among them, when
+   * there is more than one: `minutes(on:)` and `minutes(of:)`, or `label(_: Int)` and
+   * `label(_: String)`. A call chooses from them by what it is called with.
+   */
+  readonly overloads?: readonly FuncDecl[]
   /** Bound receiver for a method call, else null. */
   readonly self: StructValue | null
   readonly env: unknown

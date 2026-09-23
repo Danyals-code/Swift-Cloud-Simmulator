@@ -7,6 +7,7 @@ import type {
   ProtocolDecl,
   SourceFileNode,
   StructDecl,
+  TypeRef,
   VarDecl,
 } from './ast'
 
@@ -85,16 +86,44 @@ export function argumentLabels(params: readonly Param[]): readonly (string | nul
  * day)` silently ran the body of `minutes(of:)` with an unbound parameter - a wrong
  * answer rather than an error, which is the worst kind of wrong the preview can be.
  *
- * Parameter *types* are the other half of Swift's rule and are deliberately not
- * here: the interpreter is not typed, so `f(_ x: Int)` and `f(_ x: String)` still
- * collide. That is a much rarer shape than label overloading, and guessing between
- * two untyped candidates would be worse than picking the one that was written last.
+ * Parameter *types* are the other half of Swift's rule, and are here too:
+ * `f(_ x: Int)` and `f(_ x: String)` are both kept, and a call chooses between them
+ * by what its arguments are. Only the same signature written again in a more specific
+ * layer replaces one, which is what an override or an implementation of a protocol
+ * requirement is.
  */
 function memberKey(decl: Decl): MemberKey | null {
-  if (decl.kind === 'funcDecl') return `func:${decl.name}(${labelList(decl.params)})`
+  if (decl.kind === 'funcDecl') return `func:${decl.name}(${labelList(decl.params)})(${typeList(decl.params)})`
   if (decl.kind === 'varDecl') return `var:${decl.name}`
-  if (decl.kind === 'initDecl') return `init:(${labelList(decl.params)})`
+  if (decl.kind === 'initDecl') return `init:(${labelList(decl.params)})(${typeList(decl.params)})`
   return null
+}
+
+function typeList(params: readonly Param[]): string {
+  return params.map((p) => typeKey(p.type)).join(',')
+}
+
+/** A parameter's type as written, in one spelling: `[Int]`, `String?`, `(Int) -> Void`. */
+function typeKey(type: TypeRef | null): string {
+  if (!type) return '_'
+  switch (type.kind) {
+    case 'namedType':
+      return type.generics.length ? `${type.name}<${type.generics.map(typeKey).join(',')}>` : type.name
+    case 'optionalType':
+      return `${typeKey(type.wrapped)}?`
+    case 'arrayType':
+      return `[${typeKey(type.element)}]`
+    case 'dictionaryType':
+      return `[${typeKey(type.key)}:${typeKey(type.value)}]`
+    case 'someType':
+      return `some ${typeKey(type.constraint)}`
+    case 'functionType':
+      return `(${type.params.map(typeKey).join(',')})->${typeKey(type.result)}`
+    case 'tupleType':
+      return `(${type.elements.map(typeKey).join(',')})`
+    default:
+      return '_'
+  }
 }
 
 function labelList(params: readonly Param[]): string {
