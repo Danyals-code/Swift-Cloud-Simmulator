@@ -1375,11 +1375,13 @@ export class SwiftUIHost implements InterpreterHost {
   private eagerContent(member: string, call: HostCall): ViewArg[] {
     if (!['safeAreaInset', 'background', 'overlay'].includes(member)) return []
     const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'content')?.value)
-    if (!content) return []
-    return call
-      .invokeBuilder(content)
-      .filter((value) => asView(value) !== null)
-      .map((value) => ({ label: 'content', value }))
+    // `.overlay(Badge())`: a custom view given as the argument is a struct until it is
+    // expanded, and nothing after this point can expand it.
+    const given = content ? undefined : call.args.find((arg) => arg.label === null)?.value
+    const values = content ? call.invokeBuilder(content) : given?.kind === 'struct' ? [given] : []
+    // A `Color`, a gradient and a custom view are views without being view values, so
+    // they take the same conversion as `body`: `.background { Color.red }` drew nothing.
+    return this.toViews(values).map((content) => ({ label: 'content', value: view(content) }))
   }
 
   callValue(target: SwiftValue, call: HostCall): SwiftValue | undefined {

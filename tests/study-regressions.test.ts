@@ -240,3 +240,27 @@ describe('E8: offset and position take a size or a point', () => {
     expect(byPoint.x + byPoint.width / 2).toBeCloseTo(100, 0)
   })
 })
+
+describe('backgrounds and overlays given as a closure or a custom view', () => {
+  /** Every painted layer or shape, by size and paint, which is what a designer sees of a background. */
+  const paint = (r: CompileResult) =>
+    nodes(r).filter(n => n.background ?? n.shape?.fill).map(n => ({ width: n.frame.width, height: n.frame.height, paint: n.background ?? n.shape?.fill }))
+
+  it('draws a colour or a gradient in a background closure as the argument form does', () => {
+    const gradient = 'LinearGradient(colors: [.red, .blue], startPoint: .top, endPoint: .bottom)'
+    for (const style of ['Color.red', gradient]) {
+      const argument = runView(`var body: some View { Text("Card").padding().background(${style}) }`)
+      const closure = runView(`var body: some View { Text("Card").padding().background { ${style} } }`)
+      expect(paint(closure)).toEqual(paint(argument))
+      expect(paint(closure).length).toBeGreaterThan(1)
+    }
+  })
+
+  it('draws a custom view given to an overlay, as an argument or in a closure', () => {
+    const badge = 'struct Badge: View { var body: some View { Text("New") } }'
+    for (const overlay of ['.overlay(Badge())', '.overlay { Badge() }', '.overlay(Badge(), alignment: .topTrailing)']) {
+      const r = runView(`var body: some View { Color.blue.frame(width: 100, height: 100)${overlay} }`, badge)
+      expect(texts(r), overlay).toContain('New')
+    }
+  })
+})
