@@ -1415,6 +1415,28 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
     expect(texts(tap(r, 'Add'))).toContain('Count 1')
   })
 
+  it("draws a sheet whose content stops as stopped, and can still close it", () => {
+    const r = runView(`@State private var show = false
+      let items: [String] = []
+      var body: some View { Button("Open") { show = true }.sheet(isPresented: $show) { Detail(item: items[0]) } }`,
+      'struct Detail: View { let item: String; var body: some View { Text(item) } }')
+    const opened = tap(r, 'Open')
+    expect(stopped(opened)).toEqual([{ feature: 'Sheet stopped', reason: 'Swift runtime failure: Index out of range' }])
+    expect(stopped(tap(opened, 'Close sheet'))).toEqual([])
+  })
+
+  it('draws a pushed navigationDestination whose content stops as stopped, and can still go back', () => {
+    const r = runView(`let items: [String] = []
+      var body: some View {
+        NavigationStack {
+          NavigationLink("Open", value: 3).navigationTitle("Home").navigationDestination(for: Int.self) { index in Detail(item: items[index]) }
+        }
+      }`, 'struct Detail: View { let item: String; var body: some View { Text(item) } }')
+    const pushed = tap(r, 'Open')
+    expect(stopped(pushed)).toEqual([{ feature: 'Destination stopped', reason: 'Swift runtime failure: Index out of range' }])
+    expect(controls(tap(pushed, 'Home'))).toContain('Open')
+  })
+
   it('names the stopped view in the layers, and selects it from its placeholder', () => {
     const r = compileView(viewSource('var body: some View { VStack { Text("Top"); Broken().padding() } }', broken))
     const layers = (items: readonly ViewLayer[]): string[] => items.flatMap(item => [item.name, ...layers(item.children)])

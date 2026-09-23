@@ -181,14 +181,10 @@ export interface RuntimeFailure {
 export const STOPPED_VIEW = '_Stopped'
 const FAILURE_TYPE = 'RuntimeFailure'
 
-export function stoppedView(typeName: string, failure: RuntimeFailure, span: SourceSpan): ViewValue {
+export function stoppedView(name: string, failure: RuntimeFailure, span: SourceSpan): ViewValue {
   return {
     name: STOPPED_VIEW,
-    args: [
-      { label: 'view', value: { kind: 'string', value: typeName } },
-      { label: 'reason', value: { kind: 'string', value: failure.message } },
-      { label: 'failure', value: { kind: 'opaque', typeName: FAILURE_TYPE, payload: failure } },
-    ],
+    args: [{ label: 'failure', value: { kind: 'opaque', typeName: FAILURE_TYPE, payload: { name, failure } satisfies Stopped } }],
     children: [],
     modifiers: [],
     action: null,
@@ -196,9 +192,15 @@ export function stoppedView(typeName: string, failure: RuntimeFailure, span: Sou
   }
 }
 
+/** What a stopped view is: the view that stopped, and why. */
+export interface Stopped {
+  readonly name: string
+  readonly failure: RuntimeFailure
+}
+
 /** What stopped a view drawn as stopped, or null for any other view. */
-export function stoppedFailure(view: ViewValue): RuntimeFailure | null {
-  return view.name === STOPPED_VIEW ? payloadOf<RuntimeFailure>(view.args.find((a) => a.label === 'failure')?.value, FAILURE_TYPE) : null
+export function stopped(view: ViewValue): Stopped | null {
+  return view.name === STOPPED_VIEW ? payloadOf<Stopped>(view.args.find((a) => a.label === 'failure')?.value, FAILURE_TYPE) : null
 }
 
 /** A contextual member with no base: `.largeTitle`, `.primary`, `.infinity`. */

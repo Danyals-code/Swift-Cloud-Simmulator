@@ -469,9 +469,13 @@ Listed in the exported README so nothing is a surprise on the Mac:
 28. **A view that traps is drawn as stopped; iOS would crash.** A trap in a view's
     `body` (an index out of range, a nil unwrapped, a model no ancestor gave) draws that
     view as a placeholder naming it and the reason, and the rest of the screen keeps
-    working, so one bad row doesn't take the Design canvas with it. The error is reported
-    at its line, once the view is on screen: a destination's only when it is pushed. A
-    trap in a view's stored property, as it is created, stops the view that creates it.
+    working, so one bad row doesn't take the Design canvas with it. A sheet, a destination,
+    a toolbar, a context menu or a tab item whose own closure traps is drawn the same way,
+    as "Sheet stopped" and so on, and a stopped sheet can still be closed. The error is
+    reported at its line, once the view is on screen: a destination's only when it is
+    pushed. The Design canvas leaves out a sheet or a destination that traps with the state
+    the app has now, as the app can't show it yet. A trap in a view's stored property, as
+    it is created, stops the view that creates it.
 
 ## The strictness pass (R5)
 

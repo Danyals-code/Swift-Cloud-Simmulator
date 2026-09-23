@@ -85,13 +85,13 @@ import {
   ANIMATION_TYPE,
   COLOR_TYPE,
   EDGE_INSETS_TYPE,
-  STOPPED_VIEW,
   STROKE_STYLE_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
   asView,
   handlerIdFor,
   payloadOf,
+  stopped,
   type AnimationPayload,
   type ColorPayload,
   type EdgeInsetsPayload,
@@ -1507,9 +1507,8 @@ class Converter {
     }
 
     // A custom view whose body stopped: what it is, and why, where it would have been.
-    if (view.name === STOPPED_VIEW) {
-      return { kind: 'placeholder', id: path, feature: `${stringArg(labelled(view.args, 'view'))} stopped`, reason: stringArg(labelled(view.args, 'reason')) ?? '', ...origin }
-    }
+    const halted = stopped(view)
+    if (halted) return { kind: 'placeholder', id: path, feature: `${halted.name} stopped`, reason: halted.failure.message, ...origin }
 
     const shape = SHAPES[view.name]
     if (shape) {

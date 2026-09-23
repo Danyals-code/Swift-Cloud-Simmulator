@@ -22,7 +22,7 @@ import {
   payloadOf,
   ANIMATION_TYPE,
   COLOR_TYPE,
-  stoppedFailure,
+  stopped,
   type ActionValue,
   type AnimationPayload,
   type ColorPayload,
@@ -110,6 +110,11 @@ export interface TabBar {
 }
 
 export type OverlayKind = 'sheet' | 'cover' | 'alert' | 'dialog' | 'popover' | 'menu'
+
+/** What each presentation is called where one stops. */
+const PRESENTATION_NAMES: Readonly<Record<OverlayKind, string>> = {
+  sheet: 'Sheet', cover: 'Full-screen cover', alert: 'Alert', dialog: 'Confirmation dialog', popover: 'Popover', menu: 'Menu',
+}
 
 export interface Overlay {
   readonly kind: OverlayKind
@@ -201,8 +206,8 @@ export interface NotDrawn {
 export function stoppedFailures(ui: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'overlay'> | null | undefined): RuntimeFailure[] {
   const found: RuntimeFailure[] = []
   const visit = (view: ViewValue): void => {
-    const failure = stoppedFailure(view)
-    if (failure) found.push(failure)
+    const halted = stopped(view)
+    if (halted) found.push(halted.failure)
     view.children.forEach(visit)
     for (const modifier of view.modifiers) {
       for (const argument of modifier.args) {
@@ -374,6 +379,8 @@ export interface ResolveContext {
     closure: ClosureValue,
     args?: readonly SwiftValue[],
     environment?: EnvironmentFrame,
+    /** What the closure draws, for the placeholder shown if it stops: "Sheet", "Destination". */
+    name?: string,
   ): readonly ViewValue[]
   /**
    * Runs a custom `ButtonStyle`'s `makeBody(configuration:)`.
@@ -580,7 +587,7 @@ class Resolver {
         // Item-driven presentations need an actual selected item; inventing one
         // can produce an impossible screen or force-unwrap unavailable data.
         if (item && (!itemValue || itemValue.kind === 'nil')) continue
-        add(kind, modifier.span, () => this.ctx.build(modifier.closure!, itemValue ? [itemValue] : [], modifier.environment).map(content => inheritVisualStyle(content, visualModifiers(view))), kind === 'sheet' ? 'Sheet' : kind === 'cover' ? 'Full screen' : 'Popover')
+        add(kind, modifier.span, () => this.ctx.build(modifier.closure!, itemValue ? [itemValue] : [], modifier.environment, PRESENTATION_NAMES[kind]).map(content => inheritVisualStyle(content, visualModifiers(view))), kind === 'sheet' ? 'Sheet' : kind === 'cover' ? 'Full screen' : 'Popover')
       }
     }
     return out
@@ -1222,7 +1229,7 @@ class Resolver {
     const contextMenu = control.modifiers.find(m => m.name === 'contextMenu')
     // A menu over `ForEach` shows its rows, as a Picker over one does.
     const items = flattenForEach(isContextMenu && contextMenu?.closure
-      ? this.ctx.build(contextMenu.closure, [], contextMenu.environment)
+      ? this.ctx.build(contextMenu.closure, [], contextMenu.environment, 'Context menu')
       : control.children)
     const rows = items.map((child, index) => {
       const path = `${open}/opt-${index}`
@@ -1403,7 +1410,7 @@ class Resolver {
 
     const builder = this.destinationBuilder(link, screen)
     if (!builder?.closure) return null
-    return this.ctx.build(builder.closure, [value], builder.environment)
+    return this.ctx.build(builder.closure, [value], builder.environment, 'Destination')
   }
 
   private destinationBuilder(link: ViewValue, screen: readonly ViewValue[]): ModifierValue | null {
@@ -1425,7 +1432,7 @@ class Resolver {
     const toolbar = owner?.modifier
     if (!toolbar?.closure) return { leading: [], trailing: [] }
 
-    const items = this.ctx.build(toolbar.closure, [], toolbar.environment)
+    const items = this.ctx.build(toolbar.closure, [], toolbar.environment, 'Toolbar')
     const leading: ViewValue[] = []
     const trailing: ViewValue[] = []
 
@@ -1476,7 +1483,7 @@ class Resolver {
       const modernLabel = page.args.filter(a => a.label === 'label').map(a => asView(a.value)).filter((v): v is ViewValue => !!v)
       const label: readonly ViewValue[] = paged ? [] : page.name === 'Tab'
         ? modernLabel.length ? modernLabel : [{ name: 'Label', args: page.args.filter(a => a.label === null || a.label === 'systemImage'), children: [], modifiers: [], action: null, span: page.span }]
-        : item?.closure ? this.ctx.build(item.closure, [], item.environment) : []
+        : item?.closure ? this.ctx.build(item.closure, [], item.environment, 'Tab item') : []
       const path = `${tabId}/tab-${i}`
       const intent: ViewIntent =
         binding && tagged[i] !== null
@@ -1591,6 +1598,7 @@ class Resolver {
             modifier.closure,
             itemValue && itemValue.kind !== 'nil' ? [itemValue] : [],
             modifier.environment,
+            PRESENTATION_NAMES[kind],
           )
         : []
 

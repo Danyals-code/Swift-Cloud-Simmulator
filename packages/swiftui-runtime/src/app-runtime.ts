@@ -271,7 +271,7 @@ export class AppRuntime {
 
       const ui = resolveUI(views, {
         state: this.ui,
-        build: (closure, args, environment) => this.buildViews(closure, args, environment),
+        build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
         animation: this.animation,
       }, undefined, this.previewPrefix ? { prefix: this.previewPrefix } : undefined)
@@ -321,7 +321,7 @@ export class AppRuntime {
       {
         state: this.ui,
         includeViewHierarchy: basePage,
-        build: (closure, args, environment) => this.buildViews(closure, args, environment),
+        build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
         animation: this.animation,
       },
@@ -360,7 +360,10 @@ export class AppRuntime {
   resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number): readonly NestedPage[] {
     return resolveNestedPages(views, {
       state: new UIState(),
-      build: (closure, args, environment) => this.buildViews(closure, args, environment),
+      // The canvas opens these with the state the app has now, so one that stops,
+      // `Text(selected!)` while nothing is selected, is a screen the app can't show
+      // yet rather than one that is broken: it is left out, not drawn as stopped.
+      build: (closure, args, environment) => this.runBuilder(closure, args, environment),
       styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
       animation: null,
     }, tab, rootId, limit)
@@ -935,7 +938,7 @@ export class AppRuntime {
    * them has unwound. Without it `@EnvironmentObject` on a detail screen resolves to
    * nothing, which is not a limitation the user can see coming.
    */
-  private buildViews(
+  private runBuilder(
     closure: ClosureValue,
     args: readonly SwiftValue[] = [],
     environment?: EnvironmentFrame,
@@ -943,6 +946,25 @@ export class AppRuntime {
     return this.host.environment.withFrame(environment, () =>
       this.viewsFrom(this.interpreter.runViewBuilder(closure, args)),
     )
+  }
+
+  /**
+   * `runBuilder`, for what the app has on screen: a sheet or a destination whose own
+   * closure stops - `Detail(item: items[0])` on an empty list - is drawn as stopped,
+   * as a view is, and the sheet can still be closed and the destination left.
+   */
+  private buildViews(
+    closure: ClosureValue,
+    args: readonly SwiftValue[] = [],
+    environment?: EnvironmentFrame,
+    name = 'Content',
+  ): readonly ViewValue[] {
+    try {
+      return this.runBuilder(closure, args, environment)
+    } catch (error) {
+      if (!containable(error)) throw error
+      return [stoppedView(name, toFailure(error, this.interpreter.position), closure.span)]
+    }
   }
 
   /**
