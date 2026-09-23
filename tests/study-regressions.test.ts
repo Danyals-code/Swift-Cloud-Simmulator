@@ -477,6 +477,17 @@ describe('E6: trim draws the part of the path iOS 27 draws', () => {
     expect(pathOf(arc(true))).toBe('M 55 10 A 45 45 0 1 0 100 55')
   })
 
+  // 1 / 0 is infinite, and looped forever in the worker; 0 / 0 is not a number, and drew a stray arc.
+  it.each(['1.0', '0.0'])('draws nothing, rather than hanging, for an arc whose angle divides %s by zero', (done) => {
+    const r = runView(`@State private var done = ${done}
+      let goal = 0.0
+      var body: some View {
+        Path { p in p.addArc(center: CGPoint(x: 55, y: 55), radius: 45, startAngle: .degrees(-90), endAngle: .degrees(-90 + 360 * done / goal), clockwise: true) }
+          .stroke(Color.red, lineWidth: 8)
+      }`)
+    expect(nodes(r).find(n => n.path)?.path?.d ?? '').not.toContain('A')
+  })
+
   it("draws the Drawing template's ring counterclockwise from 12 o'clock, ending at 36 degrees at 65%", () => {
     const ring = `Path { path in
         path.addArc(center: CGPoint(x: 70, y: 70), radius: 63, startAngle: .degrees(-90), endAngle: .degrees(270), clockwise: true)

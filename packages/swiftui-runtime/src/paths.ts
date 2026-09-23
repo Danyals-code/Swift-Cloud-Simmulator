@@ -75,10 +75,13 @@ function pt(p: PathPoint): string {
  * three quarters. From -90 to 270 with `clockwise: true` is a whole turn.
  */
 function arcSweep(arc: { startDegrees: number; endDegrees: number; clockwise: boolean }): number {
-  if (arc.endDegrees === arc.startDegrees) return 0
-  let sweep = arc.clockwise ? arc.startDegrees - arc.endDegrees : arc.endDegrees - arc.startDegrees
-  while (sweep <= 0) sweep += 360
-  return Math.min(sweep, 360)
+  const turn = arc.clockwise ? arc.startDegrees - arc.endDegrees : arc.endDegrees - arc.startDegrees
+  // `.degrees(360 * done / goal)` with a goal of 0 is not a number, and draws nothing
+  // rather than looping forever in the worker.
+  if (turn === 0 || !Number.isFinite(turn)) return 0
+  if (turn >= 360) return 360
+  const sweep = turn % 360
+  return sweep <= 0 ? sweep + 360 : sweep
 }
 
 function onCircle(centre: PathPoint, radius: number, degrees: number): PathPoint {
