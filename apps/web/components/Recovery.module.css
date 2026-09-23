@@ -12,6 +12,14 @@
   font: 14px/1.45 var(--font-ui, -apple-system), system-ui, sans-serif;
 }
 
+/* Over everything else on the page: the studio behind it is not this tab's to use. */
+.cover {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  box-sizing: border-box;
+}
+
 .card {
   width: min(460px, 100%);
   padding: 24px;

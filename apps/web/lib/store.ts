@@ -88,6 +88,7 @@ let loading: Promise<void> | null = null
 let saveQueue: Promise<unknown> = Promise.resolve()
 function writeProject(project: Project): Promise<string | null> {
   const write = saveQueue.then(async () => {
+    if (handedOver) return 'Swift Web Studio is open in another tab, so this tab no longer saves.'
     try { await persistence().save(project); saved = project; return null }
     catch (error) { return error instanceof Error && error.message ? `Could not save: ${error.message}` : 'Could not save to this browser’s storage.' }
   })
@@ -103,6 +104,9 @@ function writeProject(project: Project): Promise<string | null> {
  * copy back over the newer work of another.
  */
 let saved: Project | null = null
+
+/** Set once another tab has the studio: from then on this one writes nothing. */
+let handedOver = false
 
 /**
  * Asks the browser not to clear this site's storage when space runs short.
@@ -204,6 +208,12 @@ export interface StudioState {
 
   load: () => Promise<void>
   flush: () => Promise<void>
+  /**
+   * Stops writing for good: another tab has the studio. What this tab holds is saved
+   * first unless `save` is false - when the studio was taken from a tab that did not
+   * answer, its copy is the old one. A reload replaces it.
+   */
+  handOver: (save?: boolean) => Promise<void>
   setFileText: (fileId: FileId, text: string) => void
   setActiveFile: (fileId: FileId) => void
   closeFile: (fileId: FileId) => void
@@ -529,13 +539,17 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       })
       return loading
     },
+    async handOver(save = true) {
+      if (save) await get().flush()
+      handedOver = true
+    },
     async flush() {
       if (saveTimer) {
         clearTimeout(saveTimer)
         saveTimer = null
       }
       const { project } = get()
-      if (!project || project === saved) return
+      if (!project || project === saved || handedOver) return
 
       const problem = await writeProject(project)
       // A completed older write says nothing about edits made while it was saving.

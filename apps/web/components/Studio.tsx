@@ -1,7 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { AuthoringNode, DesignEditRequest, ExportFormat, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
 import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
@@ -56,6 +56,8 @@ import { BUILD_DETAILS, BUILD_NAME, STUDIO_BUILD } from '../lib/build'
 import { crashIfTesting } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
+import { OpenElsewhere } from './OpenElsewhere'
+import { startStudioTab, studioTabState, subscribeStudioTab } from '../lib/activeTab'
 import styles from './Workspace.module.css'
 import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
@@ -198,9 +200,12 @@ export function Studio() {
   const [reveal, setReveal] = useState<{ offset: number; nonce: number } | null>(null)
   const revealNonce = useRef(0)
 
+  /** Whether this tab has the studio, or another tab does (B1). Nothing loads until it is this one. */
+  const tab = useSyncExternalStore(subscribeStudioTab, studioTabState, () => 'checking' as const)
+  useEffect(() => { startStudioTab(save => useStudio.getState().handOver(save)) }, [])
   useEffect(() => {
-    void load()
-  }, [load])
+    if (tab === 'active') void load()
+  }, [tab, load])
 
   /**
    * The sheet at launch.
@@ -250,14 +255,17 @@ export function Studio() {
   }, [])
 
   // Debounced autosave can lose the last edit when a tab is closed or backgrounded,
-  // so force the pending write at both of the points the browser gives us.
+  // so force the pending write at both of the points the browser gives us. Only when
+  // the tab is hidden: coming back to one has nothing new to write, and used to put
+  // this tab's copy back over whatever another tab had saved meanwhile (B1).
   useEffect(() => {
-    const onHide = () => void flush()
-    document.addEventListener('visibilitychange', onHide)
-    window.addEventListener('pagehide', onHide)
+    const onVisibility = () => { if (document.visibilityState === 'hidden') void flush() }
+    const onPageHide = () => void flush()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
     return () => {
-      document.removeEventListener('visibilitychange', onHide)
-      window.removeEventListener('pagehide', onHide)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
     }
   }, [flush])
 
@@ -1173,6 +1181,7 @@ export function Studio() {
   )
 
   if (!loaded || !project) {
+    if (tab === 'elsewhere') return <OpenElsewhere />
     return (
       <main className="grid h-dvh place-items-center bg-xc-editor text-[12px] text-xc-text-3">
         Loading project…
@@ -1283,7 +1292,7 @@ export function Studio() {
 
   return (
     <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
-      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen}>
+      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen || tab === 'elsewhere'}>
       <Toolbar
         mode={mode}
         onModeChange={setMode}
@@ -1615,6 +1624,7 @@ export function Studio() {
           }}
         />
       ) : null}
+      {tab === 'elsewhere' ? <OpenElsewhere /> : null}
     </main>
   )
 }
