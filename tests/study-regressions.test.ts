@@ -926,6 +926,20 @@ struct ContentView: View {
     const optional = runView('@Environment(Model.self) private var model: Model?\n var body: some View { Text(model == nil ? "No model" : "Model") }', model)
     expect(texts(optional)).toContain('No model')
   })
+
+  it.each([
+    ['a title', 'NavigationLink("Open") { Detail() }'],
+    ['destination:', 'NavigationLink(destination: Detail()) { Text("Open") }'],
+    ['a label: closure', 'NavigationLink { Detail() } label: { Text("Open") }'],
+  ])('draws a link with %s to a screen missing its model, and stops only when it is pushed, as iOS does', (_, link) => {
+    const r = runView(`var body: some View { NavigationStack { ${link} } }`, `${model}
+      struct Detail: View {
+        @Environment(Model.self) private var model
+        var body: some View { Text("Count \\(model.count)") }
+      }`)
+    expect(controls(r)).toContain('Open')
+    expect(tap(r, 'Open').diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+  })
 })
 
 describe("E11a: a view the preview doesn't know draws a placeholder, not a blank screen", () => {

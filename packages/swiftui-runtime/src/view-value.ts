@@ -160,6 +160,14 @@ export interface ModifierValue {
 
 export const VIEW_TYPE = 'View'
 
+/**
+ * A trap in building a `NavigationLink`'s destination, kept as that destination until
+ * the link is pushed; the payload is the trap. SwiftUI runs a destination's body only
+ * when it is pushed, so a trap there, such as a model no ancestor gave, crashes iOS on
+ * the push and not before.
+ */
+export const DESTINATION_TRAP_TYPE = 'DestinationTrap'
+
 /** A contextual member with no base: `.largeTitle`, `.primary`, `.infinity`. */
 export const TOKEN_TYPE = 'Token'
 

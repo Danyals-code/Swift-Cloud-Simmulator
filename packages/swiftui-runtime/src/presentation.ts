@@ -22,6 +22,7 @@ import {
   payloadOf,
   ANIMATION_TYPE,
   COLOR_TYPE,
+  DESTINATION_TRAP_TYPE,
   type ActionValue,
   type AnimationPayload,
   type ColorPayload,
@@ -1320,9 +1321,13 @@ class Resolver {
    * resolved by finding the matching destination builder on the current screen and
    * running it with the link's value - which is also why destination content is not
    * built until a push actually happens.
+   *
+   * A trap in building an eager destination was held for this moment, and is thrown
+   * now, as iOS crashes on the push.
    */
   private destinationFor(link: ViewValue, screen: readonly ViewValue[]): readonly ViewValue[] | null {
     const direct = link.args.filter((a) => a.label === 'destination')
+    for (const { value } of direct) if (value.kind === 'opaque' && value.typeName === DESTINATION_TRAP_TYPE) throw value.payload
     if (direct.length > 0) {
       const views = direct.map((a) => asView(a.value)).filter((v): v is ViewValue => v !== null)
       if (views.length > 0) return views

@@ -53,6 +53,7 @@ import {
   ANIMATION_TYPE,
   BUTTON_CONFIGURATION_TYPE,
   COLOR_TYPE,
+  DESTINATION_TRAP_TYPE,
   EDGE_INSETS_TYPE,
   DIMENSIONS_TYPE,
   GEOMETRY_TYPE,
@@ -862,7 +863,7 @@ export class SwiftUIHost implements InterpreterHost {
     // A direct destination may be a user-defined View value, not a built-in view.
     // Expand it with the same path used for destination builder closures.
     const args = name === 'NavigationLink' ? toArgs(call).flatMap(argument => argument.label === 'destination'
-      ? this.toViews([argument.value]).map(destination => ({ label: 'destination', value: view(destination) }))
+      ? this.destinationArgs(() => [argument.value])
       : [argument]) : toArgs(call)
 
     if (DATA_DRIVEN_VIEWS.has(name) && call.trailingClosure && this.looksDataDriven(call)) {
@@ -942,10 +943,10 @@ export class SwiftUIHost implements InterpreterHost {
     // `NavigationLink("Title") { Destination() }` - a title plus a trailing closure
     // means the closure is the destination, not the label.
     if (name === 'NavigationLink' && call.trailingClosure && this.hasPlainTitle(call)) {
-      const destination = this.toViews(call.invokeBuilder(call.trailingClosure))
+      const destination = call.trailingClosure
       return view({
         name,
-        args: [...args, ...destination.map((d) => ({ label: 'destination', value: view(d) }))],
+        args: [...args, ...this.destinationArgs(() => call.invokeBuilder(destination))],
         children: [],
         modifiers: [],
         action: null,
@@ -992,11 +993,12 @@ export class SwiftUIHost implements InterpreterHost {
     named: readonly { label: string | null; value: SwiftValue }[],
   ): SwiftValue {
     const isAction = ACTION_VIEWS.has(name)
-    const children = [
-      ...(call.trailingClosure && !isAction
-        ? this.toViews(call.invokeBuilder(call.trailingClosure))
-        : []),
-    ]
+    const content = call.trailingClosure && !isAction ? call.trailingClosure : null
+    // In `NavigationLink { Detail() } label: { Card() }`, only Card belongs on the
+    // current screen. Detail is the link's destination, for the presentation resolver
+    // to select after a push.
+    const destination = name === 'NavigationLink' && content ? this.destinationArgs(() => call.invokeBuilder(content)) : null
+    const children = content && !destination ? this.toViews(call.invokeBuilder(content)) : []
 
     const labelled: ViewArg[] = []
     for (const argument of named) {
@@ -1005,15 +1007,9 @@ export class SwiftUIHost implements InterpreterHost {
     }
 
     if (name === 'NavigationLink') {
-      // In `NavigationLink { Detail() } label: { Card() }`, only Card belongs
-      // on the current screen. Keep Detail under the destination argument so
-      // the presentation resolver can select it after a push.
       return view({
         name,
-        args: [
-          ...args.filter((a) => !named.some((n) => n.label === a.label)),
-          ...children.map((child) => ({ label: 'destination', value: view(child) })),
-        ],
+        args: [...args.filter((a) => !named.some((n) => n.label === a.label)), ...(destination ?? [])],
         children: labelled.flatMap((argument) => {
           const child = asView(argument.value)
           return child ? [child] : []
@@ -1769,6 +1765,22 @@ export class SwiftUIHost implements InterpreterHost {
     const first = call.args.find((a) => a.label === null)?.value
     const value = asProjection(first)?.get() ?? first
     return value?.kind === 'array' || value?.kind === 'range'
+  }
+
+  /**
+   * A `NavigationLink`'s destination, as the link's `destination` arguments.
+   *
+   * The preview builds it with the link, body and all, where SwiftUI runs its body only
+   * when it is pushed. So a trap in building it is kept as the destination: the screen
+   * with the link draws, and pushing it stops the preview where iOS would crash.
+   */
+  private destinationArgs(build: () => readonly SwiftValue[]): ViewArg[] {
+    try {
+      return this.toViews(build()).map((destination) => ({ label: 'destination', value: view(destination) }))
+    } catch (error) {
+      if (!(error instanceof SwiftTrap)) throw error
+      return [{ label: 'destination', value: { kind: 'opaque', typeName: DESTINATION_TRAP_TYPE, payload: error } }]
+    }
   }
 
   private hasPlainTitle(call: HostCall): boolean {
