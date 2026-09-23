@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { projectFromFiles } from '@studio/project-model'
 import { buildExportBundle } from '@studio/exporter'
 
-it.each(['ios27-screens', 'ios27-visual-stress', 'ios27-misrenders'])('exports the same %s source in an iOS 27 Xcode project', fixture => {
+it.each(['ios27-screens', 'ios27-visual-stress', 'ios27-misrenders', 'ios27-misrenders-ii'])('exports the same %s source in an iOS 27 Xcode project', fixture => {
   const source = readFileSync(new URL(`./fixtures/${fixture}.swift`, import.meta.url), 'utf8')
   const project = projectFromFiles([{ name: 'ScreenComparison.swift', text: source }], 0)!
   const bundle = buildExportBundle({ ...project, manifest: { ...project.manifest, deploymentTarget: '27.0' } })

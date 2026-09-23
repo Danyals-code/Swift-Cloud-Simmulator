@@ -19,6 +19,13 @@ the search field goes with and without a tab bar. Each
 screen is launched with `-screen <name>`, so the captures need no tapping. The tests that
 use a value cite this set.
 
+18 more in [native/iphone18pro-misrenders-ii](native/iphone18pro-misrenders-ii/measurements.json),
+paired with `tests/fixtures/ios27-misrenders-ii.swift`, measure the second set: which
+`ForEach` rows a Picker or TabView selects without a `.tag`, which appear hooks run and in
+what order, what a GeometryReader reports where it is placed, how links and share links
+draw, and where a ScrollView puts a lone child. Those screens also print what they
+measure, kept by launching through `simctl launch --console-pty`.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh
