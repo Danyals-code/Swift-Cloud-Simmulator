@@ -860,3 +860,72 @@ describe('E16a: an SF Symbol name the preview has no drawing for warns at the na
     expect(markup).not.toContain('unsupported symbol')
   })
 })
+
+describe('E14: an @Observable model shared through @Bindable and the environment', () => {
+  const model = '@Observable final class Model { var name = ""; var count = 0 }'
+  /** Types into the text field with this placeholder, as a person does, and draws the result. */
+  function type(r: CompileResult, placeholder: string, value: string): CompileResult {
+    const field = nodes(r).find(n => n.hitTarget?.role === 'textField' && n.a11y?.label === placeholder)!
+    applyEvent({ kind: 'textChange', handlerId: field.hitTarget!.handlerId, value })
+    return rerender(revision++)
+  }
+
+  it('writes through a child view\'s @Bindable model into the parent\'s', () => {
+    const r = runView(`@State private var model = Model()
+      var body: some View { VStack { Text("Hello \\(model.name)"); Editor(model: model) } }`, `${model}
+      struct Editor: View {
+        @Bindable var model: Model
+        var body: some View { TextField("Name", text: $model.name) }
+      }`)
+    expect(texts(type(r, 'Name', 'Ada'))).toContain('Hello Ada')
+  })
+
+  it('hands a model given with .environment(model) to a pushed screen that asks for its type', () => {
+    const r = runView(`@State private var model = Model()
+      var body: some View {
+        NavigationStack { NavigationLink("Open") { Detail() } }
+          .environment(model)
+      }`, `${model}
+      struct Detail: View {
+        @Environment(Model.self) private var model
+        var body: some View { Button("Add \\(model.count)") { model.count += 1 } }
+      }`)
+    expect(texts(tap(tap(r, 'Open'), 'Add 0'))).toContain('Add 1')
+  })
+
+  it('binds to it with @Bindable var model = model inside body, as Apple writes it', () => {
+    const r = runView(`@State private var model = Model()
+      var body: some View { VStack { Text("Hello \\(model.name)"); Detail() }.environment(model) }`, `${model}
+      struct Detail: View {
+        @Environment(Model.self) private var model
+        var body: some View {
+          @Bindable var model = model
+          TextField("Name", text: $model.name)
+        }
+      }`)
+    expect(texts(type(r, 'Name', 'Ada'))).toContain('Hello Ada')
+  })
+
+  it('reads a model given to the whole app on its WindowGroup', () => {
+    const source = `import SwiftUI
+${model}
+@main struct Demo: App {
+  @State private var model = Model()
+  var body: some Scene { WindowGroup { ContentView().environment(model) } }
+}
+struct ContentView: View {
+  @Environment(Model.self) private var model
+  var body: some View { Text("Count \\(model.count)") }
+}`
+    const r = compileView(source)
+    expect(r.diagnostics).toEqual([])
+    expect(texts(r)).toContain('Count 0')
+  })
+
+  it('stops, as iOS does, when no ancestor gave the model, and reads nil when it may be missing', () => {
+    const missing = compileView(viewSource('@Environment(Model.self) private var model\n var body: some View { Text("Count \\(model.count)") }', model))
+    expect(missing.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    const optional = runView('@Environment(Model.self) private var model: Model?\n var body: some View { Text(model == nil ? "No model" : "Model") }', model)
+    expect(texts(optional)).toContain('No model')
+  })
+})

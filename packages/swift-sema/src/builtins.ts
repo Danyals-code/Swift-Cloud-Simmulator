@@ -413,6 +413,8 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean }> = ne
   ['Binding', { supported: true }],
   ['StateObject', { supported: true }],
   ['ObservedObject', { supported: true }],
+  // `$model.name` projects through the reference an `@Observable` class already is.
+  ['Bindable', { supported: true }],
   ['EnvironmentObject', { supported: true }],
   ['Environment', { supported: true }],
   // A stored property on a class, which is a reference - so a change is visible

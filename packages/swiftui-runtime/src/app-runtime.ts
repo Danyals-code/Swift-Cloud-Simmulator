@@ -17,6 +17,7 @@ import {
   str,
   SwiftThrow,
   SwiftTrap,
+  NIL,
   UnsupportedAtRuntime,
   valuesEqual,
   type ClosureValue,
@@ -1025,6 +1026,15 @@ export class AppRuntime {
 
       const environment = member.attributes.find((a) => a.name === 'Environment')
       if (environment) {
+        // `@Environment(Model.self)`: the object an ancestor gave with `.environment(model)`.
+        const type = environmentType(environment)
+        if (type) {
+          const object = this.host.environment.object(type)
+          if (object !== undefined) instance.fields.set(member.name, object)
+          else if (member.typeAnnotation?.kind === 'optionalType') instance.fields.set(member.name, NIL)
+          else throw new SwiftTrap(`No Observable object of type ${type} found. A View.environment(_:) for ${type} may be missing as an ancestor of this view.`, member.span, [])
+          continue
+        }
         const key = asKeyPath(keyPathArgument(environment))?.components[0]
         const value = key ? this.host.environment.value(key) : undefined
         if (value === undefined) throw new UnsupportedAtRuntime(`@Environment(${key ?? 'type-based lookup'})`, member.span)
@@ -1146,6 +1156,12 @@ function storageKey(property: VarDecl): string | null {
 }
 
 /** `@Environment(\.colorScheme)` - the key path the attribute was given. */
+/** `@Environment(Model.self)`: the type it asks for, where the environment holds an `@Observable` object. */
+function environmentType(attribute: { args: readonly { value: unknown }[] }): string | undefined {
+  const first = attribute.args[0]?.value as { kind?: string; member?: string; base?: { kind?: string; name?: string } | null } | undefined
+  return first?.kind === 'memberAccess' && first.member === 'self' && first.base?.kind === 'identifier' ? first.base.name : undefined
+}
+
 function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): SwiftValue | undefined {
   const first = attribute.args[0]?.value as { kind?: string; components?: readonly string[] } | undefined
   if (first?.kind !== 'keyPath' || !first.components) return undefined

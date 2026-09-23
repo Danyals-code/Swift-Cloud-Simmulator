@@ -31,7 +31,7 @@ function tap(r: CompileResult, label: string) {
 
 // Known gaps must identify the unsupported feature. These are not compatibility passes.
 const gaps: Record<string, string> = {
-  'state-initializer': "Cannot find '_count'", 'bindable-child': 'Bindable',
+  'state-initializer': "Cannot find '_count'",
   'value-textfield': 'value/format/formatter', 'multiline-textfield': 'axis-based multiline',
   'navigation-path': 'bound navigation paths', 'navigation-boolean': 'binding-driven destinations',
   'grid-cell-span': 'gridCellColumns', 'safe-area-padding': 'safeAreaPadding',

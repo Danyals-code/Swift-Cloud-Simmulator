@@ -253,6 +253,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Binding(get:set:)` / `.constant` | ✅ | - | a projection built from the user's closures, or one that reads a value and swallows writes; a control cannot tell either from `$value` |
 | `.environmentObject` / `@EnvironmentObject` | ✅ | 11 | reaches views expanded while the modifier is in scope, *and* the deferred ones - a pushed `navigationDestination`, a presented `.sheet`, a `.toolbar` - which capture the frame they were written in and restore it when they run. Before that, a detail screen reading an `@EnvironmentObject` trapped |
 | `.environment(\.key, …)` | ✅ | 7 | same scoping rule |
+| `@Observable` / `@Bindable` / `.environment(model)` / `@Environment(Model.self)` | ✅ | - | an `@Observable` class is a reference, so a change is seen everywhere, and `@Bindable` projects `$model.name`, `@Bindable var model = model` in a body included. `.environment(model)` hands the model down by its type, by the same scoping rule. A view asking for a type no ancestor gave stops, as the app does, unless its property is optional |
 | `colorScheme`, `dynamicTypeSize` | ✅ | 4 |
 | `locale`, `layoutDirection` | 🟡 | 7 | reported; there is no RTL layout or localisation yet |
 | `horizontalSizeClass` / `verticalSizeClass` | ✅ | 7 | derived from the device size |
@@ -478,8 +479,7 @@ the commonest shape in SwiftUI and offered a fix-it that broke the file it was a
 
 ## Additional confirmed gaps from the September 2026 audit
 
-- `@Bindable` is not implemented as a property wrapper.
-- Custom `EnvironmentKey.defaultValue` and type-based environment lookup are not implemented.
+- Custom `EnvironmentKey.defaultValue` is not implemented.
   Missing environment values now stop with an unsupported-runtime diagnostic instead of `nil`.
 - `.safeAreaPadding`, `.gridCellColumns`, and `.symbolEffect` are explicitly recognized as unsupported.
 - `AsyncImage` and `TimelineView` now warn about their existing partial behavior.

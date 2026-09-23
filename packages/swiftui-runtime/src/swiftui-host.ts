@@ -121,6 +121,22 @@ const CONTENT_CLOSURE_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
   ['Gauge', new Set(['currentValueLabel', 'minimumValueLabel', 'maximumValueLabel'])],
 ])
 
+/**
+ * What `.environmentObject(store)`, `.environment(\.key, value)` and `.environment(model)`
+ * put in scope for the views below them. An object is kept by its type, which is how
+ * `@EnvironmentObject` and `@Environment(Model.self)` find it again.
+ */
+function injectedEnvironment(member: string, args: readonly { readonly value: SwiftValue }[]): { values: [string, SwiftValue][]; objects: [string, SwiftValue][] } {
+  const values: [string, SwiftValue][] = []
+  const objects: [string, SwiftValue][] = []
+  const first = args[0]?.value
+  const key = member === 'environment' ? asKeyPath(first)?.components[0] : undefined
+  const second = args[1]?.value
+  if (key && second) values.push([key, second])
+  else if (first?.kind === 'struct' && (member === 'environmentObject' || member === 'environment' && first.reference)) objects.push([first.typeName, first])
+  return { values, objects }
+}
+
 const EDGE_LABELS: ReadonlySet<string> = new Set(['top', 'leading', 'bottom', 'trailing'])
 
 /** `EdgeInsets(top:leading:bottom:trailing:)`, any edge left out being 0. */
@@ -360,16 +376,9 @@ export class SwiftUIHost implements InterpreterHost {
 
   /** Scope the entire receiver expression, including children built eagerly inside stacks. */
   withMemberScope(member: string, args: readonly CallArgument[], evaluate: () => SwiftValue): SwiftValue {
-    const values: [string, SwiftValue][] = []
-    const objects: [string, SwiftValue][] = []
+    const { values, objects } = injectedEnvironment(member, args)
     const first = args[0]?.value
-    if (member === 'environmentObject' && first?.kind === 'struct') {
-      objects.push([first.typeName, first])
-    } else if (member === 'environment') {
-      const key = asKeyPath(first)?.components[0]
-      const value = args[1]?.value
-      if (key && value) values.push([key, value])
-    } else if (member === 'disabled' && first) {
+    if (member === 'disabled' && first) {
       values.push(['isEnabled', bool(!truthy(first) && truthy(this.environment.value('isEnabled') ?? bool(true)))])
     } else if ((member === 'controlSize' || member === 'font' || member === 'dynamicTypeSize') && first) {
       values.push([member, first])
@@ -671,18 +680,7 @@ export class SwiftUIHost implements InterpreterHost {
     member: string,
     call: HostCall,
   ): SwiftValue | undefined {
-    const values: [string, SwiftValue][] = []
-    const objects: [string, SwiftValue][] = []
-
-    if (member === 'environmentObject') {
-      const object = call.args[0]?.value
-      if (object?.kind === 'struct') objects.push([object.typeName, object])
-    } else {
-      const key = asKeyPath(call.args[0]?.value)?.components[0]
-      const value = call.args[1]?.value
-      if (key && value) values.push([key, value])
-    }
-
+    const { values, objects } = injectedEnvironment(member, call.args)
     const modifier = this.makeModifier(member, call)
 
     return this.environment.scoped(values, objects, () => {
