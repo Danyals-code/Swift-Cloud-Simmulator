@@ -465,12 +465,21 @@ export interface ProjectionPayload {
   set(value: SwiftValue): void
   /** For diagnostics: `count`, `self.isOn`. */
   readonly description: string
-  /**
-   * The property is declared Optional: `@State var choice: Flavor?`. Its value alone
-   * can't say so, because a present optional is held as the value itself, and a
-   * `Picker` over `ForEach` needs to know: its rows' own tags are not Optional.
-   */
-  readonly optional?: boolean
+  /** What the bound property was declared as, where its declaration wrote a type. */
+  readonly declared?: DeclaredType
+}
+
+/**
+ * A property's declared type: `var choice: Flavor?` is an Optional `Flavor`.
+ *
+ * Its value alone can't say so. A present optional is held as the value itself, and a
+ * nil one has no type at all, while a `Picker` needs both: its rows' own tags answer
+ * only a selection of their own type, and never an Optional one.
+ */
+export interface DeclaredType {
+  readonly optional: boolean
+  /** The type's name, Optional or not, where it is a plain name: `Flavor`. */
+  readonly name?: string
 }
 
 export function projection(payload: ProjectionPayload): OpaqueValue {

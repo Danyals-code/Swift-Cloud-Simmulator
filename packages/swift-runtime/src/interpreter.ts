@@ -91,6 +91,7 @@ import {
   type DictionaryValue,
   type EnumValue,
   type FunctionValue,
+  type DeclaredType,
   type ProjectionPayload,
   type StructValue,
   type SwiftValue,
@@ -802,7 +803,20 @@ export class Interpreter {
     }
   }
 
-  /** `value.name` for a value already in hand, tried in the order `evaluateMemberAccess` tries. */
+  /** What a type's stored property was declared as, where the declaration wrote a type. */
+  private declaredTypeOf(typeName: string, property: string): DeclaredType | undefined {
+    const annotation = this.membersOf(typeName).find((m): m is VarDecl => m.kind === 'varDecl' && m.name === property)?.typeAnnotation
+    if (!annotation) return undefined
+    const optional = annotation.kind === 'optionalType'
+    const named = optional ? annotation.wrapped : annotation
+    return { optional, ...(named.kind === 'namedType' ? { name: named.name } : {}) }
+  }
+
+  /**
+   * `value.name` for a value already in hand: a tuple's element, a property, stored or
+   * computed, an enum's `rawValue`, or a built-in one. Member access asks this before
+   * the host, and a key path or a `ForEach` id reads through it too.
+   */
   private readMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
     if (member === 'self') return target
     if (target.kind === 'tuple') return tupleElement(target, member)
@@ -1800,7 +1814,7 @@ export class Interpreter {
     if (projected) {
       const owner = projected.get()
       if (owner.kind === 'struct' && owner.fields.has(member)) {
-        return memberProjection(projected, member)
+        return memberProjection(projected, member, this.declaredTypeOf(owner.typeName, member))
       }
     }
 
@@ -2544,8 +2558,8 @@ export class Interpreter {
       const current = self.fields.get(name)
       if (asProjection(current)) return current!
       const field = fieldLValue(self, name, `self.${name}`)
-      const optional = this.membersOf(self.typeName).some((m) => m.kind === 'varDecl' && m.name === name && m.typeAnnotation?.kind === 'optionalType')
-      return projection(optional ? { get: field.get, set: field.set, description: field.description, optional } : field)
+      const declared = this.declaredTypeOf(self.typeName, name)
+      return projection(declared ? { get: field.get, set: field.set, description: field.description, declared } : field)
     }
 
     return null
@@ -3156,8 +3170,9 @@ function isStaticDecl(decl: { modifiers: readonly { name: string }[] }): boolean
  * on every access rather than capturing it keeps a computed `Binding(get:set:)`
  * behaving like the storage it stands for.
  */
-function memberProjection(outer: ProjectionPayload, field: string): SwiftValue {
+function memberProjection(outer: ProjectionPayload, field: string, declared: DeclaredType | undefined): SwiftValue {
   return projection({
+    ...(declared ? { declared } : {}),
     get: () => {
       const owner = outer.get()
       return owner.kind === 'struct' ? (owner.fields.get(field) ?? { kind: 'nil' }) : { kind: 'nil' }

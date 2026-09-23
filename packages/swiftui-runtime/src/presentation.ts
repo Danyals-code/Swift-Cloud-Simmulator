@@ -1187,6 +1187,26 @@ class Resolver {
     }
   }
 
+  /**
+   * A Picker none of whose rows its selection can match selects nothing, on a device
+   * too, and nothing says why. The preview says so where it is written.
+   */
+  private warnIfUnselectable(picker: ViewValue, rows: readonly ViewValue[], binding: ProjectionPayload | null): void {
+    if (!binding || rows.length === 0 || rows.some((row) => rowTag(row, binding) !== undefined)) return
+    const selected = binding.get()
+    const written = collectModifier(rows, 'tag')?.args[0]?.value
+    const tag = written ?? rows.find((row) => row.implicitTag !== undefined)?.implicitTag
+    const reason = tag === undefined ? 'its rows have no .tag'
+      : binding.declared?.optional && written === undefined ? "its selection is Optional, and the tag a ForEach row gets is not"
+      : `its rows are tagged ${typeNameOf(tag)}, and its selection is ${selected.kind === 'nil' ? binding.declared?.name ?? 'nil' : typeNameOf(selected)}`
+    this.warnings.push({
+      span: picker.span,
+      severity: 'warning',
+      code: 'type_mismatch',
+      message: `This Picker can't select any of its rows: ${reason}. Tag each row with .tag(value) of the selection's type.`,
+    })
+  }
+
   // ----------------------------------------------------------- navigation
 
   /**
@@ -1354,26 +1374,6 @@ class Resolver {
   }
 
   // ----------------------------------------------------------------- tabs
-
-  /**
-   * A Picker none of whose rows its selection can match selects nothing, on a device
-   * too, and nothing says why. The preview says so where it is written.
-   */
-  private warnIfUnselectable(picker: ViewValue, rows: readonly ViewValue[], selection: ProjectionPayload | null): void {
-    if (!selection || rows.length === 0 || rows.some((row) => rowTag(row, selection) !== undefined)) return
-    const selected = selection.get()
-    const written = collectModifier(rows, 'tag')?.args[0]?.value
-    const tag = written ?? rows.find((row) => row.implicitTag !== undefined)?.implicitTag
-    const reason = tag === undefined ? 'its rows have no .tag'
-      : selection.optional && written === undefined ? "its selection is Optional, and the tag a ForEach row gets is not"
-      : `its rows are tagged ${typeNameOf(tag)}, and its selection is ${typeNameOf(selected)}`
-    this.warnings.push({
-      span: picker.span,
-      severity: 'warning',
-      code: 'type_mismatch',
-      message: `This Picker can't select any of its rows: ${reason}. Tag each row with .tag(value) of the selection's type.`,
-    })
-  }
 
   private resolveTabs(tabs: ViewValue): { content: readonly ViewValue[]; tabBar: TabBar | null; pages: readonly ViewValue[]; selected: number } {
     const tabId = tabs.path ?? 'tabs'
@@ -1731,22 +1731,30 @@ function modifierOn(view: ViewValue, name: string): ModifierValue | null {
  * one of its own type. `ForEach`'s tag is never Optional, so it never answers an
  * Optional selection; a written `.tag` does, unless it says `includeOptional: false`.
  */
-function rowTag(row: ViewValue, selection: ProjectionPayload | null): SwiftValue | undefined {
-  const selected = selection?.get()
-  const optional = selection?.optional === true
+function rowTag(row: ViewValue, binding: ProjectionPayload | null): SwiftValue | undefined {
+  const optional = binding?.declared?.optional === true
   const written = collectModifier([row], 'tag')
   const tag = written?.args[0]?.value
   const include = written ? labelled(written.args, 'includeOptional') : undefined
-  if (tag !== undefined && tagFits(tag, selected) && !(optional && include !== undefined && !truthy(include))) return tag
-  if (row.implicitTag !== undefined && !optional && tagFits(row.implicitTag, selected)) return row.implicitTag
+  if (tag !== undefined && tagFits(tag, binding) && !(optional && include !== undefined && !truthy(include))) return tag
+  if (row.implicitTag !== undefined && !optional && tagFits(row.implicitTag, binding)) return row.implicitTag
   return undefined
 }
 
-/** Whether a tag has the selection's type. A nil selection, or a leading-dot name, has none to compare. */
-function tagFits(tag: SwiftValue, selected: SwiftValue | undefined): boolean {
-  if (selected === undefined || selected.kind === 'nil' || tokenName(tag) !== null || tokenName(selected) !== null) return true
-  return typeNameOf(tag) === typeNameOf(selected)
+/**
+ * Whether a tag has the selection's type: the type of its value, or, while it is nil,
+ * the type it was declared with. A leading-dot name carries no type to compare.
+ */
+function tagFits(tag: SwiftValue, binding: ProjectionPayload | null): boolean {
+  const selected = binding?.get()
+  if (tokenName(tag) !== null || (selected !== undefined && tokenName(selected) !== null)) return true
+  if (selected !== undefined && selected.kind !== 'nil') return typeNameOf(tag) === typeNameOf(selected)
+  const declared = binding?.declared?.name
+  return declared === undefined || typeNameOf(tag) === (DECLARED_AS_RUNTIME[declared] ?? declared)
 }
+
+/** Declared names the preview holds as another type: a `CGFloat` is a `Double` here. */
+const DECLARED_AS_RUNTIME: Readonly<Record<string, string>> = { CGFloat: 'Double', Float: 'Double' }
 
 /** A `ForEach`'s rows are siblings of whatever surrounds it, never a nested container. */
 function flattenForEach(views: readonly ViewValue[]): ViewValue[] {

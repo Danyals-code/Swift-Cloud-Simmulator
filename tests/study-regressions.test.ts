@@ -1202,6 +1202,19 @@ struct Scoop: Identifiable { let id: Int; let name: String }`
     expect(warning).toMatchObject({ severity: 'warning', message: expect.stringContaining("can't select any of its rows") })
   })
 
+  it("treats a model's Optional property as Optional, as it does a view's own", () => {
+    const r = compileView(viewSource(`@State private var model = Model()
+      var body: some View { Picker("Flavor", selection: $model.flavor) { ForEach(FlavorSelf.allCases) { Text($0.rawValue) } }.pickerStyle(.segmented) }`,
+      `${types}\n@Observable final class Model { var flavor: FlavorSelf? = .chocolate }`))
+    expect(selectedSegment(r)).toBe(null)
+    expect(r.diagnostics.map(d => d.message)).toContainEqual(expect.stringContaining("can't select any of its rows"))
+  })
+
+  it('selects no row of another type while an Optional selection is nil', () => {
+    const r = compileView(viewSource('@State private var choice: String? = nil\n var body: some View { Picker("Size", selection: $choice) { Text("S").tag(1); Text("M").tag(2) }.pickerStyle(.segmented) }', types))
+    expect(selectedSegment(tap(r, 'M'))).toBe(null)
+  })
+
   it('says nothing about a Picker whose rows its selection matches', () => {
     expect(reported('@State private var choice: FlavorSelf = .chocolate\n var body: some View { Picker("Flavor", selection: $choice) { ForEach(FlavorSelf.allCases) { Text($0.rawValue) } } }', types)).toEqual([])
   })
