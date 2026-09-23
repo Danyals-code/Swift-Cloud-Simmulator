@@ -40,7 +40,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
 | `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths, a computed `id` and `\.rawValue` included; each row is tagged with its id, as SwiftUI tags it. Binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
 | `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's. Vertical content keeps its own height at the top, centred across, as in iOS 27 |
-| `GeometryReader` | ✅ | 7 | reports its real size through `size`, where it is on the screen through `frame(in: .global)`, and through `safeAreaInsets` the insets of the edges it touches, bars included, as iOS 27 does. It is its own coordinate space. A named coordinate space is read as the screen |
+| `GeometryReader` | ✅ | 7 | reports its real size through `size` and where it is on the screen through `frame(in: .global)`, in a sheet too, and through `safeAreaInsets` the insets of the edges it touches, bars included, as iOS 27 does. A reader inside another reader reads no insets. It is its own coordinate space. A named coordinate space is read as the screen |
 | `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks: correct, and not virtualised. A 200-row stack measures in 7.6 ms against a 120 ms budget, so the cost is real and not yet worth the identity complexity |
 | `LazyVGrid` / `LazyHGrid` | ✅ | 6 | fixed, flexible and adaptive columns |
 | `Grid` / `GridRow` | ✅ | 7 | columns align across rows |
@@ -212,7 +212,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.sequenced` / `.exclusively` | 🟡 | 7 | accepted; treated as simultaneous |
 | `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render. Several on one view all run, in the order written |
 | `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency. `.task(id:)` runs again when its id changes |
-| `.id(_:)` | ✅ | - | a new id is a new view: its state starts over when the id changes |
+| `.id(_:)` | ✅ | - | a new id is a new view: its state starts over, and its appear and disappear hooks run, when the id changes |
 | `.onChange(of:)` | ✅ | 7 | one-value and explicit zero/two-parameter callbacks; `initial: true` runs on first appearance. Independent modifiers track independent previous values |
 | `.onReceive` | ⬜ | - | needs Combine, which needs publishers and a scheduler the preview does not have |
 | `.disabled` / `.allowsHitTesting` | ✅ | 7 |

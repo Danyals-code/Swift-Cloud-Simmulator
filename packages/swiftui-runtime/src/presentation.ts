@@ -573,6 +573,10 @@ class Resolver {
         transitionOccurrences.set(source, occurrence + 1)
         segment = `transition-${source}-${occurrence}`
       }
+      // `.id(x)`: a new x is a new view, so its hooks run as it appears and the old one's
+      // as it goes, and the framework state kept by path starts over.
+      const identity = view.modifiers.find((modifier) => modifier.name === 'id')?.args[0]?.value
+      if (identity !== undefined) segment = `${segment}@${encodeURIComponent(describe(identity, true))}`
       return this.stamp(inheritVisualStyle(view, inherited), `${prefix}-${segment}`)
     })
   }

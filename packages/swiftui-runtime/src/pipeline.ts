@@ -24,6 +24,7 @@ import {
   CENTER,
   FontMetricsTable,
   LayoutEngine,
+  ZERO_INSETS,
   type LayoutElement,
   type LayoutEnvironment,
   type MeasuredFont,
@@ -778,7 +779,8 @@ function renderPages(
 /** The measured size of every geometry reader in a tree, keyed as it reported. */
 function geometryFrom(tree: RenderTree): Map<string, GeometryPayload> {
   const measured = new Map<string, GeometryPayload>()
-  const readers = tree.nodes.filter((node) => node.id.startsWith('geo:'))
+  // A sheet's nodes are prefixed with `overlay/`, and its readers are measured too.
+  const readers = tree.nodes.filter((node) => node.id.includes('geo:'))
   if (readers.length === 0) return measured
   const byId = new Map(tree.nodes.map((node) => [node.id, node]))
   for (const node of readers) {
@@ -788,12 +790,11 @@ function geometryFrom(tree: RenderTree): Map<string, GeometryPayload> {
       x += up.frame.x
       y += up.frame.y
     }
-    measured.set(node.id.slice(4), { width: node.frame.width, height: node.frame.height, x, y, insets: node.geometryInsets ?? NO_INSETS })
+    measured.set(node.id.slice(node.id.indexOf('geo:') + 4), { width: node.frame.width, height: node.frame.height, x, y, insets: node.geometryInsets ?? ZERO_INSETS })
   }
   return measured
 }
 
-const NO_INSETS = { top: 0, leading: 0, bottom: 0, trailing: 0 }
 
 /**
  * What `@Environment` reports, from what the preview controls are set to.

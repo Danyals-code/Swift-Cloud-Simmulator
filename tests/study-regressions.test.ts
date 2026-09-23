@@ -1048,7 +1048,7 @@ describe('E12: what a GeometryReader reports, where it is placed', () => {
     const r = screen(`var body: some View { ${place(reader)} }`)
     const shown = texts(r).find(text => /^\d+ \d+ \d+ \d+ \d+ \d+$/.test(text))
     expect(shown, `drew ${JSON.stringify(texts(r))}, logged ${JSON.stringify(r.logs.map(log => log.message))}`).toBeDefined()
-    const [top, bottom, x, y, width, height] = shown!.split(' ').map(Number)
+    const [top, bottom, x, y, width, height] = shown!.split(' ').map(Number) as [number, number, number, number, number, number]
     return { insets: { top, bottom }, global: [x, y, width, height] }
   }
   const expected = (name: string) => ({ insets: { top: measured[name].insets.top, bottom: measured[name].insets.bottom }, global: measured[name].global })
@@ -1071,15 +1071,30 @@ describe('E12: what a GeometryReader reports, where it is placed', () => {
     expect(reads(place).insets).toEqual(expected(name).insets)
   })
 
-  // Measured: a reader touching the top of the safe area reports the whole distance to the
-  // screen's top, bars included, and the same at the bottom (geo-nav, geo-inline, geo-tab).
+  it('reports the size and place a sheet draws a reader at', () => {
+    const r = screen('var body: some View { Text("Home").sheet(isPresented: .constant(true)) { GeometryReader { geo in Text("\\(Int(geo.size.width)) \\(Int(geo.size.height)) \\(Int(geo.frame(in: .global).minX)) \\(Int(geo.frame(in: .global).minY))") } } }')
+    const reader = nodes(r).find(n => n.id.includes('geo:'))!
+    const drawn = worldFrame(nodes(r), reader)
+    expect(texts(r)).toContain([drawn.width, drawn.height, drawn.x, drawn.y].map(Math.round).join(' '))
+  })
+
+  // Under a bar the preview's own bars stand in for iOS's, which are not quite the same
+  // height (a large title ends at 164, not 168), so the edge under the bar is checked by
+  // how the simulator's inset there relates to where its reader was, and the other edge
+  // as measured (geo-nav, geo-inline, geo-tab).
   it.each([
-    ['a large title', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title") }`],
-    ['an inline title', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title").navigationBarTitleDisplayMode(.inline) }`],
-    ['a tab bar', (reader: string) => `TabView { ${reader}.tabItem { Label("One", systemImage: "house") } }`],
-  ])('reports its distance from the screen edges as its insets under %s', (_, place) => {
-    const { insets, global: [, y, , height] } = reads(place)
-    expect(insets).toEqual({ top: y, bottom: 874 - y! - height! })
+    ['geo-nav', 'top', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title") }`],
+    ['geo-inline', 'top', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title").navigationBarTitleDisplayMode(.inline) }`],
+    ['geo-tab', 'bottom', (reader: string) => `TabView { ${reader}.tabItem { Label("One", systemImage: "house") } }`],
+  ] as const)('reports what the simulator reports on its %s screen, from the preview\'s own %s bar', (name, barEdge, place) => {
+    const measured = expected(name)
+    const drawn = reads(place)
+    const other = barEdge === 'top' ? 'bottom' : 'top'
+    /** How far the inset under the bar is from the reader's distance to that screen edge. */
+    const offBy = (insets: { top: number; bottom: number }, [, y, , height]: readonly number[]) =>
+      barEdge === 'top' ? insets.top - y! : insets.bottom - (874 - y! - height!)
+    expect(drawn.insets[other]).toBe(measured.insets[other])
+    expect(offBy(drawn.insets, drawn.global)).toBe(offBy(measured.insets, measured.global))
   })
 })
 
@@ -1092,6 +1107,15 @@ describe('E12: .id, links and a timeline, as iOS 27 draws them', () => {
     const tapped = tap(tap(r, 'Taps 0'), 'Taps 1')
     expect(texts(tapped)).toContain('Taps 2')
     expect(texts(tap(tapped, 'Reset'))).toContain('Taps 0')
+  })
+
+  it('runs the appear and disappear hooks of a view whose .id changes, as a new view', () => {
+    const r = runView(`@State private var version = 0
+      @State private var log: [String] = []
+      var body: some View { VStack { Text(log.joined(separator: ",")); Button("Reset") { version += 1 }; Child(log: $log).id(version) } }`,
+      'struct Child: View { @Binding var log: [String]; var body: some View { Text("Child").onAppear { log.append("appear") }.onDisappear { log.append("gone") } } }')
+    expect(texts(r)[0]).toBe('appear')
+    expect(texts(tap(r, 'Reset'))[0]!.split(',').sort()).toEqual(['appear', 'appear', 'gone'])
   })
 
   it('keeps its state while the .id stays the same', () => {
