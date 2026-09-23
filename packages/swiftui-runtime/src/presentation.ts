@@ -379,6 +379,8 @@ class Resolver {
   private visualStyle: readonly ModifierValue[] = []
   private contextMenuPath: string | undefined
   private previewScope: readonly ViewValue[] = []
+  /** The containers the screen was cut out of (see `containersAbove`). */
+  private around: readonly ViewValue[] = []
 
   constructor(
     private readonly ctx: ResolveContext,
@@ -400,10 +402,11 @@ class Resolver {
       // A phone collapses a split view into a stack, so it is resolved as one.
       findView(withTabs.content, 'NavigationSplitView')
     const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
+    this.around = containersAbove(stamped, tabs, withTabs.content, nav)
 
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
-    const overlay = this.basePage ? null : this.findOverlay(screen.content) ?? this.menuOverlay(screen.content)
+    const overlay = this.basePage ? null : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content)
 
     const screenLayers = (content: readonly ViewValue[], bar: NavigationBar | null | undefined): ViewLayer[] => [
       ...viewLayers(content),
@@ -438,7 +441,7 @@ class Resolver {
     return {
       viewHierarchy: pageLayers,
       content: screen.content,
-      search: this.findSearchField(screen.content),
+      search: this.findSearchField(screen.content, this.around),
       ignoresSafeArea: collectModifier(screen.content, 'ignoresSafeArea') !== null,
       navigationBar: screen.navigationBar,
       tabBar: withTabs.tabBar,
@@ -454,7 +457,7 @@ class Resolver {
     const root = this.run(views)
     const out: NestedPage[] = []
     const seen = new Set<string>()
-    const queue = [{ ui: root, scope: this.previewScope, parentId: rootId, depth: 0 }]
+    const queue = [{ ui: root, scope: this.previewScope, around: this.around, parentId: rootId, depth: 0 }]
     let attempts = 0
     while (queue.length && out.length < limit && attempts < 64) {
       const current = queue.shift()!
@@ -491,7 +494,7 @@ class Resolver {
           const name = ui.navigationBar?.title || titleOf(built, fallback)
           seen.add(key)
           out.push({ id, parentId: current.parentId, rootId, kind, name, source, ui })
-          queue.push({ ui, scope: nestedResolver.previewScope, parentId: id, depth: current.depth + 1 })
+          queue.push({ ui, scope: nestedResolver.previewScope, around: nestedResolver.around, parentId: id, depth: current.depth + 1 })
         } catch { /* A destination lacking valid data does not blank other pages. */ }
       }
       const visitLinks = (content: readonly ViewValue[]) => {
@@ -505,7 +508,7 @@ class Resolver {
       }
       const toolbar = [...(current.ui.navigationBar?.leading ?? []), ...(current.ui.navigationBar?.trailing ?? [])]
       visitLinks([...current.ui.content, ...toolbar])
-      for (const { view, modifier } of allModifiers([...current.scope, ...toolbar])) {
+      for (const { view, modifier } of [...allModifiers([...current.scope, ...toolbar]), ...ownModifiers(current.around)]) {
         const kind = OVERLAY_KINDS[modifier.name]
         if (!modifier.closure || (kind !== 'sheet' && kind !== 'cover' && kind !== 'popover')) continue
         const item = labelled(modifier.args, 'item')
@@ -1390,8 +1393,8 @@ class Resolver {
    * Registered as a control writing its binding, exactly like a `TextField` - because
    * that is all `.searchable` is. Placement is resolved later from device context.
    */
-  private findSearchField(views: readonly ViewValue[]): SearchField | null {
-    for (const { view, modifier } of allModifiers(views)) {
+  private findSearchField(views: readonly ViewValue[], around: readonly ViewValue[] = []): SearchField | null {
+    for (const { view, modifier } of [...allModifiers(views), ...ownModifiers(around)]) {
       if (modifier.name !== 'searchable') continue
 
       const binding = labelled(modifier.args, 'text') ?? modifier.args[0]?.value
@@ -1422,9 +1425,9 @@ class Resolver {
    * trap on the force-unwrap every render if the closure ran while the sheet was
    * down. SwiftUI is lazy for the same reason.
    */
-  private findOverlay(views: readonly ViewValue[], depth = 0): Overlay | null {
+  private findOverlay(views: readonly ViewValue[], depth = 0, around: readonly ViewValue[] = []): Overlay | null {
     if (depth >= 4) return null
-    for (const { view, modifier } of allModifiers(views)) {
+    for (const { view, modifier } of [...allModifiers(views), ...ownModifiers(around)]) {
       const kind = OVERLAY_KINDS[modifier.name]
       if (!kind) continue
 
@@ -1485,6 +1488,7 @@ class Resolver {
       const tabbed = tabs ? this.resolveTabs(tabs) : { content: overlayViews, tabBar: null }
       const nav = findView(tabbed.content, 'NavigationStack') ?? findView(tabbed.content, 'NavigationView')
       const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null }
+      const around = containersAbove(overlayViews, tabs, tabbed.content, nav)
       const cornerRadius = numberOf(collectModifier(overlayViews, 'presentationCornerRadius')?.args[0]?.value)
 
       return {
@@ -1496,7 +1500,7 @@ class Resolver {
         background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
-        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
+        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, around), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
         title: kind === 'dialog' && tokenName(labelled(modifier.args, 'titleVisibility')) !== 'visible' ? '' : stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
         message: this.messageOf(modifier),
         dismiss,
@@ -1698,6 +1702,40 @@ function collectModifier(views: readonly ViewValue[], name: string): ModifierVal
     if (modifier.name === name) return modifier
   }
   return null
+}
+
+/**
+ * The containers a screen was cut out of: the views from the root down to its
+ * `TabView`, and from the tab page down to its `NavigationStack`, both inclusive.
+ *
+ * The screen is the stack's content, but a sheet, an alert or `.searchable` written on
+ * the stack - or on the TabView, or on the view around either - belongs to it too.
+ * That is where a toolbar's "Add" button's sheet is most often written, and where
+ * every tab of a tab app puts its own. Only their own modifiers count: their other
+ * content is what the screen already is, or isn't drawn at all.
+ */
+function containersAbove(
+  root: readonly ViewValue[],
+  tabs: ViewValue | null,
+  page: readonly ViewValue[],
+  nav: ViewValue | null,
+): ViewValue[] {
+  return [...(tabs ? pathTo(root, tabs) : []), ...(nav ? pathTo(page, nav) : [])]
+}
+
+/** The views from a list down to `target`, both inclusive, or none when it isn't there. */
+function pathTo(views: readonly ViewValue[], target: ViewValue): ViewValue[] {
+  for (const view of views) {
+    if (view === target) return [view]
+    const below = pathTo(view.children, target)
+    if (below.length) return [view, ...below]
+  }
+  return []
+}
+
+/** The modifiers written on these views themselves, and not on anything inside them. */
+function ownModifiers(views: readonly ViewValue[]): { view: ViewValue; modifier: ModifierValue }[] {
+  return views.flatMap((view) => view.modifiers.map((modifier) => ({ view, modifier })))
 }
 
 function* allModifiers(

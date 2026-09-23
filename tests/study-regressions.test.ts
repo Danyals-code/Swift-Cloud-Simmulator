@@ -280,3 +280,59 @@ describe('controls written with a title and systemImage:', () => {
     }
   })
 })
+
+describe('E3: presentations and search written on a NavigationStack or a TabView', () => {
+  it('opens a sheet on the stack from a toolbar button, the everyday flow', () => {
+    const r = runView(`@State private var adding = false
+      var body: some View {
+        NavigationStack {
+          Text("Home")
+            .navigationTitle("Home")
+            .toolbar { Button("Add") { adding = true } }
+        }
+        .sheet(isPresented: $adding) { Text("New item") }
+      }`)
+    expect(texts(r)).not.toContain('New item')
+    expect(texts(tap(r, 'Add'))).toContain('New item')
+  })
+
+  const presentations: Record<string, string> = {
+    'a sheet': '.sheet(isPresented: .constant(true)) { Text("Presented") }',
+    'a full-screen cover': '.fullScreenCover(isPresented: .constant(true)) { Text("Presented") }',
+    'an alert': '.alert("Presented", isPresented: .constant(true)) { Button("OK") { } }',
+    'a confirmation dialog': '.confirmationDialog("Presented", isPresented: .constant(true), titleVisibility: .visible) { Button("One") { } }',
+  }
+  const tab = '.tabItem { Label("Home", systemImage: "house") }'
+  const placements: Record<string, (modifier: string) => string> = {
+    'the NavigationStack': (m) => `NavigationStack { Text("Home") }${m}`,
+    'the TabView': (m) => `TabView { Text("Home")${tab} }${m}`,
+    "a tab page's own NavigationStack": (m) => `TabView { NavigationStack { Text("Home") }${m}${tab} }`,
+    "a sheet's own NavigationStack": (m) => `Text("Home").sheet(isPresented: .constant(true)) { NavigationStack { Text("Sheet") }${m} }`,
+  }
+  const cases = Object.entries(presentations).flatMap(([kind, modifier]) =>
+    Object.entries(placements).map(([where, build]) => [kind, where, build(modifier)] as const))
+
+  it.each(cases)('shows %s written on %s', (_, __, body) => {
+    expect(texts(runView(`var body: some View { ${body} }`))).toContain('Presented')
+  })
+
+  it('lists a sheet written on the TabView as a page of the Design gallery', () => {
+    const r = runView(`@State private var adding = false
+      var body: some View {
+        TabView {
+          NavigationStack { Text("Home").toolbar { Button("Add") { adding = true } } }
+            .tabItem { Label("Home", systemImage: "house") }
+        }
+        .sheet(isPresented: $adding) { Text("New item") }
+      }`, '', { allPages: true })
+    const sheets = (r.pages ?? []).filter(page => page.kind === 'sheet')
+    expect(sheets.flatMap(page => page.tree.nodes.flatMap(n => n.text?.runs.map(run => run.text) ?? []))).toContain('New item')
+  })
+
+  // What iOS 27 does with `.searchable` on a TabView itself is still to be checked.
+  const stacks = Object.entries(placements).filter(([where]) => where !== 'the TabView')
+  it.each(stacks)('shows a search field written on %s', (_, build) => {
+    const r = runView(`var body: some View { ${build('.searchable(text: .constant(""), prompt: "Find things")')} }`)
+    expect(controls(r)).toContain('Find things')
+  })
+})
