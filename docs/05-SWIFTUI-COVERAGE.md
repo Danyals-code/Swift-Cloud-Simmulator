@@ -37,7 +37,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
 | `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths; binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
 | `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's |
-| `GeometryReader` | ✅ | 7 | reports its real size through `size` and `frame(in:)`, and is its own coordinate space |
+| `GeometryReader` | ✅ | 7 | reports its real size through `size`, where it is on the screen through `frame(in: .global)`, and through `safeAreaInsets` the insets of the edges it touches, bars included, as iOS 27 does. It is its own coordinate space. A named coordinate space is read as the screen |
 | `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks: correct, and not virtualised. A 200-row stack measures in 7.6 ms against a 120 ms budget, so the cost is real and not yet worth the identity complexity |
 | `LazyVGrid` / `LazyHGrid` | ✅ | 6 | fixed, flexible and adaptive columns |
 | `Grid` / `GridRow` | ✅ | 7 | columns align across rows |
@@ -60,11 +60,11 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
 | `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
-| `Link` / `ShareLink` | 🟡 | 6 | label only, with an explicit warning; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
+| `Link` / `ShareLink` | 🟡 | 6 | drawn as iOS 27 draws them: the title or the label given, in the accent colour, and a share link without a label is the share icon and "Share…". Tapping opens nothing, and says so. `URL(string:)` exists, so the `destination:` can be written |
 | `ProgressView` | ✅ | 6 | determinate bar filling from its leading edge; `.circular` and the indeterminate form are the turning activity indicator |
 | `Gauge` | 🟡 | 7 | linear labelled bars and value-dependent circular arcs/markers; native metrics and all label/style arrangements remain approximate |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
-| `TimelineView` | 🟡 | - | its content is drawn once, at the moment of the render. The schedule is a clock the preview does not run, and the `context` is not supplied |
+| `TimelineView` | 🟡 | - | its content is drawn once, for the moment of the render: `context.date` is now. The schedule is a clock the preview does not run |
 | `Chart` (Swift Charts) | ⬜ | - | needs a mark model and a plottable-value protocol of its own, which is a package rather than a view |
 | `Map` (MapKit) | ✗ | - | Needs a licensed tile source; placeholder with a note |
 | `UIViewRepresentable` | ✗ | - | Cannot run UIKit; labelled placeholder |
@@ -207,8 +207,9 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `@GestureState` / `.updating` | ✅ | 7 | transient, reverting when the gesture ends |
 | `.simultaneously(with:)` | ✅ | 7 | each gesture responds to its own kind of input |
 | `.sequenced` / `.exclusively` | 🟡 | 7 | accepted; treated as simultaneous |
-| `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render |
-| `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency |
+| `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render. Several on one view all run, in the order written |
+| `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency. `.task(id:)` runs again when its id changes |
+| `.id(_:)` | ✅ | - | a new id is a new view: its state starts over when the id changes |
 | `.onChange(of:)` | ✅ | 7 | one-value and explicit zero/two-parameter callbacks; `initial: true` runs on first appearance. Independent modifiers track independent previous values |
 | `.onReceive` | ⬜ | - | needs Combine, which needs publishers and a scheduler the preview does not have |
 | `.disabled` / `.allowsHitTesting` | ✅ | 7 |

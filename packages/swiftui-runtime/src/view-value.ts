@@ -246,6 +246,11 @@ export const DIMENSIONS_TYPE = 'ViewDimensions'
 export interface GeometryPayload {
   readonly width: number
   readonly height: number
+  /** Where the reader is on the screen, as `frame(in: .global)` reports it. */
+  readonly x: number
+  readonly y: number
+  /** What `safeAreaInsets` reports. */
+  readonly insets: EdgeInsetsPayload
 }
 
 /** An animation curve, as `.animation()` and `withAnimation` take it. */

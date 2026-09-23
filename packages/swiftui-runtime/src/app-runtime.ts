@@ -46,6 +46,7 @@ import {
   type ActionValue,
   type AnimationPayload,
   type EnvironmentFrame,
+  type GeometryPayload,
   type ViewIntent,
   type ViewValue,
 } from './view-value'
@@ -138,7 +139,7 @@ export class AppRuntime {
   private environmentInputs: EnvironmentInputs = DEFAULT_ENVIRONMENT
 
   /** Sizes each `GeometryReader` was measured at, from the last layout pass. */
-  private geometry = new Map<string, { width: number; height: number }>()
+  private geometry = new Map<string, GeometryPayload>()
 
   /** Paths whose `.onAppear` has already run, so it does not run every pass. */
   private appeared = new Set<string>()
@@ -151,25 +152,27 @@ export class AppRuntime {
   /**
    * Records what the layout pass actually measured, and says whether it moved.
    *
-   * A true answer means the sizes a `GeometryReader` reported to its closure were
-   * wrong, so the caller runs one more pass with the corrected ones. Two passes are
-   * enough because a reader is greedy: its size is whatever it was proposed, and the
-   * proposal does not depend on what its closure produced. The half-point tolerance
-   * stops sub-pixel jitter from looping forever.
+   * A true answer means what a `GeometryReader` reported to its closure - its size,
+   * where it is, its safe area - was wrong, so the caller runs one more pass with the
+   * corrected values. Two passes are enough because a reader is greedy: its size is
+   * whatever it was proposed, and the proposal does not depend on what its closure
+   * produced. The half-point tolerance stops sub-pixel jitter from looping forever.
    */
-  updateGeometry(measured: ReadonlyMap<string, { width: number; height: number }>): boolean {
+  updateGeometry(measured: ReadonlyMap<string, GeometryPayload>): boolean {
     let changed = false
+    const moved = (a: number, b: number) => Math.abs(a - b) > 0.5
 
-    for (const [key, size] of measured) {
+    for (const [key, next] of measured) {
       const previous = this.geometry.get(key)
       if (
         !previous ||
-        Math.abs(previous.width - size.width) > 0.5 ||
-        Math.abs(previous.height - size.height) > 0.5
+        moved(previous.width, next.width) || moved(previous.height, next.height) ||
+        moved(previous.x, next.x) || moved(previous.y, next.y) ||
+        (['top', 'leading', 'bottom', 'trailing'] as const).some((edge) => moved(previous.insets[edge], next.insets[edge]))
       ) {
         changed = true
       }
-      this.geometry.set(key, size)
+      this.geometry.set(key, next)
     }
 
     this.host.geometry = this.geometry

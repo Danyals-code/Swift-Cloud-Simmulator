@@ -36,6 +36,7 @@ import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } 
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import type { NotDrawn, OverlayKind } from './presentation'
+import type { GeometryPayload } from './view-value'
 
 /**
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
@@ -775,14 +776,24 @@ function renderPages(
 }
 
 /** The measured size of every geometry reader in a tree, keyed as it reported. */
-function geometryFrom(tree: RenderTree): Map<string, { width: number; height: number }> {
-  const sizes = new Map<string, { width: number; height: number }>()
-  for (const node of tree.nodes) {
-    if (!node.id.startsWith('geo:')) continue
-    sizes.set(node.id.slice(4), { width: node.frame.width, height: node.frame.height })
+function geometryFrom(tree: RenderTree): Map<string, GeometryPayload> {
+  const measured = new Map<string, GeometryPayload>()
+  const readers = tree.nodes.filter((node) => node.id.startsWith('geo:'))
+  if (readers.length === 0) return measured
+  const byId = new Map(tree.nodes.map((node) => [node.id, node]))
+  for (const node of readers) {
+    // Where it is on the screen: its frame is in its parent's space, and so on up.
+    let { x, y } = node.frame
+    for (let up = node.parent ? byId.get(node.parent) : undefined; up; up = up.parent ? byId.get(up.parent) : undefined) {
+      x += up.frame.x
+      y += up.frame.y
+    }
+    measured.set(node.id.slice(4), { width: node.frame.width, height: node.frame.height, x, y, insets: node.geometryInsets ?? NO_INSETS })
   }
-  return sizes
+  return measured
 }
+
+const NO_INSETS = { top: 0, leading: 0, bottom: 0, trailing: 0 }
 
 /**
  * What `@Environment` reports, from what the preview controls are set to.

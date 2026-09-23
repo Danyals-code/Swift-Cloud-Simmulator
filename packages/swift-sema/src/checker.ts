@@ -864,12 +864,12 @@ export class Checker {
       if (callee.name === 'NavigationStack' && labels.has('path')) reason = 'bound navigation paths are not synchronized; use NavigationLink destinations in the preview'
       if (callee.name === 'TextField' && (labels.has('value') || labels.has('format') || labels.has('formatter'))) reason = 'value/format/formatter bindings are not implemented; use text: with a String binding'
       if (callee.name === 'TextField' && labels.has('axis')) reason = 'axis-based multiline fields are not implemented; use TextEditor for multiline editing'
-      if (callee.name === 'Link' || callee.name === 'ShareLink') reason = 'only the label is drawn; opening URLs and the system share sheet are not implemented'
+      if (callee.name === 'Link' || callee.name === 'ShareLink') reason = 'it is drawn, but tapping it opens nothing; opening URLs and the system share sheet are not implemented'
       if (callee.name === 'ToolbarItem' || callee.name === 'ToolbarItemGroup') {
         const placement = expr.args.find(arg => arg.label === 'placement')?.value
         if (placement?.kind === 'memberAccess' && ['keyboard', 'bottomBar', 'principal'].includes(placement.member)) reason = `the .${placement.member} placement is not implemented; its controls are omitted`
       }
-      if (callee.name === 'TimelineView') reason = 'the timeline runs only once and does not supply a context or advance its schedule'
+      if (callee.name === 'TimelineView') reason = 'the timeline runs only once, for the moment it is drawn, and does not advance its schedule'
       if (callee.name === 'AsyncImage') reason = 'remote loading and image phases are not implemented; only the placeholder is previewed'
     } else if (callee.kind === 'memberAccess' && rootsInAView(callee.base)) {
       feature = `.${callee.member}`

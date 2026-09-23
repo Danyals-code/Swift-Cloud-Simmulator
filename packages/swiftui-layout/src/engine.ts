@@ -182,6 +182,8 @@ export interface PlacedNode {
   readonly blendMode?: string
   readonly redacted?: boolean
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
+  /** A `GeometryReader`'s safe-area insets, which its proxy reports. Only on a reader's own node. */
+  readonly geometryInsets?: EdgeInsets
   readonly a11y?: {
     readonly label?: string
     readonly value?: string
@@ -198,6 +200,25 @@ export interface PlacedNode {
  * downstream. Large-but-finite keeps the arithmetic total.
  */
 const UNBOUNDED = 100_000
+
+/**
+ * What a `GeometryReader`'s `safeAreaInsets` reports, measured in the iOS 27 simulator:
+ * on each edge where the reader touches the safe area, the whole distance to the
+ * screen's edge, bars included, and 0 on an edge that doesn't touch it. A reader that
+ * ignores the safe area, or scrolls, or sits in coordinates that aren't the screen's,
+ * has none.
+ */
+function readerInsets(bounds: Rect, area: LayoutEnvironment['safeArea']): EdgeInsets {
+  if (!area) return { top: 0, leading: 0, bottom: 0, trailing: 0 }
+  const { inner, outer } = area
+  const touches = (edge: number, safe: number) => Math.abs(edge - safe) <= 0.5
+  return {
+    top: touches(bounds.y, inner.y) ? inner.y - outer.y : 0,
+    leading: touches(bounds.x, inner.x) ? inner.x - outer.x : 0,
+    bottom: touches(bounds.y + bounds.height, inner.y + inner.height) ? outer.y + outer.height - inner.y - inner.height : 0,
+    trailing: touches(bounds.x + bounds.width, inner.x + inner.width) ? outer.x + outer.width - inner.x - inner.width : 0,
+  }
+}
 
 /** Default root alignment: content sits where the caller put the bounds. */
 const TOP_LEADING: Alignment = { horizontal: 'leading', vertical: 'top' }
@@ -1462,6 +1483,7 @@ export class LayoutEngine {
           opacity: env.opacity,
           cornerRadius: 0,
           paint: { kind: 'hit' },
+          geometryInsets: readerInsets(bounds, parent ? undefined : env.safeArea),
           ...(parent ? { parent } : {}),
         })
         return this.place(

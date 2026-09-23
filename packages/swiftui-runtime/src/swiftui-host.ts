@@ -8,6 +8,7 @@ import {
   int,
   asProjection,
   copyValue,
+  dateValue,
   opaque,
   projection,
   str,
@@ -367,7 +368,7 @@ export class SwiftUIHost implements InterpreterHost {
    * a reader has to report *something* the first time, and the content rect is the
    * closest guess available before anything has been laid out.
    */
-  geometry: ReadonlyMap<string, { width: number; height: number }> = new Map()
+  geometry: ReadonlyMap<string, GeometryPayload> = new Map()
   defaultGeometry = { width: 393, height: 759 }
 
   /** Per-pass counter, so two readers on one source line get distinct keys. */
@@ -376,8 +377,11 @@ export class SwiftUIHost implements InterpreterHost {
 
   /** Scope the entire receiver expression, including children built eagerly inside stacks. */
   withMemberScope(member: string, args: readonly CallArgument[], evaluate: () => SwiftValue): SwiftValue {
-    const { values, objects } = injectedEnvironment(member, args)
     const first = args[0]?.value
+    // `.id(x)`: what the receiver builds is a different view for each x, so its state
+    // starts over when x changes, as SwiftUI's does.
+    if (member === 'id' && first && args.length === 1 && this.scopeIdentity) return this.scopeIdentity(`id:${describe(first, false)}`, evaluate)
+    const { values, objects } = injectedEnvironment(member, args)
     if (member === 'disabled' && first) {
       values.push(['isEnabled', bool(!truthy(first) && truthy(this.environment.value('isEnabled') ?? bool(true)))])
     } else if ((member === 'controlSize' || member === 'font' || member === 'dynamicTypeSize') && first) {
@@ -412,8 +416,8 @@ export class SwiftUIHost implements InterpreterHost {
    */
   private makeGeometryReader(call: HostCall): SwiftValue {
     const key = this.measuredSite(`g${call.span.start}`)
-    const size = this.geometry.get(key) ?? this.defaultGeometry
-    const proxy = opaque(GEOMETRY_TYPE, { width: size.width, height: size.height })
+    const measured: GeometryPayload = this.geometry.get(key) ?? { ...this.defaultGeometry, x: 0, y: 0, insets: { top: 0, leading: 0, bottom: 0, trailing: 0 } }
+    const proxy = opaque(GEOMETRY_TYPE, measured)
 
     return view({
       name: 'GeometryReader',
@@ -897,6 +901,11 @@ export class SwiftUIHost implements InterpreterHost {
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
+    // `TimelineView(...) { context in ... }`: drawn once, for the moment of the render.
+    if (name === 'TimelineView' && call.trailingClosure) {
+      const context: SwiftValue = { kind: 'struct', typeName: 'TimelineViewDefaultContext', fields: new Map<string, SwiftValue>([['date', dateValue(Date.now() / 1000)], ['cadence', token('live')]]) }
+      return view({ name, args: toArgs(call), children: this.toViews(call.invokeBuilder(call.trailingClosure, [context])), modifiers: [], action: null, span: call.span })
+    }
 
     // A labelled closure argument that names content: `Button { … } label: { … }`,
     // `Menu { … } label: { … }`, `Section { … } header: { … } footer: { … }`. Swift
@@ -1028,24 +1037,25 @@ export class SwiftUIHost implements InterpreterHost {
       if (applied !== undefined) return applied
     }
 
-    // `geo.frame(in: .local)` - the proxy's own rectangle. `.local` is the only
-    // coordinate space the preview can answer honestly: `.global` would need the
-    // reader's position on the screen, which layout knows and the proxy does not
-    // carry, so it reports the same rect rather than inventing an offset.
+    // `geo.frame(in: .local)` is the proxy's own rectangle, and `.global` where it is on
+    // the screen, as the last layout pass placed it. A named space is read as the
+    // screen too: the preview doesn't track `.coordinateSpace(name:)`.
     if (target.kind === 'opaque' && target.typeName === GEOMETRY_TYPE && member === 'frame') {
-      const { width, height } = target.payload as GeometryPayload
+      const { width, height, x: screenX, y: screenY } = target.payload as GeometryPayload
+      const local = tokenNameOf(call.args[0]?.value) === 'local'
+      const x = local ? 0 : screenX, y = local ? 0 : screenY
       return opaque(RECT_TYPE, {
-        x: 0,
-        y: 0,
+        x,
+        y,
         width,
         height,
-        minX: 0,
-        minY: 0,
-        midX: width / 2,
-        midY: height / 2,
-        maxX: width,
-        maxY: height,
-        origin: point(0, 0),
+        minX: x,
+        minY: y,
+        midX: x + width / 2,
+        midY: y + height / 2,
+        maxX: x + width,
+        maxY: y + height,
+        origin: point(x, y),
         size: size(width, height),
       })
     }
@@ -1532,7 +1542,7 @@ export class SwiftUIHost implements InterpreterHost {
       if (member === 'size') return target
       if (member === 'width') return double(size.width)
       if (member === 'height') return double(size.height)
-      if (member === 'safeAreaInsets') return opaque(GEOMETRY_TYPE, { width: 0, height: 0 })
+      if (member === 'safeAreaInsets') return opaque(EDGE_INSETS_TYPE, (target.payload as GeometryPayload).insets)
     }
 
     // `configuration.label` and `configuration.isPressed` inside a custom ButtonStyle.

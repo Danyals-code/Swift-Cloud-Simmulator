@@ -1029,3 +1029,81 @@ describe('E11a: the Foundation the AI writes around its views: Timer, Calendar a
     expect(text).toMatch(/^9\/9\/2001, \d{1,2}:00[\s\u202f][AP]M$/)
   })
 })
+
+describe('E12: what a GeometryReader reports, where it is placed', () => {
+  const measured = nativeII.geometryReader
+  /** What a reader placed on the phone reports: its top and bottom insets and its frame on the screen. */
+  function reads(place: (reader: string) => string) {
+    const reader = 'GeometryReader { geo in Text("\\(Int(geo.safeAreaInsets.top)) \\(Int(geo.safeAreaInsets.bottom)) \\(Int(geo.frame(in: .global).minX)) \\(Int(geo.frame(in: .global).minY)) \\(Int(geo.size.width)) \\(Int(geo.size.height))") }'
+    const r = screen(`var body: some View { ${place(reader)} }`)
+    const shown = texts(r).find(text => /^\d+ \d+ \d+ \d+ \d+ \d+$/.test(text))
+    expect(shown, `drew ${JSON.stringify(texts(r))}, logged ${JSON.stringify(r.logs.map(log => log.message))}`).toBeDefined()
+    const [top, bottom, x, y, width, height] = shown!.split(' ').map(Number)
+    return { insets: { top, bottom }, global: [x, y, width, height] }
+  }
+  const expected = (name: string) => ({ insets: { top: measured[name].insets.top, bottom: measured[name].insets.bottom }, global: measured[name].global })
+
+  it.each([
+    ['geo-root', (reader: string) => reader],
+    ['geo-ignoring', (reader: string) => `${reader}.ignoresSafeArea()`],
+    ['geo-padded', (reader: string) => `VStack { ${reader} }.padding()`],
+  ])('reports what the simulator reports on its %s screen', (name, place) => {
+    expect(reads(place)).toEqual(expected(name))
+  })
+
+  it.each([
+    ['geo-header', (reader: string) => `VStack { Text("Header").frame(height: 100); ${reader} }.padding()`],
+    ['geo-scroll', (reader: string) => `ScrollView { ${reader}.frame(height: 200) }`],
+  ])('reports the insets the simulator reports on its %s screen', (name, place) => {
+    expect(reads(place).insets).toEqual(expected(name).insets)
+  })
+
+  // Measured: a reader touching the top of the safe area reports the whole distance to the
+  // screen's top, bars included, and the same at the bottom (geo-nav, geo-inline, geo-tab).
+  it.each([
+    ['a large title', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title") }`],
+    ['an inline title', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title").navigationBarTitleDisplayMode(.inline) }`],
+    ['a tab bar', (reader: string) => `TabView { ${reader}.tabItem { Label("One", systemImage: "house") } }`],
+  ])('reports its distance from the screen edges as its insets under %s', (_, place) => {
+    const { insets, global: [, y, , height] } = reads(place)
+    expect(insets).toEqual({ top: y, bottom: 874 - y! - height! })
+  })
+})
+
+describe('E12: .id, links and a timeline, as iOS 27 draws them', () => {
+  const counter = 'struct Counter: View { @State private var taps = 0; var body: some View { Button("Taps \\(taps)") { taps += 1 } } }'
+
+  it('starts a view over, with its state fresh, when its .id changes', () => {
+    const r = runView(`@State private var version = 0
+      var body: some View { VStack { Counter().id(version); Button("Reset") { version += 1 } } }`, counter)
+    const tapped = tap(tap(r, 'Taps 0'), 'Taps 1')
+    expect(texts(tapped)).toContain('Taps 2')
+    expect(texts(tap(tapped, 'Reset'))).toContain('Taps 0')
+  })
+
+  it('keeps its state while the .id stays the same', () => {
+    const r = runView(`@State private var version = 0
+      @State private var other = 0
+      var body: some View { VStack { Counter().id(version); Button("Other \\(other)") { other += 1 } } }`, counter)
+    expect(texts(tap(tap(r, 'Taps 0'), 'Other 0'))).toContain('Taps 1')
+  })
+
+  // Measured in the iOS 27 simulator (docs/parity/native/iphone18pro-misrenders-ii, links).
+  it.each([
+    ['Link("Site", destination: url)', [], ['Site']],
+    ['Link(destination: url) { Label("Site", systemImage: "globe") }', ['globe'], ['Site']],
+    ['ShareLink(item: url)', ['square.and.arrow.up'], ['Share…']],
+    ['ShareLink("Share", item: url)', ['square.and.arrow.up'], ['Share']],
+    ['ShareLink(item: url) { Label("Send", systemImage: "paperplane") }', ['paperplane'], ['Send']],
+  ])('draws %s with the icon and words the simulator draws', (link, icons, words) => {
+    const r = compileView(viewSource(`let url = URL(string: "https://example.com")!\n var body: some View { ${link} }`))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect([symbols(r), texts(r)]).toEqual([icons, words])
+  })
+
+  it("draws a TimelineView's content for the moment it is drawn", () => {
+    const r = compileView(viewSource('var body: some View { TimelineView(.periodic(from: .now, by: 1)) { context in Text(context.date, style: .time) } }'))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(r).some(text => /^\d{1,2}:\d{2}/.test(text))).toBe(true)
+  })
+})

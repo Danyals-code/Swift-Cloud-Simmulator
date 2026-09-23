@@ -1461,9 +1461,7 @@ class Converter {
 
       case 'TimelineView':
         // The schedule is a clock the preview does not run, so the content is drawn
-        // once, at the moment of the render. Its `context` is not supplied - a
-        // closure that reads `context.date` has nothing to read - so what is drawn is
-        // whatever the body produces without one. See the coverage matrix.
+        // once, for the moment of the render: its `context.date` is now.
         return {
           kind: 'stack',
           id: path,
@@ -3256,13 +3254,24 @@ class Converter {
     }
   }
 
+  /**
+   * `Link` and `ShareLink`, in the accent colour, as the iOS 27 simulator draws them: the
+   * label they were given, or their title. A share link with no label of its own is the
+   * share icon and its title, "Share…" when it has none.
+   */
   private link(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0)) ?? ''
+    const title = stringArg(positional(view.args, 0))
+    const content = view.children.length > 0 ? view.children
+      : view.name === 'ShareLink' ? [{ name: 'Label', args: [{ label: null, value: { kind: 'string', value: title ?? 'Share…' } }, { label: 'systemImage', value: { kind: 'string', value: 'square.and.arrow.up' } }], children: [], modifiers: [], action: null, span: view.span } satisfies ViewValue]
+      : []
+    const label: LayoutElement = content.length === 0
+      ? { kind: 'text', id: path, text: title ?? '', ...origin }
+      : { kind: 'stack', id: `${path}label`, axis: 'horizontal', spacing: 4, alignment: CENTER, children: content.map((child, index) => this.convert(child, `${path}l${index}`, 'horizontal')), ...origin }
     return {
       kind: 'modified',
       id: `${path}tint`,
       modifier: { kind: 'foregroundStyle', color: this.color('accentColor') },
-      child: { kind: 'text', id: path, text: title, ...origin },
+      child: label,
     }
   }
 
