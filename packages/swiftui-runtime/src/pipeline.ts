@@ -36,7 +36,7 @@ import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
-import type { NotDrawn, OverlayKind } from './presentation'
+import { stoppedFailures, type NotDrawn, type OverlayKind } from './presentation'
 import type { GeometryPayload } from './view-value'
 
 /**
@@ -512,15 +512,14 @@ function toResult(
   // A sheet can be resolved more than once in a pass, so each place is said once.
   const resolved = [...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning), ...(evaluation?.ui?.warnings ?? [])]
   const diagnostics = [...analysis.diagnostics, ...new Map(resolved.map((warning) => [`${warning.span.file}:${warning.span.start}:${warning.span.end}`, warning])).values()]
-  if (evaluation?.failure) {
+  // A view that stopped is drawn as a placeholder, and said once however many times it stopped.
+  const failures = [...(evaluation?.failure ? [evaluation.failure] : []), ...stoppedFailures(evaluation?.ui)]
+  for (const failure of new Map(failures.map((f) => [`${f.span.file}:${f.span.start}:${f.span.end}:${f.message}`, f])).values()) {
     diagnostics.push({
-      span: evaluation.failure.span,
+      span: failure.span,
       severity: 'error',
-      code: evaluation.failure.kind === 'budget' ? 'execution_budget_exceeded' : 'runtime_trap',
-      message:
-        evaluation.failure.frames.length > 0
-          ? `${evaluation.failure.message} (in ${evaluation.failure.frames[0]})`
-          : evaluation.failure.message,
+      code: failure.kind === 'budget' ? 'execution_budget_exceeded' : 'runtime_trap',
+      message: failure.frames.length > 0 ? `${failure.message} (in ${failure.frames[0]})` : failure.message,
     })
   }
 

@@ -5,17 +5,14 @@ import {
   asProjection,
   bool,
   copyValue,
-  PreviewLimitExceeded,
   describe,
   double,
-  ExecutionBudgetExceeded,
   int,
   Interpreter,
   indexSet,
   opaque,
   pickOverload,
   str,
-  SwiftThrow,
   SwiftTrap,
   NIL,
   UnsupportedAtRuntime,
@@ -36,6 +33,7 @@ import {
   kindOfEvent,
   phaseOfEvent,
 } from './gestures'
+import { containable, toFailure } from './failures'
 import { SwiftUIHost } from './swiftui-host'
 import {
   asSwiftValue,
@@ -43,7 +41,9 @@ import {
   BUTTON_CONFIGURATION_TYPE,
   DIMENSIONS_TYPE,
   handlerIdFor,
+  stoppedView,
   type ActionValue,
+  type RuntimeFailure,
   type AnimationPayload,
   type EnvironmentFrame,
   type GeometryPayload,
@@ -51,12 +51,7 @@ import {
   type ViewValue,
 } from './view-value'
 
-export interface RuntimeFailure {
-  readonly message: string
-  readonly span: SourceSpan
-  readonly frames: readonly string[]
-  readonly kind: 'trap' | 'budget' | 'unsupported'
-}
+export type { RuntimeFailure }
 
 export interface EvaluationResult {
   readonly views: readonly ViewValue[]
@@ -798,6 +793,13 @@ export class AppRuntime {
       const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
 
       return componentViews(this.viewsFrom(produced), instance)
+    } catch (error) {
+      // A view whose body stops is drawn as a placeholder saying why, and the rest of
+      // the screen goes on: a trap in one row must not blank the screen, and the Design
+      // canvas with it. Unlike iOS, which would crash, but the error is still reported
+      // where it happened.
+      if (!containable(error)) throw error
+      return componentViews([stoppedView(instance.typeName, toFailure(error, this.interpreter.position), instance.viewSource ?? decl.span)], instance)
     } finally {
       this.expandDepth--
       this.identity.pop()
@@ -1234,62 +1236,6 @@ function parameterCount(action: ActionValue): number {
 /** Handler id for the view at a given tree path. */
 export function actionId(path: string): string {
   return handlerIdFor(path)
-}
-
-/**
- * What went wrong, as the preview reports it.
- *
- * Total: nothing thrown while running the user's code may escape a pass, because an
- * error that escapes takes the worker with it - the studio says the compiler stopped,
- * every `@State` is gone, and the line that failed is never marked. What the
- * interpreter did not raise itself, it is reported at `at`, where execution last was.
- */
-function toFailure(error: unknown, at: SourceSpan): RuntimeFailure {
-  if (error instanceof SwiftTrap) {
-    return {
-      message: `Swift runtime failure: ${error.reason}`,
-      span: error.span,
-      frames: error.frames.map((f) => f.name),
-      kind: 'trap',
-    }
-  }
-  if (error instanceof PreviewLimitExceeded) {
-    return { message: error.message, span: error.span, frames: [], kind: 'budget' }
-  }
-  if (error instanceof ExecutionBudgetExceeded) {
-    return {
-      message: error.message,
-      span: error.span,
-      frames: error.frames.map((f) => f.name),
-      kind: 'budget',
-    }
-  }
-  if (error instanceof UnsupportedAtRuntime) {
-    return { message: error.message, span: error.span, frames: [], kind: 'unsupported' }
-  }
-  if (error instanceof SwiftThrow) {
-    // An error that reached the top of the tree was never caught. In a real app that
-    // is a fatal error; here it has to become a diagnostic, because anything this
-    // function does not recognise is re-thrown and takes the whole compile with it.
-    return {
-      message: `An error was thrown and never caught: ${describe(error.value as SwiftValue, false)}`,
-      span: error.span,
-      frames: [],
-      kind: 'trap',
-    }
-  }
-  // Recursion runs out of JavaScript stack before it reaches the interpreter's own
-  // depth limit when each call nests a few expressions, so it is the same failure.
-  if (isStackOverflow(error)) {
-    return { message: 'Call depth exceeded. This usually means recursion that never ends.', span: at, frames: [], kind: 'budget' }
-  }
-  const reason = error instanceof Error ? error.message : String(error)
-  return { message: `The preview stopped on an internal error here: ${reason}. It may still run in Xcode.`, span: at, frames: [], kind: 'unsupported' }
-}
-
-/** A JavaScript stack overflow: a RangeError in Chrome and Safari, "too much recursion" in Firefox. */
-function isStackOverflow(error: unknown): boolean {
-  return error instanceof Error && /call stack|too much recursion/i.test(error.message)
 }
 
 export { describe }

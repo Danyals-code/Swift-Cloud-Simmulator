@@ -464,6 +464,12 @@ Listed in the exported README so nothing is a surprise on the Mac:
 27. **Recursion stops sooner than on a device.** Each Swift call costs the interpreter
     several JavaScript frames, so a recursion a few hundred calls deep stops the preview
     with "Call depth exceeded" at the line it reached, where an iPhone would go deeper.
+28. **A view that traps is drawn as stopped; iOS would crash.** A trap in a view's
+    `body` (an index out of range, a nil unwrapped, a model no ancestor gave) draws that
+    view as a placeholder naming it and the reason, and the rest of the screen keeps
+    working, so one bad row doesn't take the Design canvas with it. The error is reported
+    at its line, once the view is on screen: a destination's only when it is pushed. A
+    trap in a view's stored property, as it is created, stops the view that creates it.
 
 ## The strictness pass (R5)
 

@@ -85,6 +85,7 @@ import {
   ANIMATION_TYPE,
   COLOR_TYPE,
   EDGE_INSETS_TYPE,
+  STOPPED_VIEW,
   STROKE_STYLE_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
@@ -1495,6 +1496,11 @@ class Converter {
 
       default:
         break
+    }
+
+    // A custom view whose body stopped: what it is, and why, where it would have been.
+    if (view.name === STOPPED_VIEW) {
+      return { kind: 'placeholder', id: path, feature: `${stringArg(labelled(view.args, 'view'))} stopped`, reason: stringArg(labelled(view.args, 'reason')) ?? '', ...origin }
     }
 
     const shape = SHAPES[view.name]

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
-import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
+import type { CompileRequest, CompileResult, RenderNode, ViewLayer } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
@@ -919,9 +919,10 @@ struct ContentView: View {
     expect(texts(r)).toContain('Count 0')
   })
 
-  it('stops, as iOS does, when no ancestor gave the model, and reads nil when it may be missing', () => {
+  it('draws a view no ancestor gave the model as stopped, saying why, and reads nil when it may be missing', () => {
     const missing = compileView(viewSource('@Environment(Model.self) private var model\n var body: some View { Text("Count \\(model.count)") }', model))
     expect(missing.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    expect(nodes(missing).find(n => n.placeholder)?.placeholder).toMatchObject({ feature: 'ContentView stopped', reason: expect.stringContaining('No Observable object of type Model found') })
     const optional = runView('@Environment(Model.self) private var model: Model?\n var body: some View { Text(model == nil ? "No model" : "Model") }', model)
     expect(texts(optional)).toContain('No model')
   })
@@ -930,14 +931,16 @@ struct ContentView: View {
     ['a title', 'NavigationLink("Open") { Detail() }'],
     ['destination:', 'NavigationLink(destination: Detail()) { Text("Open") }'],
     ['a label: closure', 'NavigationLink { Detail() } label: { Text("Open") }'],
-  ])('draws a link with %s to a screen missing its model, and stops only when it is pushed, as iOS does', (_, link) => {
+  ])('draws a link with %s to a screen missing its model, and says so only when it is pushed, as iOS runs it then', (_, link) => {
     const r = runView(`var body: some View { NavigationStack { ${link} } }`, `${model}
       struct Detail: View {
         @Environment(Model.self) private var model
         var body: some View { Text("Count \\(model.count)") }
       }`)
     expect(controls(r)).toContain('Open')
-    expect(tap(r, 'Open').diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    const pushed = tap(r, 'Open')
+    expect(pushed.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    expect(nodes(pushed).find(n => n.placeholder)?.placeholder?.feature).toBe('Detail stopped')
   })
 })
 
@@ -1385,5 +1388,47 @@ describe('F4: an internal error is reported where it happened, and never stops t
     expect(reported('var body: some View { Text("\\(Count.self)") }', 'typealias Count = Total\ntypealias Total = Count')).toEqual([
       { severity: 'error', message: "Type alias 'Count' references itself.", at: 'Count', fix: undefined },
     ])
+  })
+})
+
+describe('F11: a view that stops draws a placeholder where it is, and the rest of the screen still works', () => {
+  const broken = 'struct Broken: View { let items: [Int] = []; var body: some View { Text("\\(items[0])") } }'
+  const stopped = (r: CompileResult) => nodes(r).filter(n => n.placeholder).map(n => n.placeholder)
+
+  it('draws the views around one that stops, and reports the line it stopped at', () => {
+    const source = viewSource('var body: some View { VStack { Text("Top"); Broken(); Text("Bottom") } }', broken)
+    const r = compileView(source)
+    expect(texts(r)).toEqual(expect.arrayContaining(['Top', 'Bottom']))
+    expect(stopped(r)).toEqual([{ feature: 'Broken stopped', reason: 'Swift runtime failure: Index out of range' }])
+    const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: r.renderTree!, onEvent: () => {} }))
+    expect(markup).toContain('Broken stopped')
+    expect(markup).toContain('Swift runtime failure: Index out of range')
+    const [error, ...others] = r.diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('Index out of range')
+    expect(source.slice(error!.span.start, error!.span.end)).toContain('items[0]')
+  })
+
+  it('keeps the rest of the screen interactive', () => {
+    const r = compileView(viewSource(`@State private var count = 0
+      var body: some View { VStack { Broken(); Button("Add") { count += 1 }; Text("Count \\(count)") } }`, broken))
+    expect(texts(tap(r, 'Add'))).toContain('Count 1')
+  })
+
+  it('names the stopped view in the layers, and selects it from its placeholder', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Top"); Broken().padding() } }', broken))
+    const layers = (items: readonly ViewLayer[]): string[] => items.flatMap(item => [item.name, ...layers(item.children)])
+    expect(layers(r.viewHierarchy ?? [])).toEqual(['Main page', 'VStack', 'Top', 'Broken'])
+    const placeholder = nodes(r).find(n => n.placeholder)!
+    const authoring = r.authoring!
+    expect(authoring.nodes.find(n => n.id === authoring.runtimeToSource[placeholder.id])).toMatchObject({ kind: 'component', name: 'Broken' })
+  })
+
+  it('draws a pushed destination whose own content stops as stopped, and can still go back', () => {
+    const r = runView(`let items: [Int] = []
+      var body: some View { NavigationStack { NavigationLink("Open") { Text("\\(items[5])") }.navigationTitle("Home") } }`)
+    const pushed = tap(r, 'Open')
+    expect(nodes(pushed).find(n => n.placeholder)?.placeholder).toMatchObject({ feature: 'Destination stopped', reason: expect.stringContaining('Index out of range') })
+    expect(texts(tap(pushed, 'Home'))).toContain('Home')
   })
 })

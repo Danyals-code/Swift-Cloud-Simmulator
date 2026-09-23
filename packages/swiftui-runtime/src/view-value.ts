@@ -160,13 +160,44 @@ export interface ModifierValue {
 
 export const VIEW_TYPE = 'View'
 
+/** Why running the user's code stopped, and where. */
+export interface RuntimeFailure {
+  readonly message: string
+  readonly span: SourceSpan
+  readonly frames: readonly string[]
+  readonly kind: 'trap' | 'budget' | 'unsupported'
+}
+
 /**
- * A trap in building a `NavigationLink`'s destination, kept as that destination until
- * the link is pushed; the payload is the trap. SwiftUI runs a destination's body only
- * when it is pushed, so a trap there, such as a model no ancestor gave, crashes iOS on
- * the push and not before.
+ * A custom view whose body stopped, drawn in its place as a placeholder carrying why.
+ *
+ * One trap in one view used to replace the whole screen, and the Design canvas with
+ * it. Framework-named, like the bars, so nothing a user writes can collide with it.
+ * The failure travels with the view and is reported where the view is drawn, so a
+ * destination built with its link says nothing until it is pushed.
  */
-export const DESTINATION_TRAP_TYPE = 'DestinationTrap'
+export const STOPPED_VIEW = '_Stopped'
+const FAILURE_TYPE = 'RuntimeFailure'
+
+export function stoppedView(typeName: string, failure: RuntimeFailure, span: SourceSpan): ViewValue {
+  return {
+    name: STOPPED_VIEW,
+    args: [
+      { label: 'view', value: { kind: 'string', value: typeName } },
+      { label: 'reason', value: { kind: 'string', value: failure.message } },
+      { label: 'failure', value: { kind: 'opaque', typeName: FAILURE_TYPE, payload: failure } },
+    ],
+    children: [],
+    modifiers: [],
+    action: null,
+    span,
+  }
+}
+
+/** What stopped a view drawn as stopped, or null for any other view. */
+export function stoppedFailure(view: ViewValue): RuntimeFailure | null {
+  return view.name === STOPPED_VIEW ? payloadOf<RuntimeFailure>(view.args.find((a) => a.label === 'failure')?.value, FAILURE_TYPE) : null
+}
 
 /** A contextual member with no base: `.largeTitle`, `.primary`, `.infinity`. */
 export const TOKEN_TYPE = 'Token'

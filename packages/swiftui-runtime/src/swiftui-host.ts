@@ -27,6 +27,7 @@ import {
 import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
 import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
+import { containable, toFailure } from './failures'
 import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
@@ -56,7 +57,7 @@ import {
   ANIMATION_TYPE,
   BUTTON_CONFIGURATION_TYPE,
   COLOR_TYPE,
-  DESTINATION_TRAP_TYPE,
+  stoppedView,
   EDGE_INSETS_TYPE,
   DIMENSIONS_TYPE,
   GEOMETRY_TYPE,
@@ -867,7 +868,7 @@ export class SwiftUIHost implements InterpreterHost {
     // A direct destination may be a user-defined View value, not a built-in view.
     // Expand it with the same path used for destination builder closures.
     const args = name === 'NavigationLink' ? toArgs(call).flatMap(argument => argument.label === 'destination'
-      ? this.destinationArgs(() => [argument.value])
+      ? this.destinationArgs(() => [argument.value], call.span)
       : [argument]) : toArgs(call)
 
     if (DATA_DRIVEN_VIEWS.has(name) && call.trailingClosure && this.looksDataDriven(call)) {
@@ -950,7 +951,7 @@ export class SwiftUIHost implements InterpreterHost {
       const destination = call.trailingClosure
       return view({
         name,
-        args: [...args, ...this.destinationArgs(() => call.invokeBuilder(destination))],
+        args: [...args, ...this.destinationArgs(() => call.invokeBuilder(destination), call.span)],
         children: [],
         modifiers: [],
         action: null,
@@ -1001,7 +1002,7 @@ export class SwiftUIHost implements InterpreterHost {
     // In `NavigationLink { Detail() } label: { Card() }`, only Card belongs on the
     // current screen. Detail is the link's destination, for the presentation resolver
     // to select after a push.
-    const destination = name === 'NavigationLink' && content ? this.destinationArgs(() => call.invokeBuilder(content)) : null
+    const destination = name === 'NavigationLink' && content ? this.destinationArgs(() => call.invokeBuilder(content), call.span) : null
     const children = content && !destination ? this.toViews(call.invokeBuilder(content)) : []
 
     const labelled: ViewArg[] = []
@@ -1774,16 +1775,16 @@ export class SwiftUIHost implements InterpreterHost {
   /**
    * A `NavigationLink`'s destination, as the link's `destination` arguments.
    *
-   * The preview builds it with the link, body and all, where SwiftUI runs its body only
-   * when it is pushed. So a trap in building it is kept as the destination: the screen
-   * with the link draws, and pushing it stops the preview where iOS would crash.
+   * The preview builds it with the link, where SwiftUI builds it only when it is
+   * pushed. So a destination that stops is kept as a stopped view: the screen with the
+   * link draws, and pushing it shows why, as a view stopped anywhere else does.
    */
-  private destinationArgs(build: () => readonly SwiftValue[]): ViewArg[] {
+  private destinationArgs(build: () => readonly SwiftValue[], span: SourceSpan): ViewArg[] {
     try {
       return this.toViews(build()).map((destination) => ({ label: 'destination', value: view(destination) }))
     } catch (error) {
-      if (!(error instanceof SwiftTrap)) throw error
-      return [{ label: 'destination', value: { kind: 'opaque', typeName: DESTINATION_TRAP_TYPE, payload: error } }]
+      if (!containable(error)) throw error
+      return [{ label: 'destination', value: view(stoppedView('Destination', toFailure(error, span), span)) }]
     }
   }
 
