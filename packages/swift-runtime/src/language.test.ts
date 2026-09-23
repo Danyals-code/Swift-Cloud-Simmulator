@@ -666,3 +666,40 @@ describe('describing values', () => {
     expect(value('print("x")').kind).toBe('string')
   })
 })
+
+describe('collections the AI writes around its lists', () => {
+  it('hands a closure a tuple element as its parameters, as enumerated() and zip give them', () => {
+    expect(
+      run(`
+func main() {
+    let names = ["Ada", "Grace"]
+    names.enumerated().forEach { index, name in print("\\(index): \\(name)") }
+    for (index, name) in names.enumerated() { print("\\(index)-\\(name)") }
+    let pairs = zip([1, 2], ["a", "b"]).map { number, letter in "\\(number)\\(letter)" }
+    print(pairs.joined(separator: ","))
+}`),
+    ).toEqual(['0: Ada', '1: Grace', '0-Ada', '1-Grace', '1a,2b'])
+  })
+
+  it('maps a range', () => {
+    expect(
+      run(`
+func main() {
+    print((0..<3).map { $0 * 2 })
+    print((1...3).map { "row \\($0)" }.joined(separator: ", "))
+}`),
+    ).toEqual(['[0, 2, 4]', 'row 1, row 2, row 3'])
+  })
+
+  it('maps with a key path to a raw value or a computed property', () => {
+    expect(
+      run(`
+enum Flavor: String, CaseIterable { case vanilla, chocolate }
+struct Person { let first: String; let last: String; var full: String { first + " " + last } }
+func main() {
+    print(Flavor.allCases.map(\\.rawValue))
+    print([Person(first: "Ada", last: "Lovelace")].map(\\.full))
+}`),
+    ).toEqual(['["vanilla", "chocolate"]', '["Ada Lovelace"]'])
+  })
+})

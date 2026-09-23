@@ -433,8 +433,9 @@ export function applyKeyPath(path: KeyPathPayload, value: SwiftValue): SwiftValu
   let current = value
   for (const component of path.components) {
     if (component === 'self') continue
-    if (current.kind !== 'struct') return NIL
-    current = current.fields.get(component) ?? NIL
+    if (current.kind === 'tuple') current = tupleElement(current, component) ?? NIL
+    else if (current.kind === 'struct') current = current.fields.get(component) ?? NIL
+    else return NIL
   }
   return current
 }

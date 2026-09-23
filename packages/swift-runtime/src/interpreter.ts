@@ -603,8 +603,9 @@ export class Interpreter {
   runViewBuilder(closure: ClosureValue, args: readonly SwiftValue[] = []): SwiftValue[] {
     const env = (closure.env as Environment).child()
     if (closure.hasExplicitParams) {
+      const given = spreadTuple(closure, args)
       closure.params.forEach((param, i) => {
-        const value = args[i] ?? NIL
+        const value = given[i] ?? NIL
         const name = param.name.startsWith('$') && asProjection(value) ? param.name.slice(1) : param.name
         env.define(name, copyValue(value), true, param.span)
       })
@@ -776,8 +777,9 @@ export class Interpreter {
     const env = (closure.env as Environment).child()
 
     if (closure.hasExplicitParams) {
+      const given = spreadTuple(closure, args)
       closure.params.forEach((param, i) => {
-        const value = args[i] ?? NIL
+        const value = given[i] ?? NIL
         const name = param.name.startsWith('$') && asProjection(value) ? param.name.slice(1) : param.name
         env.define(name, copyValue(value), true, param.span)
       })
@@ -803,6 +805,7 @@ export class Interpreter {
   /** `value.name` for a value already in hand, tried in the order `evaluateMemberAccess` tries. */
   private readMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
     if (member === 'self') return target
+    if (target.kind === 'tuple') return tupleElement(target, member)
     const own = target.kind === 'enum' ? this.memberOfEnum(target, member, span) : target.kind === 'struct' ? this.memberOfStruct(target, member, span) : undefined
     if (own !== undefined) return unwrapProjection(own)
     const builtin = getBuiltinProperty(target, member)
@@ -2022,6 +2025,7 @@ export class Interpreter {
               `Cannot use mutating member on immutable value: 'self' is a 'let' constant`,
               span,
             ),
+          (value, name) => this.readMember(value, name, span),
         )
         if (onBuiltin !== undefined) return onBuiltin
 
@@ -2200,6 +2204,7 @@ export class Interpreter {
         }
         replacement = value
       },
+      (value, name) => this.readMember(value, name, span),
     )
     if (builtin !== undefined) {
       if (lvalue?.mutable && (replacement !== null || isMutatingMember(member))) lvalue.set(replacement ?? target)
@@ -3232,6 +3237,15 @@ function labelsMatch(params: readonly Param[], written: readonly (string | null)
 }
 
 /** A method call's receiver: its storage when it has one, and its value. */
+/**
+ * `{ index, item in }` given one `(offset, element)` tuple, as `enumerated()` and `zip`
+ * hand their elements over: Swift spreads a lone tuple across a closure's parameters.
+ */
+function spreadTuple(closure: ClosureValue, args: readonly SwiftValue[]): readonly SwiftValue[] {
+  const only = args.length === 1 ? args[0] : undefined
+  return closure.params.length > 1 && only?.kind === 'tuple' && only.elements.length === closure.params.length ? only.elements : args
+}
+
 interface Receiver {
   readonly lvalue: LValue | null
   readonly target: SwiftValue

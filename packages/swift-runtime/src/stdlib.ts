@@ -30,6 +30,7 @@ import {
   VOID,
   type ClosureValue,
   type SwiftValue,
+  type KeyPathPayload,
 } from './values'
 
 type Invoke = (closure: ClosureValue, args: readonly SwiftValue[]) => SwiftValue
@@ -44,6 +45,14 @@ type Trap = (reason: string) => never
  * traps when the receiver is not assignable.
  */
 type ReplaceSelf = (value: SwiftValue) => void
+/** Reads `value.name` as the interpreter does, where one is at hand. */
+type ReadMember = (value: SwiftValue, name: string) => SwiftValue | undefined
+
+/** What a range of integers does as the collection of them: `(0..<3).map { … }`. */
+const RANGE_SEQUENCE_MEMBERS: ReadonlySet<string> = new Set([
+  'map', 'compactMap', 'flatMap', 'filter', 'forEach', 'reduce', 'first', 'allSatisfy', 'sorted', 'reversed',
+  'shuffled', 'randomElement', 'enumerated', 'min', 'max', 'prefix', 'suffix', 'dropFirst', 'dropLast',
+])
 
 /**
  * Swift's rounding rule: halves go away from zero.
@@ -267,8 +276,12 @@ export function callBuiltinMember(
   invoke: Invoke,
   trap: Trap,
   replaceSelf: ReplaceSelf,
+  read?: ReadMember,
 ): SwiftValue | undefined {
   const arg = (i: number): SwiftValue | undefined => args[i]?.value
+  /** A key path as a function, read as Swift reads it where the interpreter can: computed properties and `rawValue` too. */
+  const keyPathFunction = (path: KeyPathPayload) => (element: SwiftValue): SwiftValue =>
+    read ? path.components.reduce<SwiftValue>((value, component) => component === 'self' ? value : read(value, component) ?? NIL, element) : applyKeyPath(path, element)
   const labelled = (name: string): SwiftValue | undefined =>
     args.find((a) => a.label === name)?.value
 
@@ -286,7 +299,7 @@ export function callBuiltinMember(
     if (value?.kind === 'closure') return (element) => invoke(value, [element])
 
     const path = asKeyPath(value)
-    if (path) return (element) => applyKeyPath(path, element)
+    if (path) return keyPathFunction(path)
 
     trap(`'${member}' requires a closure or key path argument`)
   }
@@ -302,7 +315,7 @@ export function callBuiltinMember(
       return stringMethod(target.value, member, arg, labelled, replaceSelf, trap)
 
     case 'array':
-      return arrayMethod(target, member, args, arg, labelled, closureArg, unaryArg, invoke, trap)
+      return arrayMethod(target, member, args, arg, labelled, closureArg, unaryArg, keyPathFunction, invoke, trap)
 
     case 'dictionary':
       switch (member) {
@@ -445,8 +458,13 @@ export function callBuiltinMember(
           const n = target.boundType === 'Date' ? asDate(value)?.epochSeconds ?? NaN : numericValue(value)
           return bool(n >= target.lower && (target.closed ? n <= target.upper : n < target.upper))
         }
-        default:
-          return undefined
+        default: {
+          // `(0..<3).map { … }`: for everything else a range of integers is the collection of them.
+          if (target.boundType === 'Date' || !RANGE_SEQUENCE_MEMBERS.has(member)) return undefined
+          const count = Math.max(0, target.upper - target.lower + (target.closed ? 1 : 0))
+          if (!Number.isSafeInteger(count) || count > PREVIEW_LIMITS.collectionElements) trap(`A range of ${count.toLocaleString()} elements exceeds the preview limit of ${PREVIEW_LIMITS.collectionElements.toLocaleString()}`)
+          return callBuiltinMember(array(Array.from({ length: count }, (_, i) => int(target.lower + i))), member, args, invoke, trap, replaceSelf, read)
+        }
       }
 
     case 'opaque': {
@@ -615,6 +633,7 @@ function arrayMethod(
   labelled: (name: string) => SwiftValue | undefined,
   closureArg: (i?: number) => ClosureValue,
   unaryArg: (i?: number) => (value: SwiftValue) => SwiftValue,
+  keyPathFunction: (path: KeyPathPayload) => (value: SwiftValue) => SwiftValue,
   invoke: Invoke,
   trap: Trap,
 ): SwiftValue | undefined {
@@ -634,7 +653,7 @@ function arrayMethod(
     if (named?.kind === 'closure') return (element) => invoke(named, [element])
 
     const path = asKeyPath(named)
-    if (path) return (element) => applyKeyPath(path, element)
+    if (path) return keyPathFunction(path)
 
     const last = args[args.length - 1]
     if (last && !last.label && last.value.kind === 'closure') {
@@ -977,16 +996,8 @@ function arrayMethod(
         ? NIL
         : [...target.elements].sort(compareValues)[target.elements.length - 1]!
     case 'enumerated':
-      return array(
-        target.elements.map((e, i) => ({
-          kind: 'struct' as const,
-          typeName: 'EnumeratedElement',
-          fields: new Map<string, SwiftValue>([
-            ['offset', int(i)],
-            ['element', e],
-          ]),
-        })),
-      )
+      // `(offset:element:)` tuples, as Swift's are, so `{ index, item in }` takes them apart.
+      return array(target.elements.map((e, i) => tuple([int(i), e], ['offset', 'element'])))
     default:
       return undefined
   }

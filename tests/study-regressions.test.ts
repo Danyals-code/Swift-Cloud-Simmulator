@@ -1209,3 +1209,16 @@ struct Scoop: Identifiable { let id: Int; let name: String }`
     expect(controls(tap(r, 'Flavours'))).toEqual(expect.arrayContaining(['vanilla', 'chocolate', 'strawberry']))
   })
 })
+
+describe('lists written over enumerated() and zip', () => {
+  it('draws a numbered list from ForEach over enumerated(), the way the AI numbers rows', () => {
+    const r = runView(`let names = ["Ada", "Grace"]
+      var body: some View {
+        VStack {
+          ForEach(Array(names.enumerated()), id: \\.offset) { index, name in Text("\\(index + 1). \\(name)") }
+          ForEach(Array(zip(names.indices, names)), id: \\.0) { index, name in Text("\\(name) at \\(index)") }
+        }
+      }`)
+    expect(texts(r)).toEqual(['1. Ada', '2. Grace', 'Ada at 0', 'Grace at 1'])
+  })
+})
