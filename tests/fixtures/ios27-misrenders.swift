@@ -43,6 +43,10 @@ struct RootView: View {
         case "alert-on-stack": AlertOnStack()
         case "dialog-on-stack": DialogOnStack()
         case "search-on-tabview": SearchOnTabView()
+        case "search-content": SearchContent()
+        case "search-tab-content": SearchTabContent()
+        case "search-tab-stack": SearchTabStack()
+        case "search-drawer": SearchDrawer()
         default: Text("Unknown screen: \(screen)")
         }
     }
@@ -488,5 +492,79 @@ struct SearchOnTabView: View {
     var body: some View {
         TabView { Text("A").tabItem { Label("A", systemImage: "house") } }
             .searchable(text: $q)
+    }
+}
+
+// MARK: - 6. Where the search field goes
+
+/// `.searchable` on the List inside a NavigationStack, no TabView.
+struct SearchContent: View {
+    @State var q = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(1...12, id: \.self) { Text("Row \($0)") }
+            }
+            .navigationTitle("Home")
+            .searchable(text: $q)
+        }
+    }
+}
+
+/// `.searchable` on the List inside a tab page's NavigationStack.
+struct SearchTabContent: View {
+    @State var q = ""
+
+    var body: some View {
+        TabView {
+            NavigationStack {
+                List {
+                    ForEach(1...12, id: \.self) { Text("Row \($0)") }
+                }
+                .navigationTitle("Home")
+                .searchable(text: $q)
+            }
+            .tabItem { Label("Home", systemImage: "house") }
+
+            Text("Two")
+                .tabItem { Label("Two", systemImage: "star") }
+        }
+    }
+}
+
+/// `.searchable` on the tab page's NavigationStack itself.
+struct SearchTabStack: View {
+    @State var q = ""
+
+    var body: some View {
+        TabView {
+            NavigationStack {
+                List {
+                    ForEach(1...12, id: \.self) { Text("Row \($0)") }
+                }
+                .navigationTitle("Home")
+            }
+            .searchable(text: $q)
+            .tabItem { Label("Home", systemImage: "house") }
+
+            Text("Two")
+                .tabItem { Label("Two", systemImage: "star") }
+        }
+    }
+}
+
+/// `.searchable` on the List with the navigation bar drawer placement, always shown.
+struct SearchDrawer: View {
+    @State var q = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(1...12, id: \.self) { Text("Row \($0)") }
+            }
+            .navigationTitle("Home")
+            .searchable(text: $q, placement: .navigationBarDrawer(displayMode: .always))
+        }
     }
 }

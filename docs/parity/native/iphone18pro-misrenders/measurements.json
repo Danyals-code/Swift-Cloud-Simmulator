@@ -1,6 +1,6 @@
 {
- "source": "Built from tests/fixtures/ios27-misrenders.swift, exported with the repo's own exporter (projectFromFiles + buildExportBundle, deploymentTarget 27.0) and compiled with Xcode 27.0 (build 27A266a) on macOS 27.0; run on the iPhone 18 Pro simulator (088B21CA-E114-42A3-948D-2C682861FDB1) with the iOS 27.0 runtime (24A434), light appearance forced with simctl ui, status bar overridden to 9:41 / charged / 100%; one launch per screen with -screen <name>, captured with simctl io screenshot (sRGB-tagged PNGs, display corners not masked; every capture has a 1 pt black simulator dot at (0,0)) on 2026-09-23. 1206x2622 pixels / 402x874 points at 3x.",
- "fixtureSha256": "b7d374532cd65d824144853e348d404d186341447a02ecdb3530092be76ddf89",
+ "source": "Built from tests/fixtures/ios27-misrenders.swift, exported with the repo's own exporter (projectFromFiles + buildExportBundle, deploymentTarget 27.0) and compiled with Xcode 27.0 (build 27A266a) on macOS 27.0; run on the iPhone 18 Pro simulator (088B21CA-E114-42A3-948D-2C682861FDB1) with the iOS 27.0 runtime (24A434), light appearance forced with simctl ui, status bar overridden to 9:41 / charged / 100%; one launch per screen with -screen <name>, captured with simctl io screenshot (sRGB-tagged PNGs, display corners not masked; every capture has a 1 pt black simulator dot at (0,0)) on 2026-09-23. 1206x2622 pixels / 402x874 points at 3x. The four search-placement screens (search-content, search-tab-content, search-tab-stack, search-drawer) were added to the fixture and captured in a second run the same day, with the same build and device; the fixture's other screens are unchanged, so the earlier captures stand.",
+ "fixtureSha256": "d21dbf3ce2df7a86977809e90d1287a34a8105273d0dc808461ddd8b9d71875b",
  "captures": [
   {"file": "alert-on-stack.png", "sha256": "0bcfdc764de4d9e2fd7ef871b8814b4c8995d4ccb458b61d8db6eb7910bed132", "size": [1206, 2622]},
   {"file": "arcs.png", "sha256": "8dce307309e788cfe093ff8024cad4802088223718243fd8a5736ff0b15310aa", "size": [1206, 2622]},
@@ -19,9 +19,13 @@
   {"file": "safe-tab-red.png", "sha256": "72b9222d4f8ee76bc1b2109f2262c10440f0df9f62ff602d3461846c9435153b", "size": [1206, 2622]},
   {"file": "safe-top-edge.png", "sha256": "b2bbb7bd979ac9b87c2885cd6c1a3f7248fbb18a033b39d77b6b491c6f888ff9", "size": [1206, 2622]},
   {"file": "safe-zstack.png", "sha256": "c5bb17dd67deaa4c857e89fd7f4f1b9ec0e39fb41d7173dde504bfe86317cdd7", "size": [1206, 2622]},
+  {"file": "search-content.png", "sha256": "47924aad9223ab0723bc4bbd746b66035eb566a2692715d80bc2f407d2f740f4", "size": [1206, 2622]},
+  {"file": "search-drawer.png", "sha256": "46103a32a26d09198dc5ebc2b8e943bfe4bba4f29019eb9b537fb22975fb777f", "size": [1206, 2622]},
   {"file": "search-on-tabview.png", "sha256": "47d3a08fa0b14fa9787dd8b8d07b00f605f58a7905b7503139b0e13e1a16fdaf", "size": [1206, 2622]},
   {"file": "search-pushed.png", "sha256": "d6261d8e1e4217da3f1e5cbe9098bf02fb494ab0581560f9456e3ee8442e2209", "size": [1206, 2622]},
   {"file": "search-root.png", "sha256": "5decc8ac0447f95aa0b6d3b93eb240332f298a8736a55a0007b4624bfa74652c", "size": [1206, 2622]},
+  {"file": "search-tab-content.png", "sha256": "4e4038bcced9299515e5f192ba4613b11c5ae8967932f18e52ddd7f8a47b19f6", "size": [1206, 2622]},
+  {"file": "search-tab-stack.png", "sha256": "4e4038bcced9299515e5f192ba4613b11c5ae8967932f18e52ddd7f8a47b19f6", "size": [1206, 2622]},
   {"file": "sheet-on-stack.png", "sha256": "0741ae2afacacc939249aada13f1631bfe67c653384befd91ff1578dfacd0a7c", "size": [1206, 2622]},
   {"file": "sheet-on-tab-stack.png", "sha256": "a765aae4e60c67e089c71405e553ea2fe982140ffbea861d1642d458156756ce", "size": [1206, 2622]},
   {"file": "trim.png", "sha256": "22c3ba4acd33ce7ff7888df439c63511f04858527b8846eb1886c93e9aa91f64", "size": [1206, 2622]},
@@ -1222,6 +1226,26 @@
     ],
     "tabBar": {"pixels": 41976, "boundsPt": [149.33, 790.33, 252.67, 853.67]},
     "nonWhiteY54to700ExcludingLabel": {"pixels": 86, "boundsPt": [195.67, 420.67, 206.33, 432.67]}
+   },
+   "search-content": {
+    "note": ".searchable on a twelve-row List inside a NavigationStack with no TabView; the field is where search-root, which writes it on the stack, has it",
+    "searchField": {"topYPt": 797.33, "bottomYPt": 846.67, "leftXPt": 27.33, "rightXPt": 374.67, "fillRGBAtX300Y822": [248, 247, 252], "magnifierGlyph": [42, 813.33, 58.33, 830], "placeholderGlyphs": [69.67, 815.67, 122.33, 828.67]},
+    "listCardTopYPt": 168,
+    "uikit": "searchController placement 1, allows toolbar integration; UISearchBarTextField frame [28, 808, 374, 836], in the bottom toolbar"
+   },
+   "search-tab-content": {
+    "note": ".searchable on the List inside a tab page's NavigationStack; search-tab-stack, with it on that stack, is byte-identical",
+    "searchFieldAtRest": "none drawn: nothing but the page between the title and the list card (y 153-168) or beside the tab bar (y 792-874)",
+    "listCardTopYPt": 168,
+    "tabBarBoundsPt": [106.33, 790.33, 295.67, 853.67],
+    "uikit": "searchController placement 2 (stacked), hidesWhenScrolling; UISearchBarTextField frame [16, 168, 386, 168], folded to no height under the title",
+    "afterPullingDown": {"how": "list contentOffset set 120 pt past the top, then back to the new top inset (222)", "searchFieldBoundsPt": [16, 168, 386, 212], "fillRGB": [227, 227, 233], "listCardTopYPt": 222, "note": "the same as the searchSurface of native/iphone18pro-light, measured in a tab app on 2026-09-16"}
+   },
+   "search-drawer": {
+    "note": ".searchable(text:placement: .navigationBarDrawer(displayMode: .always)) on the List; the title is drawn inline, not large",
+    "searchField": {"topYPt": 115.33, "bottomYPt": 160.67, "leftXPt": 15.33, "rightXPt": 386.67, "fillRGBAtX300Y138": [247, 247, 252], "magnifierGlyph": [30, 129.33, 46.33, 146], "placeholderGlyphs": [56.67, 131.67, 109.33, 144.67]},
+    "titleGlyphs": {"yPt": [78.33, 90.33], "xPt": [178.67, 224]},
+    "listCardTopYPt": 170
    },
    "sheet-on-stack": {
     "dimmedBackgroundRGB": [204, 204, 204],
