@@ -1567,12 +1567,33 @@ describe("F6: the Design gallery draws the screens it can, and says which it cou
     expect(r.renderTree).not.toBeNull()
     expect(texts(r)).toContain('Busy 1')
     const drawn = (r.pages ?? []).map(page => page.name)
-    const skipped = r.diagnostics.filter(d => d.severity === 'warning' && d.message.includes("isn't drawn on the Design canvas"))
+    const skipped = r.diagnostics.filter(d => d.severity === 'warning' && d.message.includes('drawn on the Design canvas'))
     expect(drawn.length).toBeGreaterThan(0)
     // The tabs share the ForEach's source, and each one missing is still said.
     expect(skipped.length).toBeGreaterThanOrEqual(2)
     expect(new Set(skipped.map(d => d.message)).size).toBe(skipped.length)
+    // The canvas says why, beside the count, as the Design mode has no list of warnings.
+    expect(r.pagesNotDrawn).toEqual(skipped.map(d => d.message))
     expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+  })
+
+  it('says so when the screens a page opens use up the budget', () => {
+    const r = compileView(viewSource(`var body: some View { NavigationStack { NavigationLink("Go") { Detail() }.navigationTitle("Home") } }`,
+      `func heavy() -> String { var total = 0; for i in 0..<800000 { total += i % 7 }; return "Busy" }
+struct Detail: View { var body: some View { Text("Detail").toolbar { ToolbarItem { Text(heavy()) } } } }`), { allPages: true })
+    expect(controls(r)).toContain('Go')
+    expect(r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)).toEqual([expect.stringContaining("The screens Home opens aren't drawn on the Design canvas")])
+  })
+
+  it('gives design screens nothing links to the one budget the gallery has, and says which it could not draw', () => {
+    const heavy = (name: string) => `struct ${name}: View { var body: some View { Text(heavy("${name}")) } }`
+    const r = compileView(viewSource('var body: some View { Text("Home") }',
+      `func heavy(_ tag: String) -> String { var total = 0; for i in 0..<450000 { total += i % 7 }; return tag }\n${heavy('FirstScreen')}\n${heavy('SecondScreen')}`),
+      { allPages: true, designScreens: [{ view: 'FirstScreen', name: 'First' }, { view: 'SecondScreen', name: 'Second' }] })
+    expect((r.pages ?? []).map(page => page.name)).toContain('First')
+    expect((r.pages ?? []).map(page => page.name)).not.toContain('Second')
+    expect(r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)).toEqual([expect.stringContaining('"Second" isn\'t drawn on the Design canvas')])
+    expect(r.pagesNotDrawn).toEqual([expect.stringContaining('"Second" isn\'t drawn on the Design canvas')])
   })
 })
 

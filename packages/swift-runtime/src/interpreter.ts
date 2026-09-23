@@ -116,7 +116,7 @@ export interface InterpreterOptions {
   readonly stepBudget?: number
 }
 
-const DEFAULT_STEP_BUDGET = 5_000_000
+export const DEFAULT_STEP_BUDGET = 5_000_000
 
 /**
  * Maximum interpreter call depth.

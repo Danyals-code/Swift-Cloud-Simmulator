@@ -19,7 +19,7 @@ import {
   type SourceSpan,
   type UIEvent,
 } from '@studio/shared'
-import { ExecutionBudgetExceeded } from '@studio/swift-runtime'
+import { DEFAULT_STEP_BUDGET } from '@studio/swift-runtime'
 import { Parser, type SourceFileNode } from '@studio/swift-syntax'
 import { buildAuthoringModel, scenarioFiles, Checker, lintStrictness, type SemanticModel } from '@studio/swift-sema'
 import {
@@ -39,8 +39,8 @@ import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } 
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import { stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind } from './presentation'
-import { toFailure } from './failures'
-import type { GeometryPayload } from './view-value'
+import { exhausts, toFailure } from './failures'
+import type { GeometryPayload, RuntimeFailure } from './view-value'
 
 /**
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
@@ -505,6 +505,12 @@ function notDrawnWarning(item: NotDrawn): Diagnostic {
       }
 }
 
+/** Each item once for its place in the source, or once for each message said there when `perMessage`. */
+function oncePerPlace<T extends { readonly span: SourceSpan; readonly message: string }>(items: readonly T[], perMessage: boolean): T[] {
+  const key = (item: T) => `${item.span.file}:${item.span.start}:${item.span.end}${perMessage ? `:${item.message}` : ''}`
+  return [...new Map(items.map((item) => [key(item), item])).values()]
+}
+
 function toResult(
   request: CompileRequest,
   analysis: Analysis,
@@ -526,16 +532,13 @@ function toResult(
   }))
 
   // A sheet can be resolved more than once in a pass, so each place is said once.
-  const resolved = [...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning), ...(evaluation?.ui?.warnings ?? [])]
+  const resolved = oncePerPlace([...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning), ...(evaluation?.ui?.warnings ?? [])], false)
   // Tabs a ForEach built share one source, so a screen not drawn is told apart by its name too.
-  const diagnostics = [
-    ...analysis.diagnostics,
-    ...new Map(resolved.map((warning) => [`${warning.span.file}:${warning.span.start}:${warning.span.end}`, warning])).values(),
-    ...new Map(notDrawnPages.map((warning) => [`${warning.span.file}:${warning.span.start}:${warning.span.end}:${warning.message}`, warning])).values(),
-  ]
+  const notDrawn = oncePerPlace(notDrawnPages, true)
+  const diagnostics = [...analysis.diagnostics, ...resolved, ...notDrawn]
   // A view that stopped is drawn as a placeholder, and said once however many times it stopped.
-  const failures = [...(evaluation?.failure ? [evaluation.failure] : []), ...stoppedFailures(evaluation?.ui)]
-  for (const failure of new Map(failures.map((f) => [`${f.span.file}:${f.span.start}:${f.span.end}:${f.message}`, f])).values()) {
+  const failures = oncePerPlace([...(evaluation?.failure ? [evaluation.failure] : []), ...stoppedFailures(evaluation?.ui)], true)
+  for (const failure of failures) {
     diagnostics.push({
       span: failure.span,
       severity: 'error',
@@ -555,6 +558,7 @@ function toResult(
     renderTree,
     viewHierarchy: evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],
     ...(pages ? { pages } : {}),
+    ...(notDrawn.length ? { pagesNotDrawn: notDrawn.map((warning) => warning.message) } : {}),
     logs,
     textMeasurement: renderTree && !evaluation?.failure ? { ...metrics.measurementState, generation: fontGeneration } : undefined,
     timings: {
@@ -706,7 +710,7 @@ interface Gallery {
 }
 
 /** Why a screen is missing once the gallery's one step budget is spent. */
-const BUDGET_SPENT = 'the screens drawn before it used all the time the preview gives the canvas'
+const BUDGET_SPENT = 'drawing the screens took all the time the preview gives the canvas'
 
 /**
  * Every page, drawn on its own.
@@ -715,11 +719,12 @@ const BUDGET_SPENT = 'the screens drawn before it used all the time the preview 
  * presented live screen keeps running separately while the design gallery shows
  * its main page and related screens as independent phones.
  *
- * Each page is drawn on its own guard: one that stops, or lays out at a size that
- * isn't a number, is left out with a warning at its source, and the others still
- * draw. The pages share one step budget, as a fresh one each would multiply the worst
- * case toward the worker's deadline, so once it is spent the rest are reported rather
- * than tried: each would stop on its first step.
+ * Each page is drawn on its own guard: one that stops, or lays out at a size the
+ * canvas can't draw, is left out with a warning at its source, and the others still
+ * draw. Every page shares one step budget, standalone design screens included, as a
+ * fresh one each would multiply the worst case toward the worker's deadline; once it
+ * is spent the rest are reported rather than tried, since each would stop on its
+ * first step.
  */
 function renderPages(
   request: CompileRequest,
@@ -732,24 +737,27 @@ function renderPages(
   const out: PagePreview[] = []
   const notDrawn: Diagnostic[] = []
   let spent = false
-  const skip = (name: string, source: SourceSpan | undefined, error: unknown): void => {
-    if (error instanceof ExecutionBudgetExceeded && error.limit === 'steps') spent = true
+  /** Says a screen, or the screens a page opens, isn't drawn, and why. */
+  const skip = (missing: string, source: SourceSpan | undefined, cause: unknown): void => {
+    if (exhausts(cause)) spent = true
     const span = source ?? { file: request.files[0]?.id ?? '', start: 0, end: 0 }
-    const reason = spent ? BUDGET_SPENT : error instanceof InvalidLayout ? error.message : toFailure(error, span).message
-    notDrawn.push({ span, severity: 'warning', code: spent ? 'execution_budget_exceeded' : 'runtime_trap', message: `"${name}" isn't drawn on the Design canvas: ${reason}.` })
+    const reason = spent ? BUDGET_SPENT : cause instanceof InvalidLayout ? cause.message : isFailure(cause) ? cause.message : toFailure(cause, span).message
+    notDrawn.push({ span, severity: 'warning', code: spent ? 'execution_budget_exceeded' : 'runtime_trap', message: `${missing} on the Design canvas: ${reason}.` })
   }
+  const screen = (name: string) => `"${name}" isn't drawn`
   const limit = Number.isFinite(request.galleryLimit) ? Math.max(1, Math.min(128, Math.floor(request.galleryLimit!))) : GALLERY_LIMIT
-  const preview = runtime.previewRuntime()
+  const drawing = runtime.previewRuntime()
+  const preview = drawing && !drawing.evaluation.failure ? drawing : null
   let remainingChildren = limit
   for (const [index, page] of pages.slice(0, limit).entries()) {
-    if (spent) { skip(page.name, page.source, null); continue }
+    if (spent) { skip(screen(page.name), page.source, null); continue }
     const isActive = page.page?.active === true
     try {
       const ui = preview?.runtime.resolvePage(preview.evaluation.views, index, true)
         ?? (isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index))
       if (!ui) continue
       const isLiveRoot = isActive && !evaluation.ui?.navigationBar?.canGoBack && !evaluation.ui?.overlay
-      const tree = isLiveRoot ? active : laidOut(render(request, { ...evaluation, ui }, true, preview?.runtime))
+      const tree = isLiveRoot ? active : drawable(render(request, { ...evaluation, ui }, true, preview?.runtime))
       out.push({
         id: page.id,
         rootId: page.id,
@@ -763,7 +771,7 @@ function renderPages(
         tree,
       })
     } catch (error) {
-      skip(page.name, page.source, error)
+      skip(screen(page.name), page.source, error)
       continue
     }
     if (!preview || !remainingChildren) continue
@@ -771,14 +779,14 @@ function renderPages(
     try {
       nested = preview.runtime.resolveNestedPages(preview.evaluation.views, index, page.id, remainingChildren)
     } catch (error) {
-      skip(`What ${page.name} opens`, page.source, error)
+      skip(`The screens ${page.name} opens aren't drawn`, page.source, error)
       continue
     }
     for (const child of nested) {
       if (!out.some(parent => parent.id === child.parentId)) continue
-      if (spent) { skip(child.name, child.source, null); continue }
+      if (spent) { skip(screen(child.name), child.source, null); continue }
       try {
-        const childTree = laidOut(render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime))
+        const childTree = drawable(render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime))
         out.push({
           id: child.id, parentId: child.parentId, rootId: child.rootId,
           kind: child.kind, name: child.name, source: child.source, active: false,
@@ -786,32 +794,46 @@ function renderPages(
           tree: childTree,
         })
       } catch (error) {
-        skip(child.name, child.source, error)
+        skip(screen(child.name), child.source, error)
       }
     }
     remainingChildren -= nested.length
   }
+  // Design screens nothing links to yet run in a program of their own, on what the
+  // pages above left of the budget.
+  let budget = DEFAULT_STEP_BUDGET - (preview?.runtime.stepsUsed ?? 0)
   const renamedIds = new Map<string, string>()
-  for (const screen of (request.designScreens ?? []).slice(0, limit)) {
-    const definition = lastAnalysis?.analysis.authoring.nodes.find(n => n.kind === 'definition' && n.name === screen.view)
+  for (const design of (request.designScreens ?? []).slice(0, limit)) {
+    const definition = lastAnalysis?.analysis.authoring.nodes.find(n => n.kind === 'definition' && n.name === design.view)
     if (!definition) continue
-    const existingIndex = out.findIndex(page => page.viewHierarchy?.[0]?.children[0]?.componentSources?.at(-1)?.name === screen.view)
+    const existingIndex = out.findIndex(page => page.viewHierarchy?.[0]?.children[0]?.componentSources?.at(-1)?.name === design.view)
     if (existingIndex >= 0) {
-      const page = out[existingIndex]!, id = 'screen:' + screen.view
+      const page = out[existingIndex]!, id = 'screen:' + design.view
       renamedIds.set(page.id, id)
-      out[existingIndex] = { ...page, id, name: screen.name, viewHierarchy: page.viewHierarchy?.map(layer => ({ ...layer, id, name: screen.name })) }
+      out[existingIndex] = { ...page, id, name: design.name, viewHierarchy: page.viewHierarchy?.map(layer => ({ ...layer, id, name: design.name })) }
       continue
     }
-    const detached = runtime.previewRuntime(screen.view)
-    if (!detached?.evaluation.ui) continue
-    const id = 'screen:' + screen.view
+    if (spent || budget <= 0) { spent = true; skip(screen(design.name), definition.source, null); continue }
+    const detached = runtime.previewRuntime(design.view, budget)
+    if (!detached) continue
+    const id = 'screen:' + design.view
     try {
-      const tree = laidOut(render(request, detached.evaluation, true, detached.runtime))
-      out.push({ id, rootId: id, kind: 'root', standalone: true, name: screen.name, active: false, source: definition.source,
+      const failure = detached.evaluation.failure
+      if (failure) {
+        if (detached.runtime.stepsUsed >= budget) spent = true
+        skip(screen(design.name), definition.source, failure)
+        continue
+      }
+      if (!detached.evaluation.ui) continue
+      const tree = drawable(render(request, detached.evaluation, true, detached.runtime))
+      out.push({ id, rootId: id, kind: 'root', standalone: true, name: design.name, active: false, source: definition.source,
         viewHierarchy: detached.evaluation.ui.viewHierarchy?.map(layer => ({ ...layer, id })), tree })
     } catch (error) {
       // A failed standalone screen does not invalidate the running app.
-      skip(screen.name, definition.source, error)
+      if (detached.runtime.stepsUsed >= budget) spent = true
+      skip(screen(design.name), definition.source, error)
+    } finally {
+      budget -= detached.runtime.stepsUsed
     }
   }
   return {
@@ -820,15 +842,20 @@ function renderPages(
   }
 }
 
-/** A page whose layout has a size that isn't a number, which the canvas can't draw. */
+/** A page whose layout has a size the canvas can't draw. */
 class InvalidLayout extends Error {}
 
-/** The tree, once every frame in it is a size the canvas can draw. */
-function laidOut(tree: RenderTree): RenderTree {
+/** The tree, once every frame in it is a size the canvas can draw: finite, and not negative. */
+function drawable(tree: RenderTree): RenderTree {
   if (tree.nodes.some((node) => !Object.values(node.frame).every(Number.isFinite) || node.frame.width < 0 || node.frame.height < 0)) {
-    throw new InvalidLayout("its layout has a size that isn't a number")
+    throw new InvalidLayout("its layout has a size the canvas can't draw")
   }
   return tree
+}
+
+/** Whether what stopped a screen is already a failure the runtime described. */
+function isFailure(cause: unknown): cause is RuntimeFailure {
+  return typeof cause === 'object' && cause !== null && !(cause instanceof Error) && 'message' in cause && 'span' in cause && 'kind' in cause
 }
 
 /** What every geometry reader in a tree was measured at, its size, place on the screen and safe area, keyed as it reported. */

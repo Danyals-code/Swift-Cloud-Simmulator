@@ -43,6 +43,8 @@ export interface DevicePaneProps {
   tools?: React.ReactNode
   device: DeviceSpec
   tree: RenderTree | null
+  /** Why each screen the gallery couldn't draw isn't drawn, as its warning says. */
+  pagesNotDrawn?: readonly string[]
   /** The compile the canvas draws; a canvas that crashed tries again when it changes. */
   revision?: number
   selectedRenderIds?: ReadonlySet<string>
@@ -190,6 +192,7 @@ export function DevicePane({
   tools,
   device,
   tree,
+  pagesNotDrawn,
   revision,
   selectedRenderIds,
   hoveredRenderIds,
@@ -808,7 +811,10 @@ export function DevicePane({
               : dragTarget
               ? `Drop ${dragTarget.position} ${dragTarget.name}`
               : gallery
-              ? drawnScreens < (pageCount ?? pages!.length)
+              ? pagesNotDrawn?.length
+                // Design has no list of warnings, so the reasons are here, a hover away.
+                ? <>{drawnScreens} {drawnScreens === 1 ? 'screen' : 'screens'} · <span className={styles.notDrawn} tabIndex={0} title={pagesNotDrawn.join('\n')} data-testid="pages-not-drawn">{pagesNotDrawn.length} not drawn</span></>
+                : drawnScreens < (pageCount ?? pages!.length)
                 ? `${drawnScreens} of ${pageCount ?? pages!.length} screens · scroll to explore`
                 : `${drawnScreens} ${drawnScreens === 1 ? 'screen' : 'screens'} · scroll to explore · ⌘/Ctrl-scroll to zoom`
               : inspecting ? 'Hover to find a view in Layers, click to select it' : 'Interactive preview'

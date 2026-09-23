@@ -78,6 +78,8 @@ export interface EvaluationResult {
  */
 export class AppRuntime {
   private interpreter = new Interpreter()
+  /** The steps a pass may take, when not the interpreter's own: a gallery screen gets what the gallery has left. */
+  private stepBudget: number | undefined
   private host = new SwiftUIHost()
   private readonly state = new StateStore()
   /**
@@ -193,7 +195,7 @@ export class AppRuntime {
     if (programKey === this.programKey && this.entryTypeName) return
 
     this.loadedProgram = { files, model, key: programKey, screen }
-    this.interpreter = new Interpreter({ host: this.host })
+    this.interpreter = new Interpreter({ host: this.host, ...(this.stepBudget !== undefined ? { stepBudget: this.stepBudget } : {}) })
     this.host.expandStruct = (value) => this.expand(value)
     this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
     this.host.builderIdentity = (slot, branch, fn) => {
@@ -334,11 +336,15 @@ export class AppRuntime {
    * Deferred page builders run in a separate interpreter. State objects are deeply
    * copied, so even an impure destination body cannot write through an environment
    * object into the app being edited. Actions and lifecycle callbacks never run.
+   *
+   * The evaluation comes back whether or not it stopped, so the gallery can say why a
+   * screen isn't drawn; `stepBudget` is what the gallery has left to give it.
    */
-  previewRuntime(screen?: string): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
+  previewRuntime(screen?: string, stepBudget?: number): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
     const loaded = this.loadedProgram
     if (!loaded) return null
     const preview = new AppRuntime()
+    preview.stepBudget = stepBudget
     if (screen) preview.previewPrefix = 'design:' + screen
     preview.load(loaded.files, loaded.model, loaded.key, screen ?? loaded.screen)
     const copied = new Map<object, unknown>()
@@ -353,8 +359,12 @@ export class AppRuntime {
     preview.setEnvironment(this.environmentInputs)
     preview.setDefaultGeometry(this.host.defaultGeometry)
     preview.updateGeometry(this.geometry)
-    const evaluation = preview.evaluate()
-    return evaluation.failure ? null : { runtime: preview, evaluation }
+    return { runtime: preview, evaluation: preview.evaluate() }
+  }
+
+  /** The steps taken since the last pass began, resolving included. */
+  get stepsUsed(): number {
+    return this.interpreter.stepsUsed
   }
 
   resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number): readonly NestedPage[] {

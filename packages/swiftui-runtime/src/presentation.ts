@@ -1,4 +1,5 @@
 import type { Diagnostic, SourceSpan, ViewLayer } from '@studio/shared'
+import { exhausts } from './failures'
 import { layerLabel, tabIcon, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
@@ -566,7 +567,11 @@ class Resolver {
           seen.add(key)
           out.push({ id, parentId: current.parentId, rootId, kind, name, source, ui })
           queue.push({ ui, scope: nestedResolver.previewScope, around: nestedResolver.around, parentId: id, depth: current.depth + 1 })
-        } catch { /* A destination lacking valid data does not blank other pages. */ }
+        } catch (error) {
+          // A destination lacking valid data does not blank other pages. One that
+          // spends the gallery's budget is for the gallery to report.
+          if (exhausts(error)) throw error
+        }
       }
       const visitLinks = (content: readonly ViewValue[]) => {
         for (const view of content) {

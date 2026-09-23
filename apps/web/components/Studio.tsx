@@ -1539,6 +1539,7 @@ export function Studio() {
                 canvas={canvas}
                 selectedPageId={designPage?.id}
                 pageCount={pageCount}
+                pagesNotDrawn={designPages ? result?.pagesNotDrawn : undefined}
                 onSelectPage={openPage}
                 allPages={allPages || pickingNavigation}
                 navigationPicker={navigationPageTargets ? {

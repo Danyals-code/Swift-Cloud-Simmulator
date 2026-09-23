@@ -61,15 +61,20 @@ export function toFailure(error: unknown, at: SourceSpan): RuntimeFailure {
 }
 
 /**
- * Whether a failure can stop one view and leave the rest of the pass running.
- *
- * Not the step budget or a preview limit: both count the whole pass, so once one is
- * spent every view after it would stop too. Nor the interpreter's own control-flow
+ * Whether a failure spends what the whole pass has: the step budget, or a preview
+ * limit. Once one is spent, everything after it would stop on its first step.
+ */
+export function exhausts(error: unknown): boolean {
+  return (error instanceof ExecutionBudgetExceeded && error.limit === 'steps') || error instanceof PreviewLimitExceeded
+}
+
+/**
+ * Whether a failure can stop one view and leave the rest of the pass running: any
+ * error that doesn't spend the whole pass. Not the interpreter's own control-flow
  * signals, which are never errors.
  */
 export function containable(error: unknown): boolean {
-  if (error instanceof ExecutionBudgetExceeded) return error.limit === 'depth'
-  if (error instanceof PreviewLimitExceeded) return false
+  if (exhausts(error)) return false
   return error instanceof Error || error instanceof SwiftThrow
 }
 
