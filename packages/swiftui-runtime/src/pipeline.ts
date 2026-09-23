@@ -80,7 +80,7 @@ export function relayout(revision: number): CompileResult {
   const { analysis, request } = lastAnalysis
   const next = { ...request, revision }
   lastAnalysis = { analysis, request: next }
-  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, null, performance.now(), 0, 0)
+  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, errorsNotice(next, analysis), performance.now(), 0, 0)
   return finish(next, analysis, lastEvaluation, performance.now(), 0)
 }
 
@@ -471,6 +471,18 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
 }
 
 /**
+ * What the phone shows while the code has errors: how many, and the first.
+ *
+ * The same on every redraw, a compile or not: switching Edit and Preview, Reset and a
+ * font refinement redraw the program the worker already has, and a null tree there
+ * was a blank phone.
+ */
+function errorsNotice(request: CompileRequest, analysis: Analysis): RenderTree {
+  const errors = analysis.diagnostics.filter((d) => d.severity === 'error')
+  return noticeTree(request, `${errors.length} error${errors.length === 1 ? '' : 's'}`, errors[0]?.message ?? 'Fix the errors to run.')
+}
+
+/**
  * A warning for what the preview left out around a screen's containers, pointing at
  * where it is written. A floating button in a `ZStack` beside a NavigationStack
  * would otherwise vanish with nothing to say why.
@@ -567,22 +579,7 @@ export function compile(request: CompileRequest): CompileResult {
 
   // Evaluation needs a well-formed program. Running one with parse errors would
   // produce failures that describe the broken parse rather than the user's code.
-  if (hasBlockingError(analysis.diagnostics)) {
-    const errors = analysis.diagnostics.filter((d) => d.severity === 'error')
-    return toResult(
-      request,
-      analysis,
-      null,
-      noticeTree(
-        request,
-        `${errors.length} error${errors.length === 1 ? '' : 's'}`,
-        errors[0]?.message ?? 'Fix the errors to run.',
-      ),
-      startedAt,
-      0,
-      0,
-    )
-  }
+  if (hasBlockingError(analysis.diagnostics)) return toResult(request, analysis, null, errorsNotice(request, analysis), startedAt, 0, 0)
 
   const evaluateStart = performance.now()
   let evaluationFiles = analysis.files
@@ -627,9 +624,7 @@ export function rerender(revision: number): CompileResult {
   lastAnalysis = { request: next, analysis }
 
   const startedAt = performance.now()
-  if (hasBlockingError(analysis.diagnostics)) {
-    return toResult(next, analysis, null, null, startedAt, 0, 0)
-  }
+  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, errorsNotice(next, analysis), startedAt, 0, 0)
 
   const evaluateStart = performance.now()
   let evaluation = runtime.evaluate()

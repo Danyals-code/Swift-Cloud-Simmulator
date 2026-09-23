@@ -37,6 +37,8 @@
 .add:disabled { opacity: .4; cursor: default; }
 .layers { margin: 0 0 2px; }
 .empty { margin: 0; padding: 6px 12px; font-size: 12px; line-height: 1.5; color: var(--color-xc-text-3); }
+.emptyAction { padding: 0; border: 0; background: none; font: inherit; color: var(--color-xc-accent); cursor: pointer; }
+.emptyAction:hover { text-decoration: underline; }
 
 .form { display: grid; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--color-xc-line-soft); font-size: 12px; }
 .form label { display: grid; gap: 5px; color: var(--color-xc-text-2); }

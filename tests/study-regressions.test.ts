@@ -1553,3 +1553,17 @@ describe("F6: the Design gallery draws the screens it can, and says which it cou
     expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
   })
 })
+
+describe('F7: with a syntax error, every redraw shows the errors, never a blank phone', () => {
+  const notice = (r: CompileResult) => nodes(r).find(n => n.placeholder)?.placeholder
+
+  it('shows the error notice again on a redraw that re-parses nothing', () => {
+    compileView(viewSource('var body: some View { Text("Hello") }'))
+    const broken = compileView(viewSource('var body: some View { Text("Hello" }'))
+    expect(notice(broken)?.feature).toBe('1 error')
+    // Switching Edit and Preview, or Reset, redraws the program the worker already has.
+    expect(notice(rerender(revision++))).toEqual(notice(broken))
+    resetPipelineState()
+    expect(notice(rerender(revision++))).toEqual(notice(broken))
+  })
+})

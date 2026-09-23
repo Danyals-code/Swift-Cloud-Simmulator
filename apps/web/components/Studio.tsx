@@ -1375,6 +1375,8 @@ export function Studio() {
                 selectedScreenId={focusedScreen?.id}
                 selectedComponent={authoringNode?.kind === 'definition' ? authoringNode.name : undefined}
                 busy={stale || preparingEdit}
+                diagnostics={allDiagnostics}
+                onReveal={revealSpanIn}
                 onTogglePanel={() => togglePane('navigator')}
                 onSelectApp={selectApp}
                 onSelectScreen={openPage}
