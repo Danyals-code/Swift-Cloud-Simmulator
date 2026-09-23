@@ -172,7 +172,7 @@ const SHAPES: Readonly<Record<string, ShapeKind>> = {
  * each thing it holds. A reader or an animator hands its content a value and adds no
  * box of its own.
  */
-const PASS_THROUGH_VIEWS: ReadonlySet<string> = new Set(['Group', 'ScrollViewReader', 'PhaseAnimator', 'KeyframeAnimator'])
+const GROUP_LIKE_VIEWS: ReadonlySet<string> = new Set(['Group', 'ScrollViewReader', 'PhaseAnimator', 'KeyframeAnimator'])
 
 /** Views that contribute their children to the enclosing stack rather than nesting. */
 const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
@@ -187,7 +187,7 @@ const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
   'NavigationSplitView',
   'TabView', 'Tab', 'TabSection',
   'AnyView',
-  ...PASS_THROUGH_VIEWS,
+  ...GROUP_LIKE_VIEWS,
 ])
 
 /** iOS metrics the chrome is built from. Points, at the default Dynamic Type size. */
@@ -1036,19 +1036,21 @@ class Converter {
       }
 
       /**
-       * A `Group` carrying modifiers is still not a container.
+       * A `Group` carrying modifiers is still not a container, nor is a reader or an
+       * animator standing for its content.
        *
        * SwiftUI applies a `Group`'s modifiers to each of its children rather than to
        * a box around them - `Group { A; B }.font(.caption)` *is* `A.font(.caption)`
        * and `B.font(.caption)`, and `.frame(width: 100)` sizes each of them. So the
        * modifiers are pushed down and the group disappears, which is both simpler and
-       * more correct than wrapping.
+       * more correct than wrapping. The others in `GROUP_LIKE_VIEWS` hold one view in
+       * practice, where the two are the same.
        *
        * Without this, a modified group reached the switch below, matched nothing, and
        * drew a placeholder - which is what `Group { … }.font(…)` did, and what every
        * `@ViewBuilder` helper of more than one statement now produces.
        */
-      if (PASS_THROUGH_VIEWS.has(view.name) && view.children.length > 0) {
+      if (GROUP_LIKE_VIEWS.has(view.name) && view.children.length > 0) {
         out.push(
           ...this.convertList(
             view.children.map((child, i) => ({

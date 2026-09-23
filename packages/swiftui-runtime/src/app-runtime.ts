@@ -51,8 +51,6 @@ import {
   type ViewValue,
 } from './view-value'
 
-export type { RuntimeFailure }
-
 export interface EvaluationResult {
   readonly views: readonly ViewValue[]
   /** The composed screen: navigation, tabs and presentation applied. */

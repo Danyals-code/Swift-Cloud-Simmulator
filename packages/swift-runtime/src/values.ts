@@ -604,6 +604,29 @@ export function typeNameOf(value: SwiftValue): string {
  * inside collections - which is Swift's actual, slightly inconsistent behaviour.
  */
 export function describe(value: SwiftValue, insideCollection = false): string {
+  return render(value, insideCollection, null)
+}
+
+/**
+ * A value as a key: the same for two values SwiftUI treats as one identity - two
+ * `ForEach` rows, a `.tag` and a selection, two `.id(…)`s, two dictionary keys.
+ *
+ * Not `describe`, which prints a class instance by its type alone, as Swift does:
+ * every row of one class would then be the same row. Here an instance is its
+ * properties, as a struct is, which is also what a class hashing its own fields
+ * compares. An object met again inside itself is named rather than entered, so a
+ * parent and a child that point at each other still end.
+ */
+export function identityKey(value: SwiftValue, insideCollection = false): string {
+  return render(value, insideCollection, new Set())
+}
+
+/**
+ * `describe` and `identityKey`, which differ only at a class instance: printed by its
+ * type when `entered` is null, and otherwise written out by its properties, with the
+ * instances being written out so far in `entered`.
+ */
+function render(value: SwiftValue, insideCollection: boolean, entered: Set<StructValue> | null): string {
   switch (value.kind) {
     case 'int':
       return String(value.value)
@@ -614,33 +637,39 @@ export function describe(value: SwiftValue, insideCollection = false): string {
     case 'string':
       return insideCollection ? `"${value.value}"` : value.value
     case 'array':
-      return `[${value.elements.map((e) => describe(e, true)).join(', ')}]`
+      return `[${value.elements.map((e) => render(e, true, entered)).join(', ')}]`
     case 'tuple': {
       // Swift prints a tuple with its labels: `(x: 1, y: 2)`.
       const parts = value.elements.map((e, i) => {
         const label = value.labels[i]
-        return label ? `${label}: ${describe(e, true)}` : describe(e, true)
+        return label ? `${label}: ${render(e, true, entered)}` : render(e, true, entered)
       })
       return `(${parts.join(', ')})`
     }
     case 'dictionary': {
       if (value.entries.size === 0) return '[:]'
-      const parts = [...value.entries].map(([k, v]) => `"${k}": ${describe(v, true)}`)
+      const parts = [...value.entries].map(([k, v]) => `"${k}": ${render(v, true, entered)}`)
       return `[${parts.join(', ')}]`
     }
     case 'struct': {
       // Swift prints a class instance by its type alone, and never walks its
       // properties, which is also what keeps a parent and child that point at
       // each other from recursing forever.
-      if (value.reference) return value.typeName
-      const fields = [...value.fields].map(([k, v]) => `${k}: ${describe(v, true)}`)
-      return `${value.typeName}(${fields.join(', ')})`
+      if (value.reference && !entered) return value.typeName
+      if (entered?.has(value)) return `${value.typeName}(…)`
+      if (value.reference) entered?.add(value)
+      try {
+        const fields = [...value.fields].map(([k, v]) => `${k}: ${render(v, true, entered)}`)
+        return `${value.typeName}(${fields.join(', ')})`
+      } finally {
+        entered?.delete(value)
+      }
     }
     case 'enum':
       // Swift prints an enum case by its name alone, payload in parentheses.
       return value.associated.length === 0
         ? value.caseName
-        : `${value.caseName}(${value.associated.map((v) => describe(v, true)).join(', ')})`
+        : `${value.caseName}(${value.associated.map((v) => render(v, true, entered)).join(', ')})`
     case 'closure':
     case 'function':
       return '(Function)'
@@ -656,54 +685,6 @@ export function describe(value: SwiftValue, insideCollection = false): string {
       return '()'
     case 'nil':
       return 'nil'
-  }
-}
-
-/**
- * A value as a key: the same for two values SwiftUI treats as one identity - two
- * `ForEach` rows, a `.tag` and a selection, two `.id(…)`s, two dictionary keys.
- *
- * Not `describe`, which prints a class instance by its type alone, as Swift does:
- * every row of one class would then be the same row. Here an instance is its
- * properties, as a struct is, which is also what a class hashing its own fields
- * compares. An object met again inside itself is named rather than entered, so a
- * parent and a child that point at each other still end.
- */
-export function identityKey(value: SwiftValue, insideCollection = false): string {
-  return keyOf(value, insideCollection, new Set())
-}
-
-function keyOf(value: SwiftValue, insideCollection: boolean, entered: Set<StructValue>): string {
-  switch (value.kind) {
-    case 'array':
-      return `[${value.elements.map((e) => keyOf(e, true, entered)).join(', ')}]`
-    case 'tuple': {
-      const parts = value.elements.map((e, i) => {
-        const label = value.labels[i]
-        return label ? `${label}: ${keyOf(e, true, entered)}` : keyOf(e, true, entered)
-      })
-      return `(${parts.join(', ')})`
-    }
-    case 'dictionary': {
-      if (value.entries.size === 0) return '[:]'
-      return `[${[...value.entries].map(([k, v]) => `"${k}": ${keyOf(v, true, entered)}`).join(', ')}]`
-    }
-    case 'struct': {
-      if (entered.has(value)) return `${value.typeName}(…)`
-      if (value.reference) entered.add(value)
-      try {
-        const fields = [...value.fields].map(([k, v]) => `${k}: ${keyOf(v, true, entered)}`)
-        return `${value.typeName}(${fields.join(', ')})`
-      } finally {
-        entered.delete(value)
-      }
-    }
-    case 'enum':
-      return value.associated.length === 0
-        ? value.caseName
-        : `${value.caseName}(${value.associated.map((v) => keyOf(v, true, entered)).join(', ')})`
-    default:
-      return describe(value, insideCollection)
   }
 }
 
