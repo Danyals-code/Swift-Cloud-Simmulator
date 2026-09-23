@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
@@ -64,6 +65,8 @@ function reported(members: string, declarations = '') {
 const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
 /** What the same simulator drew for the second set of fixes (docs/parity/native/iphone18pro-misrenders-ii). */
 const nativeII = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders-ii/measurements.json', import.meta.url), 'utf8')).measured
+/** What the same simulator drew running tests/fixtures/ios27-runtime.swift (docs/parity/native/iphone18pro-runtime). */
+const runtimeCapture = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-runtime/measurements.json', import.meta.url), 'utf8'))
 
 /** A `runView` on the iPhone 18 Pro the native values were measured on, with its safe area. */
 const screen = (members: string, declarations = '') => runView(members, declarations, { safeArea: DEVICES['iphone-18-pro'].safeArea })
@@ -1545,17 +1548,15 @@ describe('F12: containers that hand their content a value draw it', () => {
     expect(warnings(r)).toEqual([expect.stringContaining('initial value')])
   })
 
-  it("puts a TabSection's tabs in the tab bar", () => {
-    const r = runView(`var body: some View {
-        TabView {
-          Tab("Home", systemImage: "house") { Text("Home page") }
-          TabSection("More") {
-            Tab("One", systemImage: "star") { Text("Tab one") }
-            Tab("Two", systemImage: "heart") { Text("Tab two") }
-          }
-        }
-      }`)
-    expect(controls(r)).toEqual(expect.arrayContaining(['Home', 'One', 'Two']))
+  it("puts a TabSection's tabs in the tab bar in order, and leaves its title out, as iOS 27 does", () => {
+    // The app the simulator ran, unchanged since.
+    const fixture = readFileSync(new URL('./fixtures/ios27-runtime.swift', import.meta.url), 'utf8')
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe(runtimeCapture.fixtureSha256)
+    const r = compileView(fixture)
+    expect(r.diagnostics).toEqual([])
+    const measured = runtimeCapture.measured.tabSection
+    expect(controls(r)).toEqual(measured.tabBar)
+    expect(texts(r).includes('More')).toBe(measured.sectionTitleShown)
     expect(texts(tap(r, 'Two'))).toContain('Tab two')
   })
 })
