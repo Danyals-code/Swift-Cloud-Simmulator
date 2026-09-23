@@ -74,8 +74,11 @@ export interface ProjectSummary {
  * avoid paying for later.
  */
 export interface ProjectStore {
+  /** Whether what it saves is still there once the page has closed. The in-memory fallback's is not. */
+  readonly durable: boolean
   list(): Promise<readonly ProjectSummary[]>
   load(id: string): Promise<Project | null>
+  /** Rejects with `StaleProjectError` when another tab has saved this project since this store last read or wrote it. */
   save(project: Project): Promise<void>
   remove(id: string): Promise<void>
 }
