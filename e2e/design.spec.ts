@@ -96,6 +96,21 @@ async function openDesign(page: Page) {
 }
 
 /** Design's Layers: the focused screen's views, inside the left panel's outline. */
+/**
+ * Where a view is once the canvas has stopped redrawing it: two reads in a row that
+ * agree. A single read can land mid-redraw, when the view is briefly not there at all.
+ */
+async function settledBox(locator: Locator) {
+  let box = await locator.boundingBox()
+  await expect.poll(async () => {
+    const next = await locator.boundingBox()
+    const settled = !!box && !!next && box.x === next.x && box.y === next.y && box.width === next.width && box.height === next.height
+    box = next
+    return settled
+  }).toBe(true)
+  return box!
+}
+
 const layers = (page: Page) => page.getByTestId('logical-layers')
 
 /** A row in Layers by the name it reads as: "Beta, Text", or "Vertical Stack". */
@@ -255,8 +270,8 @@ test('a view dropped in its stack’s empty space becomes the stack’s last vie
   await expect(preview.getByText('Title', { exact: true })).toBeVisible()
   await expect(preview.getByText('Subtitle', { exact: true })).toBeVisible()
 
-  const title = (await preview.getByText('Title', { exact: true }).boundingBox())!
-  const subtitle = (await preview.getByText('Subtitle', { exact: true }).boundingBox())!
+  const title = await settledBox(preview.getByText('Title', { exact: true }))
+  const subtitle = await settledBox(preview.getByText('Subtitle', { exact: true }))
   // Well below the last line: the stack's own empty space, which fills the screen.
   const x = subtitle.x + subtitle.width / 2, y = subtitle.y + subtitle.height * 8
   await page.mouse.move(title.x + title.width / 2, title.y + title.height / 2)

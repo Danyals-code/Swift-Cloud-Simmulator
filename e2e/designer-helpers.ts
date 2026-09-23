@@ -26,6 +26,10 @@ export async function openCounter(page: Page) {
   await page.getByTestId('template-confirm').click()
   await expect(page.getByTestId('template-gallery')).toHaveCount(0)
   await expect(page.getByTestId('project-name')).toHaveText('CounterApp')
+  // Drawn, and idle: until then the canvas and Layers are still settling on the new
+  // project, and a click can land on what was open before or be undone by the redraw.
+  await expect(page.getByTestId('render-tree').getByText('Hello, World!', { exact: true }).first()).toBeVisible()
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
 }
 
 export function cards(page: Page, name: string): Locator {
