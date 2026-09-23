@@ -61,6 +61,7 @@ import {
   TOKEN_TYPE,
   TRANSITION_TYPE,
   VIEW_TYPE,
+  type ActionValue,
   type AnimationPayload,
   type ButtonConfigurationPayload,
   type ColorPayload,
@@ -127,6 +128,8 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
   'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material',
   'Task', 'MainActor', 'Gradient', 'StrokeStyle',
+  // `Color(UIColor.systemGray6)`: UIKit's colours, bridged by name like `Color(.systemGray6)`.
+  'UIColor',
 ])
 
 /**
@@ -190,6 +193,35 @@ function token(name: string): SwiftValue {
 
 function color(payload: ColorPayload): SwiftValue {
   return opaque(COLOR_TYPE, payload)
+}
+
+/**
+ * A `Button`'s `action:` argument: `Button("Save", action: save)`, and Xcode's own
+ * `Button(action: { … }) { Label(…) }`, whose trailing closure is then the label. A
+ * function named as a value arrives as a function rather than a closure.
+ */
+function actionArgument(name: string, call: HostCall): ActionValue | null {
+  if (!ACTION_VIEWS.has(name)) return null
+  const value = call.args.find((a) => a.label === 'action')?.value
+  return value?.kind === 'closure' || value?.kind === 'function' ? value : null
+}
+
+/** Modifiers that run something when an event happens, rather than drawing anything. */
+const EVENT_MODIFIERS: ReadonlySet<string> = new Set([
+  'onAppear', 'onDisappear', 'task', 'onChange', 'onDelete', 'onTapGesture', 'onLongPressGesture', 'onSubmit',
+])
+
+/**
+ * What an event modifier was given to run when no trailing closure was written:
+ * `perform:` or `action:`, or the unlabelled argument of `.task(load)` and
+ * `.onSubmit(save)`, as a closure or as a function named as a value.
+ */
+function eventArgument(call: HostCall): ActionValue | null {
+  const argument =
+    call.args.find((a) => a.label === 'perform' || a.label === 'action') ??
+    call.args.find((a) => a.label === null && (a.value.kind === 'closure' || a.value.kind === 'function'))
+  const value = argument?.value
+  return value?.kind === 'closure' || value?.kind === 'function' ? value : null
 }
 
 function toArgs(call: HostCall): ViewArg[] {
@@ -737,7 +769,8 @@ export class SwiftUIHost implements InterpreterHost {
     // "is this a view name?" guard below rejects them.
     if (name === 'Task') return this.runTask(call)
     if (name === 'Binding') return this.makeBinding(call)
-    if (name === 'Color') return this.makeColor(call)
+    // `UIColor(red:green:blue:alpha:)` is a colour like any other, bridged by `Color(uiColor:)`.
+    if (name === 'Color' || name === 'UIColor') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
     if (name === 'GridItem') return this.makeGridItem(call)
@@ -913,7 +946,7 @@ export class SwiftUIHost implements InterpreterHost {
       args,
       children,
       modifiers: [],
-      action: isAction ? call.trailingClosure : null,
+      action: actionArgument(name, call) ?? (isAction ? call.trailingClosure : null),
       span: call.span,
     })
   }
@@ -970,7 +1003,7 @@ export class SwiftUIHost implements InterpreterHost {
       args: [...args.filter((a) => !named.some((n) => n.label === a.label)), ...labelled],
       children,
       modifiers: [],
-      action: isAction ? call.trailingClosure : null,
+      action: actionArgument(name, call) ?? (isAction ? call.trailingClosure : null),
       span: call.span,
     })
   }
@@ -1110,14 +1143,16 @@ export class SwiftUIHost implements InterpreterHost {
     // handler on it, which is value semantics, same as SwiftUI.
     const chain = asGesture(target)
     if (chain) {
-      const closure = call.trailingClosure ?? asClosure(call.args[call.args.length - 1]?.value)
+      // `.onEnded { … }`, or `.onEnded(tapped)` naming a function.
+      const last = call.args[call.args.length - 1]?.value
+      const action = call.trailingClosure ?? (last?.kind === 'closure' || last?.kind === 'function' ? last : null)
 
-      if ((member === 'onChanged' || member === 'onEnded') && closure) {
-        return withHandler(chain, { phase: member === 'onChanged' ? 'changed' : 'ended', closure })
+      if ((member === 'onChanged' || member === 'onEnded') && action) {
+        return withHandler(chain, { phase: member === 'onChanged' ? 'changed' : 'ended', action })
       }
-      if (member === 'updating' && closure) {
+      if (member === 'updating' && action) {
         const binding = call.args.find((a) => a.label === null)?.value
-        if (binding) return withUpdate(chain, { binding, closure })
+        if (binding) return withUpdate(chain, { binding, action })
       }
       if (member === 'simultaneously' || member === 'exclusively' || member === 'sequenced') {
         const other = asGesture(call.args[0]?.value)
@@ -1328,12 +1363,14 @@ export class SwiftUIHost implements InterpreterHost {
       ? call.args.some(arg => arg.label === 'forSelectionType') ? null
         : call.trailingClosure ?? asClosure(call.args.find(arg => arg.label === 'menuItems')?.value)
       : call.trailingClosure
+    const action = EVENT_MODIFIERS.has(member) ? (call.trailingClosure ?? eventArgument(call)) : null
     return {
       name: member,
       args: [...toArgs(call), ...this.eagerContent(member, call)],
       span: call.span,
       // Unevaluated on purpose: a sheet's content must not run while it is down.
       closure: deferred,
+      ...(action ? { action } : {}),
       // Only where there is something deferred to run later. Every other modifier
       // resolves inside the scope it was written in and has no use for this.
       ...(deferred ? { environment: this.environment.snapshot() } : {}),
@@ -1343,11 +1380,13 @@ export class SwiftUIHost implements InterpreterHost {
   private eagerContent(member: string, call: HostCall): ViewArg[] {
     if (!['safeAreaInset', 'background', 'overlay'].includes(member)) return []
     const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'content')?.value)
-    if (!content) return []
-    return call
-      .invokeBuilder(content)
-      .filter((value) => asView(value) !== null)
-      .map((value) => ({ label: 'content', value }))
+    // `.overlay(Badge())`: a custom view given as the argument is a struct until it is
+    // expanded, and nothing after this point can expand it.
+    const given = content ? undefined : call.args.find((arg) => arg.label === null)?.value
+    const values = content ? call.invokeBuilder(content) : given?.kind === 'struct' ? [given] : []
+    // A `Color`, a gradient and a custom view are views without being view values, so
+    // they take the same conversion as `body`: `.background { Color.red }` drew nothing.
+    return this.toViews(values).map((content) => ({ label: 'content', value: view(content) }))
   }
 
   callValue(target: SwiftValue, call: HostCall): SwiftValue | undefined {
@@ -1506,6 +1545,14 @@ export class SwiftUIHost implements InterpreterHost {
     // `Color.red.gradient` - SwiftUI's one-line shade of a flat colour.
     if (target.kind === 'opaque' && target.typeName === COLOR_TYPE && member === 'gradient') {
       return this.colorGradient(target, target.payload as ColorPayload)
+    }
+
+    // `.blue.secondary` - the colour at a lower level of the hierarchy. It stopped the
+    // whole preview as an unknown member.
+    const level = HIERARCHY_OPACITY[member]
+    if (level !== undefined && target.kind === 'opaque' && target.typeName === COLOR_TYPE) {
+      const payload = target.payload as ColorPayload
+      return color({ ...payload, opacity: (payload.opacity ?? 1) * level })
     }
 
     // Every branch below answers on the strength of a type's *name*, so a name the
@@ -1888,32 +1935,82 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private makeColor(call: HostCall): SwiftValue {
+    const opacity = numberOf(call.args.find((a) => a.label === 'opacity' || a.label === 'alpha')?.value)
+    const alpha = opacity !== null ? { opacity } : {}
     const white = numberOf(call.args.find((a) => a.label === 'white')?.value)
-    if (white !== null) return color({ name: null, white })
+    if (white !== null) return color({ name: null, white, ...alpha })
+
+    // `Color(hue:saturation:brightness:)` was drawn clear.
+    const hue = numberOf(call.args.find((a) => a.label === 'hue')?.value)
+    const saturation = numberOf(call.args.find((a) => a.label === 'saturation')?.value)
+    const brightness = numberOf(call.args.find((a) => a.label === 'brightness')?.value)
+    if (hue !== null && saturation !== null && brightness !== null) {
+      const [r, g, b] = hsbToRgb(hue, saturation, brightness)
+      return color({ name: null, red: r, green: g, blue: b, ...alpha })
+    }
 
     const red = numberOf(call.args.find((a) => a.label === 'red')?.value)
     const green = numberOf(call.args.find((a) => a.label === 'green')?.value)
     const blue = numberOf(call.args.find((a) => a.label === 'blue')?.value)
     if (red !== null && green !== null && blue !== null) {
-      const opacity = numberOf(call.args.find((a) => a.label === 'opacity')?.value)
-      return color({ name: null, red, green, blue, ...(opacity !== null ? { opacity } : {}) })
+      return color({ name: null, red, green, blue, ...alpha })
     }
 
     const first = call.args[0]?.value
     // `Color("accent")` names a colour set in the asset catalog - never a system colour,
     // even one spelled the same - so it is marked and resolved against the project.
     if (first?.kind === 'string') return color({ name: first.value, asset: true })
+    // `Color(uiColor: UIColor(red: …))`: a colour already built.
+    if (first?.kind === 'opaque' && first.typeName === COLOR_TYPE) return first
 
     // `Color(.systemGroupedBackground)` - the UIKit bridge, where the argument is a
     // contextual member rather than a string. This is how idiomatic SwiftUI reaches
     // the adaptive backgrounds, so it has to work for dark mode to be usable at all.
     const named = tokenNameOf(first)
-    if (named) return color({ name: named })
+    if (named) return uikitColor(named)
     return color({ name: 'clear' })
   }
 }
 
 // -------------------------------------------------------------------- helpers
+
+/**
+ * UIKit's fixed colours, as it defines them. Through the bridge `Color(.red)` is
+ * `UIColor.red`, which is pure red, and `Color(.gray)` is half white, not SwiftUI's
+ * system red and grey. Every other name is a system or semantic colour the palette has.
+ */
+const UIKIT_FIXED: Readonly<Record<string, readonly [number, number, number]>> = {
+  black: [0, 0, 0], darkGray: [1 / 3, 1 / 3, 1 / 3], lightGray: [2 / 3, 2 / 3, 2 / 3], white: [1, 1, 1],
+  gray: [0.5, 0.5, 0.5], red: [1, 0, 0], green: [0, 1, 0], blue: [0, 0, 1], cyan: [0, 1, 1], yellow: [1, 1, 0],
+  magenta: [1, 0, 1], orange: [1, 0.5, 0], purple: [0.5, 0, 0.5], brown: [0.6, 0.4, 0.2],
+}
+
+/** A `UIColor` by name, as the bridge reads it. `tintColor` is the app's accent. */
+function uikitColor(name: string): SwiftValue {
+  const fixed = UIKIT_FIXED[name]
+  if (fixed) return color({ name: null, red: fixed[0], green: fixed[1], blue: fixed[2] })
+  return color({ name: name === 'tintColor' ? 'accentColor' : name })
+}
+
+/**
+ * A colour's hierarchical levels, as opacity. `.secondary` and `.tertiary` are measured
+ * in the iOS 27 simulator (0.5 and 0.25); the two lower levels take the label's.
+ */
+const HIERARCHY_OPACITY: Readonly<Record<string, number>> = { secondary: 0.5, tertiary: 0.25, quaternary: 0.18, quinary: 0.086 }
+
+/** HSB to sRGB components, each 0 to 1, as `Color(hue:saturation:brightness:)` means them. */
+function hsbToRgb(hue: number, saturation: number, brightness: number): [number, number, number] {
+  const h = ((hue % 1) + 1) % 1 * 6
+  const s = Math.max(0, Math.min(1, saturation))
+  const v = Math.max(0, Math.min(1, brightness))
+  const chroma = v * s
+  const x = chroma * (1 - Math.abs((h % 2) - 1))
+  const [r, g, b] =
+    h < 1 ? [chroma, x, 0] : h < 2 ? [x, chroma, 0] : h < 3 ? [0, chroma, x]
+    : h < 4 ? [0, x, chroma] : h < 5 ? [x, 0, chroma] : [chroma, 0, x]
+  const m = v - chroma
+  return [r + m, g + m, b + m]
+}
 
 /** The gesture constructors, mapped to the kind of event each responds to. */
 const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {
@@ -1937,7 +2034,8 @@ const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {
  */
 const SHAPE_MEMBERS = new Set(['fill', 'stroke', 'strokeBorder', 'trim', 'inset', 'offset', 'size'])
 
-const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init'])
+/** Members of a colour, which `.blue.secondary` reaches through its leading-dot `.blue`. */
+const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init', ...Object.keys(HIERARCHY_OPACITY)])
 
 const GRADIENTS: Readonly<Record<string, GradientPayload['kind']>> = {
   LinearGradient: 'linear',

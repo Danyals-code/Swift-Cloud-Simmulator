@@ -20,6 +20,7 @@ import {
   payloadOf,
   ANIMATION_TYPE,
   COLOR_TYPE,
+  type ActionValue,
   type AnimationPayload,
   type ColorPayload,
   type EnvironmentFrame,
@@ -118,7 +119,7 @@ export interface Overlay {
   /** Omitted disables interaction; a number enables it through that encoded detent. */
   readonly backgroundInteraction?: number
   readonly showsDragIndicator?: boolean
-  readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'search' | 'ignoresSafeArea' | 'overlay'>
+  readonly screen?: Pick<ResolvedUI, 'content' | 'navigationBar' | 'tabBar' | 'search' | 'overlay'>
   readonly title: string
   readonly message: string
   /** Tapping outside dismisses, unless the presentation is non-interactive. */
@@ -138,7 +139,7 @@ export interface LifecycleHook {
   readonly kind: 'appear' | 'disappear' | 'change'
   /** The view's path - how "has this appeared before?" is answered. */
   readonly path: string
-  readonly closure: ClosureValue
+  readonly action: ActionValue
   /** For `.onChange(of:)`: the value being watched, compared against last pass. */
   readonly watched?: SwiftValue
   readonly initial?: boolean
@@ -156,8 +157,6 @@ export interface ResolvedUI {
   readonly viewHierarchy?: readonly ViewLayer[]
   readonly content: readonly ViewValue[]
   readonly search: SearchField | null
-  /** True when the content asked to extend under the device's edges. */
-  readonly ignoresSafeArea: boolean
   readonly navigationBar: NavigationBar | null
   readonly tabBar: TabBar | null
   readonly overlay: Overlay | null
@@ -165,6 +164,20 @@ export interface ResolvedUI {
   /** Set when the last state change happened inside `withAnimation`. */
   readonly animation: AnimationPayload | null
   readonly lifecycle: readonly LifecycleHook[]
+  /** What was written around the screen's containers and isn't drawn (see `notDrawn`). */
+  readonly notDrawn?: readonly NotDrawn[]
+}
+
+/**
+ * Something the preview leaves out when it cuts a screen out of its containers: a
+ * view beside a NavigationStack or a TabView - a floating button in a `ZStack`, a
+ * banner above - or a drawing modifier written on the container itself.
+ */
+export interface NotDrawn {
+  readonly span: SourceSpan
+  readonly container: string
+  /** The modifier left out, when it is one; otherwise a view is. */
+  readonly modifier?: string
 }
 
 /** Framework-owned state: what the user's code does not hold but the screen needs. */
@@ -378,6 +391,10 @@ class Resolver {
   private visualStyle: readonly ModifierValue[] = []
   private contextMenuPath: string | undefined
   private previewScope: readonly ViewValue[] = []
+  /** The containers the screen was cut out of (see `containersAbove`). */
+  private around: readonly ViewValue[] = []
+  /** What each screen cut out of its containers leaves out, the root's and any sheet's. */
+  private readonly notDrawn: NotDrawn[] = []
 
   constructor(
     private readonly ctx: ResolveContext,
@@ -399,10 +416,16 @@ class Resolver {
       // A phone collapses a split view into a stack, so it is resolved as one.
       findView(withTabs.content, 'NavigationSplitView')
     const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
+    this.around = containersAbove(stamped, tabs, withTabs.content, nav)
+    const searchAround = searchContainers(withTabs.content, nav, screen.navigationBar)
+    this.notDrawn.push(
+      ...(tabs ? notDrawnAround(stamped, tabs) : []),
+      ...(nav ? notDrawnAround(withTabs.content, nav) : []),
+    )
 
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
-    const overlay = this.basePage ? null : this.findOverlay(screen.content) ?? this.menuOverlay(screen.content)
+    const overlay = this.basePage ? null : this.findOverlay(screen.content, 0, this.around) ?? this.menuOverlay(screen.content)
 
     const screenLayers = (content: readonly ViewValue[], bar: NavigationBar | null | undefined): ViewLayer[] => [
       ...viewLayers(content),
@@ -437,14 +460,14 @@ class Resolver {
     return {
       viewHierarchy: pageLayers,
       content: screen.content,
-      search: this.findSearchField(screen.content),
-      ignoresSafeArea: collectModifier(screen.content, 'ignoresSafeArea') !== null,
+      search: this.findSearchField(screen.content, searchAround),
       navigationBar: screen.navigationBar,
       tabBar: withTabs.tabBar,
       overlay,
       handlers: this.handlers,
       animation: this.ctx.animation,
       lifecycle: this.lifecycle,
+      ...(this.notDrawn.length ? { notDrawn: this.notDrawn } : {}),
     }
   }
 
@@ -453,7 +476,7 @@ class Resolver {
     const root = this.run(views)
     const out: NestedPage[] = []
     const seen = new Set<string>()
-    const queue = [{ ui: root, scope: this.previewScope, parentId: rootId, depth: 0 }]
+    const queue = [{ ui: root, scope: this.previewScope, around: this.around, parentId: rootId, depth: 0 }]
     let attempts = 0
     while (queue.length && out.length < limit && attempts < 64) {
       const current = queue.shift()!
@@ -490,7 +513,7 @@ class Resolver {
           const name = ui.navigationBar?.title || titleOf(built, fallback)
           seen.add(key)
           out.push({ id, parentId: current.parentId, rootId, kind, name, source, ui })
-          queue.push({ ui, scope: nestedResolver.previewScope, parentId: id, depth: current.depth + 1 })
+          queue.push({ ui, scope: nestedResolver.previewScope, around: nestedResolver.around, parentId: id, depth: current.depth + 1 })
         } catch { /* A destination lacking valid data does not blank other pages. */ }
       }
       const visitLinks = (content: readonly ViewValue[]) => {
@@ -504,7 +527,7 @@ class Resolver {
       }
       const toolbar = [...(current.ui.navigationBar?.leading ?? []), ...(current.ui.navigationBar?.trailing ?? [])]
       visitLinks([...current.ui.content, ...toolbar])
-      for (const { view, modifier } of allModifiers([...current.scope, ...toolbar])) {
+      for (const { view, modifier } of modifiersFor([...current.scope, ...toolbar], current.around)) {
         const kind = OVERLAY_KINDS[modifier.name]
         if (!modifier.closure || (kind !== 'sheet' && kind !== 'cover' && kind !== 'popover')) continue
         const item = labelled(modifier.args, 'item')
@@ -553,7 +576,7 @@ class Resolver {
       this.register(`${path}/context-menu`, { kind: 'openMenu', menu: `${path}/context-menu` })
     }
     this.visualStyle = visualModifiers(view)
-    const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.closure ?? null
+    const onDelete = view.modifiers.find((m) => m.name === 'onDelete')?.action ?? null
 
     // A custom style written on this view is in scope for its whole subtree, and for
     // this view itself when it is the button.
@@ -633,14 +656,15 @@ class Resolver {
   /** Records `.onAppear`, `.onDisappear`, `.task` and `.onChange` for this view. */
   private collectLifecycle(view: ViewValue, path: string): void {
     for (const [index, modifier] of view.modifiers.entries()) {
-      if (!modifier.closure) continue
+      const action = modifier.action
+      if (!action) continue
 
       if (modifier.name === 'onAppear' || modifier.name === 'task') {
-        this.lifecycle.push({ kind: 'appear', path, closure: modifier.closure })
+        this.lifecycle.push({ kind: 'appear', path, action })
         continue
       }
       if (modifier.name === 'onDisappear') {
-        this.lifecycle.push({ kind: 'disappear', path, closure: modifier.closure })
+        this.lifecycle.push({ kind: 'disappear', path, action })
         continue
       }
       if (modifier.name === 'onChange') {
@@ -649,7 +673,7 @@ class Resolver {
           kind: 'change',
           path: `${path}/${modifier.name}-${index}`,
           initial: truthy(labelled(modifier.args, 'initial') ?? { kind: 'bool', value: false }),
-          closure: modifier.closure,
+          action,
           ...(watched !== undefined ? { watched } : {}),
         })
       }
@@ -666,14 +690,14 @@ class Resolver {
   private stampRow(
     view: ViewValue,
     path: string,
-    onDelete: ClosureValue | null,
+    onDelete: ActionValue | null,
     offset: number,
   ): ViewValue {
     const stamped = this.stamp(view, path)
     if (!onDelete) return stamped
 
     this.register(`${path}/swipe`, { kind: 'swipe', row: path })
-    this.register(`${path}/delete`, { kind: 'delete', closure: onDelete, offset, row: path })
+    this.register(`${path}/delete`, { kind: 'delete', action: onDelete, offset, row: path })
     return { ...stamped, swipe: { offset: this.ctx.state.swipeOffset(path), path } }
   }
 
@@ -687,7 +711,7 @@ class Resolver {
    */
   private intentFor(view: ViewValue): ViewIntent | null {
     if (view.intent) return view.intent
-    if (view.action) return { kind: 'run', closure: view.action }
+    if (view.action) return { kind: 'run', action: view.action }
 
     // Controls the user gave a binding need no closure of their own: writing the
     // binding *is* the behaviour, and it is the framework's job to do it. The value
@@ -714,7 +738,7 @@ class Resolver {
     const tap = view.modifiers.find(
       (m) => m.name === 'onTapGesture' || m.name === 'onLongPressGesture',
     )
-    if (tap?.closure) return { kind: 'run', closure: tap.closure }
+    if (tap?.action) return { kind: 'run', action: tap.action }
 
     return null
   }
@@ -784,7 +808,7 @@ class Resolver {
 
   private operable(view: ViewValue, path: string): ViewValue {
     const submit = view.modifiers.find(m => m.name === 'onSubmit')
-    if (submit?.closure && ['TextField', 'SecureField', 'TextEditor'].includes(view.name)) this.register(`${path}/submit`, { kind: 'run', closure: submit.closure })
+    if (submit?.action && ['TextField', 'SecureField', 'TextEditor'].includes(view.name)) this.register(`${path}/submit`, { kind: 'run', action: submit.action })
     if (view.name === 'Stepper') {
       const binding = labelled(view.args, 'value')
       if (!binding || !asProjection(binding)) return view
@@ -1388,8 +1412,8 @@ class Resolver {
    * Registered as a control writing its binding, exactly like a `TextField` - because
    * that is all `.searchable` is. Placement is resolved later from device context.
    */
-  private findSearchField(views: readonly ViewValue[]): SearchField | null {
-    for (const { view, modifier } of allModifiers(views)) {
+  private findSearchField(views: readonly ViewValue[], around: readonly ViewValue[] = []): SearchField | null {
+    for (const { view, modifier } of modifiersFor(views, around)) {
       if (modifier.name !== 'searchable') continue
 
       const binding = labelled(modifier.args, 'text') ?? modifier.args[0]?.value
@@ -1420,9 +1444,9 @@ class Resolver {
    * trap on the force-unwrap every render if the closure ran while the sheet was
    * down. SwiftUI is lazy for the same reason.
    */
-  private findOverlay(views: readonly ViewValue[], depth = 0): Overlay | null {
+  private findOverlay(views: readonly ViewValue[], depth = 0, around: readonly ViewValue[] = []): Overlay | null {
     if (depth >= 4) return null
-    for (const { view, modifier } of allModifiers(views)) {
+    for (const { view, modifier } of modifiersFor(views, around)) {
       const kind = OVERLAY_KINDS[modifier.name]
       if (!kind) continue
 
@@ -1483,6 +1507,12 @@ class Resolver {
       const tabbed = tabs ? this.resolveTabs(tabs) : { content: overlayViews, tabBar: null }
       const nav = findView(tabbed.content, 'NavigationStack') ?? findView(tabbed.content, 'NavigationView')
       const resolved = nav ? this.resolveNavigation(nav) : { content: tabbed.content, navigationBar: null }
+      const around = containersAbove(overlayViews, tabs, tabbed.content, nav)
+      this.notDrawn.push(
+        ...(tabs ? notDrawnAround(overlayViews, tabs) : []),
+        ...(nav ? notDrawnAround(tabbed.content, nav) : []),
+      )
+      const searchAround = searchContainers(tabbed.content, nav, resolved.navigationBar)
       const cornerRadius = numberOf(collectModifier(overlayViews, 'presentationCornerRadius')?.args[0]?.value)
 
       return {
@@ -1494,7 +1524,7 @@ class Resolver {
         background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
-        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
+        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1, around) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content, searchAround) },
         title: kind === 'dialog' && tokenName(labelled(modifier.args, 'titleVisibility')) !== 'visible' ? '' : stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
         message: this.messageOf(modifier),
         dismiss,
@@ -1696,6 +1726,76 @@ function collectModifier(views: readonly ViewValue[], name: string): ModifierVal
     if (modifier.name === name) return modifier
   }
   return null
+}
+
+/**
+ * The containers a screen was cut out of: the views from the root down to its
+ * `TabView`, and from the tab page down to its `NavigationStack`, both inclusive.
+ *
+ * The screen is the stack's content, but a sheet or an alert written on the stack -
+ * or on the TabView, or on the view around either - belongs to it too. That is where
+ * a toolbar's "Add" button's sheet is most often written, and where every tab of a
+ * tab app puts its own. Only their own modifiers count: their other content is what
+ * the screen already is, or isn't drawn at all.
+ */
+function containersAbove(
+  root: readonly ViewValue[],
+  tabs: ViewValue | null,
+  page: readonly ViewValue[],
+  nav: ViewValue | null,
+): ViewValue[] {
+  return [...(tabs ? pathTo(root, tabs) : []), ...(nav ? pathTo(page, nav) : [])]
+}
+
+/** Modifiers that draw, and are left out when they are written on a screen's container. */
+const DRAWN_ON_CONTAINER: ReadonlySet<string> = new Set(['overlay', 'safeAreaInset'])
+
+/**
+ * Everything on the way down to `container` that the screen leaves out: the views
+ * beside each step, and the drawing modifiers written on the steps themselves. The
+ * container's own content is the screen, so only what surrounds it is lost.
+ */
+function notDrawnAround(views: readonly ViewValue[], container: ViewValue): NotDrawn[] {
+  const path = pathTo(views, container)
+  const beside = path.flatMap((step, i) =>
+    (i === 0 ? views : path[i - 1]!.children).filter((view) => view !== step))
+  return [
+    ...beside.map((view) => ({ span: view.span, container: container.name })),
+    ...path.flatMap((step) => step.modifiers.flatMap((modifier, i) => {
+      if (!DRAWN_ON_CONTAINER.has(modifier.name)) return []
+      // A modifier's span runs from the start of the whole chain, so its own text is
+      // what follows the step before it: the view's call, or the previous modifier.
+      const start = (i === 0 ? step.span : step.modifiers[i - 1]!.span).end
+      return [{ span: { ...modifier.span, start }, container: container.name, modifier: modifier.name }]
+    })),
+  ]
+}
+
+/**
+ * The containers whose `.searchable` searches this screen: the stack's, and only on
+ * its root screen. In iOS 27 a pushed screen has no search field, and a TabView's
+ * `.searchable` draws none without a search tab (both checked in the simulator).
+ */
+function searchContainers(page: readonly ViewValue[], nav: ViewValue | null, bar: NavigationBar | null): ViewValue[] {
+  return nav && !bar?.canGoBack ? pathTo(page, nav) : []
+}
+
+/** The views from a list down to `target`, both inclusive, or none when it isn't there. */
+function pathTo(views: readonly ViewValue[], target: ViewValue): ViewValue[] {
+  for (const view of views) {
+    if (view === target) return [view]
+    const below = pathTo(view.children, target)
+    if (below.length) return [view, ...below]
+  }
+  return []
+}
+
+/**
+ * Every modifier in a screen's views, and the modifiers written on the containers it was
+ * cut out of (see `containersAbove`) - on the containers themselves, not inside them.
+ */
+function modifiersFor(views: readonly ViewValue[], around: readonly ViewValue[]): { view: ViewValue; modifier: ModifierValue }[] {
+  return [...allModifiers(views), ...around.flatMap((view) => view.modifiers.map((modifier) => ({ view, modifier })))]
 }
 
 function* allModifiers(

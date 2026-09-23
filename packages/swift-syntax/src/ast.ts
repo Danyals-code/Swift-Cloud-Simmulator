@@ -722,13 +722,26 @@ export interface SelfExpr extends NodeBase {
 }
 
 /**
+ * The step where an optional chain ends.
+ *
+ * `a?.b.c()` is one chain: when `a` is nil the whole expression is nil, not just
+ * `a?.b`, and nothing after the `?` runs. Swift calls this point *optional
+ * evaluation*. Only the parser knows where a postfix expression stops, so it marks
+ * the last step of any that contains a `?`, and the interpreter turns a nil met
+ * anywhere inside into the nil the whole chain evaluates to.
+ */
+export interface OptionalChainEnd {
+  readonly endsOptionalChain?: true
+}
+
+/**
  * `base.member`, or `.member` with a null base.
  *
  * The null-base form is implicit member syntax - `.largeTitle`, `.infinity`,
  * `.primary` - which is pervasive in SwiftUI and resolves against the expected
  * type rather than against a value.
  */
-export interface MemberAccessExpr extends NodeBase {
+export interface MemberAccessExpr extends NodeBase, OptionalChainEnd {
   readonly kind: 'memberAccess'
   readonly base: Expr | null
   readonly member: string
@@ -742,7 +755,7 @@ export interface Argument {
   readonly span: SourceSpan
 }
 
-export interface CallExpr extends NodeBase {
+export interface CallExpr extends NodeBase, OptionalChainEnd {
   readonly kind: 'call'
   readonly callee: Expr
   readonly args: readonly Argument[]
@@ -750,7 +763,7 @@ export interface CallExpr extends NodeBase {
   readonly trailingClosure: ClosureExpr | null
 }
 
-export interface SubscriptExpr extends NodeBase {
+export interface SubscriptExpr extends NodeBase, OptionalChainEnd {
   readonly kind: 'subscript'
   readonly base: Expr
   readonly args: readonly Argument[]
@@ -816,7 +829,7 @@ export interface TupleExpr extends NodeBase {
   readonly labels: readonly (string | null)[]
 }
 
-export interface ForceUnwrapExpr extends NodeBase {
+export interface ForceUnwrapExpr extends NodeBase, OptionalChainEnd {
   readonly kind: 'forceUnwrap'
   readonly operand: Expr
 }

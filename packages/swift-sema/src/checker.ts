@@ -22,7 +22,10 @@ import {
   isViewRoot,
   EXTENSIBLE_BUILTIN_TYPES,
   KNOWN_ATTRIBUTES,
+  KNOWN_COLOR_NAMES,
   KNOWN_TYPES,
+  SWIFTUI_COLOR_NAMES,
+  UIKIT_COLOR_NAMES,
   MODIFIER_LABELS,
   NON_MODIFIER_MEMBERS,
   PROPERTY_WRAPPERS,
@@ -77,6 +80,12 @@ export class Checker {
 
   /** Method names the project adds in an extension - its own modifiers. */
   private readonly declaredModifiers = new Set<string>()
+  /** Property names the project adds in an extension - `Color.brand` among them. */
+  private readonly declaredExtensionProperties = new Set<string>()
+  /** Shape calls a `.stroke` or `.strokeBorder` is written on, so a `.trim` among them is a trimmed stroke. */
+  private readonly stroked = new WeakSet<Expr>()
+  /** The same, for a dashed stroke, which the preview draws untrimmed. */
+  private readonly dashStroked = new WeakSet<Expr>()
   /** `typealias` names, which resolve as types anywhere the target would. */
   private readonly typeAliases = new Set<string>()
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
@@ -174,6 +183,7 @@ export class Checker {
         // before the extension that gives it the modifier.
         for (const member of decl.members) {
           if (member.kind === 'funcDecl') this.declaredModifiers.add(member.name)
+          if (member.kind === 'varDecl') this.declaredExtensionProperties.add(member.name)
         }
       }
     }
@@ -716,6 +726,7 @@ export class Checker {
         return
 
       case 'call': {
+        this.checkTrim(expr)
         this.checkCallee(expr.callee, scope)
         this.checkOverloadCoverage(expr, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
@@ -731,6 +742,16 @@ export class Checker {
             this.checkStyleToken(expr.callee.member, expr.args)
           }
         }
+        // `Color(.systemGray6)` and `Color(uiColor: .systemGray6)`, UIKit's colour by name.
+        const only = expr.args.length === 1 ? expr.args[0]! : null
+        if (
+          expr.callee.kind === 'identifier' && expr.callee.name === 'Color' &&
+          only && (only.label === null || only.label === 'uiColor') &&
+          only.value.kind === 'memberAccess' && only.value.base === null
+        ) {
+          this.checkColorName(only.value.member, only.value.memberSpan, 'uikit')
+        }
+        if (expr.callee.kind === 'memberAccess' && STYLE_MODIFIERS.has(expr.callee.member)) this.checkStyleColor(expr.args)
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
         return
@@ -738,7 +759,11 @@ export class Checker {
 
       case 'memberAccess':
         // Only the base is resolved. Member existence needs real type information,
-        // and guessing produces false positives - see the class comment.
+        // and guessing produces false positives - see the class comment. Colours are
+        // the exception: `Color.name` is a name the preview draws, or it draws clear.
+        if (expr.base?.kind === 'identifier' && (expr.base.name === 'Color' || expr.base.name === 'UIColor')) {
+          this.checkColorName(expr.member, expr.memberSpan, expr.base.name === 'Color' ? 'swiftui' : 'uikit')
+        }
         if (expr.base) this.checkExpression(expr.base, scope)
         return
 
@@ -1037,6 +1062,95 @@ export class Checker {
   }
 
   /**
+   * Warns on a `.trim` that isn't stroked: a filled shape, which the preview fills whole.
+   *
+   * The stroke is written after the trim - `.trim(…).offset(…).stroke(…)` - so the
+   * outer call marks the shape calls under it before they are checked.
+   */
+  private checkTrim(call: Expr & { kind: 'call' }): void {
+    if (call.callee.kind !== 'memberAccess') return
+    if (call.callee.member === 'stroke' || call.callee.member === 'strokeBorder') {
+      const marks = isDashed(call) ? this.dashStroked : this.stroked
+      for (let base = call.callee.base; base?.kind === 'call' && base.callee.kind === 'memberAccess'; base = base.callee.base) {
+        marks.add(base)
+      }
+    }
+    // A Path and a custom shape trim their own path, and `trim()` on anything else is
+    // the project's own method: only the shapes the preview draws itself are drawn whole.
+    if (call.callee.member !== 'trim' || this.stroked.has(call)) return
+    const shape = shapeAtRoot(call.callee.base)
+    if (!shape || !BUILT_IN_SHAPES.has(shape) || this.types.has(shape)) return
+    const dashed = this.dashStroked.has(call)
+    this.report(
+      call.callee.memberSpan,
+      'warning',
+      'unsupported_swiftui_modifier',
+      dashed
+        ? 'The preview draws this dashed outline whole: it trims only strokes without a dash pattern. Xcode dashes just the trimmed part.'
+        : 'The preview fills the whole shape here: it trims only strokes. Xcode fills just the trimmed part, closed by a straight line.',
+      dashed ? '.trim on a dashed stroke' : '.trim on a filled shape',
+    )
+  }
+
+  /**
+   * Warns on a colour name the preview doesn't know, which it draws as clear.
+   *
+   * Narrow on purpose, because a warning on correct code is worse than none: a property
+   * or function the project declares in an extension (`Color.brand`, how Tokens.swift
+   * writes a colour, or `Color.hex(…)`) is its own, a project type called `Color` is its
+   * own, and a capitalised member is a nested type (`Color.Resolved`), not a colour.
+   */
+  private checkColorName(name: string, span: SourceSpan, namespace: 'swiftui' | 'uikit'): void {
+    if (name === 'init' || /^[A-Z]/.test(name)) return
+    if (this.declaredExtensionProperties.has(name) || this.declaredModifiers.has(name)) return
+    if (this.types.has('Color') || this.types.has('UIColor')) return
+    if (namespace === 'uikit' ? UIKIT_COLOR_NAMES.has(name) || KNOWN_COLOR_NAMES.has(name) : SWIFTUI_COLOR_NAMES.has(name)) return
+    // `Color.systemGray6` draws here, from the same palette, and doesn't compile in Xcode.
+    if (namespace === 'swiftui' && UIKIT_COLOR_NAMES.has(name)) {
+      this.report(
+        span,
+        'warning',
+        'may_not_compile_in_xcode',
+        `Xcode has no Color.${name}: UIKit's colours are written Color(.${name}).`,
+        undefined,
+        [{ title: `Use Color(.${name})`, edits: [{ span: { ...span, start: span.start - 'Color.'.length }, newText: `Color(.${name})` }] }],
+      )
+      return
+    }
+    if (KNOWN_COLOR_NAMES.has(name)) return
+    this.report(
+      span,
+      'warning',
+      'unresolved_member',
+      `The preview doesn't know the colour '${name}', so it draws nothing there. ` +
+        'Check the spelling: Xcode uses the name as written.',
+    )
+  }
+
+  /**
+   * Warns on a leading-dot colour spelt wrong - `.foregroundStyle(.grey)` - which draws
+   * nothing. Only a name a letter or two from a colour is taken for one: the styles these
+   * modifiers take are too many to list, and a warning on one would be on correct code.
+   */
+  private checkStyleColor(args: readonly { label: string | null; value: Expr }[]): void {
+    const value = args[0]?.value
+    if (value?.kind !== 'memberAccess' || value.base !== null) return
+    const name = value.member
+    if (KNOWN_COLOR_NAMES.has(name) || this.declaredExtensionProperties.has(name)) return
+    const budget = name.length <= 4 ? 1 : 2
+    const near = [...KNOWN_COLOR_NAMES].find((known) => editDistance(name.toLowerCase(), known.toLowerCase()) <= budget)
+    if (!near) return
+    this.report(
+      value.memberSpan,
+      'warning',
+      'unresolved_member',
+      `The preview doesn't know the colour '${name}', so it draws nothing there. Did you mean '${near}'?`,
+      undefined,
+      [{ title: `Use .${near}`, edits: [{ span: value.memberSpan, newText: near }] }],
+    )
+  }
+
+  /**
    * Warns on a style token the preview does not apply.
    *
    * The same rule as `checkBlendMode` above, generalised to every style modifier with
@@ -1186,3 +1300,24 @@ export function checkSourceFiles(files: readonly SourceFileNode[]): SemanticMode
 }
 
 export { SUPPORTED_VIEWS }
+
+/** The shapes the preview draws itself, rather than through a path. */
+const BUILT_IN_SHAPES: ReadonlySet<string> = new Set(['Circle', 'Ellipse', 'Rectangle', 'RoundedRectangle', 'Capsule'])
+
+/** `Circle` in `Circle().inset(by: 4)`: the call a chain of shape modifiers starts from. */
+function shapeAtRoot(expr: Expr | null): string | null {
+  let node = expr
+  while (node?.kind === 'call' && node.callee.kind === 'memberAccess') node = node.callee.base
+  return node?.kind === 'call' && node.callee.kind === 'identifier' ? node.callee.name : null
+}
+
+/** A stroke given `StrokeStyle(…, dash: […])` with at least one length. */
+function isDashed(stroke: Expr & { kind: 'call' }): boolean {
+  const style = stroke.args.find((arg) => arg.label === 'style')?.value
+  if (style?.kind !== 'call' || style.callee.kind !== 'identifier' || style.callee.name !== 'StrokeStyle') return false
+  const dash = style.args.find((arg) => arg.label === 'dash')?.value
+  return dash !== undefined && !(dash.kind === 'arrayLiteral' && dash.elements.length === 0)
+}
+
+/** Modifiers whose first argument is a colour or another style, as `.foregroundStyle(.gray)`. */
+const STYLE_MODIFIERS: ReadonlySet<string> = new Set(['foregroundStyle', 'foregroundColor', 'fill', 'stroke', 'strokeBorder', 'tint', 'background', 'border'])

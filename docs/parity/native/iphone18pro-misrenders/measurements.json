@@ -1,0 +1,1330 @@
+{
+ "source": "Built from tests/fixtures/ios27-misrenders.swift, exported with the repo's own exporter (projectFromFiles + buildExportBundle, deploymentTarget 27.0) and compiled with Xcode 27.0 (build 27A266a) on macOS 27.0; run on the iPhone 18 Pro simulator (088B21CA-E114-42A3-948D-2C682861FDB1) with the iOS 27.0 runtime (24A434), light appearance forced with simctl ui, status bar overridden to 9:41 / charged / 100%; one launch per screen with -screen <name>, captured with simctl io screenshot (sRGB-tagged PNGs, display corners not masked; every capture has a 1 pt black simulator dot at (0,0)) on 2026-09-23. 1206x2622 pixels / 402x874 points at 3x. The four search-placement screens (search-content, search-tab-content, search-tab-stack, search-drawer) were added to the fixture and captured in a second run the same day, with the same build and device; the fixture's other screens are unchanged, so the earlier captures stand.",
+ "fixtureSha256": "d21dbf3ce2df7a86977809e90d1287a34a8105273d0dc808461ddd8b9d71875b",
+ "captures": [
+  {"file": "alert-on-stack.png", "sha256": "0bcfdc764de4d9e2fd7ef871b8814b4c8995d4ccb458b61d8db6eb7910bed132", "size": [1206, 2622]},
+  {"file": "arcs.png", "sha256": "8dce307309e788cfe093ff8024cad4802088223718243fd8a5736ff0b15310aa", "size": [1206, 2622]},
+  {"file": "colors-black.png", "sha256": "e5f18f6b08c33484b4f25eb57fbeea2061c2b3d3212641a23668148f98726a53", "size": [1206, 2622]},
+  {"file": "colors.png", "sha256": "7b356426eca1472ab83c76280a95e9904c3312691dd0c20da48193b7c20c309d", "size": [1206, 2622]},
+  {"file": "dialog-on-stack.png", "sha256": "3c4f77beb0e3a0e037084b972b285b3e7937442d1666faaf9dde14cfc6e2044f", "size": [1206, 2622]},
+  {"file": "safe-bg-closure.png", "sha256": "e6567385add77cae15b0ced7053634de29c09a328672bcfcde4744b0e35dcd69", "size": [1206, 2622]},
+  {"file": "safe-bg-color.png", "sha256": "429dbb9dd6854821c25f680ae820703e9d25d1d26f45bee46f34a67057d4e435", "size": [1206, 2622]},
+  {"file": "safe-bg-gradient.png", "sha256": "0ddd519e401bb687701f326608f9393a311b338ecdb42c8889989675e96232a9", "size": [1206, 2622]},
+  {"file": "safe-bg-ignoring.png", "sha256": "429dbb9dd6854821c25f680ae820703e9d25d1d26f45bee46f34a67057d4e435", "size": [1206, 2622]},
+  {"file": "safe-bg-style.png", "sha256": "429dbb9dd6854821c25f680ae820703e9d25d1d26f45bee46f34a67057d4e435", "size": [1206, 2622]},
+  {"file": "safe-keyboard.png", "sha256": "e6567385add77cae15b0ced7053634de29c09a328672bcfcde4744b0e35dcd69", "size": [1206, 2622]},
+  {"file": "safe-nav-grouped.png", "sha256": "c84a16bfafdc30130b87a870a938d35b637a3186d7b4d7d288ab89483abbd373", "size": [1206, 2622]},
+  {"file": "safe-nav-red.png", "sha256": "3ce50b06673ffa34c95574c7300a5ee157ffdfcde20565e93205eebd68471d74", "size": [1206, 2622]},
+  {"file": "safe-scroll-red.png", "sha256": "a5d6093ee396e49f397f5894d821ed79d98d4bdd36d27c2e3b5575b8f6e678fc", "size": [1206, 2622]},
+  {"file": "safe-tab-red.png", "sha256": "72b9222d4f8ee76bc1b2109f2262c10440f0df9f62ff602d3461846c9435153b", "size": [1206, 2622]},
+  {"file": "safe-top-edge.png", "sha256": "b2bbb7bd979ac9b87c2885cd6c1a3f7248fbb18a033b39d77b6b491c6f888ff9", "size": [1206, 2622]},
+  {"file": "safe-zstack.png", "sha256": "c5bb17dd67deaa4c857e89fd7f4f1b9ec0e39fb41d7173dde504bfe86317cdd7", "size": [1206, 2622]},
+  {"file": "search-content.png", "sha256": "47924aad9223ab0723bc4bbd746b66035eb566a2692715d80bc2f407d2f740f4", "size": [1206, 2622]},
+  {"file": "search-drawer.png", "sha256": "46103a32a26d09198dc5ebc2b8e943bfe4bba4f29019eb9b537fb22975fb777f", "size": [1206, 2622]},
+  {"file": "search-on-tabview.png", "sha256": "47d3a08fa0b14fa9787dd8b8d07b00f605f58a7905b7503139b0e13e1a16fdaf", "size": [1206, 2622]},
+  {"file": "search-pushed.png", "sha256": "d6261d8e1e4217da3f1e5cbe9098bf02fb494ab0581560f9456e3ee8442e2209", "size": [1206, 2622]},
+  {"file": "search-root.png", "sha256": "5decc8ac0447f95aa0b6d3b93eb240332f298a8736a55a0007b4624bfa74652c", "size": [1206, 2622]},
+  {"file": "search-tab-content.png", "sha256": "4e4038bcced9299515e5f192ba4613b11c5ae8967932f18e52ddd7f8a47b19f6", "size": [1206, 2622]},
+  {"file": "search-tab-stack.png", "sha256": "4e4038bcced9299515e5f192ba4613b11c5ae8967932f18e52ddd7f8a47b19f6", "size": [1206, 2622]},
+  {"file": "sheet-on-stack.png", "sha256": "0741ae2afacacc939249aada13f1631bfe67c653384befd91ff1578dfacd0a7c", "size": [1206, 2622]},
+  {"file": "sheet-on-tab-stack.png", "sha256": "a765aae4e60c67e089c71405e553ea2fe982140ffbea861d1642d458156756ce", "size": [1206, 2622]},
+  {"file": "trim.png", "sha256": "22c3ba4acd33ce7ff7888df439c63511f04858527b8846eb1886c93e9aa91f64", "size": [1206, 2622]},
+  {"file": "trim2.png", "sha256": "8c100f0909658f6b11fa34ba752321d46747d1e8551cc9758076a1940d8189cc", "size": [1206, 2622]}
+ ],
+ "measured": {
+  "units": "points (pixels / 3) on a 402x874 pt screen; angles in degrees clockwise on screen from 3 o'clock; colours are sRGB 0-255 read from sRGB-tagged PNGs",
+  "deviceSafeArea": {"topPt": 62, "bottomPt": 840, "note": "from safe-bg-closure: its background covers exactly y 62-840"},
+  "interpretation": {
+   "trimStart": {
+    "Circle": "3 o'clock (rightmost point), clockwise on screen",
+    "Ellipse": "3 o'clock (rightmost point), clockwise on screen",
+    "RoundedRectangle": "middle of the right edge (3 o'clock), clockwise on screen: down the right edge first",
+    "Capsule": "rightmost point at mid-height (3 o'clock); for a vertical capsule the middle of the right edge; clockwise on screen",
+    "Rectangle": "top-left corner, clockwise on screen: along the top edge first"
+   },
+   "trimFractionsAreByPathLength": true,
+   "pathAddArcClockwiseFlag": "clockwise: false draws clockwise on screen, clockwise: true draws counterclockwise on screen (y-down flip)",
+   "templateRing": "addArc(-90 -> 270, clockwise: true) is a full circle starting at 12 o'clock and running counterclockwise on screen; trim(0, 0.65) covers 12 o'clock counterclockwise round to 36 degrees (about 4:10), leaving the upper-right gap",
+   "trimmedFill": "Circle().trim(0, 0.5).fill closes the trimmed arc with a straight chord: the lower half disc, flat edge on the horizontal diameter",
+   "linearGradientBackground": "interpolated in Oklab over the view frame (safe area, y 62-840); the parts under the status bar and home indicator repeat the end colours"
+  },
+  "colors": {
+   "layout": "50x50 pt swatches, 8 pt gaps, 6 per row, first at (10, 80) pt; index i at x = 10 + (i % 6) * 58, y = 80 + floor(i / 6) * 58",
+   "method": "Mean of a 5x5 pixel patch at each swatch centre. colors.png has a white page, colors-black.png the same grid on black; derivedRGBA solves a*C + (1-a)*bg for the swatches that are not opaque (low-alpha values are quantised: +-1 on the black capture moves C by about 1/a).",
+   "order": [
+    {"index": 0, "name": "Color(.systemGray)", "rectPt": [10, 80, 50, 50], "centrePt": [35, 105]},
+    {"index": 1, "name": "Color(.systemGray2)", "rectPt": [68, 80, 50, 50], "centrePt": [93, 105]},
+    {"index": 2, "name": "Color(.systemGray3)", "rectPt": [126, 80, 50, 50], "centrePt": [151, 105]},
+    {"index": 3, "name": "Color(.systemGray4)", "rectPt": [184, 80, 50, 50], "centrePt": [209, 105]},
+    {"index": 4, "name": "Color(.systemGray5)", "rectPt": [242, 80, 50, 50], "centrePt": [267, 105]},
+    {"index": 5, "name": "Color(.systemGray6)", "rectPt": [300, 80, 50, 50], "centrePt": [325, 105]},
+    {"index": 6, "name": "Color(.systemRed)", "rectPt": [10, 138, 50, 50], "centrePt": [35, 163]},
+    {"index": 7, "name": "Color(.systemOrange)", "rectPt": [68, 138, 50, 50], "centrePt": [93, 163]},
+    {"index": 8, "name": "Color(.systemYellow)", "rectPt": [126, 138, 50, 50], "centrePt": [151, 163]},
+    {"index": 9, "name": "Color(.systemGreen)", "rectPt": [184, 138, 50, 50], "centrePt": [209, 163]},
+    {"index": 10, "name": "Color(.systemMint)", "rectPt": [242, 138, 50, 50], "centrePt": [267, 163]},
+    {"index": 11, "name": "Color(.systemTeal)", "rectPt": [300, 138, 50, 50], "centrePt": [325, 163]},
+    {"index": 12, "name": "Color(.systemCyan)", "rectPt": [10, 196, 50, 50], "centrePt": [35, 221]},
+    {"index": 13, "name": "Color(.systemBlue)", "rectPt": [68, 196, 50, 50], "centrePt": [93, 221]},
+    {"index": 14, "name": "Color(.systemIndigo)", "rectPt": [126, 196, 50, 50], "centrePt": [151, 221]},
+    {"index": 15, "name": "Color(.systemPurple)", "rectPt": [184, 196, 50, 50], "centrePt": [209, 221]},
+    {"index": 16, "name": "Color(.systemPink)", "rectPt": [242, 196, 50, 50], "centrePt": [267, 221]},
+    {"index": 17, "name": "Color(.systemBrown)", "rectPt": [300, 196, 50, 50], "centrePt": [325, 221]},
+    {"index": 18, "name": "Color(.label)", "rectPt": [10, 254, 50, 50], "centrePt": [35, 279]},
+    {"index": 19, "name": "Color(.secondaryLabel)", "rectPt": [68, 254, 50, 50], "centrePt": [93, 279]},
+    {"index": 20, "name": "Color(.tertiaryLabel)", "rectPt": [126, 254, 50, 50], "centrePt": [151, 279]},
+    {"index": 21, "name": "Color(.quaternaryLabel)", "rectPt": [184, 254, 50, 50], "centrePt": [209, 279]},
+    {"index": 22, "name": "Color(.separator)", "rectPt": [242, 254, 50, 50], "centrePt": [267, 279]},
+    {"index": 23, "name": "Color(.opaqueSeparator)", "rectPt": [300, 254, 50, 50], "centrePt": [325, 279]},
+    {"index": 24, "name": "Color(.placeholderText)", "rectPt": [10, 312, 50, 50], "centrePt": [35, 337]},
+    {"index": 25, "name": "Color(.link)", "rectPt": [68, 312, 50, 50], "centrePt": [93, 337]},
+    {"index": 26, "name": "Color(.systemBackground)", "rectPt": [126, 312, 50, 50], "centrePt": [151, 337]},
+    {"index": 27, "name": "Color(.secondarySystemBackground)", "rectPt": [184, 312, 50, 50], "centrePt": [209, 337]},
+    {"index": 28, "name": "Color(.tertiarySystemBackground)", "rectPt": [242, 312, 50, 50], "centrePt": [267, 337]},
+    {"index": 29, "name": "Color(.systemGroupedBackground)", "rectPt": [300, 312, 50, 50], "centrePt": [325, 337]},
+    {"index": 30, "name": "Color(.secondarySystemGroupedBackground)", "rectPt": [10, 370, 50, 50], "centrePt": [35, 395]},
+    {"index": 31, "name": "Color(.tertiarySystemGroupedBackground)", "rectPt": [68, 370, 50, 50], "centrePt": [93, 395]},
+    {"index": 32, "name": "Color(.systemFill)", "rectPt": [126, 370, 50, 50], "centrePt": [151, 395]},
+    {"index": 33, "name": "Color(.secondarySystemFill)", "rectPt": [184, 370, 50, 50], "centrePt": [209, 395]},
+    {"index": 34, "name": "Color(.tertiarySystemFill)", "rectPt": [242, 370, 50, 50], "centrePt": [267, 395]},
+    {"index": 35, "name": "Color(.quaternarySystemFill)", "rectPt": [300, 370, 50, 50], "centrePt": [325, 395]},
+    {"index": 36, "name": "Color.red", "rectPt": [10, 428, 50, 50], "centrePt": [35, 453]},
+    {"index": 37, "name": "Color.orange", "rectPt": [68, 428, 50, 50], "centrePt": [93, 453]},
+    {"index": 38, "name": "Color.yellow", "rectPt": [126, 428, 50, 50], "centrePt": [151, 453]},
+    {"index": 39, "name": "Color.green", "rectPt": [184, 428, 50, 50], "centrePt": [209, 453]},
+    {"index": 40, "name": "Color.mint", "rectPt": [242, 428, 50, 50], "centrePt": [267, 453]},
+    {"index": 41, "name": "Color.teal", "rectPt": [300, 428, 50, 50], "centrePt": [325, 453]},
+    {"index": 42, "name": "Color.cyan", "rectPt": [10, 486, 50, 50], "centrePt": [35, 511]},
+    {"index": 43, "name": "Color.blue", "rectPt": [68, 486, 50, 50], "centrePt": [93, 511]},
+    {"index": 44, "name": "Color.indigo", "rectPt": [126, 486, 50, 50], "centrePt": [151, 511]},
+    {"index": 45, "name": "Color.purple", "rectPt": [184, 486, 50, 50], "centrePt": [209, 511]},
+    {"index": 46, "name": "Color.pink", "rectPt": [242, 486, 50, 50], "centrePt": [267, 511]},
+    {"index": 47, "name": "Color.brown", "rectPt": [300, 486, 50, 50], "centrePt": [325, 511]},
+    {"index": 48, "name": "Color.gray", "rectPt": [10, 544, 50, 50], "centrePt": [35, 569]},
+    {"index": 49, "name": "Color.primary", "rectPt": [68, 544, 50, 50], "centrePt": [93, 569]},
+    {"index": 50, "name": "Color.secondary", "rectPt": [126, 544, 50, 50], "centrePt": [151, 569]},
+    {"index": 51, "name": ".primary", "rectPt": [184, 544, 50, 50], "centrePt": [209, 569]},
+    {"index": 52, "name": ".secondary", "rectPt": [242, 544, 50, 50], "centrePt": [267, 569]},
+    {"index": 53, "name": ".tertiary", "rectPt": [300, 544, 50, 50], "centrePt": [325, 569]},
+    {"index": 54, "name": ".quaternary", "rectPt": [10, 602, 50, 50], "centrePt": [35, 627]},
+    {"index": 55, "name": ".quinary", "rectPt": [68, 602, 50, 50], "centrePt": [93, 627]},
+    {"index": 56, "name": "Color.blue.secondary", "rectPt": [126, 602, 50, 50], "centrePt": [151, 627]},
+    {"index": 57, "name": "Color.blue.tertiary", "rectPt": [184, 602, 50, 50], "centrePt": [209, 627]},
+    {"index": 58, "name": "Color(hue: 0.6, saturation: 0.8, brightness: 0.9)", "rectPt": [242, 602, 50, 50], "centrePt": [267, 627]},
+    {"index": 59, "name": "Color(white: 0.5)", "rectPt": [300, 602, 50, 50], "centrePt": [325, 627]},
+    {"index": 60, "name": "Color(white: 0.5, opacity: 0.5)", "rectPt": [10, 660, 50, 50], "centrePt": [35, 685]},
+    {"index": 61, "name": "Color(red: 0.2, green: 0.4, blue: 0.6)", "rectPt": [68, 660, 50, 50], "centrePt": [93, 685]}
+   ],
+   "onWhite": {
+    "Color(.systemGray)": [142, 142, 147],
+    "Color(.systemGray2)": [174, 174, 178],
+    "Color(.systemGray3)": [199, 199, 204],
+    "Color(.systemGray4)": [209, 209, 214],
+    "Color(.systemGray5)": [229, 229, 234],
+    "Color(.systemGray6)": [242, 242, 247],
+    "Color(.systemRed)": [255, 56, 60],
+    "Color(.systemOrange)": [255, 141, 40],
+    "Color(.systemYellow)": [255, 204, 0],
+    "Color(.systemGreen)": [52, 199, 89],
+    "Color(.systemMint)": [0, 200, 179],
+    "Color(.systemTeal)": [0, 195, 208],
+    "Color(.systemCyan)": [0, 192, 232],
+    "Color(.systemBlue)": [0, 136, 255],
+    "Color(.systemIndigo)": [97, 85, 245],
+    "Color(.systemPurple)": [203, 48, 224],
+    "Color(.systemPink)": [255, 45, 85],
+    "Color(.systemBrown)": [172, 127, 94],
+    "Color(.label)": [0, 0, 0],
+    "Color(.secondaryLabel)": [138, 138, 142],
+    "Color(.tertiaryLabel)": [197, 197, 199],
+    "Color(.quaternaryLabel)": [221, 221, 222],
+    "Color(.separator)": [232, 232, 232],
+    "Color(.opaqueSeparator)": [231, 231, 232],
+    "Color(.placeholderText)": [197, 197, 199],
+    "Color(.link)": [0, 122, 255],
+    "Color(.systemBackground)": [255, 255, 255],
+    "Color(.secondarySystemBackground)": [242, 242, 247],
+    "Color(.tertiarySystemBackground)": [255, 255, 255],
+    "Color(.systemGroupedBackground)": [242, 242, 247],
+    "Color(.secondarySystemGroupedBackground)": [255, 255, 255],
+    "Color(.tertiarySystemGroupedBackground)": [242, 242, 247],
+    "Color(.systemFill)": [228, 228, 230],
+    "Color(.secondarySystemFill)": [233, 233, 235],
+    "Color(.tertiarySystemFill)": [239, 239, 240],
+    "Color(.quaternarySystemFill)": [244, 244, 245],
+    "Color.red": [255, 56, 60],
+    "Color.orange": [255, 141, 40],
+    "Color.yellow": [255, 204, 0],
+    "Color.green": [52, 199, 89],
+    "Color.mint": [0, 200, 179],
+    "Color.teal": [0, 195, 208],
+    "Color.cyan": [0, 192, 232],
+    "Color.blue": [0, 136, 255],
+    "Color.indigo": [97, 85, 245],
+    "Color.purple": [203, 48, 224],
+    "Color.pink": [255, 45, 85],
+    "Color.brown": [172, 127, 94],
+    "Color.gray": [142, 142, 147],
+    "Color.primary": [0, 0, 0],
+    "Color.secondary": [138, 138, 142],
+    ".primary": [0, 0, 0],
+    ".secondary": [138, 138, 142],
+    ".tertiary": [197, 197, 199],
+    ".quaternary": [221, 221, 222],
+    ".quinary": [238, 238, 239],
+    "Color.blue.secondary": [128, 195, 255],
+    "Color.blue.tertiary": [191, 225, 255],
+    "Color(hue: 0.6, saturation: 0.8, brightness: 0.9)": [46, 119, 229],
+    "Color(white: 0.5)": [128, 128, 128],
+    "Color(white: 0.5, opacity: 0.5)": [191, 191, 191],
+    "Color(red: 0.2, green: 0.4, blue: 0.6)": [51, 102, 153]
+   },
+   "onBlack": {
+    "Color(.systemGray)": [142, 142, 147],
+    "Color(.systemGray2)": [174, 174, 178],
+    "Color(.systemGray3)": [199, 199, 204],
+    "Color(.systemGray4)": [209, 209, 214],
+    "Color(.systemGray5)": [229, 229, 234],
+    "Color(.systemGray6)": [242, 242, 247],
+    "Color(.systemRed)": [255, 56, 60],
+    "Color(.systemOrange)": [255, 141, 40],
+    "Color(.systemYellow)": [255, 204, 0],
+    "Color(.systemGreen)": [52, 199, 89],
+    "Color(.systemMint)": [0, 200, 179],
+    "Color(.systemTeal)": [0, 195, 208],
+    "Color(.systemCyan)": [0, 192, 232],
+    "Color(.systemBlue)": [0, 136, 255],
+    "Color(.systemIndigo)": [97, 85, 245],
+    "Color(.systemPurple)": [203, 48, 224],
+    "Color(.systemPink)": [255, 45, 85],
+    "Color(.systemBrown)": [172, 127, 94],
+    "Color(.label)": [0, 0, 0],
+    "Color(.secondaryLabel)": [36, 36, 40],
+    "Color(.tertiaryLabel)": [18, 18, 20],
+    "Color(.quaternaryLabel)": [11, 11, 12],
+    "Color(.separator)": [7, 7, 8],
+    "Color(.opaqueSeparator)": [231, 231, 232],
+    "Color(.placeholderText)": [18, 18, 20],
+    "Color(.link)": [0, 122, 255],
+    "Color(.systemBackground)": [255, 255, 255],
+    "Color(.secondarySystemBackground)": [242, 242, 247],
+    "Color(.tertiarySystemBackground)": [255, 255, 255],
+    "Color(.systemGroupedBackground)": [242, 242, 247],
+    "Color(.secondarySystemGroupedBackground)": [255, 255, 255],
+    "Color(.tertiarySystemGroupedBackground)": [242, 242, 247],
+    "Color(.systemFill)": [24, 24, 26],
+    "Color(.secondarySystemFill)": [19, 19, 20],
+    "Color(.tertiarySystemFill)": [14, 14, 15],
+    "Color(.quaternarySystemFill)": [9, 9, 10],
+    "Color.red": [255, 56, 60],
+    "Color.orange": [255, 141, 40],
+    "Color.yellow": [255, 204, 0],
+    "Color.green": [52, 199, 89],
+    "Color.mint": [0, 200, 179],
+    "Color.teal": [0, 195, 208],
+    "Color.cyan": [0, 192, 232],
+    "Color.blue": [0, 136, 255],
+    "Color.indigo": [97, 85, 245],
+    "Color.purple": [203, 48, 224],
+    "Color.pink": [255, 45, 85],
+    "Color.brown": [172, 127, 94],
+    "Color.gray": [142, 142, 147],
+    "Color.primary": [0, 0, 0],
+    "Color.secondary": [36, 36, 40],
+    ".primary": [0, 0, 0],
+    ".secondary": [36, 36, 40],
+    ".tertiary": [18, 18, 20],
+    ".quaternary": [11, 11, 12],
+    ".quinary": [5, 5, 6],
+    "Color.blue.secondary": [0, 68, 128],
+    "Color.blue.tertiary": [0, 34, 64],
+    "Color(hue: 0.6, saturation: 0.8, brightness: 0.9)": [46, 119, 229],
+    "Color(white: 0.5)": [128, 128, 128],
+    "Color(white: 0.5, opacity: 0.5)": [64, 64, 64],
+    "Color(red: 0.2, green: 0.4, blue: 0.6)": [51, 102, 153]
+   },
+   "derivedRGBA": {
+    "Color(.secondaryLabel)": [60, 60, 67, 0.6],
+    "Color(.tertiaryLabel)": [60, 60, 67, 0.298],
+    "Color(.quaternaryLabel)": [62, 62, 68, 0.176],
+    "Color(.separator)": [59, 59, 67, 0.119],
+    "Color(.placeholderText)": [60, 60, 67, 0.298],
+    "Color(.systemFill)": [120, 120, 130, 0.2],
+    "Color(.secondarySystemFill)": [119, 119, 125, 0.159],
+    "Color(.tertiarySystemFill)": [119, 119, 127, 0.118],
+    "Color(.quaternarySystemFill)": [115, 115, 127, 0.078],
+    "Color.secondary": [60, 60, 67, 0.6],
+    ".secondary": [60, 60, 67, 0.6],
+    ".tertiary": [60, 60, 67, 0.298],
+    ".quaternary": [62, 62, 68, 0.176],
+    ".quinary": [58, 58, 70, 0.086],
+    "Color.blue.secondary": [0, 136, 255, 0.501],
+    "Color.blue.tertiary": [0, 135, 255, 0.251],
+    "Color(white: 0.5, opacity: 0.5)": [128, 128, 128, 0.502]
+   },
+   "geometryCheck": {"swatch": "Color(.systemRed)", "expectedRectPt": [10, 138, 50, 50], "measuredRectPt": [10, 138, 50, 50]}
+  },
+  "trim": {
+   "note": "centreLine.runs[].from/to.on names the outline segment the point lies on (a Capsule's \"corners\" are its semicircular ends, so its 3 o'clock point is reported as the start of the bottom-right corner); from/to are in clockwise order and local is relative to the frame origin. Positions are sampled every 0.05 pt, so the Rectangle start [0.1, 0] is its top-left corner.",
+   "shapes": {
+    "Circle().trim(from: 0, to: 0.25)": {
+     "screen": "trim",
+     "framePt": [16, 90, 110, 110],
+     "centrePt": [71, 145],
+     "centreLine": {
+      "outlineLengthPt": 345.6,
+      "runs": [
+       {
+        "from": {"pt": [126, 145], "local": [110, 55], "on": "curve", "angleDeg": 0},
+        "to": {"pt": [71, 200], "local": [55, 110], "on": "curve", "angleDeg": 90},
+        "lengthPt": 86.4,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 89.8, "extentDeg": 89.7},
+     "redBoundsPt": [71, 145, 130, 204]
+    },
+    "Circle().trim(from: 0, to: 0.25) + rotationEffect(-90)": {
+     "screen": "trim",
+     "framePt": [146, 90, 110, 110],
+     "centrePt": [201, 145],
+     "centreLine": {
+      "outlineLengthPt": 345.6,
+      "runs": [
+       {
+        "from": {"pt": [201, 90], "local": [55, 0], "on": "curve", "angleDeg": 270},
+        "to": {"pt": [256, 145], "local": [110, 55], "on": "curve", "angleDeg": 359.9},
+        "lengthPt": 86.3,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 270.2, "toDeg": 359.8, "extentDeg": 89.7},
+     "redBoundsPt": [201, 86, 260, 145]
+    },
+    "Circle().trim(from: 0.25, to: 0.5)": {
+     "screen": "trim",
+     "framePt": [276, 90, 110, 110],
+     "centrePt": [331, 145],
+     "centreLine": {
+      "outlineLengthPt": 345.6,
+      "runs": [
+       {
+        "from": {"pt": [331, 200], "local": [55, 110], "on": "curve", "angleDeg": 90.1},
+        "to": {"pt": [276, 145], "local": [0, 55], "on": "curve", "angleDeg": 180},
+        "lengthPt": 86.3,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 90.2, "toDeg": 179.8, "extentDeg": 89.7},
+     "redBoundsPt": [272, 145, 331, 204]
+    },
+    "Rectangle().trim(from: 0, to: 0.25) 110x110": {
+     "screen": "trim",
+     "framePt": [16, 230, 110, 110],
+     "centrePt": [71, 285],
+     "centreLine": {
+      "outlineLengthPt": 440,
+      "runs": [
+       {
+        "from": {"pt": [16.1, 230], "local": [0.1, 0], "on": "top edge", "angleDeg": 225},
+        "to": {"pt": [126, 230], "local": [110, 0], "on": "top edge", "angleDeg": 315},
+        "lengthPt": 109.9,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 223, "toDeg": 317, "extentDeg": 94},
+     "redBoundsPt": [16, 226, 126, 234]
+    },
+    "RoundedRectangle(cornerRadius: 24).trim(from: 0, to: 0.25) 110x110": {
+     "screen": "trim",
+     "framePt": [146, 230, 110, 110],
+     "centrePt": [201, 285],
+     "centreLine": {
+      "outlineLengthPt": 398.8,
+      "runs": [
+       {
+        "from": {"pt": [256, 285], "local": [110, 55], "on": "right edge", "angleDeg": 0},
+        "to": {"pt": [201, 340], "local": [55, 110], "on": "bottom edge", "angleDeg": 90},
+        "lengthPt": 99.7,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 89.8, "extentDeg": 89.7},
+     "redBoundsPt": [201, 285, 260, 344]
+    },
+    "Capsule().trim(from: 0, to: 0.25) 110x60": {
+     "screen": "trim",
+     "framePt": [276, 230, 110, 60],
+     "centrePt": [331, 260],
+     "centreLine": {
+      "outlineLengthPt": 288.5,
+      "runs": [
+       {
+        "from": {"pt": [386, 260], "local": [110, 30], "on": "bottom-right corner", "angleDeg": 0},
+        "to": {"pt": [331, 290], "local": [55, 60], "on": "bottom edge", "angleDeg": 90},
+        "lengthPt": 72.1,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 89.7, "extentDeg": 89.6},
+     "redBoundsPt": [331, 260, 390, 294]
+    },
+    "Ellipse().trim(from: 0, to: 0.25) 110x60": {
+     "screen": "trim",
+     "framePt": [16, 370, 110, 60],
+     "centrePt": [71, 400],
+     "centreLine": {
+      "outlineLengthPt": 272.8,
+      "runs": [
+       {
+        "from": {"pt": [126, 400], "local": [110, 30], "on": "curve", "angleDeg": 0},
+        "to": {"pt": [71, 430], "local": [55, 60], "on": "curve", "angleDeg": 90},
+        "lengthPt": 68.2,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 89.7, "extentDeg": 89.6},
+     "redBoundsPt": [71, 400, 130, 434]
+    },
+    "Circle().trim(from: 0, to: 0.5).fill(Color.red)": {
+     "screen": "trim",
+     "framePt": [146, 370, 110, 110],
+     "centrePt": [201, 425],
+     "boundsPt": [146, 425, 256, 480],
+     "areaPt2": 4752.3,
+     "fractionOfFullDisk": 0.5,
+     "rimInterval": {"fromDeg": 0.2, "toDeg": 179.8, "extentDeg": 179.7},
+     "redWidthPtAtRow": {"420": 0, "426": 110, "450": 98, "475": 45.3}
+    },
+    "Circle().trim(from: 0, to: 0).stroke(Color.red, lineWidth: 8)": {"screen": "trim", "framePt": [276, 370, 110, 110], "centrePt": [331, 425], "redPixels": 0, "drawsNothing": true},
+    "Rectangle().trim(from: 0, to: 0.1) 110x110": {
+     "screen": "trim2",
+     "framePt": [16, 90, 110, 110],
+     "centrePt": [71, 145],
+     "centreLine": {
+      "outlineLengthPt": 440,
+      "runs": [
+       {
+        "from": {"pt": [16.1, 90], "local": [0.1, 0], "on": "top edge", "angleDeg": 225},
+        "to": {"pt": [60, 90], "local": [43.9, 0], "on": "top edge", "angleDeg": 258.6},
+        "lengthPt": 43.9,
+        "fractionOfOutline": 0.1
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 223, "toDeg": 259.3, "extentDeg": 36.2},
+     "redBoundsPt": [16, 86, 60, 94]
+    },
+    "RoundedRectangle(cornerRadius: 24).trim(from: 0, to: 0.1) 110x110": {
+     "screen": "trim2",
+     "framePt": [146, 90, 110, 110],
+     "centrePt": [201, 145],
+     "centreLine": {
+      "outlineLengthPt": 398.8,
+      "runs": [
+       {
+        "from": {"pt": [256, 145], "local": [110, 55], "on": "right edge", "angleDeg": 0},
+        "to": {"pt": [254.4, 184.6], "local": [108.4, 94.6], "on": "bottom-right corner", "angleDeg": 36.5},
+        "lengthPt": 39.7,
+        "fractionOfOutline": 0.1
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 37.7, "extentDeg": 37.5},
+     "redBoundsPt": [250.67, 145, 260, 185.67]
+    },
+    "Capsule().trim(from: 0, to: 0.1) 110x60": {
+     "screen": "trim2",
+     "framePt": [276, 90, 110, 60],
+     "centrePt": [331, 120],
+     "centreLine": {
+      "outlineLengthPt": 288.5,
+      "runs": [
+       {
+        "from": {"pt": [386, 120], "local": [110, 30], "on": "bottom-right corner", "angleDeg": 0},
+        "to": {"pt": [373.4, 144.4], "local": [97.4, 54.4], "on": "bottom-right corner", "angleDeg": 29.9},
+        "lengthPt": 28.5,
+        "fractionOfOutline": 0.099
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 32, "extentDeg": 31.9},
+     "redBoundsPt": [371, 120, 390, 148]
+    },
+    "Ellipse().trim(from: 0, to: 0.1) 110x60": {
+     "screen": "trim2",
+     "framePt": [16, 240, 110, 60],
+     "centrePt": [71, 270],
+     "centreLine": {
+      "outlineLengthPt": 272.8,
+      "runs": [
+       {
+        "from": {"pt": [126, 270], "local": [110, 30], "on": "curve", "angleDeg": 0},
+        "to": {"pt": [110.7, 290.8], "local": [94.7, 50.8], "on": "curve", "angleDeg": 27.6},
+        "lengthPt": 27,
+        "fractionOfOutline": 0.099
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 30.2, "extentDeg": 30.1},
+     "redBoundsPt": [108.67, 270, 130, 294.33]
+    },
+    "Rectangle().trim(from: 0, to: 0.25) 110x60": {
+     "screen": "trim2",
+     "framePt": [146, 240, 110, 60],
+     "centrePt": [201, 270],
+     "centreLine": {
+      "outlineLengthPt": 340,
+      "runs": [
+       {
+        "from": {"pt": [146.1, 240], "local": [0.1, 0], "on": "top edge", "angleDeg": 208.6},
+        "to": {"pt": [231, 240], "local": [84.9, 0], "on": "top edge", "angleDeg": 315},
+        "lengthPt": 84.9,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 205.5, "toDeg": 318.7, "extentDeg": 113.2},
+     "redBoundsPt": [146, 236, 231, 244]
+    },
+    "Capsule().trim(from: 0, to: 0.25) 60x110": {
+     "screen": "trim2",
+     "framePt": [301, 230, 60, 110],
+     "centrePt": [331, 285],
+     "centreLine": {
+      "outlineLengthPt": 288.5,
+      "runs": [
+       {
+        "from": {"pt": [361, 285], "local": [60, 55], "on": "right edge", "angleDeg": 0},
+        "to": {"pt": [331, 340], "local": [30, 110], "on": "bottom-left corner", "angleDeg": 90},
+        "lengthPt": 72.1,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.3, "toDeg": 89.8, "extentDeg": 89.6},
+     "redBoundsPt": [331, 285, 365, 344]
+    },
+    "RoundedRectangle(cornerRadius: 24).trim(from: 0, to: 0.25) 110x60": {
+     "screen": "trim2",
+     "framePt": [16, 380, 110, 60],
+     "centrePt": [71, 410],
+     "centreLine": {
+      "outlineLengthPt": 298.8,
+      "runs": [
+       {
+        "from": {"pt": [126, 410], "local": [110, 30], "on": "right edge", "angleDeg": 0},
+        "to": {"pt": [71, 440], "local": [55, 60], "on": "bottom edge", "angleDeg": 90},
+        "lengthPt": 74.7,
+        "fractionOfOutline": 0.25
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 89.7, "extentDeg": 89.6},
+     "redBoundsPt": [71, 410, 130, 444]
+    },
+    "Circle().trim(from: 0, to: 0.1)": {
+     "screen": "trim2",
+     "framePt": [146, 380, 110, 110],
+     "centrePt": [201, 435],
+     "centreLine": {
+      "outlineLengthPt": 345.6,
+      "runs": [
+       {
+        "from": {"pt": [256, 435], "local": [110, 55], "on": "curve", "angleDeg": 0},
+        "to": {"pt": [245.6, 467.2], "local": [99.6, 87.2], "on": "curve", "angleDeg": 35.9},
+        "lengthPt": 34.4,
+        "fractionOfOutline": 0.1
+       }
+      ]
+     },
+     "redPixelAngles": {"fromDeg": 0.2, "toDeg": 36, "extentDeg": 35.8},
+     "redBoundsPt": [242.33, 435, 260, 469.67]
+    }
+   },
+   "pathStarts": {
+    "Rectangle 110x110": {
+     "startLocal": [0.1, 0],
+     "startOn": "top edge",
+     "startAngleDeg": 225,
+     "endOfQuarterLocal": [110, 0],
+     "endOfQuarterOn": "top edge",
+     "direction": "clockwise on screen",
+     "sharedEndMismatchPt": 0
+    },
+    "RoundedRectangle(cornerRadius: 24) 110x110": {
+     "startLocal": [110, 55],
+     "startOn": "right edge",
+     "startAngleDeg": 0,
+     "endOfQuarterLocal": [55, 110],
+     "endOfQuarterOn": "bottom edge",
+     "direction": "clockwise on screen",
+     "sharedEndMismatchPt": 0
+    },
+    "Capsule 110x60": {
+     "startLocal": [110, 30],
+     "startOn": "bottom-right corner",
+     "startAngleDeg": 0,
+     "endOfQuarterLocal": [55, 60],
+     "endOfQuarterOn": "bottom edge",
+     "direction": "clockwise on screen",
+     "sharedEndMismatchPt": 0
+    },
+    "Ellipse 110x60": {
+     "startLocal": [110, 30],
+     "startOn": "curve",
+     "startAngleDeg": 0,
+     "endOfQuarterLocal": [55, 60],
+     "endOfQuarterOn": "curve",
+     "direction": "clockwise on screen",
+     "sharedEndMismatchPt": 0
+    },
+    "Circle 110x110": {
+     "startLocal": [110, 55],
+     "startOn": "curve",
+     "startAngleDeg": 0,
+     "endOfQuarterLocal": [55, 110],
+     "endOfQuarterOn": "curve",
+     "direction": "clockwise on screen",
+     "sharedEndMismatchPt": 0
+    }
+   }
+  },
+  "arcs": {
+   "Path addArc(center 55,55, r 45, -90 -> 0, clockwise: false), lineWidth 8": {
+    "screen": "arcs",
+    "framePt": [16, 90, 110, 110],
+    "centrePt": [71, 145],
+    "radiusPt": 45,
+    "colour": "red",
+    "centreLine": {
+     "outlineLengthPt": 282.7,
+     "runs": [
+      {
+       "from": {"pt": [71, 100], "local": [55, 10], "on": "curve", "angleDeg": 270},
+       "to": {"pt": [116, 145], "local": [100, 55], "on": "curve", "angleDeg": 359.9},
+       "lengthPt": 70.6,
+       "fractionOfOutline": 0.25
+      }
+     ]
+    },
+    "pixelAngles": {"fromDeg": 270.2, "toDeg": 359.8, "extentDeg": 89.6},
+    "boundsPt": [71, 96, 120, 145]
+   },
+   "Path addArc(center 55,55, r 45, -90 -> 0, clockwise: true), lineWidth 8": {
+    "screen": "arcs",
+    "framePt": [146, 90, 110, 110],
+    "centrePt": [201, 145],
+    "radiusPt": 45,
+    "colour": "red",
+    "centreLine": {
+     "outlineLengthPt": 282.7,
+     "runs": [
+      {
+       "from": {"pt": [246, 145], "local": [100, 55], "on": "curve", "angleDeg": 0},
+       "to": {"pt": [201, 100], "local": [55, 10], "on": "curve", "angleDeg": 270},
+       "lengthPt": 212,
+       "fractionOfOutline": 0.75
+      }
+     ]
+    },
+    "pixelAngles": {"fromDeg": 0.2, "toDeg": 269.8, "extentDeg": 269.6},
+    "boundsPt": [152, 96, 250, 194]
+   },
+   "Drawing template ring: addArc(r 63, -90 -> 270, clockwise: true).trim(0, 0.65), accentColor, lineWidth 14": {
+    "screen": "arcs",
+    "framePt": [131, 240, 140, 140],
+    "centrePt": [201, 310],
+    "radiusPt": 63,
+    "colour": "blue",
+    "centreLine": {
+     "outlineLengthPt": 395.8,
+     "runs": [
+      {
+       "from": {"pt": [251.8, 347.2], "local": [120.8, 107.2], "on": "curve", "angleDeg": 36.2},
+       "to": {"pt": [201, 247], "local": [70, 7], "on": "curve", "angleDeg": 270},
+       "lengthPt": 257,
+       "fractionOfOutline": 0.649
+      }
+     ]
+    },
+    "pixelAngles": {"fromDeg": 36, "toDeg": 269.9, "extentDeg": 233.9},
+    "boundsPt": [131, 240, 257.67, 380]
+   },
+   "Same ring path, untrimmed, red": {
+    "screen": "arcs",
+    "framePt": [40, 440, 140, 140],
+    "centrePt": [110, 510],
+    "radiusPt": 63,
+    "colour": "red",
+    "centreLine": {"closedLoop": true, "runs": [], "outlineLengthPt": 395.8},
+    "pixelAngles": {"fromDeg": 0.1, "toDeg": 359.9, "extentDeg": 359.7},
+    "boundsPt": [40, 440, 180, 580]
+   },
+   "Same ring path, trim(0, 0.65), red": {
+    "screen": "arcs",
+    "framePt": [222, 440, 140, 140],
+    "centrePt": [292, 510],
+    "radiusPt": 63,
+    "colour": "red",
+    "centreLine": {
+     "outlineLengthPt": 395.8,
+     "runs": [
+      {
+       "from": {"pt": [342.8, 547.2], "local": [120.8, 107.2], "on": "curve", "angleDeg": 36.2},
+       "to": {"pt": [292, 447], "local": [70, 7], "on": "curve", "angleDeg": 270},
+       "lengthPt": 257,
+       "fractionOfOutline": 0.649
+      }
+     ]
+    },
+    "pixelAngles": {"fromDeg": 36, "toDeg": 269.9, "extentDeg": 233.8},
+    "boundsPt": [222, 440, 348.67, 580]
+   },
+   "templateRingColours": {
+    "accentAt9OclockR63": [0, 136, 255],
+    "accentAt6OclockR63": [0, 136, 255],
+    "trackOnlyAt3OclockR66": [226, 226, 227],
+    "trackOnlyAt3OclockR74": [226, 226, 227],
+    "trackOnlyAt12OclockR74": [226, 226, 227],
+    "labelGlyphs": [
+     {"yPt": [302.33, 318.33], "xPt": [178, 223.33], "centreYPt": 310.3}
+    ]
+   }
+  },
+  "safeArea": {
+   "safe-bg-color": {
+    "column201": [
+     {"fromPt": 0, "toPt": 69, "is": "red"},
+     {"fromPt": 69, "toPt": 70.67, "is": "text"},
+     {"fromPt": 70.67, "toPt": 77, "is": "red"},
+     {"fromPt": 77, "toPt": 78.67, "is": "text"},
+     {"fromPt": 78.67, "toPt": 824.67, "is": "red"},
+     {"fromPt": 824.67, "toPt": 835.67, "is": "text"},
+     {"fromPt": 835.67, "toPt": 874, "is": "red"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 874, "is": "red"}
+    ],
+    "samplesAtX201": {"10": [255, 56, 60], "50": [255, 56, 60], "100": [255, 56, 60], "150": [255, 56, 60], "860": [255, 56, 60], "870": [255, 56, 60]},
+    "text": [
+     {"yPt": [66.33, 81.33], "xPt": [187.67, 214.33], "centreYPt": 73.8},
+     {"yPt": [824, 836], "xPt": [174.67, 227.67], "centreYPt": 830}
+    ]
+   },
+   "safe-bg-style": {
+    "column201": [
+     {"fromPt": 0, "toPt": 69, "is": "red"},
+     {"fromPt": 69, "toPt": 70.67, "is": "text"},
+     {"fromPt": 70.67, "toPt": 77, "is": "red"},
+     {"fromPt": 77, "toPt": 78.67, "is": "text"},
+     {"fromPt": 78.67, "toPt": 824.67, "is": "red"},
+     {"fromPt": 824.67, "toPt": 835.67, "is": "text"},
+     {"fromPt": 835.67, "toPt": 874, "is": "red"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 874, "is": "red"}
+    ],
+    "samplesAtX201": {"10": [255, 56, 60], "50": [255, 56, 60], "100": [255, 56, 60], "150": [255, 56, 60], "860": [255, 56, 60], "870": [255, 56, 60]},
+    "text": [
+     {"yPt": [66.33, 81.33], "xPt": [187.67, 214.33], "centreYPt": 73.8},
+     {"yPt": [824, 836], "xPt": [174.67, 227.67], "centreYPt": 830}
+    ]
+   },
+   "safe-bg-gradient": {
+    "column201": [
+     {"fromPt": 0, "toPt": 69, "is": "red"},
+     {"fromPt": 69, "toPt": 70.67, "is": "text"},
+     {"fromPt": 70.67, "toPt": 77, "is": "gradient", "meanRGB": [253, 60, 65]},
+     {"fromPt": 77, "toPt": 78.33, "is": "text"},
+     {"fromPt": 78.33, "toPt": 824.67, "is": "gradient", "meanRGB": [164, 114, 167]},
+     {"fromPt": 824.67, "toPt": 835.33, "is": "text"},
+     {"fromPt": 835.33, "toPt": 838.33, "is": "gradient", "meanRGB": [7, 130, 244]},
+     {"fromPt": 838.33, "toPt": 874, "is": "blue"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 68.67, "is": "red"},
+     {"fromPt": 68.67, "toPt": 69, "is": "gradient", "meanRGB": [253, 57, 64]},
+     {"fromPt": 69, "toPt": 70.33, "is": "red"},
+     {"fromPt": 70.33, "toPt": 837.67, "is": "gradient", "meanRGB": [163, 113, 167]},
+     {"fromPt": 837.67, "toPt": 838, "is": "blue"},
+     {"fromPt": 838, "toPt": 838.33, "is": "gradient", "meanRGB": [5, 136, 254]},
+     {"fromPt": 838.33, "toPt": 874, "is": "blue"}
+    ],
+    "samplesAtX201": {"10": [255, 57, 61], "50": [255, 57, 61], "100": [248, 68, 76], "150": [237, 80, 93], "860": [2, 136, 255], "870": [2, 136, 255]},
+    "text": [
+     {"yPt": [66.33, 81.33], "xPt": [187.67, 214.33], "centreYPt": 73.8},
+     {"yPt": [824, 836], "xPt": [174.67, 227.67], "centreYPt": 830}
+    ],
+    "gradient": {
+     "columnXPt": 390,
+     "models": {
+      "sRGB (gamma-encoded)": {"rmsIfScreenSpan0to874": 24.82, "rmsIfSafeAreaSpan62to840": 24.21, "bestFitSpanYPt": [89, 913], "bestFitRms": 21.6},
+      "linear sRGB": {"rmsIfScreenSpan0to874": 18.04, "rmsIfSafeAreaSpan62to840": 13.7, "bestFitSpanYPt": [81.5, 823], "bestFitRms": 13.21},
+      "Oklab": {"rmsIfScreenSpan0to874": 8.15, "rmsIfSafeAreaSpan62to840": 1.02, "bestFitSpanYPt": [60.5, 839], "bestFitRms": 0.96},
+      "Display P3 (gamma-encoded)": {"rmsIfScreenSpan0to874": 12.32, "rmsIfSafeAreaSpan62to840": 11.32, "bestFitSpanYPt": [52.5, 857.5], "bestFitRms": 10.97}
+     },
+     "oklabPredictionAtSafeAreaMid451": [172, 121, 168],
+     "colourAt": {
+      "30": [255, 57, 61],
+      "61": [255, 57, 61],
+      "63": [255, 57, 61],
+      "100": [247, 67, 76],
+      "150": [237, 80, 93],
+      "200": [227, 90, 107],
+      "250": [217, 98, 121],
+      "300": [206, 105, 133],
+      "350": [195, 111, 146],
+      "400": [184, 116, 157],
+      "437": [175, 120, 165],
+      "451": [172, 121, 168],
+      "500": [159, 125, 180],
+      "550": [146, 127, 192],
+      "600": [132, 130, 203],
+      "650": [116, 132, 214],
+      "700": [99, 133, 225],
+      "750": [78, 135, 236],
+      "800": [50, 136, 247],
+      "839": [2, 136, 255],
+      "841": [2, 136, 255],
+      "860": [2, 136, 255],
+      "0.5": [255, 56, 61],
+      "873.5": [2, 136, 255]
+     }
+    }
+   },
+   "safe-bg-closure": {
+    "column201": [
+     {"fromPt": 0, "toPt": 62, "is": "white"},
+     {"fromPt": 62, "toPt": 69, "is": "red"},
+     {"fromPt": 69, "toPt": 70.67, "is": "text"},
+     {"fromPt": 70.67, "toPt": 77, "is": "red"},
+     {"fromPt": 77, "toPt": 78.67, "is": "text"},
+     {"fromPt": 78.67, "toPt": 824.67, "is": "red"},
+     {"fromPt": 824.67, "toPt": 835.67, "is": "text"},
+     {"fromPt": 835.67, "toPt": 840, "is": "red"},
+     {"fromPt": 840, "toPt": 874, "is": "white"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 62, "is": "white"},
+     {"fromPt": 62, "toPt": 840, "is": "red"},
+     {"fromPt": 840, "toPt": 874, "is": "white"}
+    ],
+    "samplesAtX201": {"10": [255, 255, 255], "50": [255, 255, 255], "100": [255, 56, 60], "150": [255, 56, 60], "860": [255, 255, 255], "870": [255, 255, 255]},
+    "text": [
+     {"yPt": [66.33, 81.33], "xPt": [187.67, 214.33], "centreYPt": 73.8},
+     {"yPt": [824, 836], "xPt": [174.67, 227.67], "centreYPt": 830}
+    ]
+   },
+   "safe-bg-ignoring": {
+    "column201": [
+     {"fromPt": 0, "toPt": 69, "is": "red"},
+     {"fromPt": 69, "toPt": 70.67, "is": "text"},
+     {"fromPt": 70.67, "toPt": 77, "is": "red"},
+     {"fromPt": 77, "toPt": 78.67, "is": "text"},
+     {"fromPt": 78.67, "toPt": 824.67, "is": "red"},
+     {"fromPt": 824.67, "toPt": 835.67, "is": "text"},
+     {"fromPt": 835.67, "toPt": 874, "is": "red"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 874, "is": "red"}
+    ],
+    "samplesAtX201": {"10": [255, 56, 60], "50": [255, 56, 60], "100": [255, 56, 60], "150": [255, 56, 60], "860": [255, 56, 60], "870": [255, 56, 60]},
+    "text": [
+     {"yPt": [66.33, 81.33], "xPt": [187.67, 214.33], "centreYPt": 73.8},
+     {"yPt": [824, 836], "xPt": [174.67, 227.67], "centreYPt": 830}
+    ]
+   },
+   "safe-zstack": {
+    "column201": [
+     {"fromPt": 0, "toPt": 67, "is": "blue"},
+     {"fromPt": 67, "toPt": 78.33, "is": "text"},
+     {"fromPt": 78.33, "toPt": 827, "is": "blue"},
+     {"fromPt": 827, "toPt": 829, "is": "text"},
+     {"fromPt": 829, "toPt": 834.33, "is": "blue"},
+     {"fromPt": 834.33, "toPt": 836, "is": "text"},
+     {"fromPt": 836, "toPt": 874, "is": "blue"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 874, "is": "blue"}
+    ],
+    "samplesAtX201": {"10": [0, 136, 255], "50": [0, 136, 255], "100": [0, 136, 255], "150": [0, 136, 255], "860": [0, 136, 255], "870": [0, 136, 255]},
+    "text": [
+     {"yPt": [65.67, 78.33], "xPt": [185.33, 216.67], "centreYPt": 72},
+     {"yPt": [824, 836], "xPt": [178, 225.67], "centreYPt": 830}
+    ]
+   },
+   "safe-keyboard": {
+    "column201": [
+     {"fromPt": 0, "toPt": 62, "is": "white"},
+     {"fromPt": 62, "toPt": 69, "is": "red"},
+     {"fromPt": 69, "toPt": 70.67, "is": "text"},
+     {"fromPt": 70.67, "toPt": 77, "is": "red"},
+     {"fromPt": 77, "toPt": 78.67, "is": "text"},
+     {"fromPt": 78.67, "toPt": 824.67, "is": "red"},
+     {"fromPt": 824.67, "toPt": 835.67, "is": "text"},
+     {"fromPt": 835.67, "toPt": 840, "is": "red"},
+     {"fromPt": 840, "toPt": 874, "is": "white"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 62, "is": "white"},
+     {"fromPt": 62, "toPt": 840, "is": "red"},
+     {"fromPt": 840, "toPt": 874, "is": "white"}
+    ],
+    "samplesAtX201": {"10": [255, 255, 255], "50": [255, 255, 255], "100": [255, 56, 60], "150": [255, 56, 60], "860": [255, 255, 255], "870": [255, 255, 255]},
+    "text": [
+     {"yPt": [66.33, 81.33], "xPt": [187.67, 214.33], "centreYPt": 73.8},
+     {"yPt": [824, 836], "xPt": [174.67, 227.67], "centreYPt": 830}
+    ]
+   },
+   "safe-top-edge": {
+    "column201": [
+     {"fromPt": 0, "toPt": 200, "is": "red"},
+     {"fromPt": 200, "toPt": 874, "is": "white"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 200, "is": "red"},
+     {"fromPt": 200, "toPt": 874, "is": "white"}
+    ],
+    "samplesAtX201": {"10": [255, 56, 60], "50": [255, 56, 60], "100": [255, 56, 60], "150": [255, 56, 60], "860": [255, 255, 255], "870": [255, 255, 255]},
+    "text": []
+   },
+   "safe-nav-grouped": {
+    "column201": [
+     {"fromPt": 0, "toPt": 175.33, "is": "groupedBackground"},
+     {"fromPt": 175.33, "toPt": 177.33, "is": "text"},
+     {"fromPt": 177.33, "toPt": 182.67, "is": "groupedBackground"},
+     {"fromPt": 182.67, "toPt": 184.33, "is": "text"},
+     {"fromPt": 184.33, "toPt": 874, "is": "groupedBackground"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 874, "is": "groupedBackground"}
+    ],
+    "samplesAtX201": {"10": [242, 242, 247], "50": [242, 242, 247], "100": [242, 242, 247], "150": [242, 242, 247], "860": [242, 242, 247], "870": [242, 242, 247]},
+    "text": [
+     {"yPt": [127, 152.33], "xPt": [16.67, 83.67], "centreYPt": 139.7},
+     {"yPt": [172.33, 184.33], "xPt": [186.33, 217], "centreYPt": 178.3}
+    ],
+    "navBarArea": {
+     "background": [242, 242, 247],
+     "sampledPoints": 64,
+     "samplesThatDifferFromBackground": [],
+     "largeTitle": {"yPt": [127, 152.33], "xPt": [16.67, 83.67], "centreYPt": 139.7}
+    }
+   },
+   "safe-nav-red": {
+    "column201": [
+     {"fromPt": 0, "toPt": 175.33, "is": "red"},
+     {"fromPt": 175.33, "toPt": 177.33, "is": "text"},
+     {"fromPt": 177.33, "toPt": 182.67, "is": "red"},
+     {"fromPt": 182.67, "toPt": 184.33, "is": "text"},
+     {"fromPt": 184.33, "toPt": 874, "is": "red"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 874, "is": "red"}
+    ],
+    "samplesAtX201": {"10": [255, 56, 60], "50": [255, 56, 60], "100": [255, 56, 60], "150": [255, 56, 60], "860": [255, 56, 60], "870": [255, 56, 60]},
+    "text": [
+     {"yPt": [127, 152.33], "xPt": [16.67, 83.67], "centreYPt": 139.7},
+     {"yPt": [172.33, 184.33], "xPt": [186.33, 217], "centreYPt": 178.3}
+    ],
+    "navBarArea": {
+     "background": [255, 56, 60],
+     "sampledPoints": 64,
+     "samplesThatDifferFromBackground": [],
+     "largeTitle": {"yPt": [127, 152.33], "xPt": [16.67, 83.67], "centreYPt": 139.7}
+    }
+   },
+   "safe-tab-red": {
+    "column201": [
+     {"fromPt": 0, "toPt": 66.33, "is": "red"},
+     {"fromPt": 66.33, "toPt": 70, "is": "text"},
+     {"fromPt": 70, "toPt": 73.33, "is": "red"},
+     {"fromPt": 73.33, "toPt": 75, "is": "text"},
+     {"fromPt": 75, "toPt": 790.33, "is": "red"},
+     {"fromPt": 790.33, "toPt": 853.67, "is": "other", "meanRGB": [174, 114, 150]},
+     {"fromPt": 853.67, "toPt": 874, "is": "red"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 874, "is": "red"}
+    ],
+    "samplesAtX201": {"10": [255, 56, 60], "50": [255, 56, 60], "100": [255, 56, 60], "150": [255, 56, 60], "860": [253, 56, 60], "870": [255, 56, 60]},
+    "text": [
+     {"yPt": [66.33, 78.33], "xPt": [196, 206], "centreYPt": 72.3}
+    ],
+    "tabBar": {
+     "barBoundsPt": [149.33, 790.33, 252.67, 853.67],
+     "note": "bounds of pixels differing from red by more than 12 below y 700 (glass pill plus its shadow)",
+     "pillCentreRGB": [243, 107, 111],
+     "redAt": {
+      "201,780": [255, 56, 60],
+      "201,860": [253, 56, 60],
+      "201,870": [255, 56, 60],
+      "201,873.5": [255, 56, 60],
+      "120,822": [255, 56, 60],
+      "390,822": [255, 56, 60],
+      "390,860": [255, 56, 60],
+      "390,873.5": [255, 56, 60],
+      "5,873.5": [255, 56, 60]
+     },
+     "redRangesAtY822": [[0, 149.33], [252.67, 402]],
+     "redRangesAtY873": [[0, 402]]
+    }
+   },
+   "safe-scroll-red": {
+    "column201": [
+     {"fromPt": 0, "toPt": 75, "is": "red"},
+     {"fromPt": 75, "toPt": 78.33, "is": "text"},
+     {"fromPt": 78.33, "toPt": 94.33, "is": "red"},
+     {"fromPt": 94.33, "toPt": 100.33, "is": "text"},
+     {"fromPt": 100.33, "toPt": 120.67, "is": "red"},
+     {"fromPt": 120.67, "toPt": 123, "is": "text"},
+     {"fromPt": 123, "toPt": 142, "is": "red"},
+     {"fromPt": 142, "toPt": 145.33, "is": "text"},
+     {"fromPt": 145.33, "toPt": 164.33, "is": "red"},
+     {"fromPt": 164.33, "toPt": 167.67, "is": "text"},
+     {"fromPt": 167.67, "toPt": 186.67, "is": "red"},
+     {"fromPt": 186.67, "toPt": 190, "is": "text"},
+     {"fromPt": 190, "toPt": 209, "is": "red"},
+     {"fromPt": 209, "toPt": 212.33, "is": "text"},
+     {"fromPt": 212.33, "toPt": 232.33, "is": "red"},
+     {"fromPt": 232.33, "toPt": 234.67, "is": "text"},
+     {"fromPt": 234.67, "toPt": 253.67, "is": "red"},
+     {"fromPt": 253.67, "toPt": 257, "is": "text"},
+     {"fromPt": 257, "toPt": 276, "is": "red"},
+     {"fromPt": 276, "toPt": 279.33, "is": "text"},
+     {"fromPt": 279.33, "toPt": 294, "is": "red"},
+     {"fromPt": 294, "toPt": 299.67, "is": "text"},
+     {"fromPt": 299.67, "toPt": 315, "is": "red"},
+     {"fromPt": 315, "toPt": 318.33, "is": "text"},
+     {"fromPt": 318.33, "toPt": 338.67, "is": "red"},
+     {"fromPt": 338.67, "toPt": 344.33, "is": "text"},
+     {"fromPt": 344.33, "toPt": 361, "is": "red"},
+     {"fromPt": 361, "toPt": 366.67, "is": "text"},
+     {"fromPt": 366.67, "toPt": 384.67, "is": "red"},
+     {"fromPt": 384.67, "toPt": 390, "is": "text"},
+     {"fromPt": 390, "toPt": 405.67, "is": "red"},
+     {"fromPt": 405.67, "toPt": 411.33, "is": "text"},
+     {"fromPt": 411.33, "toPt": 428, "is": "red"},
+     {"fromPt": 428, "toPt": 433.67, "is": "text"},
+     {"fromPt": 433.67, "toPt": 449.33, "is": "red"},
+     {"fromPt": 449.33, "toPt": 454.67, "is": "text"},
+     {"fromPt": 454.67, "toPt": 474, "is": "red"},
+     {"fromPt": 474, "toPt": 479.33, "is": "text"},
+     {"fromPt": 479.33, "toPt": 495, "is": "red"},
+     {"fromPt": 495, "toPt": 500.67, "is": "text"},
+     {"fromPt": 500.67, "toPt": 522.33, "is": "red"},
+     {"fromPt": 522.33, "toPt": 525, "is": "text"},
+     {"fromPt": 525, "toPt": 539.67, "is": "red"},
+     {"fromPt": 539.67, "toPt": 545.33, "is": "text"},
+     {"fromPt": 545.33, "toPt": 565.67, "is": "red"},
+     {"fromPt": 565.67, "toPt": 569.67, "is": "text"},
+     {"fromPt": 569.67, "toPt": 589.33, "is": "red"},
+     {"fromPt": 589.33, "toPt": 592, "is": "text"},
+     {"fromPt": 592, "toPt": 611.67, "is": "red"},
+     {"fromPt": 611.67, "toPt": 614.33, "is": "text"},
+     {"fromPt": 614.33, "toPt": 634, "is": "red"},
+     {"fromPt": 634, "toPt": 636.67, "is": "text"},
+     {"fromPt": 636.67, "toPt": 656.33, "is": "red"},
+     {"fromPt": 656.33, "toPt": 659, "is": "text"},
+     {"fromPt": 659, "toPt": 677.33, "is": "red"},
+     {"fromPt": 677.33, "toPt": 681.33, "is": "text"},
+     {"fromPt": 681.33, "toPt": 701, "is": "red"},
+     {"fromPt": 701, "toPt": 703.67, "is": "text"},
+     {"fromPt": 703.67, "toPt": 723.33, "is": "red"},
+     {"fromPt": 723.33, "toPt": 726, "is": "text"},
+     {"fromPt": 726, "toPt": 745.67, "is": "red"},
+     {"fromPt": 745.67, "toPt": 748.33, "is": "text"},
+     {"fromPt": 748.33, "toPt": 763, "is": "red"},
+     {"fromPt": 763, "toPt": 768.67, "is": "text"},
+     {"fromPt": 768.67, "toPt": 790.33, "is": "red"},
+     {"fromPt": 790.33, "toPt": 793, "is": "text"},
+     {"fromPt": 793, "toPt": 812.67, "is": "red"},
+     {"fromPt": 812.67, "toPt": 815.33, "is": "text"},
+     {"fromPt": 815.33, "toPt": 834.67, "is": "red"},
+     {"fromPt": 834.67, "toPt": 837.67, "is": "text"},
+     {"fromPt": 837.67, "toPt": 857.33, "is": "red"},
+     {"fromPt": 857.33, "toPt": 860, "is": "text"},
+     {"fromPt": 860, "toPt": 874, "is": "red"}
+    ],
+    "column390": [
+     {"fromPt": 0, "toPt": 874, "is": "white"}
+    ],
+    "samplesAtX201": {"10": [255, 56, 60], "50": [255, 56, 60], "100": [194, 43, 46], "150": [255, 56, 60], "860": [255, 56, 60], "870": [255, 56, 60]},
+    "text": [
+     {"yPt": [66, 78.67], "xPt": [179.33, 224], "centreYPt": 72.3},
+     {"yPt": [88.67, 100.67], "xPt": [180.67, 221.33], "centreYPt": 94.7},
+     {"yPt": [110.67, 123], "xPt": [179.67, 223.67], "centreYPt": 116.8},
+     {"yPt": [133.33, 145.33], "xPt": [179.33, 224], "centreYPt": 139.3},
+     {"yPt": [155.67, 167.67], "xPt": [179.33, 224.33], "centreYPt": 161.7},
+     {"yPt": [178, 190.33], "xPt": [179.33, 223.67], "centreYPt": 184.2},
+     {"yPt": [200, 212.67], "xPt": [179.33, 224], "centreYPt": 206.3},
+     {"yPt": [222.67, 234.67], "xPt": [179.67, 223.33], "centreYPt": 228.7},
+     {"yPt": [245, 257.33], "xPt": [179.33, 224], "centreYPt": 251.2},
+     {"yPt": [267, 279.67], "xPt": [179.33, 224], "centreYPt": 273.3},
+     {"yPt": [289.33, 302], "xPt": [175.67, 227.67], "centreYPt": 295.7},
+     {"yPt": [312, 324], "xPt": [176.67, 224.67], "centreYPt": 318},
+     {"yPt": [334, 346.33], "xPt": [175.67, 227], "centreYPt": 340.2},
+     {"yPt": [356.67, 368.67], "xPt": [175.67, 227.67], "centreYPt": 362.7},
+     {"yPt": [379, 391], "xPt": [175.33, 227.67], "centreYPt": 385},
+     {"yPt": [401.33, 413.67], "xPt": [175.67, 227.33], "centreYPt": 407.5},
+     {"yPt": [423.33, 436], "xPt": [175.67, 227.67], "centreYPt": 429.7},
+     {"yPt": [446, 458], "xPt": [176, 227], "centreYPt": 452},
+     {"yPt": [468.33, 480.67], "xPt": [175.33, 227.33], "centreYPt": 474.5},
+     {"yPt": [490.33, 503], "xPt": [175.67, 227.67], "centreYPt": 496.7},
+     {"yPt": [512.67, 525.33], "xPt": [174.33, 228.67], "centreYPt": 519},
+     {"yPt": [535, 547.33], "xPt": [175.67, 226], "centreYPt": 541.2},
+     {"yPt": [557.33, 569.67], "xPt": [174.67, 228.33], "centreYPt": 563.5},
+     {"yPt": [579.67, 592], "xPt": [174.33, 228.67], "centreYPt": 585.8},
+     {"yPt": [602, 614.33], "xPt": [174.33, 229], "centreYPt": 608.2},
+     {"yPt": [624.33, 637], "xPt": [174.33, 228.33], "centreYPt": 630.7},
+     {"yPt": [646.67, 659.33], "xPt": [174.33, 228.67], "centreYPt": 653},
+     {"yPt": [669, 681.33], "xPt": [174.67, 228], "centreYPt": 675.2},
+     {"yPt": [691.33, 704], "xPt": [174.33, 228.67], "centreYPt": 697.7},
+     {"yPt": [713.67, 726.33], "xPt": [174.33, 228.67], "centreYPt": 720},
+     {"yPt": [736, 748.67], "xPt": [174.33, 229.33], "centreYPt": 742.3},
+     {"yPt": [758.67, 770.67], "xPt": [175.67, 226.67], "centreYPt": 764.7},
+     {"yPt": [780.67, 793], "xPt": [174.33, 228.67], "centreYPt": 786.8},
+     {"yPt": [803.33, 815.33], "xPt": [174.33, 229.33], "centreYPt": 809.3},
+     {"yPt": [825.67, 837.67], "xPt": [174, 229.33], "centreYPt": 831.7},
+     {"yPt": [848, 860.33], "xPt": [174.33, 229], "centreYPt": 854.2},
+     {"yPt": [870, 874], "xPt": [174, 228.67], "centreYPt": 872}
+    ],
+    "scroll": {
+     "redRangesAtY": {
+      "5": [[172.33, 230]],
+      "60": [[172.33, 230]],
+      "450": [
+       [172.33, 175.67],
+       [177.67, 182.33],
+       [184.33, 186.33],
+       [189, 190.67],
+       [193.33, 194.67],
+       [196.67, 199.33],
+       [202, 204.67],
+       [206.33, 215],
+       [217, 223.67],
+       [225.67, 230]
+      ],
+      "700": [
+       [172.33, 174],
+       [176, 179.33],
+       [181.33, 184],
+       [185.67, 190.33],
+       [192.33, 194.33],
+       [196, 196.33],
+       [198, 200],
+       [201.33, 202],
+       [203.33, 212.33],
+       [214.67, 220],
+       [221.67, 227],
+       [229, 230]
+      ],
+      "870": [[172.33, 173.67], [180, 212], [216.67, 222.67], [227.33, 230]],
+      "873.5": [
+       [172.33, 173.67],
+       [175.67, 180.33],
+       [182.33, 185.67],
+       [189.67, 192.33],
+       [194.33, 197.67],
+       [199.33, 203],
+       [204.67, 210.33],
+       [212, 216.67],
+       [218.33, 220.67],
+       [222.67, 230]
+      ]
+     },
+     "redColumnXPt": 174.33,
+     "columnRuns": [
+      {"fromPt": 0, "toPt": 513, "is": "red"},
+      {"fromPt": 513, "toPt": 525, "is": "text"},
+      {"fromPt": 525, "toPt": 557.67, "is": "red"},
+      {"fromPt": 557.67, "toPt": 569.67, "is": "other", "meanRGB": [148, 33, 35]},
+      {"fromPt": 569.67, "toPt": 580, "is": "red"},
+      {"fromPt": 580, "toPt": 592, "is": "text"},
+      {"fromPt": 592, "toPt": 602.33, "is": "red"},
+      {"fromPt": 602.33, "toPt": 614.33, "is": "text"},
+      {"fromPt": 614.33, "toPt": 624.67, "is": "red"},
+      {"fromPt": 624.67, "toPt": 636.67, "is": "text"},
+      {"fromPt": 636.67, "toPt": 647, "is": "red"},
+      {"fromPt": 647, "toPt": 659, "is": "text"},
+      {"fromPt": 659, "toPt": 669.33, "is": "red"},
+      {"fromPt": 669.33, "toPt": 681.33, "is": "other", "meanRGB": [148, 33, 35]},
+      {"fromPt": 681.33, "toPt": 691.67, "is": "red"},
+      {"fromPt": 691.67, "toPt": 703.67, "is": "text"},
+      {"fromPt": 703.67, "toPt": 714, "is": "red"},
+      {"fromPt": 714, "toPt": 726, "is": "text"},
+      {"fromPt": 726, "toPt": 736.33, "is": "red"},
+      {"fromPt": 736.33, "toPt": 748.33, "is": "text"},
+      {"fromPt": 748.33, "toPt": 781, "is": "red"},
+      {"fromPt": 781, "toPt": 793, "is": "text"},
+      {"fromPt": 793, "toPt": 803.33, "is": "red"},
+      {"fromPt": 803.33, "toPt": 815.33, "is": "text"},
+      {"fromPt": 815.33, "toPt": 825.67, "is": "red"},
+      {"fromPt": 825.67, "toPt": 837.67, "is": "text"},
+      {"fromPt": 837.67, "toPt": 848, "is": "red"},
+      {"fromPt": 848, "toPt": 860, "is": "text"},
+      {"fromPt": 860, "toPt": 870.33, "is": "red"},
+      {"fromPt": 870.33, "toPt": 874, "is": "text"}
+     ],
+     "row0": {"yPt": [66, 78.67], "xPt": [179.33, 224], "centreYPt": 72.3},
+     "row1": {"yPt": [88.67, 100.67], "xPt": [180.67, 221.33], "centreYPt": 94.7},
+     "rowPitchPt": 22.34,
+     "visibleRows": 37
+    }
+   }
+  },
+  "presentations": {
+   "search-root": {
+    "pageBackgroundAtY30AndY600": [[242, 242, 247], [242, 242, 247]],
+    "text": [
+     {"yPt": [128, 152.33], "xPt": [18, 108.67], "centreYPt": 140.2},
+     {"yPt": [191.33, 200.33], "xPt": [33, 40], "centreYPt": 195.8},
+     {"yPt": [240, 252.33], "xPt": [33.33, 41.67], "centreYPt": 246.2},
+     {"yPt": [813.33, 830], "xPt": [42, 58.33], "centreYPt": 821.7}
+    ],
+    "listCardColumn201": [
+     {"fromPt": 150, "toPt": 168, "is": "groupedBackground"},
+     {"fromPt": 168, "toPt": 219, "is": "white"},
+     {"fromPt": 219, "toPt": 220, "is": "other", "meanRGB": [232, 232, 232]},
+     {"fromPt": 220, "toPt": 272, "is": "white"},
+     {"fromPt": 272, "toPt": 300, "is": "groupedBackground"}
+    ],
+    "listCardLeftRightAtY210": [[16, 386]],
+    "rowSeparatorAtY219_5": [[32, 370]],
+    "searchField": {
+     "topYPt": 797.33,
+     "bottomYPt": 846.67,
+     "leftXPt": 27.33,
+     "rightXPt": 374.67,
+     "fillRGBAtX300Y822": [247, 247, 252],
+     "magnifierGlyph": [42, 813.33, 58.33, 830],
+     "placeholderGlyphs": [69.67, 815.67, 122.33, 828.67],
+     "placeholderDarkestRGB": [144, 144, 149]
+    },
+    "nonBackgroundBetweenTitleAndCardY153to167": 0
+   },
+   "search-pushed": {
+    "text": [
+     {"yPt": [75, 93.67], "xPt": [31, 42], "centreYPt": 84.3},
+     {"yPt": [471.67, 484.33], "xPt": [158, 244.67], "centreYPt": 478}
+    ],
+    "backButton": {"pixels": 1694, "boundsPt": [15.33, 61.33, 60.67, 106.67]},
+    "nonWhiteBelowY700": {"pixels": 0, "boundsPt": null},
+    "nonWhiteRightOfBackButtonY54to200": {"pixels": 0, "boundsPt": null}
+   },
+   "search-on-tabview": {
+    "text": [
+     {"yPt": [420.67, 432.67], "xPt": [196, 206], "centreYPt": 426.7}
+    ],
+    "tabBar": {"pixels": 41976, "boundsPt": [149.33, 790.33, 252.67, 853.67]},
+    "nonWhiteY54to700ExcludingLabel": {"pixels": 86, "boundsPt": [195.67, 420.67, 206.33, 432.67]}
+   },
+   "search-content": {
+    "note": ".searchable on a twelve-row List inside a NavigationStack with no TabView; the field is where search-root, which writes it on the stack, has it",
+    "searchField": {"topYPt": 797.33, "bottomYPt": 846.67, "leftXPt": 27.33, "rightXPt": 374.67, "fillRGBAtX300Y822": [248, 247, 252], "magnifierGlyph": [42, 813.33, 58.33, 830], "placeholderGlyphs": [69.67, 815.67, 122.33, 828.67]},
+    "listCardTopYPt": 168,
+    "uikit": "searchController placement 1, allows toolbar integration; UISearchBarTextField frame [28, 808, 374, 836], in the bottom toolbar"
+   },
+   "search-tab-content": {
+    "note": ".searchable on the List inside a tab page's NavigationStack; search-tab-stack, with it on that stack, is byte-identical",
+    "searchFieldAtRest": "none drawn: nothing but the page between the title and the list card (y 153-168) or beside the tab bar (y 792-874)",
+    "listCardTopYPt": 168,
+    "tabBarBoundsPt": [106.33, 790.33, 295.67, 853.67],
+    "uikit": "searchController placement 2 (stacked), hidesWhenScrolling; UISearchBarTextField frame [16, 168, 386, 168], folded to no height under the title",
+    "afterPullingDown": {"how": "list contentOffset set 120 pt past the top, then back to the new top inset (222)", "searchFieldBoundsPt": [16, 168, 386, 212], "fillRGB": [227, 227, 233], "listCardTopYPt": 222, "note": "the same as the searchSurface of native/iphone18pro-light, measured in a tab app on 2026-09-16"}
+   },
+   "search-drawer": {
+    "note": ".searchable(text:placement: .navigationBarDrawer(displayMode: .always)) on the List; the title is drawn inline, not large",
+    "searchField": {"topYPt": 115.33, "bottomYPt": 160.67, "leftXPt": 15.33, "rightXPt": 386.67, "fillRGBAtX300Y138": [247, 247, 252], "magnifierGlyph": [30, 129.33, 46.33, 146], "placeholderGlyphs": [56.67, 131.67, 109.33, 144.67]},
+    "titleGlyphs": {"yPt": [78.33, 90.33], "xPt": [178.67, 224]},
+    "listCardTopYPt": 170
+   },
+   "sheet-on-stack": {
+    "dimmedBackgroundRGB": [204, 204, 204],
+    "sheetTopYPt": 62,
+    "sheetLeftRightAtY450": [0, 402],
+    "firstSheetXPtBelowTop": {"1": 32.67, "2": 27.33, "4": 21.33, "8": 14.67, "12": 10.33, "16": 7, "24": 3, "32": 1.33, "40": 0.67, "48": 0.33, "0.34": 41.33},
+    "firstSheetXPtAboveBottom": {"1": 65, "2": 53.33, "4": 43, "8": 32.67, "12": 26, "16": 21, "24": 13.33, "32": 8.33, "40": 4.67, "48": 2.67, "56": 1.67, "64": 1, "0.34": 75},
+    "topCornerRadiusCircularFitPt": 41,
+    "bottomCornerRadiusCircularFitPt": 70,
+    "bottomEdgeRGBAtX201": [255, 255, 255],
+    "text": [
+     {"yPt": [445, 457.67], "xPt": [180, 222.67], "centreYPt": 451.3}
+    ]
+   },
+   "sheet-on-tab-stack": {
+    "dimmedBackgroundRGB": [204, 204, 204],
+    "sheetTopYPt": 62,
+    "sheetLeftRightAtY450": [0, 402],
+    "firstSheetXPtBelowTop": {"1": 32.67, "2": 27.33, "4": 21.33, "8": 14.67, "12": 10.33, "16": 7, "24": 3, "32": 1.33, "40": 0.67, "48": 0.33, "0.34": 41.33},
+    "firstSheetXPtAboveBottom": {"1": 65, "2": 53.33, "4": 43, "8": 32.67, "12": 26, "16": 21, "24": 13.33, "32": 8.33, "40": 4.67, "48": 2.67, "56": 1.67, "64": 1, "0.34": 75},
+    "topCornerRadiusCircularFitPt": 41,
+    "bottomCornerRadiusCircularFitPt": 70,
+    "bottomEdgeRGBAtX201": [255, 255, 255],
+    "text": [
+     {"yPt": [445, 457.33], "xPt": [164.67, 237.67], "centreYPt": 451.2}
+    ]
+   },
+   "alert-on-stack": {
+    "dimmedBackgroundRGB": [204, 204, 204],
+    "box": {
+     "topYPt": 387.67,
+     "bottomYPt": 514.67,
+     "leftXPt": 40.33,
+     "rightXPt": 361.67,
+     "widthPt": 321.34,
+     "heightPt": 127,
+     "centreXPt": 201,
+     "centreYPt": 451.17
+    },
+    "boxFillRGBAtY440": [235, 235, 235],
+    "okButton": {
+     "fillRGB": [204, 204, 204],
+     "xPt": [57, 345],
+     "yPtAtX120": [[450, 498]]
+    },
+    "text": [
+     {"yPt": [128, 152.33], "xPt": [18, 108.67], "centreYPt": 140.2},
+     {"yPt": [413.67, 426], "xPt": [183, 219.67], "centreYPt": 419.8},
+     {"yPt": [468, 480.67], "xPt": [190, 212.67], "centreYPt": 474.3}
+    ]
+   },
+   "dialog-on-stack": {
+    "backgroundRGBAtY30AndX20Y450": [[255, 255, 255], [255, 255, 255]],
+    "box": {
+     "topYPt": 382.67,
+     "bottomYPt": 519.33,
+     "leftXPt": 80.33,
+     "rightXPt": 321.67,
+     "widthPt": 241.34,
+     "heightPt": 136.66,
+     "centreXPt": 201,
+     "centreYPt": 451
+    },
+    "buttonColumnAtX120": [
+     {"fromPt": 390, "toPt": 399, "is": "other", "meanRGB": [250, 250, 250]},
+     {"fromPt": 399, "toPt": 399.33, "is": "white"},
+     {"fromPt": 399.33, "toPt": 446.67, "is": "other", "meanRGB": [223, 223, 223]},
+     {"fromPt": 446.67, "toPt": 455.33, "is": "white"},
+     {"fromPt": 455.33, "toPt": 502.67, "is": "other", "meanRGB": [223, 223, 223]},
+     {"fromPt": 502.67, "toPt": 510, "is": "white"}
+    ],
+    "buttonFillRGB": [[223, 223, 223], [223, 223, 223]],
+    "buttonXPtAtY423": [97, 305],
+    "text": [
+     {"yPt": [128, 152.33], "xPt": [18, 108.67], "centreYPt": 140.2},
+     {"yPt": [417, 429.67], "xPt": [186, 216.67], "centreYPt": 423.3},
+     {"yPt": [473.33, 485.33], "xPt": [185.67, 216.67], "centreYPt": 479.3}
+    ]
+   }
+  }
+ }
+}

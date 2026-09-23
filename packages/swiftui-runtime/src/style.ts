@@ -100,9 +100,20 @@ export const LABEL_COLOR = labelColor('light')
 export const SYSTEM_BACKGROUND = systemBackground('light')
 export const ACCENT_COLOR = LIGHT_COLORS.accentColor!
 
+/**
+ * UIKit's names for the SwiftUI colours: `Color(.systemRed)` is `Color.red`, as the
+ * iOS 27 simulator draws them.
+ */
+const UIKIT_NAMES: Readonly<Record<string, string>> = {
+  systemRed: 'red', systemOrange: 'orange', systemYellow: 'yellow', systemGreen: 'green',
+  systemMint: 'mint', systemTeal: 'teal', systemCyan: 'cyan', systemBlue: 'blue',
+  systemIndigo: 'indigo', systemPurple: 'purple', systemPink: 'pink', systemBrown: 'brown',
+  systemGray: 'gray',
+}
+
 export function colorForName(name: string, scheme: ColorScheme = 'light', tint?: RGBA): RGBA | null {
   if (tint && ['tint', 'accent', 'accentColor'].includes(name)) return tint
-  return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[name] ?? null
+  return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[UIKIT_NAMES[name] ?? name] ?? null
 }
 
 /** A colour set from the project's asset catalog: one value per appearance. */

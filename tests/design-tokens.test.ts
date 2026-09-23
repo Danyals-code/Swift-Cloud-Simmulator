@@ -199,7 +199,7 @@ describe('writing tokens', () => {
     const colour = planned(files, node(files, 'Text', []), { kind: 'style-migrate', name: 'brandColor' }, [])
     expect(colour.files.find(f => f.id === 'Sources/App.swift')!.text).toContain('.foregroundColor(Color.brandColor)')
     expect(colour.result.changes.find(c => c.file === 'Sources/Styles/brandColor.swift')).toMatchObject({ deleted: true })
-    expect(colour.colors).toEqual([{ name: 'brandColor', light: '#007AFF' }])
+    expect(colour.colors).toEqual([{ name: 'brandColor', light: '#0088FF' }])
     const spacing = planned(colour.files, node(colour.files, 'Text', colour.colors), { kind: 'style-migrate', name: 'cardSpacing' }, colour.colors)
     expect(spacing.files.find(f => f.id === 'Sources/App.swift')!.text).toContain('.padding(CGFloat.spaceCard)')
     expect(spacing.files.find(f => f.id === 'Sources/DesignSystem/Tokens.swift')!.text).toContain('static let spaceCard: CGFloat = 12')

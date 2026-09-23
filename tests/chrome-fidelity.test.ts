@@ -503,7 +503,7 @@ function runColor(source: string, text: string): string {
 }
 
 const BLUE = '0,136,255,1'
-const RED = '255,59,48,1'
+const RED = '255,56,60,1'
 const BLACK = '0,0,0,1'
 
 describe('what colour a label is when nothing has said', () => {

@@ -43,6 +43,7 @@ import {
   type HorizontalAlignment,
   type LayoutElement,
   type LayoutModifier,
+  type SafeAreaEdges,
   type TextRunSpec,
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
@@ -60,6 +61,7 @@ import {
   TAB_ITEM,
   type Overlay,
   type ResolvedUI,
+  type SearchField,
 } from './presentation'
 import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
 import { resolveSymbol } from './sf-symbols'
@@ -116,6 +118,13 @@ export interface ConversionResult {
   readonly hitTargets: ReadonlyMap<string, string>
 }
 
+/**
+ * Where a search field is drawn: at the top of the content, as in the drawer under the
+ * title; in an iPad's toolbar; or at the bottom of a phone's screen, in a glass capsule
+ * on the tab bar's line.
+ */
+type SearchPlacement = 'top' | 'toolbar' | 'bottom'
+
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
   readonly content: LayoutElement
@@ -128,8 +137,6 @@ export interface ScreenLayout {
    * under the bar on every navigation-plus-list screen.
    */
   readonly background: RGBA
-  /** True when the content extends under the device's edges. */
-  readonly ignoresSafeArea: boolean
   readonly navigationBar: { readonly element: LayoutElement; readonly height: number; readonly large: boolean } | null
   readonly tabBar: LayoutElement | null
   readonly search?: { readonly element: LayoutElement; readonly placement: 'top' | 'bottom'; readonly height: number }
@@ -252,13 +259,18 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
-  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && (options.viewportWidth ?? 393) < 600 && !!ui.navigationBar)
-  const toolbarSearch = ui.search && !drawerSearch && (options.viewportWidth ?? 393) >= 600 && ui.navigationBar
-    ? converter.searchField(ui.search.text, ui.search.prompt, ui.search.path, true) : null
+  // On a phone, iOS 27 puts the search field at the bottom of the screen, where a tab
+  // bar would be. Where there is one, it goes in the drawer under the title instead.
+  const compact = (options.viewportWidth ?? 393) < 600
+  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && compact && !!ui.tabBar)
+  const toolbarSearch = ui.search && !drawerSearch && !compact && ui.navigationBar ? converter.searchField(ui.search, 'toolbar') : null
   const search = ui.search && !drawerSearch && !toolbarSearch
-    ? { element: converter.searchField(ui.search.text, ui.search.prompt, ui.search.path), placement: ((options.viewportWidth ?? 393) >= 600 ? 'top' : 'bottom') as 'top' | 'bottom', height: SURFACES.search.height + 12 } : undefined
+    ? compact
+      ? { element: converter.searchField(ui.search, 'bottom'), placement: 'bottom' as const, height: TAB_BAR_HEIGHT }
+      : { element: converter.searchField(ui.search, 'top'), placement: 'top' as const, height: SURFACES.search.height + 12 }
+    : undefined
   const content = ui.search && drawerSearch
-    ? prependSearch(joinRoot(body, 'vertical'), converter.searchField(ui.search.text, ui.search.prompt, ui.search.path))
+    ? prependSearch(joinRoot(body, 'vertical'), converter.searchField(ui.search, 'top'))
     : joinRoot(body, 'vertical')
 
   const navigationBar = ui.navigationBar
@@ -295,7 +307,6 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     content,
     search,
     background,
-    ignoresSafeArea: ui.ignoresSafeArea,
     navigationBar,
     tabBar,
     overlay,
@@ -517,6 +528,14 @@ class Converter {
   /** A simple outline keeps translucent system controls visible on a flat background. */
   private chromeOutline(child: LayoutElement, id: string, radius: number): LayoutElement {
     return { kind: 'modified', id, modifier: { kind: 'border', width: 0.5, cornerRadius: radius, color: { ...this.color('label'), a: 0.15 } }, child }
+  }
+
+  /** The outlined glass capsule of iOS 27's floating bars: the tab bar, and a phone's search. */
+  private glassCapsule(content: LayoutElement, id: string, outlineId: string): LayoutElement {
+    return this.chromeOutline({
+      kind: 'modified', id: `${id}-radius`, modifier: { kind: 'cornerRadius', radius: 999 },
+      child: { kind: 'modified', id, modifier: { kind: 'material', ...this.appearance.materials.regularMaterial!, light: this.scheme === 'light' }, child: content },
+    }, outlineId, 999)
   }
 
   private symbolImage(id: string, name: string): LayoutElement {
@@ -817,14 +836,10 @@ class Converter {
       },
     }
 
-    const surface: LayoutElement = {
-      kind: 'modified', id: 'tabbar-surface-radius', modifier: { kind: 'cornerRadius', radius: 999 },
-      child: { kind: 'modified', id: 'tabbar-surface', modifier: { kind: 'material', ...this.appearance.materials.regularMaterial!, light: this.scheme === 'light' },
-        child: { kind: 'modified', id: 'tabbar-inset', modifier: { kind: 'padding', insets: uniformInsets(SURFACES.tab.inset) }, child: row } },
-    }
+    const surface = this.glassCapsule({ kind: 'modified', id: 'tabbar-inset', modifier: { kind: 'padding', insets: uniformInsets(SURFACES.tab.inset) }, child: row }, 'tabbar-surface', 'tabbar-outline')
     return {
       kind: 'modified', id: 'tabbar-margin', modifier: { kind: 'padding', insets: insets(0, SURFACES.tab.margin, SURFACES.tab.bottom, SURFACES.tab.margin) },
-      child: { kind: 'modified', id: 'tabbar-width', modifier: { kind: 'frame', maxWidth: Math.min(this.viewportWidth >= 600 ? SURFACES.tab.regularWidth : this.viewportWidth - SURFACES.tab.margin * 2, bar.items.length * SURFACES.tab.itemWidth + SURFACES.tab.inset * 2), height: SURFACES.tab.height, alignment: CENTER }, child: this.chromeOutline(surface, 'tabbar-outline', 999) },
+      child: { kind: 'modified', id: 'tabbar-width', modifier: { kind: 'frame', maxWidth: Math.min(this.viewportWidth >= 600 ? SURFACES.tab.regularWidth : this.viewportWidth - SURFACES.tab.margin * 2, bar.items.length * SURFACES.tab.itemWidth + SURFACES.tab.inset * 2), height: SURFACES.tab.height, alignment: CENTER }, child: surface },
     }
   }
 
@@ -1497,6 +1512,7 @@ class Converter {
         strokeStyle(view)?.lineWidth ??
         1
 
+      const trim = trimOf(view)
       return {
         kind: 'shape',
         id: path,
@@ -1504,6 +1520,7 @@ class Converter {
         cornerStyle: tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular',
         ...(radius !== null ? { cornerRadius: radius } : {}),
         ...(fill ? { fill } : {}),
+        ...(trim ? { trim } : {}),
         ...(strokeColor ? { stroke: { ...strokeStyle(view), color: strokeColor, width: Math.max(0, strokeWidth), usesForeground: !resolveColorArg(modifierArg(view, strokeName, 0), this.scheme, this.styles.tint), placement: strokeName === 'strokeBorder' ? 'inside' as const : 'center' as const } } : {}),
         ...origin,
       }
@@ -2153,10 +2170,11 @@ class Converter {
   }
 
   private button(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0))
+    const iconLabel = titleAndIconLabel(view)
+    const title = iconLabel ? null : stringArg(positional(view.args, 0))
     // `Button { save() } label: { … }` puts the content in a labelled argument,
     // because the unlabelled trailing closure is already the action.
-    const content = view.children.length > 0 ? view.children : argViews(view, 'label')
+    const content = iconLabel ? [iconLabel] : view.children.length > 0 ? view.children : argViews(view, 'label')
     const label: LayoutElement =
       title !== null
         ? { kind: 'text', id: `${path}label`, text: title, ...origin }
@@ -2344,7 +2362,8 @@ class Converter {
 
   private toggle(view: ViewValue, path: string, origin: object): LayoutElement {
     const on = truthyBinding(labelled(view.args, 'isOn'))
-    const title = stringArg(positional(view.args, 0))
+    const iconLabel = titleAndIconLabel(view)
+    const title = iconLabel ? null : stringArg(positional(view.args, 0))
     const style = this.styles.toggle
 
     const label: LayoutElement =
@@ -2356,7 +2375,7 @@ class Converter {
             axis: 'horizontal',
             spacing: 6,
             alignment: CENTER,
-            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+            children: this.convertList(iconLabel ? [iconLabel] : view.children, `${path}label`, 'horizontal'),
           }
 
     const track = switchControl(path, on, this.styles.tint ?? this.color('green'), this.color('tertiarySystemFill'))
@@ -3155,12 +3174,12 @@ class Converter {
     ] }
   }
 
-  /** Search geometry shared by the bottom bar, toolbar, and explicit drawer. */
-  searchField(text: string, placeholder: string, path: string, compact = false): LayoutElement {
-    return this.chromeContent(`${path}font`, () => this.searchFieldContent(text, placeholder, path, compact))
+  /** Search geometry shared by the bottom capsule, toolbar, and drawer. */
+  searchField(search: SearchField, placement: SearchPlacement): LayoutElement {
+    return this.chromeContent(`${search.path}font`, () => this.searchFieldContent(search, placement))
   }
 
-  private searchFieldContent(text: string, placeholder: string, path: string, compact: boolean): LayoutElement {
+  private searchFieldContent({ text, prompt: placeholder, path }: SearchField, placement: SearchPlacement): LayoutElement {
     const row: LayoutElement = {
       kind: 'stack',
       id: `${path}row`,
@@ -3214,6 +3233,17 @@ class Converter {
       child: row,
     }
 
+    if (placement === 'bottom') {
+      const capsule = this.glassCapsule({ kind: 'modified', id: `${path}height`, modifier: { kind: 'frame', minHeight: SURFACES.search.capsuleHeight, alignment: CENTER }, child: padded }, `${path}surface`, `${path}outline`)
+      // Centred on the tab bar's line, in the space a tab bar takes.
+      const centring = (SURFACES.tab.height - SURFACES.search.capsuleHeight) / 2
+      return {
+        kind: 'modified', id: `${path}outer`,
+        modifier: { kind: 'padding', insets: insets(centring, SURFACES.search.capsuleMargin, centring + SURFACES.tab.bottom, SURFACES.search.capsuleMargin) },
+        child: capsule,
+      }
+    }
+
     const surface: LayoutElement = {
       kind: 'modified', id: `${path}surface`,
       modifier: { kind: 'background', content: { kind: 'fill', id: `${path}surface-fill`, fill: { kind: 'solid', color: this.color('tertiarySystemFill') } } },
@@ -3221,7 +3251,7 @@ class Converter {
     }
     return {
       kind: 'modified', id: `${path}outer`,
-      modifier: { kind: 'padding', insets: compact ? ZERO_INSETS : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
+      modifier: { kind: 'padding', insets: placement === 'toolbar' ? ZERO_INSETS : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
       child: { kind: 'modified', id: `${path}round`, modifier: { kind: 'cornerRadius', radius: SURFACES.search.radius, style: 'circular' }, child: surface },
     }
   }
@@ -3255,7 +3285,16 @@ class Converter {
       case 'background': {
         const content = this.backgroundContent(args, modifier, `${id}bg`)
         const hasView = args.some((arg) => (arg.label === null || arg.label === 'content') && asView(arg.value))
-        return content ? { kind: 'background', content, ...(hasView ? { alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER } : {}) } : null
+        // `.background(.red)` and `.background(Color.red)` are the ShapeStyle form, which
+        // reaches into the safe area its view touches; a view given as the background,
+        // `.background { Color.red }`, doesn't. Both measured in the iOS 27 simulator.
+        const style = !hasView && !labelled(args, 'in') && args.some((arg) => arg.label === null)
+        return content ? {
+          kind: 'background',
+          content,
+          ...(hasView ? { alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER } : {}),
+          ...(style ? { ignoresSafeAreaEdges: safeAreaEdges(labelled(args, 'ignoresSafeAreaEdges')) } : {}),
+        } : null
       }
 
       case 'overlay': {
@@ -3340,12 +3379,15 @@ class Converter {
         }
       }
 
-      case 'offset':
+      case 'offset': {
+        // `.offset(dragOffset)` - a CGSize, which is how every drag writes it.
+        const size = payloadOf<{ width: number; height: number }>(positional(args, 0), 'CGSize')
         return {
           kind: 'offset',
-          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? 0,
-          y: numberArg(labelled(args, 'y')) ?? 0,
+          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? size?.width ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? size?.height ?? 0,
         }
+      }
 
       case 'fixedSize': {
         const horizontal = boolArg(labelled(args, 'horizontal'))
@@ -3447,10 +3489,14 @@ class Converter {
         return null
 
       case 'ignoresSafeArea':
-        // Read by the pipeline, which owns the device's edges. `.safeAreaInset` was
-        // grouped here and is not: nothing read it, and it was in the unimplemented
-        // list at the same time - so it both warned and was claimed to be handled.
-        return null
+      case 'edgesIgnoringSafeArea': {
+        // `.ignoresSafeArea(.keyboard)` is about a keyboard the preview never shows, so
+        // it changes nothing; it used to make the whole screen full-bleed.
+        const regions = modifier.name === 'ignoresSafeArea' ? tokenName(positional(args, 0)) : null
+        if (regions === 'keyboard') return null
+        const edges = modifier.name === 'ignoresSafeArea' ? labelled(args, 'edges') : positional(args, 0)
+        return { kind: 'ignoresSafeArea', edges: safeAreaEdges(edges) }
+      }
 
       case 'zIndex':
       case 'id':
@@ -3491,12 +3537,14 @@ class Converter {
 
 
 
-      case 'position':
+      case 'position': {
+        const point = payloadOf<{ x: number; y: number }>(positional(args, 0), 'CGPoint')
         return {
           kind: 'position',
-          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? 0,
-          y: numberArg(labelled(args, 'y')) ?? numberArg(positional(args, 1)) ?? 0,
+          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? point?.x ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? numberArg(positional(args, 1)) ?? point?.y ?? 0,
         }
+      }
 
       case 'layoutPriority': {
         const value = numberArg(positional(args, 0))
@@ -4088,6 +4136,14 @@ function truthyBinding(value: SwiftValue | undefined): boolean {
   return resolved !== null && truthy(resolved)
 }
 
+/** An `Edge.Set`: `.all` when none is given, one edge, `.horizontal`, `.vertical`, or a list. */
+function safeAreaEdges(value: SwiftValue | undefined): SafeAreaEdges {
+  if (value === undefined) return { top: true, bottom: true, leading: true, trailing: true }
+  const names = value.kind === 'array' ? value.elements.map(tokenName) : [tokenName(value)]
+  const has = (edge: string, axis: string) => names.some((name) => name === edge || name === axis || name === 'all')
+  return { top: has('top', 'vertical'), bottom: has('bottom', 'vertical'), leading: has('leading', 'horizontal'), trailing: has('trailing', 'horizontal') }
+}
+
 function tokenName(value: SwiftValue | undefined): string | null {
   return payloadOf<TokenPayload>(value, TOKEN_TYPE)?.name ?? null
 }
@@ -4252,6 +4308,22 @@ function stackAlignment(args: readonly ViewArg[], axis: Axis): Alignment {
 
 function zstackAlignment(args: readonly ViewArg[]): Alignment {
   return alignmentFromToken(labelled(args, 'alignment')) ?? CENTER
+}
+
+/**
+ * `Button("Add", systemImage: "plus")`, and `Menu` and `Toggle` written the same way:
+ * shorthand for a `Label` as the control's label. Without it only the title was drawn.
+ */
+function titleAndIconLabel(view: ViewValue): ViewValue | null {
+  if (!labelled(view.args, 'systemImage') || stringArg(positional(view.args, 0)) === null) return null
+  return {
+    name: 'Label',
+    args: view.args.filter((arg) => arg.label === null || arg.label === 'systemImage'),
+    children: [],
+    modifiers: [],
+    action: null,
+    span: view.span,
+  }
 }
 
 /**

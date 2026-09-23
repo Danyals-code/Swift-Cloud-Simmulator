@@ -5407,8 +5407,8 @@ exports[`ios-27 provisional geometry regression gate > ipad-11 light large 1`] =
         {
           "color": {
             "a": 1,
-            "b": 48,
-            "g": 59,
+            "b": 60,
+            "g": 56,
             "r": 255,
           },
           "font": {
@@ -13053,8 +13053,8 @@ exports[`ios-27 provisional geometry regression gate > iphone-15 light accessibi
         {
           "color": {
             "a": 1,
-            "b": 48,
-            "g": 59,
+            "b": 60,
+            "g": 56,
             "r": 255,
           },
           "font": {
@@ -16916,8 +16916,8 @@ exports[`ios-27 provisional geometry regression gate > iphone-15 light large 1`]
         {
           "color": {
             "a": 1,
-            "b": 48,
-            "g": 59,
+            "b": 60,
+            "g": 56,
             "r": 255,
           },
           "font": {
@@ -20779,8 +20779,8 @@ exports[`ios-27 provisional geometry regression gate > iphone-18-pro light large
         {
           "color": {
             "a": 1,
-            "b": 48,
-            "g": 59,
+            "b": 60,
+            "g": 56,
             "r": 255,
           },
           "font": {
@@ -28505,8 +28505,8 @@ exports[`ios-27 provisional geometry regression gate > iphone-se-3 light large 1
         {
           "color": {
             "a": 1,
-            "b": 48,
-            "g": 59,
+            "b": 60,
+            "g": 56,
             "r": 255,
           },
           "font": {

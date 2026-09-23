@@ -35,7 +35,7 @@ import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
-import type { OverlayKind } from './presentation'
+import type { NotDrawn, OverlayKind } from './presentation'
 
 /**
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
@@ -209,7 +209,6 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
           callGuide,
         }).element,
         background: systemBackground(scheme),
-        ignoresSafeArea: false,
         navigationBar: null,
         tabBar: null,
         overlay: null,
@@ -227,18 +226,34 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   const bottomTabs = regular ? 0 : tabHeight
   const bottomSearch = screen.search?.placement === 'bottom' ? screen.search.height : 0
   const topSearch = screen.search?.placement === 'top' ? screen.search.height : 0
-  const scroll = !screen.ignoresSafeArea ? primaryScroll(screen.content) : null
+  // The bars at the bottom stop short of the screen's edge, over the home indicator.
+  const bottomBarsEnd = canvas.height - Math.max(0, safeArea.bottom - SURFACES.tab.safeAreaOverlap)
+  const scroll = primaryScroll(screen.content)
   const collapseDistance = scroll && screen.navigationBar?.large ? Math.max(0, barHeight - NAV_BAR_HEIGHT) : 0
   const content = scroll ? scrollInsets(screen.content, { top: collapseDistance, leading: 0, bottom: bottomTabs + bottomSearch + safeArea.bottom, trailing: 0 }) : screen.content
-  const contentBounds: Rect = screen.ignoresSafeArea
-    ? { x: 0, y: 0, width: canvas.width, height: canvas.height }
-    : { x: safeArea.leading, y: safeArea.top + topTabs + topSearch + barHeight - collapseDistance,
-        width: canvas.width - safeArea.leading - safeArea.trailing,
-        height: Math.max(0, canvas.height - safeArea.top - topTabs - topSearch - barHeight + collapseDistance - (scroll ? 0 : safeArea.bottom + bottomTabs + bottomSearch)) }
-  const placed = engine.layout(content, contentBounds, env, CENTER)
+  const contentBounds: Rect = {
+    x: safeArea.leading, y: safeArea.top + topTabs + topSearch + barHeight - collapseDistance,
+    width: canvas.width - safeArea.leading - safeArea.trailing,
+    height: Math.max(0, canvas.height - safeArea.top - topTabs - topSearch - barHeight + collapseDistance - (scroll ? 0 : safeArea.bottom + bottomTabs + bottomSearch)),
+  }
+  // A view reaches out of the safe area on its own, where it touches an edge, and
+  // `.ignoresSafeArea()` on one view no longer makes the whole screen full-bleed.
+  const screenRect: Rect = { x: 0, y: 0, width: canvas.width, height: canvas.height }
+  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER)
   let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
+  // At rest the bar has no colour of its own in iOS 27, so what reaches under it shows
+  // through. Where nothing does, it keeps the screen's colour, which looks the same.
+  // A collapsing title keeps its surface for when the content scrolls beneath it, in
+  // the colour of what is under it.
+  const underBar = tree.nodes
+    .filter((node) => !node.parent && node.id !== 'screen' && node.frame.y < contentBounds.y - 0.5)
+    .sort((a, b) => b.z - a.z)
+  const beneath = underBar.find((node) => node.background?.kind === 'solid')?.background
   if (screen.navigationBar) {
-    const bar = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
+    const laidOut = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
+    const bar = !underBar.length ? laidOut
+      : collapseDistance && beneath ? laidOut.map((node) => node.id === 'navbar-bgf' && node.paint.kind === 'fill' ? { ...node, paint: { ...node.paint, fill: beneath } } : node)
+      : laidOut.filter((node) => node.id !== 'navbar-bgf')
     tree = appendPlaced(tree, bar, BAR_Z)
     tree = { ...tree, nodes: tree.nodes.map(node => {
       if (node.id === 'navbar-title') return { ...node, ...(collapseDistance ? { chromeRole: 'inlineTitle' as const } : {}), opacity: screen.navigationBar!.large ? 0 : node.opacity }
@@ -248,11 +263,12 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     }) }
   }
   if (screen.tabBar) {
-    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : canvas.height - Math.max(0, safeArea.bottom - SURFACES.tab.safeAreaOverlap) - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER)
+    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : bottomBarsEnd - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER)
     tree = appendPlaced(tree, bar, BAR_Z + 1000)
   }
   if (screen.search) {
-    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? canvas.height - safeArea.bottom - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
+    // At the bottom it sits where a tab bar would.
+    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? bottomBarsEnd - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
     tree = appendPlaced(tree, search, BAR_Z + 2000)
   }
   if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
@@ -449,6 +465,29 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
   return { canvas: request.canvas, nodes, revision: ++revision }
 }
 
+/**
+ * A warning for what the preview left out around a screen's containers, pointing at
+ * where it is written. A floating button in a `ZStack` beside a NavigationStack
+ * would otherwise vanish with nothing to say why.
+ */
+function notDrawnWarning(item: NotDrawn): Diagnostic {
+  return item.modifier
+    ? {
+        span: item.span,
+        severity: 'warning',
+        code: 'unsupported_swiftui_modifier',
+        feature: `.${item.modifier} on ${item.container}`,
+        message: `The preview doesn't draw .${item.modifier} written on the ${item.container}. It still appears in the app.`,
+      }
+    : {
+        span: item.span,
+        severity: 'warning',
+        code: 'unsupported_swiftui_view',
+        feature: `views beside ${item.container}`,
+        message: `The preview doesn't show views beside the ${item.container}, only what is inside it. This one still appears in the app.`,
+      }
+}
+
 function toResult(
   request: CompileRequest,
   analysis: Analysis,
@@ -468,7 +507,9 @@ function toResult(
     at: total,
   }))
 
-  const diagnostics = [...analysis.diagnostics]
+  // A sheet can be resolved more than once in a pass, so each place is said once.
+  const notDrawn = [...new Map((evaluation?.ui?.notDrawn ?? []).map((item) => [`${item.span.file}:${item.span.start}:${item.span.end}`, item])).values()]
+  const diagnostics = [...analysis.diagnostics, ...notDrawn.map(notDrawnWarning)]
   if (evaluation?.failure) {
     diagnostics.push({
       span: evaluation.failure.span,

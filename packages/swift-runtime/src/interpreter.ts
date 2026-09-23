@@ -11,6 +11,7 @@ import type {
   ForInStmt,
   FuncDecl,
   InitDecl,
+  OptionalChainEnd,
   Param,
   Pattern,
   SourceFileNode,
@@ -38,6 +39,7 @@ import {
   ContinueSignal,
   ExecutionBudgetExceeded,
   FallthroughSignal,
+  NilChainSignal,
   ReturnSignal,
   SwiftThrow,
   SwiftTrap,
@@ -1439,6 +1441,22 @@ export class Interpreter {
   // ------------------------------------------------------------- expressions
 
   evaluate(expr: Expr, env: Environment): SwiftValue {
+    return (expr as OptionalChainEnd).endsOptionalChain
+      ? this.throughChain(() => this.evaluateNode(expr, env), NIL)
+      : this.evaluateNode(expr, env)
+  }
+
+  /** Runs a whole optional chain: a `?` that meets nil anywhere inside gives `stopped` instead. */
+  private throughChain(run: () => SwiftValue, stopped: SwiftValue): SwiftValue {
+    try {
+      return run()
+    } catch (error) {
+      if (error instanceof NilChainSignal) return stopped
+      throw error
+    }
+  }
+
+  private evaluateNode(expr: Expr, env: Environment): SwiftValue {
     this.tick(expr.span)
 
     switch (expr.kind) {
@@ -1520,7 +1538,11 @@ export class Interpreter {
         return this.evaluateBinary(expr.operator, expr.left, expr.right, expr.span, env)
 
       case 'assign':
-        return this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env)
+        // `selected?.done = true` writes nothing when `selected` is nil. The target is
+        // resolved as storage rather than evaluated, so it ends its chain here.
+        return (expr.target as OptionalChainEnd).endsOptionalChain
+          ? this.throughChain(() => this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env), VOID)
+          : this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env)
 
       case 'ternary':
         return truthy(this.evaluate(expr.condition, env))
@@ -1566,8 +1588,12 @@ export class Interpreter {
       case 'keyPath':
         return keyPath(expr.components)
 
-      case 'optionalChain':
-        return this.evaluate(expr.operand, env)
+      case 'optionalChain': {
+        // `a?.b` asks nothing of a nil `a`: the rest of the chain is skipped.
+        const value = this.evaluate(expr.operand, env)
+        if (value.kind === 'nil') throw new NilChainSignal()
+        return value
+      }
 
       case 'errorExpr':
         throw new UnsupportedAtRuntime('this expression', expr.span)
@@ -1876,6 +1902,13 @@ export class Interpreter {
       return this.evaluateCall({ ...callee, name: target }, argExprs, trailing, span, env)
     }
 
+    // `a?.f(x)` and `onPick?(x)` never evaluate `x` when the chain is nil, so a call
+    // inside an optional chain settles what it calls first. Other calls keep their order.
+    const chained = insideOptionalChain(callee)
+    const receiver =
+      chained && callee.kind === 'memberAccess' && callee.base ? this.resolveReceiver(callee.base, env) : undefined
+    const calledValue = chained && callee.kind !== 'memberAccess' ? this.evaluate(callee, env) : undefined
+
     const args: CallArgument[] = argExprs.map((arg) => ({
       label: arg.label,
       value: this.evaluate(arg.value, env),
@@ -1991,13 +2024,13 @@ export class Interpreter {
 
     // A method or modifier call: `value.member(args)`.
     if (callee.kind === 'memberAccess') {
-      const evaluate = () => this.evaluateMemberCall(callee.base, callee.member, callee.memberSpan, args, allArgs, trailingClosure, span, env)
+      const evaluate = () => this.evaluateMemberCall(callee.base, callee.member, callee.memberSpan, args, allArgs, trailingClosure, span, env, receiver)
       return callee.base && this.host.withMemberScope
         ? this.host.withMemberScope(callee.member, args, evaluate)
         : evaluate()
     }
 
-    const value = this.evaluate(callee, env)
+    const value = calledValue ?? this.evaluate(callee, env)
     if (value.kind === 'function') return this.callFunction(value, allArgs, span)
     if (value.kind === 'closure') return this.callClosure(value, allArgs.map((a) => a.value), span)
 
@@ -2012,6 +2045,12 @@ export class Interpreter {
     this.trap(`Cannot call value of type '${typeNameOf(value)}'`, span)
   }
 
+  /** A mutating method needs the *storage*, not a copy, or its writes are lost. */
+  private resolveReceiver(baseExpr: Expr, env: Environment): Receiver {
+    const lvalue = this.tryResolveLValue(baseExpr, env)
+    return { lvalue, target: lvalue ? lvalue.get() : this.evaluate(baseExpr, env) }
+  }
+
   private evaluateMemberCall(
     baseExpr: Expr | null,
     member: string,
@@ -2023,6 +2062,8 @@ export class Interpreter {
     trailingClosure: ClosureValue | null,
     span: SourceSpan,
     env: Environment,
+    /** Already resolved by a call inside an optional chain, which needed it first. */
+    receiver?: Receiver,
   ): SwiftValue {
     if (!baseExpr) {
       const extended = this.extensionStatic(member, memberSpan)
@@ -2038,9 +2079,7 @@ export class Interpreter {
       this.trap(`Cannot infer contextual base for '.${member}'`, memberSpan)
     }
 
-    // A mutating method needs the *storage*, not a copy, or its writes are lost.
-    const lvalue = this.tryResolveLValue(baseExpr, env)
-    const target = lvalue ? lvalue.get() : this.evaluate(baseExpr, env)
+    const { lvalue, target } = receiver ?? this.resolveReceiver(baseExpr, env)
 
     // `super.speak()` - same receiver, lookup starting one level up, so an override
     // can call the thing it overrode instead of itself.
@@ -3176,6 +3215,28 @@ function labelsMatch(params: readonly Param[], written: readonly (string | null)
     if (!params[i]!.defaultValue) return false
   }
   return next === written.length
+}
+
+/** A method call's receiver: its storage when it has one, and its value. */
+interface Receiver {
+  readonly lvalue: LValue | null
+  readonly target: SwiftValue
+}
+
+/** Whether `expr` is inside an optional chain that has not ended yet: `a?.b` in `a?.b.f()`. */
+function insideOptionalChain(expr: Expr): boolean {
+  let node: Expr | null = expr
+  while (node) {
+    if (node.kind === 'optionalChain') return true
+    if ((node as OptionalChainEnd).endsOptionalChain) return false
+    node =
+      node.kind === 'memberAccess' ? node.base
+      : node.kind === 'call' ? node.callee
+      : node.kind === 'subscript' ? node.base
+      : node.kind === 'forceUnwrap' ? node.operand
+      : null
+  }
+  return false
 }
 
 function labelsOf(args: readonly CallArgument[]): readonly (string | null)[] {

@@ -4,6 +4,7 @@ import type {
   TransformSpec,
   CornerStyle,
   ShapeStroke,
+  ShapeTrim,
   SliderPayload,
   FilterSpec,
   Fill,
@@ -28,6 +29,7 @@ import {
   type LayoutEnvironment,
   type LayoutModifier,
   type ModifiedElement,
+  type SafeAreaEdges,
   type ScrollElement,
   type StackElement,
   type TableElement,
@@ -86,6 +88,7 @@ export type PaintSpec =
       readonly cornerStyle?: CornerStyle
       readonly fill?: Fill
       readonly stroke?: ShapeStroke
+      readonly trim?: ShapeTrim
     }
   | {
       readonly kind: 'path'
@@ -588,8 +591,10 @@ export class LayoutEngine {
       case 'blendMode':
       case 'redacted':
       case 'unredacted':
+      case 'ignoresSafeArea':
         // Paint-time: layout still reserves the untransformed size, which is why a
         // scaled view overlaps its neighbours and a redacted one keeps its shape.
+        // Reaching into the safe area is decided where the view is placed too.
         return this.measure(element.child, proposal, inner)
 
       case 'position':
@@ -848,6 +853,7 @@ export class LayoutEngine {
                 ? {}
                 : { fill: env.foregroundFill ?? { kind: 'solid' as const, color: env.foregroundColor } }),
             ...(element.stroke ? { stroke: { ...element.stroke, color: element.stroke.usesForeground ? env.foregroundColor : element.stroke.color } } : {}),
+            ...(element.trim ? { trim: element.trim } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -922,7 +928,7 @@ export class LayoutEngine {
     parent: string | null,
   ): number {
     const vertical = element.axis === 'vertical'
-    env = { ...env, containerSize: { width: bounds.width, height: bounds.height } }
+    env = { ...env, containerSize: { width: bounds.width, height: bounds.height }, safeArea: undefined }
     const proposal: ProposedSize = { width: bounds.width, height: bounds.height }
     const content = this.measure(element.content, scrollProposal(element, proposal), env)
 
@@ -1294,7 +1300,9 @@ export class LayoutEngine {
         // makes `.padding().background()` cover the padding and
         // `.background().padding()` not.
         const size = this.measure(modifier.content, { width: bounds.width, height: bounds.height }, inner)
-        const next = this.place(modifier.content, modifier.alignment ? alignedRect(bounds, size, modifier.alignment) : bounds, inner, out, z, parent)
+        const behind = modifier.ignoresSafeAreaEdges ? reachIntoSafeArea(bounds, env, modifier.ignoresSafeAreaEdges).rect : bounds
+        const content = behind === bounds ? modifier.content : gradientKeptTo(modifier.content, bounds, behind)
+        const next = this.place(content, modifier.alignment ? alignedRect(behind, size, modifier.alignment) : behind, inner, out, z, parent)
         return this.place(element.child, bounds, inner, out, next, parent)
       }
 
@@ -1613,6 +1621,15 @@ export class LayoutEngine {
         // These are inherited paint facts rather than boxes of their own, so they
         // travel in the environment and every node below carries them out.
         return this.place(element.child, bounds, inner, out, z, parent)
+
+      case 'ignoresSafeArea': {
+        // The view is proposed the room it reaches to, and keeps to the edge it
+        // reached: `.frame(height: 200).ignoresSafeArea(edges: .top)` at the top of
+        // the screen moves up to 0-200, as in the simulator, rather than growing.
+        const { rect, reached } = reachIntoSafeArea(bounds, env, modifier.edges)
+        const size = this.measure(element.child, { width: rect.width, height: rect.height }, inner)
+        return this.place(element.child, keptToReachedEdges(bounds, rect, size, reached), inner, out, z, parent)
+      }
 
       case 'hitTarget': {
         let controlEnv = inner
@@ -2065,4 +2082,73 @@ function relativeContainerProposal(modifier: Extract<LayoutModifier, { kind: 'co
     width: modifier.horizontal ? dimension(env.containerSize?.width, proposal.width) : proposal.width,
     height: modifier.vertical ? dimension(env.containerSize?.height, proposal.height) : proposal.height,
   }
+}
+
+/**
+ * Where a view reaches into the safe area: on each edge it is allowed to, and only if
+ * its bounds already touch that edge of the safe area. That is SwiftUI's rule, and it
+ * is why a full-screen background reaches under the status bar and a card in the
+ * middle of the screen doesn't.
+ */
+function reachIntoSafeArea(bounds: Rect, env: LayoutEnvironment, edges: SafeAreaEdges): { rect: Rect; reached: SafeAreaEdges } {
+  const area = env.safeArea
+  const none = { top: false, bottom: false, leading: false, trailing: false }
+  if (!area) return { rect: bounds, reached: none }
+  const touching = 0.5
+  const reached = {
+    top: edges.top && bounds.y <= area.inner.y + touching && area.outer.y < bounds.y,
+    bottom: edges.bottom && bounds.y + bounds.height >= area.inner.y + area.inner.height - touching && area.outer.y + area.outer.height > bounds.y + bounds.height,
+    leading: edges.leading && bounds.x <= area.inner.x + touching && area.outer.x < bounds.x,
+    trailing: edges.trailing && bounds.x + bounds.width >= area.inner.x + area.inner.width - touching && area.outer.x + area.outer.width > bounds.x + bounds.width,
+  }
+  if (!reached.top && !reached.bottom && !reached.leading && !reached.trailing) return { rect: bounds, reached }
+  const x = reached.leading ? area.outer.x : bounds.x
+  const y = reached.top ? area.outer.y : bounds.y
+  const right = reached.trailing ? area.outer.x + area.outer.width : bounds.x + bounds.width
+  const bottom = reached.bottom ? area.outer.y + area.outer.height : bounds.y + bounds.height
+  return { rect: { x, y, width: right - x, height: bottom - y }, reached }
+}
+
+/**
+ * A view's rect once it has reached into the safe area: across the whole of an axis
+ * where it reached both edges, against the one edge it reached, and where it was on
+ * an axis where it reached neither.
+ */
+function keptToReachedEdges(bounds: Rect, rect: Rect, size: Size, reached: SafeAreaEdges): Rect {
+  const x = keptOnAxis({ start: bounds.x, length: bounds.width }, { start: rect.x, length: rect.width }, size.width, reached.leading, reached.trailing)
+  const y = keptOnAxis({ start: bounds.y, length: bounds.height }, { start: rect.y, length: rect.height }, size.height, reached.top, reached.bottom)
+  return { x: x.start, y: y.start, width: x.length, height: y.length }
+}
+
+/** One axis of a view that reached into the safe area; `own` is the length it asked for. */
+function keptOnAxis(was: Span, reach: Span, own: number, reachedStart: boolean, reachedEnd: boolean): Span {
+  if (reachedStart && reachedEnd) return reach
+  const length = Math.min(own, reach.length)
+  if (reachedStart) return { start: reach.start, length }
+  if (reachedEnd) return { start: reach.start + reach.length - length, length }
+  return was
+}
+
+/** A stretch along one axis. */
+interface Span {
+  readonly start: number
+  readonly length: number
+}
+
+/**
+ * A gradient background that reaches into the safe area still blends across its own
+ * view, and holds its end colours beyond it: measured in the iOS 27 simulator, a
+ * full-screen gradient changes colour only between the safe area's edges. Its points
+ * are moved into the rect it now fills, so they land where they did.
+ */
+function gradientKeptTo(content: LayoutElement, view: Rect, reach: Rect): LayoutElement {
+  if (content.kind !== 'fill') return content
+  const point = (p: { x: number; y: number }) => ({
+    x: reach.width ? (view.x + p.x * view.width - reach.x) / reach.width : p.x,
+    y: reach.height ? (view.y + p.y * view.height - reach.y) / reach.height : p.y,
+  })
+  const fill = content.fill
+  if (fill.kind === 'linearGradient') return { ...content, fill: { ...fill, start: point(fill.start), end: point(fill.end) } }
+  if (fill.kind === 'radialGradient' || fill.kind === 'angularGradient') return { ...content, fill: { ...fill, center: point(fill.center) } }
+  return content
 }

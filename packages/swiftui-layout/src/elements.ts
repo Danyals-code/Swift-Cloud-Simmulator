@@ -1,4 +1,4 @@
-import type { Point, CornerStyle, ShapeStroke, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type { Point, CornerStyle, Rect, ShapeStroke, ShapeTrim, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -147,6 +147,7 @@ export interface ShapeElement extends ElementBase {
   /** `.fill(…)`; without one the shape takes the inherited foreground colour. */
   readonly fill?: Fill
   readonly stroke?: ShapeStroke
+  readonly trim?: ShapeTrim
 }
 
 export interface SliderElement extends ElementBase {
@@ -312,7 +313,13 @@ export type LayoutModifier =
       readonly maxHeight?: number
       readonly alignment: Alignment
     }
-  | { readonly kind: 'background'; readonly content: LayoutElement; readonly alignment?: Alignment }
+  /**
+   * `ignoresSafeAreaEdges` is the ShapeStyle background's own: `.background(.red)`
+   * reaches into the safe area its view touches, and `.background { Color.red }` doesn't.
+   */
+  | { readonly kind: 'background'; readonly content: LayoutElement; readonly alignment?: Alignment; readonly ignoresSafeAreaEdges?: SafeAreaEdges }
+  /** `.ignoresSafeArea(edges:)`: the view reaches into the safe area on the edges it touches. */
+  | { readonly kind: 'ignoresSafeArea'; readonly edges: SafeAreaEdges }
   | { readonly kind: 'font'; readonly font: ResolvedFont }
   /** `.fontWeight` / `.bold` / `.italic`: adjust the inherited face, keep its size. */
   | {
@@ -551,6 +558,14 @@ export interface TransitionHint {
   readonly duration: number
 }
 
+/** Which of a view's edges may reach into the safe area. */
+export interface SafeAreaEdges {
+  readonly top: boolean
+  readonly bottom: boolean
+  readonly leading: boolean
+  readonly trailing: boolean
+}
+
 /**
  * Values inherited down the tree.
  *
@@ -560,6 +575,12 @@ export interface TransitionHint {
  * `VStack { Text(…) }.font(.largeTitle)` size its text correctly.
  */
 export interface LayoutEnvironment {
+  /**
+   * The screen's safe area: where content is laid out, and the whole screen a view
+   * touching its edge may reach out to. Unset inside a scroll view, whose content
+   * never reaches out.
+   */
+  readonly safeArea?: { readonly inner: Rect; readonly outer: Rect }
   /** Nearest window/scroll viewport, independent of intervening layout proposals. */
   readonly containerSize?: { readonly width: number | null; readonly height: number | null }
   readonly fontExplicit?: boolean

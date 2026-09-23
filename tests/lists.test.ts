@@ -1,4 +1,4 @@
-import { ancestors } from './render-geometry'
+import { ancestors, worldFrame } from './render-geometry'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, RenderNode, RenderTree } from '@studio/shared'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
@@ -185,14 +185,14 @@ struct RootView: View {
 }
 `
 
-  it('draws search in the navigation drawer on phones', () => {
+  it('draws search at the bottom of the screen on phones, over the list', () => {
     const result = run(SEARCH_APP)
     const field = (result.renderTree?.nodes ?? []).find((n) => n.hitTarget?.role === 'textField')
     expect(field).toBeDefined()
     expect(field!.hitTarget!.placeholder).toBe('Search')
 
-    expect(ancestors(result.renderTree!.nodes, field!).map(node => node.id)).toContain(result.renderTree!.chrome!.scrollId)
-    expect(field!.frame.y).toBeLessThan(100)
+    expect(ancestors(result.renderTree!.nodes, field!).map(node => node.id)).not.toContain(result.renderTree!.chrome!.scrollId)
+    expect(worldFrame(result.renderTree!.nodes, field!).y).toBeGreaterThan(device.height - 100)
   })
 
   it('filters the list through its binding', () => {

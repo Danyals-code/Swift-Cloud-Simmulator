@@ -10,6 +10,15 @@ An additional 15 light/dark control and presentation images are in
 `tests/fixtures/ios27-visual-stress.swift`. See [the measurement report](../17-IOS-CONTROL-PARITY.md).
 iPhone is the current priority; the broader iPad/accessibility matrix remains pending.
 
+28 light images in [native/iphone18pro-misrenders](native/iphone18pro-misrenders/measurements.json),
+paired with `tests/fixtures/ios27-misrenders.swift`, measure what the study build's preview
+fixes rely on: the system and hierarchical colours, where `trim` starts and which way paths
+run, which backgrounds reach under the safe area, the navigation and tab bars over them,
+where presentations and search written on a NavigationStack or TabView appear, and where
+the search field goes with and without a tab bar. Each
+screen is launched with `-screen <name>`, so the captures need no tapping. The tests that
+use a value cite this set.
+
 1. Generate a comparison Xcode project from the exact tested Swift source:
 
    ```sh

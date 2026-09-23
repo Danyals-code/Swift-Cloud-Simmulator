@@ -73,7 +73,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Button` | ✅ | 3 | |
+| `Button` | ✅ | 3 | every action form: a trailing closure, `action:` with a closure or a named function, `action:label:`, and with `role:` or `systemImage:` |
 | `Toggle` | ✅ | 6 | |
 | `Slider` | ✅ | 6 | |
 | `Stepper` | ✅ | 6 | each half is its own target; `step:` and `in:` are both honoured |
@@ -91,10 +91,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `List` | 🟡 | 6 | plain/grouped/sidebar styles; binding collection closures are unsupported |
 | `Section` | ✅ | 6 | header and footer, the footer in the secondary colour under the card |
 | `Form` | ✅ | 6 | the grouped-list form |
-| `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included |
+| `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included; `perform:` takes a closure or a named function, as do `.onAppear`, `.task` and `.onTapGesture` |
 | `.onMove` | ⬜ | - | warns; no reorder UI or modifier callback. The array move helper is separate |
 | `.swipeActions` | ⬜ | - | warns; custom actions are ignored. Standard delete requires `.onDelete` |
-| `.searchable` | ✅ | 7 | a field above the content, with its magnifying glass, writing its binding |
+| `.searchable` | ✅ | 7 | a field with its magnifying glass, writing its binding. On a phone it is at the bottom of the screen, or under the title in a tab app, and on iPad in the toolbar. Written on the NavigationStack, it searches the stack's root screen only, and on a TabView without a search tab it draws nothing, as in iOS 27 |
 | `.refreshable` | ⬜ | - | pull-to-refresh callback is not implemented |
 | `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |
 | `Table` / `OutlineGroup` | ⬜ | - | a labelled placeholder. The closure of a view the preview does not draw is no longer run, so a `TableColumn`'s row parameter cannot trap |
@@ -131,10 +131,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.padding` | ✅ | 3 | all edge-set forms |
 | `.fixedSize` | ✅ | 6 | both the whole-view and per-axis forms |
 | `.layoutPriority` | ✅ | 7 | the highest-priority group takes its space first |
-| `.offset` | ✅ | 6 | paint-time, so neighbours do not move |
-| `.position` | ✅ | 7 | centres the view on a point in its parent's space |
+| `.offset` | ✅ | 6 | paint-time, so neighbours do not move; `x:y:` or a `CGSize` |
+| `.position` | ✅ | 7 | centres the view on a point in its parent's space; `x:y:` or a `CGPoint` |
 | `.aspectRatio` / `.scaledToFit` / `.scaledToFill` | ✅ | 7 | |
-| `.ignoresSafeArea` | ✅ | 7 | resolved by the pipeline, which owns the device's edges |
+| `.ignoresSafeArea` | ✅ | 7 | per view, as in iOS 27: a view reaches into the safe area only across the edges it touches, and moves rather than grows. `.keyboard` alone changes nothing; `.edgesIgnoringSafeArea` is read the same way |
 | `.safeAreaInset` | ✅ | - | all four edges; the content is *inset*, not overlaid, so a bar drawn this way does not cover the last row |
 | `.alignmentGuide` | ✅ | - | the stack aligns guides rather than edges, so a guide can be replaced. `d.width`, `d.height` and `d[.leading]` and friends all read |
 | `.containerRelativeFrame` | 🟡 | - | takes the container's size along the named axes, divided by `count`. The container is whatever proposed the size, which is the scroll view or stack above it |
@@ -144,7 +144,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Modifier | Status | Phase |
 | --- | --- | --- |
 | `.foregroundStyle` / `.foregroundColor` | ✅ | 3 |
-| `.background` (colour, gradient, shape, view) | ✅ | 6 | materials, content builders, alignment, and built-in shape clipping via `in:`; `fillStyle:` warns as unsupported |
+| `.background` (colour, gradient, shape, view) | ✅ | 6 | materials, content builders, alignment, and built-in shape clipping via `in:`; `fillStyle:` warns as unsupported. A colour, gradient or material reaches into the safe area its view touches, as the ShapeStyle form does in iOS 27; a view given as the background stays inside |
 | `.overlay` | ✅ | 6 | view arguments and content builders, including interactive content and alignment |
 | `.font` (text styles and `.system(size:weight:design:)`) | ✅ | 6 | |
 | `.bold` / `.italic` / `.fontWeight` | ✅ | 6 | compose with `.font` in either order |
@@ -186,10 +186,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 |
 | `Path` (custom) | ✅ | 7 | lines, curves, arcs, rects and ellipses, serialised to SVG |
 | `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`'s `lineWidth`; a `StrokeStyle` dash pattern is not drawn |
-| `.trim` | 🟡 | 7 | exact for arcs - progress rings - approximate elsewhere |
+| `.trim` | 🟡 | 7 | on shapes and paths, from where iOS 27 starts each shape (3 o'clock; a rectangle's top-left corner) and in an arc's own direction. On the built-in shapes, strokes only: a trimmed fill, or a trimmed stroke with a dash pattern, is drawn whole and warns. A path's arcs are trimmed whether filled or stroked |
 | `.strokeBorder` | ⬜ | - |
 | Custom `Shape` conformances | ✅ | 11 | `struct Arc: Shape { func path(in rect: CGRect) -> Path }`, with `.fill`, `.stroke` and `.trim` on the path it draws and `.frame` on the box it draws into. The rect is the one the shape was laid out in last pass, converging on the next - the same answer `GeometryReader` gives to the same ordering problem. `rect.minX` and the rest are derived, as `CGRect` derives them |
-| `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 |
+| `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 | and the iOS 27 system, label, fill and grey colours by any of their names (`Color(.systemGray6)`, `Color(uiColor:)`, `UIColor.systemGray6`), the hierarchy down to `.quinary` including a colour's own (`.blue.secondary`), and `hue:saturation:brightness:`; measured in the iOS 27 simulator. An unknown name warns |
 | Dark-mode colour resolution | ✅ | 4 |
 | `LinearGradient` | ✅ | 6 | named unit points |
 | `RadialGradient` / `AngularGradient` | 🟡 | 6 | accepted and drawn as a linear gradient |
@@ -438,6 +438,20 @@ Listed in the exported README so nothing is a surprise on the Mac:
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses
     a use leaves a name the compiler will point at, where one that renames the wrong symbol
     leaves code that compiles and is wrong.
+21. **Views beside a NavigationStack or a TabView are not drawn.** A screen is the content of
+    its container, so a floating button in a `ZStack` beside the stack, a banner above a
+    TabView, and an `.overlay` or `.safeAreaInset` written on the stack are left out. Each one
+    warns where it is written. Sheets, alerts and search written on the containers do show.
+22. **A trimmed fill is drawn whole.** `.trim` cuts strokes; iOS fills just the trimmed part of
+    a filled shape, closed by a straight line. The fill warns.
+23. **Gradients blend in sRGB.** Measured in the iOS 27 simulator, a gradient blends in Oklab,
+    which keeps a red-to-blue gradient from greying in the middle. The end colours and their
+    positions are the same.
+24. **A tab app's search field shows from the start.** iOS 27 keeps it folded under the title
+    until the list is pulled down, and the preview draws it as it is then.
+25. **A search drawer shown always keeps a large title.** With
+    `.navigationBarDrawer(displayMode: .always)`, iOS 27 makes the title inline, and the
+    preview keeps it large.
 
 ## The strictness pass (R5)
 

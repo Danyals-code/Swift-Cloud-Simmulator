@@ -1,5 +1,8 @@
 import type { ComponentSource, SourceSpan } from '@studio/shared'
-import { describe, type ClosureValue, type SwiftValue } from '@studio/swift-runtime'
+import { describe, type ClosureValue, type FunctionValue, type SwiftValue } from '@studio/swift-runtime'
+
+/** What a control runs: a closure, or a function named as a value - `Button("Save", action: save)`. */
+export type ActionValue = ClosureValue | FunctionValue
 
 /**
  * An evaluated view.
@@ -20,8 +23,8 @@ export interface ViewValue {
   readonly args: readonly ViewArg[]
   readonly children: readonly ViewValue[]
   readonly modifiers: readonly ModifierValue[]
-  /** A `Button`'s trailing closure, kept to be run on tap. */
-  readonly action: ClosureValue | null
+  /** A `Button`'s action - its `action:` argument or its trailing closure - kept to be run on tap. */
+  readonly action: ActionValue | null
   readonly span: SourceSpan
   /** Source call sites survive component expansion without adding runtime nodes. */
   readonly componentSources?: readonly ComponentSource[]
@@ -81,7 +84,7 @@ export type ViewIntent =
       readonly by: number
       readonly bounds?: { readonly min: number; readonly max: number }
     }
-  | { readonly kind: 'run'; readonly closure: ClosureValue; readonly dismiss?: ViewIntent }
+  | { readonly kind: 'run'; readonly action: ActionValue; readonly dismiss?: ViewIntent }
   /** A gesture attached with `.gesture(…)`; the event decides which handlers run. */
   | { readonly kind: 'gesture'; readonly gesture: SwiftValue }
   /** Dragging a list row sideways to reveal its actions. */
@@ -95,7 +98,7 @@ export type ViewIntent =
   /** Choosing one of them: writes the selection and closes in one press. */
   | { readonly kind: 'choose'; readonly binding: SwiftValue; readonly value: SwiftValue }
   /** `.onDelete` - remove the row at this offset from the collection. */
-  | { readonly kind: 'delete'; readonly closure: ClosureValue; readonly offset: number; readonly row: string }
+  | { readonly kind: 'delete'; readonly action: ActionValue; readonly offset: number; readonly row: string }
 
 export interface ViewArg {
   readonly label: string | null
@@ -126,6 +129,13 @@ export interface ModifierValue {
    * and the resolver runs it only if and when the sheet is actually presented.
    */
   readonly closure: ClosureValue | null
+  /**
+   * What an event modifier runs - `.onAppear`, `.task`, `.onChange`, `.onDelete`,
+   * `.onTapGesture`, `.onSubmit`: its trailing closure, or the closure or function its
+   * `perform:`, `action:` or unlabelled argument names. Xcode's own template writes
+   * `.onDelete(perform: deleteItems)`.
+   */
+  readonly action?: ActionValue
   /**
    * The environment in scope where the modifier was *written*.
    *

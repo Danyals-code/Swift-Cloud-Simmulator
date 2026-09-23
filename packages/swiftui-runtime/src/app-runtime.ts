@@ -42,6 +42,7 @@ import {
   BUTTON_CONFIGURATION_TYPE,
   DIMENSIONS_TYPE,
   handlerIdFor,
+  type ActionValue,
   type AnimationPayload,
   type EnvironmentFrame,
   type ViewIntent,
@@ -143,7 +144,7 @@ export class AppRuntime {
   /** Values `.onChange(of:)` is watching, as of the last pass. */
   private watched = new Map<string, SwiftValue>()
   /** `.onDisappear` closures, kept from the pass that last saw each view. */
-  private disappearing = new Map<string, ClosureValue>()
+  private disappearing = new Map<string, ActionValue>()
 
 
   /**
@@ -486,7 +487,7 @@ export class AppRuntime {
         seen.add(hook.path)
         if (this.appeared.has(hook.path)) continue
         this.appeared.add(hook.path)
-        this.invokeHook(hook.closure, [])
+        this.invokeHook(hook.action, [])
         ran = true
         continue
       }
@@ -496,9 +497,9 @@ export class AppRuntime {
         const previous = this.watched.get(hook.path)
         this.watched.set(hook.path, copyValue(hook.watched))
         if (previous === undefined ? !hook.initial : valuesEqual(previous, hook.watched)) continue
-        const args = hook.closure.params.length >= 2
+        const args = parameterCount(hook.action) >= 2
           ? [previous ?? hook.watched, hook.watched] : [hook.watched]
-        this.invokeHook(hook.closure, args)
+        this.invokeHook(hook.action, args)
         ran = true
       }
     }
@@ -512,7 +513,7 @@ export class AppRuntime {
       // Also counted as present: a view may have `.onDisappear` without `.onAppear`,
       // and something has to record that it was here in order to notice it leaving.
       this.appeared.add(hook.path)
-      this.disappearing.set(hook.path, hook.closure)
+      this.disappearing.set(hook.path, hook.action)
     }
 
     for (const path of [...this.appeared]) {
@@ -537,14 +538,21 @@ export class AppRuntime {
     return ran
   }
 
-  private invokeHook(closure: ClosureValue, args: readonly SwiftValue[]): void {
+  private invokeHook(action: ActionValue, args: readonly SwiftValue[]): void {
     try {
-      this.interpreter.callClosure(closure, args, closure.span)
+      this.run(action, args)
     } catch (error) {
       // A failing lifecycle callback is reported, not fatal: the screen it was about
       // to decorate is still worth showing.
-      this.host.log(`Lifecycle callback failed: ${toFailure(error).message}`, closure.span, 'error')
+      this.host.log(`Lifecycle callback failed: ${toFailure(error).message}`, actionSpan(action), 'error')
     }
+  }
+
+  /** Runs what a control or modifier holds: a closure, or a function named as a value. */
+  private run(action: ActionValue, args: readonly SwiftValue[]): void {
+    const span = actionSpan(action)
+    if (action.kind === 'function') this.interpreter.callFunction(action, args.map((value) => ({ label: null, value, span })), span)
+    else this.interpreter.callClosure(action, args, span)
   }
 
   get stateSnapshot(): ReadonlyMap<string, { value: SwiftValue }> {
@@ -557,7 +565,7 @@ export class AppRuntime {
     switch (intent.kind) {
       case 'run':
         if (intent.dismiss) this.perform(intent.dismiss, event)
-        this.interpreter.callClosure(intent.closure, [], intent.closure.span)
+        this.run(intent.action, [])
         return
 
       case 'push': {
@@ -608,11 +616,7 @@ export class AppRuntime {
       }
 
       case 'delete': {
-        this.interpreter.callClosure(
-          intent.closure,
-          [indexSet([intent.offset])],
-          intent.closure.span,
-        )
+        this.run(intent.action, [indexSet([intent.offset])])
         // The row is gone, so nothing should stay swiped open behind it.
         this.ui.closeSwipes()
         return
@@ -686,18 +690,14 @@ export class AppRuntime {
       if (phase !== 'ended') {
         for (const update of part.updates) {
           if (!asProjection(update.binding)) continue
-          this.interpreter.callClosure(
-            update.closure,
-            [payload, update.binding, { kind: 'void' }],
-            update.closure.span,
-          )
+          this.run(update.action, [payload, update.binding, { kind: 'void' }])
         }
       }
 
       for (const handler of part.handlers) {
         const wanted = phase === 'ended' ? 'ended' : 'changed'
         if (handler.phase !== wanted) continue
-        this.interpreter.callClosure(handler.closure, [payload], handler.closure.span)
+        this.run(handler.action, [payload])
       }
     }
 
@@ -1195,7 +1195,16 @@ function valueForEvent(fallback: SwiftValue, event: UIEvent): SwiftValue {
 }
 
 function spanOf(intent: ViewIntent): SourceSpan {
-  return intent.kind === 'run' ? intent.closure.span : { file: '', start: 0, end: 0 }
+  return intent.kind === 'run' ? actionSpan(intent.action) : { file: '', start: 0, end: 0 }
+}
+
+/** Where an action is written: the closure, or the declaration of the function it names. */
+function actionSpan(action: ActionValue): SourceSpan {
+  return action.kind === 'function' ? action.decl.span : action.span
+}
+
+function parameterCount(action: ActionValue): number {
+  return action.kind === 'function' ? action.decl.params.length : action.params.length
 }
 
 /** Handler id for the view at a given tree path. */
