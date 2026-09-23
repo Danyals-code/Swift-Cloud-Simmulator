@@ -35,7 +35,7 @@ import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
-import type { OverlayKind } from './presentation'
+import type { NotDrawn, OverlayKind } from './presentation'
 
 /**
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
@@ -449,6 +449,29 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
   return { canvas: request.canvas, nodes, revision: ++revision }
 }
 
+/**
+ * A warning for what the preview left out around a screen's containers, pointing at
+ * where it is written. A floating button in a `ZStack` beside a NavigationStack
+ * would otherwise vanish with nothing to say why.
+ */
+function notDrawnWarning(item: NotDrawn): Diagnostic {
+  return item.modifier
+    ? {
+        span: item.span,
+        severity: 'warning',
+        code: 'unsupported_swiftui_modifier',
+        feature: `.${item.modifier} on ${item.container}`,
+        message: `The preview doesn't draw .${item.modifier} written on the ${item.container}. It still appears in the app.`,
+      }
+    : {
+        span: item.span,
+        severity: 'warning',
+        code: 'unsupported_swiftui_view',
+        feature: `views beside ${item.container}`,
+        message: `The preview doesn't show views beside the ${item.container}, only what is inside it. This one still appears in the app.`,
+      }
+}
+
 function toResult(
   request: CompileRequest,
   analysis: Analysis,
@@ -468,7 +491,7 @@ function toResult(
     at: total,
   }))
 
-  const diagnostics = [...analysis.diagnostics]
+  const diagnostics = [...analysis.diagnostics, ...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning)]
   if (evaluation?.failure) {
     diagnostics.push({
       span: evaluation.failure.span,

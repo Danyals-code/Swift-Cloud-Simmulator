@@ -166,6 +166,20 @@ export interface ResolvedUI {
   /** Set when the last state change happened inside `withAnimation`. */
   readonly animation: AnimationPayload | null
   readonly lifecycle: readonly LifecycleHook[]
+  /** What was written around the screen's containers and isn't drawn (see `notDrawn`). */
+  readonly notDrawn?: readonly NotDrawn[]
+}
+
+/**
+ * Something the preview leaves out when it cuts a screen out of its containers: a
+ * view beside a NavigationStack or a TabView - a floating button in a `ZStack`, a
+ * banner above - or a drawing modifier written on the container itself.
+ */
+export interface NotDrawn {
+  readonly span: SourceSpan
+  readonly container: string
+  /** The modifier left out, when it is one; otherwise a view is. */
+  readonly modifier?: string
 }
 
 /** Framework-owned state: what the user's code does not hold but the screen needs. */
@@ -403,6 +417,10 @@ class Resolver {
       findView(withTabs.content, 'NavigationSplitView')
     const screen = nav ? this.resolveNavigation(nav) : { content: withTabs.content, navigationBar: null }
     this.around = containersAbove(stamped, tabs, withTabs.content, nav)
+    const notDrawn = [
+      ...(tabs ? notDrawnAround(stamped, tabs) : []),
+      ...(nav ? notDrawnAround(withTabs.content, nav) : []),
+    ]
 
     // A menu sits above everything, including a sheet: it is the thing the user just
     // opened, and it is the only one they can interact with while it is up.
@@ -449,6 +467,7 @@ class Resolver {
       handlers: this.handlers,
       animation: this.ctx.animation,
       lifecycle: this.lifecycle,
+      ...(notDrawn.length ? { notDrawn } : {}),
     }
   }
 
@@ -1721,6 +1740,30 @@ function containersAbove(
   nav: ViewValue | null,
 ): ViewValue[] {
   return [...(tabs ? pathTo(root, tabs) : []), ...(nav ? pathTo(page, nav) : [])]
+}
+
+/** Modifiers that draw, and are left out when they are written on a screen's container. */
+const DRAWN_ON_CONTAINER: ReadonlySet<string> = new Set(['overlay', 'safeAreaInset'])
+
+/**
+ * Everything on the way down to `container` that the screen leaves out: the views
+ * beside each step, and the drawing modifiers written on the steps themselves. The
+ * container's own content is the screen, so only what surrounds it is lost.
+ */
+function notDrawnAround(views: readonly ViewValue[], container: ViewValue): NotDrawn[] {
+  const path = pathTo(views, container)
+  const beside = path.flatMap((step, i) =>
+    (i === 0 ? views : path[i - 1]!.children).filter((view) => view !== step))
+  return [
+    ...beside.map((view) => ({ span: view.span, container: container.name })),
+    ...path.flatMap((step) => step.modifiers.flatMap((modifier, i) => {
+      if (!DRAWN_ON_CONTAINER.has(modifier.name)) return []
+      // A modifier's span runs from the start of the whole chain, so its own text is
+      // what follows the step before it: the view's call, or the previous modifier.
+      const start = (i === 0 ? step.span : step.modifiers[i - 1]!.span).end
+      return [{ span: { ...modifier.span, start }, container: container.name, modifier: modifier.name }]
+    })),
+  ]
 }
 
 /** The views from a list down to `target`, both inclusive, or none when it isn't there. */

@@ -24,15 +24,20 @@ struct ContentView: View {
 
 let revision = 1
 
-/** A whole `ContentView` - its state and helpers as well as `body` - and the declarations it uses. */
-function runView(members: string, declarations = '', options: Partial<CompileRequest> = {}): CompileResult {
-  const source = `import SwiftUI
+/** An app whose `ContentView` has these members - state and helpers as well as `body` - and these declarations. */
+const viewSource = (members: string, declarations = '') => `import SwiftUI
 @main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
 ${declarations}
 struct ContentView: View {
 ${members}
 }`
-  const result = compile({ files: [{ id: 'App.swift', text: source }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: revision++, ...options })
+
+const compileView = (source: string, options: Partial<CompileRequest> = {}) =>
+  compile({ files: [{ id: 'App.swift', text: source }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: revision++, ...options })
+
+/** A whole `ContentView`, which must draw with nothing to report. */
+function runView(members: string, declarations = '', options: Partial<CompileRequest> = {}): CompileResult {
+  const result = compileView(viewSource(members, declarations), options)
   expect(result.diagnostics).toEqual([])
   expect(result.renderTree).not.toBeNull()
   return result
@@ -327,6 +332,32 @@ describe('E3: presentations and search written on a NavigationStack or a TabView
       }`, '', { allPages: true })
     const sheets = (r.pages ?? []).filter(page => page.kind === 'sheet')
     expect(sheets.flatMap(page => page.tree.nodes.flatMap(n => n.text?.runs.map(run => run.text) ?? []))).toContain('New item')
+  })
+
+  /** The warnings, each with the source it points at. */
+  function warned(members: string) {
+    const source = viewSource(members)
+    return compileView(source).diagnostics.map(d => ({ severity: d.severity, message: d.message, at: source.slice(d.span.start, d.span.end) }))
+  }
+
+  it('warns, at the view, that a view beside a NavigationStack or a TabView is not drawn', () => {
+    expect(warned(`var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+          NavigationStack { Text("Home") }
+          Button("New") { }
+        }
+      }`)).toEqual([{ severity: 'warning', at: 'Button("New") { }', message: expect.stringContaining('beside the NavigationStack') }])
+    expect(warned(`var body: some View {
+        VStack {
+          Text("Offline banner")
+          TabView { Text("Home").tabItem { Label("Home", systemImage: "house") } }
+        }
+      }`)).toEqual([{ severity: 'warning', at: 'Text("Offline banner")', message: expect.stringContaining('beside the TabView') }])
+  })
+
+  it('warns that an overlay written on a NavigationStack is not drawn', () => {
+    expect(warned('var body: some View { NavigationStack { Text("Home") }.overlay(Text("Badge")) }'))
+      .toEqual([{ severity: 'warning', at: '.overlay(Text("Badge"))', message: expect.stringContaining('.overlay') }])
   })
 
   // What iOS 27 does with `.searchable` on a TabView itself is still to be checked.
