@@ -450,12 +450,39 @@ export const EXTENSIBLE_BUILTIN_TYPES: ReadonlySet<string> = new Set([
   'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL', 'Color', 'Font',
 ])
 
+/**
+ * The style types written before iOS 15, each the style its token names now:
+ * `.buttonStyle(PlainButtonStyle())` is `.buttonStyle(.plain)`.
+ */
+export const LEGACY_STYLE_TOKENS: ReadonlyMap<string, string> = new Map([
+  ['DefaultButtonStyle', 'automatic'], ['PlainButtonStyle', 'plain'], ['BorderlessButtonStyle', 'borderless'],
+  ['BorderedButtonStyle', 'bordered'], ['BorderedProminentButtonStyle', 'borderedProminent'],
+  ['DefaultListStyle', 'automatic'], ['PlainListStyle', 'plain'], ['GroupedListStyle', 'grouped'],
+  ['InsetListStyle', 'inset'], ['InsetGroupedListStyle', 'insetGrouped'], ['SidebarListStyle', 'sidebar'],
+  ['DefaultPickerStyle', 'automatic'], ['SegmentedPickerStyle', 'segmented'], ['MenuPickerStyle', 'menu'],
+  ['InlinePickerStyle', 'inline'], ['WheelPickerStyle', 'wheel'], ['NavigationLinkPickerStyle', 'navigationLink'],
+  ['DefaultDatePickerStyle', 'automatic'], ['CompactDatePickerStyle', 'compact'], ['GraphicalDatePickerStyle', 'graphical'], ['WheelDatePickerStyle', 'wheel'],
+  ['DefaultToggleStyle', 'automatic'], ['SwitchToggleStyle', 'switch'], ['ButtonToggleStyle', 'button'],
+  ['DefaultTextFieldStyle', 'automatic'], ['PlainTextFieldStyle', 'plain'], ['RoundedBorderTextFieldStyle', 'roundedBorder'],
+  ['DefaultTabViewStyle', 'automatic'], ['PageTabViewStyle', 'page'],
+  ['DefaultProgressViewStyle', 'automatic'], ['LinearProgressViewStyle', 'linear'], ['CircularProgressViewStyle', 'circular'],
+  ['DefaultLabelStyle', 'automatic'], ['IconOnlyLabelStyle', 'iconOnly'], ['TitleOnlyLabelStyle', 'titleOnly'], ['TitleAndIconLabelStyle', 'titleAndIcon'],
+  ['StackNavigationViewStyle', 'stack'], ['DoubleColumnNavigationViewStyle', 'columns'],
+])
+
+/** What a `KeyframeAnimator`'s `keyframes:` closure is written with. The preview never runs it. */
+export const KEYFRAME_TYPES: ReadonlySet<string> = new Set([
+  'KeyframeTrack', 'LinearKeyframe', 'CubicKeyframe', 'SpringKeyframe', 'MoveKeyframe', 'KeyframeTimeline',
+])
+
 export function isKnownGlobal(name: string): boolean {
   return (
     SUPPORTED_VIEWS.has(name) ||
     UNIMPLEMENTED_VIEWS.has(name) ||
     KNOWN_TYPES.has(name) ||
-    KNOWN_FUNCTIONS.has(name)
+    KNOWN_FUNCTIONS.has(name) ||
+    LEGACY_STYLE_TOKENS.has(name) ||
+    KEYFRAME_TYPES.has(name)
   )
 }
 

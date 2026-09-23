@@ -57,6 +57,12 @@ function runView(members: string, declarations = '', options: Partial<CompileReq
 /** What the iOS 27 simulator drew on iPhone 18 Pro, light (docs/parity/native/iphone18pro-misrenders). */
 const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
 
+/** What a view reports: each diagnostic, with the source it points at and the replacement it offers. */
+function reported(members: string, declarations = '') {
+  const source = viewSource(members, declarations)
+  return compileView(source).diagnostics.map(d => ({ severity: d.severity, message: d.message, at: source.slice(d.span.start, d.span.end), fix: d.fixIts?.[0]?.edits[0]?.newText }))
+}
+
 /** What it drew for the second set of fixes (docs/parity/native/iphone18pro-misrenders-ii). */
 const nativeII = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders-ii/measurements.json', import.meta.url), 'utf8')).measured
 
@@ -826,14 +832,6 @@ describe('E15: new projects start on the iPhone 18 Pro, targeting iOS 27', () =>
 })
 
 describe('E16a: an SF Symbol name the preview has no drawing for warns at the name', () => {
-  /** The diagnostics, each with the source it points at and the replacement it offers. */
-  function reported(members: string, declarations = '') {
-    const source = viewSource(members, declarations)
-    const result = compileView(source)
-    expect(result.renderTree).not.toBeNull()
-    return result.diagnostics.map(d => ({ severity: d.severity, message: d.message, at: source.slice(d.span.start, d.span.end), fix: d.fixIts?.[0]?.edits[0]?.newText }))
-  }
-
   it.each(['Image(systemName: "hose")', 'Label("Home", systemImage: "hose")', 'Button("Home", systemImage: "hose") { }'])(
     'warns at the name in %s, offering the nearest one it draws', (view) => {
       expect(reported(`var body: some View { ${view} }`)).toEqual([{ severity: 'warning', message: expect.stringContaining("If 'hose' is right, it still shows in the app."), at: '"hose"', fix: '"house"' }])
@@ -927,5 +925,51 @@ struct ContentView: View {
     expect(missing.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
     const optional = runView('@Environment(Model.self) private var model: Model?\n var body: some View { Text(model == nil ? "No model" : "Model") }', model)
     expect(texts(optional)).toContain('No model')
+  })
+})
+
+describe("E11a: a view the preview doesn't know draws a placeholder, not a blank screen", () => {
+  it('warns at a view nothing declares, and draws the rest of the screen around a placeholder for it', () => {
+    const members = 'var body: some View { VStack { Text("Title"); RatingView(rating: 3) } }'
+    expect(reported(members)).toEqual([{ severity: 'warning', message: expect.stringContaining("Cannot find 'RatingView' in scope"), at: 'RatingView', fix: undefined }])
+    const r = compileView(viewSource(members))
+    expect(texts(r)).toContain('Title')
+    expect(nodes(r).some(n => n.placeholder?.feature === 'RatingView')).toBe(true)
+  })
+
+  it('says it may still build, since it may be part of SwiftUI', () => {
+    const [warning] = reported('var body: some View { GlassEffectContainer { Text("Inside") } }')
+    expect(warning!.message).toContain("If it isn't part of SwiftUI")
+  })
+
+  it('draws what is around it, and never what it was given', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Title"); Mystery { Text("Inside") } } }'))
+    expect(texts(r)).toContain('Title')
+    expect(texts(r)).not.toContain('Inside')
+  })
+
+  it('keeps a near-typo of a view an error, with its fix', () => {
+    expect(reported('var body: some View { Buton("Save") { } }')).toEqual([{ severity: 'error', message: expect.stringContaining("Did you mean 'Button'?"), at: 'Buton', fix: 'Button' }])
+  })
+
+  it.each([
+    ['Button("Save") { }', '.buttonStyle(PlainButtonStyle())', '.buttonStyle(.plain)'],
+    ['Button("Save") { }', '.buttonStyle(BorderedProminentButtonStyle())', '.buttonStyle(.borderedProminent)'],
+    ['Picker("Size", selection: .constant(1)) { Text("S").tag(1); Text("M").tag(2) }', '.pickerStyle(SegmentedPickerStyle())', '.pickerStyle(.segmented)'],
+    ['List { Text("Row") }', '.listStyle(InsetGroupedListStyle())', '.listStyle(.insetGrouped)'],
+    ['TextField("Name", text: .constant(""))', '.textFieldStyle(RoundedBorderTextFieldStyle())', '.textFieldStyle(.roundedBorder)'],
+  ])('draws %s with the old-style %s as it does with %s', (view, old, modern) => {
+    const drawn = (style: string) => JSON.stringify(runView(`var body: some View { ${view}${style} }`).renderTree!.nodes)
+    expect(drawn(old)).toBe(drawn(modern))
+  })
+
+  it('does not stop at the keyframes a KeyframeAnimator is written with', () => {
+    const r = compileView(viewSource(`var body: some View {
+        KeyframeAnimator(initialValue: 1.0) { value in Text("Pulse").scaleEffect(value) } keyframes: { _ in
+          KeyframeTrack { LinearKeyframe(1.2, duration: 0.2); CubicKeyframe(1.0, duration: 0.3) }
+        }
+      }`))
+    expect(r.diagnostics.filter(d => d.severity === 'error' || d.message.startsWith('Cannot find'))).toEqual([])
+    expect(r.renderTree).not.toBeNull()
   })
 })

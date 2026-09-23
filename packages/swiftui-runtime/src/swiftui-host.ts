@@ -21,7 +21,7 @@ import {
   type InterpreterHost,
   type SwiftValue,
 } from '@studio/swift-runtime'
-import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
+import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
 import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
@@ -835,7 +835,17 @@ export class SwiftUIHost implements InterpreterHost {
       return gesture(GESTURE_CONSTRUCTORS[name]!, minimum ?? 10)
     }
 
-    if (!VIEW_NAMES.has(name)) return undefined
+    // `PlainButtonStyle()` is the style `.plain` names.
+    const legacy = LEGACY_STYLE_TOKENS.get(name)
+    if (legacy) return token(legacy)
+
+    if (!VIEW_NAMES.has(name)) {
+      // A view nothing declares, which the checker has warned about, is a placeholder
+      // named after it. What it was given is never run: there is no telling what it
+      // would have done with it.
+      if (!/^[A-Z]/.test(name) || isKnownGlobal(name)) return undefined
+      return view({ name, args: toArgs(call), children: [], modifiers: [], action: null, span: call.span })
+    }
     if (++this.constructedViews > PREVIEW_LIMITS.totalViews) throw new PreviewLimitExceeded('The preview exceeds 10,000 constructed views in one pass. Reduce nested collections or preview data.', call.span)
 
     // A direct destination may be a user-defined View value, not a built-in view.

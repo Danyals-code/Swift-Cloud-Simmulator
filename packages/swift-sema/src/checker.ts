@@ -895,6 +895,19 @@ export class Checker {
         )
         return
       }
+      // A view nothing declares, one the AI forgot to write or real SwiftUI the preview
+      // doesn't know, draws a placeholder rather than blanking the screen. A name a
+      // letter or two from a type or view is a typo instead, and stays an error.
+      const name = callee.name
+      if (!shadowed && /^[A-Z]/.test(name) && name !== 'Self' && !isKnownGlobal(name) && !this.typeAliases.has(name) && this.inBuiltinExtension === 0 && !this.nearestTypeName(name)) {
+        this.report(
+          callee.span,
+          'warning',
+          'unresolved_identifier',
+          `Cannot find '${name}' in scope. The preview draws a placeholder for it. If it isn't part of SwiftUI and the project doesn't declare it, Xcode won't build it either.`,
+        )
+        return
+      }
     }
     this.checkExpression(callee, scope)
   }
@@ -959,6 +972,11 @@ export class Checker {
   /** The nearest name that is actually in scope, or null. */
   private closestName(name: string, scope: Scope): string | null {
     return nearestName(name, [...scope.allNames(), ...this.types.keys(), ...this.enums.keys(), ...SUPPORTED_VIEWS])
+  }
+
+  /** The nearest type or view name, or null. Not a variable's: `Timer` is no typo of a `timer`. */
+  private nearestTypeName(name: string): string | null {
+    return nearestName(name, [...this.types.keys(), ...this.enums.keys(), ...this.typeAliases, ...SUPPORTED_VIEWS, ...UNIMPLEMENTED_VIEWS, ...KNOWN_TYPES])
   }
 
   /**
