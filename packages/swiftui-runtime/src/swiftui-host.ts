@@ -1143,14 +1143,16 @@ export class SwiftUIHost implements InterpreterHost {
     // handler on it, which is value semantics, same as SwiftUI.
     const chain = asGesture(target)
     if (chain) {
-      const closure = call.trailingClosure ?? asClosure(call.args[call.args.length - 1]?.value)
+      // `.onEnded { … }`, or `.onEnded(tapped)` naming a function.
+      const last = call.args[call.args.length - 1]?.value
+      const action = call.trailingClosure ?? (last?.kind === 'closure' || last?.kind === 'function' ? last : null)
 
-      if ((member === 'onChanged' || member === 'onEnded') && closure) {
-        return withHandler(chain, { phase: member === 'onChanged' ? 'changed' : 'ended', closure })
+      if ((member === 'onChanged' || member === 'onEnded') && action) {
+        return withHandler(chain, { phase: member === 'onChanged' ? 'changed' : 'ended', action })
       }
-      if (member === 'updating' && closure) {
+      if (member === 'updating' && action) {
         const binding = call.args.find((a) => a.label === null)?.value
-        if (binding) return withUpdate(chain, { binding, closure })
+        if (binding) return withUpdate(chain, { binding, action })
       }
       if (member === 'simultaneously' || member === 'exclusively' || member === 'sequenced') {
         const other = asGesture(call.args[0]?.value)

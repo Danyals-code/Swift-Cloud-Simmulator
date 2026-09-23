@@ -690,18 +690,14 @@ export class AppRuntime {
       if (phase !== 'ended') {
         for (const update of part.updates) {
           if (!asProjection(update.binding)) continue
-          this.interpreter.callClosure(
-            update.closure,
-            [payload, update.binding, { kind: 'void' }],
-            update.closure.span,
-          )
+          this.run(update.action, [payload, update.binding, { kind: 'void' }])
         }
       }
 
       for (const handler of part.handlers) {
         const wanted = phase === 'ended' ? 'ended' : 'changed'
         if (handler.phase !== wanted) continue
-        this.interpreter.callClosure(handler.closure, [payload], handler.closure.span)
+        this.run(handler.action, [payload])
       }
     }
 

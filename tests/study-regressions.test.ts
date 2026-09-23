@@ -221,6 +221,24 @@ describe('E2: modifiers given a function or a closure argument to run', () => {
     expect(texts(tap(r, 'Tap me'))).toContain('appear,closure,task,tap')
   })
 
+  it('runs a gesture handler given as a named function', () => {
+    const r = runView(`@State private var log: [String] = []
+      func tapped() { log.append("tap") }
+      func dropped(_ value: DragGesture.Value) { log.append("drop") }
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Text("Tap").gesture(TapGesture().onEnded(tapped))
+          Text("Drag").gesture(DragGesture().onEnded(dropped))
+        }
+      }`)
+    const tapped = tap(r, 'Tap')
+    expect(texts(tapped)).toContain('tap')
+    const handle = nodes(tapped).find(n => n.hitTarget && n.a11y?.label === 'Drag')!
+    applyEvent({ kind: 'drag', handlerId: handle.hitTarget!.handlerId, phase: 'ended', location: { x: 40, y: 0 }, startLocation: { x: 0, y: 0 }, translation: { x: 40, y: 0 } })
+    expect(texts(rerender(revision++))).toContain('tap,drop')
+  })
+
   it('deletes the swiped row with .onDelete(perform:), as Xcode writes it', () => {
     const r = runView(`@State private var items = ["One", "Two", "Three"]
       func deleteItems(at offsets: IndexSet) { items.remove(atOffsets: offsets) }
