@@ -4,6 +4,7 @@ import { featureEdit } from './authoring-features'
 import { argumentLayerProblem, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, afterOffMarkers, forEachChild, deleteView, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
+import { structuralEditProblem } from './structural-check'
 import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
 
@@ -63,10 +64,17 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
     try {
       const result = featureEdit({ deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions, colors: request.colors }, node, operation as Parameters<typeof featureEdit>[2])
+      const after = result.files.find(f => f.id === file.id)?.text
+      const kind = operation.kind === 'layer-duplicate' ? 'duplicate' : operation.kind === 'layer-wrap' ? 'wrap' : operation.kind === 'layer-reparent' ? 'reparent' : null
+      const toward = operation.kind === 'layer-reparent' ? model.nodes.find(n => n.id === operation.destination)?.source.start : undefined
+      const problem = kind && after !== undefined && structuralEditProblem({ file: file.id, before: file.text, after, kind, view: node.source, toward, landed: result.offset })
+      if (problem) return reject(problem)
       return finish(result.files, { file: file.id, offset: result.offset }, result.colors)
     } catch (error) { return reject(error instanceof Error ? error.message : 'The design operation could not be planned.') }
   }
   let changed: { text: string; offset: number } | null = null
+  /** Swift an insert brings: its snippet, and the NavigationStack a new link needs. */
+  let adds: string | undefined
   if (operation.kind === 'property' && node) {
     let expression: Expr | undefined
     function visit(item: Node): void {
@@ -91,6 +99,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       case 'move': changed = moveView(file.text, file.id, offset, operation.direction); break
       case 'moveTo': changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position); break
       case 'insert': {
+        adds = operation.snippet
         // A link offered by the palette must be runnable immediately. If this
         // screen has no navigation container, wrap its root in the same edit.
         const snippet = Parser.parse(`struct InsertPreview: View { var body: some View { ${operation.snippet} } }`, '__insert.swift')
@@ -126,6 +135,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           const wrapped = file.text.slice(0, start) + prefix + body + `\n${indent}}` + file.text.slice(end)
           const shifted = offset + prefix.length + (file.text.slice(start, offset).match(/\n/g)?.length ?? 0) * 4
           changed = insertView(wrapped, file.id, shifted, operation.snippet)
+          adds = `${operation.snippet} NavigationStack { }`
         } else changed = insertView(file.text, file.id, offset, operation.snippet)
         break
       }
@@ -136,6 +146,14 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   if (!changed) return reject('This operation has no valid destination or would leave invalid view content.')
   const next = Parser.parse(changed.text, file.id)
   if (next.diagnostics.some(d => d.severity === 'error')) return reject('The proposed change does not parse. The project was not changed.')
+  if (operation.kind === 'delete' || operation.kind === 'move' || operation.kind === 'moveTo' || operation.kind === 'insert' || operation.kind === 'hide' || operation.kind === 'show') {
+    const problem = structuralEditProblem({
+      file: file.id, before: file.text, after: changed.text, kind: operation.kind, view: node?.source ?? request.target, adds,
+      toward: operation.kind === 'moveTo' ? operation.targetOffset : undefined,
+      landed: operation.kind === 'insert' || operation.kind === 'move' || operation.kind === 'moveTo' ? changed.offset : undefined,
+    })
+    if (problem) return reject(problem)
+  }
   const nextDiagnostics = Checker.check(ast.map(f => f.span.file === file.id ? next.sourceFile : f)).diagnostics
   // Existing unrelated semantic diagnostics can remain; new errors cannot be committed.
   const signature = (d: (typeof diagnostics)[number]) => JSON.stringify([d.code, d.message, d.span.file])

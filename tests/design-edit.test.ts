@@ -546,3 +546,24 @@ describe('C10: a syntax error stops edits only to the file it is in', () => {
     })
   })
 })
+
+describe('C11: a structural change is checked before it is kept', () => {
+  /** The view written at `needle`, planned for the way Layers and the canvas plan one. */
+  function restructureAt(text: string, needle: string, operation: DesignEditRequest['operation']): DesignEditPlan {
+    const node = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(text) }).nodes.find(n => n.source.start === text.indexOf(needle) && n.kind !== 'branch')!
+    return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation })
+  }
+
+  it('refuses a drop that would give a helper, which holds one view, a second one', () => {
+    // The canvas drops onto what it draws; "Header" is drawn by `header`, not by `body`.
+    const source = wrap('VStack {\n    header\n    Text("Body")\n}', 'var header: some View {\n    Text("Header")\n}')
+    expect(restructureAt(source, 'Text("Body")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Header")'), position: 'after' }))
+      .toEqual({ ok: false, reason: '`header` can hold only one view, so this change would stop the app from building. Nothing was changed.' })
+  })
+
+  it('refuses a move that would leave a component with nothing to show', () => {
+    const source = wrap('VStack {\n    Card()\n    Text("Other")\n}') + '\nstruct Card: View {\n    var body: some View {\n        Text("Card")\n    }\n}\n'
+    expect(restructureAt(source, 'Text("Card")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Other")'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'This change would leave `Card` with nothing to show. Nothing was changed.' })
+  })
+})
