@@ -1264,4 +1264,10 @@ describe('Text interpolated into Text', () => {
     expect(runs.map(run => run.text).join('')).toBe('Bold and plain')
     expect(runs.map(run => [run.text, run.font.weight >= 600])).toEqual([['Bold', true], [' and plain', false]])
   })
+
+  it('still gives a title that is not a Text the words, as a Button or a navigation title', () => {
+    const r = runView('var body: some View { NavigationStack { Button("\\(Text("Bold").bold()) go") { }.navigationTitle("\\(Text("Home")) screen") } }')
+    expect(controls(r)).toContain('Bold go')
+    expect(texts(r)).toContain('Home screen')
+  })
 })

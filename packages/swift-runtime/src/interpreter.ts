@@ -1487,7 +1487,7 @@ export class Interpreter {
       case 'stringLiteral': {
         const parts = expr.segments.map((segment) => segment.kind === 'text' ? segment.value : this.evaluate(segment.expression, env))
         const hosted = parts.some((part) => typeof part !== 'string' && part.kind !== 'string') ? this.host.interpolate?.(parts, expr.span) : undefined
-        if (hosted !== undefined) return hosted
+        if (hosted !== undefined) return { kind: 'string', value: hosted.text, styled: hosted.styled }
         return str(parts.map((part) => typeof part === 'string' ? part : describe(part, false)).join(''))
       }
 

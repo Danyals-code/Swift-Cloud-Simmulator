@@ -104,9 +104,10 @@ export interface InterpreterHost {
   /**
    * A string interpolation with a part the host knows better than by its description:
    * `Text("\(Text("Bold").bold()) and plain")` is styled text, not "View and plain".
-   * Asked only when an interpolated value isn't a string, and undefined declines.
+   * The answer is the plain text and the styled value it stands for. Asked only when an
+   * interpolated value isn't a string, and undefined declines.
    */
-  interpolate?(parts: readonly (string | SwiftValue)[], span: SourceSpan): SwiftValue | undefined
+  interpolate?(parts: readonly (string | SwiftValue)[], span: SourceSpan): { readonly text: string; readonly styled: SwiftValue } | undefined
 
   /**
    * A binary operator applied to a value the interpreter does not own.

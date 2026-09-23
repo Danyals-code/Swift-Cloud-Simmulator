@@ -54,6 +54,12 @@ export interface BoolValue {
 export interface StringValue {
   readonly kind: 'string'
   readonly value: string
+  /**
+   * The styled text an interpolation of a `Text` stands for:
+   * `"\(Text("Bold").bold()) go"`. `Text` draws that, and everything else, a Button's
+   * title or a navigation title, reads the plain `value`.
+   */
+  readonly styled?: SwiftValue
 }
 
 /** Mutable in place; copied at every assignment and argument boundary. */

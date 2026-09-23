@@ -212,6 +212,13 @@ function isTextLike(v: ViewValue | null): boolean {
   return v?.name === 'Text'
 }
 
+/** The words of a `Text`, joined or not, without its styling. */
+function plainText(text: ViewValue): string {
+  if (text.children.length > 0) return text.children.map(plainText).join('')
+  const words = text.args.find((arg) => arg.label === null || arg.label === 'verbatim')?.value
+  return words?.kind === 'string' ? words.value : ''
+}
+
 function token(name: string): SwiftValue {
   return opaque(TOKEN_TYPE, { name })
 }
@@ -900,7 +907,7 @@ export class SwiftUIHost implements InterpreterHost {
 
     // `Text("\(Text("Bold").bold()) and plain")` arrives already joined, as a Text.
     const given = call.args[0]
-    if (name === 'Text' && given?.label === null && isTextLike(asView(given.value))) return given.value
+    if (name === 'Text' && given?.label === null && given.value.kind === 'string' && given.value.styled) return given.value.styled
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
@@ -1257,6 +1264,19 @@ export class SwiftUIHost implements InterpreterHost {
     return undefined
   }
 
+  /**
+   * `Text("\(Text("Bold").bold()) and plain")`: a `Text` interpolated into a string keeps
+   * its own styling, as `+` does, for a `Text` to draw as the same kind of joined `Text`.
+   * Anything else given the string, a Button's title, reads its plain words.
+   */
+  interpolate(parts: readonly (string | SwiftValue)[], span: SourceSpan): { text: string; styled: SwiftValue } | undefined {
+    if (!parts.some((part) => typeof part !== 'string' && isTextLike(asView(part)))) return undefined
+    const pieces = parts.map((part): string | ViewValue => typeof part === 'string' ? part : isTextLike(asView(part)) ? asView(part)! : describe(part, false))
+    const children = pieces.filter((piece) => piece !== '').map((piece): ViewValue =>
+      typeof piece === 'string' ? { name: 'Text', args: [{ label: null, value: str(piece) }], children: [], modifiers: [], action: null, span } : piece)
+    return { text: pieces.map((piece) => typeof piece === 'string' ? piece : plainText(piece)).join(''), styled: view({ name: 'Text', args: [], children, modifiers: [], action: null, span }) }
+  }
+
   /** `dismiss()` - the one callable the environment hands out. */
   /**
    * `Text("Hello, ") + Text(name).bold()` - the one operator SwiftUI defines on views.
@@ -1269,20 +1289,6 @@ export class SwiftUIHost implements InterpreterHost {
    * Anything else opaque is left alone and traps as it did, because inventing a
    * meaning for `Color.red + 1` would be a worse answer than the error.
    */
-  /**
-   * `Text("\(Text("Bold").bold()) and plain")`: a `Text` interpolated into a `Text` keeps
-   * its own styling, as `+` does, so the result is the same kind of joined `Text`.
-   */
-  interpolate(parts: readonly (string | SwiftValue)[], span: SourceSpan): SwiftValue | undefined {
-    if (!parts.some((part) => typeof part !== 'string' && isTextLike(asView(part)))) return undefined
-    const children = parts.flatMap((part): ViewValue[] => {
-      const text = typeof part === 'string' ? part : asView(part) && isTextLike(asView(part)) ? null : describe(part, false)
-      if (text === '') return []
-      return text === null ? [asView(part as SwiftValue)!] : [{ name: 'Text', args: [{ label: null, value: str(text) }], children: [], modifiers: [], action: null, span }]
-    })
-    return view({ name: 'Text', args: [], children, modifiers: [], action: null, span })
-  }
-
   applyOperator(operator: string, left: SwiftValue, right: SwiftValue, span: SourceSpan): SwiftValue | undefined {
     if (operator !== '+') return undefined
 
