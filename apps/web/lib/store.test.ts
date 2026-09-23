@@ -133,7 +133,7 @@ describe('creating a project from a template', () => {
     await useStudio.getState().load()
     const before = useStudio.getState().project!.id
 
-    expect(await useStudio.getState().applyTemplate('not-a-template')).toBe(false)
+    expect(await useStudio.getState().applyTemplate('not-a-template')).toBe('failed')
     expect(useStudio.getState().project!.id).toBe(before)
   })
 })
@@ -142,7 +142,7 @@ describe('the recents list', () => {
   it('reports a stale project without changing the current project', async () => {
     await useStudio.getState().load()
     const current = useStudio.getState().project!.id
-    expect(await useStudio.getState().openProject('missing')).toBe(false)
+    expect(await useStudio.getState().openProject('missing')).toBe('failed')
     expect(useStudio.getState().project!.id).toBe(current)
   })
   it('names every project in this browser', async () => {

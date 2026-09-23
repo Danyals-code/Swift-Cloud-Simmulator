@@ -1595,16 +1595,16 @@ export function Studio() {
           atLaunch={galleryAtLaunch}
           onClose={() => setGalleryOpen(false)}
           onChoose={async (templateId) => {
-            const made = await applyTemplate(templateId)
+            const made = await applyTemplate(templateId) === 'opened'
             // Kept open on failure: the sheet is where the message goes, and closing
             // it would leave somebody looking at a project they did not ask for.
             if (made) { setGalleryOpen(false); setMode('design'); setDesigning(true) }
             return made
           }}
-          onOpenProject={openProject}
+          onOpenProject={async (id) => await openProject(id) === 'opened'}
           onRemoveProject={(id) => void removeProject(id)}
           onOpenFiles={async (picked, history) => {
-            const opened = await openFiles(picked)
+            const opened = await openFiles(picked) === 'opened'
             if (opened && history?.length) {
               const current = useStudio.getState()
               if (current.project) current.appendPromptMessages(current.project.id, history)
