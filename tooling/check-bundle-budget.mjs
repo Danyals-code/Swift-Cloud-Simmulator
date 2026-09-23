@@ -83,8 +83,15 @@ const KB = 1024
  *              largest chunk has not moved (125.8 KB). Raised to 680 KB for the
  *              study build, so the gate stays close enough to catch the next
  *              addition rather than absorb it.
+ *   Study plan - 678.7 KB actual after PR-C1 (edit integrity, 674.8) and PR-B
+ *              (data safety: the one-tab lock, the storage banner, the switch
+ *              dialog). Raised once for the rest of the study rather than PR by
+ *              PR, by decision: its remaining items were estimated at
+ *              40-50 KB, and a ceiling every PR has to argue past stops anyone
+ *              reading it. 730 KB covers that estimate with little over, so an
+ *              addition the plan did not foresee still stands out.
  */
-const BUDGET_KB = 680
+const BUDGET_KB = 730
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.
