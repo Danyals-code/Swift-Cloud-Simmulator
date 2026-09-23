@@ -17,6 +17,7 @@ export { Lexer, type LexResult } from './lexer'
 export { Parser, isSyntaxError, typeName, type ParseResult } from './parser'
 
 export * from './conformance'
+export * from './value-kinds'
 export * from './off-markers'
 export {
   viewSiteAt, deleteView, moveView, moveViewTo, insertView, copyView,

@@ -1590,6 +1590,43 @@ describe('functions that share a name run the one Swift runs', () => {
     expect(texts(compileView(viewSource(members, declarations)))).toEqual(['double'])
   })
 
+  it('says nothing where the values tell the overloads apart, and runs the one Swift runs', () => {
+    const members = 'var body: some View { VStack { Text(tag("a")); Text(show(Box())) } }'
+    const declarations = `func tag(_ value: Character) -> String { "character" }
+func tag(_ value: String) -> String { "string" }
+protocol Sized {}
+protocol Named {}
+struct Box: Named {}
+func show(_ value: Sized) -> String { "sized" }
+func show(_ value: Named) -> String { "named" }`
+    expect(reported(members, declarations)).toEqual([])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['string', 'named'])
+  })
+
+  it('warns inside a function too, naming what the preview does as a feature', () => {
+    const members = `var body: some View { Text(measure()) }
+      func measure() -> String {
+        func size(_ value: Double) -> String { "double" }
+        func size(_ value: CGFloat) -> String { "cgfloat" }
+        let side: CGFloat = 2
+        return size(side)
+      }`
+    const warnings = compileView(viewSource(members)).diagnostics.filter(d => d.severity === 'warning')
+    expect(warnings.map(d => [d.message.startsWith("The preview can't tell size(_:)"), d.feature])).toEqual([[true, 'overloads told apart by type']])
+  })
+
+  it("reads, writes and binds a view's own state over a top-level variable of the same name", () => {
+    const r = compileView(viewSource(`@State private var count = 0
+      @State private var name = "Local"
+      var body: some View { VStack { Text("Count \\(count)"); Button("Add") { count += 1 }; TextField("Name", text: $name); Text("Name \\(name)") } }`,
+      'var count = 100\nvar name = "Global"'))
+    expect(texts(r)).toEqual(expect.arrayContaining(['Count 0', 'Name Local']))
+    expect(texts(tap(r, 'Add'))).toContain('Count 1')
+    const field = nodes(r).find(n => n.hitTarget?.role === 'textField')!
+    applyEvent({ kind: 'textChange', handlerId: field.hitTarget!.handlerId, value: 'Typed' })
+    expect(texts(rerender(revision++))).toContain('Name Typed')
+  })
+
   it('tells a concrete parameter from a generic one, and says nothing', () => {
     const members = 'var body: some View { VStack { Text(show(1)); Text(show("one")) } }'
     const declarations = 'func show(_ value: Int) -> String { "whole" }\nfunc show<T>(_ value: T) -> String { "anything" }'

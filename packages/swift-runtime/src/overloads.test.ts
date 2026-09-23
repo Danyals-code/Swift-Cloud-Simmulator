@@ -307,4 +307,63 @@ func main() {
 }`),
     ).toEqual(['whole 4', 'text four'])
   })
+
+  it('keeps the memberwise initialiser beside one declared in an extension', () => {
+    expect(
+      run(`
+struct Item {
+    var name: String
+    var count: Int
+}
+
+extension Item {
+    init(raw: String) {
+        name = raw
+        count = 1
+    }
+}
+
+func main() {
+    let item = Item(name: "Milk", count: 3)
+    print("\\(item.name) \\(item.count)")
+    let other = Item(raw: "Eggs")
+    print("\\(other.name) \\(other.count)")
+}`),
+    ).toEqual(['Milk 3', 'Eggs 1'])
+  })
+
+  it('passes a built-in value as a project protocol it was extended to adopt', () => {
+    expect(
+      run(`
+protocol Displayable {}
+extension Int: Displayable {}
+
+func format(_ value: String) -> String { return "text" }
+func format(_ value: Displayable) -> String { return "displayable" }
+
+func main() {
+    print(format(5))
+    print(format("five"))
+}`),
+    ).toEqual(['displayable', 'text'])
+  })
+
+  it("writes a type's own property, not a top-level variable of the same name", () => {
+    expect(
+      run(`
+var count = 100
+
+struct Counter {
+    var count = 0
+    mutating func bump() { count += 1 }
+}
+
+func main() {
+    var counter = Counter()
+    counter.bump()
+    print(counter.count)
+    print(count)
+}`),
+    ).toEqual(['1', '100'])
+  })
 })

@@ -319,7 +319,7 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | `_ = expr` | ✅ | - | the discard; evaluates the expression and throws the answer away |
 | Extensions on built-in types | ✅ | - | `extension String { var shout: String { uppercased() } }`; the receiver's own members are in scope unqualified |
 | Overloading by argument label | ✅ | - | `minutes(on:)` and `minutes(of:)` are two functions, top level, local or members, chosen by the labels the call writes |
-| Overloading by parameter type | 🟡 | - | `f(_ x: Int)` and `f(_ x: String)` are both kept, and a call runs the one its arguments' values suit: a whole number an `Int`, text a `String`, a project type its own. Where the values can't tell them apart (`Double` and `CGFloat`, both a number), the preview runs the first and warns at the second, where Xcode goes by the argument's declared type. A type's own method is called over a top-level function of the same name, as in Swift |
+| Overloading by parameter type | 🟡 | - | `f(_ x: Int)` and `f(_ x: String)` are both kept, and a call runs the one its arguments' values suit: a whole number an `Int`, text a `String`, a project type its own. Where the values can't tell them apart (`Double` and `CGFloat`, both a number), the preview runs the first and warns at the second, where Xcode goes by the argument's declared type. Inside a type, its own members are found before top-level ones of the same name, for a read, a call, a write and a `$` binding alike, as in Swift |
 | A method and a property sharing a name | ✅ | - | `var spent` and `func spent(on:)` coexist as they do in Swift; a call reaches the method and a read reaches the property |
 
 ## Standard library and Foundation

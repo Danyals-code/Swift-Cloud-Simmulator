@@ -18,7 +18,7 @@ import type {
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
-import { argumentLabels, collectConformance, hoistNestedTypes } from '@studio/swift-syntax'
+import { argumentLabels, collectConformance, hoistNestedTypes, valueKind, walk, type TypeNames } from '@studio/swift-syntax'
 import {
   isKnownGlobal,
   isKnownModifier,
@@ -52,20 +52,16 @@ import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './m
  * In practice that means this checker reports only what it is certain about:
  *
  * - an identifier that resolves nowhere at all (error)
+ * - a type alias that names itself, which Xcode refuses (error)
  * - a real SwiftUI view or modifier that the preview cannot draw yet (warning)
  * - a property wrapper outside the slice (warning)
+ * - two overloads the preview can't tell apart by their arguments (warning)
  * - entry-point problems (error)
  *
  * It deliberately does *not* check member existence, argument types, or arity.
  * Those need the real type checker, which arrives with the interpreter in Phase 2 -
  * guessing at them now would produce exactly the false positives the gate forbids.
  */
-/** The integer and decimal types, each of which the preview's values can't tell from the others of its kind. */
-const INTEGER_TYPE_NAMES: ReadonlySet<string> = new Set(['Int', 'Int8', 'Int16', 'Int32', 'Int64', 'UInt', 'UInt8', 'UInt16', 'UInt32', 'UInt64'])
-const DECIMAL_TYPE_NAMES: ReadonlySet<string> = new Set(['Double', 'Float', 'CGFloat', 'Float32', 'Float64', 'Float80', 'TimeInterval'])
-/** Types a value of any kind may be passed as. */
-const OPEN_TYPE_NAMES: ReadonlySet<string> = new Set(['Any', 'AnyObject', 'AnyHashable', 'Equatable', 'Hashable', 'Comparable', 'Identifiable', 'CustomStringConvertible', 'Codable', 'Encodable', 'Decodable', 'Sendable', 'Error', 'View', 'Shape', 'ShapeStyle', 'StringProtocol', 'Numeric', 'BinaryInteger', 'BinaryFloatingPoint', 'Sequence', 'Collection'])
-
 export class Checker {
   private readonly diagnostics: Diagnostic[] = []
   private readonly types = new Map<string, TypeInfo>()
@@ -232,71 +228,45 @@ export class Checker {
   /**
    * Two overloads the preview can't choose between by what they are called with.
    *
-   * The preview has no types to go on, so it chooses between functions sharing a name
-   * and labels by the values they are given: `label(1)` calls `label(_: Int)`. That
-   * can't tell `size(_: Double)` from `size(_: CGFloat)`, both handed a number, so it
-   * runs the first; said at the second, where Xcode chooses by type. Only where
-   * every parameter takes the same kind of value: `show(_: Int)` beside
-   * `show<T>(_: T)` is told apart, as a whole number suits the first better.
+   * The preview has values rather than types, so of functions sharing a name and
+   * labels it runs the one its arguments suit (`valueKind`, which the interpreter
+   * scores by too). Where every parameter takes the same kind of value, as
+   * `size(_: Double)` and `size(_: CGFloat)` both take a number, nothing can tell
+   * them apart: it runs the first, and this says so at the second, where Xcode
+   * chooses by type. At the top level, in each type, and in each function body.
    */
   private reportIndistinctOverloads(files: readonly SourceFileNode[]): void {
     const aliases = new Map(files.flatMap((file) => file.declarations.flatMap((decl) => (decl.kind === 'typealiasDecl' ? [[decl.name, decl.target] as const] : []))))
+    const names: TypeNames = {
+      alias: (name) => aliases.get(name),
+      declared: (name) => (this.types.has(name) || this.enums.has(name) ? 'type' : this.conformance.protocols.has(name) ? 'protocol' : this.typeParameterNames.has(name) ? 'generic' : undefined),
+    }
     const scopes: FuncDecl[][] = [files.flatMap((file) => file.declarations.filter((decl): decl is FuncDecl => decl.kind === 'funcDecl'))]
     for (const [name, type] of this.conformance.types) {
       scopes.push(type.members.filter((member): member is FuncDecl => member.kind === 'funcDecl' && type.origin.get(member) === name))
     }
-    const kinds = (fn: FuncDecl) => fn.params.map((param) => this.valueKind(param.type, aliases))
+    for (const file of files) {
+      walk(file, (node) => {
+        if (node.kind !== 'block') return
+        scopes.push(node.statements.flatMap((stmt) => (stmt.kind === 'declStmt' && stmt.declaration.kind === 'funcDecl' ? [stmt.declaration] : [])))
+      })
+    }
+    const signature = (fn: FuncDecl) => ({ labels: argumentLabels(fn.params), kinds: fn.params.map((param) => valueKind(param.type, names)) })
     for (const scope of scopes) {
       const named = new Map<string, FuncDecl[]>()
       for (const fn of scope) named.set(fn.name, [...(named.get(fn.name) ?? []), fn])
       for (const group of named.values()) {
         group.forEach((later, index) => {
-          const labels = argumentLabels(later.params)
+          const mine = signature(later)
           const same = group.slice(0, index).some((earlier) => {
-            const theirs = argumentLabels(earlier.params)
-            if (theirs.length !== labels.length || theirs.some((label, i) => label !== labels[i])) return false
-            const a = kinds(earlier), b = kinds(later)
-            return a.every((kind, i) => kind === b[i])
+            const theirs = signature(earlier)
+            return theirs.labels.length === mine.labels.length && theirs.labels.every((label, i) => label === mine.labels[i]) && theirs.kinds.every((kind, i) => kind === mine.kinds[i])
           })
           if (!same) return
-          const signature = `${later.name}(${labels.map((label) => `${label ?? '_'}:`).join('')})`
-          this.report(later.nameSpan, 'warning', 'unsupported_language_feature', `The preview can't tell ${signature} from the one before it by what it is called with, so it runs that one. Xcode chooses by the argument's type.`, signature)
+          const call = `${later.name}(${mine.labels.map((label) => `${label ?? '_'}:`).join('')})`
+          this.report(later.nameSpan, 'warning', 'unsupported_language_feature', `The preview can't tell ${call} from the one before it by what it is called with, so it runs that one. Xcode chooses by the argument's type.`, 'overloads told apart by type')
         })
       }
-    }
-  }
-
-  /**
-   * The kind of value a parameter's type takes, as the preview tells overloads apart:
-   * a number, text, a type the project declared and the like, or `any` for a generic,
-   * a protocol or `some View`, which could be given anything.
-   */
-  private valueKind(type: TypeRef | null, aliases: ReadonlyMap<string, TypeRef>, depth = 0): string {
-    if (!type || depth > 8) return 'any'
-    switch (type.kind) {
-      case 'optionalType': {
-        const wrapped = this.valueKind(type.wrapped, aliases, depth + 1)
-        return wrapped === 'any' ? 'any' : `${wrapped}?`
-      }
-      case 'arrayType': return 'array'
-      case 'dictionaryType': return 'dictionary'
-      case 'functionType': return 'function'
-      case 'tupleType': return `tuple${type.elements.length}`
-      case 'namedType': {
-        const alias = aliases.get(type.name)
-        if (alias) return this.valueKind(alias, aliases, depth + 1)
-        if (INTEGER_TYPE_NAMES.has(type.name)) return 'int'
-        if (DECIMAL_TYPE_NAMES.has(type.name)) return 'double'
-        if (type.name === 'String' || type.name === 'Character' || type.name === 'Substring') return 'string'
-        if (type.name === 'Bool') return 'bool'
-        if (type.name === 'Array' || type.name === 'Set') return 'array'
-        if (type.name === 'Dictionary') return 'dictionary'
-        if (type.name === 'Optional') return type.generics[0] ? this.valueKind({ kind: 'optionalType', wrapped: type.generics[0], implicitlyUnwrapped: false, span: type.span }, aliases, depth + 1) : 'any'
-        if (this.typeParameterNames.has(type.name) || this.conformance.protocols.has(type.name) || OPEN_TYPE_NAMES.has(type.name)) return 'any'
-        return `type:${type.name}`
-      }
-      default:
-        return 'any'
     }
   }
 
