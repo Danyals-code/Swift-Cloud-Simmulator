@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { unzipSync } from 'fflate'
 import { expect, test, type Download, type Page, type Route } from '@playwright/test'
+import { eventLogIn } from './designer-helpers'
 
 /**
  * A4: one exception must not leave a participant looking at a blank page.
@@ -64,6 +65,11 @@ test('a crash of the whole studio shows the recovery screen, and the download ho
   const swift = await swiftIn(download)
   expect(swift).toContain(marker)
   expect(swift).toContain('// and this')
+  // Its event log has the crash and the typing before it, and none of what was typed (G5).
+  const { events } = eventLogIn(readFileSync((await download.path())!))
+  expect(events).toContainEqual(expect.objectContaining({ type: 'recovery', action: 'crashed', area: 'studio' }))
+  expect(events).toContainEqual(expect.objectContaining({ type: 'code', inserted: expect.any(Number) }))
+  expect(JSON.stringify(events)).not.toContain('kept')
 })
 
 test('a project that crashes the studio is not reopened by itself: Open another project starts on Your projects', async ({ page }) => {

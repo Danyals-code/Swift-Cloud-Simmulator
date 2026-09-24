@@ -4,7 +4,7 @@ import { RenderTreeView } from '@studio/swiftui-render-dom'
 import type { PagePreview } from '@studio/shared'
 import { compileSnapshot } from './compileSnapshot'
 import { capturePreview } from './designExport'
-import { events } from './eventLog'
+import { eventLog } from './eventLog'
 import type { ExportSteps } from './exportProject'
 import { saveFile } from './recovery'
 
@@ -20,9 +20,9 @@ export function browserExportSteps(save: () => Promise<unknown>): ExportSteps {
     save,
     compile: (project, settings, signal) => compileSnapshot(project, signal, { colorScheme: settings.colorScheme, dynamicTypeSize: settings.dynamicTypeSize, typeScale: settings.typeScale, galleryLimit: 128 }),
     capture: capturePage,
-    events: (project, format) => {
-      events.record(project, { type: 'export', format })
-      return events.jsonl(project)
+    events: (projectId, format) => {
+      eventLog.record(projectId, { type: 'export', format })
+      return eventLog.file(projectId)
     },
     download: (name, bytes) => saveFile(name, 'application/zip', bytes),
   }

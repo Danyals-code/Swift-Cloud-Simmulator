@@ -2,7 +2,7 @@ import { expect, test, type Download, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { unzipSync } from 'fflate'
 import { PNG } from 'pngjs'
-import { addModifier, cards, openCounter, replaceSource } from './designer-helpers'
+import { addModifier, cards, eventLogIn, openCounter, replaceSource } from './designer-helpers'
 
 /** Presses Export, the complete bundle, and waits for the file. */
 async function exportComplete(page: Page): Promise<Download> {
@@ -53,7 +53,17 @@ test('the export carries the project’s event log, and none of the words the de
   // Opening the Counter replaces the untouched starter, whose events it takes over.
   await openCounter(page)
   await page.getByTestId('workspace-develop').click()
-  await replaceSource(page, 'import SwiftUI\n@main struct CounterApp: App { var body: some Scene { WindowGroup { VStack { Text("Zanzibar"); Text("Unchanged") } } } }\n')
+  await replaceSource(page, `import SwiftUI
+@main struct CounterApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Text("Zanzibar")
+            Text("Unchanged")
+        }
+    }
+}
+`)
   await expect(page.getByTestId('render-tree').getByText('Zanzibar', { exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
   await page.getByTestId('logical-layers').locator('[data-source-name="Text"]').filter({ hasText: 'Zanzibar' }).click()
@@ -65,12 +75,18 @@ test('the export carries the project’s event log, and none of the words the de
   await addModifier(page, 'Opacity', 'opacity')
   await page.getByTestId('design-undo').click()
   await expect(cards(page, 'opacity')).toHaveCount(0)
+  const layers = page.getByTestId('logical-layers'), unchanged = layers.locator('[data-source-name="Text"]').filter({ hasText: 'Unchanged' })
+  await unchanged.click()
+  await unchanged.getByRole('button', { name: 'Actions for Unchanged', exact: true }).click()
+  await page.getByTestId('source-layer-actions-menu-hide').click()
+  await expect(layers.getByTestId('hidden-layer')).toHaveCount(1)
+  await layers.getByTestId('hidden-layer').getByTestId('layer-show').click()
+  await expect(layers.getByTestId('hidden-layer')).toHaveCount(0)
 
   const download = await exportComplete(page)
 
-  const log = new TextDecoder().decode(Object.entries(await entriesOf(download)).find(([path]) => path.endsWith('/.swiftstudio/events.jsonl'))?.[1])
+  const { text: log, header, events: lines } = eventLogIn(readFileSync((await download.path())!))
   expect(log).not.toMatch(/Zanzibar|Quixotic|Unchanged/)
-  const [header, ...lines] = log.trimEnd().split('\n').map(line => JSON.parse(line))
   expect(header).toMatchObject({ format: 'swift-web-studio-events', version: 1, events: lines.length, dropped: 0 })
   const events = lines.map(({ t: _t, session: _session, seq: _seq, ...event }) => event)
   expect(events).toEqual(expect.arrayContaining([
@@ -81,8 +97,10 @@ test('the export carries the project’s event log, and none of the words the de
     { type: 'design', op: 'property', layer: 'Text', control: 'content' },
     { type: 'design', op: 'modifier-add', layer: 'Text', modifier: 'opacity' },
     { type: 'history', direction: 'undo' },
+    { type: 'design', op: 'hide', layer: 'Text' },
+    { type: 'design', op: 'show', layer: 'Text' },
   ]))
   expect(events.at(-1)).toEqual({ type: 'export', format: 'complete' })
-  const times = lines.map(line => Date.parse(line.t))
+  const times = lines.map(line => Date.parse(String(line.t)))
   expect(times).toEqual([...times].sort((a, b) => a - b))
 })

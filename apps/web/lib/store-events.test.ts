@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createEventStore, createProjectStore } from '@studio/project-model'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
-import { events, type DesignEvent } from './eventLog'
+import { eventLog, type DesignEvent } from './eventLog'
 import { useStudio } from './store'
 
 /**
@@ -22,7 +22,7 @@ afterEach(() => vi.restoreAllMocks())
 
 /** A project's events, without when each happened. */
 async function logged(project: string) {
-  return (await events.jsonl(project)).trimEnd().split('\n').slice(1).map(line => {
+  return (await eventLog.file(project)).text.trimEnd().split('\n').slice(1).map(line => {
     const { t: _t, session: _session, seq: _seq, ...event } = JSON.parse(line)
     return event
   })
@@ -94,6 +94,18 @@ describe('the event log, as the store writes it', () => {
     expect(await logged(project.id)).toEqual([])
   })
 
+  it('keeps the events of a project that could not be removed, and is still listed', async () => {
+    const { project, plan } = await counterWithEdit()
+    studio().commitTransaction(project, plan, LABEL)
+    await studio().applyTemplate('tasks')
+    vi.spyOn(persistence, 'remove').mockRejectedValue(new DOMException('The connection was lost.', 'UnknownError'))
+
+    await studio().removeProject(project.id)
+
+    expect(studio().recents.some(summary => summary.id === project.id)).toBe(true)
+    expect((await logged(project.id)).filter(event => event.type === 'design')).toEqual([LABEL])
+  })
+
   it('writes a burst of typing as one event with the file and the counts, never the code', async () => {
     await studio().load()
     const project = studio().project!, file = project.files[0]!
@@ -113,7 +125,7 @@ describe('the event log, as the store writes it', () => {
     const revision = studio().documentRevision
 
     expect(studio().commitTransaction(project, plan, LABEL)).toBeNull()
-    await events.flush()
+    await eventLog.flush()
 
     expect(studio().project!.files.some(file => file.text.includes('"Edited"'))).toBe(true)
     expect(studio().documentRevision).toBe(revision + 1)

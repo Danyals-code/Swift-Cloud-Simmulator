@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { createProjectStore, projectFromFiles } from '@studio/project-model'
-import { events } from './eventLog'
+import { eventLog } from './eventLog'
 import { useStudio } from './store'
 
 /**
@@ -27,7 +27,7 @@ it('saves what is here before stepping aside, then writes nothing more', async (
   save.mockRestore()
 
   // The other tab writes the events from here on (G5).
-  const logged = (await events.jsonl(project.id)).trimEnd().split('\n').slice(1).map(line => JSON.parse(line))
+  const logged = (await eventLog.file(project.id)).text.trimEnd().split('\n').slice(1).map(line => JSON.parse(line))
   expect(logged.map(event => event.action ?? event.type)).toEqual(['loaded', 'code', 'handed-over'])
 })
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryEventStore } from '@studio/project-model'
 import { createEventLog, type LoggedEvent } from './eventLog'
 
@@ -19,8 +19,10 @@ function logWith(limit?: number) {
 
 /** The exported lines, parsed: the header first. */
 async function lines(log: ReturnType<typeof createEventLog>, project: string) {
-  return (await log.jsonl(project)).trimEnd().split('\n').map(line => JSON.parse(line))
+  return (await log.file(project)).text.trimEnd().split('\n').map(line => JSON.parse(line))
 }
+
+afterEach(() => { vi.useRealTimers() })
 
 describe('the event log', () => {
   it('writes each event with when it happened, the page load and its order, after a header', async () => {
@@ -57,7 +59,7 @@ describe('the event log', () => {
     expect((await lines(second, 'p2'))[0]).toMatchObject({ events: 1, dropped: 0 })
   })
 
-  it('goes on writing after the storage refuses a write, and never throws at whoever records', async () => {
+  it('keeps what the storage refused for this page’s exports, in order, and never throws at whoever records', async () => {
     const store = new MemoryEventStore<LoggedEvent>()
     const append = store.append.bind(store)
     let refusals = 1
@@ -68,7 +70,26 @@ describe('the event log', () => {
     log.record('p1', { type: 'history', direction: 'redo' })
     await log.flush()
 
-    expect((await lines(log, 'p1')).slice(1).map(event => event.direction)).toEqual(['redo'])
+    const [header, ...events] = await lines(log, 'p1')
+    expect(events.map(event => [event.seq, event.direction])).toEqual([[1, 'undo'], [2, 'redo']])
+    expect(header).toMatchObject({ events: 2, dropped: 0 })
+    expect(header).not.toHaveProperty('partial')
+  })
+
+  it('exports this page’s events when the stored ones cannot be read, and says the log is partial', async () => {
+    const store = new MemoryEventStore<LoggedEvent>()
+    const earlier = createEventLog(store, { session: 's1', build: BUILD, now: () => 0 })
+    earlier.record('p1', { type: 'history', direction: 'undo' })
+    await earlier.flush()
+    const log = createEventLog(store, { session: 's2', build: BUILD, now: () => 0 })
+    log.record('p1', { type: 'history', direction: 'redo' })
+    await log.flush()
+    store.read = () => Promise.reject(new DOMException('Connection lost', 'UnknownError'))
+
+    const [header, ...events] = await lines(log, 'p1')
+
+    expect(header).toMatchObject({ events: 1, partial: true })
+    expect(events.map(event => [event.session, event.direction])).toEqual([['s2', 'redo']])
   })
 
   it('writes typing as one event a burst: the file, how much went in and out, and never the code', async () => {
@@ -84,7 +105,7 @@ describe('the event log', () => {
     tick(6000)
     log.typed('p1', 'Other.swift', 'let a = 12', 'let a = 123')
 
-    const exported = await log.jsonl('p1')
+    const exported = (await log.file('p1')).text
 
     expect(exported).not.toMatch(/Text\(|let a/)
     expect(exported.trimEnd().split('\n').slice(1).map(line => JSON.parse(line))).toEqual([
@@ -113,6 +134,43 @@ describe('the event log', () => {
     expect(events.map(event => [event.session, event.type])).toEqual([['s1', 'history'], ['s2', 'session'], ['s2', 'code']])
     expect(header).toMatchObject({ events: 3, dropped: 2 })
     expect((await lines(log, 'starter'))[0]).toMatchObject({ events: 0, dropped: 0 })
+  })
+
+  it('exports this page’s events after a moment when the storage never answers, and says the log is partial', async () => {
+    vi.useFakeTimers()
+    const store = new MemoryEventStore<LoggedEvent>()
+    store.append = () => new Promise(() => {})
+    const log = createEventLog(store, { session: 's1', build: BUILD, now: () => 0 })
+    log.record('p1', { type: 'history', direction: 'undo' })
+
+    const reading = log.file('p1')
+    await vi.advanceTimersByTimeAsync(10_000)
+    const { text, partial } = await reading
+
+    expect(partial).toBe(true)
+    expect(text.trimEnd().split('\n').map(line => JSON.parse(line))).toMatchObject([{ events: 1, partial: true }, { direction: 'undo' }])
+  })
+
+  it('hands a project’s events on in this page even when the storage refuses to move them', async () => {
+    const store = new MemoryEventStore<LoggedEvent>()
+    store.move = () => Promise.reject(new DOMException('Connection lost', 'UnknownError'))
+    const log = createEventLog(store, { session: 's1', build: BUILD, now: () => 0 })
+    log.record('starter', { type: 'session', action: 'loaded', origin: 'fresh', build: 'abc1234' })
+    log.handOn('starter', 'p1')
+    log.record('p1', { type: 'project', action: 'created', template: 'counter' })
+
+    expect((await lines(log, 'p1')).slice(1).map(event => event.type)).toEqual(['session', 'project'])
+  })
+
+  it('writes the events in the order they happened, whichever tab’s write landed first', async () => {
+    const store = new MemoryEventStore<LoggedEvent>()
+    const later = createEventLog(store, { session: 'a', build: BUILD, now: () => 2000 })
+    const sooner = createEventLog(store, { session: 'b', build: BUILD, now: () => 1000 })
+    later.record('p1', { type: 'history', direction: 'undo' })
+    await later.flush()
+    sooner.record('p1', { type: 'history', direction: 'redo' })
+
+    expect((await lines(sooner, 'p1')).slice(1).map(event => event.session)).toEqual(['b', 'a'])
   })
 
   it('forgets the events of a removed project, and only its own', async () => {

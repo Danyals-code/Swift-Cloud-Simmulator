@@ -1,4 +1,13 @@
 import { expect, type Locator, type Page } from '@playwright/test'
+import { unzipSync } from 'fflate'
+
+/** The event log an archive carries: its text, its header line, and its events (G5). */
+export function eventLogIn(zip: Uint8Array): { text: string; header: Record<string, unknown>; events: Record<string, unknown>[] } {
+  const entry = Object.entries(unzipSync(zip)).find(([path]) => path.endsWith('/.swiftstudio/events.jsonl'))?.[1]
+  const text = entry ? new TextDecoder().decode(entry) : ''
+  const [header = {}, ...events] = text.trimEnd().split('\n').filter(Boolean).map(line => JSON.parse(line))
+  return { text, header, events }
+}
 
 /**
  * Replaces the whole open file through CodeMirror's own select-all.
