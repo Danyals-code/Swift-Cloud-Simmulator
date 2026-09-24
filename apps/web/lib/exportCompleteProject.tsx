@@ -5,11 +5,12 @@ import { getDevice } from '@studio/sim-shell'
 import { downloadProjectZip, type ScreenSnapshot } from '@studio/exporter'
 import { STUDIO_BUILD } from './build'
 import type { Project } from '@studio/project-model'
-import type { PagePreview } from '@studio/shared'
+import { viewsDrawing, type PagePreview } from '@studio/shared'
 import { compileSnapshot } from './compileSnapshot'
 import { capturePreview } from './designExport'
 import type { PreviewSettings } from './store'
-import { screenCatalog, screenDefinition } from './screens'
+import { screenCatalog } from './screens'
+import { screenNaming } from './designTree'
 
 const ignoreEvent = () => {}
 /** Capture an immutable source snapshot without navigating or changing the live canvas. */
@@ -20,8 +21,10 @@ export async function exportCompleteProject(project: Project, preview: PreviewSe
   if (!result.renderTree || problem) throw new Error(`Screen capture needs a working preview${problem ? `: ${problem.slice(0, 180)}` : '.'} You can still export code from Export options.`)
   const pages: readonly PagePreview[] = result.pages?.length ? result.pages : [{ id: 'app', name: project.manifest.name, kind: 'root', active: true, tree: result.renderTree }]
   const catalog = screenCatalog(result.authoring, pages, project.studio?.screens)
+  const { nameOf } = screenNaming(pages, result.authoring, catalog)
   if ((project.studio?.screens?.length ?? 0) > 128 || pages.filter(page => page.kind === 'root').length >= 128 || pages.filter(page => page.kind !== 'root').length >= 128) throw new Error('This project exceeds the screen capture limit. Export code and individual images from Export options.')
-  const missing = project.studio?.screens?.filter(screen => !pages.some(page => page.id === `screen:${screen.view}`)) ?? []
+  // A screen holding tabs or sheets written in place is captured with them, not as a page.
+  const missing = project.studio?.screens?.filter(screen => !pages.some(page => page.id === `screen:${screen.view}` || viewsDrawing(page).some(view => view.name === screen.view))) ?? []
   if (missing.length) throw new Error(`Could not capture ${missing.map(screen => screen.name).join(', ')}. Resolve these screen previews or use a code-only export.`)
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true'); host.inert = true
@@ -35,8 +38,7 @@ export async function exportCompleteProject(project: Project, preview: PreviewSe
       flushSync(() => root.render(<div key={page.id} style={{ width, height, background: page.tree.colorScheme === 'dark' ? '#000' : '#fff' }}><RenderTreeView tree={page.tree} onEvent={ignoreEvent} /></div>))
       const canvas = await capturePreview(host.firstElementChild as HTMLElement, width, height)
       const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('A screen could not be converted to PNG.')), 'image/png'))
-      const definition = screenDefinition(result.authoring, page)
-      const name = catalog.find(screen => screen.view === definition?.name)?.name ?? page.name
+      const name = nameOf(page)
       screens.push({ id: page.id, name, kind: page.kind ?? 'root', width, height, png: new Uint8Array(await blob.arrayBuffer()) })
     }
     signal.throwIfAborted()

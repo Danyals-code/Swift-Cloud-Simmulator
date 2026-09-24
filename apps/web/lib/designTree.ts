@@ -64,18 +64,37 @@ export interface DesignTree {
 
 const PRESENTED = new Set(['sheet', 'cover', 'popover'])
 
-export function designTree(pages: readonly PagePreview[] | undefined, snapshot: AuthoringSnapshot | undefined, screens: readonly DesignScreen[]): DesignTree {
-  const all = pages ?? []
-  const byId = new Map(all.map(page => [page.id, page]))
-  const viewOf = (page: PagePreview) => page.id.startsWith('screen:') ? page.id.slice(7) : screenDefinition(snapshot, page)?.name
-  const pagesOf = new Map<string, number>()
-  for (const page of all) { const view = viewOf(page); if (view) pagesOf.set(view, (pagesOf.get(view) ?? 0) + 1) }
-  const shared = (view: string | undefined) => !!view && (pagesOf.get(view) ?? 0) > 1
-  /** The view's name for its own page, and the page's own title where the view has no one page to name. */
+/**
+ * Whose page each page is, and what it is called.
+ *
+ * A page is named by its view's screen name when it is that view's page, and by its
+ * own title otherwise: written in place inside another view, or one of several screens
+ * a view draws. A view draws several when its pages have different titles, as one list
+ * view can be two tabs; a sheet opened from two screens has one title, and is one screen.
+ */
+export function screenNaming(pages: readonly PagePreview[], snapshot: AuthoringSnapshot | undefined, screens: readonly DesignScreen[]) {
+  const views = new Map(pages.map(page => [page.id, page.id.startsWith('screen:') ? page.id.slice(7) : screenDefinition(snapshot, page)?.name]))
+  const titles = new Map<string, Set<string>>()
+  for (const page of pages) {
+    const view = views.get(page.id)
+    if (view) titles.set(view, (titles.get(view) ?? new Set()).add(page.name))
+  }
+  const viewOf = (page: PagePreview) => views.get(page.id)
+  const shared = (view: string | undefined) => !!view && (titles.get(view)?.size ?? 0) > 1
   const nameOf = (page: PagePreview) => {
     const view = viewOf(page)
     return (!shared(view) && screens.find(screen => screen.view === view)?.name) || page.name
   }
+  return { viewOf, shared, nameOf }
+}
+
+/** Whether a screen is renamed on its own: it is its view's page, and the view names no other screen. */
+export const canRename = (screen: DesignScreenNode) => !!screen.view && !screen.shared
+
+export function designTree(pages: readonly PagePreview[] | undefined, snapshot: AuthoringSnapshot | undefined, screens: readonly DesignScreen[]): DesignTree {
+  const all = pages ?? []
+  const byId = new Map(all.map(page => [page.id, page]))
+  const { viewOf, shared, nameOf } = screenNaming(all, snapshot, screens)
   const presentationOf = (page: PagePreview): ScreenPresentation => !page.parentId || !byId.has(page.parentId) ? 'root' : page.kind === 'destination' ? 'push' : page.kind === 'sheet' || page.kind === 'cover' || page.kind === 'popover' ? page.kind : 'push'
   const sheets = new Map<string, { screen: DesignScreenNode; openers: string[] }>()
   const build = (page: PagePreview, depth: number, seen: ReadonlySet<string>): DesignScreenNode => {

@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { Diagnostic, PagePreview } from '@studio/shared'
-import { designScreenPath, emptyScreensNote, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
+import { canRename, designScreenPath, emptyScreensNote, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
 import type { ScreenCommand } from '../lib/screens'
 import type { NavigatorLayout } from '../lib/layout'
 import { Icon, type IconName } from './ui/Icon'
@@ -78,7 +78,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
   // A screen written inside another has no view to act on; one sharing its view with
   // other screens is named by its title, so it isn't renamed on its own.
   const screenActions = (node: DesignScreenNode): MenuItem[] => node.view ? [
-    ...(node.shared ? [] : [{ value: 'rename', label: 'Rename…', disabled: busy }]),
+    ...(canRename(node) ? [{ value: 'rename', label: 'Rename…', disabled: busy }] : []),
     { value: 'duplicate', label: 'Duplicate', disabled: busy },
     { value: 'remove', label: 'Remove screen', disabled: busy, separated: true },
   ] : []

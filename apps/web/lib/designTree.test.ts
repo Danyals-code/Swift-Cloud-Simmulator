@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Diagnostic } from '@studio/shared'
 import { compile, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { designTree, emptyScreensNote } from './designTree'
-import { screenCatalog } from './screens'
+import { screenCatalog, type DesignScreen } from './screens'
 
 /**
  * What the Screens list says when it has none to list.
@@ -38,13 +38,13 @@ describe('the note an empty Screens list shows', () => {
  * that other screen: named after it, merged with it, and edited in its place.
  */
 describe('the screens the Design panel lists', () => {
-  function screensOf(declarations: string) {
+  function screensOf(declarations: string, saved: readonly DesignScreen[] = []) {
     resetPipelineState()
     setFontMetrics([])
     const text = `import SwiftUI\n@main struct DemoApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }\n${declarations}`
-    const result = compile({ files: [{ id: 'App.swift', text }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true })
+    const result = compile({ files: [{ id: 'App.swift', text }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true, designScreens: saved })
     expect(result.diagnostics).toEqual([])
-    return designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, []))
+    return designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, saved))
   }
 
   it('names a screen written inside another after its own title, and gives it no view to act on', () => {
@@ -91,5 +91,56 @@ struct ItemList: View {
       ['All', 'All', 'ItemList', true],
       ['Favourites', 'Favourites', 'ItemList', true],
     ])
+  })
+
+  const LISTS = `struct HomeScreen: View {
+  var body: some View {
+    TabView {
+      ItemList(title: "All").tabItem { Label("All", systemImage: "list.bullet") }
+      ItemList(title: "Favourites").tabItem { Label("Favourites", systemImage: "star") }
+    }
+  }
+}
+struct ItemList: View {
+  let title: String
+  var body: some View { NavigationStack { List { Text("Row") }.navigationTitle(title) } }
+}`
+
+  it("keeps each tab's title when the view they share was given a name", () => {
+    const tree = screensOf(LISTS, [{ view: 'ItemList', name: 'Lists' }])
+    expect(tree.lanes.map(({ root }) => root.name)).toEqual(['All', 'Favourites'])
+  })
+
+  it('names tabs written in place by their titles, and gives them no view to act on', () => {
+    const tree = screensOf(`struct HomeScreen: View {
+  var body: some View {
+    TabView {
+      NavigationStack { Text("Mail").navigationTitle("Inbox") }.tabItem { Label("Inbox", systemImage: "tray") }
+      NavigationStack { Text("Out").navigationTitle("Sent") }.tabItem { Label("Sent", systemImage: "paperplane") }
+    }
+  }
+}`)
+    expect(tree.lanes.map(({ root }) => [root.name, root.view])).toEqual([['Inbox', undefined], ['Sent', undefined]])
+  })
+
+  it('treats one sheet opened from two screens as one screen, which can be renamed', () => {
+    const tree = screensOf(`struct HomeScreen: View {
+  @State private var editing = false
+  var body: some View {
+    NavigationStack {
+      VStack { Button("Edit") { editing = true }; NavigationLink("More") { MoreScreen() } }
+        .navigationTitle("Home")
+        .sheet(isPresented: $editing) { EditScreen() }
+    }
+  }
+}
+struct MoreScreen: View {
+  @State private var editing = false
+  var body: some View { Button("Edit") { editing = true }.navigationTitle("More").sheet(isPresented: $editing) { EditScreen() } }
+}
+struct EditScreen: View {
+  var body: some View { NavigationStack { Text("Form").navigationTitle("Edit") } }
+}`)
+    expect(tree.sheets.map(({ screen, openers }) => [screen.name, screen.view, screen.shared, openers.length])).toEqual([['Edit', 'EditScreen', undefined, 2]])
   })
 })
