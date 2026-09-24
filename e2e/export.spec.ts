@@ -1,6 +1,7 @@
 import { expect, test, type Download, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { unzipSync } from 'fflate'
+import { PNG } from 'pngjs'
 import { openCounter, replaceSource } from './designer-helpers'
 
 /** Presses Export, the complete bundle, and waits for the file. */
@@ -14,6 +15,22 @@ async function exportComplete(page: Page): Promise<Download> {
 async function entriesOf(download: Download): Promise<Record<string, Uint8Array>> {
   return unzipSync(new Uint8Array(readFileSync((await download.path())!)))
 }
+
+test('the exported screen images are drawn at their full size (G8)', async ({ page }) => {
+  await openCounter(page)
+
+  const download = await exportComplete(page)
+
+  const screens = Object.entries(await entriesOf(download)).filter(([path]) => /\/Studio Report\/Screens\/[^/]+\.png$/.test(path))
+  expect(screens.length).toBeGreaterThan(0)
+  for (const [path, bytes] of screens) {
+    const png = PNG.sync.read(Buffer.from(bytes))
+    // The screen's background covers the whole image, so its far corner is drawn. An
+    // image made at half its size fills only the top-left quarter and leaves it empty.
+    const corner = ((png.height - 2) * png.width + png.width - 2) * 4
+    expect(png.data[corner + 3], `the bottom-right corner of ${path}`).toBe(255)
+  }
+})
 
 test('the Export button still downloads the project while its code has an error (G6)', async ({ page }) => {
   await openCounter(page)

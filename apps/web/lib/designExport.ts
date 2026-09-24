@@ -38,12 +38,15 @@ export async function capturePreview(element: HTMLElement, width: number, height
   clone.querySelectorAll('style, script, link').forEach(node => node.remove())
   clone.style.transform = 'none'; clone.style.margin = '0'; clone.style.position = 'relative'; clone.style.left = '0'; clone.style.top = '0'; clone.style.width = `${width}px`; clone.style.height = `${height}px`
   const xml = new XMLSerializer().serializeToString(clone)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * scale}" height="${height * scale}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`
+  // Made at the page's own size and scaled as it is drawn: WebKit ignores an SVG's scale
+  // for the HTML inside a foreignObject, so an image made at twice the size came out of
+  // Safari with only its top-left quarter drawn.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`
   const image = new Image(); image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
   await image.decode()
   const canvas = document.createElement('canvas'); canvas.width = Math.round(width * scale); canvas.height = Math.round(height * scale)
   const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('The browser could not create an image.')
-  ctx.drawImage(image, 0, 0)
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
   return canvas
 }
 export function exportName(name: string) { return name.replace(/[^a-z0-9 _-]/gi, '').trim().slice(0, 100) || 'Design' }
