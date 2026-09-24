@@ -1,7 +1,7 @@
 import { customizeCard, editsCardSurface } from './authoring-card'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import { argumentLayerProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
+import { argumentLayerProblem, canvasDropProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { structuralEditProblem, type StructuralKind } from './structural-check'
@@ -106,7 +106,12 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     switch (operation.kind) {
       case 'delete': changed = deleteView(file.text, file.id, offset); break
       case 'move': changed = moveView(file.text, file.id, offset, operation.direction); break
-      case 'moveTo': changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position); break
+      case 'moveTo': {
+        const problem = canvasDropProblem(model.nodes, node!, { file: file.id, start: operation.targetOffset }, operation.position)
+        if (problem) return reject(problem)
+        changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position)
+        break
+      }
       case 'insert': {
         // A link offered by the palette must be runnable immediately. If this
         // screen has no navigation container, wrap its root in the same edit.

@@ -1,4 +1,5 @@
 import type { AuthoringNode } from './authoring'
+import type { DropPosition } from './protocol'
 
 export const LAYER_MOVE_CONTAINERS: ReadonlySet<string> = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'Group', 'ScrollView'])
 
@@ -23,15 +24,40 @@ export function layerMoveProblem(nodes: readonly AuthoringNode[], ids: readonly 
   if (!first || selected.some(node => !node || !isStructuralLayer(node) || node.parentId !== first.parentId || node.owner !== first.owner || node.source.file !== first.source.file)) return 'Select layers with the same parent.'
   if (!['view', 'collection'].includes(destination.kind) || !LAYER_MOVE_CONTAINERS.has(destination.name) || destination.owner !== first.owner || destination.source.file !== first.source.file) return 'Choose a layout container on this screen.'
   if (selected.some(node => node && destination.source.start >= node.source.start && destination.source.end <= node.source.end)) return 'A layer cannot be moved inside itself or its children.'
-  const scope = (node: AuthoringNode) => {
-    let parent = byId.get(node.parentId ?? '')
-    while (parent && !['definition', 'template', 'branch'].includes(parent.kind)) parent = byId.get(parent.parentId ?? '')
-    return parent?.id
-  }
-  if (scope(first) !== scope(destination)) return 'Move within the same screen or repeated row to preserve its values and conditions.'
+  if (layerScope(byId, first) !== layerScope(byId, destination)) return LEAVES_SCOPE
   if (byId.get(first.parentId ?? '')?.kind === 'definition') return 'The screen must keep its root layout.'
   const siblings = byId.get(first.parentId ?? '')?.children ?? []
   const positions = selected.map(node => siblings.indexOf(node!.id)).sort((a, b) => a - b)
   if (positions.some((position, index) => position < 0 || index > 0 && position !== positions[index - 1]! + 1)) return 'Select adjacent layers to keep their layout order predictable.'
   return null
+}
+
+const LEAVES_SCOPE = 'Move within the same screen or repeated row to preserve its values and conditions.'
+
+/** What layers are drawn in, rather than layers: a screen or component, a repeated row, a condition or slot. */
+const SCOPE_KINDS: ReadonlySet<string> = new Set(['definition', 'template', 'branch'])
+
+/** The screen, repeated row or condition a layer is drawn in, which its values and conditions come from. */
+function layerScope(byId: ReadonlyMap<string, AuthoringNode>, node: AuthoringNode): string | undefined {
+  let parent = byId.get(node.parentId ?? '')
+  while (parent && !SCOPE_KINDS.has(parent.kind)) parent = byId.get(parent.parentId ?? '')
+  return parent?.id
+}
+
+/**
+ * Why the canvas cannot drop `node` at the view starting at `target` (C5), or null.
+ *
+ * The canvas drops onto what it draws, which can be a view no layer stands for: one a
+ * helper draws, where the view dropped is drawn once per call, or not at all on iOS.
+ * A drop also keeps to the screen or component the view is in, whose every copy shares
+ * its views, and to its repeated row or condition, as a move in Layers does.
+ */
+export function canvasDropProblem(nodes: readonly AuthoringNode[], node: AuthoringNode, target: { readonly file: string; readonly start: number }, position: DropPosition): string | null {
+  const byId = new Map(nodes.map(item => [item.id, item]))
+  const onto = nodes.find(item => item.source.file === target.file && item.source.start === target.start && !SCOPE_KINDS.has(item.kind))
+  if (!onto) return 'Drop it on a layer of this screen. That spot is drawn by a helper in the Swift code, where a view could repeat or disappear.'
+  if (onto.owner !== node.owner || onto.source.file !== node.source.file) return `Move it within ${node.owner}. A view moved into or out of a component would change every copy of it.`
+  // Inside a list's rows is inside its row design; anywhere else is where the view dropped on is drawn.
+  const rows = position === 'inside' && onto.kind === 'collection' ? nodes.find(item => item.parentId === onto.id && item.kind === 'template') : undefined
+  return layerScope(byId, node) === (rows?.id ?? layerScope(byId, onto)) ? null : LEAVES_SCOPE
 }

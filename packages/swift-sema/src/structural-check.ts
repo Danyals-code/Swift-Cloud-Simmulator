@@ -195,8 +195,12 @@ function holderProblems(tree: SourceFileNode): { key: string; message: string }[
     const key = `${owner ?? ''}.${decl.name}`
     const builder = decl.name === 'body' || decl.attributes.some(attribute => attribute.name === 'ViewBuilder')
     const name = decl.name === 'body' && owner ? owner : decl.name
+    const returns = block.statements.some(statement => statement.kind === 'returnStmt')
+    // Beside a `return`, even `body` is no view builder: another view there is built and thrown away (C5).
+    const views = block.statements.filter(statement => statement.kind === 'exprStmt' || statement.kind === 'returnStmt').length
     if (!block.statements.length) problems.push({ key: `${key}:empty`, message: `This change would leave \`${name}\` with nothing to show. Nothing was changed.` })
-    else if (!builder && !block.statements.some(statement => statement.kind === 'returnStmt') && block.statements.filter(statement => statement.kind === 'exprStmt').length > 1) {
+    else if (returns && views > 1) problems.push({ key: `${key}:returned:${views}`, message: `\`${name}\` returns its one view, so a view beside it would not show on iOS. Nothing was changed.` })
+    else if (!builder && !returns && views > 1) {
       problems.push({ key: `${key}:two`, message: `\`${name}\` can hold only one view, so this change would stop the app from building. Nothing was changed.` })
     }
   }
