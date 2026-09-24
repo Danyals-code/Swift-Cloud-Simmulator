@@ -66,7 +66,9 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
   return <div className={styles.panel} data-testid="screen-settings">
     <div className={styles.lede}><strong>{screen.name}</strong><small>{presentation}</small></div>
     <section className={styles.section} aria-label="Screen">
-      {screen.view && <div className={styles.row}><label htmlFor="screen-name">Name</label><input id="screen-name" aria-label="Screen name" maxLength={100} value={name} disabled={busy} onChange={event => setName(event.target.value)} onBlur={() => { if (name.trim() && name !== screen.name) void run(onScreenCommand({ kind: 'rename', view: screen.view!, name })) }} onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); if (event.key === 'Escape') setName(screen.name) }} /></div>}
+      {!screen.view && <p className={styles.note}>This screen is written inside another screen’s code, so it has no settings of its own here. Open it in Code to change it.</p>}
+      {screen.shared && <p className={styles.note}>Its view draws other screens too, so it is named by its title.</p>}
+      {screen.view && !screen.shared && <div className={styles.row}><label htmlFor="screen-name">Name</label><input id="screen-name" aria-label="Screen name" maxLength={100} value={name} disabled={busy} onChange={event => setName(event.target.value)} onBlur={() => { if (name.trim() && name !== screen.name) void run(onScreenCommand({ kind: 'rename', view: screen.view!, name })) }} onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); if (event.key === 'Escape') setName(screen.name) }} /></div>}
       {title ? <PropertyControl key={`${title.node.id}:${title.control.value}`} control={title.control} label="Title" onChange={(id, value) => onNodeChange(title.node, id, value)} />
         : root && <p className={styles.note}>No title bar title. Add a Title modifier to the screen’s first view to show one.</p>}
       {background && root && <TokenField field={background} label="Background" tokens={tokens} busy={busy} onChange={(id, value) => onNodeChange(root, id, value)} onCommand={resource(root)} />}
@@ -94,7 +96,8 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
       <div className={styles.actions}>
         {screen.view && <button type="button" className={styles.button} disabled={busy} onClick={() => void run(onScreenCommand({ kind: 'duplicate', view: screen.view! }))}>Duplicate</button>}
         {screen.view && <button type="button" className={styles.button} disabled={busy} onClick={() => void run(onScreenCommand({ kind: 'remove', view: screen.view! }))}>Remove</button>}
-        {definition && <button type="button" className={styles.button} onClick={() => onReveal(definition.source)}><Icon name="code" size={12} />Open in Code</button>}
+        {definition ? <button type="button" className={styles.button} onClick={() => onReveal(definition.source)}><Icon name="code" size={12} />Open in Code</button>
+          : screen.page.source && <button type="button" className={styles.button} onClick={() => onReveal(screen.page.source!)}><Icon name="code" size={12} />Open in Code</button>}
       </div>
       {error && <p className={styles.error} role="alert">{error}</p>}
     </section>
