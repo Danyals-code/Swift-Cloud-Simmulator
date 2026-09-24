@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { OpenedFile, PromptMessage } from '@studio/project-model'
 import { useStudio, type SwitchResult } from '../lib/store'
-import { createAttempts } from '../lib/promptAttempts'
+import { createAttempts, type DraftStamp } from '../lib/promptAttempts'
 import { useAiConnection } from '../lib/generation/connection'
+import { clearDraft, loadDraft, saveDraft } from '../lib/generation/draft'
 import { parseGeneratedApp, parseOptions, type GeneratedApp, type GenerationOptions, type Provider } from '../lib/generation/schema'
 import { checkPreview } from '../lib/generation/validate'
 import { Icon } from './ui/Icon'
@@ -17,22 +18,39 @@ const openProjectId = () => useStudio.getState().project?.id ?? null
 type AppOptions = Omit<GenerationOptions, 'provider' | 'model'>
 const INITIAL: AppOptions = { prompt: '', pageCount: 4, navigation: 'tabs', accent: 'indigo', sampleData: true, includeSettings: false }
 
-export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[]) => Promise<SwitchResult>; onBusy: (busy: boolean) => void }) {
+/**
+ * Create with AI.
+ *
+ * The connection is the tab's, shared with Prompt Editing (G3), and a draft is kept
+ * for the tab until it is opened or thrown away (G13): the panel closing loses neither.
+ * `onDraft` tells the gallery whether a draft is waiting, and `onConfirmDiscard` asks
+ * before one is thrown away.
+ */
+export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }: {
+  onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[]) => Promise<SwitchResult>
+  onBusy: (busy: boolean) => void
+  onDraft: (waiting: boolean) => void
+  onConfirmDiscard: (discard: () => void) => void
+}) {
+  const [kept] = useState(loadDraft)
   const { connection, chooseProvider, setModel, setKey } = useAiConnection()
   const [options, setOptions] = useState(INITIAL)
   const [revealKey, setRevealKey] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'generating' | 'checking' | 'opening'>('idle')
   const [error, setError] = useState<string | null>(null)
-  const [draft, setDraft] = useState<GeneratedApp | null>(null)
-  const [history, setHistory] = useState<readonly PromptMessage[]>([])
-  const [issues, setIssues] = useState<string[]>([])
+  const [draft, setDraft] = useState<GeneratedApp | null>(kept?.app ?? null)
+  const [history, setHistory] = useState<readonly PromptMessage[]>(kept?.history ?? [])
+  const [issues, setIssues] = useState<readonly string[]>(kept?.issues ?? [])
+  const [stamp, setStamp] = useState<DraftStamp | undefined>(kept?.stamp)
   const [selectedFile, setSelectedFile] = useState(0)
   const controller = useRef<AbortController | null>(null)
   const review = useRef<HTMLDivElement | null>(null)
   const busy = phase !== 'idle'
   useEffect(() => () => controller.current?.abort(), [])
-  // Closing the panel leaves its draft: opened as the project now open, or thrown away.
-  useEffect(() => () => createAttempts.settleDraft(openProjectId()), [])
+  useEffect(() => {
+    onDraft(draft !== null)
+    return () => onDraft(false)
+  }, [draft, onDraft])
   useEffect(() => { if (draft) review.current?.focus() }, [draft])
   const update = <K extends keyof AppOptions>(key: K, value: AppOptions[K]) => setOptions(current => ({ ...current, [key]: value }))
 
@@ -60,11 +78,12 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
       const found = await checkPreview(app, request.signal)
       if (request.signal.aborted) { attempt.stopped(request.signal); return }
       const common = { provider: input.provider, model: input.model, kind: 'create' as const }
-      setHistory([
+      const conversation: PromptMessage[] = [
         { ...common, id: crypto.randomUUID(), role: 'user', content: `${input.prompt}\n\nGeneration settings: ${JSON.stringify(settings)}`, createdAt: Date.now() },
         { ...common, id: crypto.randomUUID(), role: 'assistant', content: app.summary, status: 'applied', changedFiles: app.files.map(file => file.path), createdAt: Date.now() },
-      ])
-      setDraft(app); setIssues(found); setSelectedFile(0)
+      ]
+      saveDraft({ app, issues: found, history: conversation, stamp: attempt.stamp })
+      setHistory(conversation); setDraft(app); setIssues(found); setStamp(attempt.stamp); setSelectedFile(0)
       attempt.ended({ action: 'answered', files: app.files.length, issues: found.length })
     } catch (e) {
       attempt.stopped(request.signal)
@@ -79,7 +98,13 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
     setPhase('opening'); onBusy(true); setError(null)
     try {
       // Staying with an unsaved project is a choice, not a failure: the draft waits here.
-      if (await onOpenFiles(draft.files.map(f => ({ name: f.path, text: f.code })), history) === 'failed') throw new Error('The generated files could not be opened.')
+      const opened = await onOpenFiles(draft.files.map(f => ({ name: f.path, text: f.code })), history)
+      if (opened === 'failed') throw new Error('The generated files could not be opened.')
+      if (opened === 'opened') {
+        const project = openProjectId()
+        if (stamp && project) createAttempts.draftOpened(stamp, project)
+        clearDraft()
+      }
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open this project.') }
     finally { setPhase('idle'); onBusy(false) }
   }
@@ -91,7 +116,7 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
     {issues.length > 0 && <details className={styles.issues}><summary>{issues.length} preview {issues.length === 1 ? 'issue' : 'issues'}</summary><ul>{issues.map(i => <li key={i}>{i}</li>)}</ul></details>}
     <div className={styles.files}><nav aria-label="Generated files">{draft.files.map((file, i) => <button type="button" key={file.path} aria-pressed={selectedFile === i} onClick={() => setSelectedFile(i)}><Icon name="new-file" size={14} />{file.path.replace('Sources/', '')}</button>)}</nav><pre tabIndex={0} aria-label="Generated Swift source"><code>{draft.files[selectedFile]?.code}</code></pre></div>
     {error && <p role="alert" className={styles.error}>{error}</p>}
-    <footer className={styles.footer}><span>{draft.files.length} Swift files · Opens as a separate project</span><div><button type="button" className={styles.secondary} disabled={busy} onClick={() => { createAttempts.settleDraft(openProjectId()); setDraft(null); setError(null) }}>Back to prompt</button><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()} data-testid="open-generated">{busy ? 'Opening…' : issues.length ? 'Open draft' : 'Open project'}<Icon name="chevron-right" size={13} /></button></div></footer>
+    <footer className={styles.footer}><span>{draft.files.length} Swift files · Opens as a separate project</span><div><button type="button" className={styles.secondary} disabled={busy} onClick={() => onConfirmDiscard(() => { if (stamp) createAttempts.draftDiscarded(stamp); clearDraft(); setDraft(null); setStamp(undefined); setError(null) })}>Back to prompt</button><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()} data-testid="open-generated">{busy ? 'Opening…' : issues.length ? 'Open draft' : 'Open project'}<Icon name="chevron-right" size={13} /></button></div></footer>
   </div>
 
   return <form className={styles.form} onSubmit={e => { e.preventDefault(); void generate() }} data-testid="prompt-creator">
