@@ -1,4 +1,4 @@
-import { useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type UIEvent as ReactUIEvent } from 'react'
+import { createContext, useContext, useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type UIEvent as ReactUIEvent } from 'react'
 import { ScrollIndicator } from './ScrollIndicator'
 import { ShapeView, VectorPathView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
@@ -19,7 +19,7 @@ import {
 import { symbolAsset, symbolStrokeScale } from './symbols'
 import { beginContextPress } from './context-press'
 import { finishExit, reconcilePresence, type PresentNode, type RenderGroups } from './transition-presence'
-import { editField, fieldValue, NO_DRAFT, type FieldDraft, type FieldEdit } from './field-draft'
+import { editDraft, shownValue, NO_DRAFT, type ControlDraft, type ControlEdit } from './control-draft'
 
 const EMPTY_NODES: readonly RenderNode[] = []
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -95,6 +95,7 @@ export const RenderTreeView = memo(function RenderTreeView({
 }: RenderTreeViewProps) {
   const reduceMotion = useSyncExternalStore(subscribeMotion, reducedMotion, serverMotion)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const [handoffs] = useState(() => new Map<string, Handoff>())
   useLayoutEffect(() => {
     const surface = surfaceRef.current
     if (!surface) return
@@ -164,7 +165,9 @@ export const RenderTreeView = memo(function RenderTreeView({
       <TransitionKeyframes />
       <ControlStyles />
 
-      <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
+      <ControlHandoffs.Provider value={handoffs}>
+        <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
+      </ControlHandoffs.Provider>
 
       {hoveredNodes.map(node => <InspectHighlight key={node.id} node={node} tree={tree} />)}
     </div>
@@ -675,51 +678,112 @@ function ScrollContent({ node, children }: { node: RenderNode; children: ReactNo
 
 /**
  * Where the preview's events go. The promise, when there is one, settles once the app
- * has answered the event, which is when a field can show the app's value again.
+ * has answered the event, which is when a control can show the app's value again.
  */
-type EventSink = (event: UIEvent) => void | Promise<void>
+export type EventSink = (event: UIEvent) => void | Promise<void>
 
-function renderControl(
-  node: RenderNode,
-  handlerId: string,
-  onEvent: EventSink | undefined,
-): ReactNode {
+/** A control the browser owns, drawn at a node the layout engine placed. */
+interface ControlProps {
+  readonly node: RenderNode
+  readonly handlerId: string
+  readonly onEvent: EventSink | undefined
+}
+
+function renderControl(node: RenderNode, handlerId: string, onEvent: EventSink | undefined): ReactNode {
   return node.hitTarget!.role === 'textField'
     ? <PreviewField node={node} handlerId={handlerId} onEvent={onEvent} />
     : <PreviewSlider node={node} handlerId={handlerId} onEvent={onEvent} />
 }
 
 /**
- * What a field or slider shows while its changes are on their way: its own draft
- * until the app has answered them (see `field-draft`), then the app's value.
+ * What a control that is replaced leaves for the one that replaces it.
+ *
+ * A view appearing above a field, `if !name.isEmpty { Text(...) }`, moves the field
+ * in the tree, so a new one is mounted where SwiftUI keeps the same field. What was
+ * typed, the caret and the focus move to it, matched by where the control is written.
  */
-function useFieldDraft(appValue: string, send: (value: string) => void | Promise<void>) {
-  const [draft, setDraft] = useState<FieldDraft>(NO_DRAFT)
-  const latest = useRef<FieldDraft>(NO_DRAFT)
+interface Handoff {
+  readonly draft: ControlDraft
+  readonly focused: boolean
+  readonly selection: readonly [number, number] | null
+  readonly at: number
+}
+
+const ControlHandoffs = createContext<Map<string, Handoff> | null>(null)
+
+/** A handoff older than this is for a control that went away, not one being replaced. */
+const HANDOFF_MS = 1000
+
+/**
+ * What a field or slider shows while its changes are on their way: its own draft
+ * until the app has answered them (see `control-draft`), then the app's value.
+ */
+function useControlDraft(node: RenderNode, send: (value: string) => void | Promise<void>) {
+  const appValue = node.hitTarget?.value ?? (node.hitTarget?.role === 'slider' ? '0' : '')
+  const [draft, setDraft] = useState<ControlDraft>(NO_DRAFT)
+  const latest = useRef<ControlDraft>(NO_DRAFT)
   const sender = useRef(send)
   useLayoutEffect(() => { sender.current = send })
-  const apply = useCallback((change: FieldEdit): string | undefined => {
-    const next = editField(latest.current, change)
+  const element = useRef<HTMLInputElement & HTMLTextAreaElement>(null)
+  const focused = useRef(false)
+  const apply = useCallback((change: ControlEdit): string | undefined => {
+    const next = editDraft(latest.current, change)
     latest.current = next.draft
     setDraft(next.draft)
     return next.send
   }, [])
-  const edit = useCallback((change: FieldEdit) => {
+  const edit = useCallback((change: ControlEdit) => {
     const value = apply(change)
     if (value === undefined) return
     const answered = () => { apply({ kind: 'answered' }) }
     void Promise.resolve(sender.current(value)).then(answered, answered)
   }, [apply])
-  return { value: fieldValue(draft, appValue), edit }
+
+  const handoffs = useContext(ControlHandoffs)
+  const key = node.origin && `${node.origin.file}:${node.origin.start}:${node.origin.end}`
+  useLayoutEffect(() => {
+    const handoff = key ? handoffs?.get(key) : undefined
+    if (!key || !handoff) return
+    handoffs!.delete(key)
+    if (performance.now() - handoff.at > HANDOFF_MS) return
+    // The changes the old control sent went to a handler that is gone: send the text again.
+    if (handoff.draft.value !== null) edit({ kind: 'input', value: handoff.draft.value })
+    if (!handoff.focused) return
+    element.current?.focus({ preventScroll: true })
+    try {
+      if (handoff.selection) element.current?.setSelectionRange(...handoff.selection)
+    } catch {
+      // A range or a time field has no caret to put back.
+    }
+  }, [key, handoffs, edit])
+  useLayoutEffect(() => () => {
+    if (!key || !handoffs || (latest.current.value === null && !focused.current)) return
+    const target = element.current
+    let selection: Handoff['selection'] = null
+    try {
+      selection = target && target.selectionStart !== null && target.selectionEnd !== null ? [target.selectionStart, target.selectionEnd] : null
+    } catch {
+      // As above: no caret.
+    }
+    handoffs.set(key, { draft: latest.current, focused: focused.current, selection, at: performance.now() })
+  }, [key, handoffs])
+
+  const tracking = {
+    ref: element,
+    onFocus: () => { focused.current = true },
+    onBlur: () => { focused.current = false },
+  }
+  return { value: shownValue(draft, appValue), edit, tracking }
 }
 
-function PreviewField({ node, handlerId, onEvent }: { node: RenderNode; handlerId: string; onEvent: EventSink | undefined }) {
+function PreviewField({ node, handlerId, onEvent }: ControlProps) {
   const hit = node.hitTarget!
   const font = hit.font
-  const { value, edit } = useFieldDraft(hit.value ?? '', (text) => onEvent?.({ kind: 'textChange', handlerId, value: text }))
+  const { value, edit, tracking } = useControlDraft(node, (text) => onEvent?.({ kind: 'textChange', handlerId, value: text }))
   const Field = hit.multiline ? 'textarea' : 'input'
   return (
     <Field
+      {...tracking}
       className="swiftui-field"
       type={hit.multiline ? undefined : hit.inputType ?? (hit.secure ? 'password' : 'text')}
       step={hit.inputType === 'time' ? 60 : undefined}
@@ -770,11 +834,12 @@ function PreviewField({ node, handlerId, onEvent }: { node: RenderNode; handlerI
   )
 }
 
-function PreviewSlider({ node, handlerId, onEvent }: { node: RenderNode; handlerId: string; onEvent: EventSink | undefined }) {
+function PreviewSlider({ node, handlerId, onEvent }: ControlProps) {
   const hit = node.hitTarget!
-  const { value, edit } = useFieldDraft(hit.value ?? '0', (position) => onEvent?.({ kind: 'slide', handlerId, value: Number(position) }))
+  const { value, edit, tracking } = useControlDraft(node, (position) => onEvent?.({ kind: 'slide', handlerId, value: Number(position) }))
   return (
     <input
+      {...tracking}
       className="swiftui-range"
       disabled={!hit.enabled}
       type="range"

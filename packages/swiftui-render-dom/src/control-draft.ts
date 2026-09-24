@@ -1,12 +1,13 @@
 /**
- * A preview field's own copy of what the user is typing, kept while the app catches up.
+ * A preview control's own copy of what the user is changing, kept while the app catches up.
  *
- * The app's value comes back from the worker a keystroke or more behind a fast typist.
- * A field drawing that value would put each new key on text the user has already
- * changed, and drop the rest; so the field shows its draft until every change it sent
- * has been answered, and then the app's value, which the app may have changed.
+ * The app's value comes back from the worker a keystroke or more behind a fast typist,
+ * or a slider's thumb behind the pointer. A field drawing that value would put each new
+ * key on text the user has already changed, and drop the rest, and a thumb would snap
+ * back; so the control shows its draft until every change it sent has been answered,
+ * and then the app's value, which the app may have changed.
  */
-export interface FieldDraft {
+export interface ControlDraft {
   /** What the user has typed, or null to show the app's value. */
   readonly value: string | null
   /** Changes sent to the app and not answered yet. */
@@ -19,16 +20,16 @@ export interface FieldDraft {
   readonly composing: boolean
 }
 
-export const NO_DRAFT: FieldDraft = { value: null, unanswered: 0, composing: false }
+export const NO_DRAFT: ControlDraft = { value: null, unanswered: 0, composing: false }
 
-export type FieldEdit =
+export type ControlEdit =
   | { readonly kind: 'input'; readonly value: string }
   | { readonly kind: 'compositionStart' }
   | { readonly kind: 'compositionEnd'; readonly value: string }
   | { readonly kind: 'answered' }
 
-/** The field's next draft, and the value to send the app when the edit sends one. */
-export function editField(draft: FieldDraft, edit: FieldEdit): { draft: FieldDraft; send?: string } {
+/** The control's next draft, and the value to send the app when the edit sends one. */
+export function editDraft(draft: ControlDraft, edit: ControlEdit): { draft: ControlDraft; send?: string } {
   switch (edit.kind) {
     case 'input':
       return { draft: { ...draft, value: edit.value, unanswered: draft.unanswered + 1 }, send: edit.value }
@@ -43,7 +44,7 @@ export function editField(draft: FieldDraft, edit: FieldEdit): { draft: FieldDra
   }
 }
 
-/** What the field shows. */
-export function fieldValue(draft: FieldDraft, appValue: string): string {
+/** What the control shows. */
+export function shownValue(draft: ControlDraft, appValue: string): string {
   return draft.value ?? appValue
 }

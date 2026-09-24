@@ -2,9 +2,9 @@
 
 import { scenarioKey } from '../lib/screens'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
+import { RenderTreeView, symbolAsset, type EventSink } from '@studio/swiftui-render-dom'
 import { stateProblem } from '../lib/stateProblem'
-import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
+import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree } from '@studio/shared'
 import type { DeviceKey, DeviceSpec } from '@studio/sim-shell'
 import styles from './Workspace.module.css'
 import type { PreviewSettings } from '../lib/store'
@@ -56,7 +56,7 @@ export interface DevicePaneProps {
   hoveredRenderIds?: ReadonlySet<string>
   stale: boolean
   /** Sends a preview event; resolves once the app has answered it, so a field can show the app's value again. */
-  onEvent: (event: UIEvent) => void | Promise<void>
+  onEvent: EventSink
   inspecting: boolean
   /** Reveal a view's source. Null origin means the node has no source position. */
   onRevealSource: (node: RenderNode, pageId?: string) => void

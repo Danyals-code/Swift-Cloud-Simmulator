@@ -33,27 +33,35 @@ async function tap(page: Page, name: string) {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
 }
 
-test('a slider drag on a heavy screen redraws as it goes and lands where it was let go (F2)', async ({ page }) => {
-  await openSource(page, app(`  @State private var level = 0.0
+/** A slider over 400 rows that each read its value, so every move costs the worker a redraw. */
+const HEAVY_SLIDER = app(`  @State private var level = 0.0
   var body: some View {
     VStack {
       Text("Level \\(Int(level))")
       Slider(value: $level, in: 0...100)
       ScrollView { VStack { ForEach(0..<400, id: \\.self) { i in Text("Row \\(i) \\(Int(level) * i)") } } }
     }
-  }`), 'Level 0')
-  const slider = page.getByTestId('render-tree').locator('input.swiftui-range')
-  const label = page.getByTestId('render-tree').getByText(/^Level /)
-  const box = (await slider.boundingBox())!
+  }`)
+
+/** Drags the slider from end to end in `steps` moves, a pointer's pace apart, and calls `each` after every one. */
+async function dragSlider(page: Page, steps: number, each: () => Promise<void>) {
+  const box = (await page.getByTestId('render-tree').locator('input.swiftui-range').boundingBox())!
   const y = box.y + box.height / 2
   await page.mouse.move(box.x + 2, y)
   await page.mouse.down()
-  const seen = new Set<string>()
-  for (let step = 1; step <= 60; step++) {
-    await page.mouse.move(box.x + 2 + (box.width - 4) * step / 60, y)
-    seen.add((await label.textContent()) ?? '')
+  for (let step = 1; step <= steps; step++) {
+    await page.mouse.move(box.x + 2 + (box.width - 4) * step / steps, y)
+    await page.waitForTimeout(16)
+    await each()
   }
   await page.mouse.up()
+}
+
+test('a slider drag on a heavy screen redraws as it goes and lands where it was let go (F2)', async ({ page }) => {
+  await openSource(page, HEAVY_SLIDER, 'Level 0')
+  const label = page.getByTestId('render-tree').getByText(/^Level /)
+  const seen = new Set<string>()
+  await dragSlider(page, 60, async () => { seen.add((await label.textContent()) ?? '') })
   expect(seen.size).toBeGreaterThan(3)
   await expect(label).toHaveText('Level 100')
 })
@@ -101,6 +109,23 @@ test('fast typing into a preview field keeps every character (F1)', async ({ pag
   await expect(field).toHaveValue('the quick brown fox jumps over the lazy dog')
 })
 
+test('typing keeps every character when a view appears above the field and moves it (F1)', async ({ page }) => {
+  await openSource(page, app(`  @State private var name = ""
+  var body: some View {
+    VStack {
+      if !name.isEmpty { Text("Hello \\(name)") }
+      TextField("Name", text: $name)
+      Text("Say hello")
+    }
+  }`), 'Say hello')
+  const field = page.getByTestId('render-tree').locator('input.swiftui-field')
+  await field.click()
+  await page.keyboard.type('the quick brown fox')
+  await expect(page.getByTestId('render-tree').getByText('Hello the quick brown fox')).toBeVisible()
+  await expect(field).toHaveValue('the quick brown fox')
+  await expect(field).toBeFocused()
+})
+
 test('text an input method composes reaches the app whole (F1)', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Composition is driven through the Chrome DevTools Protocol.')
   await openSource(page, ECHO, 'Echo []')
@@ -116,24 +141,10 @@ test('text an input method composes reaches the app whole (F1)', async ({ page, 
 })
 
 test("a slider's thumb follows the pointer through a drag on a heavy screen (F1)", async ({ page }) => {
-  await openSource(page, app(`  @State private var level = 0.0
-  var body: some View {
-    VStack {
-      Slider(value: $level, in: 0...100)
-      ScrollView { VStack { ForEach(0..<400, id: \\.self) { i in Text("Row \\(i) \\(Int(level) * i)") } } }
-    }
-  }`), 'Row 399 0')
+  await openSource(page, HEAVY_SLIDER, 'Level 0')
   const slider = page.getByTestId('render-tree').locator('input.swiftui-range')
-  const box = (await slider.boundingBox())!
-  const y = box.y + box.height / 2
-  await page.mouse.move(box.x + 2, y)
-  await page.mouse.down()
   const thumb: number[] = []
-  for (let step = 1; step <= 40; step++) {
-    await page.mouse.move(box.x + 2 + (box.width - 4) * step / 40, y)
-    thumb.push(Number(await slider.inputValue()))
-  }
-  await page.mouse.up()
+  await dragSlider(page, 40, async () => { thumb.push(Number(await slider.inputValue())) })
   // Moving right, it never snaps back to a value the worker drew earlier.
   expect(thumb.filter((value, i) => i > 0 && value < thumb[i - 1]!)).toEqual([])
   expect(thumb.at(-1)).toBeGreaterThan(95)
