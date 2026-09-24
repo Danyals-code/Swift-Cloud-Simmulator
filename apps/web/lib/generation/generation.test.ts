@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../../app/api/generate/route'
 import { parseGeneratedApp, parseOptions, type GenerationOptions } from './schema'
+import { SWIFTUI_GUIDANCE } from './guidance'
 
 const options: GenerationOptions = { provider: 'openai', model: 'gpt-5.4-mini', prompt: 'A simple tracker for daily reading habits.', pageCount: 1, navigation: 'stack', accent: 'teal', sampleData: true, includeSettings: false }
 const app = { name: 'ReadingApp', summary: 'A reading tracker.', pages: [{ title: 'Today', file: 'Sources/ReadingApp.swift' }], files: [{ path: 'Sources/ReadingApp.swift', code: 'import SwiftUI\n@main struct ReadingApp: App { var body: some Scene { WindowGroup { Text("Today") } } }' }] }
@@ -47,6 +48,13 @@ describe('generation endpoint', () => {
     expect(body.text.format.strict).toBe(true)
     expect(init.body).not.toContain(key)
     expect(body.input).toContain(options.prompt)
+  })
+  it('asks for the SwiftUI the studio previews and Design edits, the same as Prompt Editing does (G1)', async () => {
+    const fetch = vi.fn().mockResolvedValue(openaiResponse()); vi.stubGlobal('fetch', fetch)
+    await POST(request())
+    const { instructions } = JSON.parse(fetch.mock.calls[0]![1].body)
+    expect(instructions).toContain(SWIFTUI_GUIDANCE)
+    expect(instructions).not.toContain('iOS 17')
   })
   it('uses Anthropic messages and its current JSON-output format', async () => {
     const fetch = vi.fn().mockResolvedValue(Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(app) }] })); vi.stubGlobal('fetch', fetch)

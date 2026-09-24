@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../../app/api/edit/route'
 import { parsePromptEditInput, parsePromptEditResult, promptEditChanges, promptConversationContext, type PromptEditInput } from './edit-schema'
 import { promptEditContext } from './edit-prompt'
+import { SWIFTUI_GUIDANCE } from './guidance'
 import { preparePromptEdit, promptPreviewProblem } from './applyPromptEdit'
 import { useStudio } from '../store'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
@@ -114,6 +115,11 @@ describe('edit endpoint', () => {
     expect((await POST(request(input, { Authorization: '' }))).status).toBe(400)
     expect((await POST(request({ ...input, prompt: 'x'.repeat(2_500_001) }))).status).toBe(413)
     expect(fetch).not.toHaveBeenCalled()
+  })
+  it('asks for the SwiftUI the studio previews and Design edits, the same as Create with AI does (G1)', async () => {
+    const fetch = vi.fn().mockResolvedValue(response()); vi.stubGlobal('fetch', fetch)
+    await POST(request())
+    expect(JSON.parse(fetch.mock.calls[0]![1].body).instructions).toContain(SWIFTUI_GUIDANCE)
   })
   it.each([401, 403, 429, 500])('sanitizes provider error %s without retrying', async status => {
     const fetch = vi.fn().mockResolvedValue(Response.json({ error: key }, { status })); vi.stubGlobal('fetch', fetch)
