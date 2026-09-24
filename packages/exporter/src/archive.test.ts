@@ -267,6 +267,21 @@ describe('the complete bundle', () => {
     expect(archive.issues[0]).toBe(`The image of Screen ${kept + 1} was left out, to keep the archive under 60 MB.`)
   })
 
+  it('counts the event log in the 60 MB, leaving out a screen rather than the bundle', () => {
+    const project = createDefaultProject(0), root = project.manifest.name
+    const screens = Array.from({ length: 17 }, (_, index) => ({ ...review.screens[0]!, id: `s${index}`, name: `Screen ${index + 1}`, png: new Uint8Array(3.9 * 1024 * 1024) }))
+    // Ten thousand events, with long prompts among them.
+    const events = `${'x'.repeat(699)}\n`.repeat(10_000)
+
+    const without = exportArchive(project, { format: 'complete', review: { ...review, screens }, now: NOW })
+    const archive = exportArchive(project, { format: 'complete', review: { ...review, screens }, now: NOW, events })
+
+    const entries = unzipSync(archive.bytes), pngs = (bytes: Uint8Array) => Object.keys(unzipSync(bytes)).filter(path => path.endsWith('.png')).length
+    expect(entries[`${root}/Studio Report/report.md`]).toBeDefined()
+    expect(entries[`${root}/.swiftstudio/events.jsonl`]).toHaveLength(events.length)
+    expect(pngs(archive.bytes)).toBeLessThan(pngs(without.bytes))
+  })
+
   it('leaves out a screen image over the size limit and keeps the others', () => {
     const project = createDefaultProject(0), root = project.manifest.name
     const huge = { ...review.screens[0]!, png: new Uint8Array(4 * 1024 * 1024 + 1) }
@@ -343,5 +358,41 @@ describe('an export never fails', () => {
     const swift = Object.entries(entries).filter(([path]) => path.endsWith('.swift'))
     expect(new Set(swift.map(([path]) => path.toLowerCase())).size).toBe(3)
     expect(swift.map(([, text]) => text).sort()).toEqual(['// a path that climbs out', '// home', '// the same name in other letters'])
+  })
+})
+
+describe('the event log (G5)', () => {
+  const LOG = '{"format":"swift-web-studio-events","version":1}\n{"t":"2026-09-24T07:30:00.000Z","type":"design","op":"delete"}\n'
+  const logsIn = (bytes: Uint8Array) => Object.entries(entriesOf(bytes)).filter(([path]) => path.endsWith('.swiftstudio/events.jsonl')).map(([, text]) => text)
+
+  it('goes into every kind of archive, as it was written, and the report says what it is', () => {
+    for (const format of ['xcodeproj', 'swiftpm', 'spm', 'xcodegen', 'complete', 'editable'] as const) {
+      const archive = exportArchive(createDefaultProject(0), { format, review: format === 'complete' ? review : undefined, now: NOW, events: LOG })
+      expect(logsIn(archive.bytes), format).toEqual([LOG])
+    }
+    const project = createDefaultProject(0), report = `${project.manifest.name}/Studio Report/report.md`
+    expect(entriesOf(exportArchive(project, { format: 'complete', review, now: NOW, events: LOG }).bytes)[report]).toContain('.swiftstudio/events.jsonl logs what was done in the studio')
+    expect(entriesOf(exportArchive(project, { format: 'complete', review, now: NOW }).bytes)[report]).not.toContain('events.jsonl')
+  })
+
+  it('goes into the archive an export falls back to as well', () => {
+    const base = createDefaultProject(0)
+    const project: Project = { ...base, assets: [{ id: 'logo', name: 'Logo', scale: 1, light: { ...readImage(PNG), width: readImage(PNG).width + 1 } }] }
+
+    const archive = exportArchive(project, { format: 'xcodeproj', now: NOW, events: LOG })
+
+    expect(archive.issues).toEqual([expect.stringContaining('Image metadata does not match its bytes')])
+    expect(logsIn(archive.bytes)).toEqual([LOG])
+  })
+
+  it('is left behind when the archive is opened again, which opens as it would without it', () => {
+    const project = createDefaultProject(0)
+
+    for (const format of ['editable', 'xcodeproj'] as const) {
+      const withLog = readProjectArchive(exportArchive(project, { format, now: NOW, events: LOG }).bytes)
+      const without = readProjectArchive(exportArchive(project, { format, now: NOW }).bytes)
+      expect(withLog.problem).toBeNull()
+      expect(withLog).toEqual(without)
+    }
   })
 })

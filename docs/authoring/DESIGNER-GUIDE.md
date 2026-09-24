@@ -83,6 +83,8 @@ Limits: 64 images; 4 MB per variant; 32 MB compressed image bytes and 16 megapix
 
 **Save editable** downloads a `.swiftstudio.zip` containing Swift, images, colour sets, app settings, and versioned designer metadata. Local autosave is convenient; the archive is the portable copy. Share links are for projects without image resources that fit the URL limit.
 
+Every archive, the one the recovery screen downloads included, also holds `.swiftstudio/events.jsonl`: a log of what was done in the project, with times. It lists design edits and the kind of layer each touched, bursts of typing (which file, and how many characters), Undo and Redo, AI prompts as written and how each request ended, switches between Design and Code, reloads, crashes and exports. It never holds your code, the text or values you type into a design, or an API key. Opening the archive again leaves the log out.
+
 **Export** retains four native formats. Swift is preserved as written, except that hidden views and switched-off modifiers, which the studio keeps as comments, are left out of the exported sources; the editable archive and `.swiftstudio/project.json` keep them, so reopening an export brings them back. Xcode and XcodeGen app exports place named images and colour sets in the main asset catalog. Swift package resources use a module resource bundle; package consumers must use that bundle or integrate the catalog into their host app. See [Apple's resource guide](https://developer.apple.com/documentation/xcode/bundling-resources-with-a-swift-package).
 
 To return from a developer handoff:

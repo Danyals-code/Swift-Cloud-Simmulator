@@ -2,7 +2,7 @@ import { expect, test, type Download, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { unzipSync } from 'fflate'
 import { PNG } from 'pngjs'
-import { openCounter, replaceSource } from './designer-helpers'
+import { addModifier, cards, openCounter, replaceSource } from './designer-helpers'
 
 /** Presses Export, the complete bundle, and waits for the file. */
 async function exportComplete(page: Page): Promise<Download> {
@@ -47,4 +47,42 @@ test('the Export button still downloads the project while its code has an error 
   const text = (suffix: string) => new TextDecoder().decode(Object.entries(entries).find(([path]) => path.endsWith(suffix))?.[1])
   expect(text('/CounterApp.swift')).toBe(broken)
   expect(text('/Studio Report/report.md')).toContain('The preview has 1 error, so no screen could be drawn')
+})
+
+test('the export carries the project’s event log, and none of the words the designer wrote (G5)', async ({ page }) => {
+  // Opening the Counter replaces the untouched starter, whose events it takes over.
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, 'import SwiftUI\n@main struct CounterApp: App { var body: some Scene { WindowGroup { VStack { Text("Zanzibar"); Text("Unchanged") } } } }\n')
+  await expect(page.getByTestId('render-tree').getByText('Zanzibar', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+  await page.getByTestId('logical-layers').locator('[data-source-name="Text"]').filter({ hasText: 'Zanzibar' }).click()
+  const content = page.getByTestId('settings-basics').getByRole('textbox', { name: 'Text', exact: true })
+  await expect(content).toHaveValue('Zanzibar')
+  await content.fill('Quixotic')
+  await content.press('Enter')
+  await expect(page.getByTestId('render-tree').getByText('Quixotic', { exact: true })).toBeVisible()
+  await addModifier(page, 'Opacity', 'opacity')
+  await page.getByTestId('design-undo').click()
+  await expect(cards(page, 'opacity')).toHaveCount(0)
+
+  const download = await exportComplete(page)
+
+  const log = new TextDecoder().decode(Object.entries(await entriesOf(download)).find(([path]) => path.endsWith('/.swiftstudio/events.jsonl'))?.[1])
+  expect(log).not.toMatch(/Zanzibar|Quixotic|Unchanged/)
+  const [header, ...lines] = log.trimEnd().split('\n').map(line => JSON.parse(line))
+  expect(header).toMatchObject({ format: 'swift-web-studio-events', version: 1, events: lines.length, dropped: 0 })
+  const events = lines.map(({ t: _t, session: _session, seq: _seq, ...event }) => event)
+  expect(events).toEqual(expect.arrayContaining([
+    { type: 'session', action: 'loaded', origin: 'fresh', build: expect.any(String) },
+    { type: 'project', action: 'created', template: 'counter' },
+    { type: 'mode', mode: 'code', preview: false },
+    { type: 'code', file: expect.stringMatching(/CounterApp\.swift$/), inserted: expect.any(Number), removed: expect.any(Number), ms: expect.any(Number) },
+    { type: 'design', op: 'property', layer: 'Text', control: 'content' },
+    { type: 'design', op: 'modifier-add', layer: 'Text', modifier: 'opacity' },
+    { type: 'history', direction: 'undo' },
+  ]))
+  expect(events.at(-1)).toEqual({ type: 'export', format: 'complete' })
+  const times = lines.map(line => Date.parse(line.t))
+  expect(times).toEqual([...times].sort((a, b) => a - b))
 })

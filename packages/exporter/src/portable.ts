@@ -10,6 +10,15 @@ export const PROJECT_DOCUMENT = '.swiftstudio/project.json'
 interface ResourceEntry { id: string; name: string; scale: 1 | 2 | 3; light: string; dark?: string }
 /** The Studio build an export came from: the commit it was built from, and when. */
 export interface StudioBuild { readonly commit: string; readonly builtAt: string }
+/** What the studio writes beside the project it hands over. */
+export interface HandoffExtras {
+  /** The build making the export. */
+  readonly build?: StudioBuild
+  /** The project's event log, as JSON lines. Reading an archive leaves it where it is. */
+  readonly events?: string
+}
+/** Where an archive keeps the event log, below its root. */
+export const EVENT_LOG = '.swiftstudio/events.jsonl'
 export interface Handoff {
   readonly version: 1
   readonly format: 'swift-web-studio'
@@ -51,7 +60,7 @@ export function validatePortableProject(value: unknown): asserts value is Projec
   validateColors((value.colors ?? []) as ColorAsset[])
 }
 /** Source files and resources stay outside the optional Studio metadata. */
-export function attachHandoff(project: Project, bundle: ExportBundle, root: string, sourcePath: (id: string) => string, catalogPath: string, build?: StudioBuild): ExportBundle {
+export function attachHandoff(project: Project, bundle: ExportBundle, root: string, sourcePath: (id: string) => string, catalogPath: string, { build, events }: HandoffExtras = {}): ExportBundle {
   const normalized = normalizeProject(project)
   validatePortableProject(normalized)
   const files = new Map(bundle)
@@ -67,6 +76,7 @@ export function attachHandoff(project: Project, bundle: ExportBundle, root: stri
   const put = (path: string, bytes: Uint8Array) => { if (files.has(path)) throw new Error('The project conflicts with an export metadata path.'); files.set(path, bytes) }
   put(`${root}/${PROJECT_DOCUMENT}`, encodeText(JSON.stringify(document)))
   if (project.studio) put(`${root}/.swiftstudio/studio.json`, encodeText(JSON.stringify(project.studio)))
+  if (events !== undefined) put(`${root}/${EVENT_LOG}`, encodeText(events))
   return files
 }
 export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project: Project; handoff: Handoff } | null {

@@ -18,23 +18,23 @@ describe('document transaction coordinator', () => {
   it('rejects delayed plans after typing, including an undo back to identical bytes', () => {
     const { project, plan } = prepared()
     useStudio.getState().setFileText(project.files[0]!.id, SOURCE + '\n')
-    expect(useStudio.getState().commitTransaction(project, plan)).toContain('changed')
+    expect(useStudio.getState().commitTransaction(project, plan, null)).toContain('changed')
     useStudio.getState().replayDocument('undo')
     expect(useStudio.getState().project!.files[0]!.text).toBe(SOURCE)
-    expect(useStudio.getState().commitTransaction(project, plan)).toContain('changed')
+    expect(useStudio.getState().commitTransaction(project, plan, null)).toContain('changed')
   })
   it('rejects delayed plans after a project switch even with identical paths and text', () => {
     const { project, plan } = prepared()
     const next = { ...project, id: 'other' }
     useStudio.setState({ project: next })
-    expect(useStudio.getState().commitTransaction(project, plan)).toContain('changed')
+    expect(useStudio.getState().commitTransaction(project, plan, null)).toContain('changed')
     expect(useStudio.getState().project).toBe(next)
   })
   it('records typing and design together, with source and selection restored through both directions', () => {
     const { project, plan } = prepared()
     const selected = { file: project.files[0]!.id, offset: SOURCE.indexOf('Text(') }
     useStudio.getState().setDocumentSelection(selected)
-    expect(useStudio.getState().commitTransaction(project, plan)).toBeNull()
+    expect(useStudio.getState().commitTransaction(project, plan, null)).toBeNull()
     const designSource = useStudio.getState().project!.files[0]!.text
     useStudio.getState().setFileText(selected.file, designSource.replace('"B"', '"C"'))
     useStudio.getState().replayDocument('undo')
@@ -48,7 +48,7 @@ describe('document transaction coordinator', () => {
   it('applies metadata and source together and advances the revision exactly once', () => {
     const { project, plan } = prepared(), revision = useStudio.getState().documentRevision
     const metadata = emptyStudioMetadata()
-    expect(useStudio.getState().commitTransaction(project, { ...plan, studio: { before: undefined, after: metadata } })).toBeNull()
+    expect(useStudio.getState().commitTransaction(project, { ...plan, studio: { before: undefined, after: metadata } }, null)).toBeNull()
     expect(useStudio.getState().documentRevision).toBe(revision + 1)
     expect(useStudio.getState().project!.studio).toEqual(metadata)
     useStudio.getState().replayDocument('undo')

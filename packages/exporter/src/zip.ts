@@ -4,7 +4,7 @@ import { buildExportBundle, encodeText, type ExportBundle } from './bundle'
 import { buildPackageBundle, buildSwiftPMAppBundle, buildXcodeGenBundle, type ExportFormat } from './formats'
 import { attachExportReview, type ExportReview } from './handoff-report'
 import { targetRelativePath } from './pbxproj'
-import { attachHandoff, type StudioBuild } from './portable'
+import { attachHandoff, type HandoffExtras } from './portable'
 import { assetCatalog } from './resources'
 
 /** Zip an already-built bundle. Separated from `buildExportBundle` so tests can assert on file contents without unzipping. */
@@ -29,18 +29,16 @@ export function zipBundle(bundle: ExportBundle): Uint8Array {
 }
 
 /** What an export can carry besides the project. */
-export interface ExportOptions {
+export interface ExportOptions extends HandoffExtras {
   /** The review screens and report; only the complete bundle has them. */
   readonly review?: ExportReview
-  /** The Studio build making the export, written into it. */
-  readonly build?: StudioBuild
 }
 
-export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', { review, build }: ExportOptions = {}): Uint8Array {
+export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', { review, build, events }: ExportOptions = {}): Uint8Array {
   const name = project.manifest.name, root = format === 'swiftpm' ? `${name}.swiftpm` : name
   const sourceRoot = format === 'xcodeproj' ? `${root}/${name}` : format === 'xcodegen' ? `${root}/Sources` : `${root}/Sources/${name}`
   const catalog = `${sourceRoot}/${format === 'spm' || format === 'swiftpm' ? 'Resources/' : ''}Assets.xcassets`
-  const bundle = attachHandoff(project, bundleFor(project, format), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog, build)
+  const bundle = attachHandoff(project, bundleFor(project, format), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog, { build, events })
   if (review && format !== 'xcodeproj') throw new Error('The complete bundle uses the Xcode project format.')
   return zipBundle(review ? attachExportReview(project, bundle, review, build) : bundle)
 }
@@ -60,9 +58,9 @@ export function bundleFor(project: Project, format: ExportFormat): ExportBundle 
 }
 
 /** Portable designer document, kept separate from the four native export choices. */
-export function exportEditableZip(project: Project, build?: StudioBuild): Uint8Array {
+export function exportEditableZip(project: Project, extras: HandoffExtras = {}): Uint8Array {
   const root = project.manifest.name
   const files = assetCatalog(project, `${root}/Assets.xcassets`)
   for (const file of project.files) files.set(`${root}/${file.id}`, encodeText(file.text))
-  return zipBundle(attachHandoff(project, files, root, id => `${root}/${id}`, `${root}/Assets.xcassets`, build))
+  return zipBundle(attachHandoff(project, files, root, id => `${root}/${id}`, `${root}/Assets.xcassets`, extras))
 }
