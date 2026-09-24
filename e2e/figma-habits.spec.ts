@@ -3,7 +3,8 @@ import { openInDesign, sourceInCode } from './designer-helpers'
 
 /**
  * A designer's habits from Figma, in Chrome and Safari alike: the keys (D5), the
- * words for sizing (D2), and grouping into a Column, Row or Overlap (D3).
+ * words for sizing (D2), grouping into a Column, Row or Overlap (D3), and aligning and
+ * spreading a stack's views out (D4).
  */
 
 const APP = `import SwiftUI
@@ -116,4 +117,29 @@ test('⌘G groups the layers selected together the way they sit, in Figma\'s wor
 
   // Into a column with the column's own spacing, so nothing on the canvas moves.
   await expect.poll(() => sourceInCode(page)).toContain('VStack(spacing: 12) {\n            VStack(spacing: 12) {\n                Text("Alpha")\n                Text("Beta")\n            }\n            Text("Gamma")')
+})
+
+test('a Row lines its views up with icons, Auto spreads them out, and a view in it says where that is set (D4)', async ({ page }) => {
+  await openInDesign(page, APP.replace('VStack(spacing: 12)', 'HStack(spacing: 12)'), 'Beta')
+  await drawn(page, 'Beta').click()
+  await expect(inspector(page).getByTestId('alignment-hint')).toContainText('Aligned and spaced by its Row.')
+  await inspector(page).getByRole('button', { name: 'Select Row', exact: true }).click()
+
+  await expect(inspector(page).getByRole('radiogroup', { name: 'Layout', exact: true }).getByRole('radio', { name: 'Row', exact: true })).toHaveAttribute('aria-checked', 'true')
+  const top = inspector(page).getByRole('radiogroup', { name: 'Alignment', exact: true }).getByRole('radio', { name: 'Top', exact: true })
+  await top.click()
+  await expect(top).toHaveAttribute('aria-checked', 'true')
+
+  const auto = inspector(page).getByRole('button', { name: 'Auto', exact: true })
+  await auto.click()
+  await expect(auto).toHaveAttribute('aria-pressed', 'true')
+  // Measured once the canvas has drawn the spread: while it redraws, a view has no box.
+  const gap = async () => {
+    const alpha = await drawn(page, 'Alpha').boundingBox(), beta = await drawn(page, 'Beta').boundingBox()
+    return alpha && beta ? beta.x - (alpha.x + alpha.width) : 0
+  }
+  await expect.poll(gap).toBeGreaterThan(60)
+
+  const source = await sourceInCode(page)
+  expect(source).toContain('HStack(alignment: .top, spacing: 12) {\n            Text("Alpha")\n            Spacer()\n            Text("Beta")\n            Spacer()\n            Text("Gamma")\n        }.frame(maxWidth: .infinity)')
 })

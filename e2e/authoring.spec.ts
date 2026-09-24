@@ -188,8 +188,9 @@ test('an opacity drag is one undo step and Escape cancels the whole drag', async
   const inspector = page.getByTestId('authoring-inspector')
   await addModifier(page, 'Opacity', 'opacity')
   const slider = cards(page, 'opacity').getByRole('slider', { name: 'Opacity slider', exact: true })
-  const bounds = (await slider.boundingBox())!
+  // Focused, and so scrolled into view, before it is measured.
   await slider.focus()
+  const bounds = (await slider.boundingBox())!
   await page.mouse.move(bounds.x + bounds.width * 0.8, bounds.y + bounds.height / 2)
   await page.mouse.down()
   await page.mouse.move(bounds.x + bounds.width * 0.4, bounds.y + bounds.height / 2, { steps: 5 })
@@ -214,6 +215,7 @@ test('an opacity drag whose release never comes, as when the window loses focus,
   await selectBeta(page)
   await addModifier(page, 'Opacity', 'opacity')
   const slider = cards(page, 'opacity').getByRole('slider', { name: 'Opacity slider', exact: true })
+  await slider.scrollIntoViewIfNeeded()
   const bounds = (await slider.boundingBox())!
   await page.mouse.move(bounds.x + bounds.width * 0.8, bounds.y + bounds.height / 2)
   await page.mouse.down()

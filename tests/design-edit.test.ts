@@ -309,10 +309,25 @@ it('prepares independent Apple compiler fixtures from the actual writer output',
     ['RoundedRectangle(cornerRadius: 8)', 'Shape corner radius', '12', 'RoundedRectangle'],
     ['Rectangle().fill(Color.blue)', 'fill', 'red', 'Rectangle'],
     ['Spacer()', 'Minimum spacing', '8', 'Spacer'],
+    ['HStack(spacing: 8) { Text("A"); Text("B") }', 'Spacing', 'auto', 'HStack'],
+    ['VStack { Text("A"); Spacer(minLength: 20); Text("B") }', 'Spacing', 'auto', 'VStack'],
+    ['HStack { Text("A"); Spacer(); Text("B") }.frame(maxWidth: .infinity)', 'Spacing', '12', 'HStack'],
   ] as const
+  // Groups, written the way the layers sat (D3): the first two views of each stack.
+  const groups = [
+    ['VStack(alignment: .leading, spacing: 12) { Text("A"); Text("B"); Text("C") }', 'VStack'],
+    ['HStack(alignment: .firstTextBaseline, spacing: 4) { Text("A"); Text("B") }', 'HStack'],
+    ['ZStack(alignment: .bottomTrailing) { Text("A"); Text("B") }', 'ZStack'],
+    ['ScrollView { Text("A"); Text("B") }', 'VStack'],
+  ] as const
+  const grouped = (body: string, layout: 'VStack' | 'HStack' | 'ZStack') => {
+    const source = wrap(body), texts = buildAuthoringModel({ files: files(source), projectId: 'p', revision: 1 }).nodes.filter(n => n.name === 'Text')
+    const result = planDesignEdit({ projectId: 'p', baseRevision: 1, scope: texts[0]!.owner, files: files(source), target: texts[0]!.source, fingerprint: texts[0]!.fingerprint, operation: { kind: 'layer-wrap', ids: texts.slice(0, 2).map(n => n.id), layout } })
+    if (!result.ok) throw new Error(result.reason)
+    return result.changes[0]!.after
+  }
   const output: string[] = ['import SwiftUI']
-  for (const [index, [body, label, value, name]] of forms.entries()) {
-    const source = edited(wrap(body), label, value, name)
+  for (const [index, source] of [...forms.map(([body, label, value, name]) => edited(wrap(body), label, value, name)), ...groups.map(([body, layout]) => grouped(body, layout))].entries()) {
     const node = buildAuthoringModel({ files: files(source), projectId: 'p', revision: 1 }).nodes.find(n => n.owner === 'ContentView' && n.kind === 'view')!
     const expression = source.slice(node.source.start, node.source.end)
     output.push(`struct NativeWriterForm${index}: View { var body: some View { ${expression} } }`)
@@ -324,7 +339,7 @@ it('prepares independent Apple compiler fixtures from the actual writer output',
     mkdirSync(dirname(destination), { recursive: true })
     writeFileSync(destination, output.join('\n\n') + '\n')
   }
-  expect(output).toHaveLength(forms.length + 1)
+  expect(output).toHaveLength(forms.length + groups.length + 1)
 })
 
 it.each([
@@ -766,5 +781,75 @@ ${settingsValues}    var body: some View {
 
   it('pastes a control as it was copied, rather than binding it anew as the library does', () => {
     expect(settingsOf(paste(screens(), 'Toggle("On", isOn: .constant(true))', []))).toContain('Toggle("On", isOn: .constant(true))')
+  })
+})
+
+describe('D4: Auto spacing puts a Spacer between each pair of views, as Figma\'s Auto does', () => {
+  const lines = (stack: string, views: readonly string[], after = '') => wrap(`${stack} {\n${views.map(view => `    ${view}`).join('\n')}\n}${after}`)
+  const spacing = (text: string, name = 'HStack') => target(text, name).controls?.find(c => c.label === 'Spacing')
+
+  it('spaces a row out, and makes it fill its width so the gaps show', () => {
+    const source = lines('HStack(spacing: 8)', ['Text("A")', 'Text("B")', 'Text("C")'])
+    const spaced = edited(source, 'Spacing', 'auto', 'HStack')
+    expect(spaced).toBe(lines('HStack(spacing: 8)', ['Text("A")', 'Spacer()', 'Text("B")', 'Spacer()', 'Text("C")'], '.frame(maxWidth: .infinity)'))
+    expect(spacing(spaced)).toMatchObject({ value: 'auto', options: ['auto'] })
+    expect(spacing(source)).toMatchObject({ value: '8', options: ['auto'] })
+  })
+
+  it('makes a column fill its height', () => {
+    expect(edited(lines('VStack', ['Text("A")', 'Text("B")']), 'Spacing', 'auto', 'VStack')).toBe(lines('VStack', ['Text("A")', 'Spacer()', 'Text("B")'], '.frame(maxHeight: .infinity)'))
+  })
+
+  it('keeps a size the stack already has along that axis', () => {
+    expect(edited(lines('HStack', ['Text("A")', 'Text("B")'], '.frame(width: 300)'), 'Spacing', 'auto', 'HStack')).toBe(lines('HStack', ['Text("A")', 'Spacer()', 'Text("B")'], '.frame(width: 300)'))
+  })
+
+  it('keeps a stack written on one line to one line, and a note where it was', () => {
+    expect(edited(wrap('HStack { Text("A"); Text("B") }'), 'Spacing', 'auto', 'HStack')).toBe(wrap('HStack { Text("A"); Spacer(); Text("B") }.frame(maxWidth: .infinity)'))
+    expect(edited(lines('HStack', ['Text("A")', '// the price', 'Text("B")']), 'Spacing', 'auto', 'HStack')).toBe(lines('HStack', ['Text("A")', 'Spacer()', '// the price', 'Text("B")'], '.frame(maxWidth: .infinity)'))
+  })
+
+  it('takes the Spacers out again when a number is picked, and keeps the size', () => {
+    const spaced = lines('HStack(spacing: 8)', ['Text("A")', 'Spacer()', 'Text("B")', 'Spacer()', 'Text("C")'], '.frame(maxWidth: .infinity)')
+    expect(edited(spaced, 'Spacing', '12', 'HStack')).toBe(lines('HStack(spacing: 12)', ['Text("A")', 'Text("B")', 'Text("C")'], '.frame(maxWidth: .infinity)'))
+    const unspaced = lines('HStack', ['Text("A")', 'Spacer()', 'Text("B")'])
+    expect(edited(unspaced, 'Spacing', '4', 'HStack')).toBe(lines('HStack(spacing: 4)', ['Text("A")', 'Text("B")']))
+    expect(edited(wrap('HStack { Text("A"); Spacer(); Text("B") }'), 'Spacing', '4', 'HStack')).toBe(wrap('HStack(spacing: 4) { Text("A"); Text("B") }'))
+  })
+
+  it('reads a Spacer only at one end, or two in a row, as a number, not Auto', () => {
+    expect(spacing(lines('HStack', ['Text("A")', 'Text("B")', 'Spacer()']))?.value).toBe('')
+    expect(spacing(lines('HStack', ['Text("A")', 'Spacer()', 'Spacer()', 'Text("B")']))?.value).toBe('')
+    expect(spacing(lines('HStack', ['Text("A")', 'Spacer(minLength: 0)', 'Text("B")']))?.value).toBe('')
+  })
+
+  it('says why a stack that repeats its views from data, or holds one view, cannot be spaced out', () => {
+    expect(plan(lines('HStack', ['ForEach(0..<3, id: \\.self) { index in', '    Text("\\(index)")', '}']), 'Spacing', 'auto', 'HStack')).toEqual({ ok: false, reason: 'Auto spacing puts a Spacer between views written one by one, and this Row repeats its views from data. Set a number instead.' })
+    expect(plan(lines('VStack', ['Text("A")']), 'Spacing', 'auto', 'VStack')).toEqual({ ok: false, reason: 'Auto spacing needs two or more views in the Column.' })
+  })
+
+  it('replaces the Spacers a stack already has, so every gap is the same', () => {
+    const source = lines('HStack', ['Image(systemName: "star")', 'Text("A")', 'Spacer()'])
+    const spaced = edited(source, 'Spacing', 'auto', 'HStack')
+    expect(spaced).toBe(lines('HStack', ['Image(systemName: "star")', 'Spacer()', 'Text("A")'], '.frame(maxWidth: .infinity)'))
+    expect(spacing(spaced)?.value).toBe('auto')
+    expect(edited(lines('HStack', ['Text("A")', 'Spacer(minLength: 20)', 'Text("B")']), 'Spacing', 'auto', 'HStack')).toBe(lines('HStack', ['Text("A")', 'Spacer()', 'Text("B")'], '.frame(maxWidth: .infinity)'))
+    expect(edited(wrap('HStack { Text("A"); Spacer(); Text("B"); Spacer() }'), 'Spacing', 'auto', 'HStack')).toBe(wrap('HStack { Text("A"); Spacer(); Text("B") }.frame(maxWidth: .infinity)'))
+  })
+
+  it('says why a stack a scroll view scrolls along has no room to spread out, unless it has a size', () => {
+    const scrolled = (stack: string, scroll = 'ScrollView', after = '') => wrap(`${scroll} {\n${stack} {\n    Text("A")\n    Text("B")\n}${after}\n}`)
+    expect(plan(scrolled('VStack'), 'Spacing', 'auto', 'VStack')).toEqual({ ok: false, reason: 'A scroll view that scrolls up and down leaves a Column no height to spread its views over. Set a number, or give the Column a fixed height.' })
+    expect(plan(scrolled('HStack', 'ScrollView(.horizontal)'), 'Spacing', 'auto', 'HStack')).toEqual({ ok: false, reason: 'A scroll view that scrolls sideways leaves a Row no width to spread its views across. Set a number, or give the Row a fixed width.' })
+    expect(plan(scrolled('HStack'), 'Spacing', 'auto', 'HStack')).toMatchObject({ ok: true })
+    expect(plan(scrolled('VStack', 'ScrollView', '.frame(height: 400)'), 'Spacing', 'auto', 'VStack')).toMatchObject({ ok: true })
+  })
+
+  it('builds, and spreads the views out', () => {
+    const spaced = edited(lines('HStack', ['Text("A")', 'Text("B")']), 'Spacing', 'auto', 'HStack')
+    const result = compile({ files: files(spaced), canvas: { width: 393, height: 852 }, colorScheme: 'light', revision: 1 })
+    expect(result.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    const a = result.renderTree!.nodes.find(n => n.text?.runs[0]?.text === 'A')!, b = result.renderTree!.nodes.find(n => n.text?.runs[0]?.text === 'B')!
+    expect(b.frame.x - (a.frame.x + a.frame.width)).toBeGreaterThan(300)
   })
 })

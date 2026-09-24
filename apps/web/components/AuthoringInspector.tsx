@@ -1,7 +1,7 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState } from 'react'
-import { isStructuralLayer, type AuthoringNode, type ResourceOperation, type SourceSpan } from '@studio/shared'
+import { isStructuralLayer, layoutParentOf, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { LayoutGuide } from './LayoutGuide'
@@ -91,6 +91,9 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
   const advanced = !!selected.behavior && (selected.behavior.canConfigureAction || selected.behavior.states.length > 0) || !!selected.component
   // Only wrappers with something to set: a bare NavigationStack around every view is not news.
   const wrappers = context.surrounding.filter(owner => !!owner.modifiers?.length || owner.controls?.some(control => !/^(modifier:|add:|fill:)/.test(control.id)))
+  // Figma aligns a layer itself; SwiftUI has the stack around it do it (D4), so a view in one says where to look.
+  const stack = isStructuralLayer(selected) ? layoutParentOf(features?.snapshot?.nodes ?? [], selected) : undefined
+  const stackLayout = stack && stackLayoutOf(stack.name)
   const rememberFocus = (input: EventTarget) => {
     if (input instanceof HTMLButtonElement) {
       const modifier = input.closest<HTMLElement>('[data-modifier-key]')?.dataset.modifierKey
@@ -135,6 +138,7 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
           : field.control && onChange ? <PropertyControl key={`${selected.id}:${field.control.id}:${field.control.value}`} control={field.control} onChange={onChange} /> : null)}
         {!basics.length && !selected.component && !['definition', 'template'].includes(selected.kind) && !interaction && <p className={styles.note}>{selected.properties.some(property => property.valueKind === 'data-binding' || property.valueKind === 'component-argument') ? 'Its content comes from data.' : 'Nothing to set when it is created.'}</p>}
         {features && <AuthoringFeatures key={`basics:${featureKey}`} node={selected} {...features} section="basics" />}
+        {stack && stackLayout && <p className={styles.note} data-testid="alignment-hint">{stackLayout === 'ZStack' ? 'Aligned' : 'Aligned and spaced'} by its {LAYOUT_WORDS[stackLayout]}. <button type="button" className={styles.linkButton} onClick={() => features?.onSelect?.(stack)}>Select {sourceLayerLabel(stack)}</button></p>}
         {interaction && features && <AuthoringFeatures key={`interaction:${featureKey}`} node={selected} {...features} section="interaction" />}
         {!!selected.fields?.length && features && <AuthoringFeatures key={`field:${dataKey}`} node={selected} {...features} section="field" />}
         {!!conditions.length && <div className={styles.shownWhen} data-testid="shown-when">{conditions.map(condition => {
