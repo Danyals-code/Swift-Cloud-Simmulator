@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import { openInDesign, sourceInCode } from './designer-helpers'
 
 /**
- * Refusals that say why (C7), the Swift Design writes (D9) and what the preview says of
- * a view it cannot draw (D12), in Chrome and Safari alike.
+ * Reuse across screens (D6), refusals that say why (C7), the Swift Design writes (D9)
+ * and what the preview says of a view it cannot draw (D12), in Chrome and Safari alike.
  */
 
 /** Home, which shows a count and pushes Settings, with `declarations` after them. */
@@ -44,9 +44,50 @@ const drawn = (page: Page, text: string) => page.getByTestId('render-tree').getB
 const note = (page: Page) => page.getByTestId('design-feedback')
 const inspector = (page: Page) => page.getByTestId('authoring-inspector')
 
-test('a move past the first view says why (C7)', async ({ page }) => {
+/** A menu's Copy or Paste, whose name carries its shortcut: "Copy ⌘C". */
+const clipboardOption = (page: Page, action: 'Copy' | 'Paste') => page.getByRole('option', { name: new RegExp(`^${action}`) })
+
+async function viewAction(page: Page, action: 'Copy' | 'Paste') {
+  await inspector(page).getByRole('button', { name: 'View actions', exact: true }).click()
+  await clipboardOption(page, action).click()
+}
+
+test('a view pasted onto another screen brings the value it reads (D6)', async ({ page }) => {
   await openInDesign(page, app(), 'Settings body')
   await drawn(page, 'Count 3').click()
+  await page.keyboard.press('ControlOrMeta+c')
+  await expect(note(page)).toContainText('Copied')
+
+  await drawn(page, 'Settings body').click()
+  await page.keyboard.press('ControlOrMeta+v')
+
+  await expect(drawn(page, 'Count 3')).toHaveCount(2)
+  expect(await sourceInCode(page)).toContain('struct SettingsScreen: View {\n    @State private var count = 3')
+})
+
+test('Copy and Paste are in the settings panel\'s view menu and a layer\'s menu too (D6)', async ({ page }) => {
+  await openInDesign(page, app(), 'Settings body')
+  await drawn(page, 'Count 3').click()
+  await viewAction(page, 'Copy')
+  await expect(note(page)).toContainText('Copied')
+
+  await drawn(page, 'Settings body').click()
+  await viewAction(page, 'Paste')
+  await expect(drawn(page, 'Count 3')).toHaveCount(2)
+
+  const row = page.getByTestId('logical-layers').locator('[data-source-name="Text"]').filter({ hasText: 'Settings body' })
+  await row.hover()
+  await row.getByRole('button', { name: /^Actions for / }).click()
+  await clipboardOption(page, 'Paste').click()
+  await expect(drawn(page, 'Count 3')).toHaveCount(3)
+})
+
+test('a paste with nothing copied, and a move past the first view, say why (C7)', async ({ page }) => {
+  await openInDesign(page, app(), 'Settings body')
+  await drawn(page, 'Count 3').click()
+
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(note(page)).toHaveText('Nothing copied yet. Select a view and press ⌘C first.')
 
   await page.keyboard.press('Alt+ArrowUp')
   await expect(note(page)).toHaveText('This is already the first view here.')

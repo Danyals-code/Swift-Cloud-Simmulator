@@ -233,6 +233,12 @@ export type ViewEdit =
   | { readonly kind: 'delete' }
   | { readonly kind: 'move'; readonly direction: -1 | 1 }
   | { readonly kind: 'insert'; readonly snippet: string }
+  /**
+   * A view copied with Copy, with the declarations of the values of its screen it reads,
+   * which come along to a screen without them (D6). It lands as it was copied, where a
+   * view from the library is made ready to use.
+   */
+  | { readonly kind: 'paste'; readonly snippet: string; readonly values: readonly string[] }
   /** A drag: put this view before or after another one, wherever that one is, or inside it as its last child. */
   | { readonly kind: 'moveTo'; readonly targetOffset: number; readonly position: DropPosition }
   | { readonly kind: 'hide' }
@@ -260,6 +266,15 @@ export interface ViewSiteInfo {
   readonly siblings: number
   readonly container: boolean
   readonly inContent: boolean
+}
+
+/**
+ * A view as Copy keeps it (D6): the Swift that draws it, and the declarations of the
+ * values of its screen it reads, which a paste onto another screen brings along.
+ */
+export interface CopiedView {
+  readonly snippet: string
+  readonly values: readonly string[]
 }
 
 /** The interface exposed over Comlink. */
@@ -298,8 +313,8 @@ export interface CompilerApi {
   setAllPages(enabled: boolean, revision: number): Promise<CompileResult | null>
   /** What can be done to the view at this offset, for drawing the controls. */
   describeView(text: string, file: FileId, offset: number): Promise<ViewSiteInfo | null>
-  /** The Swift that draws this view, for a copy. */
-  copyView(text: string, file: FileId, offset: number): Promise<string | null>
+  /** The Swift that draws this view, and the values of its screen it reads, for a copy. */
+  copyView(text: string, file: FileId, offset: number): Promise<CopiedView | { readonly refused: string }>
   /** Views elsewhere in the project with the same shape as the one at this span. */
   findCopies(files: readonly SourceFile[], target: SourceSpan, options?: { deploymentTarget?: string; screens?: readonly string[] }): Promise<{ copies: readonly CopyMatch[]; values: readonly CopyValue[]; eligible: boolean; reason?: string }>
   /** Every view the given files are hiding. */

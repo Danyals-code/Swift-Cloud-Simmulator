@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { ArchiveFormat, AuthoringNode, DesignEditRequest, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
+import type { ArchiveFormat, AuthoringNode, CopiedView, DesignEditRequest, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
 import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink, type Project, type StudioMetadata } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
@@ -56,8 +56,8 @@ import { TemplateGallery, type GallerySource } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
 import { BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import { eventLog, type StudioChange } from '../lib/eventLog'
-import { designEvent, studioChange } from '../lib/designEvents'
-import { busyEditProblem } from '../lib/editRefusals'
+import { designEvent, refusedClipboard, studioChange } from '../lib/designEvents'
+import { NOTHING_COPIED, busyEditProblem } from '../lib/editRefusals'
 import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
@@ -196,7 +196,7 @@ export function Studio() {
   const [preparingEdit, setPreparingEdit] = useState(false)
   const [committedEditRevision, setCommittedEditRevision] = useState(0)
   /** A view copied from Layers or the canvas, as the Swift that draws it. */
-  const [clipboard, setClipboard] = useState<string | null>(null)
+  const [clipboard, setClipboard] = useState<CopiedView | null>(null)
   const [hidden, setHidden] = useState<{ key: string; views: readonly HiddenViewInfo[] }>({ key: '', views: [] })
   const [centerOn, setCenterOn] = useState<{ id: string; nonce: number } | null>(null)
   const centerNonce = useRef(0)
@@ -807,7 +807,7 @@ export function Studio() {
         const text = selected && useStudio.getState().project?.files.find(f => f.id === selected.file)?.text
         setPendingSelect(selected && typeof text === 'string' ? { ...selected, projectId: project.id, text } : null)
       }
-      setEditNote(changed ? operation.kind === 'insert' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
+      setEditNote(changed ? operation.kind === 'insert' || operation.kind === 'paste' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
       return null
     } finally { editingRef.current = false; setPreparingEdit(false) }
   }, [project, stale, planDesignEdit, result, authoringNode, hidden.views])
@@ -1010,19 +1010,29 @@ export function Studio() {
   const undo = useCallback(() => replayEdit('undo'), [replayEdit])
   const redo = useCallback(() => replayEdit('redo'), [replayEdit])
 
-  /** Copies the selected view as the Swift that draws it, for a paste anywhere. */
-  const copySelection = useCallback(async () => {
-    const source = selectedLayer?.source
+  /** A copy or paste the studio refused: said, and logged as a refused edit is (C7). */
+  const refuseClipboard = useCallback((op: 'copy' | 'paste', reason: string, target?: AuthoringNode) => {
+    setEditNote(reason)
+    if (project) eventLog.record(project.id, refusedClipboard(op, target))
+  }, [project])
+
+  /**
+   * Copies the view at `source` as the Swift that draws it, for a paste anywhere, with
+   * the values of its screen it reads, which a paste onto another screen brings (D6).
+   */
+  const copyAt = useCallback(async (source: SourceSpan | undefined, name: string, node?: AuthoringNode) => {
     const file = source && project ? findFile(project, source.file) : undefined
     if (!source || !file) return
-    const snippet = await copyView(file.text, source.file, source.start)
-    if (!snippet) return
-    setClipboard(snippet)
-    setEditNote(`Copied ${selectedLayer!.name}`)
+    const copied = await copyView(file.text, source.file, source.start)
+    if (!copied || 'refused' in copied) { refuseClipboard('copy', copied?.refused ?? 'This view could not be copied. Try again.', node); return }
+    setClipboard(copied)
+    setEditNote(`Copied ${name}`)
     // Best effort, and never waited on: a studio clipboard is what Paste reads, and
     // the system one is a courtesy for pasting into the editor or somewhere else.
-    try { await navigator.clipboard.writeText(snippet) } catch { /* not granted, or not secure */ }
-  }, [copyView, project, selectedLayer])
+    try { await navigator.clipboard.writeText(copied.snippet) } catch { /* not granted, or not secure */ }
+  }, [copyView, project, refuseClipboard])
+  const copySelection = useCallback(() => copyAt(selectedLayer?.source, selectedLayer?.name ?? '', authoringNode ?? undefined), [copyAt, selectedLayer, authoringNode])
+  const copyLayer = useCallback((node: AuthoringNode) => void copyAt(node.source, sourceLayerLabel(node), node), [copyAt])
 
   /**
    * Pasting the same view a third time is worth a word, once.
@@ -1034,14 +1044,17 @@ export function Studio() {
   const pasteCounts = useRef(new Map<string, number>())
   const [pasteNudge, setPasteNudge] = useState<string | null>(null)
   const dismissedNudges = useRef(new Set<string>())
-  const pasteClipboard = useCallback(() => {
-    if (!clipboard) return
-    const shape = clipboard.replace(/\s+/g, ' ').trim()
+  /** Pastes what was copied beside or into `target`, a layer in Layers, or else where Add would put a view. */
+  const pasteClipboard = useCallback((target?: AuthoringNode) => {
+    if (!clipboard) { refuseClipboard('paste', NOTHING_COPIED); return }
+    const shape = clipboard.snippet.replace(/\s+/g, ' ').trim()
     const pastes = (pasteCounts.current.get(shape) ?? 0) + 1
     pasteCounts.current.set(shape, pastes)
     if (pastes >= 3 && !dismissedNudges.current.has(shape)) setPasteNudge(shape)
-    void applyEdit({ kind: 'insert', snippet: clipboard }, addTargetLayer)
-  }, [clipboard, applyEdit, addTargetLayer])
+    const paste = { kind: 'paste' as const, snippet: clipboard.snippet, values: clipboard.values }
+    if (target) void performDesignEdit(target.source, target.fingerprint, target.owner, paste)
+    else void applyEdit(paste, addTargetLayer)
+  }, [clipboard, applyEdit, addTargetLayer, performDesignEdit, refuseClipboard])
 
   /**
    * Showing a hidden view again.
@@ -1090,7 +1103,7 @@ export function Studio() {
         if (key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo() }
         else if (key === 'y' && !e.shiftKey) { e.preventDefault(); redo() }
         else if (key === 'c') { if (selectedLayer) { e.preventDefault(); void copySelection() } }
-        else if (key === 'v') { if (clipboard) { e.preventDefault(); pasteClipboard() } }
+        else if (key === 'v') { e.preventDefault(); pasteClipboard() }
         else if (key === 'h') { if (selectedLayer) { e.preventDefault(); void applyEdit({ kind: 'hide' }) } }
         return
       }
@@ -1116,7 +1129,7 @@ export function Studio() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
-      undo, redo, copySelection, pasteClipboard, clipboard])
+      undo, redo, copySelection, pasteClipboard])
 
   /**
    * Undo and redo, over the edits the canvas made.
@@ -1373,7 +1386,7 @@ export function Studio() {
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }, undefined, undefined, undefined, true)}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, true)} onSelect={selectAuthoring} onReveal={revealSpan} />
         : <p className="text-[12px] text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
-      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} />}</PaneBoundary>
+      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} />}</PaneBoundary>
   const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
     <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
     {level !== 'app' && focusedScreen && <><span aria-hidden>›</span><button type="button" aria-current={level === 'screen' ? 'page' : undefined} onClick={() => openPage(focusedScreen.page)} data-testid="level-screen">{focusedScreen.name}</button></>}
@@ -1451,6 +1464,7 @@ export function Studio() {
                   selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={result.authoring} files={project.files} selection={layerSelection?.anchor}
                   selected={authoringNode?.id} selectedAncestors={selectedSources} hovered={liveHoveredAuthoring?.node.id ?? hoveredSources[0]} hoveredAncestors={hoveredSources.slice(1)}
                   onHover={hoverAuthoring} stale={busy} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
+                  onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined}
                   hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-2 text-[12px] text-xc-text-3">Building the view hierarchy…</p>}
               /> : <Navigator tabbed
                 key={project.id}

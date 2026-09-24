@@ -8,3 +8,6 @@ export function busyEditProblem(state: { readonly current: boolean; readonly sta
   if (state.applying) return 'Still applying the last change. Try again in a moment.'
   return null
 }
+
+/** Paste with nothing copied yet. */
+export const NOTHING_COPIED = 'Nothing copied yet. Select a view and press ⌘C first.'

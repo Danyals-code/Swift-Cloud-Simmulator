@@ -1,7 +1,7 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { AuthoringNode, ResourceOperation, SourceSpan } from '@studio/shared'
+import { isStructuralLayer, type AuthoringNode, type ResourceOperation, type SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { LayoutGuide } from './LayoutGuide'
@@ -30,7 +30,11 @@ const NAVIGATE_TYPES: readonly { type: 'push' | 'sheet' | 'cover'; label: string
   { type: 'cover', label: 'Full screen' },
 ]
 
-export function AuthoringInspector({ node, stale, onReveal, onChange, features }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange }) {
+/**
+ * `onCopy` and `onPaste` put Copy and Paste in the view menu, as ⌘C and ⌘V do (D6);
+ * Paste is off while nothing is copied.
+ */
+export function AuthoringInspector({ node, stale, onReveal, onChange, features, onCopy, onPaste }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void }) {
   const root = useRef<HTMLDivElement | null>(null)
   const focus = useRef<{ source: string; owner: string; control: string; label: string; caret: number | null; modifier?: string; button?: string } | null>(null)
   const [retained, setRetained] = useState(node)
@@ -99,7 +103,16 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
     <fieldset disabled={stale} className={styles.inspectorFields}>
       <header className={styles.selectionHeader}>
         <div><strong>{title}</strong>{title !== type && <small>{type}</small>}</div>
-        {onReveal && <MenuButton label="View actions" items={[{ value: 'code', label: 'Open in Code', icon: 'code' }, ...(breadcrumbs.length ? [{ value: 'parent', label: `Select ${sourceLayerLabel(breadcrumbs.at(-1)!)}` }] : [])]} onSelect={value => { if (value === 'code') onReveal(selected.source); else if (value === 'parent') features?.onSelect?.(breadcrumbs.at(-1)!) }}><Icon name="ellipsis" size={15} /></MenuButton>}
+        {onReveal && <MenuButton label="View actions" items={[
+          { value: 'code', label: 'Open in Code', icon: 'code' },
+          ...(breadcrumbs.length ? [{ value: 'parent', label: `Select ${sourceLayerLabel(breadcrumbs.at(-1)!)}` }] : []),
+          ...(isStructuralLayer(selected) ? [{ value: 'copy', label: 'Copy', detail: '⌘C', disabled: !onCopy, separated: true }, { value: 'paste', label: 'Paste', detail: '⌘V', disabled: !onPaste }] : []),
+        ]} onSelect={value => {
+          if (value === 'code') onReveal(selected.source)
+          else if (value === 'parent') features?.onSelect?.(breadcrumbs.at(-1)!)
+          else if (value === 'copy') onCopy?.(selected)
+          else if (value === 'paste') onPaste?.(selected)
+        }}><Icon name="ellipsis" size={15} /></MenuButton>}
       </header>
       {template ? <p className={styles.scope}>Row design · changes apply to every row</p> : selected.kind === 'definition' && features?.snapshot ? <p className={styles.scope}>The Main · changes apply to every copy ({features.snapshot.nodes.filter(n => n.definitionId === selected.id).length})</p> : selected.runtimeIds.length > 1 ? <p className={styles.scope}>One design · changes apply to {selected.runtimeIds.length} places on screen</p> : null}
       {!!breadcrumbs.length && <nav className={styles.breadcrumbs} aria-label="Selection path">{breadcrumbs.map(ancestor => <button type="button" key={ancestor.id} onClick={() => features?.onSelect?.(ancestor)}>{sourceLayerLabel(ancestor)}</button>)}</nav>}

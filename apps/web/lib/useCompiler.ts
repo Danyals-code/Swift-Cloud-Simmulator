@@ -8,6 +8,7 @@ import type {
   PreviewTarget,
   DynamicTypeSize,
   CompilerApi,
+  CopiedView,
   CompletionResult,
   SourceSpan,
   SymbolInfo,
@@ -439,7 +440,7 @@ export function useCompiler({
     }
   }, [ensureWorker])
 
-  const copyView = useCallback(async (text: string, file: string, offset: number): Promise<string | null> => {
+  const copyView = useCallback(async (text: string, file: string, offset: number): Promise<CopiedView | { readonly refused: string } | null> => {
     try {
       return await ensureWorker().api.copyView(text, file, offset)
     } catch {

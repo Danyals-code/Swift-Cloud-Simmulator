@@ -5,7 +5,7 @@ export function reconcileLayerLabel(old: AuthoringNode, before: AuthoringSnapsho
   const comparable = (node: AuthoringNode) => node.owner === old.owner && node.name === old.name && node.kind === old.kind && node.fingerprint === old.fingerprint && node.source.file === old.source.file
   let previous = before.nodes.filter(comparable).sort((a, b) => a.source.start - b.source.start)
   let candidates = after.nodes.filter(comparable).sort((a, b) => a.source.start - b.source.start)
-  if ((operation.kind === 'layer-duplicate' || operation.kind === 'insert') && selectedOffset !== undefined) {
+  if (['layer-duplicate', 'insert', 'paste'].includes(operation.kind) && selectedOffset !== undefined) {
     const copy = after.nodes.find(n => n.source.file === target.file && n.source.start === selectedOffset && n.kind !== 'definition')
     if (copy) candidates = candidates.filter(n => n.source.start < copy.source.start || n.source.end > copy.source.end)
   }
@@ -17,7 +17,7 @@ export function reconcileLayerLabel(old: AuthoringNode, before: AuthoringSnapsho
     remaining.splice(insertion < 0 ? remaining.length : insertion, 0, ...moving)
     previous = remaining
   }
-  if (['layer-duplicate', 'layer-wrap', 'layer-reparent', 'insert'].includes(operation.kind) && previous.length === candidates.length) {
+  if (['layer-duplicate', 'layer-wrap', 'layer-reparent', 'insert', 'paste'].includes(operation.kind) && previous.length === candidates.length) {
     const index = previous.findIndex(n => n.id === old.id)
     if (index >= 0) return candidates[index] ?? null
   }

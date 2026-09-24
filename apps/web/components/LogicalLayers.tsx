@@ -30,6 +30,9 @@ interface Props {
   stale: boolean
   onSelect: (node: AuthoringNode, runtimeId?: string) => void
   onEdit?: (node: AuthoringNode, operation: DesignEditRequest['operation']) => Promise<string | null>
+  /** Copy and Paste in a layer's menu, as ⌘C and ⌘V do for the selection (D6). Paste is off while nothing is copied. */
+  onCopy?: (node: AuthoringNode) => void
+  onPaste?: (node: AuthoringNode) => void
   hidden?: readonly HiddenViewInfo[]
   onShow?: (view: HiddenViewInfo) => void
   editable?: boolean
@@ -53,7 +56,7 @@ const ICONS: Readonly<Record<string, IconName>> = {
 }
 
 /** The designer hierarchy has one copy of a row design, never individual records. */
-export function LogicalLayers({ labels = [], onRename, snapshot, files, selected, selectedAncestors = [], selection, hovered, hoveredAncestors = [], onHover, runtimeLayers, pageSource, pageId, pageName, selectedRuntimeId, stale, onSelect, onEdit, hidden = [], onShow, editable = false, embedded = false, indent = 8, query: externalQuery }: Props) {
+export function LogicalLayers({ labels = [], onRename, snapshot, files, selected, selectedAncestors = [], selection, hovered, hoveredAncestors = [], onHover, runtimeLayers, pageSource, pageId, pageName, selectedRuntimeId, stale, onSelect, onEdit, onCopy, onPaste, hidden = [], onShow, editable = false, embedded = false, indent = 8, query: externalQuery }: Props) {
   const [navigation, setNavigation] = useState<SourceLayerNavigation>({ snapshot, files, pageId, closed: new Set() })
   const [multiple, setMultiple] = useState<{ files: readonly SourceFile[]; ids: string[] }>({ files, ids: [] })
   const [organizing, setOrganizing] = useState<{ node: AuthoringNode; kind: 'rename' | 'reparent' } | null>(null)
@@ -134,7 +137,9 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     // A view written as an argument keeps its name; the rest is off, and says why.
     const slotProblem = argumentLayerProblem(snapshot.nodes, node)
     const structure: MenuItem[] = [
-      { value: 'duplicate', label: 'Duplicate', disabled: !canEdit },
+      { value: 'copy', label: 'Copy', detail: '⌘C', disabled: !isStructuralLayer(node) || !onCopy },
+      { value: 'paste', label: 'Paste', detail: '⌘V', disabled: !canEdit || !onPaste },
+      { value: 'duplicate', label: 'Duplicate', disabled: !canEdit, separated: true },
       { value: 'VStack', label: 'Wrap in Vertical Stack', disabled: !canEdit },
       { value: 'HStack', label: 'Wrap in Horizontal Stack', disabled: !canEdit },
       { value: 'ZStack', label: 'Wrap in ZStack', disabled: !canEdit },
@@ -155,6 +160,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
   }
   const action = (node: AuthoringNode, value: string) => {
     if (value === 'rename' || value === 'reparent') { setError(null); setOrganizing({ node, kind: value }); setDraft(labelFor(node)); setDestination('') }
+    else if (value === 'copy') onCopy?.(node)
+    else if (value === 'paste') onPaste?.(node)
     else if (value === 'duplicate') void edit(node, { kind: 'layer-duplicate' })
     else if (value === 'VStack' || value === 'HStack' || value === 'ZStack') void edit(node, { kind: 'layer-wrap', ids: idsFor(node), layout: value })
     else if (value === 'enter') enter(node)

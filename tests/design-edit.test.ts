@@ -681,3 +681,77 @@ describe('C7: a refused edit says why, in words for the one edit that was refuse
       .toEqual({ ok: false, reason: 'Text can’t hold other views. Drop it before or after instead.' })
   })
 })
+
+describe('D6: a view pasted onto another screen brings the values it reads', () => {
+  const screens = (settingsValues = '') => `import SwiftUI
+@main struct TestApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }
+struct HomeScreen: View {
+    @State private var count = 0
+    var body: some View {
+        VStack {
+            Text("Count \\(count)")
+        }
+    }
+}
+struct SettingsScreen: View {
+${settingsValues}    var body: some View {
+        VStack {
+            Text("Settings")
+        }
+    }
+}
+`
+  const paste = (text: string, snippet: string, values: readonly string[]) => {
+    const node = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(text) }).nodes.find(n => n.name === 'Text' && n.owner === 'SettingsScreen')!
+    return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation: { kind: 'paste', snippet, values } })
+  }
+  const settingsOf = (plan: ReturnType<typeof paste>) => {
+    if (!plan.ok) throw new Error(plan.reason)
+    return plan.changes[0]!.after.slice(plan.changes[0]!.after.indexOf('struct SettingsScreen'))
+  }
+
+  it('adds the value to the screen it lands on, with the view', () => {
+    expect(settingsOf(paste(screens(), 'Text("Count \\(count)")', ['@State private var count = 0']))).toBe(`struct SettingsScreen: View {
+    @State private var count = 0
+    var body: some View {
+        VStack {
+            Text("Settings")
+            Text("Count \\(count)")
+        }
+    }
+}
+`)
+  })
+
+  it('uses a value of the same name and kind the screen already has', () => {
+    const settings = settingsOf(paste(screens('    @State private var count = 5\n'), 'Text("Count \\(count)")', ['@State private var count = 0']))
+    expect(settings.match(/var count/g)).toHaveLength(1)
+    expect(settings).toContain('@State private var count = 5')
+  })
+
+  it('says why when the screen has a value of that name of another kind', () => {
+    expect(paste(screens('    let count = "many"\n'), 'Text("Count \\(count)")', ['@State private var count = 0']))
+      .toEqual({ ok: false, reason: 'SettingsScreen already has a `count` of another kind, so this view’s `count` can’t come along. Rename one of them in Code.' })
+  })
+
+  it('says why when the view reads something that does not exist where it lands', () => {
+    expect(paste(screens(), 'Button("Close") { dismiss() }', []))
+      .toEqual({ ok: false, reason: 'This view reads `dismiss`, which doesn’t exist where it was pasted. Paste it where `dismiss` is, or change it in Code.' })
+  })
+
+  it('says why when the screen has a function of that name', () => {
+    expect(paste(screens('    func count() -> Int { 1 }\n'), 'Text("Count \\(count)")', ['@State private var count = 0']))
+      .toEqual({ ok: false, reason: 'SettingsScreen already has a `count` of another kind, so this view’s `count` can’t come along. Rename one of them in Code.' })
+  })
+
+  it('tells values that are more than a number or words apart by what they are made from', () => {
+    const pet = '    struct Pet {}\n    @State private var when = Pet()\n'
+    expect(paste(screens(pet), 'Text(when, style: .date)', ['@State private var when = Date()']))
+      .toEqual({ ok: false, reason: 'SettingsScreen already has a `when` of another kind, so this view’s `when` can’t come along. Rename one of them in Code.' })
+    expect(settingsOf(paste(screens('    @State private var when = Date()\n'), 'Text(when, style: .date)', ['@State private var when = Date(timeIntervalSince1970: 0)'])).match(/var when/g)).toHaveLength(1)
+  })
+
+  it('pastes a control as it was copied, rather than binding it anew as the library does', () => {
+    expect(settingsOf(paste(screens(), 'Toggle("On", isOn: .constant(true))', []))).toContain('Toggle("On", isOn: .constant(true))')
+  })
+})

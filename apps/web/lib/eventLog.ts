@@ -12,7 +12,8 @@ export type StudioChange = 'state-save' | 'state-delete' | 'screen-rename' | 'sc
 /** A change made in Design, in the studio's own words: `designEvent` says which. */
 export interface DesignEvent {
   readonly type: 'design'
-  readonly op: DesignEditRequest['operation']['kind'] | StudioChange
+  /** An edit, a change to the studio's records, or a copy, which is logged only when refused. */
+  readonly op: DesignEditRequest['operation']['kind'] | StudioChange | 'copy'
   /** The layer's built-in type, such as Text or VStack, or else what kind of layer it is. */
   readonly layer?: string
   /** Which of the layer's controls changed. */
