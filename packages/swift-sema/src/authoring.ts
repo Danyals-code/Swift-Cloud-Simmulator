@@ -211,7 +211,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       let ancestor: MutableNode | undefined = parent
       let template = false
       while (ancestor) { if (ancestor.kind === 'template') template = true; ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }
-      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget).map(r => ({ ...r.control, scope: template ? 'All rows in this template' : r.control.scope, description: r.control.id.startsWith('fill:') ? `${r.control.description} Parent: ${parent.name}. Content uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : r.control.description }))
+      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget).map(r => ({ ...r.control, scope: template ? 'All rows in this template' : r.control.scope, description: r.control.id.startsWith('fill:') ? `${r.control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : r.control.description }))
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }

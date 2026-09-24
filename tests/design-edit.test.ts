@@ -79,7 +79,20 @@ describe('R03/R04 minimal source recipes', () => {
     const source = wrap('Text("A").padding(8)')
     const filled = edited(source, 'Width sizing', 'Fill')
     expect(filled).toBe(source.replace('.padding(8)', '.padding(8).frame(maxWidth: .infinity)'))
-    expect(edited(filled, 'Width sizing', 'Content')).toBe(source)
+    expect(edited(filled, 'Width sizing', 'Hug')).toBe(source)
+  })
+  it('names each axis\'s sizing Hug, Fill or Fixed, as Figma does (D2)', () => {
+    const sizing = target(wrap('Text("A")')).controls?.find(c => c.label === 'Width sizing')
+    expect(sizing).toMatchObject({ value: 'Hug', options: ['Hug', 'Fill', 'Fixed'] })
+    const framed = target(wrap('Text("A").frame(height: 60)')).controls?.find(c => c.label === 'Height sizing')
+    expect(framed).toMatchObject({ value: 'Fixed', options: ['Hug', 'Fill', 'Fixed'] })
+    expect(framed?.description).toMatch(/^Hug removes this axis constraint\./)
+  })
+  it('leaves filling and hugging to that control, with no second way in the modifier picker (D2)', () => {
+    const offered = target(wrap('Text("A")')).modifierCatalog?.filter(entry => !entry.hidden).map(entry => entry.label)
+    expect(offered).toContain('Aspect ratio')
+    expect(offered).not.toContain('Flexible size')
+    expect(offered).not.toContain('Ideal size')
   })
   it('changes row/column/overlay constructors without moving child code', () => {
     const source = wrap('VStack { Text("A"); Text("B") }.padding(12)')
@@ -169,7 +182,7 @@ describe('R10/R16 source → preview → export', () => {
 it('converts mixed frame dimensions without producing an invalid Swift overload', () => {
   const source = wrap('Text("A").padding(8).frame(width: 240, height: 120, alignment: .leading).background(.blue)')
   expect(edited(source, 'Width sizing', 'Fill')).toBe(source.replace('.frame(width: 240, height: 120, alignment: .leading)', '.frame(height: 120, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)'))
-  expect(edited(source, 'Height sizing', 'Content')).toBe(source.replace(', height: 120', ''))
+  expect(edited(source, 'Height sizing', 'Hug')).toBe(source.replace(', height: 120', ''))
   expect(edited(edited(wrap('Text("A")'), 'Width sizing', 'Fixed'), 'frame · width', '180')).toContain('.frame(width: 180)')
 })
 
@@ -288,7 +301,7 @@ it('prepares independent Apple compiler fixtures from the actual writer output',
     ['Text("A")', 'Accessibility label', 'Card', 'Text'],
     ['Text("A")', 'Accessibility identifier', 'card', 'Text'],
     ['Text("A").frame(width: 120, height: 60, alignment: .leading)', 'Width sizing', 'Fill', 'Text'],
-    ['Text("A").frame(width: 120, height: 60, alignment: .leading)', 'Height sizing', 'Content', 'Text'],
+    ['Text("A").frame(width: 120, height: 60, alignment: .leading)', 'Height sizing', 'Hug', 'Text'],
     ['Text("A")', 'Height sizing', 'Fill', 'Text'],
     ['VStack(spacing: 12) { Text("A") }', 'Alignment', 'leading', 'VStack'],
     ['VStack { Text("A"); Text("B") }', 'Layout', 'Stack', 'VStack'],

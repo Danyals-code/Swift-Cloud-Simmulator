@@ -220,7 +220,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     const frames = modifiers.filter(m => modName(m) === 'frame' && m.args.some(a => [axis, max, minimum].includes(a.label ?? '')))
     if (!frames.length) {
       append('add:' + axis, 'Fixed ' + axis, 'number', '', v => `.frame(${axis}: ${Number(v)})`, undefined, 0)
-      append('fill:' + axis, axisTitle + ' sizing', 'select', 'Content', v => v === 'Fill' ? `.frame(${max}: .infinity)` : `.frame(${axis}: 100)`, ['Content', 'Fill', 'Fixed'])
+      append('fill:' + axis, axisTitle + ' sizing', 'select', 'Hug', v => v === 'Fill' ? `.frame(${max}: .infinity)` : `.frame(${axis}: 100)`, ['Hug', 'Fill', 'Fixed'])
     } else if (frames.length === 1) {
       if (!authoringCapability('frame', 'modifier', frames[0]!.args.map(a => a.label))) continue
       const frame = frames[0]!
@@ -243,12 +243,12 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       const remaining = frame.args.length === 1 ? '' : suffix.slice(0, removeStart - from) + suffix.slice(removeEnd - from)
       add('fill:' + axis, axisTitle + ' sizing', 'select', current, v => {
         const align = alignment ? `, alignment: ${raw(alignment.value.span)}` : ''
-        const added = v === 'Content' ? '' : v === 'Fill' ? `.frame(${max}: .infinity${align})` : `.frame(${axis}: 100${align})`
-        const retained = v !== 'Content' && frame.args.every(a => a === arg || a === alignment) ? '' : remaining
+        const added = v === 'Hug' ? '' : v === 'Fill' ? `.frame(${max}: .infinity${align})` : `.frame(${axis}: 100${align})`
+        const retained = v !== 'Hug' && frame.args.every(a => a === arg || a === alignment) ? '' : remaining
         // One explicit frame per changed axis avoids invalid mixed Swift overloads
         // such as frame(width:maxHeight:). Other constraints retain their order.
         return { start: from, end: frame.span.end, text: retained + added }
-      }, ['Content', 'Fill', 'Fixed'], undefined, undefined, 'Content removes this axis constraint. Fill accepts the parent’s available size. Fixed starts at 100 points; edit the dimension to choose another size. Other frame arguments and surrounding modifiers are preserved.')
+      }, ['Hug', 'Fill', 'Fixed'], undefined, undefined, 'Hug removes this axis constraint. Fill accepts the parent’s available size. Fixed starts at 100 points; edit the dimension to choose another size. Other frame arguments and surrounding modifiers are preserved.')
     }
   }
   return recipes.map(recipe => ({ ...recipe, control: constrainNumericControl(recipe.control, node.name, node.behavior?.binding?.type) })).filter((recipe, index) => !recipes.slice(0, index).some(prior => prior.control.source.start === recipe.control.source.start && prior.control.source.end === recipe.control.source.end && prior.control.kind === recipe.control.kind && prior.control.value === recipe.control.value && prior.control.source !== node.source))
