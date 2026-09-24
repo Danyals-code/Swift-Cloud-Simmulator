@@ -35,7 +35,7 @@ export interface SentPrompt {
   readonly selection?: boolean
 }
 
-/** How a request to the AI ended. */
+/** How a request to the AI ended, when it did not fail. */
 export type PromptOutcome =
   /** Create with AI: a draft is ready to review. */
   | { readonly action: 'answered'; readonly files: number; readonly issues: number }
@@ -43,19 +43,24 @@ export type PromptOutcome =
   | { readonly action: 'applied'; readonly files: number }
   /** An answer that changed nothing. */
   | { readonly action: 'replied' }
-  /** No answer to use: the request failed, the answer could not be used, or its change failed the preview check. */
-  | { readonly action: 'failed'; readonly stage: 'request' | 'answer' | 'preview'; readonly status?: number }
   | { readonly action: 'cancelled' }
   /** An answer thrown away: a draft left unopened, or an edit to a project that had moved on. */
   | { readonly action: 'discarded' }
 
-/** One step of an attempt: sending, how it ended, or its draft opening as a project, in ms since sending. */
+/** How far a failed request got: no answer, an answer it could not use, or a change that failed the preview check. */
+export type FailedStage = 'request' | 'answer' | 'preview'
+
+/** One step of an attempt. After sending, each says how many ms had passed since. */
 export type AttemptStep =
   | ({ readonly action: 'sent' } & SentPrompt)
+  /** The server answered, with its HTTP status: the time to response. */
+  | { readonly action: 'responded'; readonly status: number; readonly ms: number }
   | (PromptOutcome & { readonly ms: number })
+  | { readonly action: 'failed'; readonly stage: FailedStage; readonly ms: number }
+  /** Create with AI: its draft opened as a new app, and this is logged in that app's log. */
   | { readonly action: 'opened'; readonly ms: number }
 
-/** A request to the AI, numbered within the panel that made it. */
+/** A request to the AI, numbered within the page load and the panel that made it. */
 export type AiEvent = { readonly type: 'ai'; readonly flow: 'create' | 'edit'; readonly attempt: number } & AttemptStep
 
 /** What the studio records. */
