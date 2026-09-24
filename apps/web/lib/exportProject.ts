@@ -3,6 +3,7 @@ import type { Project } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
 import { viewsDrawing, type ArchiveFormat, type CompileResult, type PagePreview } from '@studio/shared'
 import { STUDIO_BUILD } from './build'
+import type { LogFile } from './eventLog'
 import { screenNaming } from './designTree'
 import { screenCatalog } from './screens'
 import type { PreviewSettings } from './store'
@@ -18,8 +19,8 @@ export interface ExportSteps {
   compile(project: Project, settings: CaptureSettings, signal: AbortSignal): Promise<CompileResult>
   /** A page drawn as a PNG at twice its size. */
   capture(page: PagePreview, signal: AbortSignal): Promise<Uint8Array>
-  /** The project's event log as JSON lines, with this export in it. */
-  events(projectId: string, format: ArchiveFormat): Promise<string>
+  /** The project's event log, with this export in it. */
+  events(projectId: string, format: ArchiveFormat): Promise<LogFile>
   /** Hands the archive to the browser's downloads. */
   download(name: string, bytes: Uint8Array): void
 }
@@ -29,7 +30,7 @@ export interface ExportOutcome {
   readonly name: string
   /** How many screen images the complete bundle has. */
   readonly screenImages: number
-  /** What the archive leaves out, as its report says. */
+  /** What the archive leaves out that the designer should hear of. The report can list more. */
   readonly issues: readonly string[]
 }
 
@@ -38,6 +39,14 @@ const SAVE_MS = 2_500
 const EVENTS_MS = 5_000
 const COMPILE_MS = 40_000
 const CAPTURE_MS = 10_000
+/**
+ * What the report says when the event log is missing, or holds only the exporting
+ * session's events. The complete bundle's report is the only place that says so: the
+ * log is for the study, not for the designer.
+ */
+const NO_LOG = 'The studio’s event log could not be read, so events.jsonl is not in this export.'
+const PARTIAL_LOG = 'The studio’s event log could not be read in full, so events.jsonl holds only the events of the session that exported it.'
+
 /** How long all the screens together may take. */
 const CAPTURE_ALL_MS = 90_000
 
@@ -52,13 +61,13 @@ const CAPTURE_ALL_MS = 90_000
 export async function exportProject(project: Project, format: ArchiveFormat, preview: CaptureSettings, steps: ExportSteps): Promise<ExportOutcome> {
   // The archive is made from the project on screen, so a slow save only delays it.
   await within(() => steps.save(), SAVE_MS).catch(() => undefined)
-  const events = await within(() => steps.events(project.id, format), EVENTS_MS).catch(() => undefined)
+  const log = await within(() => steps.events(project.id, format), EVENTS_MS).catch(() => undefined)
   const captured = format === 'complete' ? await captureScreens(project, preview, steps) : undefined
-  // Only the complete bundle has a report to say so in.
-  const review = captured && events === undefined ? { ...captured, issues: [...captured.issues ?? [], 'The studio’s event log could not be read, so events.jsonl is not in this export.'] } : captured
-  const archive = exportArchive(project, { format, review, build: STUDIO_BUILD, events, now: new Date() })
+  const unlogged = !log ? NO_LOG : log.partial ? PARTIAL_LOG : null
+  const review = captured && unlogged ? { ...captured, issues: [...captured.issues ?? [], unlogged] } : captured
+  const archive = exportArchive(project, { format, review, build: STUDIO_BUILD, events: log?.text, now: new Date() })
   steps.download(archive.name, archive.bytes)
-  return { name: archive.name, screenImages: review?.screens.length ?? 0, issues: archive.issues }
+  return { name: archive.name, screenImages: review?.screens.length ?? 0, issues: archive.issues.filter(issue => issue !== unlogged) }
 }
 
 /** What the studio says once the archive is in the downloads. */

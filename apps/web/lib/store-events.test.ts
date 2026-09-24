@@ -22,7 +22,7 @@ afterEach(() => vi.restoreAllMocks())
 
 /** A project's events, without when each happened. */
 async function logged(project: string) {
-  return (await eventLog.jsonl(project)).trimEnd().split('\n').slice(1).map(line => {
+  return (await eventLog.file(project)).text.trimEnd().split('\n').slice(1).map(line => {
     const { t: _t, session: _session, seq: _seq, ...event } = JSON.parse(line)
     return event
   })

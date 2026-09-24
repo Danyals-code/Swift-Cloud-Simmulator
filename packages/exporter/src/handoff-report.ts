@@ -68,7 +68,7 @@ ${made}${issues}
 - settings.json contains app defaults, capture settings, resource inventory and designer metadata.
 - chat-history.md and chat-history.json contain all ${history.length} saved prompt and AI messages, including unsuccessful requests and selection context.
 - .swiftstudio metadata at the project root allows this archive to reopen in Studio.${logged ? `
-- ${EVENT_LOG} logs what was done in the studio, one event a line with its time: design edits, bursts of typing, AI requests and their outcomes, mode switches, reloads and exports. It keeps prompts as written, but no Swift code and no API keys.` : ''}
+- ${EVENT_LOG} is the studio's log of what was done in this project, one event a line with its time.` : ''}
 
 ## App defaults
 

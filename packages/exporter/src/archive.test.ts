@@ -371,7 +371,7 @@ describe('the event log (G5)', () => {
       expect(logsIn(archive.bytes), format).toEqual([LOG])
     }
     const project = createDefaultProject(0), report = `${project.manifest.name}/Studio Report/report.md`
-    expect(entriesOf(exportArchive(project, { format: 'complete', review, now: NOW, events: LOG }).bytes)[report]).toContain('.swiftstudio/events.jsonl logs what was done in the studio')
+    expect(entriesOf(exportArchive(project, { format: 'complete', review, now: NOW, events: LOG }).bytes)[report]).toContain("- .swiftstudio/events.jsonl is the studio's log of what was done in this project, one event a line with its time.\n")
     expect(entriesOf(exportArchive(project, { format: 'complete', review, now: NOW }).bytes)[report]).not.toContain('events.jsonl')
   })
 

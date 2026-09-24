@@ -4,7 +4,7 @@ import { emptyStudioMetadata, type Project } from '@studio/project-model'
 import { createDefaultProject } from '@studio/project-model/templates'
 import { getDevice } from '@studio/sim-shell'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
-import { exportProject, type ExportSteps } from './exportProject'
+import { exportNote, exportProject, type ExportSteps } from './exportProject'
 
 /**
  * Exporting, as the Export button runs it.
@@ -33,7 +33,7 @@ function browser(instead: Partial<ExportSteps> = {}) {
       return compile({ projectId: project.id, files: project.files, revision: 1, canvas: { width: device.width, height: device.height }, safeArea: device.safeArea, colorScheme: 'light', allPages: true, galleryLimit: 128, designScreens: project.studio?.screens })
     },
     capture: async () => PNG,
-    events: async () => LOG,
+    events: async () => ({ text: LOG, partial: false }),
     download: (name, bytes) => { downloads.push({ name, bytes }) },
     ...instead,
   }
@@ -116,7 +116,7 @@ describe('the Export button', () => {
 
   it('puts the project’s event log in the archive, asked for as this export', async () => {
     const project = app('Text("Hello")'), asked: unknown[] = []
-    const { steps, downloads } = browser({ events: async (id, format) => { asked.push([id, format]); return LOG } })
+    const { steps, downloads } = browser({ events: async (id, format) => { asked.push([id, format]); return { text: LOG, partial: false } } })
 
     await exportProject(project, 'xcodeproj', PREVIEW, steps)
 
@@ -124,7 +124,7 @@ describe('the Export button', () => {
     expect(inside(downloads[0]!.bytes).logs).toEqual([LOG])
   })
 
-  it('goes without the event log when it cannot be read in time, and the report says so', async () => {
+  it('goes without an event log that cannot be read in time, saying so only in the report: the log is the study’s, not the designer’s', async () => {
     vi.useFakeTimers()
     const project = app('Text("Hello")')
     const { steps, downloads } = browser({ events: () => new Promise(() => {}) })
@@ -135,7 +135,20 @@ describe('the Export button', () => {
 
     const { logs, report } = inside(downloads[0]!.bytes)
     expect(logs).toEqual([])
-    expect(outcome.issues).toEqual(['The studio’s event log could not be read, so events.jsonl is not in this export.'])
     expect(report).toContain('- The studio’s event log could not be read, so events.jsonl is not in this export.')
+    expect(outcome.issues).toEqual([])
+    expect(exportNote('complete', outcome)).toBe(`Exported ${outcome.name} with 1 screen image, the report and the chat history.`)
+  })
+
+  it('says in the report, and only there, when the log holds only this session’s events', async () => {
+    const project = app('Text("Hello")')
+    const { steps, downloads } = browser({ events: async () => ({ text: LOG, partial: true }) })
+
+    const outcome = await exportProject(project, 'complete', PREVIEW, steps)
+
+    const { logs, report } = inside(downloads[0]!.bytes)
+    expect(logs).toEqual([LOG])
+    expect(report).toContain('- The studio’s event log could not be read in full, so events.jsonl holds only the events of the session that exported it.')
+    expect(outcome.issues).toEqual([])
   })
 })

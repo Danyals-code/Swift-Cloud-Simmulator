@@ -943,9 +943,7 @@ registerLiveWork({
   },
   archive: async project => {
     const { exportEditableZip } = await import('@studio/exporter')
-    // The log is worth waiting a moment for, and not a download.
-    const log = await Promise.race([eventLog.jsonl(project.id), new Promise<undefined>(resolve => setTimeout(resolve, 3_000))]).catch(() => undefined)
-    return exportEditableZip(project, { build: STUDIO_BUILD, events: log })
+    return exportEditableZip(project, { build: STUDIO_BUILD, events: (await eventLog.file(project.id)).text })
   },
   record: event => {
     const open = useStudio.getState().project

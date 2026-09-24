@@ -22,7 +22,7 @@ export function browserExportSteps(save: () => Promise<unknown>): ExportSteps {
     capture: capturePage,
     events: (projectId, format) => {
       eventLog.record(projectId, { type: 'export', format })
-      return eventLog.jsonl(projectId)
+      return eventLog.file(projectId)
     },
     download: (name, bytes) => saveFile(name, 'application/zip', bytes),
   }

@@ -91,8 +91,19 @@ export interface EventLogOptions {
   readonly limit?: number
 }
 
+/** A project's log as an archive carries it. */
+export interface LogFile {
+  /** A header line saying what the lines after it are, then one event a line. */
+  readonly text: string
+  /** Only this page's own events: the stored ones could not be read. */
+  readonly partial: boolean
+}
+
 /** The first line of an exported log, saying what the lines after it are. */
 const FORMAT = 'swift-web-studio-events'
+
+/** How long reading the log waits for the storage before going on with this page's own events. */
+const READ_MS = 2000
 
 /**
  * Enough for hours of work: a design edit, a typing burst and a switch of mode are an
@@ -105,6 +116,9 @@ const BURST_PAUSE_MS = 5000
 
 interface Burst { readonly project: string; readonly file: FileId; readonly start: number; last: number; inserted: number; removed: number }
 
+/** An event this page recorded, and whether the storage has it yet. */
+interface Recorded { readonly event: LoggedEvent; written: boolean }
+
 /** How many characters an edit took out and put in: what lies between the text it left alone at either end. */
 function insertedAndRemoved(before: string, after: string): { readonly inserted: number; readonly removed: number } {
   const shorter = Math.min(before.length, after.length)
@@ -115,6 +129,18 @@ function insertedAndRemoved(before: string, after: string): { readonly inserted:
   return { inserted: after.length - prefix - suffix, removed: before.length - prefix - suffix }
 }
 
+/** What `promise` settles to within `ms`, or null when it fails or takes longer. */
+function settled<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms) })
+  return Promise.race([promise.catch(() => null), late]).finally(() => clearTimeout(timer))
+}
+
+/** Events in the order they happened: by time, and within one page load by its own count. */
+function chronological(events: readonly LoggedEvent[]): LoggedEvent[] {
+  return [...events].sort((a, b) => a.t < b.t ? -1 : a.t > b.t ? 1 : a.session === b.session ? a.seq - b.seq : 0)
+}
+
 export function createEventLog(store: EventStore<LoggedEvent>, { session, build, now, limit = LIMIT }: EventLogOptions) {
   let seq = 0
   let writing = Promise.resolve()
@@ -123,25 +149,37 @@ export function createEventLog(store: EventStore<LoggedEvent>, { session, build,
   let burst: Burst | null = null
   /** Another tab has the project now, and writes its own events. */
   let stopped = false
+  /**
+   * This page's events, in memory as well, up to the limit: an export still has them
+   * when the browser's storage refuses a write, or a read.
+   */
+  const recorded = new Map<string, Recorded[]>()
 
   /**
    * Runs a write after every one before it.
    *
-   * A write the storage refuses loses that write and no other. Nothing here throws at
-   * the caller: the log must never be why an edit did not happen.
+   * A write the storage refuses is kept in memory for this page and loses nothing else.
+   * Nothing here throws at the caller: the log must never be why an edit did not happen.
    */
   const queue = (work: () => Promise<void>) => {
-    if (!stopped) writing = writing.then(work).catch(() => {})
+    writing = writing.then(work).catch(() => {})
   }
 
   const append = (project: string, event: StudioEvent, at: number) => {
-    const logged: LoggedEvent = { t: new Date(at).toISOString(), session, seq: ++seq, ...event }
+    if (stopped) return
+    const entry: Recorded = { event: { t: new Date(at).toISOString(), session, seq: ++seq, ...event }, written: false }
+    const mine = recorded.get(project) ?? []
+    if (mine.length < limit) {
+      mine.push(entry)
+      recorded.set(project, mine)
+    }
     queue(async () => {
       const count = counts.get(project) ?? await store.count(project)
-      const kept = count < limit ? [logged] : []
+      const kept = count < limit ? [entry.event] : []
       counts.delete(project)
       await store.append(project, kept, 1 - kept.length)
       counts.set(project, count + kept.length)
+      entry.written = true
     })
   }
 
@@ -181,16 +219,28 @@ export function createEventLog(store: EventStore<LoggedEvent>, { session, build,
      */
     handOn(from: string, to: string): void {
       endBurst()
+      if (stopped) return
+      const moving = recorded.get(from) ?? []
+      recorded.delete(from)
+      if (moving.length) recorded.set(to, [...recorded.get(to) ?? [], ...moving])
       queue(async () => {
         counts.delete(from)
         counts.delete(to)
-        await store.move(from, to)
+        try {
+          await store.move(from, to)
+        } catch (error) {
+          // Stored under the old project still, so not yet under the new one.
+          for (const entry of moving) entry.written = false
+          throw error
+        }
       })
     },
 
     /** Forgets a project's events: the project was removed from this browser. */
     forget(project: string): void {
       endBurst()
+      if (stopped) return
+      recorded.delete(project)
       queue(async () => {
         counts.delete(project)
         await store.remove(project)
@@ -210,12 +260,22 @@ export function createEventLog(store: EventStore<LoggedEvent>, { session, build,
       return writing
     },
 
-    async jsonl(project: string): Promise<string> {
+    /**
+     * The project's log as an archive carries it: JSON lines, after a header.
+     *
+     * When the storage fails, or has not answered within a moment, this page's own events
+     * go out, and the header says the log is partial.
+     */
+    async file(project: string): Promise<LogFile> {
       endBurst()
-      await writing
-      const { events, dropped } = await store.read(project)
-      const header = { format: FORMAT, version: 1, project, build, events: events.length, dropped }
-      return [header, ...events].map(line => JSON.stringify(line)).join('\n') + '\n'
+      const stored = await settled(writing.then(() => store.read(project)), READ_MS)
+      const mine = recorded.get(project) ?? []
+      const unwritten = mine.filter(entry => !entry.written).map(entry => entry.event)
+      // Sorted, since another tab's writes can land between this one's.
+      const events = chronological(stored ? [...stored.events, ...unwritten] : mine.map(entry => entry.event))
+      const partial = !stored
+      const header = { format: FORMAT, version: 1, project, build, events: events.length, dropped: stored?.dropped ?? 0, ...(partial ? { partial } : {}) }
+      return { text: [header, ...events].map(line => JSON.stringify(line)).join('\n') + '\n', partial }
     },
   }
 }

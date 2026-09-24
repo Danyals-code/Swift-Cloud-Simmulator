@@ -12,7 +12,7 @@ import { promptAttempts } from './promptAttempts'
 function setUp() {
   let now = 0
   const log = createEventLog(new MemoryEventStore<LoggedEvent>(), { session: 's1', build: { commit: 'abc1234', builtAt: '' }, now: () => now })
-  const logged = async (project: string) => (await log.jsonl(project)).trimEnd().split('\n').slice(1).map(line => {
+  const logged = async (project: string) => (await log.file(project)).text.trimEnd().split('\n').slice(1).map(line => {
     const { t: _t, session: _session, seq: _seq, ...event } = JSON.parse(line)
     return event
   })
