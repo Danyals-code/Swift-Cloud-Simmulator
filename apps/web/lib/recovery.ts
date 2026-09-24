@@ -23,7 +23,10 @@ export type Destination = 'reload' | 'another'
 export type RecoveryEvent =
   | { readonly action: 'crashed'; readonly area: PaneArea | 'studio' | 'page' }
   | { readonly action: 'downloaded'; readonly outcome: DownloadOutcome }
-  | { readonly action: 'left'; readonly to: Destination }
+  /** Somebody chose Reload or Open another project; `force` when they went on without changes that could not be saved. */
+  | { readonly action: 'leaving'; readonly to: Destination; readonly force?: true }
+  /** The latest changes could not be saved, so the page stayed. */
+  | { readonly action: 'unsaved'; readonly to: Destination }
 
 /** The work a running studio holds, including edits the autosave has not written yet. */
 export interface LiveWork {
@@ -38,6 +41,8 @@ export interface LiveWork {
   archive(project: Project): Promise<Uint8Array>
   /** Writes what happened here into the event log, which lives with the studio. */
   record(event: RecoveryEvent): void
+  /** Resolves once what the event log has queued is written. */
+  logged(): Promise<void>
 }
 
 let live: LiveWork | null = null
@@ -138,21 +143,27 @@ export type LeaveOutcome = 'left' | 'unsaved'
  * project's own content causes: reloading into it would only crash again.
  */
 export async function leave(to: Destination, force = false): Promise<LeaveOutcome> {
-  noteRecovery({ action: 'left', to })
+  noteRecovery({ action: 'leaving', to, ...(force ? { force: true } : {}) })
   if (to === 'another') {
     try { sessionStorage.setItem(SAFE_START_KEY, String(Date.now())) } catch { /* then this is a plain reload */ }
   }
   const problem = live ? await Promise.race([live.flush().catch(() => 'The latest changes could not be saved.'), wait(2_000, 'Saving took too long.')]) : null
   if (problem && !force) {
     try { sessionStorage.removeItem(SAFE_START_KEY) } catch { /* nothing was set */ }
+    noteRecovery({ action: 'unsaved', to })
     return 'unsaved'
   }
+  // The log's last events are worth a moment before the page goes, and no more.
+  if (live) await Promise.race([live.logged().catch(() => undefined), wait(LOG_MS, undefined)])
   leaving = true
   location.reload()
   return 'left'
 }
 
 let leaving = false
+
+/** How long leaving waits for the event log's last writes. */
+const LOG_MS = 500
 
 /** Whether this page is reloading because somebody chose to here - so the browser need not ask again. */
 export function leavingOnPurpose(): boolean {

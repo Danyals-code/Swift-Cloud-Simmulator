@@ -599,7 +599,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       handedOver = true
       const open = get().project
       if (open) eventLog.record(open.id, { type: 'session', action: 'handed-over' })
-      await eventLog.stop()
+      // What is queued still gets written, but the other tab does not wait for it.
+      void eventLog.stop()
     },
     unsavedWork() {
       const { project, saveError, durable } = get()
@@ -923,10 +924,10 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 
       try {
         await persistence().remove(id)
+        eventLog.forget(id)
       } catch {
-        // Nothing useful to do: the row stays, and the list says so on the next read.
+        // Nothing useful to do: the row stays, with its events, and the list says so on the next read.
       }
-      eventLog.forget(id)
       await refreshRecents()
     },
   }
@@ -936,15 +937,12 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 // written yet included - without importing the store itself.
 registerLiveWork({
   project: () => useStudio.getState().project,
-  flush: async () => {
-    await useStudio.getState().flush()
-    await eventLog.flush()
-    return useStudio.getState().saveError
-  },
+  flush: async () => { await useStudio.getState().flush(); return useStudio.getState().saveError },
   archive: async project => {
     const { exportEditableZip } = await import('@studio/exporter')
     return exportEditableZip(project, { build: STUDIO_BUILD, events: (await eventLog.file(project.id)).text })
   },
+  logged: () => eventLog.flush(),
   record: event => {
     const open = useStudio.getState().project
     if (open) eventLog.record(open.id, { type: 'recovery', ...event })

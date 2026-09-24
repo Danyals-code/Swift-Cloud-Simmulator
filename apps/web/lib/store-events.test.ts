@@ -94,6 +94,18 @@ describe('the event log, as the store writes it', () => {
     expect(await logged(project.id)).toEqual([])
   })
 
+  it('keeps the events of a project that could not be removed, and is still listed', async () => {
+    const { project, plan } = await counterWithEdit()
+    studio().commitTransaction(project, plan, LABEL)
+    await studio().applyTemplate('tasks')
+    vi.spyOn(persistence, 'remove').mockRejectedValue(new DOMException('The connection was lost.', 'UnknownError'))
+
+    await studio().removeProject(project.id)
+
+    expect(studio().recents.some(summary => summary.id === project.id)).toBe(true)
+    expect((await logged(project.id)).filter(event => event.type === 'design')).toEqual([LABEL])
+  })
+
   it('writes a burst of typing as one event with the file and the counts, never the code', async () => {
     await studio().load()
     const project = studio().project!, file = project.files[0]!
