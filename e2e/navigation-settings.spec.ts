@@ -102,8 +102,7 @@ test('typing a known view name and pressing Enter applies its full destination e
   await assertSource(page, expectedDestination('AnotherView()'))
 })
 
-test('unknown views and missing inputs leave Swift unchanged; a complete input expression is retained', async ({ page, browserName }) => {
-  test.fixme(browserName === 'webkit', 'WebKit loses the first Apply destination click while suggestions are open: they close on mousedown and move the button (NavigationDestinationEditor.tsx:80)')
+test('unknown views and missing inputs leave Swift unchanged; a complete input expression is retained', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Choose destination', exact: true }).click()
   const required = page.getByRole('option', { name: /Required Needs title: String/ })

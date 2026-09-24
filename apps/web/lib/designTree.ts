@@ -151,7 +151,15 @@ export function designScreens(tree: DesignTree): DesignScreenNode[] {
   return out
 }
 
-/** The chain of screens from a lane root down to `id`, for revealing it in the outline. */
+/** The outline's rows that list the sheets, and the screens nothing links to yet. */
+export const SHEETS_GROUP = 'group:sheets'
+export const DETACHED_GROUP = 'group:detached'
+
+/**
+ * The rows from the outline's top down to screen `id`, for revealing it: the screens
+ * above it, and for a sheet or a screen nothing links to yet, the group it is listed in.
+ * A screen just added is in "Not linked yet", which would otherwise stay closed (D13).
+ */
 export function designScreenPath(tree: DesignTree, id: string | undefined): string[] {
   if (!id) return []
   const find = (node: DesignScreenNode, path: string[]): string[] | null => {
@@ -160,8 +168,13 @@ export function designScreenPath(tree: DesignTree, id: string | undefined): stri
     for (const child of node.children) { const found = find(child, next); if (found) return found }
     return null
   }
-  for (const root of [...tree.lanes.map(lane => lane.root), ...tree.sheets.map(sheet => sheet.screen), ...tree.detached]) {
-    const found = find(root, [])
+  const roots = [
+    ...tree.lanes.map(lane => ({ root: lane.root, groups: [] as string[] })),
+    ...tree.sheets.map(sheet => ({ root: sheet.screen, groups: [SHEETS_GROUP] })),
+    ...tree.detached.map(root => ({ root, groups: [DETACHED_GROUP] })),
+  ]
+  for (const { root, groups } of roots) {
+    const found = find(root, groups)
     if (found) return found
   }
   return []

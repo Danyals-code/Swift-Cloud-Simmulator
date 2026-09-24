@@ -6,7 +6,8 @@ import { useState } from 'react'
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, ComponentDescription, ComponentVariant, BehaviorAction, DesignRecord, DesignValue, RecordField, PreviewInput, NavigationDestination } from '@studio/shared'
 import { defaultRecord, RecordEditor } from './RecordEditor'
 import { parseRecordDrafts } from '../lib/recordDrafts'
-import { settingsVisualChildren } from '../lib/authoringSettings'
+import { newValueDefaults } from '../lib/newValue'
+import { repeatsOverRange, settingsVisualChildren } from '../lib/authoringSettings'
 import { sourceLayerLabel } from '../lib/sourceLayers'
 import styles from './AuthoringInspector.module.css'
 import { ComponentVariants } from './ComponentVariants'
@@ -54,6 +55,8 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
   const callSites = snapshot?.nodes.filter(n => n.definitionId === node.id) ?? []
   const reusableOwner = snapshot?.nodes.some(n => n.kind === 'component' && n.name === node.owner && snapshot.nodes.find(parent => parent.id === n.parentId)?.name !== 'WindowGroup')
   const textInput = node.controls?.find(c => ['content', 'title'].includes(c.id) && c.kind === 'text')
+  // Text rows written alike, or the library's Repeat over a range, become records (D13).
+  const collectionForm = <details><summary>Use a collection</summary><p>Text rows written alike, or a Repeat over a range, can become a typed collection: one record for each row. Rows that differ stay static.</p><label>Collection name<input value={collectionName} onChange={e => setCollectionName(e.target.value)} /></label><label>Record type<input value={recordType} onChange={e => setRecordType(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'collection-convert', name: collectionName, recordType })}>Convert to collection</button></details>
   return <div className={styles.features}>
     {section === 'basics' && node.kind === 'view' && node.name === 'GroupBox' && <section aria-label="Card layout">
       <h3>Card layout</h3>
@@ -78,7 +81,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
       <p>{node.kind === 'collection' ? 'Repeat for each item · one design is used by every row.' : 'Each row has its own content and structure.'}</p>
       {template && <button type="button" onClick={() => onSelect?.(template)}>Edit row design</button>}
       {node.kind !== 'collection' && <><button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("New row")' })}>Add static row</button>
-        <details><summary>Use a collection</summary><p>A single Text row can become a typed collection. Mixed rows remain static.</p><label>Collection name<input value={collectionName} onChange={e => setCollectionName(e.target.value)} /></label><label>Record type<input value={recordType} onChange={e => setRecordType(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'collection-convert', name: collectionName, recordType })}>Convert to collection</button></details></>}
+        {collectionForm}</>}
       {node.collection ? <><p>Content edits affect one selected item. “Edit row design” changes the appearance of every item.</p><label>Editing<select aria-label="Record edit scope" value={recordScope} onChange={e => setRecordScope(e.target.value as 'preview' | 'app')}><option value="preview">Preview records only</option><option value="app">App starting content</option></select></label>
         <details><summary>Add record field</summary><label>Field name<input aria-label="New record field" value={newField} onChange={e => setNewField(e.target.value)} /></label><label>Field type<select aria-label="Record field type" value={fieldType} onChange={e => { setFieldType(e.target.value as RecordField['type']); setFieldDefault(e.target.value === 'Bool' ? 'false' : e.target.value === 'String' ? '' : '0') }}>{['String', 'Double', 'Int', 'Bool'].map(t => <option key={t}>{t}</option>)}</select></label><label><input type="checkbox" checked={optional} onChange={e => setOptional(e.target.checked)} />Optional, starts with no value</label>{!optional && <label>Default value{fieldType === 'Bool' ? <select aria-label="Field default" value={fieldDefault} onChange={e => setFieldDefault(e.target.value)}><option value="false">False</option><option value="true">True</option></select> : <input aria-label="Field default" value={fieldDefault} onChange={e => setFieldDefault(e.target.value)} />}</label>}<button type="button" disabled={busy} onClick={() => void command({ kind: 'collection-field', name: newField, type: fieldType, optional, value: optional ? null : fieldType === 'String' ? fieldDefault : fieldType === 'Bool' ? fieldDefault === 'true' : fieldDefault === '' ? null : Number(fieldDefault) })}>Add field to record type</button><p>Changes the app’s record type. A default preserves existing records and initializers.</p></details>
         <div className={styles.actions}><button type="button" disabled={busy || !onPreview} onClick={() => setError(onPreview?.('Collection preview', [{ owner: node.collection!.owner, name: node.collection!.name, signature: node.collection!.signature, value: [] }]) ?? null)}>Preview empty list</button><button type="button" disabled={busy} onClick={() => setRecords(node.collection!.records)}>Load app records</button></div>
@@ -86,7 +89,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
         <RecordEditor info={node.collection} value={records} onChange={setRecords} />
         <button type="button" disabled={busy} onClick={() => { const parsed = parseRecordDrafts(node.collection!, records); if (!parsed.ok) { setError(parsed.error); return }; if (recordScope === 'app') void command({ kind: 'records', records: parsed.records }); else setError(onPreview?.('Collection preview', [{ owner: node.collection!.owner, name: node.collection!.name, signature: node.collection!.signature, value: parsed.records }]) ?? null) }}>{recordScope === 'app' ? 'Apply app initial data' : 'Apply preview records'}</button>
         <label>Empty-state message<input aria-label="Empty-state message" value={emptyText} onChange={e => setEmptyText(e.target.value)} /></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'empty-state', text: emptyText })}>Add empty-state branch</button>
-      </> : node.kind === 'collection' && <p>Data comes from Swift. Typed local Identifiable records with literal initial data expose a record editor here.</p>}
+      </> : node.kind === 'collection' && <><p>Data comes from Swift. Typed local Identifiable records with literal initial data expose a record editor here.</p>{repeatsOverRange(node) && collectionForm}</>}
     </section>}
     {section === 'basics' && node.kind === 'template' && <section><h3>Row design</h3><p>Select a view to edit the design used by every row.</p>{visualChildren.map(child => <button key={child.id} type="button" onClick={() => onSelect?.(child)}>{sourceLayerLabel(child)}</button>)}<button type="button" disabled={busy} onClick={() => { let parent = snapshot?.nodes.find(n => n.id === node.parentId); const collection = parent; while (parent && parent.name !== 'List') parent = snapshot?.nodes.find(n => n.id === parent!.parentId); if (parent ?? collection) onSelect?.((parent ?? collection)!) }}>List settings</button><button type="button" disabled={busy} onClick={() => void command({ kind: 'insert', snippet: 'Text("New element")' })}>Add element to row template</button><p>Added elements appear in every row.</p></section>}
     {section === 'field' && !!node.fields?.length && <section><h3>Shows the field</h3><label>Field<select aria-label="Row field" value={field} onChange={e => setField(e.target.value)}>{node.fields.map(f => <option key={f}>{f}</option>)}</select></label><button type="button" disabled={busy} onClick={() => void command({ kind: 'bind-field', field })}>Use this field in every row</button></section>}
@@ -111,12 +114,14 @@ function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy, part }: { s
   const [recordError, setRecordError] = useState<string | null>(null)
   const [kind, setKind] = useState<BehaviorAction['type']>('toggle'), [state, setState] = useState(info.states[0]?.name ?? '')
   const [destination, setDestination] = useState(info.destinations[0] ?? ''), [actionName, setActionName] = useState(info.actions[0] ?? '')
-  const [value, setValue] = useState(() => info.binding?.type === 'Date' ? new Date().toISOString().slice(0, 10) : ''), [replace, setReplace] = useState(false), [newState, setNewState] = useState('value')
+  // A new value starts with a name free on the screen, as the value the control shows (D13).
+  const [defaults] = useState(() => info.binding ? newValueDefaults(info.binding) : null)
+  const [value, setValue] = useState(defaults?.value ?? ''), [replace, setReplace] = useState(false), [newState, setNewState] = useState(defaults?.name ?? 'value')
   const [collectionName, setCollectionName] = useState(info.collections[0]?.name ?? ''), [item, setItem] = useState<readonly DesignRecord[]>([])
   const [deleteId, setDeleteId] = useState('')
   const [transition, setTransition] = useState<'opacity' | 'slide' | 'scale'>('opacity'), [duration, setDuration] = useState('0.25')
   const selected = info.states.find(s => s.name === state), collection = info.collections.find(c => c.name === collectionName)
-  const parse = (type: string): DesignValue => type === 'Date' ? Date.parse(value) / 1000 : type === 'Color' ? value || '#6D28D9' : type === 'Bool' ? value === 'true' : ['Int', 'Double'].includes(type) ? (value === '' ? null : Number(value)) : value
+  const parse = (type: string): DesignValue => type === 'Date' ? (value ? Date.parse(value) / 1000 : null) : type === 'Color' ? value || '#6D28D9' : type === 'Bool' ? value === 'true' : ['Int', 'Double'].includes(type) ? (value === '' ? null : Number(value)) : value
   const configure = () => {
     let action: BehaviorAction
     if (kind === 'toggle' || kind === 'dismiss') action = { type: kind, state }

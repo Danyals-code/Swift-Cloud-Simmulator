@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { DesignControl } from '@studio/shared'
 import styles from './AuthoringInspector.module.css'
 
@@ -28,6 +28,33 @@ export function PropertyControl({ control, onChange, label = control.label }: { 
   const committing = useRef(false)
   const cancelBlur = useRef(false)
   const cancelledGesture = useRef(false)
+  /**
+   * The slider drag under way, and how to stop listening for it. WebKit doesn't focus a
+   * slider it is dragged by: a press on one that has focus blurs it, which saved the
+   * first value of the drag, and Escape goes to the canvas, which deselected the view
+   * (C6). A drag whose release never comes, as when the window loses focus, ends there.
+   */
+  const drag = useRef<{ readonly stop: () => void } | null>(null)
+  function startDrag() {
+    cancelledGesture.current = false
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      cancelledGesture.current = true
+      cancel()
+    }
+    const leave = () => { endDrag(); finishDrag() }
+    endDrag()
+    document.addEventListener('keydown', escape, true)
+    window.addEventListener('blur', leave)
+    drag.current = { stop: () => { document.removeEventListener('keydown', escape, true); window.removeEventListener('blur', leave) } }
+  }
+  function endDrag() {
+    drag.current?.stop()
+    drag.current = null
+  }
+  useEffect(() => endDrag, [])
   function change(value: string) { latest.current = value; setDraft(value); setError(null); cancelBlur.current = false }
   function cancel() { latest.current = control.value; setDraft(control.value); setError(null); cancelBlur.current = true }
   async function commit() {
@@ -79,11 +106,11 @@ export function PropertyControl({ control, onChange, label = control.label }: { 
       type="range" min="0" max="1" step="0.01"
       aria-label={`${label} slider`}
       value={draft || '1'} disabled={pending || !!control.disabledReason}
-      onPointerDown={() => { cancelledGesture.current = false }}
+      onPointerDown={startDrag}
       onChange={event => { if (!cancelledGesture.current) change(event.target.value) }}
-      onPointerUp={finishDrag}
-      onPointerCancel={() => { cancelledGesture.current = true; cancel() }}
-      onBlur={() => void commit()}
+      onPointerUp={() => { endDrag(); finishDrag() }}
+      onPointerCancel={() => { endDrag(); cancelledGesture.current = true; cancel() }}
+      onBlur={() => { if (!drag.current) void commit() }}
       onKeyDown={keyDown}
       onKeyUp={event => { if (RANGE_KEYS.includes(event.key)) void commit() }}
     />}

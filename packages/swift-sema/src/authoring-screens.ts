@@ -6,6 +6,7 @@ import { Checker } from './checker'
 import { configureAction } from './authoring-behavior'
 import { emptyComponents } from './authoring-components'
 import { allDeclarations, applyPatches, callOf, identifier, insertMember, namedStruct, ownerOf, patch, raw, shadowsMember, shapedProject, sourceRoot, swiftValue, type FeatureContext, type SourcePatch } from './authoring-context'
+import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 
 type ScreenOperation = Extract<AuthoringOperation, { kind: 'screen-create' | 'screen-duplicate' | 'screen-remove' }>
 
@@ -153,17 +154,16 @@ export function guidedAction(ctx: FeatureContext, node: AuthoringNode, operation
     apply([insertMember(context, owner, `@State private var ${name}: ${type} = ${swiftValue(value)}`)])
   }
   if (operation.action.type === 'navigate') {
-    let ancestor: AuthoringNode | undefined = current, root = current, hasNavigation = false
+    let ancestor: AuthoringNode | undefined = current, root = current
     while (ancestor && ancestor.kind !== 'definition') {
-      if (['NavigationStack', 'NavigationView'].includes(ancestor.name)) hasNavigation = true
       root = ancestor; ancestor = context.nodes.find(n => n.id === ancestor!.parentId)
     }
-    if (!hasNavigation) {
+    if (!insideNavigationStack(context.nodes, current)) {
       if (root.kind !== 'view' || deploymentVersion(ctx.deploymentTarget) < 16) throw new Error('This screen needs a navigation container, which this project’s iOS version is too old for. Ask a developer to raise it to iOS 16 or newer.')
       // Insert at either boundary so the selected node remains identifiable. A modifier
       // switched off at the end of the root's chain is written after it, and goes inside with it.
       const end = afterOffMarkers(context.files.find(f => f.id === root.source.file)?.text ?? '', root.source.end)
-      apply([{ file: root.source.file, start: root.source.start, end: root.source.start, text: 'NavigationStack {\n' }, { file: root.source.file, start: end, end, text: '\n}' }])
+      apply(navigationStackPatches(context, root.source, end))
     }
   }
   const patches = configureAction(context, current, operation.action, operation.replace)

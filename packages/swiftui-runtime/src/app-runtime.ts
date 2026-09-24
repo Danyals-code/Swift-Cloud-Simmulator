@@ -280,10 +280,13 @@ export class AppRuntime {
       // whatever is presented *now* rather than to whatever was when it was read.
       let presented = ui.overlay
       while (presented?.screen?.overlay) presented = presented.screen.overlay
-      const dismiss = presented?.dismiss ?? null
+      // On the screen on top: iOS goes back from a pushed screen, and closes a sheet or
+      // cover only from its first screen (D13).
+      const back = (presented?.screen ?? ui).navigationBar?.back
+      const dismiss: ViewIntent | null = back ? { kind: 'pop' } : presented?.dismiss ?? null
       this.host.dismissAction = dismiss
         ? () => {
-            this.perform(dismiss, { kind: 'tap', handlerId: '', location: { x: 0, y: 0 } })
+            this.perform(dismiss, { kind: 'tap', handlerId: back ?? '', location: { x: 0, y: 0 } })
           }
         : null
       this.state.endPass()

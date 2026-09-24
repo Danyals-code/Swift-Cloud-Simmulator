@@ -569,16 +569,97 @@ describe('C11: a structural change is checked before it is kept', () => {
     return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation })
   }
 
-  it('refuses a drop that would give a helper, which holds one view, a second one', () => {
+  it('refuses a drop onto a helper that holds one view, which no layer stands for (C5)', () => {
     // The canvas drops onto what it draws; "Header" is drawn by `header`, not by `body`.
     const source = wrap('VStack {\n    header\n    Text("Body")\n}', 'var header: some View {\n    Text("Header")\n}')
     expect(restructureAt(source, 'Text("Body")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Header")'), position: 'after' }))
-      .toEqual({ ok: false, reason: '`header` can hold only one view, so this change would stop the app from building. Nothing was changed.' })
+      .toEqual({ ok: false, reason: 'Drop it on a layer of this screen. That spot is drawn by a helper in the Swift code, where a view could repeat or disappear.' })
   })
 
-  it('refuses a move that would leave a component with nothing to show', () => {
+  it('refuses a canvas drop onto a view a helper draws, which repeats it and loses it from Layers (C5)', () => {
+    // It builds: the helper is a view builder. But it draws "Title" once for every swatch.
+    const source = wrap('VStack {\n    swatch("Red")\n    swatch("Blue")\n    Text("Title")\n}', '@ViewBuilder func swatch(_ name: String) -> some View {\n    Text(name)\n}')
+    expect(restructureAt(source, 'Text("Title")', { kind: 'moveTo', targetOffset: source.indexOf('Text(name)'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'Drop it on a layer of this screen. That spot is drawn by a helper in the Swift code, where a view could repeat or disappear.' })
+  })
+
+  it('refuses a view placed beside one written after return, which iOS would never show (C5)', () => {
+    // With a `return`, `body` stops being a view builder: a view beside it is built and thrown away.
+    const source = wrap('let title = "Plan"\nreturn VStack {\n    Text(title)\n}')
+    expect(restructureAt(source, 'VStack', { kind: 'layer-duplicate' }))
+      .toEqual({ ok: false, reason: '`ContentView` returns its one view, so a view beside it would not show on iOS. Nothing was changed.' })
+  })
+
+  it('refuses moving a component\'s view out onto a screen, which would change every copy (C5)', () => {
     const source = wrap('VStack {\n    Card()\n    Text("Other")\n}') + '\nstruct Card: View {\n    var body: some View {\n        Text("Card")\n    }\n}\n'
     expect(restructureAt(source, 'Text("Card")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Other")'), position: 'after' }))
-      .toEqual({ ok: false, reason: 'This change would leave `Card` with nothing to show. Nothing was changed.' })
+      .toEqual({ ok: false, reason: 'Move it within Card. A view moved into or out of a component would change every copy of it.' })
+  })
+
+  it('refuses dropping a screen\'s view into a component\'s row, which every row would then show (C5)', () => {
+    const source = wrap('List {\n    Text("Total")\n    ExpenseRow()\n    ExpenseRow()\n}') + '\nstruct ExpenseRow: View {\n    var body: some View {\n        HStack {\n            Text("Rent")\n        }\n    }\n}\n'
+    expect(restructureAt(source, 'Text("Total")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Rent")'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'Move it within ContentView. A view moved into or out of a component would change every copy of it.' })
+  })
+
+  it('refuses dropping a view into a repeated row, which would draw it once for every row (C5)', () => {
+    const source = wrap('VStack {\n    Text("Header")\n    ForEach(0..<3) { index in\n        Text("Row")\n    }\n}')
+    expect(restructureAt(source, 'Text("Header")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Row")'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'Move within the same screen or repeated row to preserve its values and conditions.' })
+  })
+
+  it('still moves a view within its own screen on the canvas (C5)', () => {
+    const source = wrap('VStack {\n    Text("First")\n    Text("Second")\n}')
+    expect(restructureAt(source, 'Text("First")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Second")'), position: 'after' })).toMatchObject({ ok: true })
+  })
+})
+
+describe('D13: a control added from the library works in the preview at once', () => {
+  it('binds a toggle to a new value on its screen, instead of a constant that never switches', () => {
+    const added = restructured(wrap('VStack {\n    Text("Settings")\n}'), { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(added).toContain('@State private var isOn: Bool = true')
+    expect(added).toContain('Toggle("Toggle", isOn: $isOn)')
+    expect(added).not.toContain('.constant')
+  })
+
+  it.each([
+    ['text field', 'TextField("Placeholder", text: .constant(""))', '@State private var text: String = ""', 'TextField("Placeholder", text: $text)'],
+    ['slider', 'Slider(value: .constant(0.5))', '@State private var value: Double = 0.5', 'Slider(value: $value)'],
+    ['stepper', 'Stepper("Stepper", value: .constant(1))', '@State private var count: Int = 1', 'Stepper("Stepper", value: $count)'],
+    ['date picker', 'DatePicker("Date", selection: .constant(Date()))', '@State private var date: Date = Date()', 'DatePicker("Date", selection: $date)'],
+    ['color picker', 'ColorPicker("Colour", selection: .constant(.blue))', '@State private var color: Color = .blue', 'ColorPicker("Colour", selection: $color)'],
+  ])('binds a %s to a new value of its own type', (_control, snippet, member, control) => {
+    const added = restructured(wrap('VStack {\n    Text("Form")\n}'), { kind: 'insert', snippet }, 'Text')
+
+    expect(added).toContain(member)
+    expect(added).toContain(control)
+  })
+
+  it('names a second one apart from the first', () => {
+    const once = restructured(wrap('VStack {\n    Text("Settings")\n}'), { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+    const twice = restructured(once, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(twice).toContain('@State private var isOn2: Bool = true')
+    expect(twice).toContain('Toggle("Toggle", isOn: $isOn2)')
+  })
+
+  it.each([
+    ['a list of records', 'List(items) { item in\n    Text(item.title)\n}', 'List'],
+    ['the library\'s Repeat', 'ForEach(0..<3, id: \\.self) { index in\n    Text("Row \\(index)")\n}', 'ForEach'],
+  ])('keeps the constant when %s is selected, as the control goes into its rows', (_what, body, selected) => {
+    const source = wrap(body, '@State private var items: [Item] = [Item(id: 1, title: "One")]') + '\nstruct Item: Identifiable { let id: Int; var title: String }\n'
+    const added = restructured(source, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, selected)
+
+    expect(added).toContain('Toggle("Toggle", isOn: .constant(true))')
+    expect(added).not.toContain('@State private var isOn')
+  })
+
+  it('keeps the constant in a list\'s row design, which Saves to binds to the row\'s field', () => {
+    const source = wrap('List(items) { item in\n    Text(item.title)\n}', '@State private var items: [Item] = [Item(id: 1, title: "One")]') + '\nstruct Item: Identifiable { let id: Int; var title: String }\n'
+    const added = restructured(source, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(added).toContain('Toggle("Toggle", isOn: .constant(true))')
+    expect(added).not.toContain('@State private var isOn')
   })
 })

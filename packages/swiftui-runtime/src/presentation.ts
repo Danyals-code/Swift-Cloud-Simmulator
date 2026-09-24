@@ -100,6 +100,8 @@ export interface NavigationBar {
   readonly canGoBack: boolean
   /** What the back button returns to, for the label iOS puts beside the chevron. */
   readonly backTitle: string
+  /** The back button's handler, when the screen can go back: what `dismiss` does on a pushed screen. */
+  readonly back?: string
   readonly leading: readonly ViewValue[]
   readonly trailing: readonly ViewValue[]
   readonly view: ViewValue
@@ -1318,7 +1320,11 @@ class Resolver {
     // thing it must not do.
     const titles: string[] = [titleOf(stack.children, '')]
     let depth = 0
-    let displayMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
+    const rootMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
+    // Whether the screen on top shows a large title. A pushed screen left automatic shows
+    // what the one before it showed, so one pushed after a screen with no title, which
+    // shows none, is titled inline, as iOS 27 does (D13).
+    let large = rootMode !== 'inline' && titles[0]!.length > 0
 
     for (const linkPath of pushed) {
       const link = findByPath(screen, linkPath)
@@ -1337,7 +1343,8 @@ class Resolver {
       })
       screen = this.stampList(destination.map(content), `n${depth + 1}`, visualModifiers(link ?? stack))
       const requestedMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
-      if (requestedMode && requestedMode !== 'automatic') displayMode = requestedMode
+      if (requestedMode && requestedMode !== 'automatic') large = requestedMode !== 'inline'
+      large &&= titleOf(screen, '').length > 0
       titles.push(titleOf(screen, labelTextOf(link!) || 'Back'))
       depth++
     }
@@ -1370,9 +1377,10 @@ class Resolver {
 
     const bar: NavigationBar = {
       title,
-      large: displayMode !== 'inline' && title.length > 0,
+      large,
       canGoBack: depth > 0,
       backTitle: titles[Math.max(0, depth - 1)] || 'Back',
+      ...(backId ? { back: backId } : {}),
       leading: backButton ? [backButton] : toolbar.leading,
       trailing: toolbar.trailing,
       view: {

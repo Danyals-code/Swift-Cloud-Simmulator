@@ -95,7 +95,6 @@ async function expectRowHighlights(page: Page, rows: Locator, parts: readonly Lo
 }
 
 test('primary Layers keeps shared designs compact and collection/navigation settings editable', async ({ page }) => {
-  test.fixme(true, 'Product bug: a titled Section is now a visual layer, so the List no longer finds the ForEach(books) collection inside it (authoringSettings.ts:20) and shows static-list settings instead of Repeat for each item / records')
   await open(page, SOURCE, false)
   await expect(row(page, 'List')).toHaveAttribute('aria-expanded', 'false')
   await expect(row(page, 'BookRow')).toHaveCount(0)

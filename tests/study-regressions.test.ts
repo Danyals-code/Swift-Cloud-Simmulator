@@ -1698,3 +1698,49 @@ func show(_ value: Named) -> String { "named" }`
     expect(texts(compileView(viewSource(members, declarations)))).toEqual(['whole', 'anything'])
   })
 })
+
+describe('D13: the flows Design writes behave in the preview as they do on iOS 27', () => {
+  /** A pushed screen that closes itself, as "When tapped › Back / Close" writes it. */
+  const detail = `struct Detail: View {
+    @Environment(\\.dismiss) private var dismiss
+    var body: some View { Button("Close") { dismiss() }.navigationTitle("Detail") }
+  }`
+
+  it('goes back one screen when a pushed screen dismisses itself', () => {
+    const r = runView('var body: some View { NavigationStack { NavigationLink("Open") { Detail() }.navigationTitle("Home") } }', detail)
+
+    const back = tap(tap(r, 'Open'), 'Close')
+
+    expect(texts(back)).toContain('Open')
+    expect(texts(back)).not.toContain('Close')
+  })
+
+  const pushedFrom = (rootTitle: string) => tap(runView(`var body: some View { NavigationStack { NavigationLink("Open") { Text("Body").navigationTitle("Detail") }${rootTitle} } }`), 'Open')
+  /** The largest size "Detail" is drawn at: a large title is also drawn small, for when it scrolls away. */
+  const titleSize = (r: CompileResult) => Math.max(...nodes(r).filter(n => n.text?.runs.some(run => run.text === 'Detail')).map(n => n.text!.runs[0]!.font.size))
+
+  it('titles a screen pushed from one with no title inline, as iOS 27 does', () => {
+    expect(titleSize(pushedFrom(''))).toBe(17)
+  })
+
+  it('titles a screen pushed from a titled one large, as iOS 27 does', () => {
+    expect(titleSize(pushedFrom('.navigationTitle("Home")'))).toBe(34)
+  })
+
+  it('titles a screen pushed after a pushed one with no title inline, as iOS 27 does', () => {
+    const r = runView('var body: some View { NavigationStack { List { NavigationLink("Middle") { Middle() } }.navigationTitle("Home") } }',
+      'struct Middle: View { var body: some View { List { NavigationLink("Open") { Text("Body").navigationTitle("Detail") } } } }')
+
+    expect(titleSize(tap(tap(r, 'Middle'), 'Open'))).toBe(17)
+  })
+
+  it('goes back within a sheet\'s own stack, and leaves the sheet open', () => {
+    const r = runView(`@State private var showing = false
+      var body: some View { Button("Show") { showing = true }.sheet(isPresented: $showing) { NavigationStack { NavigationLink("Open") { Detail() } } } }`, detail)
+
+    const back = tap(tap(tap(r, 'Show'), 'Open'), 'Close')
+
+    expect(texts(back)).toContain('Open')
+    expect(texts(back)).not.toContain('Close')
+  })
+})

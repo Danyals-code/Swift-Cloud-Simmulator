@@ -1,10 +1,13 @@
 import { customizeCard, editsCardSurface } from './authoring-card'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import { argumentLayerProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
+import { argumentLayerProblem, canvasDropProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { structuralEditProblem, type StructuralKind } from './structural-check'
+import { applyPatches, type FeatureContext } from './authoring-context'
+import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
+import { liveControl } from './authoring-behavior'
 import { wrapperOf } from './authoring-structure'
 import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
@@ -25,6 +28,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   const ast = parsed.map(p => p.sourceFile)
   const diagnostics = Checker.check(ast).diagnostics
   const model = buildAuthoringModel({ ...request, revision: request.baseRevision, parsed: ast, diagnostics })
+  const context: FeatureContext = { deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions, colors: request.colors }
   const matches = model.nodes.filter(n => n.source.file === file.id && n.source.start === request.target.start && n.source.end === request.target.end && n.fingerprint === request.fingerprint)
   // A slot written as an argument - `.overlay(Circle())` - has exactly the span of the view in it, and the view is what was selected.
   const node = matches.find(n => n.kind !== 'branch') ?? matches[0]
@@ -64,7 +68,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   }
   if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
     try {
-      const result = featureEdit({ deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions, colors: request.colors }, node, operation as Parameters<typeof featureEdit>[2])
+      const result = featureEdit(context, node, operation as Parameters<typeof featureEdit>[2])
       const after = result.files.find(f => f.id === file.id)?.text
       const kind = STRUCTURAL[operation.kind]
       const toward = operation.kind === 'layer-reparent' ? model.nodes.find(n => n.id === operation.destination)?.source.start : undefined
@@ -106,7 +110,12 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     switch (operation.kind) {
       case 'delete': changed = deleteView(file.text, file.id, offset); break
       case 'move': changed = moveView(file.text, file.id, offset, operation.direction); break
-      case 'moveTo': changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position); break
+      case 'moveTo': {
+        const problem = canvasDropProblem(model.nodes, node!, { file: file.id, start: operation.targetOffset }, operation.position)
+        if (problem) return reject(problem)
+        changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position)
+        break
+      }
       case 'insert': {
         // A link offered by the palette must be runnable immediately. If this
         // screen has no navigation container, wrap its root in the same edit.
@@ -132,20 +141,29 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           if (!branch && parent.kind === 'view' && parent.name !== 'WindowGroup') root = parent
           parent = model.nodes.find(candidate => candidate.id === parent!.parentId)
         }
-        if (isLink && !hasNavigation) {
+        // A screen pushed onto a stack is on it already: a second stack would nest in it (D13).
+        if (isLink && !hasNavigation && !insideNavigationStack(model.nodes, node!)) {
           if (deploymentVersion(request.deploymentTarget) < 16) return reject('Adding a navigation screen requires iOS 16 or later.')
           if (root.source.file !== file.id || root.kind !== 'view' || !parent || !['definition', 'branch'].includes(parent.kind)) return reject('Select a view within the screen before adding a navigation link.')
           // A modifier switched off at the end of the root's chain is written after it, and goes inside with it.
-          const start = root.source.start, end = afterOffMarkers(file.text, root.source.end)
-          const indent = /^[\t ]*/.exec(file.text.slice(file.text.lastIndexOf('\n', start - 1) + 1, start))?.[0] ?? ''
-          const prefix = `NavigationStack {\n${indent}    `
-          const body = file.text.slice(start, end).replace(/\n/g, '\n    ')
-          const wrapped = file.text.slice(0, start) + prefix + body + `\n${indent}}` + file.text.slice(end)
-          const shifted = offset + prefix.length + (file.text.slice(start, offset).match(/\n/g)?.length ?? 0) * 4
+          const stack = navigationStackPatches(context, root.source, afterOffMarkers(file.text, root.source.end))
+          const wrapped = applyPatches(context, stack).find(f => f.id === file.id)!.text
+          // Only insertions: the view moves by what is written before it.
+          const shifted = offset + stack.filter(p => p.start <= offset).reduce((moved, p) => moved + p.text.length, 0)
           changed = insertView(wrapped, file.id, shifted, operation.snippet)
           // The link and the stack the screen needs for it: two places, so checked as a wrap.
-          wrap = `${operation.snippet} ${prefix}}`
-        } else changed = insertView(file.text, file.id, offset, operation.snippet)
+          wrap = `${operation.snippet} ${stack[0]!.text}${stack.at(-1)!.text}`
+        } else {
+          const live = node ? liveControl(context, node, operation.snippet) : null
+          changed = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet)
+          if (live && changed) {
+            // The value is declared above the view, which moves down by its line.
+            const { member } = live
+            changed = { text: changed.text.slice(0, member.start) + member.text + changed.text.slice(member.end), offset: changed.offset + member.text.length - (member.end - member.start) }
+            // The control and the value it is bound to: two places, so checked as a wrap.
+            wrap = `${live.snippet} ${live.declaration}`
+          }
+        }
         break
       }
       case 'hide': changed = hideView(file.text, file.id, offset); break

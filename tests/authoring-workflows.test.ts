@@ -72,6 +72,46 @@ describe('Phase 4: logical collections and source-owned data', () => {
     expect(target(next, 'List').collection?.records).toEqual([{ id: 'item-1', title: 'Hello' }])
     expect(texts(render(next))).toContain('Hello')
   })
+  /** A screen whose body is `body`, written as a designer's project is: one view to a line. */
+  const screen = (body: string) => files(`import SwiftUI\n@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }\nstruct ContentView: View {\n    var body: some View {\n${body}\n    }\n}\n`)
+
+  it('converts plain text rows into a collection, one record each, indented as the list is (D13)', () => {
+    const next = edit(screen('        List {\n            Text("Apples")\n            Text("Pears")\n        }'), 'List', { kind: 'collection-convert', name: 'items', recordType: 'Item' })
+    expect(next[0]!.text).toContain('        List(items) { item in\n            Text(item.title)\n        }')
+    expect(target(next, 'List').collection?.records).toEqual([{ id: 'item-1', title: 'Apples' }, { id: 'item-2', title: 'Pears' }])
+    expect(texts(render(next))).toEqual(expect.arrayContaining(['Apples', 'Pears']))
+  })
+
+  it('turns the library\'s Repeat into a collection of the rows it drew (D13)', () => {
+    const next = edit(screen('        VStack {\n            ForEach(0..<3, id: \\.self) { index in\n                Text("Row \\(index)")\n            }\n        }'), 'ForEach', { kind: 'collection-convert', name: 'rows', recordType: 'Row' })
+    expect(next[0]!.text).toContain('            ForEach(rows) { item in\n                Text(item.title)\n            }')
+    expect(target(next, 'ForEach').collection?.records.map(record => record.title)).toEqual(['Row 0', 'Row 1', 'Row 2'])
+    expect(texts(render(next))).toEqual(expect.arrayContaining(['Row 0', 'Row 1', 'Row 2']))
+  })
+
+  it('keeps rows that differ static, as one design would lose what makes each different (D13)', () => {
+    expect(plan(screen('        List {\n            Text("Apples").bold()\n            Text("Pears")\n        }'), 'List', { kind: 'collection-convert', name: 'items', recordType: 'Item' })).toMatchObject({ ok: false })
+  })
+
+  it('keeps a Repeat whose rows use their number outside their text, and says why (D13)', () => {
+    expect(plan(screen('        VStack {\n            ForEach(0..<3, id: \\.self) { index in\n                Text("Row \\(index)")\n                    .opacity(Double(index) / 3)\n            }\n        }'), 'ForEach', { kind: 'collection-convert', name: 'rows', recordType: 'Row' }))
+      .toEqual({ ok: false, reason: 'These rows use `index` outside their text, which a record would not keep. Keep the Repeat, or use `index` in the text only.' })
+  })
+
+  it('writes an empty state indented as the list is (D13)', () => {
+    const converted = edit(screen('        List {\n            Text("Apples")\n        }'), 'List', { kind: 'collection-convert', name: 'items', recordType: 'Item' })
+    const next = edit(converted, 'List', { kind: 'empty-state', text: 'Nothing here' })
+    expect(next[0]!.text).toContain(`        Group {
+            if items.isEmpty {
+                Text("Nothing here")
+            } else {
+                List(items) { item in
+                    Text(item.title)
+                }
+            }
+        }`)
+  })
+
   it('adds to the row template once and renders it in every row', () => {
     const source = edit(files(list()), 'Row template', { kind: 'insert', snippet: 'Text("Shared")' })
     expect(source[0]!.text.match(/Text\("Shared"\)/g)).toHaveLength(1)
@@ -384,11 +424,33 @@ it('keeps invalid scenario errors and cleared handlers across reset and rerender
   expect(rerender(revision++).diagnostics.some(d => d.code === 'invalid_preview_scenario')).toBe(true)
 })
 
+it('offers a new value a name nothing on the screen has yet, a stored property included (D13)', () => {
+  const source = files(app('VStack { TextField("Name", text: .constant("")); Toggle("Alerts", isOn: .constant(false)); Picker("Size", selection: .constant(0)) { Text("Small").tag(0) } }', 'let text: String = "Ada"\n@State private var isOn = true'))
+
+  expect(target(source, 'TextField').behavior?.binding?.newName).toBe('text2')
+  expect(target(source, 'Toggle').behavior?.binding?.newName).toBe('isOn2')
+  expect(target(source, 'Picker').behavior?.binding?.newName).toBe('selection')
+})
+
+it('saves a date picker to a new value that starts as today, written Date() rather than a fixed day (D13)', () => {
+  const bound = edit(files(app('DatePicker("Date", selection: .constant(Date()))')), 'DatePicker', { kind: 'bind-state', name: 'date', create: { value: null } })
+  expect(bound[0]!.text).toContain('@State private var date: Date = Date()')
+  expect(bound[0]!.text).toContain('DatePicker("Date", selection: $date)')
+})
+
+it('writes the sheet it adds on its own line, under the button that opens it (D13)', () => {
+  const source = files(app('VStack {\n        Button("Open") { }\n    }', '', 'struct Detail: View { var body: some View { Text("Detail content") } }'))
+  const sheet = edit(source, 'Button', { kind: 'behavior', action: { type: 'sheet', destination: 'Detail' }, replace: false })
+  expect(sheet[0]!.text).toContain('        Button("Open") { isDetailPresented = true }\n            .sheet(isPresented: $isDetailPresented) { Detail() }\n')
+  expect(texts(tap(render(sheet), 'Open'))).toContain('Detail content')
+})
+
 it('generates environment dismissal in the presented definition and returns to the parent', () => {
   let source = files(app('Button("Open") { }', '', 'struct Detail: View { var body: some View { Button("Close") { } } }'))
   source = edit(source, 'Button', { kind: 'behavior', action: { type: 'sheet', destination: 'Detail' }, replace: false })
   source = edit(source, 'Button', { kind: 'behavior', action: { type: 'dismiss', state: '' }, replace: false }, 1)
-  expect(source[0]!.text).toContain('@Environment(\\.dismiss) private var dismissPresentedView')
+  expect(source[0]!.text).toContain('@Environment(\\.dismiss) private var dismiss\n')
+  expect(source[0]!.text).toContain('Button("Close") { dismiss() }')
   const presented = tap(render(source), 'Open')
   expect(texts(presented)).toContain('Close')
   expect(texts(tap(presented, 'Close'))).not.toContain('Close')

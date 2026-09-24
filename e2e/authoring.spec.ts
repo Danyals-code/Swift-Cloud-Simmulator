@@ -182,8 +182,7 @@ test('restyles a card through supported fields without replacing computed conten
   expect(await currentSource(page)).toContain('Text("Count \\(count)").font(.title).frame(width: 100, height: 100).background(Color.blue)')
 })
 
-test('an opacity drag is one undo step and Escape cancels the whole drag', async ({ page, browserName }) => {
-  test.fixme(browserName === 'webkit', 'Product bug in WebKit/Safari: mousedown on the range blurs it (form controls are not mouse-focusable), so onBlur commits the first drag value (PropertyControl.tsx:86) and Escape never reaches the slider')
+test('an opacity drag is one undo step and Escape cancels the whole drag', async ({ page }) => {
   await openSource(page)
   await selectBeta(page)
   const inspector = page.getByTestId('authoring-inspector')
@@ -208,4 +207,25 @@ test('an opacity drag is one undo step and Escape cancels the whole drag', async
   await editor.click()
   await page.keyboard.press('ControlOrMeta+z')
   await expect(editor).toHaveText(SOURCE.replace('Text("Beta").padding(8)', 'Text("Beta").padding(8).opacity(1)'), { useInnerText: true })
+})
+
+test('an opacity drag whose release never comes, as when the window loses focus, keeps what it showed (C6)', async ({ page }) => {
+  await openSource(page)
+  await selectBeta(page)
+  await addModifier(page, 'Opacity', 'opacity')
+  const slider = cards(page, 'opacity').getByRole('slider', { name: 'Opacity slider', exact: true })
+  const bounds = (await slider.boundingBox())!
+  await page.mouse.move(bounds.x + bounds.width * 0.8, bounds.y + bounds.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(bounds.x + bounds.width * 0.5, bounds.y + bounds.height / 2, { steps: 5 })
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+
+  // Saved, not only shown in the field: the canvas draws Beta fainter.
+  const drawn = () => page.getByTestId('render-tree').getByText('Beta', { exact: true }).evaluate(element => {
+    let opacity = 1
+    for (let at: Element | null = element; at; at = at.parentElement) opacity *= Number(getComputedStyle(at).opacity)
+    return opacity
+  })
+  await expect.poll(drawn).toBeLessThan(0.9)
+  await page.mouse.up()
 })
