@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import { openCounter, replaceSource } from './designer-helpers'
 
 /**
- * What Design writes and shows for the behaviours designers build (D13), in Chrome and
- * Safari alike.
+ * What Design writes and shows for the behaviours designers build (D13), and the fields
+ * they edit staying true to the source (C6), in Chrome and Safari alike.
  */
 
 /** A one-file app whose `ContentView` has `body`, with `declarations` after it. */
@@ -39,6 +39,26 @@ const currentSource = async (page: Page) => {
   await page.getByTestId('workspace-design').click()
   return text
 }
+
+test('a screen background undone shows the source again, and leaving the field keeps Redo (C6)', async ({ page }) => {
+  await openSource(page, app('        VStack {\n            Text("Plans")\n        }\n        .background(Color.blue)'), 'Plans')
+  await page.getByTestId('design-screen').first().locator('[data-outline-row]').click()
+  // The colour, beside the token it could link to instead.
+  const background = page.getByTestId('screen-settings').getByRole('combobox', { name: 'Background value', exact: true })
+  await expect(background).toHaveValue('blue')
+
+  await background.selectOption('red')
+  await expect.poll(() => currentSource(page)).toContain('.background(Color.red)')
+  await page.getByTestId('design-undo').click()
+  await expect.poll(() => currentSource(page)).toContain('.background(Color.blue)')
+  await expect(background).toHaveValue('blue')
+
+  // Leaving the field used to apply what it still showed, and lose Redo.
+  await background.focus()
+  await background.blur()
+  await expect(page.getByTestId('design-redo')).toBeEnabled()
+  expect(await currentSource(page)).toContain('.background(Color.blue)')
+})
 
 test('App settings counts every screen Layers lists, a pushed one too (D13)', async ({ page }) => {
   await openSource(page, app('        NavigationStack {\n            NavigationLink("Details") { DetailScreen() }\n                .navigationTitle("Home")\n        }', '\nstruct DetailScreen: View {\n    var body: some View {\n        Text("More about the plan")\n            .navigationTitle("Details")\n    }\n}\n'), 'Details')
