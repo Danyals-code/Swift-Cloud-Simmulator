@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PromptMessage, PromptSelection } from '@studio/project-model'
 import { useStudio } from '../lib/store'
-import { DEFAULT_MODELS, type Provider } from '../lib/generation/schema'
+import type { Provider } from '../lib/generation/schema'
+import { useAiConnection } from '../lib/generation/connection'
 import { parsePromptEditInput, promptConversationContext } from '../lib/generation/edit-schema'
 import { preparePromptEdit, promptPreviewProblem } from '../lib/generation/applyPromptEdit'
 import { compileSnapshot } from '../lib/compileSnapshot'
@@ -13,7 +14,8 @@ import styles from './PromptEditor.module.css'
 
 export function PromptEditor({ selection, stale, onApplied }: { selection: PromptSelection | null; stale: boolean; onApplied: () => void }) {
   const project = useStudio(state => state.project)
-  const [provider, setProvider] = useState<Provider>('openai'), [model, setModel] = useState(DEFAULT_MODELS.openai), [apiKey, setApiKey] = useState('')
+  const { connection, chooseProvider, setModel, setKey } = useAiConnection()
+  const { provider, model, key: apiKey } = connection
   const [prompt, setPrompt] = useState(''), [phase, setPhase] = useState<'idle' | 'editing' | 'checking'>('idle')
   const [error, setError] = useState<string | null>(null), [connectionOpen, setConnectionOpen] = useState(false)
   const [dismissedSelection, setDismissedSelection] = useState<string | null>(null)
@@ -81,10 +83,10 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
   return <section className={styles.panel} aria-label="Prompt Editing" data-testid="prompt-editor">
     <header className={styles.header}><div><strong>Prompt Editing</strong><small>Edit your app by describing it.</small></div><button type="button" aria-label="AI connection settings" aria-expanded={connectionOpen} onClick={() => setConnectionOpen(open => !open)}><Icon name="settings" size={15} /></button></header>
     {connectionOpen && <fieldset className={styles.connection} disabled={busy}><legend>AI connection</legend>
-      <label>Provider<select value={provider} onChange={event => { const next = event.target.value as Provider; setProvider(next); setModel(DEFAULT_MODELS[next]); setApiKey('') }}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
+      <label>Provider<select value={provider} onChange={event => chooseProvider(event.target.value as Provider)}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
       <label>Model<input value={model} maxLength={100} spellCheck={false} onChange={event => setModel(event.target.value)} /></label>
-      <label>API key<input type="password" autoComplete="off" spellCheck={false} value={apiKey} maxLength={512} onChange={event => setApiKey(event.target.value)} placeholder="Paste your API key" /></label>
-      <p>The key stays in memory. Your prompt, recent chat and project source are sent to {provider === 'openai' ? 'OpenAI' : 'Anthropic'} when you send. API usage is billed by your provider.</p>
+      <label>API key<input type="password" autoComplete="off" spellCheck={false} value={apiKey} maxLength={512} onChange={event => setKey(event.target.value)} placeholder="Paste your API key" /></label>
+      <p>The key is kept in this browser tab until you close it, and never in the project. Your prompt, recent chat and project source are sent to {provider === 'openai' ? 'OpenAI' : 'Anthropic'} when you send. API usage is billed by your provider.</p>
     </fieldset>}
     <div className={styles.conversation} ref={conversation} role="log" aria-label="Prompt conversation" aria-live="polite">
       {!project?.chatHistory?.length && <div className={styles.empty}><Icon name="text-lines" size={24} /><h3>What would you like to change?</h3><p>Select a view on the canvas to target it, or describe a change to the whole app.</p><p>Edits update the canvas and Swift together. Use Undo to reverse them.</p></div>}

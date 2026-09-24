@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { OpenedFile, PromptMessage } from '@studio/project-model'
 import { useStudio, type SwitchResult } from '../lib/store'
 import { createAttempts } from '../lib/promptAttempts'
-import { DEFAULT_MODELS, parseGeneratedApp, parseOptions, type GeneratedApp, type GenerationOptions, type Provider } from '../lib/generation/schema'
+import { useAiConnection } from '../lib/generation/connection'
+import { parseGeneratedApp, parseOptions, type GeneratedApp, type GenerationOptions, type Provider } from '../lib/generation/schema'
 import { checkPreview } from '../lib/generation/validate'
 import { Icon } from './ui/Icon'
 import styles from './PromptCreator.module.css'
@@ -12,11 +13,13 @@ import styles from './PromptCreator.module.css'
 /** The project open behind Create with AI, which its attempts are logged in. */
 const openProjectId = () => useStudio.getState().project?.id ?? null
 
-const INITIAL: GenerationOptions = { provider: 'openai', model: DEFAULT_MODELS.openai, prompt: '', pageCount: 4, navigation: 'tabs', accent: 'indigo', sampleData: true, includeSettings: false }
+/** The options besides the connection, which is the tab's. */
+type AppOptions = Omit<GenerationOptions, 'provider' | 'model'>
+const INITIAL: AppOptions = { prompt: '', pageCount: 4, navigation: 'tabs', accent: 'indigo', sampleData: true, includeSettings: false }
 
 export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: readonly OpenedFile[], history?: readonly PromptMessage[]) => Promise<SwitchResult>; onBusy: (busy: boolean) => void }) {
+  const { connection, chooseProvider, setModel, setKey } = useAiConnection()
   const [options, setOptions] = useState(INITIAL)
-  const [apiKey, setApiKey] = useState('')
   const [revealKey, setRevealKey] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'generating' | 'checking' | 'opening'>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -31,15 +34,15 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
   // Closing the panel leaves its draft: opened as the project now open, or thrown away.
   useEffect(() => () => createAttempts.settleDraft(openProjectId()), [])
   useEffect(() => { if (draft) review.current?.focus() }, [draft])
-  const update = <K extends keyof GenerationOptions>(key: K, value: GenerationOptions[K]) => setOptions(current => ({ ...current, [key]: value }))
+  const update = <K extends keyof AppOptions>(key: K, value: AppOptions[K]) => setOptions(current => ({ ...current, [key]: value }))
 
   async function generate() {
     if (controller.current) return
     setError(null)
     let input: GenerationOptions
     try {
-      input = parseOptions(options)
-      if (!apiKey.trim()) throw new Error('Enter your provider API key.')
+      input = parseOptions({ ...options, provider: connection.provider, model: connection.model })
+      if (!connection.key.trim()) throw new Error('Enter your provider API key.')
     } catch (e) { setError(e instanceof Error ? e.message : 'Check your project options.'); return }
     const request = new AbortController()
     controller.current = request
@@ -47,7 +50,7 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
     const settings = { pageCount: input.pageCount, navigation: input.navigation, accent: input.accent, sampleData: input.sampleData, includeSettings: input.includeSettings }
     const attempt = createAttempts.sent(openProjectId(), { prompt: input.prompt, provider: input.provider, model: input.model, settings })
     try {
-      const response = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` }, body: JSON.stringify(input), signal: request.signal })
+      const response = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.key.trim()}` }, body: JSON.stringify(input), signal: request.signal })
       attempt.responded(response.status)
       const result = await response.json().catch(() => { throw new Error('The studio server could not finish this request. Check your connection or try a smaller app.') })
       if (!response.ok) throw new Error(result.error ?? 'Could not generate the app.')
@@ -98,12 +101,12 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
         <textarea id="app-prompt" value={options.prompt} onChange={e => update('prompt', e.target.value)} disabled={busy} minLength={20} maxLength={6000} required placeholder="A travel planner for weekend trips. Show an itinerary, saved places, and a packing checklist. Let me add stops and mark items as packed. Keep the design calm and simple." />
         <p className={styles.hint}>Describe who it’s for, the screens you need, and what people can do.</p>
         <div className={styles.connection}>
-          <label className={styles.label}>Provider<select value={options.provider} disabled={busy} onChange={e => { const provider = e.target.value as Provider; setOptions(o => ({ ...o, provider, model: DEFAULT_MODELS[provider] })); setApiKey(''); setRevealKey(false) }}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
-          <label className={styles.label}>Model<input value={options.model} disabled={busy} required maxLength={100} spellCheck={false} onChange={e => update('model', e.target.value)} /></label>
+          <label className={styles.label}>Provider<select value={connection.provider} disabled={busy} onChange={e => { chooseProvider(e.target.value as Provider); setRevealKey(false) }}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
+          <label className={styles.label}>Model<input value={connection.model} disabled={busy} required maxLength={100} spellCheck={false} onChange={e => setModel(e.target.value)} /></label>
         </div>
         <label className={styles.label} htmlFor="provider-key">API key</label>
-        <div className={styles.key}><input id="provider-key" type={revealKey ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={apiKey} onChange={e => setApiKey(e.target.value)} disabled={busy} placeholder={options.provider === 'openai' ? 'sk-…' : 'sk-ant-…'} required maxLength={512} /><button type="button" disabled={busy} onClick={() => setRevealKey(v => !v)} aria-label={revealKey ? 'Hide API key' : 'Show API key'}>{revealKey ? 'Hide' : 'Show'}</button></div>
-        <p className={styles.hint}>Your key is held only while this window is open. Your description and options go through this server to {options.provider === 'openai' ? 'OpenAI' : 'Anthropic'}. Keys are not saved in projects or browser storage. Your provider bills API usage.</p>
+        <div className={styles.key}><input id="provider-key" type={revealKey ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={connection.key} onChange={e => setKey(e.target.value)} disabled={busy} placeholder={connection.provider === 'openai' ? 'sk-…' : 'sk-ant-…'} required maxLength={512} /><button type="button" disabled={busy} onClick={() => setRevealKey(v => !v)} aria-label={revealKey ? 'Hide API key' : 'Show API key'}>{revealKey ? 'Hide' : 'Show'}</button></div>
+        <p className={styles.hint}>Your key is kept in this browser tab until you close it, and never in a project. Your description and options go through this server to {connection.provider === 'openai' ? 'OpenAI' : 'Anthropic'}. Your provider bills API usage.</p>
       </div>
       <aside className={styles.options} aria-label="Project options">
         <h3>Project options</h3>
