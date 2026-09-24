@@ -208,7 +208,7 @@ struct CardStyle: ViewModifier {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground))
-            .cornerRadius(14)
+            .clipShape(.rect(cornerRadius: 14))
     }
 }
 
@@ -248,7 +248,7 @@ struct CategoryChip: View {
         .padding(.horizontal, 8)
         .background(category.tint.opacity(0.18))
         .foregroundStyle(category.tint)
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
 }
 
@@ -383,7 +383,7 @@ struct Header: View {
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(18)
+        .clipShape(.rect(cornerRadius: 18))
     }
 }
 `

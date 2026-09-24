@@ -26,9 +26,10 @@ const enabled = process.env.XCODE_BUILD === '1'
 const only = (process.env.XCODE_TEMPLATES ?? '').split(',').filter(Boolean)
 const templates = TEMPLATES.filter(template => !only.length || only.includes(template.id))
 
-/** Unzips an export and builds it for the simulator, failing with Xcode's first errors. */
+/** Unzips an export and builds it for the simulator, failing with Xcode's first errors or deprecation warnings. */
 function buildInXcode(zip: Uint8Array, id: string) {
   const root = mkdtempSync(join(tmpdir(), `studio-xcode-${id}-`))
+  let deprecated: string[] = []
   try {
     let project = ''
     for (const [path, bytes] of Object.entries(unzipSync(zip))) {
@@ -45,11 +46,14 @@ function buildInXcode(zip: Uint8Array, id: string) {
       '-derivedDataPath', join(root, 'DerivedData'), 'build',
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 })
     expect(output).toContain('BUILD SUCCEEDED')
+    // A deprecation is a warning in Xcode today and an error in a later SDK (D9).
+    deprecated = output.split('\n').filter(line => /warning: .*deprecated/.test(line)).slice(0, 8)
   } catch (error) {
     const output = `${(error as { stdout?: string }).stdout ?? ''}${(error as { stderr?: string }).stderr ?? ''}`
     const errors = output.split('\n').filter(line => line.includes('error:')).slice(0, 8).join('\n')
     throw new Error(`${id} does not build in Xcode:\n${errors || (error as Error).message}`)
   } finally { rmSync(root, { recursive: true, force: true }) }
+  expect(deprecated, `${id} uses deprecated SwiftUI`).toEqual([])
 }
 
 describe.skipIf(!enabled)('every template builds with xcodebuild', () => {

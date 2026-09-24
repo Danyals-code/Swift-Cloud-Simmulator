@@ -190,7 +190,7 @@ struct CardStyle: ViewModifier {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground))
-            .cornerRadius(14)
+            .clipShape(.rect(cornerRadius: 14))
     }
 }
 
@@ -208,7 +208,7 @@ struct PressableButtonStyle: ButtonStyle {
             .padding(.horizontal, 18)
             .background(Color.accentColor)
             .foregroundStyle(Color.white)
-            .cornerRadius(10)
+            .clipShape(.rect(cornerRadius: 10))
             .opacity(configuration.isPressed ? 0.7 : 1.0)
     }
 }
@@ -228,7 +228,7 @@ struct DifficultyBadge: View {
         .padding(.horizontal, 8)
         .background(difficulty.tint.opacity(0.18))
         .foregroundStyle(difficulty.tint)
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
 }
 
@@ -383,7 +383,7 @@ struct FeatureTile: View {
                 endPoint: .bottomTrailing
             )
         )
-        .cornerRadius(16)
+        .clipShape(.rect(cornerRadius: 16))
     }
 }
 
@@ -549,7 +549,7 @@ struct Hero: View {
                 endPoint: .bottom
             )
         )
-        .cornerRadius(18)
+        .clipShape(.rect(cornerRadius: 18))
         .padding(.horizontal, 16)
     }
 }

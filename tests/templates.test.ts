@@ -461,7 +461,7 @@ describe('the gallery', () => {
       ['a closure over a model collection', /\.filter\s*\{/],
       ['storage that outlives a view', /@AppStorage/],
       ['a text attribute', /\.strikethrough\(|\.underline\(/],
-      ['a concatenated Text', /\+ Text\(/],
+      ['a Text interpolated into another, as Xcode 27 asks instead of Text + Text', /Text\("\\\(Text\(/],
       ['a section footer', /\}\s*footer:\s*\{/],
       ['a date picker', /DatePicker\(/],
     ]
@@ -469,6 +469,14 @@ describe('the gallery', () => {
     for (const [what, pattern] of idioms) {
       expect(pattern.test(corpus), `no template contains ${what}`).toBe(true)
     }
+  })
+
+  it('writes current SwiftUI, with none of what Apple has deprecated or marked for deprecation (D9)', () => {
+    const corpus = TEMPLATES.flatMap((t) => t.files.map((f) => f.text)).join('\n')
+    // `.cornerRadius` draws exactly as `.clipShape(.rect(cornerRadius:))`, which replaces it.
+    expect(corpus.match(/\.cornerRadius\(/g) ?? []).toEqual([])
+    // Deprecated in iOS 26: Xcode 27 warns on it.
+    expect(corpus.match(/\+ Text\(/g) ?? []).toEqual([])
   })
 
   it('no longer identifies a model by an integer it made up', () => {
