@@ -384,11 +384,19 @@ it('keeps invalid scenario errors and cleared handlers across reset and rerender
   expect(rerender(revision++).diagnostics.some(d => d.code === 'invalid_preview_scenario')).toBe(true)
 })
 
+it('writes the sheet it adds on its own line, under the button that opens it (D13)', () => {
+  const source = files(app('VStack {\n        Button("Open") { }\n    }', '', 'struct Detail: View { var body: some View { Text("Detail content") } }'))
+  const sheet = edit(source, 'Button', { kind: 'behavior', action: { type: 'sheet', destination: 'Detail' }, replace: false })
+  expect(sheet[0]!.text).toContain('        Button("Open") { isDetailPresented = true }\n            .sheet(isPresented: $isDetailPresented) { Detail() }\n')
+  expect(texts(tap(render(sheet), 'Open'))).toContain('Detail content')
+})
+
 it('generates environment dismissal in the presented definition and returns to the parent', () => {
   let source = files(app('Button("Open") { }', '', 'struct Detail: View { var body: some View { Button("Close") { } } }'))
   source = edit(source, 'Button', { kind: 'behavior', action: { type: 'sheet', destination: 'Detail' }, replace: false })
   source = edit(source, 'Button', { kind: 'behavior', action: { type: 'dismiss', state: '' }, replace: false }, 1)
-  expect(source[0]!.text).toContain('@Environment(\\.dismiss) private var dismissPresentedView')
+  expect(source[0]!.text).toContain('@Environment(\\.dismiss) private var dismiss\n')
+  expect(source[0]!.text).toContain('Button("Close") { dismiss() }')
   const presented = tap(render(source), 'Open')
   expect(texts(presented)).toContain('Close')
   expect(texts(tap(presented, 'Close'))).not.toContain('Close')
