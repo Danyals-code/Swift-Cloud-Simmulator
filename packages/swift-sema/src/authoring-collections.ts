@@ -1,8 +1,8 @@
 import { SUPPORTED_VIEWS } from './builtins'
 import { deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, CollectionSettings, DesignValue, DesignRecord, RecordField } from '@studio/shared'
-import { afterOffMarkers, type VarDecl } from '@studio/swift-syntax'
-import { callOf, hasComments, shadowsMember, identifier, insertMember, literal, namedStruct, ownerOf, patch, raw, scalarType, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import { afterOffMarkers, Lexer, type Expr, type VarDecl } from '@studio/swift-syntax'
+import { callOf, hasComments, shadowsMember, identifier, insertMember, lineIndent, literal, namedStruct, ownerOf, patch, raw, scalarType, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { swiftString } from './design-controls'
 
 export function recordDeclaration(ctx: FeatureContext, variable: VarDecl): { name: string; fields: RecordField[]; signature: string } | undefined {
@@ -115,19 +115,70 @@ export function bindField(ctx: FeatureContext, node: AuthoringNode, fieldName: s
   else if (field.type !== 'String') value = `String(${value}${field.optional ? ' ?? ' + (field.type === 'Bool' ? 'false' : '0') : ''})`
   return [patch(argument.value.span, value)]
 }
+/** A row that is `Text` of one unnamed value: that value, and the row reading its words from a record instead. */
+function textRow(ctx: FeatureContext, row: AuthoringNode | undefined): { readonly words: Expr; readonly template: string } | null {
+  const call = row?.name === 'Text' ? callOf(ctx, row) : undefined
+  const words = call?.args.length === 1 && call.args[0]!.label === null ? call.args[0]!.value : undefined
+  if (!row || !words) return null
+  const text = raw(ctx, row.source)
+  return { words, template: text.slice(0, words.span.start - row.source.start) + 'item.title' + text.slice(words.span.end - row.source.start) }
+}
+
+/** A row that is plain Text of a literal: its words, and the row reading them from a record instead. */
+function plainTextRow(ctx: FeatureContext, row: AuthoringNode | undefined): { readonly title: string; readonly template: string } | null {
+  const found = textRow(ctx, row)
+  const title = found && literal(ctx, found.words)
+  return found && typeof title === 'string' ? { title, template: found.template } : null
+}
+
+/**
+ * The rows a Repeat over a range draws, as the library writes it:
+ * `ForEach(0..<3, id: \.self) { index in Text("Row \(index)") }`. One title per number,
+ * the row reading it from a record. Null for anything else; refused, saying why, when
+ * the rows use their number outside their text, which a record would not keep.
+ */
+function rangeRows(ctx: FeatureContext, node: AuthoringNode): { readonly titles: string[]; readonly template: string } | null {
+  const call = callOf(ctx, node), closure = call?.trailingClosure
+  const range = call?.args[0]?.label === null ? call.args[0]!.value : undefined
+  if (!call || !closure || !range || range.kind !== 'binary' || !['..<', '...'].includes(range.operator) || closure.params.length !== 1 || closure.body.statements.length !== 1) return null
+  const from = literal(ctx, range.left), to = literal(ctx, range.right)
+  if (typeof from !== 'number' || typeof to !== 'number' || !Number.isInteger(from) || !Number.isInteger(to)) return null
+  const last = range.operator === '...' ? to : to - 1
+  if (last < from || last - from >= 50) return null
+  const row = textRow(ctx, ctx.nodes.find(n => n.parentId === node.id && n.kind === 'template')?.children.map(id => ctx.nodes.find(n => n.id === id)).find(Boolean))
+  const words = row?.words, param = closure.params[0]!.name
+  if (!row || words?.kind !== 'stringLiteral' || words.segments.some(s => s.kind === 'interpolation' && (s.expression.kind !== 'identifier' || s.expression.name !== param))) return null
+  const tokens = Lexer.tokenize(row.template, node.source.file).tokens
+  if (tokens.some((token, i) => token.kind === 'identifier' && token.text === param && tokens[i - 1]?.text !== '.')) throw new Error(`These rows use \`${param}\` outside their text, which a record would not keep. Keep the Repeat, or use \`${param}\` in the text only.`)
+  const titles: string[] = []
+  for (let n = from; n <= last; n++) titles.push(words.segments.map(s => s.kind === 'text' ? s.value : String(n)).join(''))
+  return { titles, template: row.template }
+}
+
+/**
+ * Makes a static list, or the library's Repeat over a range, a collection of typed
+ * records (D13): one record for each row it drew, each row drawn by one design that
+ * reads its record. Rows that differ are left alone, as one design would lose what
+ * makes each different.
+ */
 export function convertCollection(ctx: FeatureContext, node: AuthoringNode, name: string, recordType: string): SourcePatch[] {
   const owner = ownerOf(ctx, node), call = callOf(ctx, node)
-  if (!owner || node.name !== 'List' || node.kind !== 'view' || !call?.trailingClosure || call.args.length) throw new Error('Only a static List with a single plain Text row can become a collection.')
+  const range = node.name === 'ForEach' ? rangeRows(ctx, node) : null
+  if (!owner || !call?.trailingClosure || (node.name === 'List' ? node.kind !== 'view' || call.args.length > 0 : !range)) throw new Error('Only a static List of Text rows, or a Repeat over a range, can become a collection.')
   if (!identifier(name) || !identifier(recordType) || SUPPORTED_VIEWS.has(recordType) || ['String', 'Int', 'Double', 'Bool', 'Color', 'Font', 'View', 'App', 'UUID', 'CGFloat', 'Array', 'Dictionary', 'Optional'].includes(recordType) || name === recordType || owner.members.some(m => 'name' in m && m.name === name) || ctx.ast.some(f => f.declarations.some(d => 'name' in d && d.name === recordType))) throw new Error('Choose unused Swift names for the collection and record type.')
   if (hasComments(ctx, call.span)) throw new Error('This list has comments whose ownership would change during conversion. Convert it in Swift.')
-  const rows = node.children.map(id => ctx.nodes.find(n => n.id === id)!)
-  const row = rows[0], rowCall = row && callOf(ctx, row)
-  const initial = rowCall?.args[0] && literal(ctx, rowCall.args[0].value)
-  if (rows.length !== 1 || row?.name !== 'Text' || typeof initial !== 'string' || !rowCall || rowCall.args.length !== 1 || rowCall.args[0]?.label !== null) throw new Error('Conversion would discard heterogeneous rows or custom behavior. Keep the static list or use a single plain Text row.')
-  const text = raw(ctx, row.source), span = rowCall.args[0]!.value.span
-  const template = text.slice(0, span.start - row.source.start) + 'item.title' + text.slice(span.end - row.source.start)
-  // Preserve list modifier chain, replacing only its constructor/content.
-  return [patch(call.span, `List(${name}) { item in\n            ${template}\n        }`), insertMember(ctx, owner, `@State private var ${name}: [${recordType}] = [${recordType}(id: "item-1", title: ${swiftString(initial)})]`), { file: owner.span.file, start: owner.span.end, end: owner.span.end, text: `\n\nstruct ${recordType}: Identifiable {\n    let id: String\n    var title: String\n}\n` }]
+  let titles: readonly string[], template: string
+  if (range) ({ titles, template } = range)
+  else {
+    const rows = node.children.map(id => plainTextRow(ctx, ctx.nodes.find(n => n.id === id)))
+    if (!rows.length || rows.some(row => !row) || new Set(rows.map(row => row!.template)).size > 1) throw new Error('Rows that differ would lose what makes each one different in a single row design. Keep the static list, or make every row plain Text written alike.')
+    titles = rows.map(row => row!.title)
+    template = rows[0]!.template
+  }
+  const { indent, unit } = lineIndent(ctx, owner.span.file, call.span.start)
+  const records = titles.map((title, i) => `${recordType}(id: "item-${i + 1}", title: ${swiftString(title)})`).join(', ')
+  // Preserve the list's modifier chain, replacing only its constructor and content.
+  return [patch(call.span, `${node.name}(${name}) { item in\n${indent}${unit}${template}\n${indent}}`), insertMember(ctx, owner, `@State private var ${name}: [${recordType}] = [${records}]`), { file: owner.span.file, start: owner.span.end, end: owner.span.end, text: `\n\nstruct ${recordType}: Identifiable {\n    let id: String\n    var title: String\n}\n` }]
 }
 export function emptyState(ctx: FeatureContext, node: AuthoringNode, message: string): SourcePatch[] {
   const info = collectionFor(ctx, node)
@@ -136,7 +187,10 @@ export function emptyState(ctx: FeatureContext, node: AuthoringNode, message: st
   while (parent) { if (parent.kind === 'branch' && parent.properties.some(p => p.expression.includes(`${info.name}.isEmpty`))) throw new Error('This collection already has an empty-state branch. Edit its Text layer.'); parent = ctx.nodes.find(n => n.id === parent!.parentId) }
   // A modifier switched off at the end of the collection's chain is written after it, and goes inside with it.
   const source = { ...node.source, end: afterOffMarkers(ctx.files.find(f => f.id === node.source.file)?.text ?? '', node.source.end) }
-  return [patch(source, `Group {\n    if ${info.name}.isEmpty {\n        Text(${swiftString(message)})\n    } else {\n        ${raw(ctx, source)}\n    }\n}`)]
+  // Indented from the list's own line: the list goes two levels in, into the branch (D13).
+  const { indent, unit } = lineIndent(ctx, source.file, source.start)
+  const list = raw(ctx, source).replace(/\n/g, `\n${unit}${unit}`)
+  return [patch(source, `Group {\n${indent}${unit}if ${info.name}.isEmpty {\n${indent}${unit}${unit}Text(${swiftString(message)})\n${indent}${unit}} else {\n${indent}${unit}${unit}${list}\n${indent}${unit}}\n${indent}}`)]
 }
 
 

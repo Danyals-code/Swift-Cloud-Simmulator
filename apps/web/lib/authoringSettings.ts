@@ -64,6 +64,16 @@ export function authoringSettingsContext(snapshot: AuthoringSnapshot | undefined
 }
 
 /** Choose useful editable content without making a settings action stop on a Swift wrapper. */
+/**
+ * Whether `node` is a Repeat over a range of numbers, as the library writes it:
+ * `ForEach(0..<3, id: \.self)`. Its rows can become records (D13); a Repeat over data
+ * has records of its own already.
+ */
+export function repeatsOverRange(node: AuthoringNode): boolean {
+  const data = node.name === 'ForEach' ? node.properties.find(property => property.name === 'argument 1')?.expression.trim() : undefined
+  return !!data && /^-?\d+\s*\.\.[.<]\s*-?\d+$/.test(data)
+}
+
 export function settingsVisualChildren(snapshot: AuthoringSnapshot | undefined, parent: AuthoringNode): AuthoringNode[] {
   const nodes = new Map(snapshot?.nodes.map(node => [node.id, node]) ?? [])
   const children: AuthoringNode[] = []

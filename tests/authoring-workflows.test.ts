@@ -72,6 +72,46 @@ describe('Phase 4: logical collections and source-owned data', () => {
     expect(target(next, 'List').collection?.records).toEqual([{ id: 'item-1', title: 'Hello' }])
     expect(texts(render(next))).toContain('Hello')
   })
+  /** A screen whose body is `body`, written as a designer's project is: one view to a line. */
+  const screen = (body: string) => files(`import SwiftUI\n@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }\nstruct ContentView: View {\n    var body: some View {\n${body}\n    }\n}\n`)
+
+  it('converts plain text rows into a collection, one record each, indented as the list is (D13)', () => {
+    const next = edit(screen('        List {\n            Text("Apples")\n            Text("Pears")\n        }'), 'List', { kind: 'collection-convert', name: 'items', recordType: 'Item' })
+    expect(next[0]!.text).toContain('        List(items) { item in\n            Text(item.title)\n        }')
+    expect(target(next, 'List').collection?.records).toEqual([{ id: 'item-1', title: 'Apples' }, { id: 'item-2', title: 'Pears' }])
+    expect(texts(render(next))).toEqual(expect.arrayContaining(['Apples', 'Pears']))
+  })
+
+  it('turns the library\'s Repeat into a collection of the rows it drew (D13)', () => {
+    const next = edit(screen('        VStack {\n            ForEach(0..<3, id: \\.self) { index in\n                Text("Row \\(index)")\n            }\n        }'), 'ForEach', { kind: 'collection-convert', name: 'rows', recordType: 'Row' })
+    expect(next[0]!.text).toContain('            ForEach(rows) { item in\n                Text(item.title)\n            }')
+    expect(target(next, 'ForEach').collection?.records.map(record => record.title)).toEqual(['Row 0', 'Row 1', 'Row 2'])
+    expect(texts(render(next))).toEqual(expect.arrayContaining(['Row 0', 'Row 1', 'Row 2']))
+  })
+
+  it('keeps rows that differ static, as one design would lose what makes each different (D13)', () => {
+    expect(plan(screen('        List {\n            Text("Apples").bold()\n            Text("Pears")\n        }'), 'List', { kind: 'collection-convert', name: 'items', recordType: 'Item' })).toMatchObject({ ok: false })
+  })
+
+  it('keeps a Repeat whose rows use their number outside their text, and says why (D13)', () => {
+    expect(plan(screen('        VStack {\n            ForEach(0..<3, id: \\.self) { index in\n                Text("Row \\(index)")\n                    .opacity(Double(index) / 3)\n            }\n        }'), 'ForEach', { kind: 'collection-convert', name: 'rows', recordType: 'Row' }))
+      .toEqual({ ok: false, reason: 'These rows use `index` outside their text, which a record would not keep. Keep the Repeat, or use `index` in the text only.' })
+  })
+
+  it('writes an empty state indented as the list is (D13)', () => {
+    const converted = edit(screen('        List {\n            Text("Apples")\n        }'), 'List', { kind: 'collection-convert', name: 'items', recordType: 'Item' })
+    const next = edit(converted, 'List', { kind: 'empty-state', text: 'Nothing here' })
+    expect(next[0]!.text).toContain(`        Group {
+            if items.isEmpty {
+                Text("Nothing here")
+            } else {
+                List(items) { item in
+                    Text(item.title)
+                }
+            }
+        }`)
+  })
+
   it('adds to the row template once and renders it in every row', () => {
     const source = edit(files(list()), 'Row template', { kind: 'insert', snippet: 'Text("Shared")' })
     expect(source[0]!.text.match(/Text\("Shared"\)/g)).toHaveLength(1)
