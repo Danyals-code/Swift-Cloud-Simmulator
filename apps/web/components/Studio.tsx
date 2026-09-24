@@ -54,6 +54,8 @@ import { TabBar } from './TabBar'
 import { TemplateGallery, type GallerySource } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
 import { BUILD_DETAILS, BUILD_NAME } from '../lib/build'
+import { events } from '../lib/eventLog'
+import { designEvent } from '../lib/designEvents'
 import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
@@ -271,12 +273,14 @@ export function Studio() {
   }, [])
 
   // Debounced autosave can lose the last edit when a tab is closed or backgrounded,
-  // so force the pending write at both of the points the browser gives us. Only when
-  // the tab is hidden: coming back to one has nothing new to write, and used to put
-  // this tab's copy back over whatever another tab had saved meanwhile (B1).
+  // so force the pending writes, the project's and the event log's, at both of the
+  // points the browser gives us. Only when the tab is hidden: coming back to one has
+  // nothing new to write, and used to put this tab's copy back over whatever another
+  // tab had saved meanwhile (B1).
   useEffect(() => {
-    const onVisibility = () => { if (document.visibilityState === 'hidden') void flush() }
-    const onPageHide = () => void flush()
+    const leaving = () => { void flush(); void events.flush() }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') leaving() }
+    const onPageHide = leaving
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pagehide', onPageHide)
     return () => {
@@ -545,6 +549,11 @@ export function Studio() {
   const designPage = designPages?.find(page => project?.id === designPageSelection?.projectId && page.id === designPageSelection?.id)
     ?? designPages?.find(page => page.active) ?? designPages?.[0]
   useEffect(() => { if (inspecting) focusedDesignPage.current = designPage }, [inspecting, designPage])
+  // What the person is looking at, in each project's event log: Design or Code, editing or trying the app.
+  const projectId = project?.id
+  useEffect(() => {
+    if (projectId) events.record(projectId, { type: 'mode', mode: mode === 'develop' ? 'code' : 'design', preview: !inspecting })
+  }, [projectId, mode, inspecting])
   const livePage = result?.viewHierarchy?.find(layer => layer.type === 'Presentation') ?? result?.viewHierarchy?.find(layer => layer.page?.active)
   const pageHierarchy = useMemo(() => designPage?.viewHierarchy ?? (livePage ? [livePage] : undefined), [designPage?.viewHierarchy, livePage])
   const focusedPage = designPage ?? livePage
@@ -612,7 +621,7 @@ export function Studio() {
     if (problem) return problem
     const before = project.studio, metadata = before ?? emptyStudioMetadata()
     const after = { ...metadata, scenarios: [...metadata.scenarios.filter(s => scenarioKey(s) !== scenarioKey(scenario)), scenario] }
-    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after } })
+    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after } }, { type: 'design', op: 'state-save' })
     if (!error) setScenarioSelection({ projectId: project.id, key: scenarioKey(scenario) })
     return error
   }, [project, stale, result?.authoring])
@@ -723,7 +732,12 @@ export function Studio() {
     try {
       if (assets) validateAssets(assets)
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, colors: project.colors, componentDescriptions: project.studio?.components, target, fingerprint, operation })
-      if (!plan.ok) { setEditNote(plan.location ? { text: plan.reason, location: plan.location } : plan.reason); return plan.reason }
+      const label = designEvent(operation, result?.authoring?.nodes.find(node => node.source.file === target.file && node.source.start === target.start && node.source.end === target.end))
+      if (!plan.ok) {
+        events.record(project.id, { ...label, refused: true })
+        setEditNote(plan.location ? { text: plan.reason, location: plan.location } : plan.reason)
+        return plan.reason
+      }
       // Context settings edit the navigation owner while the designer keeps the
       // visible label/row selected. Reconcile it against the exact planned source.
       const afterFiles = project.files.map(file => ({ ...file, text: plan.changes.find(change => change.file === file.id)?.after ?? file.text }))
@@ -750,7 +764,7 @@ export function Studio() {
       const savedScenario = scenarioFrom?.(plan.authoring) ?? null
       const scenarios = savedScenario ? [...metadata.scenarios.filter(item => scenarioKey(item) !== scenarioKey(savedScenario)), savedScenario] : undefined
       const transaction = { ...selectedPlan, ...colorChange, ...(assets ? { assets: { before: project.assets, after: assets } } : {}), ...(screens || scenarios || JSON.stringify(labels) !== JSON.stringify(metadata.labels) ? { studio: { before, after: { ...metadata, ...(screens ? { screens } : {}), ...(scenarios ? { scenarios } : {}), labels } } } : {}) }
-      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction)
+      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction, label)
       if (problem) { setEditNote(problem); return problem }
       if (savedScenario) setScenarioSelection({ projectId: project.id, key: scenarioKey(savedScenario) })
       if (changed) setCommittedEditRevision(revision => revision + 1)
@@ -796,7 +810,7 @@ export function Studio() {
       if (index < 0) return 'Select an existing screen.'
       if (command.kind === 'rename') next[index] = { ...next[index]!, name }
       else { const to = index + (command.kind === 'up' ? -1 : 1); if (to < 0 || to >= next.length) return null; [next[index], next[to]] = [next[to]!, next[index]!] }
-      return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, screens: next } } })
+      return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, screens: next } } }, { type: 'design', op: command.kind === 'rename' ? 'screen-rename' : 'screen-move' })
     }
     const node = command.kind === 'create' ? result?.authoring?.nodes.find(n => n.kind === 'definition') : result?.authoring?.nodes.find(n => n.kind === 'definition' && n.name === command.view)
     if (!node) return 'Wait for the screen definitions to finish loading.'
@@ -816,7 +830,7 @@ export function Studio() {
     const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
     const labels = metadata.labels.filter(l => !(l.owner === node.owner && l.fingerprint === node.fingerprint && (l.offset === undefined || l.offset === node.source.start)))
     if (label.trim()) labels.push({ owner: node.owner, fingerprint: node.fingerprint, offset: node.source.start, label: label.trim() })
-    return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, labels } } })
+    return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, labels } } }, { type: 'design', op: 'layer-rename' })
   }
 
   /**
@@ -892,14 +906,14 @@ export function Studio() {
       if (operation && !node) return 'Compile the source before changing image references.'
       const plan = operation && node ? await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, scope: node.owner, files: project.files, colors: project.colors, target: node.source, fingerprint: node.fingerprint, operation }) : { ok: true as const, projectId: project.id, baseRevision: state.documentRevision, changes: [] }
       if (!plan.ok) return plan.reason
-      return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } })
+      return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } }, { type: 'design', op: 'images' })
     } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
   }, [project, stale, snapshot, planDesignEdit])
 
   const deleteScenario = useCallback((key: string) => {
     const state = useStudio.getState()
     if (!project || state.project !== project || !project.studio) return
-    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => scenarioKey(s) !== key) } } })
+    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => scenarioKey(s) !== key) } } }, { type: 'design', op: 'state-delete' })
     if (error) setEditNote(error); else setScenarioSelection(current => current?.projectId === project.id && current.key === key ? null : current)
   }, [project])
 
@@ -1284,15 +1298,15 @@ export function Studio() {
                 onFindCopies: (node: AuthoringNode) => findCopies(project.files, node.source, { deploymentTarget: project.manifest.deploymentTarget, screens: screenViews }), onSaveVariant: variant => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale || preparingEdit) return 'Wait for the current design to finish updating.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, variants: [...(metadata.variants ?? []).filter(v => v.owner !== variant.owner || v.name !== variant.name), variant] } } })
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, variants: [...(metadata.variants ?? []).filter(v => v.owner !== variant.owner || v.name !== variant.name), variant] } } }, { type: 'design', op: 'variant-save' })
                 }, onDeleteVariant: (owner, name) => {
                   const state = useStudio.getState(), before = project.studio
                   if (state.project !== project || !before || stale || preparingEdit) return 'Wait for the current design to finish updating.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...before, variants: before.variants?.filter(v => v.owner !== owner || v.name !== name) } } })
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...before, variants: before.variants?.filter(v => v.owner !== owner || v.name !== name) } } }, { type: 'design', op: 'variant-delete' })
                 }, onPickNavigation: navigationPicker.start, assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
+                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } }, { type: 'design', op: 'component-describe' })
                 }, onNodeCommand: (node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation), onNodeChange: (node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }), onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }
   const busy = stale || preparingEdit
   const revealSpan = (span: SourceSpan) => revealSpanIn(span.file, span.start)

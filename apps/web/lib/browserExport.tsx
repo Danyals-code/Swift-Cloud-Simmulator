@@ -4,6 +4,7 @@ import { RenderTreeView } from '@studio/swiftui-render-dom'
 import type { PagePreview } from '@studio/shared'
 import { compileSnapshot } from './compileSnapshot'
 import { capturePreview } from './designExport'
+import { events } from './eventLog'
 import type { ExportSteps } from './exportProject'
 import { saveFile } from './recovery'
 
@@ -11,14 +12,18 @@ const ignoreEvent = () => {}
 
 /**
  * Exporting's steps as a browser takes them: the store's save, a disposable compiler
- * that never touches the live preview, the canvas's own renderer drawn off screen, and
- * the downloads bar.
+ * that never touches the live preview, the canvas's own renderer drawn off screen, the
+ * page's event log, and the downloads bar.
  */
 export function browserExportSteps(save: () => Promise<unknown>): ExportSteps {
   return {
     save,
     compile: (project, settings, signal) => compileSnapshot(project, signal, { colorScheme: settings.colorScheme, dynamicTypeSize: settings.dynamicTypeSize, typeScale: settings.typeScale, galleryLimit: 128 }),
     capture: capturePage,
+    events: (project, format) => {
+      events.record(project, { type: 'export', format })
+      return events.jsonl(project)
+    },
     download: (name, bytes) => saveFile(name, 'application/zip', bytes),
   }
 }

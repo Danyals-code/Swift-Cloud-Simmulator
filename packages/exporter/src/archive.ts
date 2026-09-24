@@ -4,14 +4,13 @@ import { EXPORT_FORMATS, type ArchiveFormat, type ExportFormat } from '@studio/s
 import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { encodeText } from './bundle'
 import { MAX_BUNDLE_BYTES, MAX_SCREEN_BYTES, type ExportReview } from './handoff-report'
-import type { StudioBuild } from './portable'
+import { EVENT_LOG, type HandoffExtras } from './portable'
 import { exportEditableZip, exportProjectZip, zipBundle } from './zip'
 
-export interface ArchiveRequest {
+export interface ArchiveRequest extends HandoffExtras {
   readonly format: ArchiveFormat
   /** The complete bundle's screens and diagnostics. */
   readonly review?: ExportReview
-  readonly build?: StudioBuild
   /** When the archive is made. */
   readonly now: Date
 }
@@ -31,17 +30,17 @@ export interface Archive {
  * build fails, the Swift still goes out as it was written, with a note saying why the
  * rest could not be built.
  */
-export function exportArchive(stored: Project, { format, review, build, now }: ArchiveRequest): Archive {
+export function exportArchive(stored: Project, { format, review, build, events, now }: ArchiveRequest): Archive {
   const project = withCurrentBundleId(stored)
   const name = archiveName(project, format, now)
-  const captured = format === 'complete' && review ? usableScreens(review, project) : undefined
+  const captured = format === 'complete' && review ? usableScreens(review, project, events) : undefined
   const issues = captured?.issues ?? []
   try {
-    const bytes = format === 'editable' ? exportEditableZip(project, build) : exportProjectZip(project, format === 'complete' ? 'xcodeproj' : format, { review: captured, build })
+    const bytes = format === 'editable' ? exportEditableZip(project, { build, events }) : exportProjectZip(project, format === 'complete' ? 'xcodeproj' : format, { review: captured, build, events })
     return { name, bytes, issues }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    return { name, bytes: sourcesOnly(project, reason, build, format !== 'editable'), issues: [...issues, reason] }
+    return { name, bytes: sourcesOnly(project, reason, { build, events }, format !== 'editable'), issues: [...issues, reason] }
   }
 }
 
@@ -84,17 +83,17 @@ function archiveName(project: Project, format: ArchiveFormat, now: Date): string
   return `${name || 'Project'}-${stamp}${SUFFIX[format]}`
 }
 
-/** What a complete bundle holds besides its screens, at most: the Swift twice (the sources and the project record), the images, and the scaffolding, report and chat around them. */
-function bundleBytesBesidesScreens(project: Project): number {
+/** What a complete bundle holds besides its screens, at most: the Swift twice (the sources and the project record), the images, the event log, and the scaffolding, report and chat around them. */
+function bundleBytesBesidesScreens(project: Project, events: string | undefined): number {
   const swift = project.files.reduce((total, file) => total + encodeText(file.text).length, 0)
   const images = (project.assets ?? []).reduce((total, asset) => total + asset.light.bytes.length + (asset.dark?.bytes.length ?? 0), 0)
-  return 2 * swift + images + 2 * 1024 * 1024
+  return 2 * swift + images + encodeText(events ?? '').length + 2 * 1024 * 1024
 }
 
 /** The capture without the images an archive can't take, in order until it is full, and with why each other one is missing. */
-function usableScreens(review: ExportReview, project: Project): ExportReview & { readonly issues: readonly string[] } {
+function usableScreens(review: ExportReview, project: Project, events: string | undefined): ExportReview & { readonly issues: readonly string[] } {
   const issues = [...review.issues ?? []]
-  let room = MAX_BUNDLE_BYTES - bundleBytesBesidesScreens(project)
+  let room = MAX_BUNDLE_BYTES - bundleBytesBesidesScreens(project, events)
   const screens = review.screens.filter(screen => {
     if (screen.png.length > MAX_SCREEN_BYTES) issues.push(`The image of ${screen.name} was over 4 MB, so it was left out.`)
     else if (!screen.png.length) issues.push(`The image of ${screen.name} came out empty, so it was left out.`)
@@ -107,19 +106,20 @@ function usableScreens(review: ExportReview, project: Project): ExportReview & {
 }
 
 /**
- * The Swift as written, everything else in a backup, and why: what an export falls back to.
+ * The Swift as written, everything else in a backup, the event log, and why: what an export falls back to.
  *
  * The project it gets may be the one that failed its checks for having paths no archive
  * can hold, so each file keeps only the plain segments of its path, and a name another
  * file already has, in any letter case, gets a number. The backup is the one the recovery
  * screen hands over.
  */
-function sourcesOnly(project: Project, reason: string, build: StudioBuild | undefined, native: boolean): Uint8Array {
+function sourcesOnly(project: Project, reason: string, { build, events }: HandoffExtras, native: boolean): Uint8Array {
   const root = plainSegments(project.manifest.name ?? '').replace(/\//g, '-') || 'Project'
-  const taken = new Set(['known-issues.md', 'project-backup.json'])
+  const taken = new Set(['known-issues.md', 'project-backup.json', EVENT_LOG])
   const files = new Map<string, Uint8Array>()
   for (const file of project.files) files.set(`${root}/${unusedPath(plainSegments(file.id) || 'Untitled.swift', taken)}`, encodeText(native ? withoutStudioMarkers(file.text) : file.text))
   files.set(`${root}/project-backup.json`, encodeText(projectBackup(project, build)))
+  if (events !== undefined) files.set(`${root}/${EVENT_LOG}`, encodeText(events))
   files.set(`${root}/KNOWN-ISSUES.md`, encodeText(`# What this export leaves out\n\nThe project could not be built into the format you chose, so this archive holds its Swift files exactly as they were written. project-backup.json holds everything else it had: images, colour sets, designer settings and the AI conversation.\n\nWhy: ${reason}\n`))
   return zipBundle(files)
 }

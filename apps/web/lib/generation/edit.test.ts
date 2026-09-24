@@ -61,7 +61,7 @@ describe('prompt edit boundaries', () => {
     expect(useStudio.getState().appendPromptMessages(before.id, [user])).toBeNull()
     const current = useStudio.getState(), project = current.project!
     const prepared = preparePromptEdit(project, current.documentRevision, { ...edit, files: [...edit.files, { path: 'Sources/New.swift', code: '// new' }], deletedFiles: ['Sources/Old.swift'] })
-    expect(useStudio.getState().commitTransaction(project, prepared.transaction)).toBeNull()
+    expect(useStudio.getState().commitTransaction(project, prepared.transaction, null)).toBeNull()
     expect(useStudio.getState().project?.files.map(file => file.id)).toEqual(['Sources/App.swift', 'Sources/New.swift'])
     const assistant: PromptMessage = { ...message(edit.reply), role: 'assistant', status: 'applied' }
     useStudio.getState().appendPromptMessages(before.id, [assistant])
@@ -77,7 +77,7 @@ describe('prompt edit boundaries', () => {
     const current = useStudio.getState(), expected = current.project!
     const prepared = preparePromptEdit(expected, current.documentRevision, edit)
     useStudio.getState().setFileText(input.files[0]!.id, source.replace('Before', 'Manual'))
-    expect(useStudio.getState().commitTransaction(expected, prepared.transaction)).toBeTruthy()
+    expect(useStudio.getState().commitTransaction(expected, prepared.transaction, null)).toBeTruthy()
     expect(useStudio.getState().project?.files[0]?.text).toContain('Manual')
     await useStudio.getState().openFiles([{ name: 'Other.swift', text: '// other project' }])
     expect(useStudio.getState().appendPromptMessages(expected.id, [message()])).toBeTruthy()

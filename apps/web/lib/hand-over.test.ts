@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { createProjectStore, projectFromFiles } from '@studio/project-model'
+import { events } from './eventLog'
 import { useStudio } from './store'
 
 /**
@@ -24,6 +25,10 @@ it('saves what is here before stepping aside, then writes nothing more', async (
   await useStudio.getState().flush()
   expect(save).not.toHaveBeenCalled()
   save.mockRestore()
+
+  // The other tab writes the events from here on (G5).
+  const logged = (await events.jsonl(project.id)).trimEnd().split('\n').slice(1).map(line => JSON.parse(line))
+  expect(logged.map(event => event.action ?? event.type)).toEqual(['loaded', 'code', 'handed-over'])
 })
 
 it('switches and deletes nothing once another tab has the studio', async () => {

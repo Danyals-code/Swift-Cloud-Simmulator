@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { OpenedFile, PromptMessage } from '@studio/project-model'
-import type { SwitchResult } from '../lib/store'
+import { useStudio, type SwitchResult } from '../lib/store'
+import { events } from '../lib/eventLog'
+import { promptAttempts } from '../lib/promptAttempts'
 import { DEFAULT_MODELS, parseGeneratedApp, parseOptions, type GeneratedApp, type GenerationOptions, type Provider } from '../lib/generation/schema'
 import { checkPreview } from '../lib/generation/validate'
 import { Icon } from './ui/Icon'
@@ -23,7 +25,9 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
   const controller = useRef<AbortController | null>(null)
   const review = useRef<HTMLDivElement | null>(null)
   const busy = phase !== 'idle'
+  const [attempts] = useState(() => promptAttempts(events, 'create'))
   useEffect(() => () => controller.current?.abort(), [])
+  useEffect(() => () => attempts.close(useStudio.getState().project?.id ?? null), [attempts])
   useEffect(() => { if (draft) review.current?.focus() }, [draft])
   const update = <K extends keyof GenerationOptions>(key: K, value: GenerationOptions[K]) => setOptions(current => ({ ...current, [key]: value }))
 
@@ -38,21 +42,30 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
     const request = new AbortController()
     controller.current = request
     setPhase('generating'); onBusy(true)
+    const from = useStudio.getState().project?.id
+    if (from) attempts.sent(from, { prompt: input.prompt, provider: input.provider, model: input.model, settings: { pageCount: input.pageCount, navigation: input.navigation, accent: input.accent, sampleData: input.sampleData, includeSettings: input.includeSettings } })
+    // How far the attempt got, for the event log.
+    let stage: 'request' | 'answer' | 'preview' = 'request', status: number | undefined
     try {
       const response = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` }, body: JSON.stringify(input), signal: request.signal })
+      if (!response.ok) status = response.status
       const result = await response.json().catch(() => { throw new Error('The studio server could not finish this request. Check your connection or try a smaller app.') })
       if (!response.ok) throw new Error(result.error ?? 'Could not generate the app.')
+      stage = 'answer'
       const app = parseGeneratedApp(result.app, input.pageCount)
       setPhase('checking')
+      stage = 'preview'
       const found = await checkPreview(app, request.signal)
-      if (request.signal.aborted) return
+      if (request.signal.aborted) { attempts.ended({ action: 'cancelled' }); return }
       const common = { provider: input.provider, model: input.model, kind: 'create' as const }
       setHistory([
         { ...common, id: crypto.randomUUID(), role: 'user', content: `${input.prompt}\n\nGeneration settings: ${JSON.stringify({ pageCount: input.pageCount, navigation: input.navigation, accent: input.accent, sampleData: input.sampleData, includeSettings: input.includeSettings })}`, createdAt: Date.now() },
         { ...common, id: crypto.randomUUID(), role: 'assistant', content: app.summary, status: 'applied', changedFiles: app.files.map(file => file.path), createdAt: Date.now() },
       ])
       setDraft(app); setIssues(found); setSelectedFile(0)
+      attempts.ended({ action: 'answered', files: app.files.length, issues: found.length })
     } catch (e) {
+      attempts.ended(request.signal.aborted ? { action: 'cancelled' } : { action: 'failed', stage, ...(status ? { status } : {}) })
       if (!request.signal.aborted) setError(e instanceof Error ? e.message : 'Could not connect. Please try again.')
     } finally {
       if (controller.current === request) { controller.current = null; setPhase('idle'); onBusy(false) }
@@ -76,7 +89,7 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
     {issues.length > 0 && <details className={styles.issues}><summary>{issues.length} preview {issues.length === 1 ? 'issue' : 'issues'}</summary><ul>{issues.map(i => <li key={i}>{i}</li>)}</ul></details>}
     <div className={styles.files}><nav aria-label="Generated files">{draft.files.map((file, i) => <button type="button" key={file.path} aria-pressed={selectedFile === i} onClick={() => setSelectedFile(i)}><Icon name="new-file" size={14} />{file.path.replace('Sources/', '')}</button>)}</nav><pre tabIndex={0} aria-label="Generated Swift source"><code>{draft.files[selectedFile]?.code}</code></pre></div>
     {error && <p role="alert" className={styles.error}>{error}</p>}
-    <footer className={styles.footer}><span>{draft.files.length} Swift files · Opens as a separate project</span><div><button type="button" className={styles.secondary} disabled={busy} onClick={() => { setDraft(null); setError(null) }}>Back to prompt</button><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()} data-testid="open-generated">{busy ? 'Opening…' : issues.length ? 'Open draft' : 'Open project'}<Icon name="chevron-right" size={13} /></button></div></footer>
+    <footer className={styles.footer}><span>{draft.files.length} Swift files · Opens as a separate project</span><div><button type="button" className={styles.secondary} disabled={busy} onClick={() => { attempts.ended({ action: 'discarded' }); setDraft(null); setError(null) }}>Back to prompt</button><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()} data-testid="open-generated">{busy ? 'Opening…' : issues.length ? 'Open draft' : 'Open project'}<Icon name="chevron-right" size={13} /></button></div></footer>
   </div>
 
   return <form className={styles.form} onSubmit={e => { e.preventDefault(); void generate() }} data-testid="prompt-creator">

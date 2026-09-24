@@ -15,6 +15,7 @@ import { exportProject, type ExportSteps } from './exportProject'
 
 const PNG = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDOkAAAAASUVORK5CYII=', 'base64'))
 const PREVIEW = { colorScheme: 'light' as const, dynamicTypeSize: 'large' as const, typeScale: 1 }
+const LOG = '{"format":"swift-web-studio-events","version":1}\n'
 
 /** A blank design whose home screen is `body`. */
 function app(body: string): Project {
@@ -32,6 +33,7 @@ function browser(instead: Partial<ExportSteps> = {}) {
       return compile({ projectId: project.id, files: project.files, revision: 1, canvas: { width: device.width, height: device.height }, safeArea: device.safeArea, colorScheme: 'light', allPages: true, galleryLimit: 128, designScreens: project.studio?.screens })
     },
     capture: async () => PNG,
+    events: async () => LOG,
     download: (name, bytes) => { downloads.push({ name, bytes }) },
     ...instead,
   }
@@ -40,9 +42,11 @@ function browser(instead: Partial<ExportSteps> = {}) {
 
 function inside(bytes: Uint8Array) {
   const entries = unzipSync(bytes)
+  const text = (end: string) => Object.entries(entries).filter(([path]) => path.endsWith(end)).map(([, data]) => new TextDecoder().decode(data))
   return {
     screens: Object.keys(entries).filter(path => path.endsWith('.png')),
-    report: new TextDecoder().decode(Object.entries(entries).find(([path]) => path.endsWith('Studio Report/report.md'))?.[1]),
+    report: text('Studio Report/report.md')[0] ?? '',
+    logs: text('.swiftstudio/events.jsonl'),
   }
 }
 
@@ -108,5 +112,30 @@ describe('the Export button', () => {
     await exporting
 
     expect(downloads.map(download => download.name)).toEqual([expect.stringMatching(/-xcodeproj\.zip$/)])
+  })
+
+  it('puts the project’s event log in the archive, asked for as this export', async () => {
+    const project = app('Text("Hello")'), asked: unknown[] = []
+    const { steps, downloads } = browser({ events: async (id, format) => { asked.push([id, format]); return LOG } })
+
+    await exportProject(project, 'xcodeproj', PREVIEW, steps)
+
+    expect(asked).toEqual([[project.id, 'xcodeproj']])
+    expect(inside(downloads[0]!.bytes).logs).toEqual([LOG])
+  })
+
+  it('goes without the event log when it cannot be read in time, and the report says so', async () => {
+    vi.useFakeTimers()
+    const project = app('Text("Hello")')
+    const { steps, downloads } = browser({ events: () => new Promise(() => {}) })
+
+    const exporting = exportProject(project, 'complete', PREVIEW, steps)
+    await vi.advanceTimersByTimeAsync(60_000)
+    const outcome = await exporting
+
+    const { logs, report } = inside(downloads[0]!.bytes)
+    expect(logs).toEqual([])
+    expect(outcome.issues).toEqual(['The studio’s event log could not be read, so events.jsonl is not in this export.'])
+    expect(report).toContain('- The studio’s event log could not be read, so events.jsonl is not in this export.')
   })
 })

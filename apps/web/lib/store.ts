@@ -40,6 +40,7 @@ import {
 } from '@studio/project-model'
 import type { DeviceKey } from '@studio/sim-shell'
 import { STUDIO_BUILD } from './build'
+import { events, type DesignEvent, type StudioEvent } from './eventLog'
 import { registerLiveWork, takeSafeStart } from './recovery'
 import { lastOpenedId, rememberLastOpened } from './lastOpened'
 import type { FileId, SourceSpan } from '@studio/shared'
@@ -184,7 +185,13 @@ export interface StudioState {
   canRedo: boolean
   documentSelection: DocumentSelection | null
   setDocumentSelection: (selection: DocumentSelection | null) => void
-  commitTransaction: (expected: Project, transaction: ProjectTransaction) => string | null
+  /**
+   * Applies a prepared change, unless the project moved on while it was prepared.
+   *
+   * `label` is how the event log records the change once it is made. Null when the
+   * caller records it: an AI edit, whose event says how long it took.
+   */
+  commitTransaction: (expected: Project, transaction: ProjectTransaction, label: DesignEvent | null) => string | null
   appendPromptMessages: (projectId: string, messages: readonly PromptMessage[]) => string | null
   replayDocument: (direction: 'undo' | 'redo') => { selection: DocumentSelection | null } | null
   activeFileId: FileId | null
@@ -349,7 +356,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
    * a decision, not a keystroke, and a reload half a second later must not bring the
    * old project back.
    */
-  async function replace(project: Project, { leaveUnsaved = false }: SwitchOptions = {}): Promise<SwitchResult> {
+  async function replace(project: Project, created: StudioEvent, { leaveUnsaved = false }: SwitchOptions = {}): Promise<SwitchResult> {
     // Keep the latest keystrokes in the outgoing project's saved copy.
     const request = ++switchRequest, outgoingId = get().project?.id
     const blocked = await leaveOutgoing(request, outgoingId, leaveUnsaved)
@@ -373,6 +380,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       ...saveState(problem),
     })
     rememberLastOpened(project.id)
+    events.record(project.id, created)
 
     /**
      * What happens to what was open.
@@ -385,6 +393,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     if (outgoing && outgoing.id !== project.id) {
       const untouched = outgoing.manifest.templateId !== undefined && isPristine(outgoing)
       if (untouched) {
+        // What happened while it was open belongs to the story of the one after it.
+        events.handOn(outgoing.id, project.id)
         try {
           await persistence().remove(outgoing.id)
         } catch {
@@ -444,6 +454,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         origin: 'shared',
         durable,
       })
+      events.record(shared.id, { type: 'session', action: 'loaded', origin: 'shared', build: STUDIO_BUILD.commit })
       const problem = await writeProject(shared)
       if (problem) set(saveState(problem))
       return
@@ -495,16 +506,18 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     // but nothing has been typed into it either, so leaving it loses nothing.
     if (existing || failure) saved.set(project.id, project)
 
+    const origin = recovering ? 'recovered' : existing ? 'restored' : 'fresh'
     set({
       project,
       activeFileId: first,
       openFileIds: first ? [first] : [],
       loaded: true,
-      origin: recovering ? 'recovered' : existing ? 'restored' : 'fresh',
+      origin,
       recents: summaries,
       loadError: failure,
       durable,
     })
+    events.record(project.id, { type: 'session', action: 'loaded', origin, build: STUDIO_BUILD.commit })
     // After a failed read the starter is only a place to stand. Remembering it would
     // have the next reload open it instead of the work that could not be read.
     if (!failure) rememberLastOpened(project.id)
@@ -526,7 +539,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     documentRevision: 0,
     documentSelection: null,
     setDocumentSelection(selection) { set({ documentSelection: selection }) },
-    commitTransaction(expected, transaction) {
+    commitTransaction(expected, transaction, label) {
       const current = get()
       if (current.project !== expected) return 'The project changed while this edit was being prepared. Try again.'
       const result = applyProjectTransaction(expected, current.documentRevision, transaction)
@@ -534,6 +547,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       if (result.project !== expected) {
         set({ project: result.project, ...(transaction.selection === undefined ? {} : { documentSelection: transaction.selection }) })
         scheduleSave()
+        if (label) events.record(expected.id, label)
       }
       return null
     },
@@ -554,6 +568,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       replaying = true
       try { commit(result.project, result.selection?.file); set({ documentSelection: result.selection }) }
       finally { replaying = false }
+      events.record(current.id, { type: 'history', direction })
       return { selection: result.selection }
     },
     project: null,
@@ -582,6 +597,9 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     async handOver({ save }) {
       if (save) await get().flush()
       handedOver = true
+      const open = get().project
+      if (open) events.record(open.id, { type: 'session', action: 'handed-over' })
+      await events.stop()
     },
     unsavedWork() {
       const { project, saveError, durable } = get()
@@ -603,7 +621,9 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 
     setFileText(fileId, text) {
       const { project } = get()
-      if (!project || !project.files.some(f => f.id === fileId && f.text !== text)) return
+      const file = project?.files.find(f => f.id === fileId)
+      if (!project || !file || file.text === text) return
+      events.typed(project.id, fileId, file.text, text)
       typingGroup = 'typing:' + fileId
       try { set({ project: withFileText(project, fileId, text) }) }
       finally { typingGroup = undefined }
@@ -674,6 +694,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       if (!project || !normalized) return false
       if (project.manifest.name === normalized) return true
       commit({ ...project, manifest: { ...project.manifest, name: normalized, templateId: undefined }, updatedAt: Date.now() })
+      events.record(project.id, { type: 'project', action: 'renamed' })
       return true
     },
 
@@ -815,7 +836,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       const template = module.templateById(templateId)
       if (!template) return 'failed'
 
-      return replace(withUnusedName(module.createProjectFromTemplate(template)), options)
+      return replace(withUnusedName(module.createProjectFromTemplate(template)), { type: 'project', action: 'created', template: templateId }, options)
     },
 
     async importProject(expected, incoming) {
@@ -835,6 +856,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         const first = incoming.files[0]?.id ?? null
         set({ project: incoming, activeFileId: first, openFileIds: first ? [first] : [], lastSavedAt: Date.now(), ...saveState(null), origin: 'restored' })
         rememberLastOpened(incoming.id)
+        events.record(incoming.id, { type: 'project', action: 'imported' })
         await refreshRecents()
         return null
       } finally { importGuard = null }
@@ -844,7 +866,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       if (handedOver) return 'failed'
       const project = projectFromFiles(files)
       if (!project) return 'failed'
-      return replace(withUnusedName(project), options)
+      return replace(withUnusedName(project), { type: 'project', action: 'created', files: files.length }, options)
     },
 
     async openProject(id, { leaveUnsaved = false } = {}) {
@@ -888,6 +910,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         ...saveState(null),
       })
       rememberLastOpened(id)
+      events.record(id, { type: 'project', action: 'opened' })
       await refreshRecents()
       return 'opened'
     },
@@ -903,6 +926,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       } catch {
         // Nothing useful to do: the row stays, and the list says so on the next read.
       }
+      events.forget(id)
       await refreshRecents()
     },
   }
@@ -912,8 +936,21 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 // written yet included - without importing the store itself.
 registerLiveWork({
   project: () => useStudio.getState().project,
-  flush: async () => { await useStudio.getState().flush(); return useStudio.getState().saveError },
-  archive: async project => (await import('@studio/exporter')).exportEditableZip(project, STUDIO_BUILD),
+  flush: async () => {
+    await useStudio.getState().flush()
+    await events.flush()
+    return useStudio.getState().saveError
+  },
+  archive: async project => {
+    const { exportEditableZip } = await import('@studio/exporter')
+    // The log is worth waiting a moment for, and not a download.
+    const log = await Promise.race([events.jsonl(project.id), new Promise<undefined>(resolve => setTimeout(resolve, 3_000))]).catch(() => undefined)
+    return exportEditableZip(project, { build: STUDIO_BUILD, events: log })
+  },
+  record: event => {
+    const open = useStudio.getState().project
+    if (open) events.record(open.id, { type: 'recovery', ...event })
+  },
 })
 
 /**

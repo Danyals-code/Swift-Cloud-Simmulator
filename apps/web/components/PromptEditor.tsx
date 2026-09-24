@@ -7,6 +7,8 @@ import { DEFAULT_MODELS, type Provider } from '../lib/generation/schema'
 import { parsePromptEditInput, promptConversationContext } from '../lib/generation/edit-schema'
 import { preparePromptEdit, promptPreviewProblem } from '../lib/generation/applyPromptEdit'
 import { compileSnapshot } from '../lib/compileSnapshot'
+import { events } from '../lib/eventLog'
+import { promptAttempts } from '../lib/promptAttempts'
 import { Icon } from './ui/Icon'
 import styles from './PromptEditor.module.css'
 
@@ -17,6 +19,7 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
   const [error, setError] = useState<string | null>(null), [connectionOpen, setConnectionOpen] = useState(false)
   const [dismissedSelection, setDismissedSelection] = useState<string | null>(null)
   const controller = useRef<AbortController | null>(null), conversation = useRef<HTMLDivElement>(null)
+  const [attempts] = useState(() => promptAttempts(events, 'edit'))
   const selectionKey = JSON.stringify(selection), context = dismissedSelection === selectionKey ? null : selection
   const busy = phase !== 'idle'
   useEffect(() => () => controller.current?.abort(), [])
@@ -40,29 +43,37 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
     const user: PromptMessage = { ...common, id: crypto.randomUUID(), role: 'user', content: input.prompt, createdAt: Date.now(), ...(context ? { selection: context } : {}) }
     const problem = before.appendPromptMessages(projectId, [user])
     if (problem) { setError(problem); return }
+    attempts.sent(projectId, { prompt: input.prompt, provider, model, ...(context ? { selection: true } : {}) })
     const current = useStudio.getState(), expected = current.project!, revision = current.documentRevision
     controller.current = request; setPrompt(''); setPhase('editing'); setConnectionOpen(false)
     const reply = (content: string, status: PromptMessage['status'], changedFiles?: readonly string[]) => useStudio.getState().appendPromptMessages(projectId, [{ ...common, id: crypto.randomUUID(), role: 'assistant', content, status, createdAt: Date.now(), changedFiles }])
+    // How far the attempt got, for the event log.
+    let stage: 'request' | 'answer' | 'preview' = 'request', status: number | undefined, movedOn = false
     try {
       const response = await fetch('/api/edit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` }, body: JSON.stringify(input), signal: request.signal })
+      if (!response.ok) status = response.status
       const body = await response.json().catch(() => { throw new Error('The server could not finish this edit. No changes applied.') })
       if (!response.ok) throw new Error(body.error ?? 'The edit failed. No changes applied.')
       request.signal.throwIfAborted()
+      stage = 'answer'
       const prepared = preparePromptEdit(expected, revision, body.edit)
       if (prepared.transaction.changes.length) {
         setPhase('checking')
+        stage = 'preview'
         const result = await compileSnapshot(prepared.candidate, request.signal)
         const problem = promptPreviewProblem(result)
         if (problem) throw new Error(problem)
       }
       request.signal.throwIfAborted()
-      const problem = useStudio.getState().commitTransaction(expected, prepared.transaction)
-      if (problem) throw new Error(`${problem} No AI changes applied.`)
+      const problem = useStudio.getState().commitTransaction(expected, prepared.transaction, null)
+      if (problem) { movedOn = true; throw new Error(`${problem} No AI changes applied.`) }
       const applied = prepared.transaction.changes.length > 0
+      attempts.ended(applied ? { action: 'applied', files: prepared.transaction.changes.length } : { action: 'replied' })
       const historyError = reply(prepared.edit.reply, applied ? 'applied' : 'replied', prepared.transaction.changes.map(change => change.file))
       if (historyError) setError(historyError)
       if (applied) onApplied()
     } catch (error) {
+      attempts.ended(request.signal.aborted ? { action: 'cancelled' } : movedOn ? { action: 'discarded' } : { action: 'failed', stage, ...(status ? { status } : {}) })
       const message = request.signal.aborted ? 'Cancelled. No changes applied.' : error instanceof Error ? error.message.slice(0, 500) : 'The edit failed. No changes applied.'
       const historyError = reply(message, request.signal.aborted ? 'cancelled' : 'failed')
       if (historyError && useStudio.getState().project?.id === projectId) setError(historyError)

@@ -14,14 +14,15 @@ The conversation is saved locally with the project, survives Undo/Redo, and reop
 
 ## Default export
 
-**Export** downloads a complete Xcode ZIP with the original Swift files, project/scheme/assets, individual screen PNGs, and a **Studio Report** folder containing `report.md`, `settings.json`, `screens.json`, `chat-history.md`, and `chat-history.json`. The report records deployment/signing defaults, preview settings, resources, designer metadata, capture diagnostics and limitations. It includes only conversation history actually saved in this project; earlier unsaved prompts cannot be recovered.
+**Export** downloads a complete Xcode ZIP with the original Swift files, project/scheme/assets, individual screen PNGs, the project's event log (`.swiftstudio/events.jsonl`), and a **Studio Report** folder containing `report.md`, `settings.json`, `screens.json`, `chat-history.md`, and `chat-history.json`. The report records deployment/signing defaults, preview settings, resources, designer metadata, capture diagnostics and limitations. It includes only conversation history actually saved in this project; earlier unsaved prompts cannot be recovered.
 
-Screenshots are fresh 2× browser previews at the current device, appearance and text size, using starting app content. They include discoverable destinations/presentations and saved standalone screens, beyond the normal twelve-screen gallery cap. The export refuses a missing saved screen, failed preview, oversized image, or screen-count limit rather than silently omitting it. Data-dependent routes still need native review. Code-only formats and separate image review remain in **Export options**.
+Screenshots are fresh 2× browser previews at the current device, appearance and text size, using starting app content. They include discoverable destinations/presentations and saved standalone screens, beyond the normal twelve-screen gallery cap. The export never refuses: a saved screen nothing draws any more, a preview that fails, and an image over the size limits are left out and listed under Known issues in `report.md`. Data-dependent routes still need native review. Code-only formats and separate image review remain in **Export options**.
 
 ## Data and credentials
 
 - The API key exists only in the open creator component's memory. Closing the window or switching away clears it. Changing provider also clears it.
 - A same-origin POST to `/api/generate` forwards the key to the selected provider's fixed HTTPS endpoint. Keys are not written to project storage, URLs, telemetry, or server logs by application code. Production hosting should not log authorization headers or request bodies.
+- Each prompt, with its provider, model and options, and how the request ended are written to the project's event log, which every export carries. The key never is.
 - Only the submitted description/options are sent for generation. The existing project is not included. Provider retention and billing policies still apply.
 - OpenAI uses Responses with `store: false` and strict JSON schema; Anthropic uses Messages with `output_config.format`. There are no automatic retries, repair requests, or shared server credentials.
 - Cancellation aborts the local request and upstream signal. It cannot undo tokens the provider has already processed.

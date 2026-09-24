@@ -1,7 +1,7 @@
 import { validatePromptHistory, type Project } from '@studio/project-model'
 import { normalizePreviewTarget } from '@studio/shared'
 import { encodeText, newBundle, type ExportBundle } from './bundle'
-import type { StudioBuild } from './portable'
+import { EVENT_LOG, type StudioBuild } from './portable'
 
 export interface ScreenSnapshot {
   readonly id: string
@@ -31,6 +31,7 @@ export const MAX_BUNDLE_BYTES = 60 * 1024 * 1024
 export function attachExportReview(project: Project, bundle: ExportBundle, review: ExportReview, build?: StudioBuild): ExportBundle {
   validatePromptHistory(project.chatHistory ?? [])
   const root = project.manifest.name, output = newBundle(root), base = `${root}/Studio Report`
+  const logged = bundle.has(`${root}/${EVENT_LOG}`)
   for (const [path, bytes] of bundle) output.put(path, bytes)
   const screens = review.screens.map((screen, index) => {
     if (!screen.png.length || screen.png.length > MAX_SCREEN_BYTES) throw new Error('A screen image exceeds the 4 MB archive limit. Export at a smaller device size.')
@@ -66,7 +67,8 @@ ${made}${issues}
 - ${screens.length ? `${screens.length} individual screen PNGs at 2× resolution; see screens.json for names and dimensions.` : 'No screen images; see Known issues.'}
 - settings.json contains app defaults, capture settings, resource inventory and designer metadata.
 - chat-history.md and chat-history.json contain all ${history.length} saved prompt and AI messages, including unsuccessful requests and selection context.
-- .swiftstudio metadata at the project root allows this archive to reopen in Studio.
+- .swiftstudio metadata at the project root allows this archive to reopen in Studio.${logged ? `
+- ${EVENT_LOG} logs what was done in the studio, one event a line with its time: design edits, bursts of typing, AI requests and their outcomes, mode switches, reloads and exports. It keeps prompts as written, but no Swift code and no API keys.` : ''}
 
 ## App defaults
 

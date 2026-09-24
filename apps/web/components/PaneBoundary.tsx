@@ -1,7 +1,7 @@
 'use client'
 
 import { Component, type ReactNode } from 'react'
-import { crashIfTesting, type PaneArea } from '../lib/recovery'
+import { crashIfTesting, noteRecovery, type PaneArea } from '../lib/recovery'
 import { RecoveryButtons, useRecoveryActions } from './Recovery'
 import styles from './Recovery.module.css'
 
@@ -55,7 +55,7 @@ export class PaneBoundary extends Component<PaneBoundaryProps, PaneBoundaryState
   }
 
   override componentDidMount(): void {
-    if (this.state.error !== null) this.failedWith = this.props.resetKeys
+    if (this.state.error !== null) this.failed()
   }
 
   override componentDidUpdate(_previous: PaneBoundaryProps, previousState: PaneBoundaryState): void {
@@ -63,7 +63,7 @@ export class PaneBoundary extends Component<PaneBoundaryProps, PaneBoundaryState
     const { resetKeys } = this.props
     // Just failed: remember what with. Comparing now would retry at once, and fail again.
     if (previousState.error === null) {
-      this.failedWith = resetKeys
+      this.failed()
       return
     }
     const changed = resetKeys.length !== this.failedWith.length || resetKeys.some((key, index) => !Object.is(key, this.failedWith[index]))
@@ -76,6 +76,12 @@ export class PaneBoundary extends Component<PaneBoundaryProps, PaneBoundaryState
     this.retries = [...this.retries.filter(at => now - at < BURST_MS), now]
     if (this.retries.length > BURST) return
     this.setState({ error: null })
+  }
+
+  /** Remembers what the panel failed with, and tells the event log it did. */
+  private failed(): void {
+    this.failedWith = this.props.resetKeys
+    noteRecovery({ action: 'crashed', area: this.props.area })
   }
 
   override render(): ReactNode {

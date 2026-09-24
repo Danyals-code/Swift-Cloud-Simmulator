@@ -1,6 +1,9 @@
-import { openDB, type IDBPDatabase } from 'idb'
+import { openDB } from 'idb'
 import { normalizeProject, summarize, type Project, type ProjectStore, type ProjectSummary } from './types'
 import { PROJECT_DATABASE, PROJECTS, PROJECTS_BY_UPDATE } from './storage-names'
+import { databaseRequests, type DatabaseRequest, type OpenDatabase } from './connection'
+
+export type { OpenDatabase } from './connection'
 
 /**
  * The key every project used to be written to.
@@ -91,60 +94,19 @@ export class MemoryProjectStore implements ProjectStore {
   }
 }
 
-/** How the store opens its database: `idb`'s `openDB`, or a stand-in for a test. */
-export type OpenDatabase = typeof openDB
-
 export class IndexedDbProjectStore implements ProjectStore {
   readonly durable = true
-  private db: Promise<IDBPDatabase> | null = null
+  private readonly request: DatabaseRequest
   /** The revision of each project this store last read or wrote. */
   private readonly seen = new Map<string, number>()
 
-  constructor(private readonly open: OpenDatabase = openDB) {}
-
-  /**
-   * Opens the database, and forgets a failed attempt.
-   *
-   * Caching the promise is right; caching a *rejected* one is not. A single blocked
-   * open - a version upgrade held by another tab, a browser that turns IndexedDB off
-   * mid-session - used to be remembered for the life of the page, so every later save
-   * reused the same rejection and the user's work stopped being written with nothing
-   * on screen to say so. A connection the browser closes later is forgotten the same way.
-   */
-  private connect(): Promise<IDBPDatabase> {
-    const connection = this.db ??= this.open(PROJECT_DATABASE, DB_VERSION, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains(PROJECTS)) {
-          const store = db.createObjectStore(PROJECTS, { keyPath: 'id' })
-          store.createIndex(PROJECTS_BY_UPDATE, 'updatedAt')
-        }
-      },
-      terminated: () => { if (this.db === connection) this.db = null },
-    }).catch((error: unknown) => {
-      this.db = null
-      throw error
-    })
-    return connection
-  }
-
-  /**
-   * Runs a request, and runs it once more on a new connection if it fails.
-   *
-   * Safari drops a connection after a tab has sat in the background - "Connection to
-   * Indexed Database server lost" - without closing it, and every request on it fails
-   * from then on, so the work stopped being written until the page was reloaded. A
-   * refused save is an answer rather than a lost connection, and is not tried again.
-   */
-  private async request<T>(work: (db: IDBPDatabase) => Promise<T>): Promise<T> {
-    const connection = this.connect()
-    try {
-      return await work(await connection)
-    } catch (error) {
-      if (error instanceof StaleProjectError) throw error
-      if (this.db === connection) this.db = null
-      void connection.then((db) => db.close(), () => {})
-      return work(await this.connect())
-    }
+  constructor(open: OpenDatabase = openDB) {
+    this.request = databaseRequests(open, PROJECT_DATABASE, DB_VERSION, (db) => {
+      if (!db.objectStoreNames.contains(PROJECTS)) {
+        const store = db.createObjectStore(PROJECTS, { keyPath: 'id' })
+        store.createIndex(PROJECTS_BY_UPDATE, 'updatedAt')
+      }
+    }, (error) => error instanceof StaleProjectError)
   }
 
   async list(): Promise<readonly ProjectSummary[]> {

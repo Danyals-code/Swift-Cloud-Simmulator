@@ -20,7 +20,7 @@ function documentIn(zip: Uint8Array): Record<string, unknown> {
 
 describe('A5: exports name the build that made them', () => {
   it('the editable archive records the commit and build time', () => {
-    expect(documentIn(exportEditableZip(project, BUILD)).generator).toEqual({ name: 'Swift Web Studio', build: BUILD })
+    expect(documentIn(exportEditableZip(project, { build: BUILD })).generator).toEqual({ name: 'Swift Web Studio', build: BUILD })
   })
 
   it.each(EXPORT_FORMATS.map(format => format.id))('the %s export records the commit and build time', (format) => {
@@ -40,7 +40,7 @@ describe('A5: exports name the build that made them', () => {
   })
 
   it('reopens an archive that names its build, and leaves the build behind', () => {
-    const { project: reopened, handoff } = readProjectArchive(exportEditableZip(project, BUILD))
+    const { project: reopened, handoff } = readProjectArchive(exportEditableZip(project, { build: BUILD }))
     expect(reopened!.files).toEqual(project.files)
     expect(reopened!.manifest).toEqual(project.manifest)
     expect(JSON.stringify(reopened)).not.toContain(BUILD.commit)

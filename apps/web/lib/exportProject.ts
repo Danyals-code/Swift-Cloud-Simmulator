@@ -18,6 +18,8 @@ export interface ExportSteps {
   compile(project: Project, settings: CaptureSettings, signal: AbortSignal): Promise<CompileResult>
   /** A page drawn as a PNG at twice its size. */
   capture(page: PagePreview, signal: AbortSignal): Promise<Uint8Array>
+  /** The project's event log as JSON lines, with this export in it. */
+  events(project: string, format: ArchiveFormat): Promise<string>
   /** Hands the archive to the browser's downloads. */
   download(name: string, bytes: Uint8Array): void
 }
@@ -33,6 +35,7 @@ export interface ExportOutcome {
 
 /** How long each step may take before the export goes on without it. */
 const SAVE_MS = 2_500
+const EVENTS_MS = 5_000
 const COMPILE_MS = 40_000
 const CAPTURE_MS = 10_000
 /** How long all the screens together may take. */
@@ -49,8 +52,11 @@ const CAPTURE_ALL_MS = 90_000
 export async function exportProject(project: Project, format: ArchiveFormat, preview: CaptureSettings, steps: ExportSteps): Promise<ExportOutcome> {
   // The archive is made from the project on screen, so a slow save only delays it.
   await within(() => steps.save(), SAVE_MS).catch(() => undefined)
-  const review = format === 'complete' ? await captureScreens(project, preview, steps) : undefined
-  const archive = exportArchive(project, { format, review, build: STUDIO_BUILD, now: new Date() })
+  const events = await within(() => steps.events(project.id, format), EVENTS_MS).catch(() => undefined)
+  const captured = format === 'complete' ? await captureScreens(project, preview, steps) : undefined
+  // Only the complete bundle has a report to say so in.
+  const review = captured && events === undefined ? { ...captured, issues: [...captured.issues ?? [], 'The studio’s event log could not be read, so events.jsonl is not in this export.'] } : captured
+  const archive = exportArchive(project, { format, review, build: STUDIO_BUILD, events, now: new Date() })
   steps.download(archive.name, archive.bytes)
   return { name: archive.name, screenImages: review?.screens.length ?? 0, issues: archive.issues }
 }

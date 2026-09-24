@@ -19,6 +19,12 @@ export type PaneArea = 'canvas' | 'preview' | 'settings' | 'navigator' | 'editor
 /** Where somebody goes from a crash: the same project again, or a start without it. */
 export type Destination = 'reload' | 'another'
 
+/** What happens on a recovery surface, for the studio's event log. */
+export type RecoveryEvent =
+  | { readonly action: 'crashed'; readonly area: PaneArea | 'studio' | 'page' }
+  | { readonly action: 'downloaded'; readonly outcome: DownloadOutcome }
+  | { readonly action: 'left'; readonly to: Destination }
+
 /** The work a running studio holds, including edits the autosave has not written yet. */
 export interface LiveWork {
   project(): Project | null
@@ -30,12 +36,19 @@ export interface LiveWork {
    * it needs, which the studio already carries.
    */
   archive(project: Project): Promise<Uint8Array>
+  /** Writes what happened here into the event log, which lives with the studio. */
+  record(event: RecoveryEvent): void
 }
 
 let live: LiveWork | null = null
 
 export function registerLiveWork(work: LiveWork): void {
   live = work
+}
+
+/** Tells the event log what happened here, when the studio is there to keep one. */
+export function noteRecovery(event: RecoveryEvent): void {
+  try { live?.record(event) } catch { /* the log never stands in the way of recovering */ }
 }
 
 export type DownloadOutcome = 'archive' | 'backup' | 'nothing'
@@ -49,6 +62,12 @@ export type DownloadOutcome = 'archive' | 'backup' | 'nothing'
  * The backup holds the record exactly as stored; nothing in the studio opens it again.
  */
 export async function downloadLatestWork(): Promise<DownloadOutcome> {
+  const outcome = await download()
+  noteRecovery({ action: 'downloaded', outcome })
+  return outcome
+}
+
+async function download(): Promise<DownloadOutcome> {
   const project = live?.project() ?? await savedProject().catch(() => null)
   if (!project) return 'nothing'
   try {
@@ -119,6 +138,7 @@ export type LeaveOutcome = 'left' | 'unsaved'
  * project's own content causes: reloading into it would only crash again.
  */
 export async function leave(to: Destination, force = false): Promise<LeaveOutcome> {
+  noteRecovery({ action: 'left', to })
   if (to === 'another') {
     try { sessionStorage.setItem(SAFE_START_KEY, String(Date.now())) } catch { /* then this is a plain reload */ }
   }

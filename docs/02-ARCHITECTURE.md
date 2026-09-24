@@ -403,6 +403,24 @@ switched-off modifier as a `/*studio-off:1 …*/` comment, and the native format
 `.swiftstudio/project.json` keeps each file whole, and reopening an export restores it when the
 Swift is otherwise unchanged.
 
+### 9.4 Event log
+
+Every archive carries `.swiftstudio/events.jsonl` (FR-7.9): a header line (format, version, project,
+build, how many events and how many were left out), then one event per line, each with its time,
+the page load it came from and its order in that load.
+
+- The events live in an IndexedDB database of their own, `swiftui-web-studio-events`, so adding it
+  needed no new version of the projects' database. Where IndexedDB is missing they are kept in memory.
+- Writes happen in the background, after every write before them. A write that fails loses that
+  event and no other, and nothing the log does can refuse or change an edit.
+- Design edits are recorded in the studio's own words (`designEvent`): the kind of change, the
+  layer's built-in type, and the control, library view or modifier used. Typing is one event a burst:
+  the file, and how many characters went in and out.
+- A project keeps its first 10,000 events and counts the rest. The events of an untouched starter
+  that another project replaces move to that project. Create with AI's attempts wait under a key of
+  their own and join the project open when it closes. Removing a project removes its events, and a
+  tab that hands the studio over writes nothing more.
+
 ## 10. Vercel topology
 
 | Route | Runtime | Purpose |

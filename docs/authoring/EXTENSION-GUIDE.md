@@ -34,6 +34,7 @@ Use the shared timeline for resource edits. Stored projects are cloned; writes a
 
 - `.swiftstudio/project.json`: format/version, explicit project ID, app configuration, source path mapping and export baseline, stable asset IDs and paths. An optional `generator` names the Studio build that wrote the archive (commit and build time); import drops it unread, so archives open across builds.
 - `.swiftstudio/studio.json`: optional designer-only metadata; no production layout values.
+- `.swiftstudio/events.jsonl`: the project's event log, one JSON object a line after a header line (format, version, project, build, events, dropped). Import leaves it unread.
 - Swift and image files: normal standalone archive entries. No derived caches are required.
 - Source-baseline differences are expected during external editing. ZIP structure, CRC, and resource validation protect transport; baselines guide a visible merge and are not authentication.
 - Read the complete central directory before inflation. Reject traversal, duplicate/case-colliding paths, symlinks, encrypted entries, truncation, invalid UTF-8, excess entries, oversized expansion, and missing referenced images.

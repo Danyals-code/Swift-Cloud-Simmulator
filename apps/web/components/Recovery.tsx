@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BUILD_DETAILS } from '../lib/build'
-import { downloadLatestWork, leave, type Destination, type DownloadOutcome } from '../lib/recovery'
+import { downloadLatestWork, leave, noteRecovery, type Destination, type DownloadOutcome } from '../lib/recovery'
 import styles from './Recovery.module.css'
 
 const DOWNLOADED: Record<DownloadOutcome, string> = {
@@ -72,6 +72,7 @@ function failedToLoad(error: unknown): boolean {
 export function RecoveryScreen({ error, scope = 'studio' }: { error: unknown; scope?: 'studio' | 'page' }) {
   const actions = useRecoveryActions()
   const loading = failedToLoad(error)
+  useEffect(() => noteRecovery({ action: 'crashed', area: scope }), [scope])
   return (
     <main className={styles.screen} data-testid="recovery-screen" data-scope={scope}>
       <div className={styles.card} role="alert">
