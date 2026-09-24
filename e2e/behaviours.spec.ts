@@ -40,6 +40,13 @@ const currentSource = async (page: Page) => {
   return text
 }
 
+test('App settings counts every screen Layers lists, a pushed one too (D13)', async ({ page }) => {
+  await openSource(page, app('        NavigationStack {\n            NavigationLink("Details") { DetailScreen() }\n                .navigationTitle("Home")\n        }', '\nstruct DetailScreen: View {\n    var body: some View {\n        Text("More about the plan")\n            .navigationTitle("Details")\n    }\n}\n'), 'Details')
+  await page.getByTestId('design-app').click()
+
+  await expect(page.getByTestId('app-settings')).toContainText('2 screens')
+})
+
 test('a toggle added from the library switches in the preview at once (D13)', async ({ page }) => {
   await openSource(page, app('        VStack {\n            Text("Settings")\n        }'), 'Settings')
   await page.getByTestId('render-tree').getByText('Settings', { exact: true }).click()

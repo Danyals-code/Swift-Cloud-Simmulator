@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { Diagnostic, PagePreview } from '@studio/shared'
-import { canRename, designScreenPath, emptyScreensNote, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
+import { canRename, designScreenPath, DETACHED_GROUP, emptyScreensNote, SHEETS_GROUP, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
 import type { ScreenCommand } from '../lib/screens'
 import type { NavigatorLayout } from '../lib/layout'
 import { Icon, type IconName } from './ui/Icon'
@@ -105,15 +105,15 @@ export function DesignNavigator(props: DesignNavigatorProps) {
 
   const screensGroup = (depth: number, withLayers: boolean) => <>
     {tree.lanes.map(lane => screenRows(lane.root, depth, withLayers))}
-    {!focus && !!tree.detached.length && <>
-      <GroupRow id="group:detached" depth={depth} label="Not linked yet" count={tree.detached.length} expanded={isOpen('group:detached')} onToggle={() => toggle('group:detached')} title="Screens nothing navigates to yet. Add a Navigate to action to connect one." />
-      {isOpen('group:detached') && tree.detached.map(node => screenRows(node, depth + 1, withLayers))}
+    {(!focus || path.includes(DETACHED_GROUP)) && !!tree.detached.length && <>
+      <GroupRow id={DETACHED_GROUP} depth={depth} label="Not linked yet" count={tree.detached.length} expanded={isOpen(DETACHED_GROUP)} onToggle={() => toggle(DETACHED_GROUP)} title="Screens nothing navigates to yet. Add a Navigate to action to connect one." />
+      {isOpen(DETACHED_GROUP) && tree.detached.map(node => screenRows(node, depth + 1, withLayers))}
     </>}
     {!tree.lanes.length && !tree.detached.length && <p className={styles.empty}>{empty.text}{empty.at && <> <button type="button" className={styles.emptyAction} onClick={() => onReveal(empty.at!.file, empty.at!.offset)}>Show in Code</button></>}</p>}
   </>
   const sheetsGroup = (depth: number, withLayers: boolean) => !tree.sheets.length ? null : <>
-    <GroupRow id="group:sheets" depth={depth} label="Sheets" icon="sheet" count={tree.sheets.length} expanded={isOpen('group:sheets')} onToggle={() => toggle('group:sheets')} />
-    {isOpen('group:sheets') && tree.sheets.map(sheet => screenRows(sheet.screen, depth + 1, withLayers, sheet.openers.length > 1 ? `Opened from ${sheet.openers.length} screens` : undefined))}
+    <GroupRow id={SHEETS_GROUP} depth={depth} label="Sheets" icon="sheet" count={tree.sheets.length} expanded={isOpen(SHEETS_GROUP)} onToggle={() => toggle(SHEETS_GROUP)} />
+    {isOpen(SHEETS_GROUP) && tree.sheets.map(sheet => screenRows(sheet.screen, depth + 1, withLayers, sheet.openers.length > 1 ? `Opened from ${sheet.openers.length} screens` : undefined))}
   </>
   const componentsGroup = (depth: number) => <>
     <GroupRow id="group:components" depth={depth} label="Components" icon="component" count={tree.components.length} expanded={isOpen('group:components')} onToggle={() => toggle('group:components')} />
@@ -167,7 +167,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
         {!focus && componentsGroup(1)}
         <GroupRow id="group:screens" depth={1} label={tree.navigation === 'tabs' ? 'Tabs' : 'Screens'} icon={tree.navigation === 'tabs' ? 'tabs' : 'screens'} expanded={isOpen('group:screens')} onToggle={() => toggle('group:screens')} action={addScreen} />
         {isOpen('group:screens') && screensGroup(2, true)}
-        {!focus && sheetsGroup(1, true)}
+        {(!focus || path.includes(SHEETS_GROUP)) && sheetsGroup(1, true)}
       </>}
     </div>
     {feedback}

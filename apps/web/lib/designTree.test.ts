@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Diagnostic } from '@studio/shared'
 import { compile, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
-import { designTree, emptyScreensNote } from './designTree'
+import { designScreenPath, designTree, emptyScreensNote } from './designTree'
 import { screenCatalog, type DesignScreen } from './screens'
 
 /**
@@ -142,5 +142,34 @@ struct EditScreen: View {
   var body: some View { NavigationStack { Text("Form").navigationTitle("Edit") } }
 }`)
     expect(tree.sheets.map(({ screen, openers }) => [screen.name, screen.view, screen.shared, openers.length])).toEqual([['Edit', 'EditScreen', undefined, 2]])
+  })
+})
+
+/**
+ * The rows the Design panel opens to show the selected screen (D13). A screen just
+ * added is linked from nothing yet, and used to be selected inside a closed group.
+ */
+describe('the way the Design panel opens to a screen', () => {
+  function treeOf(declarations: string, saved: readonly DesignScreen[] = []) {
+    resetPipelineState()
+    setFontMetrics([])
+    const text = `import SwiftUI\n@main struct DemoApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }\n${declarations}`
+    const result = compile({ files: [{ id: 'App.swift', text }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true, designScreens: saved })
+    return designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, saved))
+  }
+
+  it('opens Not linked yet for a screen nothing links to, as one just added is', () => {
+    const tree = treeOf('struct HomeScreen: View { var body: some View { Text("Home") } }\nstruct DraftScreen: View { var body: some View { Text("Draft") } }', [{ view: 'DraftScreen', name: 'Draft' }])
+    const draft = tree.detached[0]!
+    expect(draft.name).toBe('Draft')
+
+    expect(designScreenPath(tree, draft.id)).toEqual(['group:detached', draft.id])
+  })
+
+  it('opens Sheets for a screen a sheet presents', () => {
+    const tree = treeOf('struct HomeScreen: View {\n  @State private var editing = false\n  var body: some View { Button("Edit") { editing = true }.sheet(isPresented: $editing) { EditScreen() } }\n}\nstruct EditScreen: View { var body: some View { Text("Edit") } }')
+    const edit = tree.sheets[0]!.screen
+
+    expect(designScreenPath(tree, edit.id)).toEqual(['group:sheets', edit.id])
   })
 })

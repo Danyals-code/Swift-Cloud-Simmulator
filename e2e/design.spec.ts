@@ -595,9 +595,6 @@ test('the canvas zooms with the wheel and can be dragged anywhere, at any zoom',
 })
 
 test('choosing a page in Layers brings it into view', async ({ page }) => {
-  // Product bug: the outline and the lane headers read "One" three times, while the phones
-  // read One, Two, Three. Chosen by position, the third row does centre the right page.
-  test.fixme(true, 'Layers names every inline TabView tab after the first ("One"), so "Three" cannot be chosen (designTree.ts:66-69, screens.ts:27)')
   await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')

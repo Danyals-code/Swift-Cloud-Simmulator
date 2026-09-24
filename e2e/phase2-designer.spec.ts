@@ -59,9 +59,8 @@ test('screens create, rename, duplicate, remove and undo entirely in Design', as
   await form.getByRole('textbox', { name: 'Screen name', exact: true }).fill('Club details')
   await form.getByRole('combobox', { name: 'Screen layout', exact: true }).selectOption('HStack')
   await form.getByRole('button', { name: 'Add screen', exact: true }).click()
-  // A new screen is focused on the canvas and listed as not linked yet.
+  // A new screen is focused on the canvas, and Layers opens "Not linked yet" to show it (D13).
   await expect(phone(page, 'Club details')).toContainText('Editing')
-  await showUnlinked(page)
   await expect(screenButton(page, 'Club details')).toBeEnabled()
   await phone(page, 'Club details').getByTestId('render-tree').getByText('Club details', { exact: true }).dblclick()
   await page.getByRole('textbox', { name: 'Canvas text', exact: true }).fill('Campus Design Club')
