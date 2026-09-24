@@ -208,6 +208,12 @@ describe('Ionicons adapter', () => {
     expect(symbolDefinition('eye.slash.unknown')).toBeNull()
     expect(symbolAsset('<script>alert(1)</script>')).toBeNull()
   })
+  it('has no drawing for a name Apple ships no symbol by, since Xcode draws nothing for it (G1)', () => {
+    // Checked against the SF Symbols names and their aliases in macOS 27's CoreGlyphs on 2026-09-24.
+    for (const name of ['gear.fill', 'calendar.fill', 'timer.fill', 'battery.100.fill', 'sparkles.fill', 'wand.and.stars.fill', 'hourglass.fill', 'house.square', 'house.square.fill']) {
+      expect(symbolDefinition(name), name).toBeNull()
+    }
+  })
   it('measures and paints inherited imageScale from the same metadata', () => {
     const small = run('VStack { Image(systemName: "star") }.imageScale(.small)')
     const large = run('VStack { Image(systemName: "star") }.imageScale(.large)')

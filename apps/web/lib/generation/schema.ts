@@ -1,3 +1,5 @@
+import { parsePreviousAttempt, type PreviousAttempt } from './previousAttempt'
+
 export type Provider = 'openai' | 'anthropic'
 export interface GenerationOptions {
   provider: Provider
@@ -8,6 +10,8 @@ export interface GenerationOptions {
   accent: 'blue' | 'indigo' | 'teal' | 'orange' | 'purple'
   sampleData: boolean
   includeSettings: boolean
+  /** The second request of an attempt: what was wrong with the first answer (G2). */
+  previousAttempt?: PreviousAttempt
 }
 export interface GeneratedApp {
   name: string
@@ -35,7 +39,8 @@ export function parseOptions(value: unknown): GenerationOptions {
   if (!Number.isInteger(value.pageCount) || Number(value.pageCount) < 1 || Number(value.pageCount) > 6) throw new Error('Choose between 1 and 6 pages.')
   if (!['tabs', 'stack'].includes(String(value.navigation)) || !['blue', 'indigo', 'teal', 'orange', 'purple'].includes(String(value.accent))) throw new Error('Choose a navigation style and accent color.')
   if (typeof value.sampleData !== 'boolean' || typeof value.includeSettings !== 'boolean') throw new Error('Invalid project options.')
-  return { provider: value.provider as Provider, model: value.model, prompt: value.prompt.trim(), pageCount: value.pageCount as number, navigation: value.navigation as GenerationOptions['navigation'], accent: value.accent as GenerationOptions['accent'], sampleData: value.sampleData, includeSettings: value.includeSettings }
+  const previousAttempt = parsePreviousAttempt(value.previousAttempt)
+  return { provider: value.provider as Provider, model: value.model, prompt: value.prompt.trim(), pageCount: value.pageCount as number, navigation: value.navigation as GenerationOptions['navigation'], accent: value.accent as GenerationOptions['accent'], sampleData: value.sampleData, includeSettings: value.includeSettings, ...(previousAttempt ? { previousAttempt } : {}) }
 }
 
 /** Reject the entire response rather than silently dropping or renaming model files. */
@@ -54,7 +59,9 @@ export function parseGeneratedApp(value: unknown, expectedPages?: number): Gener
     if (total > 240000) throw new Error('This app is too large. Try fewer pages or a smaller scope.')
     return { path: f.path, code: f.code }
   })
-  if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > 6 || (expectedPages !== undefined && value.pages.length !== expectedPages)) throw new Error('The generated page count does not match your request. Try generating again.')
+  if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > 6) throw new Error('The generated page count does not match your request. Try generating again.')
+  // A page either way is how the AI often reads "3 pages": a detail screen counted or not (G2).
+  if (expectedPages !== undefined && Math.abs(value.pages.length - expectedPages) > 1) throw new Error(`The app has ${value.pages.length} ${value.pages.length === 1 ? 'page' : 'pages'}, and ${expectedPages} ${expectedPages === 1 ? 'was' : 'were'} asked for.`)
   const pages = value.pages.map((p) => {
     if (!record(p) || typeof p.title !== 'string' || !p.title.trim() || p.title.length > 100 || typeof p.file !== 'string' || !files.some(f => f.path === p.file)) throw new Error('A generated page refers to a missing file.')
     return { title: p.title, file: p.file }

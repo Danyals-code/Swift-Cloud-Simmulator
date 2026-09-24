@@ -95,6 +95,18 @@ describe('an AI edit holding the project', () => {
     expect(studio().holdForAi(() => {})).not.toBeNull()
   })
 
+  it('says when the AI is fixing an answer the preview found broken, still holding the project (G2)', () => {
+    const hold = studio().holdForAi(() => {})!
+    hold.checking()
+
+    hold.fixing()
+
+    expect(studio().aiEdit).toEqual({ phase: 'fixing' })
+    studio().setFileText(studio().project!.files[0]!.id, '// typed while it fixes')
+    expect(text()).not.toBe('// typed while it fixes')
+    hold.release()
+  })
+
   it('keeps running when opening another project is refused, since nothing switched', async () => {
     const stop = vi.fn()
     studio().setFileText(studio().project!.files[0]!.id, '// typed before the AI edit')

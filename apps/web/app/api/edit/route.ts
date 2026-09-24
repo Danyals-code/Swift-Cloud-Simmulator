@@ -1,15 +1,13 @@
 import { EDIT_SCHEMA, parsePromptEditInput, parsePromptEditResult, promptEditChanges } from '../../../lib/generation/edit-schema'
 import { EDIT_SYSTEM_PROMPT, promptEditContext } from '../../../lib/generation/edit-prompt'
+import { answer, fail, fromTheStudio, unusable } from '../../../lib/generation/routeAnswers'
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
-const headers = { 'Cache-Control': 'no-store' }
-const fail = (error: string, status = 400) => Response.json({ error }, { status, headers })
 
 /** Explicit BYOK edit request. Credentials are forwarded only to the chosen provider. */
 export async function POST(request: Request): Promise<Response> {
-  const origin = request.headers.get('origin')
-  if (origin && origin !== new URL(request.url).origin) return fail('This request must come from the studio.', 403)
+  if (!fromTheStudio(request)) return fail('This request must come from the studio.', 403)
   if (!request.headers.get('content-type')?.startsWith('application/json')) return fail('Send a JSON request.', 415)
   const apiKey = request.headers.get('authorization')?.replace(/^Bearer /, '') ?? ''
   if (!/^[\x21-\x7e]{20,512}$/.test(apiKey)) return fail('Enter a valid API key.')
@@ -52,8 +50,8 @@ export async function POST(request: Request): Promise<Response> {
       const text = blocks.filter((block: { type: string }) => block.type === (openai ? 'output_text' : 'text')).map((block: { text: string }) => block.text).join('')
       const edit = parsePromptEditResult(JSON.parse(text))
       promptEditChanges(input.files, edit)
-      return Response.json({ edit }, { headers })
-    } catch (error) { return fail(error instanceof SyntaxError ? 'The AI returned an unreadable edit. No changes applied.' : error instanceof Error ? error.message : 'Invalid edit.', 422) }
+      return answer({ edit })
+    } catch (error) { return unusable(error instanceof SyntaxError ? 'The AI returned an unreadable edit. No changes applied.' : error instanceof Error ? error.message : 'Invalid edit.') }
   } catch {
     if (request.signal.aborted) return fail('Cancelled. No changes applied.', 499)
     if (timeout.aborted) return fail('The edit took too long. Try a smaller change.', 504)

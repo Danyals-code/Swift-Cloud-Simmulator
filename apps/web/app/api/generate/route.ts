@@ -1,15 +1,13 @@
 import { parseGeneratedApp, parseOptions, PROJECT_SCHEMA } from '../../../lib/generation/schema'
 import { SYSTEM_PROMPT, userPrompt } from '../../../lib/generation/prompt'
+import { answer, fail, fromTheStudio, unusable } from '../../../lib/generation/routeAnswers'
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
-const HEADERS = { 'Cache-Control': 'no-store' }
-const fail = (error: string, status = 400) => Response.json({ error }, { status, headers: HEADERS })
 
 /** BYOK only. Fixed upstream URLs, no stored credentials, prompts, or project source. */
 export async function POST(request: Request): Promise<Response> {
-  const origin = request.headers.get('origin')
-  if (origin && origin !== new URL(request.url).origin) return fail('This request must come from the studio.', 403)
+  if (!fromTheStudio(request)) return fail('This request must come from the studio.', 403)
   if (!request.headers.get('content-type')?.startsWith('application/json')) return fail('Send a JSON request.', 415)
   const apiKey = request.headers.get('authorization')?.replace(/^Bearer /, '') ?? ''
   if (!/^[\x21-\x7e]{20,512}$/.test(apiKey)) return fail('Enter a valid API key.')
@@ -24,7 +22,8 @@ export async function POST(request: Request): Promise<Response> {
       const { value, done } = await reader.read()
       if (done) break
       bytes += value.byteLength
-      if (bytes > 30000) { await reader.cancel(); return fail('The request is too large.', 413) }
+      // Room for a 6,000-character description in any script, and a second request's problems (G2).
+      if (bytes > 64_000) { await reader.cancel(); return fail('The request is too large.', 413) }
       chunks.push(value)
     }
     const data = new Uint8Array(bytes)
@@ -68,8 +67,8 @@ export async function POST(request: Request): Promise<Response> {
     const output = blocks.filter((b: { type: string }) => b.type === (openai ? 'output_text' : 'text')).map((b: { text: string }) => b.text).join('')
     let app
     try { app = parseGeneratedApp(JSON.parse(output), options.pageCount) }
-    catch (error) { return fail(error instanceof SyntaxError ? 'The provider returned an unreadable project. Try generating again.' : error instanceof Error ? error.message : 'Invalid project.', 422) }
-    return Response.json({ app }, { headers: HEADERS })
+    catch (error) { return unusable(error instanceof SyntaxError ? 'The provider returned an unreadable project. Try generating again.' : error instanceof Error ? error.message : 'Invalid project.') }
+    return answer({ app })
   } catch {
     if (request.signal.aborted) return fail('Generation was cancelled.', 499)
     if (timeout.aborted) return fail('Generation took too long. Try a smaller app or fewer pages.', 504)
