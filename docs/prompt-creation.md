@@ -4,13 +4,15 @@ Open **the project menu (top left) → From a prompt**, choose OpenAI or Anthrop
 
 The result is ordinary SwiftUI source. It can be edited visually or in code, previewed, shared, and exported with the existing tools. The creation prompt, options and AI summary are saved when the draft is opened.
 
+A draft is kept for the browser tab until it is opened or thrown away. Closing the sheet, choosing another item in it, or reloading the page keeps it, and choosing **From a prompt** again shows it. A click beside the sheet does not close it while a draft is shown, and **Back to prompt** asks before throwing the draft away.
+
 ## Prompt Editing
 
 The left panel has **Layers** and **Prompt Editing** tabs (Files in the Code workspace). Select a view on the canvas to attach its source context above the composer; remove the tag to request an app-wide change. Open the connection settings to choose a provider/model and enter a key. Enter sends; Shift+Enter inserts a new line. Replies describe the changes in one short sentence.
 
-Each request sends current Swift files, resource names, the last 24 successful conversation messages, and the optional selected source range. The `/api/edit` endpoint returns complete changed files and explicit deletions. File paths and project size are validated, then a disposable preview worker checks the candidate before any source is changed. A successful edit is one Undo step. Typing, switching projects, or otherwise changing the document while the request runs invalidates the result instead of overwriting newer work. Stop cancels the request.
+Each request sends current Swift files, resource names, the last 24 successful conversation messages, and the optional selected source range. The `/api/edit` endpoint returns complete changed files and explicit deletions. File paths and project size are validated, then a disposable preview worker checks the candidate before any source is changed. A successful edit is one Undo step. While the request runs, the AI holds the project: typing, Design edits, Undo, renaming, file changes and opening another project wait, and a banner says so with **Stop**, which cancels the request and frees the project at once. The answer is planned against the project as it was sent, so a change made meanwhile would have thrown it away after the provider billed for it. Collapsing the left panel leaves the request running, and reloading or closing the tab asks first.
 
-The conversation is saved locally with the project, survives Undo/Redo, and reopens with an exported archive. Failed/cancelled attempts stay visible but are excluded from the next request's context. Keys stay only in component memory and clear when the panel is closed or the project changes. No provider request is made until Send. Prompt editing supports up to 256 input files / 600,000 source characters and 32 changed files per response; history is limited to 1,000 messages / 2 MB without silent truncation. Browser preview checks do not replace an Xcode build.
+The conversation is saved locally with the project, survives Undo/Redo, and reopens with an exported archive. Failed/cancelled attempts stay visible but are excluded from the next request's context. The provider, model and key are kept for the browser tab, shared with prompt-to-app creation, and cleared when the tab closes. No provider request is made until Send. Prompt editing supports up to 256 input files / 600,000 source characters and 32 changed files per response; history is limited to 1,000 messages / 2 MB without silent truncation. Browser preview checks do not replace an Xcode build.
 
 ## Default export
 
@@ -20,7 +22,7 @@ Screenshots are fresh 2× browser previews at the current device, appearance and
 
 ## Data and credentials
 
-- The API key exists only in the open creator component's memory. Closing the window or switching away clears it. Changing provider also clears it.
+- The API key, with its provider and model, is kept in this browser tab's session storage until the tab closes, for both prompt-to-app creation and Prompt Editing. It is never written to a project, an export or local storage. Changing provider clears it.
 - A same-origin POST to `/api/generate` forwards the key to the selected provider's fixed HTTPS endpoint. Keys are not written to project storage, URLs, telemetry, or server logs by application code. Production hosting should not log authorization headers or request bodies.
 - Each prompt, with its provider, model and options, and how the request ended are written to the project's event log, which every export carries. The key never is.
 - Only the submitted description/options are sent for generation. The existing project is not included. Provider retention and billing policies still apply.
