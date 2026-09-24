@@ -47,6 +47,18 @@ async function open(page: Page) {
   await expect(asset).toContainText('2 × 1 pt · dark')
   await expect(layerTree(page)).toHaveAttribute('aria-busy', 'false')
 }
+test('an image named the way macOS names a screenshot can be added (G9)', async ({ page }) => {
+  await openCounter(page)
+  await page.getByTestId('level-app').click()
+  const resources = page.getByTestId('project-resources')
+
+  // An image's name may not hold dots, and a screenshot's has them in its time.
+  await resources.getByLabel('Add bundled image').setInputFiles({ name: 'Screenshot 2026-09-24 at 10.15.32.png', mimeType: 'image/png', buffer: photo })
+
+  await expect(resources.getByRole('button', { name: /^Screenshot 2026-09-24 at 10-15-32\s*2 × 1 pt/ })).toBeVisible()
+  await expect(resources.getByRole('alert')).toHaveCount(0)
+})
+
 async function download(page: Page) {
   const waiting = page.waitForEvent('download')
   await page.getByTestId('export-format').click()
