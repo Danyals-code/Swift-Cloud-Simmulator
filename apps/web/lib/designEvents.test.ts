@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildAuthoringModel } from '@studio/swift-sema'
 import type { AuthoringNode, DesignEditRequest, HiddenViewInfo } from '@studio/shared'
 import { VIEW_CATALOG } from './viewCatalog'
-import { designEvent } from './designEvents'
+import { designEvent, refusedClipboard } from './designEvents'
 
 /**
  * What a design edit is called in the event log (G5).
@@ -48,6 +48,7 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
   'delete': { kind: 'delete' },
   'move': { kind: 'move', direction: 1 },
   'insert': { kind: 'insert', snippet: `${S}Card(title: "${S}")` },
+  'paste': { kind: 'paste', snippet: `${S}Card(title: "${S}")`, values: [`@State private var ${S.toLowerCase()} = "${S}"`] },
   'moveTo': { kind: 'moveTo', targetOffset: 12, position: 'inside' },
   'hide': { kind: 'hide' },
   'show': { kind: 'show' },
@@ -115,9 +116,15 @@ describe('design edits in the event log', () => {
     expect(designEvent({ kind: 'property', control: control('padding'), value: '12' }, text)).toEqual({ type: 'design', op: 'property', layer: 'Text', control: 'modifier' })
     expect(designEvent({ kind: 'property', control: 'component:title', value: 'Hi' }, card)).toEqual({ type: 'design', op: 'property', layer: 'component', control: 'component' })
     expect(designEvent({ kind: 'insert', snippet: vstack.snippet }, screen)).toEqual({ type: 'design', op: 'insert', layer: 'definition', view: 'VStack' })
+    expect(designEvent({ kind: 'paste', snippet: vstack.snippet, values: [] }, screen)).toEqual({ type: 'design', op: 'paste', layer: 'definition', view: 'VStack' })
     expect(designEvent({ kind: 'modifier-add', name: 'opacity' }, text)).toEqual({ type: 'design', op: 'modifier-add', layer: 'Text', modifier: 'opacity' })
     expect(designEvent({ kind: 'modifier-toggle', modifier: padding.id, enabled: false }, text)).toEqual({ type: 'design', op: 'modifier-toggle', layer: 'Text', modifier: 'padding' })
     expect(designEvent({ kind: 'delete' })).toEqual({ type: 'design', op: 'delete' })
+  })
+
+  it('log a refused copy or paste as a refused edit is, on what kind of layer and nothing more (C7)', () => {
+    expect(refusedClipboard('copy', text)).toEqual({ type: 'design', op: 'copy', layer: 'Text', refused: true })
+    expect(refusedClipboard('paste')).toEqual({ type: 'design', op: 'paste', refused: true })
   })
 
   it('name the hidden view Show brings back, when it is one the library offers', () => {

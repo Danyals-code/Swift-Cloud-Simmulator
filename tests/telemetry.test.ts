@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { CompileResult } from '@studio/shared'
+import type { CompileResult, PlaceholderPayload } from '@studio/shared'
 import {
   clearCoverage,
   coverageRanking,
@@ -100,7 +100,7 @@ describe('coverage telemetry', () => {
             frame: { x: 0, y: 0, width: 10, height: 10 },
             z: 1,
             opacity: 1,
-            placeholder: { feature: 'TimelineView', reason: 'not yet' },
+            placeholder: { kind: 'unsupported', feature: 'TimelineView' },
           },
         ],
       },
@@ -108,6 +108,13 @@ describe('coverage telemetry', () => {
 
     recordCoverage(withPlaceholder)
     expect(coverageRanking().map((e) => e.feature)).toEqual(['TimelineView'])
+  })
+
+  it('leaves out a view whose own code stopped and a missing image, which are not gaps in coverage (D12)', () => {
+    const node = (placeholder: PlaceholderPayload) => ({ id: placeholder.feature, kind: 'placeholder' as const, frame: { x: 0, y: 0, width: 10, height: 10 }, z: 1, opacity: 1, placeholder })
+    recordCoverage({ ...result([]), renderTree: { canvas: { width: 100, height: 100 }, revision: 1, nodes: [node({ kind: 'stopped', feature: 'Broken', reason: 'Index out of range' }), node({ kind: 'missing', feature: 'hero' })] } })
+
+    expect(coverageRanking()).toEqual([])
   })
 
   it('separates a known gap from a name nobody wrote down', () => {

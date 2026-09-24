@@ -1,4 +1,4 @@
-import type { Point, CornerStyle, Rect, ShapeStroke, ShapeTrim, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type { Point, CornerStyle, PlaceholderPayload, Rect, ShapeStroke, ShapeTrim, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -276,10 +276,7 @@ export interface PathElement extends ElementBase {
 
 export interface PlaceholderElement extends ElementBase {
   readonly kind: 'placeholder'
-  readonly feature: string
-  readonly reason: string
-  /** A view of the project's own whose code stopped, rather than one the preview cannot draw. */
-  readonly stopped?: true
+  readonly placeholder: PlaceholderPayload
 }
 
 export interface EmptyElement extends ElementBase {

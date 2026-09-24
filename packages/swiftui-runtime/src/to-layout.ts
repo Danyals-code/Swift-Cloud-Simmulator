@@ -1510,7 +1510,7 @@ class Converter {
 
     // A custom view whose body stopped: what it is, and why, where it would have been.
     const halted = stopped(view)
-    if (halted) return { kind: 'placeholder', id: path, feature: `${halted.name} stopped`, reason: halted.failure.message, stopped: true, ...origin }
+    if (halted) return { kind: 'placeholder', id: path, placeholder: { kind: 'stopped', feature: halted.name, reason: halted.failure.message }, ...origin }
 
     const shape = SHAPES[view.name]
     if (shape) {
@@ -1544,10 +1544,7 @@ class Converter {
     return {
       kind: 'placeholder',
       id: path,
-      feature: view.name,
-      reason: UNIMPLEMENTED_VIEWS.has(view.name)
-        ? 'Real SwiftUI that the preview does not draw. It exports to Xcode unchanged.'
-        : 'Not recognised by the preview.',
+      placeholder: { kind: UNIMPLEMENTED_VIEWS.has(view.name) ? 'unsupported' : 'unknown', feature: view.name },
       ...origin,
     }
   }
@@ -2121,8 +2118,7 @@ class Converter {
       return {
         kind: 'placeholder',
         id: path,
-        feature: `Image("${assetName}")`,
-        reason: 'This named image is missing. Add it in Project resources.',
+        placeholder: { kind: 'missing', feature: assetName },
         ...origin,
       }
     }

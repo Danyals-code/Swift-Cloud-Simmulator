@@ -557,7 +557,8 @@ struct ContentView: View {
   await expect(page.getByTestId('delete-selection')).toBeDisabled()
 
   await page.keyboard.press('Backspace')
-  await expect(page.getByTestId('edit-note')).toContainText('would leave invalid view content')
+  // Why, for this edit rather than for any (C7).
+  await expect(page.getByTestId('edit-note')).toContainText('This is the only view here, and this spot can’t be left empty.')
   await expect(page.getByTestId('render-tree').getByText('Only', { exact: true })).toBeVisible()
   expect(await source(page)).toBe(originalSource)
 })

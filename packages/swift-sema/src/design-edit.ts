@@ -6,6 +6,7 @@ import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveV
 import { buildAuthoringModel } from './authoring'
 import { structuralEditProblem, type StructuralKind } from './structural-check'
 import { applyPatches, type FeatureContext } from './authoring-context'
+import { pastedValues } from './authoring-clipboard'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 import { liveControl } from './authoring-behavior'
 import { wrapperOf } from './authoring-structure'
@@ -13,7 +14,7 @@ import { designControlRecipes, validateControlValue, viewCallChain } from './des
 import { Checker } from './checker'
 
 /** The operations that act on a view's whole statement - its place, its copies, whether it is there at all - as the structural check knows them. */
-const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent' }
+const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', paste: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent' }
 
 /** Plans against an immutable source revision. Commit must compare the whole project again. */
 export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
@@ -66,7 +67,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       return finish(request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
-  if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
+  if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'paste', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
     try {
       const result = featureEdit(context, node, operation as Parameters<typeof featureEdit>[2])
       const after = result.files.find(f => f.id === file.id)?.text
@@ -85,10 +86,15 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     } catch (error) { return reject(error instanceof Error ? error.message : 'The design operation could not be planned.') }
   }
   let changed: { text: string; offset: number } | null = null
+  /** Why an edit of the view refused, in the edit's own words (C7). */
+  let refusal: string | undefined
+  const refuse = (reason: string) => { refusal = reason }
   /** Set when an insert also wraps the screen in the NavigationStack a new link needs: all it brings. */
   let wrap: string | undefined
   // Where a structural change acts: the view itself, or for a row design's insert the collection it repeats in.
-  const offset = node?.kind === 'template' && operation.kind === 'insert' ? model.nodes.find(n => n.id === node.parentId)?.source.start ?? request.target.start : request.target.start
+  /** A view added by this edit, from the library or pasted. */
+  const adding = operation.kind === 'insert' || operation.kind === 'paste' ? operation : undefined
+  const offset = node?.kind === 'template' && adding ? model.nodes.find(n => n.id === node.parentId)?.source.start ?? request.target.start : request.target.start
   if (operation.kind === 'property' && node) {
     let expression: Expr | undefined
     function visit(item: Node): void {
@@ -108,15 +114,16 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     changed = { text: file.text.slice(0, patch.start) + patch.text + file.text.slice(patch.end), offset: node.source.start }
   } else {
     switch (operation.kind) {
-      case 'delete': changed = deleteView(file.text, file.id, offset); break
-      case 'move': changed = moveView(file.text, file.id, offset, operation.direction); break
+      case 'delete': changed = deleteView(file.text, file.id, offset, refuse); break
+      case 'move': changed = moveView(file.text, file.id, offset, operation.direction, refuse); break
       case 'moveTo': {
         const problem = canvasDropProblem(model.nodes, node!, { file: file.id, start: operation.targetOffset }, operation.position)
         if (problem) return reject(problem)
-        changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position)
+        changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position, refuse)
         break
       }
-      case 'insert': {
+      case 'insert':
+      case 'paste': {
         // A link offered by the palette must be runnable immediately. If this
         // screen has no navigation container, wrap its root in the same edit.
         const snippet = Parser.parse(`struct InsertPreview: View { var body: some View { ${operation.snippet} } }`, '__insert.swift')
@@ -150,35 +157,37 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           const wrapped = applyPatches(context, stack).find(f => f.id === file.id)!.text
           // Only insertions: the view moves by what is written before it.
           const shifted = offset + stack.filter(p => p.start <= offset).reduce((moved, p) => moved + p.text.length, 0)
-          changed = insertView(wrapped, file.id, shifted, operation.snippet)
+          changed = insertView(wrapped, file.id, shifted, operation.snippet, refuse)
           // The link and the stack the screen needs for it: two places, so checked as a wrap.
           wrap = `${operation.snippet} ${stack[0]!.text}${stack.at(-1)!.text}`
         } else {
-          const live = node ? liveControl(context, node, operation.snippet) : null
-          changed = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet)
-          if (live && changed) {
-            // The value is declared above the view, which moves down by its line.
-            const { member } = live
+          const live = node && operation.kind === 'insert' ? liveControl(context, node, operation.snippet) : null
+          const brought = node && operation.kind === 'paste' ? pastedValues(context, node, operation.values) : undefined
+          if (brought && 'problem' in brought) return reject(brought.problem)
+          changed = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet, refuse)
+          const member = live?.member ?? brought?.member
+          if (member && changed) {
+            // Values are declared above the view, which moves down by their lines.
             changed = { text: changed.text.slice(0, member.start) + member.text + changed.text.slice(member.end), offset: changed.offset + member.text.length - (member.end - member.start) }
-            // The control and the value it is bound to: two places, so checked as a wrap.
-            wrap = `${live.snippet} ${live.declaration}`
+            // The view and the values it reads: two places, so checked as a wrap.
+            wrap = live ? `${live.snippet} ${live.declaration}` : `${operation.snippet} ${brought!.added.join(' ')}`
           }
         }
         break
       }
-      case 'hide': changed = hideView(file.text, file.id, offset); break
-      case 'show': changed = showView(file.text, file.id, offset); break
+      case 'hide': changed = hideView(file.text, file.id, offset, refuse); break
+      case 'show': changed = showView(file.text, file.id, offset, refuse); break
     }
   }
-  if (!changed) return reject('This operation has no valid destination or would leave invalid view content.')
+  if (!changed) return reject(refusal ?? 'This operation has no valid destination or would leave invalid view content.')
   const next = Parser.parse(changed.text, file.id)
   if (next.diagnostics.some(d => d.severity === 'error')) return reject('The proposed change does not parse. The project was not changed.')
   const structural = STRUCTURAL[operation.kind]
   if (structural) {
     const problem = structuralEditProblem({
       file: file.id, before: file.text, after: changed.text, view: node?.source ?? request.target,
-      ...(wrap ? { kind: 'wrap', adds: wrap } : { kind: structural, adds: operation.kind === 'insert' ? operation.snippet : undefined }),
-      toward: operation.kind === 'moveTo' ? operation.targetOffset : operation.kind === 'insert' ? offset : undefined,
+      ...(wrap ? { kind: 'wrap', adds: wrap } : { kind: structural, adds: adding?.snippet }),
+      toward: operation.kind === 'moveTo' ? operation.targetOffset : adding ? offset : undefined,
       inside: operation.kind === 'moveTo' ? operation.position === 'inside' : undefined,
       landed: !wrap && structural !== 'delete' && structural !== 'hide' && structural !== 'show' ? changed.offset : undefined,
     })
@@ -191,6 +200,11 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   for (const d of diagnostics.filter(d => d.severity === 'error')) remaining.set(signature(d), (remaining.get(signature(d)) ?? 0) + 1)
   for (const d of nextDiagnostics.filter(d => d.severity === 'error')) {
     const key = signature(d), count = remaining.get(key) ?? 0
+    // A pasted view reading something that is not where it landed: a value that could not come along, a row's item (D6).
+    if (!count && operation.kind === 'paste' && d.code === 'unresolved_identifier' && d.span.file === file.id) {
+      const name = changed.text.slice(d.span.start, d.span.end)
+      return reject(`This view reads \`${name}\`, which doesn’t exist where it was pasted. Paste it where \`${name}\` is, or change it in Code.`)
+    }
     if (!count) return reject('The proposed change introduces a source diagnostic: ' + d.message)
     remaining.set(key, count - 1)
   }

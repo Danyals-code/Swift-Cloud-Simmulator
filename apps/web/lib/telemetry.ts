@@ -110,8 +110,9 @@ export function recordCoverage(result: CompileResult): void {
     if (kind && diagnostic.feature) found.set(diagnostic.feature, kind)
   }
 
+  // A view the preview has no drawing for is a gap in coverage; a view that stopped or a missing image is not.
   for (const node of result.renderTree?.nodes ?? []) {
-    const feature = node.placeholder?.feature
+    const feature = node.placeholder && ['unsupported', 'unknown'].includes(node.placeholder.kind) ? node.placeholder.feature : undefined
     if (feature && !found.has(feature)) found.set(feature, 'view')
   }
 

@@ -1,4 +1,4 @@
-import { reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
+import { nameInWords, reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
 
 export interface SourceLayerNavigation {
   readonly snapshot: AuthoringSnapshot
@@ -33,7 +33,7 @@ export function sourceLayerType(node: Pick<AuthoringNode, 'name' | 'kind'> & Par
   if (node.name === 'Image' && (node.properties?.some(property => property.name === 'systemName') || node.controls?.some(control => control.id === 'image' && control.label === 'System symbol'))) return 'Symbols'
   if (node.kind === 'template') return 'Row design'
   if (node.kind === 'component') return 'Component'
-  return VIEW_NAMES[node.name] ?? node.name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(' ').map((word, index) => index ? word.toLowerCase() : word).join(' ')
+  return VIEW_NAMES[node.name] ?? nameInWords(node.name)
 }
 
 export function sourceLayerLabel(node: AuthoringNode): string {

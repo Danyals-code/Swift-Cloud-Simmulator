@@ -1,6 +1,7 @@
-import type { AuthoringNode, DesignEditRequest } from '@studio/shared'
+import { deploymentVersion, type AuthoringNode, type DesignEditRequest } from '@studio/shared'
 import { styleExpression } from './authoring-resources'
 import { applyPatches, callOf, hasComments, raw, type FeatureContext } from './authoring-context'
+import { roundedCorners } from './design-controls'
 
 /** Convert the native GroupBox surface into ordinary, editable SwiftUI layers. */
 export function customizeCard(ctx: FeatureContext, node: AuthoringNode, color?: string) {
@@ -17,14 +18,15 @@ export function customizeCard(ctx: FeatureContext, node: AuthoringNode, color?: 
   const body = raw(ctx, call.trailingClosure.body.span).slice(1, -1)
   const titleView = title ? `Text(${raw(ctx, title.value.span)}).font(.headline)` : label ? `Group ${raw(ctx, label.value.span)}.font(.headline)` : ''
   const hasCorners = node.modifiers?.some(modifier => ['cornerRadius', 'clipShape'].includes(modifier.name) && modifier.enabled !== false)
+  const corners = roundedCorners(8, deploymentVersion(ctx.deploymentTarget))
   const existingFill = node.modifiers?.find(modifier => modifier.name === 'background' && modifier.enabled !== false)
   const existingColor = existingFill && node.styles?.find(style => style.kind === 'color' && existingFill.propertyIds.includes(style.property))
   const colorSpan = existingColor && node.properties.find(property => property.id === existingColor.property)?.source
   const expression = color ? styleExpression('color', color) : undefined
   // A background already in the chain must not be hidden by a new opaque surface.
   const fill = existingFill && (!expression || colorSpan) ? undefined : expression ?? 'Color(.secondarySystemBackground)'
-  const text = `VStack(alignment: .leading, spacing: 8) {${titleView ? eol + indent + '    ' + titleView : ''}${eol}${body}${eol}${indent}}${eol}${indent}.frame(maxWidth: .infinity, alignment: .leading)${eol}${indent}.padding(16)${fill ? `${eol}${indent}.background(${fill})` : ''}${hasCorners || existingFill && !fill ? '' : `${eol}${indent}.cornerRadius(8)`}`
-  return { files: applyPatches(ctx, [{ ...call.span, file: file.id, text }, ...(expression && colorSpan ? [{ ...colorSpan, text: expression }] : []), ...(existingFill && !fill && !hasCorners ? [{ file: file.id, start: existingFill.source.end, end: existingFill.source.end, text: `${eol}${indent}.cornerRadius(8)` }] : [])]), offset: node.source.start }
+  const text = `VStack(alignment: .leading, spacing: 8) {${titleView ? eol + indent + '    ' + titleView : ''}${eol}${body}${eol}${indent}}${eol}${indent}.frame(maxWidth: .infinity, alignment: .leading)${eol}${indent}.padding(16)${fill ? `${eol}${indent}.background(${fill})` : ''}${hasCorners || existingFill && !fill ? '' : `${eol}${indent}${corners}`}`
+  return { files: applyPatches(ctx, [{ ...call.span, file: file.id, text }, ...(expression && colorSpan ? [{ ...colorSpan, text: expression }] : []), ...(existingFill && !fill && !hasCorners ? [{ file: file.id, start: existingFill.source.end, end: existingFill.source.end, text: `${eol}${indent}${corners}` }] : [])]), offset: node.source.start }
 }
 
 /** Appearance edits target the card surface, not the hidden area behind GroupBox. */

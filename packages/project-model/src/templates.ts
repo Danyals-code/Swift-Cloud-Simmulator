@@ -193,7 +193,7 @@ struct Swatch: View {
             .foregroundStyle(Color.white)
             .padding()
             .background(tint)
-            .cornerRadius(8)
+            .clipShape(.rect(cornerRadius: 8))
     }
 }
 `,
@@ -297,7 +297,7 @@ const PROFILE_CARD = app(
             }
             .padding(24)
             .background(Color(.secondarySystemGroupedBackground))
-            .cornerRadius(28)
+            .clipShape(.rect(cornerRadius: 28))
 
             Spacer()
         }
@@ -347,7 +347,7 @@ const GRID = app(
         }
         .frame(width: 72, height: 72)
         .background(tint(index))
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
         .accessibilityLabel("Swatch \\(index + 1)")
     }
 
@@ -517,7 +517,7 @@ const PHOTO_GRID = app(
                         .padding(.vertical, 16)
                         .frame(maxWidth: .infinity)
                         .background(Color(.secondarySystemGroupedBackground))
-                        .cornerRadius(12)
+                        .clipShape(.rect(cornerRadius: 12))
                     }
                 }
                 .padding()
@@ -894,7 +894,7 @@ struct Card: ViewModifier {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.15))
-            .cornerRadius(14)
+            .clipShape(.rect(cornerRadius: 14))
     }
 }
 
@@ -1070,8 +1070,7 @@ const TYPESETTING = app(
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Type").font(.largeTitle).fontWeight(.bold)
-                    + Text(" setting").font(.largeTitle).foregroundStyle(Color.accentColor)
+                Text("\\(Text("Type").font(.largeTitle).fontWeight(.bold))\\(Text(" setting").font(.largeTitle).foregroundStyle(Color.accentColor))")
 
                 Text("Two halves of one line, each with a face of its own.")
                     .font(.subheadline)

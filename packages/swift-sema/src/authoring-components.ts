@@ -1,6 +1,7 @@
-import { deploymentVersion } from '@studio/shared'
+import { deploymentVersion, nameInWords } from '@studio/shared'
 import type { AuthoringNode, ComponentSettings, ComponentVariant, DesignControl, SourceFile } from '@studio/shared'
-import { Parser, insertView, forEachChild, type FuncDecl, type Node, type VarDecl } from '@studio/swift-syntax'
+import { Parser, insertView, forEachChild, type FuncDecl, type Node, type TypeRef, type VarDecl } from '@studio/swift-syntax'
+import { readsNoValue } from './authoring-clipboard'
 import { AUTHORING_COLORS, swiftString, validateControlValue, designControlRecipes } from './design-controls'
 import { applyPatches, allDeclarations, callOf, expressionOf, identifier, insertMember, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch, sourceRoot } from './authoring-context'
 import { SUPPORTED_VIEWS } from './builtins'
@@ -53,7 +54,7 @@ export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): Comp
     const argument = call.args.find(a => a.label === field.name)
     const expr = argument?.value ?? field.initializer
     const type = field.typeAnnotation
-    const scalar = scalarType(type, field.initializer)
+    const scalar = scalarType(type, field.initializer) ?? (type?.kind === 'namedType' && ['CGFloat', 'Float'].includes(type.name) ? { type: 'Double' as const, optional: false } : undefined)
     let kind: DesignControl['kind'] = 'text', value: string | undefined, options: readonly string[] | undefined
     let format = (v: string) => swiftString(v)
     const input = literal(ctx, expr)
@@ -100,7 +101,7 @@ export function componentSettings(ctx: FeatureContext, node: AuthoringNode): Com
   if (!decl) return undefined
   const currentSignature = signature(ctx, decl)
   const desc = ctx.descriptions?.find(d => d.owner === node.name)
-  return { reusable: !!reusableComponent(ctx, node), variantControls: componentRecipes(ctx, node).filter(r => r.portable).map(r => r.control.id), definitionId: node.definitionId, signature: currentSignature, propertyNames: decl.members.filter((m): m is VarDecl => m.kind === 'varDecl' && !m.accessor && !m.modifiers.some(x => ['private', 'fileprivate', 'static'].includes(x.name))).map(m => m.name), callSites: ctx.nodes.filter(n => n.definitionId === node.definitionId).map(n => n.source), controls: componentRecipes(ctx, node).map(r => r.control), descriptionStatus: !desc ? 'Inferred from the Swift interface' : desc.signature === currentSignature ? 'Description matches the Swift interface' : 'Description is outdated; using the Swift interface' }
+  return { reusable: 'call' in componentCopy(ctx, node.name), variantControls: componentRecipes(ctx, node).filter(r => r.portable).map(r => r.control.id), definitionId: node.definitionId, signature: currentSignature, propertyNames: decl.members.filter((m): m is VarDecl => m.kind === 'varDecl' && !m.accessor && !m.modifiers.some(x => ['private', 'fileprivate', 'static'].includes(x.name))).map(m => m.name), callSites: ctx.nodes.filter(n => n.definitionId === node.definitionId).map(n => n.source), controls: componentRecipes(ctx, node).map(r => r.control), descriptionStatus: !desc ? 'Inferred from the Swift interface' : desc.signature === currentSignature ? 'Description matches the Swift interface' : 'Description is outdated; using the Swift interface' }
 }
 
 export function extractComponent(ctx: FeatureContext, node: AuthoringNode, name: string): { patches: SourcePatch[]; files: SourceFile[] } {
@@ -149,18 +150,63 @@ export function extractComponent(ctx: FeatureContext, node: AuthoringNode, name:
   return { patches: [patch(node.source, `${name}(${arguments_.join(', ')})`)], files: [{ id: file, text }] }
 }
 
-/** Reuse only arguments that mean the same thing in another screen's scope. */
-function reusableComponent(ctx: FeatureContext, node: AuthoringNode): string | undefined {
-  const call = callOf(ctx, node)
-  if (!call || node.kind !== 'component' || call.trailingClosure) return
-  const recipes = componentRecipes(ctx, node).filter(r => r.portable)
-  if (call.args.some(a => !recipes.some(r => r.control.id === `component:${a.label}`))) return
-  return raw(ctx, call.span)
+/**
+ * A value of `type` for a new copy to start with, when its screen's own cannot come along:
+ * words from the input's name, zero, false, blue, an enum's first case, or no value at all.
+ */
+function sampleOf(ctx: FeatureContext, type: TypeRef | null, label: string): string | undefined {
+  if (type?.kind === 'optionalType') return 'nil'
+  if (type?.kind !== 'namedType') return undefined
+  switch (type.name) {
+    case 'String': return swiftString(nameInWords(label).replace(/^./, first => first.toUpperCase()))
+    case 'Int': case 'Double': case 'CGFloat': case 'Float': return '0'
+    case 'Bool': return 'false'
+    case 'Color': return '.blue'
+  }
+  const first = enumCases(ctx, type.name)?.[0]
+  return first === undefined ? undefined : `.${first}`
+}
+
+const isAction = (type: TypeRef | null) => type?.kind === 'functionType' && !type.params.length && type.result.kind === 'namedType' && type.result.name === 'Void'
+
+/**
+ * A new copy of component `name`, to put on any screen (D6): each input as a copy can
+ * have it on its own. A literal, a colour or a token stays as the first copy wrote it;
+ * an action starts empty, to be set in When tapped; a value from the copy's screen gives
+ * way to the input's default, or to what another copy wrote, or to a sample of its type,
+ * which the settings panel can change - held in `.constant` for a binding. Says why when
+ * an input is something no sample fits.
+ */
+export function componentCopy(ctx: FeatureContext, name: string): { readonly call: string } | { readonly problem: string } {
+  const instances = ctx.nodes.filter(n => n.kind === 'component' && n.name === name)
+  const call = instances[0] && callOf(ctx, instances[0]), decl = namedStruct(ctx, name)
+  if (!call || !decl) return { problem: `${name} has no copy to start a new one from.` }
+  const calls = instances.flatMap(instance => callOf(ctx, instance) ?? [])
+  const fields = decl.members.filter((m): m is VarDecl => m.kind === 'varDecl')
+  const inputs: string[] = []
+  for (const argument of call.args) {
+    const field = fields.find(f => f.name === argument.label)
+    const type = field?.typeAnnotation ?? null
+    if (!argument.label || !field) return { problem: `${name}’s inputs are written in a way a new copy can’t follow. Duplicate a copy instead.` }
+    if (isAction(type)) { inputs.push(`${argument.label}: { }`); continue }
+    if (readsNoValue(argument.value)) { inputs.push(`${argument.label}: ${raw(ctx, argument.value.span)}`); continue }
+    if (field.initializer) continue
+    const written = calls.flatMap(other => other.args.filter(a => a.label === argument.label && readsNoValue(a.value))).at(0)
+    const sample = sampleOf(ctx, type, argument.label)
+    const value = written ? raw(ctx, written.value.span) : sample !== undefined && field.attributes.some(a => a.name === 'Binding') ? `.constant(${sample})` : sample
+    if (value === undefined) return { problem: `${name}’s ${argument.label} comes from the screen it is on, and a copy elsewhere can’t have it. Duplicate a copy on that screen instead.` }
+    inputs.push(`${argument.label}: ${value}`)
+  }
+  // A closure after the call is its last closure input: an action starts empty, as one in the parentheses does.
+  const trailing = [...fields].reverse().find(f => f.typeAnnotation?.kind === 'functionType')
+  const content = !call.trailingClosure ? '' : isAction(trailing?.typeAnnotation ?? null) ? ' { }' : readsNoValue(call.trailingClosure) ? ` ${raw(ctx, call.trailingClosure.span)}` : undefined
+  if (content === undefined) return { problem: `${name}’s content comes from the screen it is on, and a copy elsewhere can’t have it. Duplicate a copy on that screen instead.` }
+  return { call: `${name}(${inputs.join(', ')})${content}` }
 }
 
 export function insertComponent(ctx: FeatureContext, target: AuthoringNode, name: string) {
-  const instance = ctx.nodes.find(n => n.kind === 'component' && n.name === name && reusableComponent(ctx, n))
-  if (!instance) throw new Error('This component needs values or actions from its original screen. Duplicate it there or expose literal inputs before reusing it.')
+  const copy = componentCopy(ctx, name)
+  if ('problem' in copy) throw new Error(copy.problem)
   const dependsOn = (owner: string, seen = new Set<string>()): boolean => {
     if (owner === target.owner) return true
     if (seen.has(owner)) return false
@@ -169,7 +215,7 @@ export function insertComponent(ctx: FeatureContext, target: AuthoringNode, name
   }
   if (dependsOn(name)) throw new Error('A component cannot contain itself, directly or through another component.')
   const file = ctx.files.find(f => f.id === target.source.file)!
-  const inserted = insertView(file.text, file.id, target.source.start, reusableComponent(ctx, instance)!)
+  const inserted = insertView(file.text, file.id, target.source.start, copy.call)
   if (!inserted) throw new Error('Select a layout or a layer inside a screen before adding this component.')
   return { files: ctx.files.map(f => f.id === file.id ? { ...f, text: inserted.text } : f), offset: inserted.offset }
 }

@@ -53,6 +53,11 @@ export interface AuthoringNode {
    * cannot be moved, copied, hidden or deleted on its own.
    */
   readonly argument?: true
+  /**
+   * Set on a view the preview draws as a labelled box (D12): real SwiftUI it has no drawing
+   * for yet, or a name it does not know, which only an Apple framework or the project can declare.
+   */
+  readonly undrawn?: 'unsupported' | 'unknown'
 }
 
 export interface AuthoringSnapshot {

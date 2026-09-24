@@ -466,7 +466,7 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
       frame: { x: pad, y: (request.safeArea?.top ?? 0) + 24, width, height: 92 },
       z: 1,
       opacity: 1,
-      placeholder: { feature: title, reason: detail },
+      placeholder: { kind: 'notice', feature: title, reason: detail },
     },
   ]
   return { canvas: request.canvas, nodes, revision: ++revision, notice: { title, detail } }

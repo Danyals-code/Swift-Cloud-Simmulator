@@ -42,7 +42,8 @@ function suggestValueName(state: string): string {
 
 const OVERRIDES: readonly { modifier: string; label: string }[] = [
   { modifier: 'tint', label: 'Accent color' },
-  { modifier: 'foregroundColor', label: 'Text color' },
+  // Written as current SwiftUI writes it; one written `.foregroundColor` still reads (D9).
+  { modifier: 'foregroundStyle', label: 'Text color' },
   { modifier: 'font', label: 'Text style' },
 ]
 

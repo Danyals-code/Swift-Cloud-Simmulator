@@ -183,7 +183,7 @@ test('reports unimplemented SwiftUI by name rather than calling it unresolved', 
 
   const console_ = page.getByTestId('console')
   await expect(console_).toContainText('Chart', { timeout: 5_000 })
-  await expect(console_).toContainText('the preview does not draw')
+  await expect(console_).toContainText("isn't drawn in the preview yet")
 })
 
 // ---------------------------------------------------------------- Phase 3
@@ -328,7 +328,7 @@ test('Phase 3 - a runtime trap is reported with its reason, not a crash', async 
 
   await expect(page.getByTestId('console')).toContainText('Division by zero', { timeout: 5_000 })
   // The view that trapped is drawn as stopped, saying why, in its own place.
-  await expect(preview(page).locator('[data-kind="placeholder"]')).toContainText('Root stopped')
+  await expect(preview(page).locator('[data-kind="placeholder"]')).toContainText('Its code stopped: Division by zero.')
 })
 
 test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', async ({ page }) => {
@@ -345,7 +345,7 @@ test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', as
   const placeholder = preview(page).locator('[data-kind="placeholder"]')
   await expect(placeholder).toBeVisible({ timeout: 5_000 })
   await expect(placeholder).toContainText('Chart')
-  await expect(placeholder).toContainText('does not draw')
+  await expect(placeholder).toContainText('Not drawn in the preview yet. Xcode draws it as written.')
 })
 
 // ---------------------------------------------------------------- Phase 6

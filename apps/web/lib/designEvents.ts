@@ -38,6 +38,11 @@ export function designEvent(operation: DesignEditRequest['operation'], target?: 
   return { type: 'design', op: operation.kind, ...(layer ? { layer } : {}), ...details(operation, node) }
 }
 
+/** A copy or a paste the studio refused (C7), logged as a refused edit is: on what kind of layer, and nothing it says. */
+export function refusedClipboard(op: 'copy' | 'paste', target?: AuthoringNode): DesignEvent {
+  return { type: 'design', op, ...(target ? { layer: layerType(target) } : {}), refused: true }
+}
+
 /** A change to the studio's own records rather than to the Swift: screens, states, layer names, images. */
 export function studioChange(op: StudioChange): DesignEvent {
   return { type: 'design', op }
@@ -55,7 +60,8 @@ function libraryView(type: string): string {
 function details(operation: DesignEditRequest['operation'], node: AuthoringNode | undefined): Partial<DesignEvent> {
   switch (operation.kind) {
     case 'property': return { control: controlFamily(operation.control) }
-    case 'insert': {
+    case 'insert':
+    case 'paste': {
       const view = /^\s*([A-Z]\w*)/.exec(operation.snippet)?.[1]
       return view && LIBRARY_VIEWS.has(view) ? { view } : {}
     }
