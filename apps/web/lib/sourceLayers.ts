@@ -1,4 +1,4 @@
-import { nameInWords, reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
+import { LAYOUT_WORDS, nameInWords, reconcileAuthoringSelection, type AuthoringNode, type AuthoringSelection, type AuthoringSnapshot, type HiddenViewInfo, type SourceFile, type SourceSpan, type ViewLayer } from '@studio/shared'
 
 export interface SourceLayerNavigation {
   readonly snapshot: AuthoringSnapshot
@@ -20,7 +20,7 @@ export function rebaseSourceLayers(state: SourceLayerNavigation, snapshot: Autho
 }
 
 const VIEW_NAMES: Readonly<Record<string, string>> = {
-  VStack: 'Vertical Stack', LazyVStack: 'Lazy Vertical Stack', HStack: 'Horizontal Stack', LazyHStack: 'Lazy Horizontal Stack', ZStack: 'ZStack',
+  VStack: LAYOUT_WORDS.VStack, LazyVStack: `Lazy ${LAYOUT_WORDS.VStack}`, HStack: LAYOUT_WORDS.HStack, LazyHStack: `Lazy ${LAYOUT_WORDS.HStack}`, ZStack: LAYOUT_WORDS.ZStack,
   ForEach: 'Repeat', ScrollView: 'Scroll', NavigationStack: 'Navigation', NavigationView: 'Navigation',
   NavigationSplitView: 'Split navigation', NavigationLink: 'Link', TabView: 'Tabs',
   TextField: 'Text field', SecureField: 'Password field', DatePicker: 'Date picker', ColorPicker: 'Color picker',

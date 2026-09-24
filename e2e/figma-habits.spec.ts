@@ -1,9 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openInDesign } from './designer-helpers'
+import { openInDesign, sourceInCode } from './designer-helpers'
 
 /**
- * A designer's habits from Figma, in Chrome and Safari alike: the keys (D5) and the
- * words for sizing (D2).
+ * A designer's habits from Figma, in Chrome and Safari alike: the keys (D5), the
+ * words for sizing (D2), and grouping into a Column, Row or Overlap (D3).
  */
 
 const APP = `import SwiftUI
@@ -87,4 +87,33 @@ test('⌘S says the work is saved (D5)', async ({ page }) => {
   await drawn(page, 'Beta').click()
   await page.keyboard.press('ControlOrMeta+s')
   await expect(note(page)).toHaveText('Saved. Your work also saves as you go.')
+})
+
+test('⌘G groups the layers selected together the way they sit, in Figma\'s words (D3)', async ({ page }) => {
+  await openInDesign(page, APP, 'Beta')
+  const layers = page.getByTestId('logical-layers')
+  const row = (text: string) => layers.locator('[data-source-name="Text"]').filter({ hasText: text })
+
+  await row('Gamma').hover()
+  await row('Gamma').getByRole('button', { name: /^Actions for / }).click()
+  await expect(page.getByRole('option', { name: /^Group in Column/ })).toContainText('⌘G')
+  await expect(page.getByRole('option', { name: /^Group in Row/ })).toBeVisible()
+  await expect(page.getByRole('option', { name: /^Group in Overlap/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // Escape lets go of layers selected together, as it does of one.
+  const group = layers.getByRole('button', { name: 'Group in Column', exact: true })
+  await row('Alpha').click()
+  await row('Beta').click({ modifiers: ['Shift'] })
+  await expect(group).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(group).toHaveCount(0)
+
+  await row('Alpha').click()
+  await row('Beta').click({ modifiers: ['Shift'] })
+  await expect(group).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+g')
+
+  // Into a column with the column's own spacing, so nothing on the canvas moves.
+  await expect.poll(() => sourceInCode(page)).toContain('VStack(spacing: 12) {\n            VStack(spacing: 12) {\n                Text("Alpha")\n                Text("Beta")\n            }\n            Text("Gamma")')
 })

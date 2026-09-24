@@ -1,12 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import type { DesignControl } from '@studio/shared'
+import { LAYOUT_WORDS, type DesignControl } from '@studio/shared'
 import styles from './AuthoringInspector.module.css'
 
 const RANGE_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
 const OPTION_LABELS: Record<string, string> = {
-  Row: 'Horizontal Stack', Column: 'Vertical Stack', Stack: 'ZStack',
+  Row: LAYOUT_WORDS.HStack, Column: LAYOUT_WORDS.VStack, Stack: LAYOUT_WORDS.ZStack,
   largeTitle: 'Large title', title: 'Title', title2: 'Title 2', title3: 'Title 3',
   primary: 'Primary text', secondary: 'Secondary text', clear: 'Transparent', accentColor: 'App accent',
   systemBackground: 'Screen background', secondarySystemBackground: 'Secondary background', tertiarySystemBackground: 'Tertiary background',

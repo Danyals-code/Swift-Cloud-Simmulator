@@ -22,6 +22,7 @@ const shortcuts = [
   ['Delete selected view', 'Backspace', 'Design · Edit'],
   ['Duplicate selected view', 'Mod D', 'Design · Edit'],
   ['Hide selected view', 'Mod Shift H', 'Design · Edit'],
+  ['Group in a Column, Row or Overlap', 'Mod G', 'Design · Edit'],
   ['Move selected view', 'Alt ↑ / ↓', 'Design · Edit'],
   ['Undo canvas edit', 'Mod Z', 'Design · Edit'],
   ['Redo canvas edit', 'Mod Shift Z', 'Design · Edit'],

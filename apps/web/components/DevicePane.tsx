@@ -1,6 +1,7 @@
 'use client'
 
 import { scenarioKey } from '../lib/screens'
+import { sourceLayerType } from '../lib/sourceLayers'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RenderTreeView, symbolAsset, type EventSink } from '@studio/swiftui-render-dom'
 import { stateProblem } from '../lib/stateProblem'
@@ -634,7 +635,7 @@ export function DevicePane({
       const box = element?.getBoundingClientRect()
       return {
         node: over,
-        name: over.inspect?.name ?? over.kind,
+        name: sourceLayerType({ name: over.inspect?.name ?? over.kind, kind: 'view' }),
         position: (box && event.clientY > box.top + box.height / 2 ? 'after' : 'before') as 'before' | 'after',
       }
     }

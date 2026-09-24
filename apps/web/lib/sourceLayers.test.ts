@@ -78,7 +78,7 @@ describe('source layer navigation', () => {
 
   it('filters the displayed content label, with whitespace and case normalization', () => {
     const snapshot = model(), result = sourceLayerRows(snapshot, navigation(snapshot), undefined, '  cAtAlOg  ')
-    expect(result.rows.map(r => sourceLayerLabel(r.node))).toEqual(['Vertical Stack', 'Catalog'])
+    expect(result.rows.map(r => sourceLayerLabel(r.node))).toEqual(['Column', 'Catalog'])
     expect(sourceLayerRows(snapshot, navigation(snapshot), undefined, 'Row').rows.filter(r => r.node.name === 'Text')).toHaveLength(2)
   })
 
@@ -107,12 +107,13 @@ describe('designer layer structure', () => {
     const snapshot = model(), result = sourceLayerRows(snapshot, navigation(snapshot), undefined, '')
     expect(result.rows.filter(row => row.node.kind === 'template')).toHaveLength(0)
     expect(result.rows.filter(row => row.node.name === 'Text')).toHaveLength(3)
-    expect(sourceLayerType({ name: 'VStack', kind: 'view' })).toBe('Vertical Stack')
-    expect(sourceLayerType({ name: 'HStack', kind: 'view' })).toBe('Horizontal Stack')
-    expect(sourceLayerType({ name: 'ZStack', kind: 'view' })).toBe('ZStack')
+    expect(sourceLayerType({ name: 'VStack', kind: 'view' })).toBe('Column')
+    expect(sourceLayerType({ name: 'HStack', kind: 'view' })).toBe('Row')
+    expect(sourceLayerType({ name: 'ZStack', kind: 'view' })).toBe('Overlap')
     expect(sourceLayerType({ name: 'ForEach', kind: 'collection' })).toBe('Repeat')
     expect(sourceLayerType({ name: 'Row template', kind: 'template' })).toBe('Row design')
-    expect(sourceLayerRows(snapshot, navigation(snapshot), undefined, 'vertical stack').rows.some(row => row.node.name === 'VStack')).toBe(true)
+    expect(sourceLayerRows(snapshot, navigation(snapshot), undefined, 'column').rows.some(row => row.node.name === 'VStack')).toBe(true)
+    expect(sourceLayerRows(snapshot, navigation(snapshot), undefined, 'vstack').rows.some(row => row.node.name === 'VStack')).toBe(true)
   })
 
   it('keeps component instances as views and opens their design without duplicate definitions', () => {
@@ -397,7 +398,7 @@ ${extra}`
   it('omits unrendered alternatives and separate pages from the parent phone', () => {
     const { snapshot, layers, state } = run('VStack { Text("Main"); if false { Text("Unavailable") } else { Text("Ready") }; NavigationLink("Details", destination: Text("Detail page")) }.sheet(isPresented: .constant(false)) { Text("Add page") }')
     const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: layers }).rows
-    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['Vertical Stack', 'Main', 'Ready', 'Details'])
+    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['Column', 'Main', 'Ready', 'Details'])
     expect(rows.every(row => !sourceLayerNotShown(snapshot, row.node))).toBe(true)
     const destination = snapshot.nodes.find(node => node.kind === 'branch' && node.name === 'Destination')!
     const separate = sourceLayerRows(snapshot, state, destination.id, '')
@@ -414,12 +415,12 @@ ${extra}`
     const phone = find(layers)!
     expect(phone).toBeDefined()
     const rows = sourceLayerRows(snapshot, state, undefined, '', { runtimeLayers: [phone] }).rows
-    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['Vertical Stack', 'First content'])
+    expect(rows.map(row => sourceLayerLabel(row.node))).toEqual(['Column', 'First content'])
     expect(rows.some(row => row.node.name === 'TabView')).toBe(false)
     const otherDefinition = snapshot.nodes.find(node => node.kind === 'definition' && node.name === 'SecondView')!
     const staleEntry = sourceLayerRows(snapshot, { ...state, entered: otherDefinition.id }, otherDefinition.id, '', { runtimeLayers: [phone] })
     expect(staleEntry.entry).toBeUndefined()
-    expect(staleEntry.rows.map(row => sourceLayerLabel(row.node))).toEqual(['Vertical Stack', 'First content'])
+    expect(staleEntry.rows.map(row => sourceLayerLabel(row.node))).toEqual(['Column', 'First content'])
   })
 })
 

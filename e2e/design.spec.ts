@@ -112,7 +112,7 @@ async function settledBox(locator: Locator) {
 
 const layers = (page: Page) => page.getByTestId('logical-layers')
 
-/** A row in Layers by the name it reads as: "Beta, Text", or "Vertical Stack". */
+/** A row in Layers by the name it reads as: "Beta, Text", or "Column". */
 const layer = (page: Page, name: string) => layers(page).getByRole('treeitem', { name, exact: true })
 
 /** The Problems tab under the canvas, which badges a count when the file does not compile. */
@@ -278,7 +278,7 @@ test('a view dropped in its stack’s empty space becomes the stack’s last vie
   await page.mouse.move(x, y, { steps: 5 })
   await page.mouse.move(x, y + 1)
   // The canvas says what the drop will do before it happens.
-  await expect(page.getByRole('region', { name: 'Preview', exact: true })).toContainText('Drop inside VStack')
+  await expect(page.getByRole('region', { name: 'Preview', exact: true })).toContainText('Drop inside Column')
   await page.mouse.up()
 
   await expect.poll(() => source(page)).toMatch(/VStack\(spacing: 16\) \{\n\s*Text\("Subtitle"\)\n\s*Text\("Title"\)\n\s*\}/)
@@ -334,7 +334,7 @@ test('a drag can carry a view into another container', async ({ page }) => {
   await page.getByTestId('workspace-design').click()
 
   const alpha = layer(page, 'Alpha, Text')
-  const stack = layer(page, 'Horizontal Stack')
+  const stack = layer(page, 'Row')
   // Siblings to begin with: the text and the stack sit at one level.
   const level = Number(await stack.getAttribute('aria-level'))
   await expect(alpha).toHaveAttribute('aria-level', String(level))
@@ -360,8 +360,8 @@ test('a selected container is dragged from anywhere inside it', async ({ page })
 
   // Choose the stack in Layers, then drag it by one of its children: the drag moves
   // what is selected, which is how a whole section is carried rather than a word.
-  await layer(page, 'Horizontal Stack').click()
-  await expect(layer(page, 'Horizontal Stack')).toHaveAttribute('aria-selected', 'true')
+  await layer(page, 'Row').click()
+  await expect(layer(page, 'Row')).toHaveAttribute('aria-selected', 'true')
   const inner = (await page.getByTestId('render-tree').getByText('Inner', { exact: true }).boundingBox())!
   const alpha = (await page.getByTestId('render-tree').getByText('Alpha', { exact: true }).boundingBox())!
   await page.mouse.move(inner.x + inner.width / 2, inner.y + inner.height / 2)
@@ -509,11 +509,11 @@ test('Add opens a palette that says where the view will land, and puts it there'
 
 test('Add puts a view inside the container that is selected', async ({ page }) => {
   await openDesign(page)
-  await layer(page, 'Vertical Stack').click()
-  await expect(layer(page, 'Vertical Stack')).toHaveAttribute('aria-selected', 'true')
+  await layer(page, 'Column').click()
+  await expect(layer(page, 'Column')).toHaveAttribute('aria-selected', 'true')
 
   await page.getByTestId('add-view').click()
-  await expect(page.getByTestId('add-view-target')).toHaveText('Into Vertical Stack')
+  await expect(page.getByTestId('add-view-target')).toHaveText('Into Column')
   await page.getByTestId('add-view-search').fill('divider')
   await page.keyboard.press('Enter')
 

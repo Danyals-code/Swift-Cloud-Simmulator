@@ -73,7 +73,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       const after = result.files.find(f => f.id === file.id)?.text
       const kind = STRUCTURAL[operation.kind]
       const toward = operation.kind === 'layer-reparent' ? model.nodes.find(n => n.id === operation.destination)?.source.start : undefined
-      const adds = operation.kind === 'layer-wrap' ? `${wrapperOf(operation.layout)} { }` : undefined
+      const adds = operation.kind === 'layer-wrap' ? `${wrapperOf(context, node, operation.layout)} { }` : undefined
       const problem = kind && after !== undefined && structuralEditProblem({ file: file.id, before: file.text, after, kind, view: node.source, adds, toward, inside: kind === 'reparent', landed: result.offset })
       if (problem) return reject(problem)
       // Any other feature rewrites in its own way; what it must not leave behind is a view that cannot build.

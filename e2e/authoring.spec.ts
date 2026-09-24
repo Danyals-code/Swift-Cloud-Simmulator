@@ -58,7 +58,7 @@ test('inspects source provenance without changing the document', async ({ page }
   // as "Content") in the settings path, and its parent in the selection path.
   await expect(page.getByTestId('level-screen')).toHaveText('Content')
   await expect(page.getByTestId('level-view')).toHaveText('Beta')
-  await expect(inspector.getByRole('navigation', { name: 'Selection path' })).toContainText('Vertical Stack')
+  await expect(inspector.getByRole('navigation', { name: 'Selection path' })).toContainText('Column')
   await expect(inspector.getByRole('textbox', { name: 'Text', exact: true })).toHaveValue('Beta')
   await page.getByTestId('workspace-develop').click()
   await expect(page.getByTestId('editor').locator('.cm-content')).toHaveText(SOURCE, { useInnerText: true })

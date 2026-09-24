@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ArchiveFormat, AuthoringNode, CopiedView, DesignEditRequest, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
-import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
+import { LAYER_MOVE_CONTAINERS, groupLayoutOf, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink, type Project, type StudioMetadata } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
@@ -36,13 +36,13 @@ import type { FeatureProps } from './AuthoringFeatures'
 import { DesignNavigator, type DesignLevel } from './DesignNavigator'
 import { StudioSidebar } from './StudioSidebar'
 import { AiEditBanner } from './AiEditBanner'
-import { LogicalLayers } from './LogicalLayers'
+import { LogicalLayers, type MultiSelection } from './LogicalLayers'
 import { AppSettings } from './settings/AppSettings'
 import { AppNavigationSettings } from './settings/AppNavigationSettings'
 import { ScreenSettings } from './settings/ScreenSettings'
 import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
 import { designScreens, designTree, type DesignTree } from '../lib/designTree'
-import { sourceLayerLabel } from '../lib/sourceLayers'
+import { sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
@@ -72,6 +72,8 @@ import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
+const NO_IDS: readonly string[] = []
+const NO_MULTI_SELECTION = { page: '', files: [], ids: [] }
 const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], components: [] }
 
 /** Changes the studio's own records for `project`: one Undo step, named `op` in the event log. */
@@ -173,6 +175,11 @@ export function Studio() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [pageFocusEpoch, setPageFocusEpoch] = useState(0)
+  /**
+   * The layers selected together in Layers, for its bar and for ⌘G (D3): kept here so that
+   * ⌘G reaches them wherever the focus is, and for the page they were chosen on.
+   */
+  const [multiSelection, setMultiSelection] = useState<MultiSelection & { readonly page: string }>(NO_MULTI_SELECTION)
   /** What the source says can be done to the selection, which the controls are drawn from. */
   const [siteInfo, setSiteInfo] = useState<{ key: string; info: ViewSiteInfo | null } | null>(null)
   /**
@@ -986,6 +993,20 @@ export function Studio() {
     return () => { live = false }
   }, [project, stale, result?.revision, hiddenViews, hidden.key])
 
+  /** The page Layers shows, which layers selected together belong to. */
+  const layersPage = `${focusedPage?.id}:${pageFocusEpoch}`
+  const selectedTogether = multiSelection.page === layersPage && multiSelection.files === project?.files ? multiSelection.ids : NO_IDS
+
+  /** ⌘G (D3): the layers selected together in Layers, or else the selected view, grouped the way they already sit. */
+  const groupSelection = useCallback(() => {
+    const model = result?.authoring
+    // As Layers counts them: the layers selected together, or else the selected one.
+    const ids = selectedTogether.length ? selectedTogether : authoringNode ? [authoringNode.id] : []
+    const first = model?.nodes.find(node => node.id === ids[0])
+    if (!model || !first) { refuseEdit({ kind: 'layer-wrap', ids, layout: 'VStack' }, 'Select the views to group, on the canvas or in Layers.'); return }
+    void performDesignEdit(first.source, first.fingerprint, first.owner, { kind: 'layer-wrap', ids, layout: groupLayoutOf(model.nodes, first) })
+  }, [result?.authoring, selectedTogether, authoringNode, refuseEdit, performDesignEdit])
+
   /**
    * The keys, as `shortcutFor` reads them (D5): one table for both workspaces, by where the
    * focus is, so nothing pressed in a field reaches the view. A dialog or sheet that is
@@ -994,7 +1015,7 @@ export function Studio() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
-      const shortcut = shortcutFor({ key: e.key, mod: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey }, { workspace: mode, editing: inspecting, focus: keyFocus(e.target), selected: !!selectedLayer })
+      const shortcut = shortcutFor({ key: e.key, mod: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey }, { workspace: mode, editing: inspecting, focus: keyFocus(e.target), selected: !!selectedLayer || selectedTogether.length > 1 })
       if (!shortcut) return
       // Escape is left for the canvas's own uses of it, such as cancelling a destination pick.
       if (shortcut !== 'escape') e.preventDefault()
@@ -1012,7 +1033,7 @@ export function Studio() {
         case 'escape':
           if (layout.layersOver) setLayersOver(false)
           else if (inspecting && tool === 'delete') setTool('select')
-          else if (inspecting) setLayerSelection(null)
+          else if (inspecting) { setLayerSelection(null); setMultiSelection(NO_MULTI_SELECTION) }
           break
         case 'all-screens': setAllPages(on => !on); break
         case 'save':
@@ -1028,13 +1049,14 @@ export function Studio() {
         case 'problems': togglePane('debug'); break
         case 'inspect': case 'preview': toggleInspect(); break
         case 'workspace': setMode(mode === 'design' ? 'develop' : 'design'); break
-        case 'group': case 'hold': break
+        case 'group': groupSelection(); break
+        case 'hold': break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
-      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver])
+      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver, groupSelection, selectedTogether])
 
   /**
    * Undo and redo, over the edits the canvas made.
@@ -1064,7 +1086,7 @@ export function Studio() {
   /** The stack a canvas drop onto this node goes into - its own empty space, usually its background - or null. */
   const containerNameAt = useCallback((node: RenderNode) => {
     const layer = layerForRenderNode(layers, node)
-    return layer && LAYER_MOVE_CONTAINERS.has(layer.type) ? layer.type : null
+    return layer && LAYER_MOVE_CONTAINERS.has(layer.type) ? sourceLayerType({ name: layer.type, kind: 'view' }) : null
   }, [layers])
 
   /** A drop on the canvas, named in the terms the file understands. */
@@ -1132,6 +1154,8 @@ export function Studio() {
       setPane('navigator', true)
       setPendingSelect(null)
       setEditNote(null)
+      // A view chosen on the canvas is the selection now, not the layers chosen together in Layers.
+      setMultiSelection(NO_MULTI_SELECTION)
       captureLayer(layer)
     },
     [mode, revealSource, layers, project, activeFileId, setActiveFile, setNavigatorTab, setPane, tool, applyEdit, captureLayer],
@@ -1379,12 +1403,13 @@ export function Studio() {
                 onSelectComponent={component => { if (component.definition) selectAuthoring(component.definition); else setEditNote(`${component.name} is built in Swift the studio does not read. Open it in Code.`) }}
                 onInsertComponent={component => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, { kind: 'component-insert', component: component.name }) : Promise.resolve('Select a layer where the copy should go.')}
                 onScreenCommand={updateScreens}
-                renderLayers={options => result?.authoring ? <LogicalLayers key={`${focusedPage?.id}:${pageFocusEpoch}`} {...options}
+                renderLayers={options => result?.authoring ? <LogicalLayers key={layersPage} {...options}
                   labels={project.studio?.labels} onRename={renameLayer} pageId={focusedPage?.id} pageName={focusedPage?.name} pageSource={focusedPage?.source} runtimeLayers={pageHierarchy}
                   selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={result.authoring} files={project.files} selection={layerSelection?.anchor}
                   selected={authoringNode?.id} selectedAncestors={selectedSources} hovered={liveHoveredAuthoring?.node.id ?? hoveredSources[0]} hoveredAncestors={hoveredSources.slice(1)}
                   onHover={hoverAuthoring} stale={busy} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
                   onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined}
+                  multiple={multiSelection.page === layersPage ? multiSelection : NO_MULTI_SELECTION} onMultipleChange={next => setMultiSelection({ ...next, page: layersPage })}
                   hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-2 text-[12px] text-xc-text-3">Building the view hierarchy…</p>}
               /> : <Navigator tabbed
                 key={project.id}

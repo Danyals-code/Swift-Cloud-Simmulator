@@ -1,3 +1,5 @@
+import { LAYOUT_WORDS } from '@studio/shared'
+
 /**
  * Visual building blocks and their SwiftUI source. Controls start with sample
  * values; the Interactions panel can connect them to state. Screen links gain
@@ -18,9 +20,9 @@ export interface ViewSnippet {
 
 export const VIEW_CATALOG: readonly ViewSnippet[] = [
   // --------------------------------------------------------------- Layout
-  { id: 'vstack', name: 'Vertical Stack', swiftName: 'VStack', group: 'Layout', hint: 'Stack views top to bottom', keywords: 'column vertical', snippet: 'VStack {\n    Text("Item")\n}' },
-  { id: 'hstack', name: 'Horizontal Stack', swiftName: 'HStack', group: 'Layout', hint: 'Stack views side by side', keywords: 'row horizontal', snippet: 'HStack {\n    Text("Item")\n}' },
-  { id: 'zstack', name: 'ZStack', swiftName: 'ZStack', group: 'Layout', hint: 'Stack views front to back', keywords: 'overlay depth layer', snippet: 'ZStack {\n    Text("Item")\n}' },
+  { id: 'vstack', name: LAYOUT_WORDS.VStack, swiftName: 'VStack', group: 'Layout', hint: 'Views top to bottom', keywords: 'vertical stack', snippet: 'VStack {\n    Text("Item")\n}' },
+  { id: 'hstack', name: LAYOUT_WORDS.HStack, swiftName: 'HStack', group: 'Layout', hint: 'Views side by side', keywords: 'horizontal stack', snippet: 'HStack {\n    Text("Item")\n}' },
+  { id: 'zstack', name: LAYOUT_WORDS.ZStack, swiftName: 'ZStack', group: 'Layout', hint: 'Views front to back', keywords: 'overlay depth layer stack', snippet: 'ZStack {\n    Text("Item")\n}' },
   { id: 'spacer', name: 'Spacer', group: 'Layout', hint: 'Push the others apart', keywords: 'gap flexible', snippet: 'Spacer()' },
   { id: 'divider', name: 'Divider', group: 'Layout', hint: 'A hairline between views', keywords: 'line rule separator', snippet: 'Divider()' },
   { id: 'group', name: 'Group', group: 'Layout', hint: 'Treat several views as one', snippet: 'Group {\n    Text("Item")\n}' },
