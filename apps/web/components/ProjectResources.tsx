@@ -1,9 +1,9 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { assetName, imageDataURL, ASSET_LIMITS, type ImageAsset, type Project } from '@studio/project-model'
+import { imageDataURL, ASSET_LIMITS, type ImageAsset, type Project } from '@studio/project-model'
 import type { ResourceOperation } from '@studio/shared'
-import { decodeImportedImage } from '../lib/images'
+import { decodeImportedImage, importedImageName } from '../lib/images'
 import { Icon } from './ui/Icon'
 import styles from './settings/Settings.module.css'
 
@@ -34,7 +34,7 @@ export function ImageResources({ project, stale, onAssets }: ImageResourcesProps
   async function importFile(file: File, asset?: ImageAsset, dark = false): Promise<string | null> {
     if (file.size > ASSET_LIMITS.variantBytes) return 'Each image must be 4 MB or smaller.'
     const variant = await decodeImportedImage(new Uint8Array(await file.arrayBuffer()))
-    const next: ImageAsset = asset ? { ...asset, [dark ? 'dark' : 'light']: variant } : { id: crypto.randomUUID(), name: assetName(file.name.replace(/\.[^.]+$/, '')), scale: 1, light: variant }
+    const next: ImageAsset = asset ? { ...asset, [dark ? 'dark' : 'light']: variant } : { id: crypto.randomUUID(), name: importedImageName(file.name, project.assets ?? []), scale: 1, light: variant }
     return onAssets([...(project.assets ?? []).filter(a => a.id !== next.id), next])
   }
   return <section className={styles.section} data-testid="project-resources" aria-label="Images">

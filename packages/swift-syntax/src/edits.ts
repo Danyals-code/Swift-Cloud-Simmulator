@@ -2,6 +2,7 @@ import type { DropPosition, FileId } from '@studio/shared'
 import { Parser } from './parser'
 import { walk, type Block, type Expr, type Node, type Stmt } from './ast'
 import { afterOffMarkers } from './off-markers'
+import { HIDDEN_END, HIDDEN_MARKER } from './studio-markers'
 
 /**
  * Editing the source from the canvas.
@@ -361,18 +362,6 @@ function indentSnippet(snippet: string, indent: string): string {
     .join('\n')
 }
 
-/**
- * The marker that lets a hidden view be found again.
- *
- * Hiding comments the view out, which is the only way a view can stop taking part in
- * the layout as well as in the drawing - `.hidden()` leaves its space behind. The
- * cost of commenting is that the parser stops seeing it, so the studio would have
- * nowhere to draw the switch that brings it back. This line is how it keeps it: an
- * ordinary comment that survives Xcode, a diff and a merge, and that reads as what
- * it is if the studio never opens the file again.
- */
-export const HIDDEN_MARKER = '// hidden by Swift Web Studio'
-const HIDDEN_END = '// end hidden view'
 
 export interface HiddenView {
   /** Offset of the marker line, which is where the block starts. */

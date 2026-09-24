@@ -171,6 +171,20 @@ export function normalizeProjectName(name: string): string | null {
 }
 
 /**
+ * `name`, or `name 2`, `name 3`: the first no other project has, in any letter case.
+ *
+ * Every blank design starts as MyDesignApp, and two projects of one name export to
+ * archives and Xcode projects nobody can tell apart.
+ */
+export function unusedProjectName(name: string, taken: readonly string[]): string {
+  const key = (candidate: string) => candidate.normalize('NFC').toLowerCase()
+  const used = new Set(taken.map(key))
+  let candidate = name
+  for (let n = 2; used.has(key(candidate)); n++) candidate = `${name} ${n}`
+  return candidate
+}
+
+/**
  * Rejects anything that would escape the project or confuse a filesystem.
  *
  * Shared by the file and folder normalisers so the two cannot drift: a character

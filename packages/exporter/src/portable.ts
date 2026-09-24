@@ -1,6 +1,7 @@
 import { newProjectId, normalizeProject, normalizeProjectName, normalizeFileName, normalizeFolderPath, readColorSet, readImage, readStudioMetadata, validateAssets, validateColors, type ColorAsset, type Project, type ProjectManifest, type ImageAsset, type StudioMetadata } from '@studio/project-model'
 import { DEVICES } from '@studio/sim-shell'
 import { isPreviewTarget, type SourceFile } from '@studio/shared'
+import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { encodeText, type ExportBundle } from './bundle'
 import { importSourceAssets } from './import-assets'
 import { validatePromptHistory } from '@studio/project-model'
@@ -88,7 +89,11 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
     if (!object(s) || typeof s.id !== 'string' || typeof s.base !== 'string' || typeof s.path !== 'string' || !s.path.endsWith('.swift')) throw new Error('Invalid source reference.')
     if (!safePath(s.path) || !s.path.startsWith(root)) throw new Error('Invalid source reference.')
     // A removed Swift file is a reviewed deletion. A missing binary resource remains an error.
-    return entries.has(s.path) ? [{ id: s.id, text: decodeText(read(s.path)) }] : []
+    if (!entries.has(s.path)) return []
+    // Xcode's copy goes out without the studio's markers. Unchanged there, it is the recorded
+    // text, markers and all; changed there, it is what the developer left.
+    const text = decodeText(read(s.path))
+    return [{ id: s.id, text: text !== s.base && withoutStudioMarkers(s.base) === text ? s.base : text }]
   })
   const roots = new Set(value.sources.flatMap(s => {
     const source = s as { id: string; path: string }

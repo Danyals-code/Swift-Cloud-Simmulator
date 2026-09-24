@@ -18,16 +18,22 @@ export interface ExportReview {
   readonly typeScale: number
   readonly screens: readonly ScreenSnapshot[]
   readonly diagnostics: readonly string[]
+  /** What the bundle leaves out, in plain words: screens that could not be captured, and why. */
+  readonly issues?: readonly string[]
 }
+
+/** The largest screen image an archive takes; a bigger one comes from an unusually large device. */
+export const MAX_SCREEN_BYTES = 4 * 1024 * 1024
+/** The largest complete bundle: past it, one is slow to make and to hand on. */
+export const MAX_BUNDLE_BYTES = 60 * 1024 * 1024
 
 /** Human-readable handoff plus lossless settings and conversation records. No credentials. */
 export function attachExportReview(project: Project, bundle: ExportBundle, review: ExportReview, build?: StudioBuild): ExportBundle {
   validatePromptHistory(project.chatHistory ?? [])
-  if (!review.screens.length) throw new Error('No screen images were captured. Use a code-only export or resolve the preview errors.')
   const root = project.manifest.name, output = newBundle(root), base = `${root}/Studio Report`
   for (const [path, bytes] of bundle) output.put(path, bytes)
   const screens = review.screens.map((screen, index) => {
-    if (!screen.png.length || screen.png.length > 4 * 1024 * 1024) throw new Error('A screen image exceeds the 4 MB archive limit. Export at a smaller device size.')
+    if (!screen.png.length || screen.png.length > MAX_SCREEN_BYTES) throw new Error('A screen image exceeds the 4 MB archive limit. Export at a smaller device size.')
     const slug = screen.name.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-|-$/g, '').slice(0, 70) || 'Screen'
     const path = `Screens/${String(index + 1).padStart(3, '0')}-${slug}.png`
     output.put(`${base}/${path}`, screen.png)
@@ -51,12 +57,13 @@ export function attachExportReview(project: Project, bundle: ExportBundle, revie
   output.put(`${base}/chat-history.md`, encodeText(`# Prompts and AI conversation\n\n${chat || 'No prompts or AI messages have been saved in this project.'}\n`))
   const line = (value: string) => value.replace(/[\r\n]/g, ' ')
   const made = build ? `\nExported by Swift Web Studio build ${line(build.commit).slice(0, 7)} (commit ${line(build.commit)}, built ${line(build.builtAt)}).\n` : ''
+  const issues = review.issues?.length ? `\n## Known issues\n\n${review.issues.map(issue => `- ${line(issue)}`).join('\n')}\n` : ''
   const report = `# ${line(project.manifest.name)}: project report
-${made}
+${made}${issues}
 ## Contents
 
 - Full Xcode project, shared scheme, asset catalog and original Swift source.
-- ${screens.length} individual screen PNGs at 2× resolution; see screens.json for names and dimensions.
+- ${screens.length ? `${screens.length} individual screen PNGs at 2× resolution; see screens.json for names and dimensions.` : 'No screen images; see Known issues.'}
 - settings.json contains app defaults, capture settings, resource inventory and designer metadata.
 - chat-history.md and chat-history.json contain all ${history.length} saved prompt and AI messages, including unsuccessful requests and selection context.
 - .swiftstudio metadata at the project root allows this archive to reopen in Studio.
@@ -91,13 +98,13 @@ ${review.diagnostics.length ? review.diagnostics.map(message => `- ${line(messag
 
 ## Build and review
 
-Open ${line(project.manifest.name)}.xcodeproj in Xcode. The Swift files are exported byte for byte. Add external dependencies referenced by your code and resolve native compiler diagnostics there. This export has not been built or signed by Xcode.
+Open ${line(project.manifest.name)}.xcodeproj in Xcode. The Swift files are exported as written, without the studio's markers for hidden views and switched-off modifiers, which .swiftstudio/project.json keeps. Add external dependencies referenced by your code and resolve native compiler diagnostics there. This export has not been built or signed by Xcode.
 
 Browser screenshots approximate SwiftUI. Font metrics, SF Symbols, materials, scrolling and unsupported APIs can differ on iOS. Verify accessibility and behavior on a simulator or device. The report records saved defaults; it does not infer settings absent from the source.
 
 Chat records describe what happened when each request ran. Later manual edits or Undo may change those results. API credentials are not stored in the conversation or generated report.
 `
   output.put(`${base}/report.md`, encodeText(report))
-  if ([...output.files.values()].reduce((total, bytes) => total + bytes.length, 0) > 60 * 1024 * 1024) throw new Error('This bundle exceeds the 60 MB resource limit. Use a code-only export and export images separately.')
+  if ([...output.files.values()].reduce((total, bytes) => total + bytes.length, 0) > MAX_BUNDLE_BYTES) throw new Error('This bundle exceeds the 60 MB resource limit. Use a code-only export and export images separately.')
   return output.files
 }

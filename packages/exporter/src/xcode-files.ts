@@ -67,7 +67,9 @@ export function workspaceContents(): string {
  * feels less true than it is.
  */
 export function schemeContents(project: Project, blueprintId: string): string {
-  const name = project.manifest.name
+  // Names may hold `&`, which an XML attribute has to spell as an entity; `<`, `>` and
+  // `"` never reach here, since project names refuse them.
+  const name = project.manifest.name.replace(/&/g, '&amp;')
   const container = `container:${name}.xcodeproj`
 
   const buildableReference = `            <BuildableReference

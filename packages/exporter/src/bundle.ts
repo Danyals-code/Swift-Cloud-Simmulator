@@ -1,3 +1,5 @@
+import { isAccentColorSetName } from '@studio/shared'
+import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { assetCatalog } from './resources'
 import type { Project } from '@studio/project-model'
 import { generatePbxproj, targetRelativePath } from './pbxproj'
@@ -87,17 +89,19 @@ function resolveInside(path: string, root: string): string | null {
  *     project.xcworkspace/contents.xcworkspacedata
  *     xcshareddata/xcschemes/MyApp.xcscheme
  *   MyApp/
- *     MyApp.swift              <- the user's sources, byte for byte
+ *     MyApp.swift              <- the user's sources, as written
  *     Assets.xcassets/...
  *   README.md
  *   .gitignore
  * ```
  *
  * The guarantee the whole product rests on (FR-7.8, goal G3): every `.swift` file is
- * the editor buffer encoded as UTF-8 and nothing else. No reformatting, no
- * regeneration from an AST, no transformation of any kind. Everything else in the
- * bundle is scaffolding generated *around* those bytes, which is why the guarantee
- * holds by construction rather than by vigilance.
+ * the editor buffer encoded as UTF-8, less only the studio's own markers for hidden
+ * views and switched-off modifiers, which are comments nobody wrote. No reformatting,
+ * no regeneration from an AST. Everything else in the bundle is scaffolding generated
+ * *around* those bytes, which is why the guarantee holds by construction rather than
+ * by vigilance. The project record keeps each file whole, markers and all, for the
+ * studio to reopen.
  */
 export function buildExportBundle(project: Project): ExportBundle {
   const name = project.manifest.name
@@ -106,9 +110,9 @@ export function buildExportBundle(project: Project): ExportBundle {
 
   const add = (path: string, text: string) => put(`${root}/${path}`, encodeText(text))
 
-  // The user's sources, untouched.
+  // The user's sources, as written.
   for (const file of project.files) {
-    put(`${root}/${name}/${targetRelativePath(file.id)}`, encodeText(file.text))
+    put(`${root}/${name}/${targetRelativePath(file.id)}`, encodeText(withoutStudioMarkers(file.text)))
   }
 
   const plan = generatePbxproj(project)
@@ -123,7 +127,8 @@ export function buildExportBundle(project: Project): ExportBundle {
 
   for (const [path, bytes] of assetCatalog(project, `${root}/${name}/Assets.xcassets`)) put(path, bytes)
   add(`${name}/Assets.xcassets/AppIcon.appiconset/Contents.json`, appIconContents())
-  add(`${name}/Assets.xcassets/AccentColor.colorset/Contents.json`, accentColorContents())
+  // An app with its own colour set of this name already has the folder.
+  if (!project.colors?.some(color => isAccentColorSetName(color.name))) add(`${name}/Assets.xcassets/AccentColor.colorset/Contents.json`, accentColorContents())
 
   add('.gitignore', gitignoreContents())
   add('README.md', readme(project, plan.sourcePaths))
@@ -173,7 +178,8 @@ SwiftUI. These differences are expected, and none of them affect the exported co
 - Scrolling uses native browser physics, not iOS rubber-band deceleration.
 - The interpreter is far slower than compiled Swift; do not judge frame rates by it.
 
-Your Swift source is exported exactly as written - byte for byte. Anything the
-preview could not draw is still here, unchanged. Export preserves source; it does not certify that arbitrary Swift compiles.
+Your Swift source is exported as you wrote it, byte for byte, apart from the studio's
+own markers for hidden views and switched-off modifiers, which are left out. Anything
+the preview could not draw is still here, unchanged. Export preserves source; it does not certify that arbitrary Swift compiles.
 `
 }

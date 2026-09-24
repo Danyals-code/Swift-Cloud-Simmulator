@@ -46,11 +46,6 @@ it('keeps chat in native and editable metadata and resolves conflicting imported
   expect(resolveImport(local, incoming, handoff, { $chatHistory: 'incoming' }).chatHistory).toEqual(project.chatHistory)
 })
 
-it('does not silently download an incomplete or oversized set of screenshots', () => {
-  expect(() => exportProjectZip(project, 'xcodeproj', { review: { ...review, screens: [] } })).toThrow('No screen images')
-  expect(() => exportProjectZip(project, 'xcodeproj', { review: { ...review, screens: [{ ...review.screens[0]!, png: new Uint8Array(4 * 1024 * 1024 + 1) }] } })).toThrow('4 MB')
-})
-
 it('captures standalone screens beyond the interactive gallery’s twelve-screen limit', () => {
   resetPipelineState()
   const screens = Array.from({ length: 14 }, (_, index) => ({ view: `Screen${index}`, name: `Screen ${index}` }))

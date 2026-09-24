@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Parser } from './parser'
-import { copyView, HIDDEN_MARKER, hiddenViewsIn, hideView, insertView, moveViewTo, showView } from './edits'
+import { copyView, hiddenViewsIn, hideView, insertView, moveViewTo, showView } from './edits'
+import { HIDDEN_MARKER } from './studio-markers'
 
 /**
  * Dragging, copying and hiding.

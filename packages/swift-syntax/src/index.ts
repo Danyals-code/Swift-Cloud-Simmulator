@@ -19,8 +19,9 @@ export { Parser, isSyntaxError, typeName, type ParseResult } from './parser'
 export * from './conformance'
 export * from './value-kinds'
 export * from './off-markers'
+export { HIDDEN_MARKER } from './studio-markers'
 export {
   viewSiteAt, deleteView, moveView, moveViewTo, insertView, copyView,
-  hideView, showView, hiddenViewsIn, HIDDEN_MARKER,
+  hideView, showView, hiddenViewsIn,
   type ViewSite, type SourceEdit, type HiddenView,
 } from './edits'

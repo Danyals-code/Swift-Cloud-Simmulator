@@ -397,6 +397,12 @@ Playgrounds opens directly. Cheap to generate once the VFS exists, and it is the
 `exportedBytes(file) === editorBytes(file)` for every file in the corpus. That is FR-7.8, and it is
 what makes G3 a property of the design rather than a promise.
 
+The one exception is the studio's own markers: a hidden view is kept as a commented-out block and a
+switched-off modifier as a `/*studio-off:1 …*/` comment, and the native formats leave both out
+(`withoutStudioMarkers` in `swift-syntax`). Only comments between tokens are touched, never a string.
+`.swiftstudio/project.json` keeps each file whole, and reopening an export restores it when the
+Swift is otherwise unchanged.
+
 ## 10. Vercel topology
 
 | Route | Runtime | Purpose |

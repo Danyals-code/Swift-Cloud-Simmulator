@@ -160,6 +160,14 @@ describe('writing tokens', () => {
     expect(refuse('small', 'color', '#000000')).toContain('SwiftUI')
   })
 
+  it('refuses a colour Xcode would take for the app’s own accent colour, however it is spelled', () => {
+    // Every Xcode app has an AccentColor colour set; a token's set of that name, in any
+    // letter case, would be the same folder in the export.
+    const files = project('Text("A")')
+    const result = plan(files, node(files, 'Text'), { kind: 'style-create', name: 'accentcolor', style: 'color', value: '#FF0000' })
+    expect(result.ok ? '' : result.reason).toContain('Xcode')
+  })
+
   it('links a field with dot syntax and refuses a spacing token in a corner field', () => {
     const files = project('Text("A").foregroundStyle(.blue).cornerRadius(4)')
     const text = node(files, 'Text')

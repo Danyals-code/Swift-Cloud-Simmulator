@@ -125,7 +125,7 @@ test('gate 4 - the exported zip contains the edited source, byte-identical', asy
   await page.getByTestId('export-button').click()
   const download = await downloadPromise
 
-  expect(download.suggestedFilename()).toBe('CounterApp.zip')
+  expect(download.suggestedFilename()).toMatch(/^CounterApp-\d{8}-\d{4}-complete\.zip$/)
 
   const stream = await download.createReadStream()
   const chunks: Buffer[] = []
@@ -706,7 +706,7 @@ test('Phase 9 - the Swift Playgrounds export carries the edited source', async (
   await exportAs(page, 'swiftpm')
   const download = await downloadPromise
 
-  expect(download.suggestedFilename()).toBe('CounterApp-swiftpm.zip')
+  expect(download.suggestedFilename()).toMatch(/^CounterApp-\d{8}-\d{4}-swiftpm\.zip$/)
 
   const stream = await download.createReadStream()
   const chunks: Buffer[] = []
@@ -723,18 +723,18 @@ test('Phase 9 - every export format offers a distinct download', async ({ page }
   await openStudio(page)
 
   for (const [format, filename] of [
-    ['spm', 'CounterApp-package.zip'],
-    ['xcodegen', 'CounterApp-xcodegen.zip'],
+    ['spm', /^CounterApp-\d{8}-\d{4}-package\.zip$/],
+    ['xcodegen', /^CounterApp-\d{8}-\d{4}-xcodegen\.zip$/],
   ] as const) {
     const downloadPromise = page.waitForEvent('download')
     await exportAs(page, format)
-    expect((await downloadPromise).suggestedFilename()).toBe(filename)
+    expect((await downloadPromise).suggestedFilename()).toMatch(filename)
   }
 
   // The default button is unchanged: the common case stays one click away.
   const downloadPromise = page.waitForEvent('download')
   await page.getByTestId('export-button').click()
-  expect((await downloadPromise).suggestedFilename()).toBe('CounterApp.zip')
+  expect((await downloadPromise).suggestedFilename()).toMatch(/^CounterApp-\d{8}-\d{4}-complete\.zip$/)
 })
 
 test('Phase 9 - a share link carries the project to a fresh session', async ({ page, context }) => {

@@ -28,6 +28,7 @@ import {
   removeFolder,
   renameFile,
   renameFolder,
+  unusedProjectName,
   withFileText,
   type OpenedFile,
   type Project,
@@ -325,6 +326,19 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     if (get().lastSavedAt !== null) set({ lastSavedAt: null })
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(() => void get().flush(), AUTOSAVE_MS)
+  }
+
+  /**
+   * A project just made, numbered when one here already has its name.
+   *
+   * The list of projects is read when the set changes, not on a rename, so the open
+   * project goes by its name as it is now.
+   */
+  function withUnusedName(project: Project): Project {
+    const open = get().project
+    const taken = [...get().recents.filter(summary => summary.id !== open?.id).map(summary => summary.name), ...open ? [open.manifest.name] : []]
+    const name = unusedProjectName(project.manifest.name, taken)
+    return name === project.manifest.name ? project : { ...project, manifest: { ...project.manifest, name } }
   }
 
   /**
@@ -801,7 +815,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       const template = module.templateById(templateId)
       if (!template) return 'failed'
 
-      return replace(module.createProjectFromTemplate(template), options)
+      return replace(withUnusedName(module.createProjectFromTemplate(template)), options)
     },
 
     async importProject(expected, incoming) {
@@ -830,7 +844,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       if (handedOver) return 'failed'
       const project = projectFromFiles(files)
       if (!project) return 'failed'
-      return replace(project, options)
+      return replace(withUnusedName(project), options)
     },
 
     async openProject(id, { leaveUnsaved = false } = {}) {

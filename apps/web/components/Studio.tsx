@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { AuthoringNode, DesignEditRequest, ExportFormat, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
+import type { ArchiveFormat, AuthoringNode, DesignEditRequest, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
 import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
@@ -53,7 +53,7 @@ import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery, type GallerySource } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
-import { BUILD_DETAILS, BUILD_NAME, STUDIO_BUILD } from '../lib/build'
+import { BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
@@ -1197,23 +1197,16 @@ export function Studio() {
    * about thirty kilobytes that runs once per session at most, and it was in the
    * initial bundle for the sake of one function reference. The menu itself is plain
    * data and stays static, so the button still knows its options before the code
-   * behind them exists.
+   * behind them exists. Every step of an export has a deadline, so it always ends
+   * and the button always comes back.
    */
   const handleExport = useCallback(
-    (format: ExportFormat | 'complete') => {
+    (format: ArchiveFormat) => {
       if (!project || exportInProgress.current) return
       exportInProgress.current = true; setExporting(true); setEditNote(null)
       void (async () => {
-        await flush()
-        if (format === 'complete') {
-          const { exportCompleteProject } = await import('../lib/exportCompleteProject')
-          const count = await exportCompleteProject(project, previewSettings)
-          setEditNote(`Xcode bundle downloaded with ${count} screen ${count === 1 ? 'image' : 'images'}, report and chat history.`)
-        } else {
-          const { downloadProjectZip } = await import('@studio/exporter')
-          downloadProjectZip(project, format, { build: STUDIO_BUILD })
-          setEditNote('Project downloaded.')
-        }
+        const [{ exportNote, exportProject }, { browserExportSteps }] = await Promise.all([import('../lib/exportProject'), import('../lib/browserExport')])
+        setEditNote(exportNote(format, await exportProject(project, format, previewSettings, browserExportSteps(flush))))
       })().catch(error => setEditNote(error instanceof Error ? error.message : 'Could not export this project.')).finally(() => { exportInProgress.current = false; setExporting(false) })
     },
     [project, flush, previewSettings],
@@ -1359,7 +1352,6 @@ export function Studio() {
         onTogglePane={togglePane}
         onExport={handleExport}
         exporting={exporting}
-        onDownloadEditable={() => { void import('@studio/exporter').then(async module => { await flush(); module.downloadEditableProject(project, STUDIO_BUILD) }).catch(error => setEditNote(error instanceof Error ? error.message : 'Could not download the editable project.')) }}
         onShare={handleShare}
         environment={<><DevicePicker device={device} onChange={setDevice} /><AppearancePicker preview={previewSettings} onChange={setPreview} /><TextSizePicker preview={previewSettings} onChange={setPreview} /></>}
         previewing={!inspecting}
