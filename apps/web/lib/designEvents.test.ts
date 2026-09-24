@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildAuthoringModel } from '@studio/swift-sema'
-import type { AuthoringNode, DesignEditRequest } from '@studio/shared'
+import type { AuthoringNode, DesignEditRequest, HiddenViewInfo } from '@studio/shared'
 import { VIEW_CATALOG } from './viewCatalog'
 import { designEvent } from './designEvents'
 
@@ -34,6 +34,8 @@ const find = (test: (node: AuthoringNode) => boolean) => snapshot.nodes.find(tes
 const text = find(node => node.name === 'Text' && node.owner === 'SecretScreen')
 const card = find(node => node.kind === 'component')
 const screen = find(node => node.kind === 'definition' && node.name === 'SecretScreen')
+/** A view hidden in Design: a block of comments, with no layer of its own until it is shown again. */
+const hidden = (type: string): HiddenViewInfo => ({ file: 'App.swift', offset: 0, name: `${type} secret`, type, container: null })
 
 type Operation = DesignEditRequest['operation']
 const S = 'SECRET'
@@ -96,7 +98,7 @@ const EVERY_KIND: { readonly [K in Operation['kind']]: Extract<Operation, { kind
 describe('design edits in the event log', () => {
   it('never carry a name, text or value the designer typed, whatever the edit and wherever it lands', () => {
     for (const operation of Object.values(EVERY_KIND)) {
-      for (const node of [text, card, screen, undefined]) {
+      for (const node of [text, card, screen, hidden('SecretCard'), undefined]) {
         const event = designEvent(operation, node)
         expect(event).toMatchObject({ type: 'design', op: operation.kind })
         expect(JSON.stringify(event)).not.toMatch(/secret/i)
@@ -116,5 +118,16 @@ describe('design edits in the event log', () => {
     expect(designEvent({ kind: 'modifier-add', name: 'opacity' }, text)).toEqual({ type: 'design', op: 'modifier-add', layer: 'Text', modifier: 'opacity' })
     expect(designEvent({ kind: 'modifier-toggle', modifier: padding.id, enabled: false }, text)).toEqual({ type: 'design', op: 'modifier-toggle', layer: 'Text', modifier: 'padding' })
     expect(designEvent({ kind: 'delete' })).toEqual({ type: 'design', op: 'delete' })
+  })
+
+  it('name the hidden view Show brings back, when it is one the library offers', () => {
+    expect(designEvent({ kind: 'show' }, hidden('Text'))).toEqual({ type: 'design', op: 'show', layer: 'Text' })
+    expect(designEvent({ kind: 'show' }, hidden('SecretCard'))).toEqual({ type: 'design', op: 'show', layer: 'other' })
+  })
+
+  it('give no layer to an edit of the whole project: its tokens and the app’s navigation', () => {
+    for (const operation of [EVERY_KIND['style-create'], EVERY_KIND['style-edit'], EVERY_KIND['style-migrate'], EVERY_KIND['navigation-style'], EVERY_KIND['tab-add'], EVERY_KIND['tab-update'], EVERY_KIND['tab-remove'], EVERY_KIND['tab-move']]) {
+      expect(designEvent(operation, screen)).toEqual({ type: 'design', op: operation.kind })
+    }
   })
 })

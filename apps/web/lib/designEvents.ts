@@ -1,5 +1,5 @@
-import type { AuthoringNode, DesignEditRequest } from '@studio/shared'
-import type { DesignEvent } from './eventLog'
+import type { AuthoringNode, DesignEditRequest, HiddenViewInfo } from '@studio/shared'
+import type { DesignEvent, StudioChange } from './eventLog'
 import { VIEW_CATALOG } from './viewCatalog'
 
 /**
@@ -18,20 +18,38 @@ const NAMED_FAMILIES: ReadonlySet<string> = new Set(['add', 'fill'])
 /** The views the Add View library offers, by their Swift names. */
 const LIBRARY_VIEWS: ReadonlySet<string> = new Set(VIEW_CATALOG.map(entry => entry.swiftName ?? entry.name))
 
+/** Edits of the whole project, which land on no layer: its tokens and the app's navigation. */
+const PROJECT_WIDE: ReadonlySet<DesignEditRequest['operation']['kind']> = new Set([
+  'style-create', 'style-edit', 'style-migrate', 'navigation-style', 'tab-add', 'tab-update', 'tab-remove', 'tab-move',
+])
+
 /**
  * A design edit as the event log records it (G5): what kind of change, on what kind
  * of layer, and which control, library view or modifier it used.
  *
  * Built from the studio's own words only. A layer's name is the designer's unless it
  * is a built-in view, and so are the text, values and names an edit carries, so none
- * of them are read.
+ * of them are read. `target` is the layer the edit lands on, or the hidden view that
+ * Show brings back.
  */
-export function designEvent(operation: DesignEditRequest['operation'], node?: AuthoringNode): DesignEvent {
-  return { type: 'design', op: operation.kind, ...(node ? { layer: layerType(node) } : {}), ...details(operation, node) }
+export function designEvent(operation: DesignEditRequest['operation'], target?: AuthoringNode | HiddenViewInfo): DesignEvent {
+  const { node, hidden }: { node?: AuthoringNode; hidden?: HiddenViewInfo } = !target ? {} : 'kind' in target ? { node: target } : { hidden: target }
+  const layer = PROJECT_WIDE.has(operation.kind) ? undefined : node ? layerType(node) : hidden ? libraryView(hidden.type) : undefined
+  return { type: 'design', op: operation.kind, ...(layer ? { layer } : {}), ...details(operation, node) }
+}
+
+/** A change to the studio's own records rather than to the Swift: screens, states, layer names, images. */
+export function studioChange(op: StudioChange): DesignEvent {
+  return { type: 'design', op }
 }
 
 function layerType(node: AuthoringNode): string {
   return node.kind === 'view' || node.kind === 'collection' ? node.name : node.kind
+}
+
+/** A hidden view's type, when it is one the library offers; it could be the designer's own view's name. */
+function libraryView(type: string): string {
+  return LIBRARY_VIEWS.has(type) ? type : 'other'
 }
 
 function details(operation: DesignEditRequest['operation'], node: AuthoringNode | undefined): Partial<DesignEvent> {
