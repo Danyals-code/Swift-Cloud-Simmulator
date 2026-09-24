@@ -136,6 +136,11 @@ export interface PagePreview {
   /** A tab's SF Symbol, for its lane header. */
   readonly icon?: string
   readonly source?: SourceSpan
+  /**
+   * The Swift view this page is, when it is a view's own page (see `pageViews`). A page
+   * written in place, inside the view that holds the tab bar or opens it, has none.
+   */
+  readonly view?: string
   /** Source mapping for views only present in this isolated preview. */
   readonly viewHierarchy?: readonly ViewLayer[]
 }

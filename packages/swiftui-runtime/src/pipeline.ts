@@ -5,7 +5,9 @@ import {
   APPEARANCE_CALIBRATION,
   bindAuthoringRuntime,
   hasBlockingError,
+  pageViews,
   rgba,
+  viewsDrawing,
   type CompileRequest,
   type AuthoringSnapshot,
   type CompileResult,
@@ -803,16 +805,21 @@ function renderPages(
   // pages above left of the budget.
   let budget = DEFAULT_STEP_BUDGET - (preview?.runtime.stepsUsed ?? 0)
   const renamedIds = new Map<string, string>()
+  const views = pageViews(out)
   for (const design of (request.designScreens ?? []).slice(0, limit)) {
     const definition = lastAnalysis?.analysis.authoring.nodes.find(n => n.kind === 'definition' && n.name === design.view)
     if (!definition) continue
-    const existingIndex = out.findIndex(page => page.viewHierarchy?.[0]?.children[0]?.componentSources?.at(-1)?.name === design.view)
-    if (existingIndex >= 0) {
-      const page = out[existingIndex]!, id = 'screen:' + design.view
+    const own = out.filter(page => views.get(page.id) === design.view)
+    if (own.length) {
+      const page = own[0]!, id = 'screen:' + design.view
+      // A view drawing several pages, one list as two tabs, leaves each its own title.
+      const name = own.length === 1 ? design.name : page.name
       renamedIds.set(page.id, id)
-      out[existingIndex] = { ...page, id, name: design.name, viewHierarchy: page.viewHierarchy?.map(layer => ({ ...layer, id, name: design.name })) }
+      out[out.indexOf(page)] = { ...page, id, name, viewHierarchy: page.viewHierarchy?.map(layer => ({ ...layer, id, name })) }
       continue
     }
+    // A view holding tabs or sheets written in place is on the canvas already, around them.
+    if (out.some(page => viewsDrawing(page).some(view => view.name === design.view))) continue
     if (spent || budget <= 0) { spent = true; skip(screen(design.name), definition.source, null); continue }
     const detached = runtime.previewRuntime(design.view, budget)
     if (!detached) continue
@@ -837,7 +844,11 @@ function renderPages(
     }
   }
   return {
-    pages: out.map(page => ({ ...page, rootId: renamedIds.get(page.rootId ?? '') ?? page.rootId, parentId: renamedIds.get(page.parentId ?? '') ?? page.parentId })),
+    pages: out.map(page => {
+      // A design screen's page, and a standalone one, is its view's by its id.
+      const view = page.id.startsWith('screen:') ? page.id.slice(7) : views.get(page.id)
+      return { ...page, ...(view ? { view } : {}), rootId: renamedIds.get(page.rootId ?? '') ?? page.rootId, parentId: renamedIds.get(page.parentId ?? '') ?? page.parentId }
+    }),
     notDrawn,
   }
 }

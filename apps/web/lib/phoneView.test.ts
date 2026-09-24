@@ -24,4 +24,15 @@ describe('what the phone shows', () => {
   it('shows a screen that ran as it is', () => {
     expect(phoneView(ran, ran)).toEqual({ tree: ran, dimmed: false })
   })
+
+  it('keeps the screen, dimmed, when the preview itself stopped, and says how to start it again', () => {
+    const view = phoneView(ran, ran, 'The preview took too long and was stopped.')
+    expect(view).toMatchObject({ tree: ran, dimmed: true, stopped: true })
+    expect(view.notice).toEqual({
+      title: 'Preview stopped',
+      detail: 'The preview took too long and was stopped. Tap the phone, edit the code or press Reset to start it again.',
+    })
+    // A stop while the code has errors still shows the last screen that ran.
+    expect(phoneView(errors, ran, 'The compiler worker was closed.').tree).toBe(ran)
+  })
 })

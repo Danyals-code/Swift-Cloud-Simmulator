@@ -1,4 +1,4 @@
-import { textMeasureKey, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
+import { graphemes, textMeasureKey, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
 
 /**
  * Synchronous shaped-run measurement, cached by the full font and text. Browsers
@@ -229,15 +229,6 @@ export interface MeasuredRun {
   readonly baselineOffset?: number
 }
 
-const GRAPHEME_SEGMENTER =
-  typeof Intl !== 'undefined' && 'Segmenter' in Intl
-    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-    : null
-
-function graphemes(text: string): string[] {
-  if (!GRAPHEME_SEGMENTER) return [...text]
-  return Array.from(GRAPHEME_SEGMENTER.segment(text), (s) => s.segment)
-}
 
 /**
  * A grapheme with the run it came from and the width it takes.

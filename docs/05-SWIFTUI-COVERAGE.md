@@ -476,6 +476,11 @@ Listed in the exported README so nothing is a surprise on the Mac:
     pushed. The Design canvas leaves out a sheet or a destination that traps with the state
     the app has now, as the app can't show it yet. A trap in a view's stored property, as
     it is created, stops the view that creates it.
+29. **A busy preview merges a control's changes.** While the app is still answering one
+    event, the next keystrokes in a field, moves of a slider or a drag, and scrolls are
+    merged into the latest, so a heavy screen keeps up. `.onChange(of:)` then runs once
+    for the merge, where iOS runs it for each change. Nothing typed is lost: a field shows
+    what was typed until the app has answered it, then the app's value.
 
 ## The strictness pass (R5)
 

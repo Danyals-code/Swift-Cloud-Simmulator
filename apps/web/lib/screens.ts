@@ -3,14 +3,18 @@ import { settingsVisualChildren } from './authoringSettings'
 
 export interface DesignScreen { view: string; name: string }
 export type ScreenCommand = { kind: 'create'; name: string; layout: 'VStack' | 'HStack' | 'ZStack' } | { kind: 'rename'; view: string; name: string } | { kind: 'duplicate' | 'remove' | 'up' | 'down'; view: string }
+/**
+ * The view a page is drawn by, when it is that view's own page.
+ *
+ * A page written inside another view's code - a link or a sheet with its content
+ * inline, a tab built in place - has no view of its own. It is not the view whose code
+ * holds it: naming it after that view, or renaming, duplicating or removing that view
+ * from it, would act on another screen. The pipeline decides which pages are whose
+ * (see `pageViews`), with every page in view.
+ */
 export function screenDefinition(snapshot: AuthoringSnapshot | undefined, page: PagePreview): AuthoringNode | undefined {
-  if (page.id.startsWith('screen:')) return snapshot?.nodes.find(n => n.kind === 'definition' && n.name === page.id.slice(7))
-  const component = page.viewHierarchy?.[0]?.children[0]?.componentSources?.at(-1)?.name
-  if (component) { const definition = snapshot?.nodes.find(n => n.kind === 'definition' && n.name === component); if (definition) return definition }
-  const source = page.source
-  const candidate = source && snapshot?.nodes.filter(n => n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end && n.kind !== 'definition').sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
-  if (candidate?.definitionId) return snapshot?.nodes.find(n => n.id === candidate.definitionId)
-  return source && snapshot?.nodes.filter(n => n.kind === 'definition' && n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end).sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
+  const view = page.id.startsWith('screen:') ? page.id.slice(7) : page.view
+  return view ? snapshot?.nodes.find(n => n.kind === 'definition' && n.name === view) : undefined
 }
 /** Names the preview falls back to when a screen has no title of its own. */
 const GENERIC_PAGE = /^(Main page|Page \d+|Details|Sheet|Full screen|Popover|Menu|Alert|Confirmation)$/

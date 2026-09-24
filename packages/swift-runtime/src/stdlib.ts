@@ -80,7 +80,7 @@ function roundedAwayFromZero(n: number): number {
 export function getBuiltinProperty(target: SwiftValue, member: string): SwiftValue | undefined {
   switch (target.kind) {
     case 'string': {
-      // Grapheme clusters, not code points - see `graphemes` in values.ts.
+      // Grapheme clusters, not code points - see `graphemes` in @studio/shared.
       const chars = graphemes(target.value)
       switch (member) {
         case 'count':

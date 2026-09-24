@@ -1,4 +1,4 @@
-import { useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type UIEvent as ReactUIEvent } from 'react'
+import { createContext, useContext, useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type UIEvent as ReactUIEvent } from 'react'
 import { ScrollIndicator } from './ScrollIndicator'
 import { ShapeView, VectorPathView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
@@ -19,6 +19,7 @@ import {
 import { symbolAsset, symbolStrokeScale } from './symbols'
 import { beginContextPress } from './context-press'
 import { finishExit, reconcilePresence, type PresentNode, type RenderGroups } from './transition-presence'
+import { editDraft, shownValue, NO_DRAFT, type ControlDraft, type ControlEdit } from './control-draft'
 
 const EMPTY_NODES: readonly RenderNode[] = []
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -39,7 +40,7 @@ export interface RenderTreeViewProps {
   /** Optional workspace-owned offsets shared across live and design phone mounts. */
   scrollPositions?: Map<string, { left: number; top: number }>
   /** Raised when an interactive node is activated. */
-  onEvent?: (event: UIEvent) => void
+  onEvent?: EventSink
   /**
    * Dim the tree when it is stale - a parse error means we keep painting the last
    * good render rather than blanking the preview (requirement FR-6.3), and the user
@@ -94,6 +95,7 @@ export const RenderTreeView = memo(function RenderTreeView({
 }: RenderTreeViewProps) {
   const reduceMotion = useSyncExternalStore(subscribeMotion, reducedMotion, serverMotion)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const [handoffs] = useState(() => new Map<string, Handoff>())
   useLayoutEffect(() => {
     const surface = surfaceRef.current
     if (!surface) return
@@ -163,7 +165,9 @@ export const RenderTreeView = memo(function RenderTreeView({
       <TransitionKeyframes />
       <ControlStyles />
 
-      <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
+      <ControlHandoffs.Provider value={handoffs}>
+        <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
+      </ControlHandoffs.Provider>
 
       {hoveredNodes.map(node => <InspectHighlight key={node.id} node={node} tree={tree} />)}
     </div>
@@ -224,7 +228,7 @@ function transitionAnimation(node: RenderNode, exiting = false): string | undefi
 }
 
 interface NodePresentation {
-  onEvent?: (event: UIEvent) => void
+  onEvent?: EventSink
   debugOutlines: boolean
   selectedIds?: ReadonlySet<string>
   inspect?: RenderTreeViewProps['inspect']
@@ -337,7 +341,7 @@ function RenderNodeView({
 }: {
   node: RenderNode
   byParent: ReadonlyMap<string, RenderNode[]>
-  onEvent?: (event: UIEvent) => void
+  onEvent?: EventSink
   debugOutlines: boolean
   selectedIds?: ReadonlySet<string>
   inspect?: RenderTreeViewProps['inspect']
@@ -672,77 +676,179 @@ function ScrollContent({ node, children }: { node: RenderNode; children: ReactNo
   )
 }
 
-function renderControl(
-  node: RenderNode,
-  handlerId: string,
-  onEvent: ((event: UIEvent) => void) | undefined,
-): ReactNode {
+/**
+ * Where the preview's events go. The promise, when there is one, settles once the app
+ * has answered the event, which is when a control can show the app's value again.
+ */
+export type EventSink = (event: UIEvent) => void | Promise<void>
+
+/** A control the browser owns, drawn at a node the layout engine placed. */
+interface ControlProps {
+  readonly node: RenderNode
+  readonly handlerId: string
+  readonly onEvent: EventSink | undefined
+}
+
+function renderControl(node: RenderNode, handlerId: string, onEvent: EventSink | undefined): ReactNode {
+  return node.hitTarget!.role === 'textField'
+    ? <PreviewField node={node} handlerId={handlerId} onEvent={onEvent} />
+    : <PreviewSlider node={node} handlerId={handlerId} onEvent={onEvent} />
+}
+
+/**
+ * What a control that is replaced leaves for the one that replaces it.
+ *
+ * A view appearing above a field, `if !name.isEmpty { Text(...) }`, moves the field
+ * in the tree, so a new one is mounted where SwiftUI keeps the same field. What was
+ * typed, the caret and the focus move to it, matched by where the control is written.
+ */
+interface Handoff {
+  readonly draft: ControlDraft
+  readonly focused: boolean
+  readonly selection: readonly [number, number] | null
+  readonly at: number
+}
+
+const ControlHandoffs = createContext<Map<string, Handoff> | null>(null)
+
+/** A handoff older than this is for a control that went away, not one being replaced. */
+const HANDOFF_MS = 1000
+
+/**
+ * What a field or slider shows while its changes are on their way: its own draft
+ * until the app has answered them (see `control-draft`), then the app's value.
+ */
+function useControlDraft(node: RenderNode, send: (value: string) => void | Promise<void>) {
+  const appValue = node.hitTarget?.value ?? (node.hitTarget?.role === 'slider' ? '0' : '')
+  const [draft, setDraft] = useState<ControlDraft>(NO_DRAFT)
+  const latest = useRef<ControlDraft>(NO_DRAFT)
+  const sender = useRef(send)
+  useLayoutEffect(() => { sender.current = send })
+  const element = useRef<HTMLInputElement & HTMLTextAreaElement>(null)
+  const focused = useRef(false)
+  const apply = useCallback((change: ControlEdit): string | undefined => {
+    const next = editDraft(latest.current, change)
+    latest.current = next.draft
+    setDraft(next.draft)
+    return next.send
+  }, [])
+  const edit = useCallback((change: ControlEdit) => {
+    const value = apply(change)
+    if (value === undefined) return
+    const answered = () => { apply({ kind: 'answered' }) }
+    void Promise.resolve(sender.current(value)).then(answered, answered)
+  }, [apply])
+
+  const handoffs = useContext(ControlHandoffs)
+  const key = node.origin && `${node.origin.file}:${node.origin.start}:${node.origin.end}`
+  useLayoutEffect(() => {
+    const handoff = key ? handoffs?.get(key) : undefined
+    if (!key || !handoff) return
+    handoffs!.delete(key)
+    if (performance.now() - handoff.at > HANDOFF_MS) return
+    // The changes the old control sent went to a handler that is gone: send the text again.
+    if (handoff.draft.value !== null) edit({ kind: 'input', value: handoff.draft.value })
+    if (!handoff.focused) return
+    element.current?.focus({ preventScroll: true })
+    try {
+      if (handoff.selection) element.current?.setSelectionRange(...handoff.selection)
+    } catch {
+      // A range or a time field has no caret to put back.
+    }
+  }, [key, handoffs, edit])
+  useLayoutEffect(() => () => {
+    if (!key || !handoffs || (latest.current.value === null && !focused.current)) return
+    const target = element.current
+    let selection: Handoff['selection'] = null
+    try {
+      selection = target && target.selectionStart !== null && target.selectionEnd !== null ? [target.selectionStart, target.selectionEnd] : null
+    } catch {
+      // As above: no caret.
+    }
+    handoffs.set(key, { draft: latest.current, focused: focused.current, selection, at: performance.now() })
+  }, [key, handoffs])
+
+  const tracking = {
+    ref: element,
+    onFocus: () => { focused.current = true },
+    onBlur: () => { focused.current = false },
+  }
+  return { value: shownValue(draft, appValue), edit, tracking }
+}
+
+function PreviewField({ node, handlerId, onEvent }: ControlProps) {
   const hit = node.hitTarget!
   const font = hit.font
+  const { value, edit, tracking } = useControlDraft(node, (text) => onEvent?.({ kind: 'textChange', handlerId, value: text }))
+  const Field = hit.multiline ? 'textarea' : 'input'
+  return (
+    <Field
+      {...tracking}
+      className="swiftui-field"
+      type={hit.multiline ? undefined : hit.inputType ?? (hit.secure ? 'password' : 'text')}
+      step={hit.inputType === 'time' ? 60 : undefined}
+      disabled={!hit.enabled}
+      readOnly={!onEvent}
+      tabIndex={onEvent ? undefined : -1}
+      value={value}
+      placeholder={hit.placeholder ?? ''}
+      inputMode={hit.inputMode}
+      enterKeyHint={hit.enterKeyHint}
+      autoCapitalize={hit.autocapitalization}
+      autoCorrect={hit.autocorrection === undefined ? undefined : hit.autocorrection ? 'on' : 'off'}
+      spellCheck={hit.autocorrection}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.shiftKey || hit.multiline || !hit.submitHandlerId) return
+        event.preventDefault()
+        onEvent?.({ kind: 'tap', handlerId: hit.submitHandlerId, location: { x: 0, y: 0 } })
+      }}
+      aria-label={node.a11y?.label}
+      onChange={(e) => edit({ kind: 'input', value: e.target.value })}
+      onCompositionStart={() => edit({ kind: 'compositionStart' })}
+      onCompositionEnd={(e) => edit({ kind: 'compositionEnd', value: e.currentTarget.value })}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        border: 'none',
+        outline: 'none',
+        background: 'transparent',
+        padding: `${hit.multiline ? 8 : 0}px ${hit.multiline ? 5 : hit.inputInset ?? 0}px`,
+        resize: 'none',
+        textAlign: hit.textAlign === 'center' ? 'center' : hit.textAlign === 'trailing' ? 'end' : 'start',
+        '--field-placeholder': hit.placeholderColor ? cssColor(hit.placeholderColor) : 'GrayText',
+        boxSizing: 'border-box',
+        ...(font
+          ? {
+              fontFamily: font.family,
+              fontSize: font.size,
+              fontWeight: font.weight,
+              fontStyle: font.italic ? 'italic' : 'normal',
+              lineHeight: `${font.lineHeight}px`,
+            }
+          : {}),
+        ...(hit.color ? { color: cssColor(hit.color) } : {}),
+      } as CSSProperties}
+    />
+  )
+}
 
-  if (hit.role === 'textField') {
-    const Field = hit.multiline ? 'textarea' : 'input'
-    return (
-      <Field
-        className="swiftui-field"
-        type={hit.multiline ? undefined : hit.inputType ?? (hit.secure ? 'password' : 'text')}
-        step={hit.inputType === 'time' ? 60 : undefined}
-        disabled={!hit.enabled}
-        readOnly={!onEvent}
-        tabIndex={onEvent ? undefined : -1}
-        value={hit.value ?? ''}
-        placeholder={hit.placeholder ?? ''}
-        inputMode={hit.inputMode}
-        enterKeyHint={hit.enterKeyHint}
-        autoCapitalize={hit.autocapitalization}
-        autoCorrect={hit.autocorrection === undefined ? undefined : hit.autocorrection ? 'on' : 'off'}
-        spellCheck={hit.autocorrection}
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.shiftKey || hit.multiline || !hit.submitHandlerId) return
-          event.preventDefault()
-          onEvent?.({ kind: 'tap', handlerId: hit.submitHandlerId, location: { x: 0, y: 0 } })
-        }}
-        aria-label={node.a11y?.label}
-        onChange={(e) => onEvent?.({ kind: 'textChange', handlerId, value: e.target.value })}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          border: 'none',
-          outline: 'none',
-          background: 'transparent',
-          padding: `${hit.multiline ? 8 : 0}px ${hit.multiline ? 5 : hit.inputInset ?? 0}px`,
-          resize: 'none',
-          textAlign: hit.textAlign === 'center' ? 'center' : hit.textAlign === 'trailing' ? 'end' : 'start',
-          '--field-placeholder': hit.placeholderColor ? cssColor(hit.placeholderColor) : 'GrayText',
-          boxSizing: 'border-box',
-          ...(font
-            ? {
-                fontFamily: font.family,
-                fontSize: font.size,
-                fontWeight: font.weight,
-                fontStyle: font.italic ? 'italic' : 'normal',
-                lineHeight: `${font.lineHeight}px`,
-              }
-            : {}),
-          ...(hit.color ? { color: cssColor(hit.color) } : {}),
-        } as CSSProperties}
-      />
-    )
-  }
-
+function PreviewSlider({ node, handlerId, onEvent }: ControlProps) {
+  const hit = node.hitTarget!
+  const { value, edit, tracking } = useControlDraft(node, (position) => onEvent?.({ kind: 'slide', handlerId, value: Number(position) }))
   return (
     <input
+      {...tracking}
       className="swiftui-range"
       disabled={!hit.enabled}
       type="range"
-      value={hit.value ?? '0'}
+      value={value}
       min={hit.min ?? 0}
       max={hit.max ?? 1}
       step={hit.step && hit.step > 0 ? hit.step : 'any'}
       aria-label={node.a11y?.label}
-      onChange={(e) => onEvent?.({ kind: 'slide', handlerId, value: Number(e.target.value) })}
+      onChange={(e) => edit({ kind: 'input', value: e.target.value })}
       style={{
         position: 'absolute',
         inset: 0,

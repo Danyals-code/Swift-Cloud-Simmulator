@@ -7,7 +7,7 @@ import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelec
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
-import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, RenderTree, SourcePoint, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
+import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, RenderTree, SourcePoint, SourceSpan, ViewLayer } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
@@ -333,7 +333,7 @@ export function Studio() {
   const [lastRan, setLastRan] = useState<{ key: string; tree: RenderTree } | null>(null)
   const latestTree = result?.renderTree ?? null
   if (latestTree && !latestTree.notice && (lastRan?.tree !== latestTree || lastRan.key !== phoneKey)) setLastRan({ key: phoneKey, tree: latestTree })
-  const phone = phoneView(latestTree, lastRan?.key === phoneKey ? lastRan.tree : null)
+  const phone = phoneView(latestTree, lastRan?.key === phoneKey ? lastRan.tree : null, workerError)
 
   const activeFile = useMemo(
     () => (project && activeFileId ? findFile(project, activeFileId) : undefined),
@@ -541,7 +541,6 @@ export function Studio() {
     [activeFileId, setFileText, result?.authoring, pendingSelect, stale, project],
   )
 
-  const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
   const designPages = mode === 'design' && inspecting ? result?.pages : undefined
   const designPage = designPages?.find(page => project?.id === designPageSelection?.projectId && page.id === designPageSelection?.id)
     ?? designPages?.find(page => page.active) ?? designPages?.[0]
@@ -1578,11 +1577,12 @@ export function Studio() {
                 device={device}
                 tree={phone.tree}
                 notice={phone.notice}
+                onRestart={phone.stopped ? run : undefined}
                 revision={result?.revision}
                 selectedRenderIds={selectedRenderIds}
                 hoveredRenderIds={hoveredRenderIds}
                 stale={stale || preparingEdit || phone.dimmed}
-                onEvent={handleEvent}
+                onEvent={dispatch}
                 inspecting={inspecting}
                 onRevealSource={inspectSelect}
                 preview={previewSettings}

@@ -2,9 +2,9 @@
 
 import { scenarioKey } from '../lib/screens'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
+import { RenderTreeView, symbolAsset, type EventSink } from '@studio/swiftui-render-dom'
 import { stateProblem } from '../lib/stateProblem'
-import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
+import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree } from '@studio/shared'
 import type { DeviceKey, DeviceSpec } from '@studio/sim-shell'
 import styles from './Workspace.module.css'
 import type { PreviewSettings } from '../lib/store'
@@ -46,6 +46,8 @@ export interface DevicePaneProps {
   tree: RenderTree | null
   /** Why the phone is dimmed: the code has errors or stopped, and `tree` is the last screen that ran. */
   notice?: NonNullable<RenderTree['notice']>
+  /** Set while the preview has stopped: a tap anywhere on the phone starts it again, and presses nothing in it. */
+  onRestart?: () => void
   /** Why each screen the gallery couldn't draw isn't drawn, as its warning says. */
   pagesNotDrawn?: readonly string[]
   /** The compile the canvas draws; a canvas that crashed tries again when it changes. */
@@ -53,7 +55,8 @@ export interface DevicePaneProps {
   selectedRenderIds?: ReadonlySet<string>
   hoveredRenderIds?: ReadonlySet<string>
   stale: boolean
-  onEvent: (event: UIEvent) => void
+  /** Sends a preview event; resolves once the app has answered it, so a field can show the app's value again. */
+  onEvent: EventSink
   inspecting: boolean
   /** Reveal a view's source. Null origin means the node has no source position. */
   onRevealSource: (node: RenderNode, pageId?: string) => void
@@ -196,6 +199,7 @@ export function DevicePane({
   device,
   tree,
   notice,
+  onRestart,
   pagesNotDrawn,
   revision,
   selectedRenderIds,
@@ -789,6 +793,7 @@ export function DevicePane({
             : {})}
         />
         {live && notice ? <p className={styles.stateProblem} role="status">{notice.title}: {notice.detail}</p> : null}
+        {live && onRestart ? <button type="button" className={styles.restartPhone} aria-label="Start the preview again" onClick={onRestart} /> : null}
         <StatusBar device={device} colorScheme={preview.colorScheme} />
         {device.hasDynamicIsland ? <DynamicIsland device={device} /> : null}
         {device.homeIndicator ? <HomeIndicator device={device} colorScheme={preview.colorScheme} /> : null}

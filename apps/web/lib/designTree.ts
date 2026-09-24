@@ -8,8 +8,13 @@ export interface DesignScreenNode {
   /** The page this screen is drawn as. Selection and canvas focus use this id. */
   readonly id: string
   readonly name: string
-  /** The Swift view that draws it, when the source names one. */
+  /** The Swift view that draws it, when it is that view's own page: what its settings and actions change. */
   readonly view?: string
+  /**
+   * Its view draws other screens too, as one list view can be two tabs. Each is named
+   * by its own title, and none is renamed on its own, since the name belongs to the view.
+   */
+  readonly shared?: true
   readonly page: PagePreview
   readonly presentation: ScreenPresentation
   /** Navigation steps from the lane's root: the canvas column. */
@@ -59,14 +64,37 @@ export interface DesignTree {
 
 const PRESENTED = new Set(['sheet', 'cover', 'popover'])
 
+/**
+ * Whose page each page is, and what it is called.
+ *
+ * A page is named by its view's screen name when it is that view's page, and by its
+ * own title otherwise: written in place inside another view, or one of several screens
+ * a view draws. A view draws several when its pages have different titles, as one list
+ * view can be two tabs; a sheet opened from two screens has one title, and is one screen.
+ */
+export function screenNaming(pages: readonly PagePreview[], snapshot: AuthoringSnapshot | undefined, screens: readonly DesignScreen[]) {
+  const views = new Map(pages.map(page => [page.id, page.id.startsWith('screen:') ? page.id.slice(7) : screenDefinition(snapshot, page)?.name]))
+  const titles = new Map<string, Set<string>>()
+  for (const page of pages) {
+    const view = views.get(page.id)
+    if (view) titles.set(view, (titles.get(view) ?? new Set()).add(page.name))
+  }
+  const viewOf = (page: PagePreview) => views.get(page.id)
+  const shared = (view: string | undefined) => !!view && (titles.get(view)?.size ?? 0) > 1
+  const nameOf = (page: PagePreview) => {
+    const view = viewOf(page)
+    return (!shared(view) && screens.find(screen => screen.view === view)?.name) || page.name
+  }
+  return { viewOf, shared, nameOf }
+}
+
+/** Whether a screen is renamed on its own: it is its view's page, and the view names no other screen. */
+export const canRename = (screen: DesignScreenNode) => !!screen.view && !screen.shared
+
 export function designTree(pages: readonly PagePreview[] | undefined, snapshot: AuthoringSnapshot | undefined, screens: readonly DesignScreen[]): DesignTree {
   const all = pages ?? []
   const byId = new Map(all.map(page => [page.id, page]))
-  const viewOf = (page: PagePreview) => page.id.startsWith('screen:') ? page.id.slice(7) : screenDefinition(snapshot, page)?.name
-  const nameOf = (page: PagePreview) => {
-    const view = viewOf(page)
-    return screens.find(screen => screen.view === view)?.name ?? page.name
-  }
+  const { viewOf, shared, nameOf } = screenNaming(all, snapshot, screens)
   const presentationOf = (page: PagePreview): ScreenPresentation => !page.parentId || !byId.has(page.parentId) ? 'root' : page.kind === 'destination' ? 'push' : page.kind === 'sheet' || page.kind === 'cover' || page.kind === 'popover' ? page.kind : 'push'
   const sheets = new Map<string, { screen: DesignScreenNode; openers: string[] }>()
   const build = (page: PagePreview, depth: number, seen: ReadonlySet<string>): DesignScreenNode => {
@@ -83,7 +111,8 @@ export function designTree(pages: readonly PagePreview[] | undefined, snapshot: 
         else sheets.set(key, { screen: build(child, depth + 1, next), openers: [page.id] })
       } else children.push(build(child, depth + 1, next))
     }
-    return { id: page.id, name: nameOf(page), view: viewOf(page), page, presentation: presentationOf(page), depth, children }
+    const view = viewOf(page)
+    return { id: page.id, name: nameOf(page), view, ...(shared(view) ? { shared: true as const } : {}), page, presentation: presentationOf(page), depth, children }
   }
   const roots = all.filter(page => !page.parentId || !byId.has(page.parentId))
   const running = roots.filter(page => !page.standalone)
