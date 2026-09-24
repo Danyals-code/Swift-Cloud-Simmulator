@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { unzipSync } from 'fflate'
+import { unzipSync, zipSync } from 'fflate'
 import { readImage, type Project } from '@studio/project-model'
 import { createDefaultProject } from '@studio/project-model/templates'
-import { exportArchive, type ExportReview } from './index'
+import { exportArchive, readProjectArchive, type ExportReview } from './index'
 
 /** 2026-09-24 16:30 on the clock of whoever exports. */
 const NOW = new Date(2026, 8, 24, 16, 30)
@@ -12,6 +12,12 @@ const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 
 function entriesOf(bytes: Uint8Array): Record<string, string> {
   return Object.fromEntries(Object.entries(unzipSync(bytes)).map(([path, data]) => [path, decoder.decode(data)]))
+}
+
+/** A blank design whose HomeScreen.swift is `text`. */
+function withHome(text: string): Project {
+  const base = createDefaultProject(0)
+  return { ...base, files: base.files.map(file => file.id.endsWith('HomeScreen.swift') ? { ...file, text } : file) }
 }
 
 /** A blank design called `name`. */
@@ -44,6 +50,149 @@ describe('the app name in the files Xcode reads', () => {
 
     expect(archive.issues).toEqual([])
     expect(entriesOf(archive.bytes)['My_App/My_App.xcodeproj/project.pbxproj']).toMatch(/PRODUCT_BUNDLE_IDENTIFIER = "?com\.example\.My-App"?;/)
+  })
+})
+
+/** A screen with a switched-off modifier and a hidden view, as the Design panel leaves them. */
+const MARKED = `import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        VStack {
+            Text("Shown")
+                /*studio-off:1 ".background(Color.blue)"*/
+                .padding()
+            // hidden by Swift Web Studio
+            // Text("Secret")
+            //     .bold()
+            // end hidden view
+        }
+    }
+}
+`
+/** The same screen as Xcode should get it. */
+const CLEAN = `import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        VStack {
+            Text("Shown")
+                .padding()
+        }
+    }
+}
+`
+
+describe('the studio’s markers', () => {
+
+  it('stay out of the Swift that Xcode builds', () => {
+    const project = withHome(MARKED), root = project.manifest.name
+
+    const entries = entriesOf(exportArchive(project, { format: 'xcodeproj', now: NOW }).bytes)
+
+    expect(entries[`${root}/${root}/Features/Home/HomeScreen.swift`]).toBe(CLEAN)
+    for (const format of ['swiftpm', 'spm', 'xcodegen'] as const) {
+      const swift = Object.entries(entriesOf(exportArchive(project, { format, now: NOW }).bytes)).filter(([path]) => path.endsWith('.swift'))
+      expect(swift.filter(([, text]) => /studio-off|hidden by Swift Web Studio|end hidden view/.test(text))).toEqual([])
+    }
+  })
+
+  it('are only taken from comments: the same words inside a string are the app’s text', () => {
+    const root = createDefaultProject(0).manifest.name
+    const text = `import SwiftUI
+
+struct HomeScreen: View {
+    let help = """
+        // hidden by Swift Web Studio
+        """
+    var body: some View {
+        Text(#"/*studio-off:1 ".bold()"*/"#)
+    }
+}
+`
+    const project = withHome(text)
+
+    const entries = entriesOf(exportArchive(project, { format: 'xcodeproj', now: NOW }).bytes)
+
+    expect(entries[`${root}/${root}/Features/Home/HomeScreen.swift`]).toBe(text)
+  })
+
+  it('leave a person’s own comments alone, even between an old hidden view with no end line and the next one', () => {
+    const root = createDefaultProject(0).manifest.name
+    const text = `import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        VStack {
+            // hidden by Swift Web Studio
+            // Text("Old")
+            // Check the copy with Dana.
+            // hidden by Swift Web Studio
+            // Text("New")
+            // end hidden view
+            Text("Shown")
+        }
+    }
+}
+`
+    const project = withHome(text)
+
+    const swift = entriesOf(exportArchive(project, { format: 'xcodeproj', now: NOW }).bytes)[`${root}/${root}/Features/Home/HomeScreen.swift`]
+
+    expect(swift).toContain('// Check the copy with Dana.')
+    expect(swift).not.toContain('Text("New")')
+  })
+
+  it('take only the marker line of an old hidden view, which has no end line to say where it stops', () => {
+    const root = createDefaultProject(0).manifest.name
+    const home = (lines: string) => `import SwiftUI\n\nstruct HomeScreen: View {\n    var body: some View {\n        VStack {\n${lines}            Text("Shown")\n        }\n    }\n}\n`
+    const project = withHome(home('            // hidden by Swift Web Studio\n            // Text("Old")\n'))
+
+    const swift = entriesOf(exportArchive(project, { format: 'xcodeproj', now: NOW }).bytes)[`${root}/${root}/Features/Home/HomeScreen.swift`]
+
+    expect(swift).toBe(home('            // Text("Old")\n'))
+  })
+
+  it('keep a file’s Windows line endings, on the lines they empty and the lines they share', () => {
+    const root = createDefaultProject(0).manifest.name
+    const crlf = (text: string) => text.replace(/\n/g, '\r\n')
+    const shared = (text: string) => text.replace('Text("Shown")', 'Text("Shown") /*studio-off:1 ".bold()"*/')
+    const project = withHome(crlf(shared(MARKED)))
+
+    const swift = entriesOf(exportArchive(project, { format: 'xcodeproj', now: NOW }).bytes)[`${root}/${root}/Features/Home/HomeScreen.swift`]
+
+    expect(swift).toBe(crlf(CLEAN))
+  })
+
+  it('stay in what the studio reopens: the editable archive and each export’s project record', () => {
+    const project = withHome(MARKED), root = project.manifest.name
+
+    const editable = entriesOf(exportArchive(project, { format: 'editable', now: NOW }).bytes)
+    const record = JSON.parse(entriesOf(exportArchive(project, { format: 'xcodeproj', now: NOW }).bytes)[`${root}/.swiftstudio/project.json`]!)
+
+    expect(Object.entries(editable).find(([path]) => path.endsWith('HomeScreen.swift'))?.[1]).toBe(MARKED)
+    expect(record.sources.find((source: { id: string }) => source.id.endsWith('HomeScreen.swift')).base).toBe(MARKED)
+  })
+})
+
+describe('reopening an Xcode export', () => {
+  const homeScreen = (project: Project | null | undefined) => project?.files.find(file => file.id.endsWith('HomeScreen.swift'))?.text
+
+  it('brings back the hidden views and switched-off modifiers its Swift left out', () => {
+    const reopened = readProjectArchive(exportArchive(withHome(MARKED), { format: 'xcodeproj', now: NOW }).bytes)
+
+    expect(homeScreen(reopened.project)).toBe(MARKED)
+  })
+
+  it('keeps a file as Xcode left it when a developer changed it there', () => {
+    const project = withHome(MARKED), root = project.manifest.name
+    const entries = unzipSync(exportArchive(project, { format: 'xcodeproj', now: NOW }).bytes)
+    const edited = CLEAN.replace('"Shown"', '"Changed in Xcode"')
+    entries[`${root}/${root}/Features/Home/HomeScreen.swift`] = new TextEncoder().encode(edited)
+
+    const reopened = readProjectArchive(zipSync(entries))
+
+    expect(homeScreen(reopened.project)).toBe(edited)
   })
 })
 
@@ -151,6 +300,16 @@ describe('an export never fails', () => {
     // One set of that name, and it is the app's: the colour it was given.
     const sets = Object.keys(entries).filter(path => /\/accentcolor\.colorset\/Contents\.json$/i.test(path))
     expect(sets.map(path => entries[path])).toEqual([expect.stringMatching(/"red": "0xFF"/)])
+  })
+
+  it('leaves the studio’s markers out of the Swift it falls back to, and keeps them in the backup', () => {
+    const project: Project = { ...withHome(MARKED), assets: [{ id: 'logo', name: 'Logo', scale: 1, light: { ...readImage(PNG), width: readImage(PNG).width + 1 } }] }
+
+    const entries = entriesOf(exportArchive(project, { format: 'xcodeproj', now: NOW }).bytes)
+
+    expect(Object.entries(entries).find(([path]) => path.endsWith('HomeScreen.swift'))?.[1]).toBe(CLEAN)
+    const backup = JSON.parse(Object.entries(entries).find(([path]) => path.endsWith('project-backup.json'))![1])
+    expect(backup.project.files.find((file: { id: string }) => file.id.endsWith('HomeScreen.swift')).text).toBe(MARKED)
   })
 
   it('keeps every file of a project with unusable paths inside the archive, each under a name of its own', () => {

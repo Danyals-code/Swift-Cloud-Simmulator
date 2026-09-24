@@ -1,6 +1,7 @@
 import type { Project } from '@studio/project-model'
 import { projectBackup } from '@studio/project-model/backup'
 import { EXPORT_FORMATS, type ArchiveFormat, type ExportFormat } from '@studio/shared'
+import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { encodeText } from './bundle'
 import { MAX_BUNDLE_BYTES, MAX_SCREEN_BYTES, type ExportReview } from './handoff-report'
 import type { StudioBuild } from './portable'
@@ -40,7 +41,7 @@ export function exportArchive(stored: Project, { format, review, build, now }: A
     return { name, bytes, issues }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    return { name, bytes: sourcesOnly(project, reason, build), issues: [...issues, reason] }
+    return { name, bytes: sourcesOnly(project, reason, build, format !== 'editable'), issues: [...issues, reason] }
   }
 }
 
@@ -113,11 +114,11 @@ function usableScreens(review: ExportReview, project: Project): ExportReview & {
  * file already has, in any letter case, gets a number. The backup is the one the recovery
  * screen hands over.
  */
-function sourcesOnly(project: Project, reason: string, build?: StudioBuild): Uint8Array {
+function sourcesOnly(project: Project, reason: string, build: StudioBuild | undefined, native: boolean): Uint8Array {
   const root = plainSegments(project.manifest.name ?? '').replace(/\//g, '-') || 'Project'
   const taken = new Set(['known-issues.md', 'project-backup.json'])
   const files = new Map<string, Uint8Array>()
-  for (const file of project.files) files.set(`${root}/${unusedPath(plainSegments(file.id) || 'Untitled.swift', taken)}`, encodeText(file.text))
+  for (const file of project.files) files.set(`${root}/${unusedPath(plainSegments(file.id) || 'Untitled.swift', taken)}`, encodeText(native ? withoutStudioMarkers(file.text) : file.text))
   files.set(`${root}/project-backup.json`, encodeText(projectBackup(project, build)))
   files.set(`${root}/KNOWN-ISSUES.md`, encodeText(`# What this export leaves out\n\nThe project could not be built into the format you chose, so this archive holds its Swift files exactly as they were written. project-backup.json holds everything else it had: images, colour sets, designer settings and the AI conversation.\n\nWhy: ${reason}\n`))
   return zipBundle(files)

@@ -142,7 +142,7 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 | FR-7.5 | Copy single file, and copy whole project, to clipboard | Must |
 | FR-7.6 | Push to a GitHub repo via OAuth | Could |
 | FR-7.7 | Exported bundle includes assets catalogue, Info.plist values, deployment target, and a README with build instructions | Must |
-| FR-7.8 | Export must be byte-identical to editor content for all `.swift` files (verified by test) | Must |
+| FR-7.8 | Export must be byte-identical to editor content for all `.swift` files, apart from the studio's own markers for hidden views and switched-off modifiers, which the native formats leave out (verified by test) | Must |
 
 ### FR-8 - Persistence and sharing
 

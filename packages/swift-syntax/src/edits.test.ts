@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Parser } from './parser'
-import { copyView, deleteView, HIDDEN_MARKER, hideView, insertView, moveView, moveViewTo, viewSiteAt } from './edits'
+import { copyView, deleteView, hideView, insertView, moveView, moveViewTo, viewSiteAt } from './edits'
+import { HIDDEN_MARKER } from './studio-markers'
 
 /**
  * The canvas's edits, at the level they actually happen: text in, text out.

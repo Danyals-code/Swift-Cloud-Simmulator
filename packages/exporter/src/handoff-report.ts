@@ -98,7 +98,7 @@ ${review.diagnostics.length ? review.diagnostics.map(message => `- ${line(messag
 
 ## Build and review
 
-Open ${line(project.manifest.name)}.xcodeproj in Xcode. The Swift files are exported byte for byte. Add external dependencies referenced by your code and resolve native compiler diagnostics there. This export has not been built or signed by Xcode.
+Open ${line(project.manifest.name)}.xcodeproj in Xcode. The Swift files are exported as written, without the studio's markers for hidden views and switched-off modifiers, which .swiftstudio/project.json keeps. Add external dependencies referenced by your code and resolve native compiler diagnostics there. This export has not been built or signed by Xcode.
 
 Browser screenshots approximate SwiftUI. Font metrics, SF Symbols, materials, scrolling and unsupported APIs can differ on iOS. Verify accessibility and behavior on a simulator or device. The report records saved defaults; it does not infer settings absent from the source.
 
