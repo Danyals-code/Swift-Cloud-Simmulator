@@ -117,7 +117,7 @@ export type PaintSpec =
       readonly content: Size
       readonly showsIndicators: boolean
     }
-  | { readonly kind: 'placeholder'; readonly feature: string; readonly reason: string }
+  | { readonly kind: 'placeholder'; readonly feature: string; readonly reason: string; readonly stopped?: true }
   | { readonly kind: 'hit' }
 
 export interface PlacedNode {
@@ -909,7 +909,7 @@ export class LayoutEngine {
           z,
           opacity: env.opacity,
           cornerRadius: 8,
-          paint: { kind: 'placeholder', feature: element.feature, reason: element.reason },
+          paint: { kind: 'placeholder', feature: element.feature, reason: element.reason, ...(element.stopped ? { stopped: true } : {}) },
           ...debugInfo(element),
           ...decorations(env, parent),
           ...(element.origin ? { origin: element.origin } : {}),

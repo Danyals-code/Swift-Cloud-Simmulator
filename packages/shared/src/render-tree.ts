@@ -228,6 +228,8 @@ export interface FilterSpec {
 export interface PlaceholderPayload {
   readonly feature: string
   readonly reason: string
+  /** A view of the project's own whose code stopped, rather than one the preview cannot draw. */
+  readonly stopped?: true
 }
 
 export interface HitTarget {

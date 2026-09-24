@@ -1408,7 +1408,7 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
     const source = viewSource('var body: some View { VStack { Text("Top"); Broken(); Text("Bottom") } }', broken)
     const r = compileView(source)
     expect(texts(r)).toEqual(expect.arrayContaining(['Top', 'Bottom']))
-    expect(stopped(r)).toEqual([{ feature: 'Broken stopped', reason: 'Swift runtime failure: Index out of range' }])
+    expect(stopped(r)).toEqual([{ feature: 'Broken stopped', reason: 'Swift runtime failure: Index out of range', stopped: true }])
     const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: r.renderTree!, onEvent: () => {} }))
     expect(markup).toContain('Broken stopped')
     expect(markup).toContain('Swift runtime failure: Index out of range')
@@ -1430,7 +1430,7 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
       var body: some View { Button("Open") { show = true }.sheet(isPresented: $show) { Detail(item: items[0]) } }`,
       'struct Detail: View { let item: String; var body: some View { Text(item) } }')
     const opened = tap(r, 'Open')
-    expect(stopped(opened)).toEqual([{ feature: 'Sheet stopped', reason: 'Swift runtime failure: Index out of range' }])
+    expect(stopped(opened)).toEqual([{ feature: 'Sheet stopped', reason: 'Swift runtime failure: Index out of range', stopped: true }])
     expect(stopped(tap(opened, 'Close sheet'))).toEqual([])
   })
 
@@ -1442,7 +1442,7 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
         }
       }`, 'struct Detail: View { let item: String; var body: some View { Text(item) } }')
     const pushed = tap(r, 'Open')
-    expect(stopped(pushed)).toEqual([{ feature: 'Destination stopped', reason: 'Swift runtime failure: Index out of range' }])
+    expect(stopped(pushed)).toEqual([{ feature: 'Destination stopped', reason: 'Swift runtime failure: Index out of range', stopped: true }])
     expect(controls(tap(pushed, 'Home'))).toContain('Open')
   })
 

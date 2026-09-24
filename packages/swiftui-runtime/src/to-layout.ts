@@ -1510,7 +1510,7 @@ class Converter {
 
     // A custom view whose body stopped: what it is, and why, where it would have been.
     const halted = stopped(view)
-    if (halted) return { kind: 'placeholder', id: path, feature: `${halted.name} stopped`, reason: halted.failure.message, ...origin }
+    if (halted) return { kind: 'placeholder', id: path, feature: `${halted.name} stopped`, reason: halted.failure.message, stopped: true, ...origin }
 
     const shape = SHAPES[view.name]
     if (shape) {

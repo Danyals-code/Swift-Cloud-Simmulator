@@ -235,7 +235,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
       return {
         ...base,
         kind: 'placeholder',
-        placeholder: { feature: node.paint.feature, reason: node.paint.reason },
+        placeholder: { feature: node.paint.feature, reason: node.paint.reason, ...(node.paint.stopped ? { stopped: true } : {}) },
       }
 
     case 'hit':
