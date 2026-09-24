@@ -308,7 +308,7 @@ export function Studio() {
   const [previewResetEpoch, setPreviewResetEpoch] = useState(0)
   const previewIdentity = useMemo(() => JSON.stringify([project?.id, project?.files, scenario ?? null, previewResetEpoch]), [project?.id, project?.files, scenario, previewResetEpoch])
 
-  const { result, stale, workerError, dispatch, reset, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews } = useCompiler({
+  const { result, stale, workerError, dispatch, reset, recompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews } = useCompiler({
     projectId: project?.id,
     deploymentTarget: project?.manifest.deploymentTarget,
     images, colors: project?.colors, scenario, componentDescriptions: project?.studio?.components, designScreens: project?.studio?.screens, previewScreen: standalonePreview,
@@ -333,7 +333,7 @@ export function Studio() {
   const [lastRan, setLastRan] = useState<{ key: string; tree: RenderTree } | null>(null)
   const latestTree = result?.renderTree ?? null
   if (latestTree && !latestTree.notice && (lastRan?.tree !== latestTree || lastRan.key !== phoneKey)) setLastRan({ key: phoneKey, tree: latestTree })
-  const phone = phoneView(latestTree, lastRan?.key === phoneKey ? lastRan.tree : null)
+  const phone = phoneView(latestTree, lastRan?.key === phoneKey ? lastRan.tree : null, workerError)
 
   const activeFile = useMemo(
     () => (project && activeFileId ? findFile(project, activeFileId) : undefined),
@@ -541,7 +541,7 @@ export function Studio() {
     [activeFileId, setFileText, result?.authoring, pendingSelect, stale, project],
   )
 
-  const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
+  const handleEvent = useCallback((event: UIEvent) => dispatch(event), [dispatch])
   const designPages = mode === 'design' && inspecting ? result?.pages : undefined
   const designPage = designPages?.find(page => project?.id === designPageSelection?.projectId && page.id === designPageSelection?.id)
     ?? designPages?.find(page => page.active) ?? designPages?.[0]
@@ -1578,6 +1578,7 @@ export function Studio() {
                 device={device}
                 tree={phone.tree}
                 notice={phone.notice}
+                onRestart={phone.stopped ? () => void recompile() : undefined}
                 revision={result?.revision}
                 selectedRenderIds={selectedRenderIds}
                 hoveredRenderIds={hoveredRenderIds}
