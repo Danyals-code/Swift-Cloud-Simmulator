@@ -93,6 +93,21 @@ test('a paste with nothing copied, and a move past the first view, say why (C7)'
   await expect(note(page)).toHaveText('This is already the first view here.')
 })
 
+test('Insert copy puts a component on another screen, a sample for what its screen gave it (D6)', async ({ page }) => {
+  await openInDesign(page, app('\nstruct Badge: View {\n    let title: String\n    let padding: CGFloat\n    var body: some View {\n        Text(title).padding(padding)\n    }\n}\n', '\n                Badge(title: "Starred \\(count)", padding: 12)'), 'Settings body')
+  await drawn(page, 'Settings body').click()
+  const navigator = page.getByRole('navigation', { name: 'Layers', exact: true })
+  await navigator.getByRole('button', { name: 'Expand Components', exact: true }).click()
+  const badge = navigator.getByTestId('design-component').filter({ hasText: 'Badge' })
+  await badge.hover()
+  await badge.getByRole('button', { name: 'Actions for Badge', exact: true }).click()
+  await page.getByRole('option', { name: 'Insert copy into selection', exact: true }).click()
+
+  // The count is Home's, so the copy starts with words from the input's name, and its padding.
+  await expect(drawn(page, 'Title')).toBeVisible()
+  expect(await sourceInCode(page)).toContain('Badge(title: "Title", padding: 12)')
+})
+
 test('a screen\'s Text color override is written as current SwiftUI writes it (D9)', async ({ page }) => {
   await openInDesign(page, app(), 'Settings body')
   await page.getByTestId('design-screen').first().locator('[data-outline-row]').click()
