@@ -1,5 +1,18 @@
 import { eventLog, type AiEvent, type AttemptStep, type EventLog, type FailedStage, type PromptOutcome, type SentPrompt } from './eventLog'
 
+/**
+ * What a Create with AI draft carries from the attempt that made it: opening the draft
+ * or throwing it away is logged against that attempt, however much later, and after a
+ * reload too.
+ */
+export interface DraftStamp {
+  readonly attempt: number
+  /** When the prompt went, as the clock reads. */
+  readonly sentAt: number
+  /** The project open when it went, whose log has the attempt. */
+  readonly project: string | null
+}
+
 /** One request to the AI, followed from sending to its end. */
 export interface Attempt {
   /** The server answered: its status, and how long it took. */
@@ -9,12 +22,8 @@ export interface Attempt {
   ended(outcome: PromptOutcome): void
   /** The request stopped early: cancelled when its signal was aborted, and otherwise failed, with how far it got. */
   stopped(signal: AbortSignal): void
-}
-
-/** An attempt as its panel keeps it: one whose draft can still be opened or thrown away. */
-interface Tracked extends Attempt {
-  /** Its draft was left, with `current` the project open now. */
-  settle(current: string | null): void
+  /** For a draft this attempt makes. */
+  readonly stamp: DraftStamp
 }
 
 /**
@@ -28,55 +37,39 @@ interface Tracked extends Attempt {
  */
 export function promptAttempts(log: Pick<EventLog, 'record'>, flow: AiEvent['flow'], now: () => number = Date.now) {
   let count = 0
-  /** The attempt whose draft is on screen, waiting to be opened or thrown away. */
-  let waiting: Tracked | null = null
-
-  /**
-   * The draft on screen was left, with `current` the project open now.
-   *
-   * While Create with AI is open, only opening its draft moves the studio to another
-   * project. So a waiting draft became `current` when that differs from the project its
-   * prompt went from, and was thrown away when it does not.
-   */
-  const settleDraft = (current: string | null): void => {
-    const draft = waiting
-    waiting = null
-    draft?.settle(current)
-  }
+  const record = (to: string | null, attempt: number, step: AttemptStep) => { if (to) log.record(to, { type: 'ai', flow, attempt, ...step }) }
 
   return {
     /** Records a prompt going out from `project`, and returns the attempt, which follows it to its end. */
     sent(project: string | null, prompt: SentPrompt): Attempt {
-      // A new prompt leaves the draft on screen behind.
-      settleDraft(project)
       const attempt = ++count, sentAt = now()
       const since = () => now() - sentAt
-      const record = (step: AttemptStep, to = project) => { if (to) log.record(to, { type: 'ai', flow, attempt, ...step }) }
       let stage: FailedStage = 'request'
-      record({ action: 'sent', ...prompt })
-      const tracked: Tracked = {
+      record(project, attempt, { action: 'sent', ...prompt })
+      return {
         responded(status) {
           // An error status is the request failing; only an answer can be unusable.
           if (status >= 200 && status < 300) stage = 'answer'
-          record({ action: 'responded', status, ms: since() })
+          record(project, attempt, { action: 'responded', status, ms: since() })
         },
         checking() { stage = 'preview' },
-        ended(outcome) {
-          record({ ...outcome, ms: since() })
-          if (outcome.action === 'answered') waiting = tracked
-        },
+        ended(outcome) { record(project, attempt, { ...outcome, ms: since() }) },
         stopped(signal) {
-          record(signal.aborted ? { action: 'cancelled', ms: since() } : { action: 'failed', stage, ms: since() })
+          record(project, attempt, signal.aborted ? { action: 'cancelled', ms: since() } : { action: 'failed', stage, ms: since() })
         },
-        settle(current) {
-          if (current && current !== project) record({ action: 'opened', ms: since() }, current)
-          else record({ action: 'discarded', ms: since() })
-        },
+        stamp: { attempt, sentAt, project },
       }
-      return tracked
     },
 
-    settleDraft,
+    /** A kept draft opened as `project`, whose log notes it. */
+    draftOpened(stamp: DraftStamp, project: string): void {
+      record(project, stamp.attempt, { action: 'opened', ms: now() - stamp.sentAt })
+    },
+
+    /** A kept draft was thrown away: noted with the attempts that made it. */
+    draftDiscarded(stamp: DraftStamp): void {
+      record(stamp.project, stamp.attempt, { action: 'discarded', ms: now() - stamp.sentAt })
+    },
   }
 }
 

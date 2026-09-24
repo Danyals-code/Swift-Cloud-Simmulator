@@ -22,6 +22,8 @@ export interface ToolbarProps {
   onOpenGallery: (source: GallerySource) => void
   projectName: string
   onRenameProject: (name: string) => boolean
+  /** The project cannot be renamed now: an AI edit holds it. */
+  renameDisabled?: boolean
   onReview?: () => void
   reviewDisabled?: boolean
   onShortcuts: () => void
@@ -83,7 +85,7 @@ const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debu
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
 export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, mode, onModeChange, theme, onThemeChange,
-  panes, suppressed, onTogglePane, onExport, onShare, onRenameProject, onShortcuts, onCopyBuild, onReview, reviewDisabled,
+  panes, suppressed, onTogglePane, onExport, onShare, onRenameProject, renameDisabled = false, onShortcuts, onCopyBuild, onReview, reviewDisabled,
   environment, previewing = false, onSetPreviewing, previewDisabled, exporting = false }: ToolbarProps) {
   const design = mode === 'design'
   // One Export menu: the four native formats, the editable archive, and - in Design -
@@ -102,7 +104,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, m
   return <header data-testid="toolbar" className={styles.toolbar} data-mode={mode}>
     <div className={styles.project}>
       <button type="button" onClick={() => onOpenGallery('open')} title="Your projects, and new ones from templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={19} /><span>Projects</span></button>
-      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} /><SaveIndicator storage={storage} savedAt={savedAt} /></div>
+      <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} disabled={renameDisabled} /><SaveIndicator storage={storage} savedAt={savedAt} /></div>
     </div>
     <nav className={styles.modes} aria-label="Workspace view">
       {(['design', 'develop'] as const).map(value => <button key={value} type="button" data-testid={`workspace-${value}`} aria-pressed={mode === value} title={value === 'design' ? 'Design screens visually' : 'Swift code alongside the live preview'} onClick={() => onModeChange(value)}>{value === 'design' ? 'Design' : 'Code'}</button>)}
@@ -136,7 +138,7 @@ function SaveIndicator({ storage, savedAt }: { storage: StorageProblem | null; s
   return <span data-testid="save-indicator" title={title} className={title ? styles.saveError : styles.saveStatus}>{label}</span>
 }
 
-function ProjectName({ name, onRename }: { name: string; onRename: (name: string) => boolean }) {
+function ProjectName({ name, onRename, disabled }: { name: string; onRename: (name: string) => boolean; disabled: boolean }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
   const [error, setError] = useState(false)
@@ -152,7 +154,7 @@ function ProjectName({ name, onRename }: { name: string; onRename: (name: string
   return editing ? <input ref={input} className={styles.projectNameInput} data-testid="project-name-input" aria-label="App name" aria-invalid={error} title={error ? 'Use a name without path separators or special filename characters.' : 'Enter to save, Escape to cancel'} value={draft}
     onChange={e => { setDraft(e.target.value); setError(false) }} onBlur={finish}
     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); finish() } else if (e.key === 'Escape') { finished.current = true; setEditing(false); setDraft(name) } }} />
-    : <button type="button" className={styles.projectName} data-testid="project-name" title="Double-click to rename app" aria-label={`App name: ${name}. Double-click or press Enter to rename.`}
+    : <button type="button" className={styles.projectName} data-testid="project-name" disabled={disabled} title="Double-click to rename app" aria-label={`App name: ${name}. Double-click or press Enter to rename.`}
       onDoubleClick={() => { finished.current = false; setEditing(true) }}
       onKeyDown={e => { if (e.key === 'F2' || e.key === 'Enter') { e.preventDefault(); finished.current = false; setEditing(true) } }}>{name}</button>
 }

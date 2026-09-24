@@ -178,6 +178,19 @@ export interface PreviewSettings {
  */
 export type ProjectOrigin = 'restored' | 'shared' | 'fresh' | 'recovered'
 
+/** An AI edit's hold on the project. */
+export interface AiHold {
+  /** The answer's change is being checked in a preview. */
+  checking(): void
+  /** Applies the answer: the one change the project takes while it is held. */
+  commit(expected: Project, transaction: ProjectTransaction): string | null
+  /** Lets the project go, whether the edit landed, failed or stopped. */
+  release(): void
+}
+
+/** Why a change is refused while an AI edit holds the project. */
+export const AI_EDITING = 'The AI is editing this project. Wait for it, or press Stop.'
+
 export interface StudioState {
   project: Project | null
   documentRevision: number
@@ -192,6 +205,17 @@ export interface StudioState {
    * caller records it: an AI edit, whose event says how long it took.
    */
   commitTransaction: (expected: Project, transaction: ProjectTransaction, label: DesignEvent | null) => string | null
+  /**
+   * An AI edit holding the project, from its request until its answer lands or it
+   * stops (G12). Until then nothing else changes the project: the answer is planned
+   * against the project as it was sent, and a change made while waiting used to throw
+   * the paid-for answer away.
+   */
+  aiEdit: { readonly phase: 'editing' | 'checking' } | null
+  /** Holds the project for an AI edit, which `stop` cancels. Null while another holds it. */
+  holdForAi: (stop: () => void) => AiHold | null
+  /** Stops the AI edit holding the project: its request is cancelled and the project is free again. */
+  stopAiEdit: () => void
   appendPromptMessages: (projectId: string, messages: readonly PromptMessage[]) => string | null
   replayDocument: (direction: 'undo' | 'redo') => { selection: DocumentSelection | null } | null
   activeFileId: FileId | null
@@ -294,6 +318,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
   let replaying = false
   let typingGroup: string | undefined
   let switchRequest = 0
+  /** The AI edit holding the project, and how to stop it. */
+  let aiHold: { readonly stop: () => void } | null = null
 
   /**
    * Saves the project being left, typing that arrives during the write included.
@@ -370,6 +396,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     if (overtaken) return overtaken
     const outgoing = get().project
     const first = project.files[0]?.id ?? null
+    // The switch happens now, and an AI answer planned against the project being left no longer fits anything.
+    get().stopAiEdit()
 
     set({
       project,
@@ -413,6 +441,20 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     } catch {
       // The sheet still offers the templates and the file picker.
     }
+  }
+
+  /** Applies a prepared change, unless the project moved on while it was prepared. */
+  function applyTransaction(expected: Project, transaction: ProjectTransaction, label: DesignEvent | null): string | null {
+    const current = get()
+    if (current.project !== expected) return 'The project changed while this edit was being prepared. Try again.'
+    const result = applyProjectTransaction(expected, current.documentRevision, transaction)
+    if (!result.ok) return result.reason
+    if (result.project !== expected) {
+      set({ project: result.project, ...(transaction.selection === undefined ? {} : { documentSelection: transaction.selection }) })
+      scheduleSave()
+      if (label) eventLog.record(expected.id, label)
+    }
+    return null
   }
 
   function commit(project: Project, activeFileId?: FileId): void {
@@ -540,16 +582,32 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     documentSelection: null,
     setDocumentSelection(selection) { set({ documentSelection: selection }) },
     commitTransaction(expected, transaction, label) {
-      const current = get()
-      if (current.project !== expected) return 'The project changed while this edit was being prepared. Try again.'
-      const result = applyProjectTransaction(expected, current.documentRevision, transaction)
-      if (!result.ok) return result.reason
-      if (result.project !== expected) {
-        set({ project: result.project, ...(transaction.selection === undefined ? {} : { documentSelection: transaction.selection }) })
-        scheduleSave()
-        if (label) eventLog.record(expected.id, label)
+      if (aiHold) return AI_EDITING
+      return applyTransaction(expected, transaction, label)
+    },
+    aiEdit: null,
+    holdForAi(stop) {
+      if (aiHold) return null
+      const hold = { stop }
+      aiHold = hold
+      set({ aiEdit: { phase: 'editing' } })
+      const holding = () => aiHold === hold
+      return {
+        checking: () => { if (holding()) set({ aiEdit: { phase: 'checking' } }) },
+        commit: (expected, transaction) => holding() ? applyTransaction(expected, transaction, null) : 'The AI edit was stopped. No changes applied.',
+        release: () => {
+          if (!holding()) return
+          aiHold = null
+          set({ aiEdit: null })
+        },
       }
-      return null
+    },
+    stopAiEdit() {
+      const hold = aiHold
+      if (!hold) return
+      aiHold = null
+      set({ aiEdit: null })
+      hold.stop()
     },
     appendPromptMessages(projectId, messages) {
       const project = get().project
@@ -561,6 +619,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       return null
     },
     replayDocument(direction) {
+      if (aiHold) return null
       const current = get().project
       if (!current) return null
       const result = history.take(direction, current)
@@ -595,6 +654,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       return loading
     },
     async handOver({ save }) {
+      get().stopAiEdit()
       if (save) await get().flush()
       handedOver = true
       const open = get().project
@@ -604,7 +664,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
     unsavedWork() {
       const { project, saveError, durable } = get()
-      return !handedOver && project !== null && (!durable || saveError !== null || saved.get(project.id) !== project)
+      // An AI edit still running would go with the page, after its provider billed for it.
+      return !handedOver && project !== null && (aiHold !== null || !durable || saveError !== null || saved.get(project.id) !== project)
     },
     async flush() {
       if (saveTimer) {
@@ -621,6 +682,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     setFileText(fileId, text) {
+      if (aiHold) return
       const { project } = get()
       const file = project?.files.find(f => f.id === fileId)
       if (!project || !file || file.text === text) return
@@ -656,6 +718,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     createFile(name, parentFolder) {
+      if (aiHold) return null
       const { project } = get()
       if (!project) return null
 
@@ -674,6 +737,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
      * so the file's current folder is the parent unless the name names another.
      */
     renameFile(fileId, name) {
+      if (aiHold) return false
       const { project } = get()
       if (!project) return false
 
@@ -690,6 +754,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     renameProject(name) {
+      if (aiHold) return false
       const project = get().project
       const normalized = normalizeProjectName(name)
       if (!project || !normalized) return false
@@ -700,6 +765,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     deleteFile(fileId) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -711,6 +777,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     duplicateFile(fileId) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -723,6 +790,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     createFolder(name, parentFolder) {
+      if (aiHold) return null
       const { project } = get()
       if (!project) return null
 
@@ -737,6 +805,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     renameFolder(path, name) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -754,6 +823,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     deleteFolder(path) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -765,6 +835,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     moveFile(fileId, folder) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -779,6 +850,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     setDevice(device) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
       commit({ ...project, manifest: { ...project.manifest, device }, updatedAt: Date.now() })
@@ -789,6 +861,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     renameSymbol(spans, newName) {
+      if (aiHold) return 0
       const { project } = get()
       if (!project || spans.length === 0 || !newName) return 0
 
@@ -855,6 +928,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
           return 'The project changed during import. Its current work was preserved. Reopen the archive.'
         }
         const first = incoming.files[0]?.id ?? null
+        // The archive replaces the project now, and an AI answer planned against it no longer fits.
+        get().stopAiEdit()
         set({ project: incoming, activeFileId: first, openFileIds: first ? [first] : [], lastSavedAt: Date.now(), ...saveState(null), origin: 'restored' })
         rememberLastOpened(incoming.id)
         eventLog.record(incoming.id, { type: 'project', action: 'imported' })
@@ -897,6 +972,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       }
       const overtaken = await leaveOutgoing(request, outgoingId, leaveUnsaved)
       if (overtaken) return overtaken
+      // The switch happens now, and an AI answer planned against the project being left no longer fits anything.
+      get().stopAiEdit()
 
       // What was just read is what is stored, so nothing about it is unsaved - even
       // when the project left behind could not be.

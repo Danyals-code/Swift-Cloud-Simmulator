@@ -91,8 +91,7 @@ describe('AI attempts in the event log', () => {
     second.checking()
     second.ended({ action: 'answered', files: 5, issues: 1 })
     wait(5000)
-    // Opening the draft switches the studio to it, and closes the panel.
-    attempts.settleDraft('p2')
+    attempts.draftOpened(second.stamp, 'p2')
 
     expect(steps(await logged('p1'))).toEqual([
       [1, 'sent', undefined], [1, 'responded', 30_000], [1, 'failed', 30_000], [2, 'sent', undefined], [2, 'responded', 60_000], [2, 'answered', 60_000],
@@ -100,29 +99,27 @@ describe('AI attempts in the event log', () => {
     expect(await logged('p2')).toEqual([{ type: 'ai', flow: 'create', attempt: 2, action: 'opened', ms: 65_000 }])
   })
 
-  it('counts a draft left behind as discarded, whether sent back to the prompt or waiting when the panel closes', async () => {
+  it('notes a kept draft thrown away with the attempts that made it, and one opened after a reload by its attempt', async () => {
     const { log, logged, clock, wait } = setUp()
     const attempts = promptAttempts(log, 'create', clock)
 
     const first = attempts.sent('p1', PROMPT)
     wait(20_000)
     first.ended({ action: 'answered', files: 3, issues: 0 })
-    wait(2000)
-    attempts.settleDraft('p1')
-    const second = attempts.sent('p1', PROMPT)
     wait(3000)
+    attempts.draftDiscarded(first.stamp)
+    const second = attempts.sent('p1', PROMPT)
+    wait(10_000)
     second.ended({ action: 'answered', files: 3, issues: 0 })
-    wait(1000)
-    attempts.settleDraft('p1')
-    const third = attempts.sent('p1', PROMPT)
-    wait(1000)
-    third.ended({ action: 'cancelled' })
-    attempts.settleDraft('p1')
+    // The page reloads: the draft is kept, the page's count starts again.
+    const reloaded = promptAttempts(log, 'create', clock)
+    wait(5000)
+    reloaded.draftOpened(second.stamp, 'p2')
 
     expect(steps(await logged('p1'))).toEqual([
-      [1, 'sent', undefined], [1, 'answered', 20_000], [1, 'discarded', 22_000],
-      [2, 'sent', undefined], [2, 'answered', 3000], [2, 'discarded', 4000],
-      [3, 'sent', undefined], [3, 'cancelled', 1000],
+      [1, 'sent', undefined], [1, 'answered', 20_000], [1, 'discarded', 23_000],
+      [2, 'sent', undefined], [2, 'answered', 10_000],
     ])
+    expect(await logged('p2')).toEqual([{ type: 'ai', flow: 'create', attempt: 2, action: 'opened', ms: 15_000 }])
   })
 })

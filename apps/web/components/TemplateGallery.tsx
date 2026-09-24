@@ -106,6 +106,10 @@ export function TemplateGallery({
    * recovered at all. It gets the same interruption, for the same reason.
    */
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null)
+  /** A Create with AI draft is on screen: a click beside the sheet no longer closes it. */
+  const [draftWaiting, setDraftWaiting] = useState(false)
+  /** Throws the draft away, once the participant says so. */
+  const [discarding, setDiscarding] = useState<(() => void) | null>(null)
   /** Answers the switch waiting on the participant, because the project being left could not be saved. */
   const [answerUnsaved, setAnswerUnsaved] = useState<((answer: 'switch' | 'stay') => void) | null>(null)
 
@@ -146,6 +150,7 @@ export function TemplateGallery({
         if (creatingRef.current) return
         if (deleting) setDeleting(null)
         else if (pending) setPending(null)
+        else if (discarding) setDiscarding(null)
         else onClose()
       }
       if (event.key !== 'Tab') return
@@ -167,7 +172,7 @@ export function TemplateGallery({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, pending, deleting, answerUnsaved])
+  }, [onClose, pending, deleting, discarding, answerUnsaved])
 
   /** Confirm before leaving an edited project; the saved copy remains in recents. */
   const replacing = useCallback(
@@ -243,7 +248,7 @@ export function TemplateGallery({
   return (
     <div
       className={styles.backdrop}
-      onPointerDown={atLaunch || creating ? undefined : onClose}
+      onPointerDown={atLaunch || creating || draftWaiting ? undefined : onClose}
       data-testid="template-gallery"
     >
       <div
@@ -303,7 +308,7 @@ export function TemplateGallery({
               <Icon name="xmark" size={17} />
             </button>
           </header>
-          {imported && onImport ? <ImportReview {...imported} incoming={imported.project} onCancel={() => setImported(null)} onApply={onImport} /> : source === 'prompt' ? <PromptCreator onOpenFiles={(files, history) => switching(options => onOpenFiles(files, { ...options, history }))} onBusy={setGenerationBusy} /> : source === 'open' ? (
+          {imported && onImport ? <ImportReview {...imported} incoming={imported.project} onCancel={() => setImported(null)} onApply={onImport} /> : source === 'prompt' ? <PromptCreator onOpenFiles={(files, history) => switching(options => onOpenFiles(files, { ...options, history }))} onBusy={setGenerationBusy} onDraft={setDraftWaiting} onConfirmDiscard={discard => setDiscarding(() => discard)} /> : source === 'open' ? (
             <OpenPane
               projectId={projectId}
               recents={recents}
@@ -365,6 +370,22 @@ export function TemplateGallery({
         click anywhere but the two buttons does nothing - which is the whole point of
         asking before something irreversible.
       */}
+      {discarding ? (
+        <Confirm
+          icon="error"
+          title="Discard this draft?"
+          body="The generated app will be gone. Generating it again sends another request, which your provider bills."
+          note="To keep it, open it as a project."
+          cancel="Keep draft"
+          confirm="Discard"
+          testId="discard-draft-confirm"
+          onCancel={() => setDiscarding(null)}
+          onConfirm={() => {
+            discarding()
+            setDiscarding(null)
+          }}
+        />
+      ) : null}
       {deleting ? (
         <Confirm
           icon="error"

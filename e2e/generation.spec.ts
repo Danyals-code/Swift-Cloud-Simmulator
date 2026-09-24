@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 const generated = {
   name: 'ReadingApp', summary: 'A quiet place for your reading goals.',
@@ -6,7 +7,7 @@ const generated = {
   files: [{ path: 'Sources/ReadingApp.swift', code: 'import SwiftUI\n@main\nstruct ReadingApp: App { var body: some Scene { WindowGroup { NavigationStack { Text("A chapter a day").navigationTitle("Reading") } } } }' }],
 }
 
-test('prompt draft can be reviewed and opened without saving the API key', async ({ page }) => {
+test('prompt draft can be reviewed and opened, with the API key kept for this tab and nowhere else (G3)', async ({ page }) => {
   await page.route('**/api/generate', async route => {
     expect(route.request().postDataJSON()).toMatchObject({ pageCount: 1, provider: 'openai' })
     await route.fulfill({ json: { app: generated } })
@@ -25,7 +26,11 @@ test('prompt draft can be reviewed and opened without saving the API key', async
   await expect(page.getByTestId('render-tree')).toContainText('A chapter a day')
   await page.getByTestId('app-icon').click()
   await page.getByTestId('gallery-source-prompt').click()
-  await expect(page.getByLabel('API key', { exact: true })).toHaveValue('')
+  await expect(page.getByLabel('API key', { exact: true })).toHaveValue('sk-test-never-persist-this-value')
+  await page.getByTestId('gallery-dismiss').click()
+  await page.getByRole('tab', { name: 'Prompt Editing', exact: true }).click()
+  await page.getByRole('button', { name: 'AI connection settings', exact: true }).click()
+  await expect(page.getByTestId('prompt-editor').getByLabel('API key', { exact: true })).toHaveValue('sk-test-never-persist-this-value')
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('never-persist-this-value')
 })
 
@@ -56,4 +61,117 @@ test('generation can be cancelled without opening a project', async ({ page }) =
   release()
   await expect(page.getByRole('button', { name: 'Generate app', exact: true })).toBeEnabled()
   await expect(page.getByTestId('generated-review')).toHaveCount(0)
+})
+
+test('both AI panels share one connection for the tab, whichever was open first (G3)', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('gallery-cancel').click()
+  await page.getByRole('tab', { name: 'Prompt Editing', exact: true }).click()
+  await page.getByRole('button', { name: 'AI connection settings', exact: true }).click()
+  const editing = page.getByTestId('prompt-editor')
+  await expect(editing.getByLabel('API key', { exact: true })).toHaveValue('')
+
+  await page.getByTestId('app-icon').click()
+  await page.getByTestId('gallery-source-prompt').click()
+  // Prompt Editing's fields carry the same names behind the sheet, so these are Create with AI's.
+  const creating = page.getByTestId('prompt-creator')
+  await creating.getByRole('combobox', { name: 'Provider', exact: true }).selectOption('anthropic')
+  await creating.getByLabel('API key', { exact: true }).fill('sk-ant-test-not-a-real-key')
+  await page.getByTestId('gallery-dismiss').click()
+
+  await expect(editing.getByRole('combobox', { name: 'Provider', exact: true })).toHaveValue('anthropic')
+  await expect(editing.getByLabel('API key', { exact: true })).toHaveValue('sk-ant-test-not-a-real-key')
+})
+
+/** Answers /api/edit once `answer` is called, relabelling the counter; `refuse` instead fails it. */
+async function editWhenAnswered(page: Page) {
+  let answer!: () => void, refuse!: () => void
+  const decided = new Promise<'answer' | 'refuse'>(resolve => { answer = () => resolve('answer'); refuse = () => resolve('refuse') })
+  await page.route('**/api/edit', async route => {
+    const { files } = route.request().postDataJSON() as { files: { id: string; text: string }[] }
+    const file = files.find(f => f.text.includes('Count: '))!
+    if (await decided === 'refuse') return route.abort().catch(() => {})
+    await route.fulfill({ json: { edit: { reply: 'Relabelled the count.', files: [{ path: file.id, code: file.text.replace('Count: ', 'Taps so far: ') }], deletedFiles: [] } } })
+  })
+  return { answer, refuse }
+}
+
+/** Sends a prompt from Prompt Editing, with a key for the tab. */
+async function sendPrompt(page: Page) {
+  await page.getByRole('tab', { name: 'Prompt Editing', exact: true }).click()
+  await page.getByRole('button', { name: 'AI connection settings', exact: true }).click()
+  await page.getByTestId('prompt-editor').getByLabel('API key', { exact: true }).fill('sk-test-not-a-real-key-123456')
+  await page.getByLabel('Describe a change', { exact: true }).fill('Call the count taps.')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+}
+
+test('an AI edit holds the project until its answer lands, even with the panel collapsed (G12)', async ({ page }) => {
+  const { answer } = await editWhenAnswered(page)
+  await openCounter(page)
+  // Something to undo, so that Undo turning off is the hold's doing.
+  await page.getByTestId('workspace-develop').click()
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+Home')
+  await page.keyboard.insertText('// Tried in the study\n')
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('design-undo')).toBeEnabled()
+  await sendPrompt(page)
+
+  const banner = page.getByTestId('ai-edit-banner')
+  await expect(banner).toContainText('The AI is editing this project.')
+  await expect(page.getByTestId('design-undo')).toBeDisabled()
+  await page.getByTestId('pane-toggle-navigator').click()
+  await expect(banner).toBeVisible()
+  answer()
+
+  await expect(page.getByTestId('render-tree').getByText('Taps so far: 0', { exact: true })).toBeVisible()
+  await expect(banner).toHaveCount(0)
+  await expect(page.getByTestId('design-undo')).toBeEnabled()
+})
+
+test('Stop ends an AI edit at once, and its answer changes nothing (G12)', async ({ page }) => {
+  const { refuse } = await editWhenAnswered(page)
+  await openCounter(page)
+  await sendPrompt(page)
+  const banner = page.getByTestId('ai-edit-banner')
+  await expect(banner).toBeVisible()
+
+  await banner.getByRole('button', { name: 'Stop', exact: true }).click()
+  refuse()
+
+  await expect(banner).toHaveCount(0)
+  await expect(page.getByTestId('prompt-editor')).toContainText('Cancelled. No changes applied.')
+  await expect(page.getByTestId('render-tree').getByText('Count: 0', { exact: true })).toBeVisible()
+})
+
+test('a generated draft is kept for the tab until it is opened or thrown away, which asks first (G13)', async ({ page }) => {
+  await page.route('**/api/generate', route => route.fulfill({ json: { app: generated } }))
+  await page.goto('/')
+  await page.getByTestId('gallery-source-prompt').click()
+  await page.getByLabel('App description', { exact: true }).fill('A quiet place to track daily reading goals.')
+  await page.getByRole('combobox', { name: 'Pages', exact: true }).selectOption('1')
+  await page.getByLabel('API key', { exact: true }).fill('sk-test-not-a-real-key-123456')
+  await page.getByRole('button', { name: 'Generate app', exact: true }).click()
+  const review = page.getByTestId('generated-review')
+  await expect(review).toBeVisible()
+
+  // A click beside the sheet no longer closes it; closing it keeps the draft.
+  await page.mouse.click(5, 5)
+  await expect(review).toBeVisible()
+  await page.getByTestId('gallery-dismiss').click()
+  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await page.getByTestId('app-icon').click()
+  await page.getByTestId('gallery-source-prompt').click()
+  await expect(review).toBeVisible()
+  await page.reload()
+  await page.getByTestId('gallery-source-prompt').click()
+  await expect(review).toContainText('ReadingApp')
+
+  await review.getByRole('button', { name: 'Back to prompt', exact: true }).click()
+  await page.getByTestId('discard-draft-confirm-cancel').click()
+  await expect(review).toBeVisible()
+  await review.getByRole('button', { name: 'Back to prompt', exact: true }).click()
+  await page.getByTestId('discard-draft-confirm-button').click()
+  await expect(review).toHaveCount(0)
+  await expect(page.getByLabel('App description', { exact: true })).toBeVisible()
 })
