@@ -17,7 +17,9 @@ export function authoringSettingsContext(snapshot: AuthoringSnapshot | undefined
   const collect = (node: AuthoringNode) => {
     for (const id of node.children) {
       const child = nodes.get(id)
-      if (!child || sourceLayerIsVisual(child)) continue
+      if (!child) continue
+      // A titled Section is a layer of its own, but a list's rows are still inside it (D13).
+      if (sourceLayerIsVisual(child)) { if (child.name === 'Section') collect(child); continue }
       wrappers.push(child)
       collect(child)
     }
