@@ -12,6 +12,7 @@ import { TokenField, valueFields } from './settings/TokenField'
 import { sourceLayerIsVisual, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
 import { authoringSettingsContext, settingsContextLabel, settingsVisualChildren } from '../lib/authoringSettings'
 import { MenuButton } from './ui/Menu'
+import { SHORTCUT_KEYS } from '../lib/shortcuts'
 import { Icon } from './ui/Icon'
 import styles from './AuthoringInspector.module.css'
 
@@ -106,7 +107,7 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
         {onReveal && <MenuButton label="View actions" items={[
           { value: 'code', label: 'Open in Code', icon: 'code' },
           ...(breadcrumbs.length ? [{ value: 'parent', label: `Select ${sourceLayerLabel(breadcrumbs.at(-1)!)}` }] : []),
-          ...(isStructuralLayer(selected) ? [{ value: 'copy', label: 'Copy', detail: '⌘C', disabled: !onCopy, separated: true }, { value: 'paste', label: 'Paste', detail: '⌘V', disabled: !onPaste }] : []),
+          ...(isStructuralLayer(selected) ? [{ value: 'copy', label: 'Copy', detail: SHORTCUT_KEYS.copy, disabled: !onCopy, separated: true }, { value: 'paste', label: 'Paste', detail: SHORTCUT_KEYS.paste, disabled: !onPaste }] : []),
         ]} onSelect={value => {
           if (value === 'code') onReveal(selected.source)
           else if (value === 'parent') features?.onSelect?.(breadcrumbs.at(-1)!)

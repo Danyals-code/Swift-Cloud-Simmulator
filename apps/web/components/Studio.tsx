@@ -9,7 +9,7 @@ import { findFile } from '@studio/project-model'
 import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
 import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, RenderTree, SourcePoint, SourceSpan, ViewLayer } from '@studio/shared'
 import { AI_EDITING, useStudio, type PreviewSettings } from '../lib/store'
-import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
+import type { HiddenViewInfo, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
 import { imageViewSnippet } from '../lib/images'
 import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-model'
@@ -62,7 +62,8 @@ import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
 import { StorageBanner } from './StorageBanner'
-import { storageProblem } from '../lib/storageProblem'
+import { saveNote, storageProblem } from '../lib/storageProblem'
+import { keyFocus, shortcutFor, SHORTCUT_KEYS } from '../lib/shortcuts'
 import { OpenElsewhere } from './OpenElsewhere'
 import { startStudioTab, studioTabState, subscribeStudioTab } from '../lib/activeTab'
 import styles from './Workspace.module.css'
@@ -487,70 +488,6 @@ export function Studio() {
   /** Reset interaction state while leaving the document and its undo history intact. */
   const run = useCallback(() => { void reset().then(() => { setPreviewResetEpoch(value => value + 1); setEditNote('Preview reset. Your design is unchanged.') }).catch(() => setEditNote('Could not reset the preview. Try again.')) }, [reset])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
-      const typing = (e.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"], .cm-editor')
-
-      /**
-       * The two switches, on one key each.
-       *
-       * Tab moves between designing the app and using it; the backquote moves
-       * between the two workspaces. Both are plain keys, so both stand aside for
-       * anything with a cursor in it - Tab in a form is a Tab.
-       */
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
-        if (e.key === 'Tab' && !e.shiftKey) {
-          e.preventDefault()
-          setDesigning(!inspecting)
-          return
-        }
-        if (e.key === '`') {
-          e.preventDefault()
-          setMode(mode === 'design' ? 'develop' : 'design')
-          return
-        }
-      }
-
-      if (!(e.ctrlKey || e.metaKey)) return
-      const key = e.key.toLowerCase()
-
-      // Xcode's own bindings, which is the point: muscle memory is most of what
-      // "feels like Xcode" means once the pixels are right.
-      if (key === '/') {
-        e.preventDefault()
-        setShortcutsOpen(true)
-      } else if (key === '0') {
-        e.preventDefault()
-        togglePane('navigator')
-      } else if (key === 'y' && e.shiftKey) {
-        e.preventDefault()
-        togglePane('debug')
-      } else if (key === 'enter' && e.altKey) {
-        e.preventDefault()
-        togglePane('preview')
-      } else if (key === 'b') {
-        e.preventDefault()
-        togglePane('preview')
-      } else if ((key === 'o' && e.shiftKey) || key === 'p') {
-        e.preventDefault()
-        setSwitcherOpen(true)
-      } else if (key === 'i') {
-        e.preventDefault()
-        toggleInspect()
-      } else if (key === 'a' && e.shiftKey) {
-        e.preventDefault()
-        if (mode === 'design' && inspecting) setAllPages((on) => !on)
-      } else if (key === 'r') {
-        e.preventDefault()
-        run()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [togglePane, run, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, toggleInspect, mode, inspecting, setDesigning, setMode])
-
-
 
   const handleChange = useCallback(
     (text: string) => {
@@ -955,7 +892,7 @@ export function Studio() {
     if (project) eventLog.record(project.id, { ...designEvent(operation, node ?? undefined), refused: true })
   }, [project, result?.authoring])
 
-  const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
+  const applyEdit = useCallback(async (edit: DesignEditRequest['operation'], layer?: ViewLayer) => {
     const target = layer ?? selectedLayer
     const model = result?.authoring
     const node = model?.nodes.find(n => n.id === model.runtimeToSource[target?.id ?? ''])
@@ -1083,53 +1020,53 @@ export function Studio() {
   }, [project, stale, result?.revision, hiddenViews, hidden.key])
 
   /**
-   * The designing keys, which carry no modifier.
-   *
-   * Held apart from the Xcode chords above because they must never fire while
-   * somebody is typing: V, A and D are letters, and Backspace in a text field is a
-   * backspace. Anything with a focused field or an open sheet is left alone.
+   * The keys, as `shortcutFor` reads them (D5): one table for both workspaces, by where the
+   * focus is, so nothing pressed in a field reaches the view. A dialog or sheet that is
+   * open has the keys to itself, and a key a control has already handled is its own.
    */
   useEffect(() => {
-    if (mode !== 'design' || !inspecting) return
     const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
-      const target = e.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"], .cm-editor')) return
-
-      const key = e.key.toLowerCase()
-      // The editing chords. Undo is the studio's here rather than the editor's,
-      // because the editor is not the thing being typed into.
-      if (e.ctrlKey || e.metaKey) {
-        if (key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo() }
-        else if (key === 'y' && !e.shiftKey) { e.preventDefault(); redo() }
-        else if (key === 'c') { if (selectedLayer) { e.preventDefault(); void copySelection() } }
-        else if (key === 'v') { e.preventDefault(); pasteClipboard() }
-        else if (key === 'h') { if (selectedLayer) { e.preventDefault(); void applyEdit({ kind: 'hide' }) } }
-        return
-      }
-
-      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault()
-        void applyEdit({ kind: 'move', direction: e.key === 'ArrowUp' ? -1 : 1 })
-      } else if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (!selectedLayer) return
-        e.preventDefault()
-        void applyEdit({ kind: 'delete' })
-      } else if (key === 'v') {
-        setTool('select')
-      } else if (key === 'd') {
-        setTool(tool === 'delete' ? 'select' : 'delete')
-      } else if (key === 'a') {
-        if (canAdd) { e.preventDefault(); setAdding(true) }
-      } else if (e.key === 'Escape') {
-        if (tool === 'delete') setTool('select')
-        else setLayerSelection(null)
+      if (e.defaultPrevented || galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
+      const shortcut = shortcutFor({ key: e.key, mod: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey }, { workspace: mode, editing: inspecting, focus: keyFocus(e.target), selected: !!selectedLayer })
+      if (!shortcut) return
+      // Escape is left for the canvas's own uses of it, such as cancelling a destination pick.
+      if (shortcut !== 'escape') e.preventDefault()
+      switch (shortcut) {
+        case 'undo': undo(); break
+        case 'redo': redo(); break
+        case 'copy': void copySelection(); break
+        case 'paste': pasteClipboard(); break
+        case 'duplicate': void applyEdit({ kind: 'layer-duplicate' }); break
+        case 'hide': void applyEdit({ kind: 'hide' }); break
+        case 'delete': void applyEdit({ kind: 'delete' }); break
+        case 'move-up': case 'move-down': void applyEdit({ kind: 'move', direction: shortcut === 'move-up' ? -1 : 1 }); break
+        case 'add': if (canAdd) setAdding(true); break
+        case 'select-tool': setTool('select'); break
+        case 'escape':
+          if (inspecting && tool === 'delete') setTool('select')
+          else if (inspecting) setLayerSelection(null)
+          break
+        case 'all-screens': setAllPages(on => !on); break
+        case 'save':
+          // What was typed in a field goes in first, as leaving the field would put it.
+          if (keyFocus(e.target) === 'text') (e.target as HTMLElement).blur()
+          void flush().then(() => setEditNote(saveNote(storageProblem(useStudio.getState()))))
+          break
+        case 'restart-preview': run(); break
+        case 'open-file': setSwitcherOpen(true); break
+        case 'shortcuts': setShortcutsOpen(true); break
+        case 'left-panel': togglePane('navigator'); break
+        case 'right-panel': togglePane('preview'); break
+        case 'problems': togglePane('debug'); break
+        case 'inspect': case 'preview': toggleInspect(); break
+        case 'workspace': setMode(mode === 'design' ? 'develop' : 'design'); break
+        case 'group': case 'hold': break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
-      undo, redo, copySelection, pasteClipboard])
+      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleInspect, setMode])
 
   /**
    * Undo and redo, over the edits the canvas made.
@@ -1335,7 +1272,7 @@ export function Studio() {
                 <span className={styles.selectionKind}>{selection.type}</span>
                 <button type="button" data-testid="move-up" disabled={!selection.canMoveUp} title="Move up (⌥↑)" aria-label="Move up" onClick={() => void applyEdit({ kind: 'move', direction: -1 })}><Icon name="chevron-up-down" size={13} /><span>Up</span></button>
                 <button type="button" data-testid="move-down" disabled={!selection.canMoveDown} title="Move down (⌥↓)" aria-label="Move down" onClick={() => void applyEdit({ kind: 'move', direction: 1 })}><Icon name="chevron-up-down" size={13} /><span>Down</span></button>
-                <button type="button" data-testid="hide-selection" title="Hide (⌘H)" aria-label="Hide" onClick={() => void applyEdit({ kind: 'hide' })}><Icon name="eye" size={13} /></button>
+                <button type="button" data-testid="hide-selection" title={`Hide (${SHORTCUT_KEYS.hide})`} aria-label="Hide" onClick={() => void applyEdit({ kind: 'hide' })}><Icon name="eye" size={13} /></button>
                 <button type="button" data-testid="delete-selection" disabled={!selection.canDelete} title="Delete (⌫)" aria-label="Delete" onClick={() => void applyEdit({ kind: 'delete' })}><Icon name="xmark" size={12} /></button>
               </div>
             ) : null}

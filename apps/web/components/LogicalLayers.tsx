@@ -8,6 +8,7 @@ import { Icon, type IconName } from './ui/Icon'
 import { MenuButton, type MenuItem } from './ui/Menu'
 import { eventLog } from '../lib/eventLog'
 import { designEvent } from '../lib/designEvents'
+import { SHORTCUT_KEYS } from '../lib/shortcuts'
 import styles from './Layers.module.css'
 
 interface Props {
@@ -137,16 +138,16 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     // A view written as an argument keeps its name; the rest is off, and says why.
     const slotProblem = argumentLayerProblem(snapshot.nodes, node)
     const structure: MenuItem[] = [
-      { value: 'copy', label: 'Copy', detail: '⌘C', disabled: !isStructuralLayer(node) || !onCopy },
-      { value: 'paste', label: 'Paste', detail: '⌘V', disabled: !canEdit || !onPaste },
-      { value: 'duplicate', label: 'Duplicate', disabled: !canEdit, separated: true },
+      { value: 'copy', label: 'Copy', detail: SHORTCUT_KEYS.copy, disabled: !isStructuralLayer(node) || !onCopy },
+      { value: 'paste', label: 'Paste', detail: SHORTCUT_KEYS.paste, disabled: !canEdit || !onPaste },
+      { value: 'duplicate', label: 'Duplicate', detail: SHORTCUT_KEYS.duplicate, disabled: !canEdit, separated: true },
       { value: 'VStack', label: 'Wrap in Vertical Stack', disabled: !canEdit },
       { value: 'HStack', label: 'Wrap in Horizontal Stack', disabled: !canEdit },
       { value: 'ZStack', label: 'Wrap in ZStack', disabled: !canEdit },
       { value: 'reparent', label: 'Move into…', disabled: !canEdit },
       { value: 'up', label: 'Move up', disabled: !canEdit || index <= 0 || !rows.some(row => row.node.id === siblings[index - 1]) },
       { value: 'down', label: 'Move down', disabled: !canEdit || index < 0 || index >= siblings.length - 1 || !rows.some(row => row.node.id === siblings[index + 1]) },
-      { value: 'hide', label: 'Hide', disabled: !canEdit, separated: true },
+      { value: 'hide', label: 'Hide', detail: SHORTCUT_KEYS.hide, disabled: !canEdit, separated: true },
       { value: 'delete', label: 'Delete', disabled: !canEdit },
     ]
     return [

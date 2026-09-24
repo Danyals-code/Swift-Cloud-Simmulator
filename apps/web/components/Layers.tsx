@@ -278,7 +278,7 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
           {editable && !layer.page && onHide ? (
             <span className={styles.move}>
               <button type="button" tabIndex={-1} data-testid="layer-hide"
-                aria-label={`Hide ${layer.name}`} title="Hide this view (⌘H)"
+                aria-label={`Hide ${layer.name}`} title="Hide this view (⇧⌘H)"
                 onClick={event => { event.stopPropagation(); onHide(layer) }}>
                 <Icon name="eye" size={13} />
               </button>

@@ -31,3 +31,10 @@ export function storageProblem({ saveError, saveOutdated, durable, loadError }: 
 export function unsaved(problem: StorageProblem | null): boolean {
   return problem?.kind === 'failing' || problem?.kind === 'outdated'
 }
+
+/** What ⌘S says once it has saved (D5), with the banner saying the rest. */
+export function saveNote(problem: StorageProblem | null): string {
+  if (unsaved(problem)) return 'Not saved. The note at the top of the page says why.'
+  if (problem?.kind === 'memory') return 'Not saved: this browser keeps nothing once the tab closes. Download your project to keep it.'
+  return 'Saved. Your work also saves as you go.'
+}

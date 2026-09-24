@@ -428,17 +428,22 @@ test('copy and paste put a second one of something beside it', async ({ page }) 
   expect((await source(page)).match(/\.font\(\.title\)/g)).toHaveLength(2)
 })
 
-test('Tab switches the canvas and the backquote switches the workspace', async ({ page }) => {
+test('Preview is one button, Tab moves the focus, and the backquote switches the workspace', async ({ page }) => {
   await openDesign(page)
   // One switch in the top bar: while editing it offers Preview...
   await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByTestId('device-pane')).toHaveAttribute('data-tool', 'select')
 
+  // Tab moves the focus, as on any page, rather than switching the canvas (D5).
   await page.keyboard.press('Tab')
+  await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
+  await expect(page.getByTestId('device-pane')).toHaveAttribute('data-tool', 'select')
+
+  await page.getByTestId('live-toggle').click()
   // ...and while previewing it is pressed, and stops the preview.
   await expect(page.getByTestId('inspect-toggle')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('device-pane')).not.toHaveAttribute('data-tool')
-  await page.keyboard.press('Tab')
+  await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByTestId('device-pane')).toHaveAttribute('data-tool', 'select')
 
