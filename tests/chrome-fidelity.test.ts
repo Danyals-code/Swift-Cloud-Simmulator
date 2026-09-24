@@ -404,7 +404,7 @@ describe('a view name the preview does not draw', () => {
    * degrades the way `Chart` and `Map` already did.
    */
   it('warns and draws a placeholder rather than blanking the screen', () => {
-    const result = compileSource(app('        PhaseAnimator([1, 2]) { _ in Text("x") }'))
+    const result = compileSource(app('        EditButton()'))
 
     expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
     expect(result.diagnostics.map((d) => d.code)).toContain('unsupported_swiftui_view')

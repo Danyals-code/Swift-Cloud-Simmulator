@@ -158,6 +158,11 @@ export interface CompileResult {
    * their own hierarchy because their views are absent from the live screen.
    */
   readonly pages?: readonly PagePreview[]
+  /**
+   * The warnings for the screens the gallery couldn't draw, each saying which and why:
+   * the Design canvas shows them itself, as it has no list of warnings.
+   */
+  readonly pagesNotDrawn?: readonly string[]
   readonly logs: readonly LogEntry[]
   readonly timings: CompileTimings
   /** Pending shaped runs are resolved in one bounded main-thread batch. */

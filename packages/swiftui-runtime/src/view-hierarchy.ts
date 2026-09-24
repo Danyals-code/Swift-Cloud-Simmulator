@@ -1,7 +1,10 @@
 import type { ViewLayer } from '@studio/shared'
-import { asView, type ViewValue } from './view-value'
+import { asView, stopped, type ViewValue } from './view-value'
 
 export function layerLabel(view: ViewValue): string {
+  // A view that stopped is still the view it was: its layer says which.
+  const halted = stopped(view)
+  if (halted) return halted.name
   const title = view.args.find(a => a.label === null)?.value
   if (title?.kind === 'string') return title.value
   if (view.name === 'Image') {

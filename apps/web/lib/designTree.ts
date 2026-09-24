@@ -1,4 +1,4 @@
-import type { AuthoringNode, AuthoringSnapshot, PagePreview } from '@studio/shared'
+import type { AuthoringNode, AuthoringSnapshot, Diagnostic, PagePreview } from '@studio/shared'
 import { screenDefinition, type DesignScreen } from './screens'
 
 /** How a screen is reached from the one before it. `root` starts a lane. */
@@ -136,4 +136,18 @@ export function designScreenPath(tree: DesignTree, id: string | undefined): stri
     if (found) return found
   }
   return []
+}
+
+/**
+ * What an empty Screens list says, and where to look when an error is the reason.
+ *
+ * Screens are found by drawing them, so while a file doesn't parse there are none,
+ * and after a reload nothing is kept from before: "No screens yet" then sent a
+ * designer looking for screens that were there all along.
+ */
+export function emptyScreensNote(busy: boolean, diagnostics: readonly Diagnostic[]): { readonly text: string; readonly at?: { readonly file: string; readonly offset: number } } {
+  if (busy) return { text: 'Drawing screens…' }
+  const error = diagnostics.find((d) => d.severity === 'error')
+  if (!error) return { text: 'No screens yet.' }
+  return { text: `Fix the error in ${error.span.file.split('/').pop()} to see the screens.`, at: { file: error.span.file, offset: error.span.start } }
 }

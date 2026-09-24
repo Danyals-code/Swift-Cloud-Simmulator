@@ -210,3 +210,160 @@ func main() {
     ).toEqual(['two'])
   })
 })
+
+describe('functions that share a name, chosen as Swift chooses', () => {
+  it('calls the top-level function whose labels the call writes', () => {
+    expect(
+      run(`
+func minutes(on day: Int) -> String { return "on \\(day)" }
+func minutes(of day: Int) -> String { return "of \\(day)" }
+
+func main() {
+    print(minutes(on: 1))
+    print(minutes(of: 2))
+}`),
+    ).toEqual(['on 1', 'of 2'])
+  })
+
+  it('calls the top-level function whose parameter type the argument has', () => {
+    expect(
+      run(`
+func label(_ value: Int) -> String { return "whole \\(value)" }
+func label(_ value: String) -> String { return "text \\(value)" }
+func label(_ value: Double) -> String { return "decimal \\(value)" }
+
+func main() {
+    print(label(1))
+    print(label("one"))
+    print(label(1.5))
+}`),
+    ).toEqual(['whole 1', 'text one', 'decimal 1.5'])
+  })
+
+  it('calls the method whose parameter type the argument has, from outside and from inside its type', () => {
+    expect(
+      run(`
+struct Formatter {
+    func label(_ value: Int) -> String { return "whole \\(value)" }
+    func label(_ value: String) -> String { return "text \\(value)" }
+    func both() -> String { return label(2) + ", " + label("two") }
+}
+
+func main() {
+    let formatter = Formatter()
+    print(formatter.label(1))
+    print(formatter.label("one"))
+    print(formatter.both())
+}`),
+    ).toEqual(['whole 1', 'text one', 'whole 2, text two'])
+  })
+
+  it("calls a type's own method over a top-level function of the same name, called or named as a value", () => {
+    expect(
+      run(`
+func title() -> String { return "top level" }
+
+struct Screen {
+    func title() -> String { return "own" }
+    func heading() -> String { return title() }
+    func named() -> String {
+        let make = title
+        return make()
+    }
+}
+
+func main() {
+    print(Screen().heading())
+    print(Screen().named())
+    print(title())
+}`),
+    ).toEqual(['own', 'own', 'top level'])
+  })
+
+  it('calls the local function whose parameter type the argument has', () => {
+    expect(
+      run(`
+func main() {
+    func describe(_ value: Int) -> String { return "whole" }
+    func describe(_ value: String) -> String { return "text" }
+    print(describe(3))
+    print(describe("three"))
+}`),
+    ).toEqual(['whole', 'text'])
+  })
+
+  it('runs the initialiser whose parameter type the argument has', () => {
+    expect(
+      run(`
+struct Reading {
+    let source: String
+    init(_ value: Int) { source = "whole \\(value)" }
+    init(_ value: String) { source = "text \\(value)" }
+}
+
+func main() {
+    print(Reading(4).source)
+    print(Reading("four").source)
+}`),
+    ).toEqual(['whole 4', 'text four'])
+  })
+
+  it('keeps the memberwise initialiser beside one declared in an extension', () => {
+    expect(
+      run(`
+struct Item {
+    var name: String
+    var count: Int
+}
+
+extension Item {
+    init(raw: String) {
+        name = raw
+        count = 1
+    }
+}
+
+func main() {
+    let item = Item(name: "Milk", count: 3)
+    print("\\(item.name) \\(item.count)")
+    let other = Item(raw: "Eggs")
+    print("\\(other.name) \\(other.count)")
+}`),
+    ).toEqual(['Milk 3', 'Eggs 1'])
+  })
+
+  it('passes a built-in value as a project protocol it was extended to adopt', () => {
+    expect(
+      run(`
+protocol Displayable {}
+extension Int: Displayable {}
+
+func format(_ value: String) -> String { return "text" }
+func format(_ value: Displayable) -> String { return "displayable" }
+
+func main() {
+    print(format(5))
+    print(format("five"))
+}`),
+    ).toEqual(['displayable', 'text'])
+  })
+
+  it("writes a type's own property, not a top-level variable of the same name", () => {
+    expect(
+      run(`
+var count = 100
+
+struct Counter {
+    var count = 0
+    mutating func bump() { count += 1 }
+}
+
+func main() {
+    var counter = Counter()
+    counter.bump()
+    print(counter.count)
+    print(count)
+}`),
+    ).toEqual(['1', '100'])
+  })
+})

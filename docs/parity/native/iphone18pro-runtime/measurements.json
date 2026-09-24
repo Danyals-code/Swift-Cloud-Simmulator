@@ -1,0 +1,25 @@
+{
+  "source": "Built from tests/fixtures/ios27-runtime.swift, exported with the repo's own exporter (projectFromFiles + buildExportBundle, deploymentTarget 27.0) and compiled with Xcode 27.0 (27A266a) on macOS 27.0; run on the iPhone 18 Pro simulator (088B21CA-E114-42A3-948D-2C682861FDB1, iOS 27.0), light appearance forced with simctl ui, status bar overridden to 9:41; a simctl io screenshot after launch, on 2026-09-24. 1206x2622 pixels / 402x874 points at 3x.",
+  "fixtureSha256": "d4a1bfcbe66a7b081d8544d136e611cccaa90e05085dc3b2e6ae6f76cea770f4",
+  "captures": [
+    {
+      "file": "tabsection.png",
+      "sha256": "b95a222dcb0a5bdc6b44da5caf2d82940db98da26b8ba0ef6f96289d538efa2f",
+      "size": [
+        1206,
+        2622
+      ]
+    }
+  ],
+  "measured": {
+    "tabSection": {
+      "tabBar": [
+        "Home",
+        "One",
+        "Two"
+      ],
+      "sectionTitleShown": false,
+      "note": "A TabSection's tabs are in the tab bar beside the tabs around it, in the order written; the section's title (\"More\") is not drawn on iPhone."
+    }
+  }
+}

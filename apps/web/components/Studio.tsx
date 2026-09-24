@@ -7,7 +7,7 @@ import { LAYER_MOVE_CONTAINERS, validatePreviewScenario, reconcileAuthoringSelec
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
-import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, SourcePoint, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
+import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, RenderTree, SourcePoint, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
 import { useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
@@ -20,6 +20,7 @@ import { navigationDestinationForPage } from '../lib/navigationPicker'
 import { useNavigationPicker } from '../lib/useNavigationPicker'
 import { authoringRenderIds, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
 import { useCompiler } from '../lib/useCompiler'
+import { phoneView } from '../lib/phoneView'
 /**
  * Problems, output, timings and coverage, fetched when the panel is opened.
  *
@@ -323,6 +324,16 @@ export function Studio() {
 
   /** The authoring snapshot on its own, so memoized work depends on it and not the whole result. */
   const snapshot = result?.authoring
+
+  /**
+   * The last screen that ran, per project and state, so that while the code has errors
+   * the phone keeps it, dimmed, under the notice (FR-6.3).
+   */
+  const phoneKey = JSON.stringify([project?.id, scenario ?? null])
+  const [lastRan, setLastRan] = useState<{ key: string; tree: RenderTree } | null>(null)
+  const latestTree = result?.renderTree ?? null
+  if (latestTree && !latestTree.notice && (lastRan?.tree !== latestTree || lastRan.key !== phoneKey)) setLastRan({ key: phoneKey, tree: latestTree })
+  const phone = phoneView(latestTree, lastRan?.key === phoneKey ? lastRan.tree : null)
 
   const activeFile = useMemo(
     () => (project && activeFileId ? findFile(project, activeFileId) : undefined),
@@ -1375,6 +1386,8 @@ export function Studio() {
                 selectedScreenId={focusedScreen?.id}
                 selectedComponent={authoringNode?.kind === 'definition' ? authoringNode.name : undefined}
                 busy={stale || preparingEdit}
+                diagnostics={allDiagnostics}
+                onReveal={revealSpanIn}
                 onTogglePanel={() => togglePane('navigator')}
                 onSelectApp={selectApp}
                 onSelectScreen={openPage}
@@ -1537,6 +1550,7 @@ export function Studio() {
                 canvas={canvas}
                 selectedPageId={designPage?.id}
                 pageCount={pageCount}
+                pagesNotDrawn={designPages ? result?.pagesNotDrawn : undefined}
                 onSelectPage={openPage}
                 allPages={allPages || pickingNavigation}
                 navigationPicker={navigationPageTargets ? {
@@ -1562,11 +1576,12 @@ export function Studio() {
                 onDeviceChange={setDevice}
                 tools={previewTools}
                 device={device}
-                tree={result?.renderTree ?? null}
+                tree={phone.tree}
+                notice={phone.notice}
                 revision={result?.revision}
                 selectedRenderIds={selectedRenderIds}
                 hoveredRenderIds={hoveredRenderIds}
-                stale={stale || preparingEdit}
+                stale={stale || preparingEdit || phone.dimmed}
                 onEvent={handleEvent}
                 inspecting={inspecting}
                 onRevealSource={inspectSelect}

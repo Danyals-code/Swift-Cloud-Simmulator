@@ -327,7 +327,8 @@ test('Phase 3 - a runtime trap is reported with its reason, not a crash', async 
   )
 
   await expect(page.getByTestId('console')).toContainText('Division by zero', { timeout: 5_000 })
-  await expect(preview(page)).toContainText('Execution stopped')
+  // The view that trapped is drawn as stopped, saying why, in its own place.
+  await expect(preview(page).locator('[data-kind="placeholder"]')).toContainText('Root stopped')
 })
 
 test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', async ({ page }) => {

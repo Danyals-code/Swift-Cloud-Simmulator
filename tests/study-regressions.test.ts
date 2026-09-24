@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
-import type { CompileRequest, CompileResult, RenderNode } from '@studio/shared'
+import type { CompileRequest, CompileResult, RenderNode, ViewLayer } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
@@ -64,6 +65,8 @@ function reported(members: string, declarations = '') {
 const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
 /** What the same simulator drew for the second set of fixes (docs/parity/native/iphone18pro-misrenders-ii). */
 const nativeII = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders-ii/measurements.json', import.meta.url), 'utf8')).measured
+/** What the same simulator drew running tests/fixtures/ios27-runtime.swift (docs/parity/native/iphone18pro-runtime). */
+const runtimeCapture = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-runtime/measurements.json', import.meta.url), 'utf8'))
 
 /** A `runView` on the iPhone 18 Pro the native values were measured on, with its safe area. */
 const screen = (members: string, declarations = '') => runView(members, declarations, { safeArea: DEVICES['iphone-18-pro'].safeArea })
@@ -919,9 +922,10 @@ struct ContentView: View {
     expect(texts(r)).toContain('Count 0')
   })
 
-  it('stops, as iOS does, when no ancestor gave the model, and reads nil when it may be missing', () => {
+  it('draws a view no ancestor gave the model as stopped, saying why, and reads nil when it may be missing', () => {
     const missing = compileView(viewSource('@Environment(Model.self) private var model\n var body: some View { Text("Count \\(model.count)") }', model))
     expect(missing.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    expect(nodes(missing).find(n => n.placeholder)?.placeholder).toMatchObject({ feature: 'ContentView stopped', reason: expect.stringContaining('No Observable object of type Model found') })
     const optional = runView('@Environment(Model.self) private var model: Model?\n var body: some View { Text(model == nil ? "No model" : "Model") }', model)
     expect(texts(optional)).toContain('No model')
   })
@@ -930,14 +934,16 @@ struct ContentView: View {
     ['a title', 'NavigationLink("Open") { Detail() }'],
     ['destination:', 'NavigationLink(destination: Detail()) { Text("Open") }'],
     ['a label: closure', 'NavigationLink { Detail() } label: { Text("Open") }'],
-  ])('draws a link with %s to a screen missing its model, and stops only when it is pushed, as iOS does', (_, link) => {
+  ])('draws a link with %s to a screen missing its model, and says so only when it is pushed, as iOS runs it then', (_, link) => {
     const r = runView(`var body: some View { NavigationStack { ${link} } }`, `${model}
       struct Detail: View {
         @Environment(Model.self) private var model
         var body: some View { Text("Count \\(model.count)") }
       }`)
     expect(controls(r)).toContain('Open')
-    expect(tap(r, 'Open').diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    const pushed = tap(r, 'Open')
+    expect(pushed.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    expect(nodes(pushed).find(n => n.placeholder)?.placeholder?.feature).toBe('Detail stopped')
   })
 })
 
@@ -1320,5 +1326,375 @@ describe('Text interpolated into Text', () => {
     const r = runView('var body: some View { NavigationStack { Button("\\(Text("Bold").bold()) go") { }.navigationTitle("\\(Text("Home")) screen") } }')
     expect(controls(r)).toContain('Bold go')
     expect(texts(r)).toContain('Home screen')
+  })
+})
+
+describe('F4: an internal error is reported where it happened, and never stops the worker', () => {
+  const tagClass = `final class Tag: Hashable {
+    let name: String
+    init(_ name: String) { self.name = name }
+    static func == (a: Tag, b: Tag) -> Bool { a.name == b.name }
+    func hash(into hasher: inout Hasher) { hasher.combine(name) }
+  }`
+
+  it('keeps class instances apart as ForEach rows, though each prints as its type', () => {
+    const r = compileView(viewSource(`@State private var picked = "none"
+      let tags = [Tag("Nuts"), Tag("Fudge")]
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(tags, id: \\.self) { tag in Button(tag.name) { picked = tag.name } }
+        }
+      }`, tagClass))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(tap(r, 'Nuts'))).toContain('Picked Nuts')
+  })
+
+  it('writes through a force-unwrapped object whose parent points back at it', () => {
+    const r = runView(`var body: some View { Text(rename()) }
+      func rename() -> String {
+        let root = Node()
+        let leaf: Node? = Node()
+        root.child = leaf
+        leaf!.parent = root
+        leaf!.name = "Renamed"
+        return root.child!.name
+      }`, 'final class Node { var name = ""; var parent: Node?; var child: Node? }')
+    expect(texts(r)).toEqual(['Renamed'])
+  })
+
+  it('reports recursion that never ends where it recurses, instead of stopping the worker', () => {
+    const body = 'n == 0 ? 0 : 1 + steps(n - 1)'
+    const source = viewSource(`var body: some View { Text("\\(steps(-1))") }
+      func steps(_ n: Int) -> Int { ${body} }`)
+    const r = compileView(source)
+    const [error, ...others] = r.diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('recursion that never ends')
+    const at = source.indexOf(body)
+    expect(error!.span.start).toBeGreaterThanOrEqual(at)
+    expect(error!.span.end).toBeLessThanOrEqual(at + body.length)
+  })
+
+  it('reports a class that builds another of itself as it is built, where it does', () => {
+    const declaration = 'final class Tree { var next = Tree() }'
+    const source = viewSource('var body: some View { Text("\\(Tree().next === nil)") }', declaration)
+    const [error, ...others] = compileView(source).diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('recursion that never ends')
+    expect(source.slice(error!.span.start, error!.span.end)).toBe('Tree()')
+    expect(error!.span.start).toBe(source.indexOf(declaration) + declaration.indexOf('Tree()'))
+  })
+
+  it('reports a type alias loop that runs through optionals too', () => {
+    expect(reported('var body: some View { Text("x") }', 'typealias Count = Total?\ntypealias Total = Count?').map(d => [d.severity, d.message, d.at])).toEqual([
+      ['error', "Type alias 'Count' references itself.", 'Count'],
+    ])
+  })
+
+  it('reports a type alias that names itself as Xcode does, at the alias', () => {
+    // swiftc: "type alias 'Count' references itself", once, at the first of the two.
+    expect(reported('var body: some View { Text("\\(Count.self)") }', 'typealias Count = Total\ntypealias Total = Count')).toEqual([
+      { severity: 'error', message: "Type alias 'Count' references itself.", at: 'Count', fix: undefined },
+    ])
+  })
+})
+
+describe('F11: a view that stops draws a placeholder where it is, and the rest of the screen still works', () => {
+  const broken = 'struct Broken: View { let items: [Int] = []; var body: some View { Text("\\(items[0])") } }'
+  const stopped = (r: CompileResult) => nodes(r).filter(n => n.placeholder).map(n => n.placeholder)
+
+  it('draws the views around one that stops, and reports the line it stopped at', () => {
+    const source = viewSource('var body: some View { VStack { Text("Top"); Broken(); Text("Bottom") } }', broken)
+    const r = compileView(source)
+    expect(texts(r)).toEqual(expect.arrayContaining(['Top', 'Bottom']))
+    expect(stopped(r)).toEqual([{ feature: 'Broken stopped', reason: 'Swift runtime failure: Index out of range' }])
+    const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: r.renderTree!, onEvent: () => {} }))
+    expect(markup).toContain('Broken stopped')
+    expect(markup).toContain('Swift runtime failure: Index out of range')
+    const [error, ...others] = r.diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('Index out of range')
+    expect(source.slice(error!.span.start, error!.span.end)).toContain('items[0]')
+  })
+
+  it('keeps the rest of the screen interactive', () => {
+    const r = compileView(viewSource(`@State private var count = 0
+      var body: some View { VStack { Broken(); Button("Add") { count += 1 }; Text("Count \\(count)") } }`, broken))
+    expect(texts(tap(r, 'Add'))).toContain('Count 1')
+  })
+
+  it("draws a sheet whose content stops as stopped, and can still close it", () => {
+    const r = runView(`@State private var show = false
+      let items: [String] = []
+      var body: some View { Button("Open") { show = true }.sheet(isPresented: $show) { Detail(item: items[0]) } }`,
+      'struct Detail: View { let item: String; var body: some View { Text(item) } }')
+    const opened = tap(r, 'Open')
+    expect(stopped(opened)).toEqual([{ feature: 'Sheet stopped', reason: 'Swift runtime failure: Index out of range' }])
+    expect(stopped(tap(opened, 'Close sheet'))).toEqual([])
+  })
+
+  it('draws a pushed navigationDestination whose content stops as stopped, and can still go back', () => {
+    const r = runView(`let items: [String] = []
+      var body: some View {
+        NavigationStack {
+          NavigationLink("Open", value: 3).navigationTitle("Home").navigationDestination(for: Int.self) { index in Detail(item: items[index]) }
+        }
+      }`, 'struct Detail: View { let item: String; var body: some View { Text(item) } }')
+    const pushed = tap(r, 'Open')
+    expect(stopped(pushed)).toEqual([{ feature: 'Destination stopped', reason: 'Swift runtime failure: Index out of range' }])
+    expect(controls(tap(pushed, 'Home'))).toContain('Open')
+  })
+
+  it('names the stopped view in the layers, and selects it from its placeholder', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Top"); Broken().padding() } }', broken))
+    const layers = (items: readonly ViewLayer[]): string[] => items.flatMap(item => [item.name, ...layers(item.children)])
+    expect(layers(r.viewHierarchy ?? [])).toEqual(['Main page', 'VStack', 'Top', 'Broken'])
+    const placeholder = nodes(r).find(n => n.placeholder)!
+    const authoring = r.authoring!
+    expect(authoring.nodes.find(n => n.id === authoring.runtimeToSource[placeholder.id])).toMatchObject({ kind: 'component', name: 'Broken' })
+  })
+
+  it('draws a pushed destination whose own content stops as stopped, and can still go back', () => {
+    const r = runView(`let items: [Int] = []
+      var body: some View { NavigationStack { NavigationLink("Open") { Text("\\(items[5])") }.navigationTitle("Home") } }`)
+    const pushed = tap(r, 'Open')
+    expect(nodes(pushed).find(n => n.placeholder)?.placeholder).toMatchObject({ feature: 'Destination stopped', reason: expect.stringContaining('Index out of range') })
+    expect(texts(tap(pushed, 'Home'))).toContain('Home')
+  })
+})
+
+describe('F3: every ForEach row keeps its own identity', () => {
+  /** Swipes a row open, as a person drags it leftwards, and draws the result. */
+  const swipeOpen = (row: RenderNode) => {
+    applyEvent({ kind: 'drag', handlerId: row.hitTarget!.handlerId, phase: 'ended', location: { x: -90, y: 0 }, startLocation: { x: 0, y: 0 }, translation: { x: -90, y: 0 } })
+    return rerender(revision++)
+  }
+
+  it('gives rows whose ids differ only in punctuation their own actions', () => {
+    const r = runView(`@State private var picked = "none"
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(["C", "C++", "C#"], id: \\.self) { language in Button(language) { picked = language } }
+        }
+      }`)
+    expect(texts(tap(r, 'C++'))).toContain('Picked C++')
+    expect(texts(tap(r, 'C'))).toContain('Picked C')
+  })
+
+  it('keeps an empty id apart from the id "0"', () => {
+    const r = runView(`@State private var picked = "none"
+      var body: some View { VStack { Text("Picked [\\(picked)]"); ForEach(["", "0"], id: \\.self) { value in Button("Pick \\(value)") { picked = value } } } }`)
+    expect(texts(tap(r, 'Pick 0'))).toContain('Picked [0]')
+    expect(texts(tap(r, 'Pick '))).toContain('Picked []')
+  })
+
+  it('deletes the element a swiped row belongs to when each element draws two rows', () => {
+    const r = runView(`@State private var items = ["A", "B", "C"]
+      var body: some View {
+        List {
+          ForEach(items, id: \\.self) { item in Text(item); Text(item + " detail") }
+            .onDelete { offsets in items.remove(atOffsets: offsets) }
+        }
+      }`)
+    const rows = nodes(r).filter(n => n.hitTarget?.role === 'drag')
+    expect(new Set(rows.map(row => row.hitTarget!.handlerId)).size).toBe(6)
+    const after = tap(swipeOpen(rows[3]!), 'Delete')
+    expect(texts(after).filter(t => t !== 'Delete')).toEqual(['A', 'A detail', 'C', 'C detail'])
+  })
+
+  it('warns at a ForEach whose rows share an id, and still keeps their actions apart', () => {
+    const members = `@State private var picked = "none"
+      let pets = [Pet(id: 1, name: "Rex"), Pet(id: 1, name: "Tom")]
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(pets) { pet in Button(pet.name) { picked = pet.name } }
+        }
+      }`
+    const pet = 'struct Pet: Identifiable { let id: Int; let name: String }'
+    const [warning, ...others] = reported(members, pet)
+    expect(others).toEqual([])
+    expect(warning).toMatchObject({ severity: 'warning', message: expect.stringContaining('have the id 1') })
+    expect(warning!.at.startsWith('ForEach(pets)')).toBe(true)
+    expect(texts(tap(compileView(viewSource(members, pet)), 'Rex'))).toContain('Picked Rex')
+  })
+})
+
+describe('F12: containers that hand their content a value draw it', () => {
+  const placeholders = (r: CompileResult) => nodes(r).filter(n => n.placeholder).map(n => n.placeholder!.feature)
+  const warnings = (r: CompileResult) => r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)
+
+  it('draws what a ScrollViewReader holds, and says scrollTo does not scroll the preview', () => {
+    const r = compileView(viewSource('var body: some View { ScrollViewReader { proxy in ScrollView { Text("Inside reader"); Button("Top") { proxy.scrollTo(0) } } } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toContain('Inside reader')
+    expect(warnings(r)).toEqual([expect.stringContaining('scrollTo')])
+    expect(tap(r, 'Top').logs.filter(log => log.level === 'error')).toEqual([])
+  })
+
+  it('draws a PhaseAnimator at its first phase', () => {
+    const r = compileView(viewSource('var body: some View { PhaseAnimator([false, true]) { on in Text(on ? "On" : "Off") } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toEqual(['Off'])
+    expect(warnings(r)).toEqual([expect.stringContaining('first phase')])
+  })
+
+  it('draws a KeyframeAnimator at its initial value', () => {
+    const r = compileView(viewSource('var body: some View { KeyframeAnimator(initialValue: 1.0) { value in Text("Scale \\(value)") } keyframes: { _ in LinearKeyframe(2.0, duration: 1) } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toEqual(['Scale 1.0'])
+    expect(warnings(r)).toEqual([expect.stringContaining('initial value')])
+  })
+
+  it("puts a TabSection's tabs in the tab bar in order, and leaves its title out, as iOS 27 does", () => {
+    // The app the simulator ran, unchanged since.
+    const fixture = readFileSync(new URL('./fixtures/ios27-runtime.swift', import.meta.url), 'utf8')
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe(runtimeCapture.fixtureSha256)
+    const r = compileView(fixture)
+    expect(r.diagnostics).toEqual([])
+    const measured = runtimeCapture.measured.tabSection
+    expect(controls(r)).toEqual(measured.tabBar)
+    expect(texts(r).includes('More')).toBe(measured.sectionTitleShown)
+    expect(texts(tap(r, 'Two'))).toContain('Tab two')
+  })
+})
+
+describe("F6: the Design gallery draws the screens it can, and says which it couldn't", () => {
+  /** Four tabs whose toolbars each take about a million steps: each screen draws alone, and together they outrun one budget. */
+  const heavyTabs = viewSource(`var body: some View {
+      TabView {
+        ForEach(1...4, id: \\.self) { tab in
+          NavigationStack { List { NavigationLink("Go") { Text("Detail \\(tab)") } }.navigationTitle("Tab \\(tab)").toolbar { ToolbarItem { Text(heavy(tab)) } } }
+            .tabItem { Label("Tab \\(tab)", systemImage: "star") }
+        }
+      }
+    }`, 'func heavy(_ tag: Int) -> String { var total = 0; for i in 0..<150000 { total += i % 7 }; return "Busy \\(tag)" }')
+
+  it('draws the live screen alone', () => {
+    expect(texts(compileView(heavyTabs))).toContain('Busy 1')
+  })
+
+  it('draws the gallery up to its budget, and warns at each screen it could not draw', () => {
+    const r = compileView(heavyTabs, { allPages: true })
+    expect(r.renderTree).not.toBeNull()
+    expect(texts(r)).toContain('Busy 1')
+    const drawn = (r.pages ?? []).map(page => page.name)
+    const skipped = r.diagnostics.filter(d => d.severity === 'warning' && d.message.includes('drawn on the Design canvas'))
+    expect(drawn.length).toBeGreaterThan(0)
+    // The tabs share the ForEach's source, and each one missing is still said.
+    expect(skipped.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(skipped.map(d => d.message)).size).toBe(skipped.length)
+    // The canvas says why, beside the count, as the Design mode has no list of warnings.
+    expect(r.pagesNotDrawn).toEqual(skipped.map(d => d.message))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+  })
+
+  it('says so when the screens a page opens use up the budget', () => {
+    const r = compileView(viewSource(`var body: some View { NavigationStack { NavigationLink("Go") { Detail() }.navigationTitle("Home") } }`,
+      `func heavy() -> String { var total = 0; for i in 0..<800000 { total += i % 7 }; return "Busy" }
+struct Detail: View { var body: some View { Text("Detail").toolbar { ToolbarItem { Text(heavy()) } } } }`), { allPages: true })
+    expect(controls(r)).toContain('Go')
+    expect(r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)).toEqual([expect.stringContaining("The screens Home opens aren't drawn on the Design canvas")])
+  })
+
+  it('gives design screens nothing links to the one budget the gallery has, and says which it could not draw', () => {
+    const heavy = (name: string) => `struct ${name}: View { var body: some View { Text(heavy("${name}")) } }`
+    const r = compileView(viewSource('var body: some View { Text("Home") }',
+      `func heavy(_ tag: String) -> String { var total = 0; for i in 0..<450000 { total += i % 7 }; return tag }\n${heavy('FirstScreen')}\n${heavy('SecondScreen')}`),
+      { allPages: true, designScreens: [{ view: 'FirstScreen', name: 'First' }, { view: 'SecondScreen', name: 'Second' }] })
+    expect((r.pages ?? []).map(page => page.name)).toContain('First')
+    expect((r.pages ?? []).map(page => page.name)).not.toContain('Second')
+    expect(r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)).toEqual([expect.stringContaining('"Second" isn\'t drawn on the Design canvas')])
+    expect(r.pagesNotDrawn).toEqual([expect.stringContaining('"Second" isn\'t drawn on the Design canvas')])
+  })
+})
+
+describe('F7: with a syntax error, every redraw shows the errors, never a blank phone', () => {
+  const notice = (r: CompileResult) => nodes(r).find(n => n.placeholder)?.placeholder
+
+  it('shows the error notice again on a redraw that re-parses nothing', () => {
+    compileView(viewSource('var body: some View { Text("Hello") }'))
+    const broken = compileView(viewSource('var body: some View { Text("Hello" }'))
+    expect(notice(broken)?.feature).toBe('1 error')
+    // Switching Edit and Preview, or Reset, redraws the program the worker already has.
+    expect(notice(rerender(revision++))).toEqual(notice(broken))
+    resetPipelineState()
+    expect(notice(rerender(revision++))).toEqual(notice(broken))
+  })
+
+  it('marks a tree that only carries a message, so the phone can keep the last one that ran', () => {
+    const good = compileView(viewSource('var body: some View { Text("Hello") }'))
+    expect(good.renderTree!.notice).toBeUndefined()
+    const broken = compileView(viewSource('var body: some View { Text("Hello" }'))
+    expect(broken.renderTree!.notice).toEqual({ title: '1 error', detail: "Expected ')' to close an argument list, found '}'." })
+  })
+})
+
+describe('functions that share a name run the one Swift runs', () => {
+  it('runs the overload the argument types choose, top level and in the view, with nothing to report', () => {
+    const r = runView(`var body: some View { VStack { Text(label(1)); Text(label("one")); Text(badge(2)); Text(badge(true)) } }
+      func badge(_ count: Int) -> String { "count \\(count)" }
+      func badge(_ on: Bool) -> String { on ? "on" : "off" }`,
+      'func label(_ value: Int) -> String { "whole \\(value)" }\nfunc label(_ value: String) -> String { "text \\(value)" }')
+    expect(texts(r)).toEqual(['whole 1', 'text one', 'count 2', 'on'])
+  })
+
+  it("warns where two overloads differ only in types the preview can't tell apart, and runs the first", () => {
+    // Xcode calls the CGFloat one: the argument is declared a CGFloat.
+    const members = 'let side: CGFloat = 2\n var body: some View { Text(size(side)) }'
+    const declarations = 'func size(_ value: Double) -> String { "double" }\nfunc size(_ value: CGFloat) -> String { "cgfloat" }'
+    expect(reported(members, declarations)).toEqual([{
+      severity: 'warning',
+      message: "The preview can't tell size(_:) from the one before it by what it is called with, so it runs that one. Xcode chooses by the argument's type.",
+      at: 'size',
+      fix: undefined,
+    }])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['double'])
+  })
+
+  it('says nothing where the values tell the overloads apart, and runs the one Swift runs', () => {
+    const members = 'var body: some View { VStack { Text(tag("a")); Text(show(Box())) } }'
+    const declarations = `func tag(_ value: Character) -> String { "character" }
+func tag(_ value: String) -> String { "string" }
+protocol Sized {}
+protocol Named {}
+struct Box: Named {}
+func show(_ value: Sized) -> String { "sized" }
+func show(_ value: Named) -> String { "named" }`
+    expect(reported(members, declarations)).toEqual([])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['string', 'named'])
+  })
+
+  it('warns inside a function too, naming what the preview does as a feature', () => {
+    const members = `var body: some View { Text(measure()) }
+      func measure() -> String {
+        func size(_ value: Double) -> String { "double" }
+        func size(_ value: CGFloat) -> String { "cgfloat" }
+        let side: CGFloat = 2
+        return size(side)
+      }`
+    const warnings = compileView(viewSource(members)).diagnostics.filter(d => d.severity === 'warning')
+    expect(warnings.map(d => [d.message.startsWith("The preview can't tell size(_:)"), d.feature])).toEqual([[true, 'overloads told apart by type']])
+  })
+
+  it("reads, writes and binds a view's own state over a top-level variable of the same name", () => {
+    const r = compileView(viewSource(`@State private var count = 0
+      @State private var name = "Local"
+      var body: some View { VStack { Text("Count \\(count)"); Button("Add") { count += 1 }; TextField("Name", text: $name); Text("Name \\(name)") } }`,
+      'var count = 100\nvar name = "Global"'))
+    expect(texts(r)).toEqual(expect.arrayContaining(['Count 0', 'Name Local']))
+    expect(texts(tap(r, 'Add'))).toContain('Count 1')
+    const field = nodes(r).find(n => n.hitTarget?.role === 'textField')!
+    applyEvent({ kind: 'textChange', handlerId: field.hitTarget!.handlerId, value: 'Typed' })
+    expect(texts(rerender(revision++))).toContain('Name Typed')
+  })
+
+  it('tells a concrete parameter from a generic one, and says nothing', () => {
+    const members = 'var body: some View { VStack { Text(show(1)); Text(show("one")) } }'
+    const declarations = 'func show(_ value: Int) -> String { "whole" }\nfunc show<T>(_ value: T) -> String { "anything" }'
+    expect(reported(members, declarations)).toEqual([])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['whole', 'anything'])
   })
 })

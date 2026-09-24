@@ -8,15 +8,17 @@ import type {
   EnumDecl,
   Expr,
   ExtensionDecl,
+  FuncDecl,
   Pattern,
   ProtocolDecl,
   SourceFileNode,
   Stmt,
   StructDecl,
+  TypealiasDecl,
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
-import { collectConformance, hoistNestedTypes } from '@studio/swift-syntax'
+import { argumentLabels, collectConformance, hoistNestedTypes, valueKind, walk, type TypeNames } from '@studio/swift-syntax'
 import {
   isKnownGlobal,
   isKnownModifier,
@@ -50,8 +52,10 @@ import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './m
  * In practice that means this checker reports only what it is certain about:
  *
  * - an identifier that resolves nowhere at all (error)
+ * - a type alias that names itself, which Xcode refuses (error)
  * - a real SwiftUI view or modifier that the preview cannot draw yet (warning)
  * - a property wrapper outside the slice (warning)
+ * - two overloads the preview can't tell apart by their arguments (warning)
  * - entry-point problems (error)
  *
  * It deliberately does *not* check member existence, argument types, or arity.
@@ -121,6 +125,8 @@ export class Checker {
     const expanded = hoistNestedTypes(files)
     this.conformance = collectConformance(expanded)
     for (const file of expanded) this.collectDeclarations(file)
+    this.reportAliasCycles(files)
+    this.reportIndistinctOverloads(files)
 
     const entryPoint = this.resolveEntryPoint(files)
 
@@ -192,6 +198,80 @@ export class Checker {
           if (member.kind === 'funcDecl') this.declaredModifiers.add(member.name)
           if (member.kind === 'varDecl') this.declaredExtensionProperties.add(member.name)
         }
+      }
+    }
+  }
+
+  /**
+   * `typealias Count = Total` beside `typealias Total = Count` names no type at all,
+   * and Xcode refuses it, however the loop runs: `Total?` or `[Total]` loops as
+   * surely. Said once per loop, at the alias declared first, where swiftc says it.
+   */
+  private reportAliasCycles(files: readonly SourceFileNode[]): void {
+    const aliases = files.flatMap((file) => file.declarations.filter((decl): decl is TypealiasDecl => decl.kind === 'typealiasDecl'))
+    const declared = new Set(aliases.map((alias) => alias.name))
+    const names = new Map(aliases.map((alias) => [alias.name, namedIn(alias.target).filter((name) => declared.has(name))] as const))
+    const reaches = (from: string, to: string): boolean => {
+      const seen = new Set<string>()
+      const next = [...(names.get(from) ?? [])]
+      while (next.length) {
+        const name = next.pop()!
+        if (name === to) return true
+        if (seen.has(name)) continue
+        seen.add(name)
+        next.push(...(names.get(name) ?? []))
+      }
+      return false
+    }
+    const looped = new Set<string>()
+    for (const alias of aliases) {
+      if (looped.has(alias.name) || !reaches(alias.name, alias.name)) continue
+      for (const other of aliases) if (reaches(alias.name, other.name) && reaches(other.name, alias.name)) looped.add(other.name)
+      this.report(alias.nameSpan, 'error', 'unresolved_identifier', `Type alias '${alias.name}' references itself.`)
+    }
+  }
+
+  /**
+   * Two overloads the preview can't choose between by what they are called with.
+   *
+   * The preview has values rather than types, so of functions sharing a name and
+   * labels it runs the one its arguments suit (`valueKind`, which the interpreter
+   * scores by too). Where every parameter takes the same kind of value, as
+   * `size(_: Double)` and `size(_: CGFloat)` both take a number, nothing can tell
+   * them apart: it runs the first, and this says so at the second, where Xcode
+   * chooses by type. At the top level, in each type, and in each function body.
+   */
+  private reportIndistinctOverloads(files: readonly SourceFileNode[]): void {
+    const aliases = new Map(files.flatMap((file) => file.declarations.flatMap((decl) => (decl.kind === 'typealiasDecl' ? [[decl.name, decl.target] as const] : []))))
+    const names: TypeNames = {
+      alias: (name) => aliases.get(name),
+      declared: (name) => (this.types.has(name) || this.enums.has(name) ? 'type' : this.conformance.protocols.has(name) ? 'protocol' : this.typeParameterNames.has(name) ? 'generic' : undefined),
+    }
+    const scopes: FuncDecl[][] = [files.flatMap((file) => file.declarations.filter((decl): decl is FuncDecl => decl.kind === 'funcDecl'))]
+    for (const [name, type] of this.conformance.types) {
+      scopes.push(type.members.filter((member): member is FuncDecl => member.kind === 'funcDecl' && type.origin.get(member) === name))
+    }
+    for (const file of files) {
+      walk(file, (node) => {
+        if (node.kind !== 'block') return
+        scopes.push(node.statements.flatMap((stmt) => (stmt.kind === 'declStmt' && stmt.declaration.kind === 'funcDecl' ? [stmt.declaration] : [])))
+      })
+    }
+    const signature = (fn: FuncDecl) => ({ labels: argumentLabels(fn.params), kinds: fn.params.map((param) => valueKind(param.type, names)) })
+    for (const scope of scopes) {
+      const named = new Map<string, FuncDecl[]>()
+      for (const fn of scope) named.set(fn.name, [...(named.get(fn.name) ?? []), fn])
+      for (const group of named.values()) {
+        group.forEach((later, index) => {
+          const mine = signature(later)
+          const same = group.slice(0, index).some((earlier) => {
+            const theirs = signature(earlier)
+            return theirs.labels.length === mine.labels.length && theirs.labels.every((label, i) => label === mine.labels[i]) && theirs.kinds.every((kind, i) => kind === mine.kinds[i])
+          })
+          if (!same) return
+          const call = `${later.name}(${mine.labels.map((label) => `${label ?? '_'}:`).join('')})`
+          this.report(later.nameSpan, 'warning', 'unsupported_language_feature', `The preview can't tell ${call} from the one before it by what it is called with, so it runs that one. Xcode chooses by the argument's type.`, 'overloads told apart by type')
+        })
       }
     }
   }
@@ -880,6 +960,9 @@ export class Checker {
         if (placement?.kind === 'memberAccess' && ['keyboard', 'bottomBar', 'principal'].includes(placement.member)) reason = `the .${placement.member} placement is not implemented; its controls are omitted`
       }
       if (callee.name === 'TimelineView') reason = 'the timeline runs only once, for the moment it is drawn, and does not advance its schedule'
+      if (callee.name === 'ScrollViewReader') reason = 'what it holds is drawn, and scrollTo does not scroll the preview'
+      if (callee.name === 'PhaseAnimator') reason = 'its content is drawn at the first phase, and does not animate through the others'
+      if (callee.name === 'KeyframeAnimator') reason = 'its content is drawn at the initial value, and the keyframes do not run'
       if (callee.name === 'AsyncImage') reason = 'remote loading and image phases are not implemented; only the placeholder is previewed'
     } else if (callee.kind === 'memberAccess' && rootsInAView(callee.base)) {
       feature = `.${callee.member}`
@@ -1389,3 +1472,26 @@ function isDashed(stroke: Expr & { kind: 'call' }): boolean {
 
 /** Modifiers whose first argument is a colour or another style, as `.foregroundStyle(.gray)`. */
 const STYLE_MODIFIERS: ReadonlySet<string> = new Set(['foregroundStyle', 'foregroundColor', 'fill', 'stroke', 'strokeBorder', 'tint', 'background', 'border'])
+
+/** Every type name a type refers to, through optionals, collections, generics, tuples and functions. */
+function namedIn(type: TypeRef | null): string[] {
+  if (!type) return []
+  switch (type.kind) {
+    case 'namedType':
+      return [type.name, ...type.generics.flatMap(namedIn)]
+    case 'optionalType':
+      return namedIn(type.wrapped)
+    case 'arrayType':
+      return namedIn(type.element)
+    case 'dictionaryType':
+      return [...namedIn(type.key), ...namedIn(type.value)]
+    case 'someType':
+      return namedIn(type.constraint)
+    case 'functionType':
+      return [...type.params.flatMap(namedIn), ...namedIn(type.result)]
+    case 'tupleType':
+      return type.elements.flatMap(namedIn)
+    default:
+      return []
+  }
+}

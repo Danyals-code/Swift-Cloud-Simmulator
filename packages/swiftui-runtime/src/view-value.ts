@@ -48,6 +48,8 @@ export interface ViewValue {
    * the observable difference between keying by identity and keying by index.
    */
   readonly childKeys?: readonly string[]
+  /** For each `ForEach` child, the place in the collection of the element it was drawn for. */
+  readonly childOffsets?: readonly number[]
   /**
    * The tag `ForEach` gives each of its rows: the row's id, a value of its own type.
    *
@@ -160,13 +162,46 @@ export interface ModifierValue {
 
 export const VIEW_TYPE = 'View'
 
+/** Why running the user's code stopped, and where. */
+export interface RuntimeFailure {
+  readonly message: string
+  readonly span: SourceSpan
+  readonly frames: readonly string[]
+  readonly kind: 'trap' | 'budget' | 'unsupported'
+}
+
 /**
- * A trap in building a `NavigationLink`'s destination, kept as that destination until
- * the link is pushed; the payload is the trap. SwiftUI runs a destination's body only
- * when it is pushed, so a trap there, such as a model no ancestor gave, crashes iOS on
- * the push and not before.
+ * A custom view whose body stopped, drawn in its place as a placeholder carrying why.
+ *
+ * One trap in one view used to replace the whole screen, and the Design canvas with
+ * it. Framework-named, like the bars, so nothing a user writes can collide with it.
+ * The failure travels with the view and is reported where the view is drawn, so a
+ * destination built with its link says nothing until it is pushed.
  */
-export const DESTINATION_TRAP_TYPE = 'DestinationTrap'
+export const STOPPED_VIEW = '_Stopped'
+const FAILURE_TYPE = 'RuntimeFailure'
+
+export function stoppedView(name: string, failure: RuntimeFailure, span: SourceSpan): ViewValue {
+  return {
+    name: STOPPED_VIEW,
+    args: [{ label: 'failure', value: { kind: 'opaque', typeName: FAILURE_TYPE, payload: { name, failure } satisfies Stopped } }],
+    children: [],
+    modifiers: [],
+    action: null,
+    span,
+  }
+}
+
+/** What a stopped view is: the view that stopped, and why. */
+export interface Stopped {
+  readonly name: string
+  readonly failure: RuntimeFailure
+}
+
+/** What stopped a view drawn as stopped, or null for any other view. */
+export function stopped(view: ViewValue): Stopped | null {
+  return view.name === STOPPED_VIEW ? payloadOf<Stopped>(view.args.find((a) => a.label === 'failure')?.value, FAILURE_TYPE) : null
+}
 
 /** A contextual member with no base: `.largeTitle`, `.primary`, `.infinity`. */
 export const TOKEN_TYPE = 'Token'
@@ -248,6 +283,9 @@ export interface GradientPayload {
 
 /** A `GeometryProxy`, as `GeometryReader`'s closure receives it. */
 export const GEOMETRY_TYPE = 'GeometryProxy'
+
+/** A `ScrollViewProxy`, as `ScrollViewReader`'s closure receives it. Its `scrollTo` does nothing. */
+export const SCROLL_PROXY_TYPE = 'ScrollViewProxy'
 
 /**
  * `ViewDimensions` - what an `.alignmentGuide` closure is handed.

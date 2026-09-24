@@ -4,6 +4,7 @@ import {
   readKeyPath,
   bool,
   describe,
+  identityKey,
   double,
   int,
   asProjection,
@@ -26,6 +27,7 @@ import {
 import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
 import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
+import { containable, toFailure } from './failures'
 import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
@@ -55,10 +57,11 @@ import {
   ANIMATION_TYPE,
   BUTTON_CONFIGURATION_TYPE,
   COLOR_TYPE,
-  DESTINATION_TRAP_TYPE,
+  stoppedView,
   EDGE_INSETS_TYPE,
   DIMENSIONS_TYPE,
   GEOMETRY_TYPE,
+  SCROLL_PROXY_TYPE,
   isView,
   STROKE_STYLE_TYPE,
   STYLE_TYPE,
@@ -391,7 +394,7 @@ export class SwiftUIHost implements InterpreterHost {
     const first = args[0]?.value
     // `.id(x)`: what the receiver builds is a different view for each x, so its state
     // starts over when x changes, as SwiftUI's does.
-    if (member === 'id' && first && args.length === 1 && this.scopeIdentity) return this.scopeIdentity(`id:${describe(first, false)}`, evaluate)
+    if (member === 'id' && first && args.length === 1 && this.scopeIdentity) return this.scopeIdentity(`id:${identityKey(first)}`, evaluate)
     const { values, objects } = injectedEnvironment(member, args)
     if (member === 'disabled' && first) {
       values.push(['isEnabled', bool(!truthy(first) && truthy(this.environment.value('isEnabled') ?? bool(true)))])
@@ -866,7 +869,7 @@ export class SwiftUIHost implements InterpreterHost {
     // A direct destination may be a user-defined View value, not a built-in view.
     // Expand it with the same path used for destination builder closures.
     const args = name === 'NavigationLink' ? toArgs(call).flatMap(argument => argument.label === 'destination'
-      ? this.destinationArgs(() => [argument.value])
+      ? this.destinationArgs(() => [argument.value], call.span)
       : [argument]) : toArgs(call)
 
     if (DATA_DRIVEN_VIEWS.has(name) && call.trailingClosure && this.looksDataDriven(call)) {
@@ -915,6 +918,15 @@ export class SwiftUIHost implements InterpreterHost {
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
+    // Content handed one value, drawn at rest: a reader's proxy, an animator's first
+    // phase, a keyframe animator's initial value. What would move them never runs.
+    const handed = name === 'ScrollViewReader' ? opaque(SCROLL_PROXY_TYPE, null)
+      : name === 'PhaseAnimator' ? firstPhase(call.args.find((a) => a.label === null)?.value)
+      : name === 'KeyframeAnimator' ? call.args.find((a) => a.label === 'initialValue')?.value
+      : undefined
+    if (handed !== undefined && call.trailingClosure) {
+      return view({ name, args: [], children: this.toViews(call.invokeBuilder(call.trailingClosure, [handed])), modifiers: [], action: null, span: call.span })
+    }
     // `TimelineView(...) { context in ... }`: drawn once, for the moment of the render.
     if (name === 'TimelineView' && call.trailingClosure) {
       const context: SwiftValue = { kind: 'struct', typeName: 'TimelineViewDefaultContext', fields: new Map<string, SwiftValue>([['date', dateValue(Date.now() / 1000)], ['cadence', token('live')]]) }
@@ -949,7 +961,7 @@ export class SwiftUIHost implements InterpreterHost {
       const destination = call.trailingClosure
       return view({
         name,
-        args: [...args, ...this.destinationArgs(() => call.invokeBuilder(destination))],
+        args: [...args, ...this.destinationArgs(() => call.invokeBuilder(destination), call.span)],
         children: [],
         modifiers: [],
         action: null,
@@ -1000,7 +1012,7 @@ export class SwiftUIHost implements InterpreterHost {
     // In `NavigationLink { Detail() } label: { Card() }`, only Card belongs on the
     // current screen. Detail is the link's destination, for the presentation resolver
     // to select after a push.
-    const destination = name === 'NavigationLink' && content ? this.destinationArgs(() => call.invokeBuilder(content)) : null
+    const destination = name === 'NavigationLink' && content ? this.destinationArgs(() => call.invokeBuilder(content), call.span) : null
     const children = content && !destination ? this.toViews(call.invokeBuilder(content)) : []
 
     const labelled: ViewArg[] = []
@@ -1045,6 +1057,10 @@ export class SwiftUIHost implements InterpreterHost {
       const applied = this.applyViewModifier(target, call)
       if (applied !== undefined) return applied
     }
+
+    // `proxy.scrollTo(id)`: there is no channel from the worker to the browser's scroll
+    // position, so it does nothing, and the checker says so at the reader.
+    if (target.kind === 'opaque' && target.typeName === SCROLL_PROXY_TYPE && member === 'scrollTo') return { kind: 'void' }
 
     // `geo.frame(in: .local)` is the proxy's own rectangle, and `.global` where it is on
     // the screen, as the last layout pass placed it. A named space is read as the
@@ -1773,16 +1789,16 @@ export class SwiftUIHost implements InterpreterHost {
   /**
    * A `NavigationLink`'s destination, as the link's `destination` arguments.
    *
-   * The preview builds it with the link, body and all, where SwiftUI runs its body only
-   * when it is pushed. So a trap in building it is kept as the destination: the screen
-   * with the link draws, and pushing it stops the preview where iOS would crash.
+   * The preview builds it with the link, where SwiftUI builds it only when it is
+   * pushed. So a destination that stops is kept as a stopped view: the screen with the
+   * link draws, and pushing it shows why, as a view stopped anywhere else does.
    */
-  private destinationArgs(build: () => readonly SwiftValue[]): ViewArg[] {
+  private destinationArgs(build: () => readonly SwiftValue[], span: SourceSpan): ViewArg[] {
     try {
       return this.toViews(build()).map((destination) => ({ label: 'destination', value: view(destination) }))
     } catch (error) {
-      if (!(error instanceof SwiftTrap)) throw error
-      return [{ label: 'destination', value: { kind: 'opaque', typeName: DESTINATION_TRAP_TYPE, payload: error } }]
+      if (!containable(error)) throw error
+      return [{ label: 'destination', value: view(stoppedView('Destination', toFailure(error, span), span)) }]
     }
   }
 
@@ -1820,6 +1836,7 @@ export class SwiftUIHost implements InterpreterHost {
 
     const children: ViewValue[] = []
     const childKeys: string[] = []
+    const childOffsets: number[] = []
 
     // A row's id, read as Swift reads it: a key path can name a computed property or an
     // enum's `rawValue`, which walking stored fields can't see, and then every row had
@@ -1833,13 +1850,13 @@ export class SwiftUIHost implements InterpreterHost {
       return element.kind === 'string' || element.kind === 'int' || element.kind === 'double' ? element : undefined
     }
     // Its identity is its id, else its place, which is what SwiftUI falls back to too.
-    const identityKey = (element: SwiftValue, index: number): string => {
+    const rowKey = (element: SwiftValue, index: number): string => {
       const id = idOf(element)
-      return id === undefined ? `#${index}` : describe(id, true)
+      return id === undefined ? `#${index}` : identityKey(id, true)
     }
 
     elements.forEach((element, index) => {
-      const key = identityKey(element, index)
+      const key = rowKey(element, index)
       const implicitTag = idOf(element)
       // A row binding follows stable identity even if a pending handler outlives a reorder.
       const row = binding ? projection({
@@ -1847,13 +1864,13 @@ export class SwiftUIHost implements InterpreterHost {
         get: () => {
           const current = binding.get()
           if (current.kind !== 'array') return { kind: 'nil' }
-          const at = current.elements[index] && identityKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, i) === key)
+          const at = current.elements[index] && rowKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => rowKey(value, i) === key)
           return at < 0 ? { kind: 'nil' } : copyValue(current.elements[at]!)
         },
         set: value => {
           const current = binding.get()
           if (current.kind !== 'array') return
-          const at = current.elements[index] && identityKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, i) === key)
+          const at = current.elements[index] && rowKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => rowKey(value, i) === key)
           if (at < 0) return
           const elements = [...current.elements]; elements[at] = copyValue(value)
           binding.set({ ...current, elements })
@@ -1865,10 +1882,11 @@ export class SwiftUIHost implements InterpreterHost {
       for (const row of rows) {
         children.push(implicitTag === undefined ? row : { ...row, implicitTag })
         childKeys.push(key)
+        childOffsets.push(index)
       }
     })
 
-    return view({ name, args, children, modifiers: [], action: null, span: call.span, childKeys })
+    return view({ name, args, children, modifiers: [], action: null, span: call.span, childKeys, childOffsets })
   }
 
   /**
@@ -2215,3 +2233,9 @@ function asClosure(value: SwiftValue | undefined): ClosureValue | null {
 
 export { isView, asView, str }
 export type { ClosureValue }
+
+/** The phase a `PhaseAnimator` rests at: the first of those it was given. */
+function firstPhase(phases: SwiftValue | undefined): SwiftValue {
+  const given = asProjection(phases)?.get() ?? phases
+  return given?.kind === 'array' ? given.elements[0] ?? NIL : NIL
+}

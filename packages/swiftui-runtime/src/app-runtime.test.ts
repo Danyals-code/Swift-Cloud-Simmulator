@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { Parser } from '@studio/swift-syntax'
 import { Checker } from '@studio/swift-sema'
 import { AppRuntime, actionId } from './app-runtime'
+import { stoppedFailures } from './presentation'
 import { flattenViews, renderArg, type ViewValue } from './view-value'
 
 const FILE = 'App.swift'
@@ -303,20 +304,21 @@ ${body}
 })
 
 describe('runtime failures are reported, not thrown', () => {
-  it('reports a trap from the view body with its source position', () => {
+  it('draws a view whose body traps as stopped, carrying the trap and its source position', () => {
     const runtime = new AppRuntime()
-    load(
-      runtime,
-      `@main struct A: App { var body: some Scene { WindowGroup { Root() } } }
+    const source = `@main struct A: App { var body: some Scene { WindowGroup { Root() } } }
        struct Root: View {
            var body: some View { Text("\\(1 / 0)") }
-       }`,
-    )
+       }`
+    load(runtime, source)
 
     const result = runtime.evaluate()
-    expect(result.failure?.kind).toBe('trap')
-    expect(result.failure?.message).toContain('Division by zero')
-    expect(result.views).toEqual([])
+    expect(result.failure).toBeNull()
+    const [failure, ...others] = stoppedFailures(result.ui)
+    expect(others).toEqual([])
+    expect(failure?.kind).toBe('trap')
+    expect(failure?.message).toContain('Division by zero')
+    expect(source.slice(failure!.span.start, failure!.span.end)).toBe('1 / 0')
   })
 
   it('survives a trap inside a button action', () => {

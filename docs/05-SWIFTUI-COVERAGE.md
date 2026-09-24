@@ -38,7 +38,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
 | `Divider` | ✅ | 6 | hairline across its stack's axis |
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
-| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths, a computed `id` and `\.rawValue` included; each row is tagged with its id, as SwiftUI tags it. Binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
+| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths, a computed `id` and `\.rawValue` included; each row is tagged with its id, as SwiftUI tags it. Every row keeps its own identity: ids that differ only in punctuation ("C", "C++"), several rows drawn for one element, and an id two elements share, which warns as SwiftUI does. Binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
 | `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's. Vertical content keeps its own height at the top, centred across, as in iOS 27 |
 | `GeometryReader` | ✅ | 7 | reports its real size through `size` and where it is on the screen through `frame(in: .global)`, in a sheet too, and through `safeAreaInsets` the insets of the edges it touches, bars included, as iOS 27 does. A reader inside another reader reads no insets. It is its own coordinate space. A named coordinate space is read as the screen |
 | `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks: correct, and not virtualised. A 200-row stack measures in 7.6 ms against a 120 ms budget, so the cost is real and not yet worth the identity complexity |
@@ -61,7 +61,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
 | `ContentUnavailableView` | ✅ | 13 | the empty state: a large symbol over a title over a description. `.search` is the stock spelling and carries its own text |
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
-| `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
+| `ScrollViewReader` | 🟡 | - | what it holds is drawn, and handed a proxy whose `scrollTo` does nothing: there is no channel from the worker to the browser's scroll position. Warns at the reader |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
 | `Link` / `ShareLink` | 🟡 | 6 | drawn as iOS 27 draws them: the title or the label given, in the accent colour, and a share link without a label is the share icon and "Share…". Tapping opens nothing, and says so. `URL(string:)` exists, so the `destination:` can be written |
 | `ProgressView` | ✅ | 6 | determinate bar filling from its leading edge; `.circular` and the indeterminate form are the turning activity indicator |
@@ -94,7 +94,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `List` | 🟡 | 6 | plain/grouped/sidebar styles; binding collection closures are unsupported |
 | `Section` | ✅ | 6 | header and footer, the footer in the secondary colour under the card |
 | `Form` | ✅ | 6 | the grouped-list form |
-| `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included; `perform:` takes a closure or a named function, as do `.onAppear`, `.task` and `.onTapGesture` |
+| `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included, given the place of the element the row was drawn for; `perform:` takes a closure or a named function, as do `.onAppear`, `.task` and `.onTapGesture` |
 | `.onMove` | ⬜ | - | warns; no reorder UI or modifier callback. The array move helper is separate |
 | `.swipeActions` | ⬜ | - | warns; custom actions are ignored. Standard delete requires `.onDelete` |
 | `.searchable` | ✅ | 7 | a field with its magnifying glass, writing its binding. On a phone it is at the bottom of the screen, or under the title in a tab app, and on iPad in the toolbar. Written on the NavigationStack, it searches the stack's root screen only, and on a TabView without a search tab it draws nothing, as in iOS 27 |
@@ -105,7 +105,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
 | `.toolbar` | 🟡 | 6 | leading/trailing items work; keyboard, bottomBar and principal placements warn and are omitted |
-| `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, pages from `ForEach` selected by their ids, and `.page`, whose dots are also the way through - a preview has no swipe |
+| `TabView` | ✅ | 6 | tab bar with `.tabItem` or `Tab`, bound or unbound selection, pages from `ForEach` selected by their ids, a `TabSection`'s tabs in the bar with the others, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
 
@@ -236,6 +236,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `AnyTransition.combined(with:)` | 🟡 | - | constructs, and the preview draws the first of the two: the render tree carries one transition kind per node |
 | `matchedGeometryEffect` | ✗ | - | FLIP across an identity change needs the renderer to own both trees at once - the same shadow copy exit transitions need |
 | `.phaseAnimator` / `.keyframeAnimator` | ✗ | - | both drive frames from a clock the preview does not run |
+| `PhaseAnimator` / `KeyframeAnimator` views | 🟡 | - | the content is drawn at rest: at the first phase, and at the initial value. The animation needs the same clock, and warns |
 | `Animatable` / `animatableData` | ✗ | - | interpolating an arbitrary value needs an animation system that owns the frames; ours is CSS keyframes, deliberately |
 | Custom `ViewModifier` + `.modifier(…)` | ✅ | 8 | `body(content:)` is called with the view as a value |
 | `extension View { func … }` | ✅ | 8 | the idiom for a reusable modifier chain |
@@ -317,7 +318,8 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | Bitwise operators `&` `\|` `^` `<<` `>>` | ✅ | - | 64-bit, computed in `BigInt` |
 | `_ = expr` | ✅ | - | the discard; evaluates the expression and throws the answer away |
 | Extensions on built-in types | ✅ | - | `extension String { var shout: String { uppercased() } }`; the receiver's own members are in scope unqualified |
-| Overloading by argument label | ✅ | - | `minutes(on:)` and `minutes(of:)` are two members, chosen by the labels the call writes. Overloading by parameter *type* alone is not: the interpreter is untyped, so `f(_ x: Int)` and `f(_ x: String)` still collapse to whichever was written last |
+| Overloading by argument label | ✅ | - | `minutes(on:)` and `minutes(of:)` are two functions, top level, local or members, chosen by the labels the call writes |
+| Overloading by parameter type | 🟡 | - | `f(_ x: Int)` and `f(_ x: String)` are both kept, and a call runs the one its arguments' values suit: a whole number an `Int`, text a `String`, a project type its own. Where the values can't tell them apart (`Double` and `CGFloat`, both a number), the preview runs the first and warns at the second, where Xcode goes by the argument's declared type. Inside a type, its own members are found before top-level ones of the same name, for a read, a call, a write and a `$` binding alike, as in Swift |
 | A method and a property sharing a name | ✅ | - | `var spent` and `func spent(on:)` coexist as they do in Swift; a call reaches the method and a read reaches the property |
 
 ## Standard library and Foundation
@@ -458,6 +460,22 @@ Listed in the exported README so nothing is a surprise on the Mac:
 25. **A search drawer shown always keeps a large title.** With
     `.navigationBarDrawer(displayMode: .always)`, iOS 27 makes the title inline, and the
     preview keeps it large.
+26. **A class instance prints without its module.** `print(node)` shows `Node` where the
+    app shows `MyApp.Node`: the module is the exported target's name, which the preview
+    never sees. Its properties are never printed, as in Swift.
+27. **Recursion stops sooner than on a device.** Each Swift call costs the interpreter
+    several JavaScript frames, so a recursion a few hundred calls deep stops the preview
+    with "Call depth exceeded" at the line it reached, where an iPhone would go deeper.
+28. **A view that traps is drawn as stopped; iOS would crash.** A trap in a view's
+    `body` (an index out of range, a nil unwrapped, a model no ancestor gave) draws that
+    view as a placeholder naming it and the reason, and the rest of the screen keeps
+    working, so one bad row doesn't take the Design canvas with it. A sheet, a destination,
+    a toolbar, a context menu or a tab item whose own closure traps is drawn the same way,
+    as "Sheet stopped" and so on, and a stopped sheet can still be closed. The error is
+    reported at its line, once the view is on screen: a destination's only when it is
+    pushed. The Design canvas leaves out a sheet or a destination that traps with the state
+    the app has now, as the app can't show it yet. A trap in a view's stored property, as
+    it is created, stops the view that creates it.
 
 ## The strictness pass (R5)
 

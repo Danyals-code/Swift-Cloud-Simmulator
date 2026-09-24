@@ -91,6 +91,7 @@ import {
   asView,
   handlerIdFor,
   payloadOf,
+  stopped,
   type AnimationPayload,
   type ColorPayload,
   type EdgeInsetsPayload,
@@ -166,6 +167,13 @@ const SHAPES: Readonly<Record<string, ShapeKind>> = {
   Capsule: 'capsule',
 }
 
+/**
+ * Views that stand for their content, like a `Group`: a modifier on one applies to
+ * each thing it holds. A reader or an animator hands its content a value and adds no
+ * box of its own.
+ */
+const GROUP_LIKE_VIEWS: ReadonlySet<string> = new Set(['Group', 'ScrollViewReader', 'PhaseAnimator', 'KeyframeAnimator'])
+
 /** Views that contribute their children to the enclosing stack rather than nesting. */
 const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
   'Group',
@@ -177,8 +185,9 @@ const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
   // detail is pushed onto it. The multi-column form needs a width an iPhone has not
   // got, so collapsing is the real behaviour rather than an approximation of it.
   'NavigationSplitView',
-  'TabView', 'Tab',
+  'TabView', 'Tab', 'TabSection',
   'AnyView',
+  ...GROUP_LIKE_VIEWS,
 ])
 
 /** iOS metrics the chrome is built from. Points, at the default Dynamic Type size. */
@@ -1027,19 +1036,21 @@ class Converter {
       }
 
       /**
-       * A `Group` carrying modifiers is still not a container.
+       * A `Group` carrying modifiers is still not a container, nor is a reader or an
+       * animator standing for its content.
        *
        * SwiftUI applies a `Group`'s modifiers to each of its children rather than to
        * a box around them - `Group { A; B }.font(.caption)` *is* `A.font(.caption)`
        * and `B.font(.caption)`, and `.frame(width: 100)` sizes each of them. So the
        * modifiers are pushed down and the group disappears, which is both simpler and
-       * more correct than wrapping.
+       * more correct than wrapping. The others in `GROUP_LIKE_VIEWS` hold one view in
+       * practice, where the two are the same.
        *
        * Without this, a modified group reached the switch below, matched nothing, and
        * drew a placeholder - which is what `Group { … }.font(…)` did, and what every
        * `@ViewBuilder` helper of more than one statement now produces.
        */
-      if (view.name === 'Group' && view.children.length > 0) {
+      if (GROUP_LIKE_VIEWS.has(view.name) && view.children.length > 0) {
         out.push(
           ...this.convertList(
             view.children.map((child, i) => ({
@@ -1496,6 +1507,10 @@ class Converter {
       default:
         break
     }
+
+    // A custom view whose body stopped: what it is, and why, where it would have been.
+    const halted = stopped(view)
+    if (halted) return { kind: 'placeholder', id: path, feature: `${halted.name} stopped`, reason: halted.failure.message, ...origin }
 
     const shape = SHAPES[view.name]
     if (shape) {

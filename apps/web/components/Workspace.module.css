@@ -82,6 +82,7 @@
 .statesBadge:hover { background: var(--color-xc-select); color: var(--color-xc-accent); }
 .statePhone { position: absolute; }
 .stateProblem { position: absolute; inset: auto 8px 8px; padding: 6px 8px; border-radius: 8px; background: var(--color-xc-bar); color: var(--color-xc-text-2); font-size: 12px; text-align: center; }
+.notDrawn { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 .pageCard { position: absolute; margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .statePhone > .pageCard { position: static; }
 .statePhone [data-busy] { opacity: 0.55; }

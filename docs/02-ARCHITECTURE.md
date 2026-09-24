@@ -137,7 +137,8 @@ no witness table: conformance is a *syntactic* merge (§4.4), and generics are e
 constraints recorded and never enforced. Both follow from gate 4 - a false positive is worse than a
 missed error - and from the fact that the export hands the user's exact source to a real compiler,
 which is where type checking belongs. The checker reports what it is certain of: a name that
-resolves nowhere, a real SwiftUI construct the preview cannot draw, an entry-point problem.
+resolves nowhere, a type alias that names itself, a real SwiftUI construct the preview cannot
+draw, two overloads the preview can't tell apart by their arguments, an entry-point problem.
 
 ### 4.4 The conformance merge (`collectConformance`)
 

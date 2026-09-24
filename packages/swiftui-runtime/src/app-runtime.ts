@@ -5,17 +5,14 @@ import {
   asProjection,
   bool,
   copyValue,
-  PreviewLimitExceeded,
   describe,
   double,
-  ExecutionBudgetExceeded,
   int,
   Interpreter,
   indexSet,
   opaque,
   pickOverload,
   str,
-  SwiftThrow,
   SwiftTrap,
   NIL,
   UnsupportedAtRuntime,
@@ -36,6 +33,7 @@ import {
   kindOfEvent,
   phaseOfEvent,
 } from './gestures'
+import { containable, toFailure } from './failures'
 import { SwiftUIHost } from './swiftui-host'
 import {
   asSwiftValue,
@@ -43,20 +41,15 @@ import {
   BUTTON_CONFIGURATION_TYPE,
   DIMENSIONS_TYPE,
   handlerIdFor,
+  stoppedView,
   type ActionValue,
+  type RuntimeFailure,
   type AnimationPayload,
   type EnvironmentFrame,
   type GeometryPayload,
   type ViewIntent,
   type ViewValue,
 } from './view-value'
-
-export interface RuntimeFailure {
-  readonly message: string
-  readonly span: SourceSpan
-  readonly frames: readonly string[]
-  readonly kind: 'trap' | 'budget' | 'unsupported'
-}
 
 export interface EvaluationResult {
   readonly views: readonly ViewValue[]
@@ -83,6 +76,8 @@ export interface EvaluationResult {
  */
 export class AppRuntime {
   private interpreter = new Interpreter()
+  /** The steps a pass may take, when not the interpreter's own: a gallery screen gets what the gallery has left. */
+  private stepBudget: number | undefined
   private host = new SwiftUIHost()
   private readonly state = new StateStore()
   /**
@@ -198,7 +193,7 @@ export class AppRuntime {
     if (programKey === this.programKey && this.entryTypeName) return
 
     this.loadedProgram = { files, model, key: programKey, screen }
-    this.interpreter = new Interpreter({ host: this.host })
+    this.interpreter = new Interpreter({ host: this.host, ...(this.stepBudget !== undefined ? { stepBudget: this.stepBudget } : {}) })
     this.host.expandStruct = (value) => this.expand(value)
     this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
     this.host.builderIdentity = (slot, branch, fn) => {
@@ -217,7 +212,7 @@ export class AppRuntime {
     try {
       this.interpreter.load(files)
     } catch (error) {
-      this.loadFailure = toFailure(error)
+      this.loadFailure = toFailure(error, this.interpreter.position)
     }
 
     this.entryTypeName = screen ?? model.entryPoint?.name ?? null
@@ -276,7 +271,7 @@ export class AppRuntime {
 
       const ui = resolveUI(views, {
         state: this.ui,
-        build: (closure, args, environment) => this.buildViews(closure, args, environment),
+        build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
         animation: this.animation,
       }, undefined, this.previewPrefix ? { prefix: this.previewPrefix } : undefined)
@@ -300,7 +295,7 @@ export class AppRuntime {
         views: [],
         ui: null,
         logs: this.host.takeLogs(),
-        failure: toFailure(error),
+        failure: toFailure(error, this.interpreter.position),
         rootTypeName: this.rootTypeName,
       }
     }
@@ -316,37 +311,38 @@ export class AppRuntime {
    * page's, because a press belongs to the app that is running, not to a picture of
    * one beside it.
    *
-   * Returns null when the pass cannot be composed that way, so a gallery of six
-   * pages is never the reason the preview goes blank.
+   * A page that can't be composed throws, and the gallery reports that page and
+   * draws the rest, so a gallery of six pages is never the reason the preview goes
+   * blank.
    */
-  resolvePage(views: readonly ViewValue[], tab: number, basePage = false): ResolvedUI | null {
-    try {
-      return resolveUI(
-        views,
-        {
-          state: this.ui,
-          includeViewHierarchy: basePage,
-          build: (closure, args, environment) => this.buildViews(closure, args, environment),
-          styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
-          animation: this.animation,
-        },
-        tab,
-        { basePage },
-      )
-    } catch {
-      return null
-    }
+  resolvePage(views: readonly ViewValue[], tab: number, basePage = false): ResolvedUI {
+    return resolveUI(
+      views,
+      {
+        state: this.ui,
+        includeViewHierarchy: basePage,
+        build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
+        styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
+        animation: this.animation,
+      },
+      tab,
+      { basePage },
+    )
   }
 
   /**
    * Deferred page builders run in a separate interpreter. State objects are deeply
    * copied, so even an impure destination body cannot write through an environment
    * object into the app being edited. Actions and lifecycle callbacks never run.
+   *
+   * The evaluation comes back whether or not it stopped, so the gallery can say why a
+   * screen isn't drawn; `stepBudget` is what the gallery has left to give it.
    */
-  previewRuntime(screen?: string): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
+  previewRuntime(screen?: string, stepBudget?: number): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
     const loaded = this.loadedProgram
     if (!loaded) return null
     const preview = new AppRuntime()
+    preview.stepBudget = stepBudget
     if (screen) preview.previewPrefix = 'design:' + screen
     preview.load(loaded.files, loaded.model, loaded.key, screen ?? loaded.screen)
     const copied = new Map<object, unknown>()
@@ -361,14 +357,21 @@ export class AppRuntime {
     preview.setEnvironment(this.environmentInputs)
     preview.setDefaultGeometry(this.host.defaultGeometry)
     preview.updateGeometry(this.geometry)
-    const evaluation = preview.evaluate()
-    return evaluation.failure ? null : { runtime: preview, evaluation }
+    return { runtime: preview, evaluation: preview.evaluate() }
+  }
+
+  /** The steps taken since the last pass began, resolving included. */
+  get stepsUsed(): number {
+    return this.interpreter.stepsUsed
   }
 
   resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number): readonly NestedPage[] {
     return resolveNestedPages(views, {
       state: new UIState(),
-      build: (closure, args, environment) => this.buildViews(closure, args, environment),
+      // The canvas opens these with the state the app has now, so one that stops,
+      // `Text(selected!)` while nothing is selected, is a screen the app can't show
+      // yet rather than one that is broken: it is left out, not drawn as stopped.
+      build: (closure, args, environment) => this.runBuilder(closure, args, environment),
       styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
       animation: null,
     }, tab, rootId, limit)
@@ -419,7 +422,7 @@ export class AppRuntime {
     } catch (error) {
       // A trap inside an action is surfaced as a log rather than thrown, so one bad
       // tap cannot tear down the preview.
-      this.host.log(`Action failed: ${toFailure(error).message}`, spanOf(intent), 'error')
+      this.host.log(`Action failed: ${toFailure(error, this.interpreter.position).message}`, spanOf(intent), 'error')
     }
 
     this.animation = this.host.pendingAnimation
@@ -443,7 +446,7 @@ export class AppRuntime {
         const result = this.interpreter.callClosure(closure, [dimensions], closure.span)
         return result.kind === 'int' || result.kind === 'double' ? result.value : 0
       } catch (error) {
-        this.host.log(`Alignment guide failed: ${toFailure(error).message}`, closure.span, 'error')
+        this.host.log(`Alignment guide failed: ${toFailure(error, this.interpreter.position).message}`, closure.span, 'error')
         return 0
       }
     }
@@ -552,7 +555,7 @@ export class AppRuntime {
     } catch (error) {
       // A failing lifecycle callback is reported, not fatal: the screen it was about
       // to decorate is still worth showing.
-      this.host.log(`Lifecycle callback failed: ${toFailure(error).message}`, actionSpan(action), 'error')
+      this.host.log(`Lifecycle callback failed: ${toFailure(error, this.interpreter.position).message}`, actionSpan(action), 'error')
     }
   }
 
@@ -798,6 +801,13 @@ export class AppRuntime {
       const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
 
       return componentViews(this.viewsFrom(produced), instance)
+    } catch (error) {
+      // A view whose body stops is drawn as a placeholder saying why, and the rest of
+      // the screen goes on: a trap in one row must not blank the screen, and the Design
+      // canvas with it. Unlike iOS, which would crash, but the error is still reported
+      // where it happened.
+      if (!containable(error)) throw error
+      return componentViews([stoppedView(instance.typeName, toFailure(error, this.interpreter.position), instance.viewSource ?? decl.span)], instance)
     } finally {
       this.expandDepth--
       this.identity.pop()
@@ -936,7 +946,7 @@ export class AppRuntime {
    * them has unwound. Without it `@EnvironmentObject` on a detail screen resolves to
    * nothing, which is not a limitation the user can see coming.
    */
-  private buildViews(
+  private runBuilder(
     closure: ClosureValue,
     args: readonly SwiftValue[] = [],
     environment?: EnvironmentFrame,
@@ -944,6 +954,25 @@ export class AppRuntime {
     return this.host.environment.withFrame(environment, () =>
       this.viewsFrom(this.interpreter.runViewBuilder(closure, args)),
     )
+  }
+
+  /**
+   * `runBuilder`, for what the app has on screen: a sheet or a destination whose own
+   * closure stops - `Detail(item: items[0])` on an empty list - is drawn as stopped,
+   * as a view is, and the sheet can still be closed and the destination left.
+   */
+  private buildViews(
+    closure: ClosureValue,
+    args: readonly SwiftValue[] = [],
+    environment?: EnvironmentFrame,
+    name = 'Content',
+  ): readonly ViewValue[] {
+    try {
+      return this.runBuilder(closure, args, environment)
+    } catch (error) {
+      if (!containable(error)) throw error
+      return [stoppedView(name, toFailure(error, this.interpreter.position), closure.span)]
+    }
   }
 
   /**
@@ -1234,43 +1263,6 @@ function parameterCount(action: ActionValue): number {
 /** Handler id for the view at a given tree path. */
 export function actionId(path: string): string {
   return handlerIdFor(path)
-}
-
-function toFailure(error: unknown): RuntimeFailure {
-  if (error instanceof SwiftTrap) {
-    return {
-      message: `Swift runtime failure: ${error.reason}`,
-      span: error.span,
-      frames: error.frames.map((f) => f.name),
-      kind: 'trap',
-    }
-  }
-  if (error instanceof PreviewLimitExceeded) {
-    return { message: error.message, span: error.span, frames: [], kind: 'budget' }
-  }
-  if (error instanceof ExecutionBudgetExceeded) {
-    return {
-      message: error.message,
-      span: error.span,
-      frames: error.frames.map((f) => f.name),
-      kind: 'budget',
-    }
-  }
-  if (error instanceof UnsupportedAtRuntime) {
-    return { message: error.message, span: error.span, frames: [], kind: 'unsupported' }
-  }
-  if (error instanceof SwiftThrow) {
-    // An error that reached the top of the tree was never caught. In a real app that
-    // is a fatal error; here it has to become a diagnostic, because anything this
-    // function does not recognise is re-thrown and takes the whole compile with it.
-    return {
-      message: `An error was thrown and never caught: ${describe(error.value as SwiftValue, false)}`,
-      span: error.span,
-      frames: [],
-      kind: 'trap',
-    }
-  }
-  throw error
 }
 
 export { describe }
