@@ -62,6 +62,8 @@ export interface EditorPaneProps {
   onRedo?: () => void
   onChange: (text: string) => void
   onSave: () => void
+  /** Typing waits: an AI edit holds the project, and a change now would throw its answer away. */
+  readOnly?: boolean
   /** The file being edited, so the worker knows which one the offset belongs to. */
   fileId?: string
   language?: EditorLanguageService
@@ -94,6 +96,7 @@ export function EditorPane({
   onUndo,
   onRedo,
   onSave,
+  readOnly = false,
   reveal,
   fileId,
   language,
@@ -105,6 +108,7 @@ export function EditorPane({
   const viewRef = useRef<EditorView | null>(null)
   const theme = useLayout(s => s.theme)
   const appearance = useRef(new Compartment())
+  const typing = useRef(new Compartment())
   /** What the editor has typed that the store has not handed back yet. */
   const echoes = useRef(new EditorEchoes())
   /**
@@ -217,6 +221,7 @@ export function EditorPane({
       StreamLanguage.define(swift),
       editorTheme,
       appearance.current.of(EditorView.darkTheme.of(theme === 'dark')),
+      typing.current.of(EditorState.readOnly.of(readOnly)),
       // `override` replaces basicSetup's word-based source entirely. Left alongside
       // it, the two merge and every identifier already in the file comes back as a
       // suggestion - including the half-typed one being completed.
@@ -249,6 +254,8 @@ export function EditorPane({
           key: 'F2',
           preventDefault: true,
           run: (view) => {
+            // Renaming changes the files, which wait while the editor is read-only.
+            if (view.state.readOnly) return true
             void (async () => {
               const service = languageRef.current
               const file = fileIdRef.current
@@ -325,6 +332,10 @@ export function EditorPane({
   useEffect(() => {
     viewRef.current?.dispatch({ effects: appearance.current.reconfigure(EditorView.darkTheme.of(theme === 'dark')) })
   }, [theme])
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: typing.current.reconfigure(EditorState.readOnly.of(readOnly)) })
+  }, [readOnly])
 
   // Push external document changes in (template reset, project load, Undo) without
   // clobbering the cursor when the incoming text is what the user just typed - or
@@ -416,6 +427,8 @@ function toCodeMirror(diagnostics: readonly Diagnostic[], doc: string): CmDiagno
     actions: (d.fixIts ?? []).map((fix) => ({
       name: fix.title,
       apply: (view: EditorView) => {
+        // A fix is a change like any other, which waits while the editor is read-only.
+        if (view.state.readOnly) return
         const length = view.state.doc.length
         view.dispatch({
           changes: fix.edits.map((edit) => ({

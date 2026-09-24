@@ -8,7 +8,7 @@ import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLin
 import { findFile } from '@studio/project-model'
 import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
 import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, RenderTree, SourcePoint, SourceSpan, ViewLayer } from '@studio/shared'
-import { useStudio, type PreviewSettings } from '../lib/store'
+import { AI_EDITING, useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
 import { imageViewSnippet } from '../lib/images'
@@ -35,6 +35,7 @@ import { AuthoringInspector } from './AuthoringInspector'
 import type { FeatureProps } from './AuthoringFeatures'
 import { DesignNavigator, type DesignLevel } from './DesignNavigator'
 import { StudioSidebar } from './StudioSidebar'
+import { AiEditBanner } from './AiEditBanner'
 import { LogicalLayers } from './LogicalLayers'
 import { AppSettings } from './settings/AppSettings'
 import { AppNavigationSettings } from './settings/AppNavigationSettings'
@@ -93,6 +94,8 @@ export function Studio() {
   const storage = useMemo(() => storageProblem({ saveError, saveOutdated, durable, loadError }), [saveError, saveOutdated, durable, loadError])
   const previewSettings = useStudio((s) => s.preview)
   const canUndo = useStudio((s) => s.canUndo)
+  /** An AI edit holds the project: editing waits until its answer lands (G12). */
+  const aiEditing = useStudio((s) => s.aiEdit !== null)
   const canRedo = useStudio((s) => s.canRedo)
 
   const load = useStudio((s) => s.load)
@@ -272,7 +275,19 @@ export function Studio() {
 
   const toggleInspect = useCallback(() => setDesigning(!inspecting), [setDesigning, inspecting])
 
+  /**
+   * A change a panel asks the store for. While an AI edit holds the project the store
+   * refuses it; this says why, rather than failing silently or as if the name were wrong.
+   */
+  const unlessAiEditing = <A extends unknown[], R>(change: (...args: A) => R, refused: R) => (...args: A): R => {
+    if (!useStudio.getState().aiEdit) return change(...args)
+    setEditNote(AI_EDITING)
+    return refused
+  }
+
   const openGallery = useCallback((source: GallerySource) => {
+    // Opening another project would stop the AI edit and throw away its paid answer (G12).
+    if (useStudio.getState().aiEdit) { setEditNote(AI_EDITING); return }
     setGallerySource(source)
     setGalleryAtLaunch(false)
     setGalleryOpen(true)
@@ -952,7 +967,7 @@ export function Studio() {
    */
   const addTargetLayer = useMemo(() => insertionLayer(pageHierarchy ?? layers, selectedLayer), [selectedLayer, pageHierarchy, layers])
 
-  const canAdd = !!addTargetLayer?.source && !stale
+  const canAdd = !!addTargetLayer?.source && !stale && !aiEditing
 
   const selection = selectedLayer && site
     ? {
@@ -968,6 +983,7 @@ export function Studio() {
     : null
 
   const replayEdit = useCallback((direction: 'undo' | 'redo') => {
+    if (useStudio.getState().aiEdit) { setEditNote(AI_EDITING); return }
     const replayed = useStudio.getState().replayDocument(direction)
     if (!replayed) { setEditNote('No document edit to ' + direction); return }
     const current = useStudio.getState().project
@@ -1317,7 +1333,9 @@ export function Studio() {
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
                   return commitStudioRecords(project, { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] }, 'component-describe')
                 }, onNodeCommand: (node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation), onNodeChange: (node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }), onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }
-  const busy = stale || preparingEdit
+  /** Editing waits for the edit being prepared, and for an AI edit holding the project. */
+  const editingPaused = preparingEdit || aiEditing
+  const busy = stale || editingPaused
   const revealSpan = (span: SourceSpan) => revealSpanIn(span.file, span.start)
   /**
    * What each panel is drawn from. A panel that crashed tries again when one of these
@@ -1344,7 +1362,7 @@ export function Studio() {
     {level === 'view' && authoringNode && <><span aria-hidden>›</span><span aria-current="page" data-testid="level-view">{sourceLayerLabel(authoringNode)}</span></>}
   </nav>
 
-  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={noteText} noteAction={noteLocation ? { label: 'Show in Code', onClick: () => revealSpanIn(noteLocation.file, noteLocation.offset) } : null} />
+  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo && !aiEditing} canRedo={canRedo && !aiEditing} note={noteText} noteAction={noteLocation ? { label: 'Show in Code', onClick: () => revealSpanIn(noteLocation.file, noteLocation.offset) } : null} />
   const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
 
   return (
@@ -1357,6 +1375,7 @@ export function Studio() {
         onThemeChange={setTheme}
         onOpenGallery={openGallery}
         onRenameProject={useStudio.getState().renameProject}
+        renameDisabled={aiEditing}
         onShortcuts={() => setShortcutsOpen(true)}
         onCopyBuild={() => {
           void navigator.clipboard.writeText(BUILD_DETAILS).then(() => setEditNote(`${BUILD_NAME} copied.`), () => setEditNote(BUILD_DETAILS))
@@ -1376,12 +1395,13 @@ export function Studio() {
         onExport={handleExport}
         exporting={exporting}
         onShare={handleShare}
-        environment={<><DevicePicker device={device} onChange={setDevice} /><AppearancePicker preview={previewSettings} onChange={setPreview} /><TextSizePicker preview={previewSettings} onChange={setPreview} /></>}
+        environment={<><DevicePicker device={device} onChange={unlessAiEditing(setDevice, undefined)} /><AppearancePicker preview={previewSettings} onChange={setPreview} /><TextSizePicker preview={previewSettings} onChange={setPreview} /></>}
         previewing={!inspecting}
         onSetPreviewing={previewing => setDesigning(!previewing)}
         previewDisabled={stale || preparingEdit}
       />
       <StorageBanner problem={storage} onRetry={() => void flush()} />
+      <AiEditBanner />
 
       <div ref={splitRef} className="flex min-h-0 flex-1">
         {layout.showNavigator ? (
@@ -1399,7 +1419,7 @@ export function Studio() {
                 level={level}
                 selectedScreenId={focusedScreen?.id}
                 selectedComponent={authoringNode?.kind === 'definition' ? authoringNode.name : undefined}
-                busy={stale || preparingEdit}
+                busy={busy}
                 diagnostics={allDiagnostics}
                 onReveal={revealSpanIn}
                 onTogglePanel={() => togglePane('navigator')}
@@ -1412,7 +1432,7 @@ export function Studio() {
                   labels={project.studio?.labels} onRename={renameLayer} pageId={focusedPage?.id} pageName={focusedPage?.name} pageSource={focusedPage?.source} runtimeLayers={pageHierarchy}
                   selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={result.authoring} files={project.files} selection={layerSelection?.anchor}
                   selected={authoringNode?.id} selectedAncestors={selectedSources} hovered={liveHoveredAuthoring?.node.id ?? hoveredSources[0]} hoveredAncestors={hoveredSources.slice(1)}
-                  onHover={hoverAuthoring} stale={stale || preparingEdit} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
+                  onHover={hoverAuthoring} stale={busy} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
                   hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-2 text-[12px] text-xc-text-3">Building the view hierarchy…</p>}
               /> : <Navigator tabbed
                 key={project.id}
@@ -1440,7 +1460,7 @@ export function Studio() {
                 onHideLayer={(layer) => void applyEdit({ kind: 'hide' }, layer)}
                 onShowHidden={showHidden}
                 layersEditable={false}
-                stale={stale || preparingEdit}
+                stale={busy}
                 onSelectLayer={selectLayer}
                 tree={fileTree}
                 activeFileId={activeFileId}
@@ -1448,15 +1468,15 @@ export function Studio() {
                 diagnostics={allDiagnostics}
                 canDelete={files.length > 1}
                 onSelect={openSource}
-                onCreateFile={(name, parent) => { setMode('develop'); return createFile(name, parent) }}
-                onCreateFolder={createFolder}
+                onCreateFile={unlessAiEditing((name: string, parent?: string) => { setMode('develop'); return createFile(name, parent) }, null)}
+                onCreateFolder={unlessAiEditing(createFolder, null)}
                 onTogglePanel={() => togglePane('navigator')}
-                onRenameFile={renameFile}
-                onRenameFolder={renameFolder}
-                onDeleteFile={deleteFile}
-                onDeleteFolder={deleteFolder}
-                onDuplicateFile={duplicateFile}
-                onMoveFile={moveFile}
+                onRenameFile={unlessAiEditing(renameFile, true)}
+                onRenameFolder={unlessAiEditing(renameFolder, undefined)}
+                onDeleteFile={unlessAiEditing(deleteFile, undefined)}
+                onDeleteFolder={unlessAiEditing(deleteFolder, undefined)}
+                onDuplicateFile={unlessAiEditing(duplicateFile, undefined)}
+                onMoveFile={unlessAiEditing(moveFile, undefined)}
                 onRevealDiagnostic={revealSpanIn}
                 onOpenTemplates={() => openGallery('design')}
               />}
@@ -1479,7 +1499,7 @@ export function Studio() {
         <div className="flex min-w-0 flex-1 flex-col" style={mode === 'design' ? { display: 'none' } : undefined}>
           <TabBar
             key={project.id}
-            onRenameFile={renameFile}
+            onRenameFile={unlessAiEditing(renameFile, true)}
             openFileIds={openFileIds}
             activeFileId={activeFileId}
             filesWithErrors={filesWithErrors}
@@ -1518,6 +1538,7 @@ export function Studio() {
                 onChange={handleChange}
                 onUndo={undo}
                 onRedo={redo}
+                readOnly={aiEditing}
                 onSave={() => void flush()}
                 reveal={reveal}
                 fileId={activeFile.id}
@@ -1587,7 +1608,7 @@ export function Studio() {
                 containerNameAt={containerNameAt}
                 centerOn={centerOn}
                 status={previewStatus}
-                onDeviceChange={setDevice}
+                onDeviceChange={unlessAiEditing(setDevice, undefined)}
                 tools={previewTools}
                 device={device}
                 tree={phone.tree}

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 const generated = {
   name: 'ReadingApp', summary: 'A quiet place for your reading goals.',
@@ -80,6 +81,67 @@ test('both AI panels share one connection for the tab, whichever was open first 
 
   await expect(editing.getByRole('combobox', { name: 'Provider', exact: true })).toHaveValue('anthropic')
   await expect(editing.getByLabel('API key', { exact: true })).toHaveValue('sk-ant-test-not-a-real-key')
+})
+
+/** Answers /api/edit once `answer` is called, relabelling the counter; `refuse` instead fails it. */
+async function editWhenAnswered(page: Page) {
+  let answer!: () => void, refuse!: () => void
+  const decided = new Promise<'answer' | 'refuse'>(resolve => { answer = () => resolve('answer'); refuse = () => resolve('refuse') })
+  await page.route('**/api/edit', async route => {
+    const { files } = route.request().postDataJSON() as { files: { id: string; text: string }[] }
+    const file = files.find(f => f.text.includes('Count: '))!
+    if (await decided === 'refuse') return route.abort().catch(() => {})
+    await route.fulfill({ json: { edit: { reply: 'Relabelled the count.', files: [{ path: file.id, code: file.text.replace('Count: ', 'Taps so far: ') }], deletedFiles: [] } } })
+  })
+  return { answer, refuse }
+}
+
+/** Sends a prompt from Prompt Editing, with a key for the tab. */
+async function sendPrompt(page: Page) {
+  await page.getByRole('tab', { name: 'Prompt Editing', exact: true }).click()
+  await page.getByRole('button', { name: 'AI connection settings', exact: true }).click()
+  await page.getByTestId('prompt-editor').getByLabel('API key', { exact: true }).fill('sk-test-not-a-real-key-123456')
+  await page.getByLabel('Describe a change', { exact: true }).fill('Call the count taps.')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+}
+
+test('an AI edit holds the project until its answer lands, even with the panel collapsed (G12)', async ({ page }) => {
+  const { answer } = await editWhenAnswered(page)
+  await openCounter(page)
+  // Something to undo, so that Undo turning off is the hold's doing.
+  await page.getByTestId('workspace-develop').click()
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+Home')
+  await page.keyboard.insertText('// Tried in the study\n')
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('design-undo')).toBeEnabled()
+  await sendPrompt(page)
+
+  const banner = page.getByTestId('ai-edit-banner')
+  await expect(banner).toContainText('The AI is editing this project.')
+  await expect(page.getByTestId('design-undo')).toBeDisabled()
+  await page.getByTestId('pane-toggle-navigator').click()
+  await expect(banner).toBeVisible()
+  answer()
+
+  await expect(page.getByTestId('render-tree').getByText('Taps so far: 0', { exact: true })).toBeVisible()
+  await expect(banner).toHaveCount(0)
+  await expect(page.getByTestId('design-undo')).toBeEnabled()
+})
+
+test('Stop ends an AI edit at once, and its answer changes nothing (G12)', async ({ page }) => {
+  const { refuse } = await editWhenAnswered(page)
+  await openCounter(page)
+  await sendPrompt(page)
+  const banner = page.getByTestId('ai-edit-banner')
+  await expect(banner).toBeVisible()
+
+  await banner.getByRole('button', { name: 'Stop', exact: true }).click()
+  refuse()
+
+  await expect(banner).toHaveCount(0)
+  await expect(page.getByTestId('prompt-editor')).toContainText('Cancelled. No changes applied.')
+  await expect(page.getByTestId('render-tree').getByText('Count: 0', { exact: true })).toBeVisible()
 })
 
 test('a generated draft is kept for the tab until it is opened or thrown away, which asks first (G13)', async ({ page }) => {
