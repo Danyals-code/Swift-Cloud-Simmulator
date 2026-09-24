@@ -1,14 +1,13 @@
 import { parseGeneratedApp, parseOptions, PROJECT_SCHEMA } from '../../../lib/generation/schema'
 import { SYSTEM_PROMPT, userPrompt } from '../../../lib/generation/prompt'
-import { answer, fail, unusable } from '../../../lib/generation/routeAnswers'
+import { answer, fail, fromTheStudio, unusable } from '../../../lib/generation/routeAnswers'
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
 
 /** BYOK only. Fixed upstream URLs, no stored credentials, prompts, or project source. */
 export async function POST(request: Request): Promise<Response> {
-  const origin = request.headers.get('origin')
-  if (origin && origin !== new URL(request.url).origin) return fail('This request must come from the studio.', 403)
+  if (!fromTheStudio(request)) return fail('This request must come from the studio.', 403)
   if (!request.headers.get('content-type')?.startsWith('application/json')) return fail('Send a JSON request.', 415)
   const apiKey = request.headers.get('authorization')?.replace(/^Bearer /, '') ?? ''
   if (!/^[\x21-\x7e]{20,512}$/.test(apiKey)) return fail('Enter a valid API key.')

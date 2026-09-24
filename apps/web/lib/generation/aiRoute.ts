@@ -1,6 +1,9 @@
 import type { PreviousAttempt } from './previousAttempt'
 import { UnusableAnswer } from './retry'
 
+/** A Vercel Firewall rate limit answers 429 with a page of its own, not the studio's answer (G4). */
+const RATE_LIMITED = 'Too many AI requests came from this network. Wait a few minutes, then try again.'
+
 /**
  * Asks one of the studio's AI routes, with the tab's key, and reads its answer.
  *
@@ -27,7 +30,7 @@ export async function askAiRoute<A>(path: '/api/generate' | '/api/edit', request
   const answer = parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
   if (!response.ok || !answer) {
     const error = typeof answer?.error === 'string' ? answer.error : null
-    if (!error) throw new Error(request.defaultError)
+    if (!error) throw new Error(response.status === 429 ? RATE_LIMITED : request.defaultError)
     throw answer!.retryable === true ? new UnusableAnswer(error) : new Error(error)
   }
   try {

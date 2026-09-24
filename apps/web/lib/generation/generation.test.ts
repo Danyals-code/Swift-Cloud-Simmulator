@@ -105,6 +105,12 @@ describe('generation endpoint', () => {
     expect(await response.json()).toEqual({ error: 'The note about the first answer is not valid.' })
     expect(fetch).not.toHaveBeenCalled()
   })
+  it('rejects a request that does not say which page it comes from, without contacting a provider (G4)', async () => {
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+    const unsigned = new Request('http://localhost/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify(options) })
+    expect((await POST(unsigned)).status).toBe(403)
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('rejects invalid input and missing credentials without a paid request', async () => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
     expect((await POST(request({ ...options, pageCount: 8 }))).status).toBe(400)

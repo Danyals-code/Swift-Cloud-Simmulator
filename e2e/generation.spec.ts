@@ -235,6 +235,14 @@ test('an error the project already had does not stop an AI edit (G2)', async ({ 
   expect(sent).toHaveLength(1)
 })
 
+test('a request the Vercel Firewall turns away says to wait, in plain words (G4)', async ({ page }) => {
+  await page.route('**/api/edit', route => route.fulfill({ status: 429, contentType: 'text/html', body: '<html><body>Too Many Requests</body></html>' }))
+  await openCounter(page)
+  await sendPrompt(page)
+
+  await expect(page.getByTestId('prompt-editor')).toContainText('Too many AI requests came from this network. Wait a few minutes, then try again.')
+})
+
 /** Starts Create with AI with a description and a key, for the one-page reading app. */
 async function describeApp(page: Page) {
   await page.goto('/')
@@ -269,4 +277,21 @@ test('a draft still broken after its second try is shown with its problems, and 
   await expect(review).toContainText('The preview found problems in this draft.')
   await expect(review.getByRole('listitem')).toContainText(["Cannot find 'chapterGoal' in scope (ReadingApp.swift, line 3)."])
   await expect(page.getByTestId('open-generated')).toBeEnabled()
+})
+
+test('a draft whose second request is turned away is kept, saying why, since it was paid for (G2)', async ({ page }) => {
+  let requests = 0
+  await page.route('**/api/generate', route => ++requests === 1
+    ? route.fulfill({ json: { app: brokenDraft } })
+    : route.fulfill({ status: 429, contentType: 'text/html', body: '<html><body>Too Many Requests</body></html>' }))
+  await describeApp(page)
+  await page.getByRole('button', { name: 'Generate app', exact: true }).click()
+
+  const review = page.getByTestId('generated-review')
+  await expect(review.getByRole('listitem')).toContainText([
+    "Cannot find 'chapterGoal' in scope (ReadingApp.swift, line 3).",
+    'The AI could not be asked to fix this: Too many AI requests came from this network. Wait a few minutes, then try again.',
+  ])
+  await expect(page.getByTestId('open-generated')).toBeEnabled()
+  expect(requests).toBe(2)
 })

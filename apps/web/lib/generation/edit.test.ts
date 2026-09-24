@@ -136,6 +136,12 @@ describe('edit endpoint', () => {
     await POST(request())
     expect(JSON.parse(fetch.mock.calls[0]![1].body).instructions).toContain(SWIFTUI_GUIDANCE)
   })
+  it('does not contact the provider for a request that does not say which page it comes from (G4)', async () => {
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+    const unsigned = new Request('http://localhost/api/edit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify(input) })
+    expect((await POST(unsigned)).status).toBe(403)
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it.each([401, 403, 429, 500])('sanitizes provider error %s without retrying', async status => {
     const fetch = vi.fn().mockResolvedValue(Response.json({ error: key }, { status })); vi.stubGlobal('fetch', fetch)
     const result = await POST(request())

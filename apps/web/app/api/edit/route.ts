@@ -1,14 +1,13 @@
 import { EDIT_SCHEMA, parsePromptEditInput, parsePromptEditResult, promptEditChanges } from '../../../lib/generation/edit-schema'
 import { EDIT_SYSTEM_PROMPT, promptEditContext } from '../../../lib/generation/edit-prompt'
-import { answer, fail, unusable } from '../../../lib/generation/routeAnswers'
+import { answer, fail, fromTheStudio, unusable } from '../../../lib/generation/routeAnswers'
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
 
 /** Explicit BYOK edit request. Credentials are forwarded only to the chosen provider. */
 export async function POST(request: Request): Promise<Response> {
-  const origin = request.headers.get('origin')
-  if (origin && origin !== new URL(request.url).origin) return fail('This request must come from the studio.', 403)
+  if (!fromTheStudio(request)) return fail('This request must come from the studio.', 403)
   if (!request.headers.get('content-type')?.startsWith('application/json')) return fail('Send a JSON request.', 415)
   const apiKey = request.headers.get('authorization')?.replace(/^Bearer /, '') ?? ''
   if (!/^[\x21-\x7e]{20,512}$/.test(apiKey)) return fail('Enter a valid API key.')
