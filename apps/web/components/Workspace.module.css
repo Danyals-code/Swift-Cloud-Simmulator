@@ -12,8 +12,9 @@
 .themeToggle { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 6px; color: var(--color-xc-text-2); cursor: pointer; }
 .themeToggle:hover { background: var(--color-xc-bar-raised); color: var(--color-xc-text); }
 .actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
-.share > button { height: 32px; padding: 0 13px; border: none; background: #0d78f2; color: #ffffff; border-radius: 7px; }
-.share > button:hover { background: var(--workspace-accent-hover); }
+/* Secondary: a share link carries no report, chat or log, so Export is what ends a task. */
+.share > button { height: 32px; padding: 0 13px; border: 1px solid var(--color-xc-line); background: transparent; color: var(--color-xc-text); border-radius: 7px; }
+.share > button:hover { background: var(--color-xc-bar-raised); }
 .exportGroup { display: flex; border: 1px solid var(--color-xc-line); border-radius: 7px; height: 32px; }
 .export { display: flex; gap: 9px; align-items: center; padding: 0 10px; cursor: pointer; font-size: 14px; }
 .exportMenu { width: 23px; display: grid; place-items: center; border-left: 1px solid var(--color-xc-line-soft); cursor: pointer; }

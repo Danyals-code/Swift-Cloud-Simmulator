@@ -133,6 +133,37 @@ describe('creating a project from a template', () => {
     expect(await persistence.list()).toHaveLength(1)
   })
 
+  it('numbers a new design whose name a project here already has, so their exports can be told apart', async () => {
+    await useStudio.getState().load()
+    const first = useStudio.getState().project!
+    useStudio.getState().setFileText(first.files[0]!.id, '// the first app')
+    await useStudio.getState().flush()
+
+    await useStudio.getState().applyTemplate('blank')
+
+    expect(useStudio.getState().project!.manifest.name).toBe('MyDesignApp 2')
+  })
+
+  it('goes by the name the open project has now, not the one it was listed under', async () => {
+    await useStudio.getState().load()
+    useStudio.getState().renameProject('Kept work')
+
+    await useStudio.getState().applyTemplate('blank')
+
+    expect(useStudio.getState().project!.manifest.name).toBe('MyDesignApp')
+  })
+
+  it('numbers an opened or generated app named like one already here', async () => {
+    const app = { name: 'App.swift', text: 'import SwiftUI\n@main struct TripApp: App { var body: some Scene { WindowGroup { Text("Trip") } } }' }
+    await useStudio.getState().load()
+    await useStudio.getState().openFiles([app])
+    useStudio.getState().setFileText(useStudio.getState().project!.files[0]!.id, '// the first trip')
+
+    await useStudio.getState().openFiles([app])
+
+    expect(useStudio.getState().project!.manifest.name).toBe('TripApp 2')
+  })
+
   it('gives the new project its own id', async () => {
     await useStudio.getState().load()
     const before = useStudio.getState().project!.id
