@@ -423,8 +423,10 @@ the page load it came from and its order in that load.
   the file, and how many characters went in and out.
 - A project keeps its first 10,000 events and counts the rest. The events of an untouched starter
   that another project replaces move to that project. Create with AI's attempts are logged in the
-  project open behind it, and a draft that opens as a new app is noted in that app's log. Removing a
-  project removes its events, and a tab that hands the studio over writes nothing more.
+  project open behind it, and a draft that opens as a new app is noted in that app's log. An answer
+  the preview found broken and asked for again stays one attempt, with a step saying how many problems
+  went back. Removing a project removes its events, and a tab that hands the studio over writes nothing
+  more.
 
 ## 10. Vercel topology
 
@@ -434,7 +436,7 @@ the page load it came from and its order in that load.
 | `/embed/[id]` | Static | Read-only preview iframe (FR-8.4), stripped of the editor bundle. |
 | `/api/share` | Edge | POST a project, get a short id (only when accounts/cloud storage exist). |
 | `/api/proxy` | Node | Allowlisted CORS proxy for the `URLSession` shim (FR-3.8). |
-| `/api/generate/*` | Node | Hosted model API calls, key server-side, rate-limited (FR-9). |
+| `/api/generate`, `/api/edit` | Node | AI requests with the participant's own key, answered only for the studio's own page, and rate-limited per IP by a Vercel Firewall rule (FR-9). |
 | `/api/telemetry` | Edge | Unsupported-feature counters (NFR-6). |
 
 Storage, only if Q3 says cloud: Vercel Postgres for project metadata, Vercel Blob for file contents,
