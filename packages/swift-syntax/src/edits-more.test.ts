@@ -103,6 +103,49 @@ describe('copying a view', () => {
     expect(copyView(APP, FILE, 2)).toBeNull()
   })
 
+  it('keeps what the view says, even a run of spaces as long as its indent (C8)', () => {
+    const app = `import SwiftUI
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Text("Name            Price")
+                .font(.headline)
+        }
+    }
+}`
+    expect(copyView(app, FILE, offsetOf(app, 'Text("Name'))).toBe('Text("Name            Price")\n    .font(.headline)')
+  })
+
+  it('pastes a multi-line string back as it was, spaces on its blank lines and all (C8)', () => {
+    const poem = '            Text("""\n                Hello\n                    \n                World\n                """)'
+    const app = `import SwiftUI
+struct ContentView: View {
+    var body: some View {
+        VStack {
+${poem}
+            Text("After")
+        }
+    }
+}`
+    const copied = copyView(app, FILE, offsetOf(app, 'Text("""'))!
+    const pasted = insertView(app, FILE, offsetOf(app, 'Text("After")'), copied)!
+
+    // The string's third line is four spaces of the string itself, not indentation.
+    expect(pasted.text.split(poem).length - 1).toBe(2)
+  })
+
+  it('copies a view written after return without the return, which would hide its new siblings on iOS (C8)', () => {
+    const app = `import SwiftUI
+struct ContentView: View {
+    var body: some View {
+        return VStack {
+            Text("Inside")
+        }
+    }
+}`
+    expect(copyView(app, FILE, offsetOf(app, 'VStack'))).toBe('VStack {\n    Text("Inside")\n}')
+  })
+
   it('pastes back as a sibling, indented where it lands', () => {
     const copied = copyView(APP, FILE, offsetOf(APP, 'Text("One")'))!
     const pasted = insertView(APP, FILE, offsetOf(APP, 'Text("Inner")'), copied)!

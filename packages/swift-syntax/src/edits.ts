@@ -355,10 +355,14 @@ function indentUnit(text: string): string {
   return /\n\t+\S/.test(text) ? '\t' : '    '
 }
 
+/**
+ * Indents every line of `snippet` by `indent`. An empty line stays empty; a line of
+ * spaces keeps them, as it can be a line of a multi-line string (C8).
+ */
 function indentSnippet(snippet: string, indent: string): string {
   return snippet
     .split('\n')
-    .map((line, i) => (i === 0 ? indent + line : line.trim() ? indent + line : ''))
+    .map((line, i) => (i === 0 || line ? indent + line : ''))
     .join('\n')
 }
 
@@ -443,7 +447,8 @@ export function copyView(text: string, file: FileId, offset: number): string | n
   if (!found) return null
   const cut = cutOf(text, found.stmt)
   const extent = extentOf(text, found.stmt)
-  const body = text.slice(extent.start, extent.end)
+  // From the view itself: a `return` pasted into a stack would hide its other views on iOS.
+  const body = text.slice(viewStartOf(found.stmt) ?? extent.start, extent.end)
   return cut.ownLine ? stripIndent(body, cut.indent) : body
 }
 
@@ -604,10 +609,13 @@ function containerOffsetAt(text: string, file: FileId, offset: number): number |
   return best === null ? null : (best as { block: Block; owner: Expr }).owner.span.start
 }
 
-/** Takes one level of indentation off every line after the first. */
+/**
+ * Takes one level of indentation off the start of each line. Only off the start: the
+ * view's own text, such as a run of spaces in a string, is the view (C8).
+ */
 function stripIndent(block: string, indent: string): string {
   return block
     .split('\n')
-    .map((line, i) => (i === 0 ? line.replace(indent, '') : line.startsWith(indent) ? line.slice(indent.length) : line))
+    .map(line => (line.startsWith(indent) ? line.slice(indent.length) : line))
     .join('\n')
 }
