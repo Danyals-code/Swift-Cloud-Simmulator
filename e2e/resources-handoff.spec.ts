@@ -146,5 +146,6 @@ test('invalid image leaves the saved project intact and reports a keyboard-reada
   await page.getByLabel('Add bundled image').setInputFiles({ name: 'Corrupt.png', mimeType: 'image/png', buffer: Buffer.from('not an image') })
   await expect(page.getByTestId('project-resources').getByRole('alert')).toContainText('corrupt')
   const after = unzipSync(await download(page))
-  for (const path of Object.keys(before)) expect(after[path]).toEqual(before[path])
+  // The event log grows with every download; the project is what must not change.
+  for (const path of Object.keys(before).filter(path => !path.endsWith('.swiftstudio/events.jsonl'))) expect(after[path]).toEqual(before[path])
 })
