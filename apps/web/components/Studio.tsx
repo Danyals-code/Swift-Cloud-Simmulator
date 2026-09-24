@@ -64,6 +64,7 @@ import { ErrorBanner } from './ErrorBanner'
 import { StorageBanner } from './StorageBanner'
 import { saveNote, storageProblem } from '../lib/storageProblem'
 import { keyFocus, shortcutFor, SHORTCUT_KEYS } from '../lib/shortcuts'
+import { COMFORTABLE_WIDTH, environmentPlacement, paneLayout, type EnvironmentPicker } from '../lib/paneLayout'
 import { OpenElsewhere } from './OpenElsewhere'
 import { startStudioTab, studioTabState, subscribeStudioTab } from '../lib/activeTab'
 import styles from './Workspace.module.css'
@@ -72,9 +73,6 @@ import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
 const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], components: [] }
-
-/** The narrowest the editor is allowed to get before the side panes start yielding. */
-const EDITOR_MIN = 300
 
 /** Changes the studio's own records for `project`: one Undo step, named `op` in the event log. */
 function commitStudioRecords(project: Project, after: StudioMetadata, op: StudioChange): string | null {
@@ -399,53 +397,16 @@ export function Studio() {
   }, [loaded])
 
   /**
-   * What the side panes actually get.
-   *
-   * Their stored widths and even their visibility are a preference, not a promise.
-   * Below about 780px there is no arrangement in which a navigator, an editor and a
-   * phone all have a usable width, so one of them has to go - and a preview squeezed
-   * to 300px beside a 104px editor serves nobody. The preview yields first: a
-   * narrower phone is still a phone, while an editor that fits eight characters is
-   * not an editor.
-   *
-   * The preference is kept rather than written back, so widening the window brings
-   * the pane back exactly as it was.
+   * Layers asked for in a Design window too narrow to set it beside the canvas, where it is
+   * drawn over the canvas instead (D15). Never stored: the window decides, not a preference.
    */
-  const layout = useMemo(() => {
-    const navMin = PANE_LIMITS.navigator.min
-    const previewMin = PANE_LIMITS.preview.min
-
-    // Only the *combination* is refused. A single side pane the user asked for is
-    // always shown, even if the editor then has to go under its comfortable
-    // minimum: hiding the one thing somebody just switched on is worse than a
-    // narrow editor, and they can close it again in one keystroke.
-    const showNavigator = shown.navigator && !(mode === 'design' && available < 820)
-    if (mode === 'design') return { nav: showNavigator ? navigatorWidth : 0, preview: 0, showNavigator, showPreview: true }
-    const showPreview =
-      shown.preview &&
-      !(
-        showNavigator &&
-        Number.isFinite(available) &&
-        available < navMin + previewMin + EDITOR_MIN
-      )
-
-    const nav = showNavigator ? navigatorWidth : 0
-    const prev = showPreview ? previewWidth : 0
-    const overflow = nav + prev + EDITOR_MIN - available
-
-    if (!Number.isFinite(overflow) || overflow <= 0) {
-      return { nav, preview: prev, showNavigator, showPreview }
-    }
-
-    const fromPreview = Math.min(overflow, Math.max(0, prev - previewMin))
-    const rest = overflow - fromPreview
-    return {
-      nav: Math.max(navMin, nav - Math.max(0, rest)),
-      preview: prev - fromPreview,
-      showNavigator,
-      showPreview,
-    }
-  }, [available, navigatorWidth, previewWidth, shown.navigator, shown.preview, mode])
+  const [layersOver, setLayersOver] = useState(false)
+  /** The narrow-window note, dismissed for this visit. */
+  const [narrowNoted, setNarrowNoted] = useState(false)
+  const layout = useMemo(() => paneLayout({ available, mode, shown, widths: { navigator: navigatorWidth, preview: previewWidth }, layersOver }),
+    [available, navigatorWidth, previewWidth, shown, mode, layersOver])
+  // Closed once the window has room for it beside the canvas, so narrowing again does not reopen it.
+  if (layersOver && !layout.narrow) setLayersOver(false)
 
   /**
    * Toggling a pane.
@@ -461,6 +422,12 @@ export function Studio() {
     (pane: PaneKey) => setPane(pane, !shown[pane]),
     [setPane, shown],
   )
+
+  /** The left panel's button and ⌘0: over the canvas in a narrow Design window, the stored choice otherwise (D15). */
+  const toggleLeftPanel = useCallback(() => {
+    if (layout.narrow) setLayersOver(open => !open)
+    else togglePane('navigator')
+  }, [layout.narrow, togglePane])
 
   const openSource = useCallback((fileId: FileId) => {
     setActiveFile(fileId)
@@ -1043,7 +1010,8 @@ export function Studio() {
         case 'add': if (canAdd) setAdding(true); break
         case 'select-tool': setTool('select'); break
         case 'escape':
-          if (inspecting && tool === 'delete') setTool('select')
+          if (layout.layersOver) setLayersOver(false)
+          else if (inspecting && tool === 'delete') setTool('select')
           else if (inspecting) setLayerSelection(null)
           break
         case 'all-screens': setAllPages(on => !on); break
@@ -1055,7 +1023,7 @@ export function Studio() {
         case 'restart-preview': run(); break
         case 'open-file': setSwitcherOpen(true); break
         case 'shortcuts': setShortcutsOpen(true); break
-        case 'left-panel': togglePane('navigator'); break
+        case 'left-panel': toggleLeftPanel(); break
         case 'right-panel': togglePane('preview'); break
         case 'problems': togglePane('debug'); break
         case 'inspect': case 'preview': toggleInspect(); break
@@ -1066,7 +1034,7 @@ export function Studio() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
-      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleInspect, setMode])
+      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver])
 
   /**
    * Undo and redo, over the edits the canvas made.
@@ -1330,6 +1298,13 @@ export function Studio() {
     {level === 'view' && authoringNode && <><span aria-hidden>›</span><span aria-current="page" data-testid="level-view">{sourceLayerLabel(authoringNode)}</span></>}
   </nav>
 
+  const showLeftPanel = <button type="button" className={styles.panelToggle} data-testid="pane-toggle-navigator" aria-pressed="false" aria-label="Show left panel" title="Show left panel" onClick={toggleLeftPanel}><Icon name="sidebar-left" size={16} /></button>
+  /** Design's preview environment, in the toolbar or the canvas heading as the window allows (D15). */
+  const environment = environmentPlacement(available)
+  const picker = (which: EnvironmentPicker) => which === 'device' ? <DevicePicker key={which} device={device} onChange={unlessAiEditing(setDevice, undefined)} />
+    : which === 'appearance' ? <AppearancePicker key={which} preview={previewSettings} onChange={setPreview} />
+    : <TextSizePicker key={which} preview={previewSettings} onChange={setPreview} />
+
   const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo && !aiEditing} canRedo={canRedo && !aiEditing} note={noteText} noteAction={noteLocation ? { label: 'Show in Code', onClick: () => revealSpanIn(noteLocation.file, noteLocation.offset) } : null} />
   const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
 
@@ -1363,20 +1338,28 @@ export function Studio() {
         onExport={handleExport}
         exporting={exporting}
         onShare={handleShare}
-        environment={<><DevicePicker device={device} onChange={unlessAiEditing(setDevice, undefined)} /><AppearancePicker preview={previewSettings} onChange={setPreview} /><TextSizePicker preview={previewSettings} onChange={setPreview} /></>}
+        environment={environment.toolbar.length ? <>{environment.toolbar.map(picker)}</> : undefined}
         previewing={!inspecting}
         onSetPreviewing={previewing => setDesigning(!previewing)}
         previewDisabled={stale || preparingEdit}
       />
       <StorageBanner problem={storage} onRetry={() => void flush()} />
       <AiEditBanner />
+      {available < COMFORTABLE_WIDTH && !narrowNoted && <p className={styles.narrowNote} role="note" data-testid="narrow-window">
+        <span>This window is narrow. The studio works best at {COMFORTABLE_WIDTH.toLocaleString('en-US')} px wide or more.</span>
+        <button type="button" onClick={() => setNarrowNoted(true)}>Dismiss</button>
+      </p>}
 
-      <div ref={splitRef} className="flex min-h-0 flex-1">
-        {layout.showNavigator ? (
+      <div ref={splitRef} className="relative flex min-h-0 flex-1">
+        {/* A narrow window keeps its rail, under Layers drawn over the canvas too, so the canvas does not move. */}
+        {layout.narrow && <div className={styles.panelRail}>{!layout.layersOver && showLeftPanel}</div>}
+        {layout.showNavigator || layout.narrow ? (
           <>
-            <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
+            {layout.layersOver && <button type="button" className={styles.layersBackdrop} aria-label="Close Layers" tabIndex={-1} onClick={() => setLayersOver(false)} />}
+            {/* Kept, hidden, while a narrow window closes it: an unsent prompt and the open tab are still there. */}
+            <div style={{ width: layout.narrow ? navigatorWidth : layout.nav }} className={layout.narrow ? styles.layersOver : 'shrink-0 overflow-hidden'} hidden={layout.narrow && !layout.layersOver} data-testid={layout.layersOver ? 'layers-over' : undefined}>
               <PaneBoundary area="navigator" resetKeys={drawnFrom.navigator}>
-              <StudioSidebar key={project.id} design={mode === 'design'} stale={stale || preparingEdit} onCollapse={() => togglePane('navigator')} onApplied={() => { setCommittedEditRevision(value => value + 1); setEditNote('Prompt edits applied. Use Undo to reverse them.') }} selection={authoringNode && !stale ? { label: sourceLayerLabel(authoringNode), file: authoringNode.source.file, start: authoringNode.source.start, end: authoringNode.source.end, owner: authoringNode.owner } : null}>
+              <StudioSidebar key={project.id} design={mode === 'design'} stale={stale || preparingEdit} onCollapse={toggleLeftPanel} onApplied={() => { setCommittedEditRevision(value => value + 1); setEditNote('Prompt edits applied. Use Undo to reverse them.') }} selection={authoringNode && !stale ? { label: sourceLayerLabel(authoringNode), file: authoringNode.source.file, start: authoringNode.source.start, end: authoringNode.source.end, owner: authoringNode.owner } : null}>
               {mode === 'design' ? <DesignNavigator
                 tabbed
                 key={project.id}
@@ -1390,7 +1373,7 @@ export function Studio() {
                 busy={busy}
                 diagnostics={allDiagnostics}
                 onReveal={revealSpanIn}
-                onTogglePanel={() => togglePane('navigator')}
+                onTogglePanel={toggleLeftPanel}
                 onSelectApp={selectApp}
                 onSelectScreen={openPage}
                 onSelectComponent={component => { if (component.definition) selectAuthoring(component.definition); else setEditNote(`${component.name} is built in Swift the studio does not read. Open it in Code.`) }}
@@ -1439,7 +1422,7 @@ export function Studio() {
                 onSelect={openSource}
                 onCreateFile={unlessAiEditing((name: string, parent?: string) => { setMode('develop'); return createFile(name, parent) }, null)}
                 onCreateFolder={unlessAiEditing(createFolder, null)}
-                onTogglePanel={() => togglePane('navigator')}
+                onTogglePanel={toggleLeftPanel}
                 onRenameFile={unlessAiEditing(renameFile, true)}
                 onRenameFolder={unlessAiEditing(renameFolder, undefined)}
                 onDeleteFile={unlessAiEditing(deleteFile, undefined)}
@@ -1452,7 +1435,7 @@ export function Studio() {
               </StudioSidebar>
               </PaneBoundary>
             </div>
-            <Splitter
+            {!layout.narrow && <Splitter
               orientation="col"
               size={layout.nav}
               onResize={(size) => setSize('navigator', size)}
@@ -1461,9 +1444,9 @@ export function Studio() {
               direction={1}
               label="Navigator width"
               onToggle={() => togglePane('navigator')}
-            />
+            />}
           </>
-        ) : <div className={styles.panelRail}><button type="button" className={styles.panelToggle} data-testid="pane-toggle-navigator" aria-pressed="false" aria-label="Show left panel" title="Show left panel" onClick={() => togglePane('navigator')}><Icon name="sidebar-left" size={16} /></button></div>}
+        ) : <div className={styles.panelRail}>{showLeftPanel}</div>}
 
         <div className="flex min-w-0 flex-1 flex-col" style={mode === 'design' ? { display: 'none' } : undefined}>
           <TabBar
@@ -1544,7 +1527,7 @@ export function Studio() {
                 expanded={mode === 'design'}
                 projectId={project.id}
                 previewIdentity={previewIdentity}
-                panelLayout={`${layout.showNavigator}:${shown.preview}`}
+                panelLayout={`${layout.showNavigator && !layout.layersOver}:${shown.preview}`}
                 showSettings={shown.preview}
                 settingsWidth={settingsWidth}
                 onSettingsResize={(size) => setSize('settings', size)}
@@ -1578,6 +1561,7 @@ export function Studio() {
                 centerOn={centerOn}
                 status={previewStatus}
                 onDeviceChange={unlessAiEditing(setDevice, undefined)}
+                environment={mode === 'design' && environment.heading.length ? <>{environment.heading.map(picker)}</> : undefined}
                 tools={previewTools}
                 device={device}
                 tree={phone.tree}
