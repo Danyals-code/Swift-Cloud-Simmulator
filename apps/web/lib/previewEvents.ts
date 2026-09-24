@@ -31,6 +31,14 @@ export class PreviewEvents {
     })
   }
 
+  /**
+   * Drops the events still waiting, settling them: the preview stopped, and they were
+   * meant for the app that stopped, not the one started next.
+   */
+  clear(): void {
+    for (const job of this.waiting.splice(0)) for (const settled of job.settled) settled()
+  }
+
   private async next(): Promise<void> {
     if (this.busy) return
     const job = this.waiting.shift()

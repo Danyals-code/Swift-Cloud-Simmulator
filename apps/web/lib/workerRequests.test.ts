@@ -38,6 +38,19 @@ describe('compiler worker deadline', () => {
     expect(stopped).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
+  it('stops the worker when a queued call hangs once it is the one being answered', async () => {
+    vi.useFakeTimers()
+    const stopped = vi.fn()
+    const requests = new WorkerRequests(stopped)
+    void requests.run(() => new Promise<string>((resolve) => { setTimeout(() => resolve('first'), 10_000) }))
+    const hung = expect(requests.run(() => new Promise(() => {}))).rejects.toThrow('took too long')
+    // Its deadline started when the first was answered, at 10 s.
+    await vi.advanceTimersByTimeAsync(21_000)
+    expect(stopped).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await hung
+    expect(stopped).toHaveBeenCalledTimes(1)
+  })
   it('settles pending calls on crashes and ignores late results', async () => {
     const stopped = vi.fn()
     const requests = new WorkerRequests(stopped)

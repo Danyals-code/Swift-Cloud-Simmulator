@@ -52,6 +52,20 @@ describe('preview events', () => {
     expect(sent).toEqual([tap('first'), drag('began', 0), drag('changed', 2), tap('other'), drag('changed', 4), drag('ended', 4), pinch(1.2)])
   })
 
+  it('drops the events still waiting when the preview stops, settling them, so none reaches the app started next', async () => {
+    const { sent, send, answer } = worker()
+    const events = new PreviewEvents(send)
+    const settled: string[] = []
+    for (const id of ['hung', 'again', 'third']) void events.push(tap(id)).then(() => settled.push(id))
+    events.clear()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settled).toEqual(['again', 'third'])
+    await answer()
+    expect(sent.map((e) => e.handlerId)).toEqual(['hung'])
+    void events.push(tap('fresh'))
+    expect(sent.map((e) => e.handlerId)).toEqual(['hung', 'fresh'])
+  })
+
   it('settles an event the worker failed to answer, and goes on to the next', async () => {
     const sent: string[] = []
     const events = new PreviewEvents(async (event) => {

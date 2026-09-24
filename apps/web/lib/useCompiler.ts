@@ -1,7 +1,7 @@
 'use client'
 
 import * as Comlink from 'comlink'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   CompileResult, CompileRequest,
   PreviewScenario, ComponentDescription, PreviewImageAsset,
@@ -132,12 +132,21 @@ export function useCompiler({
   const revisionRef = useRef(0)
   const contextKey = JSON.stringify([projectId, scenario ?? null, previewScreen ?? null])
   const [compiledContext, setCompiledContext] = useState<string | null>(null)
+  /** Sends one event to the running app; set below, once it has what it needs. */
+  const latestSend = useRef<(event: UIEvent) => Promise<void>>(async () => {})
+  /**
+   * The events on their way, one at a time. A drag or a typist makes events faster
+   * than a heavy screen answers them, and only a control's latest value is sent once
+   * the worker is free, so the preview keeps drawing instead of falling behind.
+   */
+  const [events] = useState(() => new PreviewEvents((event) => latestSend.current(event)))
   // A scenario/project boundary disposes the worker and its pending handler table.
   useEffect(() => () => {
     revisionRef.current++
+    events.clear()
     handleRef.current?.dispose()
     handleRef.current = null
-  }, [contextKey])
+  }, [contextKey, events])
   const [compiledFiles, setCompiledFiles] = useState<readonly SourceFile[] | null>(null)
   /** highest revision actually painted, so stale responses can be dropped */
   const paintedRef = useRef(-1)
@@ -164,6 +173,8 @@ export function useCompiler({
     const handle = spawnWorker((error) => {
       if (handleRef.current !== handle) return
       handleRef.current = null
+      // What was still waiting was meant for the app that stopped.
+      events.clear()
       setState((s) => ({ ...s, stale: false, workerError: error.message }))
     })
     fontsRef.current ??= measureFontsWhenReady()
@@ -177,7 +188,7 @@ export function useCompiler({
     })
     handleRef.current = handle
     return handle
-  }, [])
+  }, [events])
 
   const accept = useCallback((result: CompileResult) => {
     if (result.revision < revisionRef.current || result.revision < paintedRef.current) return
@@ -209,7 +220,9 @@ export function useCompiler({
   const runCompile = useCallback(async (): Promise<boolean> => {
     const handle = ensureWorker()
     const revision = ++revisionRef.current
-    setState((s) => (s.result ? { ...s, stale: true } : s))
+    // A compile is also how a stopped preview starts again: it is no longer stopped,
+    // only busy, until the answer is drawn or the worker fails again.
+    setState((s) => ({ ...s, stale: !!s.result, workerError: null }))
 
     try {
       await handle.ready
@@ -307,26 +320,24 @@ export function useCompiler({
 
   useEffect(() => {
     return () => {
+      events.clear()
       handleRef.current?.dispose()
       handleRef.current = null
     }
-  }, [])
+  }, [events])
 
   /**
    * Sends one of the preview's events to the running app.
    *
    * A worker that stopped, or one started since that has not compiled, has no app to
-   * send it to: the event starts the preview again from the beginning instead, and
-   * is not pressed on the fresh app, where what was under it may no longer be.
+   * send it to, and the event is dropped. The preview starts again from a tap on the
+   * stopped phone, an edit or Reset, never from an event meant for the app that stopped.
    */
   const send = useCallback(
     async (event: UIEvent) => {
       if (compiledContext !== contextKey || compiledFiles !== files) return
       const handle = handleRef.current
-      if (!handle?.compiled) {
-        await runCompile()
-        return
-      }
+      if (!handle?.compiled) return
       try {
         await handle.ready
         await refine(await handle.api.dispatch(event, ++revisionRef.current), handle)
@@ -334,16 +345,10 @@ export function useCompiler({
         handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
       }
     },
-    [refine, runCompile, compiledContext, contextKey, compiledFiles, files],
+    [refine, compiledContext, contextKey, compiledFiles, files],
   )
-  const latestSend = useRef(send)
-  useEffect(() => { latestSend.current = send }, [send])
-  /**
-   * The events on their way, one at a time. A drag or a typist makes events faster
-   * than a heavy screen answers them, and only a control's latest value is sent once
-   * the worker is free, so the preview keeps drawing instead of falling behind.
-   */
-  const [events] = useState(() => new PreviewEvents((event) => latestSend.current(event)))
+  // Before paint, so an event that follows a compile's result reaches that program.
+  useLayoutEffect(() => { latestSend.current = send }, [send])
   /** Resolves once the event has been answered and drawn, or given up on. */
   const dispatch = useCallback((event: UIEvent) => events.push(event), [events])
 
