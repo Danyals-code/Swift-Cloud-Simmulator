@@ -83,3 +83,58 @@ test('a reset that fails says so rather than that the preview was reset (F5)', a
   await expect(page.getByText('Could not reset the preview. Try again.')).toBeVisible()
   await expect(page.getByText('Preview reset. Your design is unchanged.')).toHaveCount(0)
 })
+
+const ECHO = app(`  @State private var name = ""
+  var body: some View {
+    VStack {
+      TextField("Name", text: $name)
+      Text("Echo [\\(name)]")
+    }
+  }`)
+
+test('fast typing into a preview field keeps every character (F1)', async ({ page }) => {
+  await openSource(page, ECHO, 'Echo []')
+  const field = page.getByTestId('render-tree').locator('input.swiftui-field')
+  await field.click()
+  await page.keyboard.type('the quick brown fox jumps over the lazy dog')
+  await expect(page.getByTestId('render-tree').getByText('Echo [the quick brown fox jumps over the lazy dog]')).toBeVisible()
+  await expect(field).toHaveValue('the quick brown fox jumps over the lazy dog')
+})
+
+test('text an input method composes reaches the app whole (F1)', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Composition is driven through the Chrome DevTools Protocol.')
+  await openSource(page, ECHO, 'Echo []')
+  const field = page.getByTestId('render-tree').locator('input.swiftui-field')
+  await field.click()
+  await page.keyboard.type('a')
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Input.imeSetComposition', { text: 'k', selectionStart: 1, selectionEnd: 1 })
+  await cdp.send('Input.imeSetComposition', { text: 'か', selectionStart: 1, selectionEnd: 1 })
+  await cdp.send('Input.insertText', { text: '漢字' })
+  await expect(page.getByTestId('render-tree').getByText('Echo [a漢字]')).toBeVisible()
+  await expect(field).toHaveValue('a漢字')
+})
+
+test("a slider's thumb follows the pointer through a drag on a heavy screen (F1)", async ({ page }) => {
+  await openSource(page, app(`  @State private var level = 0.0
+  var body: some View {
+    VStack {
+      Slider(value: $level, in: 0...100)
+      ScrollView { VStack { ForEach(0..<400, id: \\.self) { i in Text("Row \\(i) \\(Int(level) * i)") } } }
+    }
+  }`), 'Row 399 0')
+  const slider = page.getByTestId('render-tree').locator('input.swiftui-range')
+  const box = (await slider.boundingBox())!
+  const y = box.y + box.height / 2
+  await page.mouse.move(box.x + 2, y)
+  await page.mouse.down()
+  const thumb: number[] = []
+  for (let step = 1; step <= 40; step++) {
+    await page.mouse.move(box.x + 2 + (box.width - 4) * step / 40, y)
+    thumb.push(Number(await slider.inputValue()))
+  }
+  await page.mouse.up()
+  // Moving right, it never snaps back to a value the worker drew earlier.
+  expect(thumb.filter((value, i) => i > 0 && value < thumb[i - 1]!)).toEqual([])
+  expect(thumb.at(-1)).toBeGreaterThan(95)
+})
