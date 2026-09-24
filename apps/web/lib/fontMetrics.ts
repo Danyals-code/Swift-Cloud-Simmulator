@@ -1,7 +1,7 @@
 'use client'
 
 import type { MeasuredFontData, MeasuredTextData, TextMeasureRequest } from '@studio/shared'
-import { canvasFont, textMeasureKey, MEASURED_FAMILIES } from '@studio/shared'
+import { canvasFont, graphemes, textMeasureKey, MEASURED_FAMILIES } from '@studio/shared'
 import { FONT_PROBE } from './workerFontMetrics'
 
 /**
@@ -93,16 +93,6 @@ export function measureFonts(families: readonly string[] = MEASURED_FAMILIES): M
   return fonts
 }
 
-/** Firefox 115-124 has no `Intl.Segmenter`; there a code point stands in for a grapheme. */
-const GRAPHEME_SEGMENTER =
-  typeof Intl !== 'undefined' && 'Segmenter' in Intl
-    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-    : null
-
-function graphemeCount(text: string): number {
-  return GRAPHEME_SEGMENTER ? Array.from(GRAPHEME_SEGMENTER.segment(text)).length : [...text].length
-}
-
 /** One main-thread batch for faces/features unavailable in the worker. */
 export function measureTextBatch(requests: readonly TextMeasureRequest[]): MeasuredTextData[] {
   const context = document.createElement('canvas').getContext('2d')
@@ -116,7 +106,7 @@ export function measureTextBatch(requests: readonly TextMeasureRequest[]): Measu
       context.font = canvasFont(request.font, family)
       context.fontKerning = 'normal'
       const metrics = context.measureText(request.text)
-      let width = metrics.width + graphemeCount(request.text) * (request.tracking ?? 0)
+      let width = metrics.width + graphemes(request.text).length * (request.tracking ?? 0)
       if (request.tabularNumbers || request.tracking) {
         span.style.font = canvasFont(request.font, family)
         span.style.fontVariantNumeric = request.tabularNumbers ? 'tabular-nums' : 'normal'
