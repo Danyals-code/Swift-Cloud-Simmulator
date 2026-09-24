@@ -180,7 +180,9 @@ export function buildXcodeGenBundle(project: Project): ExportBundle {
 }
 
 function xcodeGenSpec(project: Project): string {
-  const name = project.manifest.name
+  // Quoted, since YAML reads a bare `Notes #2` as "Notes" and a comment, `True` as a
+  // boolean and `123` as a number. A JSON string is a valid double-quoted YAML scalar.
+  const name = JSON.stringify(project.manifest.name)
   return `name: ${name}
 
 options:

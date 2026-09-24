@@ -35,6 +35,22 @@ const review: ExportReview = { device: 'iPhone 18 Pro', colorScheme: 'light', dy
 
 describe('the app name in the files Xcode reads', () => {
 
+  it('is escaped in the scheme, so an app called “Café & Co” still builds', () => {
+    const entries = entriesOf(exportArchive(named('Café & Co'), { format: 'xcodeproj', now: NOW }).bytes)
+
+    const scheme = entries['Café & Co/Café & Co.xcodeproj/xcshareddata/xcschemes/Café & Co.xcscheme']
+    expect(scheme).toContain('BuildableName = "Café &amp; Co.app"')
+    expect(scheme).not.toMatch(/&(?!amp;)/)
+  })
+
+  it('is quoted in the XcodeGen spec, so YAML reads “Notes #2” as the name and not as a comment', () => {
+    const entries = entriesOf(exportArchive(named('Notes #2'), { format: 'xcodegen', now: NOW }).bytes)
+
+    const spec = entries['Notes #2/project.yml']
+    expect(spec).toContain('name: "Notes #2"\n')
+    expect(spec).toContain('\n  "Notes #2":\n    type: application\n')
+  })
+
   it('names the bundle after the app as it is called now, not as it was first called', () => {
     // Created as MyDesignApp, renamed since.
     const entries = entriesOf(exportArchive(named('Café & Co'), { format: 'xcodeproj', now: NOW }).bytes)

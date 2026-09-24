@@ -150,7 +150,7 @@ describe('the XcodeGen spec', () => {
 
   it('names the target after the project', () => {
     const spec = files.get(`${project.manifest.name}/project.yml`)!
-    expect(spec).toContain(`name: ${project.manifest.name}`)
-    expect(spec).toContain(`  ${project.manifest.name}:`)
+    expect(spec).toContain(`name: "${project.manifest.name}"`)
+    expect(spec).toContain(`  "${project.manifest.name}":`)
   })
 })
