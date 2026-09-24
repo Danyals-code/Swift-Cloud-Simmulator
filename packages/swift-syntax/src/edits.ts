@@ -222,6 +222,20 @@ export function viewSiteAt(text: string, file: FileId, offset: number): ViewSite
   }
 }
 
+/** Told why an edit was refused, in words a designer can act on (C7). */
+export type RefusalReason = (reason: string) => void
+
+/** Refuses an edit: says why, to whoever asked, and returns no edit. */
+function refused(refuse: RefusalReason | undefined, reason: string): null {
+  refuse?.(reason)
+  return null
+}
+
+/** Why a view that is not a statement of its own - one side of a `? :` - can't be edited alone. */
+const partOfCode = (edit: string) => `This view is part of the code around it, so it can’t be ${edit} on its own. Change it in Code.`
+/** Why the only view of a body can't go: a `some View` with nothing in it does not build. */
+const onlyView = (edit: string) => `This is the only view here, and this spot can’t be left empty. Add another view first, or ${edit} what holds it.`
+
 /**
  * Deletes the view at `offset`.
  *
@@ -231,11 +245,11 @@ export function viewSiteAt(text: string, file: FileId, offset: number): ViewSite
  * the refusal is only for the statement that is a block's whole content when that
  * block is not a container's.
  */
-export function deleteView(text: string, file: FileId, offset: number): SourceEdit | null {
+export function deleteView(text: string, file: FileId, offset: number, refuse?: RefusalReason): SourceEdit | null {
   const found = siteAt(text, file, offset)
-  if (!found) return null
+  if (!found) return refused(refuse, partOfCode('deleted'))
   const site = viewSiteAt(text, file, offset)!
-  if (site.siblings === 1 && !site.inContent) return null
+  if (site.siblings === 1 && !site.inContent) return refused(refuse, onlyView('delete'))
 
   const cut = cutOf(text, found.stmt)
   return { text: text.slice(0, cut.start) + text.slice(cut.end), offset: cut.start }
@@ -249,19 +263,19 @@ export function deleteView(text: string, file: FileId, offset: number): SourceEd
  * put them. Returns null at either end of a block, which is what tells the studio
  * to draw the control as unavailable rather than to do nothing on a press.
  */
-export function moveView(text: string, file: FileId, offset: number, direction: -1 | 1): SourceEdit | null {
+export function moveView(text: string, file: FileId, offset: number, direction: -1 | 1, refuse?: RefusalReason): SourceEdit | null {
   const found = siteAt(text, file, offset)
-  if (!found) return null
+  if (!found) return refused(refuse, partOfCode('moved'))
 
   const target = found.index + direction
   const other = found.block.statements[target]
-  if (!other) return null
+  if (!other) return refused(refuse, `This is already the ${direction === -1 ? 'first' : 'last'} view here.`)
 
   const a = found.index < target ? found.stmt : other
   const b = found.index < target ? other : found.stmt
   const first = extentOf(text, a)
   const second = extentOf(text, b)
-  if (first.end > second.start) return null
+  if (first.end > second.start) return refused(refuse, 'These views share their code, so they can’t swap places. Change them in Code.')
 
   const firstText = text.slice(first.start, first.end)
   const secondText = text.slice(second.start, second.end)
@@ -290,9 +304,9 @@ export function moveView(text: string, file: FileId, offset: number, direction: 
  * re-indented to wherever it lands, so a multi-line one arrives formatted rather than
  * flattened against the left margin.
  */
-export function insertView(text: string, file: FileId, offset: number, snippet: string): SourceEdit | null {
+export function insertView(text: string, file: FileId, offset: number, snippet: string, refuse?: RefusalReason): SourceEdit | null {
   const found = siteAt(text, file, offset)
-  if (!found) return null
+  if (!found) return refused(refuse, 'A view can’t go beside this one, which is part of the code around it. Select what holds it instead.')
 
   const content = contentBlockOf(found.stmt)
   const reference = content?.statements[content.statements.length - 1]
@@ -309,7 +323,7 @@ export function insertView(text: string, file: FileId, offset: number, snippet: 
     // goes in front of the closing brace and everything before it stays.
     const open = content.span.start
     const close = content.span.end - 1
-    if (open === -1 || close === -1 || close < open) return null
+    if (open === -1 || close === -1 || close < open) return refused(refuse, 'There’s no room for a view here. Add it in Code.')
     const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, found.stmt.span.start), found.stmt.span.start))?.[0] ?? ''
     const inner = outer + indentUnit(text)
     const closeLine = lineStartAt(text, close)
@@ -399,18 +413,21 @@ export function moveViewTo(
   offset: number,
   targetOffset: number,
   position: DropPosition,
+  refuse?: RefusalReason,
 ): SourceEdit | null {
   const source = siteAt(text, file, offset)
   const target = siteAt(text, file, targetOffset, { near: true })
-  if (!source || !target) return null
-  if (source.stmt === target.stmt) return null
+  if (!source) return refused(refuse, partOfCode('moved'))
+  if (!target) return refused(refuse, 'That spot isn’t a view to drop beside. Drop it on a layer instead.')
+  // By place: each lookup parses the file afresh, so the same statement is never the same object.
+  if (source.stmt.span.start === target.stmt.span.start && source.stmt.span.end === target.stmt.span.end) return refused(refuse, 'A view can’t be dropped onto itself.')
   const targetStart = viewStartOf(target.stmt)
-  if (targetStart === null) return null
+  if (targetStart === null) return refused(refuse, 'That spot isn’t a view to drop beside. Drop it on a layer instead.')
 
   const from = cutOf(text, source.stmt)
   const to = cutOf(text, target.stmt)
   // A container cannot land among its own children.
-  if (to.start >= from.start && to.end <= from.end) return null
+  if (to.start >= from.start && to.end <= from.end) return refused(refuse, 'A view can’t be moved inside itself.')
 
   const extent = extentOf(text, source.stmt)
   const body = from.ownLine
@@ -423,8 +440,12 @@ export function moveViewTo(
   const without = text.slice(0, from.start) + text.slice(from.end)
   const targetAfterCut = targetStart >= from.end ? targetStart - (from.end - from.start) : targetStart
   const again = siteAt(without, file, targetAfterCut)
-  if (!again) return null
-  if (position === 'inside') return contentBlockOf(again.stmt) ? insertView(without, file, targetAfterCut, body) : null
+  if (!again) return refused(refuse, 'The drop didn’t land on a view. Try again.')
+  if (position === 'inside') {
+    if (contentBlockOf(again.stmt)) return insertView(without, file, targetAfterCut, body, refuse)
+    const name = viewCallOf(again.stmt)
+    return refused(refuse, `${(name && calleeName(name)) ?? 'That view'} can’t hold other views. Drop it before or after instead.`)
+  }
   const anchor = cutOf(without, again.stmt)
 
   if (anchor.ownLine) {
@@ -442,9 +463,9 @@ export function moveViewTo(
 }
 
 /** The Swift that draws the view at `offset`, for a copy that a paste can place anywhere. */
-export function copyView(text: string, file: FileId, offset: number): string | null {
+export function copyView(text: string, file: FileId, offset: number, refuse?: RefusalReason): string | null {
   const found = siteAt(text, file, offset)
-  if (!found) return null
+  if (!found) return refused(refuse, partOfCode('copied'))
   const cut = cutOf(text, found.stmt)
   const extent = extentOf(text, found.stmt)
   // From the view itself: a `return` pasted into a stack would hide its other views on iOS.
@@ -459,13 +480,13 @@ export function copyView(text: string, file: FileId, offset: number): string | n
  * the neighbour with it, and for the only view of a body, which would leave nothing
  * to draw at all.
  */
-export function hideView(text: string, file: FileId, offset: number): SourceEdit | null {
+export function hideView(text: string, file: FileId, offset: number, refuse?: RefusalReason): SourceEdit | null {
   const found = siteAt(text, file, offset)
   const site = viewSiteAt(text, file, offset)
-  if (!found || !site) return null
+  if (!found || !site) return refused(refuse, partOfCode('hidden'))
   const cut = cutOf(text, found.stmt)
-  if (!cut.ownLine) return null
-  if (site.siblings === 1 && !site.inContent) return null
+  if (!cut.ownLine) return refused(refuse, 'This view shares its line with another, so hiding it would hide both. Put it on a line of its own in Code first.')
+  if (site.siblings === 1 && !site.inContent) return refused(refuse, onlyView('hide'))
 
   const commented = text
     .slice(cut.start, cut.end)
@@ -481,9 +502,9 @@ export function hideView(text: string, file: FileId, offset: number): SourceEdit
 }
 
 /** Brings back the hidden view whose marker line starts at `start`. */
-export function showView(text: string, file: FileId, start: number): SourceEdit | null {
+export function showView(text: string, file: FileId, start: number, refuse?: RefusalReason): SourceEdit | null {
   const hidden = hiddenViewsIn(text, file).find((view) => view.start === start)
-  if (!hidden) return null
+  if (!hidden) return refused(refuse, 'This hidden view isn’t where it was in the code. Select it again.')
 
   const indent = /^[ \t]*/.exec(text.slice(lineStartAt(text, hidden.start)))?.[0] ?? ''
   const restored = hidden.source

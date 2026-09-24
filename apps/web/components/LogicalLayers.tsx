@@ -6,6 +6,8 @@ import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRe
 import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerIsVisual, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from '../lib/sourceLayers'
 import { Icon, type IconName } from './ui/Icon'
 import { MenuButton, type MenuItem } from './ui/Menu'
+import { eventLog } from '../lib/eventLog'
+import { designEvent } from '../lib/designEvents'
 import styles from './Layers.module.css'
 
 interface Props {
@@ -226,7 +228,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
               if (from && drag?.id === from.id && drag.over === node.id && drag.position) {
                 if (drag.position === 'inside') {
                   const problem = layerMoveProblem(snapshot.nodes, drag.ids, node)
-                  if (problem) setError(problem)
+                  // Said here and logged, as the planner's refusals are (C7).
+                  if (problem) { setError(problem); eventLog.record(snapshot.projectId, { ...designEvent({ kind: 'layer-reparent', ids: drag.ids, destination: node.id }, from), refused: true }) }
                   else { toggle(node.id, false); void edit(from, { kind: 'layer-reparent', ids: drag.ids, destination: node.id }) }
                 } else if (drag.ids.length === 1 && from.source.file === node.source.file && from.owner === node.owner && from.parentId === node.parentId) {
                   void edit(from, { kind: 'moveTo', targetOffset: node.source.start, position: drag.position })

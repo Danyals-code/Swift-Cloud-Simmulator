@@ -57,6 +57,7 @@ import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
 import { BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import { eventLog, type StudioChange } from '../lib/eventLog'
 import { designEvent, studioChange } from '../lib/designEvents'
+import { busyEditProblem } from '../lib/editRefusals'
 import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
@@ -746,17 +747,22 @@ export function Studio() {
    */
   const performDesignEdit = useCallback(async (target: SourceSpan, fingerprint: string | undefined, scope: string, operation: DesignEditRequest['operation'], screenUpdate?: readonly DesignScreen[], scenarioFrom?: (authoring: AuthoringSnapshot | undefined) => PreviewScenario | null, assets?: readonly ImageAsset[], keepSelection = false): Promise<string | null> => {
     const state = useStudio.getState()
-    if (!project || state.project !== project || stale) return 'The source is updating. Try again when the preview is ready.'
-    if (editingRef.current) return 'An edit is already being prepared. Try again.'
+    // The layer the edit lands on, or the hidden view Show brings back.
+    const landsOn = result?.authoring?.nodes.find(node => node.source.file === target.file && node.source.start === target.start && node.source.end === target.end)
+      ?? hidden.views.find(view => view.file === target.file && view.offset === target.start)
+    const label = designEvent(operation, landsOn)
+    // Said where the designer is looking and logged, as the planner's refusals are (C7).
+    const blocked = busyEditProblem({ current: !!project && state.project === project, stale, applying: editingRef.current })
+    if (blocked || !project) {
+      setEditNote(blocked)
+      if (project) eventLog.record(project.id, { ...label, refused: true })
+      return blocked
+    }
     editingRef.current = true
     setPreparingEdit(true)
     try {
       if (assets) validateAssets(assets)
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, colors: project.colors, componentDescriptions: project.studio?.components, target, fingerprint, operation })
-      // The layer the edit lands on, or the hidden view Show brings back.
-      const landsOn = result?.authoring?.nodes.find(node => node.source.file === target.file && node.source.start === target.start && node.source.end === target.end)
-        ?? hidden.views.find(view => view.file === target.file && view.offset === target.start)
-      const label = designEvent(operation, landsOn)
       if (!plan.ok) {
         eventLog.record(project.id, { ...label, refused: true })
         setEditNote(plan.location ? { text: plan.reason, location: plan.location } : plan.reason)
@@ -789,7 +795,7 @@ export function Studio() {
       const scenarios = savedScenario ? [...metadata.scenarios.filter(item => scenarioKey(item) !== scenarioKey(savedScenario)), savedScenario] : undefined
       const transaction = { ...selectedPlan, ...colorChange, ...(assets ? { assets: { before: project.assets, after: assets } } : {}), ...(screens || scenarios || JSON.stringify(labels) !== JSON.stringify(metadata.labels) ? { studio: { before, after: { ...metadata, ...(screens ? { screens } : {}), ...(scenarios ? { scenarios } : {}), labels } } } : {}) }
       const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction, label)
-      if (problem) { setEditNote(problem); return problem }
+      if (problem) { setEditNote(problem); eventLog.record(project.id, { ...label, refused: true }); return problem }
       if (savedScenario) setScenarioSelection({ projectId: project.id, key: scenarioKey(savedScenario) })
       if (changed) setCommittedEditRevision(revision => revision + 1)
       if (plan.changes.length && !selectionChanged && !preserveSelection) {
@@ -941,13 +947,21 @@ export function Studio() {
     if (error) setEditNote(error); else setScenarioSelection(current => current?.projectId === project.id && current.key === key ? null : current)
   }, [project])
 
+  /** An edit refused before it reaches the planner: said where the designer is looking, and logged (C7). */
+  const refuseEdit = useCallback((operation: DesignEditRequest['operation'], reason: string, layer?: ViewLayer) => {
+    setEditNote(reason)
+    const model = result?.authoring
+    const node = layer && model?.nodes.find(n => n.id === model.runtimeToSource[layer.id])
+    if (project) eventLog.record(project.id, { ...designEvent(operation, node ?? undefined), refused: true })
+  }, [project, result?.authoring])
+
   const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
     const target = layer ?? selectedLayer
     const model = result?.authoring
     const node = model?.nodes.find(n => n.id === model.runtimeToSource[target?.id ?? ''])
-    if (!node) { setEditNote('Select a supported source view to edit.'); return }
+    if (!node) { refuseEdit(edit, 'Select a supported source view to edit.'); return }
     await performDesignEdit(node.source, node.fingerprint, node.owner, edit)
-  }, [selectedLayer, result?.authoring, performDesignEdit])
+  }, [selectedLayer, result?.authoring, performDesignEdit, refuseEdit])
 
   const changeProperty = useCallback(async (control: string, value: string) => {
     if (!authoringNode) return 'Select the view again.'
@@ -1123,11 +1137,11 @@ export function Studio() {
     const from = layer.source
     const to = target.source
     if (!from || !to || from.file !== to.file) {
-      setEditNote('A view can only be moved within the file it is written in')
+      refuseEdit({ kind: 'moveTo', targetOffset: to?.start ?? 0, position }, 'A view can only be moved within the file it is written in.', layer)
       return
     }
     void applyEdit({ kind: 'moveTo', targetOffset: to.start, position }, layer)
-  }, [applyEdit])
+  }, [applyEdit, refuseEdit])
 
   /** The stack a canvas drop onto this node goes into - its own empty space, usually its background - or null. */
   const containerNameAt = useCallback((node: RenderNode) => {
@@ -1139,9 +1153,13 @@ export function Studio() {
   const reorderNodes = useCallback((source: RenderNode | 'selection', target: RenderNode, position: DropPosition) => {
     const from = source === 'selection' ? selectedLayer : layerForRenderNode(layers, source)
     const to = layerForRenderNode(layers, target)
-    if (!from || !to || from.id === to.id) return
+    if (!from) return
+    if (!to || from.id === to.id) {
+      refuseEdit({ kind: 'moveTo', targetOffset: to?.source?.start ?? 0, position }, to ? 'A view can’t be dropped onto itself.' : 'That spot isn’t a view to drop beside. Drop it on a layer instead.', from)
+      return
+    }
     reorderLayers(from, to, position)
-  }, [layers, reorderLayers, selectedLayer])
+  }, [layers, reorderLayers, selectedLayer, refuseEdit])
 
   /** The layer under the inspector's pointer, while Layers is there to show it. */
   const hoveredLayerId = useMemo(

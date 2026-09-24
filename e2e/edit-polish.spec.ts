@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import { openInDesign, sourceInCode } from './designer-helpers'
 
 /**
- * The Swift Design writes (D9) and what the preview says of a view it cannot draw
- * (D12), in Chrome and Safari alike.
+ * Refusals that say why (C7), the Swift Design writes (D9) and what the preview says of
+ * a view it cannot draw (D12), in Chrome and Safari alike.
  */
 
 /** Home, which shows a count and pushes Settings, with `declarations` after them. */
@@ -39,7 +39,18 @@ struct SettingsScreen: View {
 }
 ${declarations}`
 
+const drawn = (page: Page, text: string) => page.getByTestId('render-tree').getByText(text, { exact: true })
+/** What the design dock says after an edit, a copy or a refusal. */
+const note = (page: Page) => page.getByTestId('design-feedback')
 const inspector = (page: Page) => page.getByTestId('authoring-inspector')
+
+test('a move past the first view says why (C7)', async ({ page }) => {
+  await openInDesign(page, app(), 'Settings body')
+  await drawn(page, 'Count 3').click()
+
+  await page.keyboard.press('Alt+ArrowUp')
+  await expect(note(page)).toHaveText('This is already the first view here.')
+})
 
 test('a screen\'s Text color override is written as current SwiftUI writes it (D9)', async ({ page }) => {
   await openInDesign(page, app(), 'Settings body')

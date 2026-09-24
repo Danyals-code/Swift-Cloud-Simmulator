@@ -23,5 +23,5 @@ export { HIDDEN_MARKER } from './studio-markers'
 export {
   viewSiteAt, deleteView, moveView, moveViewTo, insertView, copyView,
   hideView, showView, hiddenViewsIn,
-  type ViewSite, type SourceEdit, type HiddenView,
+  type ViewSite, type SourceEdit, type HiddenView, type RefusalReason,
 } from './edits'

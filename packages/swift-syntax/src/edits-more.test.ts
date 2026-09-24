@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Parser } from './parser'
-import { copyView, hiddenViewsIn, hideView, insertView, moveViewTo, showView } from './edits'
+import { copyView, deleteView, hiddenViewsIn, hideView, insertView, moveView, moveViewTo, showView } from './edits'
 import { HIDDEN_MARKER } from './studio-markers'
 
 /**
@@ -236,5 +236,57 @@ struct ContentView: View {
     expect(hiddenViewsIn(text, FILE).map((view) => view.name)).toEqual(['One'])
     text = showView(text, FILE, hiddenViewsIn(text, FILE)[0]!.start)!.text
     expect(text).toBe(APP)
+  })
+})
+
+/**
+ * A refused edit says why (C7). The canvas and Layers show the reason, which used to
+ * be one message for every refusal: "no valid destination or would leave invalid
+ * view content", whatever the edit was.
+ */
+describe('why an edit is refused', () => {
+  /** The reason an edit gives when it refuses, which it does by returning nothing. */
+  function why(edit: (refuse: (reason: string) => void) => unknown): string {
+    let reason = ''
+    expect(edit(said => { reason = said })).toBeNull()
+    return reason
+  }
+  const ONLY = `import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        Text("Alone")
+    }
+}
+`
+
+  it('says the only view of a body cannot be deleted or hidden, as nothing would be left to show', () => {
+    expect(why(refuse => deleteView(ONLY, FILE, offsetOf(ONLY, 'Text("Alone")'), refuse))).toBe('This is the only view here, and this spot can’t be left empty. Add another view first, or delete what holds it.')
+    expect(why(refuse => hideView(ONLY, FILE, offsetOf(ONLY, 'Text("Alone")'), refuse))).toBe('This is the only view here, and this spot can’t be left empty. Add another view first, or hide what holds it.')
+  })
+
+  it('says a view is already first or last', () => {
+    expect(why(refuse => moveView(APP, FILE, offsetOf(APP, 'Text("One")'), -1, refuse))).toBe('This is already the first view here.')
+    expect(why(refuse => moveView(APP, FILE, offsetOf(APP, 'Text("Three")'), 1, refuse))).toBe('This is already the last view here.')
+  })
+
+  it('says a view cannot be dropped onto itself, inside itself, or into a view that holds none', () => {
+    expect(why(refuse => moveViewTo(APP, FILE, offsetOf(APP, 'Text("Two")'), offsetOf(APP, 'Text("Two")'), 'after', refuse))).toBe('A view can’t be dropped onto itself.')
+    expect(why(refuse => moveViewTo(APP, FILE, offsetOf(APP, 'HStack'), offsetOf(APP, 'Text("Inner")'), 'after', refuse))).toBe('A view can’t be moved inside itself.')
+    expect(why(refuse => moveViewTo(APP, FILE, offsetOf(APP, 'Text("One")'), offsetOf(APP, 'Text("Two")'), 'inside', refuse))).toBe('Text can’t hold other views. Drop it before or after instead.')
+  })
+
+  it('says a view sharing its line cannot be hidden alone', () => {
+    const shared = APP.replace('Text("Two")', 'Text("Two"); Text("Two and a half")')
+    expect(why(refuse => hideView(shared, FILE, offsetOf(shared, 'Text("Two and a half")'), refuse))).toBe('This view shares its line with another, so hiding it would hide both. Put it on a line of its own in Code first.')
+  })
+
+  it('says a view that is part of the code around it cannot be changed on its own', () => {
+    const either = APP.replace('Text("Two")', 'true ? Text("Two") : Text("Deux")')
+    const at = offsetOf(either, 'Text("Deux")')
+    expect(why(refuse => deleteView(either, FILE, at, refuse))).toBe('This view is part of the code around it, so it can’t be deleted on its own. Change it in Code.')
+    expect(why(refuse => moveView(either, FILE, at, 1, refuse))).toBe('This view is part of the code around it, so it can’t be moved on its own. Change it in Code.')
+    expect(why(refuse => insertView(either, FILE, at, 'Text("New")', refuse))).toBe('A view can’t go beside this one, which is part of the code around it. Select what holds it instead.')
+    expect(why(refuse => copyView(either, FILE, at, refuse))).toBe('This view is part of the code around it, so it can’t be copied on its own. Change it in Code.')
   })
 })

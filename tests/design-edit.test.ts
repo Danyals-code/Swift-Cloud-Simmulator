@@ -663,3 +663,21 @@ describe('D13: a control added from the library works in the preview at once', (
     expect(added).not.toContain('@State private var isOn')
   })
 })
+
+describe('C7: a refused edit says why, in words for the one edit that was refused', () => {
+  it('says a view is already first, rather than that the edit has no valid destination', () => {
+    expect(restructure(wrap('VStack {\n    Text("A")\n    Text("B")\n}'), { kind: 'move', direction: -1 }, 'Text'))
+      .toEqual({ ok: false, reason: 'This is already the first view here.' })
+  })
+
+  it('says the only view of a screen cannot be deleted', () => {
+    expect(restructure(wrap('Text("Alone")'), { kind: 'delete' }, 'Text'))
+      .toEqual({ ok: false, reason: 'This is the only view here, and this spot can’t be left empty. Add another view first, or delete what holds it.' })
+  })
+
+  it('says a view cannot be dropped into one that holds none', () => {
+    const source = wrap('VStack {\n    Text("A")\n    Text("B")\n}')
+    expect(restructure(source, { kind: 'moveTo', targetOffset: source.indexOf('Text("B")'), position: 'inside' }, 'Text'))
+      .toEqual({ ok: false, reason: 'Text can’t hold other views. Drop it before or after instead.' })
+  })
+})

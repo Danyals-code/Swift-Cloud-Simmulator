@@ -85,6 +85,9 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     } catch (error) { return reject(error instanceof Error ? error.message : 'The design operation could not be planned.') }
   }
   let changed: { text: string; offset: number } | null = null
+  /** Why an edit of the view refused, in the edit's own words (C7). */
+  let refusal: string | undefined
+  const refuse = (reason: string) => { refusal = reason }
   /** Set when an insert also wraps the screen in the NavigationStack a new link needs: all it brings. */
   let wrap: string | undefined
   // Where a structural change acts: the view itself, or for a row design's insert the collection it repeats in.
@@ -108,12 +111,12 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     changed = { text: file.text.slice(0, patch.start) + patch.text + file.text.slice(patch.end), offset: node.source.start }
   } else {
     switch (operation.kind) {
-      case 'delete': changed = deleteView(file.text, file.id, offset); break
-      case 'move': changed = moveView(file.text, file.id, offset, operation.direction); break
+      case 'delete': changed = deleteView(file.text, file.id, offset, refuse); break
+      case 'move': changed = moveView(file.text, file.id, offset, operation.direction, refuse); break
       case 'moveTo': {
         const problem = canvasDropProblem(model.nodes, node!, { file: file.id, start: operation.targetOffset }, operation.position)
         if (problem) return reject(problem)
-        changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position)
+        changed = moveViewTo(file.text, file.id, offset, operation.targetOffset, operation.position, refuse)
         break
       }
       case 'insert': {
@@ -150,12 +153,12 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           const wrapped = applyPatches(context, stack).find(f => f.id === file.id)!.text
           // Only insertions: the view moves by what is written before it.
           const shifted = offset + stack.filter(p => p.start <= offset).reduce((moved, p) => moved + p.text.length, 0)
-          changed = insertView(wrapped, file.id, shifted, operation.snippet)
+          changed = insertView(wrapped, file.id, shifted, operation.snippet, refuse)
           // The link and the stack the screen needs for it: two places, so checked as a wrap.
           wrap = `${operation.snippet} ${stack[0]!.text}${stack.at(-1)!.text}`
         } else {
           const live = node ? liveControl(context, node, operation.snippet) : null
-          changed = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet)
+          changed = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet, refuse)
           if (live && changed) {
             // The value is declared above the view, which moves down by its line.
             const { member } = live
@@ -166,11 +169,11 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
         }
         break
       }
-      case 'hide': changed = hideView(file.text, file.id, offset); break
-      case 'show': changed = showView(file.text, file.id, offset); break
+      case 'hide': changed = hideView(file.text, file.id, offset, refuse); break
+      case 'show': changed = showView(file.text, file.id, offset, refuse); break
     }
   }
-  if (!changed) return reject('This operation has no valid destination or would leave invalid view content.')
+  if (!changed) return reject(refusal ?? 'This operation has no valid destination or would leave invalid view content.')
   const next = Parser.parse(changed.text, file.id)
   if (next.diagnostics.some(d => d.severity === 'error')) return reject('The proposed change does not parse. The project was not changed.')
   const structural = STRUCTURAL[operation.kind]
