@@ -35,7 +35,7 @@ export function screenCatalog(snapshot: AuthoringSnapshot | undefined, pages: re
 
 /** The first local occurrence wins SwiftUI's inherited font/foreground precedence. */
 export function screenOverrideModifier(root: AuthoringNode, name: string) {
-  const names = name === 'foregroundColor' ? ['foregroundColor', 'foregroundStyle'] : name === 'tint' ? ['tint', 'accentColor'] : [name]
+  const names = name === 'foregroundColor' || name === 'foregroundStyle' ? ['foregroundColor', 'foregroundStyle'] : name === 'tint' ? ['tint', 'accentColor'] : [name]
   return root.modifiers?.find(modifier => modifier.enabled && names.includes(modifier.name))
 }
 

@@ -1,6 +1,6 @@
 import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
 import { Lexer, Parser, afterOffMarkers, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
-import { viewCallChain } from './design-controls'
+import { roundedCorners, viewCallChain } from './design-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { SUPPORTED_MODIFIERS } from './builtins'
 
@@ -80,7 +80,7 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'padding', label: 'Padding', category: 'layout', slot: 2, description: 'Space around it', source: () => '.padding(16)' },
   { name: 'frame', label: 'Size', category: 'layout', slot: 3, description: 'Width and height', source: () => '.frame(width: 100, height: 100)' },
   { name: 'background', label: 'Background', category: 'appearance', slot: 4, description: 'A color behind it', source: () => '.background(Color.blue)' },
-  { name: 'clipShape', label: 'Corner radius', category: 'appearance', slot: 5, description: 'Round the corners', source: ({ target }) => target >= 17 ? '.clipShape(.rect(cornerRadius: 12))' : '.clipShape(RoundedRectangle(cornerRadius: 12))' },
+  { name: 'clipShape', label: 'Corner radius', category: 'appearance', slot: 5, description: 'Round the corners', source: ({ target }) => roundedCorners(12, target) },
   { name: 'cornerRadius', label: 'Corner radius', category: 'appearance', slot: 5, description: 'Round the corners', hidden: true, source: () => '.cornerRadius(8)' },
   { name: 'border', label: 'Border', category: 'appearance', slot: 6, description: 'An outline', source: () => '.border(Color.gray, width: 1)' },
   { name: 'shadow', label: 'Shadow', category: 'appearance', slot: 7, description: 'A drop shadow', source: ({ shadowToken }) => shadowToken ? `.shadow(.${shadowToken})` : '.shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)' },

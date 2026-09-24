@@ -321,6 +321,10 @@ it('F09 exposes the existing system font and foregroundStyle and edits their eff
   expect(run?.font.size).toBe(24)
   expect(run?.color.b).toBeGreaterThan(run?.color.r ?? 255)
 })
+it('reads a screen\'s Text color override under either name, as it is now written .foregroundStyle (D9)', () => {
+  expect(screenOverrideModifier(find(source('Text("Old").foregroundColor(.blue)'), 'Text'), 'foregroundStyle')?.name).toBe('foregroundColor')
+  expect(screenOverrideModifier(find(source('Text("New").foregroundStyle(.blue)'), 'Text'), 'foregroundStyle')?.name).toBe('foregroundStyle')
+})
 it('F09 selects the nearest enabled alias and sends advanced existing values to Code', () => {
   const text = source('Text("Override").foregroundStyle(.red).foregroundColor(.blue).font(.system(size: 20 + 20))')
   expect(screenOverrideModifier(find(text, 'Text'), 'foregroundColor')?.name).toBe('foregroundStyle')

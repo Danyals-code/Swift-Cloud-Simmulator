@@ -41,6 +41,24 @@ export async function openCounter(page: Page) {
   await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
 }
 
+/** Opens the studio on `source`, back in Design once `drawn` is on the canvas and all is idle. */
+export async function openInDesign(page: Page, source: string, drawn: string) {
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, source)
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('render-tree').getByText(drawn, { exact: true }).first()).toBeVisible()
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
+}
+
+/** The Swift as it stands now, read in Code, and back to Design. */
+export async function sourceInCode(page: Page): Promise<string> {
+  await page.getByTestId('workspace-develop').click()
+  const text = await page.getByTestId('editor').locator('.cm-content').innerText()
+  await page.getByTestId('workspace-design').click()
+  return text
+}
+
 export function cards(page: Page, name: string): Locator {
   return page.getByTestId('authoring-inspector').locator(`[data-testid="modifier-card"][data-modifier-name="${name}"]`)
 }

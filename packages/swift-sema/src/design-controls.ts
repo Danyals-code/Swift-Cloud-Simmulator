@@ -24,6 +24,14 @@ export function colorOpacityParts(value: Expr): { color: Expr; opacity: Expr } |
   return { color, opacity: value.args[0]!.value }
 }
 const ALIGNMENTS = ['center', 'leading', 'trailing', 'top', 'bottom', 'topLeading', 'topTrailing', 'bottomLeading', 'bottomTrailing']
+/**
+ * Rounds a view's corners as current SwiftUI writes it (D9): `.clipShape(.rect(cornerRadius:))`
+ * from iOS 17, a RoundedRectangle before. `.cornerRadius` is on its way out, and draws the same.
+ */
+export function roundedCorners(radius: number, target: number): string {
+  return target >= 17 ? `.clipShape(.rect(cornerRadius: ${radius}))` : `.clipShape(RoundedRectangle(cornerRadius: ${radius}))`
+}
+
 /** Swift escaping, including interpolation introducers and control characters. */
 export function swiftString(value: string): string {
   return '"' + Array.from(value, c => c === '\\' ? '\\\\' : c === '"' ? '\\"' : c === '\n' ? '\\n' : c === '\r' ? '\\r' : c === '\t' ? '\\t' : c.codePointAt(0)! < 32 || c.codePointAt(0) === 127 ? `\\u{${c.codePointAt(0)!.toString(16)}}` : c).join('') + '"'
@@ -198,10 +206,10 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   advancedControls(node, base, modifiers, text, targetVersion, colors, add, replace)
   const has = (name: string) => modifiers.some(m => modName(m) === name)
   if (!has('font')) append('add:font', 'Font size', 'number', '', v => `.font(.system(size: ${Number(v)}))`, undefined, 1, 1000)
-  if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.foregroundColor(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)
+  if (!has('foregroundColor') && !has('foregroundStyle')) append('add:foreground', 'Text color', 'select', '', v => `.${targetVersion >= 15 ? 'foregroundStyle' : 'foregroundColor'}(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)
   if (!has('padding')) append('add:padding', 'Padding', 'number', '', v => `.padding(${Number(v)})`, undefined, 0)
   if (!has('background')) append('add:background', 'Background', 'select', '', v => `.background(${SYSTEM_COLORS.includes(v) ? `Color(.${v})` : `Color.${v}`})`, colors)
-  if (!has('cornerRadius')) append('add:cornerRadius', 'Corner radius', 'number', '', v => `.cornerRadius(${Number(v)})`, undefined, 0)
+  if (!has('cornerRadius') && !has('clipShape')) append('add:cornerRadius', 'Corner radius', 'number', '', v => roundedCorners(Number(v), targetVersion), undefined, 0)
   if (!has('opacity')) append('add:opacity', 'Opacity', 'number', '', v => `.opacity(${Number(v)})`, undefined, 0, 1)
   if (!has('accessibilityLabel')) append('add:accessibilityLabel', 'Accessibility label', 'text', '', v => `.accessibilityLabel(${swiftString(v)})`)
   if (targetVersion >= 14 && !has('accessibilityIdentifier')) append('add:accessibilityIdentifier', 'Accessibility identifier', 'text', '', v => `.accessibilityIdentifier(${swiftString(v)})`)
