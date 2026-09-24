@@ -4,9 +4,9 @@ import { createHash } from 'node:crypto'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
-import type { CompileRequest, CompileResult, RenderNode, ViewLayer } from '@studio/shared'
+import { placeholderWords, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
-import { KNOWN_COLOR_NAMES } from '@studio/swift-sema'
+import { KNOWN_COLOR_NAMES, buildAuthoringModel } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
 import { AUTHORING_COLOR_HEX } from '../packages/swift-sema/src/authoring-resources'
 import { DEVICES } from '@studio/sim-shell'
@@ -925,7 +925,7 @@ struct ContentView: View {
   it('draws a view no ancestor gave the model as stopped, saying why, and reads nil when it may be missing', () => {
     const missing = compileView(viewSource('@Environment(Model.self) private var model\n var body: some View { Text("Count \\(model.count)") }', model))
     expect(missing.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
-    expect(nodes(missing).find(n => n.placeholder)?.placeholder).toMatchObject({ feature: 'ContentView stopped', reason: expect.stringContaining('No Observable object of type Model found') })
+    expect(nodes(missing).find(n => n.placeholder)?.placeholder).toMatchObject({ kind: 'stopped', feature: 'ContentView', reason: expect.stringContaining('No Observable object of type Model found') })
     const optional = runView('@Environment(Model.self) private var model: Model?\n var body: some View { Text(model == nil ? "No model" : "Model") }', model)
     expect(texts(optional)).toContain('No model')
   })
@@ -943,7 +943,7 @@ struct ContentView: View {
     expect(controls(r)).toContain('Open')
     const pushed = tap(r, 'Open')
     expect(pushed.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
-    expect(nodes(pushed).find(n => n.placeholder)?.placeholder?.feature).toBe('Detail stopped')
+    expect(nodes(pushed).find(n => n.placeholder)?.placeholder?.feature).toBe('Detail')
   })
 })
 
@@ -1408,10 +1408,10 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
     const source = viewSource('var body: some View { VStack { Text("Top"); Broken(); Text("Bottom") } }', broken)
     const r = compileView(source)
     expect(texts(r)).toEqual(expect.arrayContaining(['Top', 'Bottom']))
-    expect(stopped(r)).toEqual([{ feature: 'Broken stopped', reason: 'Swift runtime failure: Index out of range', stopped: true }])
+    expect(stopped(r)).toEqual([{ kind: 'stopped', feature: 'Broken', reason: 'Swift runtime failure: Index out of range' }])
     const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: r.renderTree!, onEvent: () => {} }))
-    expect(markup).toContain('Broken stopped')
-    expect(markup).toContain('Swift runtime failure: Index out of range')
+    expect(markup).toContain('Broken')
+    expect(markup).toContain('Its code stopped: Index out of range.')
     const [error, ...others] = r.diagnostics.filter(d => d.severity === 'error')
     expect(others).toEqual([])
     expect(error!.message).toContain('Index out of range')
@@ -1430,7 +1430,7 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
       var body: some View { Button("Open") { show = true }.sheet(isPresented: $show) { Detail(item: items[0]) } }`,
       'struct Detail: View { let item: String; var body: some View { Text(item) } }')
     const opened = tap(r, 'Open')
-    expect(stopped(opened)).toEqual([{ feature: 'Sheet stopped', reason: 'Swift runtime failure: Index out of range', stopped: true }])
+    expect(stopped(opened)).toEqual([{ kind: 'stopped', feature: 'Sheet', reason: 'Swift runtime failure: Index out of range' }])
     expect(stopped(tap(opened, 'Close sheet'))).toEqual([])
   })
 
@@ -1442,7 +1442,7 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
         }
       }`, 'struct Detail: View { let item: String; var body: some View { Text(item) } }')
     const pushed = tap(r, 'Open')
-    expect(stopped(pushed)).toEqual([{ feature: 'Destination stopped', reason: 'Swift runtime failure: Index out of range', stopped: true }])
+    expect(stopped(pushed)).toEqual([{ kind: 'stopped', feature: 'Destination', reason: 'Swift runtime failure: Index out of range' }])
     expect(controls(tap(pushed, 'Home'))).toContain('Open')
   })
 
@@ -1459,8 +1459,54 @@ describe('F11: a view that stops draws a placeholder where it is, and the rest o
     const r = runView(`let items: [Int] = []
       var body: some View { NavigationStack { NavigationLink("Open") { Text("\\(items[5])") }.navigationTitle("Home") } }`)
     const pushed = tap(r, 'Open')
-    expect(nodes(pushed).find(n => n.placeholder)?.placeholder).toMatchObject({ feature: 'Destination stopped', reason: expect.stringContaining('Index out of range') })
+    expect(nodes(pushed).find(n => n.placeholder)?.placeholder).toMatchObject({ kind: 'stopped', feature: 'Destination', reason: expect.stringContaining('Index out of range') })
     expect(texts(tap(pushed, 'Home'))).toContain('Home')
+  })
+})
+
+describe('D12: a view the preview cannot draw says what it is, in a designer\'s words', () => {
+  const placeholders = (r: CompileResult) => nodes(r).filter(n => n.placeholder).map(n => n.placeholder!)
+  const drawn = (r: CompileResult) => renderToStaticMarkup(createElement(RenderTreeView, { tree: r.renderTree!, onEvent: () => {} }))
+
+  it('names real SwiftUI the preview does not draw yet, and says Xcode draws it', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Top"); EditButton() } }'))
+
+    expect(placeholders(r)).toMatchObject([{ kind: 'unsupported', feature: 'EditButton' }])
+    expect(placeholderWords(placeholders(r)[0]!)).toEqual({ title: 'Edit button', detail: 'Not drawn in the preview yet. Xcode draws it as written.' })
+    expect(drawn(r)).toContain('Not drawn in the preview yet. Xcode draws it as written.')
+  })
+
+  it('says when it does not know a view, and that Xcode builds it only if a framework or the project declares it', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Top"); FancyWidget() } }'))
+
+    expect(placeholders(r)).toMatchObject([{ kind: 'unknown', feature: 'FancyWidget' }])
+    expect(placeholderWords(placeholders(r)[0]!)).toEqual({ title: 'FancyWidget', detail: 'The preview doesn’t know this view. Xcode builds it only if an Apple framework or the project declares it.' })
+  })
+
+  it('names a missing image and where to add it', () => {
+    const r = runView('var body: some View { Image("hero") }')
+
+    expect(placeholders(r)).toMatchObject([{ kind: 'missing', feature: 'hero' }])
+    expect(placeholderWords(placeholders(r)[0]!)).toEqual({ title: 'Image “hero”', detail: 'This image is missing. Add it in Project resources.' })
+  })
+
+  it('marks a view the preview does not draw in Design, so its settings do not say it draws here', () => {
+    const files = [{ id: 'App.swift', text: viewSource('var body: some View { VStack { EditButton(); Text("Top") } }') }]
+    const designed = buildAuthoringModel({ projectId: 'p', revision: 1, files }).nodes
+
+    expect(designed.find(n => n.name === 'EditButton')).toMatchObject({ kind: 'opaque', undrawn: 'unsupported' })
+    expect(designed.find(n => n.name === 'Text')?.undrawn).toBeUndefined()
+    // As the checker says: a box for a name it does not know, and none for Color, which the preview draws.
+    const drawnHere = compileView(viewSource('var body: some View { VStack { FancyWidget(); Color(red: 1, green: 0, blue: 0) } }')).authoring!.nodes
+    expect(drawnHere.find(n => n.name === 'FancyWidget')).toMatchObject({ kind: 'opaque', undrawn: 'unknown' })
+    expect(drawnHere.find(n => n.name === 'Color')?.undrawn).toBeUndefined()
+  })
+
+  it('says a view of the project\'s own stopped, and why, without Swift\'s own words', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Broken() } }', 'struct Broken: View { let items: [Int] = []; var body: some View { Text("\\(items[0])") } }'))
+
+    expect(placeholderWords(placeholders(r)[0]!)).toEqual({ title: 'Broken', detail: 'Its code stopped: Index out of range.' })
+    expect(placeholderWords({ kind: 'stopped', feature: 'ProfileCard', reason: 'Fatal error: Unexpectedly found nil' })).toEqual({ title: 'Profile card', detail: 'Its code stopped: Unexpectedly found nil.' })
   })
 })
 

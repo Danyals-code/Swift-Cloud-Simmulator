@@ -988,8 +988,7 @@ export class Checker {
           callee.span,
           'warning',
           'unsupported_swiftui_view',
-          `'${callee.name}' is real SwiftUI that the preview does not draw. ` +
-            'It renders as a labelled placeholder and exports to Xcode unchanged.',
+          `'${callee.name}' isn't drawn in the preview yet, so it shows as a labelled box. Xcode draws it as written.`,
           callee.name,
         )
         return
@@ -1051,7 +1050,7 @@ export class Checker {
         span,
         'warning',
         'unsupported_swiftui_view',
-        `'${name}' is real SwiftUI that the preview does not draw.`,
+        `'${name}' isn't drawn in the preview yet. Xcode draws it as written.`,
         name,
       )
       return

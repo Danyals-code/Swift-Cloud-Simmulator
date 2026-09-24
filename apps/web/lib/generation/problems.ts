@@ -20,7 +20,7 @@ function problemsIn(result: CompileResult, project: Project): PreviewProblem[] {
   // screen, as iOS would run it once that screen opens, is only drawn stopped there.
   const seen = new Set<string>()
   for (const node of (result.pages ?? []).flatMap(page => page.tree.nodes)) {
-    if (!node.placeholder?.stopped) continue
+    if (node.placeholder?.kind !== 'stopped') continue
     const problem = at(node.placeholder.reason, node.origin)
     const place = `${problem.message}@${node.origin?.file}:${node.origin?.start}`
     if (seen.has(place) || found.some(reported => reported.message.startsWith(problem.message))) continue

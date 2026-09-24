@@ -1,6 +1,7 @@
 import { stackGaps } from './spacing'
 import { symbolMetrics } from '@studio/shared'
 import type {
+  PlaceholderPayload,
   TransformSpec,
   CornerStyle,
   ShapeStroke,
@@ -117,7 +118,7 @@ export type PaintSpec =
       readonly content: Size
       readonly showsIndicators: boolean
     }
-  | { readonly kind: 'placeholder'; readonly feature: string; readonly reason: string; readonly stopped?: true }
+  | { readonly kind: 'placeholder'; readonly placeholder: PlaceholderPayload }
   | { readonly kind: 'hit' }
 
 export interface PlacedNode {
@@ -909,7 +910,7 @@ export class LayoutEngine {
           z,
           opacity: env.opacity,
           cornerRadius: 8,
-          paint: { kind: 'placeholder', feature: element.feature, reason: element.reason, ...(element.stopped ? { stopped: true } : {}) },
+          paint: { kind: 'placeholder', placeholder: element.placeholder },
           ...debugInfo(element),
           ...decorations(env, parent),
           ...(element.origin ? { origin: element.origin } : {}),

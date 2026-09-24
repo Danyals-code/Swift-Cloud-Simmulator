@@ -2,7 +2,7 @@ import { createContext, useContext, useId, useState, useRef, useLayoutEffect, us
 import { ScrollIndicator } from './ScrollIndicator'
 import { ShapeView, VectorPathView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
-import { symbolMetrics, shapePath } from '@studio/shared'
+import { placeholderWords, symbolMetrics, shapePath } from '@studio/shared'
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
   cssTransform,
@@ -1123,7 +1123,7 @@ function ShapeContent({ node }: { node: RenderNode }) {
  * wrong result - a preview that quietly lies is worse than one that admits a gap.
  */
 function PlaceholderContent({ node }: { node: RenderNode }) {
-  const { feature, reason } = node.placeholder!
+  const { title, detail } = placeholderWords(node.placeholder!)
 
   return (
     <div
@@ -1142,8 +1142,8 @@ function PlaceholderContent({ node }: { node: RenderNode }) {
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
       }}
     >
-      <span style={{ fontSize: 11, fontWeight: 700, color: 'rgb(180 95 0)' }}>{feature}</span>
-      <span style={{ fontSize: 10, lineHeight: '13px', color: 'rgb(120 70 10)' }}>{reason}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: 'rgb(180 95 0)' }}>{title}</span>
+      <span style={{ fontSize: 10, lineHeight: '13px', color: 'rgb(120 70 10)' }} title={detail}>{detail}</span>
     </div>
   )
 }

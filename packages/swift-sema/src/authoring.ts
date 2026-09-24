@@ -7,7 +7,7 @@ import {
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
 import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
-import { SUPPORTED_VIEWS } from './builtins'
+import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from './builtins'
 import { colorOpacityParts, designControlRecipes, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
 
 type MutableNode = Omit<AuthoringNode, 'children' | 'properties'> & { children: string[]; properties: AuthoringProperty[] }
@@ -168,6 +168,9 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     const capability = builtin ? authoringCapability(name, 'view', chain.base.args.map(a => a.label)) : undefined
     const node = add(custom.length === 1 ? 'component' : name === 'ForEach' || name === 'List' && chain.base.args.length > 0 ? 'collection' : builtin ? 'view' : 'opaque', name, expr.span, parent.owner, parent)
     if (custom.length === 1) Object.assign(node, { definitionId: custom[0]!.node.id })
+    // Real SwiftUI with no drawing yet, or a name the checker says the preview draws a box for (D12).
+    const unknown = !custom.length && diagnostics.some(d => d.code === 'unresolved_identifier' && d.severity === 'warning' && d.span.file === expr.span.file && d.span.start === expr.span.start)
+    if (!custom.length && UNIMPLEMENTED_VIEWS.has(name) || unknown) Object.assign(node, { undrawn: UNIMPLEMENTED_VIEWS.has(name) ? 'unsupported' : 'unknown' })
     if (argument) Object.assign(node, { argument: true })
     const reason = custom.length > 1 ? 'More than one matching component declaration; ownership is ambiguous.' : !custom.length && !capability ? 'This constructor overload is outside the authoring subset.' : undefined
     for (const [i, arg] of chain.base.args.entries()) {

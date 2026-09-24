@@ -75,7 +75,7 @@ function placeholders(nodes: readonly RenderNode[]): RenderNode[] {
  */
 function assertScreenIsSound(tree: RenderTree, where: string): void {
   const unsupported = placeholders(tree.nodes).map(
-    (n) => `${n.placeholder?.feature}: ${n.placeholder?.reason}`,
+    (n) => `${n.placeholder?.feature} (${n.placeholder?.kind})`,
   )
   expect(unsupported, `${where} draws an unsupported placeholder`).toEqual([])
 
@@ -152,7 +152,7 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     expect(tree, 'template produced no render tree').not.toBeNull()
 
     const unsupported = placeholders(tree!.nodes).map(
-      (n) => `${n.placeholder?.feature}: ${n.placeholder?.reason}`,
+      (n) => `${n.placeholder?.feature} (${n.placeholder?.kind})`,
     )
     expect(unsupported).toEqual([])
   })

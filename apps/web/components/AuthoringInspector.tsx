@@ -107,7 +107,9 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
           rather than as controls that quietly do nothing. */}
       {selected.kind === 'opaque' && <p className={styles.locked} data-testid="locked-block">
         <Icon name="lock" size={12} />
-        <span>Written in Swift. It runs and draws here, and it is kept exactly as written.</span>
+        <span>{selected.undrawn === 'unsupported' ? 'Written in Swift. The preview doesn’t draw it yet, and Xcode draws it as written. It is kept exactly as written.'
+          : selected.undrawn === 'unknown' ? 'Written in Swift. The preview doesn’t know this view and shows a labelled box in its place. It is kept exactly as written.'
+          : 'Written in Swift. It runs and draws here, and it is kept exactly as written.'}</span>
         {onReveal && <button type="button" className={styles.linkButton} onClick={() => onReveal(selected.source)}>Open in Code</button>}
       </p>}
 

@@ -169,7 +169,8 @@ describe('coverage diagnostics are honest, not wrong', () => {
     const [warning] = warnings(app('        Chart { }'))
     expect(warning?.code).toBe('unsupported_swiftui_view')
     expect(warning?.feature).toBe('Chart')
-    expect(warning?.message).toContain('does not draw')
+    // In a designer's words, as the canvas says it (D12).
+    expect(warning?.message).toBe("'Chart' isn't drawn in the preview yet, so it shows as a labelled box. Xcode draws it as written.")
     expect(errors(app('        Chart { }'))).toEqual([])
   })
 

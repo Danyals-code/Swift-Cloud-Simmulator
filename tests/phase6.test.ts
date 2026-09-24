@@ -425,7 +425,9 @@ describe('Image and Label', () => {
         Image("Logo")
     }`),
     )
-    expect(placeholders(result)).toEqual(['Image("Logo")'])
+    // Named by the image, and marked missing, so the canvas can say where to add it (D12).
+    expect(placeholders(result)).toEqual(['Logo'])
+    expect(result.renderTree!.nodes.find(n => n.placeholder)?.placeholder?.kind).toBe('missing')
   })
 })
 
