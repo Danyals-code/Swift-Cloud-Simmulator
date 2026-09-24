@@ -265,9 +265,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "gear": {
     "icon": "settings-outline"
   },
-  "gear.fill": {
-    "icon": "settings"
-  },
   "gearshape": {
     "icon": "settings-outline"
   },
@@ -325,9 +322,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "calendar": {
     "icon": "calendar-outline"
   },
-  "calendar.fill": {
-    "icon": "calendar"
-  },
   "clock": {
     "icon": "time-outline"
   },
@@ -336,9 +330,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   },
   "timer": {
     "icon": "timer-outline"
-  },
-  "timer.fill": {
-    "icon": "timer"
   },
   "bookmark": {
     "icon": "bookmark-outline"
@@ -481,9 +472,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "battery.100": {
     "icon": "battery-full-outline"
   },
-  "battery.100.fill": {
-    "icon": "battery-full"
-  },
   "cart": {
     "icon": "cart-outline"
   },
@@ -535,14 +523,8 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "sparkles": {
     "icon": "sparkles-outline"
   },
-  "sparkles.fill": {
-    "icon": "sparkles"
-  },
   "wand.and.stars": {
     "icon": "color-wand-outline"
-  },
-  "wand.and.stars.fill": {
-    "icon": "color-wand"
   },
   "hand.thumbsup": {
     "icon": "thumbs-up-outline"
@@ -576,9 +558,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   },
   "hourglass": {
     "icon": "hourglass-outline"
-  },
-  "hourglass.fill": {
-    "icon": "hourglass"
   },
   "alarm": {
     "icon": "alarm-outline"
@@ -750,16 +729,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "house.circle.fill": {
     "icon": "home",
     "container": "circle",
-    "filled": true
-  },
-  "house.square": {
-    "icon": "home-outline",
-    "container": "square",
-    "filled": false
-  },
-  "house.square.fill": {
-    "icon": "home",
-    "container": "square",
     "filled": true
   },
   "plus.square": {
