@@ -14,6 +14,14 @@ export interface FeatureContext {
   readonly colors?: readonly PreviewColorAsset[]
 }
 export const raw = (ctx: FeatureContext, span: SourceSpan): string => ctx.files.find(f => f.id === span.file)?.text.slice(span.start, span.end) ?? ''
+
+
+/** The whitespace the line holding `offset` starts with, and one level of indent more: a tab where it uses tabs, or four spaces. */
+export function lineIndent(ctx: FeatureContext, file: string, offset: number): { readonly indent: string; readonly unit: string } {
+  const text = ctx.files.find(f => f.id === file)?.text ?? ''
+  const indent = /^[\t ]*/.exec(text.slice(text.lastIndexOf('\n', offset - 1) + 1))![0]
+  return { indent, unit: indent.includes('\t') ? '\t' : '    ' }
+}
 const declarationCache = new WeakMap<FeatureContext, Decl[]>()
 const expressionCache = new WeakMap<FeatureContext, Map<string, Expr>>()
 

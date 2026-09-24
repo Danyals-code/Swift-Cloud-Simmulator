@@ -1,8 +1,55 @@
 import type { AuthoringNode, NavigationDestination, NavigationSettings, SourceSpan } from '@studio/shared'
 import { forEachChild, Parser, type CallExpr, type ClosureExpr, type Expr, type Node, type StructDecl, type VarDecl } from '@studio/swift-syntax'
-import { callOf, expressionOf, hasComments, insertMember, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
+import { callOf, expressionOf, hasComments, insertMember, lineIndent, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
 import { viewCallChain } from './design-controls'
 import { enumCases } from './authoring-components'
+
+/**
+ * Whether a link at `node` pushes: whether it is shown inside a navigation stack (D13).
+ *
+ * That is a stack above it on its own screen, or, on a screen of its own, the screen
+ * being inside one wherever the app shows it: a screen pushed from Home is on Home's
+ * stack, and a second stack there would be nested in it. A sheet or a full screen cover
+ * starts a navigation of its own, and so does a tab, or the app's first screen.
+ */
+export function insideNavigationStack(nodes: readonly AuthoringNode[], node: AuthoringNode): boolean {
+  return stackAround(nodes, node, new Set()) === true
+}
+
+/**
+ * Whether `node` is shown on a navigation stack, or undefined where that is not for it
+ * to say: a `#Preview` is no place the app shows a screen, and a way back to a screen
+ * already being followed (`path`) leads nowhere new.
+ */
+function stackAround(nodes: readonly AuthoringNode[], node: AuthoringNode, path: ReadonlySet<string>): boolean | undefined {
+  const parentOf = (item: AuthoringNode) => nodes.find(candidate => candidate.id === item.parentId)
+  for (let current = node.kind === 'definition' ? node : parentOf(node); current; current = parentOf(current)) {
+    if (['NavigationStack', 'NavigationView'].includes(current.name)) return true
+    if (current.kind === 'branch' && ['Sheet', 'Full screen cover'].includes(current.name)) return false
+    if (current.kind === 'definition') {
+      if (current.name === '#Preview' || path.has(current.id)) return undefined
+      const shown = nodes.filter(candidate => candidate.definitionId === current!.id)
+      // Nothing shows it: the app starts here, with no stack around it.
+      if (!shown.length) return false
+      const next = new Set([...path, current.id])
+      const said = shown.map(site => stackAround(nodes, site, next)).filter(inside => inside !== undefined)
+      return said.length ? said.every(Boolean) : undefined
+    }
+  }
+  return false
+}
+
+/**
+ * Wraps the view `root` spans in a NavigationStack, indenting what it wraps one level
+ * inside it. Only insertions, so a view inside keeps an offset its caller can follow.
+ */
+export function navigationStackPatches(ctx: FeatureContext, root: SourceSpan, end: number): SourcePatch[] {
+  const text = ctx.files.find(f => f.id === root.file)?.text ?? ''
+  const { indent, unit } = lineIndent(ctx, root.file, root.start)
+  const inner: SourcePatch[] = []
+  for (let at = text.indexOf('\n', root.start); at !== -1 && at < end; at = text.indexOf('\n', at + 1)) inner.push({ file: root.file, start: at + 1, end: at + 1, text: unit })
+  return [{ file: root.file, start: root.start, end: root.start, text: `NavigationStack {\n${indent}${unit}` }, ...inner, { file: root.file, start: end, end, text: `\n${indent}}` }]
+}
 
 type Bindings = Map<string, string>
 interface Site {
@@ -325,9 +372,7 @@ export function changeNavigationType(ctx: FeatureContext, node: AuthoringNode, t
   const statements = action.body.statements
   const sets = statements.length === 1 && statements[0]!.kind === 'exprStmt' && own(statements[0]!.expression.span).replace(/\s/g, '') === `${flag}=true`
   if (!sets) throw new Error('This button does more than open the screen, so it cannot become a push. Change it in Swift.')
-  let parent = ctx.nodes.find(item => item.id === node.parentId)
-  while (parent && !['NavigationStack', 'NavigationView'].includes(parent.name)) parent = ctx.nodes.find(item => item.id === parent!.parentId)
-  if (!parent) throw new Error('A pushed screen needs a navigation container on this screen. Add one, or keep this as a sheet.')
+  if (!insideNavigationStack(ctx.nodes, node)) throw new Error('A pushed screen needs a navigation container on this screen. Add one, or keep this as a sheet.')
   const modifierStart = text.lastIndexOf('.', presentation!.callee.kind === 'memberAccess' ? presentation!.callee.memberSpan.start : presentation!.span.end)
   const rest = text.slice(call.span.end, modifierStart).trimEnd() + text.slice(presentation!.span.end, node.source.end)
   const patches = [patch(node.source, `NavigationLink(${own(title.span)}, destination: ${own(destination.span)})${rest}`)]

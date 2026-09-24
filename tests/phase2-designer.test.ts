@@ -85,6 +85,120 @@ describe('guided interactions', () => {
     expect(source).toContain('.padding(12)')
     expect(texts(tap(render(source), 'Details'))).toContain('Club details')
   })
+  it('pushes from a screen that is itself pushed onto the same stack, with no second NavigationStack (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            NavigationLink("Details") { DetailsScreen() }
+        }
+    }
+}
+struct DetailsScreen: View {
+    var body: some View {
+        VStack {
+            Button("More") { }
+        }
+    }
+}
+struct MoreScreen: View {
+    var body: some View {
+        Text("More details")
+    }
+}
+`
+    const pushed = edit(source, 'Button', { kind: 'guided-action', action: { type: 'navigate', destination: 'MoreScreen' }, replace: false })
+    expect(pushed.match(/NavigationStack/g)).toHaveLength(1)
+    expect(pushed).toContain('        VStack {\n            NavigationLink("More", destination: MoreScreen())\n        }')
+    expect(texts(tap(tap(render(pushed), 'Details'), 'More'))).toContain('More details')
+  })
+  it('pushes from a pushed screen that has a #Preview of its own, as screens made in the studio have, with no second stack (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            NavigationLink("Details") { DetailsScreen() }
+        }
+    }
+}
+struct DetailsScreen: View {
+    var body: some View {
+        VStack {
+            Button("More") { }
+        }
+    }
+}
+
+#Preview {
+    DetailsScreen()
+}
+struct MoreScreen: View {
+    var body: some View {
+        Text("More details")
+    }
+}
+`
+    const pushed = edit(source, 'Button', { kind: 'guided-action', action: { type: 'navigate', destination: 'MoreScreen' }, replace: false })
+    expect(pushed.match(/NavigationStack/g)).toHaveLength(1)
+    expect(texts(tap(tap(render(pushed), 'Details'), 'More'))).toContain('More details')
+  })
+  it('pushes from a screen that links back to the one before it, with no second stack (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            NavigationLink("Plans") { PlansScreen() }
+        }
+    }
+}
+struct PlansScreen: View {
+    var body: some View {
+        NavigationLink("Plan") { PlanScreen() }
+    }
+}
+struct PlanScreen: View {
+    var body: some View {
+        VStack {
+            NavigationLink("All plans") { PlansScreen() }
+            Button("Notes") { }
+        }
+    }
+}
+struct NotesScreen: View {
+    var body: some View {
+        Text("Plan notes")
+    }
+}
+`
+    const pushed = edit(source, 'Button', { kind: 'guided-action', action: { type: 'navigate', destination: 'NotesScreen' }, replace: false })
+    expect(pushed.match(/NavigationStack/g)).toHaveLength(1)
+    expect(texts(tap(tap(tap(render(pushed), 'Plans'), 'Plan'), 'Notes'))).toContain('Plan notes')
+  })
+  it('wraps a screen that needs a stack for its first push, with what it wraps indented inside it (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Text("Home")
+            Button("Details") { }
+        }
+    }
+}
+`
+    const pushed = edit(source, 'Button', { kind: 'guided-action', action: { type: 'navigate', destination: 'DetailsScreen' }, replace: false, createScreen: { name: 'DetailsScreen', title: 'Club details' } })
+    expect(pushed).toContain(`    var body: some View {
+        NavigationStack {
+            VStack {
+                Text("Home")
+                NavigationLink("Details", destination: DetailsScreen())
+            }
+        }
+    }`)
+  })
   it('creates and opens a sheet, preserving the current screen', () => {
     const source = edit(wrap('VStack { Text("Home"); Button("Join") {} }'), 'Button', { kind: 'guided-action', action: { type: 'sheet', destination: 'JoinScreen' }, replace: false, createScreen: { name: 'JoinScreen', title: 'Join the club' } })
     const result = tap(render(source), 'Join')

@@ -5,6 +5,8 @@ import { argumentLayerProblem, canvasDropProblem, deploymentVersion, type Design
 import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { structuralEditProblem, type StructuralKind } from './structural-check'
+import { applyPatches, type FeatureContext } from './authoring-context'
+import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 import { wrapperOf } from './authoring-structure'
 import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
@@ -25,6 +27,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   const ast = parsed.map(p => p.sourceFile)
   const diagnostics = Checker.check(ast).diagnostics
   const model = buildAuthoringModel({ ...request, revision: request.baseRevision, parsed: ast, diagnostics })
+  const context: FeatureContext = { deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions, colors: request.colors }
   const matches = model.nodes.filter(n => n.source.file === file.id && n.source.start === request.target.start && n.source.end === request.target.end && n.fingerprint === request.fingerprint)
   // A slot written as an argument - `.overlay(Circle())` - has exactly the span of the view in it, and the view is what was selected.
   const node = matches.find(n => n.kind !== 'branch') ?? matches[0]
@@ -64,7 +67,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   }
   if (node && (!['property', 'delete', 'move', 'moveTo', 'insert', 'hide', 'show'].includes(operation.kind) || operation.kind === 'property' && operation.control.startsWith('component:'))) {
     try {
-      const result = featureEdit({ deploymentTarget: request.deploymentTarget, files: request.files, ast, nodes: model.nodes, descriptions: request.componentDescriptions, colors: request.colors }, node, operation as Parameters<typeof featureEdit>[2])
+      const result = featureEdit(context, node, operation as Parameters<typeof featureEdit>[2])
       const after = result.files.find(f => f.id === file.id)?.text
       const kind = STRUCTURAL[operation.kind]
       const toward = operation.kind === 'layer-reparent' ? model.nodes.find(n => n.id === operation.destination)?.source.start : undefined
@@ -137,19 +140,18 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           if (!branch && parent.kind === 'view' && parent.name !== 'WindowGroup') root = parent
           parent = model.nodes.find(candidate => candidate.id === parent!.parentId)
         }
-        if (isLink && !hasNavigation) {
+        // A screen pushed onto a stack is on it already: a second stack would nest in it (D13).
+        if (isLink && !hasNavigation && !insideNavigationStack(model.nodes, node!)) {
           if (deploymentVersion(request.deploymentTarget) < 16) return reject('Adding a navigation screen requires iOS 16 or later.')
           if (root.source.file !== file.id || root.kind !== 'view' || !parent || !['definition', 'branch'].includes(parent.kind)) return reject('Select a view within the screen before adding a navigation link.')
           // A modifier switched off at the end of the root's chain is written after it, and goes inside with it.
-          const start = root.source.start, end = afterOffMarkers(file.text, root.source.end)
-          const indent = /^[\t ]*/.exec(file.text.slice(file.text.lastIndexOf('\n', start - 1) + 1, start))?.[0] ?? ''
-          const prefix = `NavigationStack {\n${indent}    `
-          const body = file.text.slice(start, end).replace(/\n/g, '\n    ')
-          const wrapped = file.text.slice(0, start) + prefix + body + `\n${indent}}` + file.text.slice(end)
-          const shifted = offset + prefix.length + (file.text.slice(start, offset).match(/\n/g)?.length ?? 0) * 4
+          const stack = navigationStackPatches(context, root.source, afterOffMarkers(file.text, root.source.end))
+          const wrapped = applyPatches(context, stack).find(f => f.id === file.id)!.text
+          // Only insertions: the view moves by what is written before it.
+          const shifted = offset + stack.filter(p => p.start <= offset).reduce((moved, p) => moved + p.text.length, 0)
           changed = insertView(wrapped, file.id, shifted, operation.snippet)
           // The link and the stack the screen needs for it: two places, so checked as a wrap.
-          wrap = `${operation.snippet} ${prefix}}`
+          wrap = `${operation.snippet} ${stack[0]!.text}${stack.at(-1)!.text}`
         } else changed = insertView(file.text, file.id, offset, operation.snippet)
         break
       }

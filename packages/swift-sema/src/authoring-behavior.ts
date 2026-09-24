@@ -5,6 +5,7 @@ import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertM
 import { collectionFor, recordsSwift } from './authoring-collections'
 import { emptyComponents, enumCases, namedActions } from './authoring-components'
 import { styleExpression } from './authoring-resources'
+import { insideNavigationStack } from './authoring-navigation'
 import { viewCallChain } from './design-controls'
 
 export function stateInputs(ctx: FeatureContext, node: AuthoringNode): StateInput[] {
@@ -155,9 +156,7 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
   } else if (action.type === 'navigate' || action.type === 'sheet' || action.type === 'cover') {
     if (!settings.destinations.includes(action.destination)) throw new Error('Choose a local View that has a supported no-argument initializer.')
     if (action.type === 'navigate') {
-      let parent = ctx.nodes.find(n => n.id === node.parentId)
-      while (parent && !['NavigationStack', 'NavigationView'].includes(parent.name)) parent = ctx.nodes.find(n => n.id === parent!.parentId)
-      if (!parent) throw new Error('Place this Button inside a NavigationStack before configuring navigation.')
+      if (!insideNavigationStack(ctx.nodes, node)) throw new Error('Place this Button inside a NavigationStack before configuring navigation.')
       return [patch(call.span, `NavigationLink(${raw(ctx, call.args[0]!.value.span)}, destination: ${action.destination}())`)]
     }
     const expression = expressionOf(ctx, node)!
