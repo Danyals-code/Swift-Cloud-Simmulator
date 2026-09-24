@@ -100,13 +100,28 @@ const ECHO = app(`  @State private var name = ""
     }
   }`)
 
+const TYPED = 'the quick brown fox jumps over the lazy dog'
+
+/**
+ * Says whether the sentence reached the app whole, rather than drawing it back. The
+ * sentence is about a phone's width, so it wraps on Linux's wider fonts, and a wrapped
+ * Text is drawn a line at a time, where its words no longer read as one string.
+ */
+const SENTENCE_CHECK = app(`  @State private var name = ""
+  var body: some View {
+    VStack {
+      TextField("Name", text: $name)
+      Text(name == "${TYPED}" ? "Echo matches" : "Echo \\(name.count)")
+    }
+  }`)
+
 test('fast typing into a preview field keeps every character (F1)', async ({ page }) => {
-  await openSource(page, ECHO, 'Echo []')
+  await openSource(page, SENTENCE_CHECK, 'Echo 0')
   const field = page.getByTestId('render-tree').locator('input.swiftui-field')
   await field.click()
-  await page.keyboard.type('the quick brown fox jumps over the lazy dog')
-  await expect(page.getByTestId('render-tree').getByText('Echo [the quick brown fox jumps over the lazy dog]')).toBeVisible()
-  await expect(field).toHaveValue('the quick brown fox jumps over the lazy dog')
+  await page.keyboard.type(TYPED)
+  await expect(page.getByTestId('render-tree').getByText(/^Echo /)).toHaveText('Echo matches')
+  await expect(field).toHaveValue(TYPED)
 })
 
 test('typing keeps every character when a view appears above the field and moves it (F1)', async ({ page }) => {
