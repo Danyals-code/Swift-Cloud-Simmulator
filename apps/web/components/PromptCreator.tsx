@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { OpenedFile, PromptMessage } from '@studio/project-model'
 import { useStudio, type SwitchResult } from '../lib/store'
-import { events } from '../lib/eventLog'
+import { eventLog } from '../lib/eventLog'
 import { promptAttempts } from '../lib/promptAttempts'
 import { DEFAULT_MODELS, parseGeneratedApp, parseOptions, type GeneratedApp, type GenerationOptions, type Provider } from '../lib/generation/schema'
 import { checkPreview } from '../lib/generation/validate'
@@ -25,7 +25,7 @@ export function PromptCreator({ onOpenFiles, onBusy }: { onOpenFiles: (files: re
   const controller = useRef<AbortController | null>(null)
   const review = useRef<HTMLDivElement | null>(null)
   const busy = phase !== 'idle'
-  const [attempts] = useState(() => promptAttempts(events, 'create'))
+  const [attempts] = useState(() => promptAttempts(eventLog, 'create'))
   useEffect(() => () => controller.current?.abort(), [])
   useEffect(() => () => attempts.close(useStudio.getState().project?.id ?? null), [attempts])
   useEffect(() => { if (draft) review.current?.focus() }, [draft])

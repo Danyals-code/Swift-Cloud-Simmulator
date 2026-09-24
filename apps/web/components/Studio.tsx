@@ -54,7 +54,7 @@ import { TabBar } from './TabBar'
 import { TemplateGallery, type GallerySource } from './TemplateGallery'
 import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
 import { BUILD_DETAILS, BUILD_NAME } from '../lib/build'
-import { events } from '../lib/eventLog'
+import { eventLog } from '../lib/eventLog'
 import { designEvent } from '../lib/designEvents'
 import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
@@ -278,7 +278,7 @@ export function Studio() {
   // nothing new to write, and used to put this tab's copy back over whatever another
   // tab had saved meanwhile (B1).
   useEffect(() => {
-    const leaving = () => { void flush(); void events.flush() }
+    const leaving = () => { void flush(); void eventLog.flush() }
     const onVisibility = () => { if (document.visibilityState === 'hidden') leaving() }
     const onPageHide = leaving
     document.addEventListener('visibilitychange', onVisibility)
@@ -552,7 +552,7 @@ export function Studio() {
   // What the person is looking at, in each project's event log: Design or Code, editing or trying the app.
   const projectId = project?.id
   useEffect(() => {
-    if (projectId) events.record(projectId, { type: 'mode', mode: mode === 'develop' ? 'code' : 'design', preview: !inspecting })
+    if (projectId) eventLog.record(projectId, { type: 'mode', mode: mode === 'develop' ? 'code' : 'design', preview: !inspecting })
   }, [projectId, mode, inspecting])
   const livePage = result?.viewHierarchy?.find(layer => layer.type === 'Presentation') ?? result?.viewHierarchy?.find(layer => layer.page?.active)
   const pageHierarchy = useMemo(() => designPage?.viewHierarchy ?? (livePage ? [livePage] : undefined), [designPage?.viewHierarchy, livePage])
@@ -734,7 +734,7 @@ export function Studio() {
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, colors: project.colors, componentDescriptions: project.studio?.components, target, fingerprint, operation })
       const label = designEvent(operation, result?.authoring?.nodes.find(node => node.source.file === target.file && node.source.start === target.start && node.source.end === target.end))
       if (!plan.ok) {
-        events.record(project.id, { ...label, refused: true })
+        eventLog.record(project.id, { ...label, refused: true })
         setEditNote(plan.location ? { text: plan.reason, location: plan.location } : plan.reason)
         return plan.reason
       }

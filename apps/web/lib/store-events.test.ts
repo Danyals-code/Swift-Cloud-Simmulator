@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createEventStore, createProjectStore } from '@studio/project-model'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
-import { events, type DesignEvent } from './eventLog'
+import { eventLog, type DesignEvent } from './eventLog'
 import { useStudio } from './store'
 
 /**
@@ -22,7 +22,7 @@ afterEach(() => vi.restoreAllMocks())
 
 /** A project's events, without when each happened. */
 async function logged(project: string) {
-  return (await events.jsonl(project)).trimEnd().split('\n').slice(1).map(line => {
+  return (await eventLog.jsonl(project)).trimEnd().split('\n').slice(1).map(line => {
     const { t: _t, session: _session, seq: _seq, ...event } = JSON.parse(line)
     return event
   })
@@ -113,7 +113,7 @@ describe('the event log, as the store writes it', () => {
     const revision = studio().documentRevision
 
     expect(studio().commitTransaction(project, plan, LABEL)).toBeNull()
-    await events.flush()
+    await eventLog.flush()
 
     expect(studio().project!.files.some(file => file.text.includes('"Edited"'))).toBe(true)
     expect(studio().documentRevision).toBe(revision + 1)

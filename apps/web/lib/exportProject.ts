@@ -19,7 +19,7 @@ export interface ExportSteps {
   /** A page drawn as a PNG at twice its size. */
   capture(page: PagePreview, signal: AbortSignal): Promise<Uint8Array>
   /** The project's event log as JSON lines, with this export in it. */
-  events(project: string, format: ArchiveFormat): Promise<string>
+  events(projectId: string, format: ArchiveFormat): Promise<string>
   /** Hands the archive to the browser's downloads. */
   download(name: string, bytes: Uint8Array): void
 }

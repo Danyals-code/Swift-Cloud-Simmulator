@@ -1,8 +1,10 @@
 import { createEventStore, type EventStore } from '@studio/project-model'
 import type { StudioBuild } from '@studio/exporter'
-import type { ArchiveFormat, DesignEditRequest } from '@studio/shared'
+import type { ArchiveFormat, DesignEditRequest, FileId } from '@studio/shared'
 import { STUDIO_BUILD } from './build'
+import type { Provider } from './generation/schema'
 import type { RecoveryEvent } from './recovery'
+import type { ProjectOrigin } from './store'
 
 /** Changes Design makes to the studio's own records rather than through the planner. */
 export type StudioChange = 'state-save' | 'state-delete' | 'screen-rename' | 'screen-move' | 'layer-rename' | 'images' | 'variant-save' | 'variant-delete' | 'component-describe'
@@ -25,7 +27,7 @@ export interface DesignEvent {
 /** What went to the AI: the prompt as typed, and never the key. */
 export interface SentPrompt {
   readonly prompt: string
-  readonly provider: string
+  readonly provider: Provider
   readonly model: string
   /** The options Create with AI sends with the prompt. */
   readonly settings?: Readonly<Record<string, string | number | boolean>>
@@ -59,7 +61,7 @@ export type AiEvent = { readonly type: 'ai'; readonly flow: 'create' | 'edit'; r
 /** What the studio records. */
 export type StudioEvent =
   /** The page loaded with this project: fresh, restored, recovered after a crash, or from a share link. */
-  | { readonly type: 'session'; readonly action: 'loaded'; readonly origin: string; readonly build: string }
+  | { readonly type: 'session'; readonly action: 'loaded'; readonly origin: ProjectOrigin; readonly build: string }
   /** Another tab took the studio over, and writes its own events from here. */
   | { readonly type: 'session'; readonly action: 'handed-over' }
   /** Made from a template, or from files opened or generated. */
@@ -73,7 +75,7 @@ export type StudioEvent =
   | { readonly type: 'mode'; readonly mode: 'design' | 'code'; readonly preview: boolean }
   | { readonly type: 'history'; readonly direction: 'undo' | 'redo' }
   /** A burst of typing in one file: how many characters went in and out, and for how long. */
-  | { readonly type: 'code'; readonly file: string; readonly inserted: number; readonly removed: number; readonly ms: number }
+  | { readonly type: 'code'; readonly file: FileId; readonly inserted: number; readonly removed: number; readonly ms: number }
   | DesignEvent
   | AiEvent
 
@@ -101,10 +103,10 @@ const LIMIT = 10_000
 /** A pause this long ends a burst of typing, as another file or anything else recorded does. */
 const BURST_PAUSE_MS = 5000
 
-interface Burst { readonly project: string; readonly file: string; readonly start: number; last: number; inserted: number; removed: number }
+interface Burst { readonly project: string; readonly file: FileId; readonly start: number; last: number; inserted: number; removed: number }
 
 /** How many characters an edit took out and put in: what lies between the text it left alone at either end. */
-function change(before: string, after: string): { readonly inserted: number; readonly removed: number } {
+function insertedAndRemoved(before: string, after: string): { readonly inserted: number; readonly removed: number } {
   const shorter = Math.min(before.length, after.length)
   let prefix = 0
   while (prefix < shorter && before[prefix] === after[prefix]) prefix++
@@ -128,13 +130,13 @@ export function createEventLog(store: EventStore<LoggedEvent>, { session, build,
    * A write the storage refuses loses that write and no other. Nothing here throws at
    * the caller: the log must never be why an edit did not happen.
    */
-  const after = (work: () => Promise<void>) => {
+  const queue = (work: () => Promise<void>) => {
     if (!stopped) writing = writing.then(work).catch(() => {})
   }
 
-  const enqueue = (project: string, event: StudioEvent, at: number) => {
+  const append = (project: string, event: StudioEvent, at: number) => {
     const logged: LoggedEvent = { t: new Date(at).toISOString(), session, seq: ++seq, ...event }
-    after(async () => {
+    queue(async () => {
       const count = counts.get(project) ?? await store.count(project)
       const kept = count < limit ? [logged] : []
       counts.delete(project)
@@ -147,24 +149,24 @@ export function createEventLog(store: EventStore<LoggedEvent>, { session, build,
     if (!burst) return
     const { project, file, start, last, inserted, removed } = burst
     burst = null
-    enqueue(project, { type: 'code', file, inserted, removed, ms: last - start }, start)
+    append(project, { type: 'code', file, inserted, removed, ms: last - start }, start)
   }
 
   return {
     record(project: string, event: StudioEvent): void {
       endBurst()
-      enqueue(project, event, now())
+      append(project, event, now())
     },
 
     /** Typing in a file, counted into the burst it belongs to. The text itself is never kept. */
-    typed(project: string, file: string, before: string, after: string): void {
+    typed(project: string, file: FileId, before: string, after: string): void {
       if (stopped) return
       const at = now()
       if (burst?.project !== project || burst.file !== file || at - burst.last >= BURST_PAUSE_MS) {
         endBurst()
         burst = { project, file, start: at, last: at, inserted: 0, removed: 0 }
       }
-      const { inserted, removed } = change(before, after)
+      const { inserted, removed } = insertedAndRemoved(before, after)
       burst.inserted += inserted
       burst.removed += removed
       burst.last = at
@@ -179,7 +181,7 @@ export function createEventLog(store: EventStore<LoggedEvent>, { session, build,
      */
     handOn(from: string, to: string): void {
       endBurst()
-      after(async () => {
+      queue(async () => {
         counts.delete(from)
         counts.delete(to)
         await store.move(from, to)
@@ -189,7 +191,7 @@ export function createEventLog(store: EventStore<LoggedEvent>, { session, build,
     /** Forgets a project's events: the project was removed from this browser. */
     forget(project: string): void {
       endBurst()
-      after(async () => {
+      queue(async () => {
         counts.delete(project)
         await store.remove(project)
       })
@@ -221,7 +223,7 @@ export function createEventLog(store: EventStore<LoggedEvent>, { session, build,
 export type EventLog = ReturnType<typeof createEventLog>
 
 /** The log of this page, as there is one store: IndexedDB, or memory where there is none. */
-export const events = createEventLog(createEventStore(), {
+export const eventLog = createEventLog(createEventStore(), {
   session: Math.random().toString(36).slice(2, 10),
   build: STUDIO_BUILD,
   now: Date.now,

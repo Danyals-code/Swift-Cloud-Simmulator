@@ -7,7 +7,7 @@ import { DEFAULT_MODELS, type Provider } from '../lib/generation/schema'
 import { parsePromptEditInput, promptConversationContext } from '../lib/generation/edit-schema'
 import { preparePromptEdit, promptPreviewProblem } from '../lib/generation/applyPromptEdit'
 import { compileSnapshot } from '../lib/compileSnapshot'
-import { events } from '../lib/eventLog'
+import { eventLog } from '../lib/eventLog'
 import { promptAttempts } from '../lib/promptAttempts'
 import { Icon } from './ui/Icon'
 import styles from './PromptEditor.module.css'
@@ -19,7 +19,7 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
   const [error, setError] = useState<string | null>(null), [connectionOpen, setConnectionOpen] = useState(false)
   const [dismissedSelection, setDismissedSelection] = useState<string | null>(null)
   const controller = useRef<AbortController | null>(null), conversation = useRef<HTMLDivElement>(null)
-  const [attempts] = useState(() => promptAttempts(events, 'edit'))
+  const [attempts] = useState(() => promptAttempts(eventLog, 'edit'))
   const selectionKey = JSON.stringify(selection), context = dismissedSelection === selectionKey ? null : selection
   const busy = phase !== 'idle'
   useEffect(() => () => controller.current?.abort(), [])
