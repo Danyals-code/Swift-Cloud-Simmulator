@@ -613,3 +613,53 @@ describe('C11: a structural change is checked before it is kept', () => {
     expect(restructureAt(source, 'Text("First")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Second")'), position: 'after' })).toMatchObject({ ok: true })
   })
 })
+
+describe('D13: a control added from the library works in the preview at once', () => {
+  it('binds a toggle to a new value on its screen, instead of a constant that never switches', () => {
+    const added = restructured(wrap('VStack {\n    Text("Settings")\n}'), { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(added).toContain('@State private var isOn: Bool = true')
+    expect(added).toContain('Toggle("Toggle", isOn: $isOn)')
+    expect(added).not.toContain('.constant')
+  })
+
+  it.each([
+    ['text field', 'TextField("Placeholder", text: .constant(""))', '@State private var text: String = ""', 'TextField("Placeholder", text: $text)'],
+    ['slider', 'Slider(value: .constant(0.5))', '@State private var value: Double = 0.5', 'Slider(value: $value)'],
+    ['stepper', 'Stepper("Stepper", value: .constant(1))', '@State private var count: Int = 1', 'Stepper("Stepper", value: $count)'],
+    ['date picker', 'DatePicker("Date", selection: .constant(Date()))', '@State private var date: Date = Date()', 'DatePicker("Date", selection: $date)'],
+    ['color picker', 'ColorPicker("Colour", selection: .constant(.blue))', '@State private var color: Color = .blue', 'ColorPicker("Colour", selection: $color)'],
+  ])('binds a %s to a new value of its own type', (_control, snippet, member, control) => {
+    const added = restructured(wrap('VStack {\n    Text("Form")\n}'), { kind: 'insert', snippet }, 'Text')
+
+    expect(added).toContain(member)
+    expect(added).toContain(control)
+  })
+
+  it('names a second one apart from the first', () => {
+    const once = restructured(wrap('VStack {\n    Text("Settings")\n}'), { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+    const twice = restructured(once, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(twice).toContain('@State private var isOn2: Bool = true')
+    expect(twice).toContain('Toggle("Toggle", isOn: $isOn2)')
+  })
+
+  it.each([
+    ['a list of records', 'List(items) { item in\n    Text(item.title)\n}', 'List'],
+    ['the library\'s Repeat', 'ForEach(0..<3, id: \\.self) { index in\n    Text("Row \\(index)")\n}', 'ForEach'],
+  ])('keeps the constant when %s is selected, as the control goes into its rows', (_what, body, selected) => {
+    const source = wrap(body, '@State private var items: [Item] = [Item(id: 1, title: "One")]') + '\nstruct Item: Identifiable { let id: Int; var title: String }\n'
+    const added = restructured(source, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, selected)
+
+    expect(added).toContain('Toggle("Toggle", isOn: .constant(true))')
+    expect(added).not.toContain('@State private var isOn')
+  })
+
+  it('keeps the constant in a list\'s row design, which Saves to binds to the row\'s field', () => {
+    const source = wrap('List(items) { item in\n    Text(item.title)\n}', '@State private var items: [Item] = [Item(id: 1, title: "One")]') + '\nstruct Item: Identifiable { let id: Int; var title: String }\n'
+    const added = restructured(source, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(added).toContain('Toggle("Toggle", isOn: .constant(true))')
+    expect(added).not.toContain('@State private var isOn')
+  })
+})

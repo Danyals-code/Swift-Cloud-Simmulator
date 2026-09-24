@@ -7,6 +7,7 @@ import { buildAuthoringModel } from './authoring'
 import { structuralEditProblem, type StructuralKind } from './structural-check'
 import { applyPatches, type FeatureContext } from './authoring-context'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
+import { liveControl } from './authoring-behavior'
 import { wrapperOf } from './authoring-structure'
 import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
@@ -152,7 +153,17 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           changed = insertView(wrapped, file.id, shifted, operation.snippet)
           // The link and the stack the screen needs for it: two places, so checked as a wrap.
           wrap = `${operation.snippet} ${stack[0]!.text}${stack.at(-1)!.text}`
-        } else changed = insertView(file.text, file.id, offset, operation.snippet)
+        } else {
+          const live = node ? liveControl(context, node, operation.snippet) : null
+          changed = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet)
+          if (live && changed) {
+            // The value is declared above the view, which moves down by its line.
+            const { member } = live
+            changed = { text: changed.text.slice(0, member.start) + member.text + changed.text.slice(member.end), offset: changed.offset + member.text.length - (member.end - member.start) }
+            // The control and the value it is bound to: two places, so checked as a wrap.
+            wrap = `${live.snippet} ${live.declaration}`
+          }
+        }
         break
       }
       case 'hide': changed = hideView(file.text, file.id, offset); break

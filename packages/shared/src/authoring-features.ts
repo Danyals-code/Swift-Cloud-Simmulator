@@ -93,7 +93,13 @@ export interface BehaviorSettings {
   readonly destinations: readonly string[]
   readonly currentAction?: string
   readonly canConfigureAction: boolean
-  readonly binding?: { readonly label: string; readonly type: string; readonly current: string }
+  readonly binding?: {
+    readonly label: string
+    readonly type: string
+    readonly current: string
+    /** The name a new value for it takes: free on its screen, as the canvas names a control's value (D13). */
+    readonly newName: string
+  }
 }
 export type BehaviorAction =
   | { readonly type: 'toggle'; readonly state: string }

@@ -1,4 +1,4 @@
-import { Lexer } from '@studio/swift-syntax'
+import { Lexer, type StructDecl } from '@studio/swift-syntax'
 import { deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
 import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, lineIndent, literal, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
@@ -85,6 +85,26 @@ function stateDependencies(ctx: FeatureContext, owner: string, inputs: readonly 
   }
   return inputs.map(input => ({ state: input.name, nodeIds: [...(owners.get(owner)?.get(input.name) ?? [])] }))
 }
+/** Whether a new value named `name` on `owner` would clash with a member of it, a type, or a local the view sees. */
+function nameTaken(ctx: FeatureContext, node: AuthoringNode, owner: StructDecl | undefined, name: string): boolean {
+  return shadowsMember(ctx, node, name) || !!owner?.members.some(m => 'name' in m && m.name === name) || allDeclarations(ctx).some(d => 'name' in d && d.name === name)
+}
+
+/** What Apple's examples call a control's value, by what it holds. */
+const VALUE_NAMES: Readonly<Record<string, string>> = { Bool: 'isOn', String: 'text', Double: 'value', Int: 'count', Date: 'date', Color: 'color' }
+
+/**
+ * The name a new value for a `control` on `node`'s screen takes (D13): what it holds, as
+ * Apple's examples name it, or a Picker's `selection`, numbered past every name taken. The
+ * canvas binds a library control to it, and Saves to offers it first.
+ */
+function newValueName(ctx: FeatureContext, node: AuthoringNode, control: string, type: string): string {
+  const owner = ownerOf(ctx, node), base = control === 'Picker' ? 'selection' : VALUE_NAMES[type] ?? 'value'
+  let name = base
+  for (let suffix = 2; nameTaken(ctx, node, owner, name); suffix++) name = base + suffix
+  return name
+}
+
 export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): BehaviorSettings | undefined {
   const call = callOf(ctx, node)
   if (!call) return undefined
@@ -92,8 +112,9 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
   const argument = label && call.args.find(a => a.label === label)
   const inputs = stateInputs(ctx, node)
   const bindingState = argument && inputs.find(s => raw(ctx, argument.value.span) === '$' + s.name)
+  const type = label === 'text' ? 'String' : label === 'isOn' ? 'Bool' : bindingState?.type ?? (node.name === 'Slider' ? 'Double' : node.name === 'DatePicker' ? 'Date' : node.name === 'ColorPicker' ? 'Color' : 'Int')
   const collections = node.name === 'Button' ? ctx.nodes.filter(n => n.owner === node.owner && n.kind === 'collection').flatMap(n => { const c = collectionFor(ctx, n); return c ? [c] : [] }).filter((c, i, a) => a.findIndex(other => other.name === c.name) === i) : []
-  return { states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' ? emptyComponents(ctx).filter(n => n !== node.owner) : [], canConfigureAction: node.name === 'Button' && call.args.length === 1 && call.args[0]?.label === null && !!call.trailingClosure && call.trailingClosure.params.length === 0, currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type: label === 'text' ? 'String' : label === 'isOn' ? 'Bool' : bindingState?.type ?? (node.name === 'Slider' ? 'Double' : node.name === 'DatePicker' ? 'Date' : node.name === 'ColorPicker' ? 'Color' : 'Int'), current: raw(ctx, argument.value.span) } : undefined }
+  return { states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' ? emptyComponents(ctx).filter(n => n !== node.owner) : [], canConfigureAction: node.name === 'Button' && call.args.length === 1 && call.args[0]?.label === null && !!call.trailingClosure && call.trailingClosure.params.length === 0, currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
 }
 function namedState(ctx: FeatureContext, node: AuthoringNode, name: string): StateInput {
   const input = stateInputs(ctx, node).find(s => s.name === name)
@@ -111,10 +132,12 @@ export function configureBinding(ctx: FeatureContext, node: AuthoringNode, name:
   if (!simpleBinding && !constant) throw new Error('This binding has developer logic. Wire it in Swift.')
   const patches = [patch(argument.value.span, '$' + name)]
   if (create) {
-    if (shadowsMember(ctx, node, name) || owner.members.some(m => 'name' in m && m.name === name) || allDeclarations(ctx).some(d => 'name' in d && d.name === name)) throw new Error('This state name is already declared.')
+    if (nameTaken(ctx, node, owner, name)) throw new Error('This state name is already declared.')
     const type = settings.binding.type
     let expression: string
-    if (type === 'Date' && typeof create.value === 'number' && Number.isFinite(create.value)) expression = `Date(timeIntervalSince1970: ${create.value})`
+    // No value is today, written as Apple writes it (D13); a day chosen is that day.
+    if (type === 'Date' && create.value === null) expression = 'Date()'
+    else if (type === 'Date' && typeof create.value === 'number' && Number.isFinite(create.value)) expression = `Date(timeIntervalSince1970: ${create.value})`
     else if (type === 'Color' && typeof create.value === 'string') expression = styleExpression('color', create.value)
     else { if (!['String', 'Bool', 'Int', 'Double'].includes(type) || !validScalar(create.value, { type: type as 'String' | 'Bool' | 'Int' | 'Double', optional: false })) throw new Error('The initial value does not match this control’s binding type.'); expression = swiftValue(create.value) }
     patches.push(insertMember(ctx, owner, `@State private var ${name}: ${type} = ${expression}`))
@@ -124,6 +147,49 @@ export function configureBinding(ctx: FeatureContext, node: AuthoringNode, name:
   }
   return patches
 }
+/** The type of the value a library control is bound to, by the constant it is written with. */
+const LIVE_CONTROL_TYPES: Readonly<Record<string, (value: string) => string | null>> = {
+  Toggle: () => 'Bool',
+  TextField: () => 'String',
+  Slider: () => 'Double',
+  Stepper: value => (/^-?\d+$/.test(value) ? 'Int' : 'Double'),
+  Picker: value => (/^-?\d+$/.test(value) ? 'Int' : /^".*"$/.test(value) ? 'String' : null),
+  DatePicker: () => 'Date',
+  ColorPicker: () => 'Color',
+}
+
+/** Whether a view added at `node` goes into a row design: inside one, or into the rows of the list or Repeat selected. */
+function addsToRows(ctx: FeatureContext, node: AuthoringNode): boolean {
+  if (ctx.nodes.some(n => n.parentId === node.id && n.kind === 'template')) return true
+  for (let item: AuthoringNode | undefined = node; item; item = ctx.nodes.find(n => n.id === item!.parentId)) if (item.kind === 'template') return true
+  return false
+}
+
+/**
+ * A control from the library, bound to a new value on its screen rather than to the
+ * constant it is written with, so it switches, slides and takes typing in the preview
+ * at once (D13). A control added to a list's rows keeps its constant, as one value would
+ * switch every row together: Saves to binds it to the row's field. Null when the
+ * snippet is not such a control.
+ */
+export function liveControl(ctx: FeatureContext, node: AuthoringNode, snippet: string): { readonly snippet: string; readonly member: SourcePatch; readonly declaration: string } | null {
+  const control = /^[A-Za-z]+/.exec(snippet)?.[0] ?? '', typeOf = LIVE_CONTROL_TYPES[control]
+  const at = snippet.indexOf('.constant(')
+  if (!typeOf || at < 0 || addsToRows(ctx, node)) return null
+  let depth = 0, close = at + '.constant('.length
+  for (; close < snippet.length; close++) {
+    if (snippet[close] === '(') depth++
+    else if (snippet[close] === ')' && depth-- === 0) break
+  }
+  const value = snippet.slice(at + '.constant('.length, close).trim()
+  const type = typeOf(value)
+  const owner = ownerOf(ctx, node)
+  if (!type || !owner) return null
+  const name = newValueName(ctx, node, control, type)
+  const declaration = `@State private var ${name}: ${type} = ${value}`
+  return { snippet: snippet.slice(0, at) + '$' + name + snippet.slice(close + 1), member: insertMember(ctx, owner, declaration), declaration }
+}
+
 export function configureAction(ctx: FeatureContext, node: AuthoringNode, action: BehaviorAction, replace: boolean): SourcePatch[] {
   const settings = behaviorSettings(ctx, node), call = callOf(ctx, node), owner = ownerOf(ctx, node)
   if (!settings?.canConfigureAction || !call?.trailingClosure || !owner) throw new Error('Select a Button with a title and one action closure.')

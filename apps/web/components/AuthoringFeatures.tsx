@@ -6,6 +6,7 @@ import { useState } from 'react'
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, ComponentDescription, ComponentVariant, BehaviorAction, DesignRecord, DesignValue, RecordField, PreviewInput, NavigationDestination } from '@studio/shared'
 import { defaultRecord, RecordEditor } from './RecordEditor'
 import { parseRecordDrafts } from '../lib/recordDrafts'
+import { newValueDefaults } from '../lib/newValue'
 import { settingsVisualChildren } from '../lib/authoringSettings'
 import { sourceLayerLabel } from '../lib/sourceLayers'
 import styles from './AuthoringInspector.module.css'
@@ -111,12 +112,14 @@ function BehaviorEditor({ node, snapshot, onSelect, onCommand, busy, part }: { s
   const [recordError, setRecordError] = useState<string | null>(null)
   const [kind, setKind] = useState<BehaviorAction['type']>('toggle'), [state, setState] = useState(info.states[0]?.name ?? '')
   const [destination, setDestination] = useState(info.destinations[0] ?? ''), [actionName, setActionName] = useState(info.actions[0] ?? '')
-  const [value, setValue] = useState(() => info.binding?.type === 'Date' ? new Date().toISOString().slice(0, 10) : ''), [replace, setReplace] = useState(false), [newState, setNewState] = useState('value')
+  // A new value starts with a name free on the screen, as the value the control shows (D13).
+  const [defaults] = useState(() => info.binding ? newValueDefaults(info.binding) : null)
+  const [value, setValue] = useState(defaults?.value ?? ''), [replace, setReplace] = useState(false), [newState, setNewState] = useState(defaults?.name ?? 'value')
   const [collectionName, setCollectionName] = useState(info.collections[0]?.name ?? ''), [item, setItem] = useState<readonly DesignRecord[]>([])
   const [deleteId, setDeleteId] = useState('')
   const [transition, setTransition] = useState<'opacity' | 'slide' | 'scale'>('opacity'), [duration, setDuration] = useState('0.25')
   const selected = info.states.find(s => s.name === state), collection = info.collections.find(c => c.name === collectionName)
-  const parse = (type: string): DesignValue => type === 'Date' ? Date.parse(value) / 1000 : type === 'Color' ? value || '#6D28D9' : type === 'Bool' ? value === 'true' : ['Int', 'Double'].includes(type) ? (value === '' ? null : Number(value)) : value
+  const parse = (type: string): DesignValue => type === 'Date' ? (value ? Date.parse(value) / 1000 : null) : type === 'Color' ? value || '#6D28D9' : type === 'Bool' ? value === 'true' : ['Int', 'Double'].includes(type) ? (value === '' ? null : Number(value)) : value
   const configure = () => {
     let action: BehaviorAction
     if (kind === 'toggle' || kind === 'dismiss') action = { type: kind, state }

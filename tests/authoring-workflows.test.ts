@@ -384,6 +384,20 @@ it('keeps invalid scenario errors and cleared handlers across reset and rerender
   expect(rerender(revision++).diagnostics.some(d => d.code === 'invalid_preview_scenario')).toBe(true)
 })
 
+it('offers a new value a name nothing on the screen has yet, a stored property included (D13)', () => {
+  const source = files(app('VStack { TextField("Name", text: .constant("")); Toggle("Alerts", isOn: .constant(false)); Picker("Size", selection: .constant(0)) { Text("Small").tag(0) } }', 'let text: String = "Ada"\n@State private var isOn = true'))
+
+  expect(target(source, 'TextField').behavior?.binding?.newName).toBe('text2')
+  expect(target(source, 'Toggle').behavior?.binding?.newName).toBe('isOn2')
+  expect(target(source, 'Picker').behavior?.binding?.newName).toBe('selection')
+})
+
+it('saves a date picker to a new value that starts as today, written Date() rather than a fixed day (D13)', () => {
+  const bound = edit(files(app('DatePicker("Date", selection: .constant(Date()))')), 'DatePicker', { kind: 'bind-state', name: 'date', create: { value: null } })
+  expect(bound[0]!.text).toContain('@State private var date: Date = Date()')
+  expect(bound[0]!.text).toContain('DatePicker("Date", selection: $date)')
+})
+
 it('writes the sheet it adds on its own line, under the button that opens it (D13)', () => {
   const source = files(app('VStack {\n        Button("Open") { }\n    }', '', 'struct Detail: View { var body: some View { Text("Detail content") } }'))
   const sheet = edit(source, 'Button', { kind: 'behavior', action: { type: 'sheet', destination: 'Detail' }, replace: false })
