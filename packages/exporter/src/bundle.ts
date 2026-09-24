@@ -1,3 +1,4 @@
+import { isAccentColorSetName } from '@studio/shared'
 import { assetCatalog } from './resources'
 import type { Project } from '@studio/project-model'
 import { generatePbxproj, targetRelativePath } from './pbxproj'
@@ -123,7 +124,8 @@ export function buildExportBundle(project: Project): ExportBundle {
 
   for (const [path, bytes] of assetCatalog(project, `${root}/${name}/Assets.xcassets`)) put(path, bytes)
   add(`${name}/Assets.xcassets/AppIcon.appiconset/Contents.json`, appIconContents())
-  add(`${name}/Assets.xcassets/AccentColor.colorset/Contents.json`, accentColorContents())
+  // An app with its own colour set of this name already has the folder.
+  if (!project.colors?.some(color => isAccentColorSetName(color.name))) add(`${name}/Assets.xcassets/AccentColor.colorset/Contents.json`, accentColorContents())
 
   add('.gitignore', gitignoreContents())
   add('README.md', readme(project, plan.sourcePaths))

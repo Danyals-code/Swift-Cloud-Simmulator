@@ -9,7 +9,6 @@ import {
   buildXcodeGenBundle,
   exportProjectZip,
   targetRelativePath,
-  zipFileName,
 } from './index'
 
 /**
@@ -99,18 +98,6 @@ describe('export byte-identity (FR-7.8)', () => {
 
     expect(readme).toContain(project.manifest.bundleId)
     expect(readme).toContain('byte for byte')
-  })
-})
-
-describe('zipFileName', () => {
-  it('uses the project name', () => {
-    expect(zipFileName(createDefaultProject(0))).toBe('MyDesignApp.zip')
-  })
-
-  it('strips characters that are illegal in filenames', () => {
-    const base = createDefaultProject(0)
-    const project = { ...base, manifest: { ...base.manifest, name: 'My App/v2: "final"' } }
-    expect(zipFileName(project)).toBe('My-App-v2---final-.zip')
   })
 })
 

@@ -1,4 +1,5 @@
 import type { Project } from '@studio/project-model'
+import { projectBackup } from '@studio/project-model/backup'
 import { PROJECT_DATABASE, PROJECTS, PROJECTS_BY_UPDATE } from '@studio/project-model/storage-names'
 import { STUDIO_BUILD } from './build'
 import { lastOpenedId } from './lastOpened'
@@ -52,10 +53,10 @@ export async function downloadLatestWork(): Promise<DownloadOutcome> {
   if (!project) return 'nothing'
   try {
     if (!live) throw new Error('The studio did not load, so there is nothing to build an archive with.')
-    save(`${fileName(project)}.swiftstudio.zip`, 'application/zip', await live.archive(project))
+    saveFile(`${fileName(project)}.swiftstudio.zip`, 'application/zip', await live.archive(project))
     return 'archive'
   } catch {
-    save(`${fileName(project)}.backup.json`, 'application/json', new TextEncoder().encode(JSON.stringify({ format: 'swift-web-studio-backup', build: STUDIO_BUILD, project }, bytesAsBase64)))
+    saveFile(`${fileName(project)}.backup.json`, 'application/json', new TextEncoder().encode(projectBackup(project, STUDIO_BUILD)))
     return 'backup'
   }
 }
@@ -161,22 +162,14 @@ function fileName(project: Project): string {
   return project.manifest?.name?.replace(/[^A-Za-z0-9._-]+/g, '-') || 'Project'
 }
 
-/** Image bytes survive JSON as base64 rather than as an object with a key per byte. */
-function bytesAsBase64(_key: string, value: unknown): unknown {
-  if (!(value instanceof Uint8Array)) return value
-  let binary = ''
-  for (const byte of value) binary += String.fromCharCode(byte)
-  return { base64: btoa(binary) }
-}
-
 /**
- * Saves a file through the browser's download.
+ * Saves a file through the browser's download: the recovery screen's and every export's.
  *
  * The object URL is freed a minute later rather than at once. Freeing it at once works
- * for the exporter's downloads in the browsers the tests run, but this is the one
- * download that has to work, and waiting costs nothing.
+ * in the browsers the tests run, but these are the files somebody's work ends up in,
+ * and waiting costs nothing.
  */
-function save(name: string, type: string, bytes: Uint8Array): void {
+export function saveFile(name: string, type: string, bytes: Uint8Array): void {
   const url = URL.createObjectURL(new Blob([bytes.slice()], { type }))
   const anchor = document.createElement('a')
   anchor.href = url

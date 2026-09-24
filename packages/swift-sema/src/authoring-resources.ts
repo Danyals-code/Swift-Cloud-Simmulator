@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion, isAccentColorSetName } from '@studio/shared'
 import type { AuthoringNode, FontTokenValue, PreviewColorAsset, ResourceOperation, ShadowTokenValue, SharedStyle, StyleKind, StyleProperty, SourceSpan, SourceFile, TokenDefinition } from '@studio/shared'
 import { Parser, forEachChild, type Decl, type Expr, type ExtensionDecl, type Node, type VarDecl } from '@studio/swift-syntax'
 import { AUTHORING_COLORS, SYSTEM_COLORS, AUTHORING_FONTS, swiftString } from './design-controls'
@@ -305,6 +305,8 @@ export function tokenNameProblem(ctx: FeatureContext, kind: StyleKind, name: str
   if (kind === 'spacing' && !name.startsWith('space')) return `Spacing tokens start with “space”, so they never mix with corner radii. Try ${suggestion}.`
   if (kind === 'radius' && !name.startsWith('radius')) return `Corner radius tokens start with “radius”. Try ${suggestion}.`
   if (FRAMEWORK_MEMBERS[kind].includes(name) || CONTEXTUAL.has(name)) return `“${name}” is already part of SwiftUI. Try ${suggestion}.`
+  // Its colour set would be the same folder as the app's own AccentColor in the export.
+  if (kind === 'color' && isAccentColorSetName(name)) return `“${name}” is the name Xcode gives the app’s accent colour. Try ${suggestion}.`
   if (name !== existing && (recipes(ctx).some(r => r.style.name === name) || allDeclarations(ctx).some(d => 'name' in d && d.name === name))) return `“${name}” is already used in this app. Choose another name.`
   if (['Color', 'Font', 'CGFloat', 'Double', 'SwiftUI', 'Bundle', 'ShadowToken', 'View'].includes(name)) return `Choose a name that is not a type. Try ${suggestion}.`
   return null

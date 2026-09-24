@@ -26,7 +26,7 @@ import { gitignoreContents } from './xcode-files'
 
 // The format list itself lives in `shared`, so the toolbar can show the menu without
 // pulling in the generator behind it.
-export { EXPORT_FORMATS, type ExportFormat, type FormatInfo } from '@studio/shared'
+export { EXPORT_FORMATS, type ArchiveFormat, type ExportFormat, type FormatInfo } from '@studio/shared'
 
 /**
  * Swift tools version.

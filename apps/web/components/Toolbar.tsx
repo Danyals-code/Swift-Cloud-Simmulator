@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { EXPORT_FORMATS, type ExportFormat } from '@studio/shared'
+import { EXPORT_FORMATS, type ArchiveFormat } from '@studio/shared'
 import { BUILD_DATE, BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import type { WorkspaceMode, WorkspaceTheme } from '../lib/layout'
 import { unsaved, type StorageProblem } from '../lib/storageProblem'
@@ -33,9 +33,8 @@ export interface ToolbarProps {
   panes: ReadonlySet<PaneKey>
   suppressed: ReadonlySet<PaneKey>
   onTogglePane: (pane: PaneKey) => void
-  onExport: (format: ExportFormat | 'complete') => void
+  onExport: (format: ArchiveFormat) => void
   exporting?: boolean
-  onDownloadEditable?: () => void
   onShare: () => Promise<'copied' | 'too-large' | 'failed'>
   /**
    * Design's preview environment - device, appearance, text size. It applies to
@@ -84,7 +83,7 @@ const debugPane = [{ key: 'debug', icon: 'sidebar-bottom' as const, label: 'Debu
 
 /** Project actions stay in the header; preview tools live beside the canvas. */
 export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, mode, onModeChange, theme, onThemeChange,
-  panes, suppressed, onTogglePane, onExport, onDownloadEditable, onShare, onRenameProject, onShortcuts, onCopyBuild, onReview, reviewDisabled,
+  panes, suppressed, onTogglePane, onExport, onShare, onRenameProject, onShortcuts, onCopyBuild, onReview, reviewDisabled,
   environment, previewing = false, onSetPreviewing, previewDisabled, exporting = false }: ToolbarProps) {
   const design = mode === 'design'
   // One Export menu: the four native formats, the editable archive, and - in Design -
@@ -93,13 +92,12 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, m
   const exportItems = [
     { value: 'complete', label: 'Complete Xcode bundle', detail: 'Default', title: 'Xcode project, every screen PNG, settings report, prompts and chat history', disabled: exporting },
     ...EXPORT_FORMATS.map((f, index) => ({ value: f.id, label: f.id === 'xcodeproj' ? 'Xcode project only' : f.name, detail: f.shortName, title: f.description, separated: index === 0, disabled: exporting })),
-    ...(onDownloadEditable ? [{ value: 'editable', label: 'Editable archive', detail: '.swiftstudio.zip', title: 'Swift, images, app settings and designer metadata, to reopen here later', separated: true }] : []),
-    ...(design && onReview ? [{ value: 'review', label: 'Review & export images…', title: 'Check contrast and touch targets, present screens, or export PNGs', disabled: reviewDisabled, separated: !onDownloadEditable }] : []),
+    { value: 'editable', label: 'Editable archive', detail: '.swiftstudio.zip', title: 'Swift, images, app settings and designer metadata, to reopen here later', separated: true, disabled: exporting },
+    ...(design && onReview ? [{ value: 'review', label: 'Review & export images…', title: 'Check contrast and touch targets, present screens, or export PNGs', disabled: reviewDisabled }] : []),
   ]
   const chooseExport = (value: string) => {
-    if (value === 'editable') onDownloadEditable?.()
-    else if (value === 'review') onReview?.()
-    else onExport(value as ExportFormat | 'complete')
+    if (value === 'review') onReview?.()
+    else onExport(value as ArchiveFormat)
   }
   return <header data-testid="toolbar" className={styles.toolbar} data-mode={mode}>
     <div className={styles.project}>

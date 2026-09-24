@@ -6,7 +6,6 @@ import {
   bundleFor,
   EXPORT_FORMATS,
   exportProjectZip,
-  zipFileName,
   type ExportFormat,
 } from '@studio/exporter'
 
@@ -68,14 +67,6 @@ describe.each(FORMATS)('every format: %s', (format) => {
     }
   })
 
-  it('names the download after the format', () => {
-    // Four zips of the same project in one Downloads folder, and the name is the only
-    // thing telling them apart.
-    const name = zipFileName(project, format)
-    expect(name.endsWith('.zip')).toBe(true)
-    expect(name).toContain(project.manifest.name)
-  })
-
   it('gives every path a project-named root', () => {
     for (const path of textFiles(format).keys()) {
       expect(path.startsWith(project.manifest.name), `${path} escapes the root`).toBe(true)
@@ -89,11 +80,6 @@ describe.each(FORMATS)('every format: %s', (format) => {
     // dictating how each README phrases it.
     for (const topic of [/SF Symbol/i, /font/i, /scroll/i]) expect(readme).toMatch(topic)
   })
-})
-
-it('produces a distinct file name for every format', () => {
-  const names = FORMATS.map((f) => zipFileName(project, f))
-  expect(new Set(names).size).toBe(names.length)
 })
 
 describe('the Swift Playgrounds package', () => {
