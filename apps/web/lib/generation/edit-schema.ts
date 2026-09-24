@@ -1,6 +1,7 @@
 import { normalizeFileName, sourcePathsConflict, validPromptSelection, type PromptSelection, type PromptMessage } from '@studio/project-model'
 import type { SourceChange, SourceFile } from '@studio/shared'
 import type { Provider } from './schema'
+import { parsePreviousAttempt, type PreviousAttempt } from './previousAttempt'
 
 export interface PromptEditInput {
   provider: Provider
@@ -10,6 +11,8 @@ export interface PromptEditInput {
   selection: PromptSelection | null
   history: readonly { role: 'user' | 'assistant'; content: string }[]
   project: { name: string; deploymentTarget: string; images: readonly string[]; colors: readonly string[] }
+  /** The second request of an attempt: what was wrong with the first answer (G2). */
+  previousAttempt?: PreviousAttempt
 }
 export interface PromptEditResult { reply: string; files: { path: string; code: string }[]; deletedFiles: string[] }
 /** Failed or interrupted turns are visible in the log, but are not instructions for the next edit. */
@@ -59,7 +62,8 @@ export function parsePromptEditInput(value: unknown): PromptEditInput {
   const project = value.project
   if (!record(project) || !text(project.name, 100) || !text(project.deploymentTarget, 20)) throw new Error('Invalid project settings.')
   const names = (value: unknown) => { if (!Array.isArray(value) || value.length > 256 || value.some(item => !text(item, 180))) throw new Error('Invalid project resources.'); return value as string[] }
-  return { provider: value.provider as Provider, model: value.model, prompt: value.prompt.trim(), files, selection, history, project: { name: project.name, deploymentTarget: project.deploymentTarget, images: names(project.images), colors: names(project.colors) } }
+  const previousAttempt = parsePreviousAttempt(value.previousAttempt)
+  return { provider: value.provider as Provider, model: value.model, prompt: value.prompt.trim(), files, selection, history, project: { name: project.name, deploymentTarget: project.deploymentTarget, images: names(project.images), colors: names(project.colors) }, ...(previousAttempt ? { previousAttempt } : {}) }
 }
 
 export function parsePromptEditResult(value: unknown): PromptEditResult {

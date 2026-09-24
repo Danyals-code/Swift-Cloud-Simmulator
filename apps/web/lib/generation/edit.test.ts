@@ -3,7 +3,7 @@ import { POST } from '../../app/api/edit/route'
 import { parsePromptEditInput, parsePromptEditResult, promptEditChanges, promptConversationContext, type PromptEditInput } from './edit-schema'
 import { promptEditContext } from './edit-prompt'
 import { SWIFTUI_GUIDANCE } from './guidance'
-import { preparePromptEdit, promptPreviewProblem } from './applyPromptEdit'
+import { preparePromptEdit } from './applyPromptEdit'
 import { useStudio } from '../store'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
 import { createDefaultProject } from '@studio/project-model/templates'
@@ -51,10 +51,8 @@ describe('prompt edit boundaries', () => {
     const prepared = preparePromptEdit(project, 4, edit)
     expect(prepared.candidate.files[1]).toBe(project.files[1])
     const result = compile({ files: prepared.candidate.files, canvas: { width: 393, height: 852 }, colorScheme: 'light', revision: 4 })
-    expect(promptPreviewProblem(result)).toBeNull()
+    expect(result.diagnostics.filter(item => item.severity === 'error')).toEqual([])
     expect(result.renderTree?.nodes.flatMap(node => node.text?.runs.map(run => run.text) ?? [])).toContain('After')
-    const broken = compile({ files: [{ id: 'Sources/App.swift', text: 'import SwiftUI\n@main struct' }], canvas: { width: 393, height: 852 }, colorScheme: 'light', revision: 5 })
-    expect(promptPreviewProblem(broken)).toContain('No changes applied')
   })
   it('applies additions, deletions and replacements in one undo while retaining the chat', async () => {
     await useStudio.getState().openFiles([...input.files.map(file => ({ name: file.id, text: file.text })), { name: 'Sources/Old.swift', text: '// old' }])
@@ -115,6 +113,23 @@ describe('edit endpoint', () => {
     expect((await POST(request(input, { Authorization: '' }))).status).toBe(400)
     expect((await POST(request({ ...input, prompt: 'x'.repeat(2_500_001) }))).status).toBe(413)
     expect(fetch).not.toHaveBeenCalled()
+  })
+  it('tells the provider what was wrong with the first answer when asking again (G2)', async () => {
+    const fetch = vi.fn().mockResolvedValue(response()); vi.stubGlobal('fetch', fetch)
+    const previousAttempt = { problems: [{ message: "Cannot find 'tapsLabel' in scope.", file: 'Sources/App.swift', line: 2, source: 'Text(tapsLabel)' }] }
+    expect((await POST(request({ ...input, previousAttempt }))).status).toBe(200)
+    expect(JSON.parse(JSON.parse(fetch.mock.calls[0]![1].body).input).previousAttempt).toEqual(previousAttempt)
+  })
+  it.each([
+    ['an unreadable edit', { status: 'completed', output: [{ content: [{ type: 'output_text', text: 'not JSON' }] }] }, true],
+    ['an edit to an unsafe path', { status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ ...edit, files: [{ path: '../App.swift', code: source }] }) }] }] }, true],
+    ['an unfinished answer', { status: 'incomplete', output: [] }, false],
+    ['a refusal', { status: 'completed', output: [{ content: [{ type: 'refusal', refusal: 'No' }] }] }, false],
+  ])('says whether asking again could make a usable edit, after %s (G2)', async (_case, body, retryable) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(body)))
+    const response = await POST(request())
+    expect(response.status).toBe(422)
+    expect((await response.json()).retryable ?? false).toBe(retryable)
   })
   it('asks for the SwiftUI the studio previews and Design edits, the same as Create with AI does (G1)', async () => {
     const fetch = vi.fn().mockResolvedValue(response()); vi.stubGlobal('fetch', fetch)

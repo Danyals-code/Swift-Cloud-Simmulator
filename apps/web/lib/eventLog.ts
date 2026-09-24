@@ -55,6 +55,8 @@ export type AttemptStep =
   | ({ readonly action: 'sent' } & SentPrompt)
   /** The server answered, with its HTTP status: the time to response. */
   | { readonly action: 'responded'; readonly status: number; readonly ms: number }
+  /** The answer was broken, so it was asked for once more, with its problems (G2). */
+  | { readonly action: 'retried'; readonly problems: number; readonly ms: number }
   | (PromptOutcome & { readonly ms: number })
   | { readonly action: 'failed'; readonly stage: FailedStage; readonly ms: number }
   /** Create with AI: its draft opened as a new app, and this is logged in that app's log. */

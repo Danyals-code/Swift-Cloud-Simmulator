@@ -1,5 +1,6 @@
 import type { PromptEditInput } from './edit-schema'
 import { SWIFTUI_GUIDANCE } from './guidance'
+import { PREVIOUS_ATTEMPT_RULE } from './previousAttempt'
 
 export const EDIT_SYSTEM_PROMPT = `You edit the user's existing SwiftUI project. Return only the requested JSON. Make the actual requested source edits; do not only explain how to do them. Reply in one short sentence, at most 30 words, describing what changed. If the user asks a question, answer briefly with empty files and deletedFiles arrays. If an essential detail is missing, ask one brief question with no source changes.
 
@@ -9,11 +10,13 @@ The current project source is authoritative. Earlier chat messages describe past
 
 Follow the rules below in the code you add or change. Where the request does not touch existing code, leave it as it is, even when it does not follow them. Keep one existing @main App entry point (or preserve a preview-only project), and keep controls functional. If the project's deploymentTarget is below 27.0, use only APIs it supports.
 
+${PREVIOUS_ATTEMPT_RULE} Start again from currentFiles.
+
 Your reply is displayed after the edits pass validation and are applied. Never claim an edit when files and deletedFiles are empty.
 
 ${SWIFTUI_GUIDANCE}`
 
 export function promptEditContext(input: PromptEditInput): string {
   const file = input.selection && input.files.find(file => file.id === input.selection!.file)
-  return JSON.stringify({ request: input.prompt, project: input.project, selection: input.selection ? { ...input.selection, source: file?.text.slice(input.selection.start, input.selection.end) } : null, conversation: input.history, currentFiles: input.files })
+  return JSON.stringify({ request: input.prompt, project: input.project, selection: input.selection ? { ...input.selection, source: file?.text.slice(input.selection.start, input.selection.end) } : null, conversation: input.history, currentFiles: input.files, ...(input.previousAttempt ? { previousAttempt: input.previousAttempt } : {}) })
 }

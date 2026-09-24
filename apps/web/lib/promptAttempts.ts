@@ -19,6 +19,8 @@ export interface Attempt {
   responded(status: number): void
   /** The answer's change is being checked in a preview. */
   checking(): void
+  /** The answer was broken, and a second request goes with its `problems` (G2). */
+  retried(problems: number): void
   ended(outcome: PromptOutcome): void
   /** The request stopped early: cancelled when its signal was aborted, and otherwise failed, with how far it got. */
   stopped(signal: AbortSignal): void
@@ -53,6 +55,11 @@ export function promptAttempts(log: Pick<EventLog, 'record'>, flow: AiEvent['flo
           record(project, attempt, { action: 'responded', status, ms: since() })
         },
         checking() { stage = 'preview' },
+        retried(problems) {
+          // How far the second request gets starts over.
+          stage = 'request'
+          record(project, attempt, { action: 'retried', problems, ms: since() })
+        },
         ended(outcome) { record(project, attempt, { ...outcome, ms: since() }) },
         stopped(signal) {
           record(project, attempt, signal.aborted ? { action: 'cancelled', ms: since() } : { action: 'failed', stage, ms: since() })

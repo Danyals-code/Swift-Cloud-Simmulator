@@ -76,6 +76,43 @@ describe('AI attempts in the event log', () => {
     ])
   })
 
+  it('notes asking again after a broken answer, and how far the second request got (G2)', async () => {
+    const { log, logged, clock, wait } = setUp()
+    const attempts = promptAttempts(log, 'edit', clock)
+
+    const fixed = attempts.sent('p1', PROMPT)
+    wait(3000)
+    fixed.responded(200)
+    fixed.checking()
+    wait(500)
+    fixed.retried(2)
+    wait(4000)
+    fixed.responded(200)
+    fixed.checking()
+    fixed.ended({ action: 'applied', files: 1 })
+    const unanswered = attempts.sent('p1', PROMPT)
+    unanswered.responded(200)
+    unanswered.checking()
+    unanswered.retried(1)
+    unanswered.stopped(RUNNING)
+    const brokenTwice = attempts.sent('p1', PROMPT)
+    brokenTwice.responded(200)
+    brokenTwice.checking()
+    brokenTwice.retried(1)
+    brokenTwice.responded(200)
+    brokenTwice.checking()
+    brokenTwice.stopped(RUNNING)
+
+    const events = await logged('p1')
+    expect(events.filter(event => event.attempt === 1).slice(1)).toEqual([
+      { type: 'ai', flow: 'edit', attempt: 1, action: 'responded', status: 200, ms: 3000 },
+      { type: 'ai', flow: 'edit', attempt: 1, action: 'retried', problems: 2, ms: 3500 },
+      { type: 'ai', flow: 'edit', attempt: 1, action: 'responded', status: 200, ms: 7500 },
+      { type: 'ai', flow: 'edit', attempt: 1, action: 'applied', files: 1, ms: 7500 },
+    ])
+    expect(events.filter(event => event.action === 'failed').map(event => [event.attempt, event.stage])).toEqual([[2, 'request'], [3, 'preview']])
+  })
+
   it('logs Create with AI in the project open behind it, and notes the draft that became a new app there', async () => {
     const { log, logged, clock, wait } = setUp()
     const attempts = promptAttempts(log, 'create', clock)

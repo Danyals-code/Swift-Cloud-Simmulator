@@ -182,11 +182,16 @@ export type ProjectOrigin = 'restored' | 'shared' | 'fresh' | 'recovered'
 export interface AiHold {
   /** The answer's change is being checked in a preview. */
   checking(): void
+  /** The answer was broken, and the AI is asked once more (G2). */
+  fixing(): void
   /** Applies the answer: the one change the project takes while it is held. */
   commit(expected: Project, transaction: ProjectTransaction): string | null
   /** Lets the project go, whether the edit landed, failed or stopped. */
   release(): void
 }
+
+/** How far an AI edit has got: waiting for its answer, checking it in a preview, or asking once more (G2). */
+export type AiEditPhase = 'editing' | 'checking' | 'fixing'
 
 /** Why a change is refused while an AI edit holds the project. */
 export const AI_EDITING = 'The AI is editing this project. Wait for it, or press Stop.'
@@ -211,7 +216,7 @@ export interface StudioState {
    * against the project as it was sent, and a change made while waiting used to throw
    * the paid-for answer away.
    */
-  aiEdit: { readonly phase: 'editing' | 'checking' } | null
+  aiEdit: { readonly phase: AiEditPhase } | null
   /** Holds the project for an AI edit, which `stop` cancels. Null while another holds it. */
   holdForAi: (stop: () => void) => AiHold | null
   /** Stops the AI edit holding the project: its request is cancelled and the project is free again. */
@@ -594,6 +599,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       const holding = () => aiHold === hold
       return {
         checking: () => { if (holding()) set({ aiEdit: { phase: 'checking' } }) },
+        fixing: () => { if (holding()) set({ aiEdit: { phase: 'fixing' } }) },
         commit: (expected, transaction) => holding() ? applyTransaction(expected, transaction, null) : 'The AI edit was stopped. No changes applied.',
         release: () => {
           if (!holding()) return

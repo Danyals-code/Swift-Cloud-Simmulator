@@ -1,28 +1,41 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { OpenedFile, PromptMessage } from '@studio/project-model'
+import { projectFromFiles, type OpenedFile, type PromptMessage } from '@studio/project-model'
 import { useStudio, type SwitchResult } from '../lib/store'
 import { createAttempts, type DraftStamp } from '../lib/promptAttempts'
 import { useAiConnection } from '../lib/generation/connection'
 import { clearDraft, loadDraft, saveDraft } from '../lib/generation/draft'
 import { parseGeneratedApp, parseOptions, type GeneratedApp, type GenerationOptions, type Provider } from '../lib/generation/schema'
-import { checkPreview } from '../lib/generation/validate'
+import { askAiRoute } from '../lib/generation/aiRoute'
+import { describeProblem, previewCheck } from '../lib/generation/problems'
+import { answerWithOneRetry } from '../lib/generation/retry'
+import { compileSnapshot } from '../lib/compileSnapshot'
 import { Icon } from './ui/Icon'
 import styles from './PromptCreator.module.css'
 
 /** The project open behind Create with AI, which its attempts are logged in. */
 const openProjectId = () => useStudio.getState().project?.id ?? null
 
+/** A draft's files, as a project opens them. */
+const openedFiles = (app: GeneratedApp) => app.files.map(file => ({ name: file.path, text: file.code }))
+
+type Phase = 'idle' | 'generating' | 'checking' | 'fixing' | 'opening'
+/** What the panel says while it works, in each phase. */
+const PROGRESS = { generating: 'Writing your SwiftUI project. This may take a minute…', checking: 'Checking every screen in the preview…', fixing: 'The draft had an error. Asking the AI to fix it…', opening: 'Opening your app…' } satisfies Record<Exclude<Phase, 'idle'>, string>
+
 /** The options besides the connection, which is the tab's. */
 type AppOptions = Omit<GenerationOptions, 'provider' | 'model'>
-const INITIAL: AppOptions = { prompt: '', pageCount: 4, navigation: 'tabs', accent: 'indigo', sampleData: true, includeSettings: false }
+// The study's apps have 2 or 3 screens (G2).
+const INITIAL: AppOptions = { prompt: '', pageCount: 3, navigation: 'tabs', accent: 'indigo', sampleData: true, includeSettings: false }
 
 /**
  * Create with AI.
  *
  * The connection is the tab's, shared with Prompt Editing (G3), and a draft is kept
  * for the tab until it is opened or thrown away (G13): the panel closing loses neither.
+ * Every screen of a draft is checked in the preview, and a draft with errors is asked
+ * for once more, with them; one still broken is shown with its problems (G2).
  * `onDraft` tells the gallery whether a draft is waiting, and `onConfirmDiscard` asks
  * before one is thrown away.
  */
@@ -36,7 +49,7 @@ export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }
   const { connection, chooseProvider, setModel, setKey } = useAiConnection()
   const [options, setOptions] = useState(INITIAL)
   const [revealKey, setRevealKey] = useState(false)
-  const [phase, setPhase] = useState<'idle' | 'generating' | 'checking' | 'opening'>('idle')
+  const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<GeneratedApp | null>(kept?.app ?? null)
   const [history, setHistory] = useState<readonly PromptMessage[]>(kept?.history ?? [])
@@ -67,16 +80,36 @@ export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }
     setPhase('generating'); onBusy(true)
     const settings = { pageCount: input.pageCount, navigation: input.navigation, accent: input.accent, sampleData: input.sampleData, includeSettings: input.includeSettings }
     const attempt = createAttempts.sent(openProjectId(), { prompt: input.prompt, provider: input.provider, model: input.model, settings })
+    // A new app has no errors of its own yet, so every error the preview finds in a draft is
+    // the answer's. It checks every screen, on the device and target the new project gets.
+    const check = previewCheck(project => compileSnapshot(project, request.signal), null)
+    /** A check that could not finish, which must not cost the paid draft. */
+    let unchecked = false
     try {
-      const response = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.key.trim()}` }, body: JSON.stringify(input), signal: request.signal })
-      attempt.responded(response.status)
-      const result = await response.json().catch(() => { throw new Error('The studio server could not finish this request. Check your connection or try a smaller app.') })
-      if (!response.ok) throw new Error(result.error ?? 'Could not generate the app.')
-      const app = parseGeneratedApp(result.app, input.pageCount)
-      setPhase('checking')
-      attempt.checking()
-      const found = await checkPreview(app, request.signal)
+      const { answer: app, problems, secondTryFailed } = await answerWithOneRetry({
+        ask: previousAttempt => askAiRoute('/api/generate', {
+          key: connection.key, body: input, previousAttempt, signal: request.signal, responded: status => attempt.responded(status),
+          defaultError: 'The studio server could not finish this request. Check your connection or try a smaller app.',
+          read: answer => parseGeneratedApp(answer.app, input.pageCount),
+        }),
+        check: async app => {
+          setPhase('checking')
+          attempt.checking()
+          try { return await check(projectFromFiles(openedFiles(app))!) }
+          catch (error) {
+            if (request.signal.aborted) throw error
+            unchecked = true
+            return []
+          }
+        },
+        retrying: found => { setPhase('fixing'); attempt.retried(found.length) },
+      })
       if (request.signal.aborted) { attempt.stopped(request.signal); return }
+      const found = [
+        ...problems.map(describeProblem),
+        ...(secondTryFailed ? [`The AI could not be asked to fix this: ${secondTryFailed.message}`] : []),
+        ...(unchecked ? ['The preview check could not finish, so some screens were not checked. Try them after opening.'] : []),
+      ]
       const common = { provider: input.provider, model: input.model, kind: 'create' as const }
       const conversation: PromptMessage[] = [
         { ...common, id: crypto.randomUUID(), role: 'user', content: `${input.prompt}\n\nGeneration settings: ${JSON.stringify(settings)}`, createdAt: Date.now() },
@@ -98,7 +131,7 @@ export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }
     setPhase('opening'); onBusy(true); setError(null)
     try {
       // Staying with an unsaved project is a choice, not a failure: the draft waits here.
-      const opened = await onOpenFiles(draft.files.map(f => ({ name: f.path, text: f.code })), history)
+      const opened = await onOpenFiles(openedFiles(draft), history)
       if (opened === 'failed') throw new Error('The generated files could not be opened.')
       if (opened === 'opened') {
         const project = openProjectId()
@@ -112,8 +145,8 @@ export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }
   if (draft) return <div ref={review} tabIndex={-1} className={styles.review} data-testid="generated-review" aria-label="Generated project review">
     <div className={styles.summary}><span className={styles.check}><Icon name="check" size={18} /></span><div><h3>{draft.name}</h3><p>{draft.summary}</p></div></div>
     <div className={styles.pages}>{draft.pages.map((p, i) => <span key={`${p.file}:${i}`}>{p.title}</span>)}</div>
-    <p className={styles.validation} role="status">{issues.length ? 'This draft needs attention in the preview.' : 'First screen passed the preview check. Review all flows after opening.'}</p>
-    {issues.length > 0 && <details className={styles.issues}><summary>{issues.length} preview {issues.length === 1 ? 'issue' : 'issues'}</summary><ul>{issues.map(i => <li key={i}>{i}</li>)}</ul></details>}
+    <p className={styles.validation} role="status">{issues.length ? 'The preview found problems in this draft. You can open it and fix them, or go back to the prompt.' : 'Every screen passed the preview check.'}</p>
+    {issues.length > 0 && <details className={styles.issues} open><summary>{issues.length} preview {issues.length === 1 ? 'problem' : 'problems'}</summary><ul>{issues.map(i => <li key={i}>{i}</li>)}</ul></details>}
     <div className={styles.files}><nav aria-label="Generated files">{draft.files.map((file, i) => <button type="button" key={file.path} aria-pressed={selectedFile === i} onClick={() => setSelectedFile(i)}><Icon name="new-file" size={14} />{file.path.replace('Sources/', '')}</button>)}</nav><pre tabIndex={0} aria-label="Generated Swift source"><code>{draft.files[selectedFile]?.code}</code></pre></div>
     {error && <p role="alert" className={styles.error}>{error}</p>}
     <footer className={styles.footer}><span>{draft.files.length} Swift files · Opens as a separate project</span><div><button type="button" className={styles.secondary} disabled={busy} onClick={() => onConfirmDiscard(() => { if (stamp) createAttempts.draftDiscarded(stamp); clearDraft(); setDraft(null); setStamp(undefined); setError(null) })}>Back to prompt</button><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()} data-testid="open-generated">{busy ? 'Opening…' : issues.length ? 'Open draft' : 'Open project'}<Icon name="chevron-right" size={13} /></button></div></footer>
@@ -144,7 +177,7 @@ export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }
         <p className={styles.scope}>Creates a first version with SwiftUI screens and local interactions. Services such as login and payments need separate implementation.</p>
       </aside>
     </div>
-    <div className={styles.bottom}>{error && <p role="alert" className={styles.error}>{error}</p>}{busy && <p role="status" aria-live="polite" className={styles.progress}><Icon name="refresh" size={14} className="animate-spin" />{phase === 'checking' ? 'Checking the preview…' : 'Writing your SwiftUI project. This may take a minute…'}</p>}</div>
+    <div className={styles.bottom}>{error && <p role="alert" className={styles.error}>{error}</p>}{busy && <p role="status" aria-live="polite" className={styles.progress}><Icon name="refresh" size={14} className="animate-spin" />{PROGRESS[phase]}</p>}</div>
     <footer className={styles.footer}><span>Review the generated files before opening.</span><div>{busy && <button type="button" className={styles.secondary} onClick={cancel}>Cancel generation</button>}<button className={styles.primary} type="submit" disabled={busy}>{busy ? 'Working…' : 'Generate app'}<Icon name="chevron-right" size={13} /></button></div></footer>
   </form>
 }

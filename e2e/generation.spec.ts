@@ -83,15 +83,36 @@ test('both AI panels share one connection for the tab, whichever was open first 
   await expect(editing.getByLabel('API key', { exact: true })).toHaveValue('sk-ant-test-not-a-real-key')
 })
 
+type Sent = Record<string, unknown> & { readonly files?: readonly { id: string; text: string }[]; readonly previousAttempt?: { readonly problems: readonly { message: string }[] } }
+
+/** Answers the AI route at `path` with each of `answers` in turn, and keeps what each request sent. */
+async function answerInTurn(page: Page, path: string, answers: readonly ((sent: Sent) => unknown)[]) {
+  const sent: Sent[] = []
+  await page.route(path, async route => {
+    const body = route.request().postDataJSON() as Sent
+    sent.push(body)
+    await route.fulfill({ json: answers[sent.length - 1]!(body) })
+  })
+  return sent
+}
+
+/** An edit of the counter's source: `change` is given the file that shows the count. */
+const counterEdit = (change: (text: string) => string) => (sent: Sent) => {
+  const file = sent.files!.find(f => f.text.includes('Count: '))!
+  return { edit: { reply: 'Relabelled the count.', files: [{ path: file.id, code: change(file.text) }], deletedFiles: [] } }
+}
+const relabel = (text: string) => text.replace('Count: ', 'Taps so far: ')
+/** A view that names something no one declared: an error the preview reports. */
+const BROKEN_VIEW = '\nstruct TallyView: View {\n    var body: some View { Text(tallyLabel) }\n}\n'
+
 /** Answers /api/edit once `answer` is called, relabelling the counter; `refuse` instead fails it. */
 async function editWhenAnswered(page: Page) {
   let answer!: () => void, refuse!: () => void
   const decided = new Promise<'answer' | 'refuse'>(resolve => { answer = () => resolve('answer'); refuse = () => resolve('refuse') })
   await page.route('**/api/edit', async route => {
-    const { files } = route.request().postDataJSON() as { files: { id: string; text: string }[] }
-    const file = files.find(f => f.text.includes('Count: '))!
+    const sent = route.request().postDataJSON() as Sent
     if (await decided === 'refuse') return route.abort().catch(() => {})
-    await route.fulfill({ json: { edit: { reply: 'Relabelled the count.', files: [{ path: file.id, code: file.text.replace('Count: ', 'Taps so far: ') }], deletedFiles: [] } } })
+    await route.fulfill({ json: counterEdit(relabel)(sent) })
   })
   return { answer, refuse }
 }
@@ -174,4 +195,78 @@ test('a generated draft is kept for the tab until it is opened or thrown away, w
   await page.getByTestId('discard-draft-confirm-button').click()
   await expect(review).toHaveCount(0)
   await expect(page.getByLabel('App description', { exact: true })).toBeVisible()
+})
+
+test('an AI edit that breaks the preview is asked for once more, with its error, and the fixed one applies (G2)', async ({ page }) => {
+  const sent = await answerInTurn(page, '**/api/edit', [counterEdit(text => relabel(text) + BROKEN_VIEW), counterEdit(relabel)])
+  await openCounter(page)
+  await sendPrompt(page)
+
+  await expect(page.getByTestId('render-tree').getByText('Taps so far: 0', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('prompt-editor')).toContainText('Relabelled the count.')
+  expect(sent).toHaveLength(2)
+  expect(sent[0]!.previousAttempt).toBeUndefined()
+  expect(sent[1]!.previousAttempt!.problems[0]!.message).toContain('tallyLabel')
+})
+
+test('an AI edit still broken after its second try changes nothing, and says why (G2)', async ({ page }) => {
+  const sent = await answerInTurn(page, '**/api/edit', [counterEdit(text => relabel(text) + BROKEN_VIEW), counterEdit(text => relabel(text) + BROKEN_VIEW)])
+  await openCounter(page)
+  await sendPrompt(page)
+
+  const editing = page.getByTestId('prompt-editor')
+  await expect(editing).toContainText('still had an error after a second try, so nothing was changed')
+  await expect(editing).toContainText('tallyLabel')
+  await expect(page.getByTestId('render-tree').getByText('Count: 0', { exact: true })).toBeVisible()
+  expect(sent).toHaveLength(2)
+})
+
+test('an error the project already had does not stop an AI edit (G2)', async ({ page }) => {
+  const sent = await answerInTurn(page, '**/api/edit', [counterEdit(relabel)])
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await page.getByTestId('editor').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.insertText(BROKEN_VIEW)
+  await sendPrompt(page)
+
+  await expect(page.getByTestId('prompt-editor')).toContainText('Relabelled the count.')
+  await expect(page.getByTestId('editor')).toContainText('Taps so far: ')
+  expect(sent).toHaveLength(1)
+})
+
+/** Starts Create with AI with a description and a key, for the one-page reading app. */
+async function describeApp(page: Page) {
+  await page.goto('/')
+  await page.getByTestId('gallery-source-prompt').click()
+  await page.getByLabel('App description', { exact: true }).fill('A quiet place to track daily reading goals.')
+  const pages = page.getByRole('combobox', { name: 'Pages', exact: true })
+  await expect(pages).toHaveValue('3')
+  await pages.selectOption('1')
+  await page.getByLabel('API key', { exact: true }).fill('sk-test-not-a-real-key-123456')
+}
+/** The reading app with its screen naming a value no one declared. */
+const brokenDraft = { ...generated, files: [{ ...generated.files[0]!, code: generated.files[0]!.code.replace('Text("A chapter a day")', 'Text(chapterGoal)') }] }
+
+test('Create with AI asks for 3 pages at first, and asks once more for a draft whose screens have an error (G2)', async ({ page }) => {
+  const sent = await answerInTurn(page, '**/api/generate', [() => ({ app: brokenDraft }), () => ({ app: generated })])
+  await describeApp(page)
+  await page.getByRole('button', { name: 'Generate app', exact: true }).click()
+
+  const review = page.getByTestId('generated-review')
+  await expect(review).toContainText('Every screen passed the preview check.')
+  await expect(page.getByLabel('Generated Swift source')).toContainText('A chapter a day')
+  expect(sent).toHaveLength(2)
+  expect(sent[1]!.previousAttempt!.problems[0]!.message).toContain('chapterGoal')
+})
+
+test('a draft still broken after its second try is shown with its problems, and can still be opened (G2)', async ({ page }) => {
+  await answerInTurn(page, '**/api/generate', [() => ({ app: brokenDraft }), () => ({ app: brokenDraft })])
+  await describeApp(page)
+  await page.getByRole('button', { name: 'Generate app', exact: true }).click()
+
+  const review = page.getByTestId('generated-review')
+  await expect(review).toContainText('The preview found problems in this draft.')
+  await expect(review.getByRole('listitem')).toContainText(["Cannot find 'chapterGoal' in scope (ReadingApp.swift, line 3)."])
+  await expect(page.getByTestId('open-generated')).toBeEnabled()
 })

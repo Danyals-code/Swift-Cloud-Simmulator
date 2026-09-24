@@ -2,15 +2,21 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { PromptMessage, PromptSelection } from '@studio/project-model'
-import { useStudio } from '../lib/store'
+import { useStudio, type AiEditPhase } from '../lib/store'
 import type { Provider } from '../lib/generation/schema'
 import { useAiConnection } from '../lib/generation/connection'
 import { parsePromptEditInput, promptConversationContext } from '../lib/generation/edit-schema'
-import { preparePromptEdit, promptPreviewProblem } from '../lib/generation/applyPromptEdit'
+import { preparePromptEdit } from '../lib/generation/applyPromptEdit'
+import { askAiRoute } from '../lib/generation/aiRoute'
+import { describeProblem, previewCheck } from '../lib/generation/problems'
+import { answerWithOneRetry } from '../lib/generation/retry'
 import { compileSnapshot } from '../lib/compileSnapshot'
 import { editAttempts } from '../lib/promptAttempts'
 import { Icon } from './ui/Icon'
 import styles from './PromptEditor.module.css'
+
+/** What the conversation says while the AI edits, in each phase of the edit. */
+const PROGRESS = { editing: 'Editing your app…', checking: 'Checking the changes…', fixing: 'The change had an error. Asking the AI to fix it…' } satisfies Record<AiEditPhase, string>
 
 /**
  * Prompt Editing.
@@ -18,7 +24,9 @@ import styles from './PromptEditor.module.css'
  * Its request holds the project through the store rather than living with this panel
  * (G12): nothing else changes the project until the answer lands, collapsing the panel
  * leaves the request running, and Stop is offered wherever the studio shows it. The
- * connection is the tab's, shared with Create with AI (G3).
+ * connection is the tab's, shared with Create with AI (G3). An answer that brings the
+ * preview new errors is asked for once more, with them, and a second broken answer
+ * leaves the project as it was (G2).
  */
 export function PromptEditor({ selection, stale, onApplied }: { selection: PromptSelection | null; stale: boolean; onApplied: () => void }) {
   const project = useStudio(state => state.project)
@@ -61,19 +69,25 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
     /** An answer that came to a project which had moved on since. */
     let movedOn = false
     try {
-      const response = await fetch('/api/edit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` }, body: JSON.stringify(input), signal: request.signal })
-      attempt.responded(response.status)
-      const body = await response.json().catch(() => { throw new Error('The server could not finish this edit. No changes applied.') })
-      if (!response.ok) throw new Error(body.error ?? 'The edit failed. No changes applied.')
-      request.signal.throwIfAborted()
-      const prepared = preparePromptEdit(expected, revision, body.edit)
-      if (prepared.transaction.changes.length) {
-        hold.checking()
-        attempt.checking()
-        const result = await compileSnapshot(prepared.candidate, request.signal)
-        const problem = promptPreviewProblem(result)
-        if (problem) throw new Error(problem)
-      }
+      // An error the project already had is not the answer's doing, so it blocks nothing.
+      const check = previewCheck(project => compileSnapshot(project, request.signal), expected)
+      const { answer: prepared, problems, secondTryFailed } = await answerWithOneRetry({
+        ask: previousAttempt => askAiRoute('/api/edit', {
+          key: apiKey, body: input, previousAttempt, signal: request.signal, responded: status => attempt.responded(status),
+          defaultError: 'The server could not finish this edit. No changes applied.',
+          read: answer => preparePromptEdit(expected, revision, answer.edit),
+        }),
+        check: async next => {
+          if (!next.transaction.changes.length) return []
+          hold.checking()
+          attempt.checking()
+          return check(next.candidate)
+        },
+        retrying: found => { hold.fixing(); attempt.retried(found.length) },
+      })
+      if (problems.length) throw new Error(secondTryFailed
+        ? `The AI's change had an error, and asking it again failed: ${secondTryFailed.message}`
+        : `The AI's change still had an error after a second try, so nothing was changed: ${describeProblem(problems[0]!)} Try a smaller change, or describe it another way.`)
       request.signal.throwIfAborted()
       const problem = hold.commit(expected, prepared.transaction)
       if (problem) { movedOn = true; throw new Error(`${problem} No AI changes applied.`) }
@@ -107,7 +121,7 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
         <p>{message.content}</p>
         {!!message.changedFiles?.length && <details><summary>{message.changedFiles.length} {message.changedFiles.length === 1 ? 'file' : 'files'} changed</summary>{message.changedFiles.map(file => <small key={file}>{file}</small>)}</details>}
       </article>)}
-      {busy && <p className={styles.progress} role="status"><Icon name="refresh" size={13} className="animate-spin" />{aiEdit?.phase === 'checking' ? 'Checking the changes…' : 'Editing your app…'}</p>}
+      {aiEdit && <p className={styles.progress} role="status"><Icon name="refresh" size={13} className="animate-spin" />{PROGRESS[aiEdit.phase]}</p>}
     </div>
     <form className={styles.composer} onSubmit={event => { event.preventDefault(); void send() }}>
       {context && <div className={styles.selection} data-testid="prompt-selection" title={`${context.owner} · ${context.file}`}><Icon name="focus" size={12} /><span>{context.label}</span><button type="button" aria-label="Remove selection context" onClick={() => setDismissedSelection(selectionKey)}>×</button></div>}
