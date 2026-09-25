@@ -1,6 +1,7 @@
 import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
-import { Lexer, Parser, afterOffMarkers, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
+import { Parser, afterOffMarkers, hasHumanComment, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
 import { roundedCorners, viewCallChain } from './design-controls'
+import { NEW_BORDER, borderOf, borderSource, cornersOf, type Corners } from './authoring-border'
 import { authoringViewMinimum } from './authoring-view'
 import { SUPPORTED_MODIFIERS } from './builtins'
 
@@ -21,7 +22,8 @@ interface CatalogEntry {
   /** Where a new one goes: after the last modifier in the same or an earlier slot. */
   readonly slot: number
   readonly description: string
-  readonly source: (options: { target: number; shadowToken?: string }) => string
+  /** `indent` is the indentation of the view's modifiers when each is on a line of its own, and null on one line. */
+  readonly source: (options: { target: number; shadowToken?: string; corners: Corners; indent: string | null }) => string
   readonly minimumIOS?: number
   readonly only?: readonly string[]
   readonly hidden?: boolean
@@ -84,7 +86,8 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'background', label: 'Background', category: 'appearance', slot: 4, description: 'A color behind it', source: () => '.background(Color.blue)' },
   { name: 'clipShape', label: 'Corner radius', category: 'appearance', slot: 5, description: 'Round the corners', source: ({ target }) => roundedCorners(12, target) },
   { name: 'cornerRadius', label: 'Corner radius', category: 'appearance', slot: 5, description: 'Round the corners', hidden: true, source: () => '.cornerRadius(8)' },
-  { name: 'border', label: 'Border', category: 'appearance', slot: 6, description: 'An outline', source: () => '.border(Color.gray, width: 1)' },
+  // The overlay closure is iOS 15's; before it the border is the overlay's argument.
+  { name: 'border', label: 'Border', category: 'appearance', slot: 6, description: 'An outline that follows the corners', source: ({ corners, indent, target }) => borderSource(NEW_BORDER, corners, target >= 15 && indent !== null ? { indent } : 'argument') },
   { name: 'shadow', label: 'Shadow', category: 'appearance', slot: 7, description: 'A drop shadow', source: ({ shadowToken }) => shadowToken ? `.shadow(.${shadowToken})` : '.shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)' },
   { name: 'offset', label: 'Offset', category: 'layout', slot: 8, description: 'Nudge it without moving others', source: () => '.offset(x: 0, y: 0)' },
   { name: 'rotationEffect', label: 'Rotation', category: 'layout', slot: 8, description: 'Turn it', source: () => '.rotationEffect(.degrees(15))' },
@@ -106,6 +109,8 @@ const TEXT = new Set(['bold', 'italic', 'fontWeight', 'fontDesign', 'multilineTe
 const LABELS: Readonly<Record<string, string>> = { task: 'Task', onAppear: 'When shown', onDisappear: 'When hidden', onChange: 'When value changes', onTapGesture: 'When tapped', onLongPressGesture: 'When held', resizable: 'Resize image', scaledToFit: 'Fit', scaledToFill: 'Fill', fill: 'Shape fill', sheet: 'Opens a sheet', fullScreenCover: 'Opens full screen', navigationDestination: 'Push destination', popover: 'Opens a popover', alert: 'Alert', toolbar: 'Toolbar', overlay: 'Overlay', tabItem: 'Tab bar item' }
 const friendly = (name: string) => CATALOG.find(c => c.name === name)?.label ?? LABELS[name] ?? name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())
 const nameOf = (call: CallExpr) => call.callee.kind === 'memberAccess' ? call.callee.member : 'unknown'
+/** The shapes SwiftUI fills in with the foreground colour when nothing else paints them. */
+const SHAPES = new Set(['Rectangle', 'RoundedRectangle', 'UnevenRoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path'])
 const slotOf = (name: string) => CATALOG.find(c => c.name === name)?.slot ?? (TEXT.has(name) ? 1 : LAYOUT.has(name) ? 8 : BEHAVIOR.has(name) ? 10 : 99)
 
 function category(name: string): ModifierCategory {
@@ -115,21 +120,6 @@ function category(name: string): ModifierCategory {
 // ---------------------------------------------------------------- the off marker
 // The format - `/*studio-off:1 "…"*/` - lives in swift-syntax's off-markers.ts, because the edits need it too.
 
-/**
- * Whether a person's comment sits in this stretch of source.
- *
- * Read from the gaps between tokens, so comment-like characters inside a string are
- * text, not a comment, and the studio's own off markers never count.
- */
-function hasHumanComment(text: string, file: string): boolean {
-  const tokens = Lexer.tokenize(text, file).tokens
-  let at = 0
-  for (const token of tokens) {
-    if (/\/\/|\/\*/.test(withoutOffMarkers(text.slice(at, token.span.start)))) return true
-    at = token.span.end
-  }
-  return /\/\/|\/\*/.test(withoutOffMarkers(text.slice(at)))
-}
 
 // ---------------------------------------------------------------- chain segments
 
@@ -212,11 +202,13 @@ function structural(call: CallExpr): boolean {
   return true
 }
 
-function offCall(original: string): CallExpr | undefined {
-  const parsed = Parser.parse(`let __off = Color.clear${original}`, '__off.swift')
+/** A switched-off modifier parsed on its own, with the text its spans are in. */
+function offCall(original: string): { call: CallExpr; text: string } | undefined {
+  const text = `let __off = Color.clear${original}`
+  const parsed = Parser.parse(text, '__off.swift')
   const declaration = parsed.sourceFile.declarations[0]
   if (parsed.diagnostics.some(d => d.severity === 'error') || declaration?.kind !== 'varDecl' || declaration.initializer?.kind !== 'call') return undefined
-  return declaration.initializer
+  return { call: declaration.initializer, text }
 }
 
 /** The UI receives all source occurrences, including ones it cannot change. */
@@ -229,19 +221,25 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
   const editable = allowEdits && minimumViewVersion !== undefined && Number.isFinite(version) && version >= minimumViewVersion
   // Only comments a person wrote pin the chain; the studio's own off markers never do.
   const commented = hasHumanComment(text.slice(parsed.base.span.end, parsed.end), node.source.file) || /^[^\S\r\n]*(?:\/\/|\/\*)/.test(withoutOffMarkers(text.slice(parsed.end)))
-  const movable = segments.map(segment => editable && !commented && (segment.off !== undefined || !!segment.call && structural(segment.call)))
+  const corners = cornersOf(viewCallChain(expr)?.modifiers ?? [], text)
+  // A shape with no fill or stroke left is filled in with the foreground colour, as SwiftUI draws it (D8).
+  const paints = segments.filter(segment => segment.call && ['fill', 'stroke', 'strokeBorder'].includes(nameOf(segment.call)))
+  const onlyStroke = (segment: Segment) => parsed.base.callee.kind === 'identifier' && SHAPES.has(parsed.base.callee.name) && paints.length === 1 && paints[0] === segment && nameOf(segment.call!) !== 'fill'
+  // A border is written as an overlay, but is a setting like any other (D8).
+  const borders = segments.map(segment => segment.call && borderOf(segment.call, corners, text))
+  const movable = segments.map((segment, index) => editable && !commented && (segment.off !== undefined || !!segment.call && (structural(segment.call) || !!borders[index])))
   let callIndex = -1
   const modifiers: AuthoringModifier[] = segments.map((segment, index) => {
     const source: SourceSpan = { file: node.source.file, start: segment.start, end: segment.end }
     const capabilitiesOf = (reason?: string) => ({ remove: movable[index]!, duplicate: movable[index]!, moveUp: movable[index]! && index > 0 && movable[index - 1]!, moveDown: movable[index]! && index < segments.length - 1 && movable[index + 1]!, toggle: editable && !commented, reason })
     if (segment.off !== undefined) {
-      const call = offCall(segment.off)
-      const name = call ? nameOf(call) : 'unknown'
+      const off = offCall(segment.off)
+      const name = !off ? 'unknown' : borderOf(off.call, corners, off.text) ? 'border' : nameOf(off.call)
       return { id: JSON.stringify([source.file, source.start, source.end, 'off', segment.off]), name, label: friendly(name), category: category(name), summary: 'Off', expression: segment.off.trim(), source, controls: [], propertyIds: [], enabled: false, capabilities: { edit: false, ...capabilitiesOf(!editable ? 'Resolve source diagnostics or edit this view in Code.' : commented ? 'Comments in this modifier chain need to stay attached. Reorder in Code.' : undefined) } }
     }
     const call = segment.call!
     callIndex++
-    const name = nameOf(call), start = call.callee.kind === 'memberAccess' && call.callee.base ? call.callee.base.span.end : call.span.start
+    const name = borders[index] ? 'border' : nameOf(call), start = call.callee.kind === 'memberAccess' && call.callee.base ? call.callee.base.span.end : call.span.start
     const expression = text.slice(start, call.span.end).trim()
     const controls = (node.controls ?? []).filter(control => {
       if (control.id.startsWith(`modifier:${callIndex}:`)) return true
@@ -256,7 +254,8 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
     const summary = controls.filter(c => !c.id.startsWith('fill:')).map(c => c.value || 'Default').join(' · ') || (linked ? linked.expression : category(name) === 'custom' ? 'Custom modifier' : call.trailingClosure ? category(name) === 'behavior' ? 'Configured action' : 'View content' : call.args.length ? 'Linked or advanced value' : 'On')
     const { reason: _unused, ...caps } = capabilitiesOf(reason)
     void _unused
-    return { id: JSON.stringify([source.file, call.span.start, call.span.end, expression]), name, label: friendly(name), category: category(name), summary, expression, source: { ...call.span, start }, controls, propertyIds, enabled: true, capabilities: { edit: editable && controls.length > 0, ...caps, reason } }
+    const fillsIn = onlyStroke(segment)
+    return { id: JSON.stringify([source.file, call.span.start, call.span.end, expression]), name, label: friendly(name), category: category(name), summary, expression, source: { ...call.span, start }, controls, propertyIds, enabled: true, capabilities: { edit: editable && controls.length > 0, ...caps, ...(fillsIn ? { toggle: false } : {}), reason: fillsIn ? 'Switched off, this stroke would leave the shape filled in. Change it in Code.' : reason } }
   })
   const unknown = segments.some(segment => segment.call && !SUPPORTED_MODIFIERS.has(nameOf(segment.call)))
   const available = editable && !unknown
@@ -292,7 +291,8 @@ export function editModifier(node: AuthoringNode, expr: Expr, text: string, oper
     const at = index < segments.length ? segments[index]!.start : parsed.end
     const lastPrefix = slices.at(-1)?.match(/^\s*/)?.[0] ?? ''
     const prefix = /\r?\n/.test(lastPrefix) ? lastPrefix : ''
-    return text.slice(0, at) + prefix + entry.source({ target: deploymentVersion(deploymentTarget), shadowToken: options.shadowToken }) + text.slice(at)
+    const corners = cornersOf(viewCallChain(expr)?.modifiers ?? [], text)
+    return text.slice(0, at) + prefix + entry.source({ target: deploymentVersion(deploymentTarget), shadowToken: options.shadowToken, corners, indent: prefix ? prefix.replace(/^\r?\n/, '') : null }) + text.slice(at)
   }
   const index = model.modifiers.findIndex(m => m.id === operation.modifier)
   if (index < 0) throw new Error('The modifier identity changed. Select the view again.')

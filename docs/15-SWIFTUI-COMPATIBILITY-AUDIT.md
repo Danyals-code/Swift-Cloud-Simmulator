@@ -81,7 +81,7 @@ The registry explicitly lists:
 - `Map`, `Marker`, `Annotation`, `VideoPlayer`, `SceneView`, `PhotosPicker`.
 - `Settings`, `MenuBarExtra`, `DocumentGroup`.
 - `EditButton`, `PasteButton`, `RenameButton`.
-- `UnevenRoundedRectangle`, `AnyShape`, `MeshGradient`.
+- `AnyShape`, `MeshGradient`.
 
 This list includes framework helpers as well as views. It is not an exhaustive list of
 Apple APIs missing from the preview. The full in-repo registries live in

@@ -852,7 +852,7 @@ export function DevicePane({
               ? `Drop ${dragTarget.position} ${dragTarget.name}`
               : gallery
               ? pagesNotDrawn?.length
-                // Design has no list of warnings, so the reasons are here, a hover away.
+                // The reasons are here, a hover away, and in the warnings list beside the status (D11).
                 ? <>{drawnScreens} {drawnScreens === 1 ? 'screen' : 'screens'} · <span className={styles.notDrawn} tabIndex={0} title={pagesNotDrawn.join('\n')} data-testid="pages-not-drawn">{pagesNotDrawn.length} not drawn</span></>
                 : drawnScreens < (pageCount ?? pages!.length)
                 ? `${drawnScreens} of ${pageCount ?? pages!.length} screens · scroll to explore`

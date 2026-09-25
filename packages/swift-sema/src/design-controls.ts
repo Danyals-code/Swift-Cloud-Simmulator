@@ -2,6 +2,7 @@ import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, authoringCapability, deploymen
 import { advancedControls } from './design-advanced-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type Expr, type Stmt } from '@studio/swift-syntax'
+import { BORDER_POSITIONS, borderOf, cornersOf, rewriteBorder, type BorderPosition } from './authoring-border'
 
 interface Patch { readonly start: number; readonly end: number; readonly text: string }
 export interface ControlRecipe {
@@ -270,7 +271,20 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       replace('progress', 'Progress', value.value, 'number', undefined, 0, Number.isFinite(maximum) ? maximum : undefined)
     }
   }
+  const corners = cornersOf(modifiers, text)
   for (const [i, m] of modifiers.entries()) {
+    const border = borderOf(m, corners, text)
+    if (border) {
+      // A border's colour is one value; its width and position reshape the whole overlay (D8).
+      const origin = { file: node.source.file, start: m.span.start, end: m.span.end }
+      const rewrite = (next: Partial<typeof border>) => rewriteBorder(m, border, corners, text, { ...border, ...next })
+      const translucent = colorOpacityParts(border.colorExpr)
+      replace(`modifier:${i}:color`, 'border · color', translucent?.color ?? border.colorExpr, 'select', colors, undefined, undefined, 'Color.')
+      if (translucent) replace(`modifier:${i}:opacity`, 'border · opacity', translucent.opacity, 'number', undefined, 0, 1)
+      add(`modifier:${i}:width`, 'border · width', 'number', String(border.width), v => rewrite({ width: Number(v) }), undefined, 0, undefined, undefined, origin)
+      add(`modifier:${i}:position`, 'border · position', 'select', border.position, v => rewrite({ position: v as BorderPosition }), BORDER_POSITIONS, undefined, undefined, undefined, origin)
+      continue
+    }
     const name = modName(m)
     const capability = authoringCapability(name, 'modifier', m.args.map(a => a.label))
     if (!capability || targetVersion < Number.parseFloat(capability.minimumIOS)) continue

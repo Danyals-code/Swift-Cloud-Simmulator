@@ -175,6 +175,18 @@
 .propertyTabs > button:last-child { margin-left: auto; }
 .previewStatus { min-width: 104px; flex-shrink: 0; }
 .previewStatus i[data-state='updating'] { background: var(--color-xc-warn); }
+.previewStatus i[data-state='warning'] { background: var(--color-xc-warn); }
+.statusGroup { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.designWarnings > button { font-size: 12px; color: var(--color-xc-text-2); padding: 3px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.designWarnings > button:hover, .designWarnings > button[aria-expanded='true'] { background: var(--color-xc-bar-raised); color: var(--color-xc-text); }
+.warningList { position: fixed; z-index: 901; width: 320px; overflow-y: auto; display: grid; gap: 12px; padding: 12px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 10px; box-shadow: 0 8px 24px #16162024; white-space: normal; }
+.warningList h4 { margin: 0; font-size: 11px; font-weight: 600; color: var(--color-xc-text-3); }
+.warningList section > div { display: grid; gap: 4px; padding-top: 8px; margin-top: 6px; border-top: 1px solid var(--color-xc-line-soft); }
+.warningList strong { font-size: 12px; font-weight: 600; color: var(--color-xc-text); }
+.warningList p { margin: 0; font-size: 12px; line-height: 1.4; color: var(--color-xc-text-2); }
+.warningList span { display: flex; gap: 12px; }
+.warningList span button { font-size: 12px; color: var(--color-xc-accent); cursor: pointer; }
+.warningList span button:disabled { color: var(--color-xc-text-3); cursor: default; }
 .canvas[data-fixed='true'] { cursor: default; touch-action: auto; }
 @media(max-width:900px) { .properties > header { display: flex; padding: 0 !important; height: 30px; border: 0; } .properties > header > button[role='tab'] { display: none; } }
 

@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { EXPORT_FORMATS, type ArchiveFormat } from '@studio/shared'
 import { BUILD_DATE, BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import type { WorkspaceMode, WorkspaceTheme } from '../lib/layout'
 import { unsaved, type StorageProblem } from '../lib/storageProblem'
+import type { DesignWarning } from '../lib/designWarnings'
 import type { GallerySource } from './TemplateGallery'
 import { Icon } from './ui/Icon'
 import { MenuButton } from './ui/Menu'
@@ -208,9 +209,62 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
  */
 export function PreviewStatus({ inspecting, tool, mode = 'design', busy, errors, warnings, workerError }: Pick<PreviewToolsProps, 'inspecting' | 'tool' | 'mode' | 'busy' | 'errors' | 'warnings' | 'workerError'>) {
   const editing = mode === 'design' ? 'Editing' : 'Inspecting'
-  const message = workerError ? 'Preview stopped' : errors ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : warnings ? `${warnings} warnings` : inspecting ? tool === 'delete' ? 'Click a view to delete it' : editing : 'Live preview'
+  // Warnings are counted beside it (D11); what the preview is doing stays said.
+  const message = workerError ? 'Preview stopped' : errors ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : inspecting ? tool === 'delete' ? 'Click a view to delete it' : editing : 'Live preview'
   return <span data-testid="status-view" role="status" aria-busy={busy} title={busy ? 'Updating preview…' : message} className={styles.previewStatus}>
-    <i data-state={errors || workerError ? 'error' : busy ? 'updating' : 'ready'} />{message}
+    <i data-state={errors || workerError ? 'error' : busy ? 'updating' : warnings ? 'warning' : 'ready'} />{message}
+  </span>
+}
+
+/**
+ * The canvas's warnings in a designer's words (D11): a count beside the status that opens
+ * them, what only the preview does differently first, then what to check in Xcode too.
+ */
+export function DesignWarnings({ warnings, onFind, onShow }: { warnings: readonly DesignWarning[]; onFind: (warning: DesignWarning) => void; onShow: (warning: DesignWarning) => void }) {
+  // Where the list is while it is open. Fixed against the window, as the studio's menus
+  // are, since every pane clips what grows past it; below the count, or above it when
+  // there is more room there.
+  const [place, setPlace] = useState<CSSProperties | null>(null)
+  const root = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!place) return
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent ? event.key !== 'Escape' : root.current?.contains(event.target as Node)) return
+      // Escape closes the list and nothing else: the selection stays.
+      event.preventDefault()
+      setPlace(null)
+    }
+    window.addEventListener('pointerdown', close, true)
+    window.addEventListener('keydown', close, true)
+    return () => { window.removeEventListener('pointerdown', close, true); window.removeEventListener('keydown', close, true) }
+  }, [place])
+  if (!warnings.length) return null
+  const toggle = (button: HTMLElement) => {
+    if (place) { setPlace(null); return }
+    const at = button.getBoundingClientRect()
+    const below = window.innerHeight - at.bottom - 12, above = at.top - 12
+    const left = Math.max(8, Math.min(at.left, window.innerWidth - 328))
+    setPlace(below >= 240 || below >= above ? { left, top: at.bottom + 6, maxHeight: below } : { left, bottom: window.innerHeight - at.top + 6, maxHeight: above })
+  }
+  const act = (action: (warning: DesignWarning) => void, warning: DesignWarning) => { setPlace(null); action(warning) }
+  return <span ref={root} className={styles.designWarnings}>
+    <button type="button" data-testid="design-warnings" aria-expanded={!!place} onClick={event => toggle(event.currentTarget)}>{warnings.length} {warnings.length === 1 ? 'warning' : 'warnings'}</button>
+    {place ? <div role="dialog" aria-label="Warnings" className={styles.warningList} style={place}>
+      {(['preview', 'xcode'] as const).map(kind => {
+        const rows = warnings.filter(warning => warning.kind === kind)
+        return rows.length ? <section key={kind}>
+          <h4>{kind === 'preview' ? 'Only the preview differs' : 'Check this in Xcode too'}</h4>
+          {rows.map((warning, index) => <div key={index}>
+            <strong>{warning.screen} · {warning.what}</strong>
+            <p>{warning.sentence}</p>
+            <span>
+              <button type="button" disabled={!warning.node} onClick={() => act(onFind, warning)}>Find layer</button>
+              <button type="button" onClick={() => act(onShow, warning)}>Show in Code</button>
+            </span>
+          </div>)}
+        </section> : null
+      })}
+    </div> : null}
   </span>
 }
 

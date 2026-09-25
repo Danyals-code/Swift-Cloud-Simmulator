@@ -1,4 +1,5 @@
 import type { LogLevel, SourceSpan } from '@studio/shared'
+import { hasCornerRadii } from '@studio/shared'
 import {
   asKeyPath,
   readKeyPath,
@@ -27,6 +28,7 @@ import {
 import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
 import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
+import { CORNER_NAMES, cornerRadii, largestCorner } from './corners'
 import { containable, toFailure } from './failures'
 import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
@@ -823,6 +825,7 @@ export class SwiftUIHost implements InterpreterHost {
     // that sets all four edges to different lengths, and the only one `.padding` has
     // no shorthand for.
     if (name === 'EdgeInsets') return edgeInsets(call)
+    if (name === 'RectangleCornerRadii') return cornerRadii(call.args)
 
     if (name === 'StrokeStyle') {
       const dash = call.args.find((a) => a.label === 'dash')?.value
@@ -1499,6 +1502,8 @@ export class SwiftUIHost implements InterpreterHost {
     if (member === 'init' && call.args.length === 2 && call.args[0]?.label === 'color' && call.args[1]?.label === 'location') return this.gradientStop(call)
     // `.padding(.init(top: 8, leading: 16, bottom: 8, trailing: 16))`, where the type is `EdgeInsets`.
     if (member === 'init' && call.args.length > 0 && call.args.every((a) => a.label && EDGE_LABELS.has(a.label))) return edgeInsets(call)
+    // `.rect(cornerRadii: .init(topLeading: 8, bottomTrailing: 8))`, where the type is `RectangleCornerRadii`.
+    if (member === 'init' && call.args.length > 0 && call.args.every((a) => a.label && CORNER_NAMES.includes(a.label))) return cornerRadii(call.args)
     if (ANIMATION_CURVES[member] || member === 'spring' || member === 'interpolatingSpring') {
       return this.makeAnimation(member, call)
     }
@@ -1534,6 +1539,12 @@ export class SwiftUIHost implements InterpreterHost {
     }
     if (member === 'height' || member === 'fraction') {
       return token(`detent:${member}:${numberOf(call.args[0]?.value) ?? 0}`)
+    }
+    // `.rect(topLeadingRadius: 20, bottomTrailingRadius: 8)`, a radius per corner: drawn
+    // with the largest on every corner (D7a), which the checker says where it is written.
+    if (member === 'rect' && hasCornerRadii(call.args.map((a) => a.label))) {
+      const style = call.args.find((a) => a.label === 'style')?.value
+      return opaque(TOKEN_TYPE, { name: 'rect', args: [double(largestCorner(call.args)), ...(style ? [style] : [])] } satisfies TokenPayload)
     }
 
     /**

@@ -1,4 +1,5 @@
 import type { AuthoringNode, AuthoringSnapshot, SharedStyle, StyleKind } from '@studio/shared'
+import { sourceLayerAround } from './sourceLayers'
 
 /** The order and wording of the token kinds, everywhere they are listed. */
 export const TOKEN_KINDS: readonly { kind: StyleKind; title: string; singular: string; prefix?: string; example: string }[] = [
@@ -49,8 +50,7 @@ export function swatchFor(value: string | undefined, dark = false, token?: Share
 export function tokenImpact(token: SharedStyle, snapshot: AuthoringSnapshot | undefined, screenViews: readonly string[]): { places: number; screens: number; components: number; nodes: AuthoringNode[] } {
   const nodes: AuthoringNode[] = []
   for (const use of token.uses) {
-    const owner = snapshot?.nodes.filter(n => n.kind !== 'definition' && n.source.file === use.file && n.source.start <= use.start && n.source.end >= use.end)
-      .sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
+    const owner = sourceLayerAround(snapshot, use)
     if (owner) nodes.push(owner)
   }
   const owners = new Set(nodes.map(node => node.owner.split('.')[0]!))

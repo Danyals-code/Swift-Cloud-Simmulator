@@ -1,5 +1,5 @@
 import type { Diagnostic, DiagnosticCode, FixIt, SourceSpan } from '@studio/shared'
-import { SYMBOL_MAP, symbolDefinition } from '@studio/shared'
+import { CORNER_RADIUS_LABELS, SYMBOL_MAP, hasCornerRadii, symbolDefinition } from '@studio/shared'
 import type {
   Block,
   ConformanceModel,
@@ -820,6 +820,7 @@ export class Checker {
         this.checkTrim(expr)
         this.checkCallee(expr.callee, scope)
         this.checkOverloadCoverage(expr, scope)
+        this.checkUnevenCorners(expr, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
         // than on every member access. Doing it there flagged `Color.accentColor` as
         // the `.accentColor` modifier - a warning on correct code, which is the one
@@ -973,6 +974,23 @@ export class Checker {
       if (callee.member === 'background' && labels.has('fillStyle')) reason = 'the fillStyle argument is not applied in the preview'
     }
     if (feature && reason) this.report(expr.span, 'warning', callee.kind === 'identifier' ? 'unsupported_swiftui_view' : 'unsupported_swiftui_modifier', `${feature}: ${reason}. The source exports unchanged.`, feature)
+  }
+
+  /**
+   * A rectangle with a radius per corner is drawn with the largest one on every corner
+   * (D7a), so the preview says so rather than drawing the wrong shape without a word.
+   */
+  private checkUnevenCorners(expr: Extract<Expr, { kind: 'call' }>, scope: Scope): void {
+    const callee = expr.callee
+    const uneven = callee.kind === 'identifier'
+      ? callee.name === 'UnevenRoundedRectangle' && !scope.has(callee.name) && !this.types.has(callee.name)
+      : callee.kind === 'memberAccess' && callee.base === null && callee.member === 'rect' && hasCornerRadii(expr.args.map(arg => arg.label))
+    // Four corners written as one number are drawn exactly as written, one by one or as `cornerRadii:`.
+    const given = expr.args.find(arg => arg.label === 'cornerRadii')?.value
+    const written = given?.kind === 'call' ? given.args.map(arg => ({ label: arg.label && `${arg.label}Radius`, value: arg.value })) : expr.args
+    const radii = written.filter(arg => CORNER_RADIUS_LABELS.includes(arg.label ?? '')).map(arg => arg.value.kind === 'integerLiteral' || arg.value.kind === 'floatLiteral' ? arg.value.value : NaN)
+    if (!uneven || radii.length === 4 && radii.every(radius => radius === radii[0])) return
+    this.report(expr.span, 'warning', 'unsupported_swiftui_view', 'UnevenRoundedRectangle: its corners are drawn equal in the preview, all with the largest radius. Xcode draws each corner as written.', 'UnevenRoundedRectangle')
   }
 
   /** A callee gets view-coverage treatment before ordinary resolution. */
