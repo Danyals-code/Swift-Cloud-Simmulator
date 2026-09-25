@@ -131,6 +131,12 @@ describe('inherited visual environment', () => {
     const detail = tap(result, 'Open')
     expect(color(detail, 'Detail')).toEqual(purple)
   })
+  it('tints a link outside a List as iOS 27 tints a button, and keeps its colour with the plain style or in a List (D16)', () => {
+    const result = run('NavigationStack { VStack { Text("Body"); NavigationLink { Text("Detail") } label: { Text("Card") }; NavigationLink { Text("Detail") } label: { Text("Plain card") }.buttonStyle(.plain); List { NavigationLink { Text("Detail") } label: { Text("Row") } } }.tint(.purple) }')
+    expect(color(result, 'Card')).toEqual(purple)
+    expect(color(result, 'Plain card')).toEqual(color(result, 'Body'))
+    expect(color(result, 'Row')).toEqual(color(result, 'Body'))
+  })
   it('preserves inherited styles in a deferred sheet', () => {
     const result = run('VStack { Button("Present") { show = true } }.sheet(isPresented: $show) { Button("Sheet button") {} }.tint(.purple)')
     expect(color(tap(result, 'Present'), 'Sheet button')).toEqual(purple)

@@ -2322,8 +2322,9 @@ class Converter {
           }
 
     // The disclosure chevron is what makes a link legible as one - inside a list.
-    // Outside one, a `NavigationLink` is however its label looks and nothing more,
-    // which is the whole reason people wrap cards in them.
+    // Outside one, iOS 27 draws a `NavigationLink` as it draws a button: tinted,
+    // unless its style is `.plain`, which is how a card wrapped in one keeps its look
+    // (measured in the simulator for D16).
     if (this.listDepth === 0) {
       return {
         kind: 'stack',
@@ -2331,7 +2332,7 @@ class Converter {
         axis: 'horizontal',
         spacing: 0,
         alignment: CENTER,
-        children: [label],
+        children: [this.applyButtonStyle(view, label, path)],
         ...origin,
       }
     }
