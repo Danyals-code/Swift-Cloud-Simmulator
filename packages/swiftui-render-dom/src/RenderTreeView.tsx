@@ -1,4 +1,4 @@
-import { createContext, useContext, useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type UIEvent as ReactUIEvent } from 'react'
+import { createContext, useContext, useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react'
 import { ScrollIndicator } from './ScrollIndicator'
 import { ShapeView, VectorPathView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
@@ -33,10 +33,17 @@ const ignorePreviewEvent = () => undefined
 
 export interface RenderTreeViewProps {
   tree: RenderTree
-  /** Workspace layer selection, without intercepting preview interactions. */
-  selectedIds?: ReadonlySet<string>
-  /** Temporary canvas outlines for the source view under the Layers pointer. */
-  hoveredIds?: ReadonlySet<string>
+  /**
+   * Workspace layer selection, without intercepting preview interactions: the nodes of
+   * each selected view, outlined as one box, so a card is outlined as a card rather than
+   * as the words in it (D1).
+   */
+  selectedGroups?: readonly (readonly string[])[]
+  /**
+   * Temporary canvas outlines: each group is one view, under the Layers pointer or where a
+   * click would select it, outlined as one box.
+   */
+  hoveredGroups?: readonly (readonly string[])[]
   /** Optional workspace-owned offsets shared across live and design phone mounts. */
   scrollPositions?: Map<string, { left: number; top: number }>
   /** Raised when an interactive node is activated. */
@@ -58,10 +65,31 @@ export interface RenderTreeViewProps {
    */
   inspect?: {
     readonly hovered: string | null
-    onHover(node: RenderNode | null): void
-    onSelect(node: RenderNode): void
-    onEditText?(node: RenderNode, rect: { x: number; y: number; width: number; height: number }): void
+    /** What is drawn under the pointer, topmost first, as a click would find it, or null once it leaves. */
+    onHover(under: readonly RenderNode[] | null): void
+    /**
+     * A click: everything drawn under the pointer, topmost first, and the keys held. A
+     * Button's tap target is drawn over its label, so the views under it are the ones a
+     * deeper selection reaches (D1).
+     */
+    onSelect(under: readonly RenderNode[], keys: InspectKeys): void
+    /** A double-click, with where the topmost node is drawn, for an editor to sit over it. */
+    onDoubleClick?(under: readonly RenderNode[], rect: { x: number; y: number; width: number; height: number }): void
   }
+}
+
+/** The keys held with a click while inspecting; what they mean is the workspace's to say. */
+export interface InspectKeys {
+  /** ⌘ on a Mac, Ctrl elsewhere. */
+  readonly command: boolean
+  readonly shift: boolean
+}
+
+/** What a node reports while inspecting; the tree adds what else is under the pointer. */
+interface NodeInspect {
+  onHover(node: RenderNode | null, event?: ReactMouseEvent<HTMLElement>): void
+  onSelect(node: RenderNode, event: ReactMouseEvent<HTMLElement>): void
+  onDoubleClick?(node: RenderNode, event: ReactMouseEvent<HTMLElement>): void
 }
 
 /**
@@ -88,8 +116,8 @@ export const RenderTreeView = memo(function RenderTreeView({
   onEvent,
   stale = false,
   debugOutlines = false,
-  selectedIds,
-  hoveredIds,
+  selectedGroups,
+  hoveredGroups,
   scrollPositions,
   inspect,
 }: RenderTreeViewProps) {
@@ -117,7 +145,13 @@ export const RenderTreeView = memo(function RenderTreeView({
     const scroller = tree.chrome && surface.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(tree.chrome.scrollId)}"]`)
     updateChrome(surface, scroller?.scrollTop ?? 0, tree.chrome?.collapseDistance ?? 0)
   }, [tree, scrollPositions])
-  const hoveredNodes = stale ? [] : tree.nodes.filter(node => node.id === inspect?.hovered || hoveredIds?.has(node.id))
+  // Each outline is the nodes of one view, as this tree paints them; a hover moving on
+  // leaves the selection's outlines as they are.
+  const nodesById = useMemo(() => new Map(tree.nodes.map(node => [node.id, node])), [tree])
+  const selectedIds = useMemo(() => new Set(selectedGroups?.flat()), [selectedGroups])
+  const selectedOutlines = useMemo(() => painted(nodesById, selectedGroups ?? []), [nodesById, selectedGroups])
+  const inspected = inspect?.hovered ?? null
+  const hoveredOutlines = useMemo(() => stale ? [] : painted(nodesById, [...(inspected ? [[inspected]] : []), ...hoveredGroups ?? []]), [nodesById, hoveredGroups, inspected, stale])
 
   // Nodes grouped by the container they live in. Built once per tree rather than
   // searched per node, so a thousand-row list stays linear.
@@ -135,6 +169,37 @@ export const RenderTreeView = memo(function RenderTreeView({
     }
     return groups
   }, [tree])
+
+  /**
+   * A gesture while inspecting, with everything drawn where it happened, topmost first:
+   * the browser's own list, in this tree, starting with the node that heard it.
+   */
+  const lastHover = useRef('')
+  const nodeInspect = useMemo((): NodeInspect | undefined => {
+    if (!inspect) return undefined
+    const under = (node: RenderNode, event: ReactMouseEvent<HTMLElement>): RenderNode[] => {
+      const surface = surfaceRef.current
+      const nodes = new Map(tree.nodes.map(node => [node.id, node]))
+      const found = (surface?.ownerDocument.elementsFromPoint?.(event.clientX, event.clientY) ?? []).flatMap(element => {
+        const id = element instanceof HTMLElement && surface!.contains(element) ? element.dataset.nodeId : undefined
+        const hit = id ? nodes.get(id) : undefined
+        return hit ? [hit] : []
+      })
+      return [node, ...found.filter(item => item.id !== node.id)]
+    }
+    return {
+      // Said again only when what is under the pointer changes, however often it moves.
+      onHover: (node, event) => {
+        const found = node && event ? under(node, event) : null
+        const key = found?.map(item => item.id).join(' ') ?? ''
+        if (key === lastHover.current) return
+        lastHover.current = key
+        inspect.onHover(found)
+      },
+      onSelect: (node, event) => inspect.onSelect(under(node, event), { command: event.metaKey || event.ctrlKey, shift: event.shiftKey }),
+      ...(inspect.onDoubleClick ? { onDoubleClick: (node, event) => inspect.onDoubleClick!(under(node, event), event.currentTarget.getBoundingClientRect()) } : {}),
+    }
+  }, [inspect, tree])
 
   return (
     <div
@@ -166,10 +231,11 @@ export const RenderTreeView = memo(function RenderTreeView({
       <ControlStyles />
 
       <ControlHandoffs.Provider value={handoffs}>
-        <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
+        <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={nodeInspect} />
       </ControlHandoffs.Provider>
 
-      {hoveredNodes.map(node => <InspectHighlight key={node.id} node={node} tree={tree} />)}
+      {selectedOutlines.map((group, index) => <Outline key={`selected:${index}:${group[0]!.id}`} nodes={group} tree={tree} byId={nodesById} kind="selected" />)}
+      {hoveredOutlines.map((group, index) => <Outline key={`hovered:${index}:${group[0]!.id}`} nodes={group} tree={tree} byId={nodesById} kind="hovered" />)}
     </div>
   )
 })
@@ -231,7 +297,7 @@ interface NodePresentation {
   onEvent?: EventSink
   debugOutlines: boolean
   selectedIds?: ReadonlySet<string>
-  inspect?: RenderTreeViewProps['inspect']
+  inspect?: NodeInspect
   animate: boolean
 }
 
@@ -260,30 +326,42 @@ function PresentRenderNode({ entry, complete, ...presentation }: NodePresentatio
 }
 
 /**
- * The highlight rect. Drawn above everything and never itself hit-testable.
+ * One box around everything a view paints: what is selected, or hovered. Drawn above
+ * everything and never itself hit-testable, and a card is outlined as one card (D1).
  *
- * A node inside a scroll view is positioned in the scroller's space, so the highlight
- * has to walk back up to the screen to find where it actually appears - otherwise
- * hovering row 40 of a list outlines something near the top of the screen.
+ * A node inside a scroll view is positioned in the scroller's space, so the box has to
+ * walk back up to the screen to find where it actually appears - otherwise hovering row
+ * 40 of a list outlines something near the top of the screen.
  */
-function InspectHighlight({ node, tree }: { node: RenderNode; tree: RenderTree }) {
+/** Each group's nodes as the tree paints them, leaving out groups it paints none of. */
+function painted(byId: ReadonlyMap<string, RenderNode>, groups: readonly (readonly string[])[]): RenderNode[][] {
+  return groups.map(ids => ids.flatMap(id => byId.get(id) ?? [])).filter(group => group.length > 0)
+}
+
+function Outline({ nodes, tree, byId, kind }: { nodes: readonly RenderNode[]; tree: RenderTree; byId: ReadonlyMap<string, RenderNode>; kind: 'selected' | 'hovered' }) {
   const outline = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const element = outline.current
     const surface = element?.parentElement
-    const target = surface?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"]`)
-    if (!element || !surface || !target) return
+    const targets = nodes.flatMap(node => surface?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"]`) ?? [])
+    if (!element || !surface || !targets.length) return
     // Read painted bounds so scrolling, padding and transforms use the same geometry
     // in both hover directions. Clip to scrollports, just like the painted content.
     const update = () => {
-      const root = surface.getBoundingClientRect(), box = target.getBoundingClientRect()
+      const root = surface.getBoundingClientRect()
       const scaleX = root.width / tree.canvas.width, scaleY = root.height / tree.canvas.height
       if (!scaleX || !scaleY) return
-      let left = box.left, top = box.top, right = box.right, bottom = box.bottom
-      for (let parent = target.parentElement; parent && parent !== surface; parent = parent.parentElement) {
-        const style = getComputedStyle(parent), rect = parent.getBoundingClientRect()
-        if (/auto|scroll|hidden|clip/.test(style.overflowX)) { left = Math.max(left, rect.left); right = Math.min(right, rect.right) }
-        if (/auto|scroll|hidden|clip/.test(style.overflowY)) { top = Math.max(top, rect.top); bottom = Math.min(bottom, rect.bottom) }
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+      for (const target of targets) {
+        const box = target.getBoundingClientRect()
+        let l = box.left, t = box.top, r = box.right, b = box.bottom
+        for (let parent = target.parentElement; parent && parent !== surface; parent = parent.parentElement) {
+          const style = getComputedStyle(parent), rect = parent.getBoundingClientRect()
+          if (/auto|scroll|hidden|clip/.test(style.overflowX)) { l = Math.max(l, rect.left); r = Math.min(r, rect.right) }
+          if (/auto|scroll|hidden|clip/.test(style.overflowY)) { t = Math.max(t, rect.top); b = Math.min(b, rect.bottom) }
+        }
+        if (r <= l || b <= t) continue
+        left = Math.min(left, l); top = Math.min(top, t); right = Math.max(right, r); bottom = Math.max(bottom, b)
       }
       Object.assign(element.style, {
         left: `${(left - root.left) / scaleX}px`, top: `${(top - root.top) / scaleY}px`,
@@ -294,34 +372,37 @@ function InspectHighlight({ node, tree }: { node: RenderNode; tree: RenderTree }
     update()
     surface.addEventListener('scroll', update, true)
     const observer = new ResizeObserver(update)
-    observer.observe(surface); observer.observe(target)
+    observer.observe(surface)
+    targets.forEach(target => observer.observe(target))
     return () => { surface.removeEventListener('scroll', update, true); observer.disconnect() }
-  }, [node, tree])
-  let x = node.frame.x
-  let y = node.frame.y
-  let current = node
+  }, [nodes, tree])
 
-  for (let depth = 0; current.parent && depth < 32; depth++) {
-    const parent = tree.nodes.find((n) => n.id === current.parent)
-    if (!parent) break
-    x += parent.frame.x
-    y += parent.frame.y
-    current = parent
-  }
+  // Where the nodes are laid out, until the painted bounds are read.
+  const frames = nodes.map(node => {
+    let x = node.frame.x, y = node.frame.y, current = node
+    for (let depth = 0; current.parent && depth < 32; depth++) {
+      const parent = byId.get(current.parent)
+      if (!parent) break
+      x += parent.frame.x
+      y += parent.frame.y
+      current = parent
+    }
+    return { x, y, right: x + node.frame.width, bottom: y + node.frame.height }
+  })
+  const x = Math.min(...frames.map(frame => frame.x)), y = Math.min(...frames.map(frame => frame.y))
 
   return (
     <div
       ref={outline}
-      data-testid="inspect-highlight"
-      data-hovered-node-id={node.id}
+      data-testid={kind === 'hovered' ? 'inspect-highlight' : 'selection-outline'}
+      data-hovered-node-id={kind === 'hovered' ? nodes[0]!.id : undefined}
       style={{
         position: 'absolute',
         left: x,
         top: y,
-        width: node.frame.width,
-        height: node.frame.height,
-        outline: '1.5px solid rgb(0 122 255)',
-        background: 'rgb(0 122 255 / 0.12)',
+        width: Math.max(...frames.map(frame => frame.right)) - x,
+        height: Math.max(...frames.map(frame => frame.bottom)) - y,
+        ...(kind === 'hovered' ? { outline: '1.5px solid rgb(0 122 255)', background: 'rgb(0 122 255 / 0.12)' } : { outline: '2px solid rgb(0 122 255)', outlineOffset: -2 }),
         pointerEvents: 'none',
         zIndex: 2_000_000,
       }}
@@ -344,7 +425,7 @@ function RenderNodeView({
   onEvent?: EventSink
   debugOutlines: boolean
   selectedIds?: ReadonlySet<string>
-  inspect?: RenderTreeViewProps['inspect']
+  inspect?: NodeInspect
   animate: boolean
   exiting?: boolean
 }) {
@@ -464,7 +545,6 @@ function RenderNodeView({
         }
       : {}),
     ...(debugOutlines ? { outline: '1px solid rgb(0 122 255 / 0.35)', outlineOffset: -1 } : {}),
-    ...(selectedIds?.has(node.id) ? { outline: '2px solid rgb(0 122 255)', outlineOffset: -2 } : {}),
   }
 
   const handlerId = node.hitTarget?.handlerId
@@ -546,14 +626,16 @@ function RenderNodeView({
       aria-valuetext={node.a11y?.value}
       aria-description={node.a11y?.hint}
       aria-hidden={exiting || node.a11y?.hidden}
-      onPointerEnter={inspecting ? () => inspect.onHover(node) : undefined}
+      onPointerEnter={inspecting ? event => inspect.onHover(node, event) : undefined}
+      // A tap target is drawn over its label: moving over it moves over the label's views.
+      onPointerMove={inspecting && node.hitTarget ? event => inspect.onHover(node, event) : undefined}
       onPointerLeave={() => { setPressed(false); if (inspecting) inspect.onHover(null) }}
-      onDoubleClick={inspecting && inspect.onEditText ? event => { event.preventDefault(); event.stopPropagation(); inspect.onEditText?.(node, event.currentTarget.getBoundingClientRect()) } : undefined}
+      onDoubleClick={inspecting && inspect.onDoubleClick ? event => { event.preventDefault(); event.stopPropagation(); inspect.onDoubleClick?.(node, event) } : undefined}
       onClick={
         inspecting
           ? (e) => {
               e.stopPropagation()
-              inspect.onSelect(node)
+              inspect.onSelect(node, e)
             }
           : undefined
       }

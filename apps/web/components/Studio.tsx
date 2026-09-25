@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ArchiveFormat, AuthoringNode, CopiedView, DesignEditRequest, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
-import { LAYER_MOVE_CONTAINERS, groupLayoutOf, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
+import { groupLayoutOf, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink, type Project, type StudioMetadata } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
@@ -15,10 +15,11 @@ import { imageViewSnippet } from '../lib/images'
 import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-model'
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
-import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
+import { findLayer, insertionLayer, layerRenderIds } from '../lib/layers'
+import { canvasDrop, canvasParent, canvasPick, type CanvasScene, type CanvasSelection } from '../lib/canvasSelection'
 import { navigationDestinationForPage } from '../lib/navigationPicker'
 import { useNavigationPicker } from '../lib/useNavigationPicker'
-import { authoringRenderIds, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
+import { authoringRenderGroups, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
 import { useCompiler } from '../lib/useCompiler'
 import { phoneView } from '../lib/phoneView'
 /**
@@ -30,7 +31,8 @@ import { phoneView } from '../lib/phoneView'
  */
 const ConsolePane = dynamic(() => import('./ConsolePane').then((m) => m.ConsolePane), { ssr: false })
 import { InspectorReadout } from './InspectorReadout'
-import { DevicePane } from './DevicePane'
+import { DevicePane, type CanvasDropTarget, type InlineTextTarget } from './DevicePane'
+import type { InspectKeys } from '@studio/swiftui-render-dom'
 import { AuthoringInspector } from './AuthoringInspector'
 import type { FeatureProps } from './AuthoringFeatures'
 import { DesignNavigator, type DesignLevel } from './DesignNavigator'
@@ -73,6 +75,7 @@ import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
 const NO_IDS: readonly string[] = []
+const NO_GROUPS: readonly (readonly string[])[] = []
 const NO_MULTI_SELECTION = { page: '', files: [], ids: [] }
 const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], components: [] }
 
@@ -124,14 +127,15 @@ export function Studio() {
 
   const [layerSelection, setLayerSelection] = useState<{ projectId: string; id: string; anchor?: AuthoringSelection } | null>(null)
   /** The node the inspector's pointer is over. Null whenever it is over nothing. */
-  const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
+  const [hoveredUnder, setHoveredUnder] = useState<readonly RenderNode[] | null>(null)
+  const hoveredNode = hoveredUnder?.[0] ?? null
   const [hoveredAuthoring, setHoveredAuthoring] = useState<{ node: AuthoringNode; runtimeId?: string; projectId?: string } | null>(null)
   const [designPageSelection, setDesignPageSelection] = useState<{ projectId: string; id: string } | null>(null)
   const hoverProjectId = project?.id
   const hoverAuthoring = useCallback((node: AuthoringNode | null, runtimeId?: string) => setHoveredAuthoring(node ? { node, runtimeId, projectId: hoverProjectId } : null), [hoverProjectId])
-  const hoverPreview = useCallback((node: RenderNode | null, pageId?: string) => {
-    setHoveredNode(node)
-    if (node && pageId && hoverProjectId) setDesignPageSelection(previous => previous?.projectId === hoverProjectId && previous.id === pageId ? previous : { projectId: hoverProjectId, id: pageId })
+  const hoverPreview = useCallback((under: readonly RenderNode[] | null, pageId?: string) => {
+    setHoveredUnder(under)
+    if (under && pageId && hoverProjectId) setDesignPageSelection(previous => previous?.projectId === hoverProjectId && previous.id === pageId ? previous : { projectId: hoverProjectId, id: pageId })
   }, [hoverProjectId])
   const setNavigatorTab = useLayout(s => s.setNavigatorTab)
   const navigatorLayout = useLayout(s => s.navigatorLayout)
@@ -572,14 +576,15 @@ export function Studio() {
   const selectedLayerId = editedLayer?.id
     ?? (layerSelection?.anchor ? sourceRuntimeSelection.layer?.id ?? null
       : layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null)
-  const selectedRenderIds = useMemo(() => {
-    if (mode !== 'design') return new Set<string>()
+  /** The selection as the canvas draws it: one group of nodes for each place it is drawn, outlined as one box (D1). */
+  const selectedRenderGroups = useMemo(() => {
+    if (mode !== 'design') return NO_GROUPS
     const trees = designPages?.map(page => page.tree) ?? [result?.renderTree]
-    const exact = sourceRuntimeSelection.exact ? sourceRuntimeSelection.layer?.id : undefined
-    return new Set(trees.flatMap(tree => [...(exact
-      ? layerRenderIds(findLayer(layers, exact), tree, layers)
-      : authoringRenderIds(authoringNode, result?.authoring, pageHierarchy ?? layers, tree))]))
+    const exact = sourceRuntimeSelection.exact ? sourceRuntimeSelection.layer : undefined
+    return trees.flatMap(tree => exact ? [[...layerRenderIds(exact, tree, layers)]].filter(group => group.length > 0)
+      : authoringRenderGroups(authoringNode, result?.authoring, pageHierarchy ?? layers, tree))
   }, [mode, designPages, result?.renderTree, result?.authoring, sourceRuntimeSelection, layers, authoringNode, pageHierarchy])
+  const selectedRenderIds = useMemo(() => new Set(selectedRenderGroups.flat()), [selectedRenderGroups])
   const selectLayer = (layer: ViewLayer, page: ViewLayer) => {
     if (stale || !project) return
     setPendingSelect(null)
@@ -603,7 +608,7 @@ export function Studio() {
     setPageFocusEpoch(value => value + 1)
     setLayerSelection(null)
     setPendingSelect(null)
-    setHoveredNode(null)
+    setHoveredUnder(null)
     setHoveredAuthoring(null)
     setCenterOn({ id: page.id, nonce: ++centerNonce.current })
   }, [project])
@@ -614,7 +619,7 @@ export function Studio() {
     setFocusLevel({ projectId: project.id, level: 'app' })
     setLayerSelection(null)
     setPendingSelect(null)
-    setHoveredNode(null)
+    setHoveredUnder(null)
     setHoveredAuthoring(null)
     setEditNote(null)
   }, [project])
@@ -633,19 +638,22 @@ export function Studio() {
    * screen and one statement in the file, and it is the file that decides whether
    * "move down" means anything. So the parser is asked, once per selection.
    */
+  const selectedSource = authoringNode?.source ?? selectedLayer?.source
+  // A copy of a component and its Main's outermost view are found at the same layer.
+  const siteKey = selectedLayerId ? `${selectedLayerId}|${authoringNode?.id ?? ''}` : null
   useEffect(() => {
-    const source = selectedLayer?.source
+    const source = selectedSource
     const file = source && project ? findFile(project, source.file) : undefined
-    if (!source || !file || !selectedLayerId) return
+    if (!source || !file || !siteKey) return
     let live = true
     void describeView(file.text, source.file, source.start)
-      .then((info) => { if (live) setSiteInfo({ key: selectedLayerId, info }) })
+      .then((info) => { if (live) setSiteInfo({ key: siteKey, info }) })
     return () => { live = false }
-  }, [selectedLayer, selectedLayerId, project, describeView])
+  }, [selectedSource, siteKey, project, describeView])
 
   // Keyed by the selection it was asked about, so an answer that arrives after the
   // selection moved on describes nothing rather than the wrong view.
-  const site = siteInfo?.key === selectedLayerId ? siteInfo.info : null
+  const site = siteInfo?.key === siteKey ? siteInfo.info : null
 
   /**
    * Performs an edit, and keeps hold of what it edited.
@@ -859,20 +867,20 @@ export function Studio() {
   }, [project])
 
   /** An edit refused before it reaches the planner: said where the designer is looking, and logged (C7). */
-  const refuseEdit = useCallback((operation: DesignEditRequest['operation'], reason: string, layer?: ViewLayer) => {
+  const refuseEdit = useCallback((operation: DesignEditRequest['operation'], reason: string, node?: AuthoringNode) => {
     setEditNote(reason)
-    const model = result?.authoring
-    const node = layer && model?.nodes.find(n => n.id === model.runtimeToSource[layer.id])
-    if (project) eventLog.record(project.id, { ...designEvent(operation, node ?? undefined), refused: true })
-  }, [project, result?.authoring])
+    if (project) eventLog.record(project.id, { ...designEvent(operation, node), refused: true })
+  }, [project])
 
   const applyEdit = useCallback(async (edit: DesignEditRequest['operation'], layer?: ViewLayer) => {
     const target = layer ?? selectedLayer
     const model = result?.authoring
-    const node = model?.nodes.find(n => n.id === model.runtimeToSource[target?.id ?? ''])
+    // The selection is its source view: a copy of a component is drawn by its Main's
+    // views, and the layer it is found at on screen would name the Main's (D1).
+    const node = target === selectedLayer && authoringNode ? authoringNode : model?.nodes.find(n => n.id === model.runtimeToSource[target?.id ?? ''])
     if (!node) { refuseEdit(edit, 'Select a supported source view to edit.'); return }
     await performDesignEdit(node.source, node.fingerprint, node.owner, edit)
-  }, [selectedLayer, result?.authoring, performDesignEdit, refuseEdit])
+  }, [selectedLayer, authoringNode, result?.authoring, performDesignEdit, refuseEdit])
 
   const changeProperty = useCallback(async (control: string, value: string) => {
     if (!authoringNode) return 'Select the view again.'
@@ -942,7 +950,7 @@ export function Studio() {
     // the system one is a courtesy for pasting into the editor or somewhere else.
     try { await navigator.clipboard.writeText(copied.snippet) } catch { /* not granted, or not secure */ }
   }, [copyView, project, refuseClipboard])
-  const copySelection = useCallback(() => copyAt(selectedLayer?.source, selectedLayer?.name ?? '', authoringNode ?? undefined), [copyAt, selectedLayer, authoringNode])
+  const copySelection = useCallback(() => authoringNode ? copyAt(authoringNode.source, sourceLayerLabel(authoringNode), authoringNode) : copyAt(selectedLayer?.source, selectedLayer?.name ?? ''), [copyAt, selectedLayer, authoringNode])
   const copyLayer = useCallback((node: AuthoringNode) => void copyAt(node.source, sourceLayerLabel(node), node), [copyAt])
 
   /**
@@ -1007,6 +1015,35 @@ export function Studio() {
     void performDesignEdit(first.source, first.fingerprint, first.owner, { kind: 'layer-wrap', ids, layout: groupLayoutOf(model.nodes, first) })
   }, [result?.authoring, selectedTogether, authoringNode, refuseEdit, performDesignEdit])
 
+  /** What the canvas outlines as selected (D1): the views selected together, or the one selection. */
+  const selectionOutlines = useMemo(() => {
+    if (mode !== 'design' || selectedTogether.length < 2) return selectedRenderGroups
+    const trees = designPages?.map(page => page.tree) ?? [result?.renderTree]
+    const together = selectedTogether.flatMap(id => result?.authoring?.nodes.find(node => node.id === id) ?? [])
+    return trees.flatMap(tree => together.flatMap(node => authoringRenderGroups(node, result?.authoring, layers, tree)))
+  }, [mode, selectedTogether, selectedRenderGroups, designPages, result?.renderTree, result?.authoring, layers])
+
+  /** The screens the canvas draws, as the selection rule reads them (D1). */
+  const canvasScene = useMemo((): CanvasScene | undefined => snapshot && !stale && snapshot.projectId === project?.id ? { snapshot, layers } : undefined, [snapshot, stale, project?.id, layers])
+  /** The view that is selected, where it is drawn. */
+  const canvasSelected = useMemo((): CanvasSelection | null => authoringNode ? { node: authoringNode, runtimeId: selectedLayerId } : null, [authoringNode, selectedLayerId])
+
+  /** Selects a view the canvas picked, at the place it was picked. */
+  const selectPick = useCallback((pick: CanvasSelection) => {
+    const snapshot = result?.authoring
+    if (!project || stale || !snapshot) return
+    setPendingSelect(null); setEditNote(null); setFocusLevel(null)
+    useStudio.getState().setDocumentSelection({ file: pick.node.source.file, offset: pick.node.source.start })
+    setLayerSelection({ projectId: project.id, id: pick.runtimeId ?? pick.node.runtimeIds[0] ?? '', anchor: { snapshot, nodeId: pick.node.id, files: project.files, ...(pick.runtimeId ? { runtimeId: pick.runtimeId } : {}) } })
+  }, [project, stale, result?.authoring])
+
+  /** Escape (D1): the view around the selection, and nothing once above the screen's own stack. */
+  const selectParent = useCallback(() => {
+    const parent = canvasScene && canvasSelected ? canvasParent(canvasScene, canvasSelected) : undefined
+    if (parent) selectPick(parent)
+    else setLayerSelection(null)
+  }, [canvasScene, canvasSelected, selectPick])
+
   /**
    * The keys, as `shortcutFor` reads them (D5): one table for both workspaces, by where the
    * focus is, so nothing pressed in a field reaches the view. A dialog or sheet that is
@@ -1033,7 +1070,8 @@ export function Studio() {
         case 'escape':
           if (layout.layersOver) setLayersOver(false)
           else if (inspecting && tool === 'delete') setTool('select')
-          else if (inspecting) { setLayerSelection(null); setMultiSelection(NO_MULTI_SELECTION) }
+          else if (inspecting && selectedTogether.length > 1) setMultiSelection(NO_MULTI_SELECTION)
+          else if (inspecting) selectParent()
           break
         case 'all-screens': setAllPages(on => !on); break
         case 'save':
@@ -1056,7 +1094,7 @@ export function Studio() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
-      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver, groupSelection, selectedTogether])
+      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver, groupSelection, selectedTogether, selectParent])
 
   /**
    * Undo and redo, over the edits the canvas made.
@@ -1065,47 +1103,36 @@ export function Studio() {
    * that cannot drift: replaying an *operation* backwards would have to know what
    * the file looked like when it ran, and after a second edit it no longer does.
    */
-  /**
-   * A drop, from the tree or from the canvas.
-   *
-   * One operation for both, because both are saying the same thing: put this view
-   * beside that one. The source's own offset and the target's are all the parser
-   * needs, and it is the parser that decides whether the result is a file that
-   * still compiles.
-   */
-  const reorderLayers = useCallback((layer: ViewLayer, target: ViewLayer, position: DropPosition) => {
-    const from = layer.source
-    const to = target.source
-    if (!from || !to || from.file !== to.file) {
-      refuseEdit({ kind: 'moveTo', targetOffset: to?.start ?? 0, position }, 'A view can only be moved within the file it is written in.', layer)
-      return
+  /** What the canvas shows while dragging: the view the drop goes beside, or the stack it goes into (D1). */
+  const dropTargetAt = useCallback((over: readonly RenderNode[], source: readonly RenderNode[] | 'selection'): CanvasDropTarget | null => {
+    const drop = canvasScene && canvasDrop(canvasScene, over, source, canvasSelected)
+    if (!drop || drop.to.node.id === drop.from.node.id) return null
+    const tree = designPages?.find(page => page.tree.nodes.some(node => node.id === over[0]?.id))?.tree ?? result?.renderTree
+    return {
+      name: sourceLayerType(drop.to.node),
+      inside: drop.inside,
+      axis: snapshot && groupLayoutOf(snapshot.nodes, drop.to.node) === 'HStack' ? 'horizontal' : 'vertical',
+      renderIds: [...layerRenderIds(findLayer(layers, drop.to.runtimeId), tree, layers)],
     }
-    void applyEdit({ kind: 'moveTo', targetOffset: to.start, position }, layer)
-  }, [applyEdit, refuseEdit])
-
-  /** The stack a canvas drop onto this node goes into - its own empty space, usually its background - or null. */
-  const containerNameAt = useCallback((node: RenderNode) => {
-    const layer = layerForRenderNode(layers, node)
-    return layer && LAYER_MOVE_CONTAINERS.has(layer.type) ? sourceLayerType({ name: layer.type, kind: 'view' }) : null
-  }, [layers])
+  }, [canvasScene, canvasSelected, snapshot, designPages, result?.renderTree, layers])
 
   /** A drop on the canvas, named in the terms the file understands. */
-  const reorderNodes = useCallback((source: RenderNode | 'selection', target: RenderNode, position: DropPosition) => {
-    const from = source === 'selection' ? selectedLayer : layerForRenderNode(layers, source)
-    const to = layerForRenderNode(layers, target)
-    if (!from) return
-    if (!to || from.id === to.id) {
-      refuseEdit({ kind: 'moveTo', targetOffset: to?.source?.start ?? 0, position }, to ? 'A view can’t be dropped onto itself.' : 'That spot isn’t a view to drop beside. Drop it on a layer instead.', from)
-      return
-    }
-    reorderLayers(from, to, position)
-  }, [layers, reorderLayers, selectedLayer, refuseEdit])
+  const reorderNodes = useCallback((source: readonly RenderNode[] | 'selection', over: readonly RenderNode[], position: DropPosition) => {
+    const drop = canvasScene && canvasDrop(canvasScene, over, source, canvasSelected)
+    const move = { kind: 'moveTo' as const, targetOffset: drop?.to.node.source.start ?? 0, position }
+    if (!drop) { refuseEdit(move, 'That spot isn’t a view to drop beside. Drop it on a layer instead.'); return }
+    const { from, to } = drop
+    if (from.node.id === to.node.id) { refuseEdit(move, 'A view can’t be dropped onto itself.', from.node); return }
+    if (from.node.source.file !== to.node.source.file) { refuseEdit(move, 'A view can only be moved within the file it is written in.', from.node); return }
+    void performDesignEdit(from.node.source, from.node.fingerprint, from.node.owner, move)
+  }, [canvasScene, canvasSelected, refuseEdit, performDesignEdit])
 
-  /** The layer under the inspector's pointer, while Layers is there to show it. */
-  const hoveredLayerId = useMemo(
-    () => (inspecting && mode === 'design' && !stale && hoveredNode && (result?.renderTree?.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file) || designPages?.some(page => page.tree.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file))) ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
-    [inspecting, mode, stale, result?.renderTree, designPages, layers, hoveredNode],
+  /** What a click would select where the inspector's pointer is (D1), while Layers is there to show it. */
+  const hoveredPick = useMemo(
+    () => (inspecting && mode === 'design' && !stale && canvasScene && hoveredNode && (result?.renderTree?.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file) || designPages?.some(page => page.tree.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file))) ? canvasPick(canvasScene, hoveredUnder ?? [], 'click', canvasSelected) : undefined),
+    [inspecting, mode, stale, canvasScene, canvasSelected, result?.renderTree, designPages, hoveredNode, hoveredUnder],
   )
+  const hoveredLayerId = hoveredPick?.runtimeId ?? null
 
   const selectedSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, selectedLayerId), [result?.authoring, layers, selectedLayerId])
   const hoveredSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, hoveredLayerId), [result?.authoring, layers, hoveredLayerId])
@@ -1115,13 +1142,16 @@ export function Studio() {
     const node = result?.authoring?.nodes.find(node => node.id === previous.id && node.fingerprint === previous.fingerprint && node.source.file === previous.source.file && node.source.start === previous.source.start && node.source.end === previous.source.end)
     return node ? { ...hoveredAuthoring, node } : null
   }, [inspecting, mode, stale, hoveredAuthoring, project?.id, result?.authoring])
-  const hoveredRenderIds = useMemo(() => {
-    if (!liveHoveredAuthoring) return new Set<string>()
-    const { node, runtimeId } = liveHoveredAuthoring
+  /** What is outlined under the pointer, one box for each place a view is drawn. */
+  const hoveredRenderGroups = useMemo(() => {
     const tree = designPage?.tree ?? result?.renderTree
-    return runtimeId ? layerRenderIds(findLayer(pageHierarchy ?? layers, runtimeId), tree, pageHierarchy ?? layers)
-      : authoringRenderIds(node, result?.authoring, pageHierarchy ?? layers, tree)
-  }, [liveHoveredAuthoring, designPage?.tree, result?.renderTree, result?.authoring, pageHierarchy, layers])
+    const one = (ids: ReadonlySet<string>) => ids.size ? [[...ids]] : NO_GROUPS
+    // On the canvas, what a click would select is outlined, as Figma outlines it (D1).
+    if (!liveHoveredAuthoring) return hoveredPick ? one(layerRenderIds(findLayer(layers, hoveredPick.runtimeId), tree, layers)) : NO_GROUPS
+    const { node, runtimeId } = liveHoveredAuthoring
+    return runtimeId ? one(layerRenderIds(findLayer(pageHierarchy ?? layers, runtimeId), tree, pageHierarchy ?? layers))
+      : authoringRenderGroups(node, result?.authoring, pageHierarchy ?? layers, tree)
+  }, [liveHoveredAuthoring, hoveredPick, designPage?.tree, result?.renderTree, result?.authoring, pageHierarchy, layers])
 
   /**
    * Clicking a view while inspecting.
@@ -1131,35 +1161,65 @@ export function Studio() {
    * and the panel that *can* answer is Layers - so the click selects the view
    * there and leaves you where you were. The editor is still pointed at the right
    * line, so switching to Code afterwards lands on it.
+   *
+   * What a click selects is Figma's (D1): the view in the screen's main stack, or at
+   * the depth already gone into; the innermost with ⌘; with Shift it joins the views
+   * selected together, as Shift-click does in Layers, for ⌘G.
    */
   const inspectSelect = useCallback(
-    (node: RenderNode, pageId?: string) => {
+    (under: readonly RenderNode[], keys: InspectKeys, pageId?: string) => {
+      const node = under[0]
+      if (!node) return
       if (pageId && project) setDesignPageSelection({ projectId: project.id, id: pageId })
       if (mode !== 'design') {
         revealSource(node)
         return
       }
+      const pick = canvasScene ? canvasPick(canvasScene, under, keys.command ? 'deep' : 'click', canvasSelected) : undefined
       if (tool === 'delete') {
-        const target = layerForRenderNode(layers, node)
-        if (target) void applyEdit({ kind: 'delete' }, target)
+        if (pick) void performDesignEdit(pick.node.source, pick.node.fingerprint, pick.node.owner, { kind: 'delete' })
         return
       }
-      if (node.origin) {
-        if (node.origin.file !== activeFileId) setActiveFile(node.origin.file)
-        setReveal({ offset: node.origin.start, nonce: ++revealNonce.current })
-      }
-      const layer = layerForRenderNode(layers, node)
-      if (!layer || !project) return
+      if (!pick || !project) return
       setNavigatorTab('layers')
       setPane('navigator', true)
-      setPendingSelect(null)
-      setEditNote(null)
+      if (keys.shift) {
+        const together = selectedTogether.length ? selectedTogether : authoringNode ? [authoringNode.id] : []
+        const ids = together.includes(pick.node.id) ? together.filter(id => id !== pick.node.id) : [...together, pick.node.id]
+        setMultiSelection({ files: project.files, ids, page: layersPage })
+        if (!authoringNode) selectPick(pick)
+        return
+      }
+      if (pick.node.source.file !== activeFileId) setActiveFile(pick.node.source.file)
+      setReveal({ offset: pick.node.source.start, nonce: ++revealNonce.current })
       // A view chosen on the canvas is the selection now, not the layers chosen together in Layers.
       setMultiSelection(NO_MULTI_SELECTION)
-      captureLayer(layer)
+      selectPick(pick)
     },
-    [mode, revealSource, layers, project, activeFileId, setActiveFile, setNavigatorTab, setPane, tool, applyEdit, captureLayer],
+    [mode, revealSource, project, activeFileId, setActiveFile, setNavigatorTab, setPane, tool, performDesignEdit, canvasScene, canvasSelected, selectedTogether, authoringNode, layersPage, selectPick],
   )
+
+  /**
+   * A double-click on the canvas (D1): text is edited where it is drawn, as it always
+   * was; anything else goes one level in from the selection. Answers the text to edit.
+   */
+  const inspectDoubleClick = useCallback((under: readonly RenderNode[], pageId?: string): InlineTextTarget | null => {
+    if (!canvasScene || !project) return null
+    if (pageId) setDesignPageSelection({ projectId: project.id, id: pageId })
+    const deep = canvasPick(canvasScene, under, 'deep')
+    const control = deep?.node.controls?.find(item => ['content', 'title'].includes(item.id) && item.kind === 'text')
+    const text = deep && control ? { node: deep.node, control: control.id, value: control.value } : null
+    // Code's inspector shows the Swift, and edits text in place as it always did.
+    if (mode !== 'design') {
+      if (under[0]) revealSource(under[0])
+      return text
+    }
+    const next = text ? deep : canvasPick(canvasScene, under, 'drill', canvasSelected)
+    if (!next) return null
+    setMultiSelection(NO_MULTI_SELECTION)
+    selectPick(next)
+    return text
+  }, [mode, canvasScene, canvasSelected, project, selectPick, revealSource])
 
 
   /** The rename in progress, if F2 found something to rename. */
@@ -1406,7 +1466,7 @@ export function Studio() {
                 renderLayers={options => result?.authoring ? <LogicalLayers key={layersPage} {...options}
                   labels={project.studio?.labels} onRename={renameLayer} pageId={focusedPage?.id} pageName={focusedPage?.name} pageSource={focusedPage?.source} runtimeLayers={pageHierarchy}
                   selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={result.authoring} files={project.files} selection={layerSelection?.anchor}
-                  selected={authoringNode?.id} selectedAncestors={selectedSources} hovered={liveHoveredAuthoring?.node.id ?? hoveredSources[0]} hoveredAncestors={hoveredSources.slice(1)}
+                  selected={authoringNode?.id} selectedAncestors={selectedSources} hovered={liveHoveredAuthoring?.node.id ?? hoveredPick?.node.id ?? hoveredSources[0]} hoveredAncestors={hoveredSources.slice(1)}
                   onHover={hoverAuthoring} stale={busy} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
                   onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined}
                   multiple={multiSelection.page === layersPage ? multiSelection : NO_MULTI_SELECTION} onMultipleChange={next => setMultiSelection({ ...next, page: layersPage })}
@@ -1425,7 +1485,7 @@ export function Studio() {
                 authoringSelection={layerSelection?.anchor}
                 selectedAuthoringId={authoringNode?.id}
                 selectedAuthoringAncestors={selectedSources}
-                hoveredAuthoringId={liveHoveredAuthoring?.node.id ?? hoveredSources[0]}
+                hoveredAuthoringId={liveHoveredAuthoring?.node.id ?? hoveredPick?.node.id ?? hoveredSources[0]}
                 hoveredAuthoringAncestors={hoveredSources.slice(1)}
                 onHoverAuthoring={hoverAuthoring}
                 onEditAuthoring={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
@@ -1582,7 +1642,7 @@ export function Studio() {
                 settingsTitle={settingsTitle}
                 onSelectBackground={mode === 'design' ? selectApp : undefined}
                 onReorderNodes={reorderNodes}
-                containerNameAt={containerNameAt}
+                dropTargetAt={dropTargetAt}
                 centerOn={centerOn}
                 status={previewStatus}
                 onDeviceChange={unlessAiEditing(setDevice, undefined)}
@@ -1593,12 +1653,13 @@ export function Studio() {
                 notice={phone.notice}
                 onRestart={phone.stopped ? run : undefined}
                 revision={result?.revision}
-                selectedRenderIds={selectedRenderIds}
-                hoveredRenderIds={hoveredRenderIds}
+                selectedRenderGroups={selectionOutlines}
+                hoveredRenderGroups={hoveredRenderGroups}
                 stale={stale || preparingEdit || phone.dimmed}
                 onEvent={dispatch}
                 inspecting={inspecting}
-                onRevealSource={inspectSelect}
+                onInspectSelect={inspectSelect}
+                onInspectDoubleClick={inspectDoubleClick}
                 preview={previewSettings}
                 onPreviewChange={(settings: Partial<PreviewSettings>) => setPreview(settings)}
               />
