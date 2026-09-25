@@ -15,7 +15,7 @@ import type { SourceFile } from '@studio/shared'
  *
  * Same gate as every other template (`tests/templates.test.ts`): zero diagnostics of
  * any severity, zero unsupported placeholders, a palette that genuinely changes in
- * dark mode, and the whole pipeline under 120 ms.
+ * dark mode, and the whole pipeline under 120 ms (`tests/template-budgets.test.ts`).
  */
 
 const APP = `import SwiftUI
