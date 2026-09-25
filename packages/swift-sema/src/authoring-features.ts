@@ -11,7 +11,7 @@ import { appNavigation, navigationPatches } from './authoring-navigation-app'
 import { makeComponent } from './authoring-copies'
 import { createScreenValue, guidedAction, screenEdit } from './authoring-screens'
 import { customizeCard } from './authoring-card'
-import { structureEdit } from './authoring-structure'
+import { makeTappable, structureEdit } from './authoring-structure'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
   // A file that does not parse keeps its own views plain - its design cannot be changed anyway - and
@@ -27,7 +27,8 @@ export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot
   function enrich(node: AuthoringNode): AuthoringNode {
     const collection = collectionFor(ctx, node), component = componentSettings(ctx, node)
     const parent = enclosingCollection(ctx, node)
-    const behavior = ['view', 'collection'].includes(node.kind) && node.name !== 'WindowGroup' ? behaviorSettings(ctx, node) : undefined
+    // A copy of a component can be made tappable as any view can (D16).
+    const behavior = ['view', 'collection', 'component'].includes(node.kind) && node.name !== 'WindowGroup' ? behaviorSettings(ctx, node) : undefined
     return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: (component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type)) }
   }
 }
@@ -41,6 +42,7 @@ export function featureEdit(ctx: FeatureContext, node: AuthoringNode, operation:
     case 'screen-create': case 'screen-duplicate': case 'screen-remove': { const result = screenEdit(ctx, node, operation); patches = result.patches; files = result.files ?? []; removed = result.removed ?? []; break }
     case 'card-customize': return customizeCard(ctx, node, operation.color)
     case 'layer-duplicate': case 'layer-wrap': case 'layer-reparent': return structureEdit(ctx, node, operation)
+    case 'make-tappable': return makeTappable(ctx, node)
     case 'navigation-target': patches = configureNavigationTarget(ctx, node, operation.destination); break
     case 'navigation-type': patches = changeNavigationType(ctx, node, operation.type); break
     case 'value-create': patches = createScreenValue(ctx, node, operation.name, operation.value); break

@@ -1,6 +1,6 @@
 import type { AuthoringNode, NavigationDestination, NavigationSettings, SourceSpan } from '@studio/shared'
 import { forEachChild, Parser, type CallExpr, type ClosureExpr, type Expr, type Node, type StructDecl, type VarDecl } from '@studio/swift-syntax'
-import { callOf, expressionOf, hasComments, insertMember, lineIndent, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
+import { callOf, expressionOf, hasComments, insertMember, lineIndent, modifierIndent, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
 import { viewCallChain } from './design-controls'
 import { enumCases } from './authoring-components'
 
@@ -350,15 +350,20 @@ export function changeNavigationType(ctx: FeatureContext, node: AuthoringNode, t
     return [patch(name, type === 'cover' ? 'fullScreenCover' : 'sheet')]
   }
 
+  // A card made tappable keeps its label either way: `Button { … } label: { … }` (D16).
+  const label = call.args.find(argument => argument.label === 'label' && argument.value.kind === 'closure')?.value
   if (current === 'push') {
     const title = call.args.find(argument => argument.label === null)?.value
     const destination = call.args.find(argument => argument.label === 'destination')?.value ?? singleExpression(call.trailingClosure ?? undefined)
-    if (!title || !destination || !owner) throw new Error('This link is built in Swift. Change how it opens there.')
+    if (!title && !label || !destination || !owner) throw new Error('This link is built in Swift. Change how it opens there.')
     const flag = unusedName(owner, `is${viewName(destination) ?? 'Screen'}Presented`)
     const rest = text.slice(call.span.end, node.source.end)
+    const opening = title ? `Button(${own(title.span)}) { ${flag} = true }` : `Button { ${flag} = true } label: ${own(label!.span)}`
+    // Under a view written over several lines, the new modifier has a line of its own.
+    const under = (opening + rest).includes('\n') ? `\n${modifierIndent(ctx, node)}` : ''
     return [
       insertMember(ctx, owner, `@State private var ${flag}: Bool = false`),
-      patch(node.source, `Button(${own(title.span)}) { ${flag} = true }${rest}.${type === 'cover' ? 'fullScreenCover' : 'sheet'}(isPresented: $${flag}) { ${own(destination.span)} }`),
+      patch(node.source, `${opening}${rest}${under}.${type === 'cover' ? 'fullScreenCover' : 'sheet'}(isPresented: $${flag}) { ${own(destination.span)} }`),
     ]
   }
 
@@ -368,20 +373,33 @@ export function changeNavigationType(ctx: FeatureContext, node: AuthoringNode, t
   const destination = singleExpression(presentation!.trailingClosure ?? undefined)
   const title = call.args.find(argument => argument.label === null)?.value
   const action = call.trailingClosure
-  if (call.callee.kind !== 'identifier' || call.callee.name !== 'Button' || !title || !destination || !action) throw new Error('Only a plain button that opens a screen can become a push. Change this one in Swift.')
+  if (call.callee.kind !== 'identifier' || call.callee.name !== 'Button' || !title && !label || !destination || !action) throw new Error('Only a plain button that opens a screen can become a push. Change this one in Swift.')
   const statements = action.body.statements
   const sets = statements.length === 1 && statements[0]!.kind === 'exprStmt' && own(statements[0]!.expression.span).replace(/\s/g, '') === `${flag}=true`
   if (!sets) throw new Error('This button does more than open the screen, so it cannot become a push. Change it in Swift.')
   if (!insideNavigationStack(ctx.nodes, node)) throw new Error('A pushed screen needs a navigation container on this screen. Add one, or keep this as a sheet.')
   const modifierStart = text.lastIndexOf('.', presentation!.callee.kind === 'memberAccess' ? presentation!.callee.memberSpan.start : presentation!.span.end)
   const rest = text.slice(call.span.end, modifierStart).trimEnd() + text.slice(presentation!.span.end, node.source.end)
-  const patches = [patch(node.source, `NavigationLink(${own(title.span)}, destination: ${own(destination.span)})${rest}`)]
+  const opening = title ? `NavigationLink(${own(title.span)}, destination: ${own(destination.span)})` : `NavigationLink { ${own(destination.span)} } label: ${own(label!.span)}`
+  const patches = [patch(node.source, `${opening}${rest}`)]
   // The value only existed to open the screen; a push does not need it.
   const declaration = owner?.members.find((item): item is VarDecl => item.kind === 'varDecl' && item.name === flag)
   const elsewhere = ctx.files.some(file => file.id !== node.source.file && file.text.includes(flag))
   const inside = countName(text.slice(0, node.source.start) + text.slice(node.source.end), flag) - (declaration ? countName(own(declaration.span), flag) : 0)
-  if (declaration && !elsewhere && inside <= 0) patches.push(patch(declaration.span, ''))
+  if (declaration && !elsewhere && inside <= 0) patches.push(patch(declarationLine(text, declaration), ''))
   return patches
+}
+
+/**
+ * A declaration with its attributes and modifiers - `@State private var …`, whose own span
+ * starts at `var` - and the line it stands on when nothing else does.
+ */
+function declarationLine(text: string, declaration: VarDecl): SourceSpan {
+  const start = Math.min(declaration.span.start, ...declaration.attributes.map(attribute => attribute.span.start), ...declaration.modifiers.map(modifier => modifier.span.start))
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1
+  const lineEnd = text.indexOf('\n', declaration.span.end)
+  const alone = !text.slice(lineStart, start).trim() && !text.slice(declaration.span.end, lineEnd < 0 ? text.length : lineEnd).trim()
+  return alone ? { file: declaration.span.file, start: lineStart, end: lineEnd < 0 ? text.length : lineEnd + 1 } : { file: declaration.span.file, start, end: declaration.span.end }
 }
 
 /** How many times a name appears as a whole word, for "is this still used?". */

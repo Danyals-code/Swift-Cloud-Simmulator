@@ -92,7 +92,12 @@ export interface BehaviorSettings {
   readonly actions: readonly string[]
   readonly destinations: readonly string[]
   readonly currentAction?: string
+  /** A Button with a title, or with a label (D16), and one action closure: When tapped can set what it does. */
   readonly canConfigureAction: boolean
+  /** A view When tapped can make tappable, by writing a Button or link around it (D16). */
+  readonly canMakeTappable?: boolean
+  /** The Button's title is plain text, which a switch can change while it is on. */
+  readonly titled?: boolean
   readonly binding?: {
     readonly label: string
     readonly type: string
@@ -100,6 +105,10 @@ export interface BehaviorSettings {
     /** The name a new value for it takes: free on its screen, as the canvas names a control's value (D13). */
     readonly newName: string
   }
+}
+/** Whether a view offers When tapped: a Button's action, or making any other view tappable (D16). */
+export function offersWhenTapped(behavior: BehaviorSettings | undefined): boolean {
+  return !!behavior && (behavior.canConfigureAction || !!behavior.canMakeTappable)
 }
 export type BehaviorAction =
   | { readonly type: 'toggle'; readonly state: string }
@@ -181,6 +190,8 @@ export type AuthoringOperation = ResourceOperation | ModifierOperation | Navigat
   | { readonly kind: 'layer-duplicate' }
   | { readonly kind: 'layer-wrap'; readonly ids: readonly string[]; readonly layout: 'VStack' | 'HStack' | 'ZStack' }
   | { readonly kind: 'layer-reparent'; readonly ids: readonly string[]; readonly destination: string }
+  /** A Button whose label is the view, doing nothing until When tapped says what (D16). */
+  | { readonly kind: 'make-tappable' }
   | { readonly kind: 'guided-action'; readonly action: BehaviorAction; readonly replace: boolean; readonly createValue?: { readonly name: string; readonly value: DesignValue; readonly activeTitle?: string }; readonly createScreen?: { readonly name: string; readonly title: string } }
   | { readonly kind: 'navigation-target'; readonly destination: string }
   /** How the screen this view opens arrives: pushed, as a sheet, or covering everything. */

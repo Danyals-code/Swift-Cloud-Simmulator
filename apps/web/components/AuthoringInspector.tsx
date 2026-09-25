@@ -1,7 +1,7 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState } from 'react'
-import { isStructuralLayer, layoutParentOf, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type SourceSpan } from '@studio/shared'
+import { isStructuralLayer, layoutParentOf, offersWhenTapped, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { LayoutGuide } from './LayoutGuide'
@@ -87,7 +87,8 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
     ...links.map(owner => ({ node: owner, type: 'push' as const })),
     ...(presented && !links.length ? [{ node: selected, type: presented.name === 'sheet' ? 'sheet' as const : 'cover' as const }] : []),
   ]
-  const interaction = !!selected.behavior && (selected.behavior.canConfigureAction || !!selected.behavior.binding)
+  // A Button's action, a control's value, or any other view When tapped can make tappable (D16).
+  const interaction = offersWhenTapped(selected.behavior) || !!selected.behavior?.binding
   const advanced = !!selected.behavior && (selected.behavior.canConfigureAction || selected.behavior.states.length > 0) || !!selected.component
   // Only wrappers with something to set: a bare NavigationStack around every view is not news.
   const wrappers = context.surrounding.filter(owner => !!owner.modifiers?.length || owner.controls?.some(control => !/^(modifier:|add:|fill:)/.test(control.id)))

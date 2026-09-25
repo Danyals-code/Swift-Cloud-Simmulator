@@ -369,6 +369,11 @@ export function asView(value: SwiftValue): ViewValue | null {
   return isView(value) ? (value.payload as ViewValue) : null
 }
 
+/** What a Button is drawn with, from a `label:` argument (D16), or null for any other argument. */
+export function labelView(arg: ViewArg): ViewValue | null {
+  return arg.label === 'label' ? asView(arg.value) : null
+}
+
 export function payloadOf<T>(value: SwiftValue | undefined, typeName: string): T | null {
   if (!value || value.kind !== 'opaque' || value.typeName !== typeName) return null
   return value.payload as T

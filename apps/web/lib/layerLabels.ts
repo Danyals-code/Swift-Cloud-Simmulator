@@ -17,7 +17,7 @@ export function reconcileLayerLabel(old: AuthoringNode, before: AuthoringSnapsho
     remaining.splice(insertion < 0 ? remaining.length : insertion, 0, ...moving)
     previous = remaining
   }
-  if (['layer-duplicate', 'layer-wrap', 'layer-reparent', 'insert', 'paste'].includes(operation.kind) && previous.length === candidates.length) {
+  if (['layer-duplicate', 'layer-wrap', 'layer-reparent', 'make-tappable', 'insert', 'paste'].includes(operation.kind) && previous.length === candidates.length) {
     const index = previous.findIndex(n => n.id === old.id)
     if (index >= 0) return candidates[index] ?? null
   }

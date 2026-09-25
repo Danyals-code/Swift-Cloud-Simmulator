@@ -186,10 +186,10 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
     </div>
     {showEditActions && inspecting ? (
       <div className={`${styles.dockRow} ${styles.dockTools}`} role="group" aria-label="Edit actions">
-        <PushButton onClick={() => onSetTool('select')} active={tool === 'select'} label="Select views" title="Select a view to change its properties (V)" testId="tool-select" icon="inspect">Select</PushButton>
+        <PushButton onClick={() => onSetTool('select')} active={tool === 'select'} label="Select views" title="Click selects a whole card or row, double-click goes in, ⌘-click the innermost view (V)" testId="tool-select" icon="inspect">Select</PushButton>
         <PushButton onClick={onAdd} disabled={!canAdd} label="Add a view" title={canAdd ? 'Add a view to the screen (A)' : 'Waiting for the preview'} testId="add-view" icon="plus">Add</PushButton>
         <span className={styles.destructive}>
-          <PushButton onClick={() => onSetTool(tool === 'delete' ? 'select' : 'delete')} active={tool === 'delete'} label="Delete views" title="Click a view on the canvas to delete it" testId="tool-delete" icon="xmark">Delete</PushButton>
+          <PushButton onClick={() => onSetTool(tool === 'delete' ? 'select' : 'delete')} active={tool === 'delete'} label="Delete views" title="Click a view on the canvas to delete it: a whole card, or the innermost view with ⌘" testId="tool-delete" icon="xmark">Delete</PushButton>
         </span>
       </div>
     ) : null}

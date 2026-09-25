@@ -1,9 +1,8 @@
 'use client'
 
 import { scenarioKey } from '../lib/screens'
-import { sourceLayerType } from '../lib/sourceLayers'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { RenderTreeView, symbolAsset, type EventSink } from '@studio/swiftui-render-dom'
+import { RenderTreeView, symbolAsset, type EventSink, type InspectKeys } from '@studio/swiftui-render-dom'
 import { stateProblem } from '../lib/stateProblem'
 import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree } from '@studio/shared'
 import type { DeviceKey, DeviceSpec } from '@studio/sim-shell'
@@ -55,16 +54,26 @@ export interface DevicePaneProps {
   pagesNotDrawn?: readonly string[]
   /** The compile the canvas draws; a canvas that crashed tries again when it changes. */
   revision?: number
-  selectedRenderIds?: ReadonlySet<string>
-  hoveredRenderIds?: ReadonlySet<string>
+  /** What is selected, as it is drawn: the nodes of each view, outlined as one box (D1). */
+  selectedRenderGroups?: readonly (readonly string[])[]
+  /** What is outlined under the pointer: one box around each group, one view each. */
+  hoveredRenderGroups?: readonly (readonly string[])[]
   stale: boolean
   /** Sends a preview event; resolves once the app has answered it, so a field can show the app's value again. */
   onEvent: EventSink
   inspecting: boolean
-  /** Reveal a view's source. Null origin means the node has no source position. */
-  onRevealSource: (node: RenderNode, pageId?: string) => void
+  /**
+   * A click on the canvas while inspecting: everything drawn under the pointer, topmost
+   * first, and the keys held. The workspace decides what that selects (D1).
+   */
+  onInspectSelect: (under: readonly RenderNode[], keys: InspectKeys, pageId?: string) => void
+  /**
+   * A double-click (D1): the text it edits, when the view under the pointer is text; the
+   * workspace otherwise goes one level in, and answers null.
+   */
+  onInspectDoubleClick?: (under: readonly RenderNode[], pageId?: string) => InlineTextTarget | null
   /** What the pointer is over while inspecting, so the workspace can follow it. */
-  onHoverNode?: (node: RenderNode | null, pageId?: string) => void
+  onHoverNode?: (under: readonly RenderNode[] | null, pageId?: string) => void
   /**
    * Tab columns with each tab's related screens underneath.
    *
@@ -120,13 +129,14 @@ export interface DevicePaneProps {
    * container paints through its children, so the node under the pointer is never
    * the container itself, and dragging a stack has to mean the stack.
    */
-  onReorderNodes?: (source: RenderNode | 'selection', target: RenderNode, position: DropPosition) => void
+  onReorderNodes?: (source: readonly RenderNode[] | 'selection', over: readonly RenderNode[], position: DropPosition) => void
   /**
-   * The layout container a drop onto this node goes into, by name, or null for a node
-   * that is not one. A stack's own empty space - usually its background - is where a
-   * drop means "put it in here, at the end", which is what the canvas then offers.
+   * Where a drop onto this node would put what is dragged, or null where it cannot go
+   * (D1): beside the view there at the dragged view's depth, drawn by `renderIds` and
+   * laid along `axis`, or `inside` a stack whose own empty space - usually its
+   * background - is under the pointer, which means "put it in here, at the end".
    */
-  containerNameAt?: (node: RenderNode) => string | null
+  dropTargetAt?: (over: readonly RenderNode[], source: readonly RenderNode[] | 'selection') => CanvasDropTarget | null
   /** The page to bring into view, when Layers picks one. */
   centerOn?: { readonly id: string; readonly nonce: number } | null
   /** What the preview is doing, drawn at the head of the canvas. */
@@ -134,6 +144,17 @@ export interface DevicePaneProps {
   preview: PreviewSettings
   onPreviewChange: (settings: Partial<PreviewSettings>) => void
 }
+
+/** Where a drop would go, as the canvas shows it while dragging. */
+export interface CanvasDropTarget {
+  readonly name: string
+  readonly inside: boolean
+  readonly axis: 'horizontal' | 'vertical'
+  readonly renderIds: readonly string[]
+}
+
+/** The text a double-click edits in place, and the control it is written with. */
+export interface InlineTextTarget { readonly node: AuthoringNode; readonly control: string; readonly value: string }
 
 /** What the canvas draws besides the screens themselves. */
 export interface CanvasInputs {
@@ -206,12 +227,13 @@ export function DevicePane({
   onRestart,
   pagesNotDrawn,
   revision,
-  selectedRenderIds,
-  hoveredRenderIds,
+  selectedRenderGroups,
+  hoveredRenderGroups,
   stale,
   onEvent,
   inspecting,
-  onRevealSource,
+  onInspectSelect,
+  onInspectDoubleClick,
   onHoverNode,
   pages,
   canvas,
@@ -225,7 +247,7 @@ export function DevicePane({
   tool = 'select',
   selection,
   onReorderNodes,
-  containerNameAt,
+  dropTargetAt,
   centerOn,
   status,
   preview,
@@ -237,15 +259,15 @@ export function DevicePane({
   const scrollMemory = useMemo(() => ({ identity: previewIdentity, positions: new Map<string, { left: number; top: number }>() }), [previewIdentity])
   const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
 
-  /** The hover as of now, for handlers that run outside React's render. */
-  const hoverRef = useRef<RenderNode | null>(null)
+  /** What is under the pointer as of now, topmost first, for handlers that run outside React's render. */
+  const hoverRef = useRef<readonly RenderNode[] | null>(null)
 
   // One call site for the hover, so the pane and the workspace cannot disagree
   // about what the pointer is over.
-  const setHovered = useCallback((node: RenderNode | null, pageId?: string) => {
-    hoverRef.current = node
-    setHoveredNode(node)
-    onHoverNode?.(node, pageId)
+  const setHovered = useCallback((under: readonly RenderNode[] | null, pageId?: string) => {
+    hoverRef.current = under
+    setHoveredNode(under?.[0] ?? null)
+    onHoverNode?.(under, pageId)
   }, [onHoverNode])
 
   // Derived rather than cleared in an effect: a stale highlight must not survive
@@ -598,13 +620,12 @@ export function DevicePane({
   /**
    * Dragging a view onto another one moves it in the file.
    *
-   * What is dragged is the *selection* when the press lands inside it, and whatever
-   * is under the pointer otherwise. That is the rule a layer editor follows: the
-   * first click chooses the innermost thing, and the drag that follows moves the
-   * thing you chose - so a whole list can be carried once it is selected, without
-   * the pointer having to find its edge.
+   * What is dragged is the *selection* when the press lands inside it, and otherwise
+   * what a click there would select (D1): a whole card, or at the depth gone into. So a
+   * whole list can be carried once it is selected, without the pointer having to find
+   * its edge. The workspace works out both ends from what is under the pointer.
    */
-  const viewDrag = useRef<{ node: RenderNode | 'selection'; x: number; y: number } | null>(null)
+  const viewDrag = useRef<{ node: readonly RenderNode[] | 'selection'; x: number; y: number } | null>(null)
   const [dragTarget, setDragTarget] = useState<{ name: string; position: DropPosition } | null>(null)
 
   const onViewPointerDown = useCallback((event: React.PointerEvent) => {
@@ -619,24 +640,29 @@ export function DevicePane({
         && event.clientY >= box.top && event.clientY <= box.bottom
     })
 
-    const node: RenderNode | 'selection' | null = within ? 'selection' : hoverRef.current
-    if (!node) return
+    const node = within ? 'selection' : hoverRef.current
+    if (!node?.length) return
     viewDrag.current = { node, x: event.clientX, y: event.clientY }
   }, [navigationPicker, expanded, stale, inspecting, tool, onReorderNodes, selection])
 
   useEffect(() => {
-    /** What the drop would do, from where the pointer is over the target. */
-    const dropAt = (event: PointerEvent, source: RenderNode | 'selection') => {
+    // Worked out again only when what is under the pointer changes, not at every move.
+    let cached: { over: readonly RenderNode[]; source: readonly RenderNode[] | 'selection'; target: CanvasDropTarget | null } | null = null
+    /** What the drop would do, from where the pointer is over the view it would go beside. */
+    const dropAt = (event: PointerEvent, source: readonly RenderNode[] | 'selection') => {
       const over = hoverRef.current
-      if (!over || (source !== 'selection' && over.id === source.id)) return null
-      const container = containerNameAt?.(over)
-      if (container) return { node: over, name: container, position: 'inside' as const }
-      const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(over.id)}"]`)
-      const box = element?.getBoundingClientRect()
+      if (!over?.length) return null
+      if (cached?.over !== over || cached.source !== source) cached = { over, source, target: dropTargetAt?.(over, source) ?? null }
+      const target = cached.target
+      if (!target) return null
+      if (target.inside) return { node: over, name: target.name, position: 'inside' as const }
+      const boxes = target.renderIds.flatMap(id => containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`)?.getBoundingClientRect() ?? [])
+      const across = target.axis === 'horizontal'
+      const start = Math.min(...boxes.map(box => across ? box.left : box.top)), end = Math.max(...boxes.map(box => across ? box.right : box.bottom))
       return {
         node: over,
-        name: sourceLayerType({ name: over.inspect?.name ?? over.kind, kind: 'view' }),
-        position: (box && event.clientY > box.top + box.height / 2 ? 'after' : 'before') as 'before' | 'after',
+        name: target.name,
+        position: (boxes.length && (across ? event.clientX : event.clientY) > (start + end) / 2 ? 'after' : 'before') as 'before' | 'after',
       }
     }
 
@@ -667,7 +693,7 @@ export function DevicePane({
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up)
     }
-  }, [onReorderNodes, containerNameAt])
+  }, [onReorderNodes, dropTargetAt])
 
   /**
    * Dragging the canvas moves it, from anywhere that is not a phone.
@@ -775,22 +801,21 @@ export function DevicePane({
           key={scrollMemory.identity}
           scrollPositions={scrollMemory.positions}
           tree={tree ?? EMPTY_RENDER_TREE}
-          selectedIds={selectedRenderIds}
-          hoveredIds={inspecting && !stale ? hoveredRenderIds : undefined}
+          {...(selectedRenderGroups ? { selectedGroups: selectedRenderGroups } : {})}
+          {...(inspecting && !stale && hoveredRenderGroups ? { hoveredGroups: hoveredRenderGroups } : {})}
           {...(live ? { onEvent } : {})}
           stale={stale}
           {...(inspecting && !navigationPicker
             ? {
                 inspect: {
-                  hovered: highlighted?.id ?? null,
-                  onHover: node => setHovered(node, page?.id),
-                  onSelect: node => onRevealSource(node, page?.id),
-                  onEditText: (rendered: RenderNode, rect: { x: number; y: number; width: number }) => {
-                    if (stale || tool !== 'select' || !rendered.origin) return
-                    const source = rendered.origin
-                    const node = authoringFeatures?.snapshot?.nodes.filter(n => n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end && n.controls?.some(c => ['content', 'title'].includes(c.id) && c.kind === 'text')).sort((a, b) => a.source.end - a.source.start - (b.source.end - b.source.start))[0]
-                    const control = node?.controls?.find(c => ['content', 'title'].includes(c.id) && c.kind === 'text')
-                    if (node && control) { onRevealSource(rendered, page?.id); setInlineText({ node, control: control.id, value: control.value, x: rect.x, y: rect.y, width: rect.width }) }
+                  // Design outlines what a click would select, which the workspace works out (D1).
+                  hovered: expanded ? null : highlighted?.id ?? null,
+                  onHover: under => setHovered(under, page?.id),
+                  onSelect: (under, keys) => onInspectSelect(under, keys, page?.id),
+                  onDoubleClick: (under, rect) => {
+                    if (stale || tool !== 'select') return
+                    const text = onInspectDoubleClick?.(under, page?.id)
+                    if (text) setInlineText({ ...text, x: rect.x, y: rect.y, width: rect.width })
                   },
                 },
               }
@@ -832,7 +857,7 @@ export function DevicePane({
                 : drawnScreens < (pageCount ?? pages!.length)
                 ? `${drawnScreens} of ${pageCount ?? pages!.length} screens · scroll to explore`
                 : `${drawnScreens} ${drawnScreens === 1 ? 'screen' : 'screens'} · scroll to explore · ⌘/Ctrl-scroll to zoom`
-              : inspecting ? 'Hover to find a view in Layers, click to select it' : 'Interactive preview'
+              : inspecting ? 'Click to select · double-click to go in · ⌘-click for the innermost' : 'Interactive preview'
           }</span>
           {navigationPicker && <button type="button" className={styles.cancelPick} onClick={navigationPicker.onCancel}>Cancel pick</button>}
           {/* Off in Live Preview, and said so rather than hidden: it is a thing the
