@@ -42,6 +42,8 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'ContentUnavailableView',
   // shapes and drawing
   'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path', 'Canvas',
+  // every corner drawn with the largest radius, and said so (D7a)
+  'UnevenRoundedRectangle',
   // styles
   'LinearGradient', 'RadialGradient', 'AngularGradient', 'GridItem',
   // gestures
@@ -194,7 +196,7 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // found this: an empty-state view is written on the way to a first screen, not after
   // it.
   'EditButton', 'PasteButton', 'RenameButton',
-  'UnevenRoundedRectangle', 'AnyShape',
+  'AnyShape',
   // iOS 18
   'MeshGradient',
 ])
@@ -374,6 +376,7 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
   'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle',
+  'RectangleCornerRadii',
   'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',

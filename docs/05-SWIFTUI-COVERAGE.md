@@ -187,6 +187,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Item | Status | Phase |
 | --- | --- | --- |
 | `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 |
+| `UnevenRoundedRectangle`, `.rect(topLeadingRadius:…)`, `RectangleCornerRadii` | 🟡 | - | drawn, clipped and filled with the largest radius on every corner; the checker says so where uneven corners are written (D7a) |
 | `Path` (custom) | ✅ | 7 | lines, curves, arcs, rects and ellipses, serialised to SVG |
 | `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`'s `lineWidth`; a `StrokeStyle` dash pattern is not drawn |
 | `.trim` | 🟡 | 7 | on shapes and paths, from where iOS 27 starts each shape (3 o'clock; a rectangle's top-left corner) and in an arc's own direction. On the built-in shapes, strokes only: a trimmed fill, or a trimmed stroke with a dash pattern, is drawn whole and warns. A path's arcs are trimmed whether filled or stroked |

@@ -1,6 +1,17 @@
 import type { CornerStyle, ShapeKind } from './render-tree'
 
 /**
+ * The labels that give a rectangle a radius per corner, in `UnevenRoundedRectangle(…)`
+ * and `.rect(…)`. The preview draws one radius on every corner, the largest (D7a).
+ */
+export const CORNER_RADIUS_LABELS: readonly string[] = ['topLeadingRadius', 'bottomLeadingRadius', 'bottomTrailingRadius', 'topTrailingRadius']
+
+/** Whether a call's labels give a rectangle a radius per corner, one by one or as `cornerRadii:`. */
+export function hasCornerRadii(labels: readonly (string | null)[]): boolean {
+  return labels.some(label => label === 'cornerRadii' || CORNER_RADIUS_LABELS.includes(label ?? ''))
+}
+
+/**
  * A shape's outline as SVG path data. A continuous-corner approximation; circular
  * corners use the circular cubic.
  *

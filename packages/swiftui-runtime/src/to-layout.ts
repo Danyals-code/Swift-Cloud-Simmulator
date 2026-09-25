@@ -10,6 +10,7 @@ import {
   type PreviewImageAsset,
   type DynamicTypeSize,
   isDynamicTypeSize,
+  hasCornerRadii,
   MONO_FAMILY,
   rgba,
   ROUNDED_FAMILY,
@@ -63,6 +64,7 @@ import {
   type ResolvedUI,
   type SearchField,
 } from './presentation'
+import { largestCorner } from './corners'
 import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
 import { resolveSymbol } from './sf-symbols'
 import {
@@ -165,6 +167,7 @@ const SHAPES: Readonly<Record<string, ShapeKind>> = {
   Circle: 'circle',
   Ellipse: 'ellipse',
   Capsule: 'capsule',
+  UnevenRoundedRectangle: 'roundedRectangle',
 }
 
 /**
@@ -1514,7 +1517,7 @@ class Converter {
 
     const shape = SHAPES[view.name]
     if (shape) {
-      const radius = numberArg(labelled(view.args, 'cornerRadius'))
+      const radius = hasCornerRadii(view.args.map((a) => a.label)) ? largestCorner(view.args) : numberArg(labelled(view.args, 'cornerRadius'))
       const fill = resolveFillArg(modifierArg(view, 'fill', 0), this.scheme, this.styles.tint)
       const strokeName = view.modifiers.some((m) => m.name === 'strokeBorder') ? 'strokeBorder' : 'stroke'
       const hasStroke = view.modifiers.some((m) => m.name === strokeName)
@@ -4199,7 +4202,7 @@ function shapeOf(value: SwiftValue | undefined): { kind: ShapeKind; cornerRadius
       return {
         kind: shape,
         style: tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular',
-        cornerRadius: numberArg(labelled(view.args, 'cornerRadius')) ?? 0,
+        cornerRadius: hasCornerRadii(view.args.map((a) => a.label)) ? largestCorner(view.args) : numberArg(labelled(view.args, 'cornerRadius')) ?? 0,
       }
     }
   }

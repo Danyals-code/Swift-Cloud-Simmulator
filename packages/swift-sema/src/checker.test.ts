@@ -160,6 +160,39 @@ struct Other: View {
   })
 })
 
+describe('uneven corners are drawn equal, and said so (D7a)', () => {
+  const UNEVEN = 'UnevenRoundedRectangle: its corners are drawn equal in the preview, all with the largest radius. Xcode draws each corner as written.'
+
+  it('warns once, in plain words, on a clip with a radius per corner', () => {
+    const found = warnings(app('        Color.blue.clipShape(.rect(topLeadingRadius: 20, bottomLeadingRadius: 0, bottomTrailingRadius: 20, topTrailingRadius: 0))'))
+    expect(found.map(d => [d.code, d.feature, d.message])).toEqual([['unsupported_swiftui_view', 'UnevenRoundedRectangle', UNEVEN]])
+  })
+
+  it('says the same of an UnevenRoundedRectangle, which is drawn rather than boxed', () => {
+    const found = warnings(app('        UnevenRoundedRectangle(topLeadingRadius: 16).fill(.red)'))
+    expect(found.map(d => [d.code, d.feature, d.message])).toEqual([['unsupported_swiftui_view', 'UnevenRoundedRectangle', UNEVEN]])
+  })
+
+  it('knows RectangleCornerRadii, so a clip built from one no longer stops the preview', () => {
+    const source = app('        Color.blue.clipShape(.rect(cornerRadii: RectangleCornerRadii(topLeading: 8, bottomTrailing: 8)))')
+    expect(errors(source)).toEqual([])
+    expect(warnings(source).map(d => d.message)).toEqual([UNEVEN])
+  })
+
+  it('says nothing when every corner has the same radius, which is drawn as written', () => {
+    expect(warnings(app('        Color.blue.clipShape(.rect(topLeadingRadius: 12, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 12))'))).toEqual([])
+  })
+
+  it('says nothing of four equal radii written as cornerRadii either', () => {
+    expect(warnings(app('        Color.blue.clipShape(.rect(cornerRadii: .init(topLeading: 12, bottomLeading: 12, bottomTrailing: 12, topTrailing: 12)))'))).toEqual([])
+  })
+
+  it('says nothing of an UnevenRoundedRectangle the project declares itself', () => {
+    const source = app('        UnevenRoundedRectangle(topLeadingRadius: 16)', 'struct UnevenRoundedRectangle: View {\n    let topLeadingRadius: Double\n    var body: some View { Text("Mine") }\n}')
+    expect(warnings(source)).toEqual([])
+  })
+})
+
 describe('coverage diagnostics are honest, not wrong', () => {
   it('names an unimplemented view rather than calling it unresolved', () => {
     // `Chart` is perfectly valid Swift. Saying "cannot find in scope" would be both
