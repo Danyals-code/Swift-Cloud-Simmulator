@@ -356,20 +356,6 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     const entries = template.files.filter((f) => /struct \w+: App/.test(f.text))
     expect(entries).toHaveLength(1)
   })
-
-  it('stays inside the interaction budget', () => {
-    const request = requestFor(template.files)
-    resetPipelineState()
-    for (let i = 0; i < 3; i++) compile(request)
-
-    let best = Infinity
-    for (let i = 0; i < 5; i++) {
-      const started = performance.now()
-      compile(request)
-      best = Math.min(best, performance.now() - started)
-    }
-    expect(best).toBeLessThan(120)
-  })
 })
 
 /**

@@ -18,8 +18,9 @@ import type { SourceFile } from '@studio/shared'
  * It has to clear the same gate as every other template (Phase 4 gate 2, in
  * `tests/templates.test.ts`): zero diagnostics of any severity, zero unsupported
  * placeholders, a palette that genuinely changes in dark mode, and the whole
- * pipeline under 120 ms. Anything the preview cannot draw is not in here - which is
- * why there is no `Chart`, no `Map` and no `.refreshable`.
+ * pipeline under 120 ms (`tests/template-budgets.test.ts`). Anything the preview
+ * cannot draw is not in here - which is why there is no `Chart`, no `Map` and no
+ * `.refreshable`.
  */
 
 const APP = `import SwiftUI

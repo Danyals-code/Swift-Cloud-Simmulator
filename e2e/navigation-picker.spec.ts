@@ -31,7 +31,12 @@ async function openSelectionInCode(page: Page) {
   return page.getByTestId('editor').locator('.cm-content')
 }
 
-test('canvas eyedropper cancels safely, preserves selection, and applies the chosen tab screen', async ({ page }, testInfo) => {
+test('canvas eyedropper cancels safely, preserves selection, and applies the chosen tab screen', async ({ page, browserName }, testInfo) => {
+  // Not a fix. On CI's Linux WebKit this ran past 30 s in its last steps in 12 of 14
+  // runs to 2026-09-25, more than seven times as long as on a Mac, while tests that
+  // take twice as long on a Mac pass there. Tripled until a trace says which step is
+  // slow; a run that still times out points at a stall, and its retry trace shows where.
+  test.slow(browserName === 'webkit', 'Runs past 30 s in its last steps on CI\'s Linux WebKit')
   await folio(page)
   const original = await destination(page).inputValue()
   const library = libraryPhone(page)
