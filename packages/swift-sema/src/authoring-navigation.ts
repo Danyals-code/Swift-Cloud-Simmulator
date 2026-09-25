@@ -1,6 +1,6 @@
 import type { AuthoringNode, NavigationDestination, NavigationSettings, SourceSpan } from '@studio/shared'
 import { forEachChild, Parser, type CallExpr, type ClosureExpr, type Expr, type Node, type StructDecl, type VarDecl } from '@studio/swift-syntax'
-import { callOf, expressionOf, hasComments, insertMember, lineIndent, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
+import { callOf, expressionOf, hasComments, insertMember, lineIndent, modifierIndent, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
 import { viewCallChain } from './design-controls'
 import { enumCases } from './authoring-components'
 
@@ -356,9 +356,12 @@ export function changeNavigationType(ctx: FeatureContext, node: AuthoringNode, t
     if (!title || !destination || !owner) throw new Error('This link is built in Swift. Change how it opens there.')
     const flag = unusedName(owner, `is${viewName(destination) ?? 'Screen'}Presented`)
     const rest = text.slice(call.span.end, node.source.end)
+    const opening = `Button(${own(title.span)}) { ${flag} = true }`
+    // Under a view written over several lines, the new modifier has a line of its own.
+    const under = (opening + rest).includes('\n') ? `\n${modifierIndent(ctx, node)}` : ''
     return [
       insertMember(ctx, owner, `@State private var ${flag}: Bool = false`),
-      patch(node.source, `Button(${own(title.span)}) { ${flag} = true }${rest}.${type === 'cover' ? 'fullScreenCover' : 'sheet'}(isPresented: $${flag}) { ${own(destination.span)} }`),
+      patch(node.source, `${opening}${rest}${under}.${type === 'cover' ? 'fullScreenCover' : 'sheet'}(isPresented: $${flag}) { ${own(destination.span)} }`),
     ]
   }
 
@@ -380,8 +383,20 @@ export function changeNavigationType(ctx: FeatureContext, node: AuthoringNode, t
   const declaration = owner?.members.find((item): item is VarDecl => item.kind === 'varDecl' && item.name === flag)
   const elsewhere = ctx.files.some(file => file.id !== node.source.file && file.text.includes(flag))
   const inside = countName(text.slice(0, node.source.start) + text.slice(node.source.end), flag) - (declaration ? countName(own(declaration.span), flag) : 0)
-  if (declaration && !elsewhere && inside <= 0) patches.push(patch(declaration.span, ''))
+  if (declaration && !elsewhere && inside <= 0) patches.push(patch(declarationLine(text, declaration), ''))
   return patches
+}
+
+/**
+ * A declaration with its attributes and modifiers - `@State private var …`, whose own span
+ * starts at `var` - and the line it stands on when nothing else does.
+ */
+function declarationLine(text: string, declaration: VarDecl): SourceSpan {
+  const start = Math.min(declaration.span.start, ...declaration.attributes.map(attribute => attribute.span.start), ...declaration.modifiers.map(modifier => modifier.span.start))
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1
+  const lineEnd = text.indexOf('\n', declaration.span.end)
+  const alone = !text.slice(lineStart, start).trim() && !text.slice(declaration.span.end, lineEnd < 0 ? text.length : lineEnd).trim()
+  return alone ? { file: declaration.span.file, start: lineStart, end: lineEnd < 0 ? text.length : lineEnd + 1 } : { file: declaration.span.file, start, end: declaration.span.end }
 }
 
 /** How many times a name appears as a whole word, for "is this still used?". */

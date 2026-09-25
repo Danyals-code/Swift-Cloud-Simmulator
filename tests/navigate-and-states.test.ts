@@ -41,7 +41,7 @@ describe('changing how a screen opens', () => {
   it('turns a push into a sheet, keeping the label and the modifiers that were there', () => {
     const next = edit(pushed(), nodeOf(pushed(), 'NavigationLink'), { kind: 'navigation-type', type: 'sheet' })
     expect(next[0]!.text).toContain('@State private var isDetailScreenPresented: Bool = false')
-    expect(next[0]!.text).toContain('Button("Open detail") { isDetailScreenPresented = true }\n                    .padding(8).sheet(isPresented: $isDetailScreenPresented) { DetailScreen() }')
+    expect(next[0]!.text).toContain('Button("Open detail") { isDetailScreenPresented = true }\n                    .padding(8)\n                    .sheet(isPresented: $isDetailScreenPresented) { DetailScreen() }')
     draws(next)
   })
 
@@ -52,6 +52,8 @@ describe('changing how a screen opens', () => {
     const back = edit(cover, nodeOf(cover, 'Button'), { kind: 'navigation-type', type: 'push' })
     expect(back[0]!.text).toContain('NavigationLink("Open detail", destination: DetailScreen())')
     expect(back[0]!.text).not.toContain('isDetailScreenPresented')
+    // Its whole line goes: what was written before `var` would otherwise fall on the next declaration.
+    expect(back[0]!.text).toContain('struct HomeScreen: View {\n    var body: some View {')
     expect(back[0]!.text).toContain('.padding(8)')
     draws(back)
   })

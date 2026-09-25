@@ -22,6 +22,17 @@ export function lineIndent(ctx: FeatureContext, file: string, offset: number): {
   const indent = /^[\t ]*/.exec(text.slice(text.lastIndexOf('\n', offset - 1) + 1))![0]
   return { indent, unit: indent.includes('\t') ? '\t' : '    ' }
 }
+/**
+ * Where a modifier added under a view starts its line: one step in from a view written on
+ * one line, and level with the modifiers of one written over several, whose last line is
+ * a `}` or a modifier at the view's own indent, as Xcode writes them.
+ */
+export function modifierIndent(ctx: FeatureContext, node: AuthoringNode): string {
+  const { indent, unit } = lineIndent(ctx, node.source.file, node.source.start)
+  const text = ctx.files.find(file => file.id === node.source.file)?.text ?? ''
+  if (!text.slice(node.source.start, node.source.end).includes('\n')) return indent + unit
+  return lineIndent(ctx, node.source.file, node.source.end).indent
+}
 const declarationCache = new WeakMap<FeatureContext, Decl[]>()
 const expressionCache = new WeakMap<FeatureContext, Map<string, Expr>>()
 

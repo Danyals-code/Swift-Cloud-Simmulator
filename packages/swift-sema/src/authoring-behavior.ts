@@ -1,7 +1,7 @@
 import { Lexer, type StructDecl } from '@studio/swift-syntax'
 import { deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
-import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, lineIndent, literal, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, literal, modifierIndent, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
 import { emptyComponents, enumCases, namedActions } from './authoring-components'
 import { styleExpression } from './authoring-resources'
@@ -232,9 +232,8 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
     while (owner.members.some(m => 'name' in m && m.name === name)) name = 'is' + action.destination + 'Presented' + suffix++
     patches.push(insertMember(ctx, owner, `@State private var ${name}: Bool = false`))
     // On a line of its own under the view, indented as a modifier is (D13).
-    const { indent, unit } = lineIndent(ctx, node.source.file, node.source.start)
     const modifier = `.${action.type === 'cover' ? 'fullScreenCover' : 'sheet'}(isPresented: $${name}) { ${action.destination}() }`
-    patches.push({ file: node.source.file, start: node.source.end, end: node.source.end, text: `\n${indent}${unit}${modifier}` })
+    patches.push({ file: node.source.file, start: node.source.end, end: node.source.end, text: `\n${modifierIndent(ctx, node)}${modifier}` })
     body = `${name} = true`
   } else {
     const info = settings.collections.find(c => c.name === action.collection && c.mutable)
