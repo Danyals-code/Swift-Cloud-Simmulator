@@ -20,6 +20,7 @@ import {
 import {
   asView,
   handlerIdFor,
+  labelView,
   payloadOf,
   ANIMATION_TYPE,
   COLOR_TYPE,
@@ -654,6 +655,10 @@ class Resolver {
         : this.stampList(restyled.children, path)
 
       const intent = this.intentFor(restyled)
+      // `Button { … } label: { … }` keeps what it is drawn with among its arguments, as
+      // its content closure is the action. Those views are stamped where the layout
+      // draws them, so a view in a tappable card has an identity of its own (D16).
+      const args = restyled.name === 'Button' ? this.stampLabel(restyled.args, path) : restyled.args
       // Layers are view subtrees too: register their controls and lifecycle hooks.
       const modifiers = restyled.modifiers.map((modifier, m) => {
         if (!['background', 'overlay', 'safeAreaInset'].includes(modifier.name)) return modifier
@@ -663,7 +668,7 @@ class Resolver {
             ? { ...arg, value: opaque('View', this.stamp(layer, `${path}-layer-${m}-${a}`)) } : arg
         }) }
       })
-      const stamped: ViewValue = { ...restyled, path, children, modifiers, contextMenuPath: this.contextMenuPath, ...(intent ? { intent } : {}) }
+      const stamped: ViewValue = { ...restyled, path, args, children, modifiers, contextMenuPath: this.contextMenuPath, ...(intent ? { intent } : {}) }
 
       if (intent) this.handlers.set(handlerIdFor(path), intent)
       this.collectLifecycle(restyled, path)
@@ -673,6 +678,15 @@ class Resolver {
       this.visualStyle = outerStyle
       this.contextMenuPath = outerContextMenu
     }
+  }
+
+  /** A Button's `label:` views, stamped in order under `…label`, the prefix the layout draws them with. */
+  private stampLabel(args: readonly ViewArg[], path: string): readonly ViewArg[] {
+    const labels = args.flatMap(arg => labelView(arg) ?? [])
+    if (!labels.length) return args
+    const stamped = this.stampList(labels, `${path}label`)
+    let next = 0
+    return args.map(arg => labelView(arg) ? { ...arg, value: opaque('View', stamped[next++]!) } : arg)
   }
 
   /** Built-in tokens also shadow an inherited custom style. */
