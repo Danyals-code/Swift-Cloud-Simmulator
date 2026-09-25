@@ -167,8 +167,9 @@ test('renames, duplicates and groups layers with a visible move destination and 
   // disabled row is ignored rather than waited for; under load that can be a while.
   await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
   await tree.getByRole('button', { name: 'Actions for Club heading', exact: true }).click()
-  await expect(page.getByRole('option', { name: 'Duplicate', exact: true })).toBeEnabled()
-  await page.getByRole('option', { name: 'Duplicate', exact: true }).click()
+  // Named with its shortcut: "Duplicate ⌘D".
+  await expect(page.getByRole('option', { name: /^Duplicate/ })).toBeEnabled()
+  await page.getByRole('option', { name: /^Duplicate/ }).click()
   await expect(tree.locator('[data-source-name="Text"]')).toHaveCount(2)
   await tree.locator('[data-source-name="Text"]').first().click()
   await tree.locator('[data-source-name="Text"]').last().click({ modifiers: ['Shift'] })
@@ -182,7 +183,7 @@ test('renames, duplicates and groups layers with a visible move destination and 
   await tree.locator('[data-source-name="Text"]').first().click()
   await tree.getByRole('button', { name: 'Actions for Club heading', exact: true }).click()
   await page.getByRole('option', { name: 'Move into…', exact: true }).click()
-  await page.getByRole('combobox', { name: 'Destination container', exact: true }).selectOption({ label: 'Horizontal Stack · container 1' })
+  await page.getByRole('combobox', { name: 'Destination container', exact: true }).selectOption({ label: 'Row · container 1' })
   await page.getByRole('button', { name: 'Move layers', exact: true }).click()
   await expect(page.getByTestId('design-feedback')).toHaveText('Design updated.')
   await expect(page.getByRole('alert')).not.toContainText('cannot')

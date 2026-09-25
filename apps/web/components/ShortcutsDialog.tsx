@@ -8,23 +8,25 @@ import styles from './AddView.module.css'
 const shortcuts = [
   ['Keyboard shortcuts', 'Mod /', 'Workspace'],
   ['Open a file', 'Mod P', 'Workspace'],
-  ['Switch Design / Code', '`', 'Outside text fields'],
-  ['Switch Edit / Preview', 'Tab', 'Outside text fields'],
+  ['Save', 'Mod S', 'Workspace'],
+  ['Switch Design / Code', '`', 'Outside fields'],
+  ['Switch Inspect / Preview', 'Tab', 'Code, with nothing focused'],
   ['Show / hide left panel', 'Mod 0', 'Workspace'],
   ['Show / hide right panel', 'Mod Alt Enter', 'Workspace'],
   ['Show / hide problems and output', 'Mod Shift Y', 'Workspace'],
   ['Restart preview', 'Mod R', 'Workspace'],
-  ['Toggle inspection', 'Mod I', 'Workspace'],
+  ['Toggle inspection', 'Mod I', 'Code'],
   ['Show all pages', 'Mod Shift A', 'Design · Edit'],
   ['Add a view', 'A', 'Design · Edit'],
   ['Arrange views', 'V', 'Design · Edit'],
-  ['Delete tool', 'D', 'Design · Edit'],
   ['Delete selected view', 'Backspace', 'Design · Edit'],
+  ['Duplicate selected view', 'Mod D', 'Design · Edit'],
+  ['Hide selected view', 'Mod Shift H', 'Design · Edit'],
+  ['Group in a Column, Row or Overlap', 'Mod G', 'Design · Edit'],
   ['Move selected view', 'Alt ↑ / ↓', 'Design · Edit'],
   ['Undo canvas edit', 'Mod Z', 'Design · Edit'],
   ['Redo canvas edit', 'Mod Shift Z', 'Design · Edit'],
   ['Copy / paste view', 'Mod C / V', 'Design · Edit'],
-  ['Save source', 'Mod S', 'Code editor'],
   ['Rename symbol', 'F2', 'Code editor'],
   ['Rename file', 'F2 / double-click', 'Files panel'],
   ['Rename app', 'Enter / double-click', 'App name'],
@@ -47,6 +49,6 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
       </div>)}
       {!results.length ? <p className={styles.empty}>No matching shortcuts.</p> : null}
     </div>
-    <footer className={styles.footer}><span>Single-key tools pause while typing.</span><span>esc to close</span></footer>
+    <footer className={styles.footer}><span>Shortcuts wait while you type in a field.</span><span>esc to close</span></footer>
   </>}</Spotlight>
 }

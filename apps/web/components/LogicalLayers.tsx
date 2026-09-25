@@ -1,13 +1,14 @@
 'use client'
 
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { argumentLayerProblem, isStructuralLayer, layerMoveProblem, LAYER_MOVE_CONTAINERS } from '@studio/shared'
+import { argumentLayerProblem, groupLayoutOf, isStructuralLayer, layerMoveProblem, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS } from '@studio/shared'
 import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRequest, HiddenViewInfo, SourceFile, SourceSpan, ViewLayer } from '@studio/shared'
 import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerIsVisual, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from '../lib/sourceLayers'
 import { Icon, type IconName } from './ui/Icon'
 import { MenuButton, type MenuItem } from './ui/Menu'
 import { eventLog } from '../lib/eventLog'
 import { designEvent } from '../lib/designEvents'
+import { SHORTCUT_KEYS } from '../lib/shortcuts'
 import styles from './Layers.module.css'
 
 interface Props {
@@ -37,6 +38,12 @@ interface Props {
   onShow?: (view: HiddenViewInfo) => void
   editable?: boolean
   /**
+   * The layers selected together with Shift- or ⌘-click, when the studio keeps them for ⌘G
+   * (D3), and where a change to them goes. Kept here when it is not passed.
+   */
+  multiple?: MultiSelection
+  onMultipleChange?: (multiple: MultiSelection) => void
+  /**
    * Drawn inside another outline - the merged Design tree - rather than as a panel
    * of its own: no heading, no filter field, no scroll area, and rows indented from
    * `indent` so they sit under the screen that owns them.
@@ -55,10 +62,15 @@ const ICONS: Readonly<Record<string, IconName>> = {
   TabView: 'screens', Group: 'section', Section: 'section', Grid: 'grid', Spacer: 'spacer',
 }
 
+/** Layers selected together with Shift- or ⌘-click, for the files they were selected in. */
+export interface MultiSelection { readonly files: readonly SourceFile[]; readonly ids: readonly string[] }
+
 /** The designer hierarchy has one copy of a row design, never individual records. */
-export function LogicalLayers({ labels = [], onRename, snapshot, files, selected, selectedAncestors = [], selection, hovered, hoveredAncestors = [], onHover, runtimeLayers, pageSource, pageId, pageName, selectedRuntimeId, stale, onSelect, onEdit, onCopy, onPaste, hidden = [], onShow, editable = false, embedded = false, indent = 8, query: externalQuery }: Props) {
+export function LogicalLayers({ labels = [], onRename, snapshot, files, selected, selectedAncestors = [], selection, hovered, hoveredAncestors = [], onHover, runtimeLayers, pageSource, pageId, pageName, selectedRuntimeId, stale, onSelect, onEdit, onCopy, onPaste, hidden = [], onShow, editable = false, multiple: keptMultiple, onMultipleChange, embedded = false, indent = 8, query: externalQuery }: Props) {
   const [navigation, setNavigation] = useState<SourceLayerNavigation>({ snapshot, files, pageId, closed: new Set() })
-  const [multiple, setMultiple] = useState<{ files: readonly SourceFile[]; ids: string[] }>({ files, ids: [] })
+  const [ownMultiple, setOwnMultiple] = useState<MultiSelection>({ files, ids: [] })
+  const multiple = keptMultiple ?? ownMultiple
+  const setMultiple = onMultipleChange ?? setOwnMultiple
   const [organizing, setOrganizing] = useState<{ node: AuthoringNode; kind: 'rename' | 'reparent' } | null>(null)
   const [draft, setDraft] = useState('')
   const [destination, setDestination] = useState('')
@@ -129,6 +141,8 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
   }
   const selectedIds = multiple.files === files && multiple.ids.length ? multiple.ids : selected ? [selected] : []
   const idsFor = (node: AuthoringNode) => selectedIds.includes(node.id) ? selectedIds : [node.id]
+  /** The first of the layers selected together, where their group goes. */
+  const groupFirst = nodes.get(selectedIds[0] ?? '')
   const menus = (node: AuthoringNode): MenuItem[] => {
     const siblings = nodes.get(node.parentId ?? '')?.children ?? []
     const index = siblings.indexOf(node.id)
@@ -137,16 +151,14 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     // A view written as an argument keeps its name; the rest is off, and says why.
     const slotProblem = argumentLayerProblem(snapshot.nodes, node)
     const structure: MenuItem[] = [
-      { value: 'copy', label: 'Copy', detail: '⌘C', disabled: !isStructuralLayer(node) || !onCopy },
-      { value: 'paste', label: 'Paste', detail: '⌘V', disabled: !canEdit || !onPaste },
-      { value: 'duplicate', label: 'Duplicate', disabled: !canEdit, separated: true },
-      { value: 'VStack', label: 'Wrap in Vertical Stack', disabled: !canEdit },
-      { value: 'HStack', label: 'Wrap in Horizontal Stack', disabled: !canEdit },
-      { value: 'ZStack', label: 'Wrap in ZStack', disabled: !canEdit },
+      { value: 'copy', label: 'Copy', detail: SHORTCUT_KEYS.copy, disabled: !isStructuralLayer(node) || !onCopy },
+      { value: 'paste', label: 'Paste', detail: SHORTCUT_KEYS.paste, disabled: !canEdit || !onPaste },
+      { value: 'duplicate', label: 'Duplicate', detail: SHORTCUT_KEYS.duplicate, disabled: !canEdit, separated: true },
+      ...(['VStack', 'HStack', 'ZStack'] as const).map(layout => ({ value: layout, label: `Group in ${LAYOUT_WORDS[layout]}`, detail: layout === groupLayoutOf(snapshot.nodes, node) ? SHORTCUT_KEYS.group : undefined, disabled: !canEdit })),
       { value: 'reparent', label: 'Move into…', disabled: !canEdit },
       { value: 'up', label: 'Move up', disabled: !canEdit || index <= 0 || !rows.some(row => row.node.id === siblings[index - 1]) },
       { value: 'down', label: 'Move down', disabled: !canEdit || index < 0 || index >= siblings.length - 1 || !rows.some(row => row.node.id === siblings[index + 1]) },
-      { value: 'hide', label: 'Hide', disabled: !canEdit, separated: true },
+      { value: 'hide', label: 'Hide', detail: SHORTCUT_KEYS.hide, disabled: !canEdit, separated: true },
       { value: 'delete', label: 'Delete', disabled: !canEdit },
     ]
     return [
@@ -277,14 +289,14 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
       {hiddenRows(visibleHidden.filter(view => !owners.get(view)), 0)}
       {!rows.length && <p className={styles.empty}>{query.trim() ? 'No matching layers.' : stale ? 'Building the view hierarchy…' : 'No views to show.'}</p>}
     </div>
-    {selectedIds.length > 1 && <div className={styles.context}><span>{selectedIds.length} layers selected</span><button type="button" disabled={disabled} onClick={() => { const n = nodes.get(selectedIds[0]!); if (n) void edit(n, { kind: 'layer-wrap', ids: selectedIds, layout: 'VStack' }) }}>Group in Column</button><button type="button" onClick={() => setMultiple({ files, ids: [] })}>Clear selection</button></div>}
+    {selectedIds.length > 1 && groupFirst && <div className={styles.context}><span>{selectedIds.length} layers selected</span><button type="button" disabled={disabled} title={`Group them the way they sit (${SHORTCUT_KEYS.group})`} onClick={() => void edit(groupFirst, { kind: 'layer-wrap', ids: selectedIds, layout: groupLayoutOf(snapshot.nodes, groupFirst) })}>Group in {LAYOUT_WORDS[groupLayoutOf(snapshot.nodes, groupFirst)]}</button><button type="button" onClick={() => setMultiple({ files, ids: [] })}>Clear selection</button></div>}
     {organizing && <form className={styles.organize} onSubmit={async event => {
       event.preventDefault()
       if (disabled) return
       if (organizing.kind === 'rename') { const problem = onRename?.(organizing.node, draft) ?? null; setError(problem); if (!problem) setOrganizing(null) }
       else { const problem = await edit(organizing.node, { kind: 'layer-reparent', ids: idsFor(organizing.node), destination }); if (!problem) setOrganizing(null) }
     }}><label>{organizing.kind === 'rename' ? 'Layer name' : 'Move selected layers into'}{organizing.kind === 'rename' ? <input autoFocus aria-label="Layer name" maxLength={100} value={draft} onChange={e => setDraft(e.target.value)} /> : <select disabled={disabled} aria-label="Destination container" value={destination} onChange={e => setDestination(e.target.value)}><option value="" disabled>Choose container</option>{snapshot.nodes.filter(n => !layerMoveProblem(snapshot.nodes, idsFor(organizing.node), n)).map(n => <option key={n.id} value={n.id}>{labelFor(n)} · container {snapshot.nodes.filter(item => item.owner === n.owner && item.name === n.name).indexOf(n) + 1}</option>)}</select>}</label><p>{organizing.kind === 'reparent' ? 'Layers are placed at the end of this container, in their current order.' : 'An empty name restores the content label.'}</p><div><button type="submit" disabled={disabled || organizing.kind === 'reparent' && !destination}>{organizing.kind === 'rename' ? 'Save layer name' : 'Move layers'}</button><button type="button" onClick={() => setOrganizing(null)}>Cancel</button></div></form>}
-    {organizing?.kind === 'reparent' && !snapshot.nodes.some(n => !layerMoveProblem(snapshot.nodes, idsFor(organizing.node), n)) && <p className={styles.empty}>{nodes.get(organizing.node.parentId ?? '')?.kind === 'definition' ? 'The screen must keep its root layout. Select a layer inside it to move.' : 'No compatible containers for these layers. Select adjacent layers in one container, or add a Row, Column or Stack in the same layout.'}</p>}
+    {organizing?.kind === 'reparent' && !snapshot.nodes.some(n => !layerMoveProblem(snapshot.nodes, idsFor(organizing.node), n)) && <p className={styles.empty}>{nodes.get(organizing.node.parentId ?? '')?.kind === 'definition' ? 'The screen must keep its root layout. Select a layer inside it to move.' : 'No compatible containers for these layers. Select adjacent layers in one container, or add a Row, Column or Overlap in the same layout.'}</p>}
     {!embedded && <p className={styles.selectionHint}>Shift-click adjacent layers to group them. ⌘/Ctrl-click adds a layer.</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
     {!embedded && externalQuery === undefined && <label className={styles.filter}><Icon name="search" size={14} /><input aria-label="Filter design layers" value={query} placeholder="Find a layer" onChange={e => setQuery(e.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setQuery('') } }} /></label>}

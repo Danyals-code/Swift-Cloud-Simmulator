@@ -10,10 +10,12 @@ import { searchCatalog } from '../apps/web/lib/viewCatalog'
 import { sourceLayerType } from '../apps/web/lib/sourceLayers'
 
 beforeEach(resetPipelineState)
-it('distinguishes photos, symbols and all three stack directions', () => {
-  expect(searchCatalog('row')[0]?.name).toBe('Horizontal Stack')
-  expect(searchCatalog('column').some(item => item.name === 'Vertical Stack')).toBe(true)
-  expect(searchCatalog('zstack')[0]?.name).toBe('ZStack')
+it('distinguishes photos, symbols and all three stack directions, by Figma\'s words and Swift\'s (D3)', () => {
+  expect(searchCatalog('row')[0]?.name).toBe('Row')
+  expect(searchCatalog('column')[0]?.name).toBe('Column')
+  expect(searchCatalog('overlap')[0]?.name).toBe('Overlap')
+  expect(searchCatalog('zstack')[0]?.name).toBe('Overlap')
+  expect(searchCatalog('vertical stack')[0]?.name).toBe('Column')
   expect(searchCatalog('symbols')[0]?.name).toBe('Symbols')
   expect(searchCatalog('images')[0]?.action).toBe('image')
 })

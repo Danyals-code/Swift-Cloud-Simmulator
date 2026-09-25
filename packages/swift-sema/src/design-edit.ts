@@ -10,7 +10,7 @@ import { pastedValues } from './authoring-clipboard'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 import { liveControl } from './authoring-behavior'
 import { wrapperOf } from './authoring-structure'
-import { designControlRecipes, validateControlValue, viewCallChain } from './design-controls'
+import { designControlRecipes, spreadRoomProblem, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
 
 /** The operations that act on a view's whole statement - its place, its copies, whether it is there at all - as the structural check knows them. */
@@ -73,7 +73,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       const after = result.files.find(f => f.id === file.id)?.text
       const kind = STRUCTURAL[operation.kind]
       const toward = operation.kind === 'layer-reparent' ? model.nodes.find(n => n.id === operation.destination)?.source.start : undefined
-      const adds = operation.kind === 'layer-wrap' ? `${wrapperOf(operation.layout)} { }` : undefined
+      const adds = operation.kind === 'layer-wrap' ? `${wrapperOf(context, node, operation.layout)} { }` : undefined
       const problem = kind && after !== undefined && structuralEditProblem({ file: file.id, before: file.text, after, kind, view: node.source, adds, toward, inside: kind === 'reparent', landed: result.offset })
       if (problem) return reject(problem)
       // Any other feature rewrites in its own way; what it must not leave behind is a view that cannot build.
@@ -105,13 +105,18 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     if (!expression) return reject('This source expression cannot be edited safely.')
     const recipe = designControlRecipes(node, expression, file.text, request.deploymentTarget).find(r => r.control.id === operation.control)
     if (!recipe) return reject('This property is controlled by Swift or is outside the editable subset.')
-    const invalid = validateControlValue(recipe.control, operation.value)
+    const invalid = validateControlValue(recipe.control, operation.value) ?? recipe.problem?.(operation.value)
+      ?? (operation.control === 'spacing' && operation.value === 'auto' && recipe.control.value !== 'auto' ? spreadRoomProblem(model.nodes, node) : null)
     if (invalid) return reject(invalid)
     if (operation.value === recipe.control.value || recipe.control.kind === 'number' && recipe.control.value !== '' && Number(operation.value) === Number(recipe.control.value)) {
       return materializeCard ? finish(request.files, { file: file.id, offset: node.source.start }) : { ok: true, projectId: request.projectId, baseRevision: request.baseRevision, changes: [], selection: { file: file.id, offset: node.source.start } }
     }
     const patch = recipe.patch(operation.value)
     changed = { text: file.text.slice(0, patch.start) + patch.text + file.text.slice(patch.end), offset: node.source.start }
+    // A value written in more than one place, such as Auto spacing's Spacers (D4), may change nothing else.
+    const reshaped = recipe.reshapes?.(operation.value)
+    const problem = reshaped && structuralEditProblem({ file: file.id, before: file.text, after: changed.text, kind: 'spacing', view: node.source, ...reshaped })
+    if (problem) return reject(problem)
   } else {
     switch (operation.kind) {
       case 'delete': changed = deleteView(file.text, file.id, offset, refuse); break

@@ -234,8 +234,24 @@
 .previewToggle:hover:not(:disabled) { background: var(--color-xc-bar-raised); }
 .previewToggle[aria-pressed='true'] { border-color: var(--color-xc-accent); background: var(--color-xc-select); color: var(--color-xc-accent); }
 .previewToggle:disabled { opacity: .45; cursor: default; }
-@media(max-width:1180px) { .environment > :nth-child(3) { display: none; } }
-@media(max-width:1020px) { .environment { display: none; } }
+/* The pickers the toolbar has no room for, in the canvas heading instead (D15). */
+.headingEnvironment { display: inline-flex; align-items: center; gap: 6px; }
+.headingEnvironment > button, .headingEnvironment > div { height: 28px; }
+/* From the width at which the pickers move here (NO_ROOM_FOR_PICKERS in lib/paneLayout.ts), the heading wraps. */
+@media(max-width:1020px) {
+  .canvasHeading { height: auto; min-height: 45px; flex-wrap: wrap; row-gap: 6px; padding: 6px 12px; }
+  .canvasHeading > span:last-child { flex-wrap: wrap; justify-content: flex-end; gap: 6px 12px; }
+  .headingHint[data-idle] { display: none; }
+  .showAll { white-space: nowrap; }
+}
+
+/* A narrow window: Layers over the canvas when asked for, and a note asking for more room (D15). */
+.layersOver { position: absolute; top: 0; bottom: 0; left: 32px; z-index: 40; overflow: hidden; background: var(--color-xc-sidebar); border-right: 1px solid var(--color-xc-line); box-shadow: 8px 0 24px rgb(0 0 0 / 18%); }
+.layersBackdrop { position: absolute; inset: 0; z-index: 39; background: rgb(0 0 0 / 8%); cursor: default; }
+.narrowNote { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 5px 12px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-size: 12px; }
+.narrowNote > span { flex: 1; min-width: 0; }
+.narrowNote > button { padding: 2px 8px; border-radius: 5px; color: var(--color-xc-accent); }
+.narrowNote > button:hover { background: var(--color-xc-line-soft); }
 
 /* Where the settings panel is: App › Screen › View. Each step selects that level. */
 .levelPath { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; font-weight: 500; color: var(--color-xc-text-3); }

@@ -15,6 +15,35 @@ export function argumentLayerProblem(nodes: readonly AuthoringNode[], node: Auth
   return `The ${slot} is part of the view it is attached to, so it can’t be moved, wrapped, copied, hidden or deleted on its own. Select that view instead.`
 }
 
+/** The three ways a stack lays its views out: as a Column, a Row or an Overlap (D3). */
+export type StackLayout = 'VStack' | 'HStack' | 'ZStack'
+
+/** Each layout in Figma's words (D3). */
+export const LAYOUT_WORDS: Readonly<Record<StackLayout, string>> = { VStack: 'Column', HStack: 'Row', ZStack: 'Overlap' }
+
+/** Which way a stack lays its views out, a lazy one as its plain one does, or undefined for any other view. */
+export function stackLayoutOf(name: string): StackLayout | undefined {
+  return name === 'VStack' || name === 'LazyVStack' ? 'VStack' : name === 'HStack' || name === 'LazyHStack' ? 'HStack' : name === 'ZStack' ? 'ZStack' : undefined
+}
+
+/** What lays a layer out: its parent, past the conditions, repeats and groups that only pass their views on. */
+export function layoutParentOf(nodes: readonly AuthoringNode[], node: AuthoringNode): AuthoringNode | undefined {
+  const byId = new Map(nodes.map(item => [item.id, item]))
+  let parent = byId.get(node.parentId ?? '')
+  while (parent && (['branch', 'collection', 'template'].includes(parent.kind) || parent.name === 'Group' || parent.name === 'ForEach')) parent = byId.get(parent.parentId ?? '')
+  return parent
+}
+
+/**
+ * The stack a group of layers goes into so that nothing moves (D3): the way their parent
+ * lays them out (a row in a row, an overlap in an overlap), and a column otherwise.
+ */
+export function groupLayoutOf(nodes: readonly AuthoringNode[], node: AuthoringNode): StackLayout {
+  const parent = layoutParentOf(nodes, node)
+  const scrollsAcross = parent?.name === 'ScrollView' && parent.controls?.some(control => control.id === 'scroll:axis' && control.value === 'horizontal')
+  return (parent && stackLayoutOf(parent.name)) ?? (scrollsAcross ? 'HStack' : 'VStack')
+}
+
 /** Structural eligibility shared by the picker, drag targets, and source writer.
  * The writer additionally checks syntax, adjacency, and local bindings. */
 export function layerMoveProblem(nodes: readonly AuthoringNode[], ids: readonly string[], destination: AuthoringNode): string | null {

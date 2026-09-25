@@ -146,9 +146,25 @@
 .swatchValue label { flex: 1; min-width: 0; }
 .visualColor label { display: grid; gap: 5px; }
 .visualColor input, .visualColor select { width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; background: var(--color-xc-bar-raised); }
+/* A stack's Layout and Alignment as icon buttons, an Overlap's as its nine places, and Auto spacing (D4). */
+.choices { display: inline-flex; justify-self: start; gap: 2px; padding: 2px; border-radius: 7px; background: var(--color-xc-bar-raised); }
+.choices > button { display: grid; place-items: center; width: 30px; height: 24px; border-radius: 5px; color: var(--color-xc-text-2); cursor: pointer; }
+.choices > button:hover:not(:disabled) { color: var(--color-xc-text); }
+.choices > button[aria-checked='true'] { background: var(--color-xc-panel); color: var(--color-xc-accent); box-shadow: 0 1px 3px #0002; }
+.places { display: grid; grid-template-columns: repeat(3, 22px); justify-self: start; gap: 2px; padding: 3px; border-radius: 7px; background: var(--color-xc-bar-raised); }
+.places > button { display: grid; place-items: center; height: 20px; border-radius: 4px; cursor: pointer; }
+.places > button > i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-xc-text-3); }
+.places > button[aria-checked='true'] { background: var(--color-xc-panel); box-shadow: 0 1px 3px #0002; }
+.places > button[aria-checked='true'] > i { width: 8px; height: 8px; border-radius: 2px; background: var(--color-xc-accent); }
+.choices > button:focus-visible, .places > button:focus-visible, .spacing > button:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
+.spacing { display: flex; gap: 6px; min-width: 0; }
+.spacing > input { flex: 1; }
+.spacing > button { flex-shrink: 0; height: 28px; padding: 0 9px; border: 1px solid var(--color-xc-line); border-radius: 5px; font-size: 12px; color: var(--color-xc-text-2); cursor: pointer; }
+.spacing > button[aria-pressed='true'] { border-color: var(--color-xc-accent); background: var(--color-xc-select); color: var(--color-xc-accent); }
 .layoutGuide { margin: 10px 0; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 7px; }
 .layoutGuide > div { display: flex; align-items: center; justify-content: center; min-height: 60px; }
 .layoutGuide > div[data-direction=column] { flex-direction: column; }
+.layoutGuide > div[data-spread] { justify-content: space-between; }
 .layoutGuide span { display: grid; place-items: center; background: var(--color-xc-select); color: var(--color-xc-accent); border: 1px solid var(--color-xc-accent); border-radius: 3px; width: 28px; height: 15px; font-size: 9px; }
 .layoutGuide > div[data-direction=overlay] { display: grid; }
 .layoutGuide > div[data-direction=overlay] span { grid-area: 1 / 1; background: var(--color-xc-select); }

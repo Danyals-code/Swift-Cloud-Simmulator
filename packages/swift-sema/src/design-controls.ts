@@ -1,10 +1,17 @@
-import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, authoringCapability, deploymentVersion, stackLayoutOf, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
 import { authoringViewMinimum } from './authoring-view'
-import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
+import { Lexer, type CallExpr, type Expr, type Stmt } from '@studio/swift-syntax'
 
 interface Patch { readonly start: number; readonly end: number; readonly text: string }
-export interface ControlRecipe { readonly control: DesignControl; readonly patch: (value: string) => Patch }
+export interface ControlRecipe {
+  readonly control: DesignControl
+  readonly patch: (value: string) => Patch
+  /** Why this value cannot be written here, beyond what the control's kind and range say. */
+  readonly problem?: (value: string) => string | null
+  /** What writing this value may add to the view and take out of it, for the structural check, when it is more than one value. */
+  readonly reshapes?: (value: string) => { readonly adds: string; readonly removes: string } | undefined
+}
 export function viewCallChain(expr: Expr): { base: CallExpr; modifiers: CallExpr[] } | null {
   if (expr.kind !== 'call') return null
   if (expr.callee.kind === 'memberAccess' && expr.callee.base?.kind === 'call') {
@@ -37,6 +44,118 @@ export function swiftString(value: string): string {
   return '"' + Array.from(value, c => c === '\\' ? '\\\\' : c === '"' ? '\\"' : c === '\n' ? '\\n' : c === '\r' ? '\\r' : c === '\t' ? '\\t' : c.codePointAt(0)! < 32 || c.codePointAt(0) === 127 ? `\\u{${c.codePointAt(0)!.toString(16)}}` : c).join('') + '"'
 }
 
+/** A modifier's name: `frame` for `.frame(width: 100)`. */
+const modName = (m: CallExpr) => m.callee.kind === 'memberAccess' ? m.callee.member : ''
+
+/** An axis's size constraints, by label: `width`, the `maxWidth` Fill writes, and `minWidth`. */
+const AXIS_LABELS = { width: ['width', 'maxWidth', 'minWidth'], height: ['height', 'maxHeight', 'minHeight'] } as const
+
+/** The frames that set a view's size along one axis. */
+function axisFrames(modifiers: readonly CallExpr[], axis: 'width' | 'height'): CallExpr[] {
+  return modifiers.filter(m => modName(m) === 'frame' && m.args.some(arg => (AXIS_LABELS[axis] as readonly string[]).includes(arg.label ?? '')))
+}
+
+/** A view statement's call, past what is set on it: `Spacer` for `Spacer().frame(width: 8)`. */
+function viewName(statement: Stmt): string | undefined {
+  const base = statement.kind === 'exprStmt' ? viewCallChain(statement.expression)?.base : undefined
+  return base?.callee.kind === 'identifier' ? base.callee.name : undefined
+}
+
+/** A `Spacer()` as Auto spacing writes it, with nothing set on it. */
+function plainSpacer(statement: Stmt): boolean {
+  const call = statement.kind === 'exprStmt' ? statement.expression : undefined
+  return call?.kind === 'call' && call.callee.kind === 'identifier' && call.callee.name === 'Spacer' && !call.args.length && !call.trailingClosure
+}
+
+/** Several edits to one stretch of text, as the one patch a control writes. */
+function merged(text: string, patches: readonly Patch[]): Patch {
+  const sorted = [...patches].sort((a, b) => a.start - b.start)
+  const start = sorted[0]!.start, end = Math.max(...sorted.map(patch => patch.end))
+  let out = '', at = start
+  for (const patch of sorted) { out += text.slice(at, patch.start) + patch.text; at = patch.end }
+  return { start, end, text: out + text.slice(at, end) }
+}
+
+/**
+ * Spacing's Auto (D4). SwiftUI stacks have no space-between, so Auto is what Figma's Auto
+ * looks like in Swift: a `Spacer()` between each pair of views, in place of any Spacers the
+ * stack had, and the stack filling that way, so the gaps have room to show. A number takes
+ * the Spacers out again and keeps the size. A stack reads as Auto when a plain Spacer sits
+ * between every pair of its views, and nowhere else.
+ */
+function autoSpacing(recipe: ControlRecipe, name: string, base: CallExpr, expr: Expr, modifiers: readonly CallExpr[], text: string): ControlRecipe {
+  const statements = base.trailingClosure?.body.statements.filter(statement => statement.kind !== 'declStmt') ?? []
+  const spacers = statements.filter(statement => viewName(statement) === 'Spacer')
+  const views = statements.filter(statement => viewName(statement) !== 'Spacer')
+  const auto = views.length >= 2 && statements.length === views.length * 2 - 1 && statements.every((statement, index) => index % 2 === 1 ? plainSpacer(statement) : viewName(statement) !== 'Spacer')
+  const row = name.includes('HStack'), word = LAYOUT_WORDS[row ? 'HStack' : 'VStack']
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lineStart = (offset: number) => text.lastIndexOf('\n', offset - 1) + 1
+  const problem = (value: string) => value !== 'auto' || auto ? null
+    : views.some(view => viewName(view) === 'ForEach') ? `Auto spacing puts a Spacer between views written one by one, and this ${word} repeats its views from data. Set a number instead.`
+    : views.length < 2 ? `Auto spacing needs two or more views in the ${word}.` : null
+  /** Where a view ends, before the `;` a statement takes with it. */
+  const endOf = (view: Stmt) => view.kind === 'exprStmt' ? view.expression.span.end : view.span.end
+  /** A Spacer after `view`: on its own line, below a note that ends the view's line, or beside it on one line. */
+  const spacerAfter = (view: Stmt, next: Stmt): Patch => {
+    const end = endOf(view)
+    if (!text.slice(end, next.span.start).includes('\n')) return { start: end, end, text: '; Spacer()' }
+    const newline = text.indexOf('\n', end)
+    const at = /^\s*\/\//.test(text.slice(end, newline)) ? newline - (text[newline - 1] === '\r' ? 1 : 0) : end
+    const indent = /^[ \t]*/.exec(text.slice(lineStart(view.span.start)))![0]
+    return { start: at, end: at, text: `${eol}${indent}Spacer()` }
+  }
+  /** A Spacer taken out: its whole line when it has one to itself, or itself and a `;` beside it. */
+  const withoutSpacer = (spacer: Stmt): Patch => {
+    const end = endOf(spacer), start = lineStart(spacer.span.start), newline = text.indexOf('\n', end)
+    if (!text.slice(start, spacer.span.start).trim() && !text.slice(end, newline < 0 ? text.length : newline).replace(';', '').trim()) return { start, end: newline + 1, text: '' }
+    const after = /^\s*;\s*/.exec(text.slice(end))?.[0]
+    if (after) return { start: spacer.span.start, end: end + after.length, text: '' }
+    const before = /;\s*$/.exec(text.slice(0, spacer.span.start))?.[0] ?? ''
+    return { start: spacer.span.start - before.length, end, text: '' }
+  }
+  const axis = row ? 'width' : 'height', max = AXIS_LABELS[axis][1]
+  const sized = axisFrames(modifiers, axis).length > 0
+  const patch = (value: string): Patch => {
+    if (value === 'auto') return merged(text, [
+      ...spacers.map(withoutSpacer),
+      ...views.slice(0, -1).map((view, index) => spacerAfter(view, views[index + 1]!)),
+      ...(sized ? [] : [{ start: expr.span.end, end: expr.span.end, text: `.frame(${max}: .infinity)` }]),
+    ])
+    return auto ? merged(text, [recipe.patch(value), ...spacers.map(withoutSpacer)]) : recipe.patch(value)
+  }
+  const written = base.args.find(arg => arg.label === 'spacing')
+  // The tokens either way may add or take out, for the structural check: Spacers and a Fill
+  // frame, the Spacers it had, a number in place of the one written, and the parentheses a
+  // first argument needs.
+  const reshapes = (value: string) => value === 'auto' || auto ? {
+    adds: `Spacer(); .frame(${max}: .infinity) ${value === 'auto' ? '' : `(spacing: ${value},)`}`,
+    removes: `Spacer(); ${spacers.map(spacer => text.slice(spacer.span.start, endOf(spacer))).join(' ')} ${written ? text.slice(written.value.span.start, written.value.span.end) : ''}`,
+  } : undefined
+  return { control: { ...recipe.control, value: auto ? 'auto' : recipe.control.value, options: ['auto'] }, patch, problem, reshapes }
+}
+
+/**
+ * Why a stack has no room to spread its views out with Auto spacing (D4): a scroll view that
+ * scrolls the way the stack runs gives it no size that way, so its Spacers shrink to nothing.
+ * A fixed size of its own gives it the room back.
+ */
+export function spreadRoomProblem(nodes: readonly AuthoringNode[], node: AuthoringNode): string | null {
+  const layout = stackLayoutOf(node.name)
+  if (layout !== 'VStack' && layout !== 'HStack') return null
+  const row = layout === 'HStack', word = LAYOUT_WORDS[layout]
+  if (node.controls?.some(control => control.id === (row ? 'fill:width' : 'fill:height') && control.value === 'Fixed')) return null
+  const byId = new Map(nodes.map(item => [item.id, item]))
+  for (let parent = byId.get(node.parentId ?? ''); parent && parent.kind !== 'definition'; parent = byId.get(parent.parentId ?? '')) {
+    if (parent.name !== 'ScrollView') continue
+    const sideways = parent.controls?.some(control => control.id === 'scroll:axis' && control.value === 'horizontal') ?? false
+    if (sideways !== row) return null
+    return row ? `A scroll view that scrolls sideways leaves a ${word} no width to spread its views across. Set a number, or give the ${word} a fixed width.`
+      : `A scroll view that scrolls up and down leaves a ${word} no height to spread its views over. Set a number, or give the ${word} a fixed height.`
+  }
+  return null
+}
+
 /** Recipes are reconstructed from syntax on every request; the UI never supplies offsets. */
 export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET): ControlRecipe[] {
   if (!['view', 'collection', 'component'].includes(node.kind) || node.name === 'WindowGroup') return []
@@ -53,7 +172,6 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   const recipes: ControlRecipe[] = []
   const scope = node.properties.some(p => p.scope === 'template') ? 'All rows in this template' : `Defined in ${node.owner}`
   const raw = (span: SourceSpan) => text.slice(span.start, span.end)
-  const modName = (m: CallExpr) => m.callee.kind === 'memberAccess' ? m.callee.member : ''
   function add(id: string, label: string, kind: DesignControl['kind'], value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description = 'Changes this source value; existing modifier order is preserved.', origin = node.source): void {
     recipes.push({ control: { id, label, kind, value, options, min, max, scope, description, source: origin }, patch })
   }
@@ -104,6 +222,12 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       return last ? { start: last.span.end, end: last.span.end, text: `, ${label}${formatted}` } : { start: at, end: at, text: `${label}${formatted}` }
     }, options, min, undefined, 'Sets a constructor argument without changing its children.')
   }
+  /** A stack's Spacing, with Figma's Auto beside the number (D4). */
+  function spacing(): void {
+    argument('spacing', 'Spacing', 'spacing', 'number', '', undefined, 0)
+    const recipe = recipes.at(-1)
+    if (recipe?.control.id === 'spacing') recipes[recipes.length - 1] = autoSpacing(recipe, node.name, base, expr, modifiers, text)
+  }
   if (node.kind !== 'component' && constructorEditable && ['HStack', 'VStack', 'ZStack'].includes(node.name)) {
     const alignment = base.args.find(a => a.label === 'alignment')
     const centered = !alignment || /^(?:(?:SwiftUI\.)?(?:Alignment|HorizontalAlignment|VerticalAlignment))?\.center$/.test(raw(alignment.value.span).trim())
@@ -117,11 +241,11 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       const recipe = recipes.at(-1)!
       recipes[recipes.length - 1] = { ...recipe, control: { ...recipe.control, disabledReason: 'Set Alignment to Center to change the layout.' } }
     }
-    if (node.name !== 'ZStack') argument('spacing', 'Spacing', 'spacing', 'number', '', undefined, 0)
+    if (node.name !== 'ZStack') spacing()
     argument('alignment', 'Alignment', 'alignment', 'select', 'center', node.name === 'HStack' ? ['center', 'top', 'bottom', 'firstTextBaseline', 'lastTextBaseline'] : node.name === 'VStack' ? ['center', 'leading', 'trailing'] : ALIGNMENTS)
   }
   if (node.kind !== 'component' && constructorEditable && ['LazyHStack', 'LazyVStack'].includes(node.name)) {
-    argument('spacing', 'Spacing', 'spacing', 'number', '', undefined, 0)
+    spacing()
     argument('alignment', 'Alignment', 'alignment', 'select', 'center', node.name === 'LazyHStack' ? ['center', 'top', 'bottom', 'firstTextBaseline', 'lastTextBaseline'] : ['center', 'leading', 'trailing'])
   }
   if (node.kind !== 'component' && constructorEditable && node.name === 'ScrollView') {
@@ -214,17 +338,16 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   if (!has('accessibilityLabel')) append('add:accessibilityLabel', 'Accessibility label', 'text', '', v => `.accessibilityLabel(${swiftString(v)})`)
   if (targetVersion >= 14 && !has('accessibilityIdentifier')) append('add:accessibilityIdentifier', 'Accessibility identifier', 'text', '', v => `.accessibilityIdentifier(${swiftString(v)})`)
   for (const axis of ['width', 'height'] as const) {
-    const max = axis === 'width' ? 'maxWidth' : 'maxHeight'
-    const minimum = axis === 'width' ? 'minWidth' : 'minHeight'
+    const max = AXIS_LABELS[axis][1]
     const axisTitle = axis === 'width' ? 'Width' : 'Height'
-    const frames = modifiers.filter(m => modName(m) === 'frame' && m.args.some(a => [axis, max, minimum].includes(a.label ?? '')))
+    const frames = axisFrames(modifiers, axis)
     if (!frames.length) {
       append('add:' + axis, 'Fixed ' + axis, 'number', '', v => `.frame(${axis}: ${Number(v)})`, undefined, 0)
-      append('fill:' + axis, axisTitle + ' sizing', 'select', 'Content', v => v === 'Fill' ? `.frame(${max}: .infinity)` : `.frame(${axis}: 100)`, ['Content', 'Fill', 'Fixed'])
+      append('fill:' + axis, axisTitle + ' sizing', 'select', 'Hug', v => v === 'Fill' ? `.frame(${max}: .infinity)` : `.frame(${axis}: 100)`, ['Hug', 'Fill', 'Fixed'])
     } else if (frames.length === 1) {
       if (!authoringCapability('frame', 'modifier', frames[0]!.args.map(a => a.label))) continue
       const frame = frames[0]!
-      const args = frame.args.filter(a => [axis, max, minimum].includes(a.label ?? ''))
+      const args = frame.args.filter(a => (AXIS_LABELS[axis] as readonly string[]).includes(a.label ?? ''))
       if (args.length !== 1 || frame.callee.kind !== 'memberAccess' || !frame.callee.base) continue
       const arg = args[0]!
       const alignment = frame.args.find(a => a.label === 'alignment')
@@ -243,12 +366,12 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       const remaining = frame.args.length === 1 ? '' : suffix.slice(0, removeStart - from) + suffix.slice(removeEnd - from)
       add('fill:' + axis, axisTitle + ' sizing', 'select', current, v => {
         const align = alignment ? `, alignment: ${raw(alignment.value.span)}` : ''
-        const added = v === 'Content' ? '' : v === 'Fill' ? `.frame(${max}: .infinity${align})` : `.frame(${axis}: 100${align})`
-        const retained = v !== 'Content' && frame.args.every(a => a === arg || a === alignment) ? '' : remaining
+        const added = v === 'Hug' ? '' : v === 'Fill' ? `.frame(${max}: .infinity${align})` : `.frame(${axis}: 100${align})`
+        const retained = v !== 'Hug' && frame.args.every(a => a === arg || a === alignment) ? '' : remaining
         // One explicit frame per changed axis avoids invalid mixed Swift overloads
         // such as frame(width:maxHeight:). Other constraints retain their order.
         return { start: from, end: frame.span.end, text: retained + added }
-      }, ['Content', 'Fill', 'Fixed'], undefined, undefined, 'Content removes this axis constraint. Fill accepts the parent’s available size. Fixed starts at 100 points; edit the dimension to choose another size. Other frame arguments and surrounding modifiers are preserved.')
+      }, ['Hug', 'Fill', 'Fixed'], undefined, undefined, 'Hug removes this axis constraint. Fill accepts the parent’s available size. Fixed starts at 100 points; edit the dimension to choose another size. Other frame arguments and surrounding modifiers are preserved.')
     }
   }
   return recipes.map(recipe => ({ ...recipe, control: constrainNumericControl(recipe.control, node.name, node.behavior?.binding?.type) })).filter((recipe, index) => !recipes.slice(0, index).some(prior => prior.control.source.start === recipe.control.source.start && prior.control.source.end === recipe.control.source.end && prior.control.kind === recipe.control.kind && prior.control.value === recipe.control.value && prior.control.source !== node.source))
@@ -267,7 +390,7 @@ export function validateControlValue(control: DesignControl, value: string): str
     if (control.min !== undefined && seconds < control.min || control.max !== undefined && seconds > control.max) return 'The earliest date must not be after the latest date.'
   }
   if (control.id.endsWith(':detail:dash') && value.trim() && (!/^\s*\d+(?:\.\d+)?(?:\s*,\s*\d+(?:\.\d+)?)*\s*$/.test(value) || !value.split(',').some(n => Number(n) > 0) || value.split(',').some(n => Number(n) > 1000000))) return 'Enter positive dash and gap lengths separated by commas.'
-  if (control.kind === 'number') {
+  if (control.kind === 'number' && !control.options?.includes(value)) {
     if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value.trim())) return 'Enter a finite number.'
     const number = Number(value)
     if (!Number.isFinite(number) || Math.abs(number) > 1_000_000 || control.min !== undefined && number < control.min || control.max !== undefined && number > control.max) return `Value is outside the supported range${control.min !== undefined ? ' (minimum ' + control.min + ')' : ''}${control.max !== undefined ? ' (maximum ' + control.max + ')' : ''}.`

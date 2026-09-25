@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, DesignValue, PreviewInput, PreviewScenario, ResourceOperation, SharedStyle, SourceSpan, StateInput } from '@studio/shared'
+import { LAYOUT_WORDS, stackLayoutOf, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type DesignValue, type PreviewInput, type PreviewScenario, type ResourceOperation, type SharedStyle, type SourceSpan, type StateInput } from '@studio/shared'
 import { canRename, type DesignScreenNode, type DesignTree } from '../../lib/designTree'
 import type { ScreenCommand } from '../../lib/screens'
 import { screenOverrideModifier, screenRoot, screenTitleControl, scenarioKey, scenarioScreen } from '../../lib/screens'
@@ -107,7 +107,8 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
 }
 
 function rootLabel(node: AuthoringNode): string {
-  return ({ VStack: 'Vertical Stack', HStack: 'Horizontal Stack', ZStack: 'ZStack', List: 'list', ScrollView: 'scroll area', Form: 'form' } as Record<string, string>)[node.name] ?? 'first view'
+  const layout = stackLayoutOf(node.name)
+  return layout ? LAYOUT_WORDS[layout].toLowerCase() : ({ List: 'list', ScrollView: 'scroll area', Form: 'form' } as Record<string, string>)[node.name] ?? 'first view'
 }
 
 function describePresentation(screen: DesignScreenNode, tree: DesignTree): string {

@@ -1,6 +1,7 @@
 'use client'
 
 import { scenarioKey } from '../lib/screens'
+import { sourceLayerType } from '../lib/sourceLayers'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RenderTreeView, symbolAsset, type EventSink } from '@studio/swiftui-render-dom'
 import { stateProblem } from '../lib/stateProblem'
@@ -41,6 +42,8 @@ export interface DevicePaneProps {
   onSettingsResize?: (width: number) => void
   onToggleSettings?: () => void
   onDeviceChange: (key: DeviceKey) => void
+  /** Design's preview environment pickers that the toolbar has no room for, drawn in the canvas heading (D15). */
+  environment?: React.ReactNode
   tools?: React.ReactNode
   device: DeviceSpec
   tree: RenderTree | null
@@ -195,6 +198,7 @@ export function DevicePane({
   onSettingsResize,
   onToggleSettings,
   onDeviceChange,
+  environment,
   tools,
   device,
   tree,
@@ -631,7 +635,7 @@ export function DevicePane({
       const box = element?.getBoundingClientRect()
       return {
         node: over,
-        name: over.inspect?.name ?? over.kind,
+        name: sourceLayerType({ name: over.inspect?.name ?? over.kind, kind: 'view' }),
         position: (box && event.clientY > box.top + box.height / 2 ? 'after' : 'before') as 'before' | 'after',
       }
     }
@@ -815,7 +819,8 @@ export function DevicePane({
       {expanded ? <div className={styles.canvasHeading}>
         {status}
         <span>
-          <span>{
+          {/* A hint while nothing is under way: the first thing a narrow window does without. */}
+          <span className={styles.headingHint} data-idle={!navigationPicker && !dragTarget || undefined}>{
             navigationPicker
               ? 'Pick a highlighted screen · Escape to cancel'
               : dragTarget
@@ -843,6 +848,7 @@ export function DevicePane({
             Show all states
           </label>}
           {!!states.held && <span title="Each state is drawn by compiling the project again, so the canvas draws a few at a time.">{states.held} more {states.held === 1 ? 'state' : 'states'} not drawn</span>}
+          {environment && <span className={styles.headingEnvironment} role="group" aria-label="Preview environment">{environment}</span>}
           {zoomPicker}
         </span>
       </div> : <header className={styles.compactSettings}>{collapsePanel}{devicePicker}{schemePicker}{typePicker}{zoomPicker}</header>}

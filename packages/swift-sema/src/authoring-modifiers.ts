@@ -39,8 +39,10 @@ const CATALOG: readonly CatalogEntry[] = [
   { name: 'lineLimit', label: 'Max lines', category: 'text', slot: 1, description: 'Cut long text after some lines', source: () => '.lineLimit(3)' },
   { name: 'tracking', label: 'Letter spacing', category: 'text', slot: 1, description: 'Space between letters', minimumIOS: 16, source: () => '.tracking(1)' },
   { name: 'lineSpacing', label: 'Line spacing', category: 'text', slot: 1, description: 'Space between lines', source: () => '.lineSpacing(4)' },
-  { name: 'frameFlexible', label: 'Flexible size', category: 'layout', slot: 3, description: 'Flexible size', minimumIOS: 13, source: () => '.frame(minWidth: 0, idealWidth: 160, maxWidth: .infinity, minHeight: 0, idealHeight: 80, maxHeight: .infinity)' },
-  { name: 'fixedSize', label: 'Ideal size', category: 'layout', slot: 3, description: 'Ideal size', minimumIOS: 13, source: () => '.fixedSize(horizontal: true, vertical: true)' },
+  // Width and Height sizing say Hug, Fill or Fixed (D2); these two were a second way to say it,
+  // and read as the same thing. A frame or fixedSize already in the code keeps its card.
+  { name: 'frameFlexible', label: 'Flexible size', category: 'layout', slot: 3, description: 'Flexible size', minimumIOS: 13, hidden: true, source: () => '.frame(minWidth: 0, idealWidth: 160, maxWidth: .infinity, minHeight: 0, idealHeight: 80, maxHeight: .infinity)' },
+  { name: 'fixedSize', label: 'Ideal size', category: 'layout', slot: 3, description: 'Ideal size', minimumIOS: 13, hidden: true, source: () => '.fixedSize(horizontal: true, vertical: true)' },
   { name: 'aspectRatio', label: 'Aspect ratio', category: 'layout', slot: 3, description: 'Aspect ratio', minimumIOS: 13, source: () => '.aspectRatio(1, contentMode: .fit)' },
   { name: 'clipped', label: 'Clip to bounds', category: 'appearance', slot: 5, description: 'Clip to bounds', minimumIOS: 13, source: () => '.clipped()' },
   { name: 'rotation3DEffect', label: '3D rotation', category: 'layout', slot: 8, description: '3D rotation', minimumIOS: 13, source: () => '.rotation3DEffect(.degrees(30), axis: (x: 0, y: 1, z: 0), anchor: .center, anchorZ: 0, perspective: 1)' },

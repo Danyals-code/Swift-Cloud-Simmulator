@@ -16,7 +16,7 @@ import { Lexer, Parser, afterOffMarkers, hiddenViewsIn, viewSiteAt, walk, type C
  *   to show, unless it already was.
  */
 
-export type StructuralKind = 'delete' | 'hide' | 'show' | 'insert' | 'move' | 'moveTo' | 'duplicate' | 'wrap' | 'reparent' | 'restructure'
+export type StructuralKind = 'delete' | 'hide' | 'show' | 'insert' | 'move' | 'moveTo' | 'duplicate' | 'wrap' | 'reparent' | 'spacing' | 'restructure'
 
 export interface StructuralEdit {
   readonly file: FileId
@@ -28,6 +28,8 @@ export interface StructuralEdit {
   readonly view: { readonly start: number; readonly end: number }
   /** Swift the change brings besides the view: an inserted snippet, or the stack a wrap puts around it. */
   readonly adds?: string
+  /** Swift a change to the view's own arrangement may take out of it: Auto spacing's Spacers. */
+  readonly removes?: string
   /** Where the view was sent, in `before`: a drop target or a destination. The view itself when omitted. */
   readonly toward?: number
   /** Whether the view goes inside `toward`, as its last child, rather than beside it. An insert works it out. */
@@ -91,12 +93,12 @@ function contentProblem(edit: StructuralEdit): string | null {
     return same(rest, kind === 'insert' || kind === 'duplicate' ? was : was.filter(atom => !view.includes(atom))) ? null : LOST
   }
 
-  // Hiding, showing and wrapping change a region's shape as well as its place: counted, not ordered.
+  // Hiding, showing, wrapping and spacing out change a region's shape as well as its place: counted, not ordered.
   const removed = difference(was, now), added = difference(now, was)
   const allowed: { removed: Bag | 'comments'; added: Bag | 'comments' } =
     kind === 'hide' ? { removed: count(view), added: 'comments' }
       : kind === 'show' ? { removed: 'comments', added: count(atoms(hiddenViewsIn(edit.before, file).find(hidden => hidden.start === edit.view.start)?.source ?? '', file)) }
-      : { removed: new Map(), added: repeatable(count(atoms(edit.adds ?? '', file))) }
+      : { removed: repeatable(count(atoms(edit.removes ?? '', file))), added: repeatable(count(atoms(edit.adds ?? '', file))) }
   if (!within(removed, allowed.removed)) return LOST
   return within(added, allowed.added) ? null : EXTRA
 }

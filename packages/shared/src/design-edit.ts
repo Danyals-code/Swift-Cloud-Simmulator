@@ -12,6 +12,7 @@ export interface DesignControl {
   readonly kind: 'text' | 'number' | 'select'
   readonly integer?: boolean
   readonly value: string
+  /** A select's choices; for a number, the words it takes besides numbers, such as a stack's Spacing `auto` (D4). */
   readonly options?: readonly string[]
   /** A visible control that cannot currently be changed safely. */
   readonly disabledReason?: string

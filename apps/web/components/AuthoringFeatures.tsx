@@ -62,7 +62,7 @@ export function AuthoringFeatures({ node, snapshot, onCommand, onNodeChange, onS
       <h3>Card layout</h3>
       <p>The standard card includes 16 pt of inner padding. Customize it to align the title and content together.</p>
       <button type="button" disabled={busy} onClick={() => void command({ kind: 'card-customize' })}>Customize card layout</button>
-      <p>Creates a left-aligned Vertical Stack with editable title, content, spacing and padding. Undo restores the original card.</p>
+      <p>Creates a left-aligned Column with editable title, content, spacing and padding. Undo restores the original card.</p>
     </section>}
     {section === 'basics' && node.controls?.some(c => c.id === 'image' && c.label === 'System symbol') && onNodeChange && <SymbolPicker selected={node.controls.find(c => c.id === 'image')?.value ?? ''} onChoose={value => onNodeChange(node, 'image', value)} />}
 

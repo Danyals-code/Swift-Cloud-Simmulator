@@ -111,7 +111,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, m
     </nav>
     <div className={styles.actions}>
       {design && environment && <div className={styles.environment} role="group" aria-label="Preview environment" data-testid="preview-environment">{environment}</div>}
-      {design && onSetPreviewing && <button type="button" className={styles.previewToggle} data-testid={previewing ? 'inspect-toggle' : 'live-toggle'} aria-pressed={previewing} disabled={previewDisabled} title={previewing ? 'Back to editing (Tab)' : 'Try the app: tap, scroll and navigate (Tab)'} onClick={() => onSetPreviewing(!previewing)}><Icon name={previewing ? 'stop' : 'run'} size={13} />{previewing ? 'Stop preview' : 'Preview'}</button>}
+      {design && onSetPreviewing && <button type="button" className={styles.previewToggle} data-testid={previewing ? 'inspect-toggle' : 'live-toggle'} aria-pressed={previewing} disabled={previewDisabled} title={previewing ? 'Back to editing' : 'Try the app: tap, scroll and navigate'} onClick={() => onSetPreviewing(!previewing)}><Icon name={previewing ? 'stop' : 'run'} size={13} />{previewing ? 'Stop preview' : 'Preview'}</button>}
       {!design && <span className={styles.paneControls}><PaneToggles options={debugPane} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>}
       <span className={styles.share}><ShareButton onShare={onShare} /></span>
       <div className={styles.exportGroup}>
@@ -189,13 +189,13 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
         <PushButton onClick={() => onSetTool('select')} active={tool === 'select'} label="Select views" title="Select a view to change its properties (V)" testId="tool-select" icon="inspect">Select</PushButton>
         <PushButton onClick={onAdd} disabled={!canAdd} label="Add a view" title={canAdd ? 'Add a view to the screen (A)' : 'Waiting for the preview'} testId="add-view" icon="plus">Add</PushButton>
         <span className={styles.destructive}>
-          <PushButton onClick={() => onSetTool(tool === 'delete' ? 'select' : 'delete')} active={tool === 'delete'} label="Delete views" title="Click a view on the canvas to delete it (D)" testId="tool-delete" icon="xmark">Delete</PushButton>
+          <PushButton onClick={() => onSetTool(tool === 'delete' ? 'select' : 'delete')} active={tool === 'delete'} label="Delete views" title="Click a view on the canvas to delete it" testId="tool-delete" icon="xmark">Delete</PushButton>
         </span>
       </div>
     ) : null}
     {showModeSwitch && <div className={`${styles.dockRow} ${styles.dockModes}`}>
-      <PushButton disabled={busy} onClick={() => onSetInspecting(true)} active={inspecting} label={designing} title={mode === 'design' ? 'Arrange, add and delete views (Tab)' : 'Point at a view to find its code (Tab)'} testId="inspect-toggle" icon="inspect">{designing}</PushButton>
-      <PushButton disabled={busy} onClick={() => onSetInspecting(false)} active={!inspecting} label="Preview" title="Tap, scroll and use the app (Tab)" testId="live-toggle" icon="run">Preview</PushButton>
+      <PushButton disabled={busy} onClick={() => onSetInspecting(true)} active={inspecting} label={designing} title={mode === 'design' ? 'Arrange, add and delete views' : 'Point at a view to find its code (Tab)'} testId="inspect-toggle" icon="inspect">{designing}</PushButton>
+      <PushButton disabled={busy} onClick={() => onSetInspecting(false)} active={!inspecting} label="Preview" title={mode === 'design' ? 'Tap, scroll and use the app' : 'Tap, scroll and use the app (Tab)'} testId="live-toggle" icon="run">Preview</PushButton>
     </div>}
   </div>
 }

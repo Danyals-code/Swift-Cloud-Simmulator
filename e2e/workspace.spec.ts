@@ -39,18 +39,34 @@ test('opening a source file from Design reveals code, and a reload comes back to
   await expect(page.getByTestId('editor')).toBeHidden()
 })
 
-test('Design keeps preview settings reachable in a small window', async ({ page }) => {
-  // Workspace.module.css:233 hides the toolbar's preview environment, and DevicePane.tsx:813
-  // draws its compact pickers only outside Design, so device and appearance are unreachable.
-  test.fixme(true, 'Design hides preview settings at ≤1020 px (plan item D15)')
+test('a narrow Design window keeps Layers and the preview settings in reach (D15)', async ({ page }) => {
+  // Half of a laptop screen, as with the instructions tiled beside the studio.
   await page.setViewportSize({ width: 760, height: 700 })
   await page.goto('/')
   await page.getByTestId('gallery-dismiss').click()
+  await expect(page.getByTestId('narrow-window')).toBeVisible()
+
+  // The canvas keeps the room, and Layers opens over it. (Its own Collapse button is there
+  // too, hidden, with the panel kept for when it opens again.)
   await expect(page.getByTestId('design-navigator')).toBeHidden()
+  await page.getByRole('button', { name: 'Show left panel', exact: true }).click()
+  await expect(page.getByTestId('layers-over')).toBeVisible()
+  await expect(page.getByTestId('design-navigator')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('layers-over')).toHaveCount(0)
+
+  // The preview settings the toolbar has no room for are in the canvas heading.
   await expect(page.getByTestId('device-select')).toBeVisible()
+  await expect(page.getByTestId('type-scale-select')).toBeVisible()
   await expect(page.getByTestId('zoom-select')).toBeVisible()
   await page.getByTestId('scheme-toggle').getByRole('button', { name: 'Dark', exact: true }).click()
   await expect(page.getByTestId('scheme-toggle').getByRole('button', { name: 'Dark', exact: true })).toHaveAttribute('aria-pressed', 'true')
+
+  // Opening Layers stored nothing, so a wider window has it beside the canvas again.
+  await page.setViewportSize({ width: 1300, height: 700 })
+  await expect(page.getByTestId('design-navigator')).toBeVisible()
+  await expect(page.getByTestId('layers-over')).toHaveCount(0)
+  await expect(page.getByTestId('narrow-window')).toHaveCount(0)
 })
 
 

@@ -1,11 +1,22 @@
-import { isStructuralLayer, layerMoveProblem, type AuthoringNode, type AuthoringOperation } from '@studio/shared'
+import { groupLayoutOf, isStructuralLayer, layerMoveProblem, layoutParentOf, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type AuthoringOperation, type StackLayout } from '@studio/shared'
 import { forEachChild, insertView, viewSiteAt, type Node } from '@studio/swift-syntax'
-import { applyPatches, callOf, type FeatureContext } from './authoring-context'
+import { applyPatches, callOf, raw, type FeatureContext } from './authoring-context'
 
 type StructureOperation = Extract<AuthoringOperation, { kind: 'layer-duplicate' | 'layer-wrap' | 'layer-reparent' }>
-/** The stack Wrap writes around the selected layers, before its `{`. */
-export function wrapperOf(layout: 'VStack' | 'HStack' | 'ZStack'): string {
-  return layout === 'ZStack' ? 'ZStack' : `${layout}(spacing: 16)`
+
+/**
+ * The stack Wrap writes around the selected layers, before its `{`. Grouped the way they
+ * already sit (a column in a column, or in a scroll view that scrolls up and down), it
+ * takes the parent's alignment and spacing, so nothing moves (D3); stacked another way,
+ * it starts at a spacing of 16.
+ */
+export function wrapperOf(ctx: FeatureContext, node: AuthoringNode, layout: StackLayout): string {
+  if (groupLayoutOf(ctx.nodes, node) !== layout) return layout === 'ZStack' ? 'ZStack' : `${layout}(spacing: 16)`
+  // A scroll view or a list sets no spacing or alignment of its own to take.
+  const parent = layoutParentOf(ctx.nodes, node)
+  const call = parent && stackLayoutOf(parent.name) ? callOf(ctx, parent) : undefined
+  const kept = call?.args.filter(arg => arg.label === 'alignment' || arg.label === 'spacing').map(arg => raw(ctx, arg.span)) ?? []
+  return kept.length ? `${layout}(${kept.join(', ')})` : layout
 }
 
 export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operation: StructureOperation) {
@@ -25,8 +36,8 @@ export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operatio
   const first = sites[0]!, last = sites.at(-1)!
   const original = file.text.slice(first.start, last.end)
   if (operation.kind === 'layer-wrap') {
-    if (!['VStack', 'HStack', 'ZStack'].includes(operation.layout)) throw new Error('Choose Column, Row or Stack.')
-    const constructor = wrapperOf(operation.layout)
+    if (!['VStack', 'HStack', 'ZStack'].includes(operation.layout)) throw new Error(`Choose ${LAYOUT_WORDS.VStack}, ${LAYOUT_WORDS.HStack} or ${LAYOUT_WORDS.ZStack}.`)
+    const constructor = wrapperOf(ctx, node, operation.layout)
     const text = `${constructor} {${eol}${first.indent}    ${original.replaceAll(eol, eol + '    ')}${eol}${first.indent}}`
     return { files: applyPatches(ctx, [{ file: file.id, start: first.start, end: last.end, text }]), offset: first.start }
   }
