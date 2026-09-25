@@ -44,7 +44,7 @@ import { AppNavigationSettings } from './settings/AppNavigationSettings'
 import { ScreenSettings } from './settings/ScreenSettings'
 import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
 import { designScreens, designTree, type DesignTree } from '../lib/designTree'
-import { sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
+import { sourceLayerAround, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
@@ -55,7 +55,8 @@ import { scenarioKey, scenarioScreen, screenCatalog, screenDefinition, type Scre
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
 import { TemplateGallery, type GallerySource } from './TemplateGallery'
-import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
+import { DesignWarnings, Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
+import { designWarnings, type DesignWarning } from '../lib/designWarnings'
 import { BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import { eventLog, type StudioChange } from '../lib/eventLog'
 import { designEvent, refusedClipboard, studioChange } from '../lib/designEvents'
@@ -133,9 +134,24 @@ export function Studio() {
   const [designPageSelection, setDesignPageSelection] = useState<{ projectId: string; id: string } | null>(null)
   const hoverProjectId = project?.id
   const hoverAuthoring = useCallback((node: AuthoringNode | null, runtimeId?: string) => setHoveredAuthoring(node ? { node, runtimeId, projectId: hoverProjectId } : null), [hoverProjectId])
+  /**
+   * Where the pointer stood when the canvas was sent to another screen (D11). The screen
+   * under a moving pointer takes focus, but a canvas scrolled under a still one is not
+   * the designer choosing another screen, so focus stays until the pointer moves.
+   */
+  const focusHold = useRef<{ x: number; y: number } | null>(null)
+  const pointerAt = useRef({ x: -1, y: -1 })
+  useEffect(() => {
+    const track = (event: PointerEvent) => {
+      pointerAt.current = { x: event.clientX, y: event.clientY }
+      if (focusHold.current && (focusHold.current.x !== event.clientX || focusHold.current.y !== event.clientY)) focusHold.current = null
+    }
+    window.addEventListener('pointermove', track, true)
+    return () => window.removeEventListener('pointermove', track, true)
+  }, [])
   const hoverPreview = useCallback((under: readonly RenderNode[] | null, pageId?: string) => {
     setHoveredUnder(under)
-    if (under && pageId && hoverProjectId) setDesignPageSelection(previous => previous?.projectId === hoverProjectId && previous.id === pageId ? previous : { projectId: hoverProjectId, id: pageId })
+    if (under && pageId && hoverProjectId && !focusHold.current) setDesignPageSelection(previous => previous?.projectId === hoverProjectId && previous.id === pageId ? previous : { projectId: hoverProjectId, id: pageId })
   }, [hoverProjectId])
   const setNavigatorTab = useLayout(s => s.setNavigatorTab)
   const navigatorLayout = useLayout(s => s.navigatorLayout)
@@ -550,6 +566,23 @@ export function Studio() {
     setInspectorTab('settings')
   }, [project, stale, result?.authoring, setInspectorTab, layerSelection?.anchor?.runtimeId, designPages, designRootId])
 
+  /**
+   * A warning's layer, found where it is drawn (D11): the canvas goes to the screen it is
+   * on first, keeping the one in view when it is drawn there too.
+   */
+  const findWarning = useCallback((warning: DesignWarning) => {
+    const node = warning.node
+    if (!node || !project) return
+    const drawnOn = (page: PagePreview | ViewLayer) => node.runtimeIds.find(id => findLayer('tree' in page ? page.viewHierarchy ?? [] : [page], id))
+    const page = focusedPage && drawnOn(focusedPage) ? focusedPage : designPages?.find(drawnOn)
+    if (page && page.id !== focusedPage?.id) {
+      focusHold.current = { ...pointerAt.current }
+      setDesignPageSelection({ projectId: project.id, id: page.id })
+      setCenterOn({ id: page.id, nonce: ++centerNonce.current })
+    }
+    selectAuthoring(node, page ? drawnOn(page) : undefined)
+  }, [project, focusedPage, designPages, selectAuthoring])
+
   const saveScenario = useCallback((name: string, inputs: readonly PreviewInput[]): string | null => {
     const state = useStudio.getState(), snapshot = result?.authoring
     if (!project || state.project !== project || stale || !snapshot) return 'Wait for the current source to finish compiling.'
@@ -749,6 +782,8 @@ export function Studio() {
   }, [snapshot, performDesignEdit])
 
   const screens = useMemo(() => screenCatalog(result?.authoring, designPages, project?.studio?.screens), [result?.authoring, designPages, project?.studio?.screens])
+  // The canvas's warnings in a designer's words, beside its status (D11).
+  const warningRows = useMemo(() => mode === 'design' ? designWarnings(allDiagnostics, result?.authoring, screens) : [], [mode, allDiagnostics, result?.authoring, screens])
   const updateScreens = async (command: ScreenCommand): Promise<string | null> => {
     if (!project || stale || preparingEdit) return 'Wait for the preview to finish updating.'
     const metadata = project.studio ?? emptyStudioMetadata()
@@ -1390,7 +1425,10 @@ export function Studio() {
     : <TextSizePicker key={which} preview={previewSettings} onChange={setPreview} />
 
   const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo && !aiEditing} canRedo={canRedo && !aiEditing} note={noteText} noteAction={noteLocation ? { label: 'Show in Code', onClick: () => revealSpanIn(noteLocation.file, noteLocation.offset) } : null} />
-  const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
+  const previewStatus = <span className={styles.statusGroup}>
+    <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
+    <DesignWarnings warnings={warningRows} onFind={findWarning} onShow={warning => revealSpanIn(warning.span.file, warning.span.start)} />
+  </span>
 
   return (
     <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
@@ -1674,7 +1712,7 @@ export function Studio() {
       </div>
       {reviewOpen && <DesignReview key={project.id} name={project.manifest.name} pages={designPages ?? []} selectedPageId={designPage?.id} options={{ projectId: project.id, files: project.files, images, colors: project.colors, scenario, designScreens: project.studio?.screens, componentDescriptions: project.studio?.components, deploymentTarget: project.manifest.deploymentTarget, previewTarget: project.manifest.previewTarget }} onClose={() => setReviewOpen(false)} onInspect={source => {
         setReviewOpen(false)
-        const node = result?.authoring?.nodes.filter(n => n.kind !== 'definition' && n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end).sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
+        const node = sourceLayerAround(result?.authoring, source)
         if (node) selectAuthoring(node)
       }} />}
       {shortcutsOpen ? <ShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}

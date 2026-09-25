@@ -76,6 +76,22 @@ export function sourceLayerHiddenOwner(snapshot: AuthoringSnapshot, hidden: Hidd
   return template?.id ?? owner.id
 }
 
+/** The view a span is written in, such as a warning's or a colour's use: the smallest layer around it. */
+export function sourceLayerAround(snapshot: AuthoringSnapshot | undefined, span: SourceSpan): AuthoringNode | undefined {
+  return smallestAround(snapshot, span, false)
+}
+
+/** The screen or component a span is written in. */
+export function sourceDefinitionAround(snapshot: AuthoringSnapshot | undefined, span: SourceSpan): AuthoringNode | undefined {
+  return smallestAround(snapshot, span, true)
+}
+
+function smallestAround(snapshot: AuthoringSnapshot | undefined, span: SourceSpan, definition: boolean): AuthoringNode | undefined {
+  return snapshot?.nodes
+    .filter(node => (node.kind === 'definition') === definition && node.source.file === span.file && node.source.start <= span.start && node.source.end >= span.end)
+    .sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
+}
+
 /** A branch can be absent from the current preview while remaining selectable. */
 export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: AuthoringNode, visibleRuntimeIds?: ReadonlySet<string>): boolean {
   if (!Object.keys(snapshot.runtimeToSource).length) return false
@@ -95,7 +111,8 @@ export function sourceLayerNotShown(snapshot: AuthoringSnapshot, node: Authoring
 
 const STRUCTURAL_VIEWS = new Set(['ForEach', 'Group', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'WindowGroup', 'Window', 'ToolbarItem', 'ToolbarItemGroup', 'ViewThatFits', 'EmptyView'])
 
-const friendlyComponentName = (name: string) => name.replace(/View$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/\b[A-Z]\w*/g, (word, offset: number) => offset ? word.toLowerCase() : word)
+/** A component's name as Layers shows it: `BookRowView` is "Book row". */
+export const friendlyComponentName = (name: string) => name.replace(/View$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/\b[A-Z]\w*/g, (word, offset: number) => offset ? word.toLowerCase() : word)
 
 /** These rows represent visible design elements, never source-control scaffolding. */
 export function sourceLayerIsVisual(node: AuthoringNode): boolean {

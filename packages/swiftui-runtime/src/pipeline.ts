@@ -523,6 +523,7 @@ function toResult(
   layoutMs: number,
   pages?: readonly PagePreview[],
   notDrawnPages: readonly Diagnostic[] = [],
+  galleryWarnings: readonly Diagnostic[] = [],
 ): CompileResult {
   const total = performance.now() - startedAt
 
@@ -534,7 +535,7 @@ function toResult(
   }))
 
   // A sheet can be resolved more than once in a pass, so each place is said once.
-  const resolved = oncePerPlace([...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning), ...(evaluation?.ui?.warnings ?? [])], false)
+  const resolved = oncePerPlace([...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning), ...(evaluation?.ui?.warnings ?? []), ...galleryWarnings], false)
   // Tabs a ForEach built share one source, so a screen not drawn is told apart by its name too.
   const notDrawn = oncePerPlace(notDrawnPages, true)
   const diagnostics = [...analysis.diagnostics, ...resolved, ...notDrawn]
@@ -692,7 +693,7 @@ function finish(
   // cannot report a size back into the live one.
   const gallery = request.allPages ? renderPages(request, evaluation, renderTree) : undefined
 
-  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, gallery?.pages, gallery?.notDrawn)
+  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, gallery?.pages, gallery?.notDrawn, gallery?.warnings)
 }
 
 /**
@@ -709,6 +710,8 @@ const GALLERY_LIMIT = 12
 interface Gallery {
   readonly pages?: readonly PagePreview[]
   readonly notDrawn: readonly Diagnostic[]
+  /** What running each screen it draws found, as the live screen's own warnings are (D11). */
+  readonly warnings?: readonly Diagnostic[]
 }
 
 /** Why a screen is missing once the gallery's one step budget is spent. */
@@ -738,6 +741,7 @@ function renderPages(
 
   const out: PagePreview[] = []
   const notDrawn: Diagnostic[] = []
+  const warnings: Diagnostic[] = []
   let spent = false
   /** Says a screen, or the screens a page opens, isn't drawn, and why. */
   const skip = (missing: string, source: SourceSpan | undefined, cause: unknown): void => {
@@ -758,6 +762,7 @@ function renderPages(
       const ui = preview?.runtime.resolvePage(preview.evaluation.views, index, true)
         ?? (isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index))
       if (!ui) continue
+      warnings.push(...ui.warnings ?? [])
       const isLiveRoot = isActive && !evaluation.ui?.navigationBar?.canGoBack && !evaluation.ui?.overlay
       const tree = isLiveRoot ? active : drawable(render(request, { ...evaluation, ui }, true, preview?.runtime))
       out.push({
@@ -789,6 +794,7 @@ function renderPages(
       if (spent) { skip(screen(child.name), child.source, null); continue }
       try {
         const childTree = drawable(render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime))
+        warnings.push(...child.ui.warnings ?? [])
         out.push({
           id: child.id, parentId: child.parentId, rootId: child.rootId,
           kind: child.kind, name: child.name, source: child.source, active: false,
@@ -833,6 +839,7 @@ function renderPages(
       }
       if (!detached.evaluation.ui) continue
       const tree = drawable(render(request, detached.evaluation, true, detached.runtime))
+      warnings.push(...detached.evaluation.ui.warnings ?? [])
       out.push({ id, rootId: id, kind: 'root', standalone: true, name: design.name, active: false, source: definition.source,
         viewHierarchy: detached.evaluation.ui.viewHierarchy?.map(layer => ({ ...layer, id })), tree })
     } catch (error) {
@@ -850,6 +857,7 @@ function renderPages(
       return { ...page, ...(view ? { view } : {}), rootId: renamedIds.get(page.rootId ?? '') ?? page.rootId, parentId: renamedIds.get(page.parentId ?? '') ?? page.parentId }
     }),
     notDrawn,
+    warnings,
   }
 }
 
