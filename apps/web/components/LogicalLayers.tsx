@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { argumentLayerProblem, groupLayoutOf, isStructuralLayer, layerMoveProblem, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS } from '@studio/shared'
+import { argumentLayerProblem, groupLayoutOf, isStructuralLayer, layerMoveProblem, tappableProblem, LAYER_MOVE_CONTAINERS, LAYOUT_WORDS } from '@studio/shared'
 import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRequest, HiddenViewInfo, SourceFile, SourceSpan, ViewLayer } from '@studio/shared'
 import { rebaseSourceLayers, sourceLayerHiddenOwner, sourceLayerHiddenInScope, sourceLayerIsVisual, sourceLayerLabel, sourceLayerNotShown, sourceLayerRows, sourceLayerType, sourceLayerVisibleId, sourceLayerPrimaryViewId, type SourceLayerNavigation } from '../lib/sourceLayers'
 import { Icon, type IconName } from './ui/Icon'
@@ -150,11 +150,14 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     const canEdit = writable && isStructuralLayer(node)
     // A view written as an argument keeps its name; the rest is off, and says why.
     const slotProblem = argumentLayerProblem(snapshot.nodes, node)
+    const tapProblem = tappableProblem(snapshot.nodes, node)
     const structure: MenuItem[] = [
       { value: 'copy', label: 'Copy', detail: SHORTCUT_KEYS.copy, disabled: !isStructuralLayer(node) || !onCopy },
       { value: 'paste', label: 'Paste', detail: SHORTCUT_KEYS.paste, disabled: !canEdit || !onPaste },
       { value: 'duplicate', label: 'Duplicate', detail: SHORTCUT_KEYS.duplicate, disabled: !canEdit, separated: true },
       ...(['VStack', 'HStack', 'ZStack'] as const).map(layout => ({ value: layout, label: `Group in ${LAYOUT_WORDS[layout]}`, detail: layout === groupLayoutOf(snapshot.nodes, node) ? SHORTCUT_KEYS.group : undefined, disabled: !canEdit })),
+      // A Button around it that keeps its look, for When tapped to say what it does (D16).
+      { value: 'tappable', label: 'Make tappable', disabled: !canEdit || !!tapProblem, ...(tapProblem && canEdit ? { title: tapProblem } : {}) },
       { value: 'reparent', label: 'Move into…', disabled: !canEdit },
       { value: 'up', label: 'Move up', disabled: !canEdit || index <= 0 || !rows.some(row => row.node.id === siblings[index - 1]) },
       { value: 'down', label: 'Move down', disabled: !canEdit || index < 0 || index >= siblings.length - 1 || !rows.some(row => row.node.id === siblings[index + 1]) },
@@ -176,6 +179,7 @@ export function LogicalLayers({ labels = [], onRename, snapshot, files, selected
     else if (value === 'paste') onPaste?.(node)
     else if (value === 'duplicate') void edit(node, { kind: 'layer-duplicate' })
     else if (value === 'VStack' || value === 'HStack' || value === 'ZStack') void edit(node, { kind: 'layer-wrap', ids: idsFor(node), layout: value })
+    else if (value === 'tappable') void edit(node, { kind: 'make-tappable' })
     else if (value === 'enter') enter(node)
     else if ((value === 'up' || value === 'down') && !menus(node).find(item => item.value === value)?.disabled) void edit(node, { kind: 'move', direction: value === 'up' ? -1 : 1 })
     else if (value === 'hide' || value === 'delete') void edit(node, { kind: value })

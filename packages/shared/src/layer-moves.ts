@@ -15,6 +15,39 @@ export function argumentLayerProblem(nodes: readonly AuthoringNode[], node: Auth
   return `The ${slot} is part of the view it is attached to, so it can’t be moved, wrapped, copied, hidden or deleted on its own. Select that view instead.`
 }
 
+/** Each snapshot's nodes by id, made once: every view of a screen is asked about as it is read. */
+const INDEXES = new WeakMap<readonly AuthoringNode[], ReadonlyMap<string, AuthoringNode>>()
+function indexOf(nodes: readonly AuthoringNode[]): ReadonlyMap<string, AuthoringNode> {
+  let index = INDEXES.get(nodes)
+  if (!index) INDEXES.set(nodes, index = new Map(nodes.map(node => [node.id, node])))
+  return index
+}
+
+/** Views that take taps of their own: making one tappable would put a tap inside a tap. */
+const TAKES_TAPS: ReadonlySet<string> = new Set(['Button', 'NavigationLink', 'Link', 'ShareLink', 'Menu', 'Toggle', 'TextField', 'SecureField', 'TextEditor', 'Slider', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'])
+/** Views that scroll, or hold screens: a tap on one would take every drag and tap inside it. */
+const HOLDS_SCREENS: ReadonlySet<string> = new Set(['ScrollView', 'List', 'Form', 'TabView', 'NavigationStack', 'NavigationView', 'NavigationSplitView'])
+
+/**
+ * Why a view cannot be made tappable (D16), or null when it can: it takes taps of its own,
+ * it scrolls, it is inside something tappable already, or it is the screen itself.
+ */
+export function tappableProblem(nodes: readonly AuthoringNode[], node: AuthoringNode): string | null {
+  if (!isStructuralLayer(node)) return argumentLayerProblem(nodes, node) ?? 'Select a view on a screen.'
+  if (TAKES_TAPS.has(node.name)) return 'It takes taps already. Set what it does under When tapped.'
+  if (HOLDS_SCREENS.has(node.name)) return 'A view that scrolls can’t be tapped as a whole. Make a view inside it tappable.'
+  const byId = indexOf(nodes)
+  // The screen's content is the screen, under whatever holds only it: a NavigationStack, a ScrollView.
+  let only = true
+  for (let child = node, parent = byId.get(node.parentId ?? ''); parent; child = parent, parent = byId.get(parent.parentId ?? '')) {
+    if (parent.kind === 'definition') return only ? 'The screen itself can’t be tapped. Make a view on it tappable.' : null
+    if (parent.name === 'Button' || parent.name === 'NavigationLink') return 'It is inside something tappable already. Select that to set what a tap does.'
+    // A repeat stands for many rows, however few are written.
+    only &&= parent.kind !== 'collection' && parent.kind !== 'template' && parent.children.length === 1 && parent.children[0] === child.id
+  }
+  return null
+}
+
 /** The three ways a stack lays its views out: as a Column, a Row or an Overlap (D3). */
 export type StackLayout = 'VStack' | 'HStack' | 'ZStack'
 

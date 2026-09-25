@@ -1,5 +1,5 @@
-import { Lexer, type StructDecl } from '@studio/swift-syntax'
-import { deploymentVersion } from '@studio/shared'
+import { Lexer, type CallExpr, type StructDecl } from '@studio/swift-syntax'
+import { deploymentVersion, tappableProblem } from '@studio/shared'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
 import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, literal, modifierIndent, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
@@ -114,7 +114,16 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
   const bindingState = argument && inputs.find(s => raw(ctx, argument.value.span) === '$' + s.name)
   const type = label === 'text' ? 'String' : label === 'isOn' ? 'Bool' : bindingState?.type ?? (node.name === 'Slider' ? 'Double' : node.name === 'DatePicker' ? 'Date' : node.name === 'ColorPicker' ? 'Color' : 'Int')
   const collections = node.name === 'Button' ? ctx.nodes.filter(n => n.owner === node.owner && n.kind === 'collection').flatMap(n => { const c = collectionFor(ctx, n); return c ? [c] : [] }).filter((c, i, a) => a.findIndex(other => other.name === c.name) === i) : []
-  return { states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' ? emptyComponents(ctx).filter(n => n !== node.owner) : [], canConfigureAction: node.name === 'Button' && call.args.length === 1 && call.args[0]?.label === null && !!call.trailingClosure && call.trailingClosure.params.length === 0, currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
+  const withTitle = node.name === 'Button' && call.args.length === 1 && call.args[0]?.label === null
+  const canConfigureAction = (withTitle || labelledButton(call)) && !!call.trailingClosure && call.trailingClosure.params.length === 0
+  // Any other view When tapped can make tappable, as a card or a row is (D16).
+  const canMakeTappable = !canConfigureAction && !tappableProblem(ctx.nodes, node)
+  return { states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? emptyComponents(ctx).filter(n => n !== node.owner) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
+}
+
+/** `Button { … } label: { … }`: the action is the trailing closure, and what it shows is its label (D16). */
+function labelledButton(call: CallExpr): boolean {
+  return call.callee.kind === 'identifier' && call.callee.name === 'Button' && call.args.length === 1 && call.args[0]!.label === 'label' && call.args[0]!.value.kind === 'closure'
 }
 function namedState(ctx: FeatureContext, node: AuthoringNode, name: string): StateInput {
   const input = stateInputs(ctx, node).find(s => s.name === name)
@@ -192,7 +201,7 @@ export function liveControl(ctx: FeatureContext, node: AuthoringNode, snippet: s
 
 export function configureAction(ctx: FeatureContext, node: AuthoringNode, action: BehaviorAction, replace: boolean): SourcePatch[] {
   const settings = behaviorSettings(ctx, node), call = callOf(ctx, node), owner = ownerOf(ctx, node)
-  if (!settings?.canConfigureAction || !call?.trailingClosure || !owner) throw new Error('Select a Button with a title and one action closure.')
+  if (!settings?.canConfigureAction || !call?.trailingClosure || !owner) throw new Error('Select a Button with a title or a label, and one action closure.')
   if ((call.trailingClosure.body.statements.length || hasComments(ctx, call.trailingClosure.span)) && !replace) throw new Error('Review the existing action and explicitly choose Replace action before changing it.')
   const patches: SourcePatch[] = []
   let body = ''
@@ -224,7 +233,10 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
     if (!settings.destinations.includes(action.destination)) throw new Error('Choose a local View that has a supported no-argument initializer.')
     if (action.type === 'navigate') {
       if (!insideNavigationStack(ctx.nodes, node)) throw new Error('Place this Button inside a NavigationStack before configuring navigation.')
-      return [patch(call.span, `NavigationLink(${raw(ctx, call.args[0]!.value.span)}, destination: ${action.destination}())`)]
+      // A card stays the link's label, as `NavigationLink { Detail() } label: { … }` writes it (D16).
+      const label = call.args[0]!
+      if (label.label === 'label' && label.labelSpan) return [{ file: call.span.file, start: call.span.start, end: label.labelSpan.start, text: `NavigationLink { ${action.destination}() } ` }]
+      return [patch(call.span, `NavigationLink(${raw(ctx, label.value.span)}, destination: ${action.destination}())`)]
     }
     const expression = expressionOf(ctx, node)!
     if (viewCallChain(expression)?.modifiers.some(m => m.callee.kind === 'memberAccess' && ['sheet', 'fullScreenCover'].includes(m.callee.member))) throw new Error('This view already presents a screen. Change that Navigate to instead.')

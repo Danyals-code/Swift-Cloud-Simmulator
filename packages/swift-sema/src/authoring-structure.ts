@@ -1,6 +1,6 @@
-import { groupLayoutOf, isStructuralLayer, layerMoveProblem, layoutParentOf, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type AuthoringOperation, type StackLayout } from '@studio/shared'
+import { groupLayoutOf, isStructuralLayer, layerMoveProblem, layoutParentOf, stackLayoutOf, tappableProblem, LAYOUT_WORDS, type AuthoringNode, type AuthoringOperation, type StackLayout } from '@studio/shared'
 import { forEachChild, insertView, viewSiteAt, type Node } from '@studio/swift-syntax'
-import { applyPatches, callOf, raw, type FeatureContext } from './authoring-context'
+import { applyPatches, callOf, raw, type FeatureContext, type SourcePatch } from './authoring-context'
 
 type StructureOperation = Extract<AuthoringOperation, { kind: 'layer-duplicate' | 'layer-wrap' | 'layer-reparent' }>
 
@@ -74,4 +74,30 @@ export function structureEdit(ctx: FeatureContext, node: AuthoringNode, operatio
   const inserted = insertView(remaining, file.id, target, original.replaceAll(eol + first.indent, eol))
   if (!inserted) throw new Error('This container cannot receive the selected layers.')
   return { files: ctx.files.map(f => f.id === file.id ? { ...f, text: inserted.text } : f), offset: inserted.offset }
+}
+
+/** What making a view tappable writes around it, less the view: the checker's word for what it may add (D16). */
+export const TAPPABLE_WRAPPER = 'Button { } label: { } .buttonStyle(.plain)'
+
+/**
+ * Makes a view tappable (D16): a Button whose label is the view, as SwiftUI writes a
+ * tappable card, with the plain style that keeps the look it had. The action starts
+ * empty, and When tapped says what it does.
+ */
+export function makeTappable(ctx: FeatureContext, node: AuthoringNode) {
+  const wrap = tappablePatch(ctx, node)
+  return { files: applyPatches(ctx, [wrap]), offset: wrap.start }
+}
+
+/** The Button making a view tappable writes, in place of the view, which it keeps as its label. */
+export function tappablePatch(ctx: FeatureContext, node: AuthoringNode): SourcePatch {
+  const problem = tappableProblem(ctx.nodes, node)
+  if (problem) throw new Error(problem)
+  const file = ctx.files.find(f => f.id === node.source.file)!
+  const site = viewSiteAt(file.text, file.id, node.source.start)
+  if (!site) throw new Error('Select a visual layer in a screen.')
+  const eol = file.text.includes('\r\n') ? '\r\n' : '\n'
+  const unit = site.indent.includes('\t') ? '\t' : '    '
+  const view = file.text.slice(site.start, site.end).replaceAll(eol, eol + unit)
+  return { file: file.id, start: site.start, end: site.end, text: `Button {${eol}${site.indent}} label: {${eol}${site.indent}${unit}${view}${eol}${site.indent}}${eol}${site.indent}.buttonStyle(.plain)` }
 }
