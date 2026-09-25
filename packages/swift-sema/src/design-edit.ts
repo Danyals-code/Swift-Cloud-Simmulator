@@ -1,4 +1,5 @@
 import { customizeCard, editsCardSurface } from './authoring-card'
+import { followCorners } from './authoring-border'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
 import { argumentLayerProblem, canvasDropProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
@@ -63,7 +64,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     if (!expression) return reject('This view no longer has an editable modifier chain.')
     try {
       const shadowToken = model.styles?.find(style => style.kind === 'shadow' && style.form === 'token')?.name
-      const text = editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken })
+      // A border takes the view's new corners in the same step (D8).
+      const text = followCorners(file.text, editModifier(node, expression, file.text, operation as ModifierOperation, request.deploymentTarget, { shadowToken }), file.id, node.source.start)
       return finish(request.files.map(f => f.id === file.id ? { ...f, text } : f), { file: file.id, offset: node.source.start })
     } catch (error) { return reject(error instanceof Error ? error.message : 'This modifier change could not be planned.') }
   }
@@ -112,7 +114,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       return materializeCard ? finish(request.files, { file: file.id, offset: node.source.start }) : { ok: true, projectId: request.projectId, baseRevision: request.baseRevision, changes: [], selection: { file: file.id, offset: node.source.start } }
     }
     const patch = recipe.patch(operation.value)
-    changed = { text: file.text.slice(0, patch.start) + patch.text + file.text.slice(patch.end), offset: node.source.start }
+    changed = { text: followCorners(file.text, file.text.slice(0, patch.start) + patch.text + file.text.slice(patch.end), file.id, node.source.start), offset: node.source.start }
     // A value written in more than one place, such as Auto spacing's Spacers (D4), may change nothing else.
     const reshaped = recipe.reshapes?.(operation.value)
     const problem = reshaped && structuralEditProblem({ file: file.id, before: file.text, after: changed.text, kind: 'spacing', view: node.source, ...reshaped })

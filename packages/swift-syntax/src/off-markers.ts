@@ -13,6 +13,8 @@
  * the switched-off modifier to whichever view ends up in front of it.
  */
 
+import { Lexer } from './lexer'
+
 const HEAD = '/*studio-off:1 '
 /** One marker, the head escaped for a pattern. Its JSON string is group 1. */
 const MARKER = HEAD.replace(/[/*]/g, '\\$&') + String.raw`("(?:[^"\\]|\\.)*")\*\/`
@@ -45,4 +47,20 @@ export function withoutOffMarkers(text: string): string {
 export function afterOffMarkers(text: string, end: number): number {
   const trailing = TRAILING.exec(text.slice(end))
   return trailing ? end + trailing[0].length : end
+}
+
+/**
+ * Whether a person's comment sits in this stretch of source.
+ *
+ * Read from the gaps between tokens, so comment-like characters inside a string are
+ * text, not a comment, and the studio's own off markers never count.
+ */
+export function hasHumanComment(text: string, file: string): boolean {
+  const tokens = Lexer.tokenize(text, file).tokens
+  let at = 0
+  for (const token of tokens) {
+    if (/\/\/|\/\*/.test(withoutOffMarkers(text.slice(at, token.span.start)))) return true
+    at = token.span.end
+  }
+  return /\/\/|\/\*/.test(withoutOffMarkers(text.slice(at)))
 }

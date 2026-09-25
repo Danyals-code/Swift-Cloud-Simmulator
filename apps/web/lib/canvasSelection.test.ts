@@ -248,3 +248,42 @@ it('drags what a click would pick, and drops it beside a view at its own depth o
   expect(into.to.node.id).toBe(cards[1]!.id)
   expect(into.inside).toBe(true)
 })
+
+it('picks a bordered card with a click, and the words in it through its border (D8)', () => {
+  const result = run(`VStack(spacing: 16) {
+  Text("Featured")
+  VStack { Text("Mia"); Text("Designer") }
+    .padding()
+    .clipShape(.rect(cornerRadius: 12))
+    .overlay {
+      RoundedRectangle(cornerRadius: 12)
+        .strokeBorder(Color.gray, lineWidth: 1)
+    }
+  Text("After")
+}`)
+  const card = canvasPick(scene(result), under(result, 'Mia'), 'click')!
+  expect(named(card)).toBe('VStack Column')
+  expect(named(canvasPick(scene(result), under(result, 'Mia'), 'deep'))).toBe('Text Mia')
+  expect(named(canvasPick(scene(result), under(result, 'Mia'), 'drill', card))).toBe('Text Mia')
+})
+
+it('drops into a bordered card\'s own space, through its border (D8)', () => {
+  const result = run(`VStack(spacing: 16) {
+  Text("Featured")
+  VStack { Text("Mia"); Text("Designer") }
+  VStack { Text("Leo"); Text("Engineer") }
+    .padding(24)
+    .background(Color.yellow)
+    .overlay {
+      Rectangle()
+        .strokeBorder(Color.gray, lineWidth: 2)
+    }
+}`)
+  const cards = result.authoring!.nodes.filter(node => node.name === 'VStack' && node.children.length === 2)
+  const mia = canvasPick(scene(result), under(result, 'Mia'), 'drill', canvasPick(scene(result), under(result, 'Mia'), 'click'))!
+  const yellow = result.renderTree!.nodes.find(node => node.id !== 'screen' && node.background?.kind === 'solid')!
+  const corner = box(result.renderTree!, yellow)
+  const into = canvasDrop(scene(result), underAt(result.renderTree!, corner.x + 6, corner.y + 6), under(result, 'Designer'), mia)!
+  expect(into.to.node.id).toBe(cards[1]!.id)
+  expect(into.inside).toBe(true)
+})

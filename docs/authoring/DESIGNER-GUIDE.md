@@ -28,6 +28,7 @@ The stack is the code. Cards are listed in source order, top to bottom, and reor
 
 - **Add** offers a searchable list, grouped by what the modifier does. A new modifier lands where it belongs in the order rather than at the end.
 - The switch on a card turns a modifier **off**: the line is commented out in place and restored exactly as written when it is switched back on.
+- **Border** follows the view's corners, as a stroke drawn inside the edge, on it or outside it. It is written as a stroke of the view's own shape over it, and moves with the corners when Corner radius changes. It is a setting of the view, not a layer, and a stroke written that way in Code shows as one too.
 - A chain that contains a comment somebody wrote, or a modifier the studio does not recognise, is left alone and says so.
 - **Navigate to** is a card in the same stack: pick the screen, and pick how it opens: push, sheet, or full screen. Changing that later rewrites the view: a push is a `NavigationLink`, a sheet is a button that sets a value with a `.sheet` reading it, and switching between them carries the label and the modifiers across. A button that does more than open the screen is left alone and says so.
 

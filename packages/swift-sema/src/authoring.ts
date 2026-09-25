@@ -1,4 +1,5 @@
 import { modifierModel } from './authoring-modifiers'
+import { borderOf, cornersOf } from './authoring-border'
 import { enrichAuthoring } from './authoring-features'
 import type { ComponentDescription, PreviewColorAsset } from '@studio/shared'
 import {
@@ -246,11 +247,13 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       if (arg.value.kind === 'closure') block(arg.value.body, slot, scope)
       else expression(arg.value, slot, scope, { argument: true })
     }
-    // A visual slot has its own layer; action closures and scalar colors are not views.
+    // A visual slot has its own layer; action closures and scalar colors are not views,
+    // and a border is a setting of the view it outlines (D8).
+    const corners = cornersOf(chain.modifiers, texts.get(node.source.file) ?? '')
     for (const modifier of chain.modifiers) {
       const name = modifier.callee.kind === 'memberAccess' ? modifier.callee.member : ''
       const label = CONTENT_SLOTS[name]
-      if (!label) continue
+      if (!label || borderOf(modifier, corners, texts.get(node.source.file) ?? '')) continue
       const closure = modifier.trailingClosure ?? modifier.args.find(arg => arg.label === 'content' && arg.value.kind === 'closure')?.value
       if (closure?.kind === 'closure') {
         const slot = add('branch', label, closure.span, parent.owner, node)

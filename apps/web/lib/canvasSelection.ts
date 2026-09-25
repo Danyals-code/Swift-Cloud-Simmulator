@@ -76,7 +76,7 @@ export interface CanvasDrop {
 export function canvasDrop(scene: CanvasScene, over: readonly RenderNode[], source: readonly RenderNode[] | 'selection', selected?: CanvasSelection | null): CanvasDrop | undefined {
   const from = source === 'selection' ? selected : canvasPick(scene, source, 'click', selected)
   if (!from) return undefined
-  const own = layerForRenderNode(scene.layers, over[0])
+  const own = layerForRenderNode(scene.layers, viewsUnder(scene, over)[0])
   const container = own && LAYER_MOVE_CONTAINERS.has(own.type) ? indexOf(scene.snapshot).nodes.get(scene.snapshot.runtimeToSource[own.id] ?? '') : undefined
   const to = container ? { node: container, runtimeId: own!.id } : canvasPick(scene, over, 'click', from)
   return to ? { from, to, inside: !!container } : undefined
@@ -108,11 +108,12 @@ const same = (item: CanvasPick, selected: CanvasSelection) =>
  * The browser's own answer is the topmost node, and that is right everywhere except on a
  * Button or link, whose tap target is drawn over its label: there the label's views are
  * found under it. A link that is no view of its own on the canvas, only a tap target
- * around its label, stands for the one view it is drawn with.
+ * around its label, stands for the one view it is drawn with. A border is no view of the
+ * design at all, and the view it outlines is found through it.
  */
 function innermostLayer(scene: CanvasScene, under: readonly RenderNode[]): string | undefined {
   const { snapshot, layers } = scene
-  const owners = under.map(node => layerForRenderNode(layers, node)?.id)
+  const owners = viewsUnder(scene, under).map(node => layerForRenderNode(layers, node)?.id)
   let innermost = owners[0]
   while (innermost) {
     const inside = innermost
@@ -127,6 +128,15 @@ function innermostLayer(scene: CanvasScene, under: readonly RenderNode[]): strin
     innermost = layer?.id
   }
   return innermost
+}
+
+/**
+ * What is under the pointer as the design has it: what is drawn over a view without being
+ * a view of the design, such as its border (D8), is seen through to the views under it.
+ */
+function viewsUnder(scene: CanvasScene, under: readonly RenderNode[]): readonly RenderNode[] {
+  const views = under.filter(node => { const layer = layerForRenderNode(scene.layers, node); return !!layer && !!scene.snapshot.runtimeToSource[layer.id] })
+  return views.length ? views : under
 }
 
 /**
