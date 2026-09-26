@@ -1101,6 +1101,17 @@ export class SwiftUIHost implements InterpreterHost {
       } satisfies TransitionPayload)
     }
 
+    // `.easeInOut.repeatForever(autoreverses: true)`, `.delay(0.2)`, `.speed(2)`. A delay
+    // and a speed change the one animation the preview plays. A repeat plays once here,
+    // as the checker's warning beside it says; without these the view stopped instead.
+    if (target.kind === 'opaque' && target.typeName === ANIMATION_TYPE) {
+      const payload = target.payload as AnimationPayload
+      const amount = numberOf(call.args[0]?.value)
+      if (member === 'delay') return opaque(ANIMATION_TYPE, { ...payload, delay: amount ?? 0 } satisfies AnimationPayload)
+      if (member === 'speed') return amount !== null && amount > 0 ? opaque(ANIMATION_TYPE, { ...payload, duration: payload.duration / amount } satisfies AnimationPayload) : target
+      if (member === 'repeatForever' || member === 'repeatCount') return target
+    }
+
     if (target.kind === 'type' && (target.name === 'Task' || target.name === 'MainActor')) {
       if (member === 'detached' || member === 'run') return this.runTask(call)
       // `Task.sleep` and `Task.yield` are the suspension points, and there is nothing

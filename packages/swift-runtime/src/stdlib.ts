@@ -1,6 +1,7 @@
 import type { CallArgument } from './host'
 import { PREVIEW_LIMITS } from './limits'
 import { CALENDAR_TYPE, TIMER_TYPE, calendarValue, callCalendarMember, callTimerMember, formatDate, timerValue, leadingDotName } from './calendar'
+import { formatNumber } from './number-format'
 import {
   array,
   asDate,
@@ -309,6 +310,12 @@ export function callBuiltinMember(
     return value
   }
 
+  // `12345.formatted()` and `total.formatted(.currency(code: "USD"))`, an Int and a Double alike.
+  if (member === 'formatted' && (target.kind === 'int' || target.kind === 'double')) {
+    const written = formatNumber(target, leadingDotName(arg(0)))
+    return written === null ? undefined : str(written)
+  }
+
   switch (target.kind) {
     case 'string':
       return stringMethod(target.value, member, arg, labelled, replaceSelf, trap)
@@ -552,6 +559,18 @@ function stringMethod(
       return bool(value.endsWith(text(arg(0))))
     case 'contains':
       return bool(value.includes(text(arg(0))))
+    // How a search box filters: without case, and for the standard form without accents
+    // too. So the iOS 27 simulator answers: "Café" does not contain "cafe" the first way
+    // and does the second, and neither way finds an empty string in anything.
+    case 'localizedCaseInsensitiveContains': {
+      const needle = text(arg(0))
+      return bool(needle !== '' && value.toLocaleLowerCase('en-US').includes(needle.toLocaleLowerCase('en-US')))
+    }
+    case 'localizedStandardContains': {
+      const fold = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('en-US')
+      const needle = text(arg(0))
+      return bool(needle !== '' && fold(value).includes(fold(needle)))
+    }
     case 'replacingOccurrences': {
       const of = labelled('of')
       const with_ = labelled('with')

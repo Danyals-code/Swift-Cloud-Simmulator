@@ -25,6 +25,7 @@ import type {
 import {
   argumentLabels,
   collectConformance,
+  DECIMAL_TYPES,
   hoistNestedTypes,
   valueKind,
   type ConformanceModel,
@@ -1359,7 +1360,7 @@ export class Interpreter {
     // `3` there is a `Double` literal and never an `Int` - so `Rect(width: 3).width`
     // is 3.0 and prints as such. Without this the value stays an Int and every
     // arithmetic result downstream loses its fractional formatting.
-    if (typeName === 'Double' && value.kind === 'int') return double(value.value)
+    if (DECIMAL_TYPES.has(typeName) && value.kind === 'int') return double(value.value)
 
     if (value.kind !== 'opaque') return value
 
@@ -2406,8 +2407,13 @@ export class Interpreter {
 
         return undefined
       }
+      // `CGFloat` and `Float` are both a Double here, as everywhere else in the preview.
+      // Without them `CGFloat(progress)`, which the AI writes for every ring and bar it
+      // draws, stopped the view, and a retry kept writing it.
       case 'Int':
-      case 'Double': {
+      case 'Double':
+      case 'CGFloat':
+      case 'Float': {
         const first = args[0]?.value
         if (!first) return undefined
 
@@ -2426,7 +2432,7 @@ export class Interpreter {
           if (!grammar.test(text)) return NIL
           const parsed = Number(text)
           if (!Number.isFinite(parsed)) return NIL
-          if (name === 'Double') return double(parsed)
+          if (name !== 'Int') return double(parsed)
           return Number.isSafeInteger(parsed) ? int(parsed) : NIL
         }
 

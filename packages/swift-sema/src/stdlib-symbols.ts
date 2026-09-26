@@ -63,6 +63,8 @@ const STRING_MEMBERS: readonly StdlibMember[] = [
   method('hasSuffix', '(String) -> Bool', 'Whether the string ends with another.'),
   method('starts', '(with: String) -> Bool', 'Whether the string begins with another.'),
   method('contains', '(String) -> Bool', 'Whether the string contains another.'),
+  method('localizedCaseInsensitiveContains', '(String) -> Bool', 'Whether the string contains another, ignoring case.'),
+  method('localizedStandardContains', '(String) -> Bool', 'Whether the string contains another, ignoring case and accents, as a search box does.'),
   method('replacingOccurrences', '(of: String, with: String) -> String', 'Every occurrence replaced.'),
   method('split', '(separator: Character) -> [String]', 'Split on a separator, dropping empty pieces.'),
   method('components', '(separatedBy: String) -> [String]', 'Split on a separator, keeping empty pieces.'),
@@ -159,6 +161,7 @@ const INT_MEMBERS: readonly StdlibMember[] = [
   property('magnitude', 'Int', 'The absolute value.'),
   method('isMultiple', '(of: Int) -> Bool', 'Whether the number divides exactly.'),
   method('quotientAndRemainder', '(dividingBy: Int) -> (quotient: Int, remainder: Int)', 'Both halves of a division.'),
+  method('formatted', '(FormatStyle) -> String', 'Written with separators, or as a percent or currency: 12,345.', false),
 ]
 
 const DOUBLE_MEMBERS: readonly StdlibMember[] = [
@@ -170,6 +173,7 @@ const DOUBLE_MEMBERS: readonly StdlibMember[] = [
   method('squareRoot', '() -> Double', 'The square root.', false),
   method('truncatingRemainder', '(dividingBy: Double) -> Double', 'The remainder after division.'),
   method('isMultiple', '(of: Double) -> Bool', 'Whether the number divides exactly.'),
+  method('formatted', '(FormatStyle) -> String', 'Written with separators and up to six decimals, or as a percent or currency: 1,234.5.', false),
 ]
 
 const BOOL_MEMBERS: readonly StdlibMember[] = [

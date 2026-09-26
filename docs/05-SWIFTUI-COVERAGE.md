@@ -231,6 +231,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- | --- |
 | `withAnimation` | ✅ | 6 | animates every change in its transaction, for one frame |
 | `.animation(_:value:)` | ✅ | 6 | animates its subtree only when `value` changes, and not on the first render |
+| `Animation` - `.delay`, `.speed`, `.repeatForever`, `.repeatCount` | 🟡 | - | a delay and a speed change the one animation the preview plays; a repeat plays once, and says so where it is written |
 | Curves: `.linear .easeIn .easeOut .easeInOut` | ✅ | 6 | CSS timing functions |
 | `.spring` (and `.bouncy` / `.snappy` / `.smooth`) | 🟡 | 6 | an overshooting bezier, not a real solver |
 | `.transition` (`.slide .opacity .scale .move`) | 🟡 | 7 | entry only; exit would need the renderer to outlive the view |
@@ -334,6 +335,7 @@ missing without anything saying so.
 | `String` - `count`, `uppercased`, `hasPrefix`, `contains`, `split`, `replacingOccurrences`, `trimmingCharacters` | ✅ | 2 | counted and sliced by grapheme cluster, so `"👋🏽".count` is 1 |
 | `String` - `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `starts(with:)`, `append` | ✅ | - | |
 | `String` - `unicodeScalars` | ✅ | - | code points, which is the whole difference from `count` |
+| `String` - `localizedCaseInsensitiveContains`, `localizedStandardContains` | ✅ | - | how a search box filters: without case, and the standard form without accents too, as iOS 27 answers; an empty string is in nothing |
 | `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | `reduce(into:)` too, whose closure takes the accumulator `inout` - the standard way to build a dictionary from a sequence. `enumerated()` gives `(offset:element:)` tuples, and a closure with a parameter for each takes one apart, as `{ index, item in }` does. A range of integers answers the same methods: `(0..<3).map { … }` |
 | `Array` - `allSatisfy`, `flatMap`, `dropFirst`, `dropLast`, `first(where:)`, `last(where:)`, `lastIndex`, `randomElement`, `shuffled` | ✅ | - | `shuffled` is Fisher-Yates, not the biased one-line sort |
 | `Array` - `append`, `insert`, `remove`, `removeAll`, `removeFirst`, `removeLast`, `popLast`, `sort`, `reverse`, `shuffle`, `swapAt`, `replaceSubrange`, `removeSubrange` | ✅ | - | mutating, and refused on a `let` as Xcode refuses them |
@@ -343,6 +345,8 @@ missing without anything saying so.
 | `counts[key, default: 0] += 1` | ✅ | 11 | the default belongs to the read half of a compound assignment; without it the first occurrence of every key read nil |
 | `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation drop duplicates; iteration is in insertion order rather than Swift's unspecified hash order |
 | `Int` / `Double` conversion from `String` | ✅ | - | failable, matched to Swift's grammar: `" 42"`, `"4_2"` and `"0x10"` are nil |
+| `CGFloat`, `Float` | ✅ | - | a Double, as everywhere in the preview: `CGFloat(x)`, `Float(x)`, and a whole-number literal given to either, so `let w: CGFloat = 3` prints 3.0 |
+| `Int` / `Double` - `formatted()`, `.number`, `.percent`, `.currency(code:)` | ✅ | - | as Foundation writes them in en-US, measured in the iOS 27 simulator: separators and up to six decimals, a Double's percent multiplied by 100 and an Int's not, and currency rounded half to even from the number as written. `Text(_:format:)` writes the same |
 | `Int.max` / `Int.min` | 🟡 | - | 2^53 - 1, not 2^63 - 1 - see approximations |
 | `Int.random(in:)`, `Double.random(in:)`, `Bool.random()` | ✅ | - | |
 | `Double` - `rounded()`, `rounded(.up/.down/.towardZero)`, `squareRoot`, `truncatingRemainder`, `isMultiple(of:)` | ✅ | - | halves round away from zero, as Swift's do |

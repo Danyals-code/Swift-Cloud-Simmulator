@@ -2017,3 +2017,112 @@ describe('pilot: a button takes the foreground style it is given, as iOS 27 draw
     expect(colour(r, 'Unstyled link')).toEqual({ r: 0, g: 136, b: 255, a: 1 })
   })
 })
+
+describe('pilot: Swift the AI writes runs as it does on iOS 27', () => {
+  /** What a String expression comes to, drawn verbatim. Expected values are the iOS 27 simulator's. */
+  const shows = (expression: string, members = '') => texts(runView(`${members}\n var body: some View { Text(verbatim: ${expression}) }`))[0]
+
+  it.each([
+    ['12345.formatted()', '12,345'],
+    ['42.formatted()', '42'],
+    ['(-1234567).formatted()', '-1,234,567'],
+    ['1234.5.formatted()', '1,234.5'],
+    ['3.14159265.formatted()', '3.141593'],
+    ['2.0.formatted()', '2'],
+    ['1234567.891.formatted()', '1,234,567.891'],
+    ['123456789.123.formatted()', '123,456,789.123'],
+    ['(-0.5).formatted()', '-0.5'],
+    ['0.0000001.formatted()', '0'],
+    ['3.14159265.formatted(.number)', '3.141593'],
+    ['1234.5678.formatted(.number)', '1,234.5678'],
+    ['1234567.formatted(.number)', '1,234,567'],
+    ['0.256.formatted(.percent)', '25.6%'],
+    ['0.12345.formatted(.percent)', '12.345%'],
+    ['1.5.formatted(.percent)', '150%'],
+    ['25.formatted(.percent)', '25%'],
+  ])('formats %s as %s', (expression, expected) => {
+    expect(shows(expression)).toBe(expected)
+  })
+
+  it.each([
+    ['342.5.formatted(.currency(code: "USD"))', '$342.50'],
+    ['342.5.formatted(.currency(code: "EUR"))', '€342.50'],
+    ['342.5.formatted(.currency(code: "GBP"))', '£342.50'],
+    ['342.5.formatted(.currency(code: "JPY"))', '¥342'],
+    ['(-12.3).formatted(.currency(code: "USD"))', '-$12.30'],
+    ['1234567.891.formatted(.currency(code: "USD"))', '$1,234,567.89'],
+    ['1500.formatted(.currency(code: "USD"))', '$1,500.00'],
+    ['0.005.formatted(.currency(code: "USD"))', '$0.00'],
+    ['2.675.formatted(.currency(code: "USD"))', '$2.68'],
+    ['2.665.formatted(.currency(code: "USD"))', '$2.66'],
+    ['1234.5.formatted(.currency(code: "EUR"))', '€1,234.50'],
+  ])('formats %s as %s', (expression, expected) => {
+    expect(shows(expression)).toBe(expected)
+  })
+
+  it('draws `Text(_:format:)` as `formatted(_:)` writes it', () => {
+    expect(texts(runView(`var body: some View {
+      VStack {
+        Text(3.14159265, format: .number)
+        Text(0.12345, format: .percent)
+        Text(25, format: .percent)
+        Text(0.005, format: .currency(code: "USD"))
+      }
+    }`))).toEqual(['3.141593', '12.345%', '25%', '$0.00'])
+  })
+
+  it.each([
+    ['"\\(CGFloat(3))"', '3.0'],
+    ['"\\(CGFloat(7) * 2)"', '14.0'],
+    ['"\\(CGFloat(4) / 3)"', '1.3333333333333333'],
+    ['"\\(Float(2.5))"', '2.5'],
+    ['"\\(Float(3))"', '3.0'],
+    ['"\\(Int(CGFloat(2.9)))"', '2'],
+  ])('makes %s %s', (expression, expected) => {
+    expect(shows(expression)).toBe(expected)
+  })
+
+  it('makes a whole-number literal given to a CGFloat a CGFloat', () => {
+    expect(shows('"\\(width)"', 'let width: CGFloat = 3')).toBe('3.0')
+  })
+
+  it.each([
+    ['"The Batman".localizedCaseInsensitiveContains("batman")', 'true'],
+    ['"The Batman".localizedCaseInsensitiveContains("")', 'false'],
+    ['"Café".localizedCaseInsensitiveContains("cafe")', 'false'],
+    ['"Café".localizedStandardContains("cafe")', 'true'],
+    ['"The Batman".localizedStandardContains("BAT")', 'true'],
+    ['"The Batman".localizedStandardContains("")', 'false'],
+  ])('answers %s with %s', (expression, expected) => {
+    expect(shows(`"\\(${expression})"`)).toBe(expected)
+  })
+
+  it('says nothing about a project\'s own method that shares a name with a repeat', () => {
+    const r = compileView(viewSource(`var body: some View { Text(verbatim: "\\(Habit().repeatCount(for: 2))") }`, 'struct Habit { func repeatCount(for weeks: Int) -> Int { weeks * 7 } }'))
+
+    expect(r.diagnostics).toEqual([])
+    expect(texts(r)).toEqual(['14'])
+  })
+
+  it('keeps running an animation that repeats, and says the preview plays it once', () => {
+    const r = compileView(viewSource(`@State private var pulse = false
+      var body: some View {
+        VStack {
+          Circle().frame(width: 20, height: 20).scaleEffect(pulse ? 1.2 : 1)
+            .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: pulse)
+          Button(pulse ? "Stop" : "Start") {
+            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false).delay(0.1).speed(2)) { pulse.toggle() }
+          }
+          Text("Twice").animation(.spring().repeatCount(2, autoreverses: true), value: pulse)
+        }
+      }`))
+
+    expect(r.diagnostics.map(d => d.message)).toEqual([
+      "'.repeatForever' repeats the animation on iOS. The preview plays it once.",
+      "'.repeatForever' repeats the animation on iOS. The preview plays it once.",
+      "'.repeatCount' repeats the animation on iOS. The preview plays it once.",
+    ])
+    expect(nodes(r).filter(n => n.placeholder?.kind === 'stopped')).toEqual([])
+    expect(texts(tap(r, 'Start'))).toContain('Stop')
+  })
+})

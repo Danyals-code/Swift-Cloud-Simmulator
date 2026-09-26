@@ -26,6 +26,7 @@ import {
   asDate,
   asKeyPath,
   asProjection,
+  formatNumber,
   foundationDescription,
   truthy,
   type ClosureValue,
@@ -4034,33 +4035,13 @@ function textOf(view: ViewValue): string {
 }
 
 /**
- * A value rendered through a `FormatStyle`.
+ * A value rendered through a `FormatStyle`, as `formatted(_:)` writes it.
  *
- * `Intl` does the work, so the grouping separators and currency symbols are the
- * platform's real ones rather than a transcription. An unrecognised style falls back
- * to the plain description: the number is still right, only its dressing is missing.
+ * An unrecognised style falls back to the plain description: the number is still
+ * right, only its dressing is missing.
  */
 function formatted(value: SwiftValue, format: SwiftValue): string {
-  const name = tokenName(format) ?? ''
-  const n = value.kind === 'int' || value.kind === 'double' ? value.value : Number.NaN
-  if (Number.isNaN(n)) return displayValue(value)
-
-  // `.currency(code:)` arrives as `currency:USD`, the same way `.system(size:)` does.
-  const [style, detail] = name.split(':')
-
-  switch (style) {
-    case 'currency':
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: detail || 'USD',
-      }).format(n)
-    case 'percent':
-      return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(n)
-    case 'number':
-      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(n)
-    default:
-      return displayValue(value)
-  }
+  return formatNumber(value, tokenName(format) ?? '') ?? displayValue(value)
 }
 
 function displayValue(value: SwiftValue): string {
