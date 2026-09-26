@@ -114,8 +114,11 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
       const item = raw.kind === 'modified' && raw.modifier.kind === 'hitTarget' && ['button', 'toggle'].includes(raw.modifier.role) ? { ...raw, child: wrap(raw.child) } : wrap(raw)
       rows.push(i > 0 && spacing !== 0 ? pad(`${rid}spacing`, item, insets(spacing, 0, 0, 0)) : item)
       if (separator) {
-        const rule = pad(`${id}r${i}sep`, { kind: 'modified', id: `${id}r${i}sepf`, modifier: { kind: 'frame', height: c.separatorHeight, alignment: CENTER }, child: { kind: 'fill', id: `${id}r${i}sepl`, pixelAligned: true, fill: { kind: 'solid', color: c.color('separator') } } }, insets(0, edges.leading + (row.name === 'Label' ? 40 : 0), 0, rowInsets(row).trailing))
-        rows[rows.length - 1] = { kind: 'modified', id: `${rid}separator-overlay`, modifier: { kind: 'overlay', alignment: { horizontal: 'center', vertical: 'bottom' }, content: rule }, child: rows[rows.length - 1]! }
+        // It starts under the row's first text, as iOS 27 draws it: a Label's title, in a
+        // NavigationLink too, or the text beside an icon. A row with no text starts it at
+        // the row's inset.
+        const rule = pad(`${id}r${i}sep`, { kind: 'modified', id: `${id}r${i}sepf`, modifier: { kind: 'frame', height: c.separatorHeight, alignment: CENTER }, child: { kind: 'fill', id: `${id}r${i}sepl`, pixelAligned: true, fill: { kind: 'solid', color: c.color('separator') } } }, insets(0, 0, 0, rowInsets(row).trailing))
+        rows[rows.length - 1] = { kind: 'modified', id: `${rid}separator-overlay`, modifier: { kind: 'overlay', alignment: { horizontal: 'center', vertical: 'bottom' }, content: rule, underFirstText: { otherwise: edges.leading } }, child: rows[rows.length - 1]! }
       }
     })
     let card = c.background(column(id, rows), `${id}bg`, c.color(grouped ? 'secondarySystemGroupedBackground' : style === 'sidebar' ? 'systemGroupedBackground' : 'systemBackground'), style === 'insetGrouped' ? m.corner : 0)

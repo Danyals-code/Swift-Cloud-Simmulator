@@ -2490,3 +2490,67 @@ describe('pilot B3: a disabled button is grey, as iOS 27 draws it', () => {
     expect(fillBehind(r, 'Prominent on')).toEqual(colorForName('accentColor'))
   })
 })
+
+describe('pilot B6: list rows as iOS 27 draws them', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro. A Label's icon in a row is a
+  // quarter larger than the row's text and centred 12 pt in, with the title at 72. Each
+  // separator starts under the row's first text: 72 under a Label, in a NavigationLink
+  // too, under the text beside an icon, and at 32 under text alone.
+  const rows = () => screen(`  var body: some View {
+    NavigationStack {
+      List {
+        Label("Books", systemImage: "books.vertical")
+        NavigationLink { Text("x") } label: { Label("Linked", systemImage: "books.vertical") }
+        NavigationLink { Text("x") } label: { HStack { Image(systemName: "books.vertical"); Text("Stacked") } }
+        Label("Star", systemImage: "star")
+        Text("Text only")
+        NavigationLink("Plain link") { Text("x") }
+      }
+      .navigationTitle("Rows")
+    }
+  }`)
+  const separators = (r: CompileResult) => nodes(r)
+    .filter(n => n.background?.kind === 'solid' && n.background.color.a === colorForName('separator')!.a && worldFrame(nodes(r), n).height <= 1)
+    .map(n => worldFrame(nodes(r), n))
+    .sort((a, b) => a.y - b.y)
+
+  it('draws a Label\'s icon a quarter larger than the row\'s text, centred 12 pt in, with its title at 72', () => {
+    const r = rows()
+    const icons = nodes(r).filter(n => n.image?.symbol === 'books.vertical' || n.image?.symbol === 'star')
+
+    for (const title of ['Books', 'Linked', 'Star']) expect(placed(r, title).x, title).toBeCloseTo(72, 1)
+    const labelled = icons.filter(n => n.image!.color.b === 255)
+    expect(labelled).toHaveLength(3)
+    for (const icon of labelled) {
+      expect(icon.image!.font.size * (icon.image!.symbolScale ?? 1)).toBeCloseTo(17 * 1.25, 1)
+      const f = worldFrame(nodes(r), icon)
+      expect(f.x + f.width / 2).toBeCloseTo(44, 0)
+    }
+  })
+
+  it('starts a separator under the text of a row drawn faded, however it is faded', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      List {
+        Label("Faded", systemImage: "star").opacity(0.5)
+        NavigationLink { Text("x") } label: { Label("Off", systemImage: "star") }.disabled(true)
+        Text("Last")
+      }
+    }
+  }`)
+
+    expect(separators(r).map(line => line.x)).toEqual([expect.closeTo(72, 1), expect.closeTo(72, 1)])
+  })
+
+  it('starts each separator under the row\'s first text', () => {
+    const r = rows()
+    const lines = separators(r)
+
+    expect(lines).toHaveLength(5)
+    // The line is snapped to the device's pixels, a third of a point.
+    expect(lines.map(line => line.x)).toEqual([72, 72, placed(r, 'Stacked').x, 72, 32].map(x => expect.closeTo(Math.round(x * 3) / 3, 1)))
+    for (const line of lines) expect(line.x + line.width).toBeCloseTo(370, 0)
+    // Rows keep iOS's pitch, the larger icon reaching past a line of text without growing its row.
+    for (const [i, line] of lines.slice(1).entries()) expect(line.y - lines[i]!.y).toBeCloseTo(52, 0)
+  })
+})

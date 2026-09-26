@@ -370,7 +370,17 @@ export type LayoutModifier =
   | { readonly kind: 'square' }
   | { readonly kind: 'inputFrame'; readonly minHeight: number; readonly paddingY: number }
   | { readonly kind: 'controlFont'; readonly font: ResolvedFont }
-  | { readonly kind: 'overlay'; readonly content: LayoutElement; readonly alignment: Alignment }
+  | {
+      readonly kind: 'overlay'
+      readonly content: LayoutElement
+      readonly alignment: Alignment
+      /**
+       * Starts the overlay at the leading edge of the leftmost text the child drew, or
+       * `otherwise` in when it drew none. A list row's separator, which iOS starts under
+       * the row's text.
+       */
+      readonly underFirstText?: { readonly otherwise: number }
+    }
   | {
       readonly kind: 'border'
       readonly color: RGBA

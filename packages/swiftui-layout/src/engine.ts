@@ -1342,15 +1342,17 @@ export class LayoutEngine {
 
       case 'overlay': {
         // The mirror image of a background: the same frame, painted afterwards.
+        const drawn = out.length
         const next = this.place(element.child, bounds, inner, out, z, parent)
+        const area = modifier.underFirstText ? underFirstText(bounds, out.slice(drawn), parent, modifier.underFirstText.otherwise) : bounds
         const size = this.measure(
           modifier.content,
-          { width: bounds.width, height: bounds.height },
+          { width: area.width, height: area.height },
           inner,
         )
         return this.place(
           modifier.content,
-          alignedRect(bounds, size, modifier.alignment),
+          alignedRect(area, size, modifier.alignment),
           inner,
           out,
           next,
@@ -1744,6 +1746,31 @@ function transformFor(modifier: Extract<LayoutModifier, { kind: 'scale' | 'rotat
   if (modifier.kind === 'rotate') return { scaleX: 1, scaleY: 1, rotate: modifier.degrees, anchor }
   const { degrees, x, y, z, anchorZ = 0, perspective = 1 } = modifier
   return { scaleX: 1, scaleY: 1, rotate: 0, anchor, rotation3D: { degrees, x, y, z, anchorZ, perspective } }
+}
+
+/**
+ * The part of `bounds` from the leading edge of the leftmost text drawn in it, which is
+ * where iOS 27 starts a list row's separator: under a Label's title rather than its
+ * icon, and under the text beside an image. With no text, `fallback` points in.
+ */
+function underFirstText(bounds: Rect, drawn: readonly PlacedNode[], parent: string | null, fallback: number): Rect {
+  const boxes = new Map(drawn.map((node) => [node.id, node]))
+  // Where a text starts in the row's own space. Inside a container the browser owns, a
+  // group opacity or a clip, frames are the container's, so its origin is added on the
+  // way out; a row drawn faded keeps its separator under its text.
+  const leading = (node: PlacedNode): number | null => {
+    let x = node.frame.x
+    for (let up = node.parent ?? null, depth = 0; up !== parent; depth++) {
+      const box = up === null || depth > 32 ? undefined : boxes.get(up)
+      if (!box) return null
+      x += box.frame.x
+      up = box.parent ?? null
+    }
+    return x
+  }
+  const starts = drawn.filter((node) => node.paint.kind === 'text').map(leading).filter((x): x is number => x !== null)
+  const x = starts.length ? Math.min(...starts) : bounds.x + fallback
+  return { ...bounds, x, width: Math.max(0, bounds.x + bounds.width - x) }
 }
 
 function decorations(

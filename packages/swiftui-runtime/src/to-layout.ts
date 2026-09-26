@@ -2178,14 +2178,18 @@ class Converter {
         kind: 'image',
         id: `${path}icon`,
         glyph: symbol.glyph,
-      symbolScale: this.styles.imageScale === 'small' ? 0.8 : this.styles.imageScale === 'large' ? 1.3 : 1,
+        // In a list row iOS 27 draws a Label's icon a quarter larger than the row's text.
+        symbolScale: (this.listDepth > 0 ? 1.25 : 1) * (this.styles.imageScale === 'small' ? 0.8 : this.styles.imageScale === 'large' ? 1.3 : 1),
         resizable: false,
         approximated: symbol.approximated,
         ...(systemImage ? { symbol: systemImage } : {}),
       })
     }
+    // Centred in a column 24 pt wide, with the title 16 pt after it, at 72 on the phone.
+    // The column is a line of text tall: the icon reaches past it, and the row keeps
+    // the height its text gives it, 52 pt apart, as on the phone.
     if (this.listDepth > 0 && children[0]) children[0] = {
-      kind: 'modified', id: `${path}icon-column`, modifier: { kind: 'frame', width: 32, alignment: { horizontal: 'leading', vertical: 'center' } },
+      kind: 'modified', id: `${path}icon-column`, modifier: { kind: 'frame', width: 24, height: bodyFont(this.typeScale).lineHeight, alignment: CENTER },
       child: { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
     }
     if (title !== null && wantsTitle) children.push({ kind: 'text', id: `${path}title`, text: title })
@@ -2195,7 +2199,7 @@ class Converter {
       kind: 'stack',
       id: path,
       axis: 'horizontal',
-      spacing: this.listDepth > 0 ? 8 : 6,
+      spacing: this.listDepth > 0 ? 16 : 6,
       alignment: CENTER,
       children,
       ...origin,
