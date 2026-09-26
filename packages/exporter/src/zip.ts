@@ -1,5 +1,6 @@
 import { zipSync } from 'fflate'
 import type { Project } from '@studio/project-model'
+import type { AppAccent } from '@studio/shared'
 import { buildExportBundle, encodeText, type ExportBundle } from './bundle'
 import { buildPackageBundle, buildSwiftPMAppBundle, buildXcodeGenBundle, type ExportFormat } from './formats'
 import { attachExportReview, type ExportReview } from './handoff-report'
@@ -32,19 +33,21 @@ export function zipBundle(bundle: ExportBundle): Uint8Array {
 export interface ExportOptions extends HandoffExtras {
   /** The review screens and report; only the complete bundle has them. */
   readonly review?: ExportReview
+  /** The tint written at the app's root, for AccentColor. */
+  readonly accent?: AppAccent
 }
 
-export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', { review, build, events }: ExportOptions = {}): Uint8Array {
+export function exportProjectZip(project: Project, format: ExportFormat = 'xcodeproj', { review, build, events, accent }: ExportOptions = {}): Uint8Array {
   const name = project.manifest.name, root = format === 'swiftpm' ? `${name}.swiftpm` : name
   const sourceRoot = format === 'xcodeproj' ? `${root}/${name}` : format === 'xcodegen' ? `${root}/Sources` : `${root}/Sources/${name}`
   const catalog = `${sourceRoot}/${format === 'spm' || format === 'swiftpm' ? 'Resources/' : ''}Assets.xcassets`
-  const bundle = attachHandoff(project, bundleFor(project, format), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog, { build, events })
+  const bundle = attachHandoff(project, bundleFor(project, format, accent), root, id => `${sourceRoot}/${targetRelativePath(id)}`, catalog, { build, events })
   if (review && format !== 'xcodeproj') throw new Error('The complete bundle uses the Xcode project format.')
   return zipBundle(review ? attachExportReview(project, bundle, review, build) : bundle)
 }
 
 /** The file set for a format. One switch, so a new format cannot be half-wired. */
-export function bundleFor(project: Project, format: ExportFormat): ExportBundle {
+export function bundleFor(project: Project, format: ExportFormat, accent?: AppAccent): ExportBundle {
   switch (format) {
     case 'swiftpm':
       return buildSwiftPMAppBundle(project)
@@ -53,7 +56,7 @@ export function bundleFor(project: Project, format: ExportFormat): ExportBundle 
     case 'xcodegen':
       return buildXcodeGenBundle(project)
     case 'xcodeproj':
-      return buildExportBundle(project)
+      return buildExportBundle(project, accent)
   }
 }
 

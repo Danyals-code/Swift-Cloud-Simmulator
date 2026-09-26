@@ -2686,3 +2686,55 @@ describe('pilot B13: a continuous corner as iOS 27 draws it', () => {
     across.forEach((x, i) => expect(Math.abs(depthAt(points, width, height, x) - depths[i]!), `${x} pt in`).toBeLessThan(0.45))
   })
 })
+
+describe('pilot B10: the app\'s accent, for the export', () => {
+  // In the iOS 27 simulator, Color.accentColor follows a tint written on a navigation
+  // container, and stays the system blue under a tint written on its content, as in
+  // streaks. The preview draws the root tint everywhere, so the export writes it into
+  // AccentColor, and the phone shows it everywhere too.
+  const accentOf = (app: string, views: string) => buildAuthoringModel({ projectId: 'p', revision: 1, files: [{ id: 'App.swift', text: `import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ${app} } } }
+${views}` }] }).accent
+  const teal = { light: '#00C3D0', dark: '#40C8E0' }
+
+  it('is the tint written on the content of the root view\'s navigation stack, as in streaks', () => {
+    expect(accentOf('HomeView()', `struct HomeView: View {
+  var body: some View {
+    NavigationStack {
+      ScrollView { Circle().fill(Color.accentColor) }
+        .navigationTitle("Streaks")
+        .tint(.teal)
+    }
+  }
+}`)).toEqual(teal)
+  })
+
+  it('is the tint written on the window\'s view, or on the tab view the root view is', () => {
+    expect(accentOf('ContentView().tint(Color.indigo)', 'struct ContentView: View { var body: some View { Text("x") } }')).toEqual({ light: '#6155F5', dark: '#5E5CE6' })
+    expect(accentOf('ContentView()', `struct ContentView: View {
+  var body: some View {
+    TabView { Text("A").tabItem { Label("A", systemImage: "star") } }
+      .tint(.teal)
+  }
+}`)).toEqual(teal)
+  })
+
+  it('follows a token the project declares to the colour it was given', () => {
+    expect(accentOf('ContentView().tint(.brand)', `struct ContentView: View { var body: some View { Text("x") } }
+extension Color { static let brand = Color.teal }`)).toEqual(teal)
+    const model = buildAuthoringModel({ projectId: 'p', revision: 1, colors: [{ name: 'Brand', light: '#112233', dark: '#445566' }], files: [{ id: 'App.swift', text: `import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView().tint(Theme.accent) } } }
+struct ContentView: View { var body: some View { Text("x") } }
+enum Theme { static let accent = Color("Brand") }` }] })
+    expect(model.accent).toEqual({ light: '#112233', dark: '#445566' })
+  })
+
+  it('is none when no tint is written at the root, or only on one control inside a screen', () => {
+    expect(accentOf('ContentView()', 'struct ContentView: View { var body: some View { Text("x") } }')).toBeUndefined()
+    expect(accentOf('ContentView()', `struct ContentView: View {
+  var body: some View {
+    VStack { Button("Delete") { }.tint(.red) }
+  }
+}`)).toBeUndefined()
+  })
+})

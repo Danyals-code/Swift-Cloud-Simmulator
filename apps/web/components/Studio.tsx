@@ -1284,6 +1284,10 @@ export function Studio() {
     }
   }, [project, flush])
 
+  // The tint written at the app's root, for the export's AccentColor: from the compile
+  // of the project on screen, and none while that compile is still to come.
+  const accent = result?.authoring && result.authoring.projectId === project?.id && !stale ? result.authoring.accent : undefined
+
   /**
    * Loaded on click, not on first paint.
    *
@@ -1300,10 +1304,10 @@ export function Studio() {
       exportInProgress.current = true; setExporting(true); setEditNote(null)
       void (async () => {
         const [{ exportNote, exportProject }, { browserExportSteps }] = await Promise.all([import('../lib/exportProject'), import('../lib/browserExport')])
-        setEditNote(exportNote(format, await exportProject(project, format, previewSettings, browserExportSteps(flush))))
+        setEditNote(exportNote(format, await exportProject(project, format, previewSettings, browserExportSteps(flush), accent)))
       })().catch(error => setEditNote(error instanceof Error ? error.message : 'Could not export this project.')).finally(() => { exportInProgress.current = false; setExporting(false) })
     },
-    [project, flush, previewSettings],
+    [project, flush, previewSettings, accent],
   )
 
   // Nothing of the studio is left to use in a tab without it: what it holds is out of

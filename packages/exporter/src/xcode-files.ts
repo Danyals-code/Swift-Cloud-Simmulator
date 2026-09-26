@@ -1,4 +1,5 @@
-import type { Project } from '@studio/project-model'
+import { colorSetContents, type Project } from '@studio/project-model'
+import type { AppAccent } from '@studio/shared'
 
 /**
  * The supporting files an Xcode project needs beyond `project.pbxproj`.
@@ -35,13 +36,14 @@ export function appIconContents(): string {
 }
 
 /**
- * The accent colour.
+ * The accent colour: the tint written at the app's root, so `Color.accentColor` is on
+ * the phone what the preview draws.
  *
- * Left unspecified rather than given a value: an empty colour set means "use the
- * system default", which is what an app with no chosen tint should do. Writing a
- * concrete blue here would silently override the platform.
+ * An app with no tint written gets an empty colour set, which means "use the system
+ * default". Writing a concrete blue there would silently override the platform.
  */
-export function accentColorContents(): string {
+export function accentColorContents(accent?: AppAccent): string {
+  if (accent) return colorSetContents({ name: 'AccentColor', light: accent.light, dark: accent.dark })
   return json({
     colors: [{ idiom: 'universal' }],
     info: CATALOG_INFO,

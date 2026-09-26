@@ -8,6 +8,7 @@ import { editResource, sharedStyles, styleProperties } from './authoring-resourc
 import { constrainNumericControl, validateControlValue } from './design-controls'
 import { navigationSettings, configureNavigationTarget, changeNavigationType } from './authoring-navigation'
 import { appNavigation, navigationPatches } from './authoring-navigation-app'
+import { appAccent } from './authoring-accent'
 import { makeComponent } from './authoring-copies'
 import { createScreenValue, guidedAction, screenEdit } from './authoring-screens'
 import { customizeCard } from './authoring-card'
@@ -22,7 +23,7 @@ export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot
   const read = <T>(settings: () => T): T | undefined => { if (!unparsed.size) return settings(); try { return settings() } catch { return undefined } }
   const nodes = snapshot.nodes.map(node => unparsed.has(node.source.file) ? node : read(() => enrich(node)) ?? node)
   const inputs = snapshot.nodes.filter(n => n.kind === 'definition' && !unparsed.has(n.source.file)).flatMap(n => read(() => stateInputs(ctx, n)) ?? [])
-  return { ...snapshot, nodes, inputs, styles: read(() => sharedStyles(ctx)), navigation: read(() => appNavigation(ctx)) }
+  return { ...snapshot, nodes, inputs, styles: read(() => sharedStyles(ctx)), navigation: read(() => appNavigation(ctx)), accent: read(() => appAccent(ctx)) }
 
   function enrich(node: AuthoringNode): AuthoringNode {
     const collection = collectionFor(ctx, node), component = componentSettings(ctx, node)

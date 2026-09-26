@@ -60,6 +60,12 @@ export interface AuthoringNode {
   readonly undrawn?: 'unsupported' | 'unknown'
 }
 
+/** The app's accent, as the hex its colour set holds in light and dark. */
+export interface AppAccent {
+  readonly light: string
+  readonly dark: string
+}
+
 export interface AuthoringSnapshot {
   readonly styles?: readonly SharedStyle[]
   readonly schemaVersion: 1
@@ -70,6 +76,8 @@ export interface AuthoringSnapshot {
   readonly inputs?: readonly StateInput[]
   /** The app's own navigation: its style, and the tabs when it has them. */
   readonly navigation?: AppNavigationModel
+  /** The tint written at the app's root, which the export writes into AccentColor. */
+  readonly accent?: AppAccent
   readonly diagnostics: readonly Diagnostic[]
   readonly runtimeToSource: Readonly<Record<string, string>>
 }

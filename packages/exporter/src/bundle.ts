@@ -1,4 +1,4 @@
-import { isAccentColorSetName } from '@studio/shared'
+import { isAccentColorSetName, type AppAccent } from '@studio/shared'
 import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { assetCatalog } from './resources'
 import type { Project } from '@studio/project-model'
@@ -103,7 +103,7 @@ function resolveInside(path: string, root: string): string | null {
  * by vigilance. The project record keeps each file whole, markers and all, for the
  * studio to reopen.
  */
-export function buildExportBundle(project: Project): ExportBundle {
+export function buildExportBundle(project: Project, accent?: AppAccent): ExportBundle {
   const name = project.manifest.name
   const root = name
   const { files, put } = newBundle(root)
@@ -128,7 +128,7 @@ export function buildExportBundle(project: Project): ExportBundle {
   for (const [path, bytes] of assetCatalog(project, `${root}/${name}/Assets.xcassets`)) put(path, bytes)
   add(`${name}/Assets.xcassets/AppIcon.appiconset/Contents.json`, appIconContents())
   // An app with its own colour set of this name already has the folder.
-  if (!project.colors?.some(color => isAccentColorSetName(color.name))) add(`${name}/Assets.xcassets/AccentColor.colorset/Contents.json`, accentColorContents())
+  if (!project.colors?.some(color => isAccentColorSetName(color.name))) add(`${name}/Assets.xcassets/AccentColor.colorset/Contents.json`, accentColorContents(accent))
 
   add('.gitignore', gitignoreContents())
   add('README.md', readme(project, plan.sourcePaths))
