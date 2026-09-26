@@ -186,7 +186,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | Item | Status | Phase |
 | --- | --- | --- |
-| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 |
+| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 | a `.continuous` corner is iOS 27's curve, measured in the simulator: it reaches 1.53 times the radius along each edge, squeezed into half a side that is too short. Grouped list and form cards and alerts use it. A sheet's clip and the glass outlines are still circular |
 | `UnevenRoundedRectangle`, `.rect(topLeadingRadius:…)`, `RectangleCornerRadii` | 🟡 | - | drawn, clipped and filled with the largest radius on every corner; the checker says so where uneven corners are written (D7a) |
 | `Path` (custom) | ✅ | 7 | lines, curves, arcs, rects and ellipses, serialised to SVG |
 | `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`'s `lineWidth`; a `StrokeStyle` dash pattern is not drawn |

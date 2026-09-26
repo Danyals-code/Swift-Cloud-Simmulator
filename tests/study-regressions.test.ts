@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
-import { placeholderWords, rgba, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
+import { placeholderWords, rgba, shapePath, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES, buildAuthoringModel } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
@@ -2636,5 +2636,53 @@ ${items}
 
     expect(controls(r)).toContain('History')
     expect(texts(tap(r, 'History'))).toContain('Past sessions')
+  })
+})
+
+describe('pilot B13: a continuous corner as iOS 27 draws it', () => {
+  // How far below a shape's top its edge is, at each distance in from its left side,
+  // traced from the iOS 27 simulator on iPhone 18 Pro. The curve reaches 1.53 times the
+  // radius along each edge, and where a side is too short, as on a one-row card or a
+  // 44-pt square, the part along that edge is squeezed into half of it.
+  const measured: readonly (readonly [string, number, number, number, readonly number[]])[] = [
+    ['a card', 26, 200, 120, [14.93, 11.26, 6.64, 3.82, 1.96, 0.97]],
+    ['a one-row card', 26, 370, 52, [14.62, 11.25, 6.64, 3.82, 1.96, 0.96]],
+    ['a 44-pt square', 22, 44, 44, [11.61, 8.57, 4.57, 2.16, 0.66, 0.06]],
+    ['a short bar', 20, 120, 40, [10.22, 7.25, 3.59, 1.58, 0.62, 0.24]],
+    ['a small radius', 12, 120, 40, [4.57, 2.57, 0.63, 0.14, 0.03, 0]],
+  ]
+  const across = [2.5, 4.5, 8.5, 12.5, 16.5, 20.5]
+
+  /** The outline's points, sampling each cubic, from the path data `shapePath` writes. */
+  const outline = (d: string) => {
+    const tokens = d.match(/[MVHCZ]|-?[\d.]+(e-?\d+)?/g)!
+    const points: [number, number][] = []
+    let at: [number, number] = [0, 0], i = 0, command = ''
+    const next = () => Number(tokens[i++])
+    while (i < tokens.length) {
+      if (/[MVHCZ]/.test(tokens[i]!)) command = tokens[i++]!
+      if (command === 'M') at = [next(), next()]
+      else if (command === 'V') at = [at[0], next()]
+      else if (command === 'H') at = [next(), at[1]]
+      else if (command === 'C') {
+        const [a, b, c, d]: [number, number][] = [at, [next(), next()], [next(), next()], [next(), next()]]
+        const bezier = (t: number, k: 0 | 1) => (1 - t) ** 3 * a![k] + 3 * (1 - t) ** 2 * t * b![k] + 3 * (1 - t) * t ** 2 * c![k] + t ** 3 * d![k]
+        for (let t = 0; t <= 1; t += 1 / 400) points.push([bezier(t, 0), bezier(t, 1)])
+        at = d!
+      } else if (command === 'Z') break
+      points.push(at)
+    }
+    return points
+  }
+  const depthAt = (points: readonly [number, number][], width: number, height: number, x: number) => {
+    const corner = points.filter(([px, py]) => px <= width / 2 && py <= height / 2)
+    const nearest = corner.reduce((best, p) => Math.abs(p[0] - x) < Math.abs(best[0] - x) ? p : best)
+    return Math.abs(nearest[0] - x) > 0.5 ? 0 : nearest[1]
+  }
+
+  it.each(measured)('curves %s as the simulator does, within half a point', (_, radius, width, height, depths) => {
+    const points = outline(shapePath('roundedRectangle', width, height, radius, 'continuous'))
+
+    across.forEach((x, i) => expect(Math.abs(depthAt(points, width, height, x) - depths[i]!), `${x} pt in`).toBeLessThan(0.45))
   })
 })
