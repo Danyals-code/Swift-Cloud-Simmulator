@@ -5,6 +5,7 @@ import {
   asProjection,
   bool,
   copyValue,
+  holdsType,
   describe,
   double,
   int,
@@ -108,6 +109,8 @@ export class AppRuntime {
    * pass's instance. Harvesting only the current one would drop the write silently.
    */
   private previousLive = new Map<string, StructValue>()
+  /** Each type's stored properties or cases in the loaded program, by name: what a value made from it has. */
+  private storedShapes: ReadonlyMap<string, string> = new Map()
   /** What each interactive element does, from the last resolved screen. */
   private handlers: ReadonlyMap<string, ViewIntent> = new Map()
   /** Identifies the loaded program, so a real edit reloads and a tap does not. */
@@ -224,8 +227,23 @@ export class AppRuntime {
     this.rootTypeName = null
     this.programKey = programKey
 
-    // State boxes deliberately survive a reload. Whether each individual value
-    // survives is decided per-property by its initialiser fingerprint.
+    // State boxes deliberately survive a reload, and whether each value survives is
+    // decided per property by its initialiser. That is not enough when the edit is to a
+    // type a value was made from: a `Model` made before `var extra = 5` was added has
+    // no `extra`, and every view reading it stopped until Reset. So a value holding a
+    // type whose stored properties or cases changed starts afresh, and the rest, typed
+    // text or a count tapped up, stays.
+    const shapes = storedShapes(files)
+    const changed = new Set([...this.storedShapes].filter(([name, shape]) => shapes.get(name) !== shape).map(([name]) => name))
+    this.storedShapes = shapes
+    if (changed.size > 0) {
+      const stale = (value: SwiftValue) => holdsType(value, changed)
+      this.state.prune(stale)
+      for (const [key, entry] of this.defaults) if (stale(entry.value)) this.defaults.delete(key)
+      this.seeded.clear()
+      this.live = new Map()
+      this.previousLive = new Map()
+    }
   }
 
   /**
@@ -1360,4 +1378,40 @@ function clonePreviewValue(value: SwiftValue, seen: Map<object, unknown>): Swift
   const result = copy(value) as SwiftValue
   for (const [key, item] of staged) seen.set(key, item)
   return result
+}
+
+/**
+ * Each type's stored shape, keyed by name: the stored properties of a struct or class,
+ * and the cases of an enum. Computed properties and methods are left out, since those
+ * are found by name when they run and a value made before the edit has them too.
+ */
+function storedShapes(files: readonly SourceFileNode[]): Map<string, string> {
+  const types = new Map<string, { readonly shape: string; readonly inherits: readonly string[] }>()
+  // A type declared inside another is known by both names, as the interpreter knows it:
+  // `Shelf.Book(…)` makes a `Shelf.Book` and `Book(…)` a `Book`.
+  const visit = (decl: Decl, owner: string | null): void => {
+    let shape: string
+    if (decl.kind === 'structDecl') {
+      const stored = decl.members.filter((m): m is VarDecl =>
+        m.kind === 'varDecl' && m.accessor === null && m.requirement === null && !m.modifiers.some((mod) => mod.name === 'static' || mod.name === 'class'))
+      shape = fingerprint({ reference: decl.isReference, stored })
+    } else if (decl.kind === 'enumDecl') {
+      shape = fingerprint(decl.cases)
+    } else return
+    const qualified = owner ? `${owner}.${decl.name}` : decl.name
+    const type = { shape, inherits: decl.inherits.map((inherited) => inherited.name) }
+    types.set(qualified, type)
+    if (!types.has(decl.name)) types.set(decl.name, type)
+    for (const member of decl.members) visit(member, qualified)
+  }
+  for (const file of files) for (const decl of file.declarations) visit(decl, null)
+  // A class holds the stored properties of the class it inherits from, so a change there
+  // changes it too. A protocol has no shape here, and a chain that comes back to a type
+  // it has passed, which Swift refuses, stops there.
+  const shapeOf = (name: string, seen: ReadonlySet<string>): string => {
+    const type = types.get(name)!
+    const above = type.inherits.filter((parent) => types.has(parent) && !seen.has(parent))
+    return [type.shape, ...above.map((parent) => shapeOf(parent, new Set([...seen, parent])))].join(' : ')
+  }
+  return new Map([...types.keys()].map((name) => [name, shapeOf(name, new Set([name]))]))
 }

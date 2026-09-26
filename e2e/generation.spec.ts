@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openCounter } from './designer-helpers'
+import { openCounter, replaceSource } from './designer-helpers'
 
 const generated = {
   name: 'ReadingApp', summary: 'A quiet place for your reading goals.',
@@ -233,6 +233,42 @@ test('an error the project already had does not stop an AI edit (G2)', async ({ 
   await expect(page.getByTestId('prompt-editor')).toContainText('Relabelled the count.')
   await expect(page.getByTestId('editor')).toContainText('Taps so far: ')
   expect(sent).toHaveLength(1)
+})
+
+test('an AI edit that adds a property to the app\'s data draws it at once, without Reset', async ({ page }) => {
+  const addGoal = (text: string) => text
+    .replace('var count = 0', 'var count = 0\n    var goal = 10')
+    .replace('Text("Count: \\(tally.count)")', 'Text("Count: \\(tally.count)")\n            Text("Goal: \\(tally.goal)")')
+  await answerInTurn(page, '**/api/edit', [counterEdit(addGoal)])
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, `import SwiftUI
+@Observable final class Tally {
+    var count = 0
+}
+@main
+struct CounterApp: App {
+    @State private var tally = Tally()
+    var body: some Scene { WindowGroup { ContentView().environment(tally) } }
+}
+struct ContentView: View {
+    @Environment(Tally.self) private var tally
+    var body: some View {
+        VStack {
+            Text("Count: \\(tally.count)")
+            Button("Add") { tally.count += 1 }
+        }
+    }
+}
+`)
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('render-tree').getByText('Count: 0', { exact: true })).toBeVisible()
+  await sendPrompt(page)
+
+  // The tally the preview already held was made before `goal` existed. Drawn from it,
+  // every view reading `goal` stopped until Reset, though the edit said Applied.
+  await expect(page.getByTestId('render-tree').getByText('Goal: 10', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('render-tree').getByText(/stopped/)).toHaveCount(0)
 })
 
 test('a request the Vercel Firewall turns away says to wait, in plain words (G4)', async ({ page }) => {

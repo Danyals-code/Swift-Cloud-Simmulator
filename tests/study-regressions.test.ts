@@ -2126,3 +2126,153 @@ describe('pilot: Swift the AI writes runs as it does on iOS 27', () => {
     expect(texts(tap(r, 'Start'))).toContain('Stop')
   })
 })
+
+describe('pilot: an edit to the app\'s data keeps the preview drawing', () => {
+  const app = (model: string, content: string, members = '') => `import SwiftUI
+@Observable final class Model {
+${model}
+}
+@main struct Demo: App {
+  @State private var model = Model()
+  var body: some Scene { WindowGroup { ContentView().environment(model) } }
+}
+struct ContentView: View {
+  @Environment(Model.self) private var model
+  @State private var taps = 0
+${members}
+  var body: some View {
+    VStack {
+${content}
+      Button("Tap \\(taps)") { taps += 1 }
+    }
+  }
+}`
+  const stopped = (r: CompileResult) => nodes(r).filter(n => n.placeholder?.kind === 'stopped').map(n => n.placeholder)
+  const draw = (source: string) => {
+    const r = compileView(source)
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    return r
+  }
+
+  it('draws a property an edit adds to a model held in state', () => {
+    draw(app('  var count = 1', '      Text("Count \\(model.count)")'))
+
+    const r = draw(app('  var count = 1\n  var extra = 5', '      Text("Count \\(model.count)")\n      Text("Extra \\(model.extra)")'))
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toEqual(expect.arrayContaining(['Count 1', 'Extra 5']))
+  })
+
+  it('draws a property an edit adds to the structs in a list held in state', () => {
+    const cars = (fields: string, row: string) => draw(`import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct Car: Identifiable {
+  let id: Int
+  var name: String
+${fields}
+}
+struct ContentView: View {
+  @State private var cars = [Car(id: 1, name: "Wagon")]
+  var body: some View {
+    List(cars) { car in
+${row}
+    }
+  }
+}`)
+    cars('', '      Text(car.name)')
+
+    const r = cars('  var dueSoon = false', '      Text(car.dueSoon ? "Soon" : "Later")')
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toContain('Later')
+  })
+
+  it('draws a property an edit adds to a type declared inside another, however it was made', () => {
+    const shelf = (fields: string, row: string) => draw(`import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct Shelf {
+  struct Book: Identifiable {
+    let id: Int
+    var title: String
+${fields}
+  }
+}
+struct ContentView: View {
+  @State private var books = [Shelf.Book(id: 1, title: "Dune")]
+  var body: some View {
+    List(books) { book in
+${row}
+    }
+  }
+}`)
+    shelf('', '      Text(book.title)')
+
+    const r = shelf('    var pages = 412', '      Text("\\(book.title), \\(book.pages) pages")')
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toContain('Dune, 412 pages')
+  })
+
+  it('keeps what was done in the preview when an edit changes only what the data does', () => {
+    const first = draw(app('  var count = 0\n  func bump() { count += 1 }', '      Button("Bump \\(model.count)") { model.bump() }'))
+    expect(texts(tap(first, 'Bump 0'))).toContain('Bump 1')
+
+    const r = draw(app('  var count = 0\n  func bump() { count += 2 }', '      Button("Bump \\(model.count)") { model.bump() }'))
+
+    expect(texts(r)).toContain('Bump 1')
+    expect(texts(tap(r, 'Bump 1'))).toContain('Bump 3')
+  })
+
+  it('starts only the data whose type changed afresh', () => {
+    const first = draw(app('  var count = 0\n  func bump() { count += 1 }', '      Button("Bump \\(model.count)") { model.bump() }'))
+    tap(first, 'Bump 0')
+    const tapped = tap(rerender(revision++), 'Tap 0')
+    expect(texts(tapped)).toEqual(expect.arrayContaining(['Bump 1', 'Tap 1']))
+
+    const r = draw(app('  var count = 0\n  var step = 1\n  func bump() { count += step }', '      Button("Bump \\(model.count)") { model.bump() }'))
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toEqual(expect.arrayContaining(['Bump 0', 'Tap 1']))
+  })
+
+  it('draws a property an edit adds to the class a model inherits from', () => {
+    const inherited = (fields: string, content: string) => draw(`import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
+class Base {
+  var count = 1
+${fields}
+}
+final class Model: Base {}
+struct ContentView: View {
+  @State private var model = Model()
+  var body: some View {
+    VStack {
+${content}
+    }
+  }
+}`)
+    inherited('', '      Text("Count \\(model.count)")')
+
+    const r = inherited('  var limit = 3', '      Text("Count \\(model.count) of \\(model.limit)")')
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toContain('Count 1 of 3')
+  })
+
+  it('keeps what was done in the preview when an edit moves code with a loop in it', () => {
+    const steps = '  var steps: [Int] = {\n    var all: [Int] = []\n    for step in 1...3 { all.append(step) }\n    return all\n  }()'
+    const order = `  @State private var order: [Int] = {
+    var all: [Int] = []
+    for place in 1...3 { all.append(place) }
+    return all
+  }()`
+    const content = '      Button("Bump \\(model.count)") { model.bump() }\n      Button("Order \\(order.count)") { order.append(0) }'
+    const first = draw(app(`  var count = 0\n${steps}\n  func bump() { count += 1 }`, content, order))
+    tap(first, 'Bump 0')
+    expect(texts(tap(rerender(revision++), 'Order 3'))).toEqual(expect.arrayContaining(['Bump 1', 'Order 4']))
+
+    const r = draw(app(`  var count = 0\n  func reset() { count = 0 }\n${steps}\n  func bump() { count += 1 }`, content, order))
+
+    expect(texts(r)).toEqual(expect.arrayContaining(['Bump 1', 'Order 4']))
+  })
+})

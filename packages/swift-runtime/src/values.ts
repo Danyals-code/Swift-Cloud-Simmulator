@@ -493,6 +493,26 @@ export function unwrapProjection(value: SwiftValue): SwiftValue {
 
 // ------------------------------------------------------------------ copying
 
+/** Whether `value`, or anything it holds, was made from one of `types`. */
+export function holdsType(value: SwiftValue, types: ReadonlySet<string>, seen = new Set<object>()): boolean {
+  switch (value.kind) {
+    case 'struct':
+      if (types.has(value.typeName)) return true
+      if (seen.has(value.fields)) return false
+      seen.add(value.fields)
+      return [...value.fields.values()].some((field) => holdsType(field, types, seen))
+    case 'enum':
+      return types.has(value.typeName) || value.associated.some((payload) => holdsType(payload, types, seen))
+    case 'array':
+    case 'tuple':
+      return value.elements.some((element) => holdsType(element, types, seen))
+    case 'dictionary':
+      return [...value.entries.values()].some((entry) => holdsType(entry, types, seen))
+    default:
+      return false
+  }
+}
+
 /**
  * Produces an independent copy for value types, and returns reference types as-is.
  *
