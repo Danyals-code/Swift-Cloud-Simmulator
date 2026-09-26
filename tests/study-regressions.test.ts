@@ -2471,6 +2471,25 @@ describe('pilot B3: a disabled button is grey, as iOS 27 draws it', () => {
     expect(titled(r, 'Save').opacity).toBe(1)
   })
 
+  it('greys a disabled button\'s icon with its title, where its label is a Label in a form row', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      Form {
+        Button { } label: { Label("Save Spot", systemImage: "star") }.disabled(true)
+        Button { } label: { Label("Park", systemImage: "star.fill") }
+      }
+    }
+  }`)
+    const icon = (symbol: string) => nodes(r).find(n => n.image?.symbol === symbol)!
+
+    expect(colorOf(r, 'Save Spot')).toEqual(rgba(0, 0, 0, 0.25))
+    expect(icon('star').image!.color).toEqual(rgba(0, 0, 0, 0.25))
+    expect(icon('star').opacity).toBe(1)
+    // An enabled one keeps its tint on both halves.
+    expect(colorOf(r, 'Park')).toEqual(colorForName('accentColor'))
+    expect(icon('star.fill').image!.color).toEqual(colorForName('accentColor'))
+  })
+
   it('greys a button on its own, and the fill and title of a bordered or prominent one', () => {
     const r = screen(`  var body: some View {
     VStack(spacing: 24) {

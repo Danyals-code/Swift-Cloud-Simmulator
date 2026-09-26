@@ -396,6 +396,8 @@ interface ControlStyles {
   readonly foregroundSet?: boolean
   /** A toolbar item drawn in a capsule it shares with the items beside it, so without a glass of its own. */
   readonly toolbarGroup?: boolean
+  /** Whether these views are a button's label, which take the button's colour, grey when it is disabled. */
+  readonly buttonLabel?: boolean
 }
 
 const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
@@ -2223,7 +2225,8 @@ class Converter {
     // the height its text gives it, 52 pt apart, as on the phone.
     if (this.listDepth > 0 && children[0]) children[0] = {
       kind: 'modified', id: `${path}icon-column`, modifier: { kind: 'frame', width: 24, height: bodyFont(this.typeScale).lineHeight, alignment: CENTER },
-      child: { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
+      // A button's Label takes the button's colour instead, grey when it is disabled.
+      child: this.styles.buttonLabel ? children[0] : { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
     }
     if (title !== null && wantsTitle) children.push({ kind: 'text', id: `${path}title`, text: title })
     if (wantsTitle || !symbol) children.push(...this.convertList(view.children, path, 'horizontal'))
@@ -2255,7 +2258,7 @@ class Converter {
             axis: 'horizontal',
             spacing: 4,
             alignment: CENTER,
-            children: this.iconScaled(iconAlone, () => this.convertList(content, `${path}label`, 'horizontal')),
+            children: this.iconScaled(iconAlone, () => this.asButtonLabel(() => this.convertList(content, `${path}label`, 'horizontal'))),
             ...origin,
           }
 
@@ -2276,6 +2279,13 @@ class Converter {
     const only = content.length === 1 ? content[0]! : null
     return this.styles.container === 'toolbar' && !!only &&
       (only.name === 'Image' || (only.name === 'Label' && withStyles(this.styles, only, this.scheme).label === 'iconOnly'))
+  }
+
+  /** What `build` converts as a button's label. */
+  private asButtonLabel<T>(build: () => T): T {
+    const outer = this.styles
+    this.styles = { ...outer, buttonLabel: true }
+    try { return build() } finally { this.styles = outer }
   }
 
   /** What `build` converts, at the large image scale when the label is a toolbar icon alone. */
