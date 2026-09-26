@@ -91,7 +91,8 @@ it('F03 updates the second Design value and keeps inherited disabling through Gr
   text = set(text, 'Button', 'disabled', 'true')
   expect(text).toContain('.disabled(false).disabled(true)')
   expect(render(text).nodes.find(n => n.hitTarget)?.hitTarget?.enabled).toBe(false)
-  expect(render(text).nodes.some(n => n.opacity === 0.4)).toBe(true)
+  // Grey, as iOS 27 draws a disabled button, rather than its tint faded.
+  expect(render(text).nodes.find(n => n.text?.runs[0]?.text === 'Press')?.text?.runs[0]?.color).toEqual({ r: 60, g: 60, b: 67, a: 0.3 })
   const inherited = source('VStack { Group { Button("Press") { }.disabled(false) } }.disabled(false).disabled(true)')
   expect(render(inherited).nodes.find(n => n.hitTarget)?.hitTarget?.enabled).toBe(false)
 })

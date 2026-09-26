@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RenderTreeView } from '@studio/swiftui-render-dom'
-import { placeholderWords, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
+import { placeholderWords, rgba, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES, buildAuthoringModel } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
@@ -2435,5 +2435,58 @@ describe('pilot B1: an empty state as iOS 27 draws it', () => {
     expect(frames.text.x + frames.text.width).toBeLessThanOrEqual(370)
     // In the simulator the view is 220 pt tall from y 168, and its group is centred in it.
     expect((frames.icon.y + frames.text.y + frames.text.height + 30) / 2).toBeCloseTo(168 + 110, 0)
+  })
+})
+
+describe('pilot B3: a disabled button is grey, as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro, light. A disabled button's title
+  // turns a grey that depends on where it sits, and a bordered or prominent button's
+  // fill turns the system grey. Nothing fades, and the toolbar keeps its glass.
+  const titled = (r: CompileResult, value: string) => nodes(r).find(n => n.text?.runs.some(run => run.text === value))!
+  const colorOf = (r: CompileResult, value: string) => titled(r, value).text!.runs[0]!.color
+  const fillBehind = (r: CompileResult, value: string) => {
+    const text = placed(r, value)
+    const inside = (n: RenderNode) => { const f = worldFrame(nodes(r), n); return f.x <= text.x && f.y <= text.y && f.x + f.width >= text.x + text.width && f.y + f.height >= text.y + text.height }
+    return nodes(r).filter(n => n.background?.kind === 'solid' && inside(n)).map(n => n.background!.kind === 'solid' ? n.background!.color : null).at(-1)
+  }
+
+  it('greys the title of a button in a form row and in the toolbar, and leaves the enabled ones tinted', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      Form {
+        Button("Save Spot") { }.disabled(true)
+        Button("Enabled Row") { }
+      }
+      .navigationTitle("Disabled")
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) { Button("Save") { }.disabled(true) }
+      }
+    }
+  }`)
+
+    expect(colorOf(r, 'Save Spot')).toEqual(rgba(0, 0, 0, 0.25))
+    expect(colorOf(r, 'Save')).toEqual(rgba(60, 60, 67, 0.41))
+    expect(colorOf(r, 'Enabled Row')).toEqual(colorForName('accentColor'))
+    expect(titled(r, 'Save Spot').opacity).toBe(1)
+    expect(titled(r, 'Save').opacity).toBe(1)
+  })
+
+  it('greys a button on its own, and the fill and title of a bordered or prominent one', () => {
+    const r = screen(`  var body: some View {
+    VStack(spacing: 24) {
+      Button("Plain off") { }.disabled(true)
+      Button("Bordered off") { }.buttonStyle(.bordered).disabled(true)
+      Button("Prominent off") { }.buttonStyle(.borderedProminent).disabled(true)
+      Button("Prominent on") { }.buttonStyle(.borderedProminent)
+    }
+  }`)
+
+    expect(colorOf(r, 'Plain off')).toEqual(colorForName('tertiaryLabel'))
+    for (const title of ['Bordered off', 'Prominent off']) {
+      expect(colorOf(r, title), title).toEqual(rgba(60, 60, 67, 0.225))
+      expect(fillBehind(r, title), title).toEqual(rgba(120, 120, 128, 0.16))
+      expect(titled(r, title).opacity, title).toBe(1)
+    }
+    expect(fillBehind(r, 'Prominent on')).toEqual(colorForName('accentColor'))
   })
 })

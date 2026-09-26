@@ -119,7 +119,8 @@ describe('inherited visual environment', () => {
   it('keeps disabled controls visible and inert, even if a child tries to enable itself', () => {
     const result = run('VStack { Button("Disabled") {}.disabled(false); Slider(value: $amount); TextField("Name", text: $text) }.disabled(true)')
     expect(nodes(result).filter((n) => n.hitTarget).every((n) => !n.hitTarget!.enabled)).toBe(true)
-    expect(textNode(result, 'Disabled').opacity).toBeLessThan(1)
+    // Grey, as iOS 27 draws a disabled button, rather than its tint faded.
+    expect(textNode(result, 'Disabled').text!.runs[0]!.color).toEqual({ r: 60, g: 60, b: 67, a: 0.3 })
     const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: result.renderTree!, onEvent: () => {} }))
     expect(markup).toContain('type="range"')
     expect(markup.match(/disabled=""/g)?.length).toBe(2)

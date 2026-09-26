@@ -494,6 +494,9 @@ class Converter {
    */
   private listDepth = 0
 
+  /** The buttons whose style drew them disabled, in grey, so they are not faded as well. */
+  private readonly greyedOut = new Set<string>()
+
   /**
    * Makes an element fill the rect it is laid out in.
    *
@@ -1121,7 +1124,7 @@ class Converter {
     // Segments own their hit areas. A full-size picker target would cover them.
     const segmented = view.name === 'Picker' && this.styles.picker === 'segmented'
     if (view.intent) {
-      if (isDisabled(view)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
+      if (isDisabled(view) && !this.greyedOut.has(path)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
       if (!segmented) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
     }
     // A passive context target sits behind descendant controls. Those controls
@@ -2264,12 +2267,19 @@ class Converter {
     // Wrapped in the tint here, `.foregroundStyle(.white)` over an accent background
     // drew the title in the accent, where it could not be seen.
     const foreground = this.styles.foregroundSet === true
+    // A disabled button is grey in iOS 27, rather than its tint faded: its title by where
+    // it sits, and a bordered or prominent button's fill. A plain button, and one given a
+    // foreground style, still fade.
+    const disabled = isDisabled(view) && style !== 'plain' && !foreground
+    const greys = this.appearance.button.disabled[this.scheme]
+    if (disabled) this.greyedOut.add(path)
     if (style !== 'bordered' && style !== 'borderedProminent' && style !== 'glass' && style !== 'glassProminent') {
       if (style === 'plain' || foreground) return label
+      const grey = this.styles.container === 'toolbar' ? greys.toolbar : this.listDepth > 0 ? greys.row : greys.title
       return {
         kind: 'modified',
         id: `${path}btntint`,
-        modifier: { kind: 'foregroundStyle', color: tint },
+        modifier: { kind: 'foregroundStyle', color: disabled ? grey : tint },
         child: label,
       }
     }
@@ -2286,12 +2296,13 @@ class Converter {
       ? this.appearance.button.roundedRectangleRadius
       : this.appearance.button.cornerRadius
 
+    const fill = disabled && !(glass && !prominent) ? this.color('secondarySystemFill') : null
     const tinted: LayoutElement = foreground ? label : {
       kind: 'modified',
       id: `${path}btncolor`,
       modifier: {
         kind: 'foregroundStyle',
-        color: prominent ? rgba(255, 255, 255) : tint,
+        color: disabled ? (fill ? greys.onFill : greys.toolbar) : prominent ? rgba(255, 255, 255) : tint,
       },
       child: label,
     }
@@ -2320,14 +2331,14 @@ class Converter {
       const surface: LayoutElement = {
         kind: 'modified', id: `${path}glassbg`,
         modifier: { kind: 'background', content: background },
-        child: prominent ? this.background(padded, `${path}btn`, { ...tint, a: tint.a * 0.85 }, radius, cornerStyle) : padded,
+        child: prominent ? this.background(padded, `${path}btn`, fill ?? { ...tint, a: tint.a * 0.85 }, radius, cornerStyle) : padded,
       }
       return { kind: 'modified', id: `${path}glassclip`, modifier: { kind: 'cornerRadius', radius, style: cornerStyle }, child: this.chromeOutline(surface, `${path}outline`, radius) }
     }
     return this.background(
       padded,
       `${path}btn`,
-      prominent ? tint : { ...tint, a: tint.a * (this.scheme === 'dark' ? 0.25 : 0.18) },
+      fill ?? (prominent ? tint : { ...tint, a: tint.a * (this.scheme === 'dark' ? 0.25 : 0.18) }),
       radius,
       cornerStyle,
     )

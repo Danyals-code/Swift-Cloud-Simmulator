@@ -152,6 +152,17 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   quaternarySystemFill: rgba(116, 116, 128, 0.18),
 }
 
+/**
+ * A disabled button's colours, measured in the iOS 27 simulator on iPhone 18 Pro. Its
+ * title turns a grey that depends on where it sits: on its own, in a list or form row,
+ * in the toolbar's glass, or on the grey fill a bordered or prominent button takes.
+ * Nothing fades.
+ */
+const DISABLED_BUTTON = {
+  light: { title: LIGHT_COLORS.tertiaryLabel!, row: rgba(0, 0, 0, 0.25), toolbar: rgba(60, 60, 67, 0.41), onFill: rgba(60, 60, 67, 0.225) },
+  dark: { title: DARK_COLORS.tertiaryLabel!, row: rgba(255, 255, 255, 0.25), toolbar: rgba(255, 255, 255, 0.23), onFill: rgba(235, 235, 245, 0.225) },
+}
+
 /** iOS 27 target. Metrics and materials are preview approximations pending native calibration. */
 export const IOS_27 = {
   id: 'ios-27',
@@ -165,7 +176,7 @@ export const IOS_27 = {
     image: { top: 6, bottom: 6, leading: 6, trailing: 6 },
   },
   metrics: { padding: 16, spacerMinimum: 8, labelGap: 6, controlGap: 8, navigationBar: 54, largeTitle: 52, tabBar: 49, row: 44, rowInset: 16, separator: 0.5, stackSpacing: 8 },
-  button: { automatic: { content: 'borderless', list: 'borderless', form: 'borderless', toolbar: 'glass' }, paddingVertical: 7, paddingHorizontal: 14, cornerRadius: 999, roundedRectangleRadius: 8 },
+  button: { automatic: { content: 'borderless', list: 'borderless', form: 'borderless', toolbar: 'glass' }, paddingVertical: 7, paddingHorizontal: 14, cornerRadius: 999, roundedRectangleRadius: 8, disabled: DISABLED_BUTTON },
   switch: CONTROL_PARTS.switch,
   materials: {
     ultraThinMaterial: { opacity: 0.3, blur: 8 },

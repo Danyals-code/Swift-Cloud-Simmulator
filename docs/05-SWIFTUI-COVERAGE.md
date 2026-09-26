@@ -216,7 +216,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.id(_:)` | ✅ | - | a new id is a new view: its state starts over, and its appear and disappear hooks run, when the id changes |
 | `.onChange(of:)` | ✅ | 7 | one-value and explicit zero/two-parameter callbacks; `initial: true` runs on first appearance. Independent modifiers track independent previous values |
 | `.onReceive` | ⬜ | - | needs Combine, which needs publishers and a scheduler the preview does not have |
-| `.disabled` / `.allowsHitTesting` | ✅ | 7 |
+| `.disabled` / `.allowsHitTesting` | ✅ | 7 | a disabled button is grey, as iOS 27 draws it: its title by where it sits (on its own, in a row, in the toolbar), and a bordered or prominent button's fill too. A plain button, one with its own foreground style, and other controls fade |
 | `.focused` | ⬜ | - | warns; `@FocusState` storage exists but native focus synchronization is absent |
 | `.onSubmit` / `.keyboardType` / `.submitLabel` | 🟡 | - | common text-field Enter submission and browser input/return-key hints, including inherited modifiers; no iOS keyboard rendering or complete submit-scope semantics |
 | `.textInputAutocapitalization` / `.autocorrectionDisabled` | 🟡 | - | browser input hints; actual behavior depends on the browser and keyboard |
