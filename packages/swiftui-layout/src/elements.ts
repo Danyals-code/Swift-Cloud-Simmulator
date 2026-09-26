@@ -122,6 +122,11 @@ export interface TextElement extends ElementBase {
    * every label in every app goes down.
    */
   readonly runs?: readonly TextRunSpec[]
+  /**
+   * Text the system draws, such as an alert's title and message: its first and last
+   * lines keep their half-leading, as UIKit's labels do. A SwiftUI `Text` gives it up.
+   */
+  readonly keepsLeading?: true
 }
 
 /**

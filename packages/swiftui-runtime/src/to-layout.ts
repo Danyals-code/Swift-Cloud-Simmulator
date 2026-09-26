@@ -201,8 +201,15 @@ const ROW_INSET = IOS_27.metrics.rowInset
 
 /** A row in an alert or confirmation dialog, which iOS sizes like a list row. */
 const ALERT_BUTTON_HEIGHT = SURFACES.alert.buttonHeight
+
 /** Must match the runtime's swipe width, or the action would not line up. */
 const SWIPE_WIDTH = 88
+
+/** The same text, keeping its half-leading above and below as the system's own labels do. */
+function keptLeading(element: LayoutElement): LayoutElement {
+  if (element.kind === 'text') return { ...element, keepsLeading: true }
+  return element.kind === 'modified' ? { ...element, child: keptLeading(element.child) } : element
+}
 
 export interface ConversionOptions {
   readonly images?: readonly PreviewImageAsset[]
@@ -916,9 +923,11 @@ class Converter {
     if (overlay.kind === 'menu') return this.menuSurface(overlay)
 
     if (overlay.kind === 'alert' || overlay.kind === 'dialog') {
-      const title = this.styledText('ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600)
+      // UIKit draws an alert's labels, which keep their leading: the iOS 27 simulator puts
+      // the title's and message's glyphs where their full line boxes centre them.
+      const title = keptLeading(this.styledText('ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600))
       const message = overlay.message
-        ? [this.styledText('ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel')]
+        ? [keptLeading(this.styledText('ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel'))]
         : []
 
       const head: LayoutElement = {
@@ -2744,6 +2753,9 @@ class Converter {
             modifier: {
               kind: 'frame',
               maxWidth: Number.POSITIVE_INFINITY,
+              // The control is 32 pt tall in the iOS 27 simulator, whatever its labels'
+              // glyphs measure: a label is centred in what the padding leaves.
+              minHeight: CONTROL_PARTS.segmented.height - 2 * (CONTROL_PARTS.segmented.inset + CONTROL_PARTS.segmented.padY),
               alignment: CENTER,
             },
             child: this.convert(child, `${path}seg${index}c`, 'horizontal'),

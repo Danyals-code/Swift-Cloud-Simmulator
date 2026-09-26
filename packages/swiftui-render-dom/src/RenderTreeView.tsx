@@ -1044,30 +1044,39 @@ function TextContent({ node }: { node: RenderNode }) {
   if (payload.lines && payload.lines.length > 0) {
     return (
       <>
-        {payload.lines.map((line, i) => (
-          <div
-            key={i}
-            style={{
-              ...typography,
-              position: 'absolute',
-              left: 0,
-              top: line.origin.y,
-              width: '100%',
-              height: line.height ?? first.font.lineHeight,
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: justify,
-            }}
-          >
-            {line.slices
-              ? line.slices.map((slice, j) => {
-                  const run = payload.runs[slice.run] ?? first
-                  return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
-                    top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
-                })
-              : <span dir="auto" style={{ position: 'relative', top: line.baseline - (line.fontBaseline ?? line.baseline) - (first.baselineOffset ?? 0) }}>{decoratedText(first, line.text)}</span>}
-          </div>
-        ))}
+        {payload.lines.map((line, i) => {
+          const height = line.height ?? first.font.lineHeight
+          // A line of one run is drawn in a box as tall as the line, so the text's box is
+          // its frame: a first or last line gives up half its leading, and a box as tall as
+          // the leading would reach into the view beside it. CSS centres the glyphs in the
+          // box, so the baseline moves by half of what the box gave up.
+          const fontBaseline = (line.fontBaseline ?? line.baseline) - (first.font.lineHeight - height) / 2
+          return (
+            <div
+              key={i}
+              style={{
+                ...typography,
+                ...(line.slices ? {} : { lineHeight: `${height}px` }),
+                position: 'absolute',
+                left: 0,
+                top: line.origin.y,
+                width: '100%',
+                height,
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: justify,
+              }}
+            >
+              {line.slices
+                ? line.slices.map((slice, j) => {
+                    const run = payload.runs[slice.run] ?? first
+                    return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
+                      top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
+                  })
+                : <span dir="auto" style={{ position: 'relative', top: line.baseline - fontBaseline - (first.baselineOffset ?? 0) }}>{decoratedText(first, line.text)}</span>}
+            </div>
+          )
+        })}
       </>
     )
   }

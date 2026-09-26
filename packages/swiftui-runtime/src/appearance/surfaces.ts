@@ -1,8 +1,10 @@
 /** Points calibrated against the supplied light/default-text phone captures.
- * Other sizes and appearances remain provisional; see docs/parity/ios27.json. */
+ * Other sizes and appearances remain provisional; see docs/parity/ios27.json.
+ * A row's and a header's padding are measured from their text's glyphs, which is where
+ * the simulator ends a text: a three-line row is its 64.33 pt of text and 15 above and below. */
 export const SURFACES = {
-  list: { row: 52, rowX: 16, rowY: 14, inset: 16, regularMaxWidth: 720, corner: 26,
-    top: 10, bottom: 24, sectionGap: 24, unheadedGap: 35, afterFooterGap: 10, headerTop: 4, headerBottom: 8, footerTop: 8 },
+  list: { row: 52, rowX: 16, rowY: 15, inset: 16, regularMaxWidth: 720, corner: 26,
+    top: 10, bottom: 24, sectionGap: 24, unheadedGap: 35, afterFooterGap: 10, headerTop: 4, headerBottom: 10, footerTop: 8 },
   navigation: { height: 54, largeTitle: 48, inset: 16, titleInset: 16, buttonGap: 8 },
   tab: { height: 62, margin: 12, bottom: 8, inset: 4, itemWidth: 90, safeAreaOverlap: 21, selectedRadius: 999, regularWidth: 520 },
   // The capsule is a phone's search at the bottom of the screen, measured in the iOS 27

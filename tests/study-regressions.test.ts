@@ -1020,6 +1020,38 @@ describe('pilot rehearsal: a label beside a Spacer keeps to one line, as in the 
   })
 })
 
+describe('pilot rehearsal: a line of text is as tall as in the iOS 27 simulator', () => {
+  // Each style's single line, measured on iPhone 18 Pro (iOS 27) as a full-width row with
+  // a background, top to bottom: the font's own line height, on the screen's 1/3 pt grid.
+  const MEASURED = { largeTitle: 122 / 3, title: 101 / 3, title2: 79 / 3, title3: 24, headline: 61 / 3, body: 61 / 3, callout: 58 / 3, subheadline: 18, footnote: 47 / 3, caption: 43 / 3, caption2: 40 / 3 }
+
+  it.each(Object.entries(MEASURED))('draws a line of .%s as tall as the simulator does', (style, height) => {
+    const r = runView(`var body: some View { Text("Line").font(.${style}) }`)
+    expect(r.renderTree!.nodes.find(n => n.text?.runs[0]?.text === 'Line')!.frame.height).toBeCloseTo(height, 2)
+  })
+
+  it('draws a line of a font given a size as tall as its text style of that size', () => {
+    const r = runView('var body: some View { Text("Line").font(.system(size: 28)) }')
+    expect(r.renderTree!.nodes.find(n => n.text?.runs[0]?.text === 'Line')!.frame.height).toBeCloseTo(MEASURED.title, 2)
+  })
+
+  // Several lines, measured the same way: a style's further lines are its leading apart,
+  // and a font given only a size has no leading beyond its glyphs.
+  it.each([
+    ['.body', 2, 127 / 3],
+    ['.body', 3, 193 / 3],
+    ['.footnote', 3, 155 / 3],
+    ['.title', 4, 407 / 3],
+    ['.system(size: 17)', 4, 244 / 3],
+  ] as const)('draws %s over %i lines as tall as the simulator does', (font, count, height) => {
+    const words = Array.from({ length: count }, (_, i) => `Line ${i + 1}`).join('\\n')
+    const r = runView(`var body: some View { Text("${words}").font(${font}) }`)
+    const node = r.renderTree!.nodes.find(n => n.text?.runs[0]?.text.startsWith('Line 1'))!
+    expect(node.text!.lines).toHaveLength(count)
+    expect(node.frame.height).toBeCloseTo(height, 2)
+  })
+})
+
 describe('E11a: the Foundation the AI writes around its views: Timer, Calendar and formatted dates', () => {
   /** Noon UTC on 9 September 2001: the same calendar day in every time zone from UTC-11 to UTC+11. */
   const noon = 'Date(timeIntervalSince1970: 1_000_036_800)'

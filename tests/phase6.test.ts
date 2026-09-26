@@ -416,7 +416,7 @@ describe('Image and Label', () => {
     expect(icon.frame.x).toBeLessThan(title.frame.x)
     // One line: the regression that made this fail was a stack dividing its own
     // measured width back up and losing a hundredth of a point to rounding.
-    expect(title.frame.height).toBe(22)
+    expect(title.frame.height).toBeCloseTo(61 / 3, 2)
   })
 
   it('reports an asset image as unavailable rather than drawing a grey box', () => {

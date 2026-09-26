@@ -61,6 +61,12 @@ is served from the application root, like the existing root-based app routes.
 - Line heights, ascent/descent, mixed-run baselines, tightening, and truncation
   now share measurements with painting. This matches the browser's actual font;
   it does not turn a substitute font into Apple's font on other operating systems.
+- A block of text is as tall as its first line's glyphs (1.19336 times the point
+  size, rounded up to a third of a point) plus the style's line height for each
+  further line, as measured in the iOS 27 simulator: body text is 20.33, 42.33 and
+  64.33 pt tall for one, two and three lines. A `.system(size:)` font adds nothing
+  between lines. Alert titles and messages, which UIKit draws, keep the full line
+  height on every line.
 
 ## Phase 5: spacing and alignment
 

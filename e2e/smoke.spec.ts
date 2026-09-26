@@ -255,9 +255,10 @@ test('Phase 3 - text is centred by the VStack and sized by its font', async ({ p
   expect(count.x + count.width / 2).toBeGreaterThan(194)
   expect(count.x + count.width / 2).toBeLessThan(208)
 
-  // `.largeTitle` is 41pt tall, `.title2` is 28pt.
+  // A line of `.largeTitle` is 40.67 pt tall and one of `.title2` 26.33, as the iOS 27
+  // simulator draws them.
   expect(title.height).toBe(41)
-  expect(count.height).toBe(28)
+  expect(count.height).toBe(26)
   expect(count.y).toBeGreaterThan(title.y)
 })
 
