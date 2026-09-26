@@ -157,8 +157,12 @@ function placeOf(tree: SourceFileNode, offset: number): string {
 function expectedPlace(edit: StructuralEdit, tree: SourceFileNode): string {
   const toward = edit.toward ?? edit.view.start
   const inside = edit.inside ?? (edit.kind === 'insert' && !!viewSiteAt(edit.before, edit.file, toward)?.container)
+  // The view itself, not a modifier after it: `List { }.toolbar { }.sheet { }` starts at
+  // the same place three times, and only the innermost of them holds the List's rows.
   let container: CallExpr | undefined
-  walk(tree, (node: Node) => { if (node.kind === 'call' && node.trailingClosure && node.span.start === toward) container ??= node })
+  walk(tree, (node: Node) => {
+    if (node.kind === 'call' && node.trailingClosure && node.span.start === toward && (!container || node.span.end < container.span.end)) container = node
+  })
   return inside && container ? `${placeOf(tree, toward)} > ${nameOf(container)}` : placeOf(tree, toward)
 }
 

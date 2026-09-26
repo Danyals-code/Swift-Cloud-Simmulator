@@ -39,6 +39,13 @@ describe('changes that do what they say', () => {
     expect(structuralEditProblem({ file: FILE, before, after, kind: 'insert', view: span(before, 'VStack'), adds: 'Text("New")', landed: at(after, 'Text("New")') })).toBeNull()
   })
 
+  it('accepts an insert into a view whose own modifiers take closures, such as .toolbar and .sheet', () => {
+    const chained = (content: string) => screen(`            List {\n${content}\n            }\n            .toolbar {\n                Button("Add") { }\n            }\n            .sheet(isPresented: .constant(false)) {\n                Text("Sheet")\n            }`)
+    const before = chained('                Text("A")')
+    const after = chained('                Text("A")\n                Text("New")')
+    expect(structuralEditProblem({ file: FILE, before, after, kind: 'insert', view: span(before, 'List'), adds: 'Text("New")', landed: at(after, 'Text("New")') })).toBeNull()
+  })
+
   it('accepts a move that re-indents a note and a text written over several lines inside the view', () => {
     const stack = (indent: string) => `${indent}HStack {\n${indent}    Text("""\n${indent}        Two lines\n${indent}        """)\n${indent}    /* A note\n${indent}       over two lines */\n${indent}}`
     const before = screen(`            Group {\n${stack('                ')}\n            }\n            Text("B")`)

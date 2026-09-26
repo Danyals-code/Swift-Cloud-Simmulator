@@ -1,6 +1,6 @@
 import type { DropPosition, FileId } from '@studio/shared'
 import { Parser } from './parser'
-import { walk, type Block, type Expr, type Node, type Stmt } from './ast'
+import { walk, type Block, type CallExpr, type Expr, type Node, type Stmt } from './ast'
 import { afterOffMarkers } from './off-markers'
 import { HIDDEN_END, HIDDEN_MARKER } from './studio-markers'
 
@@ -60,6 +60,8 @@ export interface SourceEdit {
    * swapped with it - the neighbour, not the thing that was moved.
    */
   readonly offset: number
+  /** Swift the edit wrote besides the view it was given: a list's `ForEach`, when its rows moved into one. */
+  readonly wraps?: string
 }
 
 /**
@@ -304,9 +306,11 @@ export function moveView(text: string, file: FileId, offset: number, direction: 
  * re-indented to wherever it lands, so a multi-line one arrives formatted rather than
  * flattened against the left margin.
  */
-export function insertView(text: string, file: FileId, offset: number, snippet: string, refuse?: RefusalReason): SourceEdit | null {
+export function insertView(text: string, file: FileId, offset: number, snippet: string, refuse?: RefusalReason, options: { readonly asListRow?: boolean } = {}): SourceEdit | null {
   const found = siteAt(text, file, offset)
   if (!found) return refused(refuse, 'A view can’t go beside this one, which is part of the code around it. Select what holds it instead.')
+  const list = options.asListRow ? dataList(found.stmt) : null
+  if (list) return insertListRow(text, list, snippet, refuse)
 
   const content = contentBlockOf(found.stmt)
   const reference = content?.statements[content.statements.length - 1]
@@ -343,6 +347,35 @@ export function insertView(text: string, file: FileId, offset: number, snippet: 
   }
 
   return spliceStatement(text, cutOf(text, found.stmt), snippet)
+}
+
+/** `List(items) { item in … }`: a list whose rows come from data, its closure being each row. */
+function dataList(stmt: Stmt): CallExpr | null {
+  const call = viewCallOf(stmt)
+  if (!call || call.kind !== 'call' || calleeName(call) !== 'List' || !call.trailingClosure) return null
+  return call.args[0]?.label === null ? call : null
+}
+
+/**
+ * A view added to a list of records becomes its last row: the rows move into a
+ * `ForEach` with their data and `id:`, and the view follows it, as
+ * `List { ForEach(items) { … }; Text("Text") }`. Added to the rows' closure instead,
+ * it would be drawn in every row.
+ */
+function insertListRow(text: string, list: CallExpr, snippet: string, refuse?: RefusalReason): SourceEdit | null {
+  if (list.args.some(arg => arg.label !== null && arg.label !== 'id')) return refused(refuse, 'This list’s rows come with a selection or children as well. Add the row in Code.')
+  const closure = list.trailingClosure!
+  const unit = indentUnit(text)
+  const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, list.span.start)))![0]
+  const inner = outer + unit
+  const data = list.args.map(arg => text.slice(arg.span.start, arg.span.end)).join(', ')
+  const rows = text.slice(closure.span.start, closure.span.end).split('\n').map((line, i) => (i === 0 || !line ? line : unit + line)).join('\n')
+  const head = `List {\n${inner}ForEach(${data}) ${rows}\n`
+  return {
+    text: text.slice(0, list.span.start) + head + indentSnippet(snippet, inner) + `\n${outer}}` + text.slice(list.span.end),
+    offset: list.span.start + head.length + inner.length,
+    wraps: 'ForEach { }',
+  }
 }
 
 interface Cut {

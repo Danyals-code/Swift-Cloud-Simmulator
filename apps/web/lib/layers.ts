@@ -121,5 +121,21 @@ export function insertionLayer(layers: readonly ViewLayer[], selected?: ViewLaye
     if (layer.source && !layer.page && layer.type !== 'Tab') return layer
     return layer.children.map(editable).find(Boolean)
   }
-  return page.children.map(editable).find(Boolean) ?? (page.source ? page : undefined)
+  const content = page.children.map(editable).find(Boolean)
+  return content ? heldContent(content) : page.source ? page : undefined
+}
+
+/**
+ * What a screen's content is when it is wrapped: a ScrollView around one stack, or a
+ * Group around the branch it shows, such as the list beside an empty state. A new view
+ * belongs in that, with its siblings, not beside it outside the stack's padding.
+ */
+function heldContent(layer: ViewLayer): ViewLayer {
+  let content = layer
+  while (content.type === 'ScrollView' || content.type === 'Group') {
+    const held = content.children.filter(child => child.source)
+    if (held.length !== 1) break
+    content = held[0]!
+  }
+  return content
 }
