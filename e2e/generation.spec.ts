@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openCounter } from './designer-helpers'
+import { openCounter, replaceSource } from './designer-helpers'
 
 const generated = {
   name: 'ReadingApp', summary: 'A quiet place for your reading goals.',
@@ -221,6 +221,19 @@ test('an AI edit still broken after its second try changes nothing, and says why
   expect(sent).toHaveLength(2)
 })
 
+test('an AI edit with code only Xcode would refuse is asked for once more, and applies either way', async ({ page }) => {
+  // A loop straight in a view's body: the preview runs it, and Xcode rejects the file.
+  const withLoop = (text: string) => relabel(text).replace('Text("Taps so far: ', 'var total = 0\n            for step in 1...3 { total += step }\n            Text("Taps so far: ')
+  const sent = await answerInTurn(page, '**/api/edit', [counterEdit(withLoop), counterEdit(withLoop)])
+  await openCounter(page)
+  await sendPrompt(page)
+
+  await expect(page.getByTestId('render-tree').getByText('Taps so far: 0', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('prompt-editor').locator('article[data-role="assistant"]').last()).toHaveAttribute('data-status', 'applied')
+  expect(sent).toHaveLength(2)
+  expect(sent[1]!.previousAttempt!.problems[0]!.message).toContain("Xcode rejects a 'for' loop in a view's body")
+})
+
 test('an error the project already had does not stop an AI edit (G2)', async ({ page }) => {
   const sent = await answerInTurn(page, '**/api/edit', [counterEdit(relabel)])
   await openCounter(page)
@@ -233,6 +246,42 @@ test('an error the project already had does not stop an AI edit (G2)', async ({ 
   await expect(page.getByTestId('prompt-editor')).toContainText('Relabelled the count.')
   await expect(page.getByTestId('editor')).toContainText('Taps so far: ')
   expect(sent).toHaveLength(1)
+})
+
+test('an AI edit that adds a property to the app\'s data draws it at once, without Reset', async ({ page }) => {
+  const addGoal = (text: string) => text
+    .replace('var count = 0', 'var count = 0\n    var goal = 10')
+    .replace('Text("Count: \\(tally.count)")', 'Text("Count: \\(tally.count)")\n            Text("Goal: \\(tally.goal)")')
+  await answerInTurn(page, '**/api/edit', [counterEdit(addGoal)])
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, `import SwiftUI
+@Observable final class Tally {
+    var count = 0
+}
+@main
+struct CounterApp: App {
+    @State private var tally = Tally()
+    var body: some Scene { WindowGroup { ContentView().environment(tally) } }
+}
+struct ContentView: View {
+    @Environment(Tally.self) private var tally
+    var body: some View {
+        VStack {
+            Text("Count: \\(tally.count)")
+            Button("Add") { tally.count += 1 }
+        }
+    }
+}
+`)
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('render-tree').getByText('Count: 0', { exact: true })).toBeVisible()
+  await sendPrompt(page)
+
+  // The tally the preview already held was made before `goal` existed. Drawn from it,
+  // every view reading `goal` stopped until Reset, though the edit said Applied.
+  await expect(page.getByTestId('render-tree').getByText('Goal: 10', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('render-tree').getByText(/stopped/)).toHaveCount(0)
 })
 
 test('a request the Vercel Firewall turns away says to wait, in plain words (G4)', async ({ page }) => {

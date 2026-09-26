@@ -1,5 +1,5 @@
 import { stackGaps } from './spacing'
-import { symbolMetrics } from '@studio/shared'
+import { symbolMetrics, textLineHeight } from '@studio/shared'
 import type {
   PlaceholderPayload,
   TransformSpec,
@@ -309,7 +309,7 @@ export class LayoutEngine {
           this.metrics,
           env.lineLimit,
           env.lineSpacing ?? 0,
-          textOptions(env),
+          textOptions(env, element),
         )
         return { width: measured.width, height: measured.height }
       }
@@ -488,6 +488,10 @@ export class LayoutEngine {
    * highest-priority group gets first claim on everything, and the rest divide what
    * survives. Dividing equally regardless would make the modifier almost invisible,
    * changing only the order in which two children took the same half each.
+   *
+   * A `Spacer` is no partner in that division: it keeps back its minimum length and
+   * takes what the others leave. The iOS 27 simulator draws a label longer than half
+   * its row on one line beside a Spacer, and a toggle's label likewise.
    */
   private shareFor(
     children: readonly LayoutElement[],
@@ -495,14 +499,19 @@ export class LayoutEngine {
     position: number,
     remaining: number,
   ): number {
-    const priority = layoutPriorityOf(children[order[position]!]!)
+    const child = children[order[position]!]!
+    const priority = layoutPriorityOf(child)
 
     let peers = 0
+    let keptBack = 0
     for (let i = position; i < order.length; i++) {
-      if (layoutPriorityOf(children[order[i]!]!) === priority) peers++
+      const other = children[order[i]!]!
+      if (layoutPriorityOf(other) !== priority) continue
+      if (other.kind === 'spacer' && child.kind !== 'spacer') keptBack += other.minLength
+      else peers++
     }
 
-    return peers > 0 ? Math.max(0, remaining / peers) : 0
+    return peers > 0 ? Math.max(0, (remaining - keptBack) / peers) : 0
   }
 
   private measureModified(
@@ -748,7 +757,7 @@ export class LayoutEngine {
           this.metrics,
           env.lineLimit,
           env.lineSpacing ?? 0,
-          textOptions(env),
+          textOptions(env, element),
         )
         // `.minimumScaleFactor` shrank the text to make it fit, so the painted runs
         // take the same factor. Measuring at one size and painting at another is the
@@ -1142,7 +1151,7 @@ export class LayoutEngine {
   private baselineOf(element: LayoutElement, size: Size, env: LayoutEnvironment, last: boolean): number {
     if (element.kind === 'text') {
       const measured = measureRuns(measuredRuns(paintedRuns(element, env)), env.font, size.width,
-        this.metrics, env.lineLimit, env.lineSpacing ?? 0, textOptions(env))
+        this.metrics, env.lineLimit, env.lineSpacing ?? 0, textOptions(env, element))
       if (!measured.lines.length) return size.height
       const index = last ? measured.lines.length - 1 : 0
       return measured.lines.slice(0, index).reduce((sum, line) => sum + line.height + (env.lineSpacing ?? 0), 0) + measured.lines[index]!.baseline
@@ -1955,7 +1964,7 @@ function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly Pai
       ...base.font,
       ...(run.font?.family !== undefined ? { family: run.font.family } : {}),
       ...(run.font?.size !== undefined
-        ? { size: run.font.size, lineHeight: run.font.lineHeight ?? Math.round(run.font.size * LINE_HEIGHT_RATIO) }
+        ? { size: run.font.size, lineHeight: run.font.lineHeight ?? textLineHeight(run.font.size) }
         : {}),
       ...(run.font?.weight !== undefined ? { weight: run.font.weight } : {}),
       ...(run.font?.italic !== undefined ? { italic: run.font.italic } : {}),
@@ -1980,15 +1989,6 @@ function applyRunAttributes(base: PaintedRun, run: TextRunSpec): PaintedRun {
   }
 }
 
-/**
- * SwiftUI's line height for a face, as a multiple of its size.
- *
- * Only needed where a run sets its own size and there is no resolved font to copy a
- * line height from. The same ratio the font resolver uses, kept here rather than
- * imported so `swiftui-layout` keeps owning every number layout depends on.
- */
-const LINE_HEIGHT_RATIO = 1.29
-
 function scaleFont(font: ResolvedFont, scale: number): ResolvedFont {
   return { ...font, size: font.size * scale, lineHeight: font.lineHeight * scale }
 }
@@ -2002,8 +2002,9 @@ function scaleRun(run: PaintedRun, scale: number): PaintedRun {
 }
 
 /** What text measurement needs from the environment beyond the font. */
-function textOptions(env: LayoutEnvironment): MeasureOptions {
+function textOptions(env: LayoutEnvironment, element: TextElement): MeasureOptions {
   return {
+    ...(element.keepsLeading ? { keepsLeading: true } : {}),
     ...(env.minimumScale !== undefined ? { minimumScale: env.minimumScale } : {}),
     ...(env.truncation !== undefined ? { truncation: env.truncation } : {}),
     ...(env.allowsTightening ? { allowsTightening: true } : {}),

@@ -661,7 +661,7 @@ function RenderNodeView({
                   : { kind: 'tap', handlerId, location })
               }
               if (role === 'drag') {
-                beginDrag(e, handlerId, at, onEvent)
+                beginDrag(e, handlerId, at, onEvent, e.currentTarget)
                 return
               }
               if (node.hitTarget?.contextMenuHandlerId) {
@@ -691,15 +691,22 @@ function RenderNodeView({
  * re-render during the drag replaces it.
  *
  * `translation` is cumulative from the start, as SwiftUI reports it.
+ *
+ * A press that never travels is a tap, and iOS gives a tap to the control under the
+ * finger rather than to the drag: a button in a row that swipes to delete, or a link
+ * in a card that drags. The drag's target is drawn over its content, so the tap is
+ * passed to the target beneath it.
  */
 function beginDrag(
   down: { clientX: number; clientY: number },
   handlerId: string,
   at: (event: { clientX: number; clientY: number }) => { x: number; y: number },
   onEvent: (event: UIEvent) => void,
+  layer: HTMLElement,
 ): void {
   const start = at(down)
   let moved = false
+  let farthest = 0
 
   const send = (
     phase: 'began' | 'changed' | 'ended',
@@ -717,6 +724,7 @@ function beginDrag(
   }
 
   const move = (event: PointerEvent) => {
+    farthest = Math.max(farthest, Math.hypot(event.clientX - down.clientX, event.clientY - down.clientY))
     if (!moved) {
       moved = true
       send('began', event)
@@ -729,11 +737,31 @@ function beginDrag(
     window.removeEventListener('pointerup', up)
     window.removeEventListener('pointercancel', up)
     send('ended', event)
+    if (event.type === 'pointerup' && farthest < TAP_SLOP) tapBeneath(layer, event)
   }
 
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)
   window.addEventListener('pointercancel', up)
+}
+
+/** How far a press may wander, in page pixels, and still be a tap. */
+const TAP_SLOP = 8
+
+/**
+ * Taps the first target under the point below `layer`, the way the browser would have
+ * without it: a field takes focus, anything else is pressed and let go. Only targets
+ * below it are looked at, so a tap never comes back up to a drag it already passed.
+ */
+function tapBeneath(layer: HTMLElement, at: { clientX: number; clientY: number }): void {
+  const stack = document.elementsFromPoint(at.clientX, at.clientY)
+  const beneath = stack.slice(stack.indexOf(layer) + 1).find((element): element is HTMLElement => element instanceof HTMLElement && element.dataset.handlerId !== undefined)
+  if (!beneath) return
+  const field = beneath.querySelector<HTMLElement>('input, textarea')
+  if (field) { field.focus(); return }
+  const press = { bubbles: true, cancelable: true, clientX: at.clientX, clientY: at.clientY, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true }
+  beneath.dispatchEvent(new PointerEvent('pointerdown', { ...press, buttons: 1 }))
+  beneath.dispatchEvent(new PointerEvent('pointerup', { ...press, buttons: 0 }))
 }
 
 /**
@@ -1016,30 +1044,39 @@ function TextContent({ node }: { node: RenderNode }) {
   if (payload.lines && payload.lines.length > 0) {
     return (
       <>
-        {payload.lines.map((line, i) => (
-          <div
-            key={i}
-            style={{
-              ...typography,
-              position: 'absolute',
-              left: 0,
-              top: line.origin.y,
-              width: '100%',
-              height: line.height ?? first.font.lineHeight,
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: justify,
-            }}
-          >
-            {line.slices
-              ? line.slices.map((slice, j) => {
-                  const run = payload.runs[slice.run] ?? first
-                  return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
-                    top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
-                })
-              : <span dir="auto" style={{ position: 'relative', top: line.baseline - (line.fontBaseline ?? line.baseline) - (first.baselineOffset ?? 0) }}>{decoratedText(first, line.text)}</span>}
-          </div>
-        ))}
+        {payload.lines.map((line, i) => {
+          const height = line.height ?? first.font.lineHeight
+          // A line of one run is drawn in a box as tall as the line, so the text's box is
+          // its frame: a first or last line gives up half its leading, and a box as tall as
+          // the leading would reach into the view beside it. CSS centres the glyphs in the
+          // box, so the baseline moves by half of what the box gave up.
+          const fontBaseline = (line.fontBaseline ?? line.baseline) - (first.font.lineHeight - height) / 2
+          return (
+            <div
+              key={i}
+              style={{
+                ...typography,
+                ...(line.slices ? {} : { lineHeight: `${height}px` }),
+                position: 'absolute',
+                left: 0,
+                top: line.origin.y,
+                width: '100%',
+                height,
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: justify,
+              }}
+            >
+              {line.slices
+                ? line.slices.map((slice, j) => {
+                    const run = payload.runs[slice.run] ?? first
+                    return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
+                      top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
+                  })
+                : <span dir="auto" style={{ position: 'relative', top: line.baseline - fontBaseline - (first.baselineOffset ?? 0) }}>{decoratedText(first, line.text)}</span>}
+            </div>
+          )
+        })}
       </>
     )
   }

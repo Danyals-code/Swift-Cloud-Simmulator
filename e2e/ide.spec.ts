@@ -251,8 +251,9 @@ test('gate 3 - the inspector names a view and reports its computed frame', async
 
   await expect(page.getByTestId('inspector-readout')).toContainText('Text')
   await expect(page.getByTestId('inspect-highlight')).toBeVisible()
-  // `.largeTitle` measures 41pt tall - the number a screenshot cannot tell you.
-  await expect(page.getByTestId('inspector-frame')).toContainText('41')
+  // A line of `.largeTitle` is 40.67 pt tall in the iOS 27 simulator - the number a
+  // screenshot cannot tell you.
+  await expect(page.getByTestId('inspector-frame')).toContainText('× 40.7')
 })
 
 test('gate 3 - clicking an inspected view jumps the editor to its source', async ({ page }) => {

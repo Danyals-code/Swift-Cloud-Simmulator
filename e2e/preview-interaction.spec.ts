@@ -164,3 +164,49 @@ test("a slider's thumb follows the pointer through a drag on a heavy screen (F1)
   expect(thumb.filter((value, i) => i > 0 && value < thumb[i - 1]!)).toEqual([])
   expect(thumb.at(-1)).toBeGreaterThan(95)
 })
+
+/** Rows that swipe to delete: each has a button, and one is a link. */
+const SWIPE_ROWS = app(`  @State private var taps = 0
+  @State private var rows = ["First", "Second"]
+  var body: some View {
+    NavigationStack {
+      List {
+        ForEach(rows, id: \\.self) { row in
+          HStack {
+            Text(row)
+            Spacer()
+            Button("Tapped \\(taps)") { taps += 1 }
+              .buttonStyle(.plain)
+          }
+        }
+        .onDelete { rows.remove(atOffsets: $0) }
+        ForEach(["Details"], id: \\.self) { name in
+          NavigationLink(name) { Text("Detail screen") }
+        }
+        .onDelete { _ in }
+      }
+    }
+  }`)
+
+/** Clicks the centre of the first view in the preview with this text. */
+async function click(page: Page, text: string) {
+  const box = (await page.getByTestId('render-tree').getByText(text, { exact: true }).first().boundingBox())!
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+}
+
+test('a row that swipes to delete still takes a tap on its button or its link, as on iOS', async ({ page }) => {
+  await openSource(page, SWIPE_ROWS, 'Tapped 0')
+  const phone = page.getByTestId('render-tree')
+  await click(page, 'Tapped 0')
+  await expect(phone.getByText('Tapped 1', { exact: true }).first()).toBeVisible()
+  // A drag still swipes a row open.
+  const row = (await phone.getByText('Second', { exact: true }).boundingBox())!
+  await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(row.x - 60, row.y + row.height / 2, { steps: 6 })
+  await page.mouse.move(row.x - 140, row.y + row.height / 2, { steps: 6 })
+  await page.mouse.up()
+  await expect(phone.getByRole('button', { name: 'Delete', exact: true })).toBeVisible()
+  await click(page, 'Details')
+  await expect(phone.getByText('Detail screen', { exact: true })).toBeVisible()
+})

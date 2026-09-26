@@ -91,6 +91,8 @@ export class Checker {
 
   /** Method names the project adds in an extension - its own modifiers. */
   private readonly declaredModifiers = new Set<string>()
+  /** Method names the project's own types declare, which no warning about SwiftUI's members is for. */
+  private readonly declaredMethods = new Set<string>()
   /** Property names the project adds in an extension - `Color.brand` among them. */
   private readonly declaredExtensionProperties = new Set<string>()
   /** Shape calls a `.stroke` or `.strokeBorder` is written on, so a `.trim` among them is a trimmed stroke. */
@@ -143,6 +145,9 @@ export class Checker {
   private collectDeclarations(file: SourceFileNode): void {
     for (const decl of file.declarations) {
       this.collectTypeParameters(decl)
+      if (decl.kind === 'structDecl' || decl.kind === 'enumDecl' || decl.kind === 'extensionDecl') {
+        for (const member of decl.members) if (member.kind === 'funcDecl') this.declaredMethods.add(member.name)
+      }
       if (decl.kind === 'structDecl') {
         const info = this.describeStruct(decl)
         if (this.types.has(info.name)) {
@@ -885,7 +890,9 @@ export class Checker {
 
       case 'stringLiteral':
         for (const segment of expr.segments) {
-          if (segment.kind === 'interpolation') this.checkExpression(segment.expression, scope)
+          if (segment.kind !== 'interpolation') continue
+          this.checkExpression(segment.expression, scope)
+          segment.options?.forEach((option) => this.checkExpression(option.value, scope))
         }
         return
 
@@ -1110,6 +1117,10 @@ export class Checker {
    * coverage contract exists to prevent.
    */
   private checkModifierCoverage(member: string, span: SourceSpan, onAView: boolean): void {
+    if ((member === 'repeatForever' || member === 'repeatCount') && !this.declaredMethods.has(member)) {
+      this.report(span, 'warning', 'unsupported_swiftui_modifier', `'.${member}' repeats the animation on iOS. The preview plays it once.`, `.${member}`)
+      return
+    }
     if (UNIMPLEMENTED_MODIFIERS.has(member)) {
       this.report(
         span,

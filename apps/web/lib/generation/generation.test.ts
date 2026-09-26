@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../../app/api/generate/route'
 import { parseGeneratedApp, parseOptions, type GenerationOptions } from './schema'
 import { SWIFTUI_GUIDANCE } from './guidance'
+import { SYSTEM_PROMPT } from './prompt'
 
 const options: GenerationOptions = { provider: 'openai', model: 'gpt-5.4-mini', prompt: 'A simple tracker for daily reading habits.', pageCount: 1, navigation: 'stack', accent: 'teal', sampleData: true, includeSettings: false }
 const app = { name: 'ReadingApp', summary: 'A reading tracker.', pages: [{ title: 'Today', file: 'Sources/ReadingApp.swift' }], files: [{ path: 'Sources/ReadingApp.swift', code: 'import SwiftUI\n@main struct ReadingApp: App { var body: some Scene { WindowGroup { Text("Today") } } }' }] }
@@ -16,6 +17,13 @@ describe('generated project boundaries', () => {
   it('accepts a complete project with its requested pages', () => expect(parseGeneratedApp(app, 1)).toEqual(app))
   it.each(['../escape.swift', '/tmp/App.swift', 'Sources/../App.swift', 'Sources/.hidden.swift', 'Sources/App.ts'])('rejects unsafe path %s', path => {
     expect(() => parseGeneratedApp({ ...app, files: [{ ...app.files[0], path }] })).toThrow()
+  })
+  it('names a file left outside Sources/ and the rule, so asking again can fix it (G2)', () => {
+    const outside = { ...app, pages: [{ title: 'Today', file: 'Features/TodayView.swift' }], files: [...app.files, { path: 'Features/TodayView.swift', code: 'import SwiftUI\nstruct TodayView: View { var body: some View { Text("Today") } }' }] }
+    expect(() => parseGeneratedApp(outside, 1)).toThrow('A generated file is not under Sources/: Features/TodayView.swift. Every file goes under Sources/, such as Sources/Features/TodayView.swift.')
+  })
+  it('asks for every file under Sources/, folders included, as the route checks', () => {
+    expect(SYSTEM_PROMPT).toContain('Every file is under Sources/: the entry file first, then Sources/Models/, Sources/Components/ and Sources/Features/.')
   })
   it('rejects file collisions on case-insensitive Macs', () => {
     expect(() => parseGeneratedApp({ ...app, files: [...app.files, { ...app.files[0], path: 'Sources/readingapp.swift' }] })).toThrow('duplicate')

@@ -30,7 +30,8 @@ export interface TypeNames {
 
 /** The integer types, each of which takes a whole number, and the decimal ones, which take any number. */
 const INTEGER_TYPES: ReadonlySet<string> = new Set(['Int', 'Int8', 'Int16', 'Int32', 'Int64', 'UInt', 'UInt8', 'UInt16', 'UInt32', 'UInt64'])
-const DECIMAL_TYPES: ReadonlySet<string> = new Set(['Double', 'Float', 'CGFloat', 'Float32', 'Float64', 'Float80', 'TimeInterval'])
+/** Swift's floating-point types, all a Double in the preview. */
+export const DECIMAL_TYPES: ReadonlySet<string> = new Set(['Double', 'Float', 'CGFloat', 'Float32', 'Float64', 'Float80', 'TimeInterval'])
 
 /** Types a value of any kind may be passed as. */
 const OPEN_TYPES: ReadonlySet<string> = new Set([

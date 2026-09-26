@@ -142,7 +142,8 @@ describe('text attributes', () => {
       const payload = firstText(run(view(`${wrapped}.lineSpacing(10).frame(width: 120)`)))
       const [first, second] = payload.lines ?? []
       expect(first && second).toBeTruthy()
-      expect(second!.origin.y - first!.origin.y).toBeCloseTo(
+      // Baseline to baseline: the first line's box is shorter by the half-leading above it.
+      expect(second!.origin.y + second!.baseline - (first!.origin.y + first!.baseline)).toBeCloseTo(
         payload.runs[0]!.font.lineHeight + 10,
         3,
       )
@@ -355,7 +356,8 @@ describe('the last three, which are all measurement', () => {
     // changes is exactly what the lower bound prevents.
     const one = textNodes(run(view('Text("one line").frame(width: 300)')))[0]!
     const floored = textNodes(run(view('Text("one line").lineLimit(2...4).frame(width: 300)')))[0]!
-    expect(floored.frame.height).toBeCloseTo(one.frame.height * 2, 1)
+    // Two lines are one line and a line's leading, as the iOS 27 simulator draws them.
+    expect(floored.frame.height).toBeCloseTo(one.frame.height + one.text!.runs[0]!.font.lineHeight, 1)
   })
 
   it('lineLimit(2...4) still truncates past its ceiling', () => {

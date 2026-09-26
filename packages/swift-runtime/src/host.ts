@@ -5,6 +5,12 @@ export interface CallArgument {
   readonly label: string | null
   readonly value: SwiftValue
   readonly span: SourceSpan
+  /**
+   * For a string literal given as a call's first unlabelled argument, its text as a
+   * `LocalizedStringKey` writes it, with numbers for the locale: "Goal: 2,000 mL" where
+   * `value` is "Goal: 2000 mL". The views and modifiers that take a title key read it.
+   */
+  readonly title?: string
 }
 
 export interface HostCall {

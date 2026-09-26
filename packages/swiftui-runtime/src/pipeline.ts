@@ -1,5 +1,6 @@
 import { SURFACES } from './appearance/surfaces'
 import { primaryScroll, scrollInsets } from './containers/screen'
+import { attachedSheet, sheetContentTop } from './containers/sheet'
 import type { ScreenLayout } from './to-layout'
 import {
   APPEARANCE_CALIBRATION,
@@ -326,8 +327,9 @@ function presentOverlay(
   const dimNodes = placedToRenderTree(nodes, canvas, 0).nodes.slice(1).map(n => ({ ...n, blocksPointer: true }))
   if (overlay.screen) {
     const sheet = overlay.kind === 'sheet' || overlay.kind === 'popover'
-    const top = sheet ? (overlay.showsDragIndicator !== false ? 10 : 12) : safeArea.top
-    const bottom = overlay.kind === 'cover' ? safeArea.bottom : Math.max(12, safeArea.bottom - SURFACES.sheet.margin)
+    const attached = attachedSheet(overlay, canvas.width)
+    const top = sheet ? sheetContentTop(overlay, attached, !!overlay.screen.navigationBar) : safeArea.top
+    const bottom = overlay.kind === 'cover' || attached ? safeArea.bottom : Math.max(12, safeArea.bottom - SURFACES.sheet.margin)
     const nested = composeScreen(engine, overlay.screen, { width: rect.width, height: rect.height }, { top, leading: 0, trailing: 0, bottom }, env)
     const prefix = 'overlay/'
     const radius = sheet ? overlay.cornerRadius ?? SURFACES.sheet.radius : 0
@@ -431,6 +433,8 @@ function overlayRect(
     const width = Math.min(240, canvas.width - 32)
     return { x: (canvas.width - width) / 2, y: safeArea.top, width, height: canvas.height - safeArea.top - safeArea.bottom - 8 }
   }
+
+  if (attachedSheet(overlay, canvas.width)) return { x: 0, y: safeArea.top, width: canvas.width, height: canvas.height - safeArea.top }
 
   const margin = SURFACES.sheet.margin
   const available = Math.max(0, canvas.height - safeArea.top - SURFACES.sheet.top - margin)

@@ -1,5 +1,6 @@
-import { prependSearch } from './containers/screen'
-import { buildList } from './containers/list'
+import { mapPrimaryScroll, prependSearch } from './containers/screen'
+import { buildList, startListAtTop } from './containers/list'
+import { attachedSheet, sheetContentTop } from './containers/sheet'
 import { SURFACES, listAppearance } from './appearance/surfaces'
 import { controlMetrics, CONTROL_PARTS } from './appearance/controls'
 import { controlFont, switchControl } from './controls/primitives'
@@ -25,6 +26,7 @@ import {
   asDate,
   asKeyPath,
   asProjection,
+  formatNumber,
   foundationDescription,
   truthy,
   type ClosureValue,
@@ -122,11 +124,11 @@ export interface ConversionResult {
 }
 
 /**
- * Where a search field is drawn: at the top of the content, as in the drawer under the
+ * Where a search field is drawn: at the top of an iPad's content; in the drawer under the
  * title; in an iPad's toolbar; or at the bottom of a phone's screen, in a glass capsule
  * on the tab bar's line.
  */
-type SearchPlacement = 'top' | 'toolbar' | 'bottom'
+type SearchPlacement = 'top' | 'drawer' | 'toolbar' | 'bottom'
 
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
@@ -201,8 +203,15 @@ const ROW_INSET = IOS_27.metrics.rowInset
 
 /** A row in an alert or confirmation dialog, which iOS sizes like a list row. */
 const ALERT_BUTTON_HEIGHT = SURFACES.alert.buttonHeight
+
 /** Must match the runtime's swipe width, or the action would not line up. */
 const SWIPE_WIDTH = 88
+
+/** The same text, keeping its half-leading above and below as the system's own labels do. */
+function keptLeading(element: LayoutElement): LayoutElement {
+  if (element.kind === 'text') return { ...element, keepsLeading: true }
+  return element.kind === 'modified' ? { ...element, child: keptLeading(element.child) } : element
+}
 
 export interface ConversionOptions {
   readonly images?: readonly PreviewImageAsset[]
@@ -281,19 +290,21 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
       ? { element: converter.searchField(ui.search, 'bottom'), placement: 'bottom' as const, height: TAB_BAR_HEIGHT }
       : { element: converter.searchField(ui.search, 'top'), placement: 'top' as const, height: SURFACES.search.height + 12 }
     : undefined
-  const content = ui.search && drawerSearch
-    ? prependSearch(joinRoot(body, 'vertical'), converter.searchField(ui.search, 'top'))
-    : joinRoot(body, 'vertical')
+  // Under a large title or a search field in the bar's drawer, iOS 27 starts a list's first
+  // section right below them.
+  const root = ui.navigationBar?.large || drawerSearch ? mapPrimaryScroll(joinRoot(body, 'vertical'), startListAtTop) : joinRoot(body, 'vertical')
+  const content = ui.search && drawerSearch ? prependSearch(root, converter.searchField(ui.search, 'drawer')) : root
 
   const navigationBar = ui.navigationBar
     ? {
         element: converter.navigationBar(ui.navigationBar, toolbarSearch),
         large: ui.navigationBar.large,
-        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 7) : 0),
+        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 11) : 0),
       }
     : null
 
   const tabBar = ui.tabBar ? converter.tabBar(ui.tabBar) : null
+  const attached = !!ui.overlay && attachedSheet(ui.overlay, options.viewportWidth ?? 393)
 
   const overlay = ui.overlay
     ? {
@@ -310,7 +321,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
         ...(ui.overlay.background ? { background: resolveFillArg(ui.overlay.background, scheme) ?? undefined } : {}),
         ...(MATERIALS[tokenName(ui.overlay.background) ?? ''] ? { material: { ...MATERIALS[tokenName(ui.overlay.background)!]!, light: scheme === 'light' } } : {}),
         ...(ui.overlay.screen && ['sheet', 'cover', 'popover'].includes(ui.overlay.kind) ? {
-          screen: screenToLayout({ ...ui, ...ui.overlay.screen }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : ui.overlay.showsDragIndicator !== false ? 10 : 12 } }),
+          screen: screenToLayout({ ...ui, ...ui.overlay.screen }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' || attached ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : sheetContentTop(ui.overlay, attached, !!ui.overlay.screen.navigationBar) } }),
         } : {}),
       }
     : null
@@ -381,6 +392,8 @@ interface ControlStyles {
   readonly gauge?: string
   readonly controlSize?: string
   readonly buttonBorderShape?: string
+  /** Whether a `foregroundStyle` or `foregroundColor` is set on this view or one around it, which a button's title takes over its tint. */
+  readonly foregroundSet?: boolean
 }
 
 const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
@@ -413,6 +426,7 @@ function withStyles(outer: ControlStyles, view: ViewValue, scheme: ColorScheme):
   }
   const tint = view.modifiers.find((modifier) => modifier.name === 'tint' || modifier.name === 'accentColor')
   if (tint) next = { ...next, tint: resolveColorArg(tint.args[0]?.value, scheme, outer.tint) ?? undefined }
+  if (view.modifiers.some((modifier) => modifier.name === 'foregroundStyle' || modifier.name === 'foregroundColor')) next = { ...next, foregroundSet: true }
   return next
 }
 
@@ -916,9 +930,11 @@ class Converter {
     if (overlay.kind === 'menu') return this.menuSurface(overlay)
 
     if (overlay.kind === 'alert' || overlay.kind === 'dialog') {
-      const title = this.styledText('ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600)
+      // UIKit draws an alert's labels, which keep their leading: the iOS 27 simulator puts
+      // the title's and message's glyphs where their full line boxes centre them.
+      const title = keptLeading(this.styledText('ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600))
       const message = overlay.message
-        ? [this.styledText('ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel')]
+        ? [keptLeading(this.styledText('ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel'))]
         : []
 
       const head: LayoutElement = {
@@ -1151,7 +1167,9 @@ class Converter {
         ...(view?.contextMenuPath ? { contextMenuHandlerId: handlerIdFor(`${view.contextMenuPath}/context-menu`) } : {}),
         ...(role === 'textField' && view ? this.inputOptions(view, path) : {}),
         ...(role === 'slider' ? { color: this.color('accentColor'), thumbDiameter: CONTROL_PARTS.slider.thumb } : {}),
-        ...(role === 'textField' ? { inputInset: this.styles.textField === 'roundedBorder' ? CONTROL_PARTS.field.insetX : 0, placeholderColor: this.color('secondaryLabel') } : {}),
+        // A field's placeholder is iOS's placeholder colour, half as strong as a search
+        // field's prompt, which matches the magnifying glass beside it.
+        ...(role === 'textField' ? { inputInset: this.styles.textField === 'roundedBorder' ? CONTROL_PARTS.field.insetX : 0, placeholderColor: this.color(view ? 'placeholderText' : 'secondaryLabel') } : {}),
         ...(role === 'button' ? { cornerRadius: this.styles.buttonBorderShape === 'roundedRectangle' ? this.appearance.button.roundedRectangleRadius : this.appearance.button.cornerRadius } : {}),
         ...(role === 'textField' ? { color: resolveColorArg(view?.modifiers.find((m) => m.name === 'foregroundStyle' || m.name === 'foregroundColor')?.args[0]?.value, this.scheme, this.styles.tint) ?? this.color('primary') } : {}),
       },
@@ -2241,8 +2259,13 @@ class Converter {
     const style = requested === 'automatic' ? this.appearance.button.automatic[this.styles.container ?? 'content'] : requested
     const tint = this.buttonTint(view)
 
+    // A foreground style set on the button, or on a view around it, is what iOS 27 draws
+    // its title in: over the tint, the role, and the white of a prominent button alike.
+    // Wrapped in the tint here, `.foregroundStyle(.white)` over an accent background
+    // drew the title in the accent, where it could not be seen.
+    const foreground = this.styles.foregroundSet === true
     if (style !== 'bordered' && style !== 'borderedProminent' && style !== 'glass' && style !== 'glassProminent') {
-      if (style === 'plain') return label
+      if (style === 'plain' || foreground) return label
       return {
         kind: 'modified',
         id: `${path}btntint`,
@@ -2263,7 +2286,7 @@ class Converter {
       ? this.appearance.button.roundedRectangleRadius
       : this.appearance.button.cornerRadius
 
-    const tinted: LayoutElement = {
+    const tinted: LayoutElement = foreground ? label : {
       kind: 'modified',
       id: `${path}btncolor`,
       modifier: {
@@ -2744,6 +2767,9 @@ class Converter {
             modifier: {
               kind: 'frame',
               maxWidth: Number.POSITIVE_INFINITY,
+              // The control is 32 pt tall in the iOS 27 simulator, whatever its labels'
+              // glyphs measure: a label is centred in what the padding leaves.
+              minHeight: CONTROL_PARTS.segmented.height - 2 * (CONTROL_PARTS.segmented.inset + CONTROL_PARTS.segmented.padY),
               alignment: CENTER,
             },
             child: this.convert(child, `${path}seg${index}c`, 'horizontal'),
@@ -3266,7 +3292,9 @@ class Converter {
     }
     return {
       kind: 'modified', id: `${path}outer`,
-      modifier: { kind: 'padding', insets: placement === 'toolbar' ? ZERO_INSETS : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
+      modifier: { kind: 'padding', insets: placement === 'toolbar' ? ZERO_INSETS
+        : placement === 'drawer' ? insets(0, SURFACES.search.margin, SURFACES.search.drawerBottom, SURFACES.search.margin)
+        : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
       child: { kind: 'modified', id: `${path}round`, modifier: { kind: 'cornerRadius', radius: SURFACES.search.radius, style: 'circular' }, child: surface },
     }
   }
@@ -4007,33 +4035,13 @@ function textOf(view: ViewValue): string {
 }
 
 /**
- * A value rendered through a `FormatStyle`.
+ * A value rendered through a `FormatStyle`, as `formatted(_:)` writes it.
  *
- * `Intl` does the work, so the grouping separators and currency symbols are the
- * platform's real ones rather than a transcription. An unrecognised style falls back
- * to the plain description: the number is still right, only its dressing is missing.
+ * An unrecognised style falls back to the plain description: the number is still
+ * right, only its dressing is missing.
  */
 function formatted(value: SwiftValue, format: SwiftValue): string {
-  const name = tokenName(format) ?? ''
-  const n = value.kind === 'int' || value.kind === 'double' ? value.value : Number.NaN
-  if (Number.isNaN(n)) return displayValue(value)
-
-  // `.currency(code:)` arrives as `currency:USD`, the same way `.system(size:)` does.
-  const [style, detail] = name.split(':')
-
-  switch (style) {
-    case 'currency':
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: detail || 'USD',
-      }).format(n)
-    case 'percent':
-      return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(n)
-    case 'number':
-      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(n)
-    default:
-      return displayValue(value)
-  }
+  return formatNumber(value, tokenName(format) ?? '') ?? displayValue(value)
 }
 
 function displayValue(value: SwiftValue): string {

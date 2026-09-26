@@ -143,6 +143,9 @@ test('a narrow window selects the same way, with Layers over the canvas closed (
   // Half of a laptop screen, as with the instructions tiled beside the studio.
   await page.setViewportSize({ width: 760, height: 700 })
   await openInDesign(page, APP, 'Mia')
+  // Settings stays beside the canvas, so the phone keeps a size to work at. Stacked above
+  // the canvas, the panel took most of the window's height and left the phone 8%.
+  await expect.poll(async () => Number((await page.getByTestId('zoom-select').innerText()).match(/\d+/)?.[0])).toBeGreaterThanOrEqual(30)
   await drawn(page, 'Mia').click()
   await expect(selectedName(page)).toHaveText('Column')
   await expect(page.getByTestId('layers-over')).toHaveCount(0)

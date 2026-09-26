@@ -70,6 +70,8 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     hasSuffix: 'r.hasSuffix("a")',
     starts: 'r.starts(with: "a")',
     contains: 'r.contains("a")',
+    localizedCaseInsensitiveContains: 'r.localizedCaseInsensitiveContains("A")',
+    localizedStandardContains: 'r.localizedStandardContains("A")',
     replacingOccurrences: 'r.replacingOccurrences(of: "a", with: "b")',
     split: 'r.split(separator: ",").count',
     components: 'r.components(separatedBy: ",").count',
@@ -155,6 +157,7 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     magnitude: 'r.magnitude',
     isMultiple: 'r.isMultiple(of: 2)',
     quotientAndRemainder: 'r.quotientAndRemainder(dividingBy: 2).quotient',
+    formatted: 'r.formatted()',
   },
   Double: {
     description: 'r.description',
@@ -165,6 +168,7 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     squareRoot: 'r.squareRoot()',
     truncatingRemainder: 'r.truncatingRemainder(dividingBy: 2.0)',
     isMultiple: 'r.isMultiple(of: 2.0)',
+    formatted: 'r.formatted()',
   },
   Bool: {
     description: 'r.description',

@@ -43,6 +43,8 @@ export function parseOptions(value: unknown): GenerationOptions {
   return { provider: value.provider as Provider, model: value.model, prompt: value.prompt.trim(), pageCount: value.pageCount as number, navigation: value.navigation as GenerationOptions['navigation'], accent: value.accent as GenerationOptions['accent'], sampleData: value.sampleData, includeSettings: value.includeSettings, ...(previousAttempt ? { previousAttempt } : {}) }
 }
 
+const SWIFT_PATH = /^Sources\/(?:[A-Za-z][A-Za-z0-9_]*\/)*[A-Za-z][A-Za-z0-9_]*\.swift$/
+
 /** Reject the entire response rather than silently dropping or renaming model files. */
 export function parseGeneratedApp(value: unknown, expectedPages?: number): GeneratedApp {
   if (!record(value) || typeof value.name !== 'string' || !/^[A-Z][A-Za-z0-9]{0,60}App$/.test(value.name)) throw new Error('The response did not contain a valid app name. Try generating again.')
@@ -51,7 +53,11 @@ export function parseGeneratedApp(value: unknown, expectedPages?: number): Gener
   const paths = new Set<string>()
   let total = 0
   const files = value.files.map((f) => {
-    if (!record(f) || typeof f.path !== 'string' || !/^Sources\/(?:[A-Za-z][A-Za-z0-9_]*\/)*[A-Za-z][A-Za-z0-9_]*\.swift$/.test(f.path) || f.path.length > 180) throw new Error('The response contained an invalid Swift file path.')
+    if (!record(f) || typeof f.path !== 'string' || !SWIFT_PATH.test(f.path) || f.path.length > 180) {
+      // A folder written beside Sources/ rather than in it: say which, and where it goes (G2).
+      if (record(f) && typeof f.path === 'string' && f.path.length < 170 && SWIFT_PATH.test(`Sources/${f.path}`)) throw new Error(`A generated file is not under Sources/: ${f.path}. Every file goes under Sources/, such as Sources/${f.path}.`)
+      throw new Error('The response contained an invalid Swift file path.')
+    }
     if (paths.has(f.path.toLowerCase())) throw new Error('The response contained duplicate file names.')
     paths.add(f.path.toLowerCase())
     if (typeof f.code !== 'string' || !f.code.trim() || f.code.length > 60000) throw new Error('The response contained an empty or oversized file.')

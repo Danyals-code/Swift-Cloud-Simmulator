@@ -25,6 +25,7 @@ import type {
 import {
   argumentLabels,
   collectConformance,
+  DECIMAL_TYPES,
   hoistNestedTypes,
   valueKind,
   type ConformanceModel,
@@ -52,6 +53,8 @@ import {
   type StackFrame,
 } from './errors'
 import type { CallArgument, HostCall, InterpreterHost } from './host'
+import { leadingDotName } from './calendar'
+import { formatNumber, groupDigits, titleNumber } from './number-format'
 import { checkPreviewSize, checkRepeatedValue, PREVIEW_LIMITS } from './limits'
 import {
   BUILTIN_TYPE_NAMES,
@@ -924,6 +927,55 @@ export class Interpreter {
     return this.runBody('closure', closure.body, env, span)
   }
 
+  /**
+   * A string literal, and asked for, its text as a `LocalizedStringKey` writes it: a
+   * number put into it with separators, and a Double with six decimals (`titleNumber`).
+   *
+   * An interpolation's `specifier:` and `format:` apply either way. Swift takes them only
+   * where the literal is a title, and a title's specifier puts separators in too. A
+   * format the preview cannot read or write, such as `.dateTime.month().day()`, leaves
+   * the value as Swift describes it rather than stopping the view.
+   */
+  private stringLiteral(expr: Expr & { kind: 'stringLiteral' }, env: Environment, asTitle = false): { readonly value: SwiftValue; readonly title?: string } {
+    const parts: (string | SwiftValue)[] = []
+    const styles: ({ readonly specifier?: SwiftValue | null; readonly format?: SwiftValue | null } | null)[] = []
+    for (const segment of expr.segments) {
+      if (segment.kind === 'text') {
+        parts.push(segment.value)
+        styles.push(null)
+        continue
+      }
+      parts.push(this.evaluate(segment.expression, env))
+      // Undefined for an option not written, and null for one the preview cannot read.
+      const option = (label: string): SwiftValue | null | undefined => {
+        const found = segment.options?.find((o) => o.label === label)
+        if (!found) return undefined
+        try {
+          return this.evaluate(found.value, env)
+        } catch (error) {
+          if (error instanceof SwiftTrap || error instanceof UnsupportedAtRuntime) return null
+          throw error
+        }
+      }
+      styles.push(segment.options ? { specifier: option('specifier'), format: option('format') } : null)
+    }
+    const hosted = parts.some((part) => typeof part !== 'string' && part.kind !== 'string') ? this.host.interpolate?.(parts, expr.span) : undefined
+    if (hosted !== undefined) return { value: { kind: 'string', value: hosted.text, styled: hosted.styled } }
+
+    const write = (title: boolean) => parts.map((part, i) => {
+      if (typeof part === 'string') return part
+      const style = styles[i]
+      if (style?.specifier?.kind === 'string') {
+        const written = formatString(style.specifier.value, [part])
+        return title ? groupDigits(written) : written
+      }
+      if (style?.format !== undefined) return (style.format && formatNumber(part, leadingDotName(style.format))) ?? describe(part, false)
+      return (title ? titleNumber(part) : null) ?? describe(part, false)
+    }).join('')
+    const interpolates = parts.some((part) => typeof part !== 'string')
+    return { value: str(write(false)), ...(asTitle && interpolates ? { title: write(true) } : {}) }
+  }
+
   private hostCall(args: readonly CallArgument[], trailing: ClosureValue | null, span: SourceSpan): HostCall {
     return {
       args,
@@ -1359,7 +1411,7 @@ export class Interpreter {
     // `3` there is a `Double` literal and never an `Int` - so `Rect(width: 3).width`
     // is 3.0 and prints as such. Without this the value stays an Int and every
     // arithmetic result downstream loses its fractional formatting.
-    if (typeName === 'Double' && value.kind === 'int') return double(value.value)
+    if (DECIMAL_TYPES.has(typeName) && value.kind === 'int') return double(value.value)
 
     if (value.kind !== 'opaque') return value
 
@@ -1626,12 +1678,8 @@ export class Interpreter {
       case 'nilLiteral':
         return NIL
 
-      case 'stringLiteral': {
-        const parts = expr.segments.map((segment) => segment.kind === 'text' ? segment.value : this.evaluate(segment.expression, env))
-        const hosted = parts.some((part) => typeof part !== 'string' && part.kind !== 'string') ? this.host.interpolate?.(parts, expr.span) : undefined
-        if (hosted !== undefined) return { kind: 'string', value: hosted.text, styled: hosted.styled }
-        return str(parts.map((part) => typeof part === 'string' ? part : describe(part, false)).join(''))
-      }
+      case 'stringLiteral':
+        return this.stringLiteral(expr, env).value
 
       case 'arrayLiteral':
         return array(expr.elements.map((e) => copyValue(this.evaluate(e, env))))
@@ -2045,11 +2093,15 @@ export class Interpreter {
       chained && callee.kind === 'memberAccess' && callee.base ? this.resolveReceiver(callee.base, env) : undefined
     const calledValue = chained && callee.kind !== 'memberAccess' ? this.evaluate(callee, env) : undefined
 
-    const args: CallArgument[] = argExprs.map((arg) => ({
-      label: arg.label,
-      value: this.evaluate(arg.value, env),
-      span: arg.span,
-    }))
+    // A string literal given first and unlabelled may be a title, a `LocalizedStringKey`,
+    // which writes numbers for the locale. Its text as one goes along with it, for the
+    // views and modifiers that take a title to read.
+    const titled = argExprs.findIndex((arg) => arg.label === null)
+    const args: CallArgument[] = argExprs.map((arg, index) => {
+      if (index !== titled || arg.value.kind !== 'stringLiteral') return { label: arg.label, value: this.evaluate(arg.value, env), span: arg.span }
+      const { value, title } = this.stringLiteral(arg.value, env, true)
+      return { label: arg.label, value, span: arg.span, ...(title === undefined ? {} : { title }) }
+    })
     const trailingClosure = trailing ? this.makeClosure(trailing, env) : null
 
     /**
@@ -2406,8 +2458,13 @@ export class Interpreter {
 
         return undefined
       }
+      // `CGFloat` and `Float` are both a Double here, as everywhere else in the preview.
+      // Without them `CGFloat(progress)`, which the AI writes for every ring and bar it
+      // draws, stopped the view, and a retry kept writing it.
       case 'Int':
-      case 'Double': {
+      case 'Double':
+      case 'CGFloat':
+      case 'Float': {
         const first = args[0]?.value
         if (!first) return undefined
 
@@ -2426,7 +2483,7 @@ export class Interpreter {
           if (!grammar.test(text)) return NIL
           const parsed = Number(text)
           if (!Number.isFinite(parsed)) return NIL
-          if (name === 'Double') return double(parsed)
+          if (name !== 'Int') return double(parsed)
           return Number.isSafeInteger(parsed) ? int(parsed) : NIL
         }
 

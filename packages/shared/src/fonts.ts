@@ -49,3 +49,14 @@ export const MEASURED_FAMILIES: readonly string[] = [
   MONO_FAMILY,
   SERIF_FAMILY,
 ]
+
+/**
+ * How tall one line of text is at a point size: SF Pro's ascender and descender, 1.19336
+ * of its size, rounded up to the 1/3 pt pixel grid of an iPhone. Measured in the iOS 27
+ * simulator on iPhone 18 Pro for every text style, from 40.67 pt for `.largeTitle` to
+ * 13.33 pt for `.caption2`; Apple's published leading (22 pt for `.body`) is taller than
+ * a line is drawn.
+ */
+export function textLineHeight(size: number): number {
+  return Math.ceil(size * 1.19336 * 3 - 1e-6) / 3
+}

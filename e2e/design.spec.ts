@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { openCounter } from './designer-helpers'
+import { openCounter, replaceSource } from './designer-helpers'
 
 /**
  * Designing on the canvas.
@@ -520,6 +520,47 @@ test('Add puts a view inside the container that is selected', async ({ page }) =
   await expect.poll(() => source(page)).toContain('Divider()')
   const text = await source(page)
   expect(text.indexOf('Text("Gamma")')).toBeLessThan(text.indexOf('Divider()'))
+})
+
+/** A screen as the AI writes one: a list of records, with a toolbar and a sheet. */
+const RECORDS = `import SwiftUI
+@main struct DesignApp: App { var body: some Scene { WindowGroup { NavigationStack { ContentView() } } } }
+struct Item: Identifiable { let id: Int; var name: String }
+struct ContentView: View {
+    @State private var items: [Item] = [Item(id: 1, name: "Espresso"), Item(id: 2, name: "Latte")]
+    @State private var showingForm = false
+    var body: some View {
+        List(items) { item in
+            Text(item.name)
+        }
+        .navigationTitle("Menu")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New") { showingForm = true }
+            }
+        }
+        .sheet(isPresented: $showingForm) {
+            Text("Form")
+        }
+    }
+}`
+
+test('Add with nothing selected makes the view the last row of a screen\'s list of records', async ({ page }) => {
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, RECORDS)
+  await expect(page.getByTestId('render-tree').getByText('Latte', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
+
+  await page.getByTestId('add-view').click()
+  await expect(page.getByTestId('add-view-target')).toHaveText('Into this screen')
+  await page.getByTestId('add-view-text').click()
+  await expect(page.getByTestId('add-view-palette')).toHaveCount(0)
+
+  await expect(page.getByTestId('render-tree').getByText('Text', { exact: true })).toBeVisible()
+  const text = await source(page)
+  expect(text).toContain('List {\n            ForEach(items) { item in\n                Text(item.name)\n            }\n            Text("Text")\n        }')
 })
 
 test('the Delete tool takes out the view that is clicked', async ({ page }) => {

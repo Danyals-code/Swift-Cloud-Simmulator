@@ -171,7 +171,10 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           const live = node && operation.kind === 'insert' ? liveControl(context, node, operation.snippet) : null
           const brought = node && operation.kind === 'paste' ? pastedValues(context, node, operation.values) : undefined
           if (brought && 'problem' in brought) return reject(brought.problem)
-          changed = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet, refuse)
+          // The list itself takes a new last row; its Row template takes the view in every row.
+          const inserted = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet, refuse, { asListRow: node?.kind === 'collection' })
+          const wraps = inserted?.wraps
+          changed = inserted
           const member = live?.member ?? brought?.member
           if (member && changed) {
             // Values are declared above the view, which moves down by their lines.
@@ -179,6 +182,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
             // The view and the values it reads: two places, so checked as a wrap.
             wrap = live ? `${live.snippet} ${live.declaration}` : `${operation.snippet} ${brought!.added.join(' ')}`
           }
+          // A list's rows moved into a ForEach for the new last row: checked as a wrap too.
+          if (wraps) wrap = `${wrap ?? live?.snippet ?? operation.snippet} ${wraps}`
         }
         break
       }

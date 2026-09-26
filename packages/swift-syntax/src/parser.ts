@@ -2231,8 +2231,21 @@ export class Parser {
       const lexed = Lexer.tokenize(segment.value, this.file, segment.span.start)
       const sub = new Parser(lexed.tokens, this.file)
       const expression = sub.parseExpression(true)
+      // `\(price, specifier: "%.2f")` and `\(total, format: .currency(code: "USD"))`:
+      // what a Text's interpolation takes after the value. Left unread, the value drew
+      // raw, with no word that the rest had been dropped.
+      const options: Argument[] = []
+      while (sub.match(',')) {
+        if (!((sub.current.kind === 'identifier' || sub.current.kind === 'keyword') && sub.peek().text === ':')) break
+        const start = sub.current
+        const labelToken = sub.advance()
+        sub.advance() // ':'
+        const value = sub.parseExpression(true)
+        options.push({ label: labelToken.text, labelSpan: labelToken.span, value, span: sub.spanFrom(start) })
+      }
+      if (!sub.atEnd) sub.error(sub.current.span, 'unexpected_token', `Expected ')' to end the interpolation, found '${sub.current.text}'.`)
       this.diagnostics.push(...lexed.diagnostics, ...sub.diagnostics)
-      segments.push({ kind: 'interpolation', expression, span: segment.span })
+      segments.push({ kind: 'interpolation', expression, ...(options.length ? { options } : {}), span: segment.span })
     }
 
     return segments

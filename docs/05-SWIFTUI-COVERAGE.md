@@ -35,7 +35,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `VStack` / `HStack` / `ZStack` | ✅ | 3 | alignment, spacing |
-| `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
+| `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine. The views beside it take what they need first and it keeps back only its minimum, so a long label stays on one line beside it, as in the iOS 27 simulator |
 | `Divider` | ✅ | 6 | hairline across its stack's axis |
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
 | `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths, a computed `id` and `\.rawValue` included; each row is tagged with its id, as SwiftUI tags it. Every row keeps its own identity: ids that differ only in punctuation ("C", "C++"), several rows drawn for one element, and an id two elements share, which warns as SwiftUI does. Binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
@@ -53,7 +53,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling |
+| `Text` | ✅ | 3 | interpolation, with `specifier:` and `format:` inside it too, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling. A title written as a literal, a `Text`'s or a `Button`'s, a `Label`'s, a `Section`'s or a navigation title, writes a number put into it as iOS 27 does: 2,000, and a Double with six decimals, 3.500000; a `String`, `verbatim:` and a project's own views keep Swift's text, 2000 |
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations; unknown names use an explicit fallback, not Apple artwork |
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
@@ -231,6 +231,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- | --- |
 | `withAnimation` | ✅ | 6 | animates every change in its transaction, for one frame |
 | `.animation(_:value:)` | ✅ | 6 | animates its subtree only when `value` changes, and not on the first render |
+| `Animation` - `.delay`, `.speed`, `.repeatForever`, `.repeatCount` | 🟡 | - | a delay and a speed change the one animation the preview plays; a repeat plays once, and says so where it is written |
 | Curves: `.linear .easeIn .easeOut .easeInOut` | ✅ | 6 | CSS timing functions |
 | `.spring` (and `.bouncy` / `.snappy` / `.smooth`) | 🟡 | 6 | an overshooting bezier, not a real solver |
 | `.transition` (`.slide .opacity .scale .move`) | 🟡 | 7 | entry only; exit would need the renderer to outlive the view |
@@ -334,6 +335,7 @@ missing without anything saying so.
 | `String` - `count`, `uppercased`, `hasPrefix`, `contains`, `split`, `replacingOccurrences`, `trimmingCharacters` | ✅ | 2 | counted and sliced by grapheme cluster, so `"👋🏽".count` is 1 |
 | `String` - `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `starts(with:)`, `append` | ✅ | - | |
 | `String` - `unicodeScalars` | ✅ | - | code points, which is the whole difference from `count` |
+| `String` - `localizedCaseInsensitiveContains`, `localizedStandardContains` | ✅ | - | how a search box filters: without case, and the standard form without accents too, as iOS 27 answers; an empty string is in nothing |
 | `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | `reduce(into:)` too, whose closure takes the accumulator `inout` - the standard way to build a dictionary from a sequence. `enumerated()` gives `(offset:element:)` tuples, and a closure with a parameter for each takes one apart, as `{ index, item in }` does. A range of integers answers the same methods: `(0..<3).map { … }` |
 | `Array` - `allSatisfy`, `flatMap`, `dropFirst`, `dropLast`, `first(where:)`, `last(where:)`, `lastIndex`, `randomElement`, `shuffled` | ✅ | - | `shuffled` is Fisher-Yates, not the biased one-line sort |
 | `Array` - `append`, `insert`, `remove`, `removeAll`, `removeFirst`, `removeLast`, `popLast`, `sort`, `reverse`, `shuffle`, `swapAt`, `replaceSubrange`, `removeSubrange` | ✅ | - | mutating, and refused on a `let` as Xcode refuses them |
@@ -343,6 +345,8 @@ missing without anything saying so.
 | `counts[key, default: 0] += 1` | ✅ | 11 | the default belongs to the read half of a compound assignment; without it the first occurrence of every key read nil |
 | `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation drop duplicates; iteration is in insertion order rather than Swift's unspecified hash order |
 | `Int` / `Double` conversion from `String` | ✅ | - | failable, matched to Swift's grammar: `" 42"`, `"4_2"` and `"0x10"` are nil |
+| `CGFloat`, `Float` | ✅ | - | a Double, as everywhere in the preview: `CGFloat(x)`, `Float(x)`, and a whole-number literal given to either, so `let w: CGFloat = 3` prints 3.0 |
+| `Int` / `Double` - `formatted()`, `.number`, `.percent`, `.currency(code:)` | ✅ | - | as Foundation writes them in en-US, measured in the iOS 27 simulator: separators and up to six decimals, a Double's percent multiplied by 100 and an Int's not, and currency rounded half to even from the number as written. `Text(_:format:)` writes the same |
 | `Int.max` / `Int.min` | 🟡 | - | 2^53 - 1, not 2^63 - 1 - see approximations |
 | `Int.random(in:)`, `Double.random(in:)`, `Bool.random()` | ✅ | - | |
 | `Double` - `rounded()`, `rounded(.up/.down/.towardZero)`, `squareRoot`, `truncatingRemainder`, `isMultiple(of:)` | ✅ | - | halves round away from zero, as Swift's do |
@@ -352,7 +356,7 @@ missing without anything saying so.
 | Bitwise `&`, `\|`, `^`, `<<`, `>>` | ✅ | - | computed in `BigInt`, so a shift past 32 bits is not truncated |
 | `UUID` | ✅ | - | random, and prints as its `uuidString` |
 | `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, comparison, `Date.now`. `formatted()` is Foundation's default, a numeric date and a short time, and `formatted(date:time:)` takes the parts it is given. No `DateFormatter` |
-| `Calendar` | 🟡 | - | `Calendar.current`, in the preview's time zone: `component(_:from:)`, `date(byAdding:value:to:)`, `startOfDay(for:)`, `isDateInToday` and its neighbours, `isDate(_:inSameDayAs:)`, and `dateComponents` from one date or between two, largest unit first |
+| `Calendar` | 🟡 | - | `Calendar.current`, in the preview's time zone: `component(_:from:)`, `date(byAdding:value:to:)`, `startOfDay(for:)`, `isDateInToday` and its neighbours, `isDate(_:inSameDayAs:)`, `isDate(_:equalTo:toGranularity:)` by year, month, week (starting on Sunday), day, hour, minute or second, and `dateComponents` from one date or between two, largest unit first |
 | `Timer` | 🟡 | - | `Timer.publish(every:on:in:).autoconnect()` with `.onReceive`, and `Timer.scheduledTimer`, are accepted and never fire: the preview draws one moment, and warns where a timer is made |
 | `URL` | 🟡 | - | `URL(string:)` is failable and the string is kept as written; `absoluteString`, `path`, `host`, `scheme`, `query`, `lastPathComponent`, `pathExtension`, `appendingPathComponent`. Nothing is fetched |
 | `Codable` over JSON | ⬜ | - | listed in Phase 2's scope and never built |
@@ -495,11 +499,13 @@ because a false positive would teach people to ignore the panel.
 | Mixed numeric arithmetic | `let w: Int = 10; let s: Double = 1.5; w * s` | `scale * 2` - an integer literal takes its type from context |
 | `Text` given a non-string | `Text(count)` | `Text("\(count)")` |
 | Property wrapper on a `let` | `@State private let count = 0` | the same wrapper on a `var` |
-| Assignment to a `let` | `let total = 0; total = 1` | writing an `inout` parameter, which is the caller's storage |
+| Assignment to a `let` | `let total = 0; total = 1` | writing an `inout` parameter, which is the caller's storage, or the property an `if let` shadows, outside that `if`'s own branch |
 | Non-`mutating` method writing a property | `func bump() { count += 1 }` on a plain stored `var` | the same method writing a `@State`, `@Binding` or any other wrapped property: their setters are **nonmutating**, which is what lets `body` write them |
 | `ForEach` without identity | `ForEach(items)` where the element is not `Identifiable` | a range, or an explicit `id:` |
 | Omitted argument labels | `greet("Ada")` for `func greet(name:)` | a parameter declared `_` |
 | Missing `return` | a multi-statement `func` body with a return type and no `return` anywhere | a body whose returns are inside a `switch`, `while`, `repeat`, `do`/`catch`, `guard`'s `else` or an `else if` chain |
+| Code in a view's body | a `for`, `while` or `repeat` loop, an assignment, a `break`, `defer`, `do`/`catch` or a function, in `body`, a `@ViewBuilder` member or a view's content closure (`VStack { }`, `ForEach`, `.sheet { }`) | a body with a `return`, which is ordinary code; `let`/`var` with a value, `if`, `switch` and `do`; any of it in a button's action, an `onAppear`, a sheet's `onDismiss`, a menu's `primaryAction` or a closure that is called |
+| `specifier:` or `format:` in a String | `let text = "\(km, specifier: "%.1f") km"`; the same in a `String` property, an assignment to a String, `Text(verbatim:)`, a `String` parameter of the project's own view or function, or beside a `+` | a title, such as `Text`, `Label`, a navigation title or `.badge`, and a `LocalizedStringKey`, which take both |
 
 The right-hand column is the half that matters. A pass that cries wolf is worse than no
 pass, because people stop reading the panel and then the true warnings go unread too -

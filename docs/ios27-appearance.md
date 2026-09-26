@@ -61,6 +61,12 @@ is served from the application root, like the existing root-based app routes.
 - Line heights, ascent/descent, mixed-run baselines, tightening, and truncation
   now share measurements with painting. This matches the browser's actual font;
   it does not turn a substitute font into Apple's font on other operating systems.
+- A block of text is as tall as its first line's glyphs (1.19336 times the point
+  size, rounded up to a third of a point) plus the style's line height for each
+  further line, as measured in the iOS 27 simulator: body text is 20.33, 42.33 and
+  64.33 pt tall for one, two and three lines. A `.system(size:)` font adds nothing
+  between lines. Alert titles and messages, which UIKit draws, keep the full line
+  height on every line.
 
 ## Phase 5: spacing and alignment
 
@@ -122,6 +128,13 @@ is served from the application root, like the existing root-based app routes.
   controls keep compact fonts while page content grows with Dynamic Type. The search
   drawer uses a neutral fill, and disappears with its scrolling content. The collapsed
   navigation background uses simple blur.
+- A large-title bar is 106 pt below the status bar, so content under it starts at 168 pt
+  on iPhone 18 Pro, as in the iOS 27 simulator. A grouped list puts a first section
+  without a header 35 pt down, or right under a large title or a search drawer; a header
+  has 10 pt above and below its text. A sheet at its large detent runs from under the
+  status bar, the width of the screen, with its content at its top edge and its bar
+  16 pt taller than a screen's; a sheet at a smaller detent floats 8 pt in from the
+  edges. The measurements are in `docs/parity/native/iphone18pro-under-bars`.
 - Both ordinary `Tab(...)` and existing `.tabItem` declarations work with selection
   bindings. Phone tabs float near the bottom; regular-width tabs use a narrower top
   surface. Selection uses a neutral rounded background, a tinted filled icon, and the same

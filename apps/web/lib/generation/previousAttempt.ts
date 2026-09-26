@@ -13,7 +13,16 @@ export interface PreviewProblem {
   readonly file?: string
   readonly line?: number
   readonly source?: string
+  /**
+   * `xcode` for what Xcode would reject and the preview runs, as the warnings list has
+   * it: the AI is told, so a second answer can fix it, and a change is never refused for
+   * it. The routes do not read it.
+   */
+  readonly kind?: 'xcode'
 }
+
+/** Whether a problem refuses a change: any but what only Xcode would reject. */
+export const blocksChange = (problem: PreviewProblem): boolean => problem.kind !== 'xcode'
 
 /** What a second request carries about the answer before it. */
 export interface PreviousAttempt {

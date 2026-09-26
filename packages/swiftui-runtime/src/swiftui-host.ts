@@ -268,6 +268,29 @@ function toArgs(call: HostCall): ViewArg[] {
   return call.args.map((a) => ({ label: a.label, value: a.value }))
 }
 
+/**
+ * The views and modifiers whose first unlabelled argument is a title, a
+ * `LocalizedStringKey`, when it is written as a string literal. Such a title writes a
+ * number put into it for the locale: `Text("Goal: \\(goal) mL")` reads "Goal: 2,000 mL"
+ * in the iOS 27 simulator, and a Double shows six decimals. A String, `Text(verbatim:)`
+ * and the project's own views keep Swift's text, "2000", as they do on iOS.
+ */
+const TITLED_VIEWS = new Set([
+  'Text', 'Label', 'Button', 'Toggle', 'Section', 'TextField', 'SecureField', 'Picker', 'Stepper', 'Link', 'Menu',
+  'NavigationLink', 'LabeledContent', 'ContentUnavailableView', 'ProgressView', 'DatePicker', 'Tab', 'DisclosureGroup', 'ColorPicker',
+])
+const TITLED_MODIFIERS = new Set(['navigationTitle', 'alert', 'confirmationDialog', 'badge', 'help'])
+
+/** `call` with its title as a title writes it, when `titled` and the interpreter wrote one. */
+function withTitleText(titled: boolean, call: HostCall): HostCall {
+  if (!titled) return call
+  const index = call.args.findIndex((arg) => arg.title !== undefined)
+  if (index < 0) return call
+  const args = [...call.args]
+  args[index] = { ...args[index]!, value: str(args[index]!.title!) }
+  return { ...call, args }
+}
+
 function numberOf(value: SwiftValue | undefined): number | null {
   if (!value) return null
   return value.kind === 'int' || value.kind === 'double' ? value.value : null
@@ -791,6 +814,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callGlobal(name: string, call: HostCall): SwiftValue | undefined {
+    call = withTitleText(TITLED_VIEWS.has(name), call)
     // Values first: these are not views, so they have to be handled before the
     // "is this a view name?" guard below rejects them.
     if (name === 'Task') return this.runTask(call)
@@ -1049,6 +1073,7 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
+    call = withTitleText(TITLED_MODIFIERS.has(member), call)
     if (target.kind === 'type' && (target.name === 'Gradient' && member === 'Stop' || target.name === 'Gradient.Stop' && member === 'init')) return this.gradientStop(call)
     // `Edge.Set([.top, .leading])` and `Edge.Set(.top)` are the set they are given.
     if (target.kind === 'type' && (target.name === 'Edge' && member === 'Set' || target.name === 'Edge.Set' && member === 'init')) return call.args[0]?.value ?? { kind: 'array', elements: [] }
@@ -1099,6 +1124,17 @@ export class SwiftUIHost implements InterpreterHost {
         ...payload,
         ...(added ? { combinedWith: [...(payload.combinedWith ?? []), added] } : {}),
       } satisfies TransitionPayload)
+    }
+
+    // `.easeInOut.repeatForever(autoreverses: true)`, `.delay(0.2)`, `.speed(2)`. A delay
+    // and a speed change the one animation the preview plays. A repeat plays once here,
+    // as the checker's warning beside it says; without these the view stopped instead.
+    if (target.kind === 'opaque' && target.typeName === ANIMATION_TYPE) {
+      const payload = target.payload as AnimationPayload
+      const amount = numberOf(call.args[0]?.value)
+      if (member === 'delay') return opaque(ANIMATION_TYPE, { ...payload, delay: amount ?? 0 } satisfies AnimationPayload)
+      if (member === 'speed') return amount !== null && amount > 0 ? opaque(ANIMATION_TYPE, { ...payload, duration: payload.duration / amount } satisfies AnimationPayload) : target
+      if (member === 'repeatForever' || member === 'repeatCount') return target
     }
 
     if (target.kind === 'type' && (target.name === 'Task' || target.name === 'MainActor')) {

@@ -99,7 +99,8 @@ describe('semantic typography', () => {
     const measured = measureText('AV', f, 16, table)
     expect(measured.lines).toHaveLength(1)
     expect(measured.width).toBe(15)
-    expect(measured.lines[0]!.baseline).toBe(18.5)
+    // Centred in its 25 pt of leading, less the half-leading a block gives up above its first line.
+    expect(measured.lines[0]!.baseline).toBe(18)
   })
   it('keeps grapheme clusters whole across emoji, accented, CJK, and RTL text', () => {
     const f: ResolvedFont = { family: 'Test', size: 20, weight: 400, italic: false, lineHeight: 25 }
@@ -115,7 +116,8 @@ describe('semantic typography', () => {
     const r = run('Text("Big").font(.title) + Text(" small").font(.caption)')
     const n = nodes(r).find((n) => n.text)!
     expect(n.text!.runs.map((run) => run.font.lineHeight)).toEqual([34, 16])
-    expect(n.text!.lines![0]!.height).toBeGreaterThanOrEqual(34)
+    // One line of .title, as tall as its glyphs: 33.67 pt in the iOS 27 simulator.
+    expect(n.text!.lines![0]!.height).toBeCloseTo(101 / 3, 2)
     expect(n.text!.lines![0]!.slices!.every((slice) => Number.isFinite(slice.baseline))).toBe(true)
   })
   it('applies tightening to both measurement and painted tracking', () => {
@@ -190,7 +192,7 @@ describe('automatic spacing and alignment', () => {
     }
   })
   it('exposes pixel length and scale to Swift environment readers', () => {
-    const r = run('Pixels()', { displayScale: 2 }, 'struct Pixels: View { @Environment(\\.pixelLength) var pixel; @Environment(\\.displayScale) var scale; var body: some View { Text("\\(pixel) / \\(scale)") } }')
+    const r = run('Pixels()', { displayScale: 2 }, 'struct Pixels: View { @Environment(\\.pixelLength) var pixel; @Environment(\\.displayScale) var scale; var body: some View { Text(verbatim: "\\(pixel) / \\(scale)") } }')
     expect(text(r, '0.5 / 2.0')).toBeDefined()
   })
 })

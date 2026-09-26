@@ -1,4 +1,4 @@
-import { graphemes, textMeasureKey, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
+import { graphemes, textLineHeight, textMeasureKey, type ResolvedFont, type TextMeasureRequest, type TextMetricsData, type MeasuredTextData } from '@studio/shared'
 
 /**
  * Synchronous shaped-run measurement, cached by the full font and text. Browsers
@@ -327,6 +327,7 @@ export function measureRuns(
         1,
         options.truncation,
         (step * 0.5) / 3,
+        options.keepsLeading,
       )
       if (attempt.lines.length <= lineLimit) return padTo(attempt, options.minimumLines, lineFont, table, lineSpacing)
     }
@@ -336,7 +337,7 @@ export function measureRuns(
   if (floor < 1 && lineLimit !== null && lineLimit > 0) {
     for (let step = 0; step <= 10; step++) {
       const scale = 1 - (step / 10) * (1 - floor)
-      const attempt = layOut(runs, scaled(lineFont, scale), maxWidth, table, null, lineSpacing, scale)
+      const attempt = layOut(runs, scaled(lineFont, scale), maxWidth, table, null, lineSpacing, scale, 'tail', 0, options.keepsLeading)
       if (attempt.lines.length <= lineLimit) {
         return padTo(attempt, options.minimumLines, lineFont, table, lineSpacing)
       }
@@ -344,7 +345,7 @@ export function measureRuns(
     // Nothing fits even at the floor. SwiftUI shrinks as far as it is allowed and then
     // truncates what is still over, rather than giving up and drawing at full size.
     return padTo(
-      layOut(runs, scaled(lineFont, floor), maxWidth, table, lineLimit, lineSpacing, floor, options.truncation),
+      layOut(runs, scaled(lineFont, floor), maxWidth, table, lineLimit, lineSpacing, floor, options.truncation, 0, options.keepsLeading),
       options.minimumLines,
       lineFont,
       table,
@@ -353,7 +354,7 @@ export function measureRuns(
   }
 
   return padTo(
-    layOut(runs, lineFont, maxWidth, table, lineLimit, lineSpacing, 1, options.truncation),
+    layOut(runs, lineFont, maxWidth, table, lineLimit, lineSpacing, 1, options.truncation, 0, options.keepsLeading),
     options.minimumLines,
     lineFont,
     table,
@@ -369,6 +370,8 @@ export interface MeasureOptions {
   readonly allowsTightening?: boolean
   /** `.lineLimit(2...4)` - the *floor*; the ceiling is the ordinary `lineLimit`. */
   readonly minimumLines?: number
+  /** The system's text keeps its half-leading above and below (`TextElement.keepsLeading`). */
+  readonly keepsLeading?: boolean
 }
 
 /** The same face at a fraction of its size. */
@@ -409,6 +412,7 @@ function layOut(
   scale: number,
   truncation: 'head' | 'middle' | 'tail' = 'tail',
   tighten = 0,
+  keepsLeading = false,
 ): TextMeasurement {
   runs = scale === 1 ? runs : runs.map((run) => ({ ...run, font: scaled(run.font, scale), tracking: (run.tracking ?? 0) * scale, baselineOffset: (run.baselineOffset ?? 0) * scale }))
   const multiRun = runs.length > 1
@@ -455,7 +459,7 @@ function layOut(
 
   const lines = wrapped.map((line) => line.clusters)
 
-  const boxes = lines.map((line) => toLineBox(line, multiRun, table, lineFont))
+  const boxes = lines.map((line, i) => toLineBox(line, multiRun, table, lineFont, !keepsLeading && i === 0, !keepsLeading && i === lines.length - 1))
 
   return {
     width: boxes.reduce((max, line) => Math.max(max, line.width), 0),
@@ -477,7 +481,20 @@ function slicesOf(clusters: readonly Cluster[]): { run: number; text: string; sp
   return slices
 }
 
-function toLineBox(clusters: readonly Cluster[], multiRun: boolean, table: FontMetricsTable, font: ResolvedFont): TextLineBox {
+/**
+ * A text block is as tall as its glyphs, not its leading. A text style's lines are its
+ * leading apart, 22 pt for `.body`, but the block ends where its first and last lines'
+ * glyphs do: the iOS 27 simulator draws one line of `.body` 20.33 pt tall, two 42.33
+ * and three 64.33. So the first line gives up the half-leading above it and the last
+ * the half below it, by the largest font on each. A font given only a size has no
+ * leading beyond its glyphs, and gives up nothing.
+ */
+function halfLeading(slices: readonly { spec: MeasuredRun }[], font: ResolvedFont): number {
+  const fonts = slices.length ? slices.map(slice => slice.spec.font) : [font]
+  return (Math.max(...fonts.map(f => f.lineHeight)) - Math.max(...fonts.map(f => textLineHeight(f.size)))) / 2
+}
+
+function toLineBox(clusters: readonly Cluster[], multiRun: boolean, table: FontMetricsTable, font: ResolvedFont, first: boolean, last: boolean): TextLineBox {
   const slices = slicesOf(clusters)
   const base = table.baseline(font)
   let above = base
@@ -489,6 +506,9 @@ function toLineBox(clusters: readonly Cluster[], multiRun: boolean, table: FontM
     below = Math.max(below, spec.font.lineHeight - baseline - (spec.baselineOffset ?? 0))
     return { run, text, width: metrics.width, baseline }
   })
+  const trim = first || last ? halfLeading(slices, font) : 0
+  if (first) above -= trim
+  if (last) below -= trim
   return {
     text: clusters.map((c) => c.text).join(''),
     width: boxes.reduce((sum, slice) => sum + slice.width, 0),
