@@ -1003,6 +1003,23 @@ describe("E11a: a view the preview doesn't know draws a placeholder, not a blank
   })
 })
 
+describe('pilot rehearsal: a label beside a Spacer keeps to one line, as in the iOS 27 simulator', () => {
+  const linesOf = (r: CompileResult, words: string) => r.renderTree!.nodes.find(n => n.text?.runs.map(run => run.text).join('') === words)?.text?.lines?.length
+
+  it('draws a row\'s text on one line when the row has room for it beside the Spacer', () => {
+    const r = runView(`var body: some View {
+        VStack { HStack { Text("A label that is longer than half of the row"); Spacer() } }.padding(24)
+      }`)
+    expect(linesOf(r, 'A label that is longer than half of the row')).toBe(1)
+  })
+
+  it('draws a toggle\'s label on one line when the row has room for it', () => {
+    const r = runView(`@State private var on = true
+      var body: some View { VStack { Toggle("Email me reminders every week", isOn: $on) }.padding(24) }`)
+    expect(linesOf(r, 'Email me reminders every week')).toBe(1)
+  })
+})
+
 describe('E11a: the Foundation the AI writes around its views: Timer, Calendar and formatted dates', () => {
   /** Noon UTC on 9 September 2001: the same calendar day in every time zone from UTC-11 to UTC+11. */
   const noon = 'Date(timeIntervalSince1970: 1_000_036_800)'

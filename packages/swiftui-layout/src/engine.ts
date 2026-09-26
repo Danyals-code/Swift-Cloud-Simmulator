@@ -488,6 +488,10 @@ export class LayoutEngine {
    * highest-priority group gets first claim on everything, and the rest divide what
    * survives. Dividing equally regardless would make the modifier almost invisible,
    * changing only the order in which two children took the same half each.
+   *
+   * A `Spacer` is no partner in that division: it keeps back its minimum length and
+   * takes what the others leave. The iOS 27 simulator draws a label longer than half
+   * its row on one line beside a Spacer, and a toggle's label likewise.
    */
   private shareFor(
     children: readonly LayoutElement[],
@@ -495,14 +499,19 @@ export class LayoutEngine {
     position: number,
     remaining: number,
   ): number {
-    const priority = layoutPriorityOf(children[order[position]!]!)
+    const child = children[order[position]!]!
+    const priority = layoutPriorityOf(child)
 
     let peers = 0
+    let keptBack = 0
     for (let i = position; i < order.length; i++) {
-      if (layoutPriorityOf(children[order[i]!]!) === priority) peers++
+      const other = children[order[i]!]!
+      if (layoutPriorityOf(other) !== priority) continue
+      if (other.kind === 'spacer' && child.kind !== 'spacer') keptBack += other.minLength
+      else peers++
     }
 
-    return peers > 0 ? Math.max(0, remaining / peers) : 0
+    return peers > 0 ? Math.max(0, (remaining - keptBack) / peers) : 0
   }
 
   private measureModified(

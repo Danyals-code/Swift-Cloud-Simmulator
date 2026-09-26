@@ -35,7 +35,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `VStack` / `HStack` / `ZStack` | ✅ | 3 | alignment, spacing |
-| `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
+| `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine. The views beside it take what they need first and it keeps back only its minimum, so a long label stays on one line beside it, as in the iOS 27 simulator |
 | `Divider` | ✅ | 6 | hairline across its stack's axis |
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
 | `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths, a computed `id` and `\.rawValue` included; each row is tagged with its id, as SwiftUI tags it. Every row keeps its own identity: ids that differ only in punctuation ("C", "C++"), several rows drawn for one element, and an id two elements share, which warns as SwiftUI does. Binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |

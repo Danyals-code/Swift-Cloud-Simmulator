@@ -203,6 +203,24 @@ describe('Spacer - the case that exposes a wrong engine', () => {
     expect(right!.width).toBeGreaterThan(left!.width * 3)
   })
 
+  it('lets a text take the width it needs before a Spacer takes the rest, as the simulator does', () => {
+    // The iOS 27 simulator draws "A label that is longer than half of the row" on one
+    // line beside a Spacer: the Spacer is no equal partner in the row.
+    const label = 'a label that is longer than half of the row'
+    const wide = sizeOf(text(label), Number.POSITIVE_INFINITY, 50).width
+    const [line] = frames(layout(hstack([text(label), spacer('horizontal')]), { x: 0, y: 0, width: wide * 1.5, height: 50 }))
+    expect(line!.width).toBeCloseTo(wide, 1)
+    expect(line!.height).toBe(FONT.lineHeight)
+  })
+
+  it('keeps back only its minimum length from a text too long for the row', () => {
+    const label = 'a label far too long to fit in the row it is given, however it wraps'
+    const placed = layout(hstack([text(label), spacer('horizontal', 8)]), { x: 0, y: 0, width: 120, height: 200 })
+    const [line] = frames(placed)
+    expect(line!.width).toBeLessThanOrEqual(120 - 8)
+    expect(line!.width).toBeGreaterThan(120 / 2)
+  })
+
   it('splits remaining space between two spacers', () => {
     const row = modified(
       hstack([spacer('horizontal'), text('mid'), spacer('horizontal')]),
