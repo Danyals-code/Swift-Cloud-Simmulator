@@ -90,8 +90,15 @@ const KB = 1024
  *              40-50 KB, and a ceiling every PR has to argue past stops anyone
  *              reading it. 730 KB covers that estimate with little over, so an
  *              addition the plan did not foresee still stands out.
+ *   Pilot fixes - 731.2 KB actual. PR-D2 left the plan's allowance at 729.4 KB,
+ *              and the fixes the pilot rehearsal and the test of the studio's own
+ *              AI found (taps through swipe rows, Add into AI screens, the text,
+ *              bar and list layout measured in the iOS 27 simulator) added 1.8.
+ *              Raised to 740 KB by decision: these were the additions the plan
+ *              did not foresee, and they belong in the study build. 740 KB
+ *              leaves room for the fix round after the pilot and no more.
  */
-const BUDGET_KB = 730
+const BUDGET_KB = 740
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.
