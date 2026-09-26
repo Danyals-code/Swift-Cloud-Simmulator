@@ -32,6 +32,37 @@ test('the exported screen images are drawn at their full size (G8)', async ({ pa
   }
 })
 
+test('a text field\'s placeholder is as light in the exported screen as in the preview', async ({ page }) => {
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, `import SwiftUI
+@main struct CounterApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    @State private var name = ""
+    var body: some View {
+        TextField("Placeholder", text: $name)
+            .padding(24)
+    }
+}
+`)
+  const field = page.getByTestId('render-tree').getByPlaceholder('Placeholder', { exact: true })
+  await expect(field).toBeVisible()
+  expect(await field.evaluate(input => getComputedStyle(input, '::placeholder').color)).toBe('rgba(60, 60, 67, 0.3)')
+  await page.getByTestId('workspace-design').click()
+
+  const download = await exportComplete(page)
+
+  const [, bytes] = Object.entries(await entriesOf(download)).find(([path]) => /\/Studio Report\/Screens\/[^/]+\.png$/.test(path))!
+  const png = PNG.sync.read(Buffer.from(bytes))
+  // The placeholder is the only ink on the screen, and where it covers a pixel whole
+  // it is iOS's placeholder colour over white: 60, 60, 67 at 30% makes 197, 197, 199.
+  // Drawn black, or as strong as a label, it went far darker.
+  let darkest = 255
+  for (let i = 0; i < png.data.length; i += 4) darkest = Math.min(darkest, png.data[i]!, png.data[i + 1]!)
+  expect(darkest).toBeGreaterThanOrEqual(190)
+  expect(darkest).toBeLessThan(215)
+})
+
 test('the Export button still downloads the project while its code has an error (G6)', async ({ page }) => {
   await openCounter(page)
   await page.getByTestId('workspace-develop').click()

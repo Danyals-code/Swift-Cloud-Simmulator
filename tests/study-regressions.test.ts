@@ -1052,6 +1052,27 @@ describe('pilot rehearsal: a line of text is as tall as in the iOS 27 simulator'
   })
 })
 
+describe('pilot rehearsal: a text field\'s placeholder is as light as in the iOS 27 simulator', () => {
+  const field = (r: CompileResult, placeholder: string) =>
+    r.renderTree!.nodes.find(n => n.hitTarget?.role === 'textField' && n.hitTarget.placeholder === placeholder)!.hitTarget!
+
+  it.each([
+    ['light', { r: 60, g: 60, b: 67, a: 0.3 }],
+    ['dark', { r: 235, g: 235, b: 245, a: 0.3 }],
+  ] as const)('draws the placeholder in iOS\'s placeholder colour in %s mode', (colorScheme, color) => {
+    const r = runView(`@State private var name = ""
+      var body: some View { Form { TextField("Your name", text: $name); SecureField("Password", text: $name) } }`, '', { colorScheme })
+    expect(field(r, 'Your name').placeholderColor).toEqual(color)
+    expect(field(r, 'Password').placeholderColor).toEqual(color)
+  })
+
+  it('keeps a search field\'s prompt as strong as its magnifying glass', () => {
+    const r = runView(`@State private var query = ""
+      var body: some View { NavigationStack { List { Text("Row") }.searchable(text: $query) } }`)
+    expect(field(r, 'Search').placeholderColor).toEqual({ r: 60, g: 60, b: 67, a: 0.6 })
+  })
+})
+
 describe('E11a: the Foundation the AI writes around its views: Timer, Calendar and formatted dates', () => {
   /** Noon UTC on 9 September 2001: the same calendar day in every time zone from UTC-11 to UTC+11. */
   const noon = 'Date(timeIntervalSince1970: 1_000_036_800)'

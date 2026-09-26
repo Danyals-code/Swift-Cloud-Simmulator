@@ -1160,7 +1160,9 @@ class Converter {
         ...(view?.contextMenuPath ? { contextMenuHandlerId: handlerIdFor(`${view.contextMenuPath}/context-menu`) } : {}),
         ...(role === 'textField' && view ? this.inputOptions(view, path) : {}),
         ...(role === 'slider' ? { color: this.color('accentColor'), thumbDiameter: CONTROL_PARTS.slider.thumb } : {}),
-        ...(role === 'textField' ? { inputInset: this.styles.textField === 'roundedBorder' ? CONTROL_PARTS.field.insetX : 0, placeholderColor: this.color('secondaryLabel') } : {}),
+        // A field's placeholder is iOS's placeholder colour, half as strong as a search
+        // field's prompt, which matches the magnifying glass beside it.
+        ...(role === 'textField' ? { inputInset: this.styles.textField === 'roundedBorder' ? CONTROL_PARTS.field.insetX : 0, placeholderColor: this.color(view ? 'placeholderText' : 'secondaryLabel') } : {}),
         ...(role === 'button' ? { cornerRadius: this.styles.buttonBorderShape === 'roundedRectangle' ? this.appearance.button.roundedRectangleRadius : this.appearance.button.cornerRadius } : {}),
         ...(role === 'textField' ? { color: resolveColorArg(view?.modifiers.find((m) => m.name === 'foregroundStyle' || m.name === 'foregroundColor')?.args[0]?.value, this.scheme, this.styles.tint) ?? this.color('primary') } : {}),
       },
