@@ -28,6 +28,17 @@
         "details"
       ],
       "scope": "15 supplied iPhone 18 Pro images; light/dark; text size inferred; runtime build not embedded"
+    },
+    {
+      "manifest": "native/iphone18pro-under-bars/measurements.json",
+      "fixture": "tests/fixtures/ios27-under-bars.swift",
+      "states": [
+        "content under large and inline titles",
+        "list sections with and without headers and footers",
+        "search in the bar's drawer",
+        "forms in sheets"
+      ],
+      "scope": "29 iPhone 18 Pro simulator captures, iOS 27.0, light, default text size; the sheets are measured but not yet matched"
     }
   ],
   "nativeMeasurements": "native/iphone18pro-light/measurements.json",

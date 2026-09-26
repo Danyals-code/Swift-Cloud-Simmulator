@@ -164,7 +164,7 @@ export const IOS_27 = {
     control: { top: 8, bottom: 8, leading: 8, trailing: 8 },
     image: { top: 6, bottom: 6, leading: 6, trailing: 6 },
   },
-  metrics: { padding: 16, spacerMinimum: 8, labelGap: 6, controlGap: 8, navigationBar: 54, largeTitle: 48, tabBar: 49, row: 44, rowInset: 16, separator: 0.5, stackSpacing: 8 },
+  metrics: { padding: 16, spacerMinimum: 8, labelGap: 6, controlGap: 8, navigationBar: 54, largeTitle: 52, tabBar: 49, row: 44, rowInset: 16, separator: 0.5, stackSpacing: 8 },
   button: { automatic: { content: 'borderless', list: 'borderless', form: 'borderless', toolbar: 'glass' }, paddingVertical: 7, paddingHorizontal: 14, cornerRadius: 999, roundedRectangleRadius: 8 },
   switch: CONTROL_PARTS.switch,
   materials: {

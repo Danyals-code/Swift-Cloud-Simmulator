@@ -128,6 +128,11 @@ is served from the application root, like the existing root-based app routes.
   controls keep compact fonts while page content grows with Dynamic Type. The search
   drawer uses a neutral fill, and disappears with its scrolling content. The collapsed
   navigation background uses simple blur.
+- A large-title bar is 106 pt below the status bar, so content under it starts at 168 pt
+  on iPhone 18 Pro, as in the iOS 27 simulator. A grouped list puts a first section
+  without a header 35 pt down, or right under a large title or a search drawer; a header
+  has 10 pt above and below its text. The measurements are in
+  `docs/parity/native/iphone18pro-under-bars`.
 - Both ordinary `Tab(...)` and existing `.tabItem` declarations work with selection
   bindings. Phone tabs float near the bottom; regular-width tabs use a narrower top
   surface. Selection uses a neutral rounded background, a tinted filled icon, and the same

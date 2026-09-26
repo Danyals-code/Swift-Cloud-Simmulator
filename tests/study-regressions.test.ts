@@ -1073,6 +1073,53 @@ describe('pilot rehearsal: a text field\'s placeholder is as light as in the iOS
   })
 })
 
+describe('pilot rehearsal: content starts under a bar, and a list spaces its sections, as in the iOS 27 simulator', () => {
+  const root = new URL('../docs/parity/native/iphone18pro-under-bars/', import.meta.url)
+  const manifest = JSON.parse(readFileSync(new URL('measurements.json', root), 'utf8'))
+  const fixture = readFileSync(new URL('./fixtures/ios27-under-bars.swift', import.meta.url), 'utf8')
+  const measured = manifest.measured
+
+  it('keeps the captures and the fixture they were made from', () => {
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe(manifest.fixtureSha256)
+    for (const capture of manifest.captures) {
+      expect(createHash('sha256').update(readFileSync(new URL(capture.file, root))).digest('hex'), capture.file).toBe(capture.sha256)
+    }
+  })
+
+  /** The fixture's screen of that name, drawn on iPhone 18 Pro, and a node's place on it. */
+  function drawn(name: string) {
+    const body = fixture.match(new RegExp(`case "${name}":\\n\\s+(.+)\\n`))![1]
+    const helpers = fixture.slice(fixture.indexOf('struct Band'), fixture.indexOf('struct RootView'))
+    const all = nodes(screen(`var body: some View { ${body} }`, helpers))
+    return { all, at: (node: RenderNode) => worldFrame(all, node) }
+  }
+  const cardTops = ({ all, at }: ReturnType<typeof drawn>) => all.filter(n => /s\d+bgf$/.test(n.id)).map(n => at(n).y)
+
+  it.each(Object.entries(measured.contentTop as Record<string, number>))('starts the content of %s at %d pt', (name, top) => {
+    const screen = drawn(name)
+    expect(screen.at(screen.all.find(n => n.kind === 'shape')!).y).toBeCloseTo(top, 1)
+  })
+
+  it.each([
+    'list-large', 'list-large-header', 'list-large-two', 'list-large-two-headers', 'list-large-footer-plain', 'list-large-footer-header',
+    'list-large-spacing', 'list-large-spacing-headers',
+    'list-inline', 'list-inline-header', 'list-bare', 'list-bare-header', 'list-plain-large-headers', 'list-grouped-large-header',
+    'list-grouped-large', 'form-large-header', 'tab-list-large',
+  ])('puts the cards of %s where the simulator does', name => {
+    const tops = cardTops(drawn(name)), expected = measured.lists[name].cards.map(([top]: number[]) => top)
+    expect(tops).toHaveLength(expected.length)
+    tops.forEach((top, i) => expect(top, `card ${i + 1}`).toBeCloseTo(expected[i], 0))
+  })
+
+  // With the search field always in the bar's drawer, iOS 27 draws the title inline and
+  // the preview a large title, so the first card is measured from the field above it.
+  it.each(['list-drawer', 'list-drawer-header'])('puts the first card of %s as far below the search field as the simulator does', name => {
+    const screen = drawn(name), field = screen.at(screen.all.find(n => n.id.endsWith('surface-fill'))!)
+    const { searchField: [, fieldBottom], cards: [[top]] } = measured.lists[name]
+    expect(cardTops(screen)[0]! - (field.y + field.height)).toBeCloseTo(top - fieldBottom, 0)
+  })
+})
+
 describe('E11a: the Foundation the AI writes around its views: Timer, Calendar and formatted dates', () => {
   /** Noon UTC on 9 September 2001: the same calendar day in every time zone from UTC-11 to UTC+11. */
   const noon = 'Date(timeIntervalSince1970: 1_000_036_800)'
@@ -1164,6 +1211,8 @@ describe('E12: what a GeometryReader reports, where it is placed', () => {
     ['geo-root', (reader: string) => reader],
     ['geo-ignoring', (reader: string) => `${reader}.ignoresSafeArea()`],
     ['geo-padded', (reader: string) => `VStack { ${reader} }.padding()`],
+    ['geo-nav', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title") }`],
+    ['geo-inline', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title").navigationBarTitleDisplayMode(.inline) }`],
   ])('reports what the simulator reports on its %s screen', (name, place) => {
     expect(reads(place)).toEqual(expected(name))
   })
@@ -1185,22 +1234,15 @@ describe('E12: what a GeometryReader reports, where it is placed', () => {
     expect(texts(r)).toContain([drawn.width, drawn.height, drawn.x, drawn.y].map(Math.round).join(' '))
   })
 
-  // Under a bar the preview's own bars stand in for iOS's, which are not quite the same
-  // height (a large title ends at 164, not 168), so the edge under the bar is checked by
-  // how the simulator's inset there relates to where its reader was, and the other edge
-  // as measured (geo-nav, geo-inline, geo-tab).
-  it.each([
-    ['geo-nav', 'top', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title") }`],
-    ['geo-inline', 'top', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title").navigationBarTitleDisplayMode(.inline) }`],
-    ['geo-tab', 'bottom', (reader: string) => `TabView { ${reader}.tabItem { Label("One", systemImage: "house") } }`],
-  ] as const)('reports what the simulator reports on its %s screen, from the preview\'s own %s bar', (name, barEdge, place) => {
-    const measured = expected(name)
-    const drawn = reads(place)
-    const other = barEdge === 'top' ? 'bottom' : 'top'
-    /** How far the inset under the bar is from the reader's distance to that screen edge. */
-    const offBy = (insets: { top: number; bottom: number }, [, y, , height]: readonly number[]) =>
-      barEdge === 'top' ? insets.top - y! : insets.bottom - (874 - y! - height!)
-    expect(drawn.insets[other]).toBe(measured.insets[other])
+  // Over a tab bar the preview's own bar stands in for iOS's, which is not quite the same
+  // height, so the inset over it is checked by how it relates to where the reader was, and
+  // the top inset as measured (geo-tab).
+  it('reports what the simulator reports on its geo-tab screen, from the preview\'s own tab bar', () => {
+    const measured = expected('geo-tab')
+    const drawn = reads(reader => `TabView { ${reader}.tabItem { Label("One", systemImage: "house") } }`)
+    /** How far the inset over the bar is from the reader's distance to the bottom of the screen. */
+    const offBy = (insets: { bottom: number }, [, y, , height]: readonly number[]) => insets.bottom - (874 - y! - height!)
+    expect(drawn.insets.top).toBe(measured.insets.top)
     expect(offBy(drawn.insets, drawn.global)).toBe(offBy(measured.insets, measured.global))
   })
 })

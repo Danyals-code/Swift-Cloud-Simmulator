@@ -1,5 +1,5 @@
-import { prependSearch } from './containers/screen'
-import { buildList } from './containers/list'
+import { mapPrimaryScroll, prependSearch } from './containers/screen'
+import { buildList, startListAtTop } from './containers/list'
 import { SURFACES, listAppearance } from './appearance/surfaces'
 import { controlMetrics, CONTROL_PARTS } from './appearance/controls'
 import { controlFont, switchControl } from './controls/primitives'
@@ -122,11 +122,11 @@ export interface ConversionResult {
 }
 
 /**
- * Where a search field is drawn: at the top of the content, as in the drawer under the
+ * Where a search field is drawn: at the top of an iPad's content; in the drawer under the
  * title; in an iPad's toolbar; or at the bottom of a phone's screen, in a glass capsule
  * on the tab bar's line.
  */
-type SearchPlacement = 'top' | 'toolbar' | 'bottom'
+type SearchPlacement = 'top' | 'drawer' | 'toolbar' | 'bottom'
 
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
@@ -288,15 +288,16 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
       ? { element: converter.searchField(ui.search, 'bottom'), placement: 'bottom' as const, height: TAB_BAR_HEIGHT }
       : { element: converter.searchField(ui.search, 'top'), placement: 'top' as const, height: SURFACES.search.height + 12 }
     : undefined
-  const content = ui.search && drawerSearch
-    ? prependSearch(joinRoot(body, 'vertical'), converter.searchField(ui.search, 'top'))
-    : joinRoot(body, 'vertical')
+  // Under a large title or a search field in the bar's drawer, iOS 27 starts a list's first
+  // section right below them.
+  const root = ui.navigationBar?.large || drawerSearch ? mapPrimaryScroll(joinRoot(body, 'vertical'), startListAtTop) : joinRoot(body, 'vertical')
+  const content = ui.search && drawerSearch ? prependSearch(root, converter.searchField(ui.search, 'drawer')) : root
 
   const navigationBar = ui.navigationBar
     ? {
         element: converter.navigationBar(ui.navigationBar, toolbarSearch),
         large: ui.navigationBar.large,
-        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 7) : 0),
+        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 11) : 0),
       }
     : null
 
@@ -3280,7 +3281,9 @@ class Converter {
     }
     return {
       kind: 'modified', id: `${path}outer`,
-      modifier: { kind: 'padding', insets: placement === 'toolbar' ? ZERO_INSETS : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
+      modifier: { kind: 'padding', insets: placement === 'toolbar' ? ZERO_INSETS
+        : placement === 'drawer' ? insets(0, SURFACES.search.margin, SURFACES.search.drawerBottom, SURFACES.search.margin)
+        : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
       child: { kind: 'modified', id: `${path}round`, modifier: { kind: 'cornerRadius', radius: SURFACES.search.radius, style: 'circular' }, child: surface },
     }
   }

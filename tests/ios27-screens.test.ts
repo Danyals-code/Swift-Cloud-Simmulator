@@ -89,9 +89,9 @@ describe('screen composition', () => {
     const r = run('NavigationStack { List { Text("Row") }.navigationTitle("Library") }')
     const tree = r.renderTree!, scroll = tree.nodes.find(n => n.scroll)!
     expect(scroll.frame.y).toBe(phone.safeArea.top + 54)
-    expect(scroll.scroll!.contentInsets!.top).toBe(48)
-    expect(world(tree, text(r, 'Row')).y).toBeGreaterThan(phone.safeArea.top + 102)
-    expect(tree.chrome).toEqual({ scrollId: scroll.id, collapseDistance: 48 })
+    expect(scroll.scroll!.contentInsets!.top).toBe(52)
+    expect(world(tree, text(r, 'Row')).y).toBeGreaterThan(phone.safeArea.top + 106)
+    expect(tree.chrome).toEqual({ scrollId: scroll.id, collapseDistance: 52 })
     expect(tree.nodes.find(n => n.id === 'navbar-title')!.chromeRole).toBe('inlineTitle')
   })
   it('keeps explicit drawer search in the primary scroller', () => {

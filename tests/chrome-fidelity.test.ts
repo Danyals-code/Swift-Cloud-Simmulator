@@ -787,8 +787,10 @@ describe('inset grouped sections', () => {
     expect(cards[1]!.frame.y - (cards[0]!.frame.y + cards[0]!.frame.height)).toBeGreaterThan(8)
   })
 
-  it('keeps the profile top margin above the first card', () => {
-    expect(sectionCards(TWO_SECTIONS)[0]!.frame.y - device.safeArea.top).toBe(10)
+  // With no bar above it, iOS 27 puts a first section without a header 35 pt down, as
+  // far as the gap between two such sections (iphone18pro-under-bars, list-bare).
+  it('puts the first card as far below the top as iOS 27 does', () => {
+    expect(sectionCards(TWO_SECTIONS)[0]!.frame.y - device.safeArea.top).toBe(35)
   })
 
   /**
