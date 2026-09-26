@@ -1073,6 +1073,24 @@ describe('pilot rehearsal: a text field\'s placeholder is as light as in the iOS
   })
 })
 
+describe('pilot rehearsal: a full-height sheet is drawn where the iOS 27 simulator draws it', () => {
+  const sheetOnStack = native.presentations['sheet-on-stack']
+
+  it('runs the sheet from under the status bar to the bottom, the width of the screen', () => {
+    const r = screen('var body: some View { NavigationStack { Text("Root").navigationTitle("Home") }.sheet(isPresented: .constant(true)) { Text("Sheet") } }')
+    const sheet = nodes(r).find(n => n.id === 'overlay-surface')!
+    expect(sheet.frame).toEqual({ x: sheetOnStack.sheetLeftRightAtY450[0], y: sheetOnStack.sheetTopYPt, width: sheetOnStack.sheetLeftRightAtY450[1], height: 874 - sheetOnStack.sheetTopYPt })
+    // Its content fills the sheet down to the home indicator, and a lone text is in its middle.
+    const text = worldFrame(nodes(r), nodes(r).find(n => n.text?.runs[0]?.text === 'Sheet')!)
+    expect(text.y + text.height / 2).toBeCloseTo(sheetOnStack.text[0].centreYPt, 0)
+  })
+
+  it('keeps a medium sheet floating in from the edges, as measured', () => {
+    const r = screen('var body: some View { Text("Home").sheet(isPresented: .constant(true)) { Text("Sheet").presentationDetents([.medium]) } }')
+    expect(nodes(r).find(n => n.id === 'overlay-surface')!.frame).toMatchObject({ x: 8, width: 386 })
+  })
+})
+
 describe('pilot rehearsal: content starts under a bar, and a list spaces its sections, as in the iOS 27 simulator', () => {
   const root = new URL('../docs/parity/native/iphone18pro-under-bars/', import.meta.url)
   const manifest = JSON.parse(readFileSync(new URL('measurements.json', root), 'utf8'))
@@ -1109,6 +1127,10 @@ describe('pilot rehearsal: content starts under a bar, and a list spaces its sec
     const tops = cardTops(drawn(name)), expected = measured.lists[name].cards.map(([top]: number[]) => top)
     expect(tops).toHaveLength(expected.length)
     tops.forEach((top, i) => expect(top, `card ${i + 1}`).toBeCloseTo(expected[i], 0))
+  })
+
+  it.each(['sheet-form-bare', 'sheet-form-inline', 'sheet-form-header-inline', 'sheet-form-large'])('puts the first card of %s where the simulator does', name => {
+    expect(cardTops(drawn(name))[0]).toBeCloseTo(measured.sheets[name].cards[0][0], 0)
   })
 
   // With the search field always in the bar's drawer, iOS 27 draws the title inline and

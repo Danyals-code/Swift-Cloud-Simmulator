@@ -543,7 +543,7 @@
       }
     },
     "sheets": {
-      "note": "Not matched by the preview yet. At the large detent a sheet runs from 62 pt, the width of the screen, and its bars are taller than a screen’s: an inline bar ends at 132 and a large one at 184.",
+      "note": "At the large detent a sheet runs from 62 pt, the width of the screen, with its content at its top edge, and its bars are 16 pt taller than a screen’s: an inline bar ends at 132 and a large one at 184.",
       "sheet-form-inline": {
         "cards": [
           [

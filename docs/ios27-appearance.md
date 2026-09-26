@@ -131,8 +131,10 @@ is served from the application root, like the existing root-based app routes.
 - A large-title bar is 106 pt below the status bar, so content under it starts at 168 pt
   on iPhone 18 Pro, as in the iOS 27 simulator. A grouped list puts a first section
   without a header 35 pt down, or right under a large title or a search drawer; a header
-  has 10 pt above and below its text. The measurements are in
-  `docs/parity/native/iphone18pro-under-bars`.
+  has 10 pt above and below its text. A sheet at its large detent runs from under the
+  status bar, the width of the screen, with its content at its top edge and its bar
+  16 pt taller than a screen's; a sheet at a smaller detent floats 8 pt in from the
+  edges. The measurements are in `docs/parity/native/iphone18pro-under-bars`.
 - Both ordinary `Tab(...)` and existing `.tabItem` declarations work with selection
   bindings. Phone tabs float near the bottom; regular-width tabs use a narrower top
   surface. Selection uses a neutral rounded background, a tinted filled icon, and the same

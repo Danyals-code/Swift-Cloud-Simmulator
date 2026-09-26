@@ -482,13 +482,6 @@ Listed in the exported README so nothing is a surprise on the Mac:
     merged into the latest, so a heavy screen keeps up. `.onChange(of:)` then runs once
     for the merge, where iOS runs it for each change. Nothing typed is lost: a field shows
     what was typed until the app has answered it, then the app's value.
-30. **A full-height sheet is drawn floating, and its content lower.** In the iOS 27
-    simulator a sheet at the large detent runs from 62 pt, the width of the screen, with
-    its content right at its top, and its bars are taller than a screen's: an inline bar
-    ends at 132 and a large one at 184. The preview draws it 8 pt in from each side, from
-    72 and with 10 pt above its content, so what is in it starts about 20 pt lower than on
-    iOS, or 6 pt lower under a bar (docs/parity/native/iphone18pro-under-bars, the sheet
-    screens).
 
 ## The strictness pass (R5)
 

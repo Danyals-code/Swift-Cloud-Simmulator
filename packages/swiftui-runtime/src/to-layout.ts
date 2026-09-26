@@ -1,5 +1,6 @@
 import { mapPrimaryScroll, prependSearch } from './containers/screen'
 import { buildList, startListAtTop } from './containers/list'
+import { attachedSheet, sheetContentTop } from './containers/sheet'
 import { SURFACES, listAppearance } from './appearance/surfaces'
 import { controlMetrics, CONTROL_PARTS } from './appearance/controls'
 import { controlFont, switchControl } from './controls/primitives'
@@ -302,6 +303,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     : null
 
   const tabBar = ui.tabBar ? converter.tabBar(ui.tabBar) : null
+  const attached = !!ui.overlay && attachedSheet(ui.overlay, options.viewportWidth ?? 393)
 
   const overlay = ui.overlay
     ? {
@@ -318,7 +320,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
         ...(ui.overlay.background ? { background: resolveFillArg(ui.overlay.background, scheme) ?? undefined } : {}),
         ...(MATERIALS[tokenName(ui.overlay.background) ?? ''] ? { material: { ...MATERIALS[tokenName(ui.overlay.background)!]!, light: scheme === 'light' } } : {}),
         ...(ui.overlay.screen && ['sheet', 'cover', 'popover'].includes(ui.overlay.kind) ? {
-          screen: screenToLayout({ ...ui, ...ui.overlay.screen }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : ui.overlay.showsDragIndicator !== false ? 10 : 12 } }),
+          screen: screenToLayout({ ...ui, ...ui.overlay.screen }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' || attached ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : sheetContentTop(ui.overlay, attached, !!ui.overlay.screen.navigationBar) } }),
         } : {}),
       }
     : null

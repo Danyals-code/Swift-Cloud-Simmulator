@@ -17,7 +17,9 @@ export const SURFACES = {
   // simulator (docs/parity/native/iphone18pro-misrenders).
   // In the bar's drawer the field sits right under the title, 10 pt above what follows.
   search: { height: 44, radius: 22, margin: 16, bottom: 6, drawerBottom: 10, capsuleHeight: 48, capsuleMargin: 28 },
-  sheet: { radius: 34, margin: 8, top: 10, maxWidth: 640, grabberWidth: 58, grabberHeight: 4 },
+  // A sheet at its large detent is attached to the screen's edges instead, with its bar
+  // `barTop` below its top edge (see containers/sheet.ts).
+  sheet: { radius: 34, margin: 8, top: 10, barTop: 16, maxWidth: 640, grabberWidth: 58, grabberHeight: 4 },
   alert: { width: 320, radius: 34, buttonHeight: 48, margin: 24 },
   menu: { width: 280, radius: 24, row: 44, margin: 12 },
 } as const

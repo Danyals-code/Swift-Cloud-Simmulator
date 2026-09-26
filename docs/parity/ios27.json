@@ -38,7 +38,7 @@
         "search in the bar's drawer",
         "forms in sheets"
       ],
-      "scope": "29 iPhone 18 Pro simulator captures, iOS 27.0, light, default text size; the sheets are measured but not yet matched"
+      "scope": "29 iPhone 18 Pro simulator captures, iOS 27.0, light, default text size"
     }
   ],
   "nativeMeasurements": "native/iphone18pro-light/measurements.json",
