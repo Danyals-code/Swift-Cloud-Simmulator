@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { RenderTreeView } from '@studio/swiftui-render-dom'
+import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
 import { placeholderWords, rgba, shapePath, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES, buildAuthoringModel } from '@studio/swift-sema'
@@ -2736,5 +2736,27 @@ enum Theme { static let accent = Color("Brand") }` }] })
     VStack { Button("Delete") { }.tint(.red) }
   }
 }`)).toBeUndefined()
+  })
+})
+
+describe('pilot B8: the symbols the AI apps drew, as look-alikes of iOS 27\'s', () => {
+  // Apple's artwork cannot ship on the web, so each is drawn here after the iOS 27
+  // simulator's glyph, checked beside it: 14 were another shape (a mug for a cup and
+  // saucer, a drop for a flame, an open book for a closed one) and 3 were the "?" box.
+  const drawn = ['cup.and.saucer.fill', 'flame.fill', 'suitcase', 'waveform', 'arrow.uturn.backward', 'book.closed', 'chart.bar', 'chart.line.uptrend.xyaxis', 'thermometer', 'leaf.fill', 'chart.pie', 'square.grid.2x2', 'square.and.pencil', 'photo', 'chart.bar.fill', 'mug.fill', 'square.and.pencil.circle']
+
+  it.each(drawn)('draws %s as a shape of its own', name => {
+    const asset = symbolAsset(name)
+
+    expect(asset).not.toBeNull()
+    expect(asset!.source).toBe('fallback')
+  })
+
+  it.each(['chart.pie', 'square.grid.2x2', 'chart.bar', 'suitcase', 'book.closed'])('draws %s in outline, as iOS does', name => {
+    expect(symbolAsset(name)!.body).not.toContain('fill="currentColor"')
+  })
+
+  it('gives the cup and saucer the width of its saucer', () => {
+    expect(symbolAsset('cup.and.saucer.fill')!.viewBox).toBe('-40 0 592 512')
   })
 })
