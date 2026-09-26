@@ -1979,3 +1979,41 @@ describe('pilot: an `else if` in a view body', () => {
     expect(path('Ready')).toEqual(['ContentView', 'VStack', 'Condition', 'Otherwise', 'Condition', 'Otherwise', 'Text'])
   })
 })
+
+describe('pilot: a button takes the foreground style it is given, as iOS 27 draws it', () => {
+  const buttons = () => runView(`var body: some View {
+      NavigationStack {
+        VStack {
+          Button("White") {}.foregroundStyle(.white).background(Color.blue)
+          Button("Red") {}.foregroundStyle(.red)
+          Button("Colour") {}.foregroundColor(.red)
+          Button("Borderless") {}.buttonStyle(.borderless).foregroundStyle(.red)
+          Button("Bordered") {}.buttonStyle(.bordered).foregroundStyle(.red)
+          Button("Prominent") {}.buttonStyle(.borderedProminent).foregroundStyle(.red)
+          VStack { Button("Inherited") {} }.foregroundStyle(.red)
+          Button("Tinted") {}.tint(.green).foregroundStyle(.red)
+          Button("Delete", role: .destructive) {}.foregroundStyle(.orange)
+          NavigationLink("Link") { Text("Next") }.foregroundStyle(.orange)
+          Button("Unstyled") {}
+          NavigationLink("Unstyled link") { Text("Next") }
+        }
+      }
+    }`)
+  const colour = (r: CompileResult, label: string) => nodes(r).find(n => n.text?.runs.some(run => run.text === label))!.text!.runs[0]!.color
+
+  it('draws the title white on a background, where it was the accent on the accent', () => {
+    expect(colour(buttons(), 'White')).toEqual({ r: 255, g: 255, b: 255, a: 1 })
+  })
+
+  it('lets the foreground style win over the tint, whatever the style, the role or where it is set', () => {
+    const r = buttons()
+    for (const label of ['Red', 'Colour', 'Borderless', 'Bordered', 'Prominent', 'Inherited', 'Tinted']) expect(colour(r, label), label).toEqual(colorForName('red'))
+    for (const label of ['Delete', 'Link']) expect(colour(r, label), label).toEqual(colorForName('orange'))
+  })
+
+  it('keeps the accent for a button or link given no foreground style', () => {
+    const r = buttons()
+    expect(colour(r, 'Unstyled')).toEqual({ r: 0, g: 136, b: 255, a: 1 })
+    expect(colour(r, 'Unstyled link')).toEqual({ r: 0, g: 136, b: 255, a: 1 })
+  })
+})

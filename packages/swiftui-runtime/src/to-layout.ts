@@ -391,6 +391,8 @@ interface ControlStyles {
   readonly gauge?: string
   readonly controlSize?: string
   readonly buttonBorderShape?: string
+  /** Whether a `foregroundStyle` or `foregroundColor` is set on this view or one around it, which a button's title takes over its tint. */
+  readonly foregroundSet?: boolean
 }
 
 const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
@@ -423,6 +425,7 @@ function withStyles(outer: ControlStyles, view: ViewValue, scheme: ColorScheme):
   }
   const tint = view.modifiers.find((modifier) => modifier.name === 'tint' || modifier.name === 'accentColor')
   if (tint) next = { ...next, tint: resolveColorArg(tint.args[0]?.value, scheme, outer.tint) ?? undefined }
+  if (view.modifiers.some((modifier) => modifier.name === 'foregroundStyle' || modifier.name === 'foregroundColor')) next = { ...next, foregroundSet: true }
   return next
 }
 
@@ -2255,8 +2258,13 @@ class Converter {
     const style = requested === 'automatic' ? this.appearance.button.automatic[this.styles.container ?? 'content'] : requested
     const tint = this.buttonTint(view)
 
+    // A foreground style set on the button, or on a view around it, is what iOS 27 draws
+    // its title in: over the tint, the role, and the white of a prominent button alike.
+    // Wrapped in the tint here, `.foregroundStyle(.white)` over an accent background
+    // drew the title in the accent, where it could not be seen.
+    const foreground = this.styles.foregroundSet === true
     if (style !== 'bordered' && style !== 'borderedProminent' && style !== 'glass' && style !== 'glassProminent') {
-      if (style === 'plain') return label
+      if (style === 'plain' || foreground) return label
       return {
         kind: 'modified',
         id: `${path}btntint`,
@@ -2277,7 +2285,7 @@ class Converter {
       ? this.appearance.button.roundedRectangleRadius
       : this.appearance.button.cornerRadius
 
-    const tinted: LayoutElement = {
+    const tinted: LayoutElement = foreground ? label : {
       kind: 'modified',
       id: `${path}btncolor`,
       modifier: {
