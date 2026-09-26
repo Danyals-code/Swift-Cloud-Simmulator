@@ -152,16 +152,19 @@
 .previewStatus i[data-state='paused'] { background: var(--color-xc-warn); }
 .codeFooter { display: flex; justify-content: center; padding: 10px; background: var(--color-xc-bar-raised); border-top: 1px solid var(--color-xc-line-soft); }
 @media(max-width:1100px) { .toolbar { gap: 12px; padding: 0 12px; } }
+/* A narrow window, as with the instructions tiled beside the studio, keeps Settings beside
+   the canvas, narrower. Stacked above the canvas, the panel took most of a half-screen
+   window's height and left the phone a few percent of its size. */
 @media(max-width:900px) {
-  .preview[data-expanded='true'] { flex-direction: column; }
   .settingsSplit { display: none; }
-  .properties { order: -1; width: 100%; display: flex; flex-wrap: wrap; border-left: 0; border-bottom: 1px solid var(--color-xc-line); padding: 6px 12px; gap: 8px; flex-shrink: 0; overflow: visible; }
-  .properties > header, .properties h3, .dimensions, .propertySection:last-child { display: none; }
-  .propertySection { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; }
-  .propertyRow { margin: 0; }
-  .propertyRow > span { display: none; }
+  .properties { width: min(var(--settings-width, 300px), 40vw); }
   .toolbar { grid-template-columns: minmax(100px,1fr) auto auto; }
   .modes button { min-width: 50px; padding: 0 8px; }
+}
+/* Too narrow for two columns: Settings goes above the canvas, never more than half its height. */
+@media(max-width:600px) {
+  .preview[data-expanded='true'] { flex-direction: column; }
+  .properties { order: -1; width: 100%; max-height: 50%; border-left: 0; border-bottom: 1px solid var(--color-xc-line); }
 }
 @media(max-width:600px) { .toolbar { height: 58px; gap: 6px; padding: 0 8px; } .project { gap: 2px; } .home { width: 26px; } .projectName { font-size: 13px; } .saveStatus { font-size: 11px; } .share { display: none; } .export { font-size: 13px; padding: 0 8px; } .export > svg { display: none; } .modes button { min-width: 42px; font-size: 13px; padding: 0 5px; } .canvasHeading { padding: 0 16px; } }
 
@@ -188,19 +191,12 @@
 .warningList span button { font-size: 12px; color: var(--color-xc-accent); cursor: pointer; }
 .warningList span button:disabled { color: var(--color-xc-text-3); cursor: default; }
 .canvas[data-fixed='true'] { cursor: default; touch-action: auto; }
-@media(max-width:900px) { .properties > header { display: flex; padding: 0 !important; height: 30px; border: 0; } .properties > header > button[role='tab'] { display: none; } }
 
 .navigatorTabs { gap: 2px; }
 .navigatorTabs button { padding-inline: 6px; }
 .navigatorTabs > button:first-child { width: 26px; padding: 4px; flex-shrink: 0; justify-content: center; }
 
 .designerSettings { padding: 16px 12px; display: grid; gap: 14px; min-width: 0; }
-@media(max-width:900px) {
-  .properties:has(.designerSettings) { display: block; max-height: 45vh; overflow: auto; padding: 0; }
-  .properties > .propertyTabs { display: flex; flex: 0 0 100%; }
-  .designerSettings { width: 100%; padding: 12px 16px; }
-  .designerSettings h3 { display: block; }
-}
 
 /* Destination picking covers the phone so it cannot navigate or change selection. */
 .navigationPickTarget { position: absolute; inset: 0; z-index: 1000002; border: 4px solid transparent; border-radius: 64px; background: rgb(0 0 0 / 12%); cursor: not-allowed; display: flex; align-items: center; justify-content: center; padding: 28px; }
@@ -237,7 +233,6 @@
 /* The settings rail's header: what is selected, and the button that hides the rail. */
 .settingsHeader { height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--color-xc-line-soft); }
 .settingsHeader > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-@media(max-width:900px) { .properties > .settingsHeader { display: flex; flex: 0 0 100%; } }
 
 /* Design's preview environment: one group, applying to every screen at once. */
 .environment { display: flex; align-items: center; gap: 6px; padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--color-xc-line-soft); }
