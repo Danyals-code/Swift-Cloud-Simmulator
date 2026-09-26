@@ -104,7 +104,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `NavigationStack` + `NavigationLink` | 🟡 | 6 | destination/value links work. Bound `NavigationStack(path:)` is not synchronized and now warns |
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
-| `.toolbar` | 🟡 | 6 | leading/trailing items work; keyboard, bottomBar and principal placements warn and are omitted |
+| `.toolbar` | 🟡 | 6 | leading/trailing items work, drawn as iOS 27 draws them: a Label as its icon alone in a 44-pt glass circle, text in a 44-pt capsule, the label colour unless a tint is written, and items side by side in one capsule. A NavigationLink in the toolbar pushes. Keyboard, bottomBar and principal placements warn and are omitted |
 | `TabView` | ✅ | 6 | tab bar with `.tabItem` or `Tab`, bound or unbound selection, pages from `ForEach` selected by their ids, a `TabSection`'s tabs in the bar with the others, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |

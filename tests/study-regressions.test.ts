@@ -2554,3 +2554,87 @@ describe('pilot B6: list rows as iOS 27 draws them', () => {
     for (const [i, line] of lines.slice(1).entries()) expect(line.y - lines[i]!.y).toBeCloseTo(52, 0)
   })
 })
+
+describe('pilot B2: the toolbar as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro. A Label in the toolbar shows its
+  // icon only, at the large image scale, in a 44-pt glass circle. Text sits in a glass
+  // capsule 44 pt tall, 16 pt in for a Button and 10 for a NavigationLink. Items are the
+  // label colour unless a tint is written, and items side by side share one capsule:
+  // 3 pt in at its ends, 10 pt apart, an icon 44 pt wide and text 8 pt in.
+  const bar = (items: string, tint = '', inner = '') => screen(`  var body: some View {
+    NavigationStack {
+      Text("Body")
+        .navigationTitle("Tools")
+        .toolbar {
+${items}
+        }${inner}
+    }${tint}
+  }`)
+  const colorOf = (r: CompileResult, value: string) => nodes(r).find(n => n.text?.runs.some(run => run.text === value))!.text!.runs[0]!.color
+  const glass = (r: CompileResult) => nodes(r).filter(n => n.clip && n.id.includes('glass')).map(n => worldFrame(nodes(r), n)).sort((a, b) => a.x - b.x)
+  const label = colorForName('label')!
+
+  it('draws a Label as its icon alone, in a 44-pt glass circle, in the label colour', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add Item", systemImage: "plus") } }')
+    const icon = nodes(r).find(n => n.image?.symbol === 'plus')!
+
+    expect(texts(r)).not.toContain('Add Item')
+    expect(icon.image!.symbolScale).toBeCloseTo(1.3, 2)
+    expect(icon.image!.color).toEqual(label)
+    expect(glass(r)).toEqual([expect.objectContaining({ x: 342, width: 44, height: 44 })])
+  })
+
+  it('pads a Button\'s text 16 pt and a NavigationLink\'s 10 pt, 44 pt tall, in the label colour', () => {
+    const r = bar(`          ToolbarItem(placement: .topBarLeading) { NavigationLink("Skip") { Text("Next") } }
+          ToolbarItem(placement: .topBarTrailing) { Button("History") { } }`)
+    const [skip, history] = glass(r)
+
+    expect(skip).toMatchObject({ x: 16, height: 44 })
+    expect(skip!.width).toBeCloseTo(placed(r, 'Skip').width + 20, 1)
+    expect(history!.width).toBeCloseTo(placed(r, 'History').width + 32, 1)
+    expect(history!.x + history!.width).toBeCloseTo(386, 1)
+    expect(colorOf(r, 'Skip')).toEqual(label)
+    expect(colorOf(r, 'History')).toEqual(label)
+  })
+
+  it('draws the items in a tint that is written, on the stack or on its content', () => {
+    const teal = colorForName('teal')!
+    const items = `          ToolbarItem(placement: .topBarLeading) { Button("Save") { } }
+          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add", systemImage: "plus") } }`
+
+    for (const r of [bar(items, '\n    .tint(.teal)'), bar(items, '', '\n        .tint(.teal)')]) {
+      expect(colorOf(r, 'Save')).toEqual(teal)
+    }
+    expect(nodes(bar(items, '\n    .tint(.teal)')).find(n => n.image?.symbol === 'plus')!.image!.color).toEqual(teal)
+  })
+
+  it('puts items side by side in one capsule', () => {
+    const r = bar(`          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Settings", systemImage: "gearshape") } }
+          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Share", systemImage: "square.and.arrow.up") } }
+          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Add", systemImage: "plus") } }
+          ToolbarItem(placement: .topBarTrailing) { Button("Edit") { } }
+          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add", systemImage: "plus") } }`)
+    const [icons, mixed] = glass(r)
+
+    expect(glass(r)).toHaveLength(2)
+    expect(icons).toMatchObject({ x: 16, width: 3 + 44 + 10 + 44 + 10 + 44 + 3, height: 44 })
+    expect(mixed!.width).toBeCloseTo(3 + 8 + placed(r, 'Edit').width + 8 + 10 + 44 + 3, 1)
+    expect(mixed!.x + mixed!.width).toBeCloseTo(386, 1)
+  })
+
+  it('draws a NavigationLink to a Label as its icon alone too, as restaurant\'s Cart and pomodoro\'s Settings are written', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { NavigationLink { Text("Cart") } label: { Label("Cart", systemImage: "cart") } }')
+    const icon = nodes(r).find(n => n.image?.symbol === 'cart')!
+
+    expect(texts(r)).not.toContain('Cart')
+    expect(icon.image!.symbolScale).toBeCloseTo(1.3, 2)
+    expect(glass(r)).toEqual([expect.objectContaining({ x: 342, width: 44, height: 44 })])
+  })
+
+  it('pushes a NavigationLink\'s destination when it is tapped in the toolbar', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { NavigationLink("History") { Text("Past sessions") } }')
+
+    expect(controls(r)).toContain('History')
+    expect(texts(tap(r, 'History'))).toContain('Past sessions')
+  })
+})

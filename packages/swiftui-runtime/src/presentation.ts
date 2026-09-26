@@ -1341,7 +1341,9 @@ class Resolver {
     let large = rootMode !== 'inline' && titles[0]!.length > 0
 
     for (const linkPath of pushed) {
-      const link = findByPath(screen, linkPath)
+      // A link in the toolbar pushes as one in the screen does, as `History` does in a
+      // bar's corner.
+      const link = findByPath(screen, linkPath) ?? findByPath(this.toolbarItems(screen, stackId), linkPath)
       const destination = link ? this.destinationFor(link, screen) : null
       if (!destination || destination.length === 0) break
 
@@ -1478,7 +1480,13 @@ class Resolver {
       })
     })
 
-    return { leading, trailing }
+    return { leading: this.attachPushIntents(leading, stackId), trailing: this.attachPushIntents(trailing, stackId) }
+  }
+
+  /** Every item a screen's toolbar holds, for finding a link pushed from it. */
+  private toolbarItems(screen: readonly ViewValue[], stackId: string): ViewValue[] {
+    const { leading, trailing } = this.resolveToolbar(screen, stackId)
+    return [...leading, ...trailing]
   }
 
   // ----------------------------------------------------------------- tabs
