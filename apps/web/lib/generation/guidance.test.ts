@@ -12,6 +12,14 @@ import { STYLE_EXAMPLE, SWIFTUI_GUIDANCE } from './guidance'
 const offered = () => new Set(SWIFTUI_GUIDANCE.match(/SF Symbols[^:]*: ([^\n]+)/)![1]!.split(', '))
 
 describe('the SwiftUI the AI is asked for', () => {
+  it('steers away from date format styles the preview cannot run, to the form it can', () => {
+    expect(SWIFTUI_GUIDANCE).toContain('DateFormatter and .dateTime format styles such as .formatted(.dateTime.month(.wide)) (write date.formatted(date: .abbreviated, time: .omitted))')
+    resetPipelineState()
+    const files = [{ id: 'App.swift', text: 'import SwiftUI\n@main struct DatesApp: App { var body: some Scene { WindowGroup { Text(Date().formatted(date: .abbreviated, time: .omitted)) } } }' }]
+    const preview = compile({ files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1 })
+    expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error').map(log => log.message)]).toEqual([])
+  })
+
   it('offers only SF Symbols the preview draws and Apple ships', () => {
     const symbols = offered()
 
