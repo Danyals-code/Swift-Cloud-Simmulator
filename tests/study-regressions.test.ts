@@ -1041,6 +1041,24 @@ describe('E11a: the Foundation the AI writes around its views: Timer, Calendar a
     expect(texts(r)).toEqual(expect.arrayContaining(['2001-9-9', '3 days', 'today', 'same day']))
   })
 
+  it('asks whether two dates share a month, a year, a day or a week, as a budget totals this month', () => {
+    const r = runView(`let date = ${noon}
+      func later(_ unit: Calendar.Component, _ value: Int) -> Date { Calendar.current.date(byAdding: unit, value: value, to: date)! }
+      var body: some View {
+        VStack {
+          Text(Calendar.current.isDate(date, equalTo: later(.day, 5), toGranularity: .month) ? "same month" : "other month")
+          Text(Calendar.current.isDate(date, equalTo: later(.day, 25), toGranularity: .month) ? "same month" : "other month")
+          Text(Calendar.current.isDate(date, equalTo: later(.month, 2), toGranularity: .year) ? "same year" : "other year")
+          Text(Calendar.current.isDate(date, equalTo: Calendar.current.startOfDay(for: date), toGranularity: .day) ? "same day" : "other day")
+          Text(Calendar.current.isDate(date, equalTo: later(.day, 1), toGranularity: .day) ? "same day" : "other day")
+          Text(Calendar.current.isDate(date, equalTo: later(.day, 6), toGranularity: .weekOfYear) ? "same week" : "other week")
+          Text(Calendar.current.isDate(date, equalTo: later(.day, -1), toGranularity: .weekOfYear) ? "same week" : "other week")
+        }
+      }`)
+    // 9 September 2001 is a Sunday, the first day of its week in the United States calendar.
+    expect(texts(r)).toEqual(['same month', 'other month', 'same year', 'same day', 'other day', 'same week', 'other week'])
+  })
+
   it('formats a date with the parts it is asked for', () => {
     const r = runView(`let date = ${noon}
       var body: some View {

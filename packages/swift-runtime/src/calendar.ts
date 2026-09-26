@@ -65,8 +65,14 @@ export function callCalendarMember(member: string, args: readonly CallArgument[]
     }
     case 'isDate': {
       const a = seconds(arg(0))
-      const b = seconds(labelled('inSameDayAs'))
-      return a === null || b === null ? undefined : bool(startOfDay(a) === startOfDay(b))
+      if (labelled('inSameDayAs') !== undefined) {
+        const b = seconds(labelled('inSameDayAs'))
+        return a === null || b === null ? undefined : bool(startOfDay(a) === startOfDay(b))
+      }
+      // `isDate(_:equalTo:toGranularity:)`: the same month, week or year, as a budget totals this month.
+      const b = seconds(labelled('equalTo'))
+      const period = GRANULARITIES[leadingDotName(labelled('toGranularity'))]
+      return a === null || b === null || !period ? undefined : bool(period(a) === period(b))
     }
     case 'dateComponents': {
       const units = arg(0)?.kind === 'array' ? (arg(0) as { elements: readonly SwiftValue[] }).elements.map(leadingDotName) : []
@@ -110,6 +116,21 @@ const TIME_STYLES: Readonly<Record<string, Intl.DateTimeFormatOptions>> = {
   shortened: { hour: 'numeric', minute: '2-digit' },
   standard: { hour: 'numeric', minute: '2-digit', second: '2-digit' },
   complete: { hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' },
+}
+
+/**
+ * What two dates share when they are equal to a granularity: the start of that period,
+ * in the preview's time zone. Weeks start on Sunday, as they do for the United States
+ * region the simulator starts in.
+ */
+const GRANULARITIES: Readonly<Record<string, (epochSeconds: number) => number>> = {
+  year: (s) => new Date(localParts(s).year, 0, 1).getTime() / 1000,
+  month: (s) => { const p = localParts(s); return new Date(p.year, p.month - 1, 1).getTime() / 1000 },
+  weekOfYear: (s) => adding(startOfDay(s), 'day', 1 - localParts(s).weekday) ?? NaN,
+  day: startOfDay,
+  hour: (s) => { const p = localParts(s); return new Date(p.year, p.month - 1, p.day, p.hour).getTime() / 1000 },
+  minute: (s) => Math.floor(s / 60) * 60,
+  second: Math.floor,
 }
 
 /** The components a `DateComponents` carries here, largest first. */

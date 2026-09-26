@@ -352,7 +352,7 @@ missing without anything saying so.
 | Bitwise `&`, `\|`, `^`, `<<`, `>>` | ✅ | - | computed in `BigInt`, so a shift past 32 bits is not truncated |
 | `UUID` | ✅ | - | random, and prints as its `uuidString` |
 | `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, comparison, `Date.now`. `formatted()` is Foundation's default, a numeric date and a short time, and `formatted(date:time:)` takes the parts it is given. No `DateFormatter` |
-| `Calendar` | 🟡 | - | `Calendar.current`, in the preview's time zone: `component(_:from:)`, `date(byAdding:value:to:)`, `startOfDay(for:)`, `isDateInToday` and its neighbours, `isDate(_:inSameDayAs:)`, and `dateComponents` from one date or between two, largest unit first |
+| `Calendar` | 🟡 | - | `Calendar.current`, in the preview's time zone: `component(_:from:)`, `date(byAdding:value:to:)`, `startOfDay(for:)`, `isDateInToday` and its neighbours, `isDate(_:inSameDayAs:)`, `isDate(_:equalTo:toGranularity:)` by year, month, week (starting on Sunday), day, hour, minute or second, and `dateComponents` from one date or between two, largest unit first |
 | `Timer` | 🟡 | - | `Timer.publish(every:on:in:).autoconnect()` with `.onReceive`, and `Timer.scheduledTimer`, are accepted and never fire: the preview draws one moment, and warns where a timer is made |
 | `URL` | 🟡 | - | `URL(string:)` is failable and the string is kept as written; `absoluteString`, `path`, `host`, `scheme`, `query`, `lastPathComponent`, `pathExtension`, `appendingPathComponent`. Nothing is fetched |
 | `Codable` over JSON | ⬜ | - | listed in Phase 2's scope and never built |
