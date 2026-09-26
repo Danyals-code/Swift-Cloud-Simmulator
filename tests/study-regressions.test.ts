@@ -2364,3 +2364,76 @@ describe('pilot: a number in a title is written as iOS 27 writes it', () => {
     expect(nodes(r).some(n => n.hitTarget?.role === 'textField' && n.hitTarget.placeholder === 'Field 2,000')).toBe(true)
   })
 })
+
+describe('pilot B1: an empty state as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro, and matched pixel for pixel by the
+  // same stack built from plain views: a 40-pt icon in the secondary colour, a bold
+  // title3 title 20 pt below it, the description in title3 3 pt below that, its lines
+  // centred and wrapped 32 pt in from each side, and 30 pt of space under it, the whole
+  // centred in the view.
+  const secondary = colorForName('secondaryLabel')!
+  const empty = (description: string, symbol = 'books.vertical') => screen(`  var body: some View {
+    ContentUnavailableView("No Books", systemImage: "${symbol}", description: Text("${description}"))
+  }`)
+  const textNode = (r: CompileResult, start: string) => nodes(r).find(n => n.text?.runs.some(run => run.text.startsWith(start)))!
+  const frameOf = (r: CompileResult, node: RenderNode) => worldFrame(nodes(r), node)
+  const parts = (r: CompileResult, description: string) => {
+    const icon = nodes(r).find(n => n.image?.symbol)!, title = textNode(r, 'No '), text = textNode(r, description)
+    return { icon, title, text, frames: { icon: frameOf(r, icon), title: frameOf(r, title), text: frameOf(r, text) } }
+  }
+
+  it('draws the icon, the title and the description in the sizes and colours iOS 27 gives them', () => {
+    const { icon, title, text } = parts(empty('Add a book to start your reading list.'), 'Add a book')
+
+    expect(icon.image!.font.size).toBe(40)
+    expect(icon.image!.color).toEqual(secondary)
+    expect(title.text!.runs[0]!.font).toMatchObject({ size: 20, weight: 700 })
+    expect(title.text!.runs[0]!.color).toEqual(colorForName('label'))
+    expect(text.text!.runs[0]!.font).toMatchObject({ size: 20, weight: 400, lineHeight: 25 })
+    expect(text.text!.runs[0]!.color).toEqual(secondary)
+  })
+
+  it('stacks them 20 and 3 pt apart, centred in the screen with 30 pt under the description', () => {
+    const { frames } = parts(empty('Add a book to start your reading list.'), 'Add a book')
+
+    expect(frames.title.y - (frames.icon.y + frames.icon.height)).toBeCloseTo(20, 1)
+    expect(frames.text.y - (frames.title.y + frames.title.height)).toBeCloseTo(3, 1)
+    // The safe area runs from 62 to 840, so its middle is 451.
+    expect((frames.icon.y + frames.text.y + frames.text.height + 30) / 2).toBeCloseTo(451, 1)
+    // Where the simulator puts the title and the description. The icon's box differs by
+    // symbol, 47.2 pt here and 50.33 on the phone, and half of that moves the text.
+    expect(Math.abs(frames.title.y - 445.67)).toBeLessThan(2)
+    expect(Math.abs(frames.text.y - 472.67)).toBeLessThan(2)
+  })
+
+  it('wraps a long description 32 pt in from each side, in centred lines', () => {
+    const { text, frames } = parts(empty('Tap the plus button to add the first book you are reading. It will show up here with your progress and your notes.', 'tray'), 'Tap the plus')
+
+    expect(text.text!.alignment).toBe('center')
+    expect(text.text!.lines!.length).toBeGreaterThan(2)
+    expect(frames.text.x).toBeGreaterThanOrEqual(32)
+    expect(frames.text.x + frames.text.width).toBeLessThanOrEqual(370)
+    expect(frames.text.x + frames.text.width / 2).toBeCloseTo(201, 0)
+  })
+
+  it('keeps the description centred and wrapped under a height limit, above a Form', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      VStack(spacing: 0) {
+        ContentUnavailableView("No Spot Saved", systemImage: "location.fill", description: Text("Enter your level, spot number and a note below, then save."))
+          .frame(maxHeight: 220)
+        Form { Section("Your Spot") { Text("Level") } }
+      }
+      .navigationTitle("Where Did I Park?")
+    }
+  }`)
+    const { text, frames } = parts(r, 'Enter your level')
+
+    expect(text.text!.alignment).toBe('center')
+    expect(text.text!.lines!.length).toBe(2)
+    expect(frames.text.x).toBeGreaterThanOrEqual(32)
+    expect(frames.text.x + frames.text.width).toBeLessThanOrEqual(370)
+    // In the simulator the view is 220 pt tall from y 168, and its group is centred in it.
+    expect((frames.icon.y + frames.text.y + frames.text.height + 30) / 2).toBeCloseTo(168 + 110, 0)
+  })
+})

@@ -3100,27 +3100,32 @@ class Converter {
     const describing = argViews(view, 'description')[0]
     const description = describing ? textIn(describing).join(' ') : ''
 
+    // As the iOS 27 simulator draws it, matched pixel for pixel by the same stack built
+    // from plain views: a 40-pt icon in the secondary colour, a bold title3 title 20 pt
+    // below it, the description in title3 3 pt below that, and 30 pt of space under the
+    // description, where the actions go, there even when there are none. The lines are
+    // centred and wrap 32 pt in from each side, and the whole is centred in the space
+    // the view is given.
     const children: LayoutElement[] = []
+    const after = (gap: number, id: string, child: LayoutElement): LayoutElement =>
+      children.length ? { kind: 'modified', id, modifier: { kind: 'padding', insets: insets(gap, 0, 0, 0) }, child } : child
 
     if (symbol) {
       children.push({
         kind: 'modified',
         id: `${path}iconf`,
-        // 52pt, which is roughly where iOS lands it: large enough to be the thing you
-        // see first, small enough not to become the subject.
-        modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 52 * bodyFont(this.typeScale).size / 17 } },
+        modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 40 * bodyFont(this.typeScale).size / 17 } },
         child: {
           kind: 'modified',
           id: `${path}iconc`,
-          modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
+          modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
           child: this.symbolImage(`${path}icon`, symbol),
         },
       })
     }
-
-    if (title) children.push(this.styledText(`${path}title`, title, 'title2', 'label', 600))
+    if (title) children.push(after(20, `${path}titlegap`, this.styledText(`${path}title`, title, 'title3', 'label', 700)))
     if (description) {
-      children.push(this.styledText(`${path}desc`, description, 'body', 'secondaryLabel'))
+      children.push(after(title ? 3 : 20, `${path}descgap`, this.styledText(`${path}desc`, description, 'title3', 'secondaryLabel')))
     }
 
     return {
@@ -3133,13 +3138,23 @@ class Converter {
         alignment: CENTER,
       },
       child: {
-        kind: 'stack',
-        id: path,
-        axis: 'vertical',
-        spacing: 8,
-        alignment: CENTER,
-        children,
-        ...origin,
+        kind: 'modified',
+        id: `${path}inset`,
+        modifier: { kind: 'padding', insets: insets(0, 32, 30, 32) },
+        child: {
+          kind: 'modified',
+          id: `${path}centred`,
+          modifier: { kind: 'textStyle', alignment: 'center' },
+          child: {
+            kind: 'stack',
+            id: path,
+            axis: 'vertical',
+            spacing: 0,
+            alignment: CENTER,
+            children,
+            ...origin,
+          },
+        },
       },
     }
   }

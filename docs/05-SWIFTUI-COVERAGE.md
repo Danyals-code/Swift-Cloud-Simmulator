@@ -59,7 +59,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
 | `GroupBox` | ✅ | - | a titled card: the label above, the contents on a rounded secondary panel |
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
-| `ContentUnavailableView` | ✅ | 13 | the empty state: a large symbol over a title over a description. `.search` is the stock spelling and carries its own text |
+| `ContentUnavailableView` | ✅ | 13 | the empty state as iOS 27 draws it: a 40-pt symbol in the secondary colour, a bold title3 title, and a title3 description in centred lines 32 pt in from each side, centred with 30 pt of space under it. `.search` is the stock spelling and carries its own text. The form built from content closures, and its actions, are not drawn |
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
 | `ScrollViewReader` | 🟡 | - | what it holds is drawn, and handed a proxy whose `scrollTo` does nothing: there is no channel from the worker to the browser's scroll position. Warns at the reader |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
