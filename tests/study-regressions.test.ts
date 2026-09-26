@@ -1171,8 +1171,8 @@ describe('E11a: the Foundation the AI writes around its views: Timer, Calendar a
     const r = runView(`let date = ${noon}
       var body: some View {
         VStack {
-          Text("\\(Calendar.current.component(.year, from: date))-\\(Calendar.current.component(.month, from: date))-\\(Calendar.current.component(.day, from: date))")
-          Text("\\(Calendar.current.dateComponents([.day], from: date, to: Calendar.current.date(byAdding: .day, value: 3, to: date)!).day ?? 0) days")
+          Text(verbatim: "\\(Calendar.current.component(.year, from: date))-\\(Calendar.current.component(.month, from: date))-\\(Calendar.current.component(.day, from: date))")
+          Text(verbatim: "\\(Calendar.current.dateComponents([.day], from: date, to: Calendar.current.date(byAdding: .day, value: 3, to: date)!).day ?? 0) days")
           Text(Calendar.current.isDateInToday(Date()) ? "today" : "not today")
           Text(Calendar.current.isDate(date, inSameDayAs: Calendar.current.startOfDay(for: date)) ? "same day" : "other day")
         }
@@ -1740,7 +1740,7 @@ describe('F12: containers that hand their content a value draw it', () => {
   })
 
   it('draws a KeyframeAnimator at its initial value', () => {
-    const r = compileView(viewSource('var body: some View { KeyframeAnimator(initialValue: 1.0) { value in Text("Scale \\(value)") } keyframes: { _ in LinearKeyframe(2.0, duration: 1) } }'))
+    const r = compileView(viewSource('var body: some View { KeyframeAnimator(initialValue: 1.0) { value in Text(verbatim: "Scale \\(value)") } keyframes: { _ in LinearKeyframe(2.0, duration: 1) } }'))
     expect(placeholders(r)).toEqual([])
     expect(texts(r)).toEqual(['Scale 1.0'])
     expect(warnings(r)).toEqual([expect.stringContaining('initial value')])
@@ -2274,5 +2274,93 @@ ${content}
     const r = draw(app(`  var count = 0\n  func reset() { count = 0 }\n${steps}\n  func bump() { count += 1 }`, content, order))
 
     expect(texts(r)).toEqual(expect.arrayContaining(['Bump 1', 'Order 4']))
+  })
+})
+
+describe('pilot: a number in a title is written as iOS 27 writes it', () => {
+  // A string literal given as a title is a `LocalizedStringKey`, which writes a number
+  // for the locale: separators, and a Double with six decimals. A String writes it as
+  // Swift does. Every expected text here is the iOS 27 simulator's.
+  const numbers = ['n = 2000', 'big = 1234567', 'neg = -1234', 'small = 7', 'd = 3.5', 'whole = 2.0', 'bigDouble = 1234.5', 'negDouble = -1234.5', 'pi = 3.14159']
+    .map(binding => `    let ${binding}`).join('\n') + `
+    let f: Float = 2.5
+    let cg: CGFloat = 1.5
+    let typed: CGFloat = 3
+    let label = "Var \\(n)"`
+  const drawn = (body: string, declarations = '') => texts(runView(`${numbers}\n  var body: some View {\n${body}\n  }`, declarations))
+
+  it('writes whole numbers with separators and every decimal with six places, in a Text written as a literal', () => {
+    expect(drawn(`    VStack {
+      Text("Int \\(n)")
+      Text("Big \\(big)")
+      Text("Neg \\(neg)")
+      Text("Small \\(small)")
+      Text("Double \\(d)")
+      Text("Whole \\(whole)")
+      Text("Big double \\(bigDouble)")
+      Text("Neg double \\(negDouble)")
+      Text("Float \\(f)")
+      Text("CGFloat \\(cg)")
+      Text("Typed \\(typed)")
+      Text("Mixed \\(n) of \\(d)")
+    }`)).toEqual(['Int 2,000', 'Big 1,234,567', 'Neg -1,234', 'Small 7', 'Double 3.500000', 'Whole 2.000000', 'Big double 1,234.500000',
+      'Neg double -1,234.500000', 'Float 2.500000', 'CGFloat 1.500000', 'Typed 3.000000', 'Mixed 2,000 of 3.500000'])
+  })
+
+  it('applies a specifier or a format written into the interpolation', () => {
+    expect(drawn(`    VStack {
+      Text("Spec \\(pi, specifier: "%.2f")")
+      Text("Spec big \\(bigDouble, specifier: "%.2f")")
+      Text("Spec int \\(n, specifier: "%d")")
+      Text("Pct \\(0.256 * 100, specifier: "%.1f")%")
+      Text("Price \\(342.5, format: .currency(code: "USD"))")
+    }`)).toEqual(['Spec 3.14', 'Spec big 1,234.50', 'Spec int 2,000', 'Pct 25.6%', 'Price $342.50'])
+  })
+
+  it('writes the value as Swift does when the preview cannot read its format, rather than stopping', () => {
+    const written = drawn(`    let day = Date(timeIntervalSince1970: 0)
+    return VStack {
+      Text("Pi \\(pi, format: .number.precision(.fractionLength(1)))")
+      Text("Day \\(day, format: .dateTime.month().day())")
+    }`)
+
+    expect(written[0]).toBe('Pi 3.14159')
+    expect(written[1]).toMatch(/^Day 1970/)
+  })
+
+  it('keeps Swift\'s own text for a String, however it reaches the view', () => {
+    expect(drawn(`    VStack {
+      Text(verbatim: "Verbatim \\(n)")
+      Text("Concat " + "\\(n)")
+      Text(label)
+      Text("Formatted \\(n.formatted())")
+      Text("Inner \\("x\\(n)")")
+      Row(title: "Row \\(n)")
+    }`, 'struct Row: View { let title: String; var body: some View { Text(title) } }')).toEqual(
+      ['Verbatim 2000', 'Concat 2000', 'Var 2000', 'Formatted 2,000', 'Inner x2000', 'Row 2000'])
+  })
+
+  it('writes the titles of the other views and modifiers that take one as a Text does', () => {
+    const r = compileView(viewSource(`${numbers}
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Section \\(n)") {
+          Label("Label \\(n)", systemImage: "star")
+          Button("Button \\(n)") {}
+          Toggle("Toggle \\(n)", isOn: .constant(true))
+          TextField("Field \\(n)", text: .constant(""))
+          LabeledContent("Labeled \\(n)", value: "Value \\(n)")
+          Stepper("Stepper \\(n)", value: .constant(1))
+          Link("Link \\(n)", destination: URL(string: "https://example.com")!)
+        }
+      }
+      .navigationTitle("Title \\(n)")
+    }
+  }`))
+
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(r)).toEqual(expect.arrayContaining(['Section 2,000', 'Label 2,000', 'Button 2,000', 'Toggle 2,000', 'Labeled 2,000', 'Value 2000', 'Stepper 2,000', 'Link 2,000', 'Title 2,000']))
+    expect(nodes(r).some(n => n.hitTarget?.role === 'textField' && n.hitTarget.placeholder === 'Field 2,000')).toBe(true)
   })
 })

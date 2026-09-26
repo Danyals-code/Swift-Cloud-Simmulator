@@ -12,6 +12,11 @@ import { STYLE_EXAMPLE, SWIFTUI_GUIDANCE } from './guidance'
 const offered = () => new Set(SWIFTUI_GUIDANCE.match(/SF Symbols[^:]*: ([^\n]+)/)![1]!.split(', '))
 
 describe('the SwiftUI the AI is asked for', () => {
+  it('says how iOS writes a number put into a title, and the forms that write it as meant', () => {
+    expect(SWIFTUI_GUIDANCE).toContain('Text("\\(price)") shows a Double with six decimals (3.500000) and a whole number with separators (2,000, and a year as 2,026)')
+    expect(SWIFTUI_GUIDANCE).toContain('Write decimals as Text(price, format: .currency(code: "USD")), price.formatted() or Text("\\(distance, specifier: "%.1f") km"), and a year or a code as Text(String(year)).')
+  })
+
   it('steers away from date format styles the preview cannot run, to the form it can', () => {
     expect(SWIFTUI_GUIDANCE).toContain('DateFormatter and .dateTime format styles such as .formatted(.dateTime.month(.wide)) (write date.formatted(date: .abbreviated, time: .omitted))')
     resetPipelineState()

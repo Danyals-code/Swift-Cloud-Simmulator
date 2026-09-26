@@ -207,7 +207,7 @@ describe('magnify and rotate', () => {
                         scale = value.magnification
                     }
             )
-        Text("scale \\(scale)")
+        Text(verbatim: "scale \\(scale)")
     }`)
 
     let result = run(source)

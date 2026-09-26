@@ -71,8 +71,9 @@ describe('Market', () => {
     tree = tap(tree, 'Done')
     expect(text(tree)).toContain('Your bag is empty')
     tree = tap(tree, 'Orders')
-    expect(text(tree)).toContain('Order 1001')
-    tree = tap(tree, 'Order 1001')
+    // A title written as a literal puts separators in a number on iOS, and so does the preview.
+    expect(text(tree)).toContain('Order 1,001')
+    tree = tap(tree, 'Order 1,001')
     expect(text(tree)).toContain('Taylor')
     expect(text(tree)).toContain('$76')
   })

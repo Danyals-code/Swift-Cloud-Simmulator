@@ -45,3 +45,20 @@ export function formatNumber(value: SwiftValue, style: string): string | null {
       return null
   }
 }
+
+/**
+ * A number put into a `LocalizedStringKey`: a title written as a string literal, like
+ * `Text("Goal: \\(goal) mL")`. Written for the locale, as the iOS 27 simulator writes
+ * it: a whole number with separators (2,000), and a Double, a Float or a CGFloat with
+ * six decimals (3.500000, 1,234.500000), which is its `%lf`.
+ */
+export function titleNumber(value: SwiftValue): string | null {
+  if (value.kind !== 'int' && value.kind !== 'double') return null
+  if (!Number.isFinite(value.value)) return Number.isNaN(value.value) ? 'nan' : value.value > 0 ? 'inf' : '-inf'
+  return write(value.value, value.kind === 'int' ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 6, maximumFractionDigits: 6 })
+}
+
+/** A number `String(format:)` wrote, with separators put into its whole part, as a title's `specifier:` has it. */
+export function groupDigits(written: string): string {
+  return written.replace(/^([-+]?)(\d{4,})/, (_, sign: string, digits: string) => sign + digits.replace(/\B(?=(\d{3})+$)/g, ','))
+}

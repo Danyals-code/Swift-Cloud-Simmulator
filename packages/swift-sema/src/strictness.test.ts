@@ -733,6 +733,54 @@ ${body}
   })
 })
 
+describe('a specifier or a format in a String', () => {
+  // What Xcode 27 answers, checked with swiftc: an interpolation's `specifier:` and
+  // `format:` belong to a title, which is a `LocalizedStringKey`, and a String refuses
+  // them. The preview applies them either way.
+  const SPECIFIER = "Incorrect argument label in call (have '_:specifier:', expected '_:default:')."
+  const FORMAT = "Extra argument 'format' in call."
+  const view = (members: string) => messages(app(`    let km = 1234.56
+    @State private var note = ""
+    func describe(label: String) -> String { label }
+${members}
+    var body: some View { Text("x") }`, `struct Row: View { let value: String; var body: some View { Text(value) } }
+struct KeyRow: View { let value: LocalizedStringKey; var body: some View { Text(value) } }
+struct Custom: View {
+    let value: String
+    init(_ value: String) { self.value = value }
+    var body: some View { Text(value) }
+}`))
+
+  it('stays silent on a title, and on a LocalizedStringKey written as one', () => {
+    expect(view(`    let key: LocalizedStringKey = "\\(1234.5, specifier: "%.1f") km"
+    var title: some View { Text("\\(km, specifier: "%.1f") km") }
+    var label: some View {
+        Label("\\(km, specifier: "%.1f") km", systemImage: "car")
+            .accessibilityLabel("\\(km, specifier: "%.1f") km")
+            .badge("\\(km, format: .number)")
+    }
+    var keyRow: some View { KeyRow(value: "\\(km, specifier: "%.1f") km") }`)).toEqual([])
+  })
+
+  it.each([
+    ['a property written as a String', '    let typed: String = "\\(1234.5, specifier: "%.1f") km"', SPECIFIER],
+    ['a property with no type written', '    @State private var stored = "\\(1234.5, format: .number) km"', FORMAT],
+    ['what a String property gives back', '    var computed: String { "\\(km, specifier: "%.1f") km" }', SPECIFIER],
+    ['what a String property returns', '    var returned: String {\n        guard km > 0 else { return "None" }\n        return "\\(km, specifier: "%.1f") km"\n    }', SPECIFIER],
+    ['a local constant', '    var local: some View {\n        let text = "\\(km, specifier: "%.1f") km"\n        return Text(text)\n    }', SPECIFIER],
+    ['an assignment to a String', '    func save() { note = "\\(km, specifier: "%.1f") km" }', SPECIFIER],
+    ['Text(verbatim:)', '    var verbatim: some View { Text(verbatim: "\\(km, specifier: "%.1f") km") }', SPECIFIER],
+    ['one side of a +', '    var plus: some View { Text("\\(km, format: .number)" + " km") }', FORMAT],
+    ['a String property of the project\'s own view', '    var row: some View { Row(value: "\\(km, format: .number) km") }', FORMAT],
+    ['a String parameter of the project\'s own init', '    var custom: some View { Custom("\\(km, specifier: "%.1f") km") }', SPECIFIER],
+    ['a String parameter of the project\'s own function', '    var described: String { describe(label: "\\(km, specifier: "%.1f")") }', SPECIFIER],
+  ])('flags one in %s', (_, members, message) => {
+    const found = view(members)
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain(message)
+  })
+})
+
 describe('an if-let binding reaches only its own branch', () => {
   it('stays silent on assigning to the property it shadows, in the else branch and after the if', () => {
     expect(messages(app(`    @State private var savedSpot: String?

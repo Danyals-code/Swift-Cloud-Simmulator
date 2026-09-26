@@ -890,7 +890,9 @@ export class Checker {
 
       case 'stringLiteral':
         for (const segment of expr.segments) {
-          if (segment.kind === 'interpolation') this.checkExpression(segment.expression, scope)
+          if (segment.kind !== 'interpolation') continue
+          this.checkExpression(segment.expression, scope)
+          segment.options?.forEach((option) => this.checkExpression(option.value, scope))
         }
         return
 

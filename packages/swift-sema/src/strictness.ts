@@ -5,6 +5,8 @@ import type {
   Decl,
   Expr,
   FuncDecl,
+  InitDecl,
+  Param,
   Pattern,
   SourceFileNode,
   Stmt,
@@ -39,6 +41,12 @@ import type { SemanticModel } from './model'
  */
 
 const CODE = 'may_not_compile_in_xcode'
+
+/** What Xcode says of `specifier:` or `format:` in an interpolation that makes a String, and what to write. */
+const TITLE_ONLY: Readonly<Record<string, string>> = {
+  specifier: "Incorrect argument label in call (have '_:specifier:', expected '_:default:'). Xcode takes `specifier:` only in a title, such as `Text(\"…\")`, and this is a String; the preview applies it. Use `String(format:)` here instead.",
+  format: "Extra argument 'format' in call. Xcode takes `format:` only in a title, such as `Text(\"…\")`, and this is a String; the preview applies it. Use the value's `formatted(_:)` here instead.",
+}
 
 /** The types this pass is willing to claim it knows. */
 type Known = 'Int' | 'Double' | 'String' | 'Bool' | 'unknown'
@@ -131,6 +139,7 @@ class StrictnessLinter {
       for (const member of members) {
         if (member.kind === 'varDecl') {
           this.propertyWrapperOnLet(member)
+          this.declaredStrings(member)
           if (member.initializer) this.withBuilder(false, () => this.expression(member.initializer!))
           const accessor = member.accessor
           if (accessor) this.withBuilder(isViewBody(member, owner) && !containsReturn(accessor), () => this.block(accessor))
@@ -162,6 +171,7 @@ class StrictnessLinter {
       if (body) {
         this.missingReturn(decl)
         this.mutatingSelf(decl, owner)
+        if (knownOf(decl.returnType) === 'String') resultsOf(body).forEach((result) => this.titleOnlyOptions(result))
         this.withBuilder(decl.attributes.some((a) => a.name === 'ViewBuilder') && !containsReturn(body), () => this.block(body))
       }
     } finally {
@@ -170,6 +180,7 @@ class StrictnessLinter {
   }
 
   private variable(decl: VarDecl, _owner: StructDecl | null): void {
+    this.declaredStrings(decl)
     if (decl.initializer) this.expression(decl.initializer)
     if (decl.accessor) this.block(decl.accessor)
     this.declare(decl.name, this.bindingFor(decl))
@@ -338,11 +349,13 @@ class StrictnessLinter {
         this.expression(expr.left)
         this.expression(expr.right)
         this.mixedOperands(expr.operator, expr.left, expr.right, expr.span)
+        if (expr.operator === '+') [expr.left, expr.right].forEach((operand) => this.titleOnlyOptions(operand))
         return
 
       case 'assign':
         this.expression(expr.value)
         this.assignmentToLet(expr.target, expr.span)
+        if ((expr.operator === '=' || expr.operator === '+=') && this.typeOf(expr.target) === 'String') this.titleOnlyOptions(expr.value)
         return
 
       case 'call':
@@ -405,7 +418,10 @@ class StrictnessLinter {
         const closure = arg.value
         closure.captures?.forEach(capture => this.expression(capture.value))
         content(arg.label, closure.body)
-      } else this.withBuilder(false, () => this.expression(arg.value))
+      } else {
+        this.withBuilder(false, () => this.expression(arg.value))
+        if (expr.callee.kind === 'identifier' && this.takesString(expr.callee.name, arg.label)) this.titleOnlyOptions(arg.value)
+      }
     }
     if (expr.trailingClosure) content(null, expr.trailingClosure.body)
     if (expr.callee.kind === 'memberAccess' && expr.callee.base) this.expression(expr.callee.base)
@@ -479,6 +495,46 @@ class StrictnessLinter {
           }
         : undefined,
     )
+  }
+
+  /**
+   * `specifier:` and `format:` in an interpolation belong to a title, which is a
+   * `LocalizedStringKey`: `Text("\(km, specifier: "%.1f") km")`. A String refuses them,
+   * and the preview applies them either way. Only a literal that is a String for certain
+   * is checked: a declaration's value with no other type written, what a `String`
+   * property or function gives back, an assignment to a String, `Text(verbatim:)`, a
+   * `String` parameter of the project's own type or function, and one side of a `+`,
+   * where what Xcode says depends on what is around it.
+   */
+  private titleOnlyOptions(expr: Expr): void {
+    if (expr.kind !== 'stringLiteral') return
+    for (const segment of expr.segments) {
+      if (segment.kind !== 'interpolation') continue
+      for (const option of segment.options ?? []) {
+        const message = option.label ? TITLE_ONLY[option.label] : undefined
+        if (message) this.report(option.span, message)
+      }
+    }
+  }
+
+  /** A declaration's literals that are Strings: its value, with no other type written, and what a `String` getter gives back. */
+  private declaredStrings(decl: VarDecl): void {
+    const type = decl.typeAnnotation
+    if (decl.initializer && (!type || knownOf(type) === 'String')) this.titleOnlyOptions(decl.initializer)
+    if (decl.accessor && knownOf(type) === 'String') resultsOf(decl.accessor).forEach((result) => this.titleOnlyOptions(result))
+  }
+
+  /** Whether `name(label: …)` takes a String there: `Text(verbatim:)`, or a `String` parameter of the project's own type or function. */
+  private takesString(name: string, label: string | null): boolean {
+    if (name === 'Text') return label === 'verbatim'
+    const owner = this.owners.get(name)
+    const inits = owner?.members.filter((member): member is InitDecl => member.kind === 'initDecl') ?? []
+    // A struct with no init written has the memberwise one: a label for each stored property.
+    if (owner && !owner.isReference && !inits.length) {
+      return owner.members.some((member) => member.kind === 'varDecl' && member.name === label && !member.accessor && !member.attributes.length && knownOf(member.typeAnnotation) === 'String')
+    }
+    const params = owner ? (inits.length === 1 ? inits[0]!.params : []) : this.findFunction(name)?.params ?? []
+    return params.some((param) => labelOf(param) === label && knownOf(param.type) === 'String')
   }
 
   /**
@@ -901,6 +957,22 @@ function containsReturn(block: Block): boolean {
     if (statement.kind === 'returnStmt') found = true
   })
   return found
+}
+
+/** What a body gives back: its one expression, or the value of each `return` in it. */
+function resultsOf(body: Block): Expr[] {
+  const only = body.statements.length === 1 ? body.statements[0] : undefined
+  if (only?.kind === 'exprStmt') return [only.expression]
+  const results: Expr[] = []
+  walkStatements(body, (statement) => {
+    if (statement.kind === 'returnStmt' && statement.value) results.push(statement.value)
+  })
+  return results
+}
+
+/** The label a call gives a parameter, null for one written `_`. */
+function labelOf(param: Param): string | null {
+  return param.externalName === '_' ? null : param.externalName ?? param.internalName
 }
 
 /** Every name assigned to anywhere in a body, including nested closures. */

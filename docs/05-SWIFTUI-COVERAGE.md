@@ -53,7 +53,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling |
+| `Text` | ✅ | 3 | interpolation, with `specifier:` and `format:` inside it too, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling. A title written as a literal, a `Text`'s or a `Button`'s, a `Label`'s, a `Section`'s or a navigation title, writes a number put into it as iOS 27 does: 2,000, and a Double with six decimals, 3.500000; a `String`, `verbatim:` and a project's own views keep Swift's text, 2000 |
 | `Label` | ✅ | 6 | icon then title |
 | `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations; unknown names use an explicit fallback, not Apple artwork |
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
@@ -505,6 +505,7 @@ because a false positive would teach people to ignore the panel.
 | Omitted argument labels | `greet("Ada")` for `func greet(name:)` | a parameter declared `_` |
 | Missing `return` | a multi-statement `func` body with a return type and no `return` anywhere | a body whose returns are inside a `switch`, `while`, `repeat`, `do`/`catch`, `guard`'s `else` or an `else if` chain |
 | Code in a view's body | a `for`, `while` or `repeat` loop, an assignment, a `break`, `defer`, `do`/`catch` or a function, in `body`, a `@ViewBuilder` member or a view's content closure (`VStack { }`, `ForEach`, `.sheet { }`) | a body with a `return`, which is ordinary code; `let`/`var` with a value, `if`, `switch` and `do`; any of it in a button's action, an `onAppear`, a sheet's `onDismiss`, a menu's `primaryAction` or a closure that is called |
+| `specifier:` or `format:` in a String | `let text = "\(km, specifier: "%.1f") km"`; the same in a `String` property, an assignment to a String, `Text(verbatim:)`, a `String` parameter of the project's own view or function, or beside a `+` | a title, such as `Text`, `Label`, a navigation title or `.badge`, and a `LocalizedStringKey`, which take both |
 
 The right-hand column is the half that matters. A pass that cries wolf is worse than no
 pass, because people stop reading the panel and then the true warnings go unread too -

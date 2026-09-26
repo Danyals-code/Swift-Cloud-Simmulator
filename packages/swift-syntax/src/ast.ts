@@ -700,7 +700,13 @@ export interface StringLiteralExpr extends NodeBase {
 
 export type StringExprSegment =
   | { readonly kind: 'text'; readonly value: string; readonly span: SourceSpan }
-  | { readonly kind: 'interpolation'; readonly expression: Expr; readonly span: SourceSpan }
+  | {
+      readonly kind: 'interpolation'
+      readonly expression: Expr
+      /** What follows the value: `\(price, specifier: "%.2f")`, `\(total, format: .currency(code: "USD"))`. */
+      readonly options?: readonly Argument[]
+      readonly span: SourceSpan
+    }
 
 export interface ArrayLiteralExpr extends NodeBase {
   readonly kind: 'arrayLiteral'
@@ -997,7 +1003,9 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
       return
     case 'stringLiteral':
       node.segments.forEach((s) => {
-        if (s.kind === 'interpolation') visit(s.expression)
+        if (s.kind !== 'interpolation') return
+        visit(s.expression)
+        s.options?.forEach((option) => visit(option.value))
       })
       return
     case 'arrayLiteral':

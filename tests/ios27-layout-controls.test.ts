@@ -192,7 +192,7 @@ describe('automatic spacing and alignment', () => {
     }
   })
   it('exposes pixel length and scale to Swift environment readers', () => {
-    const r = run('Pixels()', { displayScale: 2 }, 'struct Pixels: View { @Environment(\\.pixelLength) var pixel; @Environment(\\.displayScale) var scale; var body: some View { Text("\\(pixel) / \\(scale)") } }')
+    const r = run('Pixels()', { displayScale: 2 }, 'struct Pixels: View { @Environment(\\.pixelLength) var pixel; @Environment(\\.displayScale) var scale; var body: some View { Text(verbatim: "\\(pixel) / \\(scale)") } }')
     expect(text(r, '0.5 / 2.0')).toBeDefined()
   })
 })
