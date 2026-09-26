@@ -499,11 +499,12 @@ because a false positive would teach people to ignore the panel.
 | Mixed numeric arithmetic | `let w: Int = 10; let s: Double = 1.5; w * s` | `scale * 2` - an integer literal takes its type from context |
 | `Text` given a non-string | `Text(count)` | `Text("\(count)")` |
 | Property wrapper on a `let` | `@State private let count = 0` | the same wrapper on a `var` |
-| Assignment to a `let` | `let total = 0; total = 1` | writing an `inout` parameter, which is the caller's storage |
+| Assignment to a `let` | `let total = 0; total = 1` | writing an `inout` parameter, which is the caller's storage, or the property an `if let` shadows, outside that `if`'s own branch |
 | Non-`mutating` method writing a property | `func bump() { count += 1 }` on a plain stored `var` | the same method writing a `@State`, `@Binding` or any other wrapped property: their setters are **nonmutating**, which is what lets `body` write them |
 | `ForEach` without identity | `ForEach(items)` where the element is not `Identifiable` | a range, or an explicit `id:` |
 | Omitted argument labels | `greet("Ada")` for `func greet(name:)` | a parameter declared `_` |
 | Missing `return` | a multi-statement `func` body with a return type and no `return` anywhere | a body whose returns are inside a `switch`, `while`, `repeat`, `do`/`catch`, `guard`'s `else` or an `else if` chain |
+| Code in a view's body | a `for`, `while` or `repeat` loop, an assignment, a `break`, `defer`, `do`/`catch` or a function, in `body`, a `@ViewBuilder` member or a view's content closure (`VStack { }`, `ForEach`, `.sheet { }`) | a body with a `return`, which is ordinary code; `let`/`var` with a value, `if`, `switch` and `do`; any of it in a button's action, an `onAppear`, a sheet's `onDismiss`, a menu's `primaryAction` or a closure that is called |
 
 The right-hand column is the half that matters. A pass that cries wolf is worse than no
 pass, because people stop reading the panel and then the true warnings go unread too -

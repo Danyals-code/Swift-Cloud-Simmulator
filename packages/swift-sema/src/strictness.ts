@@ -64,6 +64,8 @@ class StrictnessLinter {
   private readonly scopes: Map<string, Binding>[] = [new Map()]
   /** Struct and class declarations by name, so an extension knows what it extends. */
   private readonly owners = new Map<string, StructDecl>()
+  /** Whether the statements being walked are a view builder's, where Xcode takes views and not code. */
+  private inBuilder = false
 
   constructor(private readonly model: SemanticModel) {}
 
@@ -129,8 +131,9 @@ class StrictnessLinter {
       for (const member of members) {
         if (member.kind === 'varDecl') {
           this.propertyWrapperOnLet(member)
-          if (member.initializer) this.expression(member.initializer)
-          if (member.accessor) this.block(member.accessor)
+          if (member.initializer) this.withBuilder(false, () => this.expression(member.initializer!))
+          const accessor = member.accessor
+          if (accessor) this.withBuilder(isViewBody(member, owner) && !containsReturn(accessor), () => this.block(accessor))
         } else if (member.kind === 'funcDecl') {
           this.func(member, owner)
         }
@@ -155,10 +158,11 @@ class StrictnessLinter {
           elementType: elementTypeOf(param.type),
         })
       }
-      if (decl.body) {
+      const body = decl.body
+      if (body) {
         this.missingReturn(decl)
         this.mutatingSelf(decl, owner)
-        this.block(decl.body)
+        this.withBuilder(decl.attributes.some((a) => a.name === 'ViewBuilder') && !containsReturn(body), () => this.block(body))
       }
     } finally {
       this.pop()
@@ -183,6 +187,16 @@ class StrictnessLinter {
   }
 
   private statement(statement: Stmt): void {
+    if (this.inBuilder) {
+      const rejected = rejectedInBuilder(statement)
+      if (rejected) {
+        this.report(statement.span, rejected)
+        // Once, as Xcode reports it: what the rejected statement holds is code, not
+        // views, and the other checks still read it as such.
+        this.withBuilder(false, () => this.statement(statement))
+        return
+      }
+    }
     switch (statement.kind) {
       case 'exprStmt':
         this.expression(statement.expression)
@@ -194,8 +208,17 @@ class StrictnessLinter {
         if (statement.value) this.expression(statement.value)
         return
       case 'ifStmt':
-        this.conditions(statement.conditions)
-        this.block(statement.then)
+        // What `if let` binds is in scope in its own branch only. Declared in the
+        // enclosing scope, the name reached the `else` branch and every line after the
+        // `if`, and assigning there to the property it shadows was reported as
+        // assigning to a constant: a warning on Swift that Xcode builds.
+        this.push()
+        try {
+          this.conditions(statement.conditions)
+          this.block(statement.then)
+        } finally {
+          this.pop()
+        }
         if (statement.else?.kind === 'block') this.block(statement.else)
         else if (statement.else) this.statement(statement.else)
         return
@@ -206,8 +229,13 @@ class StrictnessLinter {
         return
 
       case 'whileStmt':
-        this.conditions(statement.conditions)
-        this.block(statement.body)
+        this.push()
+        try {
+          this.conditions(statement.conditions)
+          this.block(statement.body)
+        } finally {
+          this.pop()
+        }
         return
 
       case 'repeatStmt':
@@ -337,7 +365,7 @@ class StrictnessLinter {
 
       case 'closure':
         expr.captures?.forEach(capture => this.expression(capture.value))
-        this.block(expr.body)
+        this.withBuilder(false, () => this.block(expr.body))
         return
 
       case 'arrayLiteral':
@@ -346,7 +374,9 @@ class StrictnessLinter {
 
       case 'stringLiteral':
         for (const segment of expr.segments) {
-          if (segment.kind === 'interpolation') this.expression(segment.expression)
+          if (segment.kind !== 'interpolation') continue
+          this.expression(segment.expression)
+          segment.options?.forEach((option) => this.expression(option.value))
         }
         return
 
@@ -366,8 +396,18 @@ class StrictnessLinter {
   }
 
   private call(expr: Expr & { kind: 'call' }): void {
-    for (const arg of expr.args) this.expression(arg.value)
-    if (expr.trailingClosure) this.block(expr.trailingClosure.body)
+    // A view's content closure is a view builder, as the body is: `VStack { … }`,
+    // `ForEach(items) { … }`, `.sheet { … }`. A button's action or an `onAppear` is
+    // ordinary code, and so is any closure this pass cannot be sure of.
+    const content = (label: string | null, body: Block) => this.withBuilder(buildsViews(expr, label) && !containsReturn(body), () => this.block(body))
+    for (const arg of expr.args) {
+      if (arg.value.kind === 'closure') {
+        const closure = arg.value
+        closure.captures?.forEach(capture => this.expression(capture.value))
+        content(arg.label, closure.body)
+      } else this.withBuilder(false, () => this.expression(arg.value))
+    }
+    if (expr.trailingClosure) content(null, expr.trailingClosure.body)
     if (expr.callee.kind === 'memberAccess' && expr.callee.base) this.expression(expr.callee.base)
 
     if (expr.callee.kind !== 'identifier') return
@@ -616,6 +656,17 @@ class StrictnessLinter {
 
   // ------------------------------------------------------------------ scopes
 
+  /** Walks `walk` with the builder flag set to `on`, and puts it back. */
+  private withBuilder(on: boolean, walk: () => void): void {
+    const outer = this.inBuilder
+    this.inBuilder = on
+    try {
+      walk()
+    } finally {
+      this.inBuilder = outer
+    }
+  }
+
   private push(): void {
     this.scopes.push(new Map())
   }
@@ -840,6 +891,10 @@ function letSpan(decl: VarDecl): SourceSpan {
   return { ...decl.span, end: decl.span.start + (decl.isLet ? 3 : 3) }
 }
 
+/**
+ * Whether a body returns, outside the closures in it. Swift builds views only from a
+ * body that does not: a `return` anywhere makes it ordinary code, loops and all.
+ */
 function containsReturn(block: Block): boolean {
   let found = false
   walkStatements(block, (statement) => {
@@ -927,5 +982,81 @@ function walkStatement(statement: Stmt, visit: (statement: Stmt) => void): void 
       return
     default:
       return
+  }
+}
+
+/** Views whose content closures are view builders. A project's own view is not: its closure may be anything. */
+const BUILDER_VIEWS = new Set([
+  'VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'LazyVGrid', 'LazyHGrid', 'Grid', 'GridRow',
+  'List', 'Form', 'Section', 'Group', 'ScrollView', 'ScrollViewReader', 'NavigationStack', 'NavigationView',
+  'NavigationSplitView', 'NavigationLink', 'TabView', 'Tab', 'ForEach', 'GeometryReader', 'ViewThatFits',
+  'ToolbarItem', 'ToolbarItemGroup', 'DisclosureGroup', 'ControlGroup', 'GroupBox', 'LabeledContent', 'Menu', 'Picker',
+  'Label', 'Link',
+])
+
+/** Modifiers whose closure is a view builder, as against `.onAppear { }` or `.task { }`. */
+const BUILDER_MODIFIERS = new Set([
+  'overlay', 'background', 'mask', 'toolbar', 'sheet', 'fullScreenCover', 'popover', 'safeAreaInset', 'contextMenu',
+  'swipeActions', 'navigationDestination', 'alert', 'confirmationDialog', 'searchSuggestions',
+])
+
+/**
+ * The labels those views and modifiers give a closure that builds views. Any other,
+ * such as `onDismiss:`, `primaryAction:` or `action:`, is ordinary code.
+ */
+const BUILDER_LABELS = new Set([
+  'content', 'label', 'title', 'icon', 'header', 'footer', 'actions', 'message', 'destination', 'menuItems', 'menu',
+  'preview', 'sidebar', 'detail', 'root', 'rowContent',
+])
+
+/** Whether the closure passed to `call` as `label` (null for the trailing one) builds views. */
+function buildsViews(call: Expr & { kind: 'call' }, label: string | null): boolean {
+  if (label !== null && !BUILDER_LABELS.has(label)) return false
+  if (call.callee.kind === 'identifier') {
+    const name = call.callee.name
+    // A button's trailing closure is its action; its label is the one that builds.
+    if (name === 'Button') return label === 'label'
+    return BUILDER_VIEWS.has(name)
+  }
+  return call.callee.kind === 'memberAccess' && BUILDER_MODIFIERS.has(call.callee.member)
+}
+
+/** `var body` of a view, or a `@ViewBuilder` property: the bodies Swift builds views from. */
+function isViewBody(decl: VarDecl, owner: StructDecl | null): boolean {
+  if (decl.attributes.some((a) => a.name === 'ViewBuilder')) return true
+  return decl.name === 'body' && !!owner?.inherits.some((t) => t.name === 'View' || t.name === 'SwiftUI.View')
+}
+
+const FIX = 'Work it out in a property or a function, beside `body`.'
+
+/** What Xcode says about `statement` in a view builder, or null when it takes it. Measured with swiftc. */
+function rejectedInBuilder(statement: Stmt): string | null {
+  const control = (what: string) =>
+    `Closure containing control flow statement cannot be used with result builder 'ViewBuilder'. Xcode rejects ${what} in a view's body; the preview runs it. ${FIX}`
+  switch (statement.kind) {
+    case 'forInStmt':
+      return control("a 'for' loop")
+    case 'whileStmt':
+      return control("a 'while' loop")
+    case 'repeatStmt':
+      return control("a 'repeat' loop")
+    case 'breakStmt':
+      return control("'break'")
+    case 'continueStmt':
+      return control("'continue'")
+    case 'deferStmt':
+      return control("'defer'")
+    case 'doCatchStmt':
+      return statement.catches.length > 0 ? control("'do' with 'catch'") : null
+    case 'exprStmt':
+      return statement.expression.kind === 'assign'
+        ? `Type '()' cannot conform to 'View'. Xcode rejects an assignment in a view's body; the preview runs it. ${FIX}`
+        : null
+    case 'declStmt':
+      return statement.declaration.kind === 'funcDecl'
+        ? "Closure containing a declaration cannot be used with result builder 'ViewBuilder'. Xcode rejects a function declared in a view's body; the preview runs it. Declare it beside `body`."
+        : null
+    default:
+      return null
   }
 }

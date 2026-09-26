@@ -15,6 +15,10 @@ function problemsIn(result: CompileResult, project: Project): PreviewProblem[] {
   const found = [
     ...result.diagnostics.filter(d => d.severity === 'error').map(d => at(d.message, d.span)),
     ...result.logs.filter(log => log.level === 'error').map(log => at(log.message, log.origin)),
+    // What Xcode would reject and the preview runs, like a loop in a view's body. The
+    // app draws as the answer meant, so it stops nothing, but the export would not
+    // build, so a second answer is asked to fix it too.
+    ...result.diagnostics.filter(d => d.severity === 'warning' && d.code === 'may_not_compile_in_xcode').map(d => ({ ...at(d.message, d.span), kind: 'xcode' as const })),
   ]
   // The preview reports what stops on the screen on show. A view that stops on another
   // screen, as iOS would run it once that screen opens, is only drawn stopped there.

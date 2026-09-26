@@ -9,6 +9,7 @@ import { parsePromptEditInput, promptConversationContext } from '../lib/generati
 import { preparePromptEdit } from '../lib/generation/applyPromptEdit'
 import { askAiRoute } from '../lib/generation/aiRoute'
 import { describeProblem, previewCheck } from '../lib/generation/problems'
+import { blocksChange } from '../lib/generation/previousAttempt'
 import { answerWithOneRetry } from '../lib/generation/retry'
 import { compileSnapshot } from '../lib/compileSnapshot'
 import { editAttempts } from '../lib/promptAttempts'
@@ -85,9 +86,11 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
         },
         retrying: found => { hold.fixing(); attempt.retried(found.length) },
       })
-      if (problems.length) throw new Error(secondTryFailed
+      // What only Xcode would refuse was asked about once more, and applies either way.
+      const blocking = problems.filter(blocksChange)
+      if (blocking.length) throw new Error(secondTryFailed
         ? `The AI's change had an error, and asking it again failed: ${secondTryFailed.message}`
-        : `The AI's change still had an error after a second try, so nothing was changed: ${describeProblem(problems[0]!)} Try a smaller change, or describe it another way.`)
+        : `The AI's change still had an error after a second try, so nothing was changed: ${describeProblem(blocking[0]!)} Try a smaller change, or describe it another way.`)
       request.signal.throwIfAborted()
       const problem = hold.commit(expected, prepared.transaction)
       if (problem) { movedOn = true; throw new Error(`${problem} No AI changes applied.`) }

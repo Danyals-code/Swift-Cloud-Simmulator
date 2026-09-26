@@ -51,6 +51,16 @@ describe('an AI answer with one retry', () => {
     expect(ask).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps a first answer that only Xcode would refuse when the second has an error the preview cannot run', async () => {
+    const xcode = [{ message: "Closure containing control flow statement cannot be used with result builder 'ViewBuilder'.", kind: 'xcode' as const }]
+    const ask = vi.fn(async (previous: unknown) => previous ? 'second answer' : 'first answer')
+
+    const result = await answerWithOneRetry({ ask, check: async answer => answer === 'first answer' ? xcode : broken, retrying: () => {} })
+
+    expect(result).toEqual({ answer: 'first answer', problems: xcode })
+    expect(ask).toHaveBeenLastCalledWith({ problems: xcode })
+  })
+
   it('asks once more when an answer could not be used, saying why', async () => {
     const ask = vi.fn(async (previous: unknown) => {
       if (!previous) throw new UnusableAnswer('The app has 5 pages, and 3 were asked for.')

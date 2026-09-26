@@ -1,4 +1,4 @@
-import { MAX_PROBLEMS, type PreviewProblem, type PreviousAttempt } from './previousAttempt'
+import { blocksChange, MAX_PROBLEMS, type PreviewProblem, type PreviousAttempt } from './previousAttempt'
 
 /**
  * An answer that came back but could not be used, such as one with the wrong number
@@ -51,5 +51,9 @@ export async function answerWithOneRetry<A>(steps: {
     if (!first || cancelled(error) || !(error instanceof Error)) throw error
     return { answer: first.answer, problems: found, secondTryFailed: error }
   }
-  return { answer, problems: await steps.check(answer) }
+  const problems = await steps.check(answer)
+  // A first answer that only Xcode would refuse still applies, so it is kept over a
+  // second one with an error.
+  if (first && !found.some(blocksChange) && problems.some(blocksChange)) return { answer: first.answer, problems: found }
+  return { answer, problems }
 }

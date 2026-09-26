@@ -221,6 +221,19 @@ test('an AI edit still broken after its second try changes nothing, and says why
   expect(sent).toHaveLength(2)
 })
 
+test('an AI edit with code only Xcode would refuse is asked for once more, and applies either way', async ({ page }) => {
+  // A loop straight in a view's body: the preview runs it, and Xcode rejects the file.
+  const withLoop = (text: string) => relabel(text).replace('Text("Taps so far: ', 'var total = 0\n            for step in 1...3 { total += step }\n            Text("Taps so far: ')
+  const sent = await answerInTurn(page, '**/api/edit', [counterEdit(withLoop), counterEdit(withLoop)])
+  await openCounter(page)
+  await sendPrompt(page)
+
+  await expect(page.getByTestId('render-tree').getByText('Taps so far: 0', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('prompt-editor').locator('article[data-role="assistant"]').last()).toHaveAttribute('data-status', 'applied')
+  expect(sent).toHaveLength(2)
+  expect(sent[1]!.previousAttempt!.problems[0]!.message).toContain("Xcode rejects a 'for' loop in a view's body")
+})
+
 test('an error the project already had does not stop an AI edit (G2)', async ({ page }) => {
   const sent = await answerInTurn(page, '**/api/edit', [counterEdit(relabel)])
   await openCounter(page)

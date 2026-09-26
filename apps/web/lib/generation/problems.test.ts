@@ -74,6 +74,15 @@ describe('the problems an AI answer brings to the preview', () => {
     expect(await previewCheck(compileHere, null)(after)).toEqual([])
   })
 
+  it('counts what Xcode would reject, which the preview runs, as a problem that refuses nothing', async () => {
+    const after = counter('            var total = 0\n            for step in 1...3 { total += step }\n            Text("Total: \\(total)")')
+
+    expect(await previewCheck(compileHere, null)(after)).toEqual([{
+      message: expect.stringContaining("Xcode rejects a 'for' loop in a view's body"),
+      file: 'Sources/CounterApp.swift', line: 14, source: 'for step in 1...3 { total += step }', kind: 'xcode',
+    }])
+  })
+
   it('compiles the project as it was only when an answer has errors, and once for both answers', async () => {
     const before = counter('            Text("Count: \\(count)")')
     const compiled: Project[] = []
