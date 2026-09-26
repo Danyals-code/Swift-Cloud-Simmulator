@@ -1942,3 +1942,40 @@ describe('D13: the flows Design writes behave in the preview as they do on iOS 2
     expect(texts(back)).not.toContain('Close')
   })
 })
+
+describe('pilot: an `else if` in a view body', () => {
+  const chain = (running: boolean, done: boolean) => `@State private var isRunning = ${running}
+    @State private var done = ${done}
+    var body: some View {
+      VStack {
+        if isRunning {
+          Text("Running")
+        } else if done {
+          Text("Done")
+        } else {
+          Text("Ready")
+        }
+      }
+    }`
+
+  it('draws the branch it chooses', () => {
+    expect(texts(runView(chain(false, false)))).toEqual(['Ready'])
+    expect(texts(runView(chain(false, true)))).toEqual(['Done'])
+    expect(texts(runView(chain(true, true)))).toEqual(['Running'])
+  })
+
+  it('shows in Layers as a condition inside the first one\'s otherwise branch', () => {
+    const layers = buildAuthoringModel({ projectId: 'p', revision: 1, files: [{ id: 'App.swift', text: viewSource(chain(false, false)) }] }).nodes
+    const byId = new Map(layers.map(layer => [layer.id, layer]))
+    const path = (name: string) => {
+      const names: string[] = []
+      for (let layer = layers.find(l => l.kind === 'view' && l.name === 'Text' && l.properties.some(p => p.name === 'content' && p.expression === `"${name}"`)); layer; layer = layer.parentId ? byId.get(layer.parentId) : undefined) names.unshift(layer.name)
+      return names
+    }
+
+    expect(new Set(layers.map(layer => layer.id)).size).toBe(layers.length)
+    expect(path('Running')).toEqual(['ContentView', 'VStack', 'Condition', 'Text'])
+    expect(path('Done')).toEqual(['ContentView', 'VStack', 'Condition', 'Otherwise', 'Condition', 'Text'])
+    expect(path('Ready')).toEqual(['ContentView', 'VStack', 'Condition', 'Otherwise', 'Condition', 'Otherwise', 'Text'])
+  })
+})

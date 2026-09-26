@@ -105,7 +105,10 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const fingerprint = (span: SourceSpan) => JSON.stringify(Lexer.tokenize(source(span), span.file).tokens.filter(t => t.kind !== 'endOfFile').map(t => [t.kind, t.text]))
 
   function add(kind: AuthoringNode['kind'], name: string, span: SourceSpan, owner: string, parent?: MutableNode): MutableNode {
-    const id = JSON.stringify([span.file, span.start, span.end, kind])
+    // An `else if` is the whole of its "Otherwise" branch, so the two share a span. With
+    // one id the inner "Condition" was its own parent, and walking up from it never ended.
+    let id = JSON.stringify([span.file, span.start, span.end, kind])
+    if (byId.has(id)) id = JSON.stringify([span.file, span.start, span.end, kind, name])
     const node: MutableNode = { id, kind, name, source: span, owner, parentId: parent?.id, fingerprint: fingerprint(span), children: [], properties: [], runtimeIds: [] }
     nodes.push(node)
     byId.set(id, node)
@@ -143,11 +146,18 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   }
   for (const file of parsed) for (const decl of file.declarations) index(decl)
 
+  /** `node` and the layers above it, nearest first. A layer met twice ends the walk, so an id that repeats cannot make it run forever. */
+  function* upFrom(node: MutableNode | undefined): Generator<MutableNode> {
+    const seen = new Set<string>()
+    for (let layer = node; layer && !seen.has(layer.id); layer = layer.parentId ? byId.get(layer.parentId) : undefined) {
+      seen.add(layer.id)
+      yield layer
+    }
+  }
+
   function property(node: MutableNode, name: string, expr: Expr | null, scope: Scope, capability?: string, reason?: string): AuthoringProperty {
     const value = expr ? classify(expr, scope, tokens, declaredNames, contextual) : { kind: 'literal' as const }
-    let parent: MutableNode | undefined = node
-    let repeated = false
-    while (parent) { if (parent.kind === 'template') repeated = true; parent = parent.parentId ? byId.get(parent.parentId) : undefined }
+    const repeated = [...upFrom(node)].some(layer => layer.kind === 'template')
     const invalid = diagnostics.some(d => d.severity === 'error' && d.span.file === node.source.file && d.span.start < node.source.end && d.span.end >= node.source.start)
     return {
       id: `${node.id}:${node.properties.length}`, name, expression: expr ? source(expr.span) : 'Implicit',
@@ -201,17 +211,17 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       if (!modifier.args.length) node.properties.push({ ...property(node, modifierName, null, scope, supported?.id, unsupported), source: modifier.callee.kind === 'memberAccess' ? modifier.callee.memberSpan : modifier.span })
     }
     if (name === 'Text' && !node.properties.some(p => p.name === 'font')) {
-      let ancestor: MutableNode | undefined = parent
       let origin: AuthoringProperty | undefined
-      while (ancestor && !origin) { origin = [...ancestor.properties].reverse().find(p => p.name === 'font'); ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }
+      for (const ancestor of upFrom(parent)) {
+        origin = [...ancestor.properties].reverse().find(p => p.name === 'font')
+        if (origin) break
+      }
       node.properties.push({ id: `${node.id}:inherited-font`, name: 'font', expression: origin?.expression ?? 'Environment / call site', valueKind: 'inherited', source: origin?.source, ownerId: origin?.ownerId ?? parent.id, scope: 'inherited', writable: false, reason: origin ? 'Inherited from an enclosing source view; it affects its descendants.' : 'No local font is declared; the environment supplies it.' })
     }
     // A syntax error takes the controls of its own file's views, not every file's: a half-typed draft elsewhere
     // is no reason to lock the design, and the planner refuses only changes to the file that does not parse.
     if (!diagnostics.some(d => d.span.file === node.source.file && (isSyntaxError(d) || d.severity === 'error' && d.span.start < node.source.end && d.span.end >= node.source.start))) {
-      let ancestor: MutableNode | undefined = parent
-      let template = false
-      while (ancestor) { if (ancestor.kind === 'template') template = true; ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }
+      const template = [...upFrom(parent)].some(ancestor => ancestor.kind === 'template')
       const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget).map(r => ({ ...r.control, scope: template ? 'All rows in this template' : r.control.scope, description: r.control.id.startsWith('fill:') ? `${r.control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : r.control.description }))
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
