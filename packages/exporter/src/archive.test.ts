@@ -333,6 +333,19 @@ describe('an export never fails', () => {
     expect(sets.map(path => entries[path])).toEqual([expect.stringMatching(/"red": "0xFF"/)])
   })
 
+  it('writes the app’s accent into AccentColor, in light and dark, so Color.accentColor is the colour the preview draws', () => {
+    const base = createDefaultProject(0), root = base.manifest.name
+    const set = (accent?: { light: string; dark: string }) => JSON.parse(entriesOf(exportArchive(base, { format: 'xcodeproj', now: NOW, ...(accent ? { accent } : {}) }).bytes)[`${root}/${root}/Assets.xcassets/AccentColor.colorset/Contents.json`]!)
+
+    const teal = set({ light: '#00C3D0', dark: '#40C8E0' })
+    expect(teal.colors).toEqual([
+      { idiom: 'universal', color: { 'color-space': 'srgb', components: { red: '0x00', green: '0xC3', blue: '0xD0', alpha: '1.000' } } },
+      { idiom: 'universal', appearances: [{ appearance: 'luminosity', value: 'dark' }], color: { 'color-space': 'srgb', components: { red: '0x40', green: '0xC8', blue: '0xE0', alpha: '1.000' } } },
+    ])
+    // With no accent written, the set stays empty, which is the system blue.
+    expect(set().colors).toEqual([{ idiom: 'universal' }])
+  })
+
   it('leaves the studio’s markers out of the Swift it falls back to, and keeps them in the backup', () => {
     const project: Project = { ...withHome(MARKED), assets: [{ id: 'logo', name: 'Logo', scale: 1, light: { ...readImage(PNG), width: readImage(PNG).width + 1 } }] }
 

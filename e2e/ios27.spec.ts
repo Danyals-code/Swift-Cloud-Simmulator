@@ -1,5 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
-import { openCounter } from './designer-helpers'
+import { PNG } from 'pngjs'
+import { openCounter, replaceSource } from './designer-helpers'
 import { readFileSync } from 'node:fs'
 
 const source = readFileSync(new URL('../tests/fixtures/ios27-screens.swift', import.meta.url), 'utf8')
@@ -117,4 +118,45 @@ test('reference phone retains native paragraph word boundaries on macOS', async 
     'and keep the same margins when text size',
     'changes.',
   ])
+})
+
+test.describe('a grouped list card as the browser draws it', () => {
+  test.use({ deviceScaleFactor: 3 })
+
+  test('rounds its corners as the iOS 27 simulator does', async ({ page }) => {
+    await openCounter(page)
+    await page.getByTestId('workspace-develop').click()
+    await replaceSource(page, `import SwiftUI
+
+@main
+struct DemoApp: App {
+    var body: some Scene { WindowGroup { ContentView() } }
+}
+
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            List { Section { Text("One"); Text("Two"); Text("Three") } }
+                .navigationTitle("Corners")
+        }
+    }
+}`)
+    await expect(preview(page).getByText('Three', { exact: true })).toBeVisible()
+
+    // The card is 370 pt wide, which gives the preview's scale on the page.
+    const box = (await preview(page).locator('[data-node-id$="s0clip-clip"]').first().boundingBox())!
+    const scale = box.width / 370
+    // Whole CSS pixels, which both engines clip alike, measured from the card's own corner.
+    const clip = { x: Math.floor(box.x), y: Math.floor(box.y), width: Math.ceil(14 * scale) + 2, height: Math.ceil(26 * scale) + 2 }
+    const shot = PNG.sync.read(await page.screenshot({ clip }))
+    const ratio = shot.width / clip.width
+    // How far below the card's top its edge is, 4.5 pt in: 11.26 pt in the simulator, and
+    // 6 for the corner the preview drew before. The card is white on the grey.
+    const column = Math.round((box.x - clip.x + 4.5 * scale) * ratio)
+    const green = (y: number) => shot.data[(y * shot.width + column) * 4 + 1]!
+    const grey = green(0), edge = (grey + 255) / 2
+    let y = Math.round((box.y - clip.y) * ratio)
+    while (y < shot.height && green(y) < edge) y++
+    expect(Math.abs((y / ratio - (box.y - clip.y)) / scale - 11.26)).toBeLessThan(1)
+  })
 })

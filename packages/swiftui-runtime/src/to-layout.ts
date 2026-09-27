@@ -394,6 +394,10 @@ interface ControlStyles {
   readonly buttonBorderShape?: string
   /** Whether a `foregroundStyle` or `foregroundColor` is set on this view or one around it, which a button's title takes over its tint. */
   readonly foregroundSet?: boolean
+  /** A toolbar item drawn in a capsule it shares with the items beside it, so without a glass of its own. */
+  readonly toolbarGroup?: boolean
+  /** Whether these views are a button's label, which take the button's colour, grey when it is disabled. */
+  readonly buttonLabel?: boolean
 }
 
 const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
@@ -494,6 +498,9 @@ class Converter {
    */
   private listDepth = 0
 
+  /** The buttons whose style drew them disabled, in grey, so they are not faded as well. */
+  private readonly greyedOut = new Set<string>()
+
   /**
    * Makes an element fill the rect it is laid out in.
    *
@@ -581,7 +588,8 @@ class Converter {
   navigationBar(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null = null): LayoutElement {
     const outer = this.styles
     this.styles = withStyles(outer, bar.view, this.scheme)
-    this.styles = { ...this.styles, container: 'toolbar' }
+    // iOS 27 draws a Label in the toolbar as its icon alone, unless a label style says otherwise.
+    this.styles = { ...this.styles, container: 'toolbar', label: this.styles.label ?? 'iconOnly' }
     try { return this.navigationBarContent(bar, search) } finally { this.styles = outer }
   }
 
@@ -591,6 +599,36 @@ class Converter {
     this.styles = { ...outer, dynamicTypeSize: 'large' }
     try { return { kind: 'modified', id, modifier: { kind: 'font', font: bodyFont('large') }, child: build() } }
     finally { this.styles = outer }
+  }
+
+  /**
+   * The items on one side of the bar. Side by side, iOS 27 draws them in one glass
+   * capsule, 3 pt in at its ends and 10 pt apart, each without a glass of its own.
+   */
+  private toolbarSide(items: readonly ViewValue[], prefix: string): LayoutElement[] {
+    const item = (view: ViewValue, i: number) => this.chromeContent(`${prefix}${i}-font`, () => this.convert(view, `${prefix}${i}`, 'horizontal'))
+    if (items.length < 2) return items.map(item)
+    const outer = this.styles
+    this.styles = { ...outer, toolbarGroup: true }
+    try {
+      const row: LayoutElement = { kind: 'stack', id: `${prefix}group`, axis: 'horizontal', spacing: 10, alignment: CENTER, children: items.map(item) }
+      return [this.glassSurface({ kind: 'modified', id: `${prefix}grouppad`, modifier: { kind: 'padding', insets: insets(0, 3, 0, 3) }, child: row }, `${prefix}group`, 999, 'circular')]
+    } finally { this.styles = outer }
+  }
+
+  /** iOS 27's glass behind a toolbar control, or a group of them: a thin material, clipped to its corners and outlined. */
+  private glassSurface(child: LayoutElement, path: string, radius: number, cornerStyle: 'continuous' | 'circular', fill?: RGBA): LayoutElement {
+    const background: LayoutElement = {
+      kind: 'modified', id: `${path}glass`,
+      modifier: { kind: 'material', ...this.appearance.materials.thinMaterial!, light: this.scheme === 'light' },
+      child: { kind: 'empty', id: `${path}glassbox` },
+    }
+    const surface: LayoutElement = {
+      kind: 'modified', id: `${path}glassbg`,
+      modifier: { kind: 'background', content: background },
+      child: fill ? this.background(child, `${path}btn`, fill, radius, cornerStyle) : child,
+    }
+    return { kind: 'modified', id: `${path}glassclip`, modifier: { kind: 'cornerRadius', radius, style: cornerStyle }, child: this.chromeOutline(surface, `${path}outline`, radius) }
   }
 
   private navigationBarContent(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null): LayoutElement {
@@ -606,10 +644,10 @@ class Converter {
           spacing: 8,
           alignment: CENTER,
           children: [
-            ...bar.leading.map((item, i) => this.chromeContent(`navbar-l${i}-font`, () => this.convert(item, `navbar-l${i}`, 'horizontal'))),
+            ...this.toolbarSide(bar.leading, 'navbar-l'),
             { kind: 'spacer', id: 'navbar-gap-l', axis: 'horizontal', minLength: 0 },
             ...(search ? [{ kind: 'modified' as const, id: 'navbar-search-width', modifier: { kind: 'frame' as const, width: Math.min(280, this.viewportWidth * 0.34), alignment: CENTER }, child: search }] : []),
-            ...bar.trailing.map((item, i) => this.chromeContent(`navbar-t${i}-font`, () => this.convert(item, `navbar-t${i}`, 'horizontal'))),
+            ...this.toolbarSide(bar.trailing, 'navbar-t'),
           ],
         },
         // Both titles exist so the DOM can cross-fade them without evaluating Swift.
@@ -1121,7 +1159,7 @@ class Converter {
     // Segments own their hit areas. A full-size picker target would cover them.
     const segmented = view.name === 'Picker' && this.styles.picker === 'segmented'
     if (view.intent) {
-      if (isDisabled(view)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
+      if (isDisabled(view) && !this.greyedOut.has(path)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
       if (!segmented) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
     }
     // A passive context target sits behind descendant controls. Those controls
@@ -2175,15 +2213,20 @@ class Converter {
         kind: 'image',
         id: `${path}icon`,
         glyph: symbol.glyph,
-      symbolScale: this.styles.imageScale === 'small' ? 0.8 : this.styles.imageScale === 'large' ? 1.3 : 1,
+        // In a list row iOS 27 draws a Label's icon a quarter larger than the row's text.
+        symbolScale: (this.listDepth > 0 ? 1.25 : 1) * (this.styles.imageScale === 'small' ? 0.8 : this.styles.imageScale === 'large' ? 1.3 : 1),
         resizable: false,
         approximated: symbol.approximated,
         ...(systemImage ? { symbol: systemImage } : {}),
       })
     }
+    // Centred in a column 24 pt wide, with the title 16 pt after it, at 72 on the phone.
+    // The column is a line of text tall: the icon reaches past it, and the row keeps
+    // the height its text gives it, 52 pt apart, as on the phone.
     if (this.listDepth > 0 && children[0]) children[0] = {
-      kind: 'modified', id: `${path}icon-column`, modifier: { kind: 'frame', width: 32, alignment: { horizontal: 'leading', vertical: 'center' } },
-      child: { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
+      kind: 'modified', id: `${path}icon-column`, modifier: { kind: 'frame', width: 24, height: bodyFont(this.typeScale).lineHeight, alignment: CENTER },
+      // A button's Label takes the button's colour instead, grey when it is disabled.
+      child: this.styles.buttonLabel ? children[0] : { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
     }
     if (title !== null && wantsTitle) children.push({ kind: 'text', id: `${path}title`, text: title })
     if (wantsTitle || !symbol) children.push(...this.convertList(view.children, path, 'horizontal'))
@@ -2192,7 +2235,7 @@ class Converter {
       kind: 'stack',
       id: path,
       axis: 'horizontal',
-      spacing: this.listDepth > 0 ? 8 : 6,
+      spacing: this.listDepth > 0 ? 16 : 6,
       alignment: CENTER,
       children,
       ...origin,
@@ -2205,6 +2248,7 @@ class Converter {
     // `Button { save() } label: { … }` puts the content in a labelled argument,
     // because the unlabelled trailing closure is already the action.
     const content = iconLabel ? [iconLabel] : view.children.length > 0 ? view.children : argViews(view, 'label')
+    const iconAlone = title === null && this.toolbarIcon(content)
     const label: LayoutElement =
       title !== null
         ? { kind: 'text', id: `${path}label`, text: title, ...origin }
@@ -2214,7 +2258,7 @@ class Converter {
             axis: 'horizontal',
             spacing: 4,
             alignment: CENTER,
-            children: this.convertList(content, `${path}label`, 'horizontal'),
+            children: this.iconScaled(iconAlone, () => this.asButtonLabel(() => this.convertList(content, `${path}label`, 'horizontal'))),
             ...origin,
           }
 
@@ -2224,7 +2268,31 @@ class Converter {
       lineHeight: m.lineHeight + base.lineHeight - 22, weight: this.alertCancelWeight ? 600 : m.weight }
     const styled = controlFont(label, font)
 
-    return this.applyButtonStyle(view, styled, path)
+    return this.applyButtonStyle(view, styled, path, iconAlone)
+  }
+
+  /**
+   * Whether a toolbar control's label is an icon alone, a Label's included, which iOS 27
+   * draws at the large image scale in a 44-pt glass circle.
+   */
+  private toolbarIcon(content: readonly ViewValue[]): boolean {
+    const only = content.length === 1 ? content[0]! : null
+    return this.styles.container === 'toolbar' && !!only &&
+      (only.name === 'Image' || (only.name === 'Label' && withStyles(this.styles, only, this.scheme).label === 'iconOnly'))
+  }
+
+  /** What `build` converts as a button's label. */
+  private asButtonLabel<T>(build: () => T): T {
+    const outer = this.styles
+    this.styles = { ...outer, buttonLabel: true }
+    try { return build() } finally { this.styles = outer }
+  }
+
+  /** What `build` converts, at the large image scale when the label is a toolbar icon alone. */
+  private iconScaled<T>(iconAlone: boolean, build: () => T): T {
+    const outer = this.styles
+    if (iconAlone) this.styles = { ...outer, imageScale: outer.imageScale ?? 'large' }
+    try { return build() } finally { this.styles = outer }
   }
 
   /**
@@ -2236,9 +2304,9 @@ class Converter {
    * in an alert, in a confirmation dialog and in a swipe action, which is the one
    * place a colour is load-bearing rather than decorative.
    */
-  private buttonTint(view: ViewValue): RGBA {
+  private buttonTint(view: ViewValue, untinted = 'accentColor'): RGBA {
     if (tokenName(labelled(view.args, 'role')) === 'destructive') return this.color('red')
-    return resolveColorArg(modifierArg(view, 'tint', 0), this.scheme, this.styles.tint) ?? this.color('accentColor')
+    return resolveColorArg(modifierArg(view, 'tint', 0), this.scheme, this.styles.tint) ?? this.styles.tint ?? this.color(untinted)
   }
 
   /**
@@ -2253,23 +2321,32 @@ class Converter {
    * `.plain` is the one that genuinely keeps the inherited foreground, and it is why
    * this cannot simply tint everything: `.plain` exists precisely to opt out.
    */
-  private applyButtonStyle(view: ViewValue, label: LayoutElement, path: string): LayoutElement {
+  private applyButtonStyle(view: ViewValue, label: LayoutElement, path: string, iconAlone = false): LayoutElement {
     if (modifierArg(view, 'buttonStyle', 0)?.kind === 'struct') return label
     const requested = this.styles.button ?? 'automatic'
     const style = requested === 'automatic' ? this.appearance.button.automatic[this.styles.container ?? 'content'] : requested
-    const tint = this.buttonTint(view)
+    // The toolbar's glass items are the label colour in iOS 27, unless a tint is written.
+    const toolbar = this.styles.container === 'toolbar'
+    const tint = this.buttonTint(view, toolbar && style === 'glass' ? 'label' : 'accentColor')
 
     // A foreground style set on the button, or on a view around it, is what iOS 27 draws
     // its title in: over the tint, the role, and the white of a prominent button alike.
     // Wrapped in the tint here, `.foregroundStyle(.white)` over an accent background
     // drew the title in the accent, where it could not be seen.
     const foreground = this.styles.foregroundSet === true
+    // A disabled button is grey in iOS 27, rather than its tint faded: its title by where
+    // it sits, and a bordered or prominent button's fill. A plain button, and one given a
+    // foreground style, still fade.
+    const disabled = isDisabled(view) && style !== 'plain' && !foreground
+    const greys = this.appearance.button.disabled[this.scheme]
+    const grey = toolbar ? greys.toolbar : this.listDepth > 0 ? greys.row : greys.title
+    if (disabled) this.greyedOut.add(path)
     if (style !== 'bordered' && style !== 'borderedProminent' && style !== 'glass' && style !== 'glassProminent') {
       if (style === 'plain' || foreground) return label
       return {
         kind: 'modified',
         id: `${path}btntint`,
-        modifier: { kind: 'foregroundStyle', color: tint },
+        modifier: { kind: 'foregroundStyle', color: disabled ? grey : tint },
         child: label,
       }
     }
@@ -2279,29 +2356,41 @@ class Converter {
     const glass = style === 'glass' || style === 'glassProminent'
 
     const metrics = controlMetrics(this.styles.controlSize)
-    const padV = this.styles.container === 'toolbar' ? 11 : metrics.padY
-    const padH = this.styles.container === 'toolbar' ? 16 : metrics.padX
+    // In a toolbar's glass, measured in the iOS 27 simulator: 44 pt tall, an icon alone
+    // 44 pt wide, and text 16 pt in for a Button, 10 for a NavigationLink and 8 in a
+    // capsule shared with other items.
+    const toolbarGlass = toolbar && glass && !prominent
+    const padV = toolbar ? 11 : metrics.padY
+    const padH = toolbar ? (this.styles.toolbarGroup ? 8 : view.name === 'NavigationLink' ? 10 : 16) : metrics.padX
 
     const radius = this.styles.buttonBorderShape === 'roundedRectangle'
       ? this.appearance.button.roundedRectangleRadius
       : this.appearance.button.cornerRadius
 
+    const fill = disabled && !(glass && !prominent) ? this.color('secondarySystemFill') : null
     const tinted: LayoutElement = foreground ? label : {
       kind: 'modified',
       id: `${path}btncolor`,
       modifier: {
         kind: 'foregroundStyle',
-        color: prominent ? rgba(255, 255, 255) : tint,
+        color: disabled ? (fill ? greys.onFill : grey) : prominent ? rgba(255, 255, 255) : tint,
       },
       child: label,
     }
 
-    let padded: LayoutElement = {
-      kind: 'modified',
-      id: `${path}btnpad`,
-      modifier: { kind: 'padding', insets: insets(padV, padH, padV, padH) },
-      child: tinted,
-    }
+    let padded: LayoutElement = toolbarGlass
+      ? {
+          kind: 'modified',
+          id: `${path}btnpad`,
+          modifier: { kind: 'frame', ...(iconAlone ? { width: 44 } : {}), height: 44, alignment: CENTER },
+          child: iconAlone ? tinted : { kind: 'modified', id: `${path}btnpadh`, modifier: { kind: 'padding', insets: insets(0, padH, 0, padH) }, child: tinted },
+        }
+      : {
+          kind: 'modified',
+          id: `${path}btnpad`,
+          modifier: { kind: 'padding', insets: insets(padV, padH, padV, padH) },
+          child: tinted,
+        }
 
     if (this.styles.buttonBorderShape === 'circle') {
       padded = { kind: 'modified', id: `${path}circle-size`, modifier: { kind: 'square' }, child: padded }
@@ -2312,22 +2401,13 @@ class Converter {
     // inherited environment - so a bordered button has been drawing square corners
     // since the style was added, which no test asserted either way.
     if (glass) {
-      const background: LayoutElement = {
-        kind: 'modified', id: `${path}glass`,
-        modifier: { kind: 'material', ...this.appearance.materials.thinMaterial!, light: this.scheme === 'light' },
-        child: { kind: 'empty', id: `${path}glassbox` },
-      }
-      const surface: LayoutElement = {
-        kind: 'modified', id: `${path}glassbg`,
-        modifier: { kind: 'background', content: background },
-        child: prominent ? this.background(padded, `${path}btn`, { ...tint, a: tint.a * 0.85 }, radius, cornerStyle) : padded,
-      }
-      return { kind: 'modified', id: `${path}glassclip`, modifier: { kind: 'cornerRadius', radius, style: cornerStyle }, child: this.chromeOutline(surface, `${path}outline`, radius) }
+      if (toolbarGlass && this.styles.toolbarGroup) return padded
+      return this.glassSurface(padded, path, radius, cornerStyle, prominent ? fill ?? { ...tint, a: tint.a * 0.85 } : undefined)
     }
     return this.background(
       padded,
       `${path}btn`,
-      prominent ? tint : { ...tint, a: tint.a * (this.scheme === 'dark' ? 0.25 : 0.18) },
+      fill ?? (prominent ? tint : { ...tint, a: tint.a * (this.scheme === 'dark' ? 0.25 : 0.18) }),
       radius,
       cornerStyle,
     )
@@ -2335,6 +2415,7 @@ class Converter {
 
   private navigationLink(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0))
+    const iconAlone = title === null && this.toolbarIcon(view.children)
     const label: LayoutElement =
       title !== null
         ? { kind: 'text', id: `${path}label`, text: title }
@@ -2344,7 +2425,7 @@ class Converter {
             axis: 'horizontal',
             spacing: 6,
             alignment: CENTER,
-            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+            children: this.iconScaled(iconAlone, () => this.convertList(view.children, `${path}label`, 'horizontal')),
           }
 
     // The disclosure chevron is what makes a link legible as one - inside a list.
@@ -2358,7 +2439,7 @@ class Converter {
         axis: 'horizontal',
         spacing: 0,
         alignment: CENTER,
-        children: [this.applyButtonStyle(view, label, path)],
+        children: [this.applyButtonStyle(view, label, path, iconAlone)],
         ...origin,
       }
     }
@@ -3100,27 +3181,32 @@ class Converter {
     const describing = argViews(view, 'description')[0]
     const description = describing ? textIn(describing).join(' ') : ''
 
+    // As the iOS 27 simulator draws it, matched pixel for pixel by the same stack built
+    // from plain views: a 40-pt icon in the secondary colour, a bold title3 title 20 pt
+    // below it, the description in title3 3 pt below that, and 30 pt of space under the
+    // description, where the actions go, there even when there are none. The lines are
+    // centred and wrap 32 pt in from each side, and the whole is centred in the space
+    // the view is given.
     const children: LayoutElement[] = []
+    const after = (gap: number, id: string, child: LayoutElement): LayoutElement =>
+      children.length ? { kind: 'modified', id, modifier: { kind: 'padding', insets: insets(gap, 0, 0, 0) }, child } : child
 
     if (symbol) {
       children.push({
         kind: 'modified',
         id: `${path}iconf`,
-        // 52pt, which is roughly where iOS lands it: large enough to be the thing you
-        // see first, small enough not to become the subject.
-        modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 52 * bodyFont(this.typeScale).size / 17 } },
+        modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 40 * bodyFont(this.typeScale).size / 17 } },
         child: {
           kind: 'modified',
           id: `${path}iconc`,
-          modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
+          modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
           child: this.symbolImage(`${path}icon`, symbol),
         },
       })
     }
-
-    if (title) children.push(this.styledText(`${path}title`, title, 'title2', 'label', 600))
+    if (title) children.push(after(20, `${path}titlegap`, this.styledText(`${path}title`, title, 'title3', 'label', 700)))
     if (description) {
-      children.push(this.styledText(`${path}desc`, description, 'body', 'secondaryLabel'))
+      children.push(after(title ? 3 : 20, `${path}descgap`, this.styledText(`${path}desc`, description, 'title3', 'secondaryLabel')))
     }
 
     return {
@@ -3133,13 +3219,23 @@ class Converter {
         alignment: CENTER,
       },
       child: {
-        kind: 'stack',
-        id: path,
-        axis: 'vertical',
-        spacing: 8,
-        alignment: CENTER,
-        children,
-        ...origin,
+        kind: 'modified',
+        id: `${path}inset`,
+        modifier: { kind: 'padding', insets: insets(0, 32, 30, 32) },
+        child: {
+          kind: 'modified',
+          id: `${path}centred`,
+          modifier: { kind: 'textStyle', alignment: 'center' },
+          child: {
+            kind: 'stack',
+            id: path,
+            axis: 'vertical',
+            spacing: 0,
+            alignment: CENTER,
+            children,
+            ...origin,
+          },
+        },
       },
     }
   }

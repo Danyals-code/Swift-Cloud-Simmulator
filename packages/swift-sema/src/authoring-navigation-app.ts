@@ -1,5 +1,5 @@
 import type { AppNavigationModel, AppTab, NavigationOperation, SourceFile, SourceSpan } from '@studio/shared'
-import { forEachChild, type CallExpr, type Expr, type Node, type StructDecl } from '@studio/swift-syntax'
+import { forEachChild, type CallExpr, type Expr, type Node, type Stmt, type StructDecl } from '@studio/swift-syntax'
 import { viewCallChain, swiftString } from './design-controls'
 import { allDeclarations, identifier, namedStruct, patch, raw, sourceRoot, type FeatureContext, type SourcePatch } from './authoring-context'
 
@@ -39,19 +39,16 @@ interface TabContainer {
   readonly file: string
 }
 
-/** The `@main` App struct, and the view its window shows. */
-function entry(ctx: FeatureContext): { app: StructDecl; content?: CallExpr } | undefined {
+/** The `@main` App struct, and what its WindowGroup shows, modifiers and all. */
+export function windowContent(ctx: FeatureContext): { app: StructDecl; content?: Expr } | undefined {
   const app = allDeclarations(ctx).find((d): d is StructDecl => d.kind === 'structDecl' && d.attributes.some(a => a.name === 'main'))
   if (!app) return undefined
-  let content: CallExpr | undefined
+  let content: Expr | undefined, found = false
   const visit = (node: Node) => {
-    if (content) return
+    if (found) return
     if (node.kind === 'call' && node.callee.kind === 'identifier' && node.callee.name === 'WindowGroup') {
-      const body = node.trailingClosure?.body.statements ?? []
-      const only = body.length === 1 ? body[0] : undefined
-      const expr = only?.kind === 'exprStmt' ? only.expression : undefined
-      const chain = expr ? viewCallChain(expr) : null
-      if (chain) content = chain.base
+      found = true
+      content = onlyExpression(node.trailingClosure?.body.statements)
       return
     }
     forEachChild(node, visit)
@@ -60,22 +57,34 @@ function entry(ctx: FeatureContext): { app: StructDecl; content?: CallExpr } | u
   return { app, ...(content ? { content } : {}) }
 }
 
+/** The `@main` App struct, and the view its window shows. */
+function entry(ctx: FeatureContext): { app: StructDecl; content?: CallExpr } | undefined {
+  const window = windowContent(ctx)
+  if (!window) return undefined
+  const chain = window.content ? viewCallChain(window.content) : null
+  return { app: window.app, ...(chain ? { content: chain.base } : {}) }
+}
+
+/** The one expression a body holds, or undefined when it holds anything else. */
+export function onlyExpression(statements: readonly Stmt[] | undefined): Expr | undefined {
+  const only = statements?.length === 1 ? statements[0] : undefined
+  return only?.kind === 'exprStmt' ? only.expression : undefined
+}
+
 /** The view a call names, when it is a plain `SomeScreen()` in this project. */
-function calledView(ctx: FeatureContext, call: CallExpr | undefined): StructDecl | undefined {
+export function calledView(ctx: FeatureContext, call: CallExpr | undefined): StructDecl | undefined {
   if (call?.callee.kind !== 'identifier') return undefined
   return namedStruct(ctx, call.callee.name)
 }
 
 /** The single expression a view's `body` returns. */
-function bodyExpression(struct: StructDecl | undefined): Expr | undefined {
+export function bodyExpression(struct: StructDecl | undefined): Expr | undefined {
   const body = struct?.members.find(m => m.kind === 'varDecl' && m.name === 'body')
-  const statements = body?.kind === 'varDecl' ? body.accessor?.statements ?? [] : []
-  const only = statements.length === 1 ? statements[0] : undefined
-  return only?.kind === 'exprStmt' ? only.expression : undefined
+  return onlyExpression(body?.kind === 'varDecl' ? body.accessor?.statements : undefined)
 }
 
 /** The text of a literal the editor can read and write back, or undefined. */
-function plainText(expr: Expr): string | undefined {
+export function plainText(expr: Expr): string | undefined {
   if (expr.kind !== 'stringLiteral' || !expr.segments.every(segment => segment.kind === 'text')) return undefined
   return expr.segments.map(segment => segment.kind === 'text' ? segment.value : '').join('')
 }

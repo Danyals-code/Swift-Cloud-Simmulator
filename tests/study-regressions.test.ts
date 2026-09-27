@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { RenderTreeView } from '@studio/swiftui-render-dom'
-import { placeholderWords, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
+import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
+import { placeholderWords, rgba, shapePath, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
 import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
 import { KNOWN_COLOR_NAMES, buildAuthoringModel } from '@studio/swift-sema'
 import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
@@ -2362,5 +2362,420 @@ describe('pilot: a number in a title is written as iOS 27 writes it', () => {
     expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
     expect(texts(r)).toEqual(expect.arrayContaining(['Section 2,000', 'Label 2,000', 'Button 2,000', 'Toggle 2,000', 'Labeled 2,000', 'Value 2000', 'Stepper 2,000', 'Link 2,000', 'Title 2,000']))
     expect(nodes(r).some(n => n.hitTarget?.role === 'textField' && n.hitTarget.placeholder === 'Field 2,000')).toBe(true)
+  })
+})
+
+describe('pilot B1: an empty state as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro, and matched pixel for pixel by the
+  // same stack built from plain views: a 40-pt icon in the secondary colour, a bold
+  // title3 title 20 pt below it, the description in title3 3 pt below that, its lines
+  // centred and wrapped 32 pt in from each side, and 30 pt of space under it, the whole
+  // centred in the view.
+  const secondary = colorForName('secondaryLabel')!
+  const empty = (description: string, symbol = 'books.vertical') => screen(`  var body: some View {
+    ContentUnavailableView("No Books", systemImage: "${symbol}", description: Text("${description}"))
+  }`)
+  const textNode = (r: CompileResult, start: string) => nodes(r).find(n => n.text?.runs.some(run => run.text.startsWith(start)))!
+  const frameOf = (r: CompileResult, node: RenderNode) => worldFrame(nodes(r), node)
+  const parts = (r: CompileResult, description: string) => {
+    const icon = nodes(r).find(n => n.image?.symbol)!, title = textNode(r, 'No '), text = textNode(r, description)
+    return { icon, title, text, frames: { icon: frameOf(r, icon), title: frameOf(r, title), text: frameOf(r, text) } }
+  }
+
+  it('draws the icon, the title and the description in the sizes and colours iOS 27 gives them', () => {
+    const { icon, title, text } = parts(empty('Add a book to start your reading list.'), 'Add a book')
+
+    expect(icon.image!.font.size).toBe(40)
+    expect(icon.image!.color).toEqual(secondary)
+    expect(title.text!.runs[0]!.font).toMatchObject({ size: 20, weight: 700 })
+    expect(title.text!.runs[0]!.color).toEqual(colorForName('label'))
+    expect(text.text!.runs[0]!.font).toMatchObject({ size: 20, weight: 400, lineHeight: 25 })
+    expect(text.text!.runs[0]!.color).toEqual(secondary)
+  })
+
+  it('stacks them 20 and 3 pt apart, centred in the screen with 30 pt under the description', () => {
+    const { frames } = parts(empty('Add a book to start your reading list.'), 'Add a book')
+
+    expect(frames.title.y - (frames.icon.y + frames.icon.height)).toBeCloseTo(20, 1)
+    expect(frames.text.y - (frames.title.y + frames.title.height)).toBeCloseTo(3, 1)
+    // The safe area runs from 62 to 840, so its middle is 451.
+    expect((frames.icon.y + frames.text.y + frames.text.height + 30) / 2).toBeCloseTo(451, 1)
+    // Where the simulator puts the title and the description. The icon's box differs by
+    // symbol, 47.2 pt here and 50.33 on the phone, and half of that moves the text.
+    expect(Math.abs(frames.title.y - 445.67)).toBeLessThan(2)
+    expect(Math.abs(frames.text.y - 472.67)).toBeLessThan(2)
+  })
+
+  it('wraps a long description 32 pt in from each side, in centred lines', () => {
+    const { text, frames } = parts(empty('Tap the plus button to add the first book you are reading. It will show up here with your progress and your notes.', 'tray'), 'Tap the plus')
+
+    expect(text.text!.alignment).toBe('center')
+    expect(text.text!.lines!.length).toBeGreaterThan(2)
+    expect(frames.text.x).toBeGreaterThanOrEqual(32)
+    expect(frames.text.x + frames.text.width).toBeLessThanOrEqual(370)
+    expect(frames.text.x + frames.text.width / 2).toBeCloseTo(201, 0)
+  })
+
+  it('keeps the description centred and wrapped under a height limit, above a Form', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      VStack(spacing: 0) {
+        ContentUnavailableView("No Spot Saved", systemImage: "location.fill", description: Text("Enter your level, spot number and a note below, then save."))
+          .frame(maxHeight: 220)
+        Form { Section("Your Spot") { Text("Level") } }
+      }
+      .navigationTitle("Where Did I Park?")
+    }
+  }`)
+    const { text, frames } = parts(r, 'Enter your level')
+
+    expect(text.text!.alignment).toBe('center')
+    expect(text.text!.lines!.length).toBe(2)
+    expect(frames.text.x).toBeGreaterThanOrEqual(32)
+    expect(frames.text.x + frames.text.width).toBeLessThanOrEqual(370)
+    // In the simulator the view is 220 pt tall from y 168, and its group is centred in it.
+    expect((frames.icon.y + frames.text.y + frames.text.height + 30) / 2).toBeCloseTo(168 + 110, 0)
+  })
+})
+
+describe('pilot B3: a disabled button is grey, as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro, light. A disabled button's title
+  // turns a grey that depends on where it sits, and a bordered or prominent button's
+  // fill turns the system grey. Nothing fades, and the toolbar keeps its glass.
+  const titled = (r: CompileResult, value: string) => nodes(r).find(n => n.text?.runs.some(run => run.text === value))!
+  const colorOf = (r: CompileResult, value: string) => titled(r, value).text!.runs[0]!.color
+  const fillBehind = (r: CompileResult, value: string) => {
+    const text = placed(r, value)
+    const inside = (n: RenderNode) => { const f = worldFrame(nodes(r), n); return f.x <= text.x && f.y <= text.y && f.x + f.width >= text.x + text.width && f.y + f.height >= text.y + text.height }
+    return nodes(r).filter(n => n.background?.kind === 'solid' && inside(n)).map(n => n.background!.kind === 'solid' ? n.background!.color : null).at(-1)
+  }
+
+  it('greys the title of a button in a form row and in the toolbar, and leaves the enabled ones tinted', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      Form {
+        Button("Save Spot") { }.disabled(true)
+        Button("Enabled Row") { }
+      }
+      .navigationTitle("Disabled")
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) { Button("Save") { }.disabled(true) }
+      }
+    }
+  }`)
+
+    expect(colorOf(r, 'Save Spot')).toEqual(rgba(0, 0, 0, 0.25))
+    expect(colorOf(r, 'Save')).toEqual(rgba(60, 60, 67, 0.41))
+    expect(colorOf(r, 'Enabled Row')).toEqual(colorForName('accentColor'))
+    expect(titled(r, 'Save Spot').opacity).toBe(1)
+    expect(titled(r, 'Save').opacity).toBe(1)
+  })
+
+  it('greys a disabled button\'s icon with its title, where its label is a Label in a form row', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      Form {
+        Button { } label: { Label("Save Spot", systemImage: "star") }.disabled(true)
+        Button { } label: { Label("Park", systemImage: "star.fill") }
+      }
+    }
+  }`)
+    const icon = (symbol: string) => nodes(r).find(n => n.image?.symbol === symbol)!
+
+    expect(colorOf(r, 'Save Spot')).toEqual(rgba(0, 0, 0, 0.25))
+    expect(icon('star').image!.color).toEqual(rgba(0, 0, 0, 0.25))
+    expect(icon('star').opacity).toBe(1)
+    // An enabled one keeps its tint on both halves.
+    expect(colorOf(r, 'Park')).toEqual(colorForName('accentColor'))
+    expect(icon('star.fill').image!.color).toEqual(colorForName('accentColor'))
+  })
+
+  it('greys a button on its own, and the fill and title of a bordered or prominent one', () => {
+    const r = screen(`  var body: some View {
+    VStack(spacing: 24) {
+      Button("Plain off") { }.disabled(true)
+      Button("Bordered off") { }.buttonStyle(.bordered).disabled(true)
+      Button("Prominent off") { }.buttonStyle(.borderedProminent).disabled(true)
+      Button("Prominent on") { }.buttonStyle(.borderedProminent)
+    }
+  }`)
+
+    expect(colorOf(r, 'Plain off')).toEqual(colorForName('tertiaryLabel'))
+    for (const title of ['Bordered off', 'Prominent off']) {
+      expect(colorOf(r, title), title).toEqual(rgba(60, 60, 67, 0.225))
+      expect(fillBehind(r, title), title).toEqual(rgba(120, 120, 128, 0.16))
+      expect(titled(r, title).opacity, title).toBe(1)
+    }
+    expect(fillBehind(r, 'Prominent on')).toEqual(colorForName('accentColor'))
+  })
+})
+
+describe('pilot B6: list rows as iOS 27 draws them', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro. A Label's icon in a row is a
+  // quarter larger than the row's text and centred 12 pt in, with the title at 72. Each
+  // separator starts under the row's first text: 72 under a Label, in a NavigationLink
+  // too, under the text beside an icon, and at 32 under text alone.
+  const rows = () => screen(`  var body: some View {
+    NavigationStack {
+      List {
+        Label("Books", systemImage: "books.vertical")
+        NavigationLink { Text("x") } label: { Label("Linked", systemImage: "books.vertical") }
+        NavigationLink { Text("x") } label: { HStack { Image(systemName: "books.vertical"); Text("Stacked") } }
+        Label("Star", systemImage: "star")
+        Text("Text only")
+        NavigationLink("Plain link") { Text("x") }
+      }
+      .navigationTitle("Rows")
+    }
+  }`)
+  const separators = (r: CompileResult) => nodes(r)
+    .filter(n => n.background?.kind === 'solid' && n.background.color.a === colorForName('separator')!.a && worldFrame(nodes(r), n).height <= 1)
+    .map(n => worldFrame(nodes(r), n))
+    .sort((a, b) => a.y - b.y)
+
+  it('draws a Label\'s icon a quarter larger than the row\'s text, centred 12 pt in, with its title at 72', () => {
+    const r = rows()
+    const icons = nodes(r).filter(n => n.image?.symbol === 'books.vertical' || n.image?.symbol === 'star')
+
+    for (const title of ['Books', 'Linked', 'Star']) expect(placed(r, title).x, title).toBeCloseTo(72, 1)
+    const labelled = icons.filter(n => n.image!.color.b === 255)
+    expect(labelled).toHaveLength(3)
+    for (const icon of labelled) {
+      expect(icon.image!.font.size * (icon.image!.symbolScale ?? 1)).toBeCloseTo(17 * 1.25, 1)
+      const f = worldFrame(nodes(r), icon)
+      expect(f.x + f.width / 2).toBeCloseTo(44, 0)
+    }
+  })
+
+  it('starts a separator under the text of a row drawn faded, however it is faded', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      List {
+        Label("Faded", systemImage: "star").opacity(0.5)
+        NavigationLink { Text("x") } label: { Label("Off", systemImage: "star") }.disabled(true)
+        Text("Last")
+      }
+    }
+  }`)
+
+    expect(separators(r).map(line => line.x)).toEqual([expect.closeTo(72, 1), expect.closeTo(72, 1)])
+  })
+
+  it('starts each separator under the row\'s first text', () => {
+    const r = rows()
+    const lines = separators(r)
+
+    expect(lines).toHaveLength(5)
+    // The line is snapped to the device's pixels, a third of a point.
+    expect(lines.map(line => line.x)).toEqual([72, 72, placed(r, 'Stacked').x, 72, 32].map(x => expect.closeTo(Math.round(x * 3) / 3, 1)))
+    for (const line of lines) expect(line.x + line.width).toBeCloseTo(370, 0)
+    // Rows keep iOS's pitch, the larger icon reaching past a line of text without growing its row.
+    for (const [i, line] of lines.slice(1).entries()) expect(line.y - lines[i]!.y).toBeCloseTo(52, 0)
+  })
+})
+
+describe('pilot B2: the toolbar as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro. A Label in the toolbar shows its
+  // icon only, at the large image scale, in a 44-pt glass circle. Text sits in a glass
+  // capsule 44 pt tall, 16 pt in for a Button and 10 for a NavigationLink. Items are the
+  // label colour unless a tint is written, and items side by side share one capsule:
+  // 3 pt in at its ends, 10 pt apart, an icon 44 pt wide and text 8 pt in.
+  const bar = (items: string, tint = '', inner = '') => screen(`  var body: some View {
+    NavigationStack {
+      Text("Body")
+        .navigationTitle("Tools")
+        .toolbar {
+${items}
+        }${inner}
+    }${tint}
+  }`)
+  const colorOf = (r: CompileResult, value: string) => nodes(r).find(n => n.text?.runs.some(run => run.text === value))!.text!.runs[0]!.color
+  const glass = (r: CompileResult) => nodes(r).filter(n => n.clip && n.id.includes('glass')).map(n => worldFrame(nodes(r), n)).sort((a, b) => a.x - b.x)
+  const label = colorForName('label')!
+
+  it('draws a Label as its icon alone, in a 44-pt glass circle, in the label colour', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add Item", systemImage: "plus") } }')
+    const icon = nodes(r).find(n => n.image?.symbol === 'plus')!
+
+    expect(texts(r)).not.toContain('Add Item')
+    expect(icon.image!.symbolScale).toBeCloseTo(1.3, 2)
+    expect(icon.image!.color).toEqual(label)
+    expect(glass(r)).toEqual([expect.objectContaining({ x: 342, width: 44, height: 44 })])
+  })
+
+  it('pads a Button\'s text 16 pt and a NavigationLink\'s 10 pt, 44 pt tall, in the label colour', () => {
+    const r = bar(`          ToolbarItem(placement: .topBarLeading) { NavigationLink("Skip") { Text("Next") } }
+          ToolbarItem(placement: .topBarTrailing) { Button("History") { } }`)
+    const [skip, history] = glass(r)
+
+    expect(skip).toMatchObject({ x: 16, height: 44 })
+    expect(skip!.width).toBeCloseTo(placed(r, 'Skip').width + 20, 1)
+    expect(history!.width).toBeCloseTo(placed(r, 'History').width + 32, 1)
+    expect(history!.x + history!.width).toBeCloseTo(386, 1)
+    expect(colorOf(r, 'Skip')).toEqual(label)
+    expect(colorOf(r, 'History')).toEqual(label)
+  })
+
+  it('draws the items in a tint that is written, on the stack or on its content', () => {
+    const teal = colorForName('teal')!
+    const items = `          ToolbarItem(placement: .topBarLeading) { Button("Save") { } }
+          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add", systemImage: "plus") } }`
+
+    for (const r of [bar(items, '\n    .tint(.teal)'), bar(items, '', '\n        .tint(.teal)')]) {
+      expect(colorOf(r, 'Save')).toEqual(teal)
+    }
+    expect(nodes(bar(items, '\n    .tint(.teal)')).find(n => n.image?.symbol === 'plus')!.image!.color).toEqual(teal)
+  })
+
+  it('puts items side by side in one capsule', () => {
+    const r = bar(`          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Settings", systemImage: "gearshape") } }
+          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Share", systemImage: "square.and.arrow.up") } }
+          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Add", systemImage: "plus") } }
+          ToolbarItem(placement: .topBarTrailing) { Button("Edit") { } }
+          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add", systemImage: "plus") } }`)
+    const [icons, mixed] = glass(r)
+
+    expect(glass(r)).toHaveLength(2)
+    expect(icons).toMatchObject({ x: 16, width: 3 + 44 + 10 + 44 + 10 + 44 + 3, height: 44 })
+    expect(mixed!.width).toBeCloseTo(3 + 8 + placed(r, 'Edit').width + 8 + 10 + 44 + 3, 1)
+    expect(mixed!.x + mixed!.width).toBeCloseTo(386, 1)
+  })
+
+  it('draws a NavigationLink to a Label as its icon alone too, as restaurant\'s Cart and pomodoro\'s Settings are written', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { NavigationLink { Text("Cart") } label: { Label("Cart", systemImage: "cart") } }')
+    const icon = nodes(r).find(n => n.image?.symbol === 'cart')!
+
+    expect(texts(r)).not.toContain('Cart')
+    expect(icon.image!.symbolScale).toBeCloseTo(1.3, 2)
+    expect(glass(r)).toEqual([expect.objectContaining({ x: 342, width: 44, height: 44 })])
+  })
+
+  it('pushes a NavigationLink\'s destination when it is tapped in the toolbar', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { NavigationLink("History") { Text("Past sessions") } }')
+
+    expect(controls(r)).toContain('History')
+    expect(texts(tap(r, 'History'))).toContain('Past sessions')
+  })
+})
+
+describe('pilot B13: a continuous corner as iOS 27 draws it', () => {
+  // How far below a shape's top its edge is, at each distance in from its left side,
+  // traced from the iOS 27 simulator on iPhone 18 Pro. The curve reaches 1.53 times the
+  // radius along each edge, and where a side is too short, as on a one-row card or a
+  // 44-pt square, the part along that edge is squeezed into half of it.
+  const measured: readonly (readonly [string, number, number, number, readonly number[]])[] = [
+    ['a card', 26, 200, 120, [14.93, 11.26, 6.64, 3.82, 1.96, 0.97]],
+    ['a one-row card', 26, 370, 52, [14.62, 11.25, 6.64, 3.82, 1.96, 0.96]],
+    ['a 44-pt square', 22, 44, 44, [11.61, 8.57, 4.57, 2.16, 0.66, 0.06]],
+    ['a short bar', 20, 120, 40, [10.22, 7.25, 3.59, 1.58, 0.62, 0.24]],
+    ['a small radius', 12, 120, 40, [4.57, 2.57, 0.63, 0.14, 0.03, 0]],
+  ]
+  const across = [2.5, 4.5, 8.5, 12.5, 16.5, 20.5]
+
+  /** The outline's points, sampling each cubic, from the path data `shapePath` writes. */
+  const outline = (d: string) => {
+    const tokens = d.match(/[MVHCZ]|-?[\d.]+(e-?\d+)?/g)!
+    const points: [number, number][] = []
+    let at: [number, number] = [0, 0], i = 0, command = ''
+    const next = () => Number(tokens[i++])
+    while (i < tokens.length) {
+      if (/[MVHCZ]/.test(tokens[i]!)) command = tokens[i++]!
+      if (command === 'M') at = [next(), next()]
+      else if (command === 'V') at = [at[0], next()]
+      else if (command === 'H') at = [next(), at[1]]
+      else if (command === 'C') {
+        const [a, b, c, d]: [number, number][] = [at, [next(), next()], [next(), next()], [next(), next()]]
+        const bezier = (t: number, k: 0 | 1) => (1 - t) ** 3 * a![k] + 3 * (1 - t) ** 2 * t * b![k] + 3 * (1 - t) * t ** 2 * c![k] + t ** 3 * d![k]
+        for (let t = 0; t <= 1; t += 1 / 400) points.push([bezier(t, 0), bezier(t, 1)])
+        at = d!
+      } else if (command === 'Z') break
+      points.push(at)
+    }
+    return points
+  }
+  const depthAt = (points: readonly [number, number][], width: number, height: number, x: number) => {
+    const corner = points.filter(([px, py]) => px <= width / 2 && py <= height / 2)
+    const nearest = corner.reduce((best, p) => Math.abs(p[0] - x) < Math.abs(best[0] - x) ? p : best)
+    return Math.abs(nearest[0] - x) > 0.5 ? 0 : nearest[1]
+  }
+
+  it.each(measured)('curves %s as the simulator does, within half a point', (_, radius, width, height, depths) => {
+    const points = outline(shapePath('roundedRectangle', width, height, radius, 'continuous'))
+
+    across.forEach((x, i) => expect(Math.abs(depthAt(points, width, height, x) - depths[i]!), `${x} pt in`).toBeLessThan(0.45))
+  })
+})
+
+describe('pilot B10: the app\'s accent, for the export', () => {
+  // In the iOS 27 simulator, Color.accentColor follows a tint written on a navigation
+  // container, and stays the system blue under a tint written on its content, as in
+  // streaks. The preview draws the root tint everywhere, so the export writes it into
+  // AccentColor, and the phone shows it everywhere too.
+  const accentOf = (app: string, views: string) => buildAuthoringModel({ projectId: 'p', revision: 1, files: [{ id: 'App.swift', text: `import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ${app} } } }
+${views}` }] }).accent
+  const teal = { light: '#00C3D0', dark: '#40C8E0' }
+
+  it('is the tint written on the content of the root view\'s navigation stack, as in streaks', () => {
+    expect(accentOf('HomeView()', `struct HomeView: View {
+  var body: some View {
+    NavigationStack {
+      ScrollView { Circle().fill(Color.accentColor) }
+        .navigationTitle("Streaks")
+        .tint(.teal)
+    }
+  }
+}`)).toEqual(teal)
+  })
+
+  it('is the tint written on the window\'s view, or on the tab view the root view is', () => {
+    expect(accentOf('ContentView().tint(Color.indigo)', 'struct ContentView: View { var body: some View { Text("x") } }')).toEqual({ light: '#6155F5', dark: '#5E5CE6' })
+    expect(accentOf('ContentView()', `struct ContentView: View {
+  var body: some View {
+    TabView { Text("A").tabItem { Label("A", systemImage: "star") } }
+      .tint(.teal)
+  }
+}`)).toEqual(teal)
+  })
+
+  it('follows a token the project declares to the colour it was given', () => {
+    expect(accentOf('ContentView().tint(.brand)', `struct ContentView: View { var body: some View { Text("x") } }
+extension Color { static let brand = Color.teal }`)).toEqual(teal)
+    const model = buildAuthoringModel({ projectId: 'p', revision: 1, colors: [{ name: 'Brand', light: '#112233', dark: '#445566' }], files: [{ id: 'App.swift', text: `import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView().tint(Theme.accent) } } }
+struct ContentView: View { var body: some View { Text("x") } }
+enum Theme { static let accent = Color("Brand") }` }] })
+    expect(model.accent).toEqual({ light: '#112233', dark: '#445566' })
+  })
+
+  it('is none when no tint is written at the root, or only on one control inside a screen', () => {
+    expect(accentOf('ContentView()', 'struct ContentView: View { var body: some View { Text("x") } }')).toBeUndefined()
+    expect(accentOf('ContentView()', `struct ContentView: View {
+  var body: some View {
+    VStack { Button("Delete") { }.tint(.red) }
+  }
+}`)).toBeUndefined()
+  })
+})
+
+describe('pilot B8: the symbols the AI apps drew, as look-alikes of iOS 27\'s', () => {
+  // Apple's artwork cannot ship on the web, so each is drawn here after the iOS 27
+  // simulator's glyph, checked beside it: 14 were another shape (a mug for a cup and
+  // saucer, a drop for a flame, an open book for a closed one) and 3 were the "?" box.
+  const drawn = ['cup.and.saucer.fill', 'flame.fill', 'suitcase', 'waveform', 'arrow.uturn.backward', 'book.closed', 'chart.bar', 'chart.line.uptrend.xyaxis', 'thermometer', 'leaf.fill', 'chart.pie', 'square.grid.2x2', 'square.and.pencil', 'photo', 'chart.bar.fill', 'mug.fill', 'square.and.pencil.circle']
+
+  it.each(drawn)('draws %s as a shape of its own', name => {
+    const asset = symbolAsset(name)
+
+    expect(asset).not.toBeNull()
+    expect(asset!.source).toBe('fallback')
+  })
+
+  it.each(['chart.pie', 'square.grid.2x2', 'chart.bar', 'suitcase', 'book.closed'])('draws %s in outline, as iOS does', name => {
+    expect(symbolAsset(name)!.body).not.toContain('fill="currentColor"')
+  })
+
+  it('gives the cup and saucer the width of its saucer', () => {
+    expect(symbolAsset('cup.and.saucer.fill')!.viewBox).toBe('-40 0 592 512')
   })
 })

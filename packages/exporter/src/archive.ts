@@ -5,12 +5,10 @@ import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { encodeText } from './bundle'
 import { MAX_BUNDLE_BYTES, MAX_SCREEN_BYTES, type ExportReview } from './handoff-report'
 import { EVENT_LOG, type HandoffExtras } from './portable'
-import { exportEditableZip, exportProjectZip, zipBundle } from './zip'
+import { exportEditableZip, exportProjectZip, zipBundle, type ExportOptions } from './zip'
 
-export interface ArchiveRequest extends HandoffExtras {
+export interface ArchiveRequest extends ExportOptions {
   readonly format: ArchiveFormat
-  /** The complete bundle's screens and diagnostics. */
-  readonly review?: ExportReview
   /** When the archive is made. */
   readonly now: Date
 }
@@ -30,13 +28,13 @@ export interface Archive {
  * build fails, the Swift still goes out as it was written, with a note saying why the
  * rest could not be built.
  */
-export function exportArchive(stored: Project, { format, review, build, events, now }: ArchiveRequest): Archive {
+export function exportArchive(stored: Project, { format, review, build, events, now, accent }: ArchiveRequest): Archive {
   const project = withCurrentBundleId(stored)
   const name = archiveName(project, format, now)
   const captured = format === 'complete' && review ? usableScreens(review, project, events) : undefined
   const issues = captured?.issues ?? []
   try {
-    const bytes = format === 'editable' ? exportEditableZip(project, { build, events }) : exportProjectZip(project, format === 'complete' ? 'xcodeproj' : format, { review: captured, build, events })
+    const bytes = format === 'editable' ? exportEditableZip(project, { build, events }) : exportProjectZip(project, format === 'complete' ? 'xcodeproj' : format, { review: captured, build, events, accent })
     return { name, bytes, issues }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)

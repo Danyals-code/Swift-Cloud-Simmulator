@@ -63,6 +63,36 @@ struct ContentView: View {
   expect(darkest).toBeLessThan(215)
 })
 
+test('the app\'s accent goes into AccentColor, so the phone draws Color.accentColor as the preview does', async ({ page }) => {
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  // As in streaks: the tint is on the navigation stack's content, where the phone keeps
+  // Color.accentColor the system blue unless AccentColor holds the tint.
+  await replaceSource(page, `import SwiftUI
+@main struct CounterApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            Circle().fill(Color.accentColor).frame(width: 40, height: 40)
+                .navigationTitle("Accent")
+                .tint(.teal)
+        }
+    }
+}
+`)
+  await expect(page.getByTestId('render-tree').getByText('Accent', { exact: true }).first()).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+
+  const download = await exportComplete(page)
+
+  const [, bytes] = Object.entries(await entriesOf(download)).find(([path]) => path.endsWith('/AccentColor.colorset/Contents.json'))!
+  const set = JSON.parse(new TextDecoder().decode(bytes))
+  expect(set.colors.map((color: { color: { components: Record<string, string> } }) => color.color.components)).toEqual([
+    { red: '0x00', green: '0xC3', blue: '0xD0', alpha: '1.000' },
+    { red: '0x40', green: '0xC8', blue: '0xE0', alpha: '1.000' },
+  ])
+})
+
 test('the Export button still downloads the project while its code has an error (G6)', async ({ page }) => {
   await openCounter(page)
   await page.getByTestId('workspace-develop').click()

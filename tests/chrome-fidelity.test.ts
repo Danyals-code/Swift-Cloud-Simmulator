@@ -545,13 +545,14 @@ describe('a button label', () => {
     expect(runColor(app('        Button("Tap") { }'), 'Tap')).toBe(BLUE)
   })
 
-  it('is the accent colour in a toolbar, which is where it is most visible', () => {
-    const source = app(`        NavigationStack {
+  it('is the label colour in a toolbar\'s glass unless a tint is written, as in the iOS 27 simulator', () => {
+    const source = (tint: string) => app(`        NavigationStack {
             Text("body")
                 .navigationTitle("Mail")
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Edit") { } } }
-        }`)
-    expect(runColor(source, 'Edit')).toBe(BLUE)
+        }${tint}`)
+    expect(runColor(source(''), 'Edit')).toBe('0,0,0,1')
+    expect(runColor(source('.tint(.blue)'), 'Edit')).toBe(BLUE)
   })
 
   it('is red for a destructive role', () => {

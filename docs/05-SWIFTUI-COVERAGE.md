@@ -54,12 +54,12 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `Text` | ✅ | 3 | interpolation, with `specifier:` and `format:` inside it too, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling. A title written as a literal, a `Text`'s or a `Button`'s, a `Label`'s, a `Section`'s or a navigation title, writes a number put into it as iOS 27 does: 2,000, and a Double with six decimals, 3.500000; a `String`, `verbatim:` and a project's own views keep Swift's text, 2000 |
-| `Label` | ✅ | 6 | icon then title |
-| `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations; unknown names use an explicit fallback, not Apple artwork |
+| `Label` | ✅ | 6 | icon then title. In a list row, as iOS 27 draws it, the icon is a quarter larger than the row's text, tinted and centred in a 24-pt column, with the title at 72 on the phone |
+| `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations, and shapes drawn here after the iOS 27 simulator's glyph where no Ionicon is close (a cup and saucer, a flame, a waveform, a closed book, outlined charts); unknown names use an explicit fallback, not Apple artwork |
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
 | `GroupBox` | ✅ | - | a titled card: the label above, the contents on a rounded secondary panel |
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
-| `ContentUnavailableView` | ✅ | 13 | the empty state: a large symbol over a title over a description. `.search` is the stock spelling and carries its own text |
+| `ContentUnavailableView` | ✅ | 13 | the empty state as iOS 27 draws it: a 40-pt symbol in the secondary colour, a bold title3 title, and a title3 description in centred lines 32 pt in from each side, centred with 30 pt of space under it. `.search` is the stock spelling and carries its own text. The form built from content closures, and its actions, are not drawn |
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
 | `ScrollViewReader` | 🟡 | - | what it holds is drawn, and handed a proxy whose `scrollTo` does nothing: there is no channel from the worker to the browser's scroll position. Warns at the reader |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
@@ -91,7 +91,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `List` | 🟡 | 6 | plain/grouped/sidebar styles; binding collection closures are unsupported |
+| `List` | 🟡 | 6 | plain/grouped/sidebar styles; binding collection closures are unsupported. A row's separator starts under its first text, as iOS 27 draws it: a Label's title, the text beside an icon, or the row's inset with no text |
 | `Section` | ✅ | 6 | header and footer, the footer in the secondary colour under the card |
 | `Form` | ✅ | 6 | the grouped-list form |
 | `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included, given the place of the element the row was drawn for; `perform:` takes a closure or a named function, as do `.onAppear`, `.task` and `.onTapGesture` |
@@ -104,7 +104,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `NavigationStack` + `NavigationLink` | 🟡 | 6 | destination/value links work. Bound `NavigationStack(path:)` is not synchronized and now warns |
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
-| `.toolbar` | 🟡 | 6 | leading/trailing items work; keyboard, bottomBar and principal placements warn and are omitted |
+| `.toolbar` | 🟡 | 6 | leading/trailing items work, drawn as iOS 27 draws them: a Label as its icon alone in a 44-pt glass circle, text in a 44-pt capsule, the label colour unless a tint is written, and items side by side in one capsule. A NavigationLink in the toolbar pushes. Keyboard, bottomBar and principal placements warn and are omitted |
 | `TabView` | ✅ | 6 | tab bar with `.tabItem` or `Tab`, bound or unbound selection, pages from `ForEach` selected by their ids, a `TabSection`'s tabs in the bar with the others, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
@@ -186,7 +186,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | Item | Status | Phase |
 | --- | --- | --- |
-| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 |
+| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 | a `.continuous` corner is iOS 27's curve, measured in the simulator: it reaches 1.53 times the radius along each edge, squeezed into half a side that is too short. Grouped list and form cards and alerts use it. A sheet's clip and the glass outlines are still circular |
 | `UnevenRoundedRectangle`, `.rect(topLeadingRadius:…)`, `RectangleCornerRadii` | 🟡 | - | drawn, clipped and filled with the largest radius on every corner; the checker says so where uneven corners are written (D7a) |
 | `Path` (custom) | ✅ | 7 | lines, curves, arcs, rects and ellipses, serialised to SVG |
 | `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`'s `lineWidth`; a `StrokeStyle` dash pattern is not drawn |
@@ -216,7 +216,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.id(_:)` | ✅ | - | a new id is a new view: its state starts over, and its appear and disappear hooks run, when the id changes |
 | `.onChange(of:)` | ✅ | 7 | one-value and explicit zero/two-parameter callbacks; `initial: true` runs on first appearance. Independent modifiers track independent previous values |
 | `.onReceive` | ⬜ | - | needs Combine, which needs publishers and a scheduler the preview does not have |
-| `.disabled` / `.allowsHitTesting` | ✅ | 7 |
+| `.disabled` / `.allowsHitTesting` | ✅ | 7 | a disabled button is grey, as iOS 27 draws it: its title by where it sits (on its own, in a row, in the toolbar), and a bordered or prominent button's fill too. A plain button, one with its own foreground style, and other controls fade |
 | `.focused` | ⬜ | - | warns; `@FocusState` storage exists but native focus synchronization is absent |
 | `.onSubmit` / `.keyboardType` / `.submitLabel` | 🟡 | - | common text-field Enter submission and browser input/return-key hints, including inherited modifiers; no iOS keyboard rendering or complete submit-scope semantics |
 | `.textInputAutocapitalization` / `.autocorrectionDisabled` | 🟡 | - | browser input hints; actual behavior depends on the browser and keyboard |

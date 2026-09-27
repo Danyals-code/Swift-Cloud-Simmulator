@@ -545,6 +545,9 @@ function migrateStyle(ctx: FeatureContext, name: string): ResourceEdit {
  */
 export const AUTHORING_COLOR_HEX: Readonly<Record<string, string>> = { black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF383C', orange: '#FF8D28', yellow: '#FFCC00', green: '#34C759', mint: '#00C8B3', teal: '#00C3D0', cyan: '#00C0E8', blue: '#0088FF', indigo: '#6155F5', purple: '#CB30E0', pink: '#FF2D55', brown: '#AC7F5E' }
 
+/** The same colours in dark mode, where they change, as the preview draws them. */
+export const AUTHORING_COLOR_HEX_DARK: Readonly<Record<string, string>> = { red: '#FF453A', orange: '#FF9F0A', yellow: '#FFD60A', green: '#30D158', mint: '#63E6E2', teal: '#40C8E0', cyan: '#64D2FF', blue: '#0091FF', indigo: '#5E5CE6', purple: '#BF5AF2', pink: '#FF375F', brown: '#AC8E68' }
+
 function assetReferences(ctx: FeatureContext, op: Extract<ResourceOperation, { kind: 'asset-references' }>): SourcePatch[] {
   const patches: SourcePatch[] = []
   if (allDeclarations(ctx).some(d => 'name' in d && ['Image', 'Label'].includes(d.name ?? ''))) throw new Error('An image type is shadowed. Resolve image references in Swift before changing this resource.')

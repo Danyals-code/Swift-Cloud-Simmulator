@@ -1,7 +1,7 @@
 import { exportArchive, type ExportReview, type ScreenSnapshot } from '@studio/exporter'
 import type { Project } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
-import { viewsDrawing, type ArchiveFormat, type CompileResult, type PagePreview } from '@studio/shared'
+import { viewsDrawing, type AppAccent, type ArchiveFormat, type CompileResult, type PagePreview } from '@studio/shared'
 import { STUDIO_BUILD } from './build'
 import type { LogFile } from './eventLog'
 import { screenNaming } from './designTree'
@@ -56,16 +56,20 @@ const CAPTURE_ALL_MS = 90_000
  * An export is the result of somebody's work, so nothing refuses it: a preview with
  * errors, a screen that can't be drawn, a step that never answers. What could not be
  * done is said in the archive's report instead, and every step has a deadline, so the
- * Export button always comes back.
+ * Export button always comes back. `accent` is the tint written at the app's root, which
+ * goes into AccentColor; the complete bundle takes it from its own compile, of exactly
+ * the project it exports.
  */
-export async function exportProject(project: Project, format: ArchiveFormat, preview: CaptureSettings, steps: ExportSteps): Promise<ExportOutcome> {
+export async function exportProject(project: Project, format: ArchiveFormat, preview: CaptureSettings, steps: ExportSteps, accent?: AppAccent): Promise<ExportOutcome> {
   // The archive is made from the project on screen, so a slow save only delays it.
   await within(() => steps.save(), SAVE_MS).catch(() => undefined)
   const log = await within(() => steps.events(project.id, format), EVENTS_MS).catch(() => undefined)
-  const captured = format === 'complete' ? await captureScreens(project, preview, steps) : undefined
+  const capture = format === 'complete' ? await captureScreens(project, preview, steps) : undefined
+  const captured = capture?.review
   const unlogged = !log ? NO_LOG : log.partial ? PARTIAL_LOG : null
   const review = captured && unlogged ? { ...captured, issues: [...captured.issues ?? [], unlogged] } : captured
-  const archive = exportArchive(project, { format, review, build: STUDIO_BUILD, events: log?.text, now: new Date() })
+  const tint = capture ? capture.accent : accent
+  const archive = exportArchive(project, { format, review, build: STUDIO_BUILD, events: log?.text, now: new Date(), ...(tint ? { accent: tint } : {}) })
   steps.download(archive.name, archive.bytes)
   return { name: archive.name, screenImages: review?.screens.length ?? 0, issues: archive.issues.filter(issue => issue !== unlogged) }
 }
@@ -77,21 +81,23 @@ export function exportNote(format: ArchiveFormat, { name, screenImages, issues }
   return format === 'complete' ? `Exported ${name}${images}, the report and the chat history.` : `Exported ${name}.`
 }
 
-/** Every screen of the app drawn, and what kept any of them out. */
-async function captureScreens(project: Project, preview: CaptureSettings, steps: ExportSteps): Promise<ExportReview> {
+/** Every screen of the app drawn, and what kept any of them out, with the accent the same compile found. */
+async function captureScreens(project: Project, preview: CaptureSettings, steps: ExportSteps): Promise<{ readonly review: ExportReview; readonly accent?: AppAccent }> {
   const issues: string[] = [], screens: ScreenSnapshot[] = []
   const review = { device: getDevice(project.manifest.device).name, colorScheme: preview.colorScheme, dynamicTypeSize: preview.dynamicTypeSize ?? 'large', typeScale: preview.typeScale, screens, issues }
   let result: CompileResult
   try { result = await within(signal => steps.compile(project, preview, signal), COMPILE_MS) }
-  catch (error) { issues.push(`The preview could not be drawn, so no screen is in this export: ${reason(error)}`); return { ...review, diagnostics: [] } }
+  catch (error) { issues.push(`The preview could not be drawn, so no screen is in this export: ${reason(error)}`); return { review: { ...review, diagnostics: [] } } }
 
   const diagnostics = [...result.diagnostics.map(item => `${item.severity}: ${item.message}`), ...result.logs.filter(item => item.level !== 'log').map(item => `${item.level}: ${item.message}`)]
+  const accent = result.authoring?.accent
+  const done = () => ({ review: { ...review, diagnostics }, ...(accent ? { accent } : {}) })
   const pages = drawnPages(project, result)
   const errors = result.diagnostics.filter(item => item.severity === 'error')
   if (!pages.length) {
     const problem = errors[0]?.message ?? result.renderTree?.notice?.detail
     if (problem) issues.push(`The preview has ${errors.length || 1} error${errors.length > 1 ? 's' : ''}, so no screen could be drawn: ${problem}`)
-    return { ...review, diagnostics }
+    return done()
   }
 
   const { nameOf } = screenNaming(pages, result.authoring, screenCatalog(result.authoring, pages, project.studio?.screens))
@@ -106,7 +112,7 @@ async function captureScreens(project: Project, preview: CaptureSettings, steps:
     try { screens.push({ id: page.id, name, kind: page.kind ?? 'root', width: page.tree.canvas.width, height: page.tree.canvas.height, png: await within(signal => steps.capture(page, signal), CAPTURE_MS) }) }
     catch (error) { issues.push(`The image of ${name} could not be made: ${reason(error)}`) }
   }
-  return { ...review, diagnostics }
+  return done()
 }
 
 /** The pages a compile drew, leaving out one that only says why nothing could be. */
