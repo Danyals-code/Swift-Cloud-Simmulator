@@ -1,9 +1,8 @@
 /**
  * Device definitions.
  *
- * Pure data - no rendering. The bezel is drawn in CSS by the app shell because
- * Apple's device artwork is not licensed for redistribution (risk R2 in
- * docs/01-REQUIREMENTS.md).
+ * Pure data - no rendering. The app shell draws the bezel, from artwork where it
+ * has some and otherwise in CSS.
  *
  * All measurements are in logical points, matching what SwiftUI sees. Safe-area
  * insets are the values `@Environment(\.safeAreaInsets)` reports in portrait.
@@ -73,7 +72,7 @@ export const DEVICES: Readonly<Record<DeviceKey, DeviceSpec>> = {
     homeIndicator: true,
   },
   // 1206 × 2622 user-supplied Simulator capture at 3×. Insets are the calibration
-  // assumptions recorded with that evidence; hardware artwork remains approximate.
+  // assumptions recorded with that evidence.
   'iphone-18-pro': {
     key: 'iphone-18-pro', name: 'iPhone 18 Pro', width: 402, height: 874, scale: 3,
     safeArea: { top: 62, leading: 0, bottom: 34, trailing: 0 },

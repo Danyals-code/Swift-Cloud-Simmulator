@@ -160,3 +160,39 @@ struct ContentView: View {
     expect(Math.abs((y / ratio - (box.y - clip.y)) / scale - 11.26)).toBeLessThan(1)
   })
 })
+
+test('the iPhone 18 Pro is drawn in its own artwork, which taps pass through', async ({ page }) => {
+  await openCounter(page)
+  await page.getByTestId('live-toggle').click()
+  await expect(page.getByTestId('page-gallery')).toHaveCount(0)
+  const frame = page.getByTestId('device-frame')
+  const art = frame.getByTestId('device-art')
+  const screen = frame.getByTestId('device-screen')
+
+  // The screen sits in the artwork's opening: 402 x 874 pt, 24 pt in and 23 pt down a 450 x 920 phone.
+  const outer = (await frame.boundingBox())!, inner = (await screen.boundingBox())!
+  const zoom = inner.width / 402
+  expect(inner.height / zoom).toBeCloseTo(874, 0)
+  expect((inner.x - outer.x) / zoom).toBeCloseTo(24, 0)
+  expect((inner.y - outer.y) / zoom).toBeCloseTo(23, 0)
+  expect(outer.width / zoom).toBeCloseTo(450, 0)
+  expect(outer.height / zoom).toBeCloseTo(920, 0)
+
+  // The black phone on the light workspace, served as an image, with the artwork's own island only.
+  await expect(art).toHaveCSS('background-image', /\/devices\/iphone-18-pro-black\.webp/)
+  expect((await page.request.get('/devices/iphone-18-pro-black.webp')).headers()['content-type']).toBe('image/webp')
+  await expect(frame.getByTestId('dynamic-island')).toHaveCount(0)
+
+  // A tap at the screen's edge reaches the app, and so does one on a button.
+  const edge = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-testid="device-screen"]') != null, [inner.x + 3 * zoom, inner.y + inner.height / 2])
+  expect(edge).toBe(true)
+  await preview(page).getByRole('button', { name: 'Plus', exact: true }).click()
+  await expect(preview(page).getByText('Count: 1', { exact: true })).toBeVisible()
+
+  // The dark workspace swaps in the silver phone, which a dark canvas does not swallow.
+  await page.getByTestId('workspace-more').click()
+  await page.getByTestId('workspace-more-menu-theme').click()
+  await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'dark')
+  await expect(art).toHaveCSS('background-image', /\/devices\/iphone-18-pro-silver\.webp/)
+  expect((await page.request.get('/devices/iphone-18-pro-silver.webp')).headers()['content-type']).toBe('image/webp')
+})
