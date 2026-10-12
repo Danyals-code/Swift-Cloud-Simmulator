@@ -15,6 +15,7 @@ import { AppearancePicker, DevicePicker, TextSizePicker, ZoomPicker } from './Pr
 import type { CanvasTool } from './Toolbar'
 import type { AuthoringNode, NavigationDestination, DropPosition } from '@studio/shared'
 import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../lib/pageLayout'
+import { deviceChrome, type DeviceChrome } from '../lib/deviceChrome'
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
 import type { FeatureProps } from './AuthoringFeatures'
 import { InlineTextEditor } from './InlineTextEditor'
@@ -175,8 +176,7 @@ export interface CanvasInputs {
   readonly compile: Omit<CompilerOptions, 'device' | 'colorScheme' | 'typeScale' | 'dynamicTypeSize' | 'scenario' | 'allPages' | 'previewScreen'>
 }
 
-/** Chrome around the screen: bezel thickness plus breathing room in the pane. */
-const BEZEL = 10
+/** Breathing room around the phone in the pane. */
 const PANE_PADDING = 28
 
 /** How many state phones may be drawn at once, each being its own compile. */
@@ -199,9 +199,9 @@ const DEVICE_Z = 1_000_000
 /**
  * The simulated device.
  *
- * The bezel, Dynamic Island, status bar and home indicator are all drawn in CSS.
- * Apple's device artwork is not licensed for redistribution (risk R2), and a CSS
- * frame has the side benefit of scaling cleanly to any zoom level.
+ * The status bar and home indicator are drawn in CSS, as are the bezel and the
+ * Dynamic Island of a device without artwork (see deviceChrome). The iPhone 18 Pro
+ * is drawn in its own artwork, island included, laid over the screen's edges.
  *
  * Appearance, Dynamic Type and zoom live on this pane's own bar rather than in the
  * toolbar. They describe how you are looking at the simulated app, so they belong
@@ -322,7 +322,8 @@ export function DevicePane({
     setCanvasFor(`${projectId}:${canvas?.laneNames.length ?? 0}`)
     setOpenStates(new Set()); setCollapsedLanes(new Set()); setShowAllStates(false)
   }
-  const phoneFrame = useMemo(() => ({ width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }), [device.width, device.height])
+  const chrome = useMemo(() => deviceChrome(device), [device])
+  const phoneFrame = useMemo(() => ({ width: chrome.width, height: chrome.height }), [chrome])
   const statesOf = canvas?.statesOf, laneNames = canvas?.laneNames, visibleRootId = canvas?.visibleRootId, sameScreen = canvas?.sameScreen
 
   /**
@@ -796,7 +797,7 @@ export function DevicePane({
   const inlineEditor = inlineText && inspecting && authoringFeatures?.onNodeChange ? <InlineTextEditor key={`${inlineText.node.id}:${inlineText.control}`} {...inlineText} onClose={() => setInlineText(null)} onSave={value => authoringFeatures.onNodeChange!(inlineText.node, inlineText.control, value)} /> : null
   const screenFor = (tree: RenderTree | null, live: boolean, at: number, page?: PagePreview) => (
     <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${at})`, transformOrigin: 'top left' }}>
-      <DeviceFrame device={device}>
+      <DeviceFrame device={device} chrome={chrome}>
         <RenderTreeView
           key={scrollMemory.identity}
           scrollPositions={scrollMemory.positions}
@@ -824,7 +825,7 @@ export function DevicePane({
         {live && notice ? <p className={styles.stateProblem} role="status">{notice.title}: {notice.detail}</p> : null}
         {live && onRestart ? <button type="button" className={styles.restartPhone} aria-label="Start the preview again" onClick={onRestart} /> : null}
         <StatusBar device={device} colorScheme={preview.colorScheme} />
-        {device.hasDynamicIsland ? <DynamicIsland device={device} /> : null}
+        {device.hasDynamicIsland && !chrome.art ? <DynamicIsland device={device} /> : null}
         {device.homeIndicator ? <HomeIndicator device={device} colorScheme={preview.colorScheme} /> : null}
       </DeviceFrame>
     </div>
@@ -973,11 +974,12 @@ export function DevicePane({
                   </div>
                 : state ? null
                 : <figure key={page.id} className={styles.pageCard} style={{ left: x, top: y, width: phoneFrame.width, height: phoneFrame.height + CANVAS.caption }} data-active={page.id === selectedPageId || undefined} data-page-id={page.id} data-parent-page={page.parentId} data-page-kind={page.kind ?? 'root'} data-testid="gallery-page">
-                  <div style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }}>
+                  <div style={{ position: 'relative', width: phoneFrame.width, height: phoneFrame.height }}>
                     {screenFor(page.tree, false, 1, page)}
                     {navigationPicker && <button
                       type="button"
                       className={styles.navigationPickTarget}
+                      style={{ borderRadius: chrome.outerRadius }}
                       data-testid="navigation-pick-target"
                       data-available={!!navigationPicker.targets[page.id]?.destination}
                       aria-label={`Navigate to ${page.name}`}
@@ -1000,7 +1002,7 @@ export function DevicePane({
           ) : (
             <div
               data-canvas-phone
-              style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }}
+              style={{ position: 'relative', width: phoneFrame.width, height: phoneFrame.height }}
             >
               {screenFor(tree, true, 1)}
             </div>
@@ -1070,10 +1072,11 @@ function StatePhone({ page, scenario, options, device, preview, active, onSelect
     allPages: true,
   })
   const tree = result?.pages?.find(item => item.id === page.id)?.tree ?? null
+  const chrome = useMemo(() => deviceChrome(device), [device])
   const problem = stateProblem({ page: page.name, compiled: !!result, diagnostics: result?.diagnostics ?? [], drawn: !!tree, stale, workerError })
   return (
     <figure className={styles.pageCard} data-testid="canvas-state" data-state={scenario.name} data-active={active || undefined}>
-      <div style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }} data-busy={!tree || stale || undefined}>
+      <div style={{ position: 'relative', width: chrome.width, height: chrome.height }} data-busy={!tree || stale || undefined}>
         {draw(tree)}
         {problem ? <p className={styles.stateProblem} role="status">{problem}</p> : null}
       </div>
@@ -1088,23 +1091,68 @@ function StatePhone({ page, scenario, options, device, preview, active, onSelect
 /**
  * The bezel.
  *
- * Titanium rather than the silver gradient this used to draw: a real iPhone's
- * frame is near-black and reads as a thin dark rim, and a bright bevel around a
- * simulated screen pulls the eye to the chrome instead of to the app. The band of
- * lighter grey along the top edge is the one specular cue worth keeping - without
- * it the device reads as a flat rectangle with rounded corners.
+ * Its own layers: the app's bars and sheets, the status bar and the artwork all sit
+ * in it, so whatever the canvas draws over a phone (the navigation pick) covers the
+ * whole of it.
  */
-function DeviceFrame({ device, children }: { device: DeviceSpec; children: React.ReactNode }) {
+function DeviceFrame({ device, chrome, children }: { device: DeviceSpec; chrome: DeviceChrome; children: React.ReactNode }) {
+  const screen = (
+    <div
+      data-testid="device-screen"
+      style={{
+        position: 'relative',
+        width: device.width,
+        height: device.height,
+        borderRadius: device.cornerRadius,
+        overflow: 'hidden',
+        background: '#ffffff',
+        // A hairline where the glass meets the frame, which is what stops the
+        // screen from looking painted onto the bezel.
+        boxShadow: chrome.art ? undefined : 'inset 0 0 0 0.5px rgb(0 0 0 / 0.5)',
+      }}
+    >
+      {children}
+    </div>
+  )
+  if (chrome.art) {
+    const art = chrome.art
+    return (
+      <div data-testid="device-frame" style={{ position: 'relative', width: chrome.width, height: chrome.height, isolation: 'isolate' }}>
+        <div style={{ position: 'absolute', left: chrome.screen.x, top: chrome.screen.y }}>{screen}</div>
+        {/* The glass's edge, over the app. The screen's white and the app's own background
+            meet on a fractional pixel, which left a white hairline around a dark app, so
+            this straddles that edge: 1 pt under the artwork and 1 pt over the app. */}
+        <div aria-hidden style={{ position: 'absolute', left: chrome.screen.x - 1, top: chrome.screen.y - 1, width: device.width + 2, height: device.height + 2, borderRadius: device.cornerRadius + 1, boxShadow: 'inset 0 0 0 2px #000', pointerEvents: 'none', zIndex: DEVICE_Z + 3 }} />
+        {/* Over the screen, so its glass edge and island cover the app as the hardware
+            does, and out of the way of every tap. The finish follows the workspace theme. */}
+        <div
+          data-testid="device-art"
+          aria-hidden
+          className={styles.deviceArt}
+          style={{
+            left: art.x, top: art.y, width: art.width, height: art.height, zIndex: DEVICE_Z + 3,
+            '--device-art-black': `url(${art.black})`, '--device-art-silver': `url(${art.silver})`,
+          } as React.CSSProperties}
+        />
+      </div>
+    )
+  }
+  // Titanium rather than the silver gradient this used to draw: a real iPhone's
+  // frame is near-black and reads as a thin dark rim, and a bright bevel around a
+  // simulated screen pulls the eye to the chrome instead of to the app. The band of
+  // lighter grey along the top edge is the one specular cue worth keeping - without
+  // it the device reads as a flat rectangle with rounded corners.
   return (
     <div
       data-testid="device-frame"
       style={{
         position: 'relative',
-        width: device.width + BEZEL * 2,
-        height: device.height + BEZEL * 2,
-        padding: BEZEL,
+        width: chrome.width,
+        height: chrome.height,
+        padding: `${chrome.screen.y}px ${chrome.screen.x}px`,
         boxSizing: 'border-box',
-        borderRadius: device.cornerRadius + BEZEL,
+        isolation: 'isolate',
+        borderRadius: chrome.outerRadius,
         background: 'linear-gradient(150deg, #55555c 0%, #26262a 12%, #1c1c1f 50%, #303036 100%)',
         boxShadow: [
           '0 18px 40px rgb(25 25 35 / 0.12)',
@@ -1114,21 +1162,7 @@ function DeviceFrame({ device, children }: { device: DeviceSpec; children: React
         ].join(', '),
       }}
     >
-      <div
-        style={{
-          position: 'relative',
-          width: device.width,
-          height: device.height,
-          borderRadius: device.cornerRadius,
-          overflow: 'hidden',
-          background: '#ffffff',
-          // A hairline where the glass meets the frame, which is what stops the
-          // screen from looking painted onto the bezel.
-          boxShadow: 'inset 0 0 0 0.5px rgb(0 0 0 / 0.5)',
-        }}
-      >
-        {children}
-      </div>
+      {screen}
     </div>
   )
 }
