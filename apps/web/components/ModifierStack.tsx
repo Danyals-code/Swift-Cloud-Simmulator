@@ -1,6 +1,6 @@
 'use client'
 
-import { useLayoutEffect, useRef, useState } from 'react'
+import { Children, useLayoutEffect, useRef, useState } from 'react'
 import { modifierGuidance } from '../lib/modifierGuidance'
 import { reconcileModifierRows, modifierDropIndex, type ModifierRows } from '../lib/modifierRows'
 import type { AuthoringModifier, AuthoringNode, AuthoringSnapshot, DesignControl, ModifierCatalogEntry, ResourceOperation, SourceSpan } from '@studio/shared'
@@ -153,19 +153,22 @@ export function ModifierStack({ node, snapshot, onChange, onCommand, onReveal, f
   const suggested = suggestions(node).map(name => catalog.find(item => item.name === name)).filter((item): item is ModifierCatalogEntry => !!item?.available)
   const slots = snapshot?.nodes.filter(n => n.kind === 'branch' && !!n.navigation) ?? []
   return <div ref={stack} className={styles.modifierStack} data-testid="modifier-stack" aria-busy={busy}>
-    <div className={styles.sectionHeading}><h3>Modifiers</h3>{!!node.modifierCatalog?.length && <button type="button" ref={addButton} className={styles.addButton} disabled={busy || !onCommand} aria-expanded={picker} aria-label="Add modifier" title="Add modifier" onClick={() => { setPicker(!picker); setQuery('') }}><Icon name="plus" size={13} /></button>}</div>
+    <div className={styles.sectionHeading}><h3>Modifiers</h3>{!!node.modifierCatalog?.length && <button type="button" ref={addButton} className={styles.addButton} disabled={busy || !onCommand} aria-expanded={picker} aria-label="Add modifier" title="Add modifier" onClick={() => { setPicker(!picker); setQuery('') }}><Icon name="plus" size={14} /></button>}</div>
     {leading}
     {picker && <div className={styles.modifierPicker} role="dialog" aria-label="Add modifier" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setPicker(false); addButton.current?.focus() } }}>
       <input aria-label="Search modifiers" placeholder="Search modifiers…" value={query} onChange={event => setQuery(event.target.value)} autoFocus onKeyDown={event => { if (event.key === 'Enter') { const first = matching.find(item => item.available); if (first) { event.preventDefault(); add(first.name) } } }} />
       {!needle && !!suggested.length && <div className={styles.suggested}><small>Suggested</small>{suggested.map(item => <button key={item.name} type="button" disabled={busy} onClick={() => add(item.name)}>{item.label}</button>)}</div>}
       <div className={styles.catalog}>{GROUPS.map(group => {
         const items = matching.filter(item => item.category === group.category)
-        return items.length ? <div key={group.category} role="group" aria-label={group.title}><small className={styles.catalogGroup}>{group.title}</small>{items.map(item => <button key={item.name} type="button" disabled={busy || !item.available} title={item.reason} onClick={() => add(item.name)}><span>{item.label}</span><small>{item.available ? item.description : item.reason}</small></button>)}</div> : null
+        return items.length ? <div key={group.category} role="group" aria-label={group.title}><small className={styles.catalogGroup}>{group.title}</small>{items.map(item => {
+          const subtitle = item.available ? item.description : item.reason
+          return <button key={item.name} type="button" disabled={busy || !item.available} title={item.reason} onClick={() => add(item.name)}><span>{item.label}</span>{subtitle && subtitle.toLowerCase() !== item.label.toLowerCase() && <small>{subtitle}</small>}</button>
+        })}</div> : null
       })}</div>
       {!matching.length && <p className={styles.note}>No matching modifiers.</p>}
       <p className={styles.note}>New modifiers go where they usually belong. Drag to reorder: the top one runs first.</p>
     </div>}
-    {!modifiers.length && <div className={styles.emptyStack}><p className={styles.note}>No modifiers yet.</p>{!!suggested.length && <div className={styles.suggested}>{suggested.map(item => <button key={item.name} type="button" disabled={busy || !onCommand} onClick={() => add(item.name)}>+ {item.label}</button>)}</div>}</div>}
+    {!modifiers.length && <div className={styles.emptyStack}>{!Children.toArray(leading).length && <p className={styles.note}>No modifiers yet.</p>}{!!suggested.length && <div className={styles.suggested}>{suggested.map(item => <button key={item.name} type="button" disabled={busy || !onCommand} onClick={() => add(item.name)}>+ {item.label}</button>)}</div>}</div>}
     {rows.map(({ modifier, key }, index) => {
       const enabled = modifier.enabled !== false
       const slot = slots.find(candidate => candidate.navigation?.editable && candidate.source.file === modifier.source.file && candidate.source.start >= modifier.source.start && candidate.source.end <= modifier.source.end)
@@ -226,7 +229,7 @@ export function ModifierStack({ node, snapshot, onChange, onCommand, onReveal, f
       </article>
     })}
     {!!modifiers.length && <div className={styles.dropEnd} aria-hidden="true" onDragOver={event => { if (!busy && drag.current && event.dataTransfer.types.includes('application/x-studio-modifier') && canMove(drag.current.index, modifiers.length - 1)) { event.preventDefault(); setDropIndex(modifiers.length) } }} onDrop={event => { event.preventDefault(); drop(modifiers.length) }} />}
-    <p role="status" className={styles.modifierStatus}>{busy ? 'Applying…' : 'Top runs first · drag or use the actions menu to reorder'}</p>
+    <p role="status" className={styles.modifierStatus}>{busy ? 'Applying…' : modifiers.length > 1 ? 'Top runs first · drag or use the actions menu to reorder' : ''}</p>
     {error && <p role="alert" className={styles.error}>{error}</p>}
   </div>
 }

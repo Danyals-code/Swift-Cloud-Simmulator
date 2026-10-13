@@ -1,57 +1,72 @@
 'use client'
 
 import { useState } from 'react'
+import { formatShortcut } from '../lib/shortcuts'
 import { Spotlight } from './Spotlight'
 import { Icon } from './ui/Icon'
 import styles from './AddView.module.css'
 
-const shortcuts = [
-  ['Keyboard shortcuts', 'Mod /', 'Workspace'],
-  ['Open a file', 'Mod P', 'Workspace'],
-  ['Save', 'Mod S', 'Workspace'],
-  ['Switch Design / Code', '`', 'Outside fields'],
-  ['Switch Inspect / Preview', 'Tab', 'Code, with nothing focused'],
-  ['Show / hide left panel', 'Mod 0', 'Workspace'],
-  ['Show / hide right panel', 'Mod Alt Enter', 'Workspace'],
-  ['Show / hide problems and output', 'Mod Shift Y', 'Workspace'],
-  ['Restart preview', 'Mod R', 'Workspace'],
-  ['Toggle inspection', 'Mod I', 'Code'],
-  ['Show all pages', 'Mod Shift A', 'Design · Edit'],
-  ['Select a whole card or row', 'Click', 'Design · Edit'],
-  ['Go into a view, or edit its text', 'Double-click', 'Design · Edit'],
-  ['Select the innermost view', 'Mod Click', 'Design · Edit'],
-  ['Add to the selection', 'Shift Click', 'Design · Edit'],
-  ['Select the view around it', 'Esc', 'Design · Edit'],
-  ['Add a view', 'A', 'Design · Edit'],
-  ['Arrange views', 'V', 'Design · Edit'],
-  ['Delete selected view', 'Backspace', 'Design · Edit'],
-  ['Duplicate selected view', 'Mod D', 'Design · Edit'],
-  ['Hide selected view', 'Mod Shift H', 'Design · Edit'],
-  ['Group in a Column, Row or Overlap', 'Mod G', 'Design · Edit'],
-  ['Move selected view', 'Alt ↑ / ↓', 'Design · Edit'],
-  ['Undo canvas edit', 'Mod Z', 'Design · Edit'],
-  ['Redo canvas edit', 'Mod Shift Z', 'Design · Edit'],
-  ['Copy / paste view', 'Mod C / V', 'Design · Edit'],
-  ['Rename symbol', 'F2', 'Code editor'],
-  ['Rename file', 'F2 / double-click', 'Files panel'],
-  ['Rename app', 'Enter / double-click', 'App name'],
-  ['Pan canvas', 'Space + drag', 'Design'],
-  ['Zoom canvas', 'Scroll', 'Design · Edit'],
-] as const
+/**
+ * The shortcuts, by where they work; the note says where when the group alone does not.
+ * Code before Design, so the two short groups share the first column.
+ */
+const groups = [
+  ['Workspace', [
+    ['Keyboard shortcuts', 'Mod /', 'Outside the code editor'],
+    ['Open a file', 'Mod P'],
+    ['Save', 'Mod S'],
+    ['Switch Design / Code', '`', 'Outside fields'],
+    ['Show / hide left panel', 'Mod 0'],
+    ['Show / hide right panel', 'Mod Alt Enter'],
+    ['Show / hide problems and output', 'Mod Shift Y'],
+    ['Restart preview', 'Mod R'],
+    ['Rename app', 'Enter / Double-click', 'On the app name'],
+  ]],
+  ['Code', [
+    ['Toggle inspection', 'Mod I'],
+    ['Comment line', 'Mod /', 'In the code editor'],
+    ['Rename symbol', 'F2', 'In the code editor'],
+    ['Rename file', 'F2 / Double-click', 'In Files'],
+  ]],
+  ['Design', [
+    ['Select a whole card or row', 'Click'],
+    ['Go into a view, or edit its text', 'Double-click'],
+    ['Select the innermost view', 'Mod Click'],
+    ['Add to the selection', 'Shift Click'],
+    ['Select the view around it', 'Esc'],
+    ['Add a view', 'A'],
+    ['Select tool', 'V'],
+    ['Delete selected view', 'Backspace'],
+    ['Duplicate selected view', 'Mod D'],
+    ['Hide selected view', 'Mod Shift H'],
+    ['Group in a Column, Row or Overlap', 'Mod G'],
+    ['Move selected view', 'Alt ↑ / Alt ↓'],
+    ['Undo canvas edit', 'Mod Z'],
+    ['Redo canvas edit', 'Mod Shift Z'],
+    ['Copy / paste view', 'Mod C / Mod V'],
+    ['Show all screens', 'Mod Shift A'],
+    ['Pan canvas', 'Scroll'],
+    ['Zoom canvas', 'Mod Scroll / Pinch'],
+  ]],
+] as const satisfies readonly (readonly [string, readonly (readonly [string, string, string?])[]])[]
 
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState('')
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-  const results = shortcuts.filter(row => row.join(' ').toLowerCase().includes(query.trim().toLowerCase()))
+  const needle = query.trim().toLowerCase()
+  const results = groups.map(([group, rows]) => [group, rows.filter(row => [group, ...row].join(' ').toLowerCase().includes(needle))] as const).filter(([, rows]) => rows.length)
   return <Spotlight label="Keyboard shortcuts" testId="shortcuts-dialog" onClose={onClose}>{close => <>
-    <header className={styles.field}><Icon name="keyboard" size={20} /><input aria-label="Search shortcuts" placeholder="Find a shortcut…" value={query} onChange={e => setQuery(e.target.value)} />
-      <button type="button" aria-label="Close shortcuts" onClick={() => close()}><Icon name="xmark" /></button>
+    <header className={styles.field}><Icon name="keyboard" size={16} /><input aria-label="Search shortcuts" placeholder="Find a shortcut…" value={query} onChange={e => setQuery(e.target.value)} />
+      <button type="button" className={styles.close} aria-label="Close shortcuts" onClick={() => close()}><Icon name="xmark" size={12} /></button>
     </header>
-    <div className={styles.list}>
-      {results.map(([name, keys, context]) => <div className={styles.shortcutRow} key={name}>
-        <div><span className={styles.name}>{name}</span><span className={styles.shortcutContext}>{context}</span></div>
-        <kbd>{keys.replaceAll('Mod', mac ? '⌘' : 'Ctrl').replaceAll('Alt', mac ? '⌥' : 'Alt').replaceAll('Shift', '⇧')}</kbd>
-      </div>)}
+    <div className={`${styles.list} ${styles.shortcutList}`}>
+      {results.map(([group, rows]) => <section key={group} aria-label={group}>
+        <h3 className={styles.shortcutGroup}>{group}</h3>
+        {rows.map(([name, keys, context]) => <div className={styles.shortcutRow} key={name}>
+          <div><span className={styles.name}>{name}</span>{context ? <span className={styles.shortcutContext}>{context}</span> : null}</div>
+          <kbd>{formatShortcut(keys, mac)}</kbd>
+        </div>)}
+      </section>)}
       {!results.length ? <p className={styles.empty}>No matching shortcuts.</p> : null}
     </div>
     <footer className={styles.footer}><span>Shortcuts wait while you type in a field.</span><span>esc to close</span></footer>

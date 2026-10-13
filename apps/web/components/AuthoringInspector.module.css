@@ -1,236 +1,266 @@
-.inspector { display: grid; gap: 12px; min-width: 0; }
-.owner { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
-.owner > span { overflow-wrap: anywhere; }
-.inspector button { color: var(--color-xc-accent); font-size: 11px; cursor: pointer; text-align: left; flex-shrink: 0; }
-.inspector button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 2px; }
-.note { font-size: 11px; opacity: .75; }
-.properties { display: grid; gap: 14px; margin: 0; }
-.property { border-top: 1px solid rgb(128 128 128 / .2); padding-top: 12px; }
-.property dt { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; }
-.badge { font-size: 10px; font-weight: 400; padding: 2px 5px; border: 1px solid rgb(128 128 128 / .25); border-radius: 4px; }
-.property dd { display: grid; gap: 5px; margin: 7px 0 0; min-width: 0; }
-.property code { font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; background: rgb(128 128 128 / .08); border-radius: 4px; padding: 6px; }
-.property small, .property p { font-size: 10px; line-height: 1.5; opacity: .8; margin: 0; }
-.controls { display: grid; gap: 14px; margin: 12px 0 20px; }
-.control { display: grid; gap: 5px; min-width: 0; }
-.controlLabel { composes: row from "./ui/Field.module.css"; font-size: 12px; }
-.control input, .control select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; height: 28px; padding: 0 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; }
-.control input:focus-visible, .control select:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
-.control input[aria-invalid="true"] { border-color: var(--color-xc-error); }
-.control small { font-size: 10px; color: var(--color-xc-text-3); }
-.control details, .source summary { font-size: 11px; color: var(--color-xc-text-3); }
-.control details p { font-size: 11px; line-height: 1.5; }
-.control summary, .source summary { cursor: pointer; }
-.control .error { color: var(--color-xc-error); font-size: 11px; line-height: 1.45; margin: 3px 0; }
-.control input[type="range"] { padding: 0; accent-color: var(--color-xc-accent); }
-
-.inspector header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
-.empty { font-size: 12px; color: var(--color-xc-text-3); }
-.features { display: grid; gap: 18px; border-bottom: 1px solid var(--color-xc-line); padding-bottom: 16px; }
-.features section, .features details { display: grid; gap: 9px; }
-.features h3 { font-size: 12px; font-weight: 600; margin: 0; }
-.features p, .features li { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-.features label { display: grid; gap: 5px; font-size: 11px; }
-.features input, .features select { width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--color-xc-line); border-radius: 5px; color: var(--color-xc-text); background: var(--color-xc-bar-raised); }
-.features input[type="checkbox"] { width: auto; justify-self: start; }
-.features button { padding: 5px 0; }
-.features button:disabled { opacity: .45; cursor: default; }
-.features summary { font-size: 11px; cursor: pointer; }
-.features pre { max-height: 150px; overflow: auto; white-space: pre-wrap; font-size: 10px; }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.error { color: var(--color-xc-error); font-size: 11px; }
-.features input:focus-visible, .features select:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
-
-.assetPreviews { display: flex; gap: 8px; }
-.assetPreviews figure { margin: 0; flex: 1; min-width: 0; padding: 6px; border: 1px solid var(--color-xc-line); border-radius: 6px; }
-.assetPreviews img { display: block; width: 100%; height: 70px; object-fit: contain; }
-.assetPreviews figure:first-child { background: #f8fafc; color: #17212f; }
-.assetPreviews figure:last-child { background: #17212f; color: #f8fafc; }
-.assetPreviews figcaption { font-size: 10px; margin-top: 4px; }
-
-/* The selection reads as one inspector: content, appearance, data, behavior. */
+/**
+ * The View inspector: the selected view's name, then its sections - Basics, Modifiers,
+ * Data, what wraps it, Advanced - each a run of label and control rows.
+ *
+ * Fields, popups, checkboxes and disclosure chevrons are drawn by globals.css; this
+ * file only lays them out. Actions are secondary push buttons, and a link is used only
+ * where it sits inside a sentence.
+ */
+.inspector { display: grid; gap: 8px; min-width: 0; }
 .inspectorFields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 0; }
 .inspectorFields:disabled { cursor: progress; }
-.selectionHeader { padding: 3px 0 12px; }
-.selectionHeader > div { display: grid; gap: 4px; min-width: 0; }
-.selectionHeader strong { font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
-.selectionHeader small { font-size: 11px; color: var(--color-xc-text-3); }
-.selectionHeader > button { padding: 5px; font-family: monospace; }
-.scope { margin: 0 0 10px; background: color-mix(in srgb, var(--color-xc-accent) 9%, transparent); border-radius: 5px; padding: 8px; font-size: 11px; line-height: 1.5; }
-.breadcrumbs { display: flex; gap: 5px; flex-wrap: wrap; padding-bottom: 12px; }
-.breadcrumbs button { color: var(--color-xc-text-3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.breadcrumbs button + button::before { content: '›'; padding-right: 5px; }
-.settingsSection { display: grid; gap: 12px; padding: 16px 0; border-top: 1px solid var(--color-xc-line); min-width: 0; }
-.settingsSection > h3, .sectionHeading h3 { font-size: 12px; font-weight: 650; margin: 0; }
-.settingsSection > summary { font-size: 11px; color: var(--color-xc-text-3); cursor: pointer; }
-.settingsSection .features { border: 0; padding: 0; gap: 12px; }
+.inspectorFields > .note { padding-bottom: 16px; }
+.empty { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
+.note { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); overflow-wrap: anywhere; }
+.error { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-error); overflow-wrap: anywhere; }
+.inspector code, .features code, .destinationEditor code { font-family: var(--font-mono); font-size: var(--text-footnote); overflow-wrap: anywhere; }
+
+/* The selection: its name, what kind of view it is, and the view menu. */
+.selectionHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding-bottom: 16px; }
+.selectionHeader > div { display: grid; gap: 2px; min-width: 0; }
+.selectionHeader strong { font-size: var(--text-title3); line-height: var(--text-title3--line-height); letter-spacing: var(--text-title3--letter-spacing); font-weight: 600; overflow-wrap: anywhere; }
+.selectionHeader small { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+.selectionHeader > button { display: grid; place-items: center; flex-shrink: 0; width: var(--control-height); height: var(--control-height); margin-top: -4px; border-radius: var(--radius-md); color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.selectionHeader > button:hover, .selectionHeader > button[aria-expanded='true'] { background: var(--color-xc-fill); color: var(--color-xc-text); }
+/* What follows the name before the first section: where it is, and what an edit reaches. */
+.scope, .breadcrumbs, .locked { margin: -8px 0 16px; }
+.scope { padding: 8px 12px; border-radius: var(--radius-lg); background: var(--color-xc-select); color: var(--color-xc-text); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+.breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; min-width: 0; }
+.breadcrumbs button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); transition: color var(--duration-fast); }
+.breadcrumbs button:hover { color: var(--color-xc-text); }
+.breadcrumbs button + button::before { content: '›'; padding-right: 4px; color: var(--color-xc-text-3); }
+/* Code the studio does not rewrite, said as such. */
+.locked { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 8px 12px; border-radius: var(--radius-lg); background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+.locked > svg { flex-shrink: 0; color: var(--color-xc-text-3); }
+.locked > span { flex: 1; min-width: 120px; }
+
+/* A link: only ever the end of a sentence, in the sentence's own size. */
+.linkButton { display: inline; padding: 0; color: var(--color-xc-accent); font: inherit; text-align: left; }
+.linkButton:hover { text-decoration: underline; }
+.linkButton:disabled { opacity: .4; text-decoration: none; }
+
+/* A section: a 13px heading, rows 8px apart, a hairline above. */
+.settingsSection { display: grid; gap: 8px; min-width: 0; padding: 16px 0; border-top: 1px solid var(--color-xc-line-soft); }
+.settingsSection:last-child { padding-bottom: 0; }
+.settingsSection > h3, .sectionHeading h3 { margin: 0; font-size: var(--text-body); line-height: var(--text-body--line-height); font-weight: 600; color: var(--color-xc-text); }
+.settingsSection > h3 { margin-bottom: 4px; }
+.settingsSection > summary { display: flex; align-items: center; min-height: 24px; font-size: var(--text-body); font-weight: 600; color: var(--color-xc-text); }
+details.settingsSection[open] > summary + * { margin-top: 12px; }
+.settingsSection .features { gap: 8px; }
 .settingsSection .features:empty { display: none; }
-.sectionHeading { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; }
-.sectionHeading > span { font-size: 10px; color: var(--color-xc-text-3); background: var(--color-xc-line-soft); border-radius: 4px; padding: 2px 5px; }
-.modifierStack { position: relative; isolation: isolate; overflow-anchor: none; display: grid; gap: 8px; min-width: 0; }
-.modifierCard { border: 1px solid var(--color-xc-line); border-radius: 7px; background: var(--color-xc-bar-raised); min-width: 0; overflow: hidden; }
-.modifierHeader { display: flex; align-items: stretch; min-height: 44px; }
-.dragHandle { display: grid; place-items: center; width: 21px; flex-shrink: 0; color: var(--color-xc-text-3); font-size: 18px; cursor: default; user-select: none; }
-.dragHandle[draggable="true"] { cursor: grab; }
-.inspector .modifierToggle { display: flex; align-items: center; gap: 5px; padding: 9px 0; color: var(--color-xc-text); min-width: 0; flex: 1; flex-shrink: 1; }
-.modifierToggle > span:last-child { display: grid; min-width: 0; gap: 3px; }
-.modifierToggle strong { font-size: 12px; font-weight: 550; }
-.modifierToggle small { font-size: 10px; color: var(--color-xc-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chevron { width: 9px; flex-shrink: 0; font-size: 14px; color: var(--color-xc-text-3); }
-.inspector .modifierMenuButton { padding: 0 9px; color: var(--color-xc-text-2); font-size: 17px; }
-.modifierActions { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 10px; border-top: 1px solid var(--color-xc-line); background: var(--color-xc-panel); }
-.modifierActions button { padding: 3px 0; }
-.modifierActions button:disabled, .inspector button:disabled { opacity: .4; cursor: default; }
-.modifierBody { border-top: 1px solid var(--color-xc-line); padding: 12px; display: grid; gap: 12px; min-width: 0; }
-.modifierBody .note { margin: 0; line-height: 1.5; }
+.sectionHeading { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 24px; margin-bottom: 4px; }
 
-.inspector .addModifier { width: 100%; padding: 9px 10px; border: 1px dashed var(--color-xc-line); border-radius: 6px; text-align: center; color: var(--color-xc-text-2); font-size: 12px; }
-.inspector .addModifier:hover { border-color: var(--color-xc-accent); color: var(--color-xc-accent); }
-.modifierPicker { border: 1px solid var(--color-xc-line); padding: 12px; border-radius: 8px; background: var(--color-xc-panel); box-shadow: 0 5px 18px rgb(0 0 0 / .12); display: grid; gap: 10px; min-width: 0; }
-.modifierPicker input { width: 100%; box-sizing: border-box; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font-size: 12px; }
-.modifierPicker input:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
-.catalog { display: grid; gap: 2px; max-height: 270px; overflow-y: auto; }
-.catalog button { display: grid; gap: 3px; padding: 8px; border-radius: 4px; color: var(--color-xc-text); }
-.catalog button:not(:disabled):hover { background: var(--color-xc-line-soft); }
-.catalog small { font-size: 10px; color: var(--color-xc-text-3); text-transform: capitalize; }
-.catalog button:disabled { opacity: .55; }
-.dropBefore { box-shadow: 0 -3px 0 var(--color-xc-accent); }
-.dropAfter { box-shadow: 0 3px 0 var(--color-xc-accent); }
-.modifierStatus { min-height: 28px; margin: 0; color: var(--color-xc-text-3); font-size: 10px; line-height: 1.4; }
-.dropEnd { height: 10px; margin-top: -4px; }
+/* A plain square button in a section heading: add a modifier. */
+.addButton { display: grid; place-items: center; flex-shrink: 0; width: var(--control-height-sm); height: var(--control-height-sm); border-radius: var(--radius-md); color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.addButton:hover:not(:disabled) { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.addButton[aria-expanded='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.addButton:disabled { opacity: .4; }
 
-.control textarea { box-sizing: border-box; width: 100%; min-width: 0; resize: vertical; min-height: 62px; border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; line-height: 1.5; }
-.control label:has(textarea) { grid-template-columns: minmax(0, 1fr); gap: 7px; }
-.control textarea:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
-.control textarea[aria-invalid="true"] { border-color: var(--color-xc-error); }
+/**
+ * One value: a label and its control in a row, with help, a slider or an error under
+ * the control rather than under the label.
+ */
+.control { display: grid; gap: 4px; min-width: 0; }
+.control > small:first-child { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); font-weight: 600; color: var(--color-xc-text-2); }
+.controlLabel { composes: row from "./ui/Field.module.css"; }
+.controlLabel ~ small, .controlLabel ~ p, .controlLabel ~ input[type='range'] { margin: 0 0 0 calc(max(80px, 38%) + 8px); }
+.control:has(textarea) > .controlLabel ~ * { margin-left: 0; }
+.controlLabel ~ small { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
+.control input[type='range'] { width: calc(100% - max(80px, 38%) - 8px); margin-top: 0; margin-bottom: 0; }
+.control label:has(textarea) { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.control textarea { width: 100%; min-width: 0; min-height: 52px; resize: vertical; }
 
-.contextSettings { display: grid; gap: 18px; min-width: 0; }
-.contextSettings section { display: grid; gap: 10px; }
-.contextSettings h4 { margin: 0; font-size: 12px; font-weight: 600; }
-.contextItem { display: grid; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 6px; }
-.contextItem p { margin: 0; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-.contextItem summary { font-size: 12px; cursor: pointer; }
-.contextItem button { text-align: left; font-size: 11px; }
-.contextItem > summary { margin-bottom: 8px; }
-.contextItem:not([open]) > summary { margin-bottom: 0; }
-.contextLinks { display: flex; gap: 6px 12px; flex-wrap: wrap; }
-
-
-.destinationEditor { display: grid; gap: 8px; min-width: 0; }
-.destinationEditor > label { font-size: 11px; font-weight: 550; }
-.destinationPicker { position: relative; min-width: 0; }
-.destinationInput { display: flex; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; background: var(--color-xc-bar-raised); }
-.destinationInput:focus-within { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
-.destinationInput input { flex: 1; width: 100%; min-width: 0; border: 0; outline: none; background: transparent; color: var(--color-xc-text); padding: 8px; font-size: 12px; }
-.destinationInput input[aria-invalid="true"] { box-shadow: inset 0 -1px var(--color-xc-error); }
-.destinationInput button { display: grid; place-items: center; width: 30px; color: var(--color-xc-text-2); }
-.destinationOptions { margin-top: 4px; display: grid; gap: 2px; max-height: 240px; overflow: auto; padding: 5px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-panel); box-shadow: 0 5px 18px rgb(0 0 0 / .12); }
-.destinationOptions > button { display: grid; gap: 3px; width: 100%; padding: 7px; border-radius: 4px; min-width: 0; color: var(--color-xc-text); }
-.destinationOptions > button:not(:disabled):hover, .destinationOptions > button[data-active="true"] { background: var(--color-xc-select); }
-.destinationOptions small { font-size: 10px; color: var(--color-xc-text-3); overflow-wrap: anywhere; }
-.destinationOptions p { padding: 7px; }
-.destinationCurrent { color: var(--color-xc-text-3); }
-.destinationCurrent code { font-size: 10px; overflow-wrap: anywhere; }
-.destinationActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.destinationActions button { padding: 5px 0; }
-.destinationActions .destinationPick { display: inline-flex; align-items: center; gap: 5px; }
-
-.guidedInteraction { display: grid; gap: 9px; padding: 10px; background: var(--color-xc-line-soft); border-radius: 8px; margin-bottom: 12px; }
-.valueFlow { display: flex; justify-content: space-around; align-items: center; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 6px; }
-.dependencies, .quickStyles { display: flex; flex-wrap: wrap; gap: 6px; }
-.dependencies button, .quickStyles button { border: 1px solid var(--color-xc-line); padding: 5px 8px; border-radius: 6px; font-size: 11px; background: var(--color-xc-line-soft); cursor: pointer; }
-.quickStyles { margin: 8px 0 12px; }
-.visualColor { display: grid; gap: 8px; border-top: 1px solid var(--color-xc-line); padding-top: 10px; }
-.swatchValue { display: flex; align-items: end; gap: 8px; }
-.swatchValue > input[type=color] { width: 34px; height: 32px; padding: 2px; flex-shrink: 0; }
-.swatchValue label { flex: 1; min-width: 0; }
-.visualColor label { display: grid; gap: 5px; }
-.visualColor input, .visualColor select { width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; background: var(--color-xc-bar-raised); }
-/* A stack's Layout and Alignment as icon buttons, an Overlap's as its nine places, and Auto spacing (D4). */
-.choices { display: inline-flex; justify-self: start; gap: 2px; padding: 2px; border-radius: 7px; background: var(--color-xc-bar-raised); }
-.choices > button { display: grid; place-items: center; width: 30px; height: 24px; border-radius: 5px; color: var(--color-xc-text-2); cursor: pointer; }
+/* A stack's Layout and Alignment: a segmented control of glyphs. */
+.choices { display: inline-flex; justify-self: start; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--color-xc-fill); }
+.choices > button { display: grid; place-items: center; width: var(--control-height); height: var(--control-height-sm); border-radius: var(--radius-thumb); color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast); }
 .choices > button:hover:not(:disabled) { color: var(--color-xc-text); }
-.choices > button[aria-checked='true'] { background: var(--color-xc-panel); color: var(--color-xc-accent); box-shadow: 0 1px 3px #0002; }
-.places { display: grid; grid-template-columns: repeat(3, 22px); justify-self: start; gap: 2px; padding: 3px; border-radius: 7px; background: var(--color-xc-bar-raised); }
-.places > button { display: grid; place-items: center; height: 20px; border-radius: 4px; cursor: pointer; }
-.places > button > i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-xc-text-3); }
-.places > button[aria-checked='true'] { background: var(--color-xc-panel); box-shadow: 0 1px 3px #0002; }
+.choices > button[aria-checked='true'] { background: var(--color-xc-thumb); color: var(--color-xc-text); box-shadow: var(--shadow-thumb); }
+.choices > button:disabled, .places > button:disabled { opacity: .4; }
+/* An Overlap's nine places, on the same track. */
+.places { display: grid; grid-template-columns: repeat(3, var(--control-height)); justify-self: start; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--color-xc-fill); }
+.places > button { display: grid; place-items: center; height: 20px; border-radius: var(--radius-thumb); transition: background-color var(--duration-fast), box-shadow var(--duration-fast); }
+.places > button > i { width: 4px; height: 4px; border-radius: 50%; background: var(--color-xc-text-3); }
+.places > button:hover:not(:disabled) > i { background: var(--color-xc-text); }
+.places > button[aria-checked='true'] { background: var(--color-xc-thumb); box-shadow: var(--shadow-thumb); }
 .places > button[aria-checked='true'] > i { width: 8px; height: 8px; border-radius: 2px; background: var(--color-xc-accent); }
-.choices > button:focus-visible, .places > button:focus-visible, .spacing > button:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
-.spacing { display: flex; gap: 6px; min-width: 0; }
+/* A number with Auto beside it: the toggle is a push button that stays pressed. */
+.spacing { display: flex; gap: 8px; min-width: 0; }
 .spacing > input { flex: 1; }
-.spacing > button { flex-shrink: 0; height: 28px; padding: 0 9px; border: 1px solid var(--color-xc-line); border-radius: 5px; font-size: 12px; color: var(--color-xc-text-2); cursor: pointer; }
-.spacing > button[aria-pressed='true'] { border-color: var(--color-xc-accent); background: var(--color-xc-select); color: var(--color-xc-accent); }
-.layoutGuide { margin: 10px 0; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 7px; }
-.layoutGuide > div { display: flex; align-items: center; justify-content: center; min-height: 60px; }
+.spacing > button { flex-shrink: 0; height: var(--control-height); padding: 0 10px; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); font-size: var(--text-body); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.spacing > button:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
+.spacing > button[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.spacing > button:disabled { opacity: .4; }
+
+/* How a stack lays its views out, drawn small. */
+.layoutGuide { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-lg); background: var(--color-xc-bar-raised); }
+.layoutGuide > div { display: flex; align-items: center; justify-content: center; min-height: 64px; }
 .layoutGuide > div[data-direction=column] { flex-direction: column; }
 .layoutGuide > div[data-spread] { justify-content: space-between; }
-.layoutGuide span { display: grid; place-items: center; background: var(--color-xc-select); color: var(--color-xc-accent); border: 1px solid var(--color-xc-accent); border-radius: 3px; width: 28px; height: 15px; font-size: 9px; }
 .layoutGuide > div[data-direction=overlay] { display: grid; }
-.layoutGuide > div[data-direction=overlay] span { grid-area: 1 / 1; background: var(--color-xc-select); }
-.layoutGuide small { color: var(--color-xc-text-3); font-size: 10px; }
-.layoutGuide p { font-size: 11px; line-height: 1.5; color: var(--color-xc-text-3); margin: 8px 0 0; }
-.symbolPicker { margin-top: 8px; }
-.symbolPicker > input { width: 100%; margin: 8px 0; padding: 7px; border: 1px solid var(--color-xc-line); border-radius: 5px; }
-.symbolPicker > div { display: grid; grid-template-columns: repeat(3, 1fr); max-height: 230px; overflow: auto; gap: 4px; }
-.symbolPicker button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border: 1px solid var(--color-xc-line); border-radius: 5px; }
-.symbolPicker small { font-size: 9px; overflow-wrap: anywhere; }
-.symbolPicker button[aria-pressed=true] { background: var(--color-xc-select); border-color: var(--color-xc-accent); }
+.layoutGuide span { display: grid; place-items: center; width: 28px; height: 16px; border: 1px solid var(--color-xc-accent); border-radius: var(--radius-sm); background: var(--color-xc-select); color: var(--color-xc-accent); font-size: var(--text-caption); line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; }
+.layoutGuide > div[data-direction=overlay] span { grid-area: 1 / 1; }
+.layoutGuide p { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+.layoutGuide small { font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); }
 
-/* One modifier stack: add, switch on/off, reorder. */
-.inspector .addButton { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--color-xc-text-2); background: var(--color-xc-line-soft); }
-.inspector .addButton:hover:not(:disabled), .inspector .addButton[aria-expanded='true'] { color: var(--color-xc-accent); background: var(--color-xc-select); }
-.modifierCard[data-enabled='false'] { opacity: .62; }
-.modifierCard[data-enabled='false'] .modifierToggle strong { text-decoration: line-through; text-decoration-color: var(--color-xc-text-3); }
-.modifierMenu { display: flex; align-items: center; }
-.modifierMenu > button { display: grid; place-items: center; width: 28px; height: 100%; color: var(--color-xc-text-2); cursor: pointer; }
-.inspector .switch { position: relative; align-self: center; flex-shrink: 0; width: 28px; height: 16px; margin: 0 4px; border-radius: 999px; background: var(--color-xc-line); transition: background .12s; }
-.inspector .switch > i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .12s; }
-.inspector .switch[aria-checked='true'] { background: var(--color-xc-accent); }
-.inspector .switch[aria-checked='true'] > i { transform: translateX(12px); }
-.inspector .switch:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 2px; }
-.suggested { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.suggested > small { width: 100%; font-size: 10px; color: var(--color-xc-text-3); }
-.inspector .suggested button { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); color: var(--color-xc-text); font-size: 11px; }
-.inspector .suggested button:hover:not(:disabled) { border-color: var(--color-xc-accent); color: var(--color-xc-accent); }
-.catalogGroup { display: block; padding: 8px 8px 2px; font-size: 10px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--color-xc-text-3); }
-.catalog small.catalogGroup { text-transform: uppercase; }
-.catalog button small { text-transform: none; }
-.emptyStack { display: grid; gap: 8px; padding: 6px 0; }
-.navigateCard { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 7px; background: var(--color-xc-bar-raised); }
-.navigateCard > strong { font-size: 12px; font-weight: 550; }
-.shownWhen { display: grid; gap: 6px; }
-.row { display: grid; grid-template-columns: minmax(64px, 38%) minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 12px; }
-.row > span:first-child { color: var(--color-xc-text-3); }
-.row code { font-size: 11px; overflow-wrap: anywhere; }
-.inspector .linkButton { display: block; margin-top: 3px; padding: 0; color: var(--color-xc-accent); font-size: 11px; }
-.selectionHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.selectionHeader > button { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: var(--color-xc-text-2); }
-.selectionHeader > button:hover { background: var(--color-xc-line-soft); }
+/* A value the view is shown for, with the code it comes from. */
+.shownWhen { display: grid; gap: 8px; }
+.row { composes: row from "./ui/Field.module.css"; align-items: baseline; }
+.row > span:last-child { display: grid; justify-items: start; gap: 4px; min-width: 0; }
+
+/**
+ * The feature panels: card layout, copies, data, behaviour, components. Their labels
+ * are rows, their sentences footnotes, and every action a secondary push button.
+ */
+.features { display: grid; gap: 8px; min-width: 0; }
+.features section { display: grid; gap: 8px; min-width: 0; }
+/* Disclosures are spaced with margins, not a grid gap: browsers wrap a details' content
+   in a box of their own, which a gap would only separate from the summary. */
+.features details, .makeComponent, .symbolPicker, details.settingsSection { display: block; min-width: 0; }
+:is(.features details, .makeComponent, .symbolPicker, details.settingsSection)[open] > * + * { margin-top: 8px; }
+.features h3 { margin: 4px 0 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); font-weight: 600; color: var(--color-xc-text-2); }
+.features section > h3:first-child { margin-top: 0; }
+.features p, .features li { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); overflow-wrap: anywhere; }
+.features strong { font-weight: 600; }
+.features p strong { color: var(--color-xc-text); }
+.features :is(section, details) > div:not([class]) { display: grid; gap: 8px; min-width: 0; }
+.features summary { display: flex; align-items: center; min-height: var(--row-height); font-size: var(--text-body); color: var(--color-xc-text); }
+.features label { display: grid; grid-template-columns: minmax(80px, 38%) minmax(0, 1fr); align-items: center; gap: 8px; min-height: var(--control-height); min-width: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+.features label:has(> input[type='checkbox']) { display: flex; gap: 8px; min-height: 24px; font-size: var(--text-body); line-height: var(--text-body--line-height); color: var(--color-xc-text); }
+.features label:has(> textarea) { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.features :where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file']), select) { width: 100%; min-width: 0; height: var(--control-height); }
+.features ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.features pre { max-height: 160px; margin: 0; padding: 8px; overflow: auto; white-space: pre-wrap; border-radius: var(--radius-md); background: var(--color-xc-field); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+
+/* Push buttons. Secondary throughout: the inspector edits, it does not end a task. */
+.features button, .destinationActions > button, .destinationEditor > button, .contextLinks > button, .modifierHint button, .suggested button, .nudge button {
+  display: flex; align-items: center; justify-content: center; justify-self: start; gap: 6px; width: fit-content; max-width: 100%;
+  min-height: var(--control-height); padding: 4px 12px; border-radius: var(--radius-md);
+  background: var(--color-xc-fill); color: var(--color-xc-text); font-size: var(--text-body); line-height: var(--text-body--line-height); text-align: center;
+  transition: background-color var(--duration-fast), color var(--duration-fast);
+}
+.features button:hover:not(:disabled), .destinationActions > button:hover:not(:disabled), .destinationEditor > button:hover:not(:disabled), .contextLinks > button:hover:not(:disabled), .modifierHint button:hover:not(:disabled), .suggested button:hover:not(:disabled), .nudge button:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
+.features button[aria-expanded='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.features button:disabled, .destinationActions > button:disabled, .modifierHint button:disabled, .suggested button:disabled, .nudge button:disabled { opacity: .4; }
+/* Compact: a choice among several, inside a row or a group. */
+.dependencies button, .copyList button, .contextLinks > button, .modifierHint button, .suggested button, .nudge button { min-height: var(--control-height-sm); padding: 2px 8px; }
+/* A list of places to go: rows, not buttons. */
+.features li > button { display: flex; justify-content: flex-start; width: 100%; min-height: var(--row-height); padding: 4px 8px; background: transparent; text-align: left; }
+.features li > button:hover:not(:disabled) { background: var(--color-xc-fill); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* When tapped: a quiet group of its own, inside Basics. */
+.guidedInteraction { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-lg); background: var(--color-xc-bar-raised); min-width: 0; }
+.valueFlow { display: flex; justify-content: space-around; align-items: center; min-height: var(--control-height); padding: 4px 8px; border-radius: var(--radius-md); background: var(--color-xc-bar); font-size: var(--text-body); color: var(--color-xc-text-2); }
+.valueFlow strong { font-weight: 600; color: var(--color-xc-text); }
+.dependencies { display: flex; flex-wrap: wrap; gap: 6px; }
+.contextLinks { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Choose a symbol: a grid of tiles, the chosen one selected. */
+.symbolPicker > summary { display: flex; align-items: center; min-height: var(--row-height); font-size: var(--text-body); color: var(--color-xc-text); }
+.symbolPicker > input { width: 100%; height: var(--control-height); }
+.symbolPicker > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; max-height: 232px; overflow: auto; }
+.symbolPicker > div > button { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; width: 100%; min-height: 0; padding: 8px 4px; border-radius: var(--radius-md); background: transparent; color: var(--color-xc-text); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.symbolPicker > div > button:hover:not(:disabled) { background: var(--color-xc-fill); }
+.symbolPicker > div > button[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.symbolPicker small { font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-2); overflow-wrap: anywhere; text-align: center; }
+.symbolPicker > p { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
 
 /* Make component: the copies found, and the fields each copy will own. */
-.makeComponent > summary { cursor: pointer; padding: 6px 0; font-weight: 600; }
-.makeComponent label { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
-.makeComponent > label { flex-direction: column; align-items: stretch; gap: 4px; }
-.copyList { border: 1px solid var(--color-xc-line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
-.copyList > legend { padding: 0 4px; color: var(--color-xc-text-3); font-size: 11px; }
-.copyList span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.copyList small { color: var(--color-xc-text-3); }
-.copyList button { padding: 2px 6px; border-radius: 5px; color: var(--color-xc-accent); }
-
-/* A locked block: code outside the shape the design panels are built for. */
-.locked { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 4px 0 10px; padding: 8px 10px; border: 1px solid var(--color-xc-line); border-radius: 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-size: 12px; }
-.locked > span { flex: 1; min-width: 120px; }
-.nudge { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--color-xc-select); color: var(--color-xc-text); font-size: 12px; }
+.copyList { display: grid; gap: 4px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.copyList > legend { margin-bottom: 4px; padding: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); font-weight: 600; color: var(--color-xc-text-2); }
+.features .copyList label { display: flex; align-items: center; gap: 8px; min-height: var(--control-height); font-size: var(--text-body); color: var(--color-xc-text); }
+.copyList span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copyList small { flex-shrink: 0; font-size: var(--text-caption); color: var(--color-xc-text-3); }
+.features .copyList input:not([type='checkbox']) { flex: 1; }
+/* The third paste: a suggestion with a way out. */
+.nudge { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; padding: 8px 12px; border-radius: var(--radius-lg); background: var(--color-xc-select); color: var(--color-xc-text); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
 .nudge > span { flex: 1; min-width: 140px; }
-.nudge button { padding: 3px 8px; border-radius: 6px; background: var(--color-xc-bar); color: var(--color-xc-accent); }
 
-/* The "opens as" picker on a Navigate to card. */
-.navigateType { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; font-size: 12px; color: var(--color-xc-text-2); }
-.navigateType select { flex: 1; max-width: 160px; height: 26px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; font-size: 12px; padding: 0 6px; }
+/* A record at a time, from a list of them. */
+.controls { display: grid; gap: 8px; margin: 0; min-width: 0; }
 
-.modifierHint { padding: 9px 10px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-line-soft); }
-.modifierHint p { margin: 0; font-size: 11px; line-height: 1.5; color: var(--color-xc-text-2); }
-.modifierHint button { margin-top: 7px; }
-.modifierCard:has(.dragHandle:active) { box-shadow: 0 4px 12px #00000018; }
+/**
+ * The modifier stack: one card per modifier, top to bottom as the code runs them.
+ * A card is a 36px header - handle, name and value, switch, actions - over its rows.
+ */
+.modifierStack { position: relative; isolation: isolate; overflow-anchor: none; display: grid; gap: 8px; min-width: 0; }
+.modifierCard { min-width: 0; overflow: hidden; border: 1px solid var(--color-xc-line); border-radius: var(--radius-lg); background: var(--color-xc-bar); transition: box-shadow var(--duration-fast); }
+.modifierCard:has(.dragHandle:active) { box-shadow: var(--shadow-float); }
+.modifierHeader { display: flex; align-items: center; gap: 4px; min-height: 36px; padding-right: 6px; }
+.dragHandle { display: flex; align-items: center; justify-content: center; align-self: stretch; flex-shrink: 0; width: 20px; margin-right: -4px; font-size: 0; color: transparent; user-select: none; }
+.dragHandle::before { content: ''; width: 6px; height: 10px; background: radial-gradient(circle at 1px 1px, var(--color-xc-text-3) 0.9px, transparent 1.1px) 0 0 / 4px 4px; opacity: .7; transition: opacity var(--duration-fast); }
+.dragHandle[draggable='true'] { cursor: grab; }
 .dragHandle[draggable='true']:active { cursor: grabbing; }
+.modifierHeader:hover .dragHandle[draggable='true']::before { opacity: 1; }
+.dragHandle[draggable='false']::before { opacity: 0; }
+.modifierToggle { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 36px; padding: 0 4px 0 0; color: var(--color-xc-text); text-align: left; }
+.modifierToggle > span:last-child { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.modifierToggle strong { flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-body); font-weight: 500; }
+.modifierToggle small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); }
+/* The disclosure chevron, drawn rather than typed, turning as the card opens. */
+.chevron { flex-shrink: 0; width: 12px; height: 12px; font-size: 0; background-color: var(--color-xc-text-3); -webkit-mask: var(--chevron-right-mask) center / 10px 10px no-repeat; mask: var(--chevron-right-mask) center / 10px 10px no-repeat; transition: transform var(--duration-fast) var(--ease-in-out); }
+.modifierToggle[aria-expanded='true'] .chevron { transform: rotate(90deg); }
+.modifierCard[data-enabled='false'] .modifierToggle > span:last-child { opacity: .5; }
+.modifierCard[data-enabled='false'] .modifierToggle strong { text-decoration: line-through; text-decoration-color: var(--color-xc-text-3); }
+/* A macOS switch: accent when on, a white knob that slides. */
+.switch { position: relative; flex-shrink: 0; width: 26px; height: 15px; margin: 0 4px; border-radius: 999px; background: var(--color-xc-fill-strong); transition: background-color var(--duration-fast) var(--ease-in-out); }
+.switch > i { position: absolute; top: 1px; left: 1px; width: 13px; height: 13px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-thumb); transition: transform var(--duration-fast) var(--ease-in-out); }
+.switch[aria-checked='true'] { background: var(--color-xc-accent-fill); }
+.switch[aria-checked='true'] > i { transform: translateX(11px); }
+.switch:disabled { opacity: .4; }
+.modifierMenu { display: flex; align-items: center; flex-shrink: 0; }
+.modifierMenu > button { display: grid; place-items: center; width: var(--control-height-sm); height: var(--control-height-sm); border-radius: var(--radius-md); color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.modifierMenu > button:hover, .modifierMenu > button[aria-expanded='true'] { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.modifierBody { display: grid; gap: 8px; min-width: 0; padding: 12px; border-top: 1px solid var(--color-xc-line-soft); }
+.modifierHint { display: grid; gap: 8px; padding: 8px 12px; border-radius: var(--radius-md); background: var(--color-xc-bar-raised); }
+.modifierHint p { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+/* Where a dragged card will land: a 2px accent rule above or below it. */
+.dropBefore { box-shadow: 0 -2px 0 var(--color-xc-accent); }
+.dropAfter { box-shadow: 0 2px 0 var(--color-xc-accent); }
+.dropEnd { height: 8px; margin-top: -8px; }
+.modifierStatus { min-height: 28px; margin: 0; font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); }
+.emptyStack { display: grid; gap: 8px; }
+.suggested { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.suggested > small { width: 100%; font-size: var(--text-caption); line-height: var(--text-caption--line-height); font-weight: 600; color: var(--color-xc-text-3); }
+
+/* Add modifier: a search field over the catalog, in a card like the ones it adds. */
+.modifierPicker { display: grid; gap: 8px; min-width: 0; padding: 8px; border: 1px solid var(--color-xc-line); border-radius: var(--radius-lg); background: var(--color-xc-bar); }
+.modifierPicker > input { width: 100%; height: var(--control-height); }
+.modifierPicker > .suggested, .modifierPicker > .note { padding: 0 4px; }
+.catalog { display: grid; max-height: 272px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.catalogGroup { display: block; padding: 8px 8px 4px; font-size: var(--text-caption); line-height: var(--text-caption--line-height); font-weight: 600; color: var(--color-xc-text-3); }
+.catalog button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border-radius: var(--radius-md); color: var(--color-xc-text); font-size: var(--text-body); line-height: var(--text-body--line-height); text-align: left; transition: background-color var(--duration-fast); }
+.catalog button:hover:not(:disabled) { background: var(--color-xc-fill); }
+.catalog button:disabled { opacity: .4; }
+.catalog button small { font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); }
+
+/* Navigate to: the same card as a modifier, opened. */
+.navigateCard { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--color-xc-line); border-radius: var(--radius-lg); background: var(--color-xc-bar); }
+.navigateCard > strong { font-size: var(--text-body); font-weight: 500; }
+.navigateType { composes: row from "./ui/Field.module.css"; font-size: var(--text-footnote); color: var(--color-xc-text-2); }
+
+/* Where it goes: a combo box over the app's screens. */
+.destinationEditor { display: grid; gap: 8px; min-width: 0; }
+.destinationEditor > label { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+.destinationEditor > p { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); overflow-wrap: anywhere; }
+.destinationPicker { position: relative; min-width: 0; }
+.destinationInput { display: flex; align-items: center; min-width: 0; height: var(--control-height); border: 1px solid transparent; border-radius: var(--radius-md); background: var(--color-xc-field); transition: border-color var(--duration-fast) var(--ease-in-out), box-shadow var(--duration-fast) var(--ease-in-out), background-color var(--duration-fast) var(--ease-in-out); }
+.destinationInput:hover { border-color: var(--color-xc-line); }
+.destinationInput:focus-within { border-color: var(--color-xc-accent); background: var(--color-xc-panel); box-shadow: var(--focus-ring); }
+.destinationInput:has(input[aria-invalid='true']) { border-color: var(--color-xc-error); }
+.destinationInput input, .destinationInput input:focus-visible { flex: 1; width: 100%; min-width: 0; height: 100%; min-height: 0; padding: 0 0 0 8px; border: 0; background: transparent; box-shadow: none; outline: none; }
+.destinationInput button { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 100%; color: var(--color-xc-text-3); transition: color var(--duration-fast); }
+.destinationInput button:hover:not(:disabled) { color: var(--color-xc-text); }
+.destinationOptions { display: grid; gap: 2px; max-height: 240px; overflow: auto; margin-top: 4px; padding: 4px; border: 1px solid var(--color-xc-line); border-radius: var(--radius-lg); background: var(--color-xc-panel); box-shadow: var(--shadow-card); }
+.destinationOptions > button { display: grid; gap: 2px; width: 100%; min-width: 0; padding: 4px 8px; border-radius: var(--radius-md); color: var(--color-xc-text); font-size: var(--text-body); line-height: var(--text-body--line-height); text-align: left; }
+.destinationOptions > button:not(:disabled):hover, .destinationOptions > button[data-active='true'] { background: var(--color-xc-select); }
+.destinationOptions > button:disabled { opacity: .4; }
+.destinationOptions small { font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); overflow-wrap: anywhere; }
+.destinationOptions p { margin: 0; padding: 4px 8px; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
+.destinationCurrent code { color: var(--color-xc-text-2); }
+.destinationActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.destinationActions .destinationPick > svg { color: var(--color-xc-text-2); }
+
+/* Wrapped in: each container's own settings, in a card. */
+.contextItem { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--color-xc-line); border-radius: var(--radius-lg); background: var(--color-xc-bar); }
+.contextItem > strong { font-size: var(--text-body); font-weight: 500; }

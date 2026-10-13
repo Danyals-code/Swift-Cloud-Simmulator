@@ -27,10 +27,23 @@ const KIND_LABEL: Record<Declaration['kind'], string> = {
   let: 'V',
 }
 
+/** The badge's tint: the colour the editor draws that kind of name in, as completion's badges use. */
+const KIND_COLOR: Record<Declaration['kind'], string> = {
+  struct: 'var(--editor-systemType)',
+  class: 'var(--editor-systemType)',
+  enum: 'var(--editor-systemType)',
+  protocol: 'var(--editor-systemType)',
+  extension: 'var(--editor-systemType)',
+  func: 'var(--editor-otherDeclaration)',
+  init: 'var(--editor-otherDeclaration)',
+  var: 'var(--editor-projectMember)',
+  let: 'var(--editor-projectMember)',
+}
+
 /**
  * The jump bar.
  *
- * Xcode's, and it earns its 24 pixels twice: it says where in the project the
+ * Xcode's, and it earns its 28 pixels twice: it says where in the project the
  * open file lives - which a tab showing only a basename cannot - and its last
  * segment is a menu of everything declared in the file, which is how people
  * actually move around a 400-line view.
@@ -50,47 +63,56 @@ export function JumpBar({ fileId, text, caret, onJump }: JumpBarProps) {
     value: String(decl.start),
     // Indented by nesting depth, which is what makes `body` read as belonging to
     // the type above it rather than as another top-level declaration.
-    label: `${'   '.repeat(Math.max(0, decl.depth))}${decl.name}`,
+    // Em spaces: a menu row collapses ordinary ones, and the nesting went with them.
+    label: `${'\u2003'.repeat(Math.max(0, decl.depth))}${decl.name}`,
     detail: decl.kind,
   }))
 
   return (
     <div
       data-testid="jump-bar"
-      className="flex h-[24px] shrink-0 items-center gap-1 overflow-hidden border-b border-xc-line bg-xc-bar px-2 text-[11.5px] text-xc-text-3"
+      className="flex h-7 shrink-0 items-center gap-1 overflow-hidden border-b border-xc-line bg-xc-editor px-3 text-footnote text-xc-text-2"
     >
       {path.map((segment, index) => (
         <span key={index} className="flex shrink-0 items-center gap-1">
-          {index > 0 ? <Icon name="chevron-right" size={9} /> : null}
+          {index > 0 ? <Icon name="chevron-right" size={10} className="shrink-0 text-xc-text-3" /> : null}
+          <Icon name="folder" size={14} className="shrink-0 text-xc-text-3" />
           <span className="truncate">{segment}</span>
         </span>
       ))}
 
-      <Icon name="chevron-right" size={9} className="shrink-0" />
-      <span className="shrink-0 truncate text-xc-text-2">{fileBasename(fileId)}</span>
+      {path.length > 0 ? <Icon name="chevron-right" size={10} className="shrink-0 text-xc-text-3" /> : null}
+      <Icon name="code" size={14} className="shrink-0 text-xc-text-3" />
+      <span className="shrink-0 truncate">{fileBasename(fileId)}</span>
 
       {items.length > 0 ? (
         <>
-          <Icon name="chevron-right" size={9} className="shrink-0" />
+          <Icon name="chevron-right" size={10} className="shrink-0 text-xc-text-3" />
           <MenuButton
             items={items}
             onSelect={(value) => onJump(Number(value))}
             label="Jump to a declaration"
             title="Everything this file declares"
             testId="jump-bar-symbols"
-            className="flex min-w-0 items-center gap-1 rounded-[4px] px-1 py-0.5 text-xc-text transition-colors hover:bg-xc-line-soft"
+            className="-ml-1 flex h-6 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-xc-text transition-colors duration-[120ms] hover:bg-xc-fill aria-expanded:bg-xc-fill"
           >
             {current ? (
               <>
-                <span className="grid h-[13px] w-[13px] shrink-0 place-items-center rounded-[3px] bg-xc-accent/25 text-[10px] font-bold text-xc-accent">
+                <span
+                  className="grid size-4 shrink-0 place-items-center rounded-sm text-caption font-semibold"
+                  style={{
+                    color: KIND_COLOR[current.kind],
+                    backgroundColor: `color-mix(in srgb, ${KIND_COLOR[current.kind]} 16%, transparent)`,
+                  }}
+                >
                   {KIND_LABEL[current.kind]}
                 </span>
-                <span className="truncate">{current.name}</span>
+                <span className="truncate font-semibold">{current.name}</span>
               </>
             ) : (
               <span className="truncate text-xc-text-3">No selection</span>
             )}
-            <Icon name="chevron-down" size={9} className="shrink-0 text-xc-text-3" />
+            <Icon name="chevron-down" size={10} className="shrink-0 text-xc-text-3" />
           </MenuButton>
         </>
       ) : null}

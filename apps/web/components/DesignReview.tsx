@@ -7,6 +7,7 @@ import { DYNAMIC_TYPE_SIZES, type DynamicTypeSize, type PagePreview, type Render
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
 import { reviewTree } from '../lib/designReview'
 import { capturePreview, contactSheet, downloadPNG } from '../lib/designExport'
+import { TYPE_SCALES } from './PreviewEnvironment'
 import styles from './DesignReview.module.css'
 
 const ignoreEvent = () => {}
@@ -19,17 +20,17 @@ export function DesignReview({ name, options, pages, selectedPageId, onClose, on
   const [conditions, setConditions] = useState<Condition[]>([{ device: 'iphone-se-3', colorScheme: 'light', dynamicTypeSize: 'large' }, { device: 'iphone-16-pro-max', colorScheme: 'dark', dynamicTypeSize: 'large' }, { device: 'iphone-15', colorScheme: 'light', dynamicTypeSize: 'accessibility3' }])
   const current = pages.find(p => p.id === selected) ?? pages[0], index = pages.findIndex(p => p.id === current?.id)
   const changeScreen = (delta: number) => { const next = pages[index + delta]; if (next) setSelected(next.id) }
-  useEffect(() => { const previous = document.activeElement; dialog.current?.showModal(); return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus() } }, [])
-  return <dialog ref={dialog} className={styles.dialog} aria-label="Design review" onCancel={event => { event.preventDefault(); onClose() }} onKeyDown={event => {
+  useEffect(() => { const previous = document.activeElement; dialog.current?.showModal(); dialog.current?.focus(); return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus() } }, [])
+  return <dialog ref={dialog} tabIndex={-1} className={styles.dialog} aria-label="Design review" onCancel={event => { event.preventDefault(); onClose() }} onKeyDown={event => {
     if (mode !== 'present' || (event.target as HTMLElement).matches('input, select, textarea')) return
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') { event.preventDefault(); changeScreen(event.key === 'ArrowRight' ? 1 : -1) }
   }}>
-    <header className={styles.header}><div><h1>{name}</h1><p>{mode === 'compare' ? 'Compare screens and check the design before sharing.' : 'Presentation · use ← and → to move between screens.'}</p></div><button type="button" onClick={onClose} autoFocus aria-label="Close design review">Close</button></header>
+    <header className={styles.header}><div><h1>{name}</h1><p>{mode === 'compare' ? 'Compare screens and check the design before sharing.' : 'Presentation · use ← and → to move between screens.'}</p></div><button type="button" onClick={onClose} aria-label="Close design review">Close</button></header>
     <div className={styles.toolbar}><div role="group" aria-label="Review mode"><button type="button" aria-pressed={mode === 'compare'} onClick={() => setMode('compare')}>Compare</button><button type="button" aria-pressed={mode === 'present'} onClick={() => setMode('present')}>Present</button></div>
       <label>Screen<select aria-label="Review screen" value={current?.id ?? ''} onChange={e => setSelected(e.target.value)}>{pages.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
       <button type="button" disabled={index <= 0} onClick={() => changeScreen(-1)}>Previous screen</button><span>{index + 1} / {pages.length}</span><button type="button" disabled={index === pages.length - 1} onClick={() => changeScreen(1)}>Next screen</button>
     </div>
-    <p className={styles.context}>Snapshots use {options.scenario ? `the “${options.scenario.name}” preview scenario` : 'app starting content'}. Review settings do not change the design. Use Preview in the workspace to test interactions.</p>
+    <p className={styles.context}>Showing {options.scenario ? `the “${options.scenario.name}” state` : 'the app’s starting content'}. Nothing here changes the design.</p>
     <div className={styles.grid} data-mode={mode}>
       {conditions.map((condition, i) => <ReviewCondition key={`${i}:${condition.device}:${condition.colorScheme}:${condition.dynamicTypeSize}`} number={i + 1} condition={condition} onChange={next => setConditions(conditions.map((value, index) => i === index ? { ...value, ...next } : value))} options={options} page={current} projectName={name} present={mode === 'present'} hidden={mode === 'present' && i > 0} onInspect={onInspect} />)}
     </div>
@@ -46,7 +47,7 @@ function ReviewCondition({ number, condition, onChange, options, page, projectNa
   const screen = useRef<HTMLDivElement>(null), sheet = useRef<HTMLDivElement>(null)
   const [exporting, setExporting] = useState(false), [error, setError] = useState<string | null>(null), [note, setNote] = useState(''), [highlight, setHighlight] = useState<string | null>(null)
   const report = useMemo(() => tree ? reviewTree(tree) : null, [tree])
-  const describe = `${device.name} · ${condition.colorScheme} · text ${condition.dynamicTypeSize}`
+  const describe = `${device.name} · ${condition.colorScheme === 'dark' ? 'Dark' : 'Light'} · ${textSizeName(condition.dynamicTypeSize)}`
   const runExport = async (all: boolean) => {
     if (!valid || exporting) return
     setExporting(true); setError(null); setNote('')
@@ -63,15 +64,15 @@ function ReviewCondition({ number, condition, onChange, options, page, projectNa
     <fieldset disabled={exporting} className={styles.controls}>
       <label>Device<select aria-label={`Comparison ${number} device`} value={condition.device} onChange={e => onChange({ device: e.target.value as DeviceKey })}>{DEVICE_LIST.map(d => <option key={d.key} value={d.key}>{d.name}</option>)}</select></label>
       <label>Theme<select aria-label={`Comparison ${number} theme`} value={condition.colorScheme} onChange={e => onChange({ colorScheme: e.target.value as 'light' | 'dark' })}><option value="light">Light</option><option value="dark">Dark</option></select></label>
-      <label>Text size<select aria-label={`Comparison ${number} text size`} value={condition.dynamicTypeSize} onChange={e => onChange({ dynamicTypeSize: e.target.value as DynamicTypeSize })}>{DYNAMIC_TYPE_SIZES.map(size => <option key={size} value={size}>{size === 'large' ? 'Default' : size.startsWith('accessibility') ? `Accessibility ${size.slice(-1)}` : size}</option>)}</select></label>
+      <label>Text size<select aria-label={`Comparison ${number} text size`} value={condition.dynamicTypeSize} onChange={e => onChange({ dynamicTypeSize: e.target.value as DynamicTypeSize })}>{DYNAMIC_TYPE_SIZES.map(size => <option key={size} value={size}>{textSizeName(size)}</option>)}</select></label>
     </fieldset>
-    <p className={styles.status} role="status" aria-busy={!valid} data-testid="review-ready">{workerError ?? (result?.diagnostics.some(d => d.severity === 'error') ? 'Resolve source errors before reviewing or exporting.' : !valid ? 'Preparing this screen…' : describe)}</p>
+    <p className={styles.status} role="status" aria-busy={!valid} data-testid="review-ready">{workerError ?? (result?.diagnostics.some(d => d.severity === 'error') ? 'Resolve source errors before reviewing or exporting.' : !valid ? 'Preparing this screen…' : '')}</p>
     {tree && <ReviewScreen tree={tree} present={present} captureRef={screen} highlight={present ? null : highlight} />}
     <div className={styles.exportActions}><button type="button" disabled={!valid || exporting} onClick={() => void runExport(false)}>Export screen PNG</button>{number === 1 && <button type="button" disabled={!valid || exporting} onClick={() => void runExport(true)}>Export contact sheet</button>}</div>
     {number === 1 && <p className={styles.context}>Contact sheet: all {result?.pages?.length ?? 0} loaded screens in this device, theme, and text size.</p>}
     {exporting && <p role="status">Preparing image…</p>}{error && <p role="alert">{error}</p>}{note && <p role="status">{note}</p>}
-    {!present && report && valid && <details className={styles.findings} open><summary>{report.findings.length} design {report.findings.length === 1 ? 'check' : 'checks'} to review</summary><p>{report.contrastChecked} text layers measured for contrast · {report.contrastSkipped} need manual review.</p>
-      {!report.findings.length && <p>No issues found by these checks. Also review reading order, VoiceOver labels, and interaction behavior.</p>}
+    {!present && report && valid && <details className={styles.findings} open><summary>{report.findings.length ? `${report.findings.length} ${report.findings.length === 1 ? 'issue' : 'issues'} to review` : 'No issues found'}</summary>
+      <p>Contrast checked on {report.contrastChecked} text {report.contrastChecked === 1 ? 'layer' : 'layers'}{report.contrastSkipped ? `; ${report.contrastSkipped} over images or gradients to check by eye` : ''}.{report.findings.length ? '' : ' Also check reading order, VoiceOver labels and behavior.'}</p>
       <ul>{report.findings.map((finding, index) => <li key={`${finding.kind}:${finding.nodeId}`}><button type="button" onClick={() => setHighlight(highlight === finding.nodeId ? null : finding.nodeId)} aria-pressed={highlight === finding.nodeId}>{index + 1}. {finding.title}</button><p>{finding.detail}</p>{finding.source && <button type="button" onClick={() => onInspect(finding.source!)}>Find layer in Design</button>}</li>)}</ul>
     </details>}
     {number === 1 && <div ref={sheet} className={styles.exportOnly} aria-hidden="true" inert>{result?.pages?.map(p => <div key={p.id} style={{ width: p.tree.canvas.width, height: p.tree.canvas.height, background: p.tree.colorScheme === 'dark' ? '#000' : '#fff' }}><RenderTreeView tree={p.tree} onEvent={ignoreEvent} /></div>)}</div>}
@@ -87,4 +88,10 @@ function ReviewScreen({ tree, present, captureRef, highlight }: { tree: RenderTr
       {selected && <div className={styles.highlight} aria-hidden="true" style={{ left: selected.frame.x, top: selected.frame.y, width: selected.frame.width, height: selected.frame.height }} />}
     </div>
   </div></div>
+}
+
+/** A Dynamic Type size by the name the toolbar gives it: Text L (Default), Text AX3. */
+function textSizeName(size: DynamicTypeSize): string {
+  const item = TYPE_SCALES.find(entry => entry.value === size)
+  return item ? `${item.label}${item.detail ? ` (${item.detail})` : ''}` : size
 }

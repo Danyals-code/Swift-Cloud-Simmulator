@@ -1,54 +1,88 @@
+/* Create with AI, inside the launch sheet: the brief and its options, then the review. */
 .form, .review { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-.content { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 32px; padding: 6px 32px 24px; overflow: auto; }
+.content { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 32px; padding: 4px 24px 24px; overflow: auto; }
 .brief { min-width: 0; }
-.label { display: flex; flex-direction: column; gap: 8px; margin: 0 0 10px; font-size: 14px; font-weight: 500; color: var(--color-xc-text); }
-.form input:not([type='checkbox']):not([type='radio']), .form select, .form textarea { width: 100%; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); padding: 9px 10px; font-size: 14px; font-weight: 400; color-scheme: inherit; }
-.form textarea { min-height: 180px; resize: vertical; line-height: 1.8; font-size: 14px; }
-.form input::placeholder, .form textarea::placeholder { color: var(--color-xc-text-3); }
-.form input:focus-visible, .form textarea:focus-visible, .form select:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 2px; }
-.hint { margin: 8px 0 20px; color: var(--color-xc-text-3); font-size: 13px; line-height: 1.65; }
+.label { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; font-size: var(--text-body); color: var(--color-xc-text); }
+.form input:not([type='checkbox'], [type='radio']), .form select, .form textarea { width: 100%; min-width: 0; font-weight: 400; }
+.form input:not([type='checkbox'], [type='radio']) { height: var(--control-height); }
+.form textarea { display: block; min-height: 160px; resize: vertical; }
+.hint { margin: 6px 0 16px; color: var(--color-xc-text-3); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+/* The provider, model and key: open until a key is set, then one line naming the provider. */
+.connectionGroup { margin-top: 4px; border: 1px solid var(--color-xc-line); border-radius: var(--radius-lg); background: var(--color-xc-bar-raised); }
+.connectionGroup > summary { display: flex; align-items: center; gap: 0; min-height: 36px; padding: 0 12px; font-size: var(--text-body); font-weight: 500; color: var(--color-xc-text); }
+.connectionGroup > summary small { margin-left: auto; font-size: var(--text-footnote); font-weight: 400; color: var(--color-xc-text-3); }
+.connectionGroup[open] > summary { border-bottom: 1px solid var(--color-xc-line-soft); }
+.connectionGroup > :not(summary) { margin-left: 12px; margin-right: 12px; }
+.connectionGroup > .connection { margin-top: 12px; }
+.connectionGroup > .hint:last-child { margin-bottom: 12px; }
 .connection { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; }
 .key { position: relative; }
-.key input { padding-right: 52px !important; }
-.key button { position: absolute; right: 12px; top: 11px; color: var(--color-xc-text-3); font-size: 13px; cursor: pointer; }
-.options { border-left: 1px solid var(--color-xc-line); padding-left: 24px; }
-.options h3 { font-size: 14px; font-weight: 600; color: var(--color-xc-text); margin: 0 0 24px; }
-.accents { border: 0; padding: 0; margin: 24px 0; display: flex; gap: 13px; }
-.accents legend { font-size: 14px; margin-bottom: 12px; }
-.accents label { position: relative; display: flex; cursor: pointer; }
-.accents input { position: absolute; opacity: 0; width: 24px; height: 24px; cursor: pointer; }
-.accents span { width: 22px; height: 22px; border-radius: 50%; pointer-events: none; }
-.accents input:checked + span { outline: 1px solid var(--color-xc-text); outline-offset: 3px; }
-.accents input:focus-visible + span { outline: 2px solid var(--color-xc-accent); outline-offset: 4px; }
-.toggle { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 15px 0; border-top: 1px solid var(--color-xc-line); font-size: 14px; cursor: pointer; }
-.toggle strong { font-weight: 500; }
-.toggle small { display: block; color: var(--color-xc-text-3); margin-top: 5px; font-size: 12px; line-height: 1.5; }
-.toggle input { accent-color: var(--color-xc-accent); width: 16px; height: 16px; }
-.scope { color: var(--color-xc-text-3); font-size: 12px; line-height: 1.7; margin-top: 14px; }
-.footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 32px; border-top: 1px solid var(--color-xc-line); }
-.footer > span { color: var(--color-xc-text-3); font-size: 13px; }
+.key input { padding-right: 56px; }
+.key button { position: absolute; top: 4px; right: 4px; height: 20px; padding: 0 6px; border-radius: var(--radius-sm); color: var(--color-xc-text-2); font-size: var(--text-footnote); cursor: default; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.key button:hover:not(:disabled) { background: var(--color-xc-fill); color: var(--color-xc-text); }
+
+.options { padding-left: 24px; border-left: 1px solid var(--color-xc-line); }
+.options h3 { margin: 0 0 12px; font-size: var(--text-body); font-weight: 600; color: var(--color-xc-text); }
+.options .hint { margin-top: -6px; }
+/* The accent colours, as macOS draws its own: a white dot marks the chosen one. */
+.accents { display: flex; gap: 8px; margin: 4px 0 16px; padding: 0; border: 0; }
+.accents legend { margin-bottom: 8px; padding: 0; font-size: var(--text-body); color: var(--color-xc-text); }
+.accents label { position: relative; display: flex; cursor: default; }
+.accents input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: default; }
+.accents span { position: relative; width: 20px; height: 20px; border-radius: 50%; pointer-events: none; }
+.accents input:checked + span::after { content: ''; position: absolute; inset: 7px; border-radius: 50%; background: #fff; }
+.accents input:checked + span { box-shadow: 0 0 0 2px var(--color-xc-bar), 0 0 0 3px color-mix(in srgb, var(--color-xc-text) 28%, transparent); }
+.accents input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--color-xc-accent) 45%, transparent); outline-offset: 2px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--color-xc-line-soft); font-size: var(--text-body); cursor: default; }
+.toggle strong { font-weight: 400; }
+.toggle small { display: block; margin-top: 2px; color: var(--color-xc-text-3); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+.scope { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid var(--color-xc-line-soft); color: var(--color-xc-text-3); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+
+.footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-top: 1px solid var(--color-xc-line); }
+.footer > span { color: var(--color-xc-text-3); font-size: var(--text-footnote); }
 .footer > div { display: flex; gap: 8px; }
-.primary, .secondary { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 34px; padding: 0 14px; border-radius: 6px; font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; }
-.primary { color: #ffffff; background: #0d78f2; }
-.primary:hover { background: var(--workspace-accent-hover); }
-.secondary { color: var(--color-xc-text-2); background: var(--color-xc-bar-raised); }
-.secondary:hover { background: var(--color-xc-bar-raised); }
-.bottom { padding: 0 32px; }
-.error { font-size: 14px; line-height: 1.6; color: var(--color-xc-error); margin: 0 0 14px; }
-.progress { display: flex; align-items: center; gap: 9px; color: var(--color-xc-text-3); font-size: 14px; margin-bottom: 14px; }
-.summary { display: flex; gap: 14px; padding: 0 32px; align-items: flex-start; }
-.summary h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
-.summary p { color: var(--color-xc-text-3); font-size: 14px; line-height: 1.6; margin: 0; }
-.check { color: var(--color-xc-ok); padding-top: 2px; }
-.pages { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 18px 32px; font-size: 13px; color: var(--color-xc-text-3); }
-.validation { font-size: 13px; color: var(--color-xc-ok); margin: 0 32px 14px; }
-.issues { color: var(--color-xc-warn); margin: 0 32px 14px; font-size: 13px; }
-.issues ul { padding: 6px 0 0 16px; line-height: 1.7; max-height: 90px; overflow: auto; }
-.files { flex: 1; min-height: 130px; display: grid; grid-template-columns: 210px minmax(0, 1fr); border-top: 1px solid var(--color-xc-line); }
-.files nav { padding: 12px 8px; overflow: auto; border-right: 1px solid var(--color-xc-line); }
-.files button { display: flex; align-items: center; gap: 7px; padding: 8px; width: 100%; text-align: left; color: var(--color-xc-text-3); font-size: 12px; overflow-wrap: anywhere; border-radius: 4px; cursor: pointer; }
-.files button[aria-pressed='true'] { color: var(--color-xc-text); background: var(--color-xc-bar-raised); }
-.files pre { margin: 0; padding: 18px; background: var(--color-xc-editor); overflow: auto; font: 13px/1.7 ui-monospace, 'SF Mono', Menlo, monospace; tab-size: 4; color: var(--color-xc-text); }
-.review > .error { margin: 12px 32px; }
-@media (max-width: 760px) { .content { gap: 20px; padding: 0 20px 20px; grid-template-columns: minmax(0,1fr) 180px; } .options { padding-left: 18px; } .footer { padding: 14px 20px; } .footer > span { display: none; } .footer { justify-content: flex-end; } }
-@media (max-width: 560px) { .content { grid-template-columns: 1fr; } .options { padding: 0; border-left: 0; } .form textarea { min-height: 130px; } .files { grid-template-columns: 130px minmax(0,1fr); } .files pre { font-size: 12px; } .summary, .pages { padding: 0 20px; margin-left: 0; margin-right: 0; } }
+.primary, .secondary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 80px; height: var(--control-height-lg); padding: 0 12px; border-radius: var(--radius-md); font-size: var(--text-body); white-space: nowrap; cursor: default; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.primary { background: var(--color-xc-accent-fill); color: #fff; font-weight: 500; }
+.primary:hover:not(:disabled) { background: var(--color-xc-accent-hover); }
+.primary > svg { margin-right: -2px; }
+.secondary { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.secondary:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
+.primary:disabled, .secondary:disabled { opacity: .4; }
+.bottom { padding: 0 24px; }
+.error { margin: 0 0 12px; color: var(--color-xc-error); font-size: var(--text-body); line-height: var(--text-body--line-height); }
+.progress { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--color-xc-text-2); font-size: var(--text-body); }
+
+/* The review: what was made, what the preview found, and the files. */
+.summary { display: flex; align-items: flex-start; gap: 12px; padding: 0 24px; }
+.summary h3 { margin: 4px 0 2px; font-size: var(--text-title3); line-height: var(--text-title3--line-height); letter-spacing: var(--text-title3--letter-spacing); font-weight: 600; }
+.summary p { margin: 0; color: var(--color-xc-text-2); font-size: var(--text-body); line-height: var(--text-body--line-height); }
+.check { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: color-mix(in srgb, var(--color-xc-ok) 15%, transparent); color: var(--color-xc-ok); }
+.pages { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 24px 12px 68px; }
+.pages span { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-xc-fill); color: var(--color-xc-text-2); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.validation { margin: 0 24px 12px 68px; color: var(--color-xc-ok); font-size: var(--text-footnote); }
+.issues { margin: 0 24px 12px 68px; color: var(--color-xc-warn); font-size: var(--text-footnote); }
+.issues summary { font-size: var(--text-body); font-weight: 600; }
+.issues ul { max-height: 96px; margin: 0; padding: 4px 0 0 20px; overflow: auto; line-height: var(--text-footnote--line-height); }
+.files { flex: 1; min-height: 128px; display: grid; grid-template-columns: 200px minmax(0, 1fr); border-top: 1px solid var(--color-xc-line); }
+.files nav { display: flex; flex-direction: column; gap: 2px; padding: 8px; overflow: auto; border-right: 1px solid var(--color-xc-line); }
+.files button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--row-height); padding: 4px 8px; border-radius: var(--radius-md); text-align: left; color: var(--color-xc-text); font-size: var(--text-body); overflow-wrap: anywhere; cursor: default; transition: background-color var(--duration-fast); }
+.files button > svg { color: var(--color-xc-text-3); }
+.files button:hover { background: var(--color-xc-fill); }
+.files button[aria-pressed='true'] { background: var(--color-xc-select); }
+.files button[aria-pressed='true'] > svg { color: var(--color-xc-accent); }
+.files pre { margin: 0; padding: 16px; overflow: auto; background: var(--color-xc-editor); color: var(--editor-text); font: var(--text-footnote)/18px var(--font-mono); tab-size: 4; }
+.review > .error { margin: 12px 24px; }
+
+@media (max-width: 760px) {
+  .content { gap: 20px; padding: 0 20px 20px; grid-template-columns: minmax(0, 1fr) 180px; }
+  .options { padding-left: 16px; }
+  .footer { justify-content: flex-end; padding: 12px 20px; }
+  .footer > span { display: none; }
+}
+@media (max-width: 560px) {
+  .content { grid-template-columns: 1fr; }
+  .options { padding: 0; border-left: 0; }
+  .form textarea { min-height: 128px; }
+  .files { grid-template-columns: 128px minmax(0, 1fr); }
+  .summary, .pages, .validation, .issues { padding: 0 20px; margin-left: 0; margin-right: 0; }
+}

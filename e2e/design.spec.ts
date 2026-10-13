@@ -418,7 +418,7 @@ test('copy and paste put a second one of something beside it', async ({ page }) 
   await openDesign(page)
   await page.getByTestId('render-tree').getByText('Alpha', { exact: true }).click()
   await page.keyboard.press('ControlOrMeta+c')
-  await expect(page.getByTestId('edit-note')).toContainText('Copied Alpha')
+  await expect(page.getByTestId('design-feedback')).toContainText('Copied Alpha')
 
   await page.getByTestId('render-tree').getByText('Gamma', { exact: true }).click()
   await page.keyboard.press('ControlOrMeta+v')
@@ -604,7 +604,7 @@ struct ContentView: View {
 
   await page.keyboard.press('Backspace')
   // Why, for this edit rather than for any (C7).
-  await expect(page.getByTestId('edit-note')).toContainText('This is the only view here, and this spot can’t be left empty.')
+  await expect(page.getByTestId('design-feedback')).toContainText('This is the only view here, and this spot can’t be left empty.')
   await expect(page.getByTestId('render-tree').getByText('Only', { exact: true })).toBeVisible()
   expect(await source(page)).toBe(originalSource)
 })
@@ -685,16 +685,17 @@ struct ContentView: View {
   await expect.poll(centreOf).toBeLessThan(20)
 })
 
-test('the dock is two rows of one width, and the status sits with the canvas', async ({ page }) => {
+test('the dock is one row, history then the tools, and the status sits with the canvas', async ({ page }) => {
   await openDesign(page)
 
   const dock = page.locator('[aria-label="Preview tools"]')
-  const width = async (target: Locator) => Math.round((await target.boundingBox())!.width)
-  const history = dock.getByRole('group', { name: 'History and preview', exact: true })
-  const tools = dock.getByRole('group', { name: 'Edit actions', exact: true })
-  expect(await width(history)).toBe(await width(tools))
-  // Three over three, in columns: each tool is as wide as the button above it.
-  expect(await width(page.getByTestId('tool-select'))).toBe(await width(page.getByTestId('design-undo')))
+  const box = async (target: Locator) => (await target.boundingBox())!
+  const history = await box(dock.getByRole('group', { name: 'History and preview', exact: true }))
+  const tools = await box(dock.getByRole('group', { name: 'Edit actions', exact: true }))
+  // Side by side on one line, history first, and the buttons all one height.
+  expect(Math.round(history.y + history.height / 2)).toBe(Math.round(tools.y + tools.height / 2))
+  expect(history.x + history.width).toBeLessThanOrEqual(tools.x)
+  expect((await box(page.getByTestId('tool-select'))).height).toBe((await box(page.getByTestId('design-undo'))).height)
   // The Edit/Preview switch is the top bar's in Design, not a row of the dock.
   await expect(dock.getByTestId('live-toggle')).toHaveCount(0)
   await expect(page.getByTestId('toolbar').getByTestId('live-toggle')).toBeVisible()

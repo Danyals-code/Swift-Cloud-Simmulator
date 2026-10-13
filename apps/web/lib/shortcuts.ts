@@ -7,11 +7,12 @@
  *   text, or leave for its home page while somebody types.
  * - A dropdown, slider or tick box keeps the plain keys it answers to; a chord it has
  *   no use for still acts on the view.
- * - Backspace outside a field deletes the selected view or nothing: WebKit would go back
- *   a page with it, and leave the studio.
- * - Design follows Figma: ⌘D duplicates, ⇧⌘H hides, ⌘G groups. Tab moves the focus, and
- *   ⌘B and ⌘I do nothing, where they used to hide the settings or start Preview.
- * - Code keeps its Xcode chords, in the code editor too.
+ * - Backspace outside a field deletes the selected view, says where a selected screen is
+ *   removed, or does nothing: WebKit would go back a page with it, and leave the studio.
+ * - Tab moves the focus in both workspaces, as on any page.
+ * - Design follows Figma: ⌘D duplicates, ⇧⌘H hides, ⌘G groups. ⌘B and ⌘I do nothing,
+ *   where they used to hide the settings or start Preview.
+ * - Code keeps its Xcode chords, in the code editor too, where ⌘/ comments the line.
  */
 
 import type { WorkspaceMode } from './layout'
@@ -32,13 +33,17 @@ export interface KeyPlace {
   readonly focus: KeyFocus
   /** A view is selected, on the canvas or in Layers. */
   readonly selected: boolean
+  /** No view is, and Settings shows a screen. */
+  readonly screen?: boolean
 }
 
 export type Shortcut =
   | 'undo' | 'redo' | 'copy' | 'paste' | 'duplicate' | 'hide' | 'group' | 'delete' | 'move-up' | 'move-down'
   | 'add' | 'select-tool' | 'escape' | 'all-screens'
+  /** Backspace on a screen, which says where a screen is removed. */
+  | 'screen-delete'
   | 'save' | 'restart-preview' | 'open-file' | 'shortcuts'
-  | 'left-panel' | 'right-panel' | 'problems' | 'inspect' | 'preview' | 'workspace'
+  | 'left-panel' | 'right-panel' | 'problems' | 'inspect' | 'workspace'
   /** Keeps the browser's own action from running, and does nothing else. */
   | 'hold'
 
@@ -68,7 +73,8 @@ export function shortcutFor(press: KeyPress, place: KeyPlace): Shortcut | null {
   if (press.mod) {
     // Anywhere: none of these means anything to a field, and each keeps the browser from
     // printing, reloading or saving the page itself.
-    if (key === '/') return 'shortcuts'
+    // In the code editor ⌘/ comments the line, as in Xcode; the list is a menu away.
+    if (key === '/') return focus === 'code' ? null : 'shortcuts'
     if (key === 'p' || key === 'o' && press.shift) return 'open-file'
     if (key === 'r') return 'restart-preview'
     if (key === 's') return focus === 'code' ? null : 'save'
@@ -99,10 +105,12 @@ export function shortcutFor(press: KeyPress, place: KeyPlace): Shortcut | null {
 
   if (typing) return null
   // WebKit still goes back a page on Backspace, which leaves the studio: never outside a field.
-  if (key === 'Backspace' || key === 'Delete') return design && place.editing && place.selected && focus !== 'choice' ? 'delete' : 'hold'
+  if (key === 'Backspace' || key === 'Delete') {
+    if (!design || !place.editing || focus === 'choice') return 'hold'
+    return place.selected ? 'delete' : place.screen ? 'screen-delete' : 'hold'
+  }
   if (focus === 'choice') return null
   if (key === '`' && !press.alt) return 'workspace'
-  if (key === 'Tab') return !design && focus === 'page' && !press.shift && !press.alt ? 'preview' : null
   // Heard in Preview too, to close what is open over the canvas.
   if (key === 'Escape') return design ? 'escape' : null
   if (!design || !place.editing) return null
@@ -111,4 +119,23 @@ export function shortcutFor(press: KeyPress, place: KeyPlace): Shortcut | null {
   if (key === 'v') return 'select-tool'
   if (key === 'a') return 'add'
   return null
+}
+
+const MAC_MODIFIERS: Readonly<Record<string, string>> = { Ctrl: '⌃', Alt: '⌥', Shift: '⇧', Mod: '⌘' }
+const MAC_ORDER = ['Ctrl', 'Alt', 'Shift', 'Mod']
+const OTHER_MODIFIERS: Readonly<Record<string, string>> = { Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Mod: 'Ctrl' }
+const MAC_KEYS: Readonly<Record<string, string>> = { Enter: '↩', Backspace: '⌫' }
+
+/** A chord as the platform writes it: ⇧⌘Z on a Mac, Ctrl+Shift+Z elsewhere. */
+export function formatShortcut(keys: string, mac: boolean): string {
+  return keys.split(' / ').map(chord => {
+    const parts = chord.split(' ')
+    const modifiers = parts.filter(part => part in MAC_MODIFIERS)
+    const words = parts.filter(part => !(part in MAC_MODIFIERS)).join(' ')
+    if (!mac) return [...modifiers.map(part => OTHER_MODIFIERS[part]), words].join('+')
+    const rest = MAC_KEYS[words] ?? words
+    const glyphs = MAC_ORDER.filter(part => modifiers.includes(part)).map(part => MAC_MODIFIERS[part]).join('')
+    // A glyph runs into a key (⇧⌘Z) but stands apart from a word (⌘ Click).
+    return glyphs && rest.length > 1 ? `${glyphs} ${rest}` : glyphs + rest
+  }).join(' / ')
 }

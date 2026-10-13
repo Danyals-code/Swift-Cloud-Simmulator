@@ -32,14 +32,14 @@ describe('generated project boundaries', () => {
   })
   it('rejects missing pages and mismatched page counts', () => {
     expect(() => parseGeneratedApp({ ...app, pages: [{ title: 'Missing', file: 'Sources/Missing.swift' }] })).toThrow('missing file')
-    expect(() => parseGeneratedApp(app, 4)).toThrow('The app has 1 page, and 4 were asked for.')
+    expect(() => parseGeneratedApp(app, 4)).toThrow('The app has 1 screen, and 4 were asked for.')
   })
   it('accepts one page more or fewer than asked for, and no further off (G2)', () => {
     const page = app.pages[0]!
     const three = { ...app, pages: [page, { ...page, title: 'Detail' }, { ...page, title: 'Settings' }] }
     expect(parseGeneratedApp(app, 2)).toEqual(app)
     expect(parseGeneratedApp(three, 2)).toEqual(three)
-    expect(() => parseGeneratedApp(three, 1)).toThrow('The app has 3 pages, and 1 was asked for.')
+    expect(() => parseGeneratedApp(three, 1)).toThrow('The app has 3 screens, and 1 was asked for.')
   })
   it('does not accept a commented-out entry point', () => {
     expect(() => parseGeneratedApp({ ...app, files: [{ ...app.files[0], code: '// @main struct ReadingApp: App {}' }] })).toThrow('entry point')

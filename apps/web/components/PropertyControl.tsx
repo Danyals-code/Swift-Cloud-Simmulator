@@ -42,7 +42,8 @@ function choicesFor(control: DesignControl): readonly (readonly [string, IconNam
   return set?.filter(([option]) => options.includes(option))
 }
 
-export function PropertyControl({ control, onChange, label = control.label }: { control: DesignControl; onChange: PropertyChange; label?: string }) {
+/** `label` names the control for assistive tech; `caption`, when given, is what the row shows instead. */
+export function PropertyControl({ control, onChange, label = control.label, caption }: { control: DesignControl; onChange: PropertyChange; label?: string; caption?: string }) {
   const [draft, setDraft] = useState(control.value)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -123,11 +124,11 @@ export function PropertyControl({ control, onChange, label = control.label }: { 
   const auto = control.id === 'spacing' && control.options?.includes('auto')
   return <div className={styles.control} data-testid="design-control">
     {control.group && <small>{control.group}</small>}
-    {choices || places ? <div className={styles.controlLabel}><span>{label}</span>
+    {choices || places ? <div className={styles.controlLabel}><span>{caption ?? label}</span>
       <div role="radiogroup" aria-label={label} data-control-id={control.id} className={places ? styles.places : styles.choices}>
         {(places ? PLACES.map(place => [place, undefined] as const) : choices!).map(([option, icon]) => <button key={option} type="button" role="radio" aria-checked={draft === option} aria-label={propertyOptionLabel(option)} title={propertyOptionLabel(option)} disabled={busy} onClick={() => choose(option)}>{icon ? <Icon name={icon} size={14} /> : <i />}</button>)}
       </div>
-    </div> : <label className={styles.controlLabel}><span>{label}</span>
+    </div> : <label className={styles.controlLabel}><span>{caption ?? label}</span>
       {control.kind === 'select' ? <select {...input} disabled={busy} onChange={event => { change(event.target.value); void commit() }}>
         {control.value === '' && <option value="" disabled>Use inherited / default</option>}
         {control.options?.map(option => <option key={option} value={option}>{propertyOptionLabel(option)}</option>)}
@@ -136,8 +137,6 @@ export function PropertyControl({ control, onChange, label = control.label }: { 
         <button type="button" aria-pressed={draft === 'auto'} disabled={busy} title="Spread the views out, with a Spacer between each pair. Type a number to go back." onClick={() => choose('auto')}>Auto</button>
       </span> : <input {...input} readOnly={busy} type={/^date:(from|through)$/.test(control.id) ? "datetime-local" : "text"} inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.kind === 'number' ? 'Default' : 'Enter value'} onChange={event => change(event.target.value)} />}
     </label>}
-    {control.id === 'alignment' && <small>Lines up the views inside it.</small>}
-    {control.kind === 'number' && /spacing|padding|size|radius|width|height/i.test(label) && <small>Points (pt)</small>}
     {control.min === 0 && control.max === 1 && <input
       type="range" min="0" max="1" step="0.01"
       aria-label={`${label} slider`}

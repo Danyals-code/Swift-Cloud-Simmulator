@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Spotlight } from './Spotlight'
+import { Icon } from './ui/Icon'
 import styles from './AddView.module.css'
 import { fileBasename } from '@studio/project-model'
 import type { FileId, SourceFile } from '@studio/shared'
@@ -39,6 +40,9 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
 
   return (
     <Spotlight label="Go to file" testId="file-switcher" onClose={onClose}>{close => <>
+      {/* The same search row, list and rows as Add a view: one palette, two catalogs. */}
+      <header className={styles.field}>
+        <Icon name="search" size={16} />
         <input
           value={query}
           placeholder="Go to file…"
@@ -63,32 +67,31 @@ export function FileSwitcher({ files, onSelect, onClose }: FileSwitcherProps) {
               setHighlight((h) => Math.max(h - 1, 0))
             }
           }}
-          className="w-full border-b border-xc-line bg-transparent px-4 py-3 text-[13px] text-xc-text outline-none placeholder:text-xc-text-3"
         />
+      </header>
 
-        <ul className="max-h-[50vh] overflow-auto py-1">
-          {matches.length === 0 ? (
-            <li className="px-4 py-2 text-[14px] text-xc-text-3">No matching files.</li>
-          ) : (
-            matches.map((file, index) => (
-              <li key={file.id}>
-                <button
-                  type="button"
-                  onClick={() => close(() => onSelect(file.id))}
-                  onMouseEnter={() => setHighlight(index)}
-                  className={`flex w-full items-baseline gap-2 px-4 py-1.5 text-left text-[14px] ${
-                    index === highlight ? 'bg-xc-select text-xc-text' : 'text-xc-text-2'
-                  }`}
-                >
-                  <span>{fileBasename(file.id)}</span>
-                  <span className="truncate text-[13px] text-xc-text-3">{file.id}</span>
-                </button>
-              </li>
-            ))
-          )}
-        </ul>
+      <ul className={styles.list}>
+        {matches.length === 0 ? (
+          <li className={styles.empty}>No matching files.</li>
+        ) : (
+          matches.map((file, index) => (
+            <li key={file.id}>
+              <button
+                type="button"
+                onClick={() => close(() => onSelect(file.id))}
+                onMouseEnter={() => setHighlight(index)}
+                data-active={index === highlight}
+                className={styles.row}
+              >
+                <span className={styles.name}>{fileBasename(file.id)}</span>
+                <span className={styles.hint}>{file.id}</span>
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
       <footer className={styles.footer}><span>↑↓ to choose · ↩ to open</span><span>esc to close</span></footer>
-      </>}</Spotlight>
+    </>}</Spotlight>
   )
 }
 

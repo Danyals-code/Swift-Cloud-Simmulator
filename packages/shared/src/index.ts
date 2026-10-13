@@ -28,3 +28,5 @@ export * from './design-resources'
 export * from './authoring-modifiers'
 
 export * from './layer-moves'
+
+export * from './screen-removal'

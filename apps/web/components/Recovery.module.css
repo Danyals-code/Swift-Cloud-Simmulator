@@ -1,15 +1,20 @@
 /*
- * The recovery surfaces. Colours fall back to literals because the whole-page screen
- * (global-error) renders without the app's stylesheet and its variables.
+ * The recovery surfaces. Every token falls back to its literal value (colours, sizes,
+ * corners, shadows) because the whole-page screen (global-error) renders without the
+ * app's stylesheet and its variables.
  */
 .screen {
   display: grid;
   min-height: 100dvh;
   place-items: center;
   padding: 24px 16px;
-  background: var(--color-xc-editor, #fafafa);
-  color: var(--color-xc-text, #26262b);
-  font: 14px/1.45 var(--font-ui, -apple-system), system-ui, sans-serif;
+  box-sizing: border-box;
+  background: var(--color-xc-canvas, #f0f0f3);
+  color: var(--color-xc-text, #1d1d1f);
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
+  font-size: var(--text-body, 13px);
+  line-height: var(--text-body--line-height, 18px);
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Over everything else on the page: the studio behind it is not this tab's to use. */
@@ -21,23 +26,25 @@
 }
 
 .card {
+  box-sizing: border-box;
   width: min(460px, 100%);
   padding: 24px;
-  border: 1px solid var(--color-xc-line, #e5e5e8);
-  border-radius: 12px;
-  background: var(--color-xc-panel, #ffffff);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.08);
+  border-radius: var(--radius-2xl, 16px);
+  background: var(--color-xc-bar, #ffffff);
+  box-shadow: var(--shadow-sheet, 0 0 0 0.5px rgb(0 0 0 / 0.12), 0 24px 80px rgb(0 0 0 / 0.22));
 }
 
 .card h1 {
-  margin: 0 0 8px;
-  font-size: 17px;
+  margin: 0 0 4px;
+  font-size: var(--text-title2, 17px);
+  line-height: var(--text-title2--line-height, 22px);
+  letter-spacing: var(--text-title2--letter-spacing, -0.43px);
   font-weight: 600;
 }
 
 .card p {
-  margin: 0 0 16px;
-  color: var(--color-xc-text-2, #66666e);
+  margin: 0 0 20px;
+  color: var(--color-xc-text-2, #6e6e73);
 }
 
 .actions {
@@ -46,43 +53,61 @@
   gap: 8px;
 }
 
+/* Push buttons, as ui/Control draws them: a quiet fill, and the accent for the one to press. */
 .actions button {
-  min-height: 30px;
+  box-sizing: border-box;
+  height: var(--control-height, 28px);
   padding: 0 12px;
-  border: 1px solid var(--color-xc-line, #e5e5e8);
-  border-radius: 7px;
-  background: var(--color-xc-bar, #ffffff);
-  color: var(--color-xc-text, #26262b);
+  border: 0;
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-xc-fill, rgb(116 116 128 / 0.1));
+  color: var(--color-xc-text, #1d1d1f);
   font: inherit;
-  font-size: 13px;
-  cursor: pointer;
+  font-size: var(--text-body, 13px);
+  white-space: nowrap;
+  cursor: default;
+  transition: background-color var(--duration-fast, 120ms);
+}
+
+.actions button:hover:not(:disabled) {
+  background: var(--color-xc-fill-strong, rgb(116 116 128 / 0.17));
 }
 
 .actions button[data-primary] {
-  border-color: var(--color-xc-accent, #0d78f2);
-  background: var(--color-xc-accent, #0d78f2);
-  color: #ffffff;
+  background: var(--color-xc-accent-fill, #0071e3);
+  color: #fff;
+  font-weight: 500;
+}
+
+.actions button[data-primary]:hover:not(:disabled) {
+  background: var(--color-xc-accent-hover, #0077ed);
 }
 
 .actions button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: default;
 }
 
 .status {
   margin: 12px 0 0 !important;
-  font-size: 13px;
+  color: var(--color-xc-text-2, #6e6e73);
+  font-size: var(--text-footnote, 12px);
+  line-height: var(--text-footnote--line-height, 16px);
 }
 
 .details {
-  margin-top: 16px;
-  color: var(--color-xc-text-3, #777780);
-  font-size: 12px;
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-xc-line-soft, #ededf0);
+  color: var(--color-xc-text-3, #7a7a80);
+  font-size: var(--text-footnote, 12px);
+  line-height: var(--text-footnote--line-height, 16px);
 }
 
 .details code {
   display: block;
-  margin-top: 6px;
+  margin-top: 4px;
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
   overflow-wrap: anywhere;
 }
 
@@ -96,14 +121,23 @@
   min-height: 160px;
   padding: 16px;
   overflow: auto;
-  background: var(--color-xc-editor, #fafafa);
-  color: var(--color-xc-text, #26262b);
-  font-size: 13px;
+  background: var(--color-xc-bar, #ffffff);
+  color: var(--color-xc-text, #1d1d1f);
+  font-size: var(--text-body, 13px);
+  line-height: var(--text-body--line-height, 18px);
+}
+
+.panel > strong {
+  font-weight: 600;
 }
 
 .panel p {
   margin: 0;
-  color: var(--color-xc-text-2, #66666e);
+  color: var(--color-xc-text-2, #6e6e73);
+}
+
+.panel > .actions {
+  margin-top: 4px;
 }
 
 .keep {
@@ -111,9 +145,9 @@
 }
 
 /*
- * Something failed outside any panel: a note in the bottom-left corner, over the end
- * of the layer list rather than the canvas dock's Add and Undo, and above the layer
- * search.
+ * Something failed outside any panel: a floating note in the bottom-left corner, over
+ * the end of the layer list rather than the canvas dock's Add and Undo, and above the
+ * layer search.
  */
 .banner {
   position: fixed;
@@ -126,16 +160,79 @@
   gap: 8px 12px;
   width: min(440px, calc(100vw - 32px));
   box-sizing: border-box;
-  padding: 10px 12px;
-  border: 1px solid var(--color-xc-line, #e5e5e8);
-  border-radius: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-xl, 12px);
   background: var(--color-xc-panel, #ffffff);
-  color: var(--color-xc-text, #26262b);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
-  font-size: 13px;
+  color: var(--color-xc-text, #1d1d1f);
+  box-shadow: var(--shadow-popover, 0 0 0 0.5px rgb(0 0 0 / 0.12), 0 10px 32px rgb(0 0 0 / 0.14));
+  font-size: var(--text-body, 13px);
+  line-height: var(--text-body--line-height, 18px);
+  --appear: xc-pop-in;
+  animation: var(--appear) var(--duration-base, 180ms) var(--ease-out, ease-out);
 }
 
 .banner p {
   flex: 1 1 260px;
   margin: 0;
+}
+
+.banner strong {
+  font-weight: 600;
+}
+
+/*
+ * A strip under the toolbar, for as long as something stays true: work that is not
+ * saved, or the AI editing the project.
+ */
+.strip {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: var(--pane-header-height, 40px);
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-xc-line, #e3e3e7);
+  color: var(--color-xc-text, #1d1d1f);
+  font-size: var(--text-body, 13px);
+  line-height: var(--text-body--line-height, 18px);
+}
+
+.strip > p {
+  flex: 1;
+  min-width: 240px;
+  margin: 0;
+}
+
+.strip strong {
+  font-weight: 600;
+}
+
+.strip > p[role='status'] {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--color-xc-text-2, #6e6e73);
+  font-size: var(--text-footnote, 12px);
+}
+
+.strip .actions button {
+  height: var(--control-height-sm, 24px);
+  padding: 0 10px;
+}
+
+.warn {
+  background: color-mix(in srgb, var(--color-xc-warn, #a05a00) 12%, var(--color-xc-bar, #ffffff));
+}
+
+.warn > svg {
+  color: var(--color-xc-warn, #a05a00);
+}
+
+.busy {
+  background: var(--color-xc-select, #e8f1fc);
+}
+
+.busy > svg {
+  color: var(--color-xc-accent, #0071e3);
 }

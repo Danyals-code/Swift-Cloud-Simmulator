@@ -1,61 +1,98 @@
-.toolbar { height: 64px; flex-shrink: 0; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(max-content,1fr); align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar); z-index: 30; }
-.project { display: flex; align-items: center; min-width: 0; gap: 12px; }
-.home { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px 0 8px; border-radius: 8px; color: var(--color-xc-text); font-size: 13px; font-weight: 500; cursor: pointer; flex-shrink: 0; }
-.home:hover { background: var(--color-xc-bar-raised); }
-.projectCopy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.projectName { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.saveStatus, .saveError { font-size: 12px; color: var(--color-xc-text-3); }
+/**
+ * The workspace: toolbar, canvas, dock, sidebar frame and settings panel.
+ *
+ * Sizes, colours and corners all come from the tokens in `globals.css`: 13px text,
+ * 28px controls, 6px corners on controls and 8 to 12 on anything that floats.
+ */
+
+/* The toolbar: project on the left, the workspace switch in the middle, the preview
+   environment and the project's actions on the right. */
+.toolbar { height: var(--toolbar-height); flex-shrink: 0; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(max-content,1fr); align-items: center; gap: 16px; padding: 0 12px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar); z-index: 30; }
+.project { display: flex; align-items: center; min-width: 0; gap: 8px; }
+.home { display: inline-flex; align-items: center; gap: 6px; height: var(--control-height); padding: 0 10px 0 8px; border-radius: var(--radius-md); color: var(--color-xc-text-2); font-size: var(--text-body); cursor: pointer; flex-shrink: 0; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.home:hover { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.projectCopy { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 0; padding-left: 12px; border-left: 1px solid var(--color-xc-line); }
+.projectName { font-size: var(--text-body); line-height: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; cursor: text; }
+.saveStatus, .saveError { font-size: var(--text-caption); line-height: 14px; letter-spacing: var(--text-caption--letter-spacing); color: var(--color-xc-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saveError { color: var(--color-xc-error); }
-.modes { display: flex; padding: 3px; background: var(--color-xc-bar-raised); border-radius: 8px; gap: 2px; }
-.modes button { min-width: 66px; height: 30px; padding: 0 14px; border-radius: 6px; color: var(--color-xc-text-3); cursor: pointer; font-size: 14px; font-weight: 500; }
-.modes button[aria-pressed='true'] { background: var(--color-xc-bar); color: var(--color-xc-text); box-shadow: 0 1px 4px #16162012; }
-.themeToggle { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 6px; color: var(--color-xc-text-2); cursor: pointer; }
-.themeToggle:hover { background: var(--color-xc-bar-raised); color: var(--color-xc-text); }
-.actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
-/* Secondary: a share link carries no report, chat or log, so Export is what ends a task. */
-.share > button { height: 32px; padding: 0 13px; border: 1px solid var(--color-xc-line); background: transparent; color: var(--color-xc-text); border-radius: 7px; }
-.share > button:hover { background: var(--color-xc-bar-raised); }
-.exportGroup { display: flex; border: 1px solid var(--color-xc-line); border-radius: 7px; height: 32px; }
-.export { display: flex; gap: 9px; align-items: center; padding: 0 10px; cursor: pointer; font-size: 14px; }
-.exportMenu { width: 23px; display: grid; place-items: center; border-left: 1px solid var(--color-xc-line-soft); cursor: pointer; }
-.export:hover, .exportMenu:hover { background: var(--color-xc-bar-raised); }
-.paneControls { margin-right: 8px; }
-.paneControls > div { border: 0; background: transparent; gap: 3px; }
-.paneControls button { height: 28px; width: 28px; }
+.projectNameInput { width: 100%; min-width: 80px; height: 20px; min-height: 0; padding: 0 4px; font-size: var(--text-body); font-weight: 600; border-color: var(--color-xc-accent); background: var(--color-xc-panel); box-shadow: var(--focus-ring); }
+.projectNameInput[aria-invalid='true'] { border-color: var(--color-xc-error); }
+.projectCopy { position: relative; }
+.nameError { position: absolute; top: calc(100% + 8px); left: 8px; z-index: 40; padding: 6px 10px; border-radius: var(--radius-lg); background: var(--color-xc-panel); box-shadow: var(--shadow-popover); color: var(--color-xc-error); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); white-space: nowrap; --appear: xc-pop-in; animation: var(--appear) var(--duration-base) var(--ease-out); }
+
+/* Design | Code: a segmented control, the same one the environment uses. */
+.modes { display: flex; padding: 2px; gap: 2px; background: var(--color-xc-fill); border-radius: var(--radius-md); }
+.modes button { min-width: 76px; height: 24px; padding: 0 14px; border-radius: var(--radius-thumb); color: var(--color-xc-text-2); cursor: pointer; font-size: var(--text-body); transition: background-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast); }
+.modes button:hover { color: var(--color-xc-text); }
+.modes button[aria-pressed='true'] { background: var(--color-xc-thumb); color: var(--color-xc-text); box-shadow: var(--shadow-thumb); }
+.themeToggle { display: grid; place-items: center; flex-shrink: 0; width: var(--control-height); height: var(--control-height); border-radius: var(--radius-md); color: var(--color-xc-text-2); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.themeToggle:hover, .themeToggle[aria-expanded='true'] { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+
+/* Plain toolbar items: no fill until the pointer is on one. */
+.previewToggle { display: inline-flex; align-items: center; gap: 6px; height: var(--control-height); padding: 0 10px; border-radius: var(--radius-md); color: var(--color-xc-text); cursor: pointer; font-size: var(--text-body); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.previewToggle:hover:not(:disabled) { background: var(--color-xc-fill); }
+.previewToggle[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.previewToggle:disabled { opacity: .4; cursor: default; }
+/* Wide enough for what it says after a click, so the bar does not shift. */
+.share > button { min-width: 132px; background: transparent; color: var(--color-xc-text); padding: 0 10px; }
+.share > button:hover { background: var(--color-xc-fill); }
+
+/* Export ends a task, so it is the one filled button in the bar: a split button,
+   the default export and the menu of the others. */
+.exportGroup { display: flex; height: var(--control-height); margin-left: 2px; border-radius: var(--radius-md); background: var(--color-xc-accent-fill); color: #fff; overflow: hidden; }
+.export { display: flex; gap: 6px; align-items: center; padding: 0 10px 0 12px; cursor: pointer; font-size: var(--text-body); font-weight: 500; transition: background-color var(--duration-fast); }
+.export:disabled { opacity: .7; cursor: default; }
+.exportMenu { width: 24px; display: grid; place-items: center; border-left: 1px solid rgb(255 255 255 / .28); cursor: pointer; transition: background-color var(--duration-fast); }
+.export:hover:not(:disabled), .exportMenu:hover, .exportMenu[aria-expanded='true'] { background: rgb(255 255 255 / .14); }
+.paneControls { margin-right: 2px; }
+
+/* Design's preview environment: one group, applying to every screen at once. */
+.environment { display: flex; align-items: center; gap: 6px; padding-right: 10px; margin-right: 4px; border-right: 1px solid var(--color-xc-line); }
+
+/* The canvas. */
 .preview { display: flex; height: 100%; min-width: 0; overflow: hidden; }
-.stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background-color: var(--color-xc-canvas); background-image: radial-gradient(var(--workspace-dots) .65px, transparent .65px); background-size: 16px 16px; }
-.canvasHeading { height: 45px; flex-shrink: 0; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--color-xc-text-3); font-size: 13px; }
+.stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; background-color: var(--color-xc-canvas); background-image: radial-gradient(var(--workspace-dots) 1px, transparent 1px); background-size: 18px 18px; }
+/* One row when it fits, and wrapped onto a second rather than overlapping when the
+   canvas is narrow; nothing in it breaks mid-label. */
+.canvasHeading { min-height: var(--pane-header-height); flex-shrink: 0; padding: 6px 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; color: var(--color-xc-text-3); font-size: var(--text-footnote); white-space: nowrap; }
 .canvasHeading strong { font-weight: 500; color: var(--color-xc-text-2); }
-.canvasHeading span { font-size: 12px; }
-.compactSettings { min-height: 44px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); padding: 6px 12px; }
-.compactSettings > strong { font-size: 13px; font-weight: 500; margin-right: auto; }
+.canvasHeading > span:last-child { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px 14px; margin-left: auto; }
+.headingHint { color: var(--color-xc-text-3); }
+.headingEnvironment { display: inline-flex; align-items: center; gap: 6px; }
+.showAll { display: inline-flex; align-items: center; gap: 6px; cursor: default; font-size: var(--text-footnote); color: var(--color-xc-text-2); white-space: nowrap; }
+.showAll[data-disabled] { color: var(--color-xc-text-3); }
+.notDrawn { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.cancelPick { height: var(--control-height-sm); padding: 0 10px; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-accent); font-size: var(--text-footnote); white-space: nowrap; }
+.cancelPick:hover { background: var(--color-xc-fill-strong); }
+
+/* The preview's own settings, above the phone in Code. */
+.compactSettings { min-height: var(--pane-header-height); display: flex; align-items: center; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar); padding: 6px 8px; }
+.compactSettings > strong { font-size: var(--text-body); font-weight: 500; margin-right: auto; }
+
+/* The settings panel beside the canvas. */
 .settingsSplit { display: contents; }
 .properties { width: var(--settings-width, 300px); flex-shrink: 0; background: var(--color-xc-bar); border-left: 1px solid var(--color-xc-line); overflow-y: auto; }
-.properties > header { height: 46px; display: flex; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--color-xc-line-soft); font-size: 14px; font-weight: 600; }
+.settingsHeader { position: sticky; top: 0; z-index: 2; height: var(--pane-header-height); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 6px 0 10px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar); }
+.settingsHeader > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-body); font-weight: 600; }
+.designerSettings { padding: 16px; display: grid; gap: 16px; min-width: 0; }
+
+/* Where the settings panel is: App › Screen › View. Each step selects that level. */
+.levelPath { display: flex; align-items: center; gap: 2px; min-width: 0; font-size: var(--text-body); font-weight: 400; color: var(--color-xc-text-3); }
+.levelPath > button { flex-shrink: 0; max-width: 120px; height: var(--control-height-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; border-radius: var(--radius-md); cursor: pointer; color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.levelPath > button:hover { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.levelPath > [aria-current='page'] { color: var(--color-xc-text); font-weight: 600; }
+.levelPath > span[aria-current] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; }
+
 /**
- * One tab strip, used by both panels.
- *
- * The navigator's tabs were grey and the inspector's were accent-tinted, which is
- * two answers to "what does selected look like" in one window. Selection is accent
- * everywhere else in the studio - a chosen layer, a chosen row - so the tabs follow
- * that, and both strips are the same size and shape as well as the same colour.
+ * One tab strip, used by the Code navigator and the app's navigation settings: a
+ * segmented control, as every other switch between views in the studio is.
  */
-.tabs { display: flex; align-items: center; gap: 4px; }
-.tabs button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--color-xc-text-3); cursor: pointer; transition: background .12s, color .12s; }
-.tabs button[aria-selected='true'], .tabs button[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
-.tabs button:hover[aria-selected='false'], .tabs button:hover[aria-pressed='false'] { color: var(--color-xc-text); background: var(--color-xc-line-soft); }
-.propertyTabs { composes: tabs; padding: 0 10px !important; }
-.propertySection { padding: 22px 20px; border-bottom: 1px solid var(--color-xc-line-soft); }
-.propertySection h3 { font-size: 13px; font-weight: 600; margin: 0 0 18px; }
-.propertySection p { font-size: 13px; color: var(--color-xc-text-3); line-height: 1.7; margin: 12px 0 0; }
-.propertyRow { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
-.propertyRow:last-child { margin-bottom: 0; }
-.propertyRow > span { font-size: 13px; color: var(--color-xc-text-3); }
-.propertyRow > button, .propertyRow > div { min-height: 30px; justify-content: space-between; }
-.propertyRow > div > button { flex: 1; min-height: 24px; justify-content: center; }
-.dimensions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-.dimensions span { background: var(--color-xc-bar-raised); border-radius: 5px; padding: 8px; display: flex; gap: 13px; font-size: 13px; }
-.dimensions small { color: var(--color-xc-text-3); font-size: 12px; }
+.tabs { display: flex; align-items: center; gap: 2px; }
+.tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--control-height-sm); padding: 0 10px; border-radius: var(--radius-thumb); font-size: var(--text-body); color: var(--color-xc-text-2); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast); }
+.tabs button[aria-selected='true'], .tabs button[aria-pressed='true'] { background: var(--color-xc-thumb); color: var(--color-xc-text); box-shadow: var(--shadow-thumb); }
+.tabs button:hover[aria-selected='false'], .tabs button:hover[aria-pressed='false'] { color: var(--color-xc-text); }
+
 /* The world the canvas looks at: laid out at natural size, placed by one transform. */
 .world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
 /**
@@ -67,48 +104,48 @@
  */
 .flow { position: relative; }
 .lane { position: absolute; left: 0; border-top: 1px dashed var(--color-xc-line); }
-.laneHeader { position: absolute; top: 4px; left: 8px; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 9px; border-radius: 7px; font-size: 13px; font-weight: 600; color: var(--color-xc-text-2); cursor: pointer; }
-.laneHeader:hover { background: var(--color-xc-select); color: var(--color-xc-accent); }
-.laneHeader small { font-weight: 400; color: var(--color-xc-text-3); }
+.laneHeader { position: absolute; top: 4px; left: 8px; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--radius-md); font-size: var(--text-body); font-weight: 600; color: var(--color-xc-text-2); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.laneHeader:hover { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.laneHeader small { font-size: var(--text-footnote); font-weight: 400; color: var(--color-xc-text-3); }
 .lane[data-collapsed] .laneHeader > svg:first-child { transform: rotate(-90deg); }
 .flowArrows { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; color: var(--color-xc-text-3); }
-.flowArrows > g path { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0.75; }
-.flowArrows > g path[data-kind='sheet'], .flowArrows > g path[data-kind='cover'], .flowArrows > g path[data-kind='popover'] { stroke-dasharray: 7 5; }
+.flowArrows > g path { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0.7; }
+.flowArrows > g path[data-kind='sheet'], .flowArrows > g path[data-kind='cover'], .flowArrows > g path[data-kind='popover'] { stroke-dasharray: 6 5; }
 .flowArrows marker path { fill: currentColor; stroke: none; }
-.flowArrows text { font-size: 11px; fill: var(--color-xc-text-3); paint-order: stroke; stroke: var(--color-xc-canvas); stroke-width: 6px; stroke-linejoin: round; }
+.flowArrows text { font-size: var(--text-caption); fill: var(--color-xc-text-3); paint-order: stroke; stroke: var(--color-xc-canvas); stroke-width: 6px; stroke-linejoin: round; }
 /* The screen frame: a tinted card holding one screen and its states, which is what
    tells a state apart from the next screen along. */
-.screenFrame { position: absolute; border: 1px solid var(--color-xc-line); border-radius: 20px; background: color-mix(in srgb, var(--color-xc-accent) 5%, transparent); }
-.statesBadge { position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--color-xc-line); background: var(--color-xc-bar); color: var(--color-xc-text-2); font-size: 12px; cursor: pointer; white-space: nowrap; }
-.statesBadge:hover { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.screenFrame { position: absolute; border: 1px solid var(--color-xc-line); border-radius: 24px; background: color-mix(in srgb, var(--color-xc-bar) 55%, transparent); }
+.statesBadge { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); height: var(--control-height-sm); padding: 0 10px; border-radius: 999px; background: var(--color-xc-bar); box-shadow: var(--shadow-float); color: var(--color-xc-text-2); font-size: var(--text-footnote); cursor: pointer; white-space: nowrap; }
+.statesBadge:hover { color: var(--color-xc-text); }
 .statePhone { position: absolute; }
 /* A device's artwork over its screen. The workspace theme picks the finish: a black phone vanishes into the dark canvas. */
 .deviceArt { position: absolute; pointer-events: none; background: var(--device-art-black) center / 100% 100% no-repeat; }
 :root[data-workspace-theme="dark"] .deviceArt { background-image: var(--device-art-silver); }
-.stateProblem { position: absolute; inset: auto 8px 8px; padding: 6px 8px; border-radius: 8px; background: var(--color-xc-bar); color: var(--color-xc-text-2); font-size: 12px; text-align: center; }
-.notDrawn { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.stateProblem { position: absolute; inset: auto 8px 8px; padding: 8px 10px; border-radius: var(--radius-lg); background: var(--color-xc-bar); box-shadow: var(--shadow-float); color: var(--color-xc-text-2); font-size: var(--text-footnote); text-align: center; }
 .restartPhone { position: absolute; inset: 0; border: 0; padding: 0; background: transparent; cursor: pointer; }
 .pageCard { position: absolute; margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .statePhone > .pageCard { position: static; }
 .statePhone [data-busy] { opacity: 0.55; }
-.pageCard > figcaption { display: flex; align-items: center; gap: 7px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-xc-text-3); }
-.pageCard > figcaption > button { cursor: pointer; padding: 3px 6px; border-radius: 5px; }
-.pageCard > figcaption > button:hover { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.pageCard > figcaption { display: flex; align-items: center; gap: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-footnote); color: var(--color-xc-text-2); }
+.pageCard > figcaption > button { cursor: pointer; padding: 2px 6px; border-radius: var(--radius-sm); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.pageCard > figcaption > button:hover { background: var(--color-xc-fill); color: var(--color-xc-text); }
 .pageCard[data-active] > figcaption { color: var(--color-xc-text); font-weight: 600; }
-.liveTag { flex-shrink: 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--color-xc-select); color: var(--color-xc-accent); }
+.liveTag { flex-shrink: 0; padding: 1px 6px; border-radius: var(--radius-sm); font-size: var(--text-caption); font-weight: 600; background: var(--color-xc-select); color: var(--color-xc-accent); }
+
 /* One line, always, at the top of the debug panel. It reports on one view, and a
    report that reflows into two lines moves everything around it while the pointer
    is moving. */
-.readout { flex-shrink: 0; border-bottom: 1px solid var(--color-xc-line); display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; height: 30px; overflow: hidden; border-top: 1px solid var(--color-xc-line); background: var(--color-xc-bar); padding: 0 12px; font-size: 12.5px; }
-.readoutInfo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.note { flex-shrink: 0; padding: 2px 8px; border-radius: 5px; background: var(--color-xc-warn); color: #241c00; font-size: 12px; }
-.selection { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.selectionName { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--color-xc-accent); }
-.selectionKind { color: var(--color-xc-text-3); }
-.selection button { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; border: 1px solid var(--color-xc-line); border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); cursor: pointer; font-size: 12px; }
-.selection button:hover:not(:disabled) { background: var(--color-xc-select); color: var(--color-xc-accent); }
+.readout { flex-shrink: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 12px; height: 32px; overflow: hidden; border-bottom: 1px solid var(--color-xc-line-soft); background: var(--color-xc-bar); padding: 0 8px 0 12px; font-size: var(--text-footnote); }
+.readoutInfo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.selection { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.selectionName { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--color-xc-text); }
+.selectionKind { color: var(--color-xc-text-3); margin-right: 4px; }
+.selection button { display: inline-flex; align-items: center; gap: 4px; height: var(--control-height-sm); padding: 0 8px; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); cursor: pointer; font-size: var(--text-footnote); transition: background-color var(--duration-fast); }
+.selection button:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
 .selection button:disabled { opacity: 0.4; cursor: default; }
 .selection button[data-testid='move-down'] > svg { transform: rotate(180deg); }
+
 .canvas { touch-action: none; cursor: grab; }
 .canvas[data-tool='delete'] { cursor: crosshair; }
 /* What a click will take, in the colour of taking it. The highlight is the
@@ -119,47 +156,108 @@
 .canvas[data-tool] { user-select: none; -webkit-user-select: none; }
 .canvas[data-tool] :global(img) { -webkit-user-drag: none; }
 .canvas[data-dragging], .canvas[data-dragging] * { cursor: grabbing !important; }
-.showAll { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--color-xc-text-2); }
-.showAll input { width: 13px; height: 13px; accent-color: var(--workspace-accent, #0d78f2); cursor: pointer; }
-.showAll[data-disabled] { color: var(--color-xc-text-3); cursor: default; }
-.showAll[data-disabled] input { cursor: default; }
-.canvasHeading > span:last-child { display: flex; align-items: center; gap: 14px; }
+.canvas[data-fixed='true'] { cursor: default; touch-action: auto; }
 /* Reserve the dock's height so fitted phones and their tab bars stay clickable. */
 .canvasArea { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; isolation: isolate; }
-.canvasFooter { position: relative; flex-shrink: 0; z-index: 2; display: flex; align-items: flex-end; justify-content: center; padding: 8px 12px 16px; background: transparent; pointer-events: none; }
+.canvasFooter { position: relative; flex-shrink: 0; z-index: 2; display: flex; align-items: flex-end; justify-content: center; padding: 8px 12px 16px; background: transparent; pointer-events: none; container-type: inline-size; }
+/* A canvas too narrow for the dock's words keeps its icons; the names are in the tooltips. */
+@container (max-width: 480px) {
+  .dockTools [data-label] { display: none; }
+  .dockTools > button, .dockTools > span > button { width: var(--control-height); padding: 0; }
+}
+@container (max-width: 300px) {
+  .dockModes [data-label] { display: none; }
+  .dockModes > button { width: var(--control-height); padding: 0; }
+}
 .canvasFooter button { pointer-events: auto; }
-.canvasFooter .toolDock { background: transparent; border-color: transparent; box-shadow: none; }
-.canvasFooter .dockTools { border-color: transparent; }
-.canvasFooter .dockTools button[aria-pressed='false'] { background: transparent; }
-.canvasFooter .dockTools button[aria-pressed='false']:hover { background: var(--color-xc-line-soft); }
-.toolDock { width: 312px; max-width: 100%; display: inline-flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 12px; box-shadow: 0 4px 16px #2828320b; }
-.dockRow { display: grid; align-items: center; gap: 6px; }
-.toolDock { position: relative; }
-.dockHistory { grid-template-columns: repeat(3, 1fr); }
-.dockHistory > button { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; font-size: 12px; color: var(--color-xc-text-2); background: var(--color-xc-bar-raised); cursor: pointer; }
-.dockHistory > button:hover:not(:disabled) { background: var(--color-xc-select); color: var(--color-xc-accent); }
-.dockHistory > button:disabled { opacity: .4; cursor: default; }
-.dockFeedback { position: absolute; bottom: calc(100% + 4px); left: 8px; right: 8px; padding: 8px 10px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 7px; font-size: 12px; color: var(--color-xc-text); box-shadow: 0 2px 8px #16162012; pointer-events: auto; }
-.dockFeedbackAction { display: block; margin-top: 6px; padding: 0; border: 0; background: transparent; color: var(--color-xc-accent); font: inherit; font-weight: 600; cursor: pointer; }
-.dockFeedbackAction:hover { text-decoration: underline; }
-.dockTools { grid-template-columns: repeat(3, 1fr); padding-bottom: 6px; border-bottom: 1px solid var(--color-xc-line-soft); }
-.dockModes { grid-template-columns: repeat(2, 1fr); gap: 3px; padding: 4px; border: 1px solid var(--color-xc-line); border-radius: 10px; background: var(--color-xc-bar-raised); }
-.dockModes > button { border: 0; border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-weight: 500; }
-.dockModes > button[aria-pressed='true'] { background: var(--color-xc-bar); color: var(--color-xc-accent); box-shadow: 0 1px 4px #16162020; }
-.dockModes > button[aria-pressed='false']:hover { background: var(--color-xc-line-soft); color: var(--color-xc-text); }
-.dockRow > button, .dockRow > span > button { justify-content: center; height: 30px; width: 100%; }
+
+/**
+ * The dock: one floating toolbar under the canvas. History on the left, then what a
+ * click on the canvas does, each group divided by a hairline, as Freeform and Keynote
+ * float theirs.
+ */
+.toolDock { position: relative; display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 4px; background: var(--color-xc-bar); border-radius: var(--radius-xl); box-shadow: var(--shadow-float); pointer-events: auto; }
+.dockRow { display: flex; align-items: center; gap: 2px; }
+.dockRow + .dockRow { padding-left: 4px; margin-left: 0; border-left: 1px solid var(--color-xc-line); }
+.dockRow > button, .dockRow > span > button { height: var(--control-height); }
+.dockHistory > button { display: inline-flex; align-items: center; justify-content: center; width: var(--control-height); border-radius: var(--radius-md); color: var(--color-xc-text-2); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.dockHistory > button:hover:not(:disabled) { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.dockHistory > button:disabled { opacity: .35; cursor: default; }
+.dockTools > button[aria-pressed='false'], .dockTools > span > button[aria-pressed='false'] { background: transparent; color: var(--color-xc-text); }
+.dockTools > button[aria-pressed='false']:hover, .dockTools > span > button[aria-pressed='false']:hover { background: var(--color-xc-fill); }
+.dockTools > button:disabled { opacity: .4; }
 /* Armed, and in the colour of what it does. */
-.destructive > button[aria-pressed='true'] { border-color: var(--color-xc-error); background: color-mix(in srgb, var(--color-xc-error) 18%, transparent); color: var(--color-xc-error); }
-.toolDock > button { height: 30px; border: 0; background: transparent; }
-.toolDock > button:hover { background: var(--color-xc-bar-raised); }
-.toolDock > button[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
-.divider { height: 20px; width: 1px; background: var(--color-xc-line-soft); margin: 0 3px; }
-.previewStatus { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; white-space: nowrap; color: var(--color-xc-text-2); padding: 3px 10px 3px 8px; border-radius: 999px; background: var(--color-xc-bar-raised); }
-.previewStatus i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-xc-ok); }
+.destructive > button[aria-pressed='true'] { background: color-mix(in srgb, var(--color-xc-error) 14%, transparent); color: var(--color-xc-error); }
+.dockModes { gap: 2px; }
+.dockModes > button { padding: 0 12px; }
+.dockModes > button[aria-pressed='false'] { background: transparent; color: var(--color-xc-text); }
+.dockModes > button[aria-pressed='false']:hover { background: var(--color-xc-fill); }
+.dockFeedback { position: absolute; bottom: calc(100% + 8px); left: 50%; translate: -50% 0; width: max-content; max-width: min(420px, calc(100vw - 32px)); padding: 8px 12px; background: var(--color-xc-bar); border-radius: var(--radius-lg); font-size: var(--text-footnote); color: var(--color-xc-text); box-shadow: var(--shadow-popover); pointer-events: auto; --appear: xc-pop-in; animation: var(--appear) var(--duration-base) var(--ease-out); }
+.dockFeedbackAction { display: block; margin-top: 4px; padding: 0; border: 0; background: transparent; color: var(--color-xc-accent); font: inherit; font-weight: 600; cursor: pointer; }
+.dockFeedbackAction:hover { text-decoration: underline; }
+.codeFooter { display: flex; justify-content: center; padding: 8px; background: var(--color-xc-bar); border-top: 1px solid var(--color-xc-line); }
+.codeFooter .toolDock { box-shadow: none; padding: 0; }
+
+/* What the preview is doing, at the top of the canvas. */
+.statusGroup { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.previewStatus { display: inline-flex; align-items: center; gap: 6px; min-width: 104px; flex-shrink: 0; height: var(--control-height-sm); padding: 0 10px 0 9px; border-radius: 999px; background: var(--color-xc-bar); box-shadow: var(--shadow-card), 0 0 0 1px var(--color-xc-line-soft); font-size: var(--text-footnote); white-space: nowrap; color: var(--color-xc-text-2); }
+.previewStatus i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-xc-ok); transition: background-color var(--duration-base); }
 .previewStatus i[data-state='error'] { background: var(--color-xc-error); }
-.previewStatus i[data-state='paused'] { background: var(--color-xc-warn); }
-.codeFooter { display: flex; justify-content: center; padding: 10px; background: var(--color-xc-bar-raised); border-top: 1px solid var(--color-xc-line-soft); }
-@media(max-width:1100px) { .toolbar { gap: 12px; padding: 0 12px; } }
+.previewStatus i[data-state='paused'], .previewStatus i[data-state='updating'], .previewStatus i[data-state='warning'] { background: var(--color-xc-warn); }
+.designWarnings > button { height: var(--control-height-sm); font-size: var(--text-footnote); color: var(--color-xc-warn); padding: 0 8px; border-radius: var(--radius-md); cursor: pointer; white-space: nowrap; transition: background-color var(--duration-fast); }
+.designWarnings > button:hover, .designWarnings > button[aria-expanded='true'] { background: var(--color-xc-fill); }
+.warningList { position: fixed; z-index: 901; width: 320px; overflow-y: auto; display: grid; gap: 12px; padding: 12px; background: var(--color-xc-panel); border-radius: var(--radius-xl); box-shadow: var(--shadow-popover); white-space: normal; --appear: xc-pop-in; animation: var(--appear) var(--duration-base) var(--ease-out); }
+.warningList h4 { margin: 0; font-size: var(--text-caption); font-weight: 600; color: var(--color-xc-text-3); }
+.warningList section > div { display: grid; gap: 4px; padding-top: 8px; margin-top: 8px; border-top: 1px solid var(--color-xc-line-soft); }
+.warningList strong { font-size: var(--text-footnote); font-weight: 600; color: var(--color-xc-text); }
+.warningList p { margin: 0; font-size: var(--text-footnote); color: var(--color-xc-text-2); }
+.warningList span { display: flex; gap: 12px; }
+.warningList span button { font-size: var(--text-footnote); color: var(--color-xc-accent); cursor: pointer; }
+.warningList span button:disabled { color: var(--color-xc-text-3); cursor: default; }
+
+/* Destination picking covers the phone so it cannot navigate or change selection. */
+.navigationPickTarget { position: absolute; inset: 0; z-index: 1000002; border: 4px solid transparent; background: rgb(0 0 0 / 12%); cursor: not-allowed; display: flex; align-items: center; justify-content: center; padding: 28px; }
+.navigationPickTarget[data-available="true"] { border-color: var(--color-xc-accent); background: transparent; cursor: crosshair; }
+.navigationPickTarget[data-available="true"]:hover, .navigationPickTarget:focus-visible { background: rgb(10 132 255 / 12%); outline: 3px solid var(--color-xc-accent); outline-offset: 4px; }
+.navigationPickTarget > span { padding: 10px 16px; border-radius: var(--radius-xl); color: var(--color-xc-text); background: var(--color-xc-bar); font-size: var(--text-title3); box-shadow: var(--shadow-popover); }
+
+/* Editing a Text in place, over the canvas. */
+.inlineText { position: fixed; z-index: 2147483647; padding: 8px; border-radius: var(--radius-xl); background: var(--color-xc-panel); box-shadow: 0 0 0 2px var(--color-xc-accent), var(--shadow-popover); color: var(--color-xc-text); }
+.inlineText textarea { display: block; width: 100%; resize: vertical; padding: 6px 8px; background: transparent; color: inherit; font-size: var(--text-title3); line-height: 20px; }
+.inlineText > div { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; padding-top: 8px; }
+.inlineText small { grid-column: 1 / -1; font-size: var(--text-caption); color: var(--color-xc-text-3); }
+.inlineText button[type="button"] { grid-column: 2; }
+.inlineText button { height: var(--control-height-sm); padding: 0 10px; background: var(--color-xc-fill); color: var(--color-xc-text); border-radius: var(--radius-md); font-size: var(--text-footnote); }
+.inlineText button[type="submit"] { background: var(--color-xc-accent-fill); color: #fff; font-weight: 500; }
+.inlineText p { color: var(--color-xc-error); font-size: var(--text-footnote); }
+
+/* Collapsed panels keep a rail with the button that brings them back. */
+.panelToggle { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: var(--control-height); height: var(--control-height); padding: 0 !important; border-radius: var(--radius-md); color: var(--color-xc-text-2); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.panelToggle:hover { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.panelRail { flex-shrink: 0; width: 40px; padding-top: 6px; display: flex; justify-content: center; align-items: flex-start; background: var(--color-xc-bar); border-inline: 1px solid var(--color-xc-line); }
+
+/* The left panel: Hierarchy and Prompt Editing. */
+.sidebar { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--color-xc-sidebar); }
+.sidebarHeader { display: flex; align-items: center; gap: 6px; height: var(--pane-header-height); padding: 0 8px 0 6px; border-bottom: 1px solid var(--color-xc-line); flex-shrink: 0; }
+.sidebarHeader > button { width: var(--control-height); height: var(--control-height); display: grid; place-items: center; flex-shrink: 0; color: var(--color-xc-text-2); border-radius: var(--radius-md); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.sidebarHeader > button:hover { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.sidebarTabs { display: flex; flex: 1; min-width: 0; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--color-xc-fill); }
+.sidebarTabs > button { flex: 1; min-width: 0; height: 24px; padding: 0 6px; border-radius: var(--radius-thumb); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-body); color: var(--color-xc-text-2); cursor: pointer; transition: background-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast); }
+.sidebarTabs > button:hover { color: var(--color-xc-text); }
+.sidebarTabs > button[aria-selected="true"] { background: var(--color-xc-thumb); color: var(--color-xc-text); box-shadow: var(--shadow-thumb); }
+.sidebarContent { flex: 1; min-height: 0; overflow: hidden; }
+.sidebarContent[hidden] { display: none; }
+
+
+/* A narrow window: Layers over the canvas when asked for, and a note asking for more room (D15). */
+.layersOver { position: absolute; top: 0; bottom: 0; left: 40px; z-index: 40; overflow: hidden; background: var(--color-xc-sidebar); border-right: 1px solid var(--color-xc-line); box-shadow: 8px 0 32px rgb(0 0 0 / 16%); --appear: xc-fade-in; animation: var(--appear) var(--duration-base) var(--ease-out); }
+.layersBackdrop { position: absolute; inset: 0; z-index: 39; background: rgb(0 0 0 / 8%); cursor: default; }
+.narrowNote { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 6px 12px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-size: var(--text-footnote); }
+.narrowNote > span { flex: 1; min-width: 0; }
+.narrowNote > button { height: var(--control-height-sm); padding: 0 10px; border-radius: var(--radius-md); color: var(--color-xc-accent); }
+.narrowNote > button:hover { background: var(--color-xc-fill); }
+
+@media(max-width:1100px) { .toolbar { gap: 12px; padding: 0 8px; } }
 /* A narrow window, as with the instructions tiled beside the studio, keeps Settings beside
    the canvas, narrower. Stacked above the canvas, the panel took most of a half-screen
    window's height and left the phone a few percent of its size. */
@@ -174,112 +272,8 @@
   .preview[data-expanded='true'] { flex-direction: column; }
   .properties { order: -1; width: 100%; max-height: 50%; border-left: 0; border-bottom: 1px solid var(--color-xc-line); }
 }
-@media(max-width:600px) { .toolbar { height: 58px; gap: 6px; padding: 0 8px; } .project { gap: 2px; } .home { width: 26px; } .projectName { font-size: 13px; } .saveStatus { font-size: 11px; } .share { display: none; } .export { font-size: 13px; padding: 0 8px; } .export > svg { display: none; } .modes button { min-width: 42px; font-size: 13px; padding: 0 5px; } .canvasHeading { padding: 0 16px; } }
-
-.projectName { text-align: left; cursor: text; }
-.projectNameInput { width: 100%; min-width: 80px; font-size: 14px; font-weight: 600; background: var(--color-xc-editor); border: 1px solid var(--color-xc-accent); border-radius: 4px; padding: 0 3px; outline: none; }
-.projectNameInput[aria-invalid='true'] { border-color: var(--color-xc-error); }
-.saveStatus, .saveError { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.panelToggle { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; padding: 4px !important; border-radius: 5px; color: var(--color-xc-text-3); cursor: pointer; }
-.panelToggle:hover { background: var(--color-xc-line-soft); color: var(--color-xc-text); }
-.panelRail { flex-shrink: 0; width: 32px; padding-top: 8px; display: flex; justify-content: center; align-items: flex-start; background: var(--color-xc-bar); border-inline: 1px solid var(--color-xc-line-soft); }
-.propertyTabs > button:last-child { margin-left: auto; }
-.previewStatus { min-width: 104px; flex-shrink: 0; }
-.previewStatus i[data-state='updating'] { background: var(--color-xc-warn); }
-.previewStatus i[data-state='warning'] { background: var(--color-xc-warn); }
-.statusGroup { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.designWarnings > button { font-size: 12px; color: var(--color-xc-text-2); padding: 3px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
-.designWarnings > button:hover, .designWarnings > button[aria-expanded='true'] { background: var(--color-xc-bar-raised); color: var(--color-xc-text); }
-.warningList { position: fixed; z-index: 901; width: 320px; overflow-y: auto; display: grid; gap: 12px; padding: 12px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 10px; box-shadow: 0 8px 24px #16162024; white-space: normal; }
-.warningList h4 { margin: 0; font-size: 11px; font-weight: 600; color: var(--color-xc-text-3); }
-.warningList section > div { display: grid; gap: 4px; padding-top: 8px; margin-top: 6px; border-top: 1px solid var(--color-xc-line-soft); }
-.warningList strong { font-size: 12px; font-weight: 600; color: var(--color-xc-text); }
-.warningList p { margin: 0; font-size: 12px; line-height: 1.4; color: var(--color-xc-text-2); }
-.warningList span { display: flex; gap: 12px; }
-.warningList span button { font-size: 12px; color: var(--color-xc-accent); cursor: pointer; }
-.warningList span button:disabled { color: var(--color-xc-text-3); cursor: default; }
-.canvas[data-fixed='true'] { cursor: default; touch-action: auto; }
-
-.navigatorTabs { gap: 2px; }
-.navigatorTabs button { padding-inline: 6px; }
-.navigatorTabs > button:first-child { width: 26px; padding: 4px; flex-shrink: 0; justify-content: center; }
-
-.designerSettings { padding: 16px 12px; display: grid; gap: 14px; min-width: 0; }
-
-/* Destination picking covers the phone so it cannot navigate or change selection. */
-.navigationPickTarget { position: absolute; inset: 0; z-index: 1000002; border: 4px solid transparent; background: rgb(0 0 0 / 12%); cursor: not-allowed; display: flex; align-items: center; justify-content: center; padding: 28px; }
-.navigationPickTarget[data-available="true"] { border-color: var(--color-xc-accent); background: transparent; cursor: crosshair; }
-.navigationPickTarget[data-available="true"]:hover, .navigationPickTarget:focus-visible { background: rgb(10 132 255 / 12%); outline: 3px solid var(--color-xc-accent); outline-offset: 4px; }
-.navigationPickTarget > span { padding: 10px 16px; border-radius: 10px; color: var(--color-xc-text); background: var(--color-xc-bar); font-size: 15px; box-shadow: 0 2px 12px rgb(0 0 0 / 15%); }
-.cancelPick { border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 4px 8px; color: var(--color-xc-accent); white-space: nowrap; }
-
-.screens { flex-shrink: 0; border-bottom: 1px solid var(--color-xc-line); padding: 12px 8px; font-size: 12px; }
-.screens header { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 8px; }
-.screens header button { padding: 4px; border-radius: 5px; background: var(--color-xc-line-soft); }
-.screenList { max-height: 220px; overflow: auto; }
-.screenRow { display: flex; align-items: center; border-radius: 6px; }
-.screenRow[data-selected] { background: var(--color-xc-select); }
-.screenRow > button:first-child { flex: 1; display: flex; gap: 8px; align-items: center; padding: 8px; min-width: 0; text-align: left; }
-.screenRow span { overflow: hidden; text-overflow: ellipsis; }
-.screenRow small { display: block; color: var(--color-xc-text-3); font-size: 10px; padding-top: 3px; }
-.screenRow > button:last-child { padding: 6px; }
-.screenForm { display: grid; gap: 8px; padding: 10px 5px 2px; }
-.screenForm label { display: grid; gap: 5px; }
-.screenForm input, .screenForm select { width: 100%; background: var(--color-xc-bar-raised); border: 1px solid var(--color-xc-line); padding: 6px; border-radius: 5px; }
-.screenForm > div { display: flex; gap: 8px; }
-.screenForm button { padding: 6px 8px; background: var(--color-xc-select); color: var(--color-xc-accent); border-radius: 5px; }
-.screens > p { color: var(--color-xc-error); margin: 8px 5px 0; line-height: 1.5; }
-
-.inlineText { position: fixed; z-index: 2147483647; padding: 8px; border: 2px solid var(--color-xc-accent); border-radius: 8px; background: var(--color-xc-panel); box-shadow: 0 8px 24px #0003; color: var(--color-xc-text); }
-.inlineText textarea { display: block; width: 100%; resize: vertical; padding: 8px; background: transparent; color: inherit; font-size: 16px; }
-.inlineText > div { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding-top: 8px; }
-.inlineText small { grid-column: 1 / -1; font-size: 10px; color: var(--color-xc-text-3); }
-.inlineText button[type="button"] { grid-column: 2; }
-.inlineText button { padding: 5px 8px; background: var(--color-xc-select); color: var(--color-xc-accent); border-radius: 4px; font-size: 12px; }
-.inlineText p { color: var(--color-xc-error); font-size: 12px; }
-
-/* The settings rail's header: what is selected, and the button that hides the rail. */
-.settingsHeader { height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--color-xc-line-soft); }
-.settingsHeader > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-
-/* Design's preview environment: one group, applying to every screen at once. */
-.environment { display: flex; align-items: center; gap: 6px; padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--color-xc-line-soft); }
-.environment > button, .environment > div { height: 30px; }
-.previewToggle { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--color-xc-line); color: var(--color-xc-text); cursor: pointer; font-size: 14px; }
-.previewToggle:hover:not(:disabled) { background: var(--color-xc-bar-raised); }
-.previewToggle[aria-pressed='true'] { border-color: var(--color-xc-accent); background: var(--color-xc-select); color: var(--color-xc-accent); }
-.previewToggle:disabled { opacity: .45; cursor: default; }
-/* The pickers the toolbar has no room for, in the canvas heading instead (D15). */
-.headingEnvironment { display: inline-flex; align-items: center; gap: 6px; }
-.headingEnvironment > button, .headingEnvironment > div { height: 28px; }
+@media(max-width:600px) { .toolbar { gap: 6px; padding: 0 6px; } .project { gap: 2px; } .home { width: var(--control-height); padding: 0; justify-content: center; } .home > span { display: none; } .projectCopy { padding-left: 6px; } .share { display: none; } .export { padding: 0 8px; } .export > svg { display: none; } .modes button { min-width: 42px; padding: 0 6px; } .canvasHeading { padding: 0 12px; } }
 /* From the width at which the pickers move here (NO_ROOM_FOR_PICKERS in lib/paneLayout.ts), the heading wraps. */
 @media(max-width:1020px) {
-  .canvasHeading { height: auto; min-height: 45px; flex-wrap: wrap; row-gap: 6px; padding: 6px 12px; }
-  .canvasHeading > span:last-child { flex-wrap: wrap; justify-content: flex-end; gap: 6px 12px; }
   .headingHint[data-idle] { display: none; }
-  .showAll { white-space: nowrap; }
 }
-
-/* A narrow window: Layers over the canvas when asked for, and a note asking for more room (D15). */
-.layersOver { position: absolute; top: 0; bottom: 0; left: 32px; z-index: 40; overflow: hidden; background: var(--color-xc-sidebar); border-right: 1px solid var(--color-xc-line); box-shadow: 8px 0 24px rgb(0 0 0 / 18%); }
-.layersBackdrop { position: absolute; inset: 0; z-index: 39; background: rgb(0 0 0 / 8%); cursor: default; }
-.narrowNote { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 5px 12px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-size: 12px; }
-.narrowNote > span { flex: 1; min-width: 0; }
-.narrowNote > button { padding: 2px 8px; border-radius: 5px; color: var(--color-xc-accent); }
-.narrowNote > button:hover { background: var(--color-xc-line-soft); }
-
-/* Where the settings panel is: App › Screen › View. Each step selects that level. */
-.levelPath { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; font-weight: 500; color: var(--color-xc-text-3); }
-.levelPath > button { flex-shrink: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 5px; border-radius: 5px; cursor: pointer; color: var(--color-xc-text-2); }
-.levelPath > button:hover { background: var(--color-xc-line-soft); color: var(--color-xc-text); }
-.levelPath > [aria-current='page'] { color: var(--color-xc-text); font-weight: 600; }
-.levelPath > span[aria-current] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 5px; }
-.sidebar { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--color-xc-sidebar); }
-.sidebarHeader { display: flex; align-items: center; gap: 5px; min-height: 46px; padding: 0 6px; border-bottom: 1px solid var(--color-xc-line); flex-shrink: 0; }
-.sidebarHeader > button { width: 25px; height: 28px; display: grid; place-items: center; color: var(--color-xc-text-3); border-radius: 5px; cursor: pointer; }
-.sidebarTabs { display: flex; flex: 1; min-width: 0; gap: 2px; padding: 3px; border-radius: 7px; background: var(--color-xc-bar-raised); }
-.sidebarTabs > button { flex: 1; min-width: 0; padding: 6px 4px; border-radius: 5px; white-space: nowrap; font-size: 11px; color: var(--color-xc-text-2); cursor: pointer; }
-.sidebarTabs > button[aria-selected="true"] { background: var(--color-xc-panel); color: var(--color-xc-text); box-shadow: 0 1px 3px #0001; }
-.sidebarHeader button:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
-.sidebarContent { flex: 1; min-height: 0; overflow: hidden; }
-.sidebarContent[hidden] { display: none; }

@@ -19,10 +19,10 @@ export function StorageBanner({ problem, onRetry }: { problem: StorageProblem | 
   // The participant chose to reload here, so the browser need not ask them again.
   const reload = <button type="button" data-primary={problem.kind === 'unreadable' || undefined} disabled={busy} onClick={() => go('reload', true)}>Reload</button>
   return (
-    <div role="alert" data-testid="save-banner" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-xc-line bg-xc-warn/15 px-3 py-1.5 text-[12px] leading-snug text-xc-text">
-      <Icon name="warning" size={14} className="shrink-0 text-xc-warn" />
-      <p className="min-w-[240px] flex-1"><strong>{title}</strong> {detail}</p>
-      {status && <p role="status" className="text-xc-text-2">{status}</p>}
+    <div role="alert" data-testid="save-banner" className={`${styles.strip} ${styles.warn}`}>
+      <Icon name="warning" size={16} />
+      <p><strong>{title}</strong> {detail}</p>
+      {status && <p role="status">{status}</p>}
       <span className={styles.actions}>
         {problem.kind !== 'unreadable' && <button type="button" data-primary disabled={busy} onClick={download}>Download my project</button>}
         {problem.kind === 'failing' && <button type="button" onClick={onRetry}>Try again</button>}

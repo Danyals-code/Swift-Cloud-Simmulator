@@ -28,8 +28,9 @@ export interface SplitterProps {
  *
  * The visible rule is one pixel and the grab target is nine, centred on it and
  * overhanging both panes. A one-pixel hit area is the single most common way a
- * split view feels broken, and the overhang is invisible because the handle is
- * transparent until you are on it.
+ * split view feels broken, and the overhang is invisible: all that shows on it is
+ * a thin accent rule, a moment after the pointer arrives and for as long as a
+ * drag lasts.
  *
  * The drag listens on the window rather than the handle: the pointer leaves a
  * nine-pixel strip immediately, and a handler bound to the element would stop
@@ -48,6 +49,7 @@ export function Splitter({
   onToggle,
 }: SplitterProps) {
   const dragging = useRef<{ origin: number; start: number } | null>(null)
+  const handle = useRef<HTMLDivElement | null>(null)
   const horizontal = orientation === 'col'
 
   /**
@@ -73,6 +75,7 @@ export function Splitter({
         start: size,
       }
       document.body.dataset.resizing = orientation
+      handle.current?.setAttribute('data-dragging', '')
     },
     [horizontal, orientation, size],
   )
@@ -90,6 +93,7 @@ export function Splitter({
       if (!dragging.current) return
       dragging.current = null
       delete document.body.dataset.resizing
+      handle.current?.removeAttribute('data-dragging')
     }
 
     window.addEventListener('pointermove', move)
@@ -108,6 +112,7 @@ export function Splitter({
 
   return (
     <div
+      ref={handle}
       role="separator"
       aria-orientation={horizontal ? 'vertical' : 'horizontal'}
       aria-label={label}
@@ -133,10 +138,11 @@ export function Splitter({
         horizontal ? 'w-px cursor-col-resize' : 'h-px cursor-row-resize'
       }`}
     >
+      <span aria-hidden className={`absolute ${horizontal ? '-inset-x-1 inset-y-0' : '-inset-y-1 inset-x-0'}`} />
       <span
         aria-hidden
-        className={`absolute transition-colors group-hover:bg-xc-accent/50 group-focus-visible:bg-xc-accent ${
-          horizontal ? '-inset-x-1 inset-y-0' : '-inset-y-1 inset-x-0'
+        className={`pointer-events-none absolute bg-xc-accent opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 group-hover:delay-150 group-focus-visible:opacity-100 group-data-[dragging]:opacity-100 group-data-[dragging]:delay-0 ${
+          horizontal ? '-inset-x-px inset-y-0' : '-inset-y-px inset-x-0'
         }`}
       />
     </div>

@@ -96,6 +96,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
   // Where a structural change acts: the view itself, or for a row design's insert the collection it repeats in.
   /** A view added by this edit, from the library or pasted. */
   const adding = operation.kind === 'insert' || operation.kind === 'paste' ? operation : undefined
+  /** A paste that goes after the view even when it is a container. */
+  const beside = operation.kind === 'paste' && !!operation.beside
   const offset = node?.kind === 'template' && adding ? model.nodes.find(n => n.id === node.parentId)?.source.start ?? request.target.start : request.target.start
   if (operation.kind === 'property' && node) {
     let expression: Expr | undefined
@@ -164,7 +166,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           const wrapped = applyPatches(context, stack).find(f => f.id === file.id)!.text
           // Only insertions: the view moves by what is written before it.
           const shifted = offset + stack.filter(p => p.start <= offset).reduce((moved, p) => moved + p.text.length, 0)
-          changed = insertView(wrapped, file.id, shifted, operation.snippet, refuse)
+          changed = insertView(wrapped, file.id, shifted, operation.snippet, refuse, { beside })
           // The link and the stack the screen needs for it: two places, so checked as a wrap.
           wrap = `${operation.snippet} ${stack[0]!.text}${stack.at(-1)!.text}`
         } else {
@@ -172,7 +174,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
           const brought = node && operation.kind === 'paste' ? pastedValues(context, node, operation.values) : undefined
           if (brought && 'problem' in brought) return reject(brought.problem)
           // The list itself takes a new last row; its Row template takes the view in every row.
-          const inserted = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet, refuse, { asListRow: node?.kind === 'collection' })
+          const inserted = insertView(file.text, file.id, offset, live?.snippet ?? operation.snippet, refuse, { asListRow: !beside && node?.kind === 'collection', beside })
           const wraps = inserted?.wraps
           changed = inserted
           const member = live?.member ?? brought?.member
@@ -200,7 +202,7 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       file: file.id, before: file.text, after: changed.text, view: node?.source ?? request.target,
       ...(wrap ? { kind: 'wrap', adds: wrap } : { kind: structural, adds: adding?.snippet }),
       toward: operation.kind === 'moveTo' ? operation.targetOffset : adding ? offset : undefined,
-      inside: operation.kind === 'moveTo' ? operation.position === 'inside' : undefined,
+      inside: operation.kind === 'moveTo' ? operation.position === 'inside' : beside ? false : undefined,
       landed: !wrap && structural !== 'delete' && structural !== 'hide' && structural !== 'show' ? changed.offset : undefined,
     })
     if (problem) return reject(problem)

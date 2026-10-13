@@ -541,3 +541,56 @@ it('keeps a titled Section selectable for editing its header', () => {
   expect(sourceLayerIsVisual(section)).toBe(true)
   expect(section.controls?.some(c => c.id === 'title')).toBe(true)
 })
+
+describe('hidden views in the layer tree', () => {
+  const screen = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+  var body: some View {
+    List {
+      VStack {
+        Text("Focus")
+        Text("Subtitle")
+        HStack {
+          Text("Count")
+          Text("Done")
+        }
+        ProgressView(value: 0.2)
+      }
+      Section("Next up") { Text("Task") }
+    }
+  }
+}`
+  const hide = (text: string, label: string) => {
+    const snapshot = model(text), target = snapshot.nodes.find(node => sourceLayerLabel(node) === label)!
+    const plan = planDesignEdit({ projectId: 'p', baseRevision: snapshot.revision, files: files(text), scope: target.owner, target: target.source, fingerprint: target.fingerprint, operation: { kind: 'hide' } })
+    if (!plan.ok) throw new Error(plan.reason)
+    return plan.changes[0]!.after!
+  }
+  const markers = (text: string) => hiddenViewsIn(text, 'App.swift').map(hidden => ({ file: 'App.swift', offset: hidden.start, name: hidden.name, type: hidden.type, container: hidden.container }))
+  const labels = (rows: readonly { node: Parameters<typeof sourceLayerLabel>[0] }[]) => rows.map(row => sourceLayerLabel(row.node))
+
+  // Hiding clears the selection, so nothing reveals the Column any more (⇧⌘H, the menu and the toolbar alike).
+  it('keeps the siblings of a hidden view when the selection no longer reveals its container', () => {
+    const text = hide(screen, 'Focus'), snapshot = model(text, 2)
+    const result = sourceLayerRows(snapshot, { snapshot, files: files(text), closed: new Set() }, undefined, '', undefined, markers(text))
+    const column = result.rows.find(row => row.node.name === 'VStack')!
+    expect(column.expanded).toBe(true)
+    expect(labels(result.rows)).toEqual(['List', 'Column', 'Subtitle', 'Row', 'Progress', 'Next up'])
+    expect(result.hidden).toEqual([{ view: markers(text)[0], owner: column.node.id }])
+  })
+
+  it('opens the rows around a hidden view nested deeper, and leaves rows the designer closed closed', () => {
+    const text = hide(screen, 'Done'), snapshot = model(text, 2)
+    const state = { snapshot, files: files(text), closed: new Set<string>() }
+    const open = sourceLayerRows(snapshot, state, undefined, '', undefined, markers(text))
+    const row = open.rows.find(item => item.node.name === 'HStack')!
+    expect(labels(open.rows)).toEqual(['List', 'Column', 'Focus', 'Subtitle', 'Row', 'Count', 'Progress', 'Next up'])
+    expect(open.hidden).toEqual([{ view: markers(text)[0], owner: row.node.id }])
+    const column = open.rows.find(item => item.node.name === 'VStack')!.node.id
+    const closed = sourceLayerRows(snapshot, { ...state, closed: new Set([column]) }, undefined, '', undefined, markers(text))
+    expect(labels(closed.rows)).toEqual(['List', 'Column', 'Next up'])
+    expect(closed.rows.find(item => item.node.id === column)?.expanded).toBe(false)
+    expect(closed.hidden).toEqual([{ view: markers(text)[0], owner: column }])
+  })
+})

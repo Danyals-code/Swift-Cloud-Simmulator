@@ -65,7 +65,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     const { text: output, stop } = await readProviderStream(response.body, deadline.alive)
     if (stop === 'declined') return fail('The provider declined this request. Revise the app description.', 422)
-    if (stop === 'length') return fail('The response hit its length limit before the app was finished. Try fewer pages or a smaller scope. Your current project is unchanged.', 422)
+    if (stop === 'length') return fail('The response hit its length limit before the app was finished. Try fewer screens or a smaller scope. Your current project is unchanged.', 422)
     if (stop !== 'done') return fail('Generation did not finish. Try again. Your current project is unchanged.', 422)
     let app
     try { app = parseGeneratedApp(JSON.parse(output), options.pageCount) }
@@ -73,7 +73,7 @@ export async function POST(request: Request): Promise<Response> {
     return answer({ app })
   } catch {
     if (request.signal.aborted) return fail('Generation was cancelled.', 499)
-    if (deadline.expired()) return fail('Generation took too long. Try a smaller app or fewer pages.', 504)
+    if (deadline.expired()) return fail('Generation took too long. Try a smaller app or fewer screens.', 504)
     return fail('Could not reach the provider. Check your connection and try again.', 502)
   } finally { deadline.stop() }
 }

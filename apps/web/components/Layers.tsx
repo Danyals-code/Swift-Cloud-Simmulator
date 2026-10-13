@@ -53,6 +53,10 @@ const LAYER_ICONS: Record<string, IconName> = {
   Toolbar: 'rows', Destination: 'nav', Presentation: 'screens',
 }
 
+/** Each level of the tree is 16px further in, from 4px at the top. */
+const INDENT = 16
+const INDENT_BASE = 4
+
 const iconFor = (type: string, expandable: boolean): IconName =>
   LAYER_ICONS[type] ?? (expandable ? 'section' : 'dot')
 
@@ -240,7 +244,7 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
       setDismissed(expandNext ? null : selectedId)
       setCollapsed(ids)
       setExpandNext(value => !value)
-    }}><Icon name={expandNext ? 'expand' : 'collapse'} size={13} /></button></span></div>
+    }}><Icon name={expandNext ? 'expand' : 'collapse'} size={14} /></button></span></div>
     <div ref={tree} className={styles.tree} role="tree" aria-label="App layers" aria-busy={stale}>
       {rows.map(({ layer, page, depth, parent }, index) => {
         const expandable = layer.children.length > 0
@@ -250,7 +254,7 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
           aria-expanded={expandable ? expanded : undefined} aria-selected={selectedId === layer.id}
           data-hovered={hovered === layer.id || undefined}
           tabIndex={tabStop === layer.id ? 0 : -1} data-layer-id={layer.id} data-page={!!layer.page}
-          className={styles.row} style={{ paddingLeft: 8 + depth * 14 }}
+          className={styles.row} style={{ paddingLeft: INDENT_BASE + depth * INDENT }}
           title={`${layer.type}${layer.source ? ` · ${layer.source.file}` : ''}`}
           data-dragging={drag?.id === layer.id || undefined}
           data-drop={drag?.over === layer.id ? drag.position : undefined}
@@ -271,7 +275,7 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
           <button type="button" tabIndex={-1} className={styles.disclosure} disabled={!expandable}
             aria-label={`${expanded ? 'Collapse' : 'Expand'} ${layer.name}`}
             onClick={event => { event.stopPropagation(); toggle(layer.id) }}>
-            {expandable && <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />}
+            {expandable && <Icon name="chevron-right" size={12} />}
           </button>
           <span className={styles.icon}>{layer.page ? <Icon name="screens" size={14} /> : <Icon name={iconFor(layer.type, expandable)} size={14} />}</span>
           <span className={styles.name}>{layer.name}</span>
@@ -280,7 +284,7 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
               <button type="button" tabIndex={-1} data-testid="layer-hide"
                 aria-label={`Hide ${layer.name}`} title="Hide this view (⇧⌘H)"
                 onClick={event => { event.stopPropagation(); onHide(layer) }}>
-                <Icon name="eye" size={13} />
+                <Icon name="eye" size={14} />
               </button>
             </span>
           ) : null}
@@ -298,16 +302,16 @@ export function Layers({ pages, selectedId, hoveredId = null, stale, onSelect, o
           <div key={`hidden:${view.file}:${view.offset}`} role="treeitem" aria-level={depth + 2}
             aria-label={`${view.name}, ${view.type}, hidden`} aria-selected={false}
             data-testid="hidden-layer" className={`${styles.row} ${styles.hiddenRow}`}
-            style={{ paddingLeft: 8 + (depth + 1) * 14 }} tabIndex={-1}
+            style={{ paddingLeft: INDENT_BASE + (depth + 1) * INDENT }} tabIndex={-1}
             title={`Hidden · ${view.type}`}>
             <span className={styles.disclosure} />
-            <span className={styles.icon}><Icon name="eye-off" size={13} /></span>
+            <span className={styles.icon}><Icon name="eye-off" size={14} /></span>
             <span className={styles.name}>{view.name}</span>
             <span className={styles.move}>
               <button type="button" tabIndex={-1} data-testid="layer-show"
                 aria-label={`Show ${view.name}`} title="Show this view again"
                 onClick={event => { event.stopPropagation(); onShow?.(view) }}>
-                <Icon name="eye-off" size={13} />
+                <Icon name="eye-off" size={14} />
               </button>
             </span>
           </div>

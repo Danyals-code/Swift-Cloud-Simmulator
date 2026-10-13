@@ -45,7 +45,7 @@ interface Anchor {
   readonly top: number
 }
 
-const ROW_HEIGHT = 28
+const ROW_HEIGHT = 26
 
 /**
  * The floating list.
@@ -59,6 +59,7 @@ export function MenuPanel({
   selected,
   anchor,
   matchTriggerWidth = false,
+  highlight = true,
   testId,
   onChoose,
   onDismiss,
@@ -67,6 +68,12 @@ export function MenuPanel({
   selected?: string
   anchor: Anchor
   matchTriggerWidth?: boolean
+  /**
+   * Whether a row starts highlighted. A menu opened from the keyboard needs one for
+   * the arrow keys to move from; one opened with the pointer starts with none, as on
+   * macOS, until the pointer or a key picks a row.
+   */
+  highlight?: boolean
   testId?: string
   onChoose: (value: string) => void
   onDismiss: () => void
@@ -76,7 +83,8 @@ export function MenuPanel({
   const enabled = items.filter((item) => !item.disabled)
   const [active, setActive] = useState(() => {
     const index = items.findIndex((item) => item.value === selected && !item.disabled)
-    return index >= 0 ? index : items.findIndex((item) => !item.disabled)
+    if (index >= 0) return index
+    return highlight ? items.findIndex((item) => !item.disabled) : -1
   })
   const [placement, setPlacement] = useState<{ left: number; top: number; width?: number }>({
     left: anchor.x,
@@ -116,6 +124,8 @@ export function MenuPanel({
         event.preventDefault()
         event.stopPropagation()
         setActive((current) => {
+          // Nothing highlighted yet: the first arrow lands on the first or last row.
+          if (current < 0) current = step > 0 ? items.length - 1 : 0
           // Walks past disabled rows rather than stopping on them, so holding an
           // arrow key never appears to jam.
           for (let i = 1; i <= items.length; i++) {
@@ -183,10 +193,13 @@ export function MenuPanel({
         aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
         onClick={event => event.stopPropagation()}
         onPointerDown={event => event.stopPropagation()}
+        onPointerLeave={() => setActive(-1)}
         tabIndex={-1}
         data-testid={testId}
         style={{ left: placement.left, top: placement.top, minWidth: placement.width }}
-        className="fixed z-[901] max-h-[60vh] min-w-[180px] max-w-[calc(100vw-16px)] overflow-auto rounded-md border border-xc-line bg-xc-panel py-[5px] shadow-[0_8px_30px_rgb(0_0_0/0.12)]"
+        // A macOS menu: translucent material, 8px corners, rows inset by 5px, and a
+        // short drop-in so it reads as coming from its trigger rather than blinking on.
+        className="fixed z-[901] max-h-[60vh] min-w-[200px] max-w-[calc(100vw-16px)] origin-top animate-[xc-pop-in_140ms_cubic-bezier(0.2,0.8,0.2,1)] overflow-auto rounded-lg bg-[color-mix(in_srgb,var(--color-xc-panel)_90%,transparent)] p-[5px] shadow-[var(--shadow-popover)] backdrop-blur-xl backdrop-saturate-150"
       >
         {items.map((item, index) => {
           const isSelected = item.value === selected
@@ -195,7 +208,7 @@ export function MenuPanel({
           return (
             <div key={item.value}>
               {item.separated && index > 0 ? (
-                <div className="my-[5px] h-px bg-xc-line-soft" role="separator" />
+                <div className="mx-2 my-[5px] h-px bg-xc-line" role="separator" />
               ) : null}
 
               <button
@@ -216,20 +229,22 @@ export function MenuPanel({
                 }}
                 onPointerEnter={() => !item.disabled && setActive(index)}
                 title={item.title}
-                className={`flex w-full items-center gap-2 px-2 text-left text-[12px] leading-none disabled:opacity-40 ${
-                  isActive && !item.disabled ? 'bg-xc-select text-xc-text' : 'text-xc-text'
+                // Highlighted rows are filled with the accent and drawn in white,
+                // as every macOS menu is.
+                className={`flex w-full items-center gap-2 rounded-[var(--radius-thumb)] pl-1.5 pr-2.5 text-left text-body disabled:opacity-40 ${
+                  isActive && !item.disabled ? 'bg-xc-accent-fill text-white' : 'text-xc-text'
                 }`}
-                style={{ height: ROW_HEIGHT, borderRadius: 4 }}
+                style={{ height: ROW_HEIGHT }}
               >
-                <span className="w-3 shrink-0">
-                  {isSelected ? <Icon name="check" size={11} weight={2} /> : null}
+                <span className="grid w-3.5 shrink-0 place-items-center">
+                  {isSelected ? <Icon name="check" size={12} weight={2} /> : null}
                 </span>
-                {item.icon ? <Icon name={item.icon} size={13} /> : null}
+                {item.icon ? <Icon name={item.icon} size={14} /> : null}
                 <span className="truncate">{item.label}</span>
                 {item.detail ? (
                   <span
-                    className={`ml-auto shrink-0 pl-4 text-[13px] ${
-                      isActive && !item.disabled ? 'text-xc-text/70' : 'text-xc-text-3'
+                    className={`ml-auto shrink-0 pl-6 ${
+                      isActive && !item.disabled ? 'text-white/75' : 'text-xc-text-3'
                     }`}
                   >
                     {item.detail}
@@ -262,6 +277,8 @@ export interface PopupButtonProps {
   className?: string
   /** Shown instead of the value's label when nothing matches - an action menu's verb. */
   placeholder?: string
+  /** What the button shows in place of the chosen item's label: Fit's actual percentage. */
+  display?: string
 }
 
 /**
@@ -280,6 +297,7 @@ export function PopupButton({
   testId,
   className,
   placeholder,
+  display,
 }: PopupButtonProps) {
   const ref = useRef<HTMLButtonElement | null>(null)
   const [anchor, setAnchor] = useState<Anchor | null>(null)
@@ -314,11 +332,11 @@ export function PopupButton({
         }}
         className={
           className ??
-          'flex h-[22px] items-center gap-1.5 rounded-[5px] border border-xc-line bg-xc-line-soft px-2 text-[14px] text-xc-text transition-colors hover:bg-xc-line-soft active:bg-xc-line-soft'
+          'flex h-7 min-w-0 shrink-0 items-center gap-1 rounded-md bg-xc-fill pl-2.5 pr-1.5 text-body text-xc-text transition-colors duration-[120ms] hover:bg-xc-fill-strong aria-expanded:bg-xc-fill-strong'
         }
       >
-        <span className="truncate">{current?.label ?? placeholder ?? value}</span>
-        <Icon name="chevron-up-down" size={11} className="text-xc-text-2" />
+        <span className="truncate">{display ?? current?.label ?? placeholder ?? value}</span>
+        <Icon name="chevron-up-down" size={13} className="shrink-0 text-xc-text-2" />
       </button>
 
       {anchor ? (
@@ -366,6 +384,7 @@ export function MenuButton({
 }: MenuButtonProps) {
   const ref = useRef<HTMLButtonElement | null>(null)
   const [anchor, setAnchor] = useState<Anchor | null>(null)
+  const [byKeyboard, setByKeyboard] = useState(false)
 
   const close = useCallback(() => {
     setAnchor(null)
@@ -384,6 +403,7 @@ export function MenuButton({
         data-testid={testId}
         onPointerDown={(event) => {
           event.preventDefault()
+          setByKeyboard(false)
           setAnchor((open) => (open ? null : anchorOf(ref.current)))
         }}
         onKeyDown={(event) => {
@@ -392,6 +412,7 @@ export function MenuButton({
           event.stopPropagation()
           // Pointer-down opens mouse menus; prevent the keyboard's synthetic click
           // from toggling the menu again after opening it here.
+          setByKeyboard(true)
           setAnchor(anchorOf(ref.current))
         }}
         className={className}
@@ -403,6 +424,7 @@ export function MenuButton({
         <MenuPanel
           items={items}
           anchor={anchor}
+          highlight={byKeyboard}
           testId={testId ? `${testId}-menu` : undefined}
           onChoose={(next) => {
             close()
@@ -439,6 +461,7 @@ export function ContextMenu({
     <MenuPanel
       items={items}
       anchor={{ x: at.x, y: at.y, width: 0, top: at.y, bottom: at.y }}
+      highlight={false}
       testId={testId}
       onChoose={(value) => {
         onDismiss()

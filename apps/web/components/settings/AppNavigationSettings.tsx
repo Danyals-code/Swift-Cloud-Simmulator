@@ -56,7 +56,7 @@ export function AppNavigationSettings({ navigation, screens, busy, onCommand, on
             const asset = symbolAsset(tab.icon || 'circle', `tab-${index}`)
             return <div key={`${tab.screen}:${index}`} className={styles.tabRow} data-testid="tab-row">
               <button type="button" className={styles.iconButton} aria-label={`Symbol for ${tab.name || nameOf(tab.screen)}`} aria-expanded={choosingIcon === index} disabled={busy || !navigation.editable} title={tab.icon || 'Choose a symbol'} onClick={() => setChoosingIcon(choosingIcon === index ? null : index)}>
-                {asset ? <svg viewBox={asset.viewBox} width="15" height="15" aria-hidden="true" dangerouslySetInnerHTML={{ __html: asset.body }} /> : <Icon name="circle" size={13} />}
+                {asset ? <svg viewBox={asset.viewBox} width="15" height="15" aria-hidden="true" dangerouslySetInnerHTML={{ __html: asset.body }} /> : <Icon name="dot" size={14} />}
               </button>
               {navigation.editable
                 ? <input aria-label={`Tab ${index + 1} name`} defaultValue={tab.name} key={`name:${tab.name}`} disabled={busy} onBlur={event => { if (event.target.value !== tab.name) void run({ kind: 'tab-update', index, name: event.target.value }) }} onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); if (event.key === 'Escape') { (event.target as HTMLInputElement).value = tab.name; (event.target as HTMLInputElement).blur() } }} />
@@ -68,9 +68,9 @@ export function AppNavigationSettings({ navigation, screens, busy, onCommand, on
                 </select>
                 : <span>{nameOf(tab.screen)}</span>}
               {navigation.editable && <span className={styles.inline}>
-                <button type="button" className={styles.iconButton} aria-label={`Move ${tab.name} up`} disabled={busy || index === 0} onClick={() => void run({ kind: 'tab-move', index, toIndex: index - 1 })}><Icon name="chevron-up" size={11} /></button>
-                <button type="button" className={styles.iconButton} aria-label={`Move ${tab.name} down`} disabled={busy || index === tabs.length - 1} onClick={() => void run({ kind: 'tab-move', index, toIndex: index + 1 })}><Icon name="chevron-down" size={11} /></button>
-                <button type="button" className={styles.iconButton} aria-label={`Remove ${tab.name}`} disabled={busy || tabs.length === 1} onClick={() => void run({ kind: 'tab-remove', index })}><Icon name="xmark" size={11} /></button>
+                <button type="button" className={styles.iconButton} aria-label={`Move ${tab.name} up`} disabled={busy || index === 0} onClick={() => void run({ kind: 'tab-move', index, toIndex: index - 1 })}><Icon name="chevron-down" size={12} className={styles.flip} /></button>
+                <button type="button" className={styles.iconButton} aria-label={`Move ${tab.name} down`} disabled={busy || index === tabs.length - 1} onClick={() => void run({ kind: 'tab-move', index, toIndex: index + 1 })}><Icon name="chevron-down" size={12} /></button>
+                <button type="button" className={styles.iconButton} aria-label={`Remove ${tab.name}`} disabled={busy || tabs.length === 1} onClick={() => void run({ kind: 'tab-remove', index })}><Icon name="xmark" size={12} /></button>
               </span>}
             </div>
           })}
@@ -84,7 +84,7 @@ export function AppNavigationSettings({ navigation, screens, busy, onCommand, on
         {navigation.style === 'tabs' && tabs.length > TAB_LIMIT && <p className={styles.warning} role="status">iPhone shows {TAB_LIMIT} tabs; the rest are grouped under “More”. Consider moving some screens inside a tab.</p>}
         {!navigation.editable && <p className={styles.note}>{navigation.reason} {navigation.source && <button type="button" className={styles.link} onClick={() => onReveal(navigation.source!)}>Open in Code</button>}</p>}
         {navigation.editable && navigation.style === 'tabs' && (adding
-          ? <div className={styles.states} data-testid="add-tab">
+          ? <div className={styles.form} data-testid="add-tab">
             <div className={styles.row}><label htmlFor="tab-screen">Screen</label><select id="tab-screen" aria-label="New tab screen" value={draft.screen} onChange={event => setDraft({ ...draft, screen: event.target.value, name: draft.name || nameOf(event.target.value) })}><option value="" disabled>Choose…</option>{free.map(screen => <option key={screen.view} value={screen.view}>{screen.name}</option>)}</select></div>
             <div className={styles.row}><label htmlFor="tab-name">Name</label><input id="tab-name" aria-label="New tab name" value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></div>
             <SymbolPicker selected={draft.icon} onChoose={async name => { setDraft({ ...draft, icon: name }); return null }} />
