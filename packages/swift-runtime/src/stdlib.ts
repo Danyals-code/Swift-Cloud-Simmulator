@@ -25,6 +25,7 @@ import {
   str,
   tuple,
   typeNameOf,
+  uniqueArray,
   urlValue,
   valuesEqual,
   VOID,
@@ -456,22 +457,20 @@ export function callBuiltinMember(
           return undefined
       }
 
-    case 'range':
-      switch (member) {
-        case 'contains': {
-          const value = arg(0)
-          if (!value) return undefined
-          const n = target.boundType === 'Date' ? asDate(value)?.epochSeconds ?? NaN : numericValue(value)
-          return bool(n >= target.lower && (target.closed ? n <= target.upper : n < target.upper))
-        }
-        default: {
-          // `(0..<3).map { … }`: for everything else a range of integers is the collection of them.
-          if (target.boundType === 'Date' || !RANGE_SEQUENCE_MEMBERS.has(member)) return undefined
-          const count = Math.max(0, target.upper - target.lower + (target.closed ? 1 : 0))
-          if (!Number.isSafeInteger(count) || count > PREVIEW_LIMITS.collectionElements) trap(`A range of ${count.toLocaleString()} elements exceeds the preview limit of ${PREVIEW_LIMITS.collectionElements.toLocaleString()}`)
-          return callBuiltinMember(array(Array.from({ length: count }, (_, i) => int(target.lower + i))), member, args, invoke, trap, replaceSelf, read)
-        }
+    case 'range': {
+      const value = arg(0)
+      // `contains(where:)` is the collection's question, answered below with the rest;
+      // read as a value, the closure compared unequal to every element.
+      if (member === 'contains' && value && value.kind !== 'closure' && !labelled('where')) {
+        const n = target.boundType === 'Date' ? asDate(value)?.epochSeconds ?? NaN : numericValue(value)
+        return bool(n >= target.lower && (target.closed ? n <= target.upper : n < target.upper))
       }
+      // `(0..<3).map { … }`: for everything else a range of integers is the collection of them.
+      if (target.boundType === 'Date' || !(RANGE_SEQUENCE_MEMBERS.has(member) || member === 'contains')) return undefined
+      const count = Math.max(0, target.upper - target.lower + (target.closed ? 1 : 0))
+      if (!Number.isSafeInteger(count) || count > PREVIEW_LIMITS.collectionElements) trap(`A range of ${count.toLocaleString()} elements exceeds the preview limit of ${PREVIEW_LIMITS.collectionElements.toLocaleString()}`)
+      return callBuiltinMember(array(Array.from({ length: count }, (_, i) => int(target.lower + i))), member, args, invoke, trap, replaceSelf, read)
+    }
 
     case 'opaque': {
       if (target.typeName === TIMER_TYPE) return callTimerMember(target, member)
@@ -696,6 +695,122 @@ function arrayMethod(
       trap('Range out of bounds')
     }
     return { start: value.lower, end }
+  }
+
+  /**
+   * The other operand of a set operation, as its elements.
+   *
+   * Swift takes any sequence there - another set, an array literal, a range - so
+   * `tags.subtracting(["All"])` and `ids.union(other.ids)` read the same way here.
+   */
+  const operand = (value: SwiftValue | undefined): SwiftValue[] => {
+    if (value?.kind === 'array') return value.elements
+    if (value?.kind === 'range') {
+      const out: SwiftValue[] = []
+      const end = value.closed ? value.upper : value.upper - 1
+      if (end - value.lower >= PREVIEW_LIMITS.collectionElements) trap('Range exceeds the preview limit of 100,000 elements')
+      for (let i = value.lower; i <= end; i++) out.push(int(i))
+      return out
+    }
+    if (value?.kind === 'string') return graphemes(value.value).map(str)
+    trap(`'${member}' expects a sequence`)
+  }
+  const within = (elements: readonly SwiftValue[], value: SwiftValue) => elements.some((e) => valuesEqual(e, value))
+  /** `a ⊆ b`, element by element: sets are small in view code, and order is not a hash. */
+  const subset = (a: readonly SwiftValue[], b: readonly SwiftValue[]) => a.every((e) => within(b, e))
+  const setTo = (elements: readonly SwiftValue[]) => {
+    const next = uniqueArray(elements)
+    target.elements.length = 0
+    target.elements.push(...next.elements)
+    return VOID
+  }
+
+  /**
+   * Set algebra, which only a `Set` has.
+   *
+   * The results are sets, so they refuse duplicates and keep the receiver's order
+   * followed by the operand's - Swift's own order is a hash order nothing may rely
+   * on, and a stable one is the more useful approximation in a preview. An array
+   * has none of these in Swift, so on one they stay "has no member".
+   */
+  if (target.unique) {
+    const other = (label?: string) => operand(label ? (labelled(label) ?? arg(0)) : arg(0))
+    switch (member) {
+      case 'union':
+        return uniqueArray([...target.elements, ...other()].map(copyValue))
+      case 'intersection': {
+        const b = other()
+        return uniqueArray(target.elements.filter((e) => within(b, e)).map(copyValue))
+      }
+      case 'subtracting': {
+        const b = other()
+        return uniqueArray(target.elements.filter((e) => !within(b, e)).map(copyValue))
+      }
+      case 'symmetricDifference': {
+        const b = other()
+        return uniqueArray([...target.elements.filter((e) => !within(b, e)), ...b.filter((e) => !within(target.elements, e))].map(copyValue))
+      }
+      case 'formUnion':
+        return setTo([...target.elements, ...other().map(copyValue)])
+      case 'formIntersection': {
+        const b = other()
+        return setTo(target.elements.filter((e) => within(b, e)))
+      }
+      case 'subtract': {
+        const b = other()
+        return setTo(target.elements.filter((e) => !within(b, e)))
+      }
+      case 'formSymmetricDifference': {
+        const b = other()
+        return setTo([...target.elements.filter((e) => !within(b, e)), ...b.filter((e) => !within(target.elements, e)).map(copyValue)])
+      }
+      case 'isSubset': {
+        const b = other('of')
+        return bool(subset(target.elements, b))
+      }
+      case 'isStrictSubset': {
+        const b = uniqueArray(other('of')).elements
+        return bool(subset(target.elements, b) && b.length > target.elements.length)
+      }
+      case 'isSuperset': {
+        const b = other('of')
+        return bool(subset(b, target.elements))
+      }
+      case 'isStrictSuperset': {
+        const b = uniqueArray(other('of')).elements
+        return bool(subset(b, target.elements) && target.elements.length > b.length)
+      }
+      case 'isDisjoint': {
+        const b = other('with')
+        return bool(!target.elements.some((e) => within(b, e)))
+      }
+      case 'remove': {
+        // `Set.remove(_:)` takes the element itself and answers it, or nil when it
+        // was not there. The positional forms below are Array's.
+        if (args.length !== 1 || args[0]!.label) break
+        const value = arg(0)!
+        const index = target.elements.findIndex((e) => valuesEqual(e, value))
+        return index >= 0 ? target.elements.splice(index, 1)[0]! : NIL
+      }
+      case 'update': {
+        // `update(with:)` inserts or replaces, answering what it replaced.
+        const value = labelled('with')
+        if (!value) break
+        const index = target.elements.findIndex((e) => valuesEqual(e, value))
+        if (index < 0) {
+          target.elements.push(copyValue(value))
+          return NIL
+        }
+        const old = target.elements[index]!
+        target.elements[index] = copyValue(value)
+        return old
+      }
+      case 'filter': {
+        // A set's `filter` answers a set; its `map` answers an array, as in Swift.
+        const predicate = unaryArg()
+        return uniqueArray(target.elements.filter((e) => truthyOf(predicate(e))).map(copyValue))
+      }
+    }
   }
 
   switch (member) {
@@ -1035,6 +1150,8 @@ const MUTATING_MEMBERS: ReadonlySet<string> = new Set([
   // Array
   'append', 'insert', 'remove', 'removeAll', 'removeFirst', 'removeLast', 'popLast',
   'removeSubrange', 'replaceSubrange', 'sort', 'reverse', 'shuffle', 'swapAt', 'move',
+  // Set
+  'formUnion', 'formIntersection', 'formSymmetricDifference', 'subtract', 'update',
   // Dictionary
   'updateValue', 'removeValue',
   // Bool and String

@@ -1,8 +1,10 @@
 import { normalizeFileName, sourcePathsConflict, validPromptSelection, type PromptSelection, type PromptMessage } from '@studio/project-model'
-import type { SourceChange, SourceFile } from '@studio/shared'
+import type { Diagnostic, SourceChange, SourceFile } from '@studio/shared'
 import type { Provider } from './schema'
 import { parsePreviousAttempt, type PreviousAttempt } from './previousAttempt'
 
+/** One thing the live preview reports, as Prompt Editing sends it: not the retry's PreviewProblem. */
+export interface LivePreviewProblem { severity: 'error' | 'warning'; file: string; message: string }
 export interface PromptEditInput {
   provider: Provider
   model: string
@@ -13,6 +15,23 @@ export interface PromptEditInput {
   project: { name: string; deploymentTarget: string; images: readonly string[]; colors: readonly string[] }
   /** The second request of an attempt: what was wrong with the first answer (G2). */
   previousAttempt?: PreviousAttempt
+  /** What the live preview reports for this source, so the model knows what the preview cannot show. */
+  previewProblems?: readonly LivePreviewProblem[]
+}
+const PREVIEW_PROBLEMS = 40
+
+/** The live preview's errors, then its warnings, once each: enough to steer an edit, never the whole log. */
+export function promptPreviewContext(diagnostics: readonly Diagnostic[]): readonly LivePreviewProblem[] {
+  const seen = new Set<string>(), out: LivePreviewProblem[] = []
+  for (const severity of ['error', 'warning'] as const) {
+    for (const diagnostic of diagnostics) {
+      if (diagnostic.severity !== severity || out.length === PREVIEW_PROBLEMS) continue
+      const problem = { severity, file: diagnostic.span.file.slice(0, 180), message: diagnostic.message.slice(0, 300) }
+      const key = `${problem.file}\n${problem.message}`
+      if (!seen.has(key)) { seen.add(key); out.push(problem) }
+    }
+  }
+  return out
 }
 export interface PromptEditResult { reply: string; files: { path: string; code: string }[]; deletedFiles: string[] }
 /** Failed or interrupted turns are visible in the log, but are not instructions for the next edit. */
@@ -62,8 +81,14 @@ export function parsePromptEditInput(value: unknown): PromptEditInput {
   const project = value.project
   if (!record(project) || !text(project.name, 100) || !text(project.deploymentTarget, 20)) throw new Error('Invalid project settings.')
   const names = (value: unknown) => { if (!Array.isArray(value) || value.length > 256 || value.some(item => !text(item, 180))) throw new Error('Invalid project resources.'); return value as string[] }
+  const problems = value.previewProblems ?? []
+  if (!Array.isArray(problems) || problems.length > PREVIEW_PROBLEMS) throw new Error('Invalid preview problems.')
+  const previewProblems = problems.map(problem => {
+    if (!record(problem) || !['error', 'warning'].includes(String(problem.severity)) || typeof problem.file !== 'string' || problem.file.length > 180 || !text(problem.message, 300)) throw new Error('Invalid preview problems.')
+    return { severity: problem.severity as LivePreviewProblem['severity'], file: problem.file, message: problem.message }
+  })
   const previousAttempt = parsePreviousAttempt(value.previousAttempt)
-  return { provider: value.provider as Provider, model: value.model, prompt: value.prompt.trim(), files, selection, history, project: { name: project.name, deploymentTarget: project.deploymentTarget, images: names(project.images), colors: names(project.colors) }, ...(previousAttempt ? { previousAttempt } : {}) }
+  return { provider: value.provider as Provider, model: value.model, prompt: value.prompt.trim(), files, selection, history, project: { name: project.name, deploymentTarget: project.deploymentTarget, images: names(project.images), colors: names(project.colors) }, ...(previousAttempt ? { previousAttempt } : {}), ...(previewProblems.length ? { previewProblems } : {}) }
 }
 
 export function parsePromptEditResult(value: unknown): PromptEditResult {

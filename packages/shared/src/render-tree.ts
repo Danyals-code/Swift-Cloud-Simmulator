@@ -446,6 +446,8 @@ export interface RenderNode {
   readonly filter?: FilterSpec
   /** `.regularMaterial` and friends: a translucent, blurred backdrop. */
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
+  /** `.mask` with a gradient or a colour: the alpha everything inside this node is drawn through. */
+  readonly mask?: Fill
   /** A `GeometryReader`'s safe-area insets, which its proxy reports. Only on a reader's own node. */
   readonly geometryInsets?: { readonly top: number; readonly leading: number; readonly bottom: number; readonly trailing: number }
   /**

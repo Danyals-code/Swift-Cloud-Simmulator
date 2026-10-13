@@ -35,12 +35,12 @@ struct ContentView: View {
   }
 }`
 
-/** The left panel's tabs: Layers in Design, Files in Code, and Prompt Editing. */
+/** The left panel's tabs: Hierarchy and Prompt Editing. */
 const sidebarTab = (page: Page, name: string) => page.getByRole('tablist', { name: 'Left panel', exact: true }).getByRole('tab', { name, exact: true })
 
 test('Layers shows nested pages, selects without activating controls, and follows workspace modes', async ({ page }, testInfo) => {
   await openCounter(page)
-  await expect(sidebarTab(page, 'Layers')).toHaveAttribute('aria-selected', 'true')
+  await expect(sidebarTab(page, 'Hierarchy')).toHaveAttribute('aria-selected', 'true')
   await page.getByTestId('workspace-develop').click()
   await expect(page.getByTestId('navigator-tab-project')).toHaveAttribute('aria-pressed', 'true')
   const editor = page.getByTestId('editor').locator('.cm-content')
@@ -87,7 +87,7 @@ test('Layers shows nested pages, selects without activating controls, and follow
   await profile.press('ArrowRight')
   await expect(layers.getByRole('treeitem', { name: 'Taylor, Text', exact: true })).toBeVisible()
   await page.getByTestId('workspace-design').click()
-  await expect(sidebarTab(page, 'Layers')).toHaveAttribute('aria-selected', 'true')
+  await expect(sidebarTab(page, 'Hierarchy')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('navigation', { name: 'Layers', exact: true })).toBeVisible()
   await testInfo.attach('design-layers-light', { body: await page.screenshot(), contentType: 'image/png' })
   await page.getByTestId('workspace-more').click()
@@ -100,7 +100,7 @@ test('Layers shows nested pages, selects without activating controls, and follow
   await expect(preview.getByText('Taylor', { exact: true })).toBeVisible()
   await page.getByTestId('navigator-tab-issues').click()
   await page.getByTestId('workspace-design').click()
-  await expect(sidebarTab(page, 'Layers')).toHaveAttribute('aria-selected', 'true')
+  await expect(sidebarTab(page, 'Hierarchy')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('navigation', { name: 'Layers', exact: true })).toBeVisible()
 })
 

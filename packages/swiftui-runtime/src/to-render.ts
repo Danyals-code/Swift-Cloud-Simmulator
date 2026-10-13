@@ -76,6 +76,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
     ...(node.transition ? { transition: node.transition } : {}),
     ...(node.filter ? { filter: node.filter } : {}),
     ...(node.material ? { material: node.material } : {}),
+    ...(node.mask ? { mask: node.mask } : {}),
     ...(node.geometryInsets ? { geometryInsets: node.geometryInsets } : {}),
     ...(node.debugName
       ? {

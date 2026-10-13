@@ -1474,6 +1474,12 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private eagerContent(member: string, call: HostCall): ViewArg[] {
+    if (member === 'mask') {
+      // `.mask { LinearGradient(...) }`: what the closure draws is the mask, and a
+      // gradient or colour there is a view too - `toViews` wraps it as the one it is.
+      const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'mask')?.value)
+      return content ? this.toViews(call.invokeBuilder(content)).map((value) => ({ label: 'content', value: view(value) })) : []
+    }
     if (!['safeAreaInset', 'background', 'overlay'].includes(member)) return []
     const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'content')?.value)
     // `.overlay(Badge())`: a custom view given as the argument is a struct until it is

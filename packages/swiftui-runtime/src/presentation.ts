@@ -175,6 +175,8 @@ export interface ResolvedUI {
   readonly content: readonly ViewValue[]
   readonly search: SearchField | null
   readonly navigationBar: NavigationBar | null
+  /** The navigation stack's visual environment: what a screen pushed onto it inherits. */
+  readonly environment?: readonly ModifierValue[]
   readonly tabBar: TabBar | null
   readonly overlay: Overlay | null
   readonly handlers: ReadonlyMap<string, ViewIntent>
@@ -517,6 +519,7 @@ class Resolver {
       content: screen.content,
       search: this.findSearchField(screen.content, searchAround),
       navigationBar: screen.navigationBar,
+      ...(nav ? { environment: visualModifiers(nav) } : {}),
       tabBar: withTabs.tabBar,
       overlay,
       handlers: this.handlers,
@@ -580,7 +583,10 @@ class Resolver {
         for (const view of content) {
           if (view.name === 'NavigationLink') {
             const builder = this.destinationBuilder(view, current.scope)
-            add('destination', builder?.span ?? view.span, () => (this.destinationFor(view, current.scope) ?? []).map(content => inheritVisualStyle(content, visualModifiers(view))), labelTextOf(view) || 'Details')
+            // A pushed screen is drawn under the navigation stack, so it takes the stack's
+            // environment, not modifiers written on the link.
+            const environment = current.ui.environment ?? visualModifiers(view)
+            add('destination', builder?.span ?? view.span, () => (this.destinationFor(view, current.scope) ?? []).map(content => inheritVisualStyle(content, environment)), labelTextOf(view) || 'Details')
           }
           visitLinks(view.children)
         }
@@ -1357,7 +1363,9 @@ class Resolver {
         name: ['NavigationStack', 'NavigationView', 'NavigationSplitView'].includes(view.name) ? 'Group' : view.name,
         children: view.children.map(content),
       })
-      screen = this.stampList(destination.map(content), `n${depth + 1}`, visualModifiers(link ?? stack))
+      // The stack's environment, not the link's: `.buttonStyle(.plain)` on a list row's
+      // link styles that row, and must not turn every button on the pushed screen plain.
+      screen = this.stampList(destination.map(content), `n${depth + 1}`, visualModifiers(stack))
       const requestedMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
       if (requestedMode && requestedMode !== 'automatic') large = requestedMode !== 'inline'
       large &&= titleOf(screen, '').length > 0

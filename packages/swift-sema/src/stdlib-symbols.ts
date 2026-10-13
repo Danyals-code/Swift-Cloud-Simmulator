@@ -141,6 +141,21 @@ const SET_MEMBERS: readonly StdlibMember[] = [
   method('reduce', '(T, (T, Element) -> T) -> T', 'Combined into a single value.'),
   method('allSatisfy', '((Element) -> Bool) -> Bool', 'Whether every element matches.'),
   method('randomElement', '() -> Element?', 'One element at random, or nil when empty.', false),
+  method('remove', '(Element) -> Element?', 'Removes an element and answers it, or nil when absent. Mutating.'),
+  method('update', '(with: Element) -> Element?', 'Inserts or replaces, answering what was replaced. Mutating.'),
+  method('union', '(Sequence) -> Set<Element>', 'Every element of both.'),
+  method('intersection', '(Sequence) -> Set<Element>', 'The elements in both.'),
+  method('subtracting', '(Sequence) -> Set<Element>', 'The elements not in the other.'),
+  method('symmetricDifference', '(Sequence) -> Set<Element>', 'The elements in one but not both.'),
+  method('formUnion', '(Sequence) -> Void', 'Adds every element of another. Mutating.'),
+  method('formIntersection', '(Sequence) -> Void', 'Keeps only the elements also in another. Mutating.'),
+  method('subtract', '(Sequence) -> Void', 'Removes the elements of another. Mutating.'),
+  method('formSymmetricDifference', '(Sequence) -> Void', 'Keeps the elements in one but not both. Mutating.'),
+  method('isSubset', '(of: Sequence) -> Bool', 'Whether every element is in the other.'),
+  method('isStrictSubset', '(of: Sequence) -> Bool', 'A subset, and smaller.'),
+  method('isSuperset', '(of: Sequence) -> Bool', 'Whether it holds every element of the other.'),
+  method('isStrictSuperset', '(of: Sequence) -> Bool', 'A superset, and larger.'),
+  method('isDisjoint', '(with: Sequence) -> Bool', 'Whether no element is in both.'),
 ]
 
 const DICTIONARY_MEMBERS: readonly StdlibMember[] = [
@@ -210,6 +225,10 @@ const RANGE_MEMBERS: readonly StdlibMember[] = [
   property('lowerBound', 'Int', 'The first value.'),
   property('upperBound', 'Int', 'The bound at the top; included only for `...`.'),
   method('contains', '(Int) -> Bool', 'Whether a value falls inside.'),
+  method('map', '((Int) -> T) -> [T]', 'Each value transformed. A range of Ints is a collection.'),
+  method('filter', '((Int) -> Bool) -> [Int]', 'The values the predicate keeps.'),
+  method('reduce', '(T, (T, Int) -> T) -> T', 'Combined into a single value.'),
+  method('forEach', '((Int) -> Void) -> Void', 'Runs a closure for each value.'),
 ]
 
 /**

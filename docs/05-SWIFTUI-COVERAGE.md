@@ -105,6 +105,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
 | `.toolbar` | 🟡 | 6 | leading/trailing items work, drawn as iOS 27 draws them: a Label as its icon alone in a 44-pt glass circle, text in a 44-pt capsule, the label colour unless a tint is written, and items side by side in one capsule. A NavigationLink in the toolbar pushes. Keyboard, bottomBar and principal placements warn and are omitted |
+| `.toolbarBackground` | 🟡 | - | navigation bar only: `.hidden` paints no bar background, so the content behind shows, and a colour or gradient paints that. `.visible` and the other bars draw as before. A view extending under the bar with `.ignoresSafeArea` also clears the bar, as iOS does at the top of the content |
 | `TabView` | ✅ | 6 | tab bar with `.tabItem` or `Tab`, bound or unbound selection, pages from `ForEach` selected by their ids, a `TabSection`'s tabs in the bar with the others, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
@@ -158,12 +159,12 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.border` | ✅ | 6 |
 | `.rotationEffect` / `.scaleEffect` | ✅ | 6 | paint-time, so layout keeps the untransformed size |
 | `.blur` / `.saturation` / `.brightness` / `.contrast` / `.grayscale` | ✅ | 7 |
-| `.mask` | ⬜ | - | needs an arbitrary view as a mask image, which CSS can only do for a shape |
+| `.mask` | 🟡 | - | a gradient or a colour, as an argument or in the closure - the fade of an image into its background. Any other view as a mask warns and is drawn unmasked |
 | `.blendMode` | 🟡 | - | the sixteen modes CSS shares with SwiftUI; `.plusLighter` and the `sourceAtop` family warn rather than drawing the nearest one |
 | `.hueRotation` / `.colorMultiply` | ✅ | - | the multiply is an overlay, since no CSS filter multiplies by a colour |
 | `.rotation3DEffect` | ✅ | - | a real rotation with a perspective, about the axis vector given |
 | `.redacted` / `.unredacted` | ✅ | - | text and images become bars of the size the engine laid out for them |
-| `.tint` / `.accentColor` | ✅ | 6 |
+| `.tint` / `.accentColor` | ✅ | 6 | a destructive button stays red whatever its tint, as on iOS; its own `.foregroundStyle` recolours it. A screen pushed by a link takes the stack's styles, not ones written on the link - a row's `.buttonStyle(.plain)` no longer greys the buttons on the screen it opens |
 | `.buttonStyle` | 🟡 | 6 | `.bordered` and `.borderedProminent`; others fall back to plain. `.controlSize` scales it and `.buttonBorderShape` rounds it |
 | `.toggleStyle` | ✅ | - | `.switch`, `.button` and `.checkbox` each draw differently, and all three stay pressable |
 | `.pickerStyle` | 🟡 | - | segmented/menu/inline selection; wheel is a dimmed column. Navigation-link and palette styles warn. Menu displays the selected label |
@@ -343,7 +344,9 @@ missing without anything saying so.
 | `Dictionary` - `sorted`, `mapValues`, `filter`, `map`, `contains` | ✅ | - | over `(key: , value: )` pairs; `filter` answers a dictionary and `sorted` an array |
 | `Dictionary(grouping:by:)`, `Dictionary(uniqueKeysWithValues:)` | ✅ | 11 | grouping keeps the order the groups were first met, which is what a sectioned list wants and what Swift's hash order promises nothing about |
 | `counts[key, default: 0] += 1` | ✅ | 11 | the default belongs to the read half of a compound assignment; without it the first occurrence of every key read nil |
-| `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation drop duplicates; iteration is in insertion order rather than Swift's unspecified hash order |
+| `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation, parameter or property drop duplicates, and assignment keeps a set a set; iteration is in insertion order rather than Swift's unspecified hash order |
+| `Set` - `union`, `intersection`, `subtracting`, `symmetricDifference`, `formUnion`, `formIntersection`, `subtract`, `formSymmetricDifference`, `isSubset`, `isSuperset`, `isStrictSubset`, `isStrictSuperset`, `isDisjoint`, `remove(_:)`, `update(with:)` | ✅ | - | any sequence as the other operand; `filter` answers a set; two sets compare equal regardless of order. An array has none of these, as in Swift |
+| A range of `Int`s as a collection - `map`, `filter`, `reduce`, `contains(where:)` and the rest | ✅ | - | `(1...5).map { … }`; ranges of `Double` and `Date` are not sequences, as in Swift |
 | `Int` / `Double` conversion from `String` | ✅ | - | failable, matched to Swift's grammar: `" 42"`, `"4_2"` and `"0x10"` are nil |
 | `CGFloat`, `Float` | ✅ | - | a Double, as everywhere in the preview: `CGFloat(x)`, `Float(x)`, and a whole-number literal given to either, so `let w: CGFloat = 3` prints 3.0 |
 | `Int` / `Double` - `formatted()`, `.number`, `.percent`, `.currency(code:)` | ✅ | - | as Foundation writes them in en-US, measured in the iOS 27 simulator: separators and up to six decimals, a Double's percent multiplied by 100 and an Int's not, and currency rounded half to even from the number as written. `Text(_:format:)` writes the same |

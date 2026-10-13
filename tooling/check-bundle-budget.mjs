@@ -97,8 +97,13 @@ const KB = 1024
  *              Raised to 740 KB by decision: these were the additions the plan
  *              did not foresee, and they belong in the study build. 740 KB
  *              leaves room for the fix round after the pilot and no more.
+ *   Agentic testing fixes - 745.0 KB actual, measured on main merged with
+ *              the agentic-testing branch. Its additions are the Assets
+ *              folder in Hierarchy, image drops onto the canvas and the
+ *              zoomable image preview; the prompt and streaming work runs on
+ *              the server and adds nothing here. Raised to 750 KB by decision.
  */
-const BUDGET_KB = 740
+const BUDGET_KB = 750
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.

@@ -484,7 +484,7 @@ function RenderNodeView({
     // needs them too, or the wheel does nothing. In inspector mode every node is
     // hittable, which is the whole point.
     pointerEvents: inspecting || interactive || scroll || node.blocksPointer ? 'auto' : 'none',
-    cursor: inspecting ? 'crosshair' : interactive ? 'pointer' : 'default',
+    cursor: inspecting ? 'default' : interactive ? 'pointer' : 'default',
     ...(node.background && node.cornerStyle !== 'continuous' ? { background: cssFill(node.background, node.frame) } : {}),
     ...(node.chromeRole === 'navigationSurface' && node.background?.kind === 'solid' ? {
       background: `rgb(${node.background.color.r} ${node.background.color.g} ${node.background.color.b} / calc(1 - 0.28 * var(--chrome-progress, 0)))`,
@@ -523,6 +523,9 @@ function RenderNodeView({
       : {}),
     ...(node.filter ? { filter: [cssFilter(node.filter), node.filter.multiply ? `url(#${multiplyId})` : ''].filter(Boolean).join(' ') || undefined } : {}),
     ...(node.blendMode ? { mixBlendMode: node.blendMode as CSSProperties['mixBlendMode'] } : {}),
+    // A mask's alpha is all that counts; a solid colour is a uniform one, which CSS
+    // only takes as an image, so it becomes a gradient between two equal stops.
+    ...(node.mask ? (mask => ({ maskImage: mask, WebkitMaskImage: mask }))(node.mask.kind === 'solid' ? `linear-gradient(${cssColor(node.mask.color)}, ${cssColor(node.mask.color)})` : cssFill(node.mask, node.frame)) : {}),
     ...(node.transition && animate ? { animation: transitionAnimation(node, exiting) } : {}),
     ...(node.material
       ? {

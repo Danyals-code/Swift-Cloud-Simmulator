@@ -302,7 +302,10 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         }
         block(stmt.then, branch, locals)
         if (stmt.else) {
-          const otherwise = add('branch', 'Otherwise', stmt.else.span, parent.owner, branch)
+          // An `else if` covers exactly the span of its nested Condition, so the two would share an
+          // id and the Condition would become its own parent. Starting after `then` keeps them apart.
+          const span = stmt.else.kind === 'block' ? stmt.else.span : { ...stmt.else.span, start: stmt.then.span.end }
+          const otherwise = add('branch', 'Otherwise', span, parent.owner, branch)
           if (stmt.else.kind === 'block') block(stmt.else, otherwise, scope)
           else block({ kind: 'block', span: stmt.else.span, statements: [stmt.else] }, otherwise, scope)
         }

@@ -10,7 +10,7 @@ Design has one panel on the right, and it shows whatever is selected.
 2. **Screen**: how the screen is reached, its title, values it overrides for everything inside it, and its states.
 3. **View**: Basics, then the modifier stack, in the order the code runs.
 
-The tree on the left shows the same app: the App, its Components, one lane per tab, the sheets, and screens nothing links to yet. Files appear in Code mode only.
+The left panel's **Hierarchy** tab has two views. **Layers** shows the same app as a tree: the App, its Components, one lane per tab, the sheets, and screens nothing links to yet. **Files** shows the project: the **Assets** folder - images and colours, everything bundled that is not Swift - and the Swift folders. A Swift file opens in Code. The other tab is **Prompt Editing**.
 
 ## Tokens
 
@@ -72,9 +72,16 @@ New screens get their own folder under `Features/`; components go to `DesignSyst
 
 ## Images
 
-Open **App → Images**.
+Images live in the **Assets** folder (**Hierarchy → Files**, and at the top of Code's file tree). There are several ways in, and all of them end there:
 
-- Import PNG or JPEG files. Add an Image from the Add palette, select it, and choose its **Bundled image**. This can replace an existing system symbol.
+- Drop PNG or JPEG files on the Assets folder, or use its **+**.
+- Drop a file on a view on the canvas: it is added to Assets and placed as an `Image` where Add would put a new view with that view selected, in one undo step. Dropped on empty canvas, it is only added to Assets.
+- Drop it anywhere else in the studio, including the code editor: it is added to Assets.
+- **Add → Image → Upload image…**, or **App → Images**.
+
+Double-click an image in Assets, or press Enter on it, to see it up close: it opens fitted to the window, a click shows it at its real size, `+` and `-` zoom, and Escape closes it. Drag an image from Assets onto a view to place it, or into the code editor, where it lands as `Image("Name")`. Prompt Editing knows the Assets images by name, so "use Sunset as the background" works. A file that is not a PNG or JPEG is refused by name; the rest of the drop still comes in.
+
+**App → Images** is where an image is renamed, given a dark version, duplicated or deleted. Select an Image and choose its **Bundled image** to change which one it shows; this can replace an existing system symbol.
 - Each image has a stable ID, name, and 1×/2×/3× pixel scale. Its optional dark variant must have the same pixel dimensions as the default image.
 - Rename updates supported literal `Image`/`Label` references in the same undo step. Duplicate requires a new name. A referenced image needs an explicit replacement before deletion. Dynamic names or custom bundles require a code review.
 

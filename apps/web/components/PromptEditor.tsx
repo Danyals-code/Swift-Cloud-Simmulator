@@ -5,7 +5,8 @@ import type { PromptMessage, PromptSelection } from '@studio/project-model'
 import { useStudio, type AiEditPhase } from '../lib/store'
 import type { Provider } from '../lib/generation/schema'
 import { useAiConnection } from '../lib/generation/connection'
-import { parsePromptEditInput, promptConversationContext } from '../lib/generation/edit-schema'
+import type { Diagnostic } from '@studio/shared'
+import { parsePromptEditInput, promptConversationContext, promptPreviewContext } from '../lib/generation/edit-schema'
 import { preparePromptEdit } from '../lib/generation/applyPromptEdit'
 import { askAiRoute } from '../lib/generation/aiRoute'
 import { describeProblem, previewCheck } from '../lib/generation/problems'
@@ -29,7 +30,7 @@ const PROGRESS = { editing: 'Editing your app…', checking: 'Checking the chang
  * preview new errors is asked for once more, with them, and a second broken answer
  * leaves the project as it was (G2).
  */
-export function PromptEditor({ selection, stale, onApplied }: { selection: PromptSelection | null; stale: boolean; onApplied: () => void }) {
+export function PromptEditor({ selection, stale, previewProblems, onApplied }: { selection: PromptSelection | null; stale: boolean; previewProblems: readonly Diagnostic[]; onApplied: () => void }) {
   const project = useStudio(state => state.project)
   const aiEdit = useStudio(state => state.aiEdit)
   const { connection, chooseProvider, setModel, setKey } = useAiConnection()
@@ -50,7 +51,7 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
     let input
     try {
       if (!/^[\x21-\x7e]{20,512}$/.test(apiKey.trim())) { setConnectionOpen(true); throw new Error('Enter your provider API key to start editing.') }
-      input = parsePromptEditInput({ provider, model, prompt, files: before.project.files, selection: context, history: promptConversationContext(before.project.chatHistory ?? []), project: { name: before.project.manifest.name, deploymentTarget: before.project.manifest.deploymentTarget, images: before.project.assets?.map(asset => asset.name) ?? [], colors: before.project.colors?.map(color => color.name) ?? [] } })
+      input = parsePromptEditInput({ provider, model, prompt, files: before.project.files, selection: context, history: promptConversationContext(before.project.chatHistory ?? []), project: { name: before.project.manifest.name, deploymentTarget: before.project.manifest.deploymentTarget, images: before.project.assets?.map(asset => asset.name) ?? [], colors: before.project.colors?.map(color => color.name) ?? [] }, previewProblems: promptPreviewContext(previewProblems) })
       // Reserve space for the answer; never silently truncate a saved conversation.
       if ((before.project.chatHistory?.length ?? 0) > 998) throw new Error('This conversation is full. Export the project to keep its history.')
       if (JSON.stringify(before.project.chatHistory ?? []).length + input.prompt.length + 16000 > 2_000_000) throw new Error('This conversation is full. Export the project to keep its history.')
@@ -114,7 +115,7 @@ export function PromptEditor({ selection, stale, onApplied }: { selection: Promp
       <label>Provider<select value={provider} onChange={event => chooseProvider(event.target.value as Provider)}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
       <label>Model<input value={model} maxLength={100} spellCheck={false} onChange={event => setModel(event.target.value)} /></label>
       <label>API key<input type="password" autoComplete="off" spellCheck={false} value={apiKey} maxLength={512} onChange={event => setKey(event.target.value)} placeholder="Paste your API key" /></label>
-      <p>The key is kept in this browser tab until you close it, and never in the project. Your prompt, recent chat and project source are sent to {provider === 'openai' ? 'OpenAI' : 'Anthropic'} when you send. API usage is billed by your provider.</p>
+      <p>The key is kept in this browser tab until you close it, and never in the project. Your prompt, recent chat, project source and preview warnings are sent to {provider === 'openai' ? 'OpenAI' : 'Anthropic'} when you send. API usage is billed by your provider.</p>
     </fieldset>}
     <div className={styles.conversation} ref={conversation} role="log" aria-label="Prompt conversation" aria-live="polite">
       {!project?.chatHistory?.length && <div className={styles.empty}><Icon name="text-lines" size={24} /><h3>What would you like to change?</h3><p>Select a view on the canvas to target it, or describe a change to the whole app.</p><p>Edits update the canvas and Swift together. Use Undo to reverse them.</p></div>}

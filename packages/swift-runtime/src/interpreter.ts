@@ -1413,6 +1413,10 @@ export class Interpreter {
     // arithmetic result downstream loses its fractional formatting.
     if (DECIMAL_TYPES.has(typeName) && value.kind === 'int') return double(value.value)
 
+    // `Tags(names: ["a"])` and `select(ids: [])` for a `Set` parameter or property: the
+    // literal is an array literal, and the declared type is what makes it a set.
+    if (typeName === 'Set' && value.kind === 'array' && !value.unique) return uniqueArray(value.elements)
+
     if (value.kind !== 'opaque') return value
 
     const decl = this.enums.get(typeName)
@@ -2936,10 +2940,9 @@ export class Interpreter {
     // `tab = .settings` - the target's current value says which enum `.settings`
     // belongs to, which is the only context available at an assignment.
     const current = lvalue.get()
-    const rhs = this.coerceToEnum(
-      this.evaluateExpecting(valueExpr, env, current.kind === 'enum' ? current.typeName : null),
-      current.kind === 'enum' ? current.typeName : null,
-    )
+    // `selected = []` keeps a set a set: the target's type is the context, as above.
+    const context = current.kind === 'enum' ? current.typeName : current.kind === 'array' && current.unique ? 'Set' : null
+    const rhs = this.coerceToEnum(this.evaluateExpecting(valueExpr, env, context), context)
 
     if (operator === '=') {
       lvalue.set(copyValue(rhs))

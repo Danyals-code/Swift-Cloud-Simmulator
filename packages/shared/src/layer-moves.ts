@@ -1,7 +1,8 @@
 import type { AuthoringNode } from './authoring'
 import type { DropPosition } from './protocol'
 
-export const LAYER_MOVE_CONTAINERS: ReadonlySet<string> = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'Group', 'ScrollView'])
+/** Containers a layer can be moved into. A Form's or List's rows and a Section's are a column like any stack's. */
+export const LAYER_MOVE_CONTAINERS: ReadonlySet<string> = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'Group', 'ScrollView', 'List', 'Form', 'Section'])
 
 /** A layer that the structural actions - move, copy, duplicate, wrap, hide, delete, add beside - take as a whole. */
 export function isStructuralLayer(node: AuthoringNode): boolean {

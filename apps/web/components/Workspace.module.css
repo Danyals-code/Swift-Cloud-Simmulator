@@ -114,6 +114,11 @@
 /* What a click will take, in the colour of taking it. The highlight is the
    inspector's own element, so the delete tool only has to recolour it. */
 .canvas[data-tool='delete'] :global([data-testid='inspect-highlight']) { outline-color: var(--color-xc-error) !important; background: rgb(255 59 48 / 0.16) !important; }
+/* Editing views, not reading them: a press on text must not start a text selection,
+   and a press on an image must not start the browser's own image drag. */
+.canvas[data-tool] { user-select: none; -webkit-user-select: none; }
+.canvas[data-tool] :global(img) { -webkit-user-drag: none; }
+.canvas[data-dragging], .canvas[data-dragging] * { cursor: grabbing !important; }
 .showAll { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--color-xc-text-2); }
 .showAll input { width: 13px; height: 13px; accent-color: var(--workspace-accent, #0d78f2); cursor: pointer; }
 .showAll[data-disabled] { color: var(--color-xc-text-3); cursor: default; }

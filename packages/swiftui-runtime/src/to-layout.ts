@@ -297,7 +297,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
 
   const navigationBar = ui.navigationBar
     ? {
-        element: converter.navigationBar(ui.navigationBar, toolbarSearch),
+        element: converter.navigationBar(ui.navigationBar, toolbarSearch, navigationBarFill(ui.content, scheme)),
         large: ui.navigationBar.large,
         height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 11) : 0),
       }
@@ -335,6 +335,48 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     overlay,
     hitTargets,
   }
+}
+
+/**
+ * What the navigation bar paints behind its title: a fill, `null` for nothing, or
+ * `undefined` for the default.
+ *
+ * The default is the screen's own background, standing in for the transparent bar
+ * iOS draws at the top of its content. The stand-in cannot match a view that runs on
+ * under the bar with `.ignoresSafeArea` - a gradient behind a large title came out
+ * white - so then the bar paints nothing and the view shows through, as on a device.
+ * `.toolbarBackground(.hidden, for: .navigationBar)` asks for the same thing, and a
+ * style there paints that style.
+ */
+function navigationBarFill(views: readonly ViewValue[], scheme: ColorScheme): Fill | null | undefined {
+  let explicit: Fill | null | undefined
+  let underBar = false
+  const visit = (list: readonly ViewValue[]) => {
+    for (const view of list) {
+      for (const modifier of view.modifiers) {
+        if (modifier.name === 'toolbarBackground' && explicit === undefined && stylesNavigationBar(modifier.args)) {
+          const value = positional(modifier.args, 0)
+          const token = tokenName(value)
+          if (token === 'hidden') explicit = null
+          else if (token !== 'visible' && token !== 'automatic') explicit = resolveFillArg(value, scheme) ?? undefined
+        }
+        // Read as the modifier is: the keyboard region alone reaches nowhere.
+        if (modifier.name === 'ignoresSafeArea' && tokenName(positional(modifier.args, 0)) !== 'keyboard' && edgeSet(labelled(modifier.args, 'edges')).top) underBar = true
+      }
+      visit(view.children)
+    }
+  }
+  visit(views)
+  return explicit !== undefined ? explicit : underBar ? null : undefined
+}
+
+/** Whether a toolbar modifier's `for:` bars include the navigation bar; with no `for:`, they do. */
+function stylesNavigationBar(args: readonly ViewArg[]): boolean {
+  const index = args.findIndex(arg => arg.label === 'for')
+  if (index < 0) return true
+  // `for:` is variadic: the bars after the first arrive unlabelled.
+  const bars = [args[index]!, ...args.slice(index + 1).filter(arg => arg.label === null)].map(arg => tokenName(arg.value))
+  return bars.some(bar => bar === 'navigationBar' || bar === 'automatic')
 }
 
 /** Grouped lists supply a screen surface. Other backgrounds paint only their view's bounds. */
@@ -585,12 +627,12 @@ class Converter {
   }
 
   /** The navigation bar: a translucent strip with a title and its bar buttons. */
-  navigationBar(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null = null): LayoutElement {
+  navigationBar(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null = null, fill?: Fill | null): LayoutElement {
     const outer = this.styles
     this.styles = withStyles(outer, bar.view, this.scheme)
     // iOS 27 draws a Label in the toolbar as its icon alone, unless a label style says otherwise.
     this.styles = { ...this.styles, container: 'toolbar', label: this.styles.label ?? 'iconOnly' }
-    try { return this.navigationBarContent(bar, search) } finally { this.styles = outer }
+    try { return this.navigationBarContent(bar, search, fill) } finally { this.styles = outer }
   }
 
   /** System bar controls keep a compact font; content still follows Dynamic Type. */
@@ -631,7 +673,7 @@ class Converter {
     return { kind: 'modified', id: `${path}glassclip`, modifier: { kind: 'cornerRadius', radius, style: cornerStyle }, child: this.chromeOutline(surface, `${path}outline`, radius) }
   }
 
-  private navigationBarContent(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null): LayoutElement {
+  private navigationBarContent(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null, fill: Fill | null | undefined): LayoutElement {
     const inline: LayoutElement = {
       kind: 'zstack',
       id: 'navbar-inline',
@@ -711,12 +753,15 @@ class Converter {
       is transparent and the content's own background runs behind it, which is why
       no seam exists there; matching the background is the same result without
       having to let the content scroll under the bar.
+
+      Matching only works against a solid colour, so `fill` overrides it: `null`
+      paints nothing, for content that already runs under the bar, and a fill paints
+      what `.toolbarBackground` asked for.
     */
-    return this.background(
-      this.fill(inset, 'navbar-fill', { horizontal: 'center', vertical: 'top' }),
-      'navbar-bg',
-      this.screenBackground,
-    )
+    const filled = this.fill(inset, 'navbar-fill', { horizontal: 'center', vertical: 'top' })
+    if (fill === null) return filled
+    if (!fill || fill.kind === 'solid') return this.background(filled, 'navbar-bg', fill?.color ?? this.screenBackground)
+    return { kind: 'modified', id: 'navbar-bg', modifier: { kind: 'background', content: { kind: 'fill', id: 'navbar-bgf', fill } }, child: filled }
   }
 
   /**
@@ -3493,6 +3538,15 @@ class Converter {
         return value === null ? null : { kind: 'opacity', value }
       }
 
+      case 'mask': {
+        // A gradient or a colour masks by its alpha. A gradient written in the
+        // modifier's closure arrives as the view it is, a Color view carrying it.
+        const value = positional(args, 0) ?? labelled(args, 'mask') ?? labelled(args, 'content')
+        const masking = value?.kind === 'opaque' && value.typeName === 'View' ? value.payload as ViewValue : null
+        const fill = resolveFillArg(masking?.name === 'Color' ? positional(masking.args, 0) : value, this.scheme, this.styles.tint)
+        return fill ? { kind: 'mask', fill } : null
+      }
+
       case 'cornerRadius': {
         const radius = numberArg(args[0]?.value)
         return radius === null ? null : { kind: 'cornerRadius', radius }
@@ -3914,6 +3968,7 @@ class Converter {
       case 'tag':
       case 'navigationTitle':
       case 'navigationBarTitleDisplayMode':
+      case 'toolbarBackground':
       case 'navigationDestination':
       case 'toolbar':
       case 'sheet':

@@ -478,6 +478,13 @@ export type LayoutModifier =
       readonly count: number
       readonly spacing: number
     }
+  /**
+   * `.mask` with a gradient or a colour - the subtree is drawn through its alpha.
+   *
+   * The fade of an image into its background is written this way, and a view used
+   * as a mask in general is not drawn: only these two have an alpha CSS can take.
+   */
+  | { readonly kind: 'mask'; readonly fill: Fill }
   /** `.blendMode` - how the subtree composites with what is under it. */
   | { readonly kind: 'blendMode'; readonly mode: string }
   /** `.redacted(reason:)` - draw the shape of the content, not the content. */

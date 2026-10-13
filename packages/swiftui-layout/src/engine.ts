@@ -184,6 +184,8 @@ export interface PlacedNode {
   readonly blendMode?: string
   readonly redacted?: boolean
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
+  /** `.mask` with a gradient or colour: the alpha this box's content is drawn through. */
+  readonly mask?: Fill
   /** A `GeometryReader`'s safe-area insets, which its proxy reports. Only on a reader's own node. */
   readonly geometryInsets?: EdgeInsets
   readonly a11y?: {
@@ -1425,6 +1427,14 @@ export class LayoutEngine {
           ...(parent ? { parent } : {}),
         })
         return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, inner, out, z + 1, shadowId)
+      }
+
+      case 'mask': {
+        // Masked as one: the content is drawn into a box of its own and that box takes
+        // the mask's alpha, so a gradient fades the whole view rather than each part.
+        const maskId = `${element.id}-mask`
+        out.push({ id: maskId, frame: bounds, z, opacity: 1, cornerRadius: 0, paint: { kind: 'hit' }, mask: modifier.fill, ...(parent ? { parent } : {}) })
+        return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, inner, out, z + 1, maskId)
       }
 
       case 'opacity': {

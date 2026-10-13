@@ -1,4 +1,5 @@
 import { SYMBOL_MAP } from '@studio/shared'
+import { PREVIEW_STDLIB } from './preview-stdlib'
 
 /**
  * A small app in the style the rules ask for, shown to the AI with them. Its tests
@@ -147,6 +148,7 @@ export const SWIFTUI_GUIDANCE = `SwiftUI rules. The studio previews the app in a
 - Shared state: only when several screens must share data, one @Observable final class, created as @State in the App, passed down with .environment(model), and read with @Environment(Model.self), with @Bindable var model = model inside body for bindings. Never ObservableObject, @Published, @StateObject, @ObservedObject or @EnvironmentObject.
 - SF Symbols, only these names, which the preview draws as iOS does: ${Object.keys(SYMBOL_MAP).join(', ')}
 - The preview cannot show these, so never use them: Liquid Glass APIs (.glassEffect, GlassEffectContainer, glass button styles); Markdown or links inside Text strings; .redacted; corners with different radii (.rect(topLeadingRadius: ...), UnevenRoundedRectangle); Label, ContentUnavailableView or DisclosureGroup built from content closures (write Label("Title", systemImage: "star"), ContentUnavailableView("No places", systemImage: "map", description: Text("Add one to start.")) and DisclosureGroup("More") { ... }); a second .toolbar on one view, or .toolbar(.hidden, ...); ToolbarItem placements other than .topBarLeading and .topBarTrailing; .environment(\\.colorScheme, ...) and .preferredColorScheme; timers (Timer, .onReceive), which never fire in the preview; .searchScopes and .searchSuggestions; .presentationBackground with a view (use a Color or a Material); a ForEach over more than 1,000 items; custom EnvironmentKey or @Entry values; DateFormatter and .dateTime format styles such as .formatted(.dateTime.month(.wide)) (write date.formatted(date: .abbreviated, time: .omitted)); _value = State(initialValue:); TextField(value:format:); NavigationStack(path:); navigationDestination(isPresented:) or (item:); AsyncImage, TimelineView, Link, ShareLink, .swipeActions, .onMove, .refreshable, .contextMenu, .sensoryFeedback, .symbolEffect, .contentMargins, .scrollTargetBehavior, PhotosPicker, MultiDatePicker, Table, OutlineGroup, TipKit, .fileImporter, .fileExporter, Charts, MapKit, web views, SwiftData, GeometryReader, custom Layouts and preference keys.
+${PREVIEW_STDLIB}
 
 An example of these forms, not content to copy:
 ${STYLE_EXAMPLE}`

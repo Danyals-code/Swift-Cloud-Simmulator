@@ -1,6 +1,7 @@
 'use client'
 
 import { scenarioKey } from '../lib/screens'
+import { ASSET_DRAG_TYPE, draggingFiles } from '../lib/images'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RenderTreeView, symbolAsset, type EventSink, type InspectKeys } from '@studio/swiftui-render-dom'
 import { stateProblem } from '../lib/stateProblem'
@@ -75,6 +76,11 @@ export interface DevicePaneProps {
   onInspectDoubleClick?: (under: readonly RenderNode[], pageId?: string) => InlineTextTarget | null
   /** What the pointer is over while inspecting, so the workspace can follow it. */
   onHoverNode?: (under: readonly RenderNode[] | null, pageId?: string) => void
+  /**
+   * An image dropped on the canvas: files from outside the studio, or a row dragged
+   * from the Assets folder. `node` is the view it landed on, null for empty canvas.
+   */
+  onDropImage?: (image: { files: readonly File[] } | { asset: string }, node: RenderNode | null, pageId?: string) => void
   /**
    * Tab columns with each tab's related screens underneath.
    *
@@ -235,6 +241,7 @@ export function DevicePane({
   onInspectSelect,
   onInspectDoubleClick,
   onHoverNode,
+  onDropImage,
   pages,
   canvas,
   selectedPageId,
@@ -269,6 +276,15 @@ export function DevicePane({
     setHoveredNode(under?.[0] ?? null)
     onHoverNode?.(under, pageId)
   }, [onHoverNode])
+
+  /** The rendered view an element belongs to, and the phone it is on. */
+  const droppedOn = (target: EventTarget | null): { node: RenderNode | null; pageId?: string } => {
+    const element = target instanceof Element ? target : null
+    const id = element?.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId
+    const pageId = element?.closest<HTMLElement>('[data-page-id]')?.dataset.pageId
+    const nodes = pageId ? pages?.find(page => page.id === pageId)?.tree?.nodes : tree?.nodes
+    return { node: (id && nodes?.find(node => node.id === id)) || null, ...(pageId ? { pageId } : {}) }
+  }
 
   // Derived rather than cleared in an effect: a stale highlight must not survive
   // leaving inspector mode, and "only meaningful while inspecting" is a property of
@@ -892,6 +908,28 @@ export function DevicePane({
         // The pointer can leave the device without crossing any node's boundary -
         // straight off the bezel - so the pane itself has to clear the highlight.
         onPointerLeave={() => setHovered(null)}
+        // A drag is not a pointer move, so the view it would land on is found from the
+        // element under it, and highlighted the way hovering highlights it.
+        onDragOver={(event) => {
+          if (!onDropImage || stale || !(draggingFiles(event.dataTransfer) || event.dataTransfer.types.includes(ASSET_DRAG_TYPE))) return
+          event.preventDefault()
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = 'copy'
+          const { node, pageId } = droppedOn(event.target)
+          if (node?.id !== hoverRef.current?.[0]?.id) setHovered(node ? [node] : null, pageId)
+        }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHovered(null) }}
+        onDrop={(event) => {
+          if (!onDropImage || stale) return
+          const asset = event.dataTransfer.getData(ASSET_DRAG_TYPE)
+          const files = Array.from(event.dataTransfer.files)
+          if (!asset && !files.length) return
+          event.preventDefault()
+          event.stopPropagation()
+          const { node, pageId } = droppedOn(event.target)
+          setHovered(null)
+          onDropImage(asset ? { asset } : { files }, node, pageId)
+        }}
       >
         {/* The world. Everything in it is laid out at its natural size and this one
             transform decides where and how big it appears, which is what lets the

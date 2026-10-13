@@ -164,14 +164,19 @@ test('editing detail and sheet Layers updates exact Swift and keeps page selecti
   await expect(page.getByTestId('render-tree').getByText('New book form', { exact: true })).toHaveCount(0)
 })
 
-test('canvas scrolling explores phones and child hover selects the right Layers context without running actions', async ({ page }) => {
+test('canvas scrolling explores phones, and a click on a child phone selects the right Layers context without running actions', async ({ page }) => {
   await open(page)
   const detail = page.locator('[data-page-kind="destination"]')
   const action = detail.getByRole('button', { name: 'Change count', exact: true })
+  // Hovering points at the view on its phone; it does not move Layers to that screen,
+  // which would open and close the tree as the pointer crossed the canvas.
   await action.hover()
-  await expect(page.getByTestId('logical-layers')).toContainText('Book details layers')
-  await expect(layer(page, 'Change count, Button')).toHaveAttribute('data-hovered', 'true')
+  await expect(detail.getByTestId('inspect-highlight')).toHaveCount(1)
+  await expect(page.getByTestId('logical-layers')).not.toContainText('Book details layers')
+  // A click is what chooses: the screen's Layers, with the view selected and not run.
   await action.click()
+  await expect(page.getByTestId('logical-layers')).toContainText('Book details layers')
+  await expect(layer(page, 'Change count, Button')).toHaveAttribute('aria-selected', 'true')
   await expect(detail.getByText('Count: 0', { exact: true })).toBeVisible()
   await layer(page, 'Detail heading, Text').hover()
   await expect(detail.getByTestId('inspect-highlight')).toHaveCount(1)

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../../app/api/edit/route'
-import { parsePromptEditInput, parsePromptEditResult, promptEditChanges, promptConversationContext, type PromptEditInput } from './edit-schema'
+import { parsePromptEditInput, parsePromptEditResult, promptEditChanges, promptConversationContext, promptPreviewContext, type PromptEditInput } from './edit-schema'
 import { promptEditContext } from './edit-prompt'
 import { SWIFTUI_GUIDANCE } from './guidance'
 import { preparePromptEdit } from './applyPromptEdit'
@@ -10,11 +10,12 @@ import { createDefaultProject } from '@studio/project-model/templates'
 import { normalizeProject, type PromptMessage } from '@studio/project-model'
 
 const source = 'import SwiftUI\n@main struct DemoApp: App { var body: some Scene { WindowGroup { Text("Before") } } }'
-const input: PromptEditInput = { provider: 'openai', model: 'gpt-5.4-mini', prompt: 'Change the title to After.', files: [{ id: 'Sources/App.swift', text: source }], selection: { label: 'Title', file: 'Sources/App.swift', start: source.indexOf('Text'), end: source.indexOf('Text') + 14, owner: 'DemoApp' }, history: [{ role: 'assistant', content: 'Added a title.' }], project: { name: 'DemoApp', deploymentTarget: '17.0', images: [], colors: [] } }
-const edit = { reply: 'Changed the title to After.', files: [{ path: 'Sources/App.swift', code: source.replace('Before', 'After') }], deletedFiles: [] }
+const input: PromptEditInput = { provider: 'openai', model: 'gpt-5.4-mini', prompt: 'Change the title to After.', files: [{ id: 'Sources/App.swift', text: source }], selection: { label: 'Title', file: 'Sources/App.swift', start: source.indexOf('Text'), end: source.indexOf('Text') + 14, owner: 'DemoApp' }, history: [{ role: 'assistant', content: 'Added a title.' }], project: { name: 'DemoApp', deploymentTarget: '17.0', images: [], colors: [] }, previewProblems: [{ severity: 'warning', file: 'Sources/App.swift', message: '`.toolbarBackground` is recognised but not applied by the preview.' }] }
+const edit ={ reply: 'Changed the title to After.', files: [{ path: 'Sources/App.swift', code: source.replace('Before', 'After') }], deletedFiles: [] }
 const key = 'sk-test-not-a-real-key-123456789'
 const request = (body: unknown = input, headers = {}) => new Request('http://localhost/api/edit', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'http://localhost', Authorization: `Bearer ${key}`, ...headers }, body: JSON.stringify(body) })
-const response = (value: unknown = edit) => Response.json({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }] })
+const sse = (...events: object[]) => new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+const response = (value: unknown = edit) => sse({ type: 'response.output_text.delta', delta: JSON.stringify(value) }, { type: 'response.completed', response: { status: 'completed' } })
 const message = (content = 'Change the title'): PromptMessage => ({ id: crypto.randomUUID(), role: 'user', content, createdAt: 1, kind: 'edit', provider: 'openai', model: input.model })
 afterEach(() => vi.unstubAllGlobals())
 
@@ -28,6 +29,17 @@ describe('prompt edit boundaries', () => {
     expect(context).toContain('Text(\\"Before\\")')
     expect(context).toContain('Added a title.')
     expect(context).toContain(source.replace(/\n/g, '\\n').replace(/"/g, '\\"'))
+    expect(JSON.parse(context).previewProblems).toEqual(input.previewProblems)
+  })
+  it('sends the preview\'s errors before its warnings, once each and bounded', () => {
+    const at = (severity: 'error' | 'warning' | 'info', message: string) => ({ severity, message, code: 'unsupported_swiftui_modifier' as const, span: { file: 'Sources/App.swift', start: 0, end: 1 } })
+    const problems = promptPreviewContext([at('warning', 'Not drawn.'), at('info', 'Just so you know.'), at('error', 'Cannot find X.'), at('warning', 'Not drawn.'), ...Array.from({ length: 60 }, (_, i) => at('warning', `Warning ${i}`))])
+    expect(problems.slice(0, 2)).toEqual([{ severity: 'error', file: 'Sources/App.swift', message: 'Cannot find X.' }, { severity: 'warning', file: 'Sources/App.swift', message: 'Not drawn.' }])
+    expect(problems).toHaveLength(40)
+    expect(problems.some(problem => problem.message === 'Just so you know.')).toBe(false)
+    expect(parsePromptEditInput({ ...input, previewProblems: undefined }).previewProblems).toBeUndefined()
+    expect(() => parsePromptEditInput({ ...input, previewProblems: [{ severity: 'info', file: '', message: 'x' }] })).toThrow('preview problems')
+    expect(() => parsePromptEditInput({ ...input, previewProblems: Array(41).fill(input.previewProblems![0]) })).toThrow('preview problems')
   })
   it.each(['../App.swift', '/App.swift', 'Sources/../App.swift', 'Sources/App.ts'])('rejects unsafe result path %s', path => {
     expect(() => parsePromptEditResult({ ...edit, files: [{ ...edit.files[0], path }] })).toThrow()
@@ -97,14 +109,16 @@ describe('edit endpoint', () => {
     expect(await result.json()).toEqual({ edit })
     const [url, init] = fetch.mock.calls[0]!
     expect(url).toBe('https://api.openai.com/v1/responses')
-    expect(JSON.parse(init.body)).toMatchObject({ store: false, text: { format: { type: 'json_schema', strict: true } } })
+    expect(JSON.parse(init.body)).toMatchObject({ store: false, stream: true, text: { format: { type: 'json_schema', strict: true } } })
     expect(init.body).not.toContain(key)
   })
   it('supports Anthropic with the same validated edit contract', async () => {
-    const fetch = vi.fn().mockResolvedValue(Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(edit) }] })); vi.stubGlobal('fetch', fetch)
-    expect((await POST(request({ ...input, provider: 'anthropic', model: 'claude-sonnet-5' }))).status).toBe(200)
+    const fetch = vi.fn().mockResolvedValue(sse({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: JSON.stringify(edit) } }, { type: 'message_delta', delta: { stop_reason: 'end_turn' } })); vi.stubGlobal('fetch', fetch)
+    const result = await POST(request({ ...input, provider: 'anthropic', model: 'claude-sonnet-5' }))
+    expect(result.status).toBe(200)
+    expect(await result.json()).toEqual({ edit })
     expect(fetch.mock.calls[0]?.[0]).toBe('https://api.anthropic.com/v1/messages')
-    expect(JSON.parse(fetch.mock.calls[0]?.[1].body).output_config.format.type).toBe('json_schema')
+    expect(JSON.parse(fetch.mock.calls[0]?.[1].body)).toMatchObject({ max_tokens: 24000, stream: true, output_config: { effort: 'medium', format: { type: 'json_schema' } } })
     expect(fetch.mock.calls[0]?.[1].body).not.toContain(key)
   })
   it('does not contact the provider for foreign origins, missing keys or oversized requests', async () => {
@@ -121,12 +135,12 @@ describe('edit endpoint', () => {
     expect(JSON.parse(JSON.parse(fetch.mock.calls[0]![1].body).input).previousAttempt).toEqual(previousAttempt)
   })
   it.each([
-    ['an unreadable edit', { status: 'completed', output: [{ content: [{ type: 'output_text', text: 'not JSON' }] }] }, true],
-    ['an edit to an unsafe path', { status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ ...edit, files: [{ path: '../App.swift', code: source }] }) }] }] }, true],
-    ['an unfinished answer', { status: 'incomplete', output: [] }, false],
-    ['a refusal', { status: 'completed', output: [{ content: [{ type: 'refusal', refusal: 'No' }] }] }, false],
-  ])('says whether asking again could make a usable edit, after %s (G2)', async (_case, body, retryable) => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(body)))
+    ['an unreadable edit', [{ type: 'response.output_text.delta', delta: 'not JSON' }, { type: 'response.completed', response: { status: 'completed' } }], true],
+    ['an edit to an unsafe path', [{ type: 'response.output_text.delta', delta: JSON.stringify({ ...edit, files: [{ path: '../App.swift', code: source }] }) }, { type: 'response.completed', response: { status: 'completed' } }], true],
+    ['an unfinished answer', [{ type: 'response.incomplete', response: { incomplete_details: null } }], false],
+    ['a refusal', [{ type: 'response.refusal.delta', delta: 'No' }, { type: 'response.completed', response: { status: 'completed' } }], false],
+  ] as const)('says whether asking again could make a usable edit, after %s (G2)', async (_case, events, retryable) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sse(...events)))
     const response = await POST(request())
     expect(response.status).toBe(422)
     expect((await response.json()).retryable ?? false).toBe(retryable)
@@ -150,14 +164,26 @@ describe('edit endpoint', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
   it.each([
-    { status: 'incomplete', output: [] },
-    { status: 'completed', output: [{ content: [{ type: 'refusal' }] }] },
-    { status: 'completed', output: [{ content: [{ type: 'output_text', text: 'not JSON' }] }] },
-  ])('rejects incomplete, refused or malformed output', async output => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(output)))
+    [{ type: 'response.incomplete', response: { incomplete_details: null } }],
+    [{ type: 'response.refusal.done', refusal: 'No' }, { type: 'response.completed', response: {} }],
+    [{ type: 'response.output_text.delta', delta: 'not JSON' }, { type: 'response.completed', response: {} }],
+    [{ type: 'response.output_text.delta', delta: JSON.stringify(edit) }],
+  ])('rejects incomplete, refused or malformed output', async (...events) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sse(...events)))
     const result = await POST(request())
     expect(result.status).toBe(422)
     expect(await result.json()).not.toHaveProperty('edit')
+  })
+  it.each([
+    ['anthropic', { type: 'message_delta', delta: { stop_reason: 'max_tokens' } }, 'length limit'],
+    ['openai', { type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' } } }, 'length limit'],
+    ['anthropic', { type: 'message_delta', delta: { stop_reason: 'refusal' } }, 'declined'],
+    ['openai', { type: 'response.incomplete', response: { incomplete_details: { reason: 'content_filter' } } }, 'declined'],
+  ] as const)('tells a %s edit that ran out of room from a declined one', async (provider, event, error) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sse(event)))
+    const result = await POST(request({ ...input, provider, model: provider === 'anthropic' ? 'claude-sonnet-5' : input.model }))
+    expect(result.status).toBe(422)
+    expect((await result.json()).error).toContain(error)
   })
   it('rejects output that deletes an unknown file', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...edit, deletedFiles: ['Sources/Unknown.swift'] })))
