@@ -187,7 +187,8 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     for (const [i, arg] of chain.base.args.entries()) {
       node.properties.push(property(node, arg.label ?? (name === 'Text' ? 'content' : `argument ${i + 1}`), arg.value, scope, capability?.id, reason))
     }
-    if (reason && !builtin && !chain.base.args.length) node.properties.push(property(node, 'Source', expr, scope, undefined, reason))
+    // A labelled box keeps its modifiers editable: only the view itself goes undrawn.
+    if (reason && !builtin && !chain.base.args.length && node.undrawn !== 'unsupported') node.properties.push(property(node, 'Source', expr, scope, undefined, reason))
     for (const modifier of chain.modifiers) {
       const modifierName = modifier.callee.kind === 'memberAccess' ? modifier.callee.member : 'unknown'
       const supported = authoringCapability(modifierName, 'modifier', modifier.args.map(a => a.label))
@@ -259,7 +260,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
     // A visual slot has its own layer; action closures and scalar colors are not views,
     // and a border is a setting of the view it outlines (D8).
-    const corners = cornersOf(chain.modifiers, texts.get(node.source.file) ?? '')
+    const corners = cornersOf(chain, texts.get(node.source.file) ?? '')
     for (const modifier of chain.modifiers) {
       const name = modifier.callee.kind === 'memberAccess' ? modifier.callee.member : ''
       const label = CONTENT_SLOTS[name]

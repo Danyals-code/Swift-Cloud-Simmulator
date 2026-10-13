@@ -39,3 +39,31 @@ export function typographyAt(style: string, category: DynamicTypeSize): { size: 
   const lineHeight = heights[style]?.[index]
   return size === undefined || lineHeight === undefined ? null : { size, lineHeight }
 }
+
+/**
+ * The curve `UIFontMetrics` scales a custom size by: each style's line spacing at each
+ * Dynamic Type size, measured in the iOS 27 simulator. A size grows by the ratio of the
+ * category's spacing to Large's, rounded to the 1/3 pt pixel grid, so 20 pt relative to
+ * `.body` is 17.33 at xSmall and 26.33 at xxxLarge. It is not the ratio of the point
+ * sizes, which would make that 27.06.
+ */
+const metricsCurve: Record<string, readonly number[]> = {
+  largeTitle: [38, 39, 40, 41, 43, 46, 48, 52, 57, 61, 66, 70],
+  title: [31, 32, 33, 34, 36, 38, 41, 46, 51, 57, 61, 68],
+  title2: [24, 25, 26, 28, 30, 32, 34, 41, 47, 52, 59, 66],
+  title3: [22, 23, 24, 25, 28, 30, 32, 38, 44, 51, 58, 65],
+  headline: [19, 20, 21, 22, 24, 26, 29, 34, 40, 48, 51, 62],
+  body: [19, 20, 21, 22, 24, 26, 29, 34, 40, 48, 56, 62],
+  callout: [18, 19, 20, 21, 23, 25, 28, 32, 39, 46, 52, 60],
+  subheadline: [16, 18, 19, 20, 22, 24, 26, 31, 36, 43, 50, 58],
+  footnote: [16, 16, 16, 18, 20, 22, 24, 29, 33, 40, 46, 52],
+  caption: [13, 13, 13, 16, 19, 21, 23, 27, 32, 39, 44, 51],
+  caption2: [13, 13, 13, 13, 18, 20, 22, 25, 29, 35, 41, 48],
+}
+
+/** A size written relative to a text style, `.custom(_:size:relativeTo:)`, at a Dynamic Type size. */
+export function scaledSize(style: string, category: DynamicTypeSize, size: number): number {
+  const curve = metricsCurve[style] ?? metricsCurve.body!
+  const large = curve[DYNAMIC_TYPE_SIZES.indexOf('large')]!
+  return Math.round(size * curve[DYNAMIC_TYPE_SIZES.indexOf(category)]! / large * 3) / 3
+}

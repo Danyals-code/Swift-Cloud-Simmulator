@@ -1,5 +1,5 @@
 import type { Diagnostic, DiagnosticCode, FixIt, SourceSpan } from '@studio/shared'
-import { CORNER_RADIUS_LABELS, SYMBOL_MAP, hasCornerRadii, symbolDefinition } from '@studio/shared'
+import { CORNER_RADIUS_LABELS, SYMBOL_MAP, TEXT_STYLES, hasCornerRadii, symbolDefinition } from '@studio/shared'
 import type {
   Block,
   ConformanceModel,
@@ -827,6 +827,7 @@ export class Checker {
         this.checkCallee(expr.callee, scope)
         this.checkOverloadCoverage(expr, scope)
         this.checkUnevenCorners(expr, scope)
+        this.checkFontCoverage(expr, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
         // than on every member access. Doing it there flagged `Color.accentColor` as
         // the `.accentColor` modifier - a warning on correct code, which is the one
@@ -974,6 +975,7 @@ export class Checker {
       if (callee.name === 'PhaseAnimator') reason = 'its content is drawn at the first phase, and does not animate through the others'
       if (callee.name === 'KeyframeAnimator') reason = 'its content is drawn at the initial value, and the keyframes do not run'
       if (callee.name === 'AsyncImage') reason = 'remote loading and image phases are not implemented; only the placeholder is previewed'
+      if ((callee.name === 'LazyVStack' || callee.name === 'LazyHStack') && labels.has('pinnedViews')) reason = 'its section headers and footers scroll with the content, as pinnedViews is not applied by the preview'
     } else if (callee.kind === 'memberAccess' && rootsInAView(callee.base)) {
       feature = `.${callee.member}`
       if (callee.member === 'navigationDestination' && (labels.has('isPresented') || labels.has('item'))) reason = 'binding-driven destinations are not implemented; use NavigationLink with destination: or value: and navigationDestination(for:)'
@@ -981,6 +983,21 @@ export class Checker {
       if (callee.member === 'contextMenu' && labels.has('forSelectionType')) reason = 'selection-based context menus are not implemented; use contextMenu with action buttons'
       if (callee.member === 'contextMenu' && labels.has('preview')) reason = 'custom menu previews are not implemented; menu actions are available'
       if (callee.member === 'background' && labels.has('fillStyle')) reason = 'the fillStyle argument is not applied in the preview'
+    }
+    // These two are told apart by their arguments, so they need no view at the root:
+    // they are as often written on a view of the project's own.
+    if (callee.kind === 'memberAccess') {
+      const hidden = callee.member === 'toolbar' && expr.args[0]?.label === null && expr.args[0].value.kind === 'memberAccess' && expr.args[0].value.member === 'hidden'
+      // The navigation bar is hidden; the others are not.
+      const bars = hidden ? expr.args.slice(1).flatMap((arg) => arg.value.kind === 'memberAccess' && arg.value.member !== 'navigationBar' ? [`.${arg.value.member}`] : []) : []
+      if (bars.length > 0) {
+        feature = `.toolbar(.hidden, for: ${bars.join(', ')})`
+        reason = 'it is not applied by the preview, so the bar still shows'
+      }
+      if (callee.member === 'asymmetric' && labels.has('insertion') && (callee.base === null || callee.base.kind === 'identifier' && callee.base.name === 'AnyTransition')) {
+        feature = '.asymmetric'
+        reason = 'the preview plays the insertion transition when the view is removed too'
+      }
     }
     if (feature && reason) this.report(expr.span, 'warning', callee.kind === 'identifier' ? 'unsupported_swiftui_view' : 'unsupported_swiftui_modifier', `${feature}: ${reason}. The source exports unchanged.`, feature)
   }
@@ -1002,6 +1019,30 @@ export class Checker {
     this.report(expr.span, 'warning', 'unsupported_swiftui_view', 'UnevenRoundedRectangle: its corners are drawn equal in the preview, all with the largest radius. Xcode draws each corner as written.', 'UnevenRoundedRectangle')
   }
 
+  /**
+   * A font the preview draws only in part. It still resolves, so the screen draws;
+   * these say what is drawn in its place.
+   */
+  private checkFontCoverage(expr: Extract<Expr, { kind: 'call' }>, scope: Scope): void {
+    const callee = expr.callee
+    if (callee.kind !== 'memberAccess' || (callee.base?.kind === 'identifier' && scope.has(callee.base.name))) return
+    const onFont = isFontExpression(callee.base)
+    const feature = `Font.${callee.member}`
+    if (callee.member === 'custom' && (callee.base === null || isFontType(callee.base)) && expr.args[0]?.label === null) {
+      const name = expr.args[0].value
+      const written = name.kind === 'stringLiteral' && name.segments.every(segment => segment.kind === 'text') ? `'${name.segments.map(segment => segment.kind === 'text' ? segment.value : '').join('')}' ` : ''
+      this.report(expr.span, 'warning', 'unsupported_swiftui_modifier', `Custom font ${written}is not in this project; the preview draws the system font at the same size.`, feature)
+    } else if (onFont && callee.member === 'width') {
+      const width = expr.args[0]?.value
+      const named = width?.kind === 'memberAccess' ? ` .${width.member}` : ''
+      this.report(expr.span, 'warning', 'unsupported_swiftui_modifier', `The font width${named} is drawn at the standard width in the preview. The app draws it as written.`, feature)
+    } else if (onFont && callee.member === 'monospacedDigit') {
+      this.report(expr.span, 'warning', 'unsupported_swiftui_modifier', "A font's .monospacedDigit() draws proportional digits in the preview; the .monospacedDigit() view modifier draws them fixed width. The app draws both as written.", feature)
+    } else if (onFont && callee.member === 'uppercaseSmallCaps') {
+      this.report(expr.span, 'warning', 'unsupported_swiftui_modifier', '.uppercaseSmallCaps() is not drawn in the preview: capitals stay full size. The app draws it as written.', feature)
+    }
+  }
+
   /** A callee gets view-coverage treatment before ordinary resolution. */
   private checkCallee(callee: Expr, scope: Scope): void {
     if (callee.kind === 'identifier') {
@@ -1019,6 +1060,11 @@ export class Checker {
           callee.name,
         )
         return
+      }
+      // A custom `Layout` is a container whose placement the preview never runs.
+      const conforms = this.conformance.types.get(callee.name)?.conformances
+      if (conforms?.has('Layout') && !conforms.has('View')) {
+        this.report(callee.span, 'warning', 'unsupported_swiftui_view', `'${callee.name}' is a custom Layout. The preview does not run its placement, so what it holds is not drawn here. The app lays it out as written.`, callee.name)
       }
       // A view nothing declares, one the AI forgot to write or real SwiftUI the preview
       // doesn't know, draws a placeholder rather than blanking the screen. A name a
@@ -1467,6 +1513,26 @@ function editDistance(a: string, b: string): number {
   }
 
   return previous[b.length]!
+}
+
+const FONT_TEXT_STYLES: ReadonlySet<string> = new Set(TEXT_STYLES)
+/** What a `Font` answers with another `Font`: `.title.bold()`. */
+const FONT_MEMBERS: ReadonlySet<string> = new Set([
+  'bold', 'italic', 'weight', 'width', 'leading', 'smallCaps', 'lowercaseSmallCaps', 'uppercaseSmallCaps', 'monospaced', 'monospacedDigit',
+])
+
+function isFontType(expr: Expr): boolean {
+  return expr.kind === 'identifier' && expr.name === 'Font'
+}
+
+/** `.body`, `Font.title`, `.system(size: 20)` and any of those changed by a `Font` member. */
+function isFontExpression(expr: Expr | null): boolean {
+  if (!expr) return false
+  if (expr.kind === 'memberAccess') return (expr.base === null || isFontType(expr.base)) && FONT_TEXT_STYLES.has(expr.member)
+  if (expr.kind !== 'call' || expr.callee.kind !== 'memberAccess') return false
+  const { base, member } = expr.callee
+  if (member === 'system' || member === 'custom') return base === null || isFontType(base)
+  return FONT_MEMBERS.has(member) && isFontExpression(base)
 }
 
 /**

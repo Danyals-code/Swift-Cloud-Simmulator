@@ -241,6 +241,15 @@ export interface ButtonConfigurationPayload {
   readonly isPressed: boolean
 }
 
+/**
+ * `ToggleStyleConfiguration` and `LabelStyleConfiguration`, as handed to a custom
+ * `ToggleStyle` or `LabelStyle`. Structs rather than opaque values: a toggle's `isOn`
+ * is its binding, which `configuration.isOn.toggle()` writes through as it would
+ * through a `@Binding` property.
+ */
+export const TOGGLE_CONFIGURATION_TYPE = 'ToggleStyleConfiguration'
+export const LABEL_CONFIGURATION_TYPE = 'LabelStyleConfiguration'
+
 export const COLOR_TYPE = 'Color'
 
 export interface ColorPayload {
@@ -262,6 +271,27 @@ export interface ColorPayload {
    * a name.
    */
   readonly shade?: number
+  /**
+   * `Color.red.mix(with: .blue, by: 0.3)`: two colours, each resolved against the
+   * scheme first, mixed when the style layer resolves this one.
+   */
+  readonly mix?: { readonly from: SwiftValue; readonly with: SwiftValue; readonly by: number }
+  /** `.blue.shadow(.drop(radius: 4))`: the shadow what this colour paints casts. */
+  readonly shadow?: ShadowStylePayload
+  /** `UIColor { traits in … }`: the colour its provider gave for each appearance. */
+  readonly adaptive?: { readonly light: SwiftValue; readonly dark: SwiftValue }
+}
+
+/** `.drop(color:radius:x:y:)` and `.inner(…)`, the `ShadowStyle` a ShapeStyle's `.shadow` takes. */
+export const SHADOW_STYLE_TYPE = 'ShadowStyle'
+
+export interface ShadowStylePayload {
+  readonly kind: 'drop' | 'inner'
+  /** Null for SwiftUI's default, black at a third opacity. */
+  readonly color: SwiftValue | null
+  readonly radius: number
+  readonly x: number
+  readonly y: number
 }
 
 /** A gradient or material, carried as a value so it can be used as a style. */
@@ -279,6 +309,7 @@ export interface GradientPayload {
   readonly stops?: readonly { color: SwiftValue; location: number }[]
   readonly startPoint: string | { x: number; y: number } | null
   readonly endPoint: string | { x: number; y: number } | null
+  readonly shadow?: ShadowStylePayload
 }
 
 /** A `GeometryProxy`, as `GeometryReader`'s closure receives it. */

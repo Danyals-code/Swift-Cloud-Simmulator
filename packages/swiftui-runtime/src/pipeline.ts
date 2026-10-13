@@ -5,7 +5,6 @@ import type { ScreenLayout } from './to-layout'
 import {
   APPEARANCE_CALIBRATION,
   bindAuthoringRuntime,
-  hasBlockingError,
   pageViews,
   rgba,
   viewsDrawing,
@@ -42,6 +41,7 @@ import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } 
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
 import { stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind } from './presentation'
+import { runnableProgram, setAsideRan, type Runnable } from './set-aside'
 import { exhausts, toFailure } from './failures'
 import type { GeometryPayload, RuntimeFailure } from './view-value'
 
@@ -83,7 +83,7 @@ export function relayout(revision: number): CompileResult {
   const { analysis, request } = lastAnalysis
   const next = { ...request, revision }
   lastAnalysis = { analysis, request: next }
-  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, errorsNotice(next, analysis), performance.now(), 0, 0)
+  if (!analysis.runnable) return toResult(next, analysis, null, errorsNotice(next, analysis), performance.now(), 0, 0)
   return finish(next, analysis, lastEvaluation, performance.now(), 0)
 }
 
@@ -120,6 +120,8 @@ interface Analysis {
   readonly files: readonly SourceFileNode[]
   readonly model: SemanticModel
   readonly diagnostics: readonly Diagnostic[]
+  /** What runs while the code has errors that only some lines depend on; null when it cannot run at all. */
+  readonly runnable: Runnable | null
   readonly parseMs: number
   readonly checkMs: number
 }
@@ -151,6 +153,7 @@ function analyse(request: CompileRequest): Analysis {
     files,
     model,
     diagnostics: [...diagnostics, ...model.diagnostics, ...strict],
+    runnable: runnableProgram(files, [...diagnostics, ...model.diagnostics]),
     parseMs,
     checkMs,
   }
@@ -483,9 +486,9 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
  * font refinement redraw the program the worker already has, and a null tree there
  * was a blank phone.
  */
-function errorsNotice(request: CompileRequest, analysis: Analysis): RenderTree {
+function errorsNotice(request: CompileRequest, analysis: Analysis, first?: Diagnostic): RenderTree {
   const errors = analysis.diagnostics.filter((d) => d.severity === 'error')
-  return noticeTree(request, `${errors.length} error${errors.length === 1 ? '' : 's'}`, errors[0]?.message ?? 'Fix the errors to run.')
+  return noticeTree(request, `${errors.length} error${errors.length === 1 ? '' : 's'}`, (first ?? errors[0])?.message ?? 'Fix the errors to run.')
 }
 
 /**
@@ -589,12 +592,14 @@ export function compile(request: CompileRequest): CompileResult {
   lastAnalysis = { request, analysis }
 
   // Evaluation needs a well-formed program. Running one with parse errors would
-  // produce failures that describe the broken parse rather than the user's code.
-  if (hasBlockingError(analysis.diagnostics)) return toResult(request, analysis, null, errorsNotice(request, analysis), startedAt, 0, 0)
+  // produce failures that describe the broken parse rather than the user's code; an
+  // error that only some lines depend on is set aside in them instead.
+  const program = analysis.runnable
+  if (!program) return toResult(request, analysis, null, errorsNotice(request, analysis), startedAt, 0, 0)
 
   const evaluateStart = performance.now()
-  let evaluationFiles = analysis.files
-  try { evaluationFiles = scenarioFiles({ files: request.files, ast: analysis.files, nodes: analysis.authoring.nodes }, analysis.authoring, request.scenario) }
+  let evaluationFiles = program.files
+  try { evaluationFiles = scenarioFiles({ files: request.files, ast: program.files, nodes: analysis.authoring.nodes }, analysis.authoring, request.scenario) }
   catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid preview scenario.'
     const diagnostic: Diagnostic = { severity: 'error', code: 'invalid_preview_scenario', message, span: { file: request.files[0]?.id ?? '', start: 0, end: 0 } }
@@ -611,13 +616,12 @@ export function compile(request: CompileRequest): CompileResult {
   // `.onAppear` usually sets the state the view is about to draw from, so the pass
   // that *discovered* the callback is not the pass worth showing. One more is enough:
   // a second appearance of the same path is not an appearance.
-  if (evaluation.ui && runtime.runLifecycle(evaluation.ui.lifecycle)) {
-    evaluation = runtime.evaluate()
-  }
+  const appeared = !!evaluation.ui && runtime.runLifecycle(evaluation.ui.lifecycle)
+  if (appeared) evaluation = runtime.evaluate()
 
   const evaluateMs = performance.now() - evaluateStart
 
-  return finish(request, analysis, evaluation, startedAt, evaluateMs)
+  return finish(request, analysis, evaluation, startedAt, evaluateMs, appeared)
 }
 
 /**
@@ -635,16 +639,15 @@ export function rerender(revision: number): CompileResult {
   lastAnalysis = { request: next, analysis }
 
   const startedAt = performance.now()
-  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, errorsNotice(next, analysis), startedAt, 0, 0)
+  if (!analysis.runnable) return toResult(next, analysis, null, errorsNotice(next, analysis), startedAt, 0, 0)
 
   const evaluateStart = performance.now()
   let evaluation = runtime.evaluate()
 
-  if (evaluation.ui && runtime.runLifecycle(evaluation.ui.lifecycle)) {
-    evaluation = runtime.evaluate()
-  }
+  const appeared = !!evaluation.ui && runtime.runLifecycle(evaluation.ui.lifecycle)
+  if (appeared) evaluation = runtime.evaluate()
 
-  return finish(next, analysis, evaluation, startedAt, performance.now() - evaluateStart)
+  return finish(next, analysis, evaluation, startedAt, performance.now() - evaluateStart, appeared)
 }
 
 function finish(
@@ -653,7 +656,16 @@ function finish(
   evaluation: EvaluationResult,
   startedAt: number,
   evaluateMs: number,
+  appeared = false,
 ): CompileResult {
+  // The screen ran a line set aside for its error, so what it would draw is not what
+  // the app draws: the error is said over the last drawing that ran, as with any error.
+  const stoppedAt = analysis.runnable && setAsideRan(analysis.runnable, evaluation, appeared)
+  if (stoppedAt) {
+    lastEvaluation = null
+    return toResult(request, analysis, null, errorsNotice(request, analysis, stoppedAt), startedAt, evaluateMs, 0)
+  }
+
   if (evaluation.failure) {
     return toResult(
       request,

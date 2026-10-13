@@ -100,6 +100,7 @@ export interface TextRunSpec {
     readonly lineHeight?: number
     readonly weight?: number
     readonly italic?: boolean
+    readonly smallCaps?: boolean
   }
   readonly color?: RGBA
   readonly underline?: boolean
@@ -245,6 +246,8 @@ export interface GridTrack {
 export interface TableElement extends ElementBase {
   readonly kind: 'table'
   readonly rowAlignments?: readonly Alignment['vertical'][]
+  /** `.gridColumnAlignment(_:)`: a column's own horizontal alignment, where one was written. */
+  readonly columnAlignments?: readonly (Alignment['horizontal'] | undefined)[]
   readonly rows: readonly (readonly LayoutElement[])[]
   readonly spacing: number
   readonly rowSpacing: number
@@ -384,6 +387,8 @@ export type LayoutModifier =
   | {
       readonly kind: 'border'
       readonly color: RGBA
+      /** `.border(LinearGradient(…), width: 2)`; `color` is then its first stop. */
+      readonly fill?: Fill
       readonly width: number
       readonly cornerRadius?: number
     }

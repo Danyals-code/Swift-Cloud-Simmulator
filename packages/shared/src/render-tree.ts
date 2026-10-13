@@ -43,7 +43,15 @@ export interface GradientStop {
   readonly location: number
 }
 
-export type Fill =
+/** A shadow cast inward from the edges of what a fill paints, as `.blue.shadow(.inner(radius: 4))` asks. */
+export interface InnerShadow {
+  readonly color: RGBA
+  readonly radius: number
+  readonly x: number
+  readonly y: number
+}
+
+export type Fill = (
   | { readonly kind: 'radialGradient'; readonly stops: readonly GradientStop[]; readonly center: Point; readonly startRadius: number; readonly endRadius: number }
   | { readonly kind: 'angularGradient'; readonly stops: readonly GradientStop[]; readonly center: Point; readonly startAngle: number; readonly endAngle: number }
   | { readonly kind: 'solid'; readonly color: RGBA }
@@ -54,6 +62,7 @@ export type Fill =
       readonly start: Point
       readonly end: Point
     }
+) & { readonly innerShadow?: InnerShadow }
 
 export interface ResolvedFont {
   readonly family: string
@@ -64,6 +73,8 @@ export interface ResolvedFont {
   readonly italic: boolean
   /** points */
   readonly lineHeight: number
+  /** `.smallCaps()`: lowercase letters drawn as small capitals. */
+  readonly smallCaps?: boolean
 }
 
 export type TextAlignment = 'leading' | 'center' | 'trailing'
@@ -161,7 +172,14 @@ export type ShapeKind =
 
 export type CornerStyle = 'circular' | 'continuous'
 export interface StrokeOptions { readonly lineCap?: 'butt' | 'round' | 'square'; readonly lineJoin?: 'miter' | 'round' | 'bevel'; readonly miterLimit?: number; readonly dash?: readonly number[]; readonly dashPhase?: number }
-export interface ShapeStroke extends StrokeOptions { readonly color: RGBA; readonly width: number; readonly placement?: 'center' | 'inside'; readonly usesForeground?: boolean }
+export interface ShapeStroke extends StrokeOptions {
+  readonly color: RGBA
+  /** A gradient the stroke is painted with, as `.stroke(LinearGradient(…))` asks; `color` is then its first stop. */
+  readonly fill?: Fill
+  readonly width: number
+  readonly placement?: 'center' | 'inside'
+  readonly usesForeground?: boolean
+}
 
 export interface SliderPayload {
   readonly fraction: number
@@ -433,7 +451,8 @@ export interface RenderNode {
    * where the browser has to own a real box for the effect to work at all.
    */
   readonly parent?: string
-  readonly border?: { readonly color: RGBA; readonly width: number; readonly cornerRadius: number }
+  /** `fill` is a gradient the border is painted with, `color` its first stop. */
+  readonly border?: { readonly color: RGBA; readonly fill?: Fill; readonly width: number; readonly cornerRadius: number }
   readonly shadow?: {
     readonly color: RGBA
     readonly radius: number

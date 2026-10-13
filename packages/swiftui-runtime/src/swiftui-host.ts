@@ -30,7 +30,8 @@ import { ZERO_INSETS } from '@studio/swiftui-layout'
 import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
 import { CORNER_NAMES, cornerRadii, largestCorner } from './corners'
 import { containable, toFailure } from './failures'
-import { colorForName, fontForToken } from './style'
+import { customFont, fontTokenName, parseFontToken } from './font-token'
+import { colorForName, fontForToken, hasAssetColor, systemStyleLevel } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
   asCanvasContext,
@@ -58,6 +59,8 @@ import {
   asView,
   ANIMATION_TYPE,
   BUTTON_CONFIGURATION_TYPE,
+  LABEL_CONFIGURATION_TYPE,
+  TOGGLE_CONFIGURATION_TYPE,
   COLOR_TYPE,
   stoppedView,
   EDGE_INSETS_TYPE,
@@ -65,11 +68,14 @@ import {
   GEOMETRY_TYPE,
   SCROLL_PROXY_TYPE,
   isView,
+  payloadOf,
+  SHADOW_STYLE_TYPE,
   STROKE_STYLE_TYPE,
   STYLE_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
   VIEW_TYPE,
+  type ShadowStylePayload,
   type ActionValue,
   type AnimationPayload,
   type ButtonConfigurationPayload,
@@ -128,6 +134,8 @@ const CONTENT_CLOSURE_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
   ['GroupBox', new Set(['label'])],
   ['LabeledContent', new Set(['label'])],
   ['Gauge', new Set(['currentValueLabel', 'minimumValueLabel', 'maximumValueLabel'])],
+  ['ProgressView', new Set(['label', 'currentValueLabel'])],
+  ['Slider', new Set(['label', 'minimumValueLabel', 'maximumValueLabel'])],
 ])
 
 /**
@@ -159,7 +167,7 @@ const NAMESPACES: ReadonlySet<string> = new Set([
   'Color', 'Font', 'Alignment', 'Edge', 'Edge.Set', 'Angle', 'UnitPoint', 'Axis',
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
-  'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material',
+  'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material', 'Glass',
   'Task', 'MainActor', 'Gradient', 'StrokeStyle',
   // `Color(UIColor.systemGray6)`: UIKit's colours, bridged by name like `Color(.systemGray6)`.
   'UIColor',
@@ -654,8 +662,8 @@ export class SwiftUIHost implements InterpreterHost {
    * two-pass loop that serves `GeometryReader` corrects it on the next pass.
    */
   private makeCanvas(call: HostCall): SwiftValue {
-    const context = newCanvasContext()
     const size = this.defaultGeometry
+    const context = newCanvasContext({ width: size.width, height: size.height })
     const proxy = opaque('CGSize', { width: size.width, height: size.height })
 
     call.invoke(call.trailingClosure!, [context, proxy])
@@ -818,11 +826,25 @@ export class SwiftUIHost implements InterpreterHost {
     // Values first: these are not views, so they have to be handled before the
     // "is this a view name?" guard below rejects them.
     if (name === 'Task') return this.runTask(call)
+    // `Toggle(configuration)` inside a custom ToggleStyle and `Label(configuration)`
+    // inside a custom LabelStyle: the stock control its configuration describes.
+    const configuration = name === 'Toggle' || name === 'Label' ? call.args[0]?.value : undefined
+    if (configuration?.kind === 'struct' && configuration.typeName === TOGGLE_CONFIGURATION_TYPE) {
+      const given = configuration.fields.get('label')
+      const label = given ? asView(given) : null
+      return view({ name, args: [{ label: 'isOn', value: configuration.fields.get('isOn')! }], children: label ? [label] : [], modifiers: [], action: null, span: call.span })
+    }
+    if (configuration?.kind === 'struct' && configuration.typeName === LABEL_CONFIGURATION_TYPE) {
+      const title = asView(configuration.fields.get('title')!)
+      return view({ name, args: [{ label: 'icon', value: configuration.fields.get('icon')! }], children: title ? [title] : [], modifiers: [], action: null, span: call.span })
+    }
     if (name === 'Binding') return this.makeBinding(call)
     // `UIColor(red:green:blue:alpha:)` is a colour like any other, bridged by `Color(uiColor:)`.
     if (name === 'Color' || name === 'UIColor') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
+    // `AnyShapeStyle(.tint)` erases the style's type, which the preview never had: it is the style.
+    if (name === 'AnyShapeStyle' && call.args.length === 1) return call.args[0]!.value
     if (name === 'GridItem') return this.makeGridItem(call)
     if (name === 'Gradient') return opaque('Gradient', this.gradientStops(call))
     if (name === 'Gradient.Stop') return this.gradientStop(call)
@@ -1253,6 +1275,14 @@ export class SwiftUIHost implements InterpreterHost {
       return opaque(target.typeName, { ...payload, opacity: (payload.opacity ?? 1) * amount })
     }
 
+    // `.blue.shadow(.inner(radius: 4))` is a ShapeStyle with a shadow, not a view's.
+    const shadowed = this.paintWithShadow(target, member, call)
+    if (shadowed) return shadowed
+
+    // `.regular.tint(.blue).interactive()`: a Liquid Glass variant, refined. The glass is
+    // not drawn yet, which the checker says at `.glassEffect`, so refining keeps it as it is.
+    if (target.kind === 'opaque' && target.typeName === TOKEN_TYPE && GLASS_VARIANTS.has((target.payload as TokenPayload).name) && (member === 'tint' || member === 'interactive')) return target
+
     // `.red.opacity(0.5)` - a contextual colour asked for one of `Color`'s members.
     const promoted = this.colorFromToken(target, member)
     if (promoted) return this.callMember(promoted, member, call)
@@ -1286,6 +1316,12 @@ export class SwiftUIHost implements InterpreterHost {
           endPoint: 'bottom',
         } satisfies GradientPayload)
       }
+      // `Color.red.mix(with: .blue, by: 0.5)` was drawn as a view and filled black.
+      const other = member === 'mix' ? call.args.find((a) => a.label === 'with')?.value : undefined
+      if (other) {
+        const by = Math.max(0, Math.min(1, numberOf(call.args.find((a) => a.label === 'by')?.value) ?? 0))
+        return color({ name: null, mix: { from: target, with: other, by } })
+      }
     }
 
     // `Color(white: 0.95)` reaching here as `Color.init(...)`.
@@ -1311,8 +1347,8 @@ export class SwiftUIHost implements InterpreterHost {
       return this.makeAnimation(member, call)
     }
 
-    if (target.kind === 'type' && target.name === 'Font' && member === 'system') {
-      return this.makeSystemFont(call)
+    if (target.kind === 'type' && target.name === 'Font' && (member === 'system' || member === 'custom')) {
+      return this.callImplicitMember(member, call)
     }
 
     return undefined
@@ -1550,20 +1586,32 @@ export class SwiftUIHost implements InterpreterHost {
       return this.makeAnimation(member, call)
     }
     if (TRANSITIONS.has(member)) return this.makeTransition(member, call)
+    // `.asymmetric(insertion: .scale, removal: .opacity)`. A view carries one transition
+    // here, so the insertion plays both ways; the checker says so where it is written.
+    if (member === 'asymmetric') {
+      const insertion = call.args.find((a) => a.label === 'insertion')?.value
+      return insertion?.kind === 'opaque' && insertion.typeName === TRANSITION_TYPE ? insertion : this.transitionToken('opacity')
+    }
     if (member === 'system') return this.makeSystemFont(call)
+    // `.foregroundStyle(.linearGradient(colors:startPoint:endPoint:))`, the ShapeStyle spelling of `LinearGradient(…)`.
+    if (STYLE_GRADIENTS[member]) return this.makeGradient(STYLE_GRADIENTS[member]!, call)
+    const shadowStyle = shadowStyleOf(member, call)
+    if (shadowStyle) return shadowStyle
 
     // `.constant(false)` where a `Binding` is expected - the contextual spelling, and
     // the one previews actually use. `Binding.constant(…)` reaches `callMember`.
     if (member === 'constant') return this.constantBinding(call)
 
     // `.custom("Avenir", size: 24)`. The face itself cannot be honoured - a browser
-    // has no access to a project's bundled fonts - but the *size* is a layout input,
-    // and dropping it left every custom-font view previewing at the 17-point body
-    // size with nothing said about it.
+    // has no access to a project's bundled fonts, and the checker says so - but the
+    // *size* is a layout input, and dropping it left every custom-font view previewing
+    // at the 17-point body size. It grows with Dynamic Type as `.body` does, or as the
+    // style `relativeTo:` names, and a `fixedSize:` does not grow.
     if (member === 'custom') {
       const size = numberOf(call.args.find((a) => a.label === 'size')?.value)
       const fixed = numberOf(call.args.find((a) => a.label === 'fixedSize')?.value)
-      return token(`system:${size ?? fixed ?? 17}:regular:default`)
+      const relativeTo = size === null ? null : tokenNameOf(call.args.find((a) => a.label === 'relativeTo')?.value) ?? 'body'
+      return token(fontTokenName(customFont(size ?? fixed ?? 17, relativeTo)))
     }
 
     // `.currency(code:)` carries the code, and a format style that loses it renders
@@ -1636,6 +1684,9 @@ export class SwiftUIHost implements InterpreterHost {
       if (member === 'safeAreaInsets') return opaque(EDGE_INSETS_TYPE, (target.payload as GeometryPayload).insets)
     }
 
+    // `configuration.$isOn` inside a custom ToggleStyle: the toggle's own binding.
+    if (target.kind === 'struct' && target.typeName === TOGGLE_CONFIGURATION_TYPE && member === '$isOn') return target.fields.get('isOn')
+
     // `configuration.label` and `configuration.isPressed` inside a custom ButtonStyle.
     if (target.kind === 'opaque' && target.typeName === BUTTON_CONFIGURATION_TYPE) {
       const payload = target.payload as ButtonConfigurationPayload
@@ -1648,6 +1699,11 @@ export class SwiftUIHost implements InterpreterHost {
       const payload = target.payload as unknown as Record<string, number>
       if (member in payload) return double(payload[member]!)
     }
+
+    // `.background.secondary`, `.fill.tertiary`: a system style's levels are colours of
+    // their own, not the base style made fainter.
+    const styleLevel = target.kind === 'opaque' && target.typeName === TOKEN_TYPE ? systemStyleLevel((target.payload as TokenPayload).name, member) : null
+    if (styleLevel) return color({ name: styleLevel })
 
     // `.blue.gradient` - the same promotion the call path does, for the member of
     // `Color` that is written without parentheses.
@@ -1708,6 +1764,20 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   /**
+   * `.blue.shadow(.drop(radius: 4))`, `gradient.shadow(.inner(radius: 2))`: the paint
+   * keeps its shadow, for whatever it fills to cast. Only with a `ShadowStyle`, so
+   * `Color.blue.shadow(radius: 4)` stays the view modifier it is.
+   */
+  private paintWithShadow(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
+    const shadow = member === 'shadow' ? payloadOf<ShadowStylePayload>(call.args[0]?.value, SHADOW_STYLE_TYPE) : null
+    if (!shadow || target.kind !== 'opaque') return undefined
+    const name = target.typeName === TOKEN_TYPE ? (target.payload as TokenPayload).name : null
+    const paint = name !== null && colorForName(name) !== null ? color({ name }) : target
+    if (paint.kind !== 'opaque' || (paint.typeName !== COLOR_TYPE && paint.typeName !== STYLE_TYPE)) return undefined
+    return opaque(paint.typeName, { ...(paint.payload as ColorPayload | GradientPayload), shadow })
+  }
+
+  /**
    * A contextual colour that has been asked for one of `Color`'s own members.
    *
    * `.red` is a token because nothing where it is written says which type it belongs
@@ -1732,21 +1802,20 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   /**
-   * A contextual text style asked to change its face: `.title.bold()`.
+   * A contextual font asked to change itself: `.title.bold()`, `.system(size: 20).leading(.tight)`.
    *
    * `Color` was not the only type with the problem above it - `.font(.title.bold())`
    * and `.font(.body.weight(.semibold))` trapped on "Value of type 'Token' has no
    * member", and took the screen with them, for exactly the same reason.
    *
    * The result is a token again rather than a font value, because that is how fonts
-   * already travel here: `.system(size:weight:)` is a token whose *name* carries its
-   * size and weight, and `resolveFontArg` is the one place that reads them. A `style:`
-   * token is the same idea keeping the style's name, so the line height stays the one
-   * the table gives rather than a ratio recomputed from the size.
+   * already travel here (see `FontSpec`), and `resolveFontArg` is the one place that
+   * reads them. A text style keeps its name, so the line height stays the one the
+   * table gives rather than a ratio recomputed from the size.
    *
-   * Only the four members whose effect the preview can honour. `.monospacedDigit()`
-   * and `.leading(_:)` are deliberately absent: answering them would mean returning a
-   * font that ignores what was asked, which is worse than the report.
+   * Every member `Font` has answers, because a styling call must never stop the screen.
+   * `.width(_:)` and `.monospacedDigit()` leave the font as it was: the preview does not
+   * draw them, and the checker says so where they are written.
    */
   private fontFromToken(
     target: SwiftValue,
@@ -1755,34 +1824,34 @@ export class SwiftUIHost implements InterpreterHost {
   ): SwiftValue | undefined {
     if (target.kind !== 'opaque' || target.typeName !== TOKEN_TYPE) return undefined
 
-    const { name } = target.payload as TokenPayload
-    const [style = '', weight = '', design = '', italic = ''] = name.startsWith('style:')
-      ? name.slice('style:'.length).split(':')
-      : [name, '', '', '']
+    // A font and nothing else. `.done.bold()` on a project's own enum case is not a
+    // font, and must go on reporting as one of its own members.
+    const font = parseFontToken((target.payload as TokenPayload).name)
+    if (!font) return undefined
 
-    // A text style and nothing else. `.done.bold()` on a project's own enum case is
-    // not a font, and must go on reporting as one of its own members.
-    if (fontForToken(style) === null) return undefined
-
-    const next = { style, weight, design, italic }
+    const given = call.args[0]?.value
+    const on = given?.kind !== 'bool' || given.value
     switch (member) {
       case 'weight':
-        next.weight = tokenNameOf(call.args[0]?.value) ?? weight
-        break
+        return token(fontTokenName({ ...font, weight: tokenNameOf(given) ?? font.weight }))
       case 'bold':
-        next.weight = call.args[0]?.value.kind === 'bool' && !call.args[0].value.value ? '' : 'bold'
-        break
+        return token(fontTokenName({ ...font, weight: on ? 'bold' : '' }))
       case 'italic':
-        next.italic = call.args[0]?.value.kind === 'bool' && !call.args[0].value.value ? '' : 'italic'
-        break
+        return token(fontTokenName({ ...font, italic: on }))
       case 'monospaced':
-        next.design = 'monospaced'
-        break
+        return token(fontTokenName({ ...font, design: on ? 'monospaced' : '' }))
+      case 'leading':
+        return token(fontTokenName({ ...font, leading: tokenNameOf(given) ?? '' }))
+      case 'smallCaps':
+      case 'lowercaseSmallCaps':
+        return token(fontTokenName({ ...font, smallCaps: true }))
+      case 'uppercaseSmallCaps':
+      case 'width':
+      case 'monospacedDigit':
+        return target
       default:
         return undefined
     }
-
-    return token(`style:${next.style}:${next.weight}:${next.design}:${next.italic}`)
   }
 
   /**
@@ -2009,7 +2078,8 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private gradientStops(call: HostCall): { color: SwiftValue; location: number }[] {
-    const gradient = call.args.find(a => a.label === 'gradient')?.value
+    // `.linearGradient(Gradient(colors: …), startPoint:endPoint:)` passes the gradient unlabelled.
+    const gradient = call.args.find(a => a.label === 'gradient' || a.label === null && a.value.kind === 'opaque' && a.value.typeName === 'Gradient')?.value
     if (gradient?.kind === 'opaque' && gradient.typeName === 'Gradient') return gradient.payload as { color: SwiftValue; location: number }[]
     const stops = call.args.find(a => a.label === 'stops')?.value
     if (stops?.kind === 'array') return stops.elements.flatMap(stop => {
@@ -2106,9 +2176,17 @@ export class SwiftUIHost implements InterpreterHost {
     }
 
     const first = call.args[0]?.value
+    // `UIColor { traits in … }`, the adaptive colour written by hand: UIKit asks the
+    // provider once per appearance, so it is asked for both and the scheme picks one.
+    const provider = call.trailingClosure ?? (first?.kind === 'closure' ? first : null)
+    if (provider) {
+      const traits = (style: string): SwiftValue => ({ kind: 'struct', typeName: 'UITraitCollection', fields: new Map([['userInterfaceStyle', token(style)]]) })
+      return color({ name: null, adaptive: { light: call.invoke(provider, [traits('light')]), dark: call.invoke(provider, [traits('dark')]) } })
+    }
     // `Color("accent")` names a colour set in the asset catalog - never a system colour,
     // even one spelled the same - so it is marked and resolved against the project.
-    if (first?.kind === 'string') return color({ name: first.value, asset: true })
+    // `UIColor(named:)` is nil for a name the catalog does not have.
+    if (first?.kind === 'string') return call.args[0]!.label === 'named' && !hasAssetColor(first.value) ? NIL : color({ name: first.value, asset: true })
     // `Color(uiColor: UIColor(red: …))`: a colour already built.
     if (first?.kind === 'opaque' && first.typeName === COLOR_TYPE) return first
 
@@ -2147,6 +2225,24 @@ function uikitColor(name: string): SwiftValue {
  */
 const HIERARCHY_OPACITY: Readonly<Record<string, number>> = { secondary: 0.5, tertiary: 0.25, quaternary: 0.18, quinary: 0.086 }
 
+/**
+ * `.drop(color:radius:x:y:)` and `.inner(…)`, the `ShadowStyle`s, recognised by their
+ * labels so a project's own `.drop(…)` enum case still reaches the project.
+ */
+function shadowStyleOf(member: string, call: HostCall): SwiftValue | undefined {
+  if (member !== 'drop' && member !== 'inner') return undefined
+  const labels = call.args.map((a) => a.label)
+  if (!labels.includes('radius') || !labels.every((label) => label === 'color' || label === 'radius' || label === 'x' || label === 'y')) return undefined
+  const value = (label: string) => call.args.find((a) => a.label === label)?.value
+  return opaque(SHADOW_STYLE_TYPE, {
+    kind: member,
+    color: value('color') ?? null,
+    radius: numberOf(value('radius')) ?? 0,
+    x: numberOf(value('x')) ?? 0,
+    y: numberOf(value('y')) ?? 0,
+  } satisfies ShadowStylePayload)
+}
+
 /** HSB to sRGB components, each 0 to 1, as `Color(hue:saturation:brightness:)` means them. */
 function hsbToRgb(hue: number, saturation: number, brightness: number): [number, number, number] {
   const h = ((hue % 1) + 1) % 1 * 6
@@ -2184,12 +2280,24 @@ const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {
 const SHAPE_MEMBERS = new Set(['fill', 'stroke', 'strokeBorder', 'trim', 'inset', 'offset', 'size'])
 
 /** Members of a colour, which `.blue.secondary` reaches through its leading-dot `.blue`. */
-const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init', ...Object.keys(HIERARCHY_OPACITY)])
+const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init', 'mix', ...Object.keys(HIERARCHY_OPACITY)])
 
 const GRADIENTS: Readonly<Record<string, GradientPayload['kind']>> = {
   LinearGradient: 'linear',
   RadialGradient: 'radial',
   AngularGradient: 'angular',
+}
+
+/** `Glass.regular`, `.clear` and `.identity`, as `.glassEffect(_:)` takes them. */
+const GLASS_VARIANTS: ReadonlySet<string> = new Set(['regular', 'clear', 'identity'])
+
+/** `ShapeStyle`'s static gradients, as `.fill(.radialGradient(…))` writes them. An elliptical one is drawn circular. */
+const STYLE_GRADIENTS: Readonly<Record<string, GradientPayload['kind']>> = {
+  linearGradient: 'linear',
+  radialGradient: 'radial',
+  ellipticalGradient: 'radial',
+  angularGradient: 'angular',
+  conicGradient: 'angular',
 }
 
 const ANIMATION_CURVES: Readonly<Record<string, AnimationPayload['curve']>> = {

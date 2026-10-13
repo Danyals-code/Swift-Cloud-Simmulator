@@ -53,11 +53,13 @@ import {
   type StackFrame,
 } from './errors'
 import type { CallArgument, HostCall, InterpreterHost } from './host'
-import { leadingDotName } from './calendar'
+import { formatDateValue, leadingDotName } from './calendar'
 import { formatNumber, groupDigits, titleNumber } from './number-format'
+import { characterSetOf, scannerValue } from './scanner'
 import { checkPreviewSize, checkRepeatedValue, PREVIEW_LIMITS } from './limits'
 import {
   BUILTIN_TYPE_NAMES,
+  FIXED_WIDTH_INTEGERS,
   callBuiltinMember,
   callStaticBuiltin,
   getBuiltinProperty,
@@ -166,6 +168,8 @@ export class Interpreter {
   private readonly returnTypes: (string | null)[] = []
   /** Declaring types, innermost last, so `super` steps above the right one. */
   private readonly owners: (string | null)[] = []
+  /** Extension `init`s on framework types being run, innermost last, with the `self` each fills in. */
+  private readonly extensionInits: { readonly typeName: string; readonly self: Binding }[] = []
   private readonly host: InterpreterHost
   private readonly stepBudget: number
 
@@ -516,7 +520,14 @@ export class Interpreter {
 
     for (const property of stored) {
       const expected = namedTypeOf(property.typeAnnotation)
-      const provided = supplied.get(property.name)
+      let provided = supplied.get(property.name)
+      // `@ViewBuilder var content: Content` is given a closure and keeps the views it
+      // builds, as Swift's memberwise init does; `@ViewBuilder let content: () -> Content`
+      // keeps the closure, to build them each time it is called.
+      if (provided?.kind === 'closure' && property.attributes.some((a) => a.name === 'ViewBuilder')) {
+        const builder = { ...provided, builder: true as const }
+        provided = property.typeAnnotation?.kind === 'functionType' ? builder : this.callClosure(builder, [], span)
+      }
       const value =
         provided !== undefined
           ? this.coerceToEnum(provided, expected)
@@ -553,6 +564,75 @@ export class Interpreter {
     }
 
     return undefined
+  }
+
+  /**
+   * The `init` a project's `extension` adds to a type it did not declare, if the call
+   * is one: `extension Color { init(hex: String) }` for `Color(hex: "#FF8000")`.
+   *
+   * Stricter than a method's overload choice, because declining here is not a failure:
+   * the call goes on to the framework's own initialisers, so `Color(.systemGray6)` must
+   * not land in `init(_ hex: String)` just because its one argument is unlabelled.
+   */
+  private extensionInit(typeName: string, args: readonly CallArgument[]): InitDecl | undefined {
+    if (this.types.has(typeName) || this.enums.has(typeName)) return undefined
+    const labels = labelsOf(args)
+    const fitting = this.membersOf(typeName).filter(
+      (m): m is InitDecl =>
+        m.kind === 'initDecl' && m.body !== null && labelsMatch(m.params, labels) && this.suitability(m.params, args) > -Infinity,
+    )
+    return pickOverload(fitting, labels, (candidate) => this.suitability(candidate.params, args))
+  }
+
+  /**
+   * Runs an extension `init` on a framework type. There is no instance to fill in, so
+   * `self` starts empty and becomes whatever `self.init(…)` in the body builds.
+   */
+  private runExtensionInit(typeName: string, decl: InitDecl, args: readonly CallArgument[], span: SourceSpan): SwiftValue {
+    const scope = this.globals.child()
+    scope.define('self', NIL, false, span)
+    this.bindParameters(decl.params, args, scope, span)
+    this.extensionInits.push({ typeName, self: scope.own('self')! })
+    this.owners.push(typeName)
+    try {
+      this.runBody(`${typeName}.init`, decl.body!, scope, span)
+    } finally {
+      this.owners.pop()
+      this.extensionInits.pop()
+    }
+    return scope.own('self')!.value
+  }
+
+  /**
+   * `self.init(…)`: on a framework type, builds the value with that type's own
+   * initialisers (or another extension one); on a project struct, builds a second
+   * instance and takes its stored properties, which is what delegating to the
+   * memberwise initialiser from an `extension` init does.
+   */
+  private delegateInit(
+    args: readonly CallArgument[],
+    allArgs: readonly CallArgument[],
+    trailingClosure: ClosureValue | null,
+    span: SourceSpan,
+    env: Environment,
+  ): SwiftValue | undefined {
+    const building = this.extensionInits[this.extensionInits.length - 1]
+    if (building && env.lookup('self') === building.self) {
+      const extended = this.extensionInit(building.typeName, allArgs)
+      const built = extended
+        ? this.runExtensionInit(building.typeName, extended, allArgs, span)
+        : (this.host.callGlobal?.(building.typeName, this.hostCall(args, trailingClosure, span)) ??
+          this.callGlobalBuiltin(building.typeName, allArgs, span))
+      if (built === undefined) this.trap(`Cannot construct a value of type '${building.typeName}'`, span)
+      building.self.value = built
+      return VOID
+    }
+
+    const self = env.resolveSelf()
+    if (self?.kind !== 'struct' || !this.types.has(self.typeName)) return undefined
+    const other = this.instantiate(self.typeName, allArgs, span)
+    for (const [name, value] of other.fields) self.fields.set(name, value)
+    return VOID
   }
 
   /**
@@ -863,6 +943,7 @@ export class Interpreter {
       type?: TypeRef | null
       isInout?: boolean
       isVariadic?: boolean
+      attributes?: readonly { readonly name: string }[]
       span: SourceSpan
     }[],
     args: readonly CallArgument[],
@@ -901,6 +982,10 @@ export class Interpreter {
         continue
       }
 
+      // `init(@ViewBuilder content: () -> Content)`: a call of `content` builds every view
+      // the closure lists, where a plain closure of two views would return neither.
+      if (value?.kind === 'closure' && param.attributes?.some((a) => a.name === 'ViewBuilder')) value = { ...value, builder: true }
+
       // Otherwise arguments are passed by value, so the callee cannot mutate the
       // caller's copy. A declared parameter type is also the context a contextual
       // member resolves against, which is what makes `select(.home)` mean anything.
@@ -924,7 +1009,7 @@ export class Interpreter {
       args.forEach((value, i) => env.define(`$${i}`, copyValue(value), true, closure.span))
     }
 
-    return this.runBody('closure', closure.body, env, span)
+    return this.runBody('closure', closure.body, env, span, null, closure.builder === true)
   }
 
   /**
@@ -933,8 +1018,8 @@ export class Interpreter {
    *
    * An interpolation's `specifier:` and `format:` apply either way. Swift takes them only
    * where the literal is a title, and a title's specifier puts separators in too. A
-   * format the preview cannot read or write, such as `.dateTime.month().day()`, leaves
-   * the value as Swift describes it rather than stopping the view.
+   * format the preview cannot read or write, such as `.iso8601`, leaves the value as
+   * Swift describes it rather than stopping the view.
    */
   private stringLiteral(expr: Expr & { kind: 'stringLiteral' }, env: Environment, asTitle = false): { readonly value: SwiftValue; readonly title?: string } {
     const parts: (string | SwiftValue)[] = []
@@ -969,7 +1054,7 @@ export class Interpreter {
         const written = formatString(style.specifier.value, [part])
         return title ? groupDigits(written) : written
       }
-      if (style?.format !== undefined) return (style.format && formatNumber(part, leadingDotName(style.format))) ?? describe(part, false)
+      if (style?.format !== undefined) return (style.format && (formatNumber(part, leadingDotName(style.format)) ?? formatDateValue(part, leadingDotName(style.format)))) ?? describe(part, false)
       return (title ? titleNumber(part) : null) ?? describe(part, false)
     }).join('')
     const interpolates = parts.some((part) => typeof part !== 'string')
@@ -1276,7 +1361,13 @@ export class Interpreter {
       }
 
       case 'enumCase': {
-        if (subject.kind !== 'enum') return false
+        // `case .dark:` against a value the host made, such as a trait collection's
+        // `userInterfaceStyle`: the host's own member by that name, compared.
+        if (subject.kind !== 'enum') {
+          if (pattern.typeName || pattern.bindings.length) return false
+          const member = this.host.resolveImplicitMember?.(pattern.caseName, pattern.span)
+          return member !== undefined && valuesEqual(member, subject)
+        }
         if (pattern.typeName && pattern.typeName !== subject.typeName) return false
         if (pattern.caseName !== subject.caseName) return false
 
@@ -1576,7 +1667,9 @@ export class Interpreter {
           return
         }
 
-        env.define(decl.name, copyValue(value), decl.isLet, decl.nameSpan)
+        // `let r: Int` with no value is given one later, once, as the hex initialiser's
+        // `(a, r, g, b) = …` does; the compiler holds it to once, so the preview need not.
+        env.define(decl.name, copyValue(value), decl.isLet && decl.initializer !== null, decl.nameSpan)
         return
       }
       case 'funcDecl': {
@@ -1800,8 +1893,9 @@ export class Interpreter {
         return value
       }
 
+      // Only ever run in a line set aside for its error, which is what it stops with.
       case 'errorExpr':
-        throw new UnsupportedAtRuntime('this expression', expr.span)
+        this.trap(expr.message, expr.span)
     }
   }
 
@@ -2154,6 +2248,11 @@ export class Interpreter {
       const declared = this.types.has(callee.name) || this.enums.has(callee.name)
 
       if (!declared) {
+        // `Color(hex: 0xFF8000)`: an `init` the project's `extension` added to a type it
+        // did not declare comes before the host's own, which would otherwise build a
+        // colour from the arguments it recognises and draw clear.
+        const extended = this.extensionInit(callee.name, allArgs)
+        if (extended) return this.runExtensionInit(callee.name, extended, allArgs, span)
         const fromHost = this.host.callGlobal?.(callee.name, this.hostCall(args, trailingClosure, span))
         if (fromHost !== undefined) return fromHost
       }
@@ -2213,6 +2312,12 @@ export class Interpreter {
         )
         if (onSelf !== undefined) return onSelf
       }
+    }
+
+    // `self.init(…)` inside an initialiser hands the building on to another one.
+    if (callee.kind === 'memberAccess' && callee.member === 'init' && callee.base?.kind === 'selfExpr') {
+      const delegated = this.delegateInit(args, allArgs, trailingClosure, span, env)
+      if (delegated !== undefined) return delegated
     }
 
     // A method or modifier call: `value.member(args)`.
@@ -2295,6 +2400,10 @@ export class Interpreter {
       }
       const statik = this.staticMember(target.name, member, memberSpan)
       if (statik?.kind === 'function') return this.callFunction(statik, allArgs, span)
+
+      // `Color.init(hex: 0xFF8000)` is the same call as `Color(hex: 0xFF8000)`.
+      const extended = member === 'init' ? this.extensionInit(target.name, allArgs) : undefined
+      if (extended) return this.runExtensionInit(target.name, extended, allArgs, span)
 
       // `S.Inner()` - constructing a type declared inside another one.
       const nested = this.nestedTypeName(target.name, member)
@@ -2405,6 +2514,7 @@ export class Interpreter {
     args: readonly CallArgument[],
     span: SourceSpan,
   ): SwiftValue | undefined {
+    if (FIXED_WIDTH_INTEGERS.has(name)) return this.callGlobalBuiltin('Int', args, span)
     switch (name) {
       case 'print': {
         const message = args.map((a) => describe(a.value, false)).join(' ')
@@ -2483,6 +2593,16 @@ export class Interpreter {
           // than the compiler is the dishonest direction - the value shows here and
           // the app gets nil.
           const text = first.value
+          // `Int(hex, radix: 16)`, how a `Color(hex:)` initialiser reads its digits.
+          const radixArg = args.find((a) => a.label === 'radix')?.value
+          const radix = name === 'Int' && radixArg?.kind === 'int' ? radixArg.value : null
+          if (radix !== null) {
+            const digits = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, radix)
+            const unsigned = text.replace(/^[+-]/, '').toLowerCase()
+            if (radix < 2 || radix > 36 || !unsigned || [...unsigned].some((c) => !digits.includes(c))) return NIL
+            const parsed = parseInt(text, radix)
+            return Number.isSafeInteger(parsed) ? int(parsed) : NIL
+          }
           const grammar = name === 'Int' ? /^[+-]?\d+$/ : /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/
           if (!grammar.test(text)) return NIL
           const parsed = Number(text)
@@ -2536,6 +2656,15 @@ export class Interpreter {
 
       case 'UUID':
         return uuidValue(randomUUIDString())
+      // `Scanner(string: hex)`, how a `Color(hex:)` initialiser reads its digits.
+      case 'Scanner': {
+        const text = args.find((a) => a.label === 'string')?.value
+        return text?.kind === 'string' ? scannerValue(text.value) : undefined
+      }
+      case 'CharacterSet': {
+        const characters = args.find((a) => a.label === 'charactersIn')?.value
+        return characters?.kind === 'string' ? characterSetOf(characters.value) : undefined
+      }
       case 'Date': {
         // `Date()` is now; `Date(timeIntervalSince1970:)` and
         // `Date(timeIntervalSinceNow:)` are the two forms that need no calendar.
@@ -2931,6 +3060,13 @@ export class Interpreter {
       return VOID
     }
 
+    // `(a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)`: the right side is
+    // read whole first, so `(a, b) = (b, a)` swaps, then each part goes to its target.
+    if (targetExpr.kind === 'tuple' && operator === '=') {
+      this.assignTuple(targetExpr, this.evaluate(valueExpr, env), span, env)
+      return VOID
+    }
+
     const lvalue = this.tryResolveLValue(targetExpr, env)
     if (!lvalue) this.trap('Cannot assign to this expression', span)
     if (!lvalue.mutable) {
@@ -2953,6 +3089,21 @@ export class Interpreter {
     const combined = this.applyBinary(operator.slice(0, -1), lvalue.get(), rhs, span)
     lvalue.set(copyValue(combined))
     return VOID
+  }
+
+  private assignTuple(target: Expr & { kind: 'tuple' }, value: SwiftValue, span: SourceSpan, env: Environment): void {
+    if (value.kind !== 'tuple' || value.elements.length !== target.elements.length) {
+      this.trap(`Cannot assign a value of type '${typeNameOf(value)}' to a tuple of ${target.elements.length} elements`, span)
+    }
+    target.elements.forEach((part, index) => {
+      const element = value.elements[index]!
+      if (part.kind === 'identifier' && part.name === '_') return
+      if (part.kind === 'tuple') return this.assignTuple(part, element, span, env)
+      const lvalue = this.tryResolveLValue(part, env)
+      if (!lvalue) this.trap('Cannot assign to this expression', part.span)
+      if (!lvalue.mutable) this.trap(`Cannot assign to value: '${lvalue.description}' is a 'let' constant`, part.span)
+      lvalue.set(copyValue(element))
+    })
   }
 
   private evaluateBinary(

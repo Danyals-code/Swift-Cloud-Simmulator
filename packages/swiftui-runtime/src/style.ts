@@ -1,5 +1,6 @@
 import { dynamicTypeForScale, textLineHeight, type DynamicTypeSize } from '@studio/shared'
-import { typographyAt } from './appearance/typography'
+import { scaledSize, typographyAt } from './appearance/typography'
+import { parseFontToken, type FontSpec } from './font-token'
 import { IOS_27 } from './appearance/ios27'
 import {
   MONO_FAMILY,
@@ -111,9 +112,27 @@ const UIKIT_NAMES: Readonly<Record<string, string>> = {
   systemGray: 'gray',
 }
 
+/**
+ * The system ShapeStyles that are not colours by name, and the semantic colour iOS
+ * draws each of their hierarchical levels with: `.fill.tertiary` is
+ * `tertiarySystemFill`. `.background` has three levels, so the lower two repeat the
+ * last. `.fill` drew black, and `.background.secondary` stopped the screen.
+ */
+const SYSTEM_STYLE_LEVELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  background: { primary: 'systemBackground', secondary: 'secondarySystemBackground', tertiary: 'tertiarySystemBackground', quaternary: 'tertiarySystemBackground', quinary: 'tertiarySystemBackground' },
+  fill: { primary: 'systemFill', secondary: 'secondarySystemFill', tertiary: 'tertiarySystemFill', quaternary: 'quaternarySystemFill', quinary: 'quaternarySystemFill' },
+  foreground: { primary: 'primary', secondary: 'secondary', tertiary: 'tertiary', quaternary: 'quaternary', quinary: 'quinary' },
+}
+
+/** The colour name for one level of a system style, `.background.secondary`, or null for any other pair. */
+export function systemStyleLevel(style: string, level: string): string | null {
+  return SYSTEM_STYLE_LEVELS[style]?.[level] ?? null
+}
+
 export function colorForName(name: string, scheme: ColorScheme = 'light', tint?: RGBA): RGBA | null {
   if (tint && ['tint', 'accent', 'accentColor'].includes(name)) return tint
-  return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[UIKIT_NAMES[name] ?? name] ?? null
+  const named = UIKIT_NAMES[name] ?? SYSTEM_STYLE_LEVELS[name]?.primary ?? name
+  return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[named] ?? null
 }
 
 /** A colour set from the project's asset catalog: one value per appearance. */
@@ -140,6 +159,11 @@ export function hexColor(value: string): RGBA | null {
   return rgba(channel(0), channel(2), channel(4), match[2] ? Math.round(parseInt(match[2], 16) / 255 * 1000) / 1000 : 1)
 }
 
+/** Whether the project's asset catalog has a colour set by this name. */
+export function hasAssetColor(name: string): boolean {
+  return assetColors.has(name)
+}
+
 /**
  * A named asset colour for one appearance. A missing set is clear, which is what
  * SwiftUI draws for a name the catalog does not have; `AccentColor` falls back to
@@ -155,7 +179,15 @@ function assetColor(name: string, scheme: ColorScheme, tint?: RGBA): RGBA {
 /** Turns a `Color` payload - named, or built from components - into an RGBA. */
 export function resolveColorPayload(payload: ColorPayload, scheme: ColorScheme = 'light', tint?: RGBA): RGBA {
   const base =
-    payload.name !== null && payload.asset
+    payload.adaptive
+      ? (resolveColorArg(scheme === 'dark' ? payload.adaptive.dark : payload.adaptive.light, scheme, tint) ?? rgba(0, 0, 0, 0))
+      : payload.mix
+      ? mixColors(
+          resolveColorArg(payload.mix.from, scheme, tint) ?? rgba(0, 0, 0, 0),
+          resolveColorArg(payload.mix.with, scheme, tint) ?? rgba(0, 0, 0, 0),
+          payload.mix.by,
+        )
+      : payload.name !== null && payload.asset
       ? assetColor(payload.name, scheme, tint)
       : payload.name !== null
       ? (colorForName(payload.name, scheme, tint) ?? rgba(0, 0, 0, 0))
@@ -181,6 +213,48 @@ export function resolveColorPayload(payload: ColorPayload, scheme: ColorScheme =
 }
 
 /**
+ * `Color.mix(with:by:)` in its default `.perceptual` colour space, taken here as
+ * OKLab: mixing red and blue passes through a purple of even lightness rather than
+ * the darker one an sRGB average gives.
+ */
+function mixColors(from: RGBA, to: RGBA, by: number): RGBA {
+  if (by <= 0) return from
+  if (by >= 1) return to
+  const a = toOklab(from)
+  const b = toOklab(to)
+  const [r, g, blue] = fromOklab(a.map((value, i) => value + (b[i]! - value) * by) as [number, number, number])
+  return rgba(r, g, blue, Math.round((from.a + (to.a - from.a) * by) * 1000) / 1000)
+}
+
+function toOklab(color: RGBA): [number, number, number] {
+  const linear = (channel: number) => {
+    const c = channel / 255
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  const [r, g, b] = [linear(color.r), linear(color.g), linear(color.b)]
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ]
+}
+
+function fromOklab([lightness, a, b]: [number, number, number]): [number, number, number] {
+  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3
+  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3
+  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3
+  const encode = (c: number) => Math.round(clamp01(c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055) * 255)
+  return [
+    encode(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    encode(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    encode(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+  ]
+}
+
+/**
  * Resolves anything usable as a `ShapeStyle`: a colour, a token, or a gradient.
  *
  * `.background`, `.foregroundStyle` and `.fill` all take the same protocol in
@@ -193,6 +267,23 @@ export function resolveFillArg(
   tint?: RGBA,
 ): Fill | null {
   if (!value || value.kind !== 'opaque') return null
+  const shaded = shadingPaint(value)
+  if (shaded) return resolveFillArg(shaded, scheme, tint)
+
+  // An inner shadow is drawn inside the paint, so it travels with it; a drop shadow is
+  // cast by the view the paint fills, which `paintShadow` gives the layout.
+  const shadow = paintShadow(value, scheme, tint)
+  if (shadow) {
+    const plain = resolveFillArg({ ...value, payload: { ...(value.payload as ColorPayload), shadow: undefined } }, scheme, tint)
+    const { kind, ...inner } = shadow
+    return plain && kind === 'inner' ? { ...plain, innerShadow: inner } : plain
+  }
+
+  // `.fill(Gradient(colors: [.red, .blue]))`: a Gradient is a ShapeStyle too, drawn top to bottom.
+  if (value.typeName === 'Gradient') {
+    const stops = value.payload as GradientPayload['stops']
+    return resolveFillArg({ kind: 'opaque', typeName: STYLE_TYPE, payload: { kind: 'linear', colors: [], ...(stops ? { stops } : {}), startPoint: 'top', endPoint: 'bottom' } satisfies GradientPayload }, scheme, tint)
+  }
 
   if (value.typeName === STYLE_TYPE) {
     const gradient = value.payload as GradientPayload
@@ -216,10 +307,67 @@ export function resolveFillArg(
   return color ? { kind: 'solid', color } : null
 }
 
+/**
+ * The shadow a ShapeStyle carries, `.blue.shadow(.drop(radius: 4))`, or null. SwiftUI's
+ * default shadow colour is black at a third opacity.
+ */
+export function paintShadow(
+  value: SwiftValue | undefined,
+  scheme: ColorScheme = 'light',
+  tint?: RGBA,
+): { readonly kind: 'drop' | 'inner'; readonly color: RGBA; readonly radius: number; readonly x: number; readonly y: number } | null {
+  if (!value || value.kind !== 'opaque' || (value.typeName !== COLOR_TYPE && value.typeName !== STYLE_TYPE)) return null
+  const shadow = (value.payload as ColorPayload | GradientPayload).shadow
+  if (!shadow) return null
+  const color = (shadow.color ? resolveColorArg(shadow.color, scheme, tint) : null) ?? rgba(0, 0, 0, 0.33)
+  return { kind: shadow.kind, color, radius: shadow.radius, x: shadow.x, y: shadow.y }
+}
+
+/**
+ * What a `.stroke(_:)` or `.strokeBorder(_:)` paints with: a colour, or a gradient.
+ * A gradient keeps its first stop as the colour too, for anything that reads a
+ * stroke as one colour. Null when the argument is no paint, so the stroke takes the
+ * foreground style as SwiftUI's does.
+ */
+export function resolveStrokePaint(
+  value: SwiftValue | undefined,
+  scheme: ColorScheme = 'light',
+  tint?: RGBA,
+): { readonly color: RGBA; readonly fill?: Fill } | null {
+  const fill = resolveFillArg(value, scheme, tint)
+  if (!fill) return null
+  return fill.kind === 'solid' ? { color: fill.color } : { color: fill.stops[0]!.color, fill }
+}
+
+/**
+ * The paint a Canvas shading wraps: `with: .color(.red)` and `with: .style(.tint)`.
+ * They arrive as contextual calls the host has no type for, so as a token with the
+ * paint as its argument.
+ */
+function shadingPaint(value: SwiftValue): SwiftValue | undefined {
+  if (value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return undefined
+  const { name, args } = value.payload as TokenPayload
+  return (name === 'color' || name === 'style') && args?.length === 1 ? args[0] : undefined
+}
+
+/**
+ * A Canvas shading's gradient moved into the unit space a fill is drawn in. Its points
+ * are `CGPoint`s in the canvas's own coordinates, where a ShapeStyle's are unit points;
+ * the radii stay in points, as a fill's do.
+ */
+export function canvasShading(value: SwiftValue | null, size: { readonly width: number; readonly height: number } | undefined): SwiftValue | undefined {
+  if (!value || !size || value.kind !== 'opaque' || value.typeName !== STYLE_TYPE) return value ?? undefined
+  const gradient = value.payload as GradientPayload
+  const unit = (point: GradientPayload['startPoint'] | undefined) =>
+    point !== null && typeof point === 'object' ? { x: point.x / (size.width || 1), y: point.y / (size.height || 1) } : point ?? null
+  return { ...value, payload: { ...gradient, startPoint: unit(gradient.startPoint), endPoint: unit(gradient.endPoint), ...(gradient.center === undefined ? {} : { center: unit(gradient.center) }) } satisfies GradientPayload }
+}
+
 /** SwiftUI's named unit points, in the (0,0) top-leading space the render tree uses. */
 export function unitPoint(name: string | { x: number; y: number }): { x: number; y: number } {
   if (typeof name !== 'string') return name
   const points: Readonly<Record<string, { x: number; y: number }>> = {
+    zero: { x: 0, y: 0 },
     topLeading: { x: 0, y: 0 },
     top: { x: 0.5, y: 0 },
     topTrailing: { x: 1, y: 0 },
@@ -256,6 +404,8 @@ export function resolveColorArg(
   tint?: RGBA,
 ): RGBA | null {
   if (!value || value.kind !== 'opaque') return null
+  const shaded = shadingPaint(value)
+  if (shaded) return resolveColorArg(shaded, scheme, tint)
 
   if (value.typeName === COLOR_TYPE) {
     return resolveColorPayload(value.payload as ColorPayload, scheme, tint)
@@ -284,45 +434,54 @@ export const FONT_WEIGHTS: Readonly<Record<string, number>> = {
 /**
  * Resolves an argument that should be a font.
  *
- * Two shapes: a text style token like `.largeTitle`, and the encoded form the host
- * produces for `Font.system(size:weight:design:)`. The second carries its arguments
- * in the token name because a contextual member has no type information to hang them
- * on - see `callImplicitMember` in the host.
+ * A text style token like `.largeTitle`, or the encoded form the host produces for
+ * `Font.system(size:weight:design:)`, `.custom(_:size:)` and a font changed by one of
+ * its members (`FontSpec`). Those carry their arguments in the token name because a
+ * contextual member has no type information to hang them on - see `callImplicitMember`
+ * in the host.
  */
 export function resolveFontArg(value: SwiftValue | undefined, scale: number | DynamicTypeSize = 1): ResolvedFont | null {
   if (!value || value.kind !== 'opaque' || value.typeName !== TOKEN_TYPE) return null
   const name = (value.payload as TokenPayload).name
 
-  // `.title.bold()`, `.body.weight(.semibold)`, `.caption.italic()` - a text style
-  // with a face change on it. Encoded as the style's own name plus the changes rather
-  // than resolved to a point size here, so the style keeps the leading Apple designed
-  // for it: `.title`'s lines are 34 pt apart, a 28 pt system font's 33.67.
-  if (name.startsWith('style:')) {
-    const [style, weight, design, italic] = name.slice('style:'.length).split(':')
-    const base = fontForToken(style ?? 'body', scale)
-    if (!base) return null
-    return {
-      ...base,
-      family:
-        design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : design === 'serif' ? SERIF_FAMILY : base.family,
-      weight: FONT_WEIGHTS[weight ?? ''] ?? base.weight,
-      italic: italic === 'italic',
-    }
+  // `.title.bold()`, `.body.leading(.tight)`, `.system(size: 20)`: a font described in
+  // the token's name (`FontSpec`). A text style is kept by name rather than resolved to
+  // a point size there, so it keeps the leading Apple designed for it: `.title`'s lines
+  // are 34 pt apart, a 28 pt system font's 33.67.
+  const font = parseFontToken(name)
+  if (!font) return null
+  const base = font.style ? fontForToken(font.style, scale) : sizedFont(font, scale)
+  if (!base) return null
+  return {
+    ...base,
+    family: font.design === 'rounded' ? ROUNDED_FAMILY : font.design === 'monospaced' ? MONO_FAMILY : font.design === 'serif' ? SERIF_FAMILY : base.family,
+    weight: FONT_WEIGHTS[font.weight] ?? base.weight,
+    italic: font.italic,
+    lineHeight: base.lineHeight + leadingChange(font),
+    ...(font.smallCaps ? { smallCaps: true } : {}),
   }
+}
 
-  if (name.startsWith('system:')) {
-    const [, size, weight, design] = name.split(':')
-    const points = Number(size) || 17
-    return {
-      family: design === 'rounded' ? ROUNDED_FAMILY : design === 'monospaced' ? MONO_FAMILY : design === 'serif' ? SERIF_FAMILY : UI_FONT_FAMILY,
-      size: points,
-      weight: FONT_WEIGHTS[weight ?? 'regular'] ?? 400,
-      italic: false,
-      lineHeight: textLineHeight(points),
-    }
-  }
+/**
+ * `.system(size:)`, which keeps its size at every Dynamic Type size, and
+ * `.custom(_:size:relativeTo:)`, which grows with the text style it names as UIKit's
+ * `UIFontMetrics` scales it.
+ */
+function sizedFont(font: FontSpec, scale: number | DynamicTypeSize): ResolvedFont {
+  const given = font.size ?? 17
+  const size = font.relativeTo ? scaledSize(font.relativeTo, typeof scale === 'number' ? dynamicTypeForScale(scale) : scale, given) : given
+  return { family: UI_FONT_FAMILY, size, weight: 400, italic: false, lineHeight: textLineHeight(size) }
+}
 
-  return fontForToken(name, scale)
+/**
+ * `.leading(.tight)` and `.leading(.loose)`: two points closer or further apart, as the
+ * iOS 27 simulator spaces every text style, except that `.subheadline` and `.footnote`
+ * keep their own spacing when loose.
+ */
+function leadingChange(font: FontSpec): number {
+  if (font.leading === 'tight') return -2
+  if (font.leading === 'loose') return font.style === 'subheadline' || font.style === 'footnote' ? 0 : 2
+  return 0
 }
 
 /** `.fontWeight(.bold)` and `.bold()` change weight without changing size. */

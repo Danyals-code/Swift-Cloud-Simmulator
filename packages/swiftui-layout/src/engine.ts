@@ -170,7 +170,7 @@ export interface PlacedNode {
    */
   readonly parent?: string
   readonly clip?: boolean
-  readonly border?: { readonly color: RGBA; readonly width: number; readonly cornerRadius: number }
+  readonly border?: { readonly color: RGBA; readonly fill?: Fill; readonly width: number; readonly cornerRadius: number }
   readonly shadow?: {
     readonly color: RGBA
     readonly radius: number
@@ -860,7 +860,7 @@ export class LayoutEngine {
               : element.stroke
                 ? {}
                 : { fill: env.foregroundFill ?? { kind: 'solid' as const, color: env.foregroundColor } }),
-            ...(element.stroke ? { stroke: { ...element.stroke, color: element.stroke.usesForeground ? env.foregroundColor : element.stroke.color } } : {}),
+            ...(element.stroke ? { stroke: foregroundStroke(element.stroke, env.foregroundColor, env.foregroundFill) } : {}),
           },
           ...debugInfo(element),
           ...decorations(env, parent),
@@ -886,7 +886,7 @@ export class LayoutEngine {
               : element.stroke
                 ? {}
                 : { fill: env.foregroundFill ?? { kind: 'solid' as const, color: env.foregroundColor } }),
-            ...(element.stroke ? { stroke: { ...element.stroke, color: element.stroke.usesForeground ? env.foregroundColor : element.stroke.color } } : {}),
+            ...(element.stroke ? { stroke: foregroundStroke(element.stroke, env.foregroundColor, env.foregroundFill) } : {}),
             ...(element.trim ? { trim: element.trim } : {}),
           },
           ...debugInfo(element),
@@ -1075,7 +1075,8 @@ export class LayoutEngine {
         const width = columns[columnIndex] ?? 0
         const height = rows[rowIndex] ?? 0
         const size = sizes[columnIndex]!
-        const aligned = alignedRect({ x, y, width, height }, size, alignment)
+        const column = element.columnAlignments?.[columnIndex]
+        const aligned = alignedRect({ x, y, width, height }, size, column ? { ...alignment, horizontal: column } : alignment)
         const rect = baseline ? { ...aligned, y: y + guide - guides[columnIndex]! } : aligned
         next = this.place(
           cell,
@@ -1404,6 +1405,7 @@ export class LayoutEngine {
           paint: { kind: 'hit' },
           border: {
             color: modifier.color,
+            ...(modifier.fill ? { fill: modifier.fill } : {}),
             width: modifier.width,
             cornerRadius: modifier.cornerRadius ?? env.cornerRadius,
           },
@@ -2005,6 +2007,7 @@ function paintedRuns(element: TextElement, env: LayoutEnvironment): readonly Pai
         : {}),
       ...(run.font?.weight !== undefined ? { weight: run.font.weight } : {}),
       ...(run.font?.italic !== undefined ? { italic: run.font.italic } : {}),
+      ...(run.font?.smallCaps ? { smallCaps: true } : {}),
     }
     return applyRunAttributes(
       { ...base, font, ...(run.color ? { color: run.color, foregroundFill: undefined } : {}), ...(run.foregroundFill ? { foregroundFill: run.foregroundFill } : {}) },
@@ -2215,4 +2218,13 @@ function gradientKeptTo(content: LayoutElement, view: Rect, reach: Rect): Layout
   if (fill.kind === 'linearGradient') return { ...content, fill: { ...fill, start: point(fill.start), end: point(fill.end) } }
   if (fill.kind === 'radialGradient' || fill.kind === 'angularGradient') return { ...content, fill: { ...fill, center: point(fill.center) } }
   return content
+}
+
+/**
+ * A stroke that names no paint takes the foreground style, all of it: `.stroke(lineWidth: 8)`
+ * under a gradient `.foregroundStyle` is a gradient stroke, which drew black.
+ */
+function foregroundStroke(stroke: ShapeStroke, color: RGBA, fill: Fill | undefined): ShapeStroke {
+  if (!stroke.usesForeground) return stroke
+  return fill && fill.kind !== 'solid' ? { ...stroke, color: fill.stops[0]?.color ?? color, fill } : { ...stroke, color }
 }

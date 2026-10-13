@@ -28,7 +28,7 @@ export const BORDER_POSITIONS: readonly BorderPosition[] = ['inside', 'center', 
  * `radii` and `style` are source, a number or a token.
  */
 export interface Corners {
-  readonly kind: 'rectangle' | 'rounded' | 'uneven' | 'capsule' | 'circle'
+  readonly kind: 'rectangle' | 'rounded' | 'uneven' | 'capsule' | 'circle' | 'ellipse'
   readonly radius?: string
   /** An uneven rectangle's corners as written: `topLeadingRadius` and its radius. */
   readonly radii?: readonly (readonly [string, string])[]
@@ -56,12 +56,13 @@ const modifierName = (call: CallExpr) => call.callee.kind === 'memberAccess' ? c
 const source = (expr: Expr, text: string) => text.slice(expr.span.start, expr.span.end)
 
 /**
- * The corners a view's modifiers give it: the last of its clip, `.cornerRadius` and a
- * rounded background, else square.
+ * The corners a view has: the last of its clip, `.cornerRadius` and a rounded
+ * background, else its own shape when it is one, else square.
  */
-export function cornersOf(modifiers: readonly CallExpr[], text: string): Corners {
-  let corners: Corners = { kind: 'rectangle' }
-  for (const modifier of modifiers) {
+export function cornersOf(chain: { readonly base: CallExpr; readonly modifiers: readonly CallExpr[] } | null | undefined, text: string): Corners {
+  // A Circle's outline is a circle before any modifier says otherwise.
+  let corners: Corners = (chain && shapeCorners(chain.base, text)) ?? { kind: 'rectangle' }
+  for (const modifier of chain?.modifiers ?? []) {
     const name = modifierName(modifier)
     const only = modifier.args.length === 1 && modifier.args[0]!.label === null ? modifier.args[0]!.value : undefined
     const drawn = modifier.trailingClosure?.body.statements.length === 1 && modifier.trailingClosure.body.statements[0]!.kind === 'exprStmt' ? modifier.trailingClosure.body.statements[0]!.expression : undefined
@@ -83,10 +84,11 @@ function shapeCorners(shape: Expr | undefined, text: string): Corners | undefine
   if (!call || call.trailingClosure) return undefined
   const name = call.callee.kind === 'identifier' ? call.callee.name : call.callee.kind === 'memberAccess' && !call.callee.base ? `.${call.callee.member}` : ''
   if (['Rectangle', '.rect'].includes(name) && !call.args.length) return { kind: 'rectangle' }
-  if (['Capsule', '.capsule'].includes(name) && !call.args.length) return { kind: 'capsule' }
   if (['Circle', '.circle'].includes(name) && !call.args.length) return { kind: 'circle' }
+  if (['Ellipse', '.ellipse'].includes(name) && !call.args.length) return { kind: 'ellipse' }
   const style = call.args.find(arg => arg.label === 'style')
   const styled = style ? { style: source(style.value, text) } : {}
+  if (['Capsule', '.capsule'].includes(name) && call.args.length === (style ? 1 : 0)) return { kind: 'capsule', ...styled }
   const corners = call.args.filter(arg => CORNER_RADIUS_LABELS.includes(arg.label ?? ''))
   if (['UnevenRoundedRectangle', '.rect'].includes(name) && corners.length && call.args.length === corners.length + (style ? 1 : 0)) {
     return { kind: 'uneven', radii: corners.map(arg => [arg.label!, source(arg.value, text)] as const), ...styled }
@@ -99,8 +101,9 @@ function shapeCorners(shape: Expr | undefined, text: string): Corners | undefine
 
 /** The shape a border in `position` is drawn as, on a view with these corners. */
 function borderShape(corners: Corners, position: BorderPosition, width: number): string {
-  if (corners.kind === 'capsule') return 'Capsule()'
+  if (corners.kind === 'capsule') return `Capsule(${corners.style ? `style: ${corners.style}` : ''})`
   if (corners.kind === 'circle') return 'Circle()'
+  if (corners.kind === 'ellipse') return 'Ellipse()'
   if (corners.kind === 'rectangle') return 'Rectangle()'
   const radius = (written: string) => position === 'outside' ? grown(written, width) : written
   const style = corners.style ? `, style: ${corners.style}` : ''
@@ -202,14 +205,14 @@ function dotOf(modifier: CallExpr, text: string): number {
 export function followCorners(before: string, after: string, file: string, viewStart: number): string {
   const old = chainAt(before, file, viewStart), next = chainAt(after, file, viewStart)
   if (!old || !next) return after
-  const oldCorners = cornersOf(old.modifiers, before)
+  const oldCorners = cornersOf(old, before)
   // What the view's borders were, as written: the ones on, and the ones switched off.
   const were = new Set([
     ...old.modifiers.filter(modifier => borderOf(modifier, oldCorners, before)).map(modifier => before.slice(dotOf(modifier, before), modifier.span.end)),
     ...switchedOff(before, old).filter(off => borderOf(off.call, oldCorners, off.text)).map(off => off.original),
   ])
   if (!were.size) return after
-  const corners = cornersOf(next.modifiers, after)
+  const corners = cornersOf(next, after)
   const patches = [
     ...next.modifiers.flatMap(modifier => {
       const found = were.has(after.slice(dotOf(modifier, after), modifier.span.end)) && !borderOf(modifier, corners, after) ? borderOf(modifier, oldCorners, after) : undefined

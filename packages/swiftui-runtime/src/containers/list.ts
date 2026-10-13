@@ -94,7 +94,8 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
       const badge = arg(row, 'badge')
       if (badge && badge.kind !== 'nil' && !(badge.kind === 'int' && badge.value === 0)) {
         const value = badge.kind === 'opaque' ? asView(badge)?.args[0]?.value : badge
-        const text = value ? describe(value, true) : ''
+        // A string badge is its text, `.badge("New")`, not Swift's quoted description of it.
+        const text = value ? describe(value, false) : ''
         if (text) {
           const decorate = (child: LayoutElement): LayoutElement => ({ kind: 'stack', id: `${rid}badge-row`, axis: 'horizontal', spacing: 8, alignment: CENTER,
             children: [child, { kind: 'spacer', id: `${rid}badge-space`, axis: 'horizontal', minLength: 0 }, c.text(`${rid}badge-text`, text, 'body', 'secondaryLabel')] })

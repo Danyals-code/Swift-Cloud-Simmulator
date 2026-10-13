@@ -18,12 +18,15 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import {
+  asSwiftValue,
   asView,
   handlerIdFor,
   labelView,
   payloadOf,
   ANIMATION_TYPE,
   COLOR_TYPE,
+  LABEL_CONFIGURATION_TYPE,
+  TOGGLE_CONFIGURATION_TYPE,
   stopped,
   type ActionValue,
   type AnimationPayload,
@@ -400,7 +403,43 @@ export interface ResolveContext {
     label: readonly ViewValue[],
     isPressed: boolean,
   ): readonly ViewValue[] | null
+  /**
+   * Runs a custom `ToggleStyle`'s or `LabelStyle`'s `makeBody(configuration:)`, for the
+   * same reason; null when the value is not a style the project declared.
+   */
+  styleBody?(style: SwiftValue, protocol: string, configuration: SwiftValue): readonly ViewValue[] | null
   readonly animation: AnimationPayload | null
+}
+
+/** What a style's own body is drawn with: the control's stock style. */
+const AUTOMATIC_STYLE: SwiftValue = opaque('Token', { name: 'automatic' })
+
+/** A view of its own, as a style's configuration hands it over. */
+function viewOf(views: readonly ViewValue[], span: SourceSpan): SwiftValue {
+  return asSwiftValue(views.length === 1 ? views[0]! : { name: 'Group', args: [], children: [...views], modifiers: [], action: null, span })
+}
+
+/** A control's title as the view SwiftUI makes of it: `Toggle("Wi-Fi", …)` is labelled by `Text("Wi-Fi")`. */
+function titleView(view: ViewValue): readonly ViewValue[] {
+  const title = view.args.find((a) => a.label === null)?.value
+  if (title?.kind === 'string') return [{ name: 'Text', args: [{ label: null, value: title }], children: [], modifiers: [], action: null, span: view.span }]
+  // `Toggle(isOn: $on, label: { … })` keeps its label among its arguments.
+  return view.children.length > 0 ? view.children : view.args.flatMap((a) => a.label === 'label' || a.label === 'title' ? asView(a.value) ?? [] : [])
+}
+
+/** `ToggleStyleConfiguration`: `label`, and `isOn`, the toggle's own binding. */
+function toggleConfiguration(view: ViewValue): SwiftValue {
+  const isOn = view.args.find((a) => a.label === 'isOn')?.value ?? makeProjection({ get: () => ({ kind: 'bool', value: false }), set: () => {}, description: 'isOn' })
+  return { kind: 'struct', typeName: TOGGLE_CONFIGURATION_TYPE, fields: new Map([['label', viewOf(titleView(view), view.span)], ['isOn', isOn]]) }
+}
+
+/** `LabelStyleConfiguration`: the label's `title` and `icon`, each a view. */
+function labelConfiguration(view: ViewValue): SwiftValue {
+  const symbol = view.args.find((a) => a.label === 'systemImage' || a.label === 'image')
+  const icon: readonly ViewValue[] = symbol
+    ? [{ name: 'Image', args: [{ label: symbol.label === 'systemImage' ? 'systemName' : null, value: symbol.value }], children: [], modifiers: [], action: null, span: view.span }]
+    : view.args.flatMap((a) => a.label === 'icon' ? asView(a.value) ?? [] : [])
+  return { kind: 'struct', typeName: LABEL_CONFIGURATION_TYPE, fields: new Map([['title', viewOf(titleView(view), view.span)], ['icon', viewOf(icon, view.span)]]) }
 }
 
 /**
@@ -639,6 +678,7 @@ class Resolver {
 
   private stamp(view: ViewValue, path: string): ViewValue {
     view = inheritVisualStyle(view, this.visualStyle)
+    view = this.applyControlStyle(view) ?? view
     const outerStyle = this.visualStyle
     const outerContextMenu = this.contextMenuPath
     if (view.modifiers.some(m => m.name === 'contextMenu' && m.closure)) {
@@ -693,6 +733,28 @@ class Resolver {
     const stamped = this.stampList(labels, `${path}label`)
     let next = 0
     return args.map(arg => labelView(arg) ? { ...arg, value: opaque('View', stamped[next++]!) } : arg)
+  }
+
+  /**
+   * A `Toggle` or a `Label` drawn by a custom style's `makeBody(configuration:)`, the
+   * style written on it or above it (`inheritVisualStyle` has already brought it down).
+   *
+   * The style draws the whole control, as in SwiftUI: a toggle with a custom style
+   * switches only where its body says so, `configuration.isOn.toggle()`, which writes
+   * through to the toggle's own binding. What the body draws stands where the control
+   * did, as a group, so the control's own modifiers still apply to it. Inside the body
+   * the style is the stock one again, as in SwiftUI, or a Toggle the style draws would
+   * be drawn by the style again.
+   */
+  private applyControlStyle(view: ViewValue): ViewValue | null {
+    const name = view.name === 'Toggle' ? 'toggleStyle' : view.name === 'Label' ? 'labelStyle' : null
+    const style = name ? view.modifiers.find((m) => m.name === name)?.args[0]?.value : undefined
+    if (!name || style?.kind !== 'struct' || !this.ctx.styleBody) return null
+    const configuration = name === 'toggleStyle' ? toggleConfiguration(view) : labelConfiguration(view)
+    const body = this.ctx.styleBody(style, name === 'toggleStyle' ? 'ToggleStyle' : 'LabelStyle', configuration)
+    if (!body || body.length === 0) return null
+    const modifiers = view.modifiers.map((m) => m.name === name ? { ...m, args: [{ label: null, value: AUTOMATIC_STYLE }] } : m)
+    return { ...view, name: 'Group', args: [], children: body, modifiers }
   }
 
   /** Built-in tokens also shadow an inherited custom style. */
@@ -1423,7 +1485,7 @@ class Resolver {
     const hasChrome =
       title.length > 0 || depth > 0 || toolbar.leading.length > 0 || toolbar.trailing.length > 0
 
-    return { content: screen, navigationBar: hasChrome ? bar : null }
+    return { content: screen, navigationBar: hasChrome && !hidesNavigationBar(screen) ? bar : null }
   }
 
   /**
@@ -1465,7 +1527,9 @@ class Resolver {
     screen: readonly ViewValue[],
     stackId: string,
   ): { leading: ViewValue[]; trailing: ViewValue[] } {
-    const owner = [...allModifiers(screen)].find(({ modifier }) => modifier.name === 'toolbar')
+    // The toolbar with items: `.toolbar(.hidden, for: .navigationBar)` is a toolbar
+    // modifier too, and taking it first lost the items written beside it.
+    const owner = [...allModifiers(screen)].find(({ modifier }) => modifier.name === 'toolbar' && modifier.closure)
     const toolbar = owner?.modifier
     if (!toolbar?.closure) return { leading: [], trailing: [] }
 
@@ -2003,6 +2067,18 @@ function pathTo(views: readonly ViewValue[], target: ViewValue): ViewValue[] {
  */
 function modifiersFor(views: readonly ViewValue[], around: readonly ViewValue[]): { view: ViewValue; modifier: ModifierValue }[] {
   return [...allModifiers(views), ...around.flatMap((view) => view.modifiers.map((modifier) => ({ view, modifier })))]
+}
+
+/**
+ * `.toolbar(.hidden, for: .navigationBar)` anywhere on the screen, as SwiftUI reads it:
+ * the screen is drawn without its bar. Written with no bar, it is the navigation bar.
+ */
+function hidesNavigationBar(screen: readonly ViewValue[]): boolean {
+  return [...allModifiers(screen)].some(({ modifier }) => {
+    if (modifier.name !== 'toolbar' || modifier.closure || tokenName(modifier.args[0]?.value) !== 'hidden') return false
+    const bars = modifier.args.slice(1).map((arg) => tokenName(arg.value))
+    return bars.length === 0 || bars.includes('navigationBar')
+  })
 }
 
 function* allModifiers(

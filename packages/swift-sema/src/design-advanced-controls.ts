@@ -2,9 +2,10 @@ import { objectControls } from './design-object-controls'
 import { authoringCapability, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
 import { Lexer, type CallExpr, type Expr } from '@studio/swift-syntax'
 import type { ControlRecipe } from './design-controls'
+import { EDGE_SET_MEMBERS } from './structural-check'
 
 const anchors = ['center', 'topLeading', 'top', 'topTrailing', 'leading', 'trailing', 'bottomLeading', 'bottom', 'bottomTrailing']
-const edges = ['all', 'horizontal', 'vertical', 'top', 'bottom', 'leading', 'trailing']
+const edges = EDGE_SET_MEMBERS
 export const STYLE_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   toggleStyle: ['automatic', 'switch', 'button'], pickerStyle: ['automatic', 'menu', 'segmented', 'inline', 'wheel'],
   labelStyle: ['automatic', 'titleAndIcon', 'titleOnly', 'iconOnly'], progressViewStyle: ['automatic', 'linear', 'circular'],
@@ -14,6 +15,14 @@ export const STYLE_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   fontDesign: ['default', 'serif', 'rounded', 'monospaced'], textCase: ['uppercase', 'lowercase'], truncationMode: ['head', 'middle', 'tail'],
   scrollIndicators: ['automatic', 'visible', 'hidden'], scrollContentBackground: ['visible', 'hidden'], listRowSeparator: ['visible', 'hidden'],
   blendMode: ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'colorDodge', 'colorBurn', 'softLight', 'hardLight', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'],
+}
+/** Apple's five material thicknesses, thinnest first. */
+const MATERIALS = ['ultraThin', 'thin', 'regular', 'thick', 'ultraThick']
+/** The thickness of `.ultraThinMaterial` or `Material.ultraThin`, which are the same value. */
+export function materialThickness(value: Expr): string | undefined {
+  if (value.kind !== 'memberAccess') return undefined
+  if (!value.base) return MATERIALS.find(thickness => value.member === thickness + 'Material')
+  return value.base.kind === 'identifier' && value.base.name === 'Material' && MATERIALS.includes(value.member) ? value.member : undefined
 }
 export type AddControl = (id: string, label: string, kind: DesignControl['kind'], value: string, patch: ControlRecipe['patch'], options?: readonly string[], min?: number, max?: number, description?: string, origin?: SourceSpan) => void
 export type ReplaceControl = (id: string, label: string, value: Expr, kind: DesignControl['kind'], options?: readonly string[], min?: number, max?: number, prefix?: string) => void
@@ -42,10 +51,14 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
   objectControls(node, base, modifiers, text, target, colors, add, replace, param, insert)
   if (node.kind !== 'component' && node.name === 'ScrollView' && authoringCapability(node.name, 'view', base.args.map(a => a.label)) && !base.args.some(a => a.label === 'showsIndicators')) param(base, 'scroll:indicators', 'Show indicators', 'showsIndicators', 'select', 'true', ['true', 'false'], undefined, undefined, '')
   if (node.kind !== 'component' && node.name === 'Image') {
-    const resizing = modifiers.filter(m => ['resizable', 'scaledToFit', 'scaledToFill'].includes(nameOf(m)))
+    // `.aspectRatio(contentMode: .fit)` is `.scaledToFit()` spelled out. One with a ratio of its own sets
+    // something else, edited on its card: sizing written beside it would scale the image twice.
+    const contentMode = (m: CallExpr) => nameOf(m) === 'aspectRatio' && m.args.length === 1 && m.args[0]!.label === 'contentMode' ? /^(?:ContentMode)?\.(fit|fill)$/.exec(raw(m.args[0]!.value.span).replace(/\s/g, ''))?.[1] : undefined
+    const resizing = modifiers.filter(m => ['resizable', 'scaledToFit', 'scaledToFill'].includes(nameOf(m)) || contentMode(m))
+    const ratio = modifiers.some(m => nameOf(m) === 'aspectRatio' && !contentMode(m))
     const span = { ...base.span, start: base.span.end, end: modifiers.at(-1)?.span.end ?? base.span.end }
-    if (safe(span) && resizing.every(m => m.args.length === 0) && modifiers.every(m => authoringCapability(nameOf(m), 'modifier', m.args.map(a => a.label)))) {
-      const mode = resizing.some(m => nameOf(m) === 'scaledToFill') ? 'Fill' : resizing.some(m => nameOf(m) === 'scaledToFit') ? 'Fit' : resizing.some(m => nameOf(m) === 'resizable') ? 'Stretch' : 'Intrinsic'
+    if (safe(span) && !ratio && resizing.every(m => m.args.length === 0 || contentMode(m)) && modifiers.every(m => authoringCapability(nameOf(m), 'modifier', m.args.map(a => a.label)))) {
+      const mode = resizing.some(m => nameOf(m) === 'scaledToFill' || contentMode(m) === 'fill') ? 'Fill' : resizing.some(m => nameOf(m) === 'scaledToFit' || contentMode(m) === 'fit') ? 'Fit' : resizing.some(m => nameOf(m) === 'resizable') ? 'Stretch' : 'Intrinsic'
       add('image:sizing', 'Image sizing', 'select', mode, value => {
         const retained = modifiers.filter(m => !resizing.includes(m)).map(m => text.slice(m.callee.kind === 'memberAccess' ? m.callee.base!.span.end : m.span.start, m.span.end)).join('')
         return { ...span, text: (value === 'Intrinsic' ? '' : '.resizable()' + (value === 'Fit' ? '.scaledToFit()' : value === 'Fill' ? '.scaledToFill()' : '')) + retained }
@@ -76,12 +89,37 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
     param(base, 'grid:spacing', 'Grid spacing', 'spacing', 'number', '', undefined, 0, undefined, '.', [axis, 'alignment', 'spacing', 'pinnedViews'])
     param(base, 'grid:alignment', 'Grid alignment', 'alignment', 'select', 'center', node.name === 'LazyVGrid' ? ['leading', 'center', 'trailing'] : ['top', 'center', 'bottom'], undefined, undefined, '.', [axis, 'alignment', 'spacing', 'pinnedViews'])
   }
+  /** A fill's kind, and what that kind has to edit: a gradient's stops and points, a material's thickness. */
+  function fill(name: string, value: Expr, key: string) {
+    const gradient = value.kind === 'call' && value.callee.kind === 'identifier' && ['LinearGradient', 'RadialGradient', 'AngularGradient'].includes(value.callee.name) ? value : undefined
+    const material = materialThickness(value)
+    // Materials are ShapeStyles from iOS 15; a background is where a designer reaches for one.
+    const kinds = material || name === 'background' && target >= 15 ? ['Solid', 'Gradient', 'Material'] : ['Solid', 'Gradient']
+    if (!safe(value.span)) return
+    if (simple(value) || material) add(key + ':fillType', 'Fill type', 'select', material ? 'Material' : gradient ? 'Gradient' : 'Solid', v => ({ ...value.span, text: v === 'Solid' ? 'Color.blue' : v === 'Material' ? '.regularMaterial' : 'LinearGradient(colors: [Color.red, Color.blue], startPoint: .leading, endPoint: .trailing)' }), kinds)
+    if (material) add(key + ':material', 'Thickness', 'select', material, v => ({ ...value.span, text: value.kind === 'memberAccess' && value.base ? `Material.${v}` : `.${v}Material` }), MATERIALS)
+    if (gradient) for (const field of gradient.args) {
+      if (field.label === 'colors' && field.value.kind === 'arrayLiteral') field.value.elements.forEach((color, stop) => replace(key + ':stop:' + stop, `Color ${stop + 1}`, color, 'select', colors, undefined, undefined, 'Color.'))
+      if (['startPoint', 'endPoint', 'center'].includes(field.label ?? '')) replace(key + ':' + field.label, field.label === 'startPoint' ? 'Start point' : field.label === 'endPoint' ? 'End point' : field.label === 'startRadius' ? 'Start radius' : field.label === 'endRadius' ? 'End radius' : 'Center', field.value, 'select', anchors)
+      if (['startRadius', 'endRadius'].includes(field.label ?? '')) replace(key + ':' + field.label, field.label === 'startPoint' ? 'Start point' : field.label === 'endPoint' ? 'End point' : field.label === 'startRadius' ? 'Start radius' : field.label === 'endRadius' ? 'End radius' : 'Center', field.value, 'number', undefined, 0)
+    }
+  }
   for (const [i, m] of modifiers.entries()) {
     const name = nameOf(m), capability = authoringCapability(name, 'modifier', m.args.map(a => a.label)), id = `modifier:${i}:advanced`
+    // `.background(style, in: shape)` (iOS 15) is outside the read forms, but its style is a fill like any other.
+    if (name === 'background' && target >= 15 && !m.trailingClosure && m.args.length === 2 && m.args[0]!.label === null && m.args[1]!.label === 'in') {
+      const style = m.args[0]!.value, named = /^(?:Color)?\.(\w+)$|^Color\(\.(\w+)\)$/.exec(raw(style.span).replace(/\s/g, ''))
+      const color = named?.[1] ?? named?.[2]
+      // Its values read as unsupported, so the colour is offered here rather than by `replace`.
+      if (color && colors.includes(color) && safe(style.span)) add(id + ':0:color', 'background', 'select', color, v => ({ ...style.span, text: /^(?:secondary|tertiary)?system/i.test(v) ? `Color(.${v})` : `Color.${v}` }), colors)
+      fill(name, style, id + ':0')
+    }
     if (!capability || target < Number.parseFloat(capability.minimumIOS)) continue
     if (name === 'padding') {
       const first = m.args[0]?.value
-      if (first?.kind === 'memberAccess' || first?.kind === 'arrayLiteral') {
+      // Only `Edge.Set`'s own members are edges: `.space16` or `Layout.padding` there is the amount, a token or constant.
+      const edgeSet = first?.kind === 'memberAccess' && edges.includes(first.member) && (!first.base || /^(?:SwiftUI\.)?Edge\.Set$/.test(raw(first.base.span).replace(/\s/g, '')))
+      if (edgeSet || first?.kind === 'arrayLiteral') {
         if (first.kind === 'memberAccess') replace(id + ':edges', 'Padding edges', first, 'select', edges)
         else if (safe(first.span) && first.elements.every(e => e.kind === 'memberAccess' && !e.base && edges.includes(e.member))) {
           for (const edge of ['top', 'leading', 'bottom', 'trailing']) add(id + ':' + edge, `Pad ${edge}`, 'select', String(first.elements.some(e => e.kind === 'memberAccess' && (e.member === edge || e.member === 'all' || e.member === 'horizontal' && ['leading', 'trailing'].includes(edge) || e.member === 'vertical' && ['top', 'bottom'].includes(edge)))), value => {
@@ -122,15 +160,7 @@ export function advancedControls(node: AuthoringNode, base: CallExpr, modifiers:
       if (name === 'scaleEffect' && arg.value.kind === 'call' && arg.value.callee.kind === 'identifier' && arg.value.callee.name === 'CGSize') for (const dimension of arg.value.args) if (['width', 'height'].includes(dimension.label ?? '')) replace(key + ':' + dimension.label, dimension.label === 'width' ? 'Horizontal scale' : 'Vertical scale', dimension.value, 'number')
       if (['rotation3DEffect', 'hueRotation', 'rotationEffect'].includes(name) && arg.value.kind === 'call' && arg.value.callee.kind === 'identifier' && arg.value.callee.name === 'Angle') for (const angle of arg.value.args) if (['degrees', 'radians'].includes(angle.label ?? '')) replace(key + ':angle', `Angle (${angle.label})`, angle.value, 'number')
       if (['rotation3DEffect', 'hueRotation', 'rotationEffect'].includes(name) && arg.value.kind === 'call' && arg.value.callee.kind === 'memberAccess' && ['degrees', 'radians'].includes(arg.value.callee.member) && arg.value.args[0]) replace(key + ':angle', 'Angle (' + arg.value.callee.member + ')', arg.value.args[0].value, 'number')
-      if (['foregroundStyle', 'background', 'fill'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) {
-        const value = arg.value, gradient = value.kind === 'call' && value.callee.kind === 'identifier' && ['LinearGradient', 'RadialGradient', 'AngularGradient'].includes(value.callee.name) ? value : undefined
-        if (safe(value.span) && simple(value)) add(key + ':fillType', 'Fill type', 'select', gradient ? 'Gradient' : 'Solid', v => ({ ...value.span, text: v === 'Solid' ? 'Color.blue' : 'LinearGradient(colors: [Color.red, Color.blue], startPoint: .leading, endPoint: .trailing)' }), ['Solid', 'Gradient'])
-        if (gradient) for (const field of gradient.args) {
-          if (field.label === 'colors' && field.value.kind === 'arrayLiteral') field.value.elements.forEach((color, stop) => replace(key + ':stop:' + stop, `Color ${stop + 1}`, color, 'select', colors, undefined, undefined, 'Color.'))
-          if (['startPoint', 'endPoint', 'center'].includes(field.label ?? '')) replace(key + ':' + field.label, field.label === 'startPoint' ? 'Start point' : field.label === 'endPoint' ? 'End point' : field.label === 'startRadius' ? 'Start radius' : field.label === 'endRadius' ? 'End radius' : 'Center', field.value, 'select', anchors)
-          if (['startRadius', 'endRadius'].includes(field.label ?? '')) replace(key + ':' + field.label, field.label === 'startPoint' ? 'Start point' : field.label === 'endPoint' ? 'End point' : field.label === 'startRadius' ? 'Start radius' : field.label === 'endRadius' ? 'End radius' : 'Center', field.value, 'number', undefined, 0)
-        }
-      }
+      if (['foregroundStyle', 'background', 'fill'].includes(name) && !arg.label && m.args.length === 1 && !m.trailingClosure) fill(name, arg.value, key)
     }
     if (name === 'fixedSize' && !m.args.length) for (const axis of ['horizontal', 'vertical']) add(id + ':' + axis, `Ideal ${axis} size`, 'select', 'true', v => ({ start: m.callee.span.end, end: m.span.end, text: `(horizontal: ${axis === 'horizontal' ? v : 'true'}, vertical: ${axis === 'vertical' ? v : 'true'})` }), ['true', 'false'])
   }

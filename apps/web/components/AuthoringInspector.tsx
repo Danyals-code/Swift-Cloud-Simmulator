@@ -127,7 +127,9 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
         <Icon name="lock" size={12} />
         <span>{selected.undrawn === 'unsupported' ? 'Written in Swift. The preview doesn’t draw it yet, and Xcode draws it as written. It is kept exactly as written.'
           : selected.undrawn === 'unknown' ? 'Written in Swift. The preview doesn’t know this view and shows a labelled box in its place. It is kept exactly as written.'
-          : 'Written in Swift. It runs and draws here, and it is kept exactly as written.'}</span>
+          : 'Written in Swift. It runs and draws here, and it is kept exactly as written.'}
+          {/* A placeholder's frame, padding and the rest still apply, and are edited below. */}
+          {selected.controls?.length || selected.modifierCatalog?.some(entry => entry.available) ? ' Its size and modifiers can still be changed below.' : ''}</span>
         {onReveal && <button type="button" className={styles.linkButton} onClick={() => onReveal(selected.source)}>Open in Code</button>}
       </p>}
 

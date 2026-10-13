@@ -6,6 +6,12 @@ export function controlFont(child: LayoutElement, font: ResolvedFont): LayoutEle
   return { kind: 'modified', id: `${child.id}-control-font`, modifier: { kind: 'controlFont', font }, child }
 }
 
+/** A control's label views in the font and colour iOS gives them, where they set none of their own. */
+export function labelText(child: LayoutElement, font: ResolvedFont, color: RGBA): LayoutElement {
+  return { kind: 'modified', id: `${child.id}-label-font`, modifier: { kind: 'font', font },
+    child: { kind: 'modified', id: `${child.id}-label-color`, modifier: { kind: 'foregroundStyle', color }, child } }
+}
+
 /** A fixed switch with the wide capsule thumb measured in the native reference. */
 export function switchControl(path: string, on: boolean, tint: RGBA, off: RGBA): LayoutElement {
   const m = CONTROL_PARTS.switch

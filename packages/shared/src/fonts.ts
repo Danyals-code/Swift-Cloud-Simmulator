@@ -60,3 +60,6 @@ export const MEASURED_FAMILIES: readonly string[] = [
 export function textLineHeight(size: number): number {
   return Math.ceil(size * 1.19336 * 3 - 1e-6) / 3
 }
+
+/** SwiftUI's text styles, as `.font(.title)` and `Font.title` name them, largest first. */
+export const TEXT_STYLES: readonly string[] = ['largeTitle', 'title', 'title2', 'title3', 'headline', 'subheadline', 'body', 'callout', 'footnote', 'caption', 'caption2']

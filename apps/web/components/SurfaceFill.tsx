@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import type { AuthoringNode } from '@studio/shared'
 import type { FeatureChange } from './AuthoringFeatures'
-import { SYSTEM_COLOR_SWATCHES } from '../lib/tokens'
+import { SYSTEM_COLOR_SWATCHES, isHexColor, pickerColor, withPickedColor } from '../lib/tokens'
 import styles from './SurfaceFill.module.css'
 
 const COLORS = [
@@ -17,12 +17,12 @@ export function SurfaceFill({ node, onCommand }: { node: AuthoringNode; onComman
   const background = node.modifiers?.find(modifier => modifier.name === 'background' && modifier.enabled !== false)
   const property = node.styles?.find(style => style.kind === 'color' && background?.propertyIds.includes(style.property))
   const value = native ? '#F2F2F7' : property?.value ?? ''
-  const hex = /^#[0-9a-f]{6}$/i.test(value) ? value.toUpperCase() : SYSTEM_COLOR_SWATCHES[value]?.slice(0, 7).toUpperCase() ?? ''
+  const hex = isHexColor(value) ? value.toUpperCase() : SYSTEM_COLOR_SWATCHES[value]?.slice(0, 7).toUpperCase() ?? ''
   const [base, setBase] = useState(hex), [draft, setDraft] = useState(hex)
   const [pending, setPending] = useState(false), [error, setError] = useState<string | null>(null)
   if (base !== hex) { setBase(hex); setDraft(hex) }
   if (!onCommand || !native && (!['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack'].includes(node.name) || !property)) return null
-  const valid = /^#[0-9a-f]{6}$/i.test(draft)
+  const valid = isHexColor(draft)
   const apply = async (color: string) => {
     if (pending) return
     setPending(true); setError(null)
@@ -39,8 +39,8 @@ export function SurfaceFill({ node, onCommand }: { node: AuthoringNode; onComman
       <button key={name} type="button" aria-label={`${name} fill`} title={name} aria-pressed={!native && hex === color} disabled={pending} style={{ backgroundColor: color }} onClick={() => void apply(color)} />
     )}</div>
     <form className={styles.custom} onSubmit={event => { event.preventDefault(); if (valid) void apply(draft.toUpperCase()) }}>
-      <input type="color" aria-label="Fill color picker" value={valid ? draft : '#F2F2F7'} disabled={pending} onChange={event => setDraft(event.target.value.toUpperCase())} />
-      <input type="text" aria-label="Fill hex color" placeholder="#RRGGBB" value={draft} maxLength={7} spellCheck={false} aria-invalid={!!draft && !valid} disabled={pending} onChange={event => setDraft(event.target.value)} />
+      <input type="color" aria-label="Fill color picker" value={pickerColor(draft, '#F2F2F7')} disabled={pending} onChange={event => setDraft(withPickedColor(draft, event.target.value))} />
+      <input type="text" aria-label="Fill hex color" placeholder="#RRGGBBAA" value={draft} maxLength={9} spellCheck={false} aria-invalid={!!draft && !valid} disabled={pending} onChange={event => setDraft(event.target.value)} />
       <button type="submit" disabled={pending || !valid || !native && draft.toUpperCase() === hex}>Apply</button>
     </form>
     {native && <p>Pick a color to make this card fully editable, with aligned title and content. Undo restores the original card.</p>}

@@ -1,5 +1,5 @@
 import type { FileId } from '@studio/shared'
-import { Lexer, Parser, afterOffMarkers, hiddenViewsIn, viewSiteAt, walk, type CallExpr, type Decl, type Node, type SourceFileNode, type TypeRef } from '@studio/swift-syntax'
+import { Lexer, Parser, afterOffMarkers, hiddenViewsIn, viewSiteAt, walk, type CallExpr, type Decl, type Expr, type FuncDecl, type Node, type SourceFileNode, type TypeRef, type VarDecl } from '@studio/swift-syntax'
 
 /**
  * The last check a structural change passes before it is kept.
@@ -216,4 +216,112 @@ function holderProblems(tree: SourceFileNode): { key: string; message: string }[
 
 function isView(type: TypeRef | null): boolean {
   return type?.kind === 'someType' && type.constraint.kind === 'namedType' && type.constraint.name === 'View'
+}
+
+/** What a padding or frame call a change wrote must look like for Swift to build it. */
+export interface ArgumentEdit {
+  readonly file: FileId
+  readonly before: string
+  readonly after: string
+  /** Every file of the project after the change, where tokens and constants are declared. The changed file alone when omitted. */
+  readonly declarations?: readonly SourceFileNode[]
+}
+
+/** The members of `Edge.Set` that `.padding` takes as its first argument. */
+export const EDGE_SET_MEMBERS: readonly string[] = ['all', 'horizontal', 'vertical', 'top', 'bottom', 'leading', 'trailing']
+const EDGES = new Set(EDGE_SET_MEMBERS)
+const FRAME_FORMS = [['width', 'height', 'alignment'], ['minWidth', 'idealWidth', 'maxWidth', 'minHeight', 'idealHeight', 'maxHeight', 'alignment']]
+/** `String.padding(toLength:withPad:startingAt:)`, which shares the name and is no view's. */
+const STRING_PADDING = 'toLength,withPad,startingAt'
+/** `GeometryProxy.frame(in:)`, which shares the name and is no view's. */
+const PROXY_FRAME = 'in'
+const NUMBER_TYPES = new Set(['CGFloat', 'Double', 'Float', 'Int'])
+
+/**
+ * A `.padding`, `.frame` or `.border` a change wrote with arguments SwiftUI has no
+ * version of.
+ *
+ * The planner's other checks parse the result and resolve its names, and
+ * `.padding(.space16, 24)` passes both: only the type checker knows `.space16` is no
+ * edge. This knows the overloads, and the project's own tokens, constants and
+ * overloads, well enough to catch that shape in whichever writer has it. A call already
+ * in the file before the change is its author's to fix, not the change's.
+ */
+export function modifierArgumentProblem(edit: ArgumentEdit): string | null {
+  const tree = Parser.parse(edit.after, edit.file).sourceFile
+  const trees = [tree, ...(edit.declarations ?? []).filter(other => other.span.file !== edit.file)]
+  const was = new Set(unbuildable(Parser.parse(edit.before, edit.file).sourceFile, edit.before, trees))
+  const added = unbuildable(tree, edit.after, trees).find(call => !was.has(call))
+  return added ? `This change would write \`${added}\`, which would stop the app from building. Nothing was changed.` : null
+}
+
+/** The padding, frame and border calls in a file that no overload takes, as written, on one line. */
+function unbuildable(tree: SourceFileNode, text: string, trees: readonly SourceFileNode[]): string[] {
+  const found: string[] = []
+  walk(tree, (node: Node) => {
+    if (node.kind !== 'call') return
+    const name = node.callee.kind === 'memberAccess' ? node.callee.member : node.callee.kind === 'identifier' ? node.callee.name : ''
+    const labels = node.args.map(arg => arg.label)
+    const builds = name === 'padding' ? labels.join() === STRING_PADDING || paddingBuilds(node, trees)
+      : name === 'frame' ? labels.join() === PROXY_FRAME || frameBuilds(labels)
+      : name === 'border' ? labels[0] === null && (labels.length === 1 || labels.length === 2 && labels[1] === 'width')
+      : true
+    if (!builds && !ownOverload(trees, name, labels)) found.push('.' + name + text.slice(node.callee.span.end, node.span.end).replace(/\s+/g, ' '))
+  })
+  return found
+}
+
+/** Whether the project declares a function by this name that takes these argument labels. */
+function ownOverload(trees: readonly SourceFileNode[], name: string, labels: readonly (string | null)[]): boolean {
+  const takes = (decl: FuncDecl) => {
+    let at = 0
+    for (const param of decl.params) {
+      const label = param.externalName === '_' ? null : param.externalName ?? param.internalName
+      if (at < labels.length && labels[at] === label) at++
+      else if (!param.defaultValue) return false
+    }
+    return at === labels.length
+  }
+  const visit = (decl: Decl): boolean => decl.kind === 'funcDecl' ? decl.name === name && takes(decl)
+    : 'members' in decl && (decl.members as readonly Decl[]).some(visit)
+  return trees.some(tree => tree.declarations.some(visit))
+}
+
+/** `padding()`, `padding(length)`, `padding(insets)`, `padding(edges)` and `padding(edges, length)`. */
+function paddingBuilds(call: CallExpr, trees: readonly SourceFileNode[]): boolean {
+  if (call.args.some(arg => arg.label !== null) || call.args.length > 2) return false
+  if (call.args.length < 2) return true
+  const [edges, length] = call.args.map(arg => arg.value) as [Expr, Expr]
+  return !notEdges(edges, trees) && !(length.kind === 'arrayLiteral' || length.kind === 'memberAccess' && !length.base && EDGES.has(length.member))
+}
+
+/**
+ * Whether a value certainly is no `Edge.Set`: a number, a name `Edge.Set` does not have,
+ * or a type's number constant. A bare name could be a local of any type, so it is left be.
+ */
+function notEdges(value: Expr, trees: readonly SourceFileNode[]): boolean {
+  if (value.kind === 'integerLiteral' || value.kind === 'floatLiteral') return true
+  if (value.kind === 'unary') return notEdges(value.operand, trees)
+  if (value.kind === 'memberAccess' && !value.base) return !EDGES.has(value.member) && !declared(trees, value.member, 'Edge.Set').length
+  const decls = value.kind === 'memberAccess' && value.base?.kind === 'identifier' ? declared(trees, value.member, value.base.name) : []
+  return decls.length > 0 && decls.every(decl => decl.typeAnnotation ? decl.typeAnnotation.kind === 'namedType' && NUMBER_TYPES.has(decl.typeAnnotation.name) : decl.initializer?.kind === 'integerLiteral' || decl.initializer?.kind === 'floatLiteral')
+}
+
+/** The properties named `name` that `owner`, or an extension of it, declares. */
+function declared(trees: readonly SourceFileNode[], name: string, owner: string): VarDecl[] {
+  const out: VarDecl[] = []
+  const visit = (decl: Decl, inside: string | undefined) => {
+    if (decl.kind === 'varDecl' && decl.name === name && inside === owner) out.push(decl)
+    if ('members' in decl && 'name' in decl) for (const member of decl.members as readonly Decl[]) visit(member, String(decl.name))
+  }
+  for (const tree of trees) for (const decl of tree.declarations) visit(decl, undefined)
+  return out
+}
+
+/** `frame(width:height:alignment:)` or `frame(minWidth:idealWidth:maxWidth:minHeight:idealHeight:maxHeight:alignment:)`, each label at most once and in order. */
+function frameBuilds(labels: readonly (string | null)[]): boolean {
+  return FRAME_FORMS.some(form => {
+    let at = 0
+    return labels.every(label => { const index = label === null ? -1 : form.indexOf(label, at); at = index + 1; return index >= 0 })
+  })
 }

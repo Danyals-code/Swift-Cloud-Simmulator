@@ -17,10 +17,10 @@ describe('the SwiftUI the AI is asked for', () => {
     expect(SWIFTUI_GUIDANCE).toContain('Write decimals as Text(price, format: .currency(code: "USD")), price.formatted() or Text("\\(distance, specifier: "%.1f") km"), and a year or a code as Text(String(year)).')
   })
 
-  it('steers away from date format styles the preview cannot run, to the form it can', () => {
-    expect(SWIFTUI_GUIDANCE).toContain('DateFormatter and .dateTime format styles such as .formatted(.dateTime.month(.wide)) (write date.formatted(date: .abbreviated, time: .omitted))')
+  it('steers away from DateFormatter, which the preview cannot run, to the forms it can', () => {
+    expect(SWIFTUI_GUIDANCE).toContain('DateFormatter (write date.formatted(date: .abbreviated, time: .omitted) or date.formatted(.dateTime.month(.wide).day()))')
     resetPipelineState()
-    const files = [{ id: 'App.swift', text: 'import SwiftUI\n@main struct DatesApp: App { var body: some Scene { WindowGroup { Text(Date().formatted(date: .abbreviated, time: .omitted)) } } }' }]
+    const files = [{ id: 'App.swift', text: 'import SwiftUI\n@main struct DatesApp: App { var body: some Scene { WindowGroup { VStack { Text(Date().formatted(date: .abbreviated, time: .omitted)); Text(Date().formatted(.dateTime.month(.wide).day())) } } } }' }]
     const preview = compile({ files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1 })
     expect([...preview.diagnostics.map(d => d.message), ...preview.logs.filter(log => log.level === 'error').map(log => log.message)]).toEqual([])
   })

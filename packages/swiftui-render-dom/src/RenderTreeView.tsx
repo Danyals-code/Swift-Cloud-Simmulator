@@ -486,6 +486,7 @@ function RenderNodeView({
     pointerEvents: inspecting || interactive || scroll || node.blocksPointer ? 'auto' : 'none',
     cursor: inspecting ? 'default' : interactive ? 'pointer' : 'default',
     ...(node.background && node.cornerStyle !== 'continuous' ? { background: cssFill(node.background, node.frame) } : {}),
+    ...(node.background?.innerShadow && node.cornerStyle !== 'continuous' ? { boxShadow: `inset ${node.background.innerShadow.x}px ${node.background.innerShadow.y}px ${node.background.innerShadow.radius}px ${cssColor(node.background.innerShadow.color)}` } : {}),
     ...(node.chromeRole === 'navigationSurface' && node.background?.kind === 'solid' ? {
       background: `rgb(${node.background.color.r} ${node.background.color.g} ${node.background.color.b} / calc(1 - 0.28 * var(--chrome-progress, 0)))`,
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
@@ -508,6 +509,8 @@ function RenderNodeView({
           boxSizing: 'border-box',
           border: `${node.border.width}px solid ${cssColor(node.border.color)}`,
           borderRadius: node.border.cornerRadius || undefined,
+          // A gradient border: `.border` is always a rectangle, which is all `border-image` draws.
+          ...(node.border.fill && node.border.fill.kind !== 'solid' ? { borderImage: `${cssFill(node.border.fill, node.frame)} 1` } : {}),
         }
       : {}),
     ...(node.shadow
@@ -1144,6 +1147,7 @@ function runStyle(run: TextRun, size?: {width:number;height:number}): CSSPropert
     ...(run.tracking ? { letterSpacing: run.tracking } : {}),
     ...(run.baselineOffset ? { position: 'relative', bottom: run.baselineOffset } : {}),
     ...(run.tabularNumbers ? { fontVariantNumeric: 'tabular-nums' } : {}),
+    ...(run.font.smallCaps ? { fontVariantCaps: 'small-caps' } : {}),
   }
 }
 

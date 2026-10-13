@@ -23,7 +23,7 @@ export function timerValue(): OpaqueValue {
 
 /** The name of a leading-dot member such as `.day`, which the host answers as a token; '' for anything else. */
 export function leadingDotName(value: SwiftValue | undefined): string {
-  return value?.kind === 'opaque' ? String((value.payload as { name?: string }).name ?? '') : ''
+  return value?.kind === 'opaque' ? String((value.payload as { name?: string } | null)?.name ?? '') : ''
 }
 
 /** `Timer.publish(every:on:in:).autoconnect()`, `timer.invalidate()`: a timer that never fires. */
@@ -102,6 +102,84 @@ export function formatDate(epochSeconds: number, args: readonly CallArgument[]):
   const options: Intl.DateTimeFormatOptions = { ...DATE_STYLES[date], ...TIME_STYLES[time] }
   return str(new Intl.DateTimeFormat(undefined, options).format(new Date(epochSeconds * 1000)))
 }
+
+/** `formatted()` with no style: a numeric date and a short time. */
+function defaultDateText(epochSeconds: number): string {
+  return new Intl.DateTimeFormat(undefined, { ...DATE_STYLES.numeric, ...TIME_STYLES.shortened }).format(new Date(epochSeconds * 1000))
+}
+
+/**
+ * `.dateTime.weekday().hour().minute()`: a `Date.FormatStyle` built field by field.
+ *
+ * `.dateTime` arrives as a contextual token, and every field call returns it again
+ * with the field written into its name, `dateTime;weekday=;hour=twoDigits.omitted`,
+ * the way `.currency(code:)` carries its code. The fields' order is not what Swift
+ * writes either: like Foundation, ICU's pattern generator puts them in the locale's
+ * order, en_US as the simulator starts in. A member the preview does not draw, such as
+ * `.quarter()` or `.locale(_:)`, leaves the style as it was rather than stopping the view.
+ */
+export function callDateFormatMember(target: OpaqueValue, member: string, args: readonly CallArgument[]): SwiftValue | undefined {
+  if (target.typeName !== 'Token') return undefined
+  const name = leadingDotName(target)
+  if (name !== 'dateTime' && !name.startsWith('dateTime;')) return undefined
+  if (!DATE_FIELDS.has(member)) return target
+  const option = args[0]?.value
+  // `.hour(.defaultDigits(amPM: .omitted))` arrives as a token carrying its argument.
+  const amPM = option?.kind === 'opaque' ? leadingDotName((option.payload as { args?: readonly SwiftValue[] }).args?.[0]) : ''
+  const fields = name.split(';').slice(1).filter((field) => !field.startsWith(`${member}=`))
+  fields.push(`${member}=${leadingDotName(option)}${amPM ? `.${amPM}` : ''}`)
+  return { ...target, payload: { ...(target.payload as object), name: ['dateTime', ...fields].join(';') } }
+}
+
+/** A value written in a `.dateTime` style; null for anything else, a date or a style. */
+export function formatDateValue(value: SwiftValue, style: string): string | null {
+  const date = asDate(value)
+  return date ? formatDateStyle(date.epochSeconds, style) : null
+}
+
+/** A date in a `.dateTime` style; null for a style that is not one. */
+export function formatDateStyle(epochSeconds: number, style: string): string | null {
+  // `.dateTime` with no fields is Foundation's default, as `formatted()` writes it.
+  if (style === 'dateTime') return defaultDateText(epochSeconds)
+  if (!style.startsWith('dateTime;')) return null
+  const options: Intl.DateTimeFormatOptions = {}
+  const written = new Map(style.split(';').slice(1).map((field) => field.split('=') as [string, string]))
+  for (const [field, given] of written) {
+    const width = given.split('.')[0]!
+    const digits = width === 'twoDigits' ? '2-digit' : 'numeric'
+    const words = width === 'wide' ? 'long' : width === 'narrow' ? 'narrow' : 'short'
+    if (field === 'era') options.era = words
+    if (field === 'year') options.year = digits
+    if (field === 'month') options.month = width === 'defaultDigits' ? 'numeric' : width === 'twoDigits' ? '2-digit' : words
+    if (field === 'day') options.day = digits
+    if (field === 'weekday') options.weekday = words
+    if (field === 'hour') options.hour = width.startsWith('two') || width.startsWith('conversationalTwo') ? '2-digit' : 'numeric'
+    if (field === 'minute') options.minute = digits
+    if (field === 'second') options.second = digits
+    if (field === 'timeZone') options.timeZoneName = 'short'
+  }
+  if (Object.keys(options).length === 0) return defaultDateText(epochSeconds)
+  const amPM = written.get('hour')?.split('.')[1] ?? ''
+  const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(new Date(epochSeconds * 1000))
+  return parts.map((part, i) => {
+    // `.weekday(.short)` is two letters, "Su", which Intl has no width for.
+    if (part.type === 'weekday' && written.get('weekday') === 'short') return part.value.slice(0, 2)
+    if (part.type === 'dayPeriod') return amPM === 'omitted' ? '' : amPM === 'narrow' ? part.value.charAt(0).toLowerCase() : part.value
+    if (part.type !== 'literal') return part.value
+    // iOS 27 writes a narrow no-break space before the day period, where browsers differ,
+    // and "Sep 9, 2001 at 9:41 AM" for a month in words, where Intl writes a comma.
+    if (parts[i + 1]?.type === 'dayPeriod') return amPM === 'omitted' ? '' : '\u202f'
+    const joinsTime = DATE_PARTS.has(parts[i - 1]?.type ?? '') && TIME_PARTS.has(parts[i + 1]?.type ?? '')
+    return joinsTime && part.value === ', ' && (options.month === 'short' || options.month === 'long') ? ' at ' : part.value
+  }).join('').trim()
+}
+
+const DATE_PARTS: ReadonlySet<string> = new Set(['era', 'year', 'month', 'day', 'weekday'])
+const TIME_PARTS: ReadonlySet<string> = new Set(['hour', 'minute', 'second'])
+
+const DATE_FIELDS: ReadonlySet<string> = new Set([
+  'era', 'year', 'quarter', 'month', 'week', 'day', 'dayOfYear', 'weekday', 'hour', 'minute', 'second', 'secondFraction', 'timeZone',
+])
 
 const DATE_STYLES: Readonly<Record<string, Intl.DateTimeFormatOptions>> = {
   omitted: {},

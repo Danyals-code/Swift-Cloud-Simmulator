@@ -39,7 +39,6 @@ export const PREVIEW_UNSUPPORTED: readonly (readonly [name: string, probe: strin
   ['Dictionary.first', '["a": 1].first'],
   ['Array.lazy', '[1].lazy'],
   ['Array.count(where:)', '[1].count(where: { $0 > 0 })'],
-  ['.dateTime format styles', 'Date().formatted(.dateTime.month())'],
 ]
 
 /**

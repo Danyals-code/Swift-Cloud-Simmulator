@@ -144,8 +144,9 @@ test('scenarios survive reload and source stays unchanged', async ({ page }) => 
 
 test('reduced motion disables preview transitions', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await open(page)
-  await sourceRow(page, 'Button').click()
+  // An appear animation is offered on a view an if adds and removes, where it plays.
+  await open(page, SOURCE.replace('Card(title: "Primary")', 'if !on { Text("Animated") }; Card(title: "Primary")'))
+  await sourceRow(page, 'Text').filter({ hasText: 'Animated' }).click()
   const animation = await advanced(page, 'Appear animation')
   await animation.getByLabel('Behavior state').last().selectOption('on')
   await animation.getByRole('button', { name: 'Add transition', exact: true }).click()

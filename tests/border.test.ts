@@ -266,6 +266,41 @@ describe('where a border is written (D8)', () => {
   })
 })
 
+describe('a border on a shape follows the shape itself (doc 18, Fix first 2)', () => {
+  const SIZE = '\n            .fill(.blue)\n            .frame(width: 60, height: 60)'
+  const on = (base: string) => screen(`        ${base}${SIZE}`)
+  const bordered = (base: string, shape: string, stroke = '.strokeBorder(Color.gray, lineWidth: 1)', after = '') => on(base).replace(SIZE, `${SIZE}\n            .overlay {\n                ${shape}\n                    ${stroke}\n${after}            }`)
+  const position = (text: string, name: string, value: string) => edit(text, name, { kind: 'property', control: view(text, name).controls!.find(item => item.id.endsWith(':position'))!.id, value })
+
+  it.each([
+    ['Circle', 'Circle()', 'Circle()'],
+    ['Capsule', 'Capsule()', 'Capsule()'],
+    ['Capsule', 'Capsule(style: .continuous)', 'Capsule(style: .continuous)'],
+    ['Ellipse', 'Ellipse()', 'Ellipse()'],
+    ['RoundedRectangle', 'RoundedRectangle(cornerRadius: 16, style: .continuous)', 'RoundedRectangle(cornerRadius: 16, style: .continuous)'],
+  ])('outlines a %s written as %s with that shape, and reads it back as its Border', (name, base, shape) => {
+    const text = edit(on(base), name, { kind: 'modifier-add', name: 'border' })
+    expect(text).toBe(bordered(base, shape))
+    expect(view(text, name).modifiers!.map(modifier => modifier.name)).toEqual(['fill', 'frame', 'border'])
+    expect(model(text).nodes.filter(node => node.parentId === view(text, name).id)).toEqual([])
+  })
+
+  it.each([
+    ['Circle', 'Circle()', 'Circle()', 'Circle()'],
+    ['RoundedRectangle', 'RoundedRectangle(cornerRadius: 16)', 'RoundedRectangle(cornerRadius: 16)', 'RoundedRectangle(cornerRadius: 17)'],
+  ])('draws a %s\'s border on its edge and outside it with the same shape', (name, base, shape, grown) => {
+    const inside = edit(on(base), name, { kind: 'modifier-add', name: 'border' })
+    expect(position(inside, name, 'center')).toBe(bordered(base, shape, '.stroke(Color.gray, lineWidth: 1)'))
+    expect(position(inside, name, 'outside')).toBe(bordered(base, grown, '.strokeBorder(Color.gray, lineWidth: 1)', '                    .padding(-1)\n'))
+  })
+
+  it('takes a rounded rectangle\'s new radius in the same step', () => {
+    const inside = edit(on('RoundedRectangle(cornerRadius: 16)'), 'RoundedRectangle', { kind: 'modifier-add', name: 'border' })
+    const radius = view(inside, 'RoundedRectangle').controls!.find(item => item.id === 'shape:radius')!
+    expect(edit(inside, 'RoundedRectangle', { kind: 'property', control: radius.id, value: '24' })).toBe(bordered('RoundedRectangle(cornerRadius: 24)', 'RoundedRectangle(cornerRadius: 24)'))
+  })
+})
+
 describe('a shape drawn only by its stroke (D8)', () => {
   const RING = '        Circle()\n            .stroke(Color.blue, lineWidth: 8)\n            .frame(width: 80, height: 80)'
   const stroke = (text: string) => model(text).nodes.find(node => node.name === 'Circle')!.modifiers!.find(modifier => modifier.name === 'stroke')!
@@ -300,6 +335,11 @@ describe.skipIf(process.env.XCODE_BUILD !== '1')('what a border is written as ty
     shapes.push(set(set(screen(BORDERED), 'cornerRadius', '20'), 'color', 'red'))
     shapes.push(edit(screen('        Button("Join") { }\n            .buttonStyle(.bordered)\n            .buttonBorderShape(.capsule)'), 'Button', { kind: 'modifier-add', name: 'border' }))
     shapes.push(set(screen(`${CARD}\n            .overlay { RoundedRectangle(cornerRadius: 12).stroke(Color.gray, lineWidth: 2) }`), 'position', 'outside'))
+    for (const [name, base] of [['Circle', 'Circle()'], ['Capsule', 'Capsule(style: .continuous)'], ['Ellipse', 'Ellipse()'], ['RoundedRectangle', 'RoundedRectangle(cornerRadius: 16, style: .continuous)']]) {
+      const inside = edit(screen(`        ${base}\n            .fill(.blue)\n            .frame(width: 60, height: 60)`), name!, { kind: 'modifier-add', name: 'border' })
+      const position = (text: string, value: string) => edit(text, name!, { kind: 'property', control: view(text, name!).controls!.find(item => item.id.endsWith(':position'))!.id, value })
+      shapes.push(inside, position(inside, 'center'), position(inside, 'outside'))
+    }
     const root = mkdtempSync(join(tmpdir(), 'studio-border-'))
     try {
       const sdk = execFileSync('xcrun', ['--sdk', 'iphonesimulator', '--show-sdk-path'], { encoding: 'utf8' }).trim()
@@ -309,6 +349,6 @@ describe.skipIf(process.env.XCODE_BUILD !== '1')('what a border is written as ty
         execFileSync('xcrun', ['--sdk', 'iphonesimulator', 'swiftc', '-typecheck', '-parse-as-library', '-sdk', sdk, '-target', 'arm64-apple-ios27.0-simulator', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
       }
     } finally { rmSync(root, { recursive: true, force: true }) }
-    expect(shapes).toHaveLength(34)
+    expect(shapes).toHaveLength(46)
   }, 300_000)
 })

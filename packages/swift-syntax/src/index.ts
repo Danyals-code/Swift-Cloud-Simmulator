@@ -25,3 +25,4 @@ export {
   hideView, showView, hiddenViewsIn,
   type ViewSite, type SourceEdit, type HiddenView, type RefusalReason,
 } from './edits'
+export { DIRECTIVE_LINE } from './conditional-compilation'
