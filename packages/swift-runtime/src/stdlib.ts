@@ -1,7 +1,8 @@
 import type { CallArgument } from './host'
 import { PREVIEW_LIMITS } from './limits'
-import { CALENDAR_TYPE, TIMER_TYPE, calendarValue, callCalendarMember, callTimerMember, formatDate, timerValue, leadingDotName } from './calendar'
+import { CALENDAR_TYPE, TIMER_TYPE, calendarValue, callCalendarMember, callDateFormatMember, callTimerMember, formatDate, formatDateStyle, timerValue, leadingDotName } from './calendar'
 import { formatNumber } from './number-format'
+import { CHARACTER_SET_TYPE, SCANNER_TYPE, callScannerMember, characterSetProperty, inCharacterSet, namedCharacterSet } from './scanner'
 import {
   array,
   asDate,
@@ -185,6 +186,7 @@ export function getBuiltinProperty(target: SwiftValue, member: string): SwiftVal
     // `UUID`, `Date` and `URL`. Their stored form is deliberately unreachable - only
     // the members Foundation really publishes answer here.
     case 'opaque': {
+      if (target.typeName === CHARACTER_SET_TYPE) return characterSetProperty(target, member)
       const uuid = asUUID(target)
       if (uuid) {
         if (member === 'uuidString') return str(uuid.uuidString)
@@ -475,6 +477,9 @@ export function callBuiltinMember(
     case 'opaque': {
       if (target.typeName === TIMER_TYPE) return callTimerMember(target, member)
       if (target.typeName === CALENDAR_TYPE) return callCalendarMember(member, args)
+      if (target.typeName === SCANNER_TYPE) return callScannerMember(target, member, args)
+      const dateStyle = callDateFormatMember(target, member, args)
+      if (dateStyle) return dateStyle
       const date = asDate(target)
       if (date) {
         switch (member) {
@@ -486,11 +491,13 @@ export function callBuiltinMember(
             const other = asDate(arg(0))
             return other ? double(date.epochSeconds - other.epochSeconds) : undefined
           }
-          case 'formatted':
+          case 'formatted': {
             // The locale-formatted form, which is what `formatted()` is for. The
             // locale is the browser's, so this is the only member of `Date` whose
             // answer legitimately differs between two machines.
-            return formatDate(date.epochSeconds, args)
+            const styled = formatDateStyle(date.epochSeconds, leadingDotName(arg(0)))
+            return styled === null ? formatDate(date.epochSeconds, args) : str(styled)
+          }
           case 'description':
             return str(dateDescription(date.epochSeconds))
           default:
@@ -581,9 +588,18 @@ function stringMethod(
       if (!separator) return undefined
       return array(value.split(text(separator)).map(str))
     }
-    case 'trimmingCharacters':
-      // The only `CharacterSet` the slice uses is `.whitespaces`.
-      return str(value.trim())
+    case 'trimmingCharacters': {
+      // `.whitespacesAndNewlines`, `CharacterSet.alphanumerics.inverted`, or a set of
+      // given characters; one this does not know trims whitespace, as it always did.
+      const set = labelled('in')
+      const characters = [...value]
+      const trims = (c: string) => inCharacterSet(set, c) ?? /\s/.test(c)
+      let start = 0
+      let end = characters.length
+      while (start < end && trims(characters[start]!)) start++
+      while (end > start && trims(characters[end - 1]!)) end--
+      return str(characters.slice(start, end).join(''))
+    }
     case 'starts':
       return bool(value.startsWith(text(labelled('with') ?? arg(0))))
     case 'reversed':
@@ -1178,6 +1194,15 @@ const INT_MAX = Number.MAX_SAFE_INTEGER
 const INT_MIN = -Number.MAX_SAFE_INTEGER
 
 /**
+ * The fixed-width integers. A number here is a JavaScript number either way, so each is
+ * an `Int`: `UInt64(hex, radix: 16)` and `let r: UInt64` in a hex colour initialiser
+ * read the same as their `Int` spellings, which is all view code asks of them.
+ */
+export const FIXED_WIDTH_INTEGERS: ReadonlySet<string> = new Set([
+  'Int8', 'Int16', 'Int32', 'Int64', 'UInt', 'UInt8', 'UInt16', 'UInt32', 'UInt64',
+])
+
+/**
  * Built-in type names that may be written as values.
  *
  * `Int.max` reads a member of the *type*, so `Int` has to resolve to something
@@ -1185,12 +1210,14 @@ const INT_MIN = -Number.MAX_SAFE_INTEGER
  * though the preview had never heard of `Int`.
  */
 export const BUILTIN_TYPE_NAMES: ReadonlySet<string> = new Set([
+  ...FIXED_WIDTH_INTEGERS,
   'Int', 'Double', 'Float', 'CGFloat', 'Bool', 'String', 'Character',
-  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL', 'Timer', 'Calendar',
+  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL', 'Timer', 'Calendar', 'CharacterSet',
 ])
 
 /** `Int.max`, `Double.pi`, `Date.now` - a static read on a built-in type. */
 export function staticBuiltinProperty(typeName: string, member: string): SwiftValue | undefined {
+  if (typeName === 'CharacterSet') return namedCharacterSet(member)
   switch (`${typeName}.${member}`) {
     case 'Int.max':
       return int(INT_MAX)

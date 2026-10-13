@@ -3,7 +3,7 @@ import { buildList, startListAtTop } from './containers/list'
 import { attachedSheet, sheetContentTop } from './containers/sheet'
 import { SURFACES, listAppearance } from './appearance/surfaces'
 import { controlMetrics, CONTROL_PARTS } from './appearance/controls'
-import { controlFont, switchControl } from './controls/primitives'
+import { controlFont, labelText, switchControl } from './controls/primitives'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import { appearanceFor, IOS_27 } from './appearance/ios27'
 import {
@@ -26,6 +26,7 @@ import {
   asDate,
   asKeyPath,
   asProjection,
+  formatDateValue,
   formatNumber,
   foundationDescription,
   truthy,
@@ -72,14 +73,17 @@ import { resolveSymbol } from './sf-symbols'
 import {
   unitPoint,
   bodyFont,
+  canvasShading,
   colorForName,
   fontForToken,
   monospacedFont,
   numberArg,
+  paintShadow,
   resolveColorArg,
   resolveColorPayload,
   resolveFillArg,
   resolveFontArg,
+  resolveStrokePaint,
   resolveWeightArg,
   stringArg,
   systemBackground,
@@ -1191,6 +1195,9 @@ class Converter {
     // background(padding(view)) and therefore covers the padding.
     for (const [index, modifier] of view.modifiers.entries()) {
       const converted = this.convertModifier(modifier, `${path}m${index}`, view)
+      // `.fill(.blue.shadow(.drop(radius: 4)))`: what the paint fills casts its shadow.
+      const cast = ['fill', 'foregroundStyle', 'foregroundColor'].includes(modifier.name) ? this.dropShadow(positional(modifier.args, 0)) : null
+      if (cast) element = { kind: 'modified', id: `${path}m${index}cast`, modifier: cast, child: element }
       if (!converted) continue
       if (view.intent && converted.kind === 'a11y') {
         accessibility.push({ index, modifier: converted })
@@ -1203,9 +1210,11 @@ class Converter {
     // outermost - tapping a button's padding must count, exactly as on iOS.
     // Segments own their hit areas. A full-size picker target would cover them.
     const segmented = view.name === 'Picker' && this.styles.picker === 'segmented'
+    // So does a Slider's track, drawn between its value labels.
+    const ownsTarget = segmented || view.name === 'Slider' && hasSliderValueLabels(view)
     if (view.intent) {
       if (isDisabled(view) && !this.greyedOut.has(path)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
-      if (!segmented) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
+      if (!ownsTarget) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
     }
     // A passive context target sits behind descendant controls. Those controls
     // also carry the menu handler, so a hold never steals their normal short tap.
@@ -1387,7 +1396,8 @@ class Converter {
         if (!payload) return { kind: 'empty', id: path, ...origin }
 
         const fill = resolveFillArg(modifierArg(view, 'fill', 0), this.scheme, this.styles.tint)
-        const strokeColor = view.modifiers.some(m => m.name === 'stroke') ? resolveColorArg(modifierArg(view, 'stroke', 0), this.scheme, this.styles.tint) ?? this.color('primary') : null
+        const strokePaint = resolveStrokePaint(modifierArg(view, 'stroke', 0), this.scheme, this.styles.tint)
+        const strokeColor = view.modifiers.some(m => m.name === 'stroke') ? strokePaint?.color ?? this.color('primary') : null
         const strokeWidth =
           numberArg(modifierNamedArg(view, 'stroke', 'lineWidth')) ??
           numberArg(modifierArg(view, 'stroke', 1)) ??
@@ -1400,7 +1410,7 @@ class Converter {
           id: path,
           d: toSVGPath(applyTrim({ commands: payload.commands, trim: trimmed })),
           fill: fill ?? null,
-          stroke: strokeColor ? { ...strokeStyle(view), color: strokeColor, width: strokeWidth, usesForeground: !resolveColorArg(modifierArg(view, 'stroke', 0), this.scheme, this.styles.tint) } : null,
+          stroke: strokeColor ? { ...strokeStyle(view), color: strokeColor, ...(strokePaint?.fill ? { fill: strokePaint.fill } : {}), width: strokeWidth, usesForeground: !strokePaint } : null,
           fillRule: tokenName(modifierNamedArg(view, 'fill', 'style')) === 'evenOdd'
             ? 'evenodd'
             : 'nonzero',
@@ -1421,14 +1431,14 @@ class Converter {
           id: path,
           alignment: { horizontal: 'leading', vertical: 'top' },
           children: context.drawings.map((drawing, index) => {
-            const fill = resolveFillArg(drawing.fill ?? undefined, this.scheme, this.styles.tint)
-            const stroke = resolveColorArg(drawing.stroke ?? undefined, this.scheme, this.styles.tint)
+            const fill = resolveFillArg(canvasShading(drawing.fill, context.size), this.scheme, this.styles.tint)
+            const stroke = resolveStrokePaint(canvasShading(drawing.stroke, context.size), this.scheme, this.styles.tint)
             return {
               kind: 'path' as const,
               id: `${path}d${index}`,
               d: drawing.d,
               fill: fill ?? null,
-              stroke: stroke ? { color: stroke, width: drawing.lineWidth } : null,
+              stroke: stroke ? { ...stroke, width: drawing.lineWidth } : null,
               fillRule: 'nonzero' as const,
             }
           }),
@@ -1620,9 +1630,20 @@ class Converter {
     if (shape) {
       const radius = hasCornerRadii(view.args.map((a) => a.label)) ? largestCorner(view.args) : numberArg(labelled(view.args, 'cornerRadius'))
       const fill = resolveFillArg(modifierArg(view, 'fill', 0), this.scheme, this.styles.tint)
+      // `.fill(.ultraThinMaterial)` is a material panel cut to the shape; it drew black.
+      const fillValue = modifierArg(view, 'fill', 0)
+      const material = MATERIALS[tokenName(fillValue) ?? '']
+      if (material) {
+        const opacity = fillValue?.kind === 'opaque' ? (fillValue.payload as TokenPayload).opacity : undefined
+        const panel: LayoutElement = { kind: 'modified', id: `${path}mat`, modifier: { kind: 'material', ...material, light: this.scheme === 'light' }, child: { kind: 'fill', id: `${path}matbox`, fill: { kind: 'solid', color: rgba(0, 0, 0, 0) } } }
+        const style = tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular'
+        const cut: LayoutElement = { kind: 'modified', id: `${path}cut`, modifier: { kind: 'clip', shape, cornerRadius: radius ?? 0, style }, child: panel }
+        return opacity === undefined ? { ...cut, ...origin } : { kind: 'modified', id: path, modifier: { kind: 'opacity', value: opacity }, child: cut, ...origin }
+      }
       const strokeName = view.modifiers.some((m) => m.name === 'strokeBorder') ? 'strokeBorder' : 'stroke'
       const hasStroke = view.modifiers.some((m) => m.name === strokeName)
-      const strokeColor = resolveColorArg(modifierArg(view, strokeName, 0), this.scheme, this.styles.tint) ?? (hasStroke ? this.color('primary') : null)
+      const strokePaint = resolveStrokePaint(modifierArg(view, strokeName, 0), this.scheme, this.styles.tint)
+      const strokeColor = strokePaint?.color ?? (hasStroke ? this.color('primary') : null)
       const strokeWidth =
         numberArg(modifierNamedArg(view, strokeName, 'lineWidth')) ??
         numberArg(modifierArg(view, strokeName, 1)) ??
@@ -1638,7 +1659,7 @@ class Converter {
         ...(radius !== null ? { cornerRadius: radius } : {}),
         ...(fill ? { fill } : {}),
         ...(trim ? { trim } : {}),
-        ...(strokeColor ? { stroke: { ...strokeStyle(view), color: strokeColor, width: Math.max(0, strokeWidth), usesForeground: !resolveColorArg(modifierArg(view, strokeName, 0), this.scheme, this.styles.tint), placement: strokeName === 'strokeBorder' ? 'inside' as const : 'center' as const } } : {}),
+        ...(strokeColor ? { stroke: { ...strokeStyle(view), color: strokeColor, ...(strokePaint?.fill ? { fill: strokePaint.fill } : {}), width: Math.max(0, strokeWidth), usesForeground: !strokePaint, placement: strokeName === 'strokeBorder' ? 'inside' as const : 'center' as const } } : {}),
         ...origin,
       }
     }
@@ -1703,7 +1724,7 @@ class Converter {
     let tracking: number | undefined
     let baselineOffset: number | undefined
 
-    const face = (patch: { family?: string; size?: number; lineHeight?: number; weight?: number; italic?: boolean }) => {
+    const face = (patch: { family?: string; size?: number; lineHeight?: number; weight?: number; italic?: boolean; smallCaps?: boolean }) => {
       font = { ...font, ...patch }
     }
 
@@ -1719,6 +1740,7 @@ class Converter {
               lineHeight: resolved.lineHeight,
               weight: resolved.weight,
               italic: resolved.italic,
+              ...(resolved.smallCaps ? { smallCaps: true } : {}),
             })
           }
           break
@@ -2123,10 +2145,20 @@ class Converter {
         : [this.convert(row, row.path ?? `${path}-${index}`, 'horizontal')],
     )
 
+    // `.gridColumnAlignment(.leading)` on any cell aligns its whole column; the first
+    // one written in a column wins.
+    const columns = flattened.map((row) => (row.name === 'GridRow' ? row.children : []).map((cell) =>
+      positional(cell.modifiers.find((m) => m.name === 'gridColumnAlignment')?.args ?? [], 0)))
+    const columnAlignments = Array.from({ length: Math.max(0, ...rows.map((row) => row.length)) }, (_, i) => {
+      const name = tokenName(columns.map((row) => row[i]).find((given) => given !== undefined))
+      return name === 'leading' || name === 'trailing' || name === 'center' ? name : undefined
+    })
+
     return {
       kind: 'table',
       id: path,
       rows,
+      ...(columnAlignments.some(Boolean) ? { columnAlignments } : {}),
       spacing: numberArg(labelled(view.args, 'horizontalSpacing')) ?? defaultSpacing(),
       rowAlignments: flattened.map(row => labelled(row.args, 'alignment') ? stackAlignment(row.args, 'horizontal').vertical : stackAlignment(view.args, 'vertical').vertical),
       rowSpacing: numberArg(labelled(view.args, 'verticalSpacing')) ?? (flattened.every(row => row.name === 'GridRow' && row.children.every(cell => cell.name === 'Text')) ? 0 : defaultSpacing()),
@@ -2252,7 +2284,9 @@ class Converter {
     const wantsIcon = style !== 'titleOnly'
     const wantsTitle = style !== 'iconOnly'
 
-    const children: LayoutElement[] = []
+    // `Label { Text("Title") } icon: { Image(…) }`: the icon is views of its own.
+    const icon = symbol ? [] : argViews(view, 'icon')
+    const children: LayoutElement[] = wantsIcon ? this.convertList(icon, `${path}icon`, 'horizontal') : []
     if (symbol && wantsIcon) {
       children.push({
         kind: 'image',
@@ -2274,7 +2308,7 @@ class Converter {
       child: this.styles.buttonLabel ? children[0] : { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
     }
     if (title !== null && wantsTitle) children.push({ kind: 'text', id: `${path}title`, text: title })
-    if (wantsTitle || !symbol) children.push(...this.convertList(view.children, path, 'horizontal'))
+    if (wantsTitle || !(symbol || icon.length)) children.push(...this.convertList(view.children, path, 'horizontal'))
 
     return {
       kind: 'stack',
@@ -2646,12 +2680,20 @@ class Converter {
     const state = this.controlState(view)
     const min = state.min ?? 0, max = state.max ?? 1, value = Number(state.value ?? 0)
     const ticks = state.step && max > min ? Math.floor((max - min) / state.step) : 0
-    return { kind: 'slider', id: path, height: CONTROL_PARTS.slider.height,
+    const slider: LayoutElement = { kind: 'slider', id: path, height: CONTROL_PARTS.slider.height,
       style: { fraction: max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0,
         trackHeight: CONTROL_PARTS.slider.track, thumbDiameter: CONTROL_PARTS.slider.thumb, thumbHeight: CONTROL_PARTS.slider.thumbHeight,
         tint: this.color('accentColor'), trackColor: this.color('tertiarySystemFill'), thumbColor: rgba(255, 255, 255),
         ...(ticks > 0 && ticks <= 20 ? { ticks: Array.from({ length: ticks + 1 }, (_, i) => i * state.step! / (max - min)) } : {}),
       }, ...origin }
+    // `minimumValueLabel:` and `maximumValueLabel:` either side of the track, 8 pt from it
+    // and centred on it, as the iOS 27 simulator draws them; the label itself is not
+    // drawn there. The track keeps the hit target to itself, so a drag maps onto the
+    // track it moves along rather than onto the labels as well.
+    if (!hasSliderValueLabels(view)) return slider
+    const [lower, upper] = SLIDER_VALUE_LABELS.map((name) => this.convertList(argViews(view, name), `${path}${name}`, 'horizontal'))
+    const track = this.withHitTarget(slider, path, roleOf(view), labelOf(view), view, disabledBy(view))
+    return { kind: 'stack', id: `${path}row`, axis: 'horizontal', spacing: 8, alignment: CENTER, children: [...lower!, track, ...upper!] }
   }
 
   private stepper(view: ViewValue, path: string, origin: object): LayoutElement {
@@ -2739,6 +2781,11 @@ class Converter {
     const value = numberArg(labelled(view.args, 'value'))
     const total = numberArg(labelled(view.args, 'total')) ?? 1
     const title = stringArg(positional(view.args, 0))
+    // Its label, a title or the views of `ProgressView { … }`, in body text.
+    const label = (color: string): LayoutElement[] => {
+      const views: LayoutElement[] = title !== null ? [{ kind: 'text', id: `${path}title`, text: title }] : this.convertList(view.children, `${path}label`, 'vertical')
+      return views.map(child => labelText(child, bodyFont(this.typeScale), this.color(color)))
+    }
 
     // `.progressViewStyle(.circular)` is a ring whatever the value, which is what iOS
     // draws: the determinate bar is the `.linear` style, and asking for the circular
@@ -2746,7 +2793,7 @@ class Converter {
     if (value === null || this.styles.progressView === 'circular') {
       // Indeterminate: the activity indicator, eight spokes turning. This was a filled
       // grey circle, which is not an approximation of a spinner - it is a dot.
-      return {
+      const spinner: LayoutElement = {
         kind: 'modified',
         id: `${path}frame`,
         modifier: { kind: 'frame', width: CONTROL_PARTS.progress.spinner, height: CONTROL_PARTS.progress.spinner, alignment: CENTER },
@@ -2757,6 +2804,9 @@ class Converter {
           child: { kind: 'shape', id: path, shape: 'spinner', ...origin },
         },
       }
+      // A label goes under the spinner in secondary text, 6.43 pt below it on iOS 27.
+      const under = label('secondaryLabel')
+      return under.length === 0 ? spinner : { kind: 'stack', id: `${path}stack`, axis: 'vertical', spacing: 6.43, alignment: CENTER, children: [spinner, ...under] }
     }
 
     const fraction = total === 0 ? 0 : Math.max(0, Math.min(1, value / total))
@@ -2795,14 +2845,19 @@ class Converter {
       ...origin,
     }
 
-    if (title === null) return bar
+    // The label above the bar and `currentValueLabel:` below it in secondary caption
+    // text, each 4 pt from the bar, as the iOS 27 simulator lays them out.
+    const current = argViews(view, 'currentValueLabel').flatMap((child, i) => this.convertList([child], `${path}current${i}`, 'vertical'))
+      .map(child => labelText(child, fontForToken('caption', this.typeScale)!, this.color('secondaryLabel')))
+    const above = label('label')
+    if (above.length === 0 && current.length === 0) return bar
     return {
       kind: 'stack',
       id: `${path}stack`,
       axis: 'vertical',
-      spacing: 3,
+      spacing: 4,
       alignment: { horizontal: 'leading', vertical: 'center' },
-      children: [this.styledText(`${path}title`, title, 'body', 'label'), bar],
+      children: [...above, bar, ...current],
     }
   }
 
@@ -3478,7 +3533,11 @@ class Converter {
         return frameModifier(args)
 
       case 'background': {
-        const content = this.backgroundContent(args, modifier, `${id}bg`)
+        const painted = this.backgroundContent(args, modifier, `${id}bg`)
+        // `.background(.white.shadow(.drop(radius: 8)), in: .rect(cornerRadius: 12))`: the
+        // card's shape casts it, outside the shape's clip.
+        const cast = this.dropShadow(positional(args, 0))
+        const content: LayoutElement | null = painted && cast ? { kind: 'modified', id: `${id}bgcast`, modifier: cast, child: painted } : painted
         const hasView = args.some((arg) => (arg.label === null || arg.label === 'content') && asView(arg.value))
         // `.background(.red)` and `.background(Color.red)` are the ShapeStyle form, which
         // reaches into the safe area its view touches; a view given as the background,
@@ -3566,9 +3625,10 @@ class Converter {
         return { kind: 'clip', shape: 'rectangle', cornerRadius: 0 }
 
       case 'border': {
-        const color = resolveColorArg(args[0]?.value, this.scheme, this.styles.tint)
+        // Any ShapeStyle: `.border(LinearGradient(…), width: 2)` drew no border at all.
+        const paint = resolveStrokePaint(args[0]?.value, this.scheme, this.styles.tint)
         const width = numberArg(positional(args, 1)) ?? numberArg(labelled(args, 'width')) ?? 1
-        return color ? { kind: 'border', color, width } : null
+        return paint ? { kind: 'border', color: paint.color, ...(paint.fill ? { fill: paint.fill } : {}), width } : null
       }
 
       case 'shadow': {
@@ -3731,6 +3791,7 @@ class Converter {
       case 'buttonBorderShape':
       case 'contextMenu':
       case 'badge':
+      case 'gridColumnAlignment':
         // Recognised, and either read elsewhere or deliberately inert. Recorded as
         // applied rather than as a coverage gap, because the code *is* honoured -
         // just not by a wrapper around this view.
@@ -3996,6 +4057,12 @@ class Converter {
     }
   }
 
+  /** The drop shadow a ShapeStyle carries, as the `.shadow` modifier draws one, or null. */
+  private dropShadow(value: SwiftValue | undefined): LayoutModifier | null {
+    const shadow = paintShadow(value, this.scheme, this.styles.tint)
+    return shadow?.kind === 'drop' ? { kind: 'shadow', color: shadow.color, radius: shadow.radius, x: shadow.x, y: shadow.y } : null
+  }
+
   /** `.background(Color.red)`, `.background(.regularMaterial)`, `.background { … }`. */
   private backgroundContent(
     args: readonly ViewArg[],
@@ -4173,8 +4240,9 @@ function textOf(view: ViewValue): string {
   // `Text(date, style: .time)`. A Date reaching here as an unrecognised value drew an
   // empty string - a blank where the app shows a date, which is the failure mode this
   // whole pass exists to remove.
+  // `Text(date, format: .dateTime.day().month())` is written by the style it names.
   const date = asDate(first)
-  if (date) return dateText(date.epochSeconds, tokenName(labelled(view.args, 'style')))
+  if (date) return formatDateValue(first, tokenName(labelled(view.args, 'format')) ?? '') ?? dateText(date.epochSeconds, tokenName(labelled(view.args, 'style')))
 
   // `Text(total, format: .currency(code: "USD"))`. Dropping the format and describing
   // the number renders `1234.5` where the app shows `$1,234.50` - a plausible-looking
@@ -4495,6 +4563,13 @@ function titleAndIconLabel(view: ViewValue): ViewValue | null {
     action: null,
     span: view.span,
   }
+}
+
+/** The views a Slider draws at either end of its track. */
+const SLIDER_VALUE_LABELS = ['minimumValueLabel', 'maximumValueLabel']
+
+function hasSliderValueLabels(view: ViewValue): boolean {
+  return view.args.some((a) => SLIDER_VALUE_LABELS.includes(a.label ?? ''))
 }
 
 /**

@@ -323,12 +323,15 @@ describe('Preservation, scenarios and independent native fixtures', () => {
     expect(edit(picker, 'Picker', { kind: 'bind-state', name: 'second' })[0]!.text).toContain('selection: $second')
   })
   it('adds bounded animations without replacing developer-owned transition code', () => {
-    const source = files(app('Button("Change") { on.toggle() }', '@State var on = false'))
-    const next = edit(source, 'Button', { kind: 'transition', state: 'on', style: 'opacity', duration: 0.25 })
-    expect(next[0]!.text).toContain('.transition(.opacity).animation(.easeInOut(duration: 0.25), value: on)')
+    const source = files(app('VStack { if on { Text("Row") }; Button("Change") { on.toggle() } }', '@State var on = false'))
+    const next = edit(source, 'Text', { kind: 'transition', state: 'on', style: 'opacity', duration: 0.25 })
+    expect(next[0]!.text).toContain('Text("Row").transition(.opacity) }')
+    expect(next[0]!.text).toContain('.animation(.easeInOut(duration: 0.25), value: on)')
     expect(render(next).diagnostics.filter(d => d.severity === 'error')).toEqual([])
-    expect(plan(next, 'Button', { kind: 'transition', state: 'on', style: 'slide', duration: 0.5 })).toMatchObject({ ok: false })
-    expect(plan(source, 'Button', { kind: 'transition', state: 'on', style: 'slide', duration: 5 })).toMatchObject({ ok: false })
+    expect(plan(next, 'Text', { kind: 'transition', state: 'on', style: 'slide', duration: 0.5 })).toMatchObject({ ok: false })
+    expect(plan(source, 'Text', { kind: 'transition', state: 'on', style: 'slide', duration: 5 })).toMatchObject({ ok: false })
+    // The button is always there, so a transition on it would never play.
+    expect(plan(source, 'Button', { kind: 'transition', state: 'on', style: 'opacity', duration: 0.25 })).toMatchObject({ ok: false })
   })
   it('places conditional animation on the surviving container and preserves existing action comments', () => {
     const source = files(app('VStack { if on { Text("Row") }; Button("Change") { /* configured by developer */ } }', '@State var on = true'))

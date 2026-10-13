@@ -5,7 +5,7 @@ import { featureEdit } from './authoring-features'
 import { argumentLayerProblem, canvasDropProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Expr, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
-import { structuralEditProblem, type StructuralKind } from './structural-check'
+import { modifierArgumentProblem, structuralEditProblem, type StructuralKind } from './structural-check'
 import { applyPatches, type FeatureContext } from './authoring-context'
 import { pastedValues } from './authoring-clipboard'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
@@ -13,6 +13,7 @@ import { liveControl } from './authoring-behavior'
 import { TAPPABLE_WRAPPER, wrapperOf } from './authoring-structure'
 import { designControlRecipes, spreadRoomProblem, validateControlValue, viewCallChain } from './design-controls'
 import { Checker } from './checker'
+import { retagDuplicate } from './authoring-picker-tags'
 
 /** The operations that act on a view's whole statement - its place, its copies, whether it is there at all - as the structural check knows them. */
 const STRUCTURAL: Partial<Record<DesignEditRequest['operation']['kind'], StructuralKind>> = { delete: 'delete', move: 'move', moveTo: 'moveTo', insert: 'insert', paste: 'insert', hide: 'hide', show: 'show', 'layer-duplicate': 'duplicate', 'layer-wrap': 'wrap', 'layer-reparent': 'reparent', 'make-tappable': 'wrap' }
@@ -78,6 +79,8 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
       const adds = operation.kind === 'layer-wrap' ? `${wrapperOf(context, node, operation.layout)} { }` : operation.kind === 'make-tappable' ? TAPPABLE_WRAPPER : undefined
       const problem = kind && after !== undefined && structuralEditProblem({ file: file.id, before: file.text, after, kind, view: node.source, adds, toward, inside: kind === 'reparent', landed: result.offset })
       if (problem) return reject(problem)
+      // Checked as an exact copy, a Picker option's copy then takes a tag of its own.
+      if (operation.kind === 'layer-duplicate') return finish(retagDuplicate(context, node, result), { file: file.id, offset: result.offset })
       // Any other feature rewrites in its own way; what it must not leave behind is a view that cannot build.
       for (const next of kind ? [] : result.files) {
         const old = request.files.find(f => f.id === next.id)
@@ -207,6 +210,9 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     })
     if (problem) return reject(problem)
   }
+  // Parsing and resolving names says nothing of a padding or frame no overload takes, whichever writer wrote it.
+  const written = modifierArgumentProblem({ file: file.id, before: file.text, after: changed.text, declarations: ast.map(f => f.span.file === file.id ? next.sourceFile : f) })
+  if (written) return reject(written)
   const nextDiagnostics = Checker.check(ast.map(f => f.span.file === file.id ? next.sourceFile : f)).diagnostics
   // Existing unrelated semantic diagnostics can remain; new errors cannot be committed.
   const signature = (d: (typeof diagnostics)[number]) => JSON.stringify([d.code, d.message, d.span.file])
@@ -264,6 +270,11 @@ function finishDesignPlan(request: DesignEditRequest, nextFiles: readonly Source
   const broken = brokenWrite(request.files, nextFiles)
   if (broken) return broken
   const parsed = nextFiles.map(f => Parser.parse(f.text, f.id))
+  for (const next of nextFiles) {
+    const old = request.files.find(f => f.id === next.id)?.text ?? ''
+    const written = old !== next.text && modifierArgumentProblem({ file: next.id, before: old, after: next.text, declarations: parsed.map(p => p.sourceFile) })
+    if (written) return { ok: false, reason: written }
+  }
   const diagnostics = Checker.check(parsed.map(p => p.sourceFile)).diagnostics
   const before = Checker.check(request.files.map(f => Parser.parse(f.text, f.id).sourceFile)).diagnostics
   const signature = (d: (typeof diagnostics)[number]) => JSON.stringify([d.code, d.message, d.span.file])

@@ -98,6 +98,12 @@ export interface BehaviorSettings {
   readonly canMakeTappable?: boolean
   /** The Button's title is plain text, which a switch can change while it is on. */
   readonly titled?: boolean
+  /**
+   * Whether an appear animation can play on the view: it comes and goes by an `if` or a
+   * `switch` (which then needs a state to animate on), or as a row of a changing
+   * collection. Otherwise, why not.
+   */
+  readonly appear?: { readonly by: 'branch' | 'row' } | { readonly problem: string }
   readonly binding?: {
     readonly label: string
     readonly type: string

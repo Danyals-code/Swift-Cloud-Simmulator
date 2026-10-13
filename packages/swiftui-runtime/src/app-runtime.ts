@@ -291,6 +291,7 @@ export class AppRuntime {
         state: this.ui,
         build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
+        styleBody: (style, protocol, configuration) => this.styleBody(style, protocol, configuration),
         animation: this.animation,
       }, undefined, this.previewPrefix ? { prefix: this.previewPrefix } : undefined)
       this.handlers = ui.handlers
@@ -344,6 +345,7 @@ export class AppRuntime {
         includeViewHierarchy: basePage,
         build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
+        styleBody: (style, protocol, configuration) => this.styleBody(style, protocol, configuration),
         animation: this.animation,
       },
       tab,
@@ -394,6 +396,7 @@ export class AppRuntime {
       // yet rather than one that is broken: it is left out, not drawn as stopped.
       build: (closure, args, environment) => this.runBuilder(closure, args, environment),
       styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
+      styleBody: (style, protocol, configuration) => this.styleBody(style, protocol, configuration),
       animation: null,
     }, tab, rootId, limit)
   }
@@ -923,9 +926,6 @@ export class AppRuntime {
     label: readonly ViewValue[],
     isPressed: boolean,
   ): readonly ViewValue[] | null {
-    if (style.kind !== 'struct') return null
-    if (!this.interpreter.conformsTo(style.typeName, 'ButtonStyle')) return null
-
     const content =
       label.length === 1
         ? asSwiftValue(label[0]!)
@@ -938,7 +938,15 @@ export class AppRuntime {
             span: { file: '', start: 0, end: 0 },
           })
 
-    const configuration = opaque(BUTTON_CONFIGURATION_TYPE, { label: content, isPressed })
+    return this.styleBody(style, 'ButtonStyle', opaque(BUTTON_CONFIGURATION_TYPE, { label: content, isPressed }))
+  }
+
+  /**
+   * Runs a custom style's `makeBody(configuration:)`, for a style of a project type that
+   * conforms to `protocol`: `ButtonStyle`, `ToggleStyle` or `LabelStyle`.
+   */
+  private styleBody(style: SwiftValue, protocol: string, configuration: SwiftValue): readonly ViewValue[] | null {
+    if (style.kind !== 'struct' || !this.interpreter.conformsTo(style.typeName, protocol)) return null
     const produced = this.callMethod(style, 'makeBody', [configuration])
     if (produced === undefined) return null
 

@@ -59,7 +59,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'modifier',
   // layout
   'frame', 'padding', 'offset', 'position', 'fixedSize', 'clipShape', 'clipped',
-  'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame',
+  'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame', 'gridColumnAlignment',
   'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill',
   // appearance
   'background', 'overlay', 'border', 'shadow', 'cornerRadius', 'opacity', 'mask',
@@ -218,13 +218,15 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'safeAreaPadding', 'gridCellColumns', 'coordinateSpace',
   // painting and effects
   'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
+  // Liquid Glass: the view draws without its glass
+  'glassEffect',
 
   // symbols and images
   'symbolRenderingMode', 'symbolVariant', 'symbolEffect', 'interpolation',
   // motion
   'matchedGeometryEffect', 'phaseAnimator', 'keyframeAnimator',
   // scrolling and lists
-  'refreshable', 'scrollDismissesKeyboard', 'scrollTargetBehavior', 'scrollPosition',
+  'refreshable', 'scrollDismissesKeyboard', 'scrollTargetBehavior', 'scrollPosition', 'scrollTransition',
   'scrollDisabled', 'listSectionSeparator',
   // presentation and chrome
   'navigationBarBackButtonHidden', 'statusBarHidden',
@@ -371,18 +373,21 @@ export const UIKIT_COLOR_NAMES: ReadonlySet<string> = new Set([
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */
 export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'String', 'Bool', 'Character',
+  'Int8', 'Int16', 'Int32', 'Int64', 'UInt', 'UInt8', 'UInt16', 'UInt32', 'UInt64',
   'Array', 'Dictionary', 'Set', 'Optional', 'Range', 'ClosedRange',
   'Color', 'UIColor', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
-  'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle',
+  'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle', 'Glass',
   'RectangleCornerRadii',
-  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet',
+  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet', 'Scanner', 'CharacterSet',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
   'ViewModifier', 'ButtonStyle', 'LabelStyle', 'ToggleStyle', 'Configuration',
   'Content', 'Body',
   'ButtonStyleConfiguration', 'Layout', 'PreferenceKey', 'Animatable',
+  // A custom `Layout`'s own signatures. Its methods never run, and the checker says so where it is used.
+  'ProposedViewSize', 'Subviews', 'LayoutSubviews', 'LayoutSubview', 'ViewDimensions',
   'Codable', 'Decodable', 'Encodable', 'CaseIterable', 'CustomStringConvertible',
   'LayoutDirection', 'UserInterfaceSizeClass', 'Locale',
   'View', 'App', 'Scene', 'Identifiable', 'Equatable', 'Hashable', 'Comparable', 'Codable',

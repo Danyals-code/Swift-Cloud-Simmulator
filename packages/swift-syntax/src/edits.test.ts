@@ -426,3 +426,48 @@ struct ContentView: View {
     expect(parses(moved.text)).toBe(true)
   })
 })
+
+/**
+ * Views written in a `#if` block. Only one clause is compiled, so a view's clause is
+ * part of what it means: an edit that slips a view into or out of one changes which
+ * builds show it, though the file still parses.
+ */
+describe('views in a #if block', () => {
+  const DEBUG_LAST = `import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Text("Title")
+            #if DEBUG
+            Text("Debug only")
+            #endif
+        }
+    }
+}
+`
+
+  it('adds a container\'s new last child after the block, not inside its clause', () => {
+    const added = insertView(DEBUG_LAST, FILE, offsetOf(DEBUG_LAST, 'VStack'), 'Spacer()')!
+    expect(added.text).toContain(`            #if DEBUG
+            Text("Debug only")
+            #endif
+            Spacer()
+        }`)
+    expect(added.text.slice(added.offset)).toMatch(/^Spacer\(\)/)
+    expect(parses(added.text)).toBe(true)
+  })
+
+  it('adds beside a view in a clause inside that clause', () => {
+    const added = insertView(DEBUG_LAST, FILE, offsetOf(DEBUG_LAST, 'Text("Debug only")'), 'Text("Also debug")')!
+    expect(added.text).toContain(`            Text("Debug only")
+            Text("Also debug")
+            #endif`)
+  })
+
+  it('refuses to swap a view across the edge of a clause', () => {
+    let reason = ''
+    expect(moveView(DEBUG_LAST, FILE, offsetOf(DEBUG_LAST, 'Text("Title")'), 1, (why) => { reason = why })).toBeNull()
+    expect(reason).toBe('A #if block decides which builds show one of these views, so they can’t swap places. Move them in Code.')
+  })
+})

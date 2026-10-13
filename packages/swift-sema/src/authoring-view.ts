@@ -11,8 +11,19 @@ const INTRODUCED: Readonly<Record<string, number>> = {
   Gauge: 16, ContentUnavailableView: 17,
 }
 
+/**
+ * Real SwiftUI the preview draws as a labelled box, and the iOS that introduced each.
+ * The box is laid out like the view, so its frame, padding and background are drawn
+ * and stay editable; only the view itself is kept as written.
+ */
+const PLACEHOLDERS: Readonly<Record<string, number>> = {
+  Chart: 16, Map: 14, PhotosPicker: 16, VideoPlayer: 14, Table: 16, MultiDatePicker: 16, OutlineGroup: 14,
+  EditButton: 13, PasteButton: 16, RenameButton: 16, AnyShape: 16, MeshGradient: 18, SceneView: 13, EquatableView: 13,
+}
+
 export function authoringViewMinimum(node: AuthoringNode): number | undefined {
   if (node.properties.some(property => property.name === 'Source')) return undefined
+  if (node.kind === 'opaque') return node.undrawn === 'unsupported' ? PLACEHOLDERS[node.name] : undefined
   if (node.kind === 'component') return node.definitionId ? 13 : undefined
   if (!['view', 'collection'].includes(node.kind) || !SUPPORTED_VIEWS.has(node.name) || NON_VIEWS.has(node.name) || GESTURE_TYPES.has(node.name)) return undefined
   const capability = AUTHORING_CAPABILITIES.find(entry => entry.kind === 'view' && entry.name === node.name)

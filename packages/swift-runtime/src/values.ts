@@ -143,6 +143,11 @@ export interface ClosureValue {
   /** Captured lexical environment. Typed as unknown to avoid a circular import. */
   readonly env: unknown
   readonly span: SourceSpan
+  /**
+   * Passed where Swift says `@ViewBuilder`, so a call builds every view its body lists,
+   * as a view's `body` does, rather than returning the one expression of a closure.
+   */
+  readonly builder?: true
 }
 
 export interface FunctionValue {

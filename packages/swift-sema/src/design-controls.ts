@@ -1,4 +1,4 @@
-import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, authoringCapability, deploymentVersion, stackLayoutOf, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, authoringCapability, deploymentVersion, stackLayoutOf, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type Expr, type Stmt } from '@studio/swift-syntax'
@@ -22,7 +22,7 @@ export function viewCallChain(expr: Expr): { base: CallExpr; modifiers: CallExpr
   return { base: expr, modifiers: [] }
 }
 export const AUTHORING_COLORS = ['primary', 'secondary', 'black', 'white', 'gray', 'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown', 'clear']
-export const AUTHORING_FONTS = ['largeTitle', 'title', 'title2', 'title3', 'headline', 'subheadline', 'body', 'callout', 'footnote', 'caption', 'caption2']
+export const AUTHORING_FONTS = TEXT_STYLES
 export const SYSTEM_COLORS = ['systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground', 'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground']
 /** Only the color's opacity wrapper; the returned spans leave its expression intact. */
 export function colorOpacityParts(value: Expr): { color: Expr; opacity: Expr } | undefined {
@@ -75,6 +75,67 @@ function merged(text: string, patches: readonly Patch[]): Patch {
   let out = '', at = start
   for (const patch of sorted) { out += text.slice(at, patch.start) + patch.text; at = patch.end }
   return { start, end, text: out + text.slice(at, end) }
+}
+
+/**
+ * An SF Symbol name is lowercase words joined by dots. One the preview has no drawing for
+ * still builds: the panel and the checker say the preview shows a placeholder for it,
+ * because the full list of Apple's names is not something the studio can ship.
+ */
+function symbolNameProblem(value: string): string | null {
+  if (/^[a-z0-9]+(?:\.[a-z0-9]+)*$/.test(value)) return null
+  return value.trim() ? 'An SF Symbol name is lowercase words joined by dots, such as star.fill.' : 'Enter a symbol name, such as star.fill.'
+}
+
+/** A Button's label as a frame is set on it: the label's own modifiers, and how to add one. */
+type ButtonLabel = { readonly modifiers: readonly CallExpr[]; readonly write: (modifier: string) => Patch }
+
+/**
+ * Where a Button is sized: its label. A frame outside the button sizes the room around a
+ * bordered style and leaves its capsule as it was (doc 18, Fix first 3); one on the label
+ * widens the capsule on every iOS version. A titled button is written in the label form
+ * to take it, its action and role kept as they are, and a label of several views gets
+ * the HStack they already sit in, so the frame has one view to size. Null for a label
+ * Design can't rewrite safely: one that declares values, takes parameters, or has a
+ * comment that would lose its place.
+ */
+function buttonLabel(base: CallExpr, text: string): ButtonLabel | null {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lineStart = (offset: number) => text.lastIndexOf('\n', offset - 1) + 1
+  const indentAt = (offset: number) => /^[ \t]*/.exec(text.slice(lineStart(offset)))![0]
+  const ownLine = (offset: number) => !text.slice(lineStart(offset), offset).trim()
+  const explicit = base.args.find(arg => arg.label === 'label' && arg.value.kind === 'closure')?.value
+  const closure = explicit?.kind === 'closure' ? explicit : base.args.some(arg => arg.label === 'action') ? base.trailingClosure : undefined
+  if (closure) {
+    const views = closure.body.statements
+    if (closure.params.length || !views.length || views.some(statement => statement.kind === 'declStmt')) return null
+    const only = views.length === 1 && views[0]!.kind === 'exprStmt' ? views[0]!.expression : undefined
+    const chain = only && viewCallChain(only)
+    if (only && chain) {
+      const lined = ownLine(only.span.start) && text.slice(only.span.end, closure.span.end).includes('\n')
+      return { modifiers: chain.modifiers, write: modifier => ({ start: only.span.end, end: only.span.end, text: lined ? `${eol}${indentAt(only.span.start)}    ${modifier}` : modifier }) }
+    }
+    const start = views[0]!.span.start, last = views.at(-1)!
+    const end = last.kind === 'exprStmt' ? last.expression.span.end : last.span.end
+    const indent = indentAt(start), body = text.slice(start, end)
+    return { modifiers: [], write: modifier => ({ start, end, text: ownLine(start)
+      ? `HStack {${eol}${indent}    ${body.split('\n').map((line, index) => index && line.trim() ? '    ' + line : line).join('\n')}${eol}${indent}}${eol}${indent}${modifier}`
+      : `HStack { ${body} }${modifier}` }) }
+  }
+  const [title, ...rest] = base.args
+  const action = base.trailingClosure, symbol = rest.find(arg => arg.label === 'systemImage')
+  if (!title || title.label !== null || rest.some(arg => !['systemImage', 'role', 'action'].includes(arg.label ?? '')) || !action === !rest.some(arg => arg.label === 'action')) return null
+  // A comment between the title and the action would have nowhere to go.
+  if (/\/\/|\/\*/.test(text.slice(base.callee.span.end, action?.span.start ?? base.span.end))) return null
+  const slice = (span: SourceSpan) => text.slice(span.start, span.end)
+  const kept = rest.filter(arg => arg !== symbol).map(arg => slice(arg.span))
+  const view = symbol ? `Label(${slice(title.value.span)}, systemImage: ${slice(symbol.value.span)})` : `Text(${slice(title.value.span)})`
+  const indent = indentAt(base.span.start), lined = ownLine(base.span.start)
+  return { modifiers: [], write: modifier => {
+    const label = lined ? `{${eol}${indent}    ${view}${eol}${indent}        ${modifier}${eol}${indent}}` : `{ ${view}${modifier} }`
+    const head = slice(base.callee.span) + (kept.length ? `(${kept.join(', ')})` : '')
+    return { start: base.span.start, end: base.span.end, text: action ? `${head} ${slice(action.span)} label: ${label}` : `${head} ${label}` }
+  } }
 }
 
 /**
@@ -159,7 +220,7 @@ export function spreadRoomProblem(nodes: readonly AuthoringNode[], node: Authori
 
 /** Recipes are reconstructed from syntax on every request; the UI never supplies offsets. */
 export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET): ControlRecipe[] {
-  if (!['view', 'collection', 'component'].includes(node.kind) || node.name === 'WindowGroup') return []
+  if (!['view', 'collection', 'component'].includes(node.kind) && node.undrawn !== 'unsupported' || node.name === 'WindowGroup') return []
   const chain = viewCallChain(expr)
   if (!chain || node.properties.some(p => p.name === 'Source')) return []
   const { base, modifiers } = chain
@@ -200,9 +261,9 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       add(id, label, kind, current, v => ({ ...value.span, text: prefix === 'Color.' && SYSTEM_COLORS.includes(v) ? `Color(.${v})` : prefix + v }), options, undefined, undefined, undefined, value.span)
     }
   }
-  function append(id: string, label: string, kind: DesignControl['kind'], value: string, format: (v: string) => string, options?: readonly string[], min?: number, max?: number): void {
+  function append(id: string, label: string, kind: DesignControl['kind'], value: string, format: (v: string) => string, options?: readonly string[], min?: number, max?: number, description = 'Adds a local modifier at the end of this view’s modifier chain. Earlier styles keep their order.'): void {
     if (modifiers.some(m => !authoringCapability(modName(m), 'modifier', m.args.map(a => a.label)))) return
-    add(id, label, kind, value, v => ({ start: expr.span.end, end: expr.span.end, text: format(v) }), options, min, max, 'Adds a local modifier at the end of this view’s modifier chain. Earlier styles keep their order.')
+    add(id, label, kind, value, v => ({ start: expr.span.end, end: expr.span.end, text: format(v) }), options, min, max, description)
   }
   function argument(id: string, label: string, name: string | null, kind: DesignControl['kind'], value: string, options?: readonly string[], min?: number): void {
     const found = base.args.find(a => a.label === name)
@@ -259,10 +320,19 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   if (node.kind !== 'component' && constructorEditable && node.name === 'Spacer') argument('spacer:minLength', 'Minimum spacing', 'minLength', 'number', '', undefined, 0)
   if (node.kind !== 'component' && constructorEditable && node.name === 'Text' && base.args[0]) replace('content', 'Text', base.args[0].value, 'text')
   if (node.kind !== 'component' && constructorEditable && ['SecureField', 'Menu', 'DisclosureGroup', 'ContentUnavailableView', 'ProgressView', 'TextField', 'Toggle', 'Button', 'NavigationLink', 'Label', 'LabeledContent', 'Link', 'GroupBox', 'Section', 'Stepper', 'Picker', 'DatePicker', 'ColorPicker'].includes(node.name) && base.args[0]?.label === null) replace('title', 'Title', base.args[0].value, 'text')
-  if (node.kind !== 'component' && constructorEditable && node.name === 'Image' && base.args[0]) replace('image', base.args[0].label === 'systemName' ? 'System symbol' : 'Asset name', base.args[0].value, 'text')
+  /** A symbol's name, checked as it is typed: the field takes only a well-formed one. */
+  function symbolName(value: Expr): void {
+    const first = recipes.length
+    replace('image', 'System symbol', value, 'text')
+    for (let index = first; index < recipes.length; index++) recipes[index] = { ...recipes[index]!, problem: symbolNameProblem }
+  }
+  if (node.kind !== 'component' && constructorEditable && node.name === 'Image' && base.args[0]) {
+    if (base.args[0].label === 'systemName') symbolName(base.args[0].value)
+    else replace('image', 'Asset name', base.args[0].value, 'text')
+  }
   if (node.kind !== 'component' && constructorEditable) {
     const symbol = node.name === 'Label' && base.args.find(arg => arg.label === 'systemImage')
-    if (symbol) replace('image', 'System symbol', symbol.value, 'text')
+    if (symbol) symbolName(symbol.value)
     const value = base.args.find(arg => arg.label === 'value')
     if (value && node.name === 'LabeledContent') replace('value', 'Value', value.value, 'text')
     if (value && node.name === 'ProgressView') {
@@ -271,7 +341,7 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       replace('progress', 'Progress', value.value, 'number', undefined, 0, Number.isFinite(maximum) ? maximum : undefined)
     }
   }
-  const corners = cornersOf(modifiers, text)
+  const corners = cornersOf(chain, text)
   for (const [i, m] of modifiers.entries()) {
     const border = borderOf(m, corners, text)
     if (border) {
@@ -351,13 +421,21 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   if (!has('opacity')) append('add:opacity', 'Opacity', 'number', '', v => `.opacity(${Number(v)})`, undefined, 0, 1)
   if (!has('accessibilityLabel')) append('add:accessibilityLabel', 'Accessibility label', 'text', '', v => `.accessibilityLabel(${swiftString(v)})`)
   if (targetVersion >= 14 && !has('accessibilityIdentifier')) append('add:accessibilityIdentifier', 'Accessibility identifier', 'text', '', v => `.accessibilityIdentifier(${swiftString(v)})`)
+  // A Button is sized by its label; a frame already written around one stays where it is.
+  const button = node.kind === 'view' && node.name === 'Button'
+  const label = button ? buttonLabel(base, text) : null
   for (const axis of ['width', 'height'] as const) {
     const max = AXIS_LABELS[axis][1]
     const axisTitle = axis === 'width' ? 'Width' : 'Height'
-    const frames = axisFrames(modifiers, axis)
+    const own = axisFrames(modifiers, axis)
+    const inner = label && !own.length ? label : null
+    const frames = inner ? axisFrames(inner.modifiers, axis) : own
     if (!frames.length) {
       append('add:' + axis, 'Fixed ' + axis, 'number', '', v => `.frame(${axis}: ${Number(v)})`, undefined, 0)
-      append('fill:' + axis, axisTitle + ' sizing', 'select', 'Hug', v => v === 'Fill' ? `.frame(${max}: .infinity)` : `.frame(${axis}: 100)`, ['Hug', 'Fill', 'Fixed'])
+      const sized = (v: string) => v === 'Fill' ? `.frame(${max}: .infinity)` : `.frame(${axis}: 100)`
+      if (inner) add('fill:' + axis, axisTitle + ' sizing', 'select', 'Hug', v => inner.write(sized(v)), ['Hug', 'Fill', 'Fixed'], undefined, undefined, 'Hug fits the button to its label. Fill and Fixed size the label, so the button’s shape grows with it.')
+      else if (button && !own.length) append('fill:' + axis, axisTitle + ' sizing', 'select', 'Hug', sized, ['Hug', 'Fill', 'Fixed'], undefined, undefined, 'Sizes the room around this button. A bordered button’s shape keeps fitting its label; to grow the shape, size the label in Code.')
+      else append('fill:' + axis, axisTitle + ' sizing', 'select', 'Hug', sized, ['Hug', 'Fill', 'Fixed'])
     } else if (frames.length === 1) {
       if (!authoringCapability('frame', 'modifier', frames[0]!.args.map(a => a.label))) continue
       const frame = frames[0]!
@@ -366,7 +444,8 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
       const arg = args[0]!
       const alignment = frame.args.find(a => a.label === 'alignment')
       if (alignment && !recipes.some(r => r.control.source.start === alignment.value.span.start && r.control.source.end === alignment.value.span.end)) continue
-      const current = arg.label === max && raw(arg.value.span) === '.infinity' ? 'Fill' : arg.label === axis && /^[+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw(arg.value.span)) ? 'Fixed' : undefined
+      // A max of any size fills: `.frame(maxWidth: 260)` takes all the room up to 260, as Figma's Fill with a max width does.
+      const current = arg.label === max ? 'Fill' : arg.label === axis && /^[+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw(arg.value.span)) ? 'Fixed' : undefined
       if (!current) continue
       const from = frame.callee.base.span.end
       const suffix = text.slice(from, frame.span.end)

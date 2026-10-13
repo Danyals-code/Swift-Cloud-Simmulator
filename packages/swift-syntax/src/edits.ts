@@ -1,3 +1,4 @@
+import { DIRECTIVE_LINE } from './conditional-compilation'
 import type { DropPosition, FileId } from '@studio/shared'
 import { Parser } from './parser'
 import { walk, type Block, type CallExpr, type Expr, type Node, type Stmt } from './ast'
@@ -168,6 +169,9 @@ function extentOf(text: string, stmt: Stmt): { start: number; end: number } {
   return { start: stmt.span.start, end: afterOffMarkers(text, end) }
 }
 
+/** A `#if`, `#elseif`, `#else` or `#endif` line: the edge of a clause that only some builds compile. */
+const CLAUSE_EDGE = DIRECTIVE_LINE
+
 function lineStartAt(text: string, offset: number): number {
   return text.lastIndexOf('\n', Math.max(0, offset - 1)) + 1
 }
@@ -278,6 +282,7 @@ export function moveView(text: string, file: FileId, offset: number, direction: 
   const first = extentOf(text, a)
   const second = extentOf(text, b)
   if (first.end > second.start) return refused(refuse, 'These views share their code, so they can’t swap places. Change them in Code.')
+  if (CLAUSE_EDGE.test(text.slice(first.end, second.start))) return refused(refuse, 'A #if block decides which builds show one of these views, so they can’t swap places. Move them in Code.')
 
   const firstText = text.slice(first.start, first.end)
   const secondText = text.slice(second.start, second.end)
@@ -313,7 +318,10 @@ export function insertView(text: string, file: FileId, offset: number, snippet: 
   if (list) return insertListRow(text, list, snippet, refuse)
 
   const content = options.beside ? null : contentBlockOf(found.stmt)
-  const reference = content?.statements[content.statements.length - 1]
+  const last = content?.statements[content.statements.length - 1]
+  // A last child written in a `#if` clause has the block's `#endif` after it, and a view
+  // put straight after it would be in that clause too, shown only by the builds it names.
+  const reference = last && !CLAUSE_EDGE.test(text.slice(extentOf(text, last).end, content!.span.end - 1)) ? last : undefined
 
   if (content && reference) {
     // Last child of the container.

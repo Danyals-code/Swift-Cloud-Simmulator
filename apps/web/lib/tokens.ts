@@ -38,11 +38,28 @@ export const SYSTEM_COLOR_SWATCHES: Readonly<Record<string, string>> = {
   systemGray2: '#AEAEB2', systemGray3: '#C7C7CC', systemGray4: '#D1D1D6', systemGray5: '#E5E5EA', systemGray6: '#F2F2F7',
 }
 
+const HEX_COLOR = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i
+
+/** A hex colour as the colour fields take it: #RRGGBB, or #RRGGBBAA with its alpha. */
+export function isHexColor(text: string): boolean {
+  return HEX_COLOR.test(text)
+}
+
+/** The value for an `<input type="color">`, which has no alpha: the draft's colour, or `fallback`. */
+export function pickerColor(draft: string, fallback: string): string {
+  return isHexColor(draft) ? draft.slice(0, 7) : fallback
+}
+
+/** A colour chosen in the picker, keeping the alpha the draft already had. */
+export function withPickedColor(draft: string, picked: string): string {
+  return picked.toUpperCase() + (isHexColor(draft) ? draft.slice(7) : '')
+}
+
 /** A CSS colour for a swatch: a token's light value, a hex, or a system colour name. */
 export function swatchFor(value: string | undefined, dark = false, token?: SharedStyle): string {
   const chosen = token?.form === 'token' && token.light ? (dark && token.dark ? token.dark : token.light) : value
   if (!chosen) return 'transparent'
-  if (/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(chosen)) return chosen
+  if (isHexColor(chosen)) return chosen
   return SYSTEM_COLOR_SWATCHES[chosen] ?? 'transparent'
 }
 

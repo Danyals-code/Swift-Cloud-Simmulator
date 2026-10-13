@@ -51,7 +51,36 @@ export function screenTitleControl(snapshot: AuthoringSnapshot | undefined, defi
   for (const node of snapshot.nodes) {
     if (node.owner !== definition.name || node.kind === 'definition') continue
     const control = node.controls?.find(c => c.id.startsWith('modifier:') && c.label.startsWith('navigationTitle'))
-    if (control) return { node, control }
+    // Only a navigation stack gives a title a bar to show in: a sheet starts without one.
+    if (control) return { node, control: barred(snapshot.nodes, node) !== false ? control : { ...control, disabledReason: 'This screen has no navigation bar here, so its title does not show. Put its content in a NavigationStack in Code to give it one.' } }
+  }
+  return undefined
+}
+
+/** Whether a screen's first view certainly has no navigation bar over it, so a title would not show. */
+export function lacksNavigationBar(snapshot: AuthoringSnapshot | undefined, root: AuthoringNode | undefined): boolean {
+  return !!snapshot && !!root && barred(snapshot.nodes, root) === false
+}
+
+const NAVIGATION_CONTAINERS: ReadonlySet<string> = new Set(['NavigationStack', 'NavigationView', 'NavigationSplitView'])
+
+/**
+ * Whether a view is shown on a navigation stack, which is what gives a title its bar: a
+ * stack around it on its own screen, or its screen being inside one wherever it is shown.
+ * False only where that is certain: in a sheet or a cover, which starts without one, or
+ * on the screen the app starts on. Undefined where the model can't follow how a screen
+ * is shown, as through a helper property, and on a `#Preview`, which the app never shows.
+ */
+function barred(nodes: readonly AuthoringNode[], node: AuthoringNode, seen: readonly string[] = []): boolean | undefined {
+  for (let at = nodes.find(n => n.id === node.parentId); at; at = nodes.find(n => n.id === at!.parentId)) {
+    if (NAVIGATION_CONTAINERS.has(at.name)) return true
+    if (at.kind === 'branch' && (at.name === 'Sheet' || at.name === 'Full screen cover')) return false
+    if (at.name === 'WindowGroup') return false
+    if (at.kind === 'definition') {
+      if (at.name === '#Preview' || seen.includes(at.id)) return undefined
+      const said = nodes.filter(site => site.definitionId === at!.id).map(site => barred(nodes, site, [...seen, at!.id])).filter(inside => inside !== undefined)
+      return said.length ? said.every(Boolean) : undefined
+    }
   }
   return undefined
 }

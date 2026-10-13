@@ -55,8 +55,8 @@ limits, not claims about what native Swift supports.
 
 | Area | What currently works | What is missing or approximate |
 | --- | --- | --- |
-| Basic layouts | Stacks, spacers, grids, padding, ordinary frames, scrolling | Custom `Layout`/`AnyLayout`; grid spans; ideal frame dimensions; coordinate-space APIs; full layout parity |
-| Collections | Plain/range `ForEach`, common lists/forms/sections, identity, deletion | `List($items)` / `ForEach($items) { $item in ... }`; lazy virtualization; full move/swipe behavior; large datasets |
+| Basic layouts | Stacks, spacers, grids, padding, ordinary frames (ideal sizes included), scrolling | Custom `Layout`/`AnyLayout`; grid spans; coordinate-space APIs; full layout parity |
+| Collections | Plain/range `ForEach`, `List($items)`, common lists/forms/sections, identity, deletion | `ForEach($items) { $item in ... }`; lazy virtualization; full move/swipe behavior; large datasets |
 | Navigation | Destination/value `NavigationLink`, `navigationDestination(for:)`, ordinary tabs | `NavigationStack(path:)` synchronization; `navigationDestination(isPresented:)` and `item:`; full split-view behavior; interactive back gesture |
 | Text entry | String-backed `TextField`, masked `SecureField`, multiline `TextEditor` | `TextField(value:format:/formatter:)`; multiline `axis:` fields; native focus/keyboard behavior; advanced editor selection APIs |
 | State and models | Common `@State`, `@Binding`, observable objects, declaration initializers | `_count = State(initialValue:)`; `@Bindable`; custom property-wrapper semantics; full Observation behavior |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { structuralEditProblem } from './structural-check'
+import { modifierArgumentProblem, structuralEditProblem } from './structural-check'
 
 /**
  * The last check before a structural change is kept (C11).
@@ -128,5 +128,71 @@ describe('changes that do something else', () => {
     const before = screen('            Text("A")', helper)
     const after = screen('            Text("A")\n            Text("New")', helper)
     expect(structuralEditProblem({ file: FILE, before, after, kind: 'insert', view: span(before, 'VStack'), adds: 'Text("New")', landed: at(after, 'Text("New")') })).toBeNull()
+  })
+})
+
+/**
+ * Padding and frame arguments a writer put together (doc 18, Fix first 1). The planner's
+ * other checks parse and resolve names; neither knows `.padding(.space16, 24)` has no
+ * overload, so these are the shapes Xcode refused, next to the ones it builds.
+ */
+describe('padding, frame and border arguments a change writes', () => {
+  const TOKENS = '\nenum Layout {\n    static let padding: CGFloat = 30\n    static let sides: Edge.Set = .horizontal\n}\n\nextension CGFloat {\n    static let space16: CGFloat = 16\n}\n\nextension Edge.Set {\n    static let sides: Edge.Set = [.leading, .trailing]\n}\n'
+  const view = (modifiers: string) => screen(`            Text("A")${modifiers}`) + TOKENS
+  const problem = (before: string, after: string) => modifierArgumentProblem({ file: FILE, before: view(before), after: view(after) })
+  const refusal = (call: string) => `This change would write \`${call}\`, which would stop the app from building. Nothing was changed.`
+
+  it.each([
+    ['.padding(Layout.padding)', '.padding(Layout.padding, 30)'],
+    ['.padding(.space16)', '.padding(.space16, 24)'],
+    ['.padding(16)', '.padding(16, .top)'],
+    ['.padding(16)', '.padding(16, 8)'],
+    ['.padding(16)', '.padding(top: 16)'],
+    ['.padding(.space16)', '.padding(CGFloat.space16, 24)'],
+    ['.frame(width: 100)', '.frame(width: 100, maxWidth: .infinity)'],
+    ['.frame(width: 100)', '.frame(height: 40, width: 100)'],
+    ['.frame(width: 100)', '.frame(100)'],
+    ['.border(.red)', '.border(.red, 2, .blue)'],
+    ['.border(.red)', '.border(width: 2)'],
+    ['.border(.red)', '.border(.red, lineWidth: 2)'],
+  ])('refuses %s written as %s', (before, after) => {
+    expect(problem(before, after)).toBe(refusal(after))
+  })
+
+  it.each([
+    ['', '.padding()'],
+    ['.padding(.horizontal)', '.padding(.horizontal, 12)'],
+    ['.padding(.horizontal)', '.padding(.horizontal, .space16)'],
+    ['.padding(Layout.sides)', '.padding(Layout.sides, 8)'],
+    ['.padding(.sides)', '.padding(.sides, 8)'],
+    ['.padding(.horizontal)', '.padding(.horizontal, CGFloat.space16)'],
+    ['.padding([.top, .leading])', '.padding([.top, .leading], 8)'],
+    ['.padding(Layout.padding)', '.padding(30)'],
+    ['', '.padding(EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4))'],
+    ['', '.frame(maxWidth: .infinity, alignment: .leading)'],
+    ['', '.frame(minWidth: 10, maxWidth: 200, minHeight: 44)'],
+    ['', '.frame(width: 100, height: 40, alignment: .top)'],
+    ['', '.border(.red)'],
+    ['', '.border(Color.gray, width: 2)'],
+  ])('accepts %s written as %s', (before, after) => {
+    expect(problem(before, after)).toBeNull()
+  })
+
+  it('leaves a call the change did not write to the person who wrote it', () => {
+    expect(problem('.padding(.space16, 24)', '.padding(.space16, 24)\n                .bold()')).toBeNull()
+  })
+
+  it('accepts a project\'s own overload of the name, as Swift does', () => {
+    const own = '\nextension View {\n    func frame(size: CGFloat) -> some View { frame(width: size, height: size) }\n    func padding(_ edges: Edge.Set, _ length: CGFloat, extra: Bool = false) -> some View { padding(edges, length) }\n    func border(_ color: Color, radius: CGFloat) -> some View { overlay(RoundedRectangle(cornerRadius: radius).stroke(color)) }\n}\n'
+    const withOwn = (before: string, after: string) => modifierArgumentProblem({ file: FILE, before: view(before) + own, after: view(after) + own })
+    expect(withOwn('', '.frame(size: 40)')).toBeNull()
+    expect(withOwn('', '.padding(.top, 8, extra: true)')).toBeNull()
+    expect(withOwn('', '.border(.red, radius: 8)')).toBeNull()
+    expect(withOwn('', '.frame(side: 40)')).toBe(refusal('.frame(side: 40)'))
+  })
+
+  it('leaves alone padding and frame calls that are not the view modifiers', () => {
+    expect(problem('', '\n                .onAppear { _ = "a".padding(toLength: 3, withPad: " ", startingAt: 0) }')).toBeNull()
+    expect(problem('', '\n                .background(GeometryReader { proxy in Color.clear.onAppear { _ = proxy.frame(in: .global) } })')).toBeNull()
   })
 })

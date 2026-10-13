@@ -1,5 +1,4 @@
 import type { AuthoringNode, AuthoringOperation, AuthoringSnapshot, PreviewColorAsset, SourceFile } from '@studio/shared'
-import { isSyntaxError } from '@studio/swift-syntax'
 import { collectionFor, addCollectionField, bindField, convertCollection, emptyState, enclosingCollection, recordsSwift, validateRecords } from './authoring-collections'
 import { componentRecipes, componentSettings, extractComponent, insertComponent, applyComponentVariant, exposeComponentInput } from './authoring-components'
 import { behaviorSettings, configureAction, configureBinding, configureTransition, stateInputs } from './authoring-behavior'
@@ -15,19 +14,22 @@ import { customizeCard } from './authoring-card'
 import { makeTappable, structureEdit } from './authoring-structure'
 
 export function enrichAuthoring(ctx: FeatureContext, snapshot: AuthoringSnapshot): AuthoringSnapshot {
-  // A file that does not parse keeps its own views plain - its design cannot be changed anyway - and
-  // the rest keep their settings. An error in a file that parses still turns them off everywhere.
-  const unparsed = new Set(snapshot.diagnostics.filter(isSyntaxError).map(d => d.span.file))
-  if (snapshot.diagnostics.some(d => d.severity === 'error' && !unparsed.has(d.span.file))) return snapshot
-  // These have only ever read projects that parse; with part of one missing, a surprise costs a view its settings, not the snapshot.
-  const read = <T>(settings: () => T): T | undefined => { if (!unparsed.size) return settings(); try { return settings() } catch { return undefined } }
-  const nodes = snapshot.nodes.map(node => unparsed.has(node.source.file) ? node : read(() => enrich(node)) ?? node)
-  const inputs = snapshot.nodes.filter(n => n.kind === 'definition' && !unparsed.has(n.source.file)).flatMap(n => read(() => stateInputs(ctx, n)) ?? [])
-  return { ...snapshot, nodes, inputs, styles: read(() => sharedStyles(ctx)), navigation: read(() => appNavigation(ctx)), accent: read(() => appAccent(ctx)) }
+  // A file with an error keeps its own views plain, and what is declared in it gives no settings: a
+  // component defined there, records written there, a token there. Every other file keeps its settings,
+  // as the planner keeps its edits - a typo in a service no screen uses is no reason to lock the design.
+  const broken = new Set(snapshot.diagnostics.filter(d => d.severity === 'error').map(d => d.span.file))
+  // These have only ever read projects with no errors; with part of one wrong, a surprise costs a view its settings, not the snapshot.
+  const read = <T>(settings: () => T): T | undefined => { if (!broken.size) return settings(); try { return settings() } catch { return undefined } }
+  const fileOf = new Map(snapshot.nodes.map(node => [node.id, node.source.file]))
+  const sound = <T>(setting: T | undefined, file: (setting: T) => string | undefined): T | undefined => setting && !broken.has(file(setting) ?? '') ? setting : undefined
+  const nodes = snapshot.nodes.map(node => broken.has(node.source.file) ? node : read(() => enrich(node)) ?? node)
+  const inputs = snapshot.nodes.filter(n => n.kind === 'definition' && !broken.has(n.source.file)).flatMap(n => read(() => stateInputs(ctx, n)) ?? [])
+  const styles = read(() => sharedStyles(ctx))?.filter(style => !broken.has(style.source.file))
+  return { ...snapshot, nodes, inputs, styles, navigation: read(() => appNavigation(ctx)), accent: read(() => appAccent(ctx)) }
 
   function enrich(node: AuthoringNode): AuthoringNode {
-    const collection = collectionFor(ctx, node), component = componentSettings(ctx, node)
-    const parent = enclosingCollection(ctx, node)
+    const collection = sound(collectionFor(ctx, node), c => c.source.file), component = sound(componentSettings(ctx, node), c => fileOf.get(c.definitionId))
+    const parent = sound(enclosingCollection(ctx, node), c => c.source.file)
     // A copy of a component can be made tappable as any view can (D16).
     const behavior = ['view', 'collection', 'component'].includes(node.kind) && node.name !== 'WindowGroup' ? behaviorSettings(ctx, node) : undefined
     return { ...node, navigation: navigationSettings(ctx, node), styles: styleProperties(ctx, node), collection, component, behavior, fields: parent && ['Text', 'Image', 'Toggle', 'TextField', 'SecureField'].includes(node.name) ? parent.fields.filter(f => node.name === 'Text' || node.name === 'Image' && f.type === 'String' && !f.optional || ['Toggle', 'TextField', 'SecureField'].includes(node.name) && parent.mutable && f.mutable && !f.optional && f.type === (node.name === 'Toggle' ? 'Bool' : 'String')).map(f => f.name) : undefined, controls: (component ? [...component.controls, ...(node.controls ?? [])] : node.controls)?.map(c => constrainNumericControl(c, node.name, behavior?.binding?.type)) }

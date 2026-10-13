@@ -1,5 +1,6 @@
 import type { Diagnostic, DiagnosticCode, FileId, SourceSpan } from '@studio/shared'
 import { Lexer } from './lexer'
+import { compiledTokens } from './conditional-compilation'
 import {
   ASSIGNMENT_OPERATORS,
   DECLARATION_KEYWORDS,
@@ -129,6 +130,13 @@ export function isSyntaxError(diagnostic: Diagnostic): boolean {
 }
 
 export class Parser {
+  /**
+   * The further names of `let a, b: T` or `var x = 1, y = 2`. One declaration is
+   * returned per call, so the rest wait here until the loop that collects
+   * declarations or statements takes them.
+   */
+  private pendingBindings: Decl[] = []
+
   private index = 0
   private readonly diagnostics: Diagnostic[] = []
   /** Guards against a recovery loop that fails to consume anything. */
@@ -141,11 +149,12 @@ export class Parser {
 
   static parse(text: string, file: FileId): ParseResult {
     const lexed = Lexer.tokenize(text, file)
-    const parser = new Parser(lexed.tokens, file)
+    const compiled = compiledTokens(lexed.tokens)
+    const parser = new Parser(compiled.tokens, file)
     const sourceFile = parser.parseSourceFile()
     return {
       sourceFile,
-      diagnostics: [...lexed.diagnostics, ...parser.diagnostics],
+      diagnostics: [...lexed.diagnostics, ...compiled.diagnostics, ...parser.diagnostics],
     }
   }
 
@@ -242,7 +251,7 @@ export class Parser {
       if (this.atEnd) break
       const before = this.index
       const decl = this.parseDeclaration()
-      if (decl) declarations.push(decl)
+      if (decl) declarations.push(decl, ...this.takePendingBindings())
       // Absolute guarantee of progress: without this a recovery path that consumes
       // nothing becomes an infinite loop, which in a Web Worker means a hung preview.
       if (this.index === before) this.advance()
@@ -453,7 +462,7 @@ export class Parser {
           } while (this.match(','))
         } else {
           const member = this.parseDeclaration()
-          if (member) members.push(member)
+          if (member) members.push(member, ...this.takePendingBindings())
         }
 
         if (this.index === before) this.advance()
@@ -569,7 +578,7 @@ export class Parser {
           if (this.match('=')) this.parseType()
         } else {
           const member = this.parseDeclaration()
-          if (member) members.push(member)
+          if (member) members.push(member, ...this.takePendingBindings())
         }
 
         if (this.index === before) this.advance()
@@ -706,7 +715,7 @@ export class Parser {
         if (this.check('}') || this.atEnd) break
         const before = this.index
         const member = this.parseDeclaration()
-        if (member) members.push(member)
+        if (member) members.push(member, ...this.takePendingBindings())
         if (this.index === before) this.advance()
       }
       this.expect('}', `to close the ${keyword} body`)
@@ -910,6 +919,13 @@ export class Parser {
     return params
   }
 
+  /** The declarations `parseVar` set aside after the first name of a list. */
+  private takePendingBindings(): Decl[] {
+    const taken = this.pendingBindings
+    this.pendingBindings = []
+    return taken
+  }
+
   private parseVar(attributes: Attribute[], modifiers: Modifier[]): Decl {
     const start = this.advance() // 'var' | 'let'
     const isLet = start.text === 'let'
@@ -941,6 +957,29 @@ export class Parser {
     let setter: PropertySetter | null = null
     let observers: PropertyObservers | null = null
     let requirement: 'get' | 'get set' | null = null
+
+    // `let a, r, g, b: UInt64` and `var x = 1, y = 2`: one keyword, several names.
+    // A name with neither a type nor a value takes the type written after it.
+    if (!destructured && this.check(',')) {
+      const bindings: { name: string; nameSpan: SourceSpan; typeAnnotation: TypeRef | null; initializer: Expr | null; start: Token }[] = [{ name, nameSpan, typeAnnotation, initializer, start }]
+      while (this.match(',')) {
+        const bindingStart = this.current
+        const next = this.expectIdentifier('a variable name')
+        const type = this.match(':') ? this.parseType() : null
+        const value = this.match('=') ? this.parseExpression(true) : null
+        bindings.push({ name: next.name, nameSpan: next.span, typeAnnotation: type, initializer: value, start: bindingStart })
+      }
+      for (let index = bindings.length - 2; index >= 0; index--) {
+        const binding = bindings[index]!
+        if (!binding.typeAnnotation && !binding.initializer) binding.typeAnnotation = bindings[index + 1]!.typeAnnotation
+      }
+      const declare = (binding: typeof bindings[number], span: SourceSpan): Decl => ({
+        kind: 'varDecl', span, attributes, modifiers, isLet, name: binding.name, nameSpan: binding.nameSpan, typeAnnotation: binding.typeAnnotation,
+        setter: null, observers: null, destructured: null, initializer: binding.initializer, accessor: null, requirement: null,
+      })
+      this.pendingBindings.push(...bindings.slice(1).map(binding => declare(binding, this.spanFrom(binding.start))))
+      return declare(bindings[0]!, this.spanFrom(start))
+    }
 
     if (this.check('{') && (!initializer || !this.current.newlineBefore)) {
       requirement = initializer ? null : this.tryParseAccessorRequirement()
@@ -1193,12 +1232,17 @@ export class Parser {
       this.skipSemicolons()
       if (this.check('}') || this.atEnd) break
       const before = this.index
-      statements.push(this.parseStatement())
+      statements.push(this.parseStatement(), ...this.pendingStatements())
       if (this.index === before) this.advance()
     }
 
     this.expect('}', 'to close a block')
     return { kind: 'block', span: this.spanFrom(start), statements }
+  }
+
+  /** Further names of a `let a, b` statement, each as a statement of its own. */
+  private pendingStatements(): Stmt[] {
+    return this.takePendingBindings().map(declaration => ({ kind: 'declStmt', span: declaration.span, declaration }))
   }
 
   private parseStatement(): Stmt {
@@ -1441,7 +1485,7 @@ export class Parser {
         // can neither consume nor recover from returns an error node without moving,
         // and a loop that does not check for that never ends.
         const before = this.index
-        statements.push(this.parseStatement())
+        statements.push(this.parseStatement(), ...this.pendingStatements())
         if (this.index === before) this.advance()
       }
 
@@ -2373,7 +2417,7 @@ export class Parser {
       this.skipSemicolons()
       if (this.check('}') || this.atEnd) break
       const before = this.index
-      statements.push(this.parseStatement())
+      statements.push(this.parseStatement(), ...this.pendingStatements())
       if (this.index === before) this.advance()
     }
     this.expect('}', 'to close a closure')

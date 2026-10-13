@@ -122,6 +122,23 @@ describe('declarations', () => {
   })
 })
 
+describe('declarations with several names', () => {
+  const vars = (source: string) => {
+    const decls: Decl[] = []
+    walk(parseClean(source), (node: Node) => { if (node.kind === 'varDecl') decls.push(node) })
+    return decls.flatMap(decl => decl.kind === 'varDecl' ? [{ name: decl.name, type: decl.typeAnnotation?.kind === 'namedType' ? decl.typeAnnotation.name : null, value: decl.initializer !== null, isLet: decl.isLet }] : [])
+  }
+
+  it('gives every name the type written after the last one', () => {
+    expect(vars('func f() { let a, r, g, b: UInt64 }')).toEqual(['a', 'r', 'g', 'b'].map(name => ({ name, type: 'UInt64', value: false, isLet: true })))
+  })
+
+  it('keeps each name its own initialiser, in members and in statements', () => {
+    expect(vars('struct S { var x = 1, y = 2 }')).toEqual([{ name: 'x', type: null, value: true, isLet: false }, { name: 'y', type: null, value: true, isLet: false }])
+    expect(vars('func f() { var red: Double = 0, green: Int }')).toEqual([{ name: 'red', type: 'Double', value: true, isLet: false }, { name: 'green', type: 'Int', value: false, isLet: false }])
+  })
+})
+
 describe('unsupported constructs are named, not mangled', () => {
   it.each([
     ['associatedtype T', 'associatedtype'],
@@ -677,5 +694,176 @@ describe('a switch case name may be a keyword', () => {
       }
     `)
     expect(sourceFile.declarations.length).toBe(1)
+  })
+})
+
+/**
+ * `#if`, read as an iOS Debug build in the simulator reads it.
+ *
+ * Swift compiles one clause of each block and ignores the rest, so the tree holds
+ * that clause in place of the whole block. A designer's `#if DEBUG` inside a view
+ * used to be three syntax errors: a blank preview, and every edit in the file refused.
+ */
+describe('conditional compilation', () => {
+  const debugBody = `
+    struct ContentView: View {
+        var body: some View {
+            VStack {
+                #if DEBUG
+                Text("debug")
+                #else
+                Text("release")
+                #endif
+                Text("after")
+            }
+        }
+    }
+  `
+
+  function texts(file: SourceFileNode): string[] {
+    const found: string[] = []
+    walk(file, (node: Node) => {
+      if (node.kind === 'stringLiteral') found.push(node.segments.map((s) => (s.kind === 'text' ? s.value : '')).join(''))
+    })
+    return found
+  }
+
+  it('keeps the Debug clause of a block inside a view builder', () => {
+    expect(texts(parseClean(debugBody))).toEqual(['debug', 'after'])
+  })
+
+  it('keeps each kept view at its own place in the source', () => {
+    const file = parseClean(debugBody)
+    const spans: string[] = []
+    walk(file, (node: Node) => {
+      if (node.kind === 'call' && node.callee.kind === 'identifier' && node.callee.name === 'Text') spans.push(debugBody.slice(node.span.start, node.span.end))
+    })
+    expect(spans).toEqual(['Text("debug")', 'Text("after")'])
+  })
+
+  it.each([
+    ['os(iOS)', 'yes'],
+    ['os(macOS)', 'no'],
+    ['!DEBUG', 'no'],
+    ['RELEASE', 'no'],
+    ['canImport(UIKit)', 'yes'],
+    ['canImport(SwiftUI) && os(iOS)', 'yes'],
+    ['canImport(AppKit)', 'no'],
+    ['targetEnvironment(simulator)', 'yes'],
+    ['targetEnvironment(macCatalyst) || os(watchOS)', 'no'],
+    ['swift(>=5.9)', 'yes'],
+    ['compiler(<5.0)', 'no'],
+    ['(os(iOS) || os(visionOS)) && !targetEnvironment(macCatalyst)', 'yes'],
+  ])('reads #if %s as an iOS Debug simulator build does', (condition, expected) => {
+    const file = parseClean(`
+      func answer() -> String {
+          #if ${condition}
+          return "yes"
+          #else
+          return "no"
+          #endif
+      }
+    `)
+    expect(texts(file)).toEqual([expected])
+  })
+
+  it('takes the first #elseif that holds', () => {
+    const file = parseClean(`
+      func platform() -> String {
+          #if os(macOS)
+          return "mac"
+          #elseif os(iOS)
+          return "phone"
+          #elseif DEBUG
+          return "debug"
+          #else
+          return "other"
+          #endif
+      }
+    `)
+    expect(texts(file)).toEqual(['phone'])
+  })
+
+  it('reads blocks among a type\'s members and at the top of a file', () => {
+    const file = parseClean(`
+      #if DEBUG
+      let mode = "debug"
+      #else
+      let mode = "release"
+      #endif
+      struct Settings {
+          #if os(macOS)
+          var width = 800
+          #else
+          var width = 390
+          #endif
+          var height = 844
+      }
+    `)
+    expect(kindsOf(file)).toEqual(['varDecl', 'structDecl'])
+    expect(texts(file)).toEqual(['debug'])
+    const settings = structNamed(file, 'Settings')
+    expect(settings.members.map((m) => m.kind === 'varDecl' && m.name)).toEqual(['width', 'height'])
+    const width = settings.members[0]!
+    expect(width.kind === 'varDecl' && width.initializer?.kind).toBe('integerLiteral')
+    expect(width.kind === 'varDecl' && width.initializer?.kind === 'integerLiteral' && width.initializer.value).toBe(390)
+  })
+
+  it('applies the modifiers written in a kept clause of a modifier chain', () => {
+    const file = parseClean(`
+      struct V: View {
+          var body: some View {
+              Text("x")
+                  #if os(iOS)
+                  .padding()
+                  #else
+                  .frame(width: 10)
+                  #endif
+                  .bold()
+          }
+      }
+    `)
+    const members: string[] = []
+    walk(file, (node: Node) => {
+      if (node.kind === 'memberAccess') members.push(node.member)
+    })
+    expect(members).toEqual(['bold', 'padding'])
+  })
+
+  it('nests, and skips a nested block inside a clause that is not compiled', () => {
+    const file = parseClean(`
+      func f() -> [String] {
+          var out: [String] = []
+          #if os(macOS)
+          #if DEBUG
+          out.append("mac debug")
+          #endif
+          #else
+          #if DEBUG
+          out.append("ios debug")
+          #else
+          out.append("ios release")
+          #endif
+          #endif
+          return out
+      }
+    `)
+    expect(texts(file)).toEqual(['ios debug'])
+  })
+
+  it('reports a block with no #endif instead of reading on silently', () => {
+    const errors = errorsIn(`
+      struct V: View {
+          var body: some View {
+              #if DEBUG
+              Text("a")
+          }
+      }
+    `)
+    expect(errors.map((e) => e.message)).toContain("Expected '#endif' to close this '#if'.")
+  })
+
+  it('reports an #endif with no #if', () => {
+    expect(errorsIn('let a = 1\n#endif\n').map((e) => e.message)).toEqual(["'#endif' has no '#if' to close."])
   })
 })

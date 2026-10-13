@@ -312,6 +312,10 @@ it('prepares independent Apple compiler fixtures from the actual writer output',
     ['HStack(spacing: 8) { Text("A"); Text("B") }', 'Spacing', 'auto', 'HStack'],
     ['VStack { Text("A"); Spacer(minLength: 20); Text("B") }', 'Spacing', 'auto', 'VStack'],
     ['HStack { Text("A"); Spacer(); Text("B") }.frame(maxWidth: .infinity)', 'Spacing', '12', 'HStack'],
+    // Materials as fills (doc 18, Fix first 4).
+    ['Text("A").background(Color.red)', 'Fill type', 'Material', 'Text'],
+    ['Text("A").background(.ultraThinMaterial)', 'Thickness', 'thick', 'Text'],
+    ['Text("A").background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))', 'Fill type', 'Solid', 'Text'],
   ] as const
   // Groups, written the way the layers sat (D3): the first two views of each stack.
   const groups = [

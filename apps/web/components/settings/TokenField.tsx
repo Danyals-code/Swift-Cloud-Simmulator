@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import type { AuthoringNode, DesignControl, ResourceOperation, SharedStyle, StyleProperty } from '@studio/shared'
 import { PropertyControl, type PropertyChange } from '../PropertyControl'
-import { SYSTEM_COLOR_SWATCHES, suggestedName, nameHint } from '../../lib/tokens'
+import { SYSTEM_COLOR_SWATCHES, isHexColor, nameHint, pickerColor, suggestedName, withPickedColor } from '../../lib/tokens'
 import styles from './Settings.module.css'
 
 const CUSTOM = '__custom'
@@ -104,9 +104,10 @@ function CustomColor({ label, value, disabled, onApply }: { label: string; value
   const [draft, setDraft] = useState(value)
   const [base, setBase] = useState(value)
   if (base !== value) { setBase(value); setDraft(value) }
-  const valid = /^#[0-9a-f]{6}$/i.test(draft)
+  // #RRGGBBAA keeps its alpha: the swatch picks the colour, and the field shows and sets both.
+  const valid = isHexColor(draft)
   return <div className={styles.row}><span>{label}</span><span className={styles.inline}>
-    <input type="color" aria-label="Custom color swatch" value={valid ? draft : '#000000'} disabled={disabled} onChange={event => setDraft(event.target.value.toUpperCase())} onBlur={() => { if (valid && draft.toUpperCase() !== value.toUpperCase()) onApply(draft) }} />
-    <input aria-label="Custom color hex" value={draft} disabled={disabled} spellCheck={false} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && valid) onApply(draft.toUpperCase()) }} onBlur={() => { if (valid && draft.toUpperCase() !== value.toUpperCase()) onApply(draft.toUpperCase()) }} />
+    <input type="color" aria-label="Custom color swatch" value={pickerColor(draft, '#000000')} disabled={disabled} onChange={event => setDraft(withPickedColor(draft, event.target.value))} onBlur={() => { if (valid && draft.toUpperCase() !== value.toUpperCase()) onApply(draft) }} />
+    <input aria-label="Custom color hex" placeholder="#RRGGBBAA" maxLength={9} value={draft} disabled={disabled} spellCheck={false} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && valid) onApply(draft.toUpperCase()) }} onBlur={() => { if (valid && draft.toUpperCase() !== value.toUpperCase()) onApply(draft.toUpperCase()) }} />
   </span></div>
 }

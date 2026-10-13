@@ -214,10 +214,12 @@ export interface CanvasDrawing {
 export interface CanvasContextPayload {
   /** Mutable: the closure draws into the context it was handed. */
   drawings: CanvasDrawing[]
+  /** The size the closure was handed, which a shading's points are measured in. */
+  readonly size?: { readonly width: number; readonly height: number }
 }
 
-export function newCanvasContext(): SwiftValue {
-  return opaque(CANVAS_CONTEXT_TYPE, { drawings: [] } satisfies CanvasContextPayload)
+export function newCanvasContext(size?: CanvasContextPayload['size']): SwiftValue {
+  return opaque(CANVAS_CONTEXT_TYPE, { drawings: [], ...(size ? { size } : {}) } satisfies CanvasContextPayload)
 }
 
 export function asCanvasContext(value: SwiftValue | undefined): CanvasContextPayload | null {

@@ -2321,7 +2321,7 @@ describe('pilot: a number in a title is written as iOS 27 writes it', () => {
     const written = drawn(`    let day = Date(timeIntervalSince1970: 0)
     return VStack {
       Text("Pi \\(pi, format: .number.precision(.fractionLength(1)))")
-      Text("Day \\(day, format: .dateTime.month().day())")
+      Text("Day \\(day, format: .iso8601)")
     }`)
 
     expect(written[0]).toBe('Pi 3.14159')

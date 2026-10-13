@@ -54,8 +54,9 @@ export function styleExpression(kind: StyleKind, value: string): string {
   throw new Error(kind === 'color' ? 'Choose a system color or an RGB/RGBA hex color.' : kind === 'font' ? 'Choose a supported text style.' : kind === 'shadow' ? 'Choose a shadow token.' : `${kind === 'radius' ? 'Corner radius' : 'Spacing'} must be a number from 0 to 1024.`)
 }
 function rgbExpression(hex: string): string {
-  const components = [1, 3, 5].map(i => String(Math.round(parseInt(hex.slice(i, i + 2), 16) / 255 * 1000) / 1000))
-  return `Color(red: ${components[0]}, green: ${components[1]}, blue: ${components[2]}${hex.length === 9 ? ', opacity: ' + String(parseInt(hex.slice(7, 9), 16) / 255) : ''})`
+  // Three places is finer than a channel's 1/255 step, so the hex reads back exactly.
+  const components = [1, 3, 5, 7].map(i => String(Math.round(parseInt(hex.slice(i, i + 2) || 'FF', 16) / 255 * 1000) / 1000))
+  return `Color(red: ${components[0]}, green: ${components[1]}, blue: ${components[2]}${components[3] === '1' ? '' : ', opacity: ' + components[3]})`
 }
 function minimumFor(kind: StyleKind, value: string): number {
   return kind === 'color' && ['mint', 'teal', 'cyan', 'indigo', 'brown'].includes(value) ? 15 : kind === 'font' && ['title2', 'title3', 'caption2'].includes(value) ? 14 : 13
@@ -73,8 +74,10 @@ function styleValue(text: string, type?: string): { kind: StyleKind; value: stri
   if (color && [...AUTHORING_COLORS, 'accentColor'].includes(color[1]!)) return { kind: 'color', value: color[1]! }
   const font = /^(?:SwiftUI\.)?Font\.([A-Za-z0-9]+)$/.exec(text)
   if (font && AUTHORING_FONTS.includes(font[1]!)) return { kind: 'font', value: font[1]! }
-  const rgb = /^(?:SwiftUI\.)?Color\(\s*red:\s*([\d.]+)\s*,\s*green:\s*([\d.]+)\s*,\s*blue:\s*([\d.]+)\s*\)$/.exec(text)
-  if (rgb && rgb.slice(1).every(v => Number(v) >= 0 && Number(v) <= 1)) return { kind: 'color', value: '#' + rgb.slice(1).map(v => Math.round(Number(v) * 255).toString(16).padStart(2, '0')).join('') }
+  const rgb = /^(?:SwiftUI\.)?Color\(\s*red:\s*([\d.]+)\s*,\s*green:\s*([\d.]+)\s*,\s*blue:\s*([\d.]+)\s*(?:,\s*opacity:\s*([\d.]+)\s*)?\)$/.exec(text)
+  // An opacity is the hex's alpha, kept only when it is not opaque.
+  const channels = rgb?.slice(1).filter((v, i) => v !== undefined && !(i === 3 && Number(v) === 1))
+  if (channels?.every(v => v !== '' && Number(v) >= 0 && Number(v) <= 1)) return { kind: 'color', value: '#' + channels.map(v => Math.round(Number(v) * 255).toString(16).padStart(2, '0')).join('') }
   // Untyped integer constants cannot be passed to CGFloat parameters in native Swift.
   if (type && ['CGFloat', 'Double'].includes(type) && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text) && Number(text) <= 1024) return { kind: 'spacing', value: String(Number(text)) }
   return undefined

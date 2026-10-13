@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { LAYOUT_WORDS, stackLayoutOf, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type DesignValue, type PreviewInput, type PreviewScenario, type ResourceOperation, type SharedStyle, type SourceSpan, type StateInput } from '@studio/shared'
 import { canRename, screenRemovalRefusal, type DesignScreenNode, type DesignTree } from '../../lib/designTree'
 import type { ScreenCommand } from '../../lib/screens'
-import { screenOverrideModifier, screenRoot, screenTitleControl, scenarioKey, scenarioScreen } from '../../lib/screens'
+import { screenOverrideModifier, screenRoot, screenTitleControl, scenarioKey, scenarioScreen, lacksNavigationBar } from '../../lib/screens'
 import { PropertyControl } from '../PropertyControl'
 import { TokenField, valueFields } from './TokenField'
 import { Icon } from '../ui/Icon'
@@ -76,7 +76,9 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
       {screen.shared && <p className={styles.note}>Its view draws other screens too, so it is named by its title.</p>}
       {canRename(screen) && <div className={styles.row}><label htmlFor="screen-name">Name</label><input id="screen-name" aria-label="Screen name" maxLength={100} value={name} disabled={busy} onChange={event => setName(event.target.value)} onBlur={() => { if (name.trim() && name !== screen.name) void run(onScreenCommand({ kind: 'rename', view: screen.view!, name })) }} onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); if (event.key === 'Escape') setName(screen.name) }} /></div>}
       {title ? <PropertyControl key={`${title.node.id}:${title.control.value}`} control={title.control} label="Title" onChange={(id, value) => onNodeChange(title.node, id, value)} />
-        : root && <p className={styles.note}>No title bar title. Add a Title modifier to the screen’s first view to show one.</p>}
+        : root && <p className={styles.note}>{lacksNavigationBar(snapshot, root)
+          ? 'This screen has no navigation bar here, so a title would not show.'
+          : 'No title bar title. Add a Title modifier to the screen’s first view to show one.'}</p>}
       {background && root && <TokenField field={background} label="Background" tokens={tokens} busy={busy} onChange={(id, value) => onNodeChange(root, id, value)} onCommand={resource(root)} />}
       {root && <button type="button" className={styles.button} onClick={() => onSelect(root)}>Edit {rootLabel(root)} settings</button>}
     </section>

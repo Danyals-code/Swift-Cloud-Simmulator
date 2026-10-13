@@ -1,5 +1,5 @@
 import { DEFAULT_DEPLOYMENT_TARGET, authoringCapability, deploymentVersion, type AuthoringModifier, type AuthoringNode, type ModifierCatalogEntry, type ModifierCategory, type ModifierOperation, type SourceSpan } from '@studio/shared'
-import { Parser, afterOffMarkers, hasHumanComment, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr } from '@studio/swift-syntax'
+import { Parser, afterOffMarkers, hasHumanComment, offMarker, offMarkerText, offMarkersIn, withoutOffMarkers, type CallExpr, type Expr, DIRECTIVE_LINE } from '@studio/swift-syntax'
 import { roundedCorners, viewCallChain } from './design-controls'
 import { NEW_BORDER, borderOf, borderSource, cornersOf, type Corners } from './authoring-border'
 import { authoringViewMinimum } from './authoring-view'
@@ -219,23 +219,32 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
   const version = deploymentVersion(deploymentTarget)
   const minimumViewVersion = authoringViewMinimum(node)
   const editable = allowEdits && minimumViewVersion !== undefined && Number.isFinite(version) && version >= minimumViewVersion
+  // Why nothing in the chain can change, named as what is in the way: a diagnostic only when there is one.
+  const locked = !allowEdits ? 'Resolve source diagnostics or edit this view in Code.'
+    : minimumViewVersion !== undefined && version < minimumViewVersion ? `${node.name} needs iOS ${minimumViewVersion} or newer. Change the deployment target to edit it here.`
+      : 'This view is kept exactly as written, so its modifiers are changed in Code.'
   // Only comments a person wrote pin the chain; the studio's own off markers never do.
   const commented = hasHumanComment(text.slice(parsed.base.span.end, parsed.end), node.source.file) || /^[^\S\r\n]*(?:\/\/|\/\*)/.test(withoutOffMarkers(text.slice(parsed.end)))
-  const corners = cornersOf(viewCallChain(expr)?.modifiers ?? [], text)
+  // A `#if` line goes with the modifier after it, so moving, removing or switching off any of
+  // them would change which builds apply which, or leave a clause unclosed.
+  const conditional = DIRECTIVE_LINE.test(text.slice(parsed.base.span.end, parsed.end))
+  const pinned = commented || conditional
+  const pinnedReason = conditional ? 'A #if in this modifier chain decides which builds apply these modifiers. Change their order in Code.' : undefined
+  const corners = cornersOf(viewCallChain(expr), text)
   // A shape with no fill or stroke left is filled in with the foreground colour, as SwiftUI draws it (D8).
   const paints = segments.filter(segment => segment.call && ['fill', 'stroke', 'strokeBorder'].includes(nameOf(segment.call)))
   const onlyStroke = (segment: Segment) => parsed.base.callee.kind === 'identifier' && SHAPES.has(parsed.base.callee.name) && paints.length === 1 && paints[0] === segment && nameOf(segment.call!) !== 'fill'
   // A border is written as an overlay, but is a setting like any other (D8).
   const borders = segments.map(segment => segment.call && borderOf(segment.call, corners, text))
-  const movable = segments.map((segment, index) => editable && !commented && (segment.off !== undefined || !!segment.call && (structural(segment.call) || !!borders[index])))
+  const movable = segments.map((segment, index) => editable && !pinned && (segment.off !== undefined || !!segment.call && (structural(segment.call) || !!borders[index])))
   let callIndex = -1
   const modifiers: AuthoringModifier[] = segments.map((segment, index) => {
     const source: SourceSpan = { file: node.source.file, start: segment.start, end: segment.end }
-    const capabilitiesOf = (reason?: string) => ({ remove: movable[index]!, duplicate: movable[index]!, moveUp: movable[index]! && index > 0 && movable[index - 1]!, moveDown: movable[index]! && index < segments.length - 1 && movable[index + 1]!, toggle: editable && !commented, reason })
+    const capabilitiesOf = (reason?: string) => ({ remove: movable[index]!, duplicate: movable[index]!, moveUp: movable[index]! && index > 0 && movable[index - 1]!, moveDown: movable[index]! && index < segments.length - 1 && movable[index + 1]!, toggle: editable && !pinned, reason })
     if (segment.off !== undefined) {
       const off = offCall(segment.off)
       const name = !off ? 'unknown' : borderOf(off.call, corners, off.text) ? 'border' : nameOf(off.call)
-      return { id: JSON.stringify([source.file, source.start, source.end, 'off', segment.off]), name, label: friendly(name), category: category(name), summary: 'Off', expression: segment.off.trim(), source, controls: [], propertyIds: [], enabled: false, capabilities: { edit: false, ...capabilitiesOf(!editable ? 'Resolve source diagnostics or edit this view in Code.' : commented ? 'Comments in this modifier chain need to stay attached. Reorder in Code.' : undefined) } }
+      return { id: JSON.stringify([source.file, source.start, source.end, 'off', segment.off]), name, label: friendly(name), category: category(name), summary: 'Off', expression: segment.off.trim(), source, controls: [], propertyIds: [], enabled: false, capabilities: { edit: false, ...capabilitiesOf(!editable ? locked : pinnedReason ?? (commented ? 'Comments in this modifier chain need to stay attached. Reorder in Code.' : undefined)) } }
     }
     const call = segment.call!
     callIndex++
@@ -248,7 +257,7 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
       return call.args.some(a => [axis, `min${upper}`, `max${upper}`].includes(a.label ?? ''))
     })
     const known = !!authoringCapability(name, 'modifier', call.args.map(a => a.label))
-    const reason = !editable ? 'Resolve source diagnostics or edit this view in Code.' : commented ? 'Comments in this modifier chain need to stay attached. Change values here or reorder in Code.' : !movable[index] ? category(name) === 'behavior' ? 'This behavior stays in its source position.' : !known ? 'This modifier is preserved; its structure is edited in Code.' : 'This modifier has type or content requirements. Change its structure in Code.' : undefined
+    const reason = !editable ? locked : pinnedReason ?? (commented ? 'Comments in this modifier chain need to stay attached. Change values here or reorder in Code.' : !movable[index] ? category(name) === 'behavior' ? 'This behavior stays in its source position.' : !known ? 'This modifier is preserved; its structure is edited in Code.' : 'This modifier has type or content requirements. Change its structure in Code.' : undefined)
     const propertyIds = node.properties.filter(p => p.source && p.source.start >= start && p.source.end <= call.span.end).map(p => p.id)
     const linked = node.properties.find(p => p.source && p.source.start >= start && p.source.end <= call.span.end && p.valueKind === 'token')
     const summary = controls.filter(c => !c.id.startsWith('fill:')).map(c => c.value || 'Default').join(' · ') || (linked ? linked.expression : category(name) === 'custom' ? 'Custom modifier' : call.trailingClosure ? category(name) === 'behavior' ? 'Configured action' : 'View content' : call.args.length ? 'Linked or advanced value' : 'On')
@@ -262,7 +271,7 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, dep
   return { modifiers, modifierCatalog: CATALOG.filter(entry => !entry.only || entry.only.includes(node.name)).map(entry => {
     const minimum = Math.max(entry.minimumIOS ?? 13, Number.parseFloat(authoringCapability(entry.name, 'modifier', [null])?.minimumIOS ?? '13'))
     const supported = available && version >= minimum
-    return { name: entry.name, label: entry.label, category: entry.category, description: entry.description, ...(entry.hidden ? { hidden: true } : {}), available: supported, reason: supported ? undefined : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : node.name === 'Tab' && node.kind !== 'component' ? 'Select the view inside this tab to style its content.' : 'This view cannot be changed until its source is resolved.' }
+    return { name: entry.name, label: entry.label, category: entry.category, description: entry.description, ...(entry.hidden ? { hidden: true } : {}), available: supported, reason: supported ? undefined : unknown ? 'This view has a custom modifier. Add styling in Code until its return type is known.' : available ? `Needs iOS ${minimum} or newer. Change the deployment target to use it.` : node.name === 'Tab' && node.kind !== 'component' ? 'Select the view inside this tab to style its content.' : !allowEdits ? 'This view cannot be changed until its source is resolved.' : locked }
   }) }
 }
 
@@ -291,7 +300,7 @@ export function editModifier(node: AuthoringNode, expr: Expr, text: string, oper
     const at = index < segments.length ? segments[index]!.start : parsed.end
     const lastPrefix = slices.at(-1)?.match(/^\s*/)?.[0] ?? ''
     const prefix = /\r?\n/.test(lastPrefix) ? lastPrefix : ''
-    const corners = cornersOf(viewCallChain(expr)?.modifiers ?? [], text)
+    const corners = cornersOf(viewCallChain(expr), text)
     return text.slice(0, at) + prefix + entry.source({ target: deploymentVersion(deploymentTarget), shadowToken: options.shadowToken, corners, indent: prefix ? prefix.replace(/^\r?\n/, '') : null }) + text.slice(at)
   }
   const index = model.modifiers.findIndex(m => m.id === operation.modifier)

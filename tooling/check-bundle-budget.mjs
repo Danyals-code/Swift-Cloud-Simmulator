@@ -102,8 +102,15 @@ const KB = 1024
  *              folder in Hierarchy, image drops onto the canvas and the
  *              zoomable image preview; the prompt and streaming work runs on
  *              the server and adds nothing here. Raised to 750 KB by decision.
+ *   Design flexibility roadmap - 748.9 KB actual after the Apple-style design
+ *              system and its usability fixes (745.0 on main, +3.9). The
+ *              roadmap in docs/18-DESIGN-FLEXIBILITY-AUDIT.md adds Design
+ *              controls and writers in waves 2 to 5 (layout and fills, real-code
+ *              reach, system UI, states and motion). Raised once for those
+ *              waves, by decision, rather than PR by PR; each PR still reports
+ *              its own growth, and the largest-chunk gate is unchanged.
  */
-const BUDGET_KB = 750
+const BUDGET_KB = 800
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.

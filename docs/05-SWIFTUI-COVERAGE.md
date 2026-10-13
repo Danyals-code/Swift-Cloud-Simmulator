@@ -53,10 +53,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | ✅ | 3 | interpolation, with `specifier:` and `format:` inside it too, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling. A title written as a literal, a `Text`'s or a `Button`'s, a `Label`'s, a `Section`'s or a navigation title, writes a number put into it as iOS 27 does: 2,000, and a Double with six decimals, 3.500000; a `String`, `verbatim:` and a project's own views keep Swift's text, 2000 |
+| `Text` | ✅ | 3 | interpolation, with `specifier:` and `format:` inside it too, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`), and `Date.FormatStyle` field chains (`.dateTime.weekday(.wide).hour().minute()`) written in en-US order as Foundation writes them. `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling. A title written as a literal, a `Text`'s or a `Button`'s, a `Label`'s, a `Section`'s or a navigation title, writes a number put into it as iOS 27 does: 2,000, and a Double with six decimals, 3.500000; a `String`, `verbatim:` and a project's own views keep Swift's text, 2000 |
 | `Label` | ✅ | 6 | icon then title. In a list row, as iOS 27 draws it, the icon is a quarter larger than the row's text, tinted and centred in a 24-pt column, with the title at 72 on the phone |
 | `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations, and shapes drawn here after the iOS 27 simulator's glyph where no Ionicon is close (a cup and saucer, a flame, a waveform, a closed book, outlined charts); unknown names use an explicit fallback, not Apple artwork |
-| `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
+| `Image("asset")` | ✅ | - | PNG and JPEG images in the project's Assets, with light and dark variants, resized, scaled and clipped as iOS does. SVG, PDF and HEIC are rejected when added, rather than drawn wrongly |
 | `GroupBox` | ✅ | - | a titled card: the label above, the contents on a rounded secondary panel |
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
 | `ContentUnavailableView` | ✅ | 13 | the empty state as iOS 27 draws it: a 40-pt symbol in the secondary colour, a bold title3 title, and a title3 description in centred lines 32 pt in from each side, centred with 30 pt of space under it. `.search` is the stock spelling and carries its own text. The form built from content closures, and its actions, are not drawn |
@@ -131,7 +131,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Modifier | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `.frame(width:height:alignment:)` | ✅ | 3 | |
-| `.frame(minWidth:idealWidth:maxWidth:...)` | 🟡 | 3 | min/max constraints and maximum infinity; ideal dimensions are not applied |
+| `.frame(minWidth:idealWidth:maxWidth:...)` | ✅ | 3 | min/max constraints, maximum infinity, and ideal dimensions where a parent asks for them (`fixedSize`) |
 | `.padding` | ✅ | 3 | all edge-set forms |
 | `.fixedSize` | ✅ | 6 | both the whole-view and per-axis forms |
 | `.layoutPriority` | ✅ | 7 | the highest-priority group takes its space first |
@@ -190,14 +190,14 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 | a `.continuous` corner is iOS 27's curve, measured in the simulator: it reaches 1.53 times the radius along each edge, squeezed into half a side that is too short. Grouped list and form cards and alerts use it. A sheet's clip and the glass outlines are still circular |
 | `UnevenRoundedRectangle`, `.rect(topLeadingRadius:…)`, `RectangleCornerRadii` | 🟡 | - | drawn, clipped and filled with the largest radius on every corner; the checker says so where uneven corners are written (D7a) |
 | `Path` (custom) | ✅ | 7 | lines, curves, arcs, rects and ellipses, serialised to SVG |
-| `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`'s `lineWidth`; a `StrokeStyle` dash pattern is not drawn |
+| `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`: line width, dash pattern, cap and join |
 | `.trim` | 🟡 | 7 | on shapes and paths, from where iOS 27 starts each shape (3 o'clock; a rectangle's top-left corner) and in an arc's own direction. On the built-in shapes, strokes only: a trimmed fill, or a trimmed stroke with a dash pattern, is drawn whole and warns. A path's arcs are trimmed whether filled or stroked |
 | `.strokeBorder` | ✅ | 7 | drawn inside the shape's edge; a Design panel Border is one (D8) |
 | Custom `Shape` conformances | ✅ | 11 | `struct Arc: Shape { func path(in rect: CGRect) -> Path }`, with `.fill`, `.stroke` and `.trim` on the path it draws and `.frame` on the box it draws into. The rect is the one the shape was laid out in last pass, converging on the next - the same answer `GeometryReader` gives to the same ordering problem. `rect.minX` and the rest are derived, as `CGRect` derives them |
 | `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 | and the iOS 27 system, label, fill and grey colours by any of their names (`Color(.systemGray6)`, `Color(uiColor:)`, `UIColor.systemGray6`), the hierarchy down to `.quinary` including a colour's own (`.blue.secondary`), and `hue:saturation:brightness:`; measured in the iOS 27 simulator. An unknown name warns |
 | Dark-mode colour resolution | ✅ | 4 |
 | `LinearGradient` | ✅ | 6 | named unit points |
-| `RadialGradient` / `AngularGradient` | 🟡 | 6 | accepted and drawn as a linear gradient |
+| `RadialGradient` / `AngularGradient` | ✅ | 6 | drawn as radial and conic gradients |
 | `Material` (`.ultraThinMaterial` etc.) | ✅ | 7 | a real translucent, blurred panel via `backdrop-filter`. `Material.ultraThin` and `.ultraThinMaterial` are the same value |
 | `ShapeStyle` conformances generally | 🟡 | 6 | colours, tokens and gradients anywhere a style is taken |
 
@@ -235,7 +235,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Animation` - `.delay`, `.speed`, `.repeatForever`, `.repeatCount` | 🟡 | - | a delay and a speed change the one animation the preview plays; a repeat plays once, and says so where it is written |
 | Curves: `.linear .easeIn .easeOut .easeInOut` | ✅ | 6 | CSS timing functions |
 | `.spring` (and `.bouncy` / `.snappy` / `.smooth`) | 🟡 | 6 | an overshooting bezier, not a real solver |
-| `.transition` (`.slide .opacity .scale .move`) | 🟡 | 7 | entry only; exit would need the renderer to outlive the view |
+| `.transition` (`.slide .opacity .scale .move`) | 🟡 | 7 | in and out: the renderer keeps a bounded, inert copy of a leaving view for its exit. `.asymmetric` plays its insertion both ways, with a warning |
 | `AnyTransition.combined(with:)` | 🟡 | - | constructs, and the preview draws the first of the two: the render tree carries one transition kind per node |
 | `matchedGeometryEffect` | ✗ | - | FLIP across an identity change needs the renderer to own both trees at once - the same shadow copy exit transitions need |
 | `.phaseAnimator` / `.keyframeAnimator` | ✗ | - | both drive frames from a clock the preview does not run |
@@ -244,7 +244,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Custom `ViewModifier` + `.modifier(…)` | ✅ | 8 | `body(content:)` is called with the view as a value |
 | `extension View { func … }` | ✅ | 8 | the idiom for a reusable modifier chain |
 | Custom `ButtonStyle` | ✅ | 9 | applies to every button below it, not only the one it is written on |
-| Custom `ToggleStyle` / `LabelStyle` | ✗ | - | the same mechanism as `ButtonStyle`, except a Toggle's configuration carries a *binding* the style writes through. Half of that is worse than none |
+| Custom `ToggleStyle` / `LabelStyle` | ✅ | - | the same mechanism as `ButtonStyle`: `makeBody(configuration:)` runs, and a Toggle's configuration carries the toggle's own binding, so `configuration.isOn.toggle()` writes through. Inside its own body the style resets to the automatic one, so `Toggle(configuration)` draws the stock switch |
 
 ## Environment and app structure
 
@@ -371,8 +371,8 @@ Listed in the exported README so nothing is a surprise on the Mac:
 
 1. **Fonts** - `-apple-system` leads the stack, so a Mac or an iPad previews in the *real* SF Pro,
    SF Pro Rounded and SF Mono. Everywhere else a self-hosted Inter stands in for SF Pro, and
-   `ui-rounded` resolves to nothing outside Apple platforms, so `.rounded` falls back to the default
-   design. Layout is correct either way - the main thread measures whichever face actually resolved
+   `ui-rounded` resolves only in Safari (not in Chrome, even on a Mac), so elsewhere `.rounded`
+   falls back to the default design. Layout is correct either way - the main thread measures whichever face actually resolved
    rather than reading a transcribed table - but two machines will break lines in different places,
    and neither is CoreText.
 2. **SF Symbols** - supported symbol names map to bundled Ionicons assets. These are visual
@@ -387,9 +387,9 @@ Listed in the exported README so nothing is a surprise on the Mac:
    dominant idiom, where the view's body has not run yet - and not the case where the modifier sits
    above children that were already built. Views expand eagerly here; making them lazy is a larger
    change than this phase took on.
-7. **Transitions are entry only.** Animating a view *out* means keeping it alive after the state
-   says it is gone, which needs the renderer to own a shadow copy of the tree. A half-built version
-   of that is worse than none: a view that lingers is a preview telling a lie.
+7. **Transitions are bounded.** A view animates out from an inert copy the renderer keeps for the
+   length of its exit, and a re-entry cancels the stale removal. An `.asymmetric` transition plays
+   its insertion when the view leaves too, and matched geometry between two views is not drawn.
 8. **Concurrency does not suspend.** One rule covers all of it: everything async runs immediately
    and in order. `await` is transparent, an `async` function runs like any other, `Task { … }` runs
    its body where it is written, and `Task.sleep` returns at once. The alternatives are worse in a

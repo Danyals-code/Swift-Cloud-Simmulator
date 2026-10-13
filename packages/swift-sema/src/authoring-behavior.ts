@@ -119,7 +119,9 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
   const canConfigureAction = (withTitle || labelledButton(call)) && !!call.trailingClosure && call.trailingClosure.params.length === 0
   // Any other view When tapped can make tappable, as a card or a row is (D16).
   const canMakeTappable = !canConfigureAction && !tappableProblem(ctx.nodes, node)
-  return { states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? tapDestinations(ctx, node) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
+  const site = deploymentVersion(ctx.deploymentTarget) < 15 ? { problem: 'An appear animation needs an iOS 15 deployment target.' } : appearSite(ctx, node)
+  const appear = 'problem' in site ? { problem: site.problem } : { by: site.by }
+  return { appear, states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? tapDestinations(ctx, node) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
 }
 
 /** The objects a view reads from its surroundings, by type. */
@@ -283,26 +285,43 @@ export function configureAction(ctx: FeatureContext, node: AuthoringNode, action
   patches.push(patch(call.trailingClosure.span, `{ ${body} }`))
   return patches
 }
+/**
+ * How a view comes and goes, which is when a transition plays: by an if or a switch, or as
+ * a row a collection adds. `owner` is the ancestor that stays while it does, where the
+ * animation goes, and `value` what it animates on for rows.
+ */
+function appearSite(ctx: FeatureContext, node: AuthoringNode): { by: 'branch' | 'row'; owner: AuthoringNode; value?: string } | { problem: string } {
+  const expression = expressionOf(ctx, node), chain = expression && viewCallChain(expression)
+  if (!chain || chain.modifiers.some(m => m.callee.kind === 'memberAccess' && ['animation', 'transition'].includes(m.callee.member))) return { problem: 'Existing animation code is developer-owned. Edit it in Swift.' }
+  let parent = ctx.nodes.find(n => n.id === node.parentId), inserted: AuthoringNode | undefined, owner = node
+  while (parent && parent.kind !== 'definition') {
+    if (!inserted && (parent.kind === 'branch' && ['Condition', 'Otherwise', 'Switch'].includes(parent.name) || parent.kind === 'template')) inserted = parent
+    // A ForEach lays nothing out, so a modifier on it would land on every row.
+    if (inserted && parent.kind !== 'template' && parent.name !== 'ForEach' && expressionOf(ctx, parent)) { owner = parent; break }
+    parent = ctx.nodes.find(n => n.id === parent!.parentId)
+  }
+  if (!inserted) return { problem: APPEAR_ALWAYS_SHOWN }
+  if (owner === node) return { problem: 'An appear animation needs a container that stays while this view comes and goes. Put it in a stack first.' }
+  if (viewCallChain(expressionOf(ctx, owner)!)?.modifiers.some(m => m.callee.kind === 'memberAccess' && m.callee.member === 'animation')) return { problem: 'The enclosing container already controls animation. Preserve it and add the transition in Swift.' }
+  if (inserted.kind !== 'template') return { by: 'branch', owner }
+  // Rows come and go as their collection does: its count changes with every row added or removed.
+  const collection = ctx.nodes.find(n => n.id === inserted!.parentId), data = collection && callOf(ctx, collection)?.args[0]?.value
+  const name = data && /^\$?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(raw(ctx, data.span)) ? raw(ctx, data.span).replace(/^\$/, '') : undefined
+  const fixed = data?.kind === 'identifier' && ownerOf(ctx, node)?.members.some(m => m.kind === 'varDecl' && m.name === name && m.isLet && !!m.initializer)
+  if (!name || fixed) return { problem: 'An appear animation on rows plays as rows are added or removed, and these rows are fixed in the code rather than read from a collection that changes, such as ForEach(items). Add it in Code.' }
+  return { by: 'row', owner, value: `${name}.count` }
+}
 export function configureTransition(ctx: FeatureContext, node: AuthoringNode, state: string, style: 'opacity' | 'slide' | 'scale', duration: number): SourcePatch[] {
   if (deploymentVersion(ctx.deploymentTarget) < 15) throw new Error('Value-driven animation requires an iOS 15 deployment target.')
   if (!['opacity', 'slide', 'scale'].includes(style) || !Number.isFinite(duration) || duration < 0 || duration > 2) throw new Error('Use a supported transition and a duration from 0 to 2 seconds.')
-  namedState(ctx, node, state)
-  const expression = expressionOf(ctx, node), chain = expression && viewCallChain(expression)
-  if (!chain || chain.modifiers.some(m => m.callee.kind === 'memberAccess' && ['animation', 'transition'].includes(m.callee.member))) throw new Error('Existing animation code is developer-owned. Edit it in Swift.')
-  let parent = ctx.nodes.find(n => n.id === node.parentId), conditional = false, animationOwner = node
-  while (parent && parent.kind !== 'definition') {
-    if (parent.kind === 'branch' && ['Condition', 'Otherwise', 'Switch'].includes(parent.name)) conditional = true
-    if (conditional && expressionOf(ctx, parent)) { animationOwner = parent; break }
-    parent = ctx.nodes.find(n => n.id === parent!.parentId)
-  }
-  if (conditional && animationOwner === node) throw new Error('Wrap this conditional in a Group or stack before configuring its transition.')
-  if (animationOwner !== node) {
-    const ownerChain = viewCallChain(expressionOf(ctx, animationOwner)!)
-    if (ownerChain?.modifiers.some(m => m.callee.kind === 'memberAccess' && m.callee.member === 'animation')) throw new Error('The enclosing container already controls animation. Preserve it and add the transition in Swift.')
-  }
-  // Keep the animation transaction on a surviving ancestor of a conditional;
-  // a removed child cannot observe the state change that should animate its exit.
-  const animation = `.animation(.easeInOut(duration: ${duration}), value: ${state})`
+  const site = appearSite(ctx, node)
+  if ('problem' in site) throw new Error(site.problem)
+  if (site.by === 'branch') namedState(ctx, node, state)
+  // Keep the animation transaction on a surviving ancestor; a removed child cannot
+  // observe the state change that should animate its exit.
+  const animation = `.animation(.easeInOut(duration: ${duration}), value: ${site.value ?? state})`
   const transition: SourcePatch = { file: node.source.file, start: node.source.end, end: node.source.end, text: `.transition(.${style})` }
-  return animationOwner === node ? [{ ...transition, text: transition.text + animation }] : [transition, { file: animationOwner.source.file, start: animationOwner.source.end, end: animationOwner.source.end, text: animation }]
+  return [transition, { file: site.owner.source.file, start: site.owner.source.end, end: site.owner.source.end, text: animation }]
 }
+/** Why an appear animation does not apply to a view that is always there. */
+const APPEAR_ALWAYS_SHOWN = 'An appear animation plays when a view is added or removed, and this view is always shown. Use it on a view inside an if or a switch, or on the rows of a collection.'
