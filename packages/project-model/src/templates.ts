@@ -1,4 +1,5 @@
-import { DEFAULT_PREVIEW_TARGET } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, DEFAULT_PREVIEW_TARGET } from '@studio/shared'
+import { DEFAULT_DEVICE } from '@studio/sim-shell'
 import type { SourceFile } from '@studio/shared'
 import { STARTER_TEMPLATE_ID, TEMPLATE_CATALOG, type TemplateInfo } from './catalog'
 import { fingerprintFiles, newProjectId } from './open'
@@ -192,7 +193,7 @@ struct Swatch: View {
             .foregroundStyle(Color.white)
             .padding()
             .background(tint)
-            .cornerRadius(8)
+            .clipShape(.rect(cornerRadius: 8))
     }
 }
 `,
@@ -296,7 +297,7 @@ const PROFILE_CARD = app(
             }
             .padding(24)
             .background(Color(.secondarySystemGroupedBackground))
-            .cornerRadius(28)
+            .clipShape(.rect(cornerRadius: 28))
 
             Spacer()
         }
@@ -346,7 +347,7 @@ const GRID = app(
         }
         .frame(width: 72, height: 72)
         .background(tint(index))
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
         .accessibilityLabel("Swatch \\(index + 1)")
     }
 
@@ -516,7 +517,7 @@ const PHOTO_GRID = app(
                         .padding(.vertical, 16)
                         .frame(maxWidth: .infinity)
                         .background(Color(.secondarySystemGroupedBackground))
-                        .cornerRadius(12)
+                        .clipShape(.rect(cornerRadius: 12))
                     }
                 }
                 .padding()
@@ -893,7 +894,7 @@ struct Card: ViewModifier {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint.opacity(0.15))
-            .cornerRadius(14)
+            .clipShape(.rect(cornerRadius: 14))
     }
 }
 
@@ -1069,8 +1070,7 @@ const TYPESETTING = app(
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Type").font(.largeTitle).fontWeight(.bold)
-                    + Text(" setting").font(.largeTitle).foregroundStyle(Color.accentColor)
+                Text("\\(Text("Type").font(.largeTitle).fontWeight(.bold))\\(Text(" setting").font(.largeTitle).foregroundStyle(Color.accentColor))")
 
                 Text("Two halves of one line, each with a face of its own.")
                     .font(.subheadline)
@@ -1201,9 +1201,9 @@ export function createProjectFromTemplate(template: Template, now: number = Date
     manifest: {
       name: appName,
       bundleId: `com.example.${appName}`,
-      deploymentTarget: '17.0',
+      deploymentTarget: DEFAULT_DEPLOYMENT_TARGET,
       previewTarget: DEFAULT_PREVIEW_TARGET,
-      device: 'iphone-15',
+      device: DEFAULT_DEVICE,
       colorScheme: 'light',
       // What `isPristine` compares against later, so the confirmation before a
       // replacement can tell "untouched" from "worked on" without the corpus.

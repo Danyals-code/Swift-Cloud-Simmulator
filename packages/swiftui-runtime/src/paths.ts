@@ -67,6 +67,22 @@ function pt(p: PathPoint): string {
   return `${fmt(p.x)} ${fmt(p.y)}`
 }
 
+/**
+ * How far an `addArc` turns, in degrees: from its start to its end in its own direction,
+ * up to one full turn. Measured in the iOS 27 simulator: from -90 to 0, `clockwise:
+ * false` draws the quarter from 12 to 3 o'clock, and `clockwise: true` draws the other
+ * three quarters. From -90 to 270 with `clockwise: true` is a whole turn.
+ */
+function arcSweep(arc: { startDegrees: number; endDegrees: number; clockwise: boolean }): number {
+  const turn = arc.clockwise ? arc.startDegrees - arc.endDegrees : arc.endDegrees - arc.startDegrees
+  // `.degrees(360 * done / goal)` with a goal of 0 is not a number, and draws nothing
+  // rather than looping forever in the worker.
+  if (turn === 0 || !Number.isFinite(turn)) return 0
+  if (turn >= 360) return 360
+  const sweep = turn % 360
+  return sweep <= 0 ? sweep + 360 : sweep
+}
+
 /** A point on an ellipse arc, for the SVG `A` command's endpoints. */
 function onCircle(centre: PathPoint, radius: number, degrees: number): PathPoint {
   const radians = (degrees * Math.PI) / 180
@@ -134,20 +150,20 @@ export function toSVGPath(payload: PathPayload): string {
       }
 
       case 'arc': {
-        const { centre, radius, startDegrees, endDegrees, clockwise } = command
-        const sweep = Math.abs(endDegrees - startDegrees)
+        const { centre, radius, startDegrees, clockwise } = command
+        const sweep = arcSweep(command)
+        if (sweep === 0) break
         const start = onCircle(centre, radius, startDegrees)
         parts.push(`${parts.length === 0 ? 'M' : 'L'} ${pt(start)}`)
 
         // One SVG arc cannot express a full turn: its endpoints would coincide.
         const steps = sweep >= 360 ? 2 : 1
         for (let step = 1; step <= steps; step++) {
-          const angle = startDegrees + ((endDegrees - startDegrees) * step) / steps
-          const to = onCircle(centre, radius, angle)
+          const to = onCircle(centre, radius, startDegrees + (clockwise ? -1 : 1) * ((sweep * step) / steps))
           const large = sweep / steps > 180 ? 1 : 0
-          parts.push(
-            `A ${fmt(radius)} ${fmt(radius)} 0 ${large} ${clockwise ? 1 : 0} ${pt(to)}`,
-          )
+          // SVG's sweep flag 1 runs clockwise on screen, which is SwiftUI's
+          // `clockwise: false`: its angles are measured with y pointing down.
+          parts.push(`A ${fmt(radius)} ${fmt(radius)} 0 ${large} ${clockwise ? 0 : 1} ${pt(to)}`)
         }
         break
       }
@@ -171,11 +187,12 @@ export function applyTrim(payload: PathPayload): PathPayload {
 
   const commands = payload.commands.map((command): PathCommand => {
     if (command.kind !== 'arc') return command
-    const total = command.endDegrees - command.startDegrees
+    // Along the arc's own direction, which is the way it is drawn.
+    const turn = arcSweep(command) * (command.clockwise ? -1 : 1)
     return {
       ...command,
-      startDegrees: command.startDegrees + total * trim.from,
-      endDegrees: command.startDegrees + total * trim.to,
+      startDegrees: command.startDegrees + turn * trim.from,
+      endDegrees: command.startDegrees + turn * trim.to,
     }
   })
 

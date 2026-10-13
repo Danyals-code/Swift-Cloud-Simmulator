@@ -6,9 +6,9 @@ Swift and bundled images are the app. Every design action writes one SwiftUI con
 
 Design has one panel on the right, and it shows whatever is selected.
 
-1. **App** — the app's name, its navigation, and the design tokens every screen reads. Click empty canvas, or the App row in the tree.
-2. **Screen** — how the screen is reached, its title, values it overrides for everything inside it, and its states.
-3. **View** — Basics, then the modifier stack, in the order the code runs.
+1. **App**: the app's name, its navigation, and the design tokens every screen reads. Click empty canvas, or the App row in the tree.
+2. **Screen**: how the screen is reached, its title, values it overrides for everything inside it, and its states.
+3. **View**: Basics, then the modifier stack, in the order the code runs.
 
 The left panel's **Hierarchy** tab has two views. **Layers** shows the same app as a tree: the App, its Components, one lane per tab, the sheets, and screens nothing links to yet. **Files** shows the project: the **Assets** folder - images and colours, everything bundled that is not Swift - and the Swift folders. A Swift file opens in Code. The other tab is **Prompt Editing**.
 
@@ -24,12 +24,13 @@ Open **App → Design tokens**. A token is a Swift member in `DesignSystem/Token
 
 ## The modifier stack
 
-The stack is the code. Cards are listed in source order, top to bottom, and reordering one moves it in the file — `.padding()` then `.background()` colours the padding; the other way round colours only the text.
+The stack is the code. Cards are listed in source order, top to bottom, and reordering one moves it in the file: `.padding()` then `.background()` colours the padding; the other way round colours only the text.
 
 - **Add** offers a searchable list, grouped by what the modifier does. A new modifier lands where it belongs in the order rather than at the end.
 - The switch on a card turns a modifier **off**: the line is commented out in place and restored exactly as written when it is switched back on.
+- **Border** follows the view's corners, as a stroke drawn inside the edge, on it or outside it. It is written as a stroke of the view's own shape over it, and moves with the corners when Corner radius changes. It is a setting of the view, not a layer, and a stroke written that way in Code shows as one too.
 - A chain that contains a comment somebody wrote, or a modifier the studio does not recognise, is left alone and says so.
-- **Navigate to** is a card in the same stack: pick the screen, and pick how it opens — push, sheet, or full screen. Changing that later rewrites the view: a push is a `NavigationLink`, a sheet is a button that sets a value with a `.sheet` reading it, and switching between them carries the label and the modifiers across. A button that does more than open the screen is left alone and says so.
+- **Navigate to** is a card in the same stack: pick the screen, and pick how it opens: push, sheet, or full screen. Changing that later rewrites the view: a push is a `NavigationLink`, a sheet is a button that sets a value with a `.sheet` reading it, and switching between them carries the label and the modifiers across. A button that does more than open the screen is left alone and says so.
 
 ## The canvas
 
@@ -40,16 +41,14 @@ The canvas is laid out from the navigation, never by hand, so it always matches 
 - Arrows are labeled with how they navigate: solid for a push, dashed for a sheet or full-screen cover. A sheet opened from several screens is drawn once, with an arrow from each opener.
 - **States** stack below a screen inside its tinted frame. Anything inside the frame is a state of that screen; anything outside it is a different screen. A frame shows "+2 states" until it is opened, and **Show all states** in the canvas heading opens every one.
 
-**Moving views.** Drag a view to move it in the file. A click stays a click until the pointer has moved a few pixels; then a copy follows the pointer, the stack, list, form or section it would land in is outlined, and a bar shows where - across a column, down a row. Pressing inside the selection carries the selection, so a chosen stack can be moved from anywhere in it. Where it cannot land the copy greys out and the canvas header says why; released there, or with Escape, it goes back. A list's rows come from its data and are not dragged one by one. Hovering only points: the screen in focus, and its layers, change on a click.
-
-A state is a set of preview inputs — no app data changes, and the screen's layout is shared by every state. Add one in **Screen → States**. A screen with nothing to switch yet gets its first switch from the same form: name the state "Loading" and the screen gains a `loading` value, off by default and on in that state, in one step you can undo. Use it in **Shown when**, or in any value field, to change what the screen shows.
+A state is a set of preview inputs: no app data changes, and the screen's layout is shared by every state. Add one in **Screen → States**. A screen with nothing to switch yet gets its first switch from the same form: name the state "Loading" and the screen gains a `loading` value, off by default and on in that state, in one step you can undo. Use it in **Shown when**, or in any value field, to change what the screen shows.
 
 ## Components from copies
 
 Copy freely, then promote one copy.
 
 1. Select the view and open **Make component**. The studio looks for views with the same shape elsewhere in the project and lists them, pre-ticked; untick any you do not want.
-2. Values the ticked copies disagree on become parameters, named after their role — `title`, `icon`, `action` — and you can rename them before anything is written.
+2. Values the ticked copies disagree on become parameters, named after their role (`title`, `icon`, `action`), and you can rename them before anything is written.
 3. Every ticked copy becomes a call to the new component in one undo step. The Main goes to `DesignSystem/Components/`.
 4. Extra modifiers at the end of a copy's chain stay on the call, so `RowView(icon:title:).opacity(0.5)` keeps its own opacity.
 
@@ -57,7 +56,7 @@ Two views are copies only when their shape matches exactly: the same views neste
 
 ## Navigation and tabs
 
-**App → Navigation** sets the shape: one screen, or tabs. Tabs are a list of rows — name, symbol, screen — written as `TabView` with one `.tabItem` per tab in `App/AppNavigation.swift`. Above five tabs the panel says what iPhone does with the rest. Tabs written in Swift in a way the studio cannot reproduce are shown read-only with **Open in Code**.
+**App → Navigation** sets the shape: one screen, or tabs. Tabs are a list of rows (name, symbol, screen), written as `TabView` with one `.tabItem` per tab in `App/AppNavigation.swift`. Above five tabs the panel says what iPhone does with the rest. Tabs written in Swift in a way the studio cannot reproduce are shown read-only with **Open in Code**.
 
 ## Project shape
 
@@ -69,7 +68,7 @@ DesignSystem/  Tokens.swift, Components/
 Features/      one folder per screen, each with its own #Preview
 ```
 
-New screens get their own folder under `Features/`; components go to `DesignSystem/Components/`; tokens go to `DesignSystem/Tokens.swift`. An imported project keeps its own layout and is edited where it stands. Code the studio does not rewrite — custom expressions, unsupported constructs — appears as a locked block with **Open in Code**; it still runs and still draws.
+New screens get their own folder under `Features/`; components go to `DesignSystem/Components/`; tokens go to `DesignSystem/Tokens.swift`. An imported project keeps its own layout and is edited where it stands. Code the studio does not rewrite (custom expressions, unsupported constructs) appears as a locked block with **Open in Code**; it still runs and still draws.
 
 ## Images
 
@@ -92,7 +91,9 @@ Limits: 64 images; 4 MB per variant; 32 MB compressed image bytes and 16 megapix
 
 **Save editable** downloads a `.swiftstudio.zip` containing Swift, images, colour sets, app settings, and versioned designer metadata. Local autosave is convenient; the archive is the portable copy. Share links are for projects without image resources that fit the URL limit.
 
-**Export** retains four native formats. Swift bytes are preserved. Xcode and XcodeGen app exports place named images and colour sets in the main asset catalog. Swift package resources use a module resource bundle; package consumers must use that bundle or integrate the catalog into their host app. See [Apple's resource guide](https://developer.apple.com/documentation/xcode/bundling-resources-with-a-swift-package).
+Every archive, the one the recovery screen downloads included, also holds `.swiftstudio/events.jsonl`: a log of what was done in the project, with times. It lists design edits and the kind of layer each touched, bursts of typing (which file, and how many characters), Undo and Redo, AI prompts as written and how each request ended, switches between Design and Code, reloads, crashes and exports. It never holds your code, the text or values you type into a design, or an API key. Opening the archive again leaves the log out.
+
+**Export** retains four native formats. Swift is preserved as written, except that hidden views and switched-off modifiers, which the studio keeps as comments, are left out of the exported sources; the editable archive and `.swiftstudio/project.json` keep them, so reopening an export brings them back. Xcode and XcodeGen app exports place named images and colour sets in the main asset catalog. Swift package resources use a module resource bundle; package consumers must use that bundle or integrate the catalog into their host app. See [Apple's resource guide](https://developer.apple.com/documentation/xcode/bundling-resources-with-a-swift-package).
 
 To return from a developer handoff:
 

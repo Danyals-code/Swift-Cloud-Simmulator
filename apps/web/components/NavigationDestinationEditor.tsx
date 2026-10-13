@@ -107,7 +107,8 @@ export function NavigationDestinationEditor({ owner, features, onReveal }: Props
     </div>
     <p className={styles.destinationCurrent}>Current: <code>{current || 'No destination'}</code></p>
     {info.scopeDescription && <p className={styles.note}>{info.scopeDescription}</p>}
-    <div className={styles.destinationActions}>
+    {/* WebKit moves focus on a press, which closed the list above and moved these buttons out from under the click (D13). */}
+    <div className={styles.destinationActions} onMouseDown={event => event.preventDefault()}>
       <button type="button" disabled={disabled || !draft.text.trim() || destination() === current} onClick={() => void apply()}>Apply destination</button>
       {features?.onPickNavigation && <button type="button" className={styles.destinationPick} disabled={disabled || !choices.some(choice => choice.available)} onClick={() => void pick()}><Icon name="inspect" />Pick screen from canvas</button>}
     </div>

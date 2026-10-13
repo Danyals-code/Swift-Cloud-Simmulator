@@ -1,13 +1,14 @@
 'use client'
 
 import * as Comlink from 'comlink'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   CompileResult, CompileRequest,
   PreviewScenario, ComponentDescription, PreviewImageAsset,
   PreviewTarget,
   DynamicTypeSize,
   CompilerApi,
+  CopiedView,
   CompletionResult,
   SourceSpan,
   SymbolInfo,
@@ -21,6 +22,7 @@ import type {
 } from '@studio/shared'
 import type { DeviceSpec } from '@studio/sim-shell'
 import { measureFontsWhenReady, measureTextBatch } from './fontMetrics'
+import { PreviewEvents } from './previewEvents'
 import { recordCoverage } from './telemetry'
 import { WorkerRequests } from './workerRequests'
 
@@ -40,6 +42,8 @@ interface WorkerHandle {
   ready?: Promise<void>
   api: Comlink.Remote<CompilerApi>
   requests: WorkerRequests
+  /** Set once this worker has compiled the program: until then it has no app to send events to. */
+  compiled?: boolean
   dispose(): void
 }
 
@@ -129,12 +133,21 @@ export function useCompiler({
   const revisionRef = useRef(0)
   const contextKey = JSON.stringify([projectId, scenario ?? null, previewScreen ?? null])
   const [compiledContext, setCompiledContext] = useState<string | null>(null)
+  /** Sends one event to the running app; set below, once it has what it needs. */
+  const latestSend = useRef<(event: UIEvent) => Promise<void>>(async () => {})
+  /**
+   * The events on their way, one at a time. A drag or a typist makes events faster
+   * than a heavy screen answers them, and only a control's latest value is sent once
+   * the worker is free, so the preview keeps drawing instead of falling behind.
+   */
+  const [events] = useState(() => new PreviewEvents((event) => latestSend.current(event)))
   // A scenario/project boundary disposes the worker and its pending handler table.
   useEffect(() => () => {
     revisionRef.current++
+    events.clear()
     handleRef.current?.dispose()
     handleRef.current = null
-  }, [contextKey])
+  }, [contextKey, events])
   const [compiledFiles, setCompiledFiles] = useState<readonly SourceFile[] | null>(null)
   /** highest revision actually painted, so stale responses can be dropped */
   const paintedRef = useRef(-1)
@@ -161,6 +174,8 @@ export function useCompiler({
     const handle = spawnWorker((error) => {
       if (handleRef.current !== handle) return
       handleRef.current = null
+      // What was still waiting was meant for the app that stopped.
+      events.clear()
       setState((s) => ({ ...s, stale: false, workerError: error.message }))
     })
     fontsRef.current ??= measureFontsWhenReady()
@@ -168,11 +183,13 @@ export function useCompiler({
       if (fonts.length > 0) await handle.api.setFontMetrics(fonts)
     })
     handle.worker.addEventListener('error', (event) => {
+      // Handled here, as the worker error the preview shows; not re-reported on the page.
+      event.preventDefault()
       handle.requests.stop(new Error(event.message || 'The compiler worker stopped unexpectedly.'))
     })
     handleRef.current = handle
     return handle
-  }, [])
+  }, [events])
 
   const accept = useCallback((result: CompileResult) => {
     if (result.revision < revisionRef.current || result.revision < paintedRef.current) return
@@ -200,14 +217,17 @@ export function useCompiler({
     if (handle === handleRef.current) accept(result)
   }, [accept])
 
-  const runCompile = useCallback(async () => {
+  /** Compiles the project; false when the worker failed, rather than the user's code. */
+  const runCompile = useCallback(async (): Promise<boolean> => {
     const handle = ensureWorker()
     const revision = ++revisionRef.current
-    setState((s) => (s.result ? { ...s, stale: true } : s))
+    // A compile is also how a stopped preview starts again: it is no longer stopped,
+    // only busy, until the answer is drawn or the worker fails again.
+    setState((s) => ({ ...s, stale: !!s.result, workerError: null }))
 
     try {
       await handle.ready
-      if (revision !== revisionRef.current || handle !== handleRef.current) return
+      if (revision !== revisionRef.current || handle !== handleRef.current) return true
       const result = await handle.api.compile({
           projectId,
           deploymentTarget,
@@ -223,12 +243,14 @@ export function useCompiler({
           allPages: allPagesRef.current,
           revision,
         })
-      if (revision !== revisionRef.current || handle !== handleRef.current) return
+      handle.compiled = true
+      if (revision !== revisionRef.current || handle !== handleRef.current) return true
       setCompiledFiles(files)
       setCompiledContext(contextKey)
       await refine(result, handle)
+      return true
     } catch (error) {
-      if (handleRef.current !== handle) return
+      if (handleRef.current !== handle) return false
       handle.dispose()
       setState((s) => ({
         ...s,
@@ -236,6 +258,7 @@ export function useCompiler({
         workerError: error instanceof Error ? error.message : String(error),
       }))
       handleRef.current = null
+      return false
     }
   }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, designScreens, previewScreen, images, colors, contextKey])
 
@@ -298,15 +321,24 @@ export function useCompiler({
 
   useEffect(() => {
     return () => {
+      events.clear()
       handleRef.current?.dispose()
       handleRef.current = null
     }
-  }, [])
+  }, [events])
 
-  const dispatch = useCallback(
+  /**
+   * Sends one of the preview's events to the running app.
+   *
+   * A worker that stopped, or one started since that has not compiled, has no app to
+   * send it to, and the event is dropped. The preview starts again from a tap on the
+   * stopped phone, an edit or Reset, never from an event meant for the app that stopped.
+   */
+  const send = useCallback(
     async (event: UIEvent) => {
       if (compiledContext !== contextKey || compiledFiles !== files) return
-      const handle = ensureWorker()
+      const handle = handleRef.current
+      if (!handle?.compiled) return
       try {
         await handle.ready
         await refine(await handle.api.dispatch(event, ++revisionRef.current), handle)
@@ -314,8 +346,12 @@ export function useCompiler({
         handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
       }
     },
-    [refine, ensureWorker, compiledContext, contextKey, compiledFiles, files],
+    [refine, compiledContext, contextKey, compiledFiles, files],
   )
+  // Before paint, so an event that follows a compile's result reaches that program.
+  useLayoutEffect(() => { latestSend.current = send }, [send])
+  /** Resolves once the event has been answered and drawn, or given up on. */
+  const dispatch = useCallback((event: UIEvent) => events.push(event), [events])
 
   /**
    * Opening and closing the gallery.
@@ -351,20 +387,26 @@ export function useCompiler({
     return () => { live = false }
   }, [allPages, refine, compiledFiles, files, compiledContext, contextKey])
 
+  /** Starts the app again from its initial state; rejects when that failed. */
   const reset = useCallback(async () => {
+    const failed = new Error('The preview could not be reset.')
     if (compiledContext !== contextKey || compiledFiles !== files) {
       handleRef.current?.dispose()
       handleRef.current = null
-      await runCompile()
+      if (!await runCompile()) throw failed
       return
     }
     const handle = handleRef.current
-    if (!handle) { await runCompile(); return }
+    if (!handle?.compiled) {
+      if (!await runCompile()) throw failed
+      return
+    }
     try {
       await handle.ready
       await refine(await handle.api.reset(++revisionRef.current), handle)
     } catch (error) {
       handle.requests.stop(error instanceof Error ? error : new Error(String(error)))
+      throw failed
     }
   }, [refine, runCompile, compiledContext, contextKey, compiledFiles, files])
 
@@ -398,7 +440,7 @@ export function useCompiler({
     }
   }, [ensureWorker])
 
-  const copyView = useCallback(async (text: string, file: string, offset: number): Promise<string | null> => {
+  const copyView = useCallback(async (text: string, file: string, offset: number): Promise<CopiedView | { readonly refused: string } | null> => {
     try {
       return await ensureWorker().api.copyView(text, file, offset)
     } catch {

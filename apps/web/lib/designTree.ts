@@ -1,4 +1,4 @@
-import type { AuthoringNode, AuthoringSnapshot, PagePreview } from '@studio/shared'
+import type { AuthoringNode, AuthoringSnapshot, Diagnostic, PagePreview } from '@studio/shared'
 import { screenDefinition, type DesignScreen } from './screens'
 
 /** How a screen is reached from the one before it. `root` starts a lane. */
@@ -8,8 +8,13 @@ export interface DesignScreenNode {
   /** The page this screen is drawn as. Selection and canvas focus use this id. */
   readonly id: string
   readonly name: string
-  /** The Swift view that draws it, when the source names one. */
+  /** The Swift view that draws it, when it is that view's own page: what its settings and actions change. */
   readonly view?: string
+  /**
+   * Its view draws other screens too, as one list view can be two tabs. Each is named
+   * by its own title, and none is renamed on its own, since the name belongs to the view.
+   */
+  readonly shared?: true
   readonly page: PagePreview
   readonly presentation: ScreenPresentation
   /** Navigation steps from the lane's root: the canvas column. */
@@ -59,14 +64,37 @@ export interface DesignTree {
 
 const PRESENTED = new Set(['sheet', 'cover', 'popover'])
 
+/**
+ * Whose page each page is, and what it is called.
+ *
+ * A page is named by its view's screen name when it is that view's page, and by its
+ * own title otherwise: written in place inside another view, or one of several screens
+ * a view draws. A view draws several when its pages have different titles, as one list
+ * view can be two tabs; a sheet opened from two screens has one title, and is one screen.
+ */
+export function screenNaming(pages: readonly PagePreview[], snapshot: AuthoringSnapshot | undefined, screens: readonly DesignScreen[]) {
+  const views = new Map(pages.map(page => [page.id, page.id.startsWith('screen:') ? page.id.slice(7) : screenDefinition(snapshot, page)?.name]))
+  const titles = new Map<string, Set<string>>()
+  for (const page of pages) {
+    const view = views.get(page.id)
+    if (view) titles.set(view, (titles.get(view) ?? new Set()).add(page.name))
+  }
+  const viewOf = (page: PagePreview) => views.get(page.id)
+  const shared = (view: string | undefined) => !!view && (titles.get(view)?.size ?? 0) > 1
+  const nameOf = (page: PagePreview) => {
+    const view = viewOf(page)
+    return (!shared(view) && screens.find(screen => screen.view === view)?.name) || page.name
+  }
+  return { viewOf, shared, nameOf }
+}
+
+/** Whether a screen is renamed on its own: it is its view's page, and the view names no other screen. */
+export const canRename = (screen: DesignScreenNode) => !!screen.view && !screen.shared
+
 export function designTree(pages: readonly PagePreview[] | undefined, snapshot: AuthoringSnapshot | undefined, screens: readonly DesignScreen[]): DesignTree {
   const all = pages ?? []
   const byId = new Map(all.map(page => [page.id, page]))
-  const viewOf = (page: PagePreview) => page.id.startsWith('screen:') ? page.id.slice(7) : screenDefinition(snapshot, page)?.name
-  const nameOf = (page: PagePreview) => {
-    const view = viewOf(page)
-    return screens.find(screen => screen.view === view)?.name ?? page.name
-  }
+  const { viewOf, shared, nameOf } = screenNaming(all, snapshot, screens)
   const presentationOf = (page: PagePreview): ScreenPresentation => !page.parentId || !byId.has(page.parentId) ? 'root' : page.kind === 'destination' ? 'push' : page.kind === 'sheet' || page.kind === 'cover' || page.kind === 'popover' ? page.kind : 'push'
   const sheets = new Map<string, { screen: DesignScreenNode; openers: string[] }>()
   const build = (page: PagePreview, depth: number, seen: ReadonlySet<string>): DesignScreenNode => {
@@ -83,7 +111,8 @@ export function designTree(pages: readonly PagePreview[] | undefined, snapshot: 
         else sheets.set(key, { screen: build(child, depth + 1, next), openers: [page.id] })
       } else children.push(build(child, depth + 1, next))
     }
-    return { id: page.id, name: nameOf(page), view: viewOf(page), page, presentation: presentationOf(page), depth, children }
+    const view = viewOf(page)
+    return { id: page.id, name: nameOf(page), view, ...(shared(view) ? { shared: true as const } : {}), page, presentation: presentationOf(page), depth, children }
   }
   const roots = all.filter(page => !page.parentId || !byId.has(page.parentId))
   const running = roots.filter(page => !page.standalone)
@@ -122,7 +151,15 @@ export function designScreens(tree: DesignTree): DesignScreenNode[] {
   return out
 }
 
-/** The chain of screens from a lane root down to `id`, for revealing it in the outline. */
+/** The outline's rows that list the sheets, and the screens nothing links to yet. */
+export const SHEETS_GROUP = 'group:sheets'
+export const DETACHED_GROUP = 'group:detached'
+
+/**
+ * The rows from the outline's top down to screen `id`, for revealing it: the screens
+ * above it, and for a sheet or a screen nothing links to yet, the group it is listed in.
+ * A screen just added is in "Not linked yet", which would otherwise stay closed (D13).
+ */
 export function designScreenPath(tree: DesignTree, id: string | undefined): string[] {
   if (!id) return []
   const find = (node: DesignScreenNode, path: string[]): string[] | null => {
@@ -131,9 +168,28 @@ export function designScreenPath(tree: DesignTree, id: string | undefined): stri
     for (const child of node.children) { const found = find(child, next); if (found) return found }
     return null
   }
-  for (const root of [...tree.lanes.map(lane => lane.root), ...tree.sheets.map(sheet => sheet.screen), ...tree.detached]) {
-    const found = find(root, [])
+  const roots = [
+    ...tree.lanes.map(lane => ({ root: lane.root, groups: [] as string[] })),
+    ...tree.sheets.map(sheet => ({ root: sheet.screen, groups: [SHEETS_GROUP] })),
+    ...tree.detached.map(root => ({ root, groups: [DETACHED_GROUP] })),
+  ]
+  for (const { root, groups } of roots) {
+    const found = find(root, groups)
     if (found) return found
   }
   return []
+}
+
+/**
+ * What an empty Screens list says, and where to look when an error is the reason.
+ *
+ * Screens are found by drawing them, so while a file doesn't parse there are none,
+ * and after a reload nothing is kept from before: "No screens yet" then sent a
+ * designer looking for screens that were there all along.
+ */
+export function emptyScreensNote(busy: boolean, diagnostics: readonly Diagnostic[]): { readonly text: string; readonly at?: { readonly file: string; readonly offset: number } } {
+  if (busy) return { text: 'Drawing screens…' }
+  const error = diagnostics.find((d) => d.severity === 'error')
+  if (!error) return { text: 'No screens yet.' }
+  return { text: `Fix the error in ${error.span.file.split('/').pop()} to see the screens.`, at: { file: error.span.file, offset: error.span.start } }
 }

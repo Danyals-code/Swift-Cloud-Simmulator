@@ -1,6 +1,6 @@
 import { beforeEach, expect, it } from 'vitest'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
-import { authoringRenderIds, hoveredSourceIds, resolveAuthoringRuntimeSelection } from './authoringHover'
+import { authoringRenderGroups, authoringRenderIds, hoveredSourceIds, resolveAuthoringRuntimeSelection } from './authoringHover'
 import { layerForRenderNode } from './layers'
 import { reconcileAuthoringSelection } from '@studio/shared'
 
@@ -88,4 +88,12 @@ it('prefers the focused phone when a source view has several rendered instances'
   expect(resolveAuthoringRuntimeSelection(text, snapshot, layers, undefined, [secondLayer])).toEqual({ layer: secondLayer, exact: false })
   const next = run('Text("Changed")')
   expect(resolveAuthoringRuntimeSelection(text, next.authoring, next.viewHierarchy!, secondLayer.id)).toEqual({ exact: false })
+})
+
+it('groups what a repeated source view paints by the row it is drawn in, so each row is outlined as one (D1)', () => {
+  const result = run('VStack { ForEach(0..<3, id: \\.self) { i in HStack { Text("Row \\(i)"); Text("Detail") } } }')
+  const row = result.authoring!.nodes.find(node => node.name === 'HStack')!
+  const groups = authoringRenderGroups(row, result.authoring, result.viewHierarchy!, result.renderTree)
+  expect(groups).toHaveLength(3)
+  expect(groups.map(group => group.flatMap(id => result.renderTree!.nodes.find(node => node.id === id)?.text?.runs.map(run => run.text) ?? []))).toEqual([['Row 0', 'Detail'], ['Row 1', 'Detail'], ['Row 2', 'Detail']])
 })

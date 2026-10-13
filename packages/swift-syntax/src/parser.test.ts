@@ -280,6 +280,16 @@ describe('expressions', () => {
       operator: '+',
     })
   })
+
+  it('keeps what an interpolation takes after its value, and says when something is left', () => {
+    const expr = firstExpression('func f() { "\\(pi, specifier: "%.2f") and \\(total, format: .currency(code: "USD"))" }')
+    if (expr.kind !== 'stringLiteral') throw new Error(expr.kind)
+    const [first, , second] = expr.segments
+    expect(first).toMatchObject({ kind: 'interpolation', expression: { name: 'pi' }, options: [{ label: 'specifier', value: { kind: 'stringLiteral' } }] })
+    expect(second).toMatchObject({ kind: 'interpolation', expression: { name: 'total' }, options: [{ label: 'format', value: { kind: 'call' } }] })
+
+    expect(errorsIn('func f() { "\\(a, b)" }').map((d) => d.message)).toEqual(["Expected ')' to end the interpolation, found 'b'."])
+  })
 })
 
 describe('SwiftUI shapes', () => {

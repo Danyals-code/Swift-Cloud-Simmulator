@@ -89,9 +89,9 @@ describe('screen composition', () => {
     const r = run('NavigationStack { List { Text("Row") }.navigationTitle("Library") }')
     const tree = r.renderTree!, scroll = tree.nodes.find(n => n.scroll)!
     expect(scroll.frame.y).toBe(phone.safeArea.top + 54)
-    expect(scroll.scroll!.contentInsets!.top).toBe(48)
-    expect(world(tree, text(r, 'Row')).y).toBeGreaterThan(phone.safeArea.top + 102)
-    expect(tree.chrome).toEqual({ scrollId: scroll.id, collapseDistance: 48 })
+    expect(scroll.scroll!.contentInsets!.top).toBe(52)
+    expect(world(tree, text(r, 'Row')).y).toBeGreaterThan(phone.safeArea.top + 106)
+    expect(tree.chrome).toEqual({ scrollId: scroll.id, collapseDistance: 52 })
     expect(tree.nodes.find(n => n.id === 'navbar-title')!.chromeRole).toBe('inlineTitle')
   })
   it('keeps explicit drawer search in the primary scroller', () => {
@@ -99,15 +99,15 @@ describe('screen composition', () => {
     const field = r.renderTree!.nodes.find(n => n.hitTarget?.role === 'textField')!
     expect(ancestors(r.renderTree!.nodes, field).map(node => node.id)).toContain(r.renderTree!.chrome!.scrollId)
   })
-  it('puts automatic search in the drawer on phones and in the toolbar on iPad', () => {
+  it('puts automatic search at the bottom on phones and in the toolbar on iPad', () => {
     for (const key of ['iphone-15', 'ipad-11'] as const) {
       const d = DEVICES[key]
       const r = run('NavigationStack { List { Text("Row") }.navigationTitle("Find").searchable(text: $query) }', { canvas: d, safeArea: d.safeArea }, '@State var query = ""')
       const field = r.renderTree!.nodes.find(n => n.hitTarget?.role === 'textField')!
       expect(field.frame.height).toBeGreaterThan(0)
       if (key === 'iphone-15') {
-        expect(ancestors(r.renderTree!.nodes, field).map(node => node.id)).toContain(r.renderTree!.chrome!.scrollId)
-        expect(world(r.renderTree!, field).y).toBeLessThan(220)
+        expect(ancestors(r.renderTree!.nodes, field).map(node => node.id)).not.toContain(r.renderTree!.chrome!.scrollId)
+        expect(world(r.renderTree!, field).y).toBeGreaterThan(d.height - 100)
       }
       else expect(world(r.renderTree!, field).y).toBeLessThan(d.safeArea.top + 44)
     }

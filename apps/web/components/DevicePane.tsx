@@ -2,11 +2,10 @@
 
 import { scenarioKey } from '../lib/screens'
 import { ASSET_DRAG_TYPE, draggingFiles } from '../lib/images'
-import { dropSlot, unionBox, type Box, type CanvasMove, type MoveContainer, type MoveSource } from '../lib/canvasMove'
-import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
-import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
+import { RenderTreeView, symbolAsset, type EventSink, type InspectKeys } from '@studio/swiftui-render-dom'
+import { stateProblem } from '../lib/stateProblem'
+import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree } from '@studio/shared'
 import type { DeviceKey, DeviceSpec } from '@studio/sim-shell'
 import styles from './Workspace.module.css'
 import type { PreviewSettings } from '../lib/store'
@@ -15,24 +14,13 @@ import { Splitter } from './ui/Splitter'
 import { PANE_LIMITS } from '../lib/layout'
 import { AppearancePicker, DevicePicker, TextSizePicker, ZoomPicker } from './PreviewEnvironment'
 import type { CanvasTool } from './Toolbar'
-import type { AuthoringNode, NavigationDestination } from '@studio/shared'
+import type { AuthoringNode, NavigationDestination, DropPosition } from '@studio/shared'
 import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../lib/pageLayout'
+import { deviceChrome, type DeviceChrome } from '../lib/deviceChrome'
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
 import type { FeatureProps } from './AuthoringFeatures'
 import { InlineTextEditor } from './InlineTextEditor'
-
-/** A press on a view, which becomes a move once the pointer has travelled. */
-interface MoveGesture {
-  readonly pointerId: number
-  readonly start: { readonly x: number; readonly y: number }
-  last: { x: number; y: number }
-  readonly node: RenderNode | 'selection'
-  readonly pageId?: string
-  source: MoveSource | null
-  elements: HTMLElement[]
-  slot: { readonly container: MoveContainer; readonly index: number } | null
-  frame: number
-}
+import { PaneBoundary } from './PaneBoundary'
 
 export interface DevicePaneProps {
   authoringFeatures?: Omit<FeatureProps, 'node'>
@@ -55,18 +43,39 @@ export interface DevicePaneProps {
   onSettingsResize?: (width: number) => void
   onToggleSettings?: () => void
   onDeviceChange: (key: DeviceKey) => void
+  /** Design's preview environment pickers that the toolbar has no room for, drawn in the canvas heading (D15). */
+  environment?: React.ReactNode
   tools?: React.ReactNode
   device: DeviceSpec
   tree: RenderTree | null
-  selectedRenderIds?: ReadonlySet<string>
-  hoveredRenderIds?: ReadonlySet<string>
+  /** Why the phone is dimmed: the code has errors or stopped, and `tree` is the last screen that ran. */
+  notice?: NonNullable<RenderTree['notice']>
+  /** Set while the preview has stopped: a tap anywhere on the phone starts it again, and presses nothing in it. */
+  onRestart?: () => void
+  /** Why each screen the gallery couldn't draw isn't drawn, as its warning says. */
+  pagesNotDrawn?: readonly string[]
+  /** The compile the canvas draws; a canvas that crashed tries again when it changes. */
+  revision?: number
+  /** What is selected, as it is drawn: the nodes of each view, outlined as one box (D1). */
+  selectedRenderGroups?: readonly (readonly string[])[]
+  /** What is outlined under the pointer: one box around each group, one view each. */
+  hoveredRenderGroups?: readonly (readonly string[])[]
   stale: boolean
-  onEvent: (event: UIEvent) => void
+  /** Sends a preview event; resolves once the app has answered it, so a field can show the app's value again. */
+  onEvent: EventSink
   inspecting: boolean
-  /** Reveal a view's source. Null origin means the node has no source position. */
-  onRevealSource: (node: RenderNode, pageId?: string) => void
+  /**
+   * A click on the canvas while inspecting: everything drawn under the pointer, topmost
+   * first, and the keys held. The workspace decides what that selects (D1).
+   */
+  onInspectSelect: (under: readonly RenderNode[], keys: InspectKeys, pageId?: string) => void
+  /**
+   * A double-click (D1): the text it edits, when the view under the pointer is text; the
+   * workspace otherwise goes one level in, and answers null.
+   */
+  onInspectDoubleClick?: (under: readonly RenderNode[], pageId?: string) => InlineTextTarget | null
   /** What the pointer is over while inspecting, so the workspace can follow it. */
-  onHoverNode?: (node: RenderNode | null, pageId?: string) => void
+  onHoverNode?: (under: readonly RenderNode[] | null, pageId?: string) => void
   /**
    * An image dropped on the canvas: files from outside the studio, or a row dragged
    * from the Assets folder. `node` is the view it landed on, null for empty canvas.
@@ -120,8 +129,21 @@ export interface DevicePaneProps {
     /** Everything it paints, so a drag can start from anywhere inside it. */
     readonly renderIds?: readonly string[]
   } | null
-  /** How a drag on the canvas moves a view in the file: what it picks up, where it can go, the drop. */
-  canvasMove?: CanvasMove
+  /**
+   * A view dragged onto another one, which is a move in the file.
+   *
+   * The source is `'selection'` when the drag began inside what is selected: a
+   * container paints through its children, so the node under the pointer is never
+   * the container itself, and dragging a stack has to mean the stack.
+   */
+  onReorderNodes?: (source: readonly RenderNode[] | 'selection', over: readonly RenderNode[], position: DropPosition) => void
+  /**
+   * Where a drop onto this node would put what is dragged, or null where it cannot go
+   * (D1): beside the view there at the dragged view's depth, drawn by `renderIds` and
+   * laid along `axis`, or `inside` a stack whose own empty space - usually its
+   * background - is under the pointer, which means "put it in here, at the end".
+   */
+  dropTargetAt?: (over: readonly RenderNode[], source: readonly RenderNode[] | 'selection') => CanvasDropTarget | null
   /** The page to bring into view, when Layers picks one. */
   centerOn?: { readonly id: string; readonly nonce: number } | null
   /** What the preview is doing, drawn at the head of the canvas. */
@@ -129,6 +151,17 @@ export interface DevicePaneProps {
   preview: PreviewSettings
   onPreviewChange: (settings: Partial<PreviewSettings>) => void
 }
+
+/** Where a drop would go, as the canvas shows it while dragging. */
+export interface CanvasDropTarget {
+  readonly name: string
+  readonly inside: boolean
+  readonly axis: 'horizontal' | 'vertical'
+  readonly renderIds: readonly string[]
+}
+
+/** The text a double-click edits in place, and the control it is written with. */
+export interface InlineTextTarget { readonly node: AuthoringNode; readonly control: string; readonly value: string }
 
 /** What the canvas draws besides the screens themselves. */
 export interface CanvasInputs {
@@ -149,8 +182,7 @@ export interface CanvasInputs {
   readonly compile: Omit<CompilerOptions, 'device' | 'colorScheme' | 'typeScale' | 'dynamicTypeSize' | 'scenario' | 'allPages' | 'previewScreen'>
 }
 
-/** Chrome around the screen: bezel thickness plus breathing room in the pane. */
-const BEZEL = 10
+/** Breathing room around the phone in the pane. */
 const PANE_PADDING = 28
 
 /** How many state phones may be drawn at once, each being its own compile. */
@@ -173,9 +205,9 @@ const DEVICE_Z = 1_000_000
 /**
  * The simulated device.
  *
- * The bezel, Dynamic Island, status bar and home indicator are all drawn in CSS.
- * Apple's device artwork is not licensed for redistribution (risk R2), and a CSS
- * frame has the side benefit of scaling cleanly to any zoom level.
+ * The status bar and home indicator are drawn in CSS, as are the bezel and the
+ * Dynamic Island of a device without artwork (see deviceChrome). The iPhone 18 Pro
+ * is drawn in its own artwork, island included, laid over the screen's edges.
  *
  * Appearance, Dynamic Type and zoom live on this pane's own bar rather than in the
  * toolbar. They describe how you are looking at the simulated app, so they belong
@@ -193,15 +225,21 @@ export function DevicePane({
   onSettingsResize,
   onToggleSettings,
   onDeviceChange,
+  environment,
   tools,
   device,
   tree,
-  selectedRenderIds,
-  hoveredRenderIds,
+  notice,
+  onRestart,
+  pagesNotDrawn,
+  revision,
+  selectedRenderGroups,
+  hoveredRenderGroups,
   stale,
   onEvent,
   inspecting,
-  onRevealSource,
+  onInspectSelect,
+  onInspectDoubleClick,
   onHoverNode,
   onDropImage,
   pages,
@@ -215,7 +253,8 @@ export function DevicePane({
   belowCanvas,
   tool = 'select',
   selection,
-  canvasMove,
+  onReorderNodes,
+  dropTargetAt,
   centerOn,
   status,
   preview,
@@ -227,19 +266,15 @@ export function DevicePane({
   const scrollMemory = useMemo(() => ({ identity: previewIdentity, positions: new Map<string, { left: number; top: number }>() }), [previewIdentity])
   const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
 
-  /** The hover as of now, for handlers that run outside React's render. */
-  const hoverRef = useRef<RenderNode | null>(null)
-  /** The press or drag in progress on a view; see `onViewPointerDown`. */
-  const gesture = useRef<MoveGesture | null>(null)
+  /** What is under the pointer as of now, topmost first, for handlers that run outside React's render. */
+  const hoverRef = useRef<readonly RenderNode[] | null>(null)
 
   // One call site for the hover, so the pane and the workspace cannot disagree
   // about what the pointer is over.
-  const setHovered = useCallback((node: RenderNode | null, pageId?: string) => {
-    // A move draws its own target; hover would flicker under the copy that follows the pointer.
-    if (gesture.current?.source && node) return
-    hoverRef.current = node
-    setHoveredNode(node)
-    onHoverNode?.(node, pageId)
+  const setHovered = useCallback((under: readonly RenderNode[] | null, pageId?: string) => {
+    hoverRef.current = under
+    setHoveredNode(under?.[0] ?? null)
+    onHoverNode?.(under, pageId)
   }, [onHoverNode])
 
   /** The rendered view an element belongs to, and the phone it is on. */
@@ -281,6 +316,11 @@ export function DevicePane({
     const { x, y, scale } = viewRef.current
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
   }, [])
+  /** A world drawn again after a crash picks up the view where the old one left it. */
+  const attachWorld = useCallback((world: HTMLDivElement | null) => {
+    worldRef.current = world
+    applyView()
+  }, [applyView])
 
   /**
    * The canvas: lanes of screens with each screen's states inside its frame.
@@ -298,7 +338,8 @@ export function DevicePane({
     setCanvasFor(`${projectId}:${canvas?.laneNames.length ?? 0}`)
     setOpenStates(new Set()); setCollapsedLanes(new Set()); setShowAllStates(false)
   }
-  const phoneFrame = useMemo(() => ({ width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }), [device.width, device.height])
+  const chrome = useMemo(() => deviceChrome(device), [device])
+  const phoneFrame = useMemo(() => ({ width: chrome.width, height: chrome.height }), [chrome])
   const statesOf = canvas?.statesOf, laneNames = canvas?.laneNames, visibleRootId = canvas?.visibleRootId, sameScreen = canvas?.sameScreen
 
   /**
@@ -594,183 +635,82 @@ export function DevicePane({
   }, [pickingDestination, expanded, inspecting, gallery, onPreviewChange, applyView])
 
   /**
-   * Dragging a view moves it in the file, the way a design tool moves a layer in an
-   * auto layout frame.
+   * Dragging a view onto another one moves it in the file.
    *
-   * A press picks up the selection when it lands inside it, and what is under the
-   * pointer otherwise: a container paints through its children, so once a stack is
-   * chosen, dragging it from anywhere has to mean the stack. Nothing moves until the
-   * pointer has travelled a few pixels, so a click stays a click. Then a copy of the
-   * view follows the pointer, the original dims in place, and the container that
-   * would take it is outlined with a bar where it would land, across a column and
-   * down a row. Escape puts everything back. The copy, outline and bar are drawn
-   * straight to the DOM once a frame, so the canvas is not re-rendered as it moves.
+   * What is dragged is the *selection* when the press lands inside it, and otherwise
+   * what a click there would select (D1): a whole card, or at the depth gone into. So a
+   * whole list can be carried once it is selected, without the pointer having to find
+   * its edge. The workspace works out both ends from what is under the pointer.
    */
-  const ghostRef = useRef<HTMLDivElement>(null)
-  const targetRef = useRef<HTMLDivElement>(null)
-  const lineRef = useRef<HTMLDivElement>(null)
-  /** What is being moved, for the heading; null when nothing is. */
-  const [moving, setMoving] = useState<string | null>(null)
-  /** Why the view cannot be dropped where the pointer is; null while it can. */
-  const [blocked, setBlocked] = useState<string | null>(null)
-  /** The click a drag ends with is not a selection. */
-  const suppressClick = useRef(false)
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
-  /** The window listeners outlive renders; they read these. */
-  const latest = useRef({ canvasMove, droppedOn, setHovered })
-  useEffect(() => { latest.current = { canvasMove, droppedOn, setHovered } })
+  const viewDrag = useRef<{ node: readonly RenderNode[] | 'selection'; x: number; y: number } | null>(null)
+  const [dragTarget, setDragTarget] = useState<{ name: string; position: DropPosition } | null>(null)
 
-  const onViewPointerDown = (event: React.PointerEvent) => {
-    suppressClick.current = false
-    if (navigationPicker || !expanded || stale || !inspecting || tool !== 'select' || !canvasMove || event.button !== 0 || spaceRef.current) return
+  const onViewPointerDown = useCallback((event: React.PointerEvent) => {
+    if (navigationPicker || !expanded || stale || !inspecting || tool !== 'select' || !onReorderNodes || event.button !== 0) return
     const element = containerRef.current
     if (!element) return
+
     const within = (selection?.renderIds ?? []).some((id) => {
       const box = element.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`)?.getBoundingClientRect()
-      return !!box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom
+      return !!box
+        && event.clientX >= box.left && event.clientX <= box.right
+        && event.clientY >= box.top && event.clientY <= box.bottom
     })
-    const { node, pageId } = droppedOn(event.target)
-    if (!within && !node) return
-    // Text would otherwise start a selection, and an image the browser's own drag.
-    event.preventDefault()
-    const at = { x: event.clientX, y: event.clientY }
-    gesture.current = { pointerId: event.pointerId, start: at, last: at, node: within ? 'selection' : node!, ...(pageId ? { pageId } : {}), source: null, elements: [], slot: null, frame: 0 }
-  }
+
+    const node = within ? 'selection' : hoverRef.current
+    if (!node?.length) return
+    viewDrag.current = { node, x: event.clientX, y: event.clientY }
+  }, [navigationPicker, expanded, stale, inspecting, tool, onReorderNodes, selection])
 
   useEffect(() => {
-    const scopeFor = (pageId?: string): ParentNode =>
-      (pageId ? containerRef.current?.querySelector(`[data-page-id="${CSS.escape(pageId)}"]:not([data-state])`) : null) ?? containerRef.current ?? document
-    const elementsOf = (scope: ParentNode, ids: readonly string[]) =>
-      ids.flatMap(id => { const element = scope.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`); return element ? [element] : [] })
-    const boxOf = (scope: ParentNode, ids: readonly string[]): Box | null =>
-      unionBox(elementsOf(scope, ids).map(element => element.getBoundingClientRect()).filter(rect => rect.width > 0 || rect.height > 0))
-    const show = (element: HTMLElement | null, box: Box | null) => {
-      if (!element) return
-      if (!box) { element.style.display = 'none'; return }
-      Object.assign(element.style, { display: 'block', left: `${box.left}px`, top: `${box.top}px`, width: `${box.right - box.left}px`, height: `${box.bottom - box.top}px` })
-    }
-
-    /** A copy still sliding back from the last drag, finished at once if another starts. */
-    let settling: { timer: number; finish: () => void } | null = null
-    const settle = () => { if (!settling) return; const { timer, finish } = settling; settling = null; clearTimeout(timer); finish() }
-
-    /** Picks the view up: the copy that follows the pointer, and the original dimmed. */
-    const begin = (g: MoveGesture): boolean => {
-      settle()
-      const source = latest.current.canvasMove?.pick(g.node, g.pageId)
-      const ghost = ghostRef.current
-      if (!source || !ghost) return false
-      const elements = elementsOf(scopeFor(g.pageId), source.renderIds)
-      const area = (element: HTMLElement) => { const rect = element.getBoundingClientRect(); return rect.width * rect.height }
-      const outer = elements.reduce<HTMLElement | null>((best, element) => !best || area(element) > area(best) ? element : best, null)
-      if (!outer) return false
-      const rect = outer.getBoundingClientRect()
-      const copy = outer.cloneNode(true) as HTMLElement
-      // A copy, not the view: nothing in it may be found, selected or read out as the original.
-      for (const element of [copy, ...copy.querySelectorAll<HTMLElement>('*')]) {
-        for (const name of ['data-node-id', 'data-handler-id', 'data-layer-selected', 'id', 'tabindex', 'role', 'aria-label']) element.removeAttribute(name)
+    // Worked out again only when what is under the pointer changes, not at every move.
+    let cached: { over: readonly RenderNode[]; source: readonly RenderNode[] | 'selection'; target: CanvasDropTarget | null } | null = null
+    /** What the drop would do, from where the pointer is over the view it would go beside. */
+    const dropAt = (event: PointerEvent, source: readonly RenderNode[] | 'selection') => {
+      const over = hoverRef.current
+      if (!over?.length) return null
+      if (cached?.over !== over || cached.source !== source) cached = { over, source, target: dropTargetAt?.(over, source) ?? null }
+      const target = cached.target
+      if (!target) return null
+      if (target.inside) return { node: over, name: target.name, position: 'inside' as const }
+      const boxes = target.renderIds.flatMap(id => containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`)?.getBoundingClientRect() ?? [])
+      const across = target.axis === 'horizontal'
+      const start = Math.min(...boxes.map(box => across ? box.left : box.top)), end = Math.max(...boxes.map(box => across ? box.right : box.bottom))
+      return {
+        node: over,
+        name: target.name,
+        position: (boxes.length && (across ? event.clientX : event.clientY) > (start + end) / 2 ? 'after' : 'before') as 'before' | 'after',
       }
-      Object.assign(copy.style, { left: '0px', top: '0px', margin: '0px', outline: 'none', transformOrigin: '0 0', transform: `scale(${rect.width / (outer.offsetWidth || rect.width) || 1})` })
-      ghost.replaceChildren(copy)
-      show(ghost, rect)
-      ghost.style.transform = 'translate(0px, 0px)'
-      for (const element of elements) element.setAttribute('data-drag-source', '')
-      g.source = source; g.elements = elements
-      latest.current.setHovered(null)
-      setMoving(source.label)
-      return true
     }
 
-    /** Follows the pointer: the copy, and the container and slot it would land in. */
-    const update = () => {
-      const g = gesture.current
-      if (!g?.source) return
-      g.frame = 0
-      const { x, y } = g.last
-      if (ghostRef.current) ghostRef.current.style.transform = `translate(${x - g.start.x}px, ${y - g.start.y}px)`
-      const { node, pageId } = latest.current.droppedOn(document.elementFromPoint(x, y))
-      const move = latest.current.canvasMove
-      const container = node ? move?.targets(g.source, node, pageId)[0] : undefined
-      const scope = scopeFor(pageId)
-      const box = container ? boxOf(scope, container.renderIds) : null
-      if (!container || !box || !move) {
-        g.slot = null; show(targetRef.current, null); show(lineRef.current, null)
-        ghostRef.current?.setAttribute('data-blocked', '')
-        setBlocked(move ? move.blocked(g.source, node, pageId) : null)
-        return
-      }
-      ghostRef.current?.removeAttribute('data-blocked')
-      setBlocked(null)
-      // A child that is not drawn - scrolled away, or hidden - cannot be measured; the
-      // slot is found among the ones that are, and counted among all of them.
-      const others = container.children.filter(child => child.id !== g.source!.id)
-      const visible = others.flatMap((child, index) => { const childBox = boxOf(scope, child.renderIds); return childBox ? [{ index, box: childBox }] : [] })
-      const slot = dropSlot(container.axis, box, visible.map(child => child.box), { x, y })
-      const index = slot.index < visible.length ? visible[slot.index]!.index : visible.length ? visible[visible.length - 1]!.index + 1 : others.length
-      g.slot = { container, index }
-      show(targetRef.current, box)
-      show(lineRef.current, slot.line)
+    const moved = (event: PointerEvent, drag: { x: number; y: number }) =>
+      Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) >= 6
+
+    const move = (event: PointerEvent) => {
+      const drag = viewDrag.current
+      if (!drag || !moved(event, drag)) return
+      const drop = dropAt(event, drag.node)
+      setDragTarget(drop ? { name: drop.name, position: drop.position } : null)
     }
 
-    const end = (drop: boolean) => {
-      const g = gesture.current
-      gesture.current = null
-      if (!g?.source) return
-      cancelAnimationFrame(g.frame)
-      show(targetRef.current, null); show(lineRef.current, null)
-      setMoving(null); setBlocked(null)
-      suppressClick.current = true
-      const ghost = ghostRef.current
-      const finish = () => {
-        for (const element of g.elements) element.removeAttribute('data-drag-source')
-        if (!ghost) return
-        ghost.replaceChildren(); ghost.removeAttribute('data-blocked'); ghost.style.transition = ''; show(ghost, null)
-      }
-      const moves = drop && !!g.slot && g.slot.container.children.findIndex(child => child.id === g.source!.id) !== g.slot.index
-      // Nothing to land on, or called off: the copy goes back to where the view still is.
-      if (!moves && ghost && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        ghost.style.transition = 'transform 160ms cubic-bezier(.2,.8,.2,1)'
-        ghost.style.transform = 'translate(0px, 0px)'
-        settling = { timer: window.setTimeout(() => { settling = null; finish() }, 170), finish }
-      } else finish()
-      if (!moves || !g.slot) return
-      const { container, index } = g.slot
-      latest.current.canvasMove?.drop(g.source, container, index)
+    const up = (event: PointerEvent) => {
+      const drag = viewDrag.current
+      viewDrag.current = null
+      setDragTarget(null)
+      if (!drag || !moved(event, drag)) return
+      const drop = dropAt(event, drag.node)
+      if (drop) onReorderNodes?.(drag.node, drop.node, drop.position)
     }
 
-    const onMove = (event: PointerEvent) => {
-      const g = gesture.current
-      if (!g || event.pointerId !== g.pointerId) return
-      g.last = { x: event.clientX, y: event.clientY }
-      if (!g.source) {
-        if (Math.abs(g.last.x - g.start.x) + Math.abs(g.last.y - g.start.y) < 4) return
-        if (!begin(g)) { gesture.current = null; return }
-      }
-      if (!g.frame) g.frame = requestAnimationFrame(update)
-    }
-    const onUp = (event: PointerEvent) => {
-      const g = gesture.current
-      if (!g || event.pointerId !== g.pointerId) return
-      if (g.source) { g.last = { x: event.clientX, y: event.clientY }; cancelAnimationFrame(g.frame); update() }
-      end(true)
-    }
-    const onCancel = (event: PointerEvent) => { if (gesture.current?.pointerId === event.pointerId) end(false) }
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && gesture.current?.source) { event.preventDefault(); event.stopPropagation(); end(false) } }
-
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onCancel)
-    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
     return () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onCancel)
-      window.removeEventListener('keydown', onKey, true)
-      end(false)
-      settle()
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
     }
-  }, [])
+  }, [onReorderNodes, dropTargetAt])
 
   /**
    * Dragging the canvas moves it, from anywhere that is not a phone.
@@ -873,34 +813,35 @@ export function DevicePane({
   const inlineEditor = inlineText && inspecting && authoringFeatures?.onNodeChange ? <InlineTextEditor key={`${inlineText.node.id}:${inlineText.control}`} {...inlineText} onClose={() => setInlineText(null)} onSave={value => authoringFeatures.onNodeChange!(inlineText.node, inlineText.control, value)} /> : null
   const screenFor = (tree: RenderTree | null, live: boolean, at: number, page?: PagePreview) => (
     <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${at})`, transformOrigin: 'top left' }}>
-      <DeviceFrame device={device}>
+      <DeviceFrame device={device} chrome={chrome}>
         <RenderTreeView
           key={scrollMemory.identity}
           scrollPositions={scrollMemory.positions}
           tree={tree ?? EMPTY_RENDER_TREE}
-          selectedIds={selectedRenderIds}
-          hoveredIds={inspecting && !stale ? hoveredRenderIds : undefined}
+          {...(selectedRenderGroups ? { selectedGroups: selectedRenderGroups } : {})}
+          {...(inspecting && !stale && hoveredRenderGroups ? { hoveredGroups: hoveredRenderGroups } : {})}
           {...(live ? { onEvent } : {})}
           stale={stale}
           {...(inspecting && !navigationPicker
             ? {
                 inspect: {
-                  hovered: highlighted?.id ?? null,
-                  onHover: node => setHovered(node, page?.id),
-                  onSelect: node => onRevealSource(node, page?.id),
-                  onEditText: (rendered: RenderNode, rect: { x: number; y: number; width: number }) => {
-                    if (stale || tool !== 'select' || !rendered.origin) return
-                    const source = rendered.origin
-                    const node = authoringFeatures?.snapshot?.nodes.filter(n => n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end && n.controls?.some(c => ['content', 'title'].includes(c.id) && c.kind === 'text')).sort((a, b) => a.source.end - a.source.start - (b.source.end - b.source.start))[0]
-                    const control = node?.controls?.find(c => ['content', 'title'].includes(c.id) && c.kind === 'text')
-                    if (node && control) { onRevealSource(rendered, page?.id); setInlineText({ node, control: control.id, value: control.value, x: rect.x, y: rect.y, width: rect.width }) }
+                  // Design outlines what a click would select, which the workspace works out (D1).
+                  hovered: expanded ? null : highlighted?.id ?? null,
+                  onHover: under => setHovered(under, page?.id),
+                  onSelect: (under, keys) => onInspectSelect(under, keys, page?.id),
+                  onDoubleClick: (under, rect) => {
+                    if (stale || tool !== 'select') return
+                    const text = onInspectDoubleClick?.(under, page?.id)
+                    if (text) setInlineText({ ...text, x: rect.x, y: rect.y, width: rect.width })
                   },
                 },
               }
             : {})}
         />
+        {live && notice ? <p className={styles.stateProblem} role="status">{notice.title}: {notice.detail}</p> : null}
+        {live && onRestart ? <button type="button" className={styles.restartPhone} aria-label="Start the preview again" onClick={onRestart} /> : null}
         <StatusBar device={device} colorScheme={preview.colorScheme} />
-        {device.hasDynamicIsland ? <DynamicIsland device={device} /> : null}
+        {device.hasDynamicIsland && !chrome.art ? <DynamicIsland device={device} /> : null}
         {device.homeIndicator ? <HomeIndicator device={device} colorScheme={preview.colorScheme} /> : null}
       </DeviceFrame>
     </div>
@@ -915,26 +856,25 @@ export function DevicePane({
 
   return (<>
     {inlineEditor}
-    {mounted && createPortal(<div aria-hidden="true">
-      <div ref={ghostRef} className={styles.moveGhost} data-testid="move-ghost" />
-      <div ref={targetRef} className={styles.moveTarget} data-testid="move-target" />
-      <div ref={lineRef} className={styles.moveLine} data-testid="move-line" />
-    </div>, document.body)}
     <section className={styles.preview} aria-label="Preview" data-expanded={expanded}>
       <div className={styles.stage}>
       {expanded ? <div className={styles.canvasHeading}>
         {status}
         <span>
-          <span>{
+          {/* A hint while nothing is under way: the first thing a narrow window does without. */}
+          <span className={styles.headingHint} data-idle={!navigationPicker && !dragTarget || undefined}>{
             navigationPicker
               ? 'Pick a highlighted screen · Escape to cancel'
-              : moving
-              ? blocked ? `Can't drop ${moving} here · ${blocked}` : `Moving ${moving} · release to drop, Esc to cancel`
+              : dragTarget
+              ? `Drop ${dragTarget.position} ${dragTarget.name}`
               : gallery
-              ? drawnScreens < (pageCount ?? pages!.length)
+              ? pagesNotDrawn?.length
+                // The reasons are here, a hover away, and in the warnings list beside the status (D11).
+                ? <>{drawnScreens} {drawnScreens === 1 ? 'screen' : 'screens'} · <span className={styles.notDrawn} tabIndex={0} title={pagesNotDrawn.join('\n')} data-testid="pages-not-drawn">{pagesNotDrawn.length} not drawn</span></>
+                : drawnScreens < (pageCount ?? pages!.length)
                 ? `${drawnScreens} of ${pageCount ?? pages!.length} screens · scroll to explore`
                 : `${drawnScreens} ${drawnScreens === 1 ? 'screen' : 'screens'} · scroll to explore · ⌘/Ctrl-scroll to zoom`
-              : inspecting ? 'Hover to find a view in Layers, click to select it' : 'Interactive preview'
+              : inspecting ? 'Click to select · double-click to go in · ⌘-click for the innermost' : 'Interactive preview'
           }</span>
           {navigationPicker && <button type="button" className={styles.cancelPick} onClick={navigationPicker.onCancel}>Cancel pick</button>}
           {/* Off in Live Preview, and said so rather than hidden: it is a thing the
@@ -950,6 +890,7 @@ export function DevicePane({
             Show all states
           </label>}
           {!!states.held && <span title="Each state is drawn by compiling the project again, so the canvas draws a few at a time.">{states.held} more {states.held === 1 ? 'state' : 'states'} not drawn</span>}
+          {environment && <span className={styles.headingEnvironment} role="group" aria-label="Preview environment">{environment}</span>}
           {zoomPicker}
         </span>
       </div> : <header className={styles.compactSettings}>{collapsePanel}{devicePicker}{schemePicker}{typePicker}{zoomPicker}</header>}
@@ -961,9 +902,7 @@ export function DevicePane({
         data-testid="device-pane"
         data-fixed={!expanded}
         data-tool={inspecting ? tool : undefined}
-        data-dragging={moving ? true : undefined}
-        data-blocked={moving && blocked ? true : undefined}
-        onClickCapture={(event) => { if (suppressClick.current) { suppressClick.current = false; event.stopPropagation(); event.preventDefault() } }}
+        data-dragging={dragTarget ? true : undefined}
         onPointerDown={(event) => { skipNavigationPickClick.current = event.button === 1 || spaceRef.current; onPanStart(event); onViewPointerDown(event) }}
         onPointerUp={onBackgroundUp}
         // The pointer can leave the device without crossing any node's boundary -
@@ -977,7 +916,7 @@ export function DevicePane({
           event.stopPropagation()
           event.dataTransfer.dropEffect = 'copy'
           const { node, pageId } = droppedOn(event.target)
-          if (node?.id !== hoverRef.current?.id) setHovered(node, pageId)
+          if (node?.id !== hoverRef.current?.[0]?.id) setHovered(node ? [node] : null, pageId)
         }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHovered(null) }}
         onDrop={(event) => {
@@ -995,7 +934,8 @@ export function DevicePane({
         {/* The world. Everything in it is laid out at its natural size and this one
             transform decides where and how big it appears, which is what lets the
             canvas be panned anywhere and zoomed about the pointer. */}
-        <div ref={worldRef} data-world className={styles.world}>
+        <PaneBoundary area="canvas" resetKeys={[revision, inspecting]}>
+        <div ref={attachWorld} data-world className={styles.world}>
           {gallery && layout ? (
             <div
               className={styles.flow}
@@ -1072,11 +1012,12 @@ export function DevicePane({
                   </div>
                 : state ? null
                 : <figure key={page.id} className={styles.pageCard} style={{ left: x, top: y, width: phoneFrame.width, height: phoneFrame.height + CANVAS.caption }} data-active={page.id === selectedPageId || undefined} data-page-id={page.id} data-parent-page={page.parentId} data-page-kind={page.kind ?? 'root'} data-testid="gallery-page">
-                  <div style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }}>
+                  <div style={{ position: 'relative', width: phoneFrame.width, height: phoneFrame.height }}>
                     {screenFor(page.tree, false, 1, page)}
                     {navigationPicker && <button
                       type="button"
                       className={styles.navigationPickTarget}
+                      style={{ borderRadius: chrome.outerRadius }}
                       data-testid="navigation-pick-target"
                       data-available={!!navigationPicker.targets[page.id]?.destination}
                       aria-label={`Navigate to ${page.name}`}
@@ -1099,12 +1040,13 @@ export function DevicePane({
           ) : (
             <div
               data-canvas-phone
-              style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }}
+              style={{ position: 'relative', width: phoneFrame.width, height: phoneFrame.height }}
             >
               {screenFor(tree, true, 1)}
             </div>
           )}
         </div>
+        </PaneBoundary>
       </div>
 
       <footer className={styles.canvasFooter}>{tools}</footer>
@@ -1168,16 +1110,11 @@ function StatePhone({ page, scenario, options, device, preview, active, onSelect
     allPages: true,
   })
   const tree = result?.pages?.find(item => item.id === page.id)?.tree ?? null
-  // A state is a set of values for this screen. When the screen no longer has them -
-  // renamed, removed, retyped - that is what to say, not that the code is broken.
-  const mismatch = result?.diagnostics.find(d => d.severity === 'error' && d.code === 'invalid_preview_scenario')
-  const problem = workerError
-    ?? (mismatch ? `This state no longer matches ${page.name}. Open Screen \u203a States to change or remove it.` : null)
-    ?? (result?.diagnostics.some(d => d.severity === 'error') ? 'This state cannot be drawn while the code has errors.' : null)
-    ?? (result && !stale && !tree ? `This state no longer matches ${page.name}. Open Screen \u203a States to change or remove it.` : null)
+  const chrome = useMemo(() => deviceChrome(device), [device])
+  const problem = stateProblem({ page: page.name, compiled: !!result, diagnostics: result?.diagnostics ?? [], drawn: !!tree, stale, workerError })
   return (
     <figure className={styles.pageCard} data-testid="canvas-state" data-state={scenario.name} data-active={active || undefined}>
-      <div style={{ position: 'relative', width: device.width + BEZEL * 2, height: device.height + BEZEL * 2 }} data-busy={!tree || stale || undefined}>
+      <div style={{ position: 'relative', width: chrome.width, height: chrome.height }} data-busy={!tree || stale || undefined}>
         {draw(tree)}
         {problem ? <p className={styles.stateProblem} role="status">{problem}</p> : null}
       </div>
@@ -1192,23 +1129,68 @@ function StatePhone({ page, scenario, options, device, preview, active, onSelect
 /**
  * The bezel.
  *
- * Titanium rather than the silver gradient this used to draw: a real iPhone's
- * frame is near-black and reads as a thin dark rim, and a bright bevel around a
- * simulated screen pulls the eye to the chrome instead of to the app. The band of
- * lighter grey along the top edge is the one specular cue worth keeping - without
- * it the device reads as a flat rectangle with rounded corners.
+ * Its own layers: the app's bars and sheets, the status bar and the artwork all sit
+ * in it, so whatever the canvas draws over a phone (the navigation pick) covers the
+ * whole of it.
  */
-function DeviceFrame({ device, children }: { device: DeviceSpec; children: React.ReactNode }) {
+function DeviceFrame({ device, chrome, children }: { device: DeviceSpec; chrome: DeviceChrome; children: React.ReactNode }) {
+  const screen = (
+    <div
+      data-testid="device-screen"
+      style={{
+        position: 'relative',
+        width: device.width,
+        height: device.height,
+        borderRadius: device.cornerRadius,
+        overflow: 'hidden',
+        background: '#ffffff',
+        // A hairline where the glass meets the frame, which is what stops the
+        // screen from looking painted onto the bezel.
+        boxShadow: chrome.art ? undefined : 'inset 0 0 0 0.5px rgb(0 0 0 / 0.5)',
+      }}
+    >
+      {children}
+    </div>
+  )
+  if (chrome.art) {
+    const art = chrome.art
+    return (
+      <div data-testid="device-frame" style={{ position: 'relative', width: chrome.width, height: chrome.height, isolation: 'isolate' }}>
+        <div style={{ position: 'absolute', left: chrome.screen.x, top: chrome.screen.y }}>{screen}</div>
+        {/* The glass's edge, over the app. The screen's white and the app's own background
+            meet on a fractional pixel, which left a white hairline around a dark app, so
+            this straddles that edge: 1 pt under the artwork and 1 pt over the app. */}
+        <div aria-hidden style={{ position: 'absolute', left: chrome.screen.x - 1, top: chrome.screen.y - 1, width: device.width + 2, height: device.height + 2, borderRadius: device.cornerRadius + 1, boxShadow: 'inset 0 0 0 2px #000', pointerEvents: 'none', zIndex: DEVICE_Z + 3 }} />
+        {/* Over the screen, so its glass edge and island cover the app as the hardware
+            does, and out of the way of every tap. The finish follows the workspace theme. */}
+        <div
+          data-testid="device-art"
+          aria-hidden
+          className={styles.deviceArt}
+          style={{
+            left: art.x, top: art.y, width: art.width, height: art.height, zIndex: DEVICE_Z + 3,
+            '--device-art-black': `url(${art.black})`, '--device-art-silver': `url(${art.silver})`,
+          } as React.CSSProperties}
+        />
+      </div>
+    )
+  }
+  // Titanium rather than the silver gradient this used to draw: a real iPhone's
+  // frame is near-black and reads as a thin dark rim, and a bright bevel around a
+  // simulated screen pulls the eye to the chrome instead of to the app. The band of
+  // lighter grey along the top edge is the one specular cue worth keeping - without
+  // it the device reads as a flat rectangle with rounded corners.
   return (
     <div
       data-testid="device-frame"
       style={{
         position: 'relative',
-        width: device.width + BEZEL * 2,
-        height: device.height + BEZEL * 2,
-        padding: BEZEL,
+        width: chrome.width,
+        height: chrome.height,
+        padding: `${chrome.screen.y}px ${chrome.screen.x}px`,
         boxSizing: 'border-box',
-        borderRadius: device.cornerRadius + BEZEL,
+        isolation: 'isolate',
+        borderRadius: chrome.outerRadius,
         background: 'linear-gradient(150deg, #55555c 0%, #26262a 12%, #1c1c1f 50%, #303036 100%)',
         boxShadow: [
           '0 18px 40px rgb(25 25 35 / 0.12)',
@@ -1218,21 +1200,7 @@ function DeviceFrame({ device, children }: { device: DeviceSpec; children: React
         ].join(', '),
       }}
     >
-      <div
-        style={{
-          position: 'relative',
-          width: device.width,
-          height: device.height,
-          borderRadius: device.cornerRadius,
-          overflow: 'hidden',
-          background: '#ffffff',
-          // A hairline where the glass meets the frame, which is what stops the
-          // screen from looking painted onto the bezel.
-          boxShadow: 'inset 0 0 0 0.5px rgb(0 0 0 / 0.5)',
-        }}
-      >
-        {children}
-      </div>
+      {screen}
     </div>
   )
 }

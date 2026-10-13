@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openCounter, replaceSource } from './designer-helpers'
 
 /**
  * Gates from every phase, kept together.
@@ -18,10 +19,7 @@ import { expect, test, type Page } from '@playwright/test'
  * what is already open.
  */
 async function openStudio(page: Page) {
-  await page.goto('/')
-  await expect(page.getByTestId('template-gallery')).toBeVisible()
-  await page.getByTestId('gallery-dismiss').click()
-  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') await page.getByTestId('pane-toggle-debug').click()
   // Code opens with the preview pointing at views; these tests tap it as an app.
@@ -42,14 +40,15 @@ async function typeAtTop(page: Page, text: string) {
 }
 
 /**
- * Replaces the whole document.
+ * Replaces the whole document by typing it, key by key. Everywhere else a program is
+ * put in with `replaceSource`, because the program is what those tests are about.
  *
  * Takes a single line deliberately. CodeMirror auto-closes brackets, so typing a
  * multi-line block leaves the auto-inserted `}` in place *and* adds the one the test
  * typed on its own line - silently producing unbalanced source, and a failure that
  * has nothing to do with the product.
  */
-async function replaceAll(page: Page, source: string) {
+async function typeSource(page: Page, source: string) {
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type(source)
@@ -88,12 +87,15 @@ async function frames(page: Page) {
 
 // ---------------------------------------------------------------- Phase 0
 
-test('loads the studio with the starter project', async ({ page }) => {
-  await openStudio(page)
+test('loads the studio with the starter project: the blank screen (B6)', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByTestId('template-gallery')).toBeVisible()
+  await page.getByTestId('gallery-dismiss').click()
 
-  await expect(page.getByTestId('project-name')).toHaveText('CounterApp')
-  await expect(page.getByTestId('file-rail')).toContainText('CounterApp.swift')
-  expect(await editorText(page)).toContain('struct ContentView: View')
+  await expect(page.getByTestId('project-name')).toHaveText('MyDesignApp')
+  await page.getByTestId('workspace-develop').click()
+  await expect(page.getByTestId('file-rail')).toContainText('MyDesignApp.swift')
+  await expect(page.getByTestId('file-rail')).toContainText('HomeScreen.swift')
 })
 
 test('gate 1 - edits persist across a reload', async ({ page }) => {
@@ -123,7 +125,7 @@ test('gate 4 - the exported zip contains the edited source, byte-identical', asy
   await page.getByTestId('export-button').click()
   const download = await downloadPromise
 
-  expect(download.suggestedFilename()).toBe('CounterApp.zip')
+  expect(download.suggestedFilename()).toMatch(/^CounterApp-\d{8}-\d{4}-complete\.zip$/)
 
   const stream = await download.createReadStream()
   const chunks: Buffer[] = []
@@ -181,7 +183,7 @@ test('reports unimplemented SwiftUI by name rather than calling it unresolved', 
 
   const console_ = page.getByTestId('console')
   await expect(console_).toContainText('Chart', { timeout: 5_000 })
-  await expect(console_).toContainText('the preview does not draw')
+  await expect(console_).toContainText("isn't drawn in the preview yet")
 })
 
 // ---------------------------------------------------------------- Phase 3
@@ -219,8 +221,8 @@ test('Phase 3 gate 1 - tapping a rendered Button runs its Swift closure', async 
 
 test('Phase 3 gate 2 - Spacer pushes the buttons to opposite edges', async ({ page }) => {
   // The case that exposes a wrong layout engine. The row is inset by the VStack's
-  // 16pt padding plus the HStack's own 24pt, so the buttons sit at 40 and end at 353
-  // on a 393pt screen.
+  // 16pt padding plus the HStack's own 24pt, so the buttons sit at 40 and end at 362
+  // on the iPhone 18 Pro's 402pt screen.
   await openStudio(page)
   await expect(preview(page)).toContainText('Count: 0')
 
@@ -234,7 +236,7 @@ test('Phase 3 gate 2 - Spacer pushes the buttons to opposite edges', async ({ pa
   const last = backgrounds[backgrounds.length - 1]!
 
   expect(first.x).toBe(40)
-  expect(last.x + last.width).toBe(353)
+  expect(last.x + last.width).toBe(362)
   // They are on the same row.
   expect(first.y).toBe(last.y)
 })
@@ -247,15 +249,16 @@ test('Phase 3 - text is centred by the VStack and sized by its font', async ({ p
   const title = painted.find((n) => n.text === 'Hello, World!')!
   const count = painted.find((n) => n.text === 'Count: 0')!
 
-  // Both centred on a 393pt screen.
-  expect(title.x + title.width / 2).toBeGreaterThan(190)
-  expect(title.x + title.width / 2).toBeLessThan(203)
-  expect(count.x + count.width / 2).toBeGreaterThan(190)
-  expect(count.x + count.width / 2).toBeLessThan(203)
+  // Both centred on a 402pt screen.
+  expect(title.x + title.width / 2).toBeGreaterThan(194)
+  expect(title.x + title.width / 2).toBeLessThan(208)
+  expect(count.x + count.width / 2).toBeGreaterThan(194)
+  expect(count.x + count.width / 2).toBeLessThan(208)
 
-  // `.largeTitle` is 41pt tall, `.title2` is 28pt.
+  // A line of `.largeTitle` is 40.67 pt tall and one of `.title2` 26.33, as the iOS 27
+  // simulator draws them.
   expect(title.height).toBe(41)
-  expect(count.height).toBe(28)
+  expect(count.height).toBe(26)
   expect(count.y).toBeGreaterThan(title.y)
 })
 
@@ -302,13 +305,14 @@ test('Phase 3 - the interface updates as you type', async ({ page }) => {
   const tree = preview(page)
   await expect(tree).toContainText('Hello, World!')
 
-  await replaceAll(
-    page,
-    'import SwiftUI; ' +
-      '@main struct TinyApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
-      'struct Root: View { var body: some View { VStack { Text("replaced") } } }',
-  )
+  const source = 'import SwiftUI; ' +
+    '@main struct TinyApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
+    'struct Root: View { var body: some View { VStack { Text("replaced") } } }'
+  await typeSource(page, source)
 
+  // Exactly what was typed: a late echo of the editor's own text must not write over
+  // newer typing, which cost CodeMirror its auto-closed brackets and added a `}`.
+  expect(await editorText(page)).toBe(source)
   await expect(tree).toContainText('replaced', { timeout: 5_000 })
   await expect(tree).not.toContainText('Hello, World!')
 })
@@ -316,7 +320,7 @@ test('Phase 3 - the interface updates as you type', async ({ page }) => {
 test('Phase 3 - a runtime trap is reported with its reason, not a crash', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct BoomApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -324,14 +328,15 @@ test('Phase 3 - a runtime trap is reported with its reason, not a crash', async 
   )
 
   await expect(page.getByTestId('console')).toContainText('Division by zero', { timeout: 5_000 })
-  await expect(preview(page)).toContainText('Execution stopped')
+  // The view that trapped is drawn as stopped, saying why, in its own place.
+  await expect(preview(page).locator('[data-kind="placeholder"]')).toContainText('Its code stopped: Division by zero.')
 })
 
 test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', async ({ page }) => {
   // FR-4.11: never a blank space, never a silent wrong result.
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct ChartApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -341,7 +346,7 @@ test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', as
   const placeholder = preview(page).locator('[data-kind="placeholder"]')
   await expect(placeholder).toBeVisible({ timeout: 5_000 })
   await expect(placeholder).toContainText('Chart')
-  await expect(placeholder).toContainText('does not draw')
+  await expect(placeholder).toContainText('Not drawn in the preview yet. Xcode draws it as written.')
 })
 
 // ---------------------------------------------------------------- Phase 6
@@ -349,7 +354,7 @@ test('gate 3b - unimplemented views render a labelled placeholder (FR-4.11)', as
 test('Phase 6 - a navigation flow pushes and pops in the browser', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct NavApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -373,7 +378,7 @@ test('Phase 6 - a navigation flow pushes and pops in the browser', async ({ page
 test('Phase 6 - a sheet presents over the content and dismisses', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct SheetApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -396,7 +401,7 @@ test('Phase 6 - a sheet presents over the content and dismisses', async ({ page 
 test('Phase 6 - a Toggle flips through its binding', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct ToggleApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -416,7 +421,7 @@ test('Phase 6 - the strictness linter warns about code Xcode would reject', asyn
   // that runs happily in the preview and fails the moment it reaches Xcode.
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct StrictApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -436,7 +441,7 @@ test('Phase 7 - a class shared between two views updates both', async ({ page })
   // useful because both views see the same instance.
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       'class Store: ObservableObject { @Published var count = 0; func bump() { count += 1 } } ' +
@@ -460,7 +465,7 @@ test('Phase 7 - a class shared between two views updates both', async ({ page })
 test('Phase 7 - an enum and a switch drive the screen', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       'enum Step: String { case one, two } ' +
@@ -484,7 +489,7 @@ test('Phase 7 - onAppear runs once, not on every render', async ({ page }) => {
   // number climbs with every tap.
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct AppearApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -506,7 +511,7 @@ test('Phase 7 - onAppear runs once, not on every render', async ({ page }) => {
 test('Phase 7 - GeometryReader reports the size it was actually given', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct GeoApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -521,7 +526,7 @@ test('Phase 7 - GeometryReader reports the size it was actually given', async ({
 test('Phase 7 - a Path draws as a real vector', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct PathApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -538,7 +543,7 @@ test('Phase 7 - a Path draws as a real vector', async ({ page }) => {
 test('Phase 7 - a drag moves the view it is attached to', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct DragApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -568,7 +573,7 @@ test('Phase 7 - a drag moves the view it is attached to', async ({ page }) => {
 test('Phase 6 - the coverage panel ranks what the preview could not draw', async ({ page }) => {
   await openStudio(page)
 
-  await replaceAll(
+  await replaceSource(
     page,
     'import SwiftUI; ' +
       '@main struct GapApp: App { var body: some Scene { WindowGroup { Root() } } } ' +
@@ -702,7 +707,7 @@ test('Phase 9 - the Swift Playgrounds export carries the edited source', async (
   await exportAs(page, 'swiftpm')
   const download = await downloadPromise
 
-  expect(download.suggestedFilename()).toBe('CounterApp-swiftpm.zip')
+  expect(download.suggestedFilename()).toMatch(/^CounterApp-\d{8}-\d{4}-swiftpm\.zip$/)
 
   const stream = await download.createReadStream()
   const chunks: Buffer[] = []
@@ -719,18 +724,18 @@ test('Phase 9 - every export format offers a distinct download', async ({ page }
   await openStudio(page)
 
   for (const [format, filename] of [
-    ['spm', 'CounterApp-package.zip'],
-    ['xcodegen', 'CounterApp-xcodegen.zip'],
+    ['spm', /^CounterApp-\d{8}-\d{4}-package\.zip$/],
+    ['xcodegen', /^CounterApp-\d{8}-\d{4}-xcodegen\.zip$/],
   ] as const) {
     const downloadPromise = page.waitForEvent('download')
     await exportAs(page, format)
-    expect((await downloadPromise).suggestedFilename()).toBe(filename)
+    expect((await downloadPromise).suggestedFilename()).toMatch(filename)
   }
 
   // The default button is unchanged: the common case stays one click away.
   const downloadPromise = page.waitForEvent('download')
   await page.getByTestId('export-button').click()
-  expect((await downloadPromise).suggestedFilename()).toBe('CounterApp.zip')
+  expect((await downloadPromise).suggestedFilename()).toMatch(/^CounterApp-\d{8}-\d{4}-complete\.zip$/)
 })
 
 test('Phase 9 - a share link carries the project to a fresh session', async ({ page, context }) => {
@@ -867,7 +872,7 @@ test('Phase 10 - a view with only a #Preview renders instead of erroring', async
   // meant pasting modern SwiftUI produced a blank screen and a complaint about a
   // character rather than about anything the user wrote.
   await openStudio(page)
-  await replaceAll(
+  await replaceSource(
     page,
     'struct ContentView: View { var body: some View { Text("pasted") } }',
   )

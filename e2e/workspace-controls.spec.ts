@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 async function open(page: Page) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await expect(page.getByTestId('render-tree')).toBeVisible()
 }
 

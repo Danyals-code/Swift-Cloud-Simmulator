@@ -422,6 +422,122 @@ func main() {
   })
 })
 
+describe('optional chaining', () => {
+  it('gives nil for the whole chain when the optional is nil', () => {
+    // `items.first?.name` on an empty list is how every empty state is written, and
+    // it stopped the preview with "Value of type 'Optional' has no member 'name'".
+    expect(
+      run(`
+struct Item {
+    var name: String
+}
+
+func main() {
+    let items: [Item] = []
+    print(items.first?.name ?? "none")
+    let text: String? = nil
+    print(text?.uppercased() ?? "empty")
+    print("\\(text?.count ?? 0)")
+    let full = [Item(name: "A")]
+    print(full.first?.name ?? "none")
+}`),
+    ).toEqual(['none', 'empty', '0', 'A'])
+  })
+
+  it('runs nothing after a nil, not even the arguments', () => {
+    expect(
+      run(`
+class Node {
+    var next: Node? = nil
+    var name = "node"
+    func tag(_ label: String) -> String { return label + name }
+}
+
+func label() -> String {
+    print("evaluated")
+    return "x"
+}
+
+func main() {
+    let empty: Node? = nil
+    print(empty?.tag(label()) ?? "skipped")
+    print(empty?.next?.name.count ?? -1)
+    let one = Node()
+    print(one.next?.name ?? "no next")
+    one.next = Node()
+    print(one.next?.tag(label()) ?? "no next")
+}`),
+    ).toEqual(['skipped', '-1', 'no next', 'evaluated', 'xnode'])
+  })
+
+  it('subscripts and calls through a chain', () => {
+    // `onDismiss?()` is how a component calls a callback it may not have been given.
+    expect(
+      run(`
+func main() {
+    let none: [Int]? = nil
+    print(none?[0] ?? -1)
+    let some: [Int]? = [7, 8]
+    print(some?[1] ?? -1)
+    let lists: [String: [Int]] = [:]
+    print(lists["k"]?[0] ?? -2)
+    var action: (() -> Void)? = nil
+    action?()
+    action = { print("called") }
+    action?()
+}`),
+    ).toEqual(['-1', '8', '-2', 'called'])
+  })
+
+  it('skips the arguments of a callback that is nil', () => {
+    expect(
+      run(`
+func label() -> String {
+    print("evaluated")
+    return "x"
+}
+
+func main() {
+    var onPick: ((String) -> Void)? = nil
+    onPick?(label())
+    onPick = { print("picked " + $0) }
+    onPick?(label())
+}`),
+    ).toEqual(['evaluated', 'picked x'])
+  })
+
+  it('writes through a chain into the stored value, and does nothing when it is nil', () => {
+    expect(
+      run(`
+struct Point {
+    var x = 0
+}
+
+class Counter {
+    var value = 0
+}
+
+func main() {
+    var point: Point? = Point()
+    point?.x = 5
+    print(point?.x ?? -1)
+    var none: Point? = nil
+    none?.x = 5
+    print(none?.x ?? -1)
+    var items: [Int]? = [1]
+    items?.append(2)
+    print(items?.count ?? -1)
+    let counter: Counter? = Counter()
+    counter?.value += 3
+    print(counter?.value ?? -1)
+    var forced: Point? = Point()
+    forced!.x = 9
+    print(forced!.x)
+}`),
+    ).toEqual(['5', '-1', '2', '3', '9'])
+  })
+})
+
 describe('loops', () => {
   it('runs a while loop', () => {
     expect(
@@ -548,5 +664,79 @@ describe('describing values', () => {
 
   it('is still a string-valued helper', () => {
     expect(value('print("x")').kind).toBe('string')
+  })
+
+  // Swift prints a class instance as `MyApp.Node`. The module is the exported
+  // target's name, which the preview never sees, so the type name stands alone.
+  it('prints a class instance by its type name, even when two objects point at each other', () => {
+    expect(
+      run(`
+final class Node {
+    var name = ""
+    var parent: Node?
+    var child: Node?
+}
+
+func main() {
+    let root = Node()
+    let leaf = Node()
+    root.child = leaf
+    leaf.parent = root
+    print(root)
+    print("child: \\(leaf)")
+    print([root, leaf])
+}`),
+    ).toEqual(['Node', 'child: Node', '[Node, Node]'])
+  })
+
+  it('stops a class that builds another of itself as it is built, at a depth, not by running out of stack', () => {
+    expect(() =>
+      run(`
+final class Tree {
+    var next = Tree()
+}
+
+func main() {
+    let tree = Tree()
+    print(tree)
+}`),
+    ).toThrow('Call depth exceeded')
+  })
+})
+
+describe('collections the AI writes around its lists', () => {
+  it('hands a closure a tuple element as its parameters, as enumerated() and zip give them', () => {
+    expect(
+      run(`
+func main() {
+    let names = ["Ada", "Grace"]
+    names.enumerated().forEach { index, name in print("\\(index): \\(name)") }
+    for (index, name) in names.enumerated() { print("\\(index)-\\(name)") }
+    let pairs = zip([1, 2], ["a", "b"]).map { number, letter in "\\(number)\\(letter)" }
+    print(pairs.joined(separator: ","))
+}`),
+    ).toEqual(['0: Ada', '1: Grace', '0-Ada', '1-Grace', '1a,2b'])
+  })
+
+  it('maps a range', () => {
+    expect(
+      run(`
+func main() {
+    print((0..<3).map { $0 * 2 })
+    print((1...3).map { "row \\($0)" }.joined(separator: ", "))
+}`),
+    ).toEqual(['[0, 2, 4]', 'row 1, row 2, row 3'])
+  })
+
+  it('maps with a key path to a raw value or a computed property', () => {
+    expect(
+      run(`
+enum Flavor: String, CaseIterable { case vanilla, chocolate }
+struct Person { let first: String; let last: String; var full: String { first + " " + last } }
+func main() {
+    print(Flavor.allCases.map(\\.rawValue))
+    print([Person(first: "Ada", last: "Lovelace")].map(\\.full))
+}`),
+    ).toEqual(['["vanilla", "chocolate"]', '["Ada Lovelace"]'])
   })
 })

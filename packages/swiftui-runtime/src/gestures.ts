@@ -1,5 +1,6 @@
 import type { GesturePhase, UIEvent } from '@studio/shared'
-import { double, opaque, type ClosureValue, type SwiftValue } from '@studio/swift-runtime'
+import { double, opaque, type SwiftValue } from '@studio/swift-runtime'
+import type { ActionValue } from './view-value'
 
 /**
  * Gestures.
@@ -25,15 +26,16 @@ export const RECT_TYPE = 'CGRect'
 
 export type GestureKind = 'drag' | 'longPress' | 'magnify' | 'rotate' | 'tap'
 
+/** What a gesture runs: its closure, or a function named as a value - `.onEnded(tapped)`. */
 export interface GestureHandler {
   readonly phase: 'changed' | 'ended'
-  readonly closure: ClosureValue
+  readonly action: ActionValue
 }
 
 export interface GestureUpdate {
   /** The `@GestureState` projection the closure writes through. */
   readonly binding: SwiftValue
-  readonly closure: ClosureValue
+  readonly action: ActionValue
 }
 
 export interface GesturePayload {

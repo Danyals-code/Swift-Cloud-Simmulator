@@ -77,6 +77,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
     ...(node.filter ? { filter: node.filter } : {}),
     ...(node.material ? { material: node.material } : {}),
     ...(node.mask ? { mask: node.mask } : {}),
+    ...(node.geometryInsets ? { geometryInsets: node.geometryInsets } : {}),
     ...(node.debugName
       ? {
           inspect: {
@@ -214,6 +215,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
           cornerStyle: node.paint.cornerStyle,
           ...(node.paint.fill ? { fill: node.paint.fill } : {}),
           ...(node.paint.stroke ? { stroke: node.paint.stroke } : {}),
+          ...(node.paint.trim ? { trim: node.paint.trim } : {}),
           ...(node.cornerRadius > 0 ? { cornerRadius: node.cornerRadius } : {}),
         },
       }
@@ -234,7 +236,7 @@ function toRenderNode(node: PlacedNode): RenderNode | null {
       return {
         ...base,
         kind: 'placeholder',
-        placeholder: { feature: node.paint.feature, reason: node.paint.reason },
+        placeholder: node.paint.placeholder,
       }
 
     case 'hit':

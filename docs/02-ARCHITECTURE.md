@@ -137,7 +137,8 @@ no witness table: conformance is a *syntactic* merge (§4.4), and generics are e
 constraints recorded and never enforced. Both follow from gate 4 - a false positive is worse than a
 missed error - and from the fact that the export hands the user's exact source to a real compiler,
 which is where type checking belongs. The checker reports what it is certain of: a name that
-resolves nowhere, a real SwiftUI construct the preview cannot draw, an entry-point problem.
+resolves nowhere, a type alias that names itself, a real SwiftUI construct the preview cannot
+draw, two overloads the preview can't tell apart by their arguments, an entry-point problem.
 
 ### 4.4 The conformance merge (`collectConformance`)
 
@@ -396,6 +397,37 @@ Playgrounds opens directly. Cheap to generate once the VFS exists, and it is the
 `exportedBytes(file) === editorBytes(file)` for every file in the corpus. That is FR-7.8, and it is
 what makes G3 a property of the design rather than a promise.
 
+The one exception is the studio's own markers: a hidden view is kept as a commented-out block and a
+switched-off modifier as a `/*studio-off:1 …*/` comment, and the native formats leave both out
+(`withoutStudioMarkers` in `swift-syntax`). Only comments between tokens are touched, never a string.
+`.swiftstudio/project.json` keeps each file whole, and reopening an export restores it when the
+Swift is otherwise unchanged.
+
+### 9.4 Event log
+
+Every archive carries `.swiftstudio/events.jsonl` (FR-7.9): a header line (format, version, project,
+build, how many events and how many were left out), then one event per line, each with its time,
+the page load it came from and its order in that load.
+
+- The events live in an IndexedDB database of their own, `swiftui-web-studio-events`, so adding it
+  needed no new version of the projects' database. Where IndexedDB is missing they are kept in memory.
+- Writes happen in the background, after every write before them. Nothing the log does can refuse
+  or change an edit, and a hand-over never waits for it. The recovery screen's Reload gives the
+  log's last writes at most half a second.
+- The page keeps its own events in memory as well. An export waits at most two seconds for the
+  stored ones; when the storage fails or takes longer, it carries this page's own events and the
+  header says `partial`. Events are written out in the order they happened, whichever tab's write
+  landed first.
+- Design edits are recorded in the studio's own words (`designEvent`): the kind of change, the
+  layer's built-in type, and the control, library view or modifier used. Typing is one event a burst:
+  the file, and how many characters went in and out.
+- A project keeps its first 10,000 events and counts the rest. The events of an untouched starter
+  that another project replaces move to that project. Create with AI's attempts are logged in the
+  project open behind it, and a draft that opens as a new app is noted in that app's log. An answer
+  the preview found broken and asked for again stays one attempt, with a step saying how many problems
+  went back. Removing a project removes its events, and a tab that hands the studio over writes nothing
+  more.
+
 ## 10. Vercel topology
 
 | Route | Runtime | Purpose |
@@ -404,7 +436,7 @@ what makes G3 a property of the design rather than a promise.
 | `/embed/[id]` | Static | Read-only preview iframe (FR-8.4), stripped of the editor bundle. |
 | `/api/share` | Edge | POST a project, get a short id (only when accounts/cloud storage exist). |
 | `/api/proxy` | Node | Allowlisted CORS proxy for the `URLSession` shim (FR-3.8). |
-| `/api/generate/*` | Node | Hosted model API calls, key server-side, rate-limited (FR-9). |
+| `/api/generate`, `/api/edit` | Node | AI requests with the participant's own key, answered only for the studio's own page, and rate-limited per IP by a Vercel Firewall rule (FR-9). |
 | `/api/telemetry` | Edge | Unsupported-feature counters (NFR-6). |
 
 Storage, only if Q3 says cloud: Vercel Postgres for project metadata, Vercel Blob for file contents,

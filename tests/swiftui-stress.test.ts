@@ -31,13 +31,13 @@ function tap(r: CompileResult, label: string) {
 
 // Known gaps must identify the unsupported feature. These are not compatibility passes.
 const gaps: Record<string, string> = {
-  'state-initializer': "Cannot find '_count'", 'bindable-child': 'Bindable',
+  'state-initializer': "Cannot find '_count'",
   'value-textfield': 'value/format/formatter', 'multiline-textfield': 'axis-based multiline',
   'navigation-path': 'bound navigation paths', 'navigation-boolean': 'binding-driven destinations',
   'grid-cell-span': 'gridCellColumns', 'safe-area-padding': 'safeAreaPadding',
   'preferred-scheme': 'preferredColorScheme', 'symbol-effects': 'symbolEffect',
   'scroll-reader': 'ScrollViewReader', 'custom-environment': '@Environment(featureEnabled)',
-  'dateformatter': 'DateFormatter', 'calendar': 'Calendar', 'timeline-context': 'timeline runs only once',
+  'dateformatter': 'DateFormatter', 'timeline-context': 'timeline runs only once',
   'async-phase': 'remote loading and image phases', 'map-placeholder': 'Map',
   'chart-placeholder': 'Chart', 'uneven-shape': 'UnevenRoundedRectangle',
 }

@@ -8,8 +8,11 @@ async function start(page: Page) {
   await expect(page.getByTestId('add-screen')).toBeEnabled()
   // The blank template's one screen is already called Home.
   await expect(screenButton(page, 'Home')).toBeVisible()
+  // The canvas redraws for editing once Design opens; buttons pressed meanwhile are off.
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
 }
 async function add(page: Page, kind: string) {
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
   await expect(page.getByTestId('add-view')).toBeEnabled()
   await page.getByTestId('add-view').click()
   await page.getByTestId(`add-view-${kind}`).click()
@@ -26,11 +29,18 @@ const navigator = (page: Page) => page.getByRole('navigation', { name: 'Layers',
 /** A screen's own button in the navigator, which opens it on the canvas. */
 const screenButton = (page: Page, name: string) => navigator(page).getByTestId('design-screen').getByRole('button', { name, exact: true })
 const phone = (page: Page, name: string) => page.getByTestId('gallery-page').filter({ has: page.getByRole('button', { name: `Edit ${name}`, exact: true }) })
-/** A screen's actions menu, which shows on the row the pointer is over. */
+/**
+ * A screen's actions menu, which shows on the row the pointer is over.
+ *
+ * Once the last change has been compiled: until then its actions are disabled, and a
+ * press on a disabled row is ignored rather than waited for.
+ */
 async function screenAction(page: Page, screen: string, action: 'Rename…' | 'Duplicate' | 'Remove screen') {
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
   const row = navigator(page).getByTestId('design-screen').filter({ has: page.getByRole('button', { name: screen, exact: true }) })
   await row.hover()
   await row.getByRole('button', { name: `Actions for ${screen}`, exact: true }).click()
+  await expect(page.getByRole('option', { name: action, exact: true })).toBeEnabled()
   await page.getByRole('option', { name: action, exact: true }).click()
 }
 /** Screens nothing navigates to yet are listed under "Not linked yet", which starts closed. */
@@ -49,9 +59,8 @@ test('screens create, rename, duplicate, remove and undo entirely in Design', as
   await form.getByRole('textbox', { name: 'Screen name', exact: true }).fill('Club details')
   await form.getByRole('combobox', { name: 'Screen layout', exact: true }).selectOption('HStack')
   await form.getByRole('button', { name: 'Add screen', exact: true }).click()
-  // A new screen is focused on the canvas and listed as not linked yet.
+  // A new screen is focused on the canvas, and Layers opens "Not linked yet" to show it (D13).
   await expect(phone(page, 'Club details')).toContainText('Editing')
-  await showUnlinked(page)
   await expect(screenButton(page, 'Club details')).toBeEnabled()
   await phone(page, 'Club details').getByTestId('render-tree').getByText('Club details', { exact: true }).dblclick()
   await page.getByRole('textbox', { name: 'Canvas text', exact: true }).fill('Campus Design Club')
@@ -154,8 +163,13 @@ test('renames, duplicates and groups layers with a visible move destination and 
   await page.getByRole('option', { name: 'Rename layer…', exact: true }).click()
   await page.getByRole('textbox', { name: 'Layer name', exact: true }).fill('Club heading')
   await page.getByRole('button', { name: 'Save layer name', exact: true }).click()
+  // A layer's actions are disabled while the rename is compiled, and a press on a
+  // disabled row is ignored rather than waited for; under load that can be a while.
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
   await tree.getByRole('button', { name: 'Actions for Club heading', exact: true }).click()
-  await page.getByRole('option', { name: 'Duplicate', exact: true }).click()
+  // Named with its shortcut: "Duplicate ⌘D".
+  await expect(page.getByRole('option', { name: /^Duplicate/ })).toBeEnabled()
+  await page.getByRole('option', { name: /^Duplicate/ }).click()
   await expect(tree.locator('[data-source-name="Text"]')).toHaveCount(2)
   await tree.locator('[data-source-name="Text"]').first().click()
   await tree.locator('[data-source-name="Text"]').last().click({ modifiers: ['Shift'] })
@@ -169,7 +183,7 @@ test('renames, duplicates and groups layers with a visible move destination and 
   await tree.locator('[data-source-name="Text"]').first().click()
   await tree.getByRole('button', { name: 'Actions for Club heading', exact: true }).click()
   await page.getByRole('option', { name: 'Move into…', exact: true }).click()
-  await page.getByRole('combobox', { name: 'Destination container', exact: true }).selectOption({ label: 'Horizontal Stack · container 1' })
+  await page.getByRole('combobox', { name: 'Destination container', exact: true }).selectOption({ label: 'Row · container 1' })
   await page.getByRole('button', { name: 'Move layers', exact: true }).click()
   await expect(page.getByTestId('design-feedback')).toHaveText('Design updated.')
   await expect(page.getByRole('alert')).not.toContainText('cannot')

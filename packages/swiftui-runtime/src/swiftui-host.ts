@@ -1,13 +1,17 @@
 import type { LogLevel, SourceSpan } from '@studio/shared'
+import { hasCornerRadii } from '@studio/shared'
 import {
-  applyKeyPath,
   asKeyPath,
+  readKeyPath,
   bool,
   describe,
+  identityKey,
   double,
   int,
   asProjection,
   copyValue,
+  dateValue,
+  NIL,
   opaque,
   projection,
   str,
@@ -21,8 +25,11 @@ import {
   type InterpreterHost,
   type SwiftValue,
 } from '@studio/swift-runtime'
-import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
-import { formatNumber } from './number-format'
+import { LEGACY_STYLE_TOKENS, SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS, isKnownGlobal } from '@studio/swift-sema'
+import { ZERO_INSETS } from '@studio/swiftui-layout'
+import { ConsoleBuffer, type ConsoleLine } from './console-buffer'
+import { CORNER_NAMES, cornerRadii, largestCorner } from './corners'
+import { containable, toFailure } from './failures'
 import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
@@ -52,15 +59,18 @@ import {
   ANIMATION_TYPE,
   BUTTON_CONFIGURATION_TYPE,
   COLOR_TYPE,
+  stoppedView,
   EDGE_INSETS_TYPE,
   DIMENSIONS_TYPE,
   GEOMETRY_TYPE,
+  SCROLL_PROXY_TYPE,
   isView,
   STROKE_STYLE_TYPE,
   STYLE_TYPE,
   TOKEN_TYPE,
   TRANSITION_TYPE,
   VIEW_TYPE,
+  type ActionValue,
   type AnimationPayload,
   type ButtonConfigurationPayload,
   type ColorPayload,
@@ -120,13 +130,39 @@ const CONTENT_CLOSURE_LABELS: ReadonlyMap<string, ReadonlySet<string>> = new Map
   ['Gauge', new Set(['currentValueLabel', 'minimumValueLabel', 'maximumValueLabel'])],
 ])
 
+/**
+ * What `.environmentObject(store)`, `.environment(\.key, value)` and `.environment(model)`
+ * put in scope for the views below them. An object is kept by its type, which is how
+ * `@EnvironmentObject` and `@Environment(Model.self)` find it again.
+ */
+function injectedEnvironment(member: string, args: readonly { readonly value: SwiftValue }[]): { values: [string, SwiftValue][]; objects: [string, SwiftValue][] } {
+  const values: [string, SwiftValue][] = []
+  const objects: [string, SwiftValue][] = []
+  const first = args[0]?.value
+  const key = member === 'environment' ? asKeyPath(first)?.components[0] : undefined
+  const second = args[1]?.value
+  if (key && second) values.push([key, second])
+  else if (first?.kind === 'struct' && (member === 'environmentObject' || member === 'environment' && first.reference)) objects.push([first.typeName, first])
+  return { values, objects }
+}
+
+const EDGE_LABELS: ReadonlySet<string> = new Set(['top', 'leading', 'bottom', 'trailing'])
+
+/** `EdgeInsets(top:leading:bottom:trailing:)`, any edge left out being 0. */
+function edgeInsets(call: HostCall): SwiftValue {
+  const edge = (label: string): number => numberOf(call.args.find((a) => a.label === label)?.value) ?? 0
+  return opaque(EDGE_INSETS_TYPE, { top: edge('top'), leading: edge('leading'), bottom: edge('bottom'), trailing: edge('trailing') } satisfies EdgeInsetsPayload)
+}
+
 /** Names that are types rather than views: `Color.red`, `Font.title`. */
 const NAMESPACES: ReadonlySet<string> = new Set([
-  'Color', 'Font', 'Alignment', 'Edge', 'Angle', 'UnitPoint', 'Axis',
+  'Color', 'Font', 'Alignment', 'Edge', 'Edge.Set', 'Angle', 'UnitPoint', 'Axis',
   'Animation', 'AnyTransition', 'Text', 'Image', 'ContentMode',
   'HorizontalAlignment', 'VerticalAlignment', 'PresentationDetent', 'ToolbarItemPlacement',
   'CGSize', 'CGPoint', 'CGRect', 'CGFloat', 'Material',
   'Task', 'MainActor', 'Gradient', 'StrokeStyle',
+  // `Color(UIColor.systemGray6)`: UIKit's colours, bridged by name like `Color(.systemGray6)`.
+  'UIColor',
 ])
 
 /**
@@ -180,8 +216,15 @@ function view(v: ViewValue): SwiftValue {
  * quietly draw nothing, which is the kind of silent wrong the preview exists to
  * avoid - so it declines and the operator reports itself instead.
  */
-function isTextLike(v: ViewValue): boolean {
-  return v.name === 'Text'
+function isTextLike(v: ViewValue | null): boolean {
+  return v?.name === 'Text'
+}
+
+/** The words of a `Text`, joined or not, without its styling. */
+function plainText(text: ViewValue): string {
+  if (text.children.length > 0) return text.children.map(plainText).join('')
+  const words = text.args.find((arg) => arg.label === null || arg.label === 'verbatim')?.value
+  return words?.kind === 'string' ? words.value : ''
 }
 
 function token(name: string): SwiftValue {
@@ -192,8 +235,60 @@ function color(payload: ColorPayload): SwiftValue {
   return opaque(COLOR_TYPE, payload)
 }
 
+/**
+ * A `Button`'s `action:` argument: `Button("Save", action: save)`, and Xcode's own
+ * `Button(action: { … }) { Label(…) }`, whose trailing closure is then the label. A
+ * function named as a value arrives as a function rather than a closure.
+ */
+function actionArgument(name: string, call: HostCall): ActionValue | null {
+  if (!ACTION_VIEWS.has(name)) return null
+  const value = call.args.find((a) => a.label === 'action')?.value
+  return value?.kind === 'closure' || value?.kind === 'function' ? value : null
+}
+
+/** Modifiers that run something when an event happens, rather than drawing anything. */
+const EVENT_MODIFIERS: ReadonlySet<string> = new Set([
+  'onAppear', 'onDisappear', 'task', 'onChange', 'onDelete', 'onTapGesture', 'onLongPressGesture', 'onSubmit',
+])
+
+/**
+ * What an event modifier was given to run when no trailing closure was written:
+ * `perform:` or `action:`, or the unlabelled argument of `.task(load)` and
+ * `.onSubmit(save)`, as a closure or as a function named as a value.
+ */
+function eventArgument(call: HostCall): ActionValue | null {
+  const argument =
+    call.args.find((a) => a.label === 'perform' || a.label === 'action') ??
+    call.args.find((a) => a.label === null && (a.value.kind === 'closure' || a.value.kind === 'function'))
+  const value = argument?.value
+  return value?.kind === 'closure' || value?.kind === 'function' ? value : null
+}
+
 function toArgs(call: HostCall): ViewArg[] {
   return call.args.map((a) => ({ label: a.label, value: a.value }))
+}
+
+/**
+ * The views and modifiers whose first unlabelled argument is a title, a
+ * `LocalizedStringKey`, when it is written as a string literal. Such a title writes a
+ * number put into it for the locale: `Text("Goal: \\(goal) mL")` reads "Goal: 2,000 mL"
+ * in the iOS 27 simulator, and a Double shows six decimals. A String, `Text(verbatim:)`
+ * and the project's own views keep Swift's text, "2000", as they do on iOS.
+ */
+const TITLED_VIEWS = new Set([
+  'Text', 'Label', 'Button', 'Toggle', 'Section', 'TextField', 'SecureField', 'Picker', 'Stepper', 'Link', 'Menu',
+  'NavigationLink', 'LabeledContent', 'ContentUnavailableView', 'ProgressView', 'DatePicker', 'Tab', 'DisclosureGroup', 'ColorPicker',
+])
+const TITLED_MODIFIERS = new Set(['navigationTitle', 'alert', 'confirmationDialog', 'badge', 'help'])
+
+/** `call` with its title as a title writes it, when `titled` and the interpreter wrote one. */
+function withTitleText(titled: boolean, call: HostCall): HostCall {
+  if (!titled) return call
+  const index = call.args.findIndex((arg) => arg.title !== undefined)
+  if (index < 0) return call
+  const args = [...call.args]
+  args[index] = { ...args[index]!, value: str(args[index]!.title!) }
+  return { ...call, args }
 }
 
 function numberOf(value: SwiftValue | undefined): number | null {
@@ -220,7 +315,7 @@ function tokenNameOf(value: SwiftValue | undefined): string | null {
  * means the coverage matrix has exactly one place to be wrong.
  */
 export class SwiftUIHost implements InterpreterHost {
-  private readonly logs: { message: string; span: SourceSpan; level: LogLevel }[] = []
+  private readonly console = new ConsoleBuffer()
 
   /**
    * Expands a user-declared `View` struct into its evaluated body.
@@ -305,13 +400,14 @@ export class SwiftUIHost implements InterpreterHost {
   dismissAction: (() => void) | null = null
 
   /**
-   * Sizes measured for each `GeometryReader` on the previous layout pass.
+   * What each `GeometryReader` was measured at on the previous layout pass: its size,
+   * where it is on the screen and its safe area.
    *
    * Empty on the first pass of a new screen, which is why `defaultGeometry` exists:
    * a reader has to report *something* the first time, and the content rect is the
    * closest guess available before anything has been laid out.
    */
-  geometry: ReadonlyMap<string, { width: number; height: number }> = new Map()
+  geometry: ReadonlyMap<string, GeometryPayload> = new Map()
   defaultGeometry = { width: 393, height: 759 }
 
   /** Per-pass counter, so two readers on one source line get distinct keys. */
@@ -320,16 +416,12 @@ export class SwiftUIHost implements InterpreterHost {
 
   /** Scope the entire receiver expression, including children built eagerly inside stacks. */
   withMemberScope(member: string, args: readonly CallArgument[], evaluate: () => SwiftValue): SwiftValue {
-    const values: [string, SwiftValue][] = []
-    const objects: [string, SwiftValue][] = []
     const first = args[0]?.value
-    if (member === 'environmentObject' && first?.kind === 'struct') {
-      objects.push([first.typeName, first])
-    } else if (member === 'environment') {
-      const key = asKeyPath(first)?.components[0]
-      const value = args[1]?.value
-      if (key && value) values.push([key, value])
-    } else if (member === 'disabled' && first) {
+    // `.id(x)`: what the receiver builds is a different view for each x, so its state
+    // starts over when x changes, as SwiftUI's does.
+    if (member === 'id' && first && args.length === 1 && this.scopeIdentity) return this.scopeIdentity(`id:${identityKey(first)}`, evaluate)
+    const { values, objects } = injectedEnvironment(member, args)
+    if (member === 'disabled' && first) {
       values.push(['isEnabled', bool(!truthy(first) && truthy(this.environment.value('isEnabled') ?? bool(true)))])
     } else if ((member === 'controlSize' || member === 'font' || member === 'dynamicTypeSize') && first) {
       values.push([member, first])
@@ -363,8 +455,8 @@ export class SwiftUIHost implements InterpreterHost {
    */
   private makeGeometryReader(call: HostCall): SwiftValue {
     const key = this.measuredSite(`g${call.span.start}`)
-    const size = this.geometry.get(key) ?? this.defaultGeometry
-    const proxy = opaque(GEOMETRY_TYPE, { width: size.width, height: size.height })
+    const measured: GeometryPayload = this.geometry.get(key) ?? { ...this.defaultGeometry, x: 0, y: 0, insets: ZERO_INSETS }
+    const proxy = opaque(GEOMETRY_TYPE, measured)
 
     return view({
       name: 'GeometryReader',
@@ -631,18 +723,7 @@ export class SwiftUIHost implements InterpreterHost {
     member: string,
     call: HostCall,
   ): SwiftValue | undefined {
-    const values: [string, SwiftValue][] = []
-    const objects: [string, SwiftValue][] = []
-
-    if (member === 'environmentObject') {
-      const object = call.args[0]?.value
-      if (object?.kind === 'struct') objects.push([object.typeName, object])
-    } else {
-      const key = asKeyPath(call.args[0]?.value)?.components[0]
-      const value = call.args[1]?.value
-      if (key && value) values.push([key, value])
-    }
-
+    const { values, objects } = injectedEnvironment(member, call.args)
     const modifier = this.makeModifier(member, call)
 
     return this.environment.scoped(values, objects, () => {
@@ -708,8 +789,8 @@ export class SwiftUIHost implements InterpreterHost {
     }
   }
 
-  takeLogs(): { message: string; span: SourceSpan; level: LogLevel }[] {
-    return this.logs.splice(0, this.logs.length)
+  takeLogs(): ConsoleLine[] {
+    return this.console.drain()
   }
 
   /**
@@ -721,7 +802,7 @@ export class SwiftUIHost implements InterpreterHost {
    * something. The console already styles errors; it had nothing to style.
    */
   log(message: string, span: SourceSpan, level: LogLevel = 'log'): void {
-    this.logs.push({ message, span, level })
+    this.console.write({ message, span, level })
   }
 
   resolveGlobal(name: string): SwiftValue | undefined {
@@ -733,11 +814,13 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callGlobal(name: string, call: HostCall): SwiftValue | undefined {
+    call = withTitleText(TITLED_VIEWS.has(name), call)
     // Values first: these are not views, so they have to be handled before the
     // "is this a view name?" guard below rejects them.
     if (name === 'Task') return this.runTask(call)
     if (name === 'Binding') return this.makeBinding(call)
-    if (name === 'Color') return this.makeColor(call)
+    // `UIColor(red:green:blue:alpha:)` is a colour like any other, bridged by `Color(uiColor:)`.
+    if (name === 'Color' || name === 'UIColor') return this.makeColor(call)
     if (name === 'withAnimation') return this.runWithAnimation(call)
     if (GRADIENTS[name]) return this.makeGradient(GRADIENTS[name]!, call)
     if (name === 'GridItem') return this.makeGridItem(call)
@@ -765,16 +848,8 @@ export class SwiftUIHost implements InterpreterHost {
     // `.padding(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))` - the form
     // that sets all four edges to different lengths, and the only one `.padding` has
     // no shorthand for.
-    if (name === 'EdgeInsets') {
-      const edge = (label: string): number =>
-        numberOf(call.args.find((a) => a.label === label)?.value) ?? 0
-      return opaque(EDGE_INSETS_TYPE, {
-        top: edge('top'),
-        leading: edge('leading'),
-        bottom: edge('bottom'),
-        trailing: edge('trailing'),
-      } satisfies EdgeInsetsPayload)
-    }
+    if (name === 'EdgeInsets') return edgeInsets(call)
+    if (name === 'RectangleCornerRadii') return cornerRadii(call.args)
 
     if (name === 'StrokeStyle') {
       const dash = call.args.find((a) => a.label === 'dash')?.value
@@ -805,13 +880,23 @@ export class SwiftUIHost implements InterpreterHost {
       return gesture(GESTURE_CONSTRUCTORS[name]!, minimum ?? 10)
     }
 
-    if (!VIEW_NAMES.has(name)) return undefined
+    // `PlainButtonStyle()` is the style `.plain` names.
+    const legacy = LEGACY_STYLE_TOKENS.get(name)
+    if (legacy) return token(legacy)
+
+    if (!VIEW_NAMES.has(name)) {
+      // A view nothing declares, which the checker has warned about, is a placeholder
+      // named after it. What it was given is never run: there is no telling what it
+      // would have done with it.
+      if (!/^[A-Z]/.test(name) || isKnownGlobal(name)) return undefined
+      return view({ name, args: toArgs(call), children: [], modifiers: [], action: null, span: call.span })
+    }
     if (++this.constructedViews > PREVIEW_LIMITS.totalViews) throw new PreviewLimitExceeded('The preview exceeds 10,000 constructed views in one pass. Reduce nested collections or preview data.', call.span)
 
     // A direct destination may be a user-defined View value, not a built-in view.
     // Expand it with the same path used for destination builder closures.
     const args = name === 'NavigationLink' ? toArgs(call).flatMap(argument => argument.label === 'destination'
-      ? this.toViews([argument.value]).map(destination => ({ label: 'destination', value: view(destination) }))
+      ? this.destinationArgs(() => [argument.value], call.span)
       : [argument]) : toArgs(call)
 
     if (DATA_DRIVEN_VIEWS.has(name) && call.trailingClosure && this.looksDataDriven(call)) {
@@ -854,9 +939,26 @@ export class SwiftUIHost implements InterpreterHost {
       })
     }
 
+    // `Text("\(Text("Bold").bold()) and plain")` arrives already joined, as a Text.
+    const given = call.args[0]
+    if (name === 'Text' && given?.label === null && given.value.kind === 'string' && given.value.styled) return given.value.styled
     if (name === 'Path') return this.makePath(call)
     if (name === 'Canvas' && call.trailingClosure) return this.makeCanvas(call)
     if (name === 'GeometryReader' && call.trailingClosure) return this.makeGeometryReader(call)
+    // Content handed one value, drawn at rest: a reader's proxy, an animator's first
+    // phase, a keyframe animator's initial value. What would move them never runs.
+    const handed = name === 'ScrollViewReader' ? opaque(SCROLL_PROXY_TYPE, null)
+      : name === 'PhaseAnimator' ? firstPhase(call.args.find((a) => a.label === null)?.value)
+      : name === 'KeyframeAnimator' ? call.args.find((a) => a.label === 'initialValue')?.value
+      : undefined
+    if (handed !== undefined && call.trailingClosure) {
+      return view({ name, args: [], children: this.toViews(call.invokeBuilder(call.trailingClosure, [handed])), modifiers: [], action: null, span: call.span })
+    }
+    // `TimelineView(...) { context in ... }`: drawn once, for the moment of the render.
+    if (name === 'TimelineView' && call.trailingClosure) {
+      const context: SwiftValue = { kind: 'struct', typeName: 'TimelineViewDefaultContext', fields: new Map<string, SwiftValue>([['date', dateValue(Date.now() / 1000)], ['cadence', token('live')]]) }
+      return view({ name, args: toArgs(call), children: this.toViews(call.invokeBuilder(call.trailingClosure, [context])), modifiers: [], action: null, span: call.span })
+    }
 
     // A labelled closure argument that names content: `Button { … } label: { … }`,
     // `Menu { … } label: { … }`, `Section { … } header: { … } footer: { … }`. Swift
@@ -883,10 +985,10 @@ export class SwiftUIHost implements InterpreterHost {
     // `NavigationLink("Title") { Destination() }` - a title plus a trailing closure
     // means the closure is the destination, not the label.
     if (name === 'NavigationLink' && call.trailingClosure && this.hasPlainTitle(call)) {
-      const destination = this.toViews(call.invokeBuilder(call.trailingClosure))
+      const destination = call.trailingClosure
       return view({
         name,
-        args: [...args, ...destination.map((d) => ({ label: 'destination', value: view(d) }))],
+        args: [...args, ...this.destinationArgs(() => call.invokeBuilder(destination), call.span)],
         children: [],
         modifiers: [],
         action: null,
@@ -913,7 +1015,7 @@ export class SwiftUIHost implements InterpreterHost {
       args,
       children,
       modifiers: [],
-      action: isAction ? call.trailingClosure : null,
+      action: actionArgument(name, call) ?? (isAction ? call.trailingClosure : null),
       span: call.span,
     })
   }
@@ -933,11 +1035,12 @@ export class SwiftUIHost implements InterpreterHost {
     named: readonly { label: string | null; value: SwiftValue }[],
   ): SwiftValue {
     const isAction = ACTION_VIEWS.has(name)
-    const children = [
-      ...(call.trailingClosure && !isAction
-        ? this.toViews(call.invokeBuilder(call.trailingClosure))
-        : []),
-    ]
+    const content = call.trailingClosure && !isAction ? call.trailingClosure : null
+    // In `NavigationLink { Detail() } label: { Card() }`, only Card belongs on the
+    // current screen. Detail is the link's destination, for the presentation resolver
+    // to select after a push.
+    const destination = name === 'NavigationLink' && content ? this.destinationArgs(() => call.invokeBuilder(content), call.span) : null
+    const children = content && !destination ? this.toViews(call.invokeBuilder(content)) : []
 
     const labelled: ViewArg[] = []
     for (const argument of named) {
@@ -946,15 +1049,9 @@ export class SwiftUIHost implements InterpreterHost {
     }
 
     if (name === 'NavigationLink') {
-      // In `NavigationLink { Detail() } label: { Card() }`, only Card belongs
-      // on the current screen. Keep Detail under the destination argument so
-      // the presentation resolver can select it after a push.
       return view({
         name,
-        args: [
-          ...args.filter((a) => !named.some((n) => n.label === a.label)),
-          ...children.map((child) => ({ label: 'destination', value: view(child) })),
-        ],
+        args: [...args.filter((a) => !named.some((n) => n.label === a.label)), ...(destination ?? [])],
         children: labelled.flatMap((argument) => {
           const child = asView(argument.value)
           return child ? [child] : []
@@ -970,20 +1067,16 @@ export class SwiftUIHost implements InterpreterHost {
       args: [...args.filter((a) => !named.some((n) => n.label === a.label)), ...labelled],
       children,
       modifiers: [],
-      action: isAction ? call.trailingClosure : null,
+      action: actionArgument(name, call) ?? (isAction ? call.trailingClosure : null),
       span: call.span,
     })
   }
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
-    // `price.formatted(.currency(code: "USD"))`, `share.formatted(.percent)` and the
-    // plain `count.formatted()`: the styles `Text(_:format:)` draws, as a String.
-    if ((target.kind === 'int' || target.kind === 'double') && member === 'formatted') {
-      const style = call.args[0]?.value
-      const text = formatNumber(target.value, style ? tokenNameOf(style) ?? '' : 'number')
-      if (text !== null) return { kind: 'string', value: text }
-    }
+    call = withTitleText(TITLED_MODIFIERS.has(member), call)
     if (target.kind === 'type' && (target.name === 'Gradient' && member === 'Stop' || target.name === 'Gradient.Stop' && member === 'init')) return this.gradientStop(call)
+    // `Edge.Set([.top, .leading])` and `Edge.Set(.top)` are the set they are given.
+    if (target.kind === 'type' && (target.name === 'Edge' && member === 'Set' || target.name === 'Edge.Set' && member === 'init')) return call.args[0]?.value ?? { kind: 'array', elements: [] }
     // `.modifier(Shadowed())` - a custom `ViewModifier`. Its `body(content:)` takes
     // the view it is applied to and returns a new one, so the content is handed over
     // as a value: inside the modifier, `content.padding()` is then an ordinary
@@ -993,24 +1086,29 @@ export class SwiftUIHost implements InterpreterHost {
       if (applied !== undefined) return applied
     }
 
-    // `geo.frame(in: .local)` - the proxy's own rectangle. `.local` is the only
-    // coordinate space the preview can answer honestly: `.global` would need the
-    // reader's position on the screen, which layout knows and the proxy does not
-    // carry, so it reports the same rect rather than inventing an offset.
+    // `proxy.scrollTo(id)`: there is no channel from the worker to the browser's scroll
+    // position, so it does nothing, and the checker says so at the reader.
+    if (target.kind === 'opaque' && target.typeName === SCROLL_PROXY_TYPE && member === 'scrollTo') return { kind: 'void' }
+
+    // `geo.frame(in: .local)` is the proxy's own rectangle, and `.global` where it is on
+    // the screen, as the last layout pass placed it. A named space is read as the
+    // screen too: the preview doesn't track `.coordinateSpace(name:)`.
     if (target.kind === 'opaque' && target.typeName === GEOMETRY_TYPE && member === 'frame') {
-      const { width, height } = target.payload as GeometryPayload
+      const { width, height, x: screenX, y: screenY } = target.payload as GeometryPayload
+      const local = tokenNameOf(call.args[0]?.value) === 'local'
+      const x = local ? 0 : screenX, y = local ? 0 : screenY
       return opaque(RECT_TYPE, {
-        x: 0,
-        y: 0,
+        x,
+        y,
         width,
         height,
-        minX: 0,
-        minY: 0,
-        midX: width / 2,
-        midY: height / 2,
-        maxX: width,
-        maxY: height,
-        origin: point(0, 0),
+        minX: x,
+        minY: y,
+        midX: x + width / 2,
+        midY: y + height / 2,
+        maxX: x + width,
+        maxY: y + height,
+        origin: point(x, y),
         size: size(width, height),
       })
     }
@@ -1026,6 +1124,17 @@ export class SwiftUIHost implements InterpreterHost {
         ...payload,
         ...(added ? { combinedWith: [...(payload.combinedWith ?? []), added] } : {}),
       } satisfies TransitionPayload)
+    }
+
+    // `.easeInOut.repeatForever(autoreverses: true)`, `.delay(0.2)`, `.speed(2)`. A delay
+    // and a speed change the one animation the preview plays. A repeat plays once here,
+    // as the checker's warning beside it says; without these the view stopped instead.
+    if (target.kind === 'opaque' && target.typeName === ANIMATION_TYPE) {
+      const payload = target.payload as AnimationPayload
+      const amount = numberOf(call.args[0]?.value)
+      if (member === 'delay') return opaque(ANIMATION_TYPE, { ...payload, delay: amount ?? 0 } satisfies AnimationPayload)
+      if (member === 'speed') return amount !== null && amount > 0 ? opaque(ANIMATION_TYPE, { ...payload, duration: payload.duration / amount } satisfies AnimationPayload) : target
+      if (member === 'repeatForever' || member === 'repeatCount') return target
     }
 
     if (target.kind === 'type' && (target.name === 'Task' || target.name === 'MainActor')) {
@@ -1117,14 +1226,16 @@ export class SwiftUIHost implements InterpreterHost {
     // handler on it, which is value semantics, same as SwiftUI.
     const chain = asGesture(target)
     if (chain) {
-      const closure = call.trailingClosure ?? asClosure(call.args[call.args.length - 1]?.value)
+      // `.onEnded { … }`, or `.onEnded(tapped)` naming a function.
+      const last = call.args[call.args.length - 1]?.value
+      const action = call.trailingClosure ?? (last?.kind === 'closure' || last?.kind === 'function' ? last : null)
 
-      if ((member === 'onChanged' || member === 'onEnded') && closure) {
-        return withHandler(chain, { phase: member === 'onChanged' ? 'changed' : 'ended', closure })
+      if ((member === 'onChanged' || member === 'onEnded') && action) {
+        return withHandler(chain, { phase: member === 'onChanged' ? 'changed' : 'ended', action })
       }
-      if (member === 'updating' && closure) {
+      if (member === 'updating' && action) {
         const binding = call.args.find((a) => a.label === null)?.value
-        if (binding) return withUpdate(chain, { binding, closure })
+        if (binding) return withUpdate(chain, { binding, action })
       }
       if (member === 'simultaneously' || member === 'exclusively' || member === 'sequenced') {
         const other = asGesture(call.args[0]?.value)
@@ -1205,6 +1316,19 @@ export class SwiftUIHost implements InterpreterHost {
     }
 
     return undefined
+  }
+
+  /**
+   * `Text("\(Text("Bold").bold()) and plain")`: a `Text` interpolated into a string keeps
+   * its own styling, as `+` does, for a `Text` to draw as the same kind of joined `Text`.
+   * Anything else given the string, a Button's title, reads its plain words.
+   */
+  interpolate(parts: readonly (string | SwiftValue)[], span: SourceSpan): { text: string; styled: SwiftValue } | undefined {
+    if (!parts.some((part) => typeof part !== 'string' && isTextLike(asView(part)))) return undefined
+    const pieces = parts.map((part): string | ViewValue => typeof part === 'string' ? part : isTextLike(asView(part)) ? asView(part)! : describe(part, false))
+    const children = pieces.filter((piece) => piece !== '').map((piece): ViewValue =>
+      typeof piece === 'string' ? { name: 'Text', args: [{ label: null, value: str(piece) }], children: [], modifiers: [], action: null, span } : piece)
+    return { text: pieces.map((piece) => typeof piece === 'string' ? piece : plainText(piece)).join(''), styled: view({ name: 'Text', args: [], children, modifiers: [], action: null, span }) }
   }
 
   /** `dismiss()` - the one callable the environment hands out. */
@@ -1335,12 +1459,14 @@ export class SwiftUIHost implements InterpreterHost {
       ? call.args.some(arg => arg.label === 'forSelectionType') ? null
         : call.trailingClosure ?? asClosure(call.args.find(arg => arg.label === 'menuItems')?.value)
       : call.trailingClosure
+    const action = EVENT_MODIFIERS.has(member) ? (call.trailingClosure ?? eventArgument(call)) : null
     return {
       name: member,
       args: [...toArgs(call), ...this.eagerContent(member, call)],
       span: call.span,
       // Unevaluated on purpose: a sheet's content must not run while it is down.
       closure: deferred,
+      ...(action ? { action } : {}),
       // Only where there is something deferred to run later. Every other modifier
       // resolves inside the scope it was written in and has no use for this.
       ...(deferred ? { environment: this.environment.snapshot() } : {}),
@@ -1356,11 +1482,13 @@ export class SwiftUIHost implements InterpreterHost {
     }
     if (!['safeAreaInset', 'background', 'overlay'].includes(member)) return []
     const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'content')?.value)
-    if (!content) return []
-    return call
-      .invokeBuilder(content)
-      .filter((value) => asView(value) !== null)
-      .map((value) => ({ label: 'content', value }))
+    // `.overlay(Badge())`: a custom view given as the argument is a struct until it is
+    // expanded, and nothing after this point can expand it.
+    const given = content ? undefined : call.args.find((arg) => arg.label === null)?.value
+    const values = content ? call.invokeBuilder(content) : given?.kind === 'struct' ? [given] : []
+    // A `Color`, a gradient and a custom view are views without being view values, so
+    // they take the same conversion as `body`: `.background { Color.red }` drew nothing.
+    return this.toViews(values).map((content) => ({ label: 'content', value: view(content) }))
   }
 
   callValue(target: SwiftValue, call: HostCall): SwiftValue | undefined {
@@ -1414,6 +1542,10 @@ export class SwiftUIHost implements InterpreterHost {
 
   callImplicitMember(member: string, call: HostCall): SwiftValue | undefined {
     if (member === 'init' && call.args.length === 2 && call.args[0]?.label === 'color' && call.args[1]?.label === 'location') return this.gradientStop(call)
+    // `.padding(.init(top: 8, leading: 16, bottom: 8, trailing: 16))`, where the type is `EdgeInsets`.
+    if (member === 'init' && call.args.length > 0 && call.args.every((a) => a.label && EDGE_LABELS.has(a.label))) return edgeInsets(call)
+    // `.rect(cornerRadii: .init(topLeading: 8, bottomTrailing: 8))`, where the type is `RectangleCornerRadii`.
+    if (member === 'init' && call.args.length > 0 && call.args.every((a) => a.label && CORNER_NAMES.includes(a.label))) return cornerRadii(call.args)
     if (ANIMATION_CURVES[member] || member === 'spring' || member === 'interpolatingSpring') {
       return this.makeAnimation(member, call)
     }
@@ -1449,6 +1581,12 @@ export class SwiftUIHost implements InterpreterHost {
     }
     if (member === 'height' || member === 'fraction') {
       return token(`detent:${member}:${numberOf(call.args[0]?.value) ?? 0}`)
+    }
+    // `.rect(topLeadingRadius: 20, bottomTrailingRadius: 8)`, a radius per corner: drawn
+    // with the largest on every corner (D7a), which the checker says where it is written.
+    if (member === 'rect' && hasCornerRadii(call.args.map((a) => a.label))) {
+      const style = call.args.find((a) => a.label === 'style')?.value
+      return opaque(TOKEN_TYPE, { name: 'rect', args: [double(largestCorner(call.args)), ...(style ? [style] : [])] } satisfies TokenPayload)
     }
 
     /**
@@ -1495,7 +1633,7 @@ export class SwiftUIHost implements InterpreterHost {
       if (member === 'size') return target
       if (member === 'width') return double(size.width)
       if (member === 'height') return double(size.height)
-      if (member === 'safeAreaInsets') return opaque(GEOMETRY_TYPE, { width: 0, height: 0 })
+      if (member === 'safeAreaInsets') return opaque(EDGE_INSETS_TYPE, (target.payload as GeometryPayload).insets)
     }
 
     // `configuration.label` and `configuration.isPressed` inside a custom ButtonStyle.
@@ -1521,6 +1659,14 @@ export class SwiftUIHost implements InterpreterHost {
       return this.colorGradient(target, target.payload as ColorPayload)
     }
 
+    // `.blue.secondary` - the colour at a lower level of the hierarchy. It stopped the
+    // whole preview as an unknown member.
+    const level = HIERARCHY_OPACITY[member]
+    if (level !== undefined && target.kind === 'opaque' && target.typeName === COLOR_TYPE) {
+      const payload = target.payload as ColorPayload
+      return color({ ...payload, opacity: (payload.opacity ?? 1) * level })
+    }
+
     // Every branch below answers on the strength of a type's *name*, so a name the
     // project declared belongs to the project. Declining sends the member back to the
     // interpreter, which reports against the real declaration.
@@ -1528,6 +1674,7 @@ export class SwiftUIHost implements InterpreterHost {
 
     if (target.kind === 'type') {
       if (target.name === 'Gradient' && member === 'Stop') return { kind: 'type', name: 'Gradient.Stop' }
+      if (target.name === 'Edge' && member === 'Set') return { kind: 'type', name: 'Edge.Set' }
       if (target.name === 'Color') return color({ name: member })
       if (target.name === 'Animation') return this.animationToken(member)
       if (target.name === 'AnyTransition') return this.transitionToken(member)
@@ -1692,6 +1839,22 @@ export class SwiftUIHost implements InterpreterHost {
     return value?.kind === 'array' || value?.kind === 'range'
   }
 
+  /**
+   * A `NavigationLink`'s destination, as the link's `destination` arguments.
+   *
+   * The preview builds it with the link, where SwiftUI builds it only when it is
+   * pushed. So a destination that stops is kept as a stopped view: the screen with the
+   * link draws, and pushing it shows why, as a view stopped anywhere else does.
+   */
+  private destinationArgs(build: () => readonly SwiftValue[], span: SourceSpan): ViewArg[] {
+    try {
+      return this.toViews(build()).map((destination) => ({ label: 'destination', value: view(destination) }))
+    } catch (error) {
+      if (!containable(error)) throw error
+      return [{ label: 'destination', value: view(stoppedView('Destination', toFailure(error, span), span)) }]
+    }
+  }
+
   private hasPlainTitle(call: HostCall): boolean {
     const first = call.args.find((a) => a.label === null)?.value
     return first?.kind === 'string'
@@ -1726,22 +1889,41 @@ export class SwiftUIHost implements InterpreterHost {
 
     const children: ViewValue[] = []
     const childKeys: string[] = []
+    const childOffsets: number[] = []
+
+    // A row's id, read as Swift reads it: a key path can name a computed property or an
+    // enum's `rawValue`, which walking stored fields can't see, and then every row had
+    // the same key and the same action.
+    const idOf = (element: SwiftValue): SwiftValue | undefined => {
+      if (idPath) return readKeyPath(idPath, element, call.member)
+      if (element.kind === 'struct' || element.kind === 'enum') {
+        const id = call.member(element, 'id') ?? NIL
+        return id.kind === 'nil' ? undefined : id
+      }
+      return element.kind === 'string' || element.kind === 'int' || element.kind === 'double' ? element : undefined
+    }
+    // Its identity is its id, else its place, which is what SwiftUI falls back to too.
+    const rowKey = (element: SwiftValue, index: number): string => {
+      const id = idOf(element)
+      return id === undefined ? `#${index}` : identityKey(id, true)
+    }
 
     elements.forEach((element, index) => {
-      const key = identityKey(element, idPath?.components ?? null, index)
+      const key = rowKey(element, index)
+      const implicitTag = idOf(element)
       // A row binding follows stable identity even if a pending handler outlives a reorder.
       const row = binding ? projection({
         description: `${binding.description}[${key}]`,
         get: () => {
           const current = binding.get()
           if (current.kind !== 'array') return { kind: 'nil' }
-          const at = current.elements[index] && identityKey(current.elements[index]!, idPath?.components ?? null, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, idPath?.components ?? null, i) === key)
+          const at = current.elements[index] && rowKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => rowKey(value, i) === key)
           return at < 0 ? { kind: 'nil' } : copyValue(current.elements[at]!)
         },
         set: value => {
           const current = binding.get()
           if (current.kind !== 'array') return
-          const at = current.elements[index] && identityKey(current.elements[index]!, idPath?.components ?? null, index) === key ? index : current.elements.findIndex((value, i) => identityKey(value, idPath?.components ?? null, i) === key)
+          const at = current.elements[index] && rowKey(current.elements[index]!, index) === key ? index : current.elements.findIndex((value, i) => rowKey(value, i) === key)
           if (at < 0) return
           const elements = [...current.elements]; elements[at] = copyValue(value)
           binding.set({ ...current, elements })
@@ -1751,12 +1933,13 @@ export class SwiftUIHost implements InterpreterHost {
       const rows = this.scopeIdentity ? this.scopeIdentity(key, build) : build()
 
       for (const row of rows) {
-        children.push(row)
+        children.push(implicitTag === undefined ? row : { ...row, implicitTag })
         childKeys.push(key)
+        childOffsets.push(index)
       }
     })
 
-    return view({ name, args, children, modifiers: [], action: null, span: call.span, childKeys })
+    return view({ name, args, children, modifiers: [], action: null, span: call.span, childKeys, childOffsets })
   }
 
   /**
@@ -1901,32 +2084,82 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private makeColor(call: HostCall): SwiftValue {
+    const opacity = numberOf(call.args.find((a) => a.label === 'opacity' || a.label === 'alpha')?.value)
+    const alpha = opacity !== null ? { opacity } : {}
     const white = numberOf(call.args.find((a) => a.label === 'white')?.value)
-    if (white !== null) return color({ name: null, white })
+    if (white !== null) return color({ name: null, white, ...alpha })
+
+    // `Color(hue:saturation:brightness:)` was drawn clear.
+    const hue = numberOf(call.args.find((a) => a.label === 'hue')?.value)
+    const saturation = numberOf(call.args.find((a) => a.label === 'saturation')?.value)
+    const brightness = numberOf(call.args.find((a) => a.label === 'brightness')?.value)
+    if (hue !== null && saturation !== null && brightness !== null) {
+      const [r, g, b] = hsbToRgb(hue, saturation, brightness)
+      return color({ name: null, red: r, green: g, blue: b, ...alpha })
+    }
 
     const red = numberOf(call.args.find((a) => a.label === 'red')?.value)
     const green = numberOf(call.args.find((a) => a.label === 'green')?.value)
     const blue = numberOf(call.args.find((a) => a.label === 'blue')?.value)
     if (red !== null && green !== null && blue !== null) {
-      const opacity = numberOf(call.args.find((a) => a.label === 'opacity')?.value)
-      return color({ name: null, red, green, blue, ...(opacity !== null ? { opacity } : {}) })
+      return color({ name: null, red, green, blue, ...alpha })
     }
 
     const first = call.args[0]?.value
     // `Color("accent")` names a colour set in the asset catalog - never a system colour,
     // even one spelled the same - so it is marked and resolved against the project.
     if (first?.kind === 'string') return color({ name: first.value, asset: true })
+    // `Color(uiColor: UIColor(red: …))`: a colour already built.
+    if (first?.kind === 'opaque' && first.typeName === COLOR_TYPE) return first
 
     // `Color(.systemGroupedBackground)` - the UIKit bridge, where the argument is a
     // contextual member rather than a string. This is how idiomatic SwiftUI reaches
     // the adaptive backgrounds, so it has to work for dark mode to be usable at all.
     const named = tokenNameOf(first)
-    if (named) return color({ name: named })
+    if (named) return uikitColor(named)
     return color({ name: 'clear' })
   }
 }
 
 // -------------------------------------------------------------------- helpers
+
+/**
+ * UIKit's fixed colours, as it defines them. Through the bridge `Color(.red)` is
+ * `UIColor.red`, which is pure red, and `Color(.gray)` is half white, not SwiftUI's
+ * system red and grey. Every other name is a system or semantic colour the palette has.
+ */
+const UIKIT_FIXED: Readonly<Record<string, readonly [number, number, number]>> = {
+  black: [0, 0, 0], darkGray: [1 / 3, 1 / 3, 1 / 3], lightGray: [2 / 3, 2 / 3, 2 / 3], white: [1, 1, 1],
+  gray: [0.5, 0.5, 0.5], red: [1, 0, 0], green: [0, 1, 0], blue: [0, 0, 1], cyan: [0, 1, 1], yellow: [1, 1, 0],
+  magenta: [1, 0, 1], orange: [1, 0.5, 0], purple: [0.5, 0, 0.5], brown: [0.6, 0.4, 0.2],
+}
+
+/** A `UIColor` by name, as the bridge reads it. `tintColor` is the app's accent. */
+function uikitColor(name: string): SwiftValue {
+  const fixed = UIKIT_FIXED[name]
+  if (fixed) return color({ name: null, red: fixed[0], green: fixed[1], blue: fixed[2] })
+  return color({ name: name === 'tintColor' ? 'accentColor' : name })
+}
+
+/**
+ * A colour's hierarchical levels, as opacity. `.secondary` and `.tertiary` are measured
+ * in the iOS 27 simulator (0.5 and 0.25); the two lower levels take the label's.
+ */
+const HIERARCHY_OPACITY: Readonly<Record<string, number>> = { secondary: 0.5, tertiary: 0.25, quaternary: 0.18, quinary: 0.086 }
+
+/** HSB to sRGB components, each 0 to 1, as `Color(hue:saturation:brightness:)` means them. */
+function hsbToRgb(hue: number, saturation: number, brightness: number): [number, number, number] {
+  const h = ((hue % 1) + 1) % 1 * 6
+  const s = Math.max(0, Math.min(1, saturation))
+  const v = Math.max(0, Math.min(1, brightness))
+  const chroma = v * s
+  const x = chroma * (1 - Math.abs((h % 2) - 1))
+  const [r, g, b] =
+    h < 1 ? [chroma, x, 0] : h < 2 ? [x, chroma, 0] : h < 3 ? [0, chroma, x]
+    : h < 4 ? [0, x, chroma] : h < 5 ? [x, 0, chroma] : [chroma, 0, x]
+  const m = v - chroma
+  return [r + m, g + m, b + m]
+}
 
 /** The gesture constructors, mapped to the kind of event each responds to. */
 const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {
@@ -1950,7 +2183,8 @@ const GESTURE_CONSTRUCTORS: Readonly<Record<string, GestureKind>> = {
  */
 const SHAPE_MEMBERS = new Set(['fill', 'stroke', 'strokeBorder', 'trim', 'inset', 'offset', 'size'])
 
-const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init'])
+/** Members of a colour, which `.blue.secondary` reaches through its leading-dot `.blue`. */
+const COLOR_MEMBERS: ReadonlySet<string> = new Set(['opacity', 'gradient', 'init', ...Object.keys(HIERARCHY_OPACITY)])
 
 const GRADIENTS: Readonly<Record<string, GradientPayload['kind']>> = {
   LinearGradient: 'linear',
@@ -2016,31 +2250,6 @@ function rangeElements(lower: number, upper: number, closed: boolean): SwiftValu
   return out
 }
 
-/**
- * The identity of one `ForEach` element.
- *
- * Explicit `id:` wins; then a stored `id` property, which is what `Identifiable`
- * means in practice; then the index, which is what `ForEach(0..<n)` needs and what
- * SwiftUI itself falls back to.
- */
-function identityKey(
-  element: SwiftValue,
-  idComponents: readonly string[] | null,
-  index: number,
-): string {
-  if (idComponents) {
-    return describe(applyKeyPath({ components: idComponents }, element), true)
-  }
-  if (element.kind === 'struct') {
-    const id = element.fields.get('id')
-    if (id !== undefined) return describe(id, true)
-  }
-  if (element.kind === 'string' || element.kind === 'int' || element.kind === 'double') {
-    return describe(element, true)
-  }
-  return `#${index}`
-}
-
 function pointOf(value: SwiftValue | undefined): PathPoint | null {
   if (!value || value.kind !== 'opaque') return null
   const payload = value.payload as { x?: number; y?: number }
@@ -2077,3 +2286,9 @@ function asClosure(value: SwiftValue | undefined): ClosureValue | null {
 
 export { isView, asView, str }
 export type { ClosureValue }
+
+/** The phase a `PhaseAnimator` rests at: the first of those it was given. */
+function firstPhase(phases: SwiftValue | undefined): SwiftValue {
+  const given = asProjection(phases)?.get() ?? phases
+  return given?.kind === 'array' ? given.elements[0] ?? NIL : NIL
+}

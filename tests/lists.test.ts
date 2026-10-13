@@ -185,14 +185,14 @@ struct RootView: View {
 }
 `
 
-  it('draws search in the navigation drawer on phones', () => {
+  it('draws search at the bottom of the screen on phones, over the list', () => {
     const result = run(SEARCH_APP)
     const field = (result.renderTree?.nodes ?? []).find((n) => n.hitTarget?.role === 'textField')
     expect(field).toBeDefined()
     expect(field!.hitTarget!.placeholder).toBe('Search')
 
-    expect(ancestors(result.renderTree!.nodes, field!).map(node => node.id)).toContain(result.renderTree!.chrome!.scrollId)
-    expect(field!.frame.y).toBeLessThan(100)
+    expect(ancestors(result.renderTree!.nodes, field!).map(node => node.id)).not.toContain(result.renderTree!.chrome!.scrollId)
+    expect(worldFrame(result.renderTree!.nodes, field!).y).toBeGreaterThan(device.height - 100)
   })
 
   it('filters the list through its binding', () => {
@@ -268,11 +268,9 @@ struct RootView: View {
             }`, '.searchable(text: $query)'))
     const gradient = node(result, n => n.background?.kind === 'linearGradient')
     const title = node(result, n => n.id === 'navbar-large-title')
-    const search = node(result, n => n.hitTarget?.role === 'textField')
     const first = node(result, n => !!n.text?.runs.some(run => run.text === 'First'))
     expect(gradient).toMatchObject({ y: 0, height: device.height, width: device.width })
     expect(first.y).toBeGreaterThanOrEqual(title.y + title.height)
-    expect(first.y).toBeGreaterThanOrEqual(search.y + search.height)
     // The bar paints nothing, so the gradient shows behind the title as it does on iOS.
     expect(result.renderTree?.nodes.some(n => n.id === 'navbar-bgf')).toBe(false)
   })

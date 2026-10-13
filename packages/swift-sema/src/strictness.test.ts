@@ -633,3 +633,176 @@ struct TaskList: View {
     ).toEqual([])
   })
 })
+
+describe('statements Xcode rejects in a view body', () => {
+  // What Xcode 27 answers, checked with swiftc against the iOS 27 simulator SDK. A body
+  // with no `return` is a result builder, and a builder takes views, declarations with
+  // a value, `if`, `switch` and `do`; a loop, an assignment or a `break` is an error.
+  const CONTROL = "Closure containing control flow statement cannot be used with result builder 'ViewBuilder'."
+  const ASSIGN = "Type '()' cannot conform to 'View'."
+  const FUNC = "Closure containing a declaration cannot be used with result builder 'ViewBuilder'."
+  const view = (body: string, members = '') => messages(app(`    let days = [true, false, true]
+    @State private var flag = true
+${members}
+    var body: some View {
+${body}
+    }`))
+
+  describe('the silence cases', () => {
+    it.each([
+      ['an explicit return, which makes the body ordinary code', `        var n = 0
+        for day in days where day { n += 1 }
+        return Text("\\(n)")`],
+      ['declarations with a value', '        let n = days.count\n        var label = "Days"\n        Text("\\(label) \\(n)")'],
+      ['if, if let, if case and switch', `        if flag { Text("a") } else { Text("b") }
+        if let first = days.first { Text("\\(first)") }
+        if case .some(let v) = days.first { Text("\\(v)") }
+        switch flag { case true: Text("y"); case false: Text("n") }`],
+      ['a loop and assignments in a button\'s action, an onAppear and withAnimation', `        VStack {
+            Button("Count") { var n = 0; for _ in days { n += 1 } }
+            Text("x").onAppear { var n = 0; while n < 3 { n += 1 } }
+            Button("Animate") { withAnimation { flag.toggle(); flag = false } }
+        }
+        .toolbar { Button("Reset") { for _ in days { } } }`],
+      ['a closure that is called, with statements of its own', '        let total: Int = { var s = 0; for i in 0..<3 { s += i }; return s }()\n        Text("\\(total)")'],
+      ['declarations in a ForEach, and a guard that returns', `        ForEach(0..<3, id: \\.self) { i in
+            let doubled = i * 2
+            Text("\\(doubled)")
+        }
+        ForEach(0..<3, id: \\.self) { i in
+            guard i > 0 else { return AnyView(EmptyView()) }
+            return AnyView(Text("\\(i)"))
+        }`],
+      ['a binding that sets, and a print written as a declaration', '        let _ = print("drawn")\n        Toggle("On", isOn: Binding(get: { flag }, set: { flag = $0 }))'],
+      ['do without catch', '        do { Text("x") }'],
+      ['a sheet\'s onDismiss and a menu\'s primary action', `        Menu("More") { Button("One") { } } primaryAction: { flag = false; for _ in days { } }
+        Text("x").sheet(isPresented: .constant(false), onDismiss: { flag = true; for _ in days { } }) { Text("y") }
+        Text("z").contextMenu(forSelectionType: Int.self) { _ in Text("m") } primaryAction: { _ in flag = true; for _ in days { } }`],
+    ])('stays silent on %s', (_, body) => {
+      expect(view(body)).toEqual([])
+    })
+
+    it('stays silent on a loop in a computed property that is not a view', () => {
+      expect(view('        Text("\\(streak)")', `    var streak: Int {
+        var n = 0
+        for day in days where day { n += 1 }
+        return n
+    }`)).toEqual([])
+    })
+  })
+
+  it('flags a for loop and the assignments that feed it, once, as Xcode does', () => {
+    const found = view(`        var longest = 0
+        var run = 0
+        for day in days {
+            if day { run += 1; longest = max(longest, run) } else { run = 0 }
+        }
+        VStack { Text("\\(longest)") }`)
+
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain(CONTROL)
+    expect(found[0]).toContain("a 'for' loop")
+  })
+
+  it.each([
+    ['a while loop', '        var n = 0\n        while n < 3 { }\n        Text("\\(n)")', CONTROL],
+    ['a repeat loop', '        var n = 0\n        repeat { } while n < 3\n        Text("\\(n)")', CONTROL],
+    ['a loop in a VStack', '        VStack { for day in days { Text("\\(day)") } }', CONTROL],
+    ['a loop in a ForEach row', '        ForEach(0..<2, id: \\.self) { i in\n            for _ in days { }\n            Text("\\(i)")\n        }', CONTROL],
+    ['a loop in a sheet', '        Text("x").sheet(isPresented: .constant(false)) { for _ in days { }; Text("y") }', CONTROL],
+    ['a break in a switch', '        switch flag { case true: Text("a"); default: break }', CONTROL],
+    ['do with catch', '        do { Text("x") } catch { Text("y") }', CONTROL],
+    ['defer', '        defer { }\n        Text("x")', CONTROL],
+    ['an assignment', '        var n = 3\n        n = 4\n        Text("\\(n)")', ASSIGN],
+    ['a compound assignment in a VStack', '        VStack { var n = 1\n n += 1\n Text("\\(n)") }', ASSIGN],
+    ['a function', '        func label() -> String { "x" }\n        Text(label())', FUNC],
+  ])('flags %s', (_, body, message) => {
+    const found = view(body)
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain(message)
+  })
+
+  it('flags an assignment in a @ViewBuilder function', () => {
+    const found = view('        row()', `    @ViewBuilder func row() -> some View {
+        var n = 1
+        n += 1
+        Text("\\(n)")
+    }`)
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain(ASSIGN)
+  })
+})
+
+describe('a specifier or a format in a String', () => {
+  // What Xcode 27 answers, checked with swiftc: an interpolation's `specifier:` and
+  // `format:` belong to a title, which is a `LocalizedStringKey`, and a String refuses
+  // them. The preview applies them either way.
+  const SPECIFIER = "Incorrect argument label in call (have '_:specifier:', expected '_:default:')."
+  const FORMAT = "Extra argument 'format' in call."
+  const view = (members: string) => messages(app(`    let km = 1234.56
+    @State private var note = ""
+    func describe(label: String) -> String { label }
+${members}
+    var body: some View { Text("x") }`, `struct Row: View { let value: String; var body: some View { Text(value) } }
+struct KeyRow: View { let value: LocalizedStringKey; var body: some View { Text(value) } }
+struct Custom: View {
+    let value: String
+    init(_ value: String) { self.value = value }
+    var body: some View { Text(value) }
+}`))
+
+  it('stays silent on a title, and on a LocalizedStringKey written as one', () => {
+    expect(view(`    let key: LocalizedStringKey = "\\(1234.5, specifier: "%.1f") km"
+    var title: some View { Text("\\(km, specifier: "%.1f") km") }
+    var label: some View {
+        Label("\\(km, specifier: "%.1f") km", systemImage: "car")
+            .accessibilityLabel("\\(km, specifier: "%.1f") km")
+            .badge("\\(km, format: .number)")
+    }
+    var keyRow: some View { KeyRow(value: "\\(km, specifier: "%.1f") km") }`)).toEqual([])
+  })
+
+  it.each([
+    ['a property written as a String', '    let typed: String = "\\(1234.5, specifier: "%.1f") km"', SPECIFIER],
+    ['a property with no type written', '    @State private var stored = "\\(1234.5, format: .number) km"', FORMAT],
+    ['what a String property gives back', '    var computed: String { "\\(km, specifier: "%.1f") km" }', SPECIFIER],
+    ['what a String property returns', '    var returned: String {\n        guard km > 0 else { return "None" }\n        return "\\(km, specifier: "%.1f") km"\n    }', SPECIFIER],
+    ['a local constant', '    var local: some View {\n        let text = "\\(km, specifier: "%.1f") km"\n        return Text(text)\n    }', SPECIFIER],
+    ['an assignment to a String', '    func save() { note = "\\(km, specifier: "%.1f") km" }', SPECIFIER],
+    ['Text(verbatim:)', '    var verbatim: some View { Text(verbatim: "\\(km, specifier: "%.1f") km") }', SPECIFIER],
+    ['one side of a +', '    var plus: some View { Text("\\(km, format: .number)" + " km") }', FORMAT],
+    ['a String property of the project\'s own view', '    var row: some View { Row(value: "\\(km, format: .number) km") }', FORMAT],
+    ['a String parameter of the project\'s own init', '    var custom: some View { Custom("\\(km, specifier: "%.1f") km") }', SPECIFIER],
+    ['a String parameter of the project\'s own function', '    var described: String { describe(label: "\\(km, specifier: "%.1f")") }', SPECIFIER],
+  ])('flags one in %s', (_, members, message) => {
+    const found = view(members)
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain(message)
+  })
+})
+
+describe('an if-let binding reaches only its own branch', () => {
+  it('stays silent on assigning to the property it shadows, in the else branch and after the if', () => {
+    expect(messages(app(`    @State private var savedSpot: String?
+
+    var body: some View {
+        Button("Save") {
+            if let savedSpot { print(savedSpot) } else { savedSpot = "Level 2" }
+            if let savedSpot { print(savedSpot) }
+            savedSpot = nil
+        }
+    }`))).toEqual([])
+  })
+
+  it('still flags an assignment to the binding inside its own branch', () => {
+    const found = messages(app(`    @State private var savedSpot: String?
+
+    var body: some View {
+        Button("Save") {
+            if let savedSpot { savedSpot = "x" }
+        }
+    }`))
+    expect(found).toHaveLength(1)
+    expect(found[0]).toContain("'savedSpot' is a 'let' constant")
+  })
+})

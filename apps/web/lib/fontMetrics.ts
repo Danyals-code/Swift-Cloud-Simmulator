@@ -1,7 +1,7 @@
 'use client'
 
 import type { MeasuredFontData, MeasuredTextData, TextMeasureRequest } from '@studio/shared'
-import { canvasFont, textMeasureKey, MEASURED_FAMILIES } from '@studio/shared'
+import { canvasFont, graphemes, textMeasureKey, MEASURED_FAMILIES } from '@studio/shared'
 import { FONT_PROBE } from './workerFontMetrics'
 
 /**
@@ -100,14 +100,13 @@ export function measureTextBatch(requests: readonly TextMeasureRequest[]): Measu
   const span = document.createElement('span')
   Object.assign(span.style, { position: 'absolute', left: '-100000px', top: '0', whiteSpace: 'pre', visibility: 'hidden' })
   document.body.append(span)
-  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   try {
     return requests.map((request) => {
       const family = tidy(resolvable(request.font.family))
       context.font = canvasFont(request.font, family)
       context.fontKerning = 'normal'
       const metrics = context.measureText(request.text)
-      let width = metrics.width + Array.from(segmenter.segment(request.text)).length * (request.tracking ?? 0)
+      let width = metrics.width + graphemes(request.text).length * (request.tracking ?? 0)
       if (request.tabularNumbers || request.tracking) {
         span.style.font = canvasFont(request.font, family)
         span.style.fontVariantNumeric = request.tabularNumbers ? 'tabular-nums' : 'normal'

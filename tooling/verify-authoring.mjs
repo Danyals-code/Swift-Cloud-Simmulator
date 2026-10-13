@@ -42,7 +42,7 @@ function check(name, command, arguments_, timeout = 300_000, env = {}) {
   console.log(`${name}: ${result.status === 0 ? 'pass' : 'fail'}`)
   return result.status === 0
 }
-function blocked(name, reason) { report.checks.push({ name, status: 'blocked', reason }); persist(); console.error(`${name}: blocked — ${reason}`) }
+function blocked(name, reason) { report.checks.push({ name, status: 'blocked', reason }); persist(); console.error(`${name}: blocked (${reason})`) }
 
 if (process.version !== `v${contract.node}` || report.environment.npm.stdout !== contract.npm) blocked('toolchain', `Use Node ${contract.node} and npm ${contract.npm} before comparing results.`)
 else if (mode === 'web') {

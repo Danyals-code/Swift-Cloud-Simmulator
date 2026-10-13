@@ -1,3 +1,4 @@
+import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { assetCatalog, hasCatalog } from './resources'
 import type { Project } from '@studio/project-model'
 import { encodeText, newBundle, type ExportBundle } from './bundle'
@@ -9,8 +10,8 @@ import { gitignoreContents } from './xcode-files'
  *
  * Phase 5 shipped one format and recorded the other three as a shortfall. They are
  * here now, and they share the single guarantee the whole product rests on: every
- * `.swift` file is the editor buffer encoded as UTF-8 and nothing else. Everything
- * below generates scaffolding *around* those bytes, never over them.
+ * `.swift` file is the editor buffer encoded as UTF-8, less only the studio's own
+ * markers. Everything below generates scaffolding *around* those bytes, never over them.
  *
  * Each format answers a different question, which is why one is not enough:
  *
@@ -26,7 +27,7 @@ import { gitignoreContents } from './xcode-files'
 
 // The format list itself lives in `shared`, so the toolbar can show the menu without
 // pulling in the generator behind it.
-export { EXPORT_FORMATS, type ExportFormat, type FormatInfo } from '@studio/shared'
+export { EXPORT_FORMATS, type ArchiveFormat, type ExportFormat, type FormatInfo } from '@studio/shared'
 
 /**
  * Swift tools version.
@@ -38,7 +39,7 @@ export { EXPORT_FORMATS, type ExportFormat, type FormatInfo } from '@studio/shar
 const TOOLS_VERSION = '5.9'
 
 function sourcesOf(project: Project): { path: string; text: string }[] {
-  return project.files.map((file) => ({ path: targetRelativePath(file.id), text: file.text }))
+  return project.files.map((file) => ({ path: targetRelativePath(file.id), text: withoutStudioMarkers(file.text) }))
 }
 
 /**
@@ -179,7 +180,9 @@ export function buildXcodeGenBundle(project: Project): ExportBundle {
 }
 
 function xcodeGenSpec(project: Project): string {
-  const name = project.manifest.name
+  // Quoted, since YAML reads a bare `Notes #2` as "Notes" and a comment, `True` as a
+  // boolean and `123` as a number. A JSON string is a valid double-quoted YAML scalar.
+  const name = JSON.stringify(project.manifest.name)
   return `name: ${name}
 
 options:
@@ -207,7 +210,8 @@ targets:
 
 const APPROXIMATIONS = `## Resources and source compatibility
 
-Swift files are preserved exactly. Swift package resources are processed into a
+Swift files are preserved exactly, less the studio's markers for hidden views and
+switched-off modifiers. Swift package resources are processed into a
 resource bundle. Named images in a package need the package bundle (for example,
 \`Image("Photo", bundle: .module)\`) or integration into the host app's main asset
 catalog. Use the Xcode project or XcodeGen app export for main-bundle images.
@@ -216,7 +220,7 @@ unsupported code or external dependencies before distribution.
 
 ## What the preview approximated
 
-The Swift is exactly what you wrote - byte for byte. The *preview* made some
+The Swift is what you wrote, byte for byte, apart from those markers. The *preview* made some
 substitutions that this build will not:
 
 - **Fonts** - an open metric-compatible stack stood in for SF Pro.

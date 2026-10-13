@@ -1,4 +1,5 @@
 import { modifierModel } from './authoring-modifiers'
+import { borderOf, cornersOf } from './authoring-border'
 import { enrichAuthoring } from './authoring-features'
 import type { ComponentDescription, PreviewColorAsset } from '@studio/shared'
 import {
@@ -6,8 +7,8 @@ import {
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
-import { Lexer, Parser, forEachChild, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
-import { SUPPORTED_VIEWS } from './builtins'
+import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
+import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from './builtins'
 import { colorOpacityParts, designControlRecipes, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
 
 type MutableNode = Omit<AuthoringNode, 'children' | 'properties'> & { children: string[]; properties: AuthoringProperty[] }
@@ -104,7 +105,10 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const fingerprint = (span: SourceSpan) => JSON.stringify(Lexer.tokenize(source(span), span.file).tokens.filter(t => t.kind !== 'endOfFile').map(t => [t.kind, t.text]))
 
   function add(kind: AuthoringNode['kind'], name: string, span: SourceSpan, owner: string, parent?: MutableNode): MutableNode {
-    const id = JSON.stringify([span.file, span.start, span.end, kind])
+    // An `else if` is the whole of its "Otherwise" branch, so the two share a span. With
+    // one id the inner "Condition" was its own parent, and walking up from it never ended.
+    let id = JSON.stringify([span.file, span.start, span.end, kind])
+    if (byId.has(id)) id = JSON.stringify([span.file, span.start, span.end, kind, name])
     const node: MutableNode = { id, kind, name, source: span, owner, parentId: parent?.id, fingerprint: fingerprint(span), children: [], properties: [], runtimeIds: [] }
     nodes.push(node)
     byId.set(id, node)
@@ -142,11 +146,18 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   }
   for (const file of parsed) for (const decl of file.declarations) index(decl)
 
+  /** `node` and the layers above it, nearest first. A layer met twice ends the walk, so an id that repeats cannot make it run forever. */
+  function* upFrom(node: MutableNode | undefined): Generator<MutableNode> {
+    const seen = new Set<string>()
+    for (let layer = node; layer && !seen.has(layer.id); layer = layer.parentId ? byId.get(layer.parentId) : undefined) {
+      seen.add(layer.id)
+      yield layer
+    }
+  }
+
   function property(node: MutableNode, name: string, expr: Expr | null, scope: Scope, capability?: string, reason?: string): AuthoringProperty {
     const value = expr ? classify(expr, scope, tokens, declaredNames, contextual) : { kind: 'literal' as const }
-    let parent: MutableNode | undefined = node
-    let repeated = false
-    while (parent) { if (parent.kind === 'template') repeated = true; parent = parent.parentId ? byId.get(parent.parentId) : undefined }
+    const repeated = [...upFrom(node)].some(layer => layer.kind === 'template')
     const invalid = diagnostics.some(d => d.severity === 'error' && d.span.file === node.source.file && d.span.start < node.source.end && d.span.end >= node.source.start)
     return {
       id: `${node.id}:${node.properties.length}`, name, expression: expr ? source(expr.span) : 'Implicit',
@@ -158,7 +169,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
   }
 
-  function expression(expr: Expr, parent: MutableNode, scope: Scope): void {
+  function expression(expr: Expr, parent: MutableNode, scope: Scope, { argument = false } = {}): void {
     const chain = viewCallChain(expr)
     if (!chain) { add('opaque', 'Custom expression', expr.span, parent.owner, parent); return }
     const name = callName(chain.base.callee)
@@ -168,6 +179,10 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     const capability = builtin ? authoringCapability(name, 'view', chain.base.args.map(a => a.label)) : undefined
     const node = add(custom.length === 1 ? 'component' : name === 'ForEach' || name === 'List' && chain.base.args.length > 0 ? 'collection' : builtin ? 'view' : 'opaque', name, expr.span, parent.owner, parent)
     if (custom.length === 1) Object.assign(node, { definitionId: custom[0]!.node.id })
+    // Real SwiftUI with no drawing yet, or a name the checker says the preview draws a box for (D12).
+    const unknown = !custom.length && diagnostics.some(d => d.code === 'unresolved_identifier' && d.severity === 'warning' && d.span.file === expr.span.file && d.span.start === expr.span.start)
+    if (!custom.length && UNIMPLEMENTED_VIEWS.has(name) || unknown) Object.assign(node, { undrawn: UNIMPLEMENTED_VIEWS.has(name) ? 'unsupported' : 'unknown' })
+    if (argument) Object.assign(node, { argument: true })
     const reason = custom.length > 1 ? 'More than one matching component declaration; ownership is ambiguous.' : !custom.length && !capability ? 'This constructor overload is outside the authoring subset.' : undefined
     for (const [i, arg] of chain.base.args.entries()) {
       node.properties.push(property(node, arg.label ?? (name === 'Text' ? 'content' : `argument ${i + 1}`), arg.value, scope, capability?.id, reason))
@@ -196,16 +211,18 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       if (!modifier.args.length) node.properties.push({ ...property(node, modifierName, null, scope, supported?.id, unsupported), source: modifier.callee.kind === 'memberAccess' ? modifier.callee.memberSpan : modifier.span })
     }
     if (name === 'Text' && !node.properties.some(p => p.name === 'font')) {
-      let ancestor: MutableNode | undefined = parent
       let origin: AuthoringProperty | undefined
-      while (ancestor && !origin) { origin = [...ancestor.properties].reverse().find(p => p.name === 'font'); ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }
+      for (const ancestor of upFrom(parent)) {
+        origin = [...ancestor.properties].reverse().find(p => p.name === 'font')
+        if (origin) break
+      }
       node.properties.push({ id: `${node.id}:inherited-font`, name: 'font', expression: origin?.expression ?? 'Environment / call site', valueKind: 'inherited', source: origin?.source, ownerId: origin?.ownerId ?? parent.id, scope: 'inherited', writable: false, reason: origin ? 'Inherited from an enclosing source view; it affects its descendants.' : 'No local font is declared; the environment supplies it.' })
     }
-    if (!diagnostics.some(d => d.severity === 'error' && (['expected_token', 'unexpected_token', 'unterminated_string', 'unterminated_block'].includes(d.code) || d.span.file === node.source.file && d.span.start < node.source.end && d.span.end >= node.source.start))) {
-      let ancestor: MutableNode | undefined = parent
-      let template = false
-      while (ancestor) { if (ancestor.kind === 'template') template = true; ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined }
-      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget).map(r => ({ ...r.control, scope: template ? 'All rows in this template' : r.control.scope, description: r.control.id.startsWith('fill:') ? `${r.control.description} Parent: ${parent.name}. Content uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : r.control.description }))
+    // A syntax error takes the controls of its own file's views, not every file's: a half-typed draft elsewhere
+    // is no reason to lock the design, and the planner refuses only changes to the file that does not parse.
+    if (!diagnostics.some(d => d.span.file === node.source.file && (isSyntaxError(d) || d.severity === 'error' && d.span.start < node.source.end && d.span.end >= node.source.start))) {
+      const template = [...upFrom(parent)].some(ancestor => ancestor.kind === 'template')
+      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget).map(r => ({ ...r.control, scope: template ? 'All rows in this template' : r.control.scope, description: r.control.id.startsWith('fill:') ? `${r.control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : r.control.description }))
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
@@ -231,20 +248,22 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     if (destination) {
       const slot = add('branch', 'Destination', destination.span, parent.owner, node)
       if (destination.kind === 'closure') block(destination.body, slot, scope)
-      else expression(destination, slot, scope)
+      else expression(destination, slot, scope, { argument: true })
     }
     // Section headers/footers are content slots, not repeated rows or actions.
     if (name === 'Section' && capability) for (const arg of chain.base.args) {
       if (!['header', 'footer'].includes(arg.label ?? '')) continue
       const slot = add('branch', arg.label === 'header' ? 'Header' : 'Footer', arg.value.span, parent.owner, node)
       if (arg.value.kind === 'closure') block(arg.value.body, slot, scope)
-      else expression(arg.value, slot, scope)
+      else expression(arg.value, slot, scope, { argument: true })
     }
-    // A visual slot has its own layer; action closures and scalar colors are not views.
+    // A visual slot has its own layer; action closures and scalar colors are not views,
+    // and a border is a setting of the view it outlines (D8).
+    const corners = cornersOf(chain.modifiers, texts.get(node.source.file) ?? '')
     for (const modifier of chain.modifiers) {
       const name = modifier.callee.kind === 'memberAccess' ? modifier.callee.member : ''
       const label = CONTENT_SLOTS[name]
-      if (!label) continue
+      if (!label || borderOf(modifier, corners, texts.get(node.source.file) ?? '')) continue
       const closure = modifier.trailingClosure ?? modifier.args.find(arg => arg.label === 'content' && arg.value.kind === 'closure')?.value
       if (closure?.kind === 'closure') {
         const slot = add('branch', label, closure.span, parent.owner, node)
@@ -259,7 +278,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         const builtinColor = contentName === 'Color' && (!definitions.has('Color') || content?.base.callee.kind === 'memberAccess' && content.base.callee.base?.kind === 'identifier' && content.base.callee.base.name === 'SwiftUI')
         if (argument && contentName && !builtinColor && (SUPPORTED_VIEWS.has(contentName) || definitions.has(contentName))) {
           const slot = add('branch', label, argument.span, parent.owner, node)
-          expression(argument, slot, scope)
+          expression(argument, slot, scope, { argument: true })
         }
       }
     }

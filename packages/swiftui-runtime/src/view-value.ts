@@ -1,5 +1,8 @@
 import type { ComponentSource, SourceSpan } from '@studio/shared'
-import { describe, type ClosureValue, type SwiftValue } from '@studio/swift-runtime'
+import { describe, type ClosureValue, type FunctionValue, type SwiftValue } from '@studio/swift-runtime'
+
+/** What a control runs: a closure, or a function named as a value - `Button("Save", action: save)`. */
+export type ActionValue = ClosureValue | FunctionValue
 
 /**
  * An evaluated view.
@@ -20,8 +23,8 @@ export interface ViewValue {
   readonly args: readonly ViewArg[]
   readonly children: readonly ViewValue[]
   readonly modifiers: readonly ModifierValue[]
-  /** A `Button`'s trailing closure, kept to be run on tap. */
-  readonly action: ClosureValue | null
+  /** A `Button`'s action - its `action:` argument or its trailing closure - kept to be run on tap. */
+  readonly action: ActionValue | null
   readonly span: SourceSpan
   /** Source call sites survive component expansion without adding runtime nodes. */
   readonly componentSources?: readonly ComponentSource[]
@@ -45,6 +48,15 @@ export interface ViewValue {
    * the observable difference between keying by identity and keying by index.
    */
   readonly childKeys?: readonly string[]
+  /** For each `ForEach` child, the place in the collection of the element it was drawn for. */
+  readonly childOffsets?: readonly number[]
+  /**
+   * The tag `ForEach` gives each of its rows: the row's id, a value of its own type.
+   *
+   * SwiftUI tags every row with its `id:` key path's value, or its `Identifiable.id`,
+   * and a `Picker` or a `TabView` selects a row by it when it has the selection's type.
+   */
+  readonly implicitTag?: SwiftValue
   /**
    * The key a `GeometryReader` reports its resolved size under.
    *
@@ -81,7 +93,7 @@ export type ViewIntent =
       readonly by: number
       readonly bounds?: { readonly min: number; readonly max: number }
     }
-  | { readonly kind: 'run'; readonly closure: ClosureValue; readonly dismiss?: ViewIntent }
+  | { readonly kind: 'run'; readonly action: ActionValue; readonly dismiss?: ViewIntent }
   /** A gesture attached with `.gesture(…)`; the event decides which handlers run. */
   | { readonly kind: 'gesture'; readonly gesture: SwiftValue }
   /** Dragging a list row sideways to reveal its actions. */
@@ -95,7 +107,7 @@ export type ViewIntent =
   /** Choosing one of them: writes the selection and closes in one press. */
   | { readonly kind: 'choose'; readonly binding: SwiftValue; readonly value: SwiftValue }
   /** `.onDelete` - remove the row at this offset from the collection. */
-  | { readonly kind: 'delete'; readonly closure: ClosureValue; readonly offset: number; readonly row: string }
+  | { readonly kind: 'delete'; readonly action: ActionValue; readonly offset: number; readonly row: string }
 
 export interface ViewArg {
   readonly label: string | null
@@ -127,6 +139,13 @@ export interface ModifierValue {
    */
   readonly closure: ClosureValue | null
   /**
+   * What an event modifier runs - `.onAppear`, `.task`, `.onChange`, `.onDelete`,
+   * `.onTapGesture`, `.onSubmit`: its trailing closure, or the closure or function its
+   * `perform:`, `action:` or unlabelled argument names. Xcode's own template writes
+   * `.onDelete(perform: deleteItems)`.
+   */
+  readonly action?: ActionValue
+  /**
    * The environment in scope where the modifier was *written*.
    *
    * A deferred closure runs long after the expansion that declared it has unwound, so
@@ -142,6 +161,47 @@ export interface ModifierValue {
 }
 
 export const VIEW_TYPE = 'View'
+
+/** Why running the user's code stopped, and where. */
+export interface RuntimeFailure {
+  readonly message: string
+  readonly span: SourceSpan
+  readonly frames: readonly string[]
+  readonly kind: 'trap' | 'budget' | 'unsupported'
+}
+
+/**
+ * A custom view whose body stopped, drawn in its place as a placeholder carrying why.
+ *
+ * One trap in one view used to replace the whole screen, and the Design canvas with
+ * it. Framework-named, like the bars, so nothing a user writes can collide with it.
+ * The failure travels with the view and is reported where the view is drawn, so a
+ * destination built with its link says nothing until it is pushed.
+ */
+export const STOPPED_VIEW = '_Stopped'
+const FAILURE_TYPE = 'RuntimeFailure'
+
+export function stoppedView(name: string, failure: RuntimeFailure, span: SourceSpan): ViewValue {
+  return {
+    name: STOPPED_VIEW,
+    args: [{ label: 'failure', value: { kind: 'opaque', typeName: FAILURE_TYPE, payload: { name, failure } satisfies Stopped } }],
+    children: [],
+    modifiers: [],
+    action: null,
+    span,
+  }
+}
+
+/** What a stopped view is: the view that stopped, and why. */
+export interface Stopped {
+  readonly name: string
+  readonly failure: RuntimeFailure
+}
+
+/** What stopped a view drawn as stopped, or null for any other view. */
+export function stopped(view: ViewValue): Stopped | null {
+  return view.name === STOPPED_VIEW ? payloadOf<Stopped>(view.args.find((a) => a.label === 'failure')?.value, FAILURE_TYPE) : null
+}
 
 /** A contextual member with no base: `.largeTitle`, `.primary`, `.infinity`. */
 export const TOKEN_TYPE = 'Token'
@@ -224,6 +284,9 @@ export interface GradientPayload {
 /** A `GeometryProxy`, as `GeometryReader`'s closure receives it. */
 export const GEOMETRY_TYPE = 'GeometryProxy'
 
+/** A `ScrollViewProxy`, as `ScrollViewReader`'s closure receives it. Its `scrollTo` does nothing. */
+export const SCROLL_PROXY_TYPE = 'ScrollViewProxy'
+
 /**
  * `ViewDimensions` - what an `.alignmentGuide` closure is handed.
  *
@@ -236,6 +299,11 @@ export const DIMENSIONS_TYPE = 'ViewDimensions'
 export interface GeometryPayload {
   readonly width: number
   readonly height: number
+  /** Where the reader is on the screen, as `frame(in: .global)` reports it. */
+  readonly x: number
+  readonly y: number
+  /** What `safeAreaInsets` reports. */
+  readonly insets: EdgeInsetsPayload
 }
 
 /** An animation curve, as `.animation()` and `withAnimation` take it. */
@@ -299,6 +367,11 @@ export function isView(value: SwiftValue): value is SwiftValue & { payload: View
 
 export function asView(value: SwiftValue): ViewValue | null {
   return isView(value) ? (value.payload as ViewValue) : null
+}
+
+/** What a Button is drawn with, from a `label:` argument (D16), or null for any other argument. */
+export function labelView(arg: ViewArg): ViewValue | null {
+  return arg.label === 'label' ? asView(arg.value) : null
 }
 
 export function payloadOf<T>(value: SwiftValue | undefined, typeName: string): T | null {

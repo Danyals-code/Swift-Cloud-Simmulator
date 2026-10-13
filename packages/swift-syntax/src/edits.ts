@@ -1,6 +1,8 @@
-import type { FileId } from '@studio/shared'
+import type { DropPosition, FileId } from '@studio/shared'
 import { Parser } from './parser'
-import { walk, type Block, type Expr, type Node, type Stmt } from './ast'
+import { walk, type Block, type CallExpr, type Expr, type Node, type Stmt } from './ast'
+import { afterOffMarkers } from './off-markers'
+import { HIDDEN_END, HIDDEN_MARKER } from './studio-markers'
 
 /**
  * Editing the source from the canvas.
@@ -58,10 +60,20 @@ export interface SourceEdit {
    * swapped with it - the neighbour, not the thing that was moved.
    */
   readonly offset: number
+  /** Swift the edit wrote besides the view it was given: a list's `ForEach`, when its rows moved into one. */
+  readonly wraps?: string
 }
 
-/** The innermost statement containing `offset`, with the block it belongs to. */
-function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null {
+/**
+ * The statement whose view starts at `offset`, with the block it belongs to.
+ *
+ * Exact on purpose. A view written as an argument - `.overlay(Circle())`,
+ * `Section(header: Text("A"))` - sits inside a statement without being one, and taking
+ * the statement around it would move, hide or delete the view that takes it. `near`
+ * answers the innermost statement containing `offset` instead, for a drop target: a
+ * drop onto an overlay means beside the view it belongs to.
+ */
+function siteAt(text: string, file: FileId, offset: number, { near = false } = {}): { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null {
   const { sourceFile } = Parser.parse(text, file)
 
   let best: { stmt: Stmt; block: Block; index: number; blockOwner: Expr | null } | null = null
@@ -72,9 +84,9 @@ function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block
     if (node.kind === 'call' && node.trailingClosure) owners.set(node.trailingClosure.body, node)
     if (node.kind !== 'block') return
     node.statements.forEach((stmt, index) => {
-      if (offset < stmt.span.start || offset >= stmt.span.end) return
-      // Deeper blocks are visited after shallower ones, and the deepest statement
-      // containing the offset is the view that was actually pointed at.
+      if (near ? offset < stmt.span.start || offset >= stmt.span.end : viewStartOf(stmt) !== offset) return
+      // At most one statement starts at an offset. Near it, deeper blocks are visited
+      // after shallower ones, so the innermost statement containing it wins.
       if (!best || stmt.span.start >= best.stmt.span.start) {
         best = { stmt, block: node, index, blockOwner: owners.get(node) ?? null }
       }
@@ -82,6 +94,13 @@ function siteAt(text: string, file: FileId, offset: number): { stmt: Stmt; block
   })
 
   return best
+}
+
+/** Where the view a statement produces is written: past a `return`, where its expression starts. */
+function viewStartOf(stmt: Stmt): number | null {
+  if (stmt.kind === 'exprStmt') return stmt.expression.span.start
+  if (stmt.kind === 'returnStmt') return stmt.value?.span.start ?? null
+  return null
 }
 
 /** The name a call expression invokes, for `Text(…)` and `SwiftUI.Text(…)` alike. */
@@ -144,7 +163,9 @@ function contentBlockOf(stmt: Stmt): Block | null {
 function extentOf(text: string, stmt: Stmt): { start: number; end: number } {
   let end = stmt.span.end
   while (end > stmt.span.start && /[\s;]/.test(text[end - 1]!)) end--
-  return { start: stmt.span.start, end }
+  // A modifier switched off at the end of the chain is a comment after the statement,
+  // not part of it, but it is still this view's: it moves, copies and goes with it.
+  return { start: stmt.span.start, end: afterOffMarkers(text, end) }
 }
 
 function lineStartAt(text: string, offset: number): number {
@@ -203,6 +224,20 @@ export function viewSiteAt(text: string, file: FileId, offset: number): ViewSite
   }
 }
 
+/** Told why an edit was refused, in words a designer can act on (C7). */
+export type RefusalReason = (reason: string) => void
+
+/** Refuses an edit: says why, to whoever asked, and returns no edit. */
+function refused(refuse: RefusalReason | undefined, reason: string): null {
+  refuse?.(reason)
+  return null
+}
+
+/** Why a view that is not a statement of its own - one side of a `? :` - can't be edited alone. */
+const partOfCode = (edit: string) => `This view is part of the code around it, so it can’t be ${edit} on its own. Change it in Code.`
+/** Why the only view of a body can't go: a `some View` with nothing in it does not build. */
+const onlyView = (edit: string) => `This is the only view here, and this spot can’t be left empty. Add another view first, or ${edit} what holds it.`
+
 /**
  * Deletes the view at `offset`.
  *
@@ -212,11 +247,11 @@ export function viewSiteAt(text: string, file: FileId, offset: number): ViewSite
  * the refusal is only for the statement that is a block's whole content when that
  * block is not a container's.
  */
-export function deleteView(text: string, file: FileId, offset: number): SourceEdit | null {
+export function deleteView(text: string, file: FileId, offset: number, refuse?: RefusalReason): SourceEdit | null {
   const found = siteAt(text, file, offset)
-  if (!found) return null
+  if (!found) return refused(refuse, partOfCode('deleted'))
   const site = viewSiteAt(text, file, offset)!
-  if (site.siblings === 1 && !site.inContent) return null
+  if (site.siblings === 1 && !site.inContent) return refused(refuse, onlyView('delete'))
 
   const cut = cutOf(text, found.stmt)
   return { text: text.slice(0, cut.start) + text.slice(cut.end), offset: cut.start }
@@ -230,19 +265,19 @@ export function deleteView(text: string, file: FileId, offset: number): SourceEd
  * put them. Returns null at either end of a block, which is what tells the studio
  * to draw the control as unavailable rather than to do nothing on a press.
  */
-export function moveView(text: string, file: FileId, offset: number, direction: -1 | 1): SourceEdit | null {
+export function moveView(text: string, file: FileId, offset: number, direction: -1 | 1, refuse?: RefusalReason): SourceEdit | null {
   const found = siteAt(text, file, offset)
-  if (!found) return null
+  if (!found) return refused(refuse, partOfCode('moved'))
 
   const target = found.index + direction
   const other = found.block.statements[target]
-  if (!other) return null
+  if (!other) return refused(refuse, `This is already the ${direction === -1 ? 'first' : 'last'} view here.`)
 
   const a = found.index < target ? found.stmt : other
   const b = found.index < target ? other : found.stmt
   const first = extentOf(text, a)
   const second = extentOf(text, b)
-  if (first.end > second.start) return null
+  if (first.end > second.start) return refused(refuse, 'These views share their code, so they can’t swap places. Change them in Code.')
 
   const firstText = text.slice(first.start, first.end)
   const secondText = text.slice(second.start, second.end)
@@ -271,9 +306,11 @@ export function moveView(text: string, file: FileId, offset: number, direction: 
  * re-indented to wherever it lands, so a multi-line one arrives formatted rather than
  * flattened against the left margin.
  */
-export function insertView(text: string, file: FileId, offset: number, snippet: string): SourceEdit | null {
+export function insertView(text: string, file: FileId, offset: number, snippet: string, refuse?: RefusalReason, options: { readonly asListRow?: boolean } = {}): SourceEdit | null {
   const found = siteAt(text, file, offset)
-  if (!found) return null
+  if (!found) return refused(refuse, 'A view can’t go beside this one, which is part of the code around it. Select what holds it instead.')
+  const list = options.asListRow ? dataList(found.stmt) : null
+  if (list) return insertListRow(text, list, snippet, refuse)
 
   const content = contentBlockOf(found.stmt)
   const reference = content?.statements[content.statements.length - 1]
@@ -285,21 +322,60 @@ export function insertView(text: string, file: FileId, offset: number, snippet: 
   }
 
   if (content) {
-    // An empty container: open it onto its own lines rather than inlining a child
-    // into `VStack { }`, which is where nested content stops being readable.
+    // A container with no statements can still hold text the parser does not turn
+    // into one - a hidden view, a comment, a ForEach's `item in` - so the new view
+    // goes in front of the closing brace and everything before it stays.
     const open = content.span.start
     const close = content.span.end - 1
-    if (open === -1 || close === -1 || close < open) return null
+    if (open === -1 || close === -1 || close < open) return refused(refuse, 'There’s no room for a view here. Add it in Code.')
     const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, found.stmt.span.start), found.stmt.span.start))?.[0] ?? ''
     const inner = outer + indentUnit(text)
-    const body = `\n${indentSnippet(snippet, inner)}\n${outer}`
+    const closeLine = lineStartAt(text, close)
+    if (closeLine > open && /^[ \t]*$/.test(text.slice(closeLine, close))) {
+      // Lined up with what is already inside, when a line of it comes before the brace.
+      const lastLine = lineStartAt(text, closeLine - 1)
+      const indent = (lastLine > open ? /^[ \t]*(?=\S)/.exec(text.slice(lastLine, closeLine))?.[0] : undefined) ?? inner
+      return { text: text.slice(0, closeLine) + `${indentSnippet(snippet, indent)}\n` + text.slice(closeLine), offset: closeLine + indent.length }
+    }
+    // A brace on a shared line - `VStack { }` - opens onto its own lines, which is
+    // where nested content stays readable.
+    const end = open + 1 + text.slice(open + 1, close).trimEnd().length
     return {
-      text: text.slice(0, open + 1) + body + text.slice(close),
-      offset: open + 1 + 1 + inner.length,
+      text: text.slice(0, end) + `\n${indentSnippet(snippet, inner)}\n${outer}` + text.slice(close),
+      offset: end + 1 + inner.length,
     }
   }
 
   return spliceStatement(text, cutOf(text, found.stmt), snippet)
+}
+
+/** `List(items) { item in … }`: a list whose rows come from data, its closure being each row. */
+function dataList(stmt: Stmt): CallExpr | null {
+  const call = viewCallOf(stmt)
+  if (!call || call.kind !== 'call' || calleeName(call) !== 'List' || !call.trailingClosure) return null
+  return call.args[0]?.label === null ? call : null
+}
+
+/**
+ * A view added to a list of records becomes its last row: the rows move into a
+ * `ForEach` with their data and `id:`, and the view follows it, as
+ * `List { ForEach(items) { … }; Text("Text") }`. Added to the rows' closure instead,
+ * it would be drawn in every row.
+ */
+function insertListRow(text: string, list: CallExpr, snippet: string, refuse?: RefusalReason): SourceEdit | null {
+  if (list.args.some(arg => arg.label !== null && arg.label !== 'id')) return refused(refuse, 'This list’s rows come with a selection or children as well. Add the row in Code.')
+  const closure = list.trailingClosure!
+  const unit = indentUnit(text)
+  const outer = /^[ \t]*/.exec(text.slice(lineStartAt(text, list.span.start)))![0]
+  const inner = outer + unit
+  const data = list.args.map(arg => text.slice(arg.span.start, arg.span.end)).join(', ')
+  const rows = text.slice(closure.span.start, closure.span.end).split('\n').map((line, i) => (i === 0 || !line ? line : unit + line)).join('\n')
+  const head = `List {\n${inner}ForEach(${data}) ${rows}\n`
+  return {
+    text: text.slice(0, list.span.start) + head + indentSnippet(snippet, inner) + `\n${outer}}` + text.slice(list.span.end),
+    offset: list.span.start + head.length + inner.length,
+    wraps: 'ForEach { }',
+  }
 }
 
 interface Cut {
@@ -326,25 +402,17 @@ function indentUnit(text: string): string {
   return /\n\t+\S/.test(text) ? '\t' : '    '
 }
 
+/**
+ * Indents every line of `snippet` by `indent`. An empty line stays empty; a line of
+ * spaces keeps them, as it can be a line of a multi-line string (C8).
+ */
 function indentSnippet(snippet: string, indent: string): string {
   return snippet
     .split('\n')
-    .map((line, i) => (i === 0 ? indent + line : line.trim() ? indent + line : ''))
+    .map((line, i) => (i === 0 || line ? indent + line : ''))
     .join('\n')
 }
 
-/**
- * The marker that lets a hidden view be found again.
- *
- * Hiding comments the view out, which is the only way a view can stop taking part in
- * the layout as well as in the drawing - `.hidden()` leaves its space behind. The
- * cost of commenting is that the parser stops seeing it, so the studio would have
- * nowhere to draw the switch that brings it back. This line is how it keeps it: an
- * ordinary comment that survives Xcode, a diff and a merge, and that reads as what
- * it is if the studio never opens the file again.
- */
-export const HIDDEN_MARKER = '// hidden by Swift Web Studio'
-const HIDDEN_END = '// end hidden view'
 
 export interface HiddenView {
   /** Offset of the marker line, which is where the block starts. */
@@ -364,7 +432,8 @@ export interface HiddenView {
 }
 
 /**
- * Moves the view at `offset` to sit before or after another one.
+ * Moves the view at `offset` to sit before or after another one, or inside it as its
+ * last child.
  *
  * The general form of a move: the statement's text is cut and put back at the
  * target, so it works between siblings, into a different container and out of one -
@@ -376,34 +445,41 @@ export function moveViewTo(
   file: FileId,
   offset: number,
   targetOffset: number,
-  position: 'before' | 'after',
+  position: DropPosition,
+  refuse?: RefusalReason,
 ): SourceEdit | null {
   const source = siteAt(text, file, offset)
-  const target = siteAt(text, file, targetOffset)
-  if (!source || !target) return null
-  if (source.stmt === target.stmt) return null
+  const target = siteAt(text, file, targetOffset, { near: true })
+  if (!source) return refused(refuse, partOfCode('moved'))
+  if (!target) return refused(refuse, 'That spot isn’t a view to drop beside. Drop it on a layer instead.')
+  // By place: each lookup parses the file afresh, so the same statement is never the same object.
+  if (source.stmt.span.start === target.stmt.span.start && source.stmt.span.end === target.stmt.span.end) return refused(refuse, 'A view can’t be dropped onto itself.')
+  const targetStart = viewStartOf(target.stmt)
+  if (targetStart === null) return refused(refuse, 'That spot isn’t a view to drop beside. Drop it on a layer instead.')
 
   const from = cutOf(text, source.stmt)
   const to = cutOf(text, target.stmt)
   // A container cannot land among its own children.
-  if (to.start >= from.start && to.end <= from.end) return null
+  if (to.start >= from.start && to.end <= from.end) return refused(refuse, 'A view can’t be moved inside itself.')
 
   const extent = extentOf(text, source.stmt)
   const body = from.ownLine
     ? stripIndent(text.slice(from.start, from.end).replace(/\r?\n$/, ''), from.indent)
     : text.slice(extent.start, extent.end)
 
-  // Cut first, then place: with the source gone, everything after it has moved left
-  // by the length of the cut.
+  // Cut first, then find the target again in what is left. Only its start can be
+  // worked out from before the cut: a target that held the view got shorter rather
+  // than moving, so its end and its lines are read from the new text.
   const without = text.slice(0, from.start) + text.slice(from.end)
-  const shift = from.start < to.start ? from.end - from.start : 0
-  const anchor = {
-    start: to.start - shift,
-    end: to.end - shift,
-    after: to.after - shift,
-    indent: to.indent,
-    ownLine: to.ownLine,
+  const targetAfterCut = targetStart >= from.end ? targetStart - (from.end - from.start) : targetStart
+  const again = siteAt(without, file, targetAfterCut)
+  if (!again) return refused(refuse, 'The drop didn’t land on a view. Try again.')
+  if (position === 'inside') {
+    if (contentBlockOf(again.stmt)) return insertView(without, file, targetAfterCut, body, refuse)
+    const name = viewCallOf(again.stmt)
+    return refused(refuse, `${(name && calleeName(name)) ?? 'That view'} can’t hold other views. Drop it before or after instead.`)
   }
+  const anchor = cutOf(without, again.stmt)
 
   if (anchor.ownLine) {
     const at = position === 'before' ? anchor.start : anchor.end
@@ -420,12 +496,13 @@ export function moveViewTo(
 }
 
 /** The Swift that draws the view at `offset`, for a copy that a paste can place anywhere. */
-export function copyView(text: string, file: FileId, offset: number): string | null {
+export function copyView(text: string, file: FileId, offset: number, refuse?: RefusalReason): string | null {
   const found = siteAt(text, file, offset)
-  if (!found) return null
+  if (!found) return refused(refuse, partOfCode('copied'))
   const cut = cutOf(text, found.stmt)
   const extent = extentOf(text, found.stmt)
-  const body = text.slice(extent.start, extent.end)
+  // From the view itself: a `return` pasted into a stack would hide its other views on iOS.
+  const body = text.slice(viewStartOf(found.stmt) ?? extent.start, extent.end)
   return cut.ownLine ? stripIndent(body, cut.indent) : body
 }
 
@@ -436,13 +513,13 @@ export function copyView(text: string, file: FileId, offset: number): string | n
  * the neighbour with it, and for the only view of a body, which would leave nothing
  * to draw at all.
  */
-export function hideView(text: string, file: FileId, offset: number): SourceEdit | null {
+export function hideView(text: string, file: FileId, offset: number, refuse?: RefusalReason): SourceEdit | null {
   const found = siteAt(text, file, offset)
   const site = viewSiteAt(text, file, offset)
-  if (!found || !site) return null
+  if (!found || !site) return refused(refuse, partOfCode('hidden'))
   const cut = cutOf(text, found.stmt)
-  if (!cut.ownLine) return null
-  if (site.siblings === 1 && !site.inContent) return null
+  if (!cut.ownLine) return refused(refuse, 'This view shares its line with another, so hiding it would hide both. Put it on a line of its own in Code first.')
+  if (site.siblings === 1 && !site.inContent) return refused(refuse, onlyView('hide'))
 
   const commented = text
     .slice(cut.start, cut.end)
@@ -458,9 +535,9 @@ export function hideView(text: string, file: FileId, offset: number): SourceEdit
 }
 
 /** Brings back the hidden view whose marker line starts at `start`. */
-export function showView(text: string, file: FileId, start: number): SourceEdit | null {
+export function showView(text: string, file: FileId, start: number, refuse?: RefusalReason): SourceEdit | null {
   const hidden = hiddenViewsIn(text, file).find((view) => view.start === start)
-  if (!hidden) return null
+  if (!hidden) return refused(refuse, 'This hidden view isn’t where it was in the code. Select it again.')
 
   const indent = /^[ \t]*/.exec(text.slice(lineStartAt(text, hidden.start)))?.[0] ?? ''
   const restored = hidden.source
@@ -586,10 +663,13 @@ function containerOffsetAt(text: string, file: FileId, offset: number): number |
   return best === null ? null : (best as { block: Block; owner: Expr }).owner.span.start
 }
 
-/** Takes one level of indentation off every line after the first. */
+/**
+ * Takes one level of indentation off the start of each line. Only off the start: the
+ * view's own text, such as a run of spaces in a string, is the view (C8).
+ */
 function stripIndent(block: string, indent: string): string {
   return block
     .split('\n')
-    .map((line, i) => (i === 0 ? line.replace(indent, '') : line.startsWith(indent) ? line.slice(indent.length) : line))
+    .map(line => (line.startsWith(indent) ? line.slice(indent.length) : line))
     .join('\n')
 }

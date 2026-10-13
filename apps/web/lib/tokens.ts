@@ -1,4 +1,5 @@
 import type { AuthoringNode, AuthoringSnapshot, SharedStyle, StyleKind } from '@studio/shared'
+import { sourceLayerAround } from './sourceLayers'
 
 /** The order and wording of the token kinds, everywhere they are listed. */
 export const TOKEN_KINDS: readonly { kind: StyleKind; title: string; singular: string; prefix?: string; example: string }[] = [
@@ -24,13 +25,17 @@ export const TEXT_STYLES: readonly { value: string; label: string; size: number;
 ]
 export const FONT_WEIGHTS = ['ultraLight', 'thin', 'light', 'regular', 'medium', 'semibold', 'bold', 'heavy', 'black'] as const
 
-/** The system colours a token or a raw field can name, with their light sRGB value for swatches. */
+/**
+ * The system colours a token or a raw field can name, with their light sRGB value for
+ * swatches: the iOS 27 simulator's, as the preview draws them (a test keeps the two equal).
+ */
 export const SYSTEM_COLOR_SWATCHES: Readonly<Record<string, string>> = {
-  primary: '#000000', secondary: '#3C3C4399', black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF3B30', orange: '#FF9500',
-  yellow: '#FFCC00', green: '#34C759', mint: '#00C7BE', teal: '#30B0C7', cyan: '#32ADE6', blue: '#0088FF', indigo: '#5856D6',
-  purple: '#CB30E0', pink: '#FF2D55', brown: '#A2845E', clear: '#00000000', accentColor: '#0088FF', systemBackground: '#FFFFFF',
+  primary: '#000000', secondary: '#3C3C4399', black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF383C', orange: '#FF8D28',
+  yellow: '#FFCC00', green: '#34C759', mint: '#00C8B3', teal: '#00C3D0', cyan: '#00C0E8', blue: '#0088FF', indigo: '#6155F5',
+  purple: '#CB30E0', pink: '#FF2D55', brown: '#AC7F5E', clear: '#00000000', accentColor: '#0088FF', systemBackground: '#FFFFFF',
   secondarySystemBackground: '#F2F2F7', tertiarySystemBackground: '#FFFFFF', systemGroupedBackground: '#F2F2F7',
   secondarySystemGroupedBackground: '#FFFFFF', tertiarySystemGroupedBackground: '#F2F2F7',
+  systemGray2: '#AEAEB2', systemGray3: '#C7C7CC', systemGray4: '#D1D1D6', systemGray5: '#E5E5EA', systemGray6: '#F2F2F7',
 }
 
 /** A CSS colour for a swatch: a token's light value, a hex, or a system colour name. */
@@ -45,8 +50,7 @@ export function swatchFor(value: string | undefined, dark = false, token?: Share
 export function tokenImpact(token: SharedStyle, snapshot: AuthoringSnapshot | undefined, screenViews: readonly string[]): { places: number; screens: number; components: number; nodes: AuthoringNode[] } {
   const nodes: AuthoringNode[] = []
   for (const use of token.uses) {
-    const owner = snapshot?.nodes.filter(n => n.kind !== 'definition' && n.source.file === use.file && n.source.start <= use.start && n.source.end >= use.end)
-      .sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
+    const owner = sourceLayerAround(snapshot, use)
     if (owner) nodes.push(owner)
   }
   const owners = new Set(nodes.map(node => node.owner.split('.')[0]!))

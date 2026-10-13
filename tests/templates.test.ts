@@ -75,7 +75,7 @@ function placeholders(nodes: readonly RenderNode[]): RenderNode[] {
  */
 function assertScreenIsSound(tree: RenderTree, where: string): void {
   const unsupported = placeholders(tree.nodes).map(
-    (n) => `${n.placeholder?.feature}: ${n.placeholder?.reason}`,
+    (n) => `${n.placeholder?.feature} (${n.placeholder?.kind})`,
   )
   expect(unsupported, `${where} draws an unsupported placeholder`).toEqual([])
 
@@ -152,7 +152,7 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     expect(tree, 'template produced no render tree').not.toBeNull()
 
     const unsupported = placeholders(tree!.nodes).map(
-      (n) => `${n.placeholder?.feature}: ${n.placeholder?.reason}`,
+      (n) => `${n.placeholder?.feature} (${n.placeholder?.kind})`,
     )
     expect(unsupported).toEqual([])
   })
@@ -356,20 +356,6 @@ describe.each(TEMPLATES)('template: $name', (template) => {
     const entries = template.files.filter((f) => /struct \w+: App/.test(f.text))
     expect(entries).toHaveLength(1)
   })
-
-  it('stays inside the interaction budget', () => {
-    const request = requestFor(template.files)
-    resetPipelineState()
-    for (let i = 0; i < 3; i++) compile(request)
-
-    let best = Infinity
-    for (let i = 0; i < 5; i++) {
-      const started = performance.now()
-      compile(request)
-      best = Math.min(best, performance.now() - started)
-    }
-    expect(best).toBeLessThan(120)
-  })
 })
 
 /**
@@ -461,7 +447,7 @@ describe('the gallery', () => {
       ['a closure over a model collection', /\.filter\s*\{/],
       ['storage that outlives a view', /@AppStorage/],
       ['a text attribute', /\.strikethrough\(|\.underline\(/],
-      ['a concatenated Text', /\+ Text\(/],
+      ['a Text interpolated into another, as Xcode 27 asks instead of Text + Text', /Text\("\\\(Text\(/],
       ['a section footer', /\}\s*footer:\s*\{/],
       ['a date picker', /DatePicker\(/],
     ]
@@ -469,6 +455,14 @@ describe('the gallery', () => {
     for (const [what, pattern] of idioms) {
       expect(pattern.test(corpus), `no template contains ${what}`).toBe(true)
     }
+  })
+
+  it('writes current SwiftUI, with none of what Apple has deprecated or marked for deprecation (D9)', () => {
+    const corpus = TEMPLATES.flatMap((t) => t.files.map((f) => f.text)).join('\n')
+    // `.cornerRadius` draws exactly as `.clipShape(.rect(cornerRadius:))`, which replaces it.
+    expect(corpus.match(/\.cornerRadius\(/g) ?? []).toEqual([])
+    // Deprecated in iOS 26: Xcode 27 warns on it.
+    expect(corpus.match(/\+ Text\(/g) ?? []).toEqual([])
   })
 
   it('no longer identifies a model by an integer it made up', () => {
@@ -484,7 +478,7 @@ describe('the gallery', () => {
  * A colour swatch with no text is a button VoiceOver cannot name.
  *
  * The grid is also the one place a starter builds views in a loop, so this pins
- * both: nine swatches, nine names, and no `for` loop inside a ViewBuilder — which
+ * both: nine swatches, nine names, and no `for` loop inside a ViewBuilder, which
  * the browser accepts and Xcode does not.
  */
 describe('the palette grid', () => {

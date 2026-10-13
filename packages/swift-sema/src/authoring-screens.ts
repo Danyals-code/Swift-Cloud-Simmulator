@@ -1,10 +1,13 @@
+import { deploymentVersion } from '@studio/shared'
 import type { AuthoringNode, AuthoringOperation, DesignValue, SourceFile, SourceSpan } from '@studio/shared'
-import { forEachChild, Lexer, Parser, type Node } from '@studio/swift-syntax'
+import { afterOffMarkers, forEachChild, Lexer, Parser, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
 import { Checker } from './checker'
-import { configureAction } from './authoring-behavior'
+import { behaviorSettings, configureAction } from './authoring-behavior'
+import { tappablePatch } from './authoring-structure'
 import { emptyComponents } from './authoring-components'
 import { allDeclarations, applyPatches, callOf, identifier, insertMember, namedStruct, ownerOf, patch, raw, shadowsMember, shapedProject, sourceRoot, swiftValue, type FeatureContext, type SourcePatch } from './authoring-context'
+import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
 
 type ScreenOperation = Extract<AuthoringOperation, { kind: 'screen-create' | 'screen-duplicate' | 'screen-remove' }>
 
@@ -133,11 +136,10 @@ export function guidedAction(ctx: FeatureContext, node: AuthoringNode, operation
   const apply = (patches: SourcePatch[], created: readonly SourceFile[] = []) => {
     const offset = current.source.start + patches.filter(p => p.file === current.source.file && p.end <= current.source.start).reduce((n, p) => n + p.text.length - (p.end - p.start), 0)
     files = applyPatches(context, patches, created)
-    const ast = files.map(f => Parser.parse(f.text, f.id).sourceFile)
-    const snapshot = buildAuthoringModel({ files, parsed: ast, diagnostics: Checker.check(ast).diagnostics, projectId: '', revision: 0, deploymentTarget: ctx.deploymentTarget })
-    const found = snapshot.nodes.find(n => n.source.file === current.source.file && n.source.start === offset && n.kind !== 'definition')
+    const { ast, nodes } = modelOf(files, ctx.deploymentTarget)
+    const found = nodes.find(n => n.source.file === current.source.file && n.source.start === offset && n.kind !== 'definition')
     if (!found) throw new Error('The selected button could not be preserved. No changes were made.')
-    current = found; context = { ...ctx, files, ast, nodes: snapshot.nodes }
+    current = found; context = { ...ctx, files, ast, nodes }
   }
   if (operation.createScreen) {
     if (!['navigate', 'sheet', 'cover'].includes(operation.action.type) || !('destination' in operation.action) || operation.action.destination !== operation.createScreen.name) throw new Error('The new screen must match the action destination.')
@@ -151,16 +153,19 @@ export function guidedAction(ctx: FeatureContext, node: AuthoringNode, operation
     const type = typeof value === 'boolean' ? 'Bool' : typeof value === 'number' ? 'Double' : 'String'
     apply([insertMember(context, owner, `@State private var ${name}: ${type} = ${swiftValue(value)}`)])
   }
+  // Any other view is made tappable first, and keeps its look as the Button's label (D16).
+  if (!behaviorSettings(context, current)?.canConfigureAction) apply([tappablePatch(context, current)])
   if (operation.action.type === 'navigate') {
-    let ancestor: AuthoringNode | undefined = current, root = current, hasNavigation = false
+    let ancestor: AuthoringNode | undefined = current, root = current
     while (ancestor && ancestor.kind !== 'definition') {
-      if (['NavigationStack', 'NavigationView'].includes(ancestor.name)) hasNavigation = true
       root = ancestor; ancestor = context.nodes.find(n => n.id === ancestor!.parentId)
     }
-    if (!hasNavigation) {
-      if (root.kind !== 'view' || Number.parseFloat(ctx.deploymentTarget ?? '17.0') < 16) throw new Error('This screen needs a navigation container, which this project’s iOS version is too old for. Ask a developer to raise it to iOS 16 or newer.')
-      // Insert at either boundary so the selected node remains identifiable.
-      apply([{ file: root.source.file, start: root.source.start, end: root.source.start, text: 'NavigationStack {\n' }, { file: root.source.file, start: root.source.end, end: root.source.end, text: '\n}' }])
+    if (!insideNavigationStack(context.nodes, current)) {
+      if (root.kind !== 'view' || deploymentVersion(ctx.deploymentTarget) < 16) throw new Error('This screen needs a navigation container, which this project’s iOS version is too old for. Ask a developer to raise it to iOS 16 or newer.')
+      // Insert at either boundary so the selected node remains identifiable. A modifier
+      // switched off at the end of the root's chain is written after it, and goes inside with it.
+      const end = afterOffMarkers(context.files.find(f => f.id === root.source.file)?.text ?? '', root.source.end)
+      apply(navigationStackPatches(context, root.source, end))
     }
   }
   const patches = configureAction(context, current, operation.action, operation.replace)
@@ -169,5 +174,24 @@ export function guidedAction(ctx: FeatureContext, node: AuthoringNode, operation
     if (typeof operation.createValue.value !== 'boolean' || !title || title.kind !== 'stringLiteral') throw new Error('A selected label needs a switch value and a plain text button title.')
     patches.push(patch(title.span, `${operation.createValue.name} ? ${swiftValue(operation.createValue.activeTitle)} : ${raw(context, title.span)}`))
   }
-  return { files: applyPatches(context, patches), offset: current.source.start + patches.filter(p => p.file === current.source.file && p.end <= current.source.start).reduce((n, p) => n + p.text.length - (p.end - p.start), 0) }
+  const done = applyPatches(context, patches)
+  const offset = current.source.start + patches.filter(p => p.file === current.source.file && p.end <= current.source.start).reduce((n, p) => n + p.text.length - (p.end - p.start), 0)
+  return { files: done, offset: operation.action.type === 'navigate' ? labelAt(done, current.source.file, offset, ctx.deploymentTarget) ?? offset : offset }
+}
+
+/** The views of `files`, as each step of a guided edit reads them. */
+function modelOf(files: readonly SourceFile[], deploymentTarget?: string) {
+  const ast = files.map(f => Parser.parse(f.text, f.id).sourceFile)
+  return { ast, nodes: buildAuthoringModel({ files: [...files], parsed: ast, diagnostics: Checker.check(ast).diagnostics, projectId: '', revision: 0, deploymentTarget }).nodes }
+}
+
+/**
+ * The view a link written with a label shows, where the link starts: the link is no layer
+ * of its own, so what it shows stays selected, a card that was made tappable (D16).
+ */
+function labelAt(files: readonly SourceFile[], file: string, offset: number, deploymentTarget?: string): number | undefined {
+  const { nodes } = modelOf(files, deploymentTarget)
+  const link = nodes.find(n => n.source.file === file && n.source.start === offset && n.name === 'NavigationLink')
+  const label = link && nodes.find(n => n.id === link.children[0] && n.name !== 'Destination')
+  return label?.source.start
 }

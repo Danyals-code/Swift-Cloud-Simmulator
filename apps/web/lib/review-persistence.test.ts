@@ -19,7 +19,7 @@ it.each(['files', 'template', 'saved'] as const)('keeps unsaved outgoing work wh
   vi.spyOn(persistence, 'save').mockRejectedValueOnce(new Error('Quota exceeded'))
   const opened = kind === 'files' ? await useStudio.getState().openFiles([{ name: 'Other.swift', text: '// incoming' }])
     : kind === 'template' ? await useStudio.getState().applyTemplate('counter') : await useStudio.getState().openProject(incoming.id)
-  expect(opened).toBe(false)
+  expect(opened).toBe('unsaved')
   expect(useStudio.getState().project?.id).toBe(original.id)
   expect(useStudio.getState().project?.files[0]!.text).toBe('// unsaved work')
   expect(useStudio.getState().saveError).toContain('Quota exceeded')
@@ -33,20 +33,25 @@ it.each(['files', 'saved'] as const)('persists typing that arrives while a switc
   const blocked = new Promise<void>(resolve => { release = resolve })
   const save = persistence.save.bind(persistence)
   vi.spyOn(persistence, 'save').mockImplementationOnce(async project => { entered(); await blocked; await save(project) })
+  // An edit to save on the way out: a project with none is not written again.
+  useStudio.getState().setFileText(original.files[0]!.id, '// first edit')
   const opening = kind === 'files' ? useStudio.getState().openFiles([{ name: 'Other.swift', text: '// incoming' }]) : useStudio.getState().openProject(incoming.id)
   await started
   useStudio.getState().setFileText(original.files[0]!.id, '// latest edit')
   release()
-  expect(await opening).toBe(true)
+  expect(await opening).toBe('opened')
   expect((await persistence.load(original.id))?.files[0]!.text).toBe('// latest edit')
 })
 
-it('keeps the original active when the incoming project cannot be saved', async () => {
+it('opens the incoming project though it cannot be saved, and keeps saying so (B3)', async () => {
+  // Refusing used to leave a participant whose storage had failed unable to start
+  // the next task. What was open is saved; the new project is what needs the warning.
   const save = persistence.save.bind(persistence)
   vi.spyOn(persistence, 'save').mockImplementation(async project => { if (project.id !== original.id) throw new Error('Storage full'); await save(project) })
-  expect(await useStudio.getState().openFiles([{ name: 'Other.swift', text: '// incoming' }])).toBe(false)
-  expect(useStudio.getState().project?.id).toBe(original.id)
+  expect(await useStudio.getState().openFiles([{ name: 'Other.swift', text: '// incoming' }])).toBe('opened')
+  expect(useStudio.getState().project?.files[0]?.text).toBe('// incoming')
   expect(useStudio.getState().saveError).toContain('Storage full')
+  expect((await persistence.load(original.id))?.files[0]?.text).toBe('// original')
 })
 
 it.each(['other', 'current'] as const)('does not let an older project load override a newer choice of %s project', async choice => {
@@ -65,9 +70,9 @@ it.each(['other', 'current'] as const)('does not let an older project load overr
   const opening = useStudio.getState().openProject(slow.id)
   await started
   const target = choice === 'current' ? original : latest
-  expect(await useStudio.getState().openProject(target.id)).toBe(true)
+  expect(await useStudio.getState().openProject(target.id)).toBe('opened')
   release()
-  expect(await opening).toBe(false)
+  expect(await opening).toBe('failed')
   expect(useStudio.getState().project?.id).toBe(target.id)
 })
 
@@ -76,7 +81,7 @@ it('preserves a template edited only through its screen name', async () => {
   const edited = { ...initial, studio: { ...emptyStudioMetadata(), screens: [{ view: 'ContentView', name: 'My home' }] } }
   useStudio.setState({ project: edited })
   await useStudio.getState().flush()
-  expect(await useStudio.getState().openFiles([{ name: 'Other.swift', text: '// incoming' }])).toBe(true)
+  expect(await useStudio.getState().openFiles([{ name: 'Other.swift', text: '// incoming' }])).toBe('opened')
   expect((await persistence.load(edited.id))?.studio?.screens).toEqual(edited.studio.screens)
 })
 

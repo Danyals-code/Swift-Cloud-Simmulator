@@ -1,6 +1,6 @@
 import type { RGBA, ResolvedFont } from '@studio/shared'
 import { describe, type SwiftValue } from '@studio/swift-runtime'
-import { CENTER, insets, type EdgeInsets, type LayoutElement } from '@studio/swiftui-layout'
+import { CENTER, insets, type EdgeInsets, type LayoutElement, type ScrollElement } from '@studio/swiftui-layout'
 import { SURFACES, listAppearance } from '../appearance/surfaces'
 import { asView, payloadOf, EDGE_INSETS_TYPE, TOKEN_TYPE, type TokenPayload, type ViewValue } from '../view-value'
 import { numberArg, resolveFillArg, stringArg, type ColorScheme } from '../style'
@@ -33,7 +33,7 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
   const grouped = style === 'grouped' || style === 'insetGrouped'
   const inset = style === 'insetGrouped' ? Math.max(m.inset, (c.width - m.regularMaxWidth) / 2) : style === 'sidebar' || style === 'inset' ? m.inset : 0
   const spacing = numberArg(arg(view, 'listRowSpacing')) ?? 0
-  const sectionGap = numberArg(arg(view, 'listSectionSpacing')) ?? m.sectionGap
+  const sectionGap = numberArg(arg(view, 'listSectionSpacing')) ?? (style === 'plain' ? m.plainSectionGap : m.sectionGap)
   const flatten = (children: readonly ViewValue[]): ViewValue[] => children.flatMap(child =>
     ['ForEach', 'Group'].includes(child.name)
       ? flatten(child.children.map(v => ({ ...inheritVisualStyle(v, visualModifiers(view)), modifiers: [...v.modifiers, ...child.modifiers] })))
@@ -80,7 +80,11 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
       return pad(`${id}${name}`, frame(`${id}${name}frame`, content), insets(name === 'header' ? m.headerTop : m.footerTop, inset + m.rowX, name === 'header' ? m.headerBottom : 0, inset + m.rowX))
     }
     const header = accessory('header'), footer = accessory('footer')
-    if (index > 0) blocks.push({ kind: 'modified', id: `${id}gap`, modifier: { kind: 'frame', height: arg(view, 'listSectionSpacing') ? sectionGap : previousHadFooter ? m.afterFooterGap : header ? sectionGap : m.unheadedGap, alignment: CENTER }, child: { kind: 'empty', id: `${id}gapx` } })
+    const gap = index === 0 ? (grouped && !header ? m.unheadedGap : 0)
+      : arg(view, 'listSectionSpacing') ? sectionGap
+      : previousHadFooter ? (header ? m.afterFooterHeaderGap : m.afterFooterGap)
+      : header ? sectionGap : m.unheadedGap
+    if (gap) blocks.push({ kind: 'modified', id: `${id}gap`, modifier: { kind: 'frame', height: gap, alignment: CENTER }, child: { kind: 'empty', id: `${id}gapx` } })
     if (header) blocks.push(header)
     const rows: LayoutElement[] = []
     const visibleRows = expandedRows(section.rows)
@@ -110,8 +114,11 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
       const item = raw.kind === 'modified' && raw.modifier.kind === 'hitTarget' && ['button', 'toggle'].includes(raw.modifier.role) ? { ...raw, child: wrap(raw.child) } : wrap(raw)
       rows.push(i > 0 && spacing !== 0 ? pad(`${rid}spacing`, item, insets(spacing, 0, 0, 0)) : item)
       if (separator) {
-        const rule = pad(`${id}r${i}sep`, { kind: 'modified', id: `${id}r${i}sepf`, modifier: { kind: 'frame', height: c.separatorHeight, alignment: CENTER }, child: { kind: 'fill', id: `${id}r${i}sepl`, pixelAligned: true, fill: { kind: 'solid', color: c.color('separator') } } }, insets(0, edges.leading + (row.name === 'Label' ? 40 : 0), 0, rowInsets(row).trailing))
-        rows[rows.length - 1] = { kind: 'modified', id: `${rid}separator-overlay`, modifier: { kind: 'overlay', alignment: { horizontal: 'center', vertical: 'bottom' }, content: rule }, child: rows[rows.length - 1]! }
+        // It starts under the row's first text, as iOS 27 draws it: a Label's title, in a
+        // NavigationLink too, or the text beside an icon. A row with no text starts it at
+        // the row's inset.
+        const rule = pad(`${id}r${i}sep`, { kind: 'modified', id: `${id}r${i}sepf`, modifier: { kind: 'frame', height: c.separatorHeight, alignment: CENTER }, child: { kind: 'fill', id: `${id}r${i}sepl`, pixelAligned: true, fill: { kind: 'solid', color: c.color('separator') } } }, insets(0, 0, 0, rowInsets(row).trailing))
+        rows[rows.length - 1] = { kind: 'modified', id: `${rid}separator-overlay`, modifier: { kind: 'overlay', alignment: { horizontal: 'center', vertical: 'bottom' }, content: rule, underFirstText: { otherwise: edges.leading } }, child: rows[rows.length - 1]! }
       }
     })
     let card = c.background(column(id, rows), `${id}bg`, c.color(grouped ? 'secondarySystemGroupedBackground' : style === 'sidebar' ? 'systemGroupedBackground' : 'systemBackground'), style === 'insetGrouped' ? m.corner : 0)
@@ -120,7 +127,20 @@ export function buildList(view: ViewValue, path: string, origin: object, c: Cont
     if (footer) blocks.push(footer)
     previousHadFooter = !!footer
   })
-  const content = pad(`${path}margins`, column(`${path}rows`, blocks), insets(grouped || style === 'sidebar' ? m.top : 0, 0, m.bottom, 0))
+  const content = pad(`${path}margins`, column(`${path}rows`, blocks), insets(style === 'sidebar' ? m.sidebarTop : 0, 0, m.bottom, 0))
   const scroll: LayoutElement = { kind: 'scroll', id: path, axis: 'vertical', showsIndicators: c.showsIndicators ?? token(arg(view, 'scrollIndicators')) !== 'hidden', content, ...origin }
   return token(arg(view, 'scrollContentBackground')) === 'hidden' ? scroll : c.background(scroll, `${path}bg`, c.color(grouped || style === 'sidebar' ? 'systemGroupedBackground' : 'systemBackground'))
+}
+
+/**
+ * The list with its first section at its top, as iOS 27 draws a grouped list under a large
+ * title or a search field in the bar's drawer: a first section without a header sits right
+ * below them, where anywhere else it is `unheadedGap` down. A section with a header keeps
+ * its header's padding.
+ */
+export function startListAtTop(scroll: ScrollElement): ScrollElement {
+  const margins = scroll.content
+  if (margins.kind !== 'modified' || margins.id !== `${scroll.id}margins` || margins.child.kind !== 'stack') return scroll
+  const [first, ...rest] = margins.child.children
+  return first?.id === `${scroll.id}s0gap` ? { ...scroll, content: { ...margins, child: { ...margins.child, children: rest } } } : scroll
 }

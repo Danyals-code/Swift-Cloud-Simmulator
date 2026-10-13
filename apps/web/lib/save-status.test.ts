@@ -48,6 +48,8 @@ describe('save status describes the current document', () => {
   })
 
   it('does not attach an old project save failure to a different current project', async () => {
+    // Something to write: a project with no edits since its last save is not written again.
+    useStudio.getState().setFileText(original.files[0]!.id, '// Pending')
     const held = holdNextSave(true), first = useStudio.getState().flush()
     await held.started
     const next = projectFromFiles([{ name: 'Other.swift', text: '// Different project' }])!

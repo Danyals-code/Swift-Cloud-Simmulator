@@ -1,16 +1,17 @@
-import { prependSearch, primaryScroll } from './containers/screen'
-import { buildList } from './containers/list'
+import { mapPrimaryScroll, prependSearch } from './containers/screen'
+import { buildList, startListAtTop } from './containers/list'
+import { attachedSheet, sheetContentTop } from './containers/sheet'
 import { SURFACES, listAppearance } from './appearance/surfaces'
 import { controlMetrics, CONTROL_PARTS } from './appearance/controls'
 import { controlFont, switchControl } from './controls/primitives'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
-import { formatNumber } from './number-format'
 import { appearanceFor, IOS_27 } from './appearance/ios27'
 import {
   type PreviewTarget,
   type PreviewImageAsset,
   type DynamicTypeSize,
   isDynamicTypeSize,
+  hasCornerRadii,
   MONO_FAMILY,
   rgba,
   ROUNDED_FAMILY,
@@ -25,6 +26,7 @@ import {
   asDate,
   asKeyPath,
   asProjection,
+  formatNumber,
   foundationDescription,
   truthy,
   type ClosureValue,
@@ -44,6 +46,7 @@ import {
   type HorizontalAlignment,
   type LayoutElement,
   type LayoutModifier,
+  type SafeAreaEdges,
   type TextRunSpec,
   type VerticalAlignment,
 } from '@studio/swiftui-layout'
@@ -61,7 +64,9 @@ import {
   TAB_ITEM,
   type Overlay,
   type ResolvedUI,
+  type SearchField,
 } from './presentation'
+import { largestCorner } from './corners'
 import { applyTrim, asCanvasContext, asPath, toSVGPath } from './paths'
 import { resolveSymbol } from './sf-symbols'
 import {
@@ -90,6 +95,7 @@ import {
   asView,
   handlerIdFor,
   payloadOf,
+  stopped,
   type AnimationPayload,
   type ColorPayload,
   type EdgeInsetsPayload,
@@ -117,6 +123,13 @@ export interface ConversionResult {
   readonly hitTargets: ReadonlyMap<string, string>
 }
 
+/**
+ * Where a search field is drawn: at the top of an iPad's content; in the drawer under the
+ * title; in an iPad's toolbar; or at the bottom of a phone's screen, in a glass capsule
+ * on the tab bar's line.
+ */
+type SearchPlacement = 'top' | 'drawer' | 'toolbar' | 'bottom'
+
 /** A whole screen: content, the bars around it, and anything presented over it. */
 export interface ScreenLayout {
   readonly content: LayoutElement
@@ -129,8 +142,6 @@ export interface ScreenLayout {
    * under the bar on every navigation-plus-list screen.
    */
   readonly background: RGBA
-  /** True when the content extends under the device's edges. */
-  readonly ignoresSafeArea: boolean
   readonly navigationBar: { readonly element: LayoutElement; readonly height: number; readonly large: boolean } | null
   readonly tabBar: LayoutElement | null
   readonly search?: { readonly element: LayoutElement; readonly placement: 'top' | 'bottom'; readonly height: number }
@@ -158,7 +169,15 @@ const SHAPES: Readonly<Record<string, ShapeKind>> = {
   Circle: 'circle',
   Ellipse: 'ellipse',
   Capsule: 'capsule',
+  UnevenRoundedRectangle: 'roundedRectangle',
 }
+
+/**
+ * Views that stand for their content, like a `Group`: a modifier on one applies to
+ * each thing it holds. A reader or an animator hands its content a value and adds no
+ * box of its own.
+ */
+const GROUP_LIKE_VIEWS: ReadonlySet<string> = new Set(['Group', 'ScrollViewReader', 'PhaseAnimator', 'KeyframeAnimator'])
 
 /** Views that contribute their children to the enclosing stack rather than nesting. */
 const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
@@ -171,8 +190,9 @@ const TRANSPARENT_VIEWS: ReadonlySet<string> = new Set([
   // detail is pushed onto it. The multi-column form needs a width an iPhone has not
   // got, so collapsing is the real behaviour rather than an approximation of it.
   'NavigationSplitView',
-  'TabView', 'Tab',
+  'TabView', 'Tab', 'TabSection',
   'AnyView',
+  ...GROUP_LIKE_VIEWS,
 ])
 
 /** iOS metrics the chrome is built from. Points, at the default Dynamic Type size. */
@@ -183,8 +203,15 @@ const ROW_INSET = IOS_27.metrics.rowInset
 
 /** A row in an alert or confirmation dialog, which iOS sizes like a list row. */
 const ALERT_BUTTON_HEIGHT = SURFACES.alert.buttonHeight
+
 /** Must match the runtime's swipe width, or the action would not line up. */
 const SWIPE_WIDTH = 88
+
+/** The same text, keeping its half-leading above and below as the system's own labels do. */
+function keptLeading(element: LayoutElement): LayoutElement {
+  if (element.kind === 'text') return { ...element, keepsLeading: true }
+  return element.kind === 'modified' ? { ...element, child: keptLeading(element.child) } : element
+}
 
 export interface ConversionOptions {
   readonly images?: readonly PreviewImageAsset[]
@@ -253,28 +280,31 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
-  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && (options.viewportWidth ?? 393) < 600 && !!ui.navigationBar)
-  // A drawer belongs to the navigation bar. Over a scroll view it scrolls with the
-  // content, so it goes in it; over anything else it stays with the bar, so the
-  // content's safe area - what `.ignoresSafeArea` measures from - starts below it.
-  const drawerInContent = drawerSearch && !!primaryScroll(joinRoot(body, 'vertical'))
-  const toolbarSearch = ui.search && !drawerSearch && (options.viewportWidth ?? 393) >= 600 && ui.navigationBar
-    ? converter.searchField(ui.search.text, ui.search.prompt, ui.search.path, true) : null
-  const search = ui.search && !drawerInContent && !toolbarSearch
-    ? { element: converter.searchField(ui.search.text, ui.search.prompt, ui.search.path), placement: (drawerSearch || (options.viewportWidth ?? 393) >= 600 ? 'top' : 'bottom') as 'top' | 'bottom', height: SURFACES.search.height + 12 } : undefined
-  const content = ui.search && drawerInContent
-    ? prependSearch(joinRoot(body, 'vertical'), converter.searchField(ui.search.text, ui.search.prompt, ui.search.path))
-    : joinRoot(body, 'vertical')
+  // On a phone, iOS 27 puts the search field at the bottom of the screen, where a tab
+  // bar would be. Where there is one, it goes in the drawer under the title instead.
+  const compact = (options.viewportWidth ?? 393) < 600
+  const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && compact && !!ui.tabBar)
+  const toolbarSearch = ui.search && !drawerSearch && !compact && ui.navigationBar ? converter.searchField(ui.search, 'toolbar') : null
+  const search = ui.search && !drawerSearch && !toolbarSearch
+    ? compact
+      ? { element: converter.searchField(ui.search, 'bottom'), placement: 'bottom' as const, height: TAB_BAR_HEIGHT }
+      : { element: converter.searchField(ui.search, 'top'), placement: 'top' as const, height: SURFACES.search.height + 12 }
+    : undefined
+  // Under a large title or a search field in the bar's drawer, iOS 27 starts a list's first
+  // section right below them.
+  const root = ui.navigationBar?.large || drawerSearch ? mapPrimaryScroll(joinRoot(body, 'vertical'), startListAtTop) : joinRoot(body, 'vertical')
+  const content = ui.search && drawerSearch ? prependSearch(root, converter.searchField(ui.search, 'drawer')) : root
 
   const navigationBar = ui.navigationBar
     ? {
         element: converter.navigationBar(ui.navigationBar, toolbarSearch, navigationBarFill(ui.content, scheme)),
         large: ui.navigationBar.large,
-        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 7) : 0),
+        height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 11) : 0),
       }
     : null
 
   const tabBar = ui.tabBar ? converter.tabBar(ui.tabBar) : null
+  const attached = !!ui.overlay && attachedSheet(ui.overlay, options.viewportWidth ?? 393)
 
   const overlay = ui.overlay
     ? {
@@ -291,7 +321,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
         ...(ui.overlay.background ? { background: resolveFillArg(ui.overlay.background, scheme) ?? undefined } : {}),
         ...(MATERIALS[tokenName(ui.overlay.background) ?? ''] ? { material: { ...MATERIALS[tokenName(ui.overlay.background)!]!, light: scheme === 'light' } } : {}),
         ...(ui.overlay.screen && ['sheet', 'cover', 'popover'].includes(ui.overlay.kind) ? {
-          screen: screenToLayout({ ...ui, ...ui.overlay.screen }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : ui.overlay.showsDragIndicator !== false ? 10 : 12 } }),
+          screen: screenToLayout({ ...ui, ...ui.overlay.screen }, { ...options, sheetSurface: ui.overlay.kind !== 'cover', viewportWidth: ui.overlay.kind === 'cover' || attached ? options.viewportWidth : Math.min(SURFACES.sheet.maxWidth, (options.viewportWidth ?? 393) - SURFACES.sheet.margin * 2), safeArea: { ...safeArea, top: ui.overlay.kind === 'cover' ? safeArea.top : sheetContentTop(ui.overlay, attached, !!ui.overlay.screen.navigationBar) } }),
         } : {}),
       }
     : null
@@ -300,7 +330,6 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     content,
     search,
     background,
-    ignoresSafeArea: ui.ignoresSafeArea,
     navigationBar,
     tabBar,
     overlay,
@@ -331,7 +360,8 @@ function navigationBarFill(views: readonly ViewValue[], scheme: ColorScheme): Fi
           if (token === 'hidden') explicit = null
           else if (token !== 'visible' && token !== 'automatic') explicit = resolveFillArg(value, scheme) ?? undefined
         }
-        if (modifier.name === 'ignoresSafeArea' && ignoredEdges(modifier.args)?.top) underBar = true
+        // Read as the modifier is: the keyboard region alone reaches nowhere.
+        if (modifier.name === 'ignoresSafeArea' && tokenName(positional(modifier.args, 0)) !== 'keyboard' && edgeSet(labelled(modifier.args, 'edges')).top) underBar = true
       }
       visit(view.children)
     }
@@ -404,6 +434,12 @@ interface ControlStyles {
   readonly gauge?: string
   readonly controlSize?: string
   readonly buttonBorderShape?: string
+  /** Whether a `foregroundStyle` or `foregroundColor` is set on this view or one around it, which a button's title takes over its tint. */
+  readonly foregroundSet?: boolean
+  /** A toolbar item drawn in a capsule it shares with the items beside it, so without a glass of its own. */
+  readonly toolbarGroup?: boolean
+  /** Whether these views are a button's label, which take the button's colour, grey when it is disabled. */
+  readonly buttonLabel?: boolean
 }
 
 const STYLE_MODIFIERS: readonly (readonly [string, keyof ControlStyles])[] = [
@@ -436,6 +472,7 @@ function withStyles(outer: ControlStyles, view: ViewValue, scheme: ColorScheme):
   }
   const tint = view.modifiers.find((modifier) => modifier.name === 'tint' || modifier.name === 'accentColor')
   if (tint) next = { ...next, tint: resolveColorArg(tint.args[0]?.value, scheme, outer.tint) ?? undefined }
+  if (view.modifiers.some((modifier) => modifier.name === 'foregroundStyle' || modifier.name === 'foregroundColor')) next = { ...next, foregroundSet: true }
   return next
 }
 
@@ -503,6 +540,9 @@ class Converter {
    */
   private listDepth = 0
 
+  /** The buttons whose style drew them disabled, in grey, so they are not faded as well. */
+  private readonly greyedOut = new Set<string>()
+
   /**
    * Makes an element fill the rect it is laid out in.
    *
@@ -565,6 +605,14 @@ class Converter {
     return { kind: 'modified', id, modifier: { kind: 'border', width: 0.5, cornerRadius: radius, color: { ...this.color('label'), a: 0.15 } }, child }
   }
 
+  /** The outlined glass capsule of iOS 27's floating bars: the tab bar, and a phone's search. */
+  private glassCapsule(content: LayoutElement, id: string, outlineId: string): LayoutElement {
+    return this.chromeOutline({
+      kind: 'modified', id: `${id}-radius`, modifier: { kind: 'cornerRadius', radius: 999 },
+      child: { kind: 'modified', id, modifier: { kind: 'material', ...this.appearance.materials.regularMaterial!, light: this.scheme === 'light' }, child: content },
+    }, outlineId, 999)
+  }
+
   private symbolImage(id: string, name: string): LayoutElement {
     const symbol = resolveSymbol(name)
     return {
@@ -582,7 +630,8 @@ class Converter {
   navigationBar(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null = null, fill?: Fill | null): LayoutElement {
     const outer = this.styles
     this.styles = withStyles(outer, bar.view, this.scheme)
-    this.styles = { ...this.styles, container: 'toolbar' }
+    // iOS 27 draws a Label in the toolbar as its icon alone, unless a label style says otherwise.
+    this.styles = { ...this.styles, container: 'toolbar', label: this.styles.label ?? 'iconOnly' }
     try { return this.navigationBarContent(bar, search, fill) } finally { this.styles = outer }
   }
 
@@ -592,6 +641,36 @@ class Converter {
     this.styles = { ...outer, dynamicTypeSize: 'large' }
     try { return { kind: 'modified', id, modifier: { kind: 'font', font: bodyFont('large') }, child: build() } }
     finally { this.styles = outer }
+  }
+
+  /**
+   * The items on one side of the bar. Side by side, iOS 27 draws them in one glass
+   * capsule, 3 pt in at its ends and 10 pt apart, each without a glass of its own.
+   */
+  private toolbarSide(items: readonly ViewValue[], prefix: string): LayoutElement[] {
+    const item = (view: ViewValue, i: number) => this.chromeContent(`${prefix}${i}-font`, () => this.convert(view, `${prefix}${i}`, 'horizontal'))
+    if (items.length < 2) return items.map(item)
+    const outer = this.styles
+    this.styles = { ...outer, toolbarGroup: true }
+    try {
+      const row: LayoutElement = { kind: 'stack', id: `${prefix}group`, axis: 'horizontal', spacing: 10, alignment: CENTER, children: items.map(item) }
+      return [this.glassSurface({ kind: 'modified', id: `${prefix}grouppad`, modifier: { kind: 'padding', insets: insets(0, 3, 0, 3) }, child: row }, `${prefix}group`, 999, 'circular')]
+    } finally { this.styles = outer }
+  }
+
+  /** iOS 27's glass behind a toolbar control, or a group of them: a thin material, clipped to its corners and outlined. */
+  private glassSurface(child: LayoutElement, path: string, radius: number, cornerStyle: 'continuous' | 'circular', fill?: RGBA): LayoutElement {
+    const background: LayoutElement = {
+      kind: 'modified', id: `${path}glass`,
+      modifier: { kind: 'material', ...this.appearance.materials.thinMaterial!, light: this.scheme === 'light' },
+      child: { kind: 'empty', id: `${path}glassbox` },
+    }
+    const surface: LayoutElement = {
+      kind: 'modified', id: `${path}glassbg`,
+      modifier: { kind: 'background', content: background },
+      child: fill ? this.background(child, `${path}btn`, fill, radius, cornerStyle) : child,
+    }
+    return { kind: 'modified', id: `${path}glassclip`, modifier: { kind: 'cornerRadius', radius, style: cornerStyle }, child: this.chromeOutline(surface, `${path}outline`, radius) }
   }
 
   private navigationBarContent(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null, fill: Fill | null | undefined): LayoutElement {
@@ -607,10 +686,10 @@ class Converter {
           spacing: 8,
           alignment: CENTER,
           children: [
-            ...bar.leading.map((item, i) => this.chromeContent(`navbar-l${i}-font`, () => this.convert(item, `navbar-l${i}`, 'horizontal'))),
+            ...this.toolbarSide(bar.leading, 'navbar-l'),
             { kind: 'spacer', id: 'navbar-gap-l', axis: 'horizontal', minLength: 0 },
             ...(search ? [{ kind: 'modified' as const, id: 'navbar-search-width', modifier: { kind: 'frame' as const, width: Math.min(280, this.viewportWidth * 0.34), alignment: CENTER }, child: search }] : []),
-            ...bar.trailing.map((item, i) => this.chromeContent(`navbar-t${i}-font`, () => this.convert(item, `navbar-t${i}`, 'horizontal'))),
+            ...this.toolbarSide(bar.trailing, 'navbar-t'),
           ],
         },
         // Both titles exist so the DOM can cross-fade them without evaluating Swift.
@@ -866,14 +945,10 @@ class Converter {
       },
     }
 
-    const surface: LayoutElement = {
-      kind: 'modified', id: 'tabbar-surface-radius', modifier: { kind: 'cornerRadius', radius: 999 },
-      child: { kind: 'modified', id: 'tabbar-surface', modifier: { kind: 'material', ...this.appearance.materials.regularMaterial!, light: this.scheme === 'light' },
-        child: { kind: 'modified', id: 'tabbar-inset', modifier: { kind: 'padding', insets: uniformInsets(SURFACES.tab.inset) }, child: row } },
-    }
+    const surface = this.glassCapsule({ kind: 'modified', id: 'tabbar-inset', modifier: { kind: 'padding', insets: uniformInsets(SURFACES.tab.inset) }, child: row }, 'tabbar-surface', 'tabbar-outline')
     return {
       kind: 'modified', id: 'tabbar-margin', modifier: { kind: 'padding', insets: insets(0, SURFACES.tab.margin, SURFACES.tab.bottom, SURFACES.tab.margin) },
-      child: { kind: 'modified', id: 'tabbar-width', modifier: { kind: 'frame', maxWidth: Math.min(this.viewportWidth >= 600 ? SURFACES.tab.regularWidth : this.viewportWidth - SURFACES.tab.margin * 2, bar.items.length * SURFACES.tab.itemWidth + SURFACES.tab.inset * 2), height: SURFACES.tab.height, alignment: CENTER }, child: this.chromeOutline(surface, 'tabbar-outline', 999) },
+      child: { kind: 'modified', id: 'tabbar-width', modifier: { kind: 'frame', maxWidth: Math.min(this.viewportWidth >= 600 ? SURFACES.tab.regularWidth : this.viewportWidth - SURFACES.tab.margin * 2, bar.items.length * SURFACES.tab.itemWidth + SURFACES.tab.inset * 2), height: SURFACES.tab.height, alignment: CENTER }, child: surface },
     }
   }
 
@@ -938,9 +1013,11 @@ class Converter {
     if (overlay.kind === 'menu') return this.menuSurface(overlay)
 
     if (overlay.kind === 'alert' || overlay.kind === 'dialog') {
-      const title = this.styledText('ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600)
+      // UIKit draws an alert's labels, which keep their leading: the iOS 27 simulator puts
+      // the title's and message's glyphs where their full line boxes centre them.
+      const title = keptLeading(this.styledText('ov-title', overlay.title, overlay.kind === 'dialog' ? 'body' : 'headline', 'label', overlay.kind === 'dialog' ? 400 : 600))
       const message = overlay.message
-        ? [this.styledText('ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel')]
+        ? [keptLeading(this.styledText('ov-message', overlay.message, overlay.kind === 'alert' ? 'subheadline' : 'footnote', 'secondaryLabel'))]
         : []
 
       const head: LayoutElement = {
@@ -1061,19 +1138,21 @@ class Converter {
       }
 
       /**
-       * A `Group` carrying modifiers is still not a container.
+       * A `Group` carrying modifiers is still not a container, nor is a reader or an
+       * animator standing for its content.
        *
        * SwiftUI applies a `Group`'s modifiers to each of its children rather than to
        * a box around them - `Group { A; B }.font(.caption)` *is* `A.font(.caption)`
        * and `B.font(.caption)`, and `.frame(width: 100)` sizes each of them. So the
        * modifiers are pushed down and the group disappears, which is both simpler and
-       * more correct than wrapping.
+       * more correct than wrapping. The others in `GROUP_LIKE_VIEWS` hold one view in
+       * practice, where the two are the same.
        *
        * Without this, a modified group reached the switch below, matched nothing, and
        * drew a placeholder - which is what `Group { … }.font(…)` did, and what every
        * `@ViewBuilder` helper of more than one statement now produces.
        */
-      if (view.name === 'Group' && view.children.length > 0) {
+      if (GROUP_LIKE_VIEWS.has(view.name) && view.children.length > 0) {
         out.push(
           ...this.convertList(
             view.children.map((child, i) => ({
@@ -1125,7 +1204,7 @@ class Converter {
     // Segments own their hit areas. A full-size picker target would cover them.
     const segmented = view.name === 'Picker' && this.styles.picker === 'segmented'
     if (view.intent) {
-      if (isDisabled(view)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
+      if (isDisabled(view) && !this.greyedOut.has(path)) element = { kind: 'modified', id: `${path}disabled`, modifier: { kind: 'opacity', value: 0.4 }, child: element }
       if (!segmented) element = this.withHitTarget(element, path, roleOf(view), labelOf(view), view, disabledBy(view))
     }
     // A passive context target sits behind descendant controls. Those controls
@@ -1171,7 +1250,9 @@ class Converter {
         ...(view?.contextMenuPath ? { contextMenuHandlerId: handlerIdFor(`${view.contextMenuPath}/context-menu`) } : {}),
         ...(role === 'textField' && view ? this.inputOptions(view, path) : {}),
         ...(role === 'slider' ? { color: this.color('accentColor'), thumbDiameter: CONTROL_PARTS.slider.thumb } : {}),
-        ...(role === 'textField' ? { inputInset: this.styles.textField === 'roundedBorder' ? CONTROL_PARTS.field.insetX : 0, placeholderColor: this.color('secondaryLabel') } : {}),
+        // A field's placeholder is iOS's placeholder colour, half as strong as a search
+        // field's prompt, which matches the magnifying glass beside it.
+        ...(role === 'textField' ? { inputInset: this.styles.textField === 'roundedBorder' ? CONTROL_PARTS.field.insetX : 0, placeholderColor: this.color(view ? 'placeholderText' : 'secondaryLabel') } : {}),
         ...(role === 'button' ? { cornerRadius: this.styles.buttonBorderShape === 'roundedRectangle' ? this.appearance.button.roundedRectangleRadius : this.appearance.button.cornerRadius } : {}),
         ...(role === 'textField' ? { color: resolveColorArg(view?.modifiers.find((m) => m.name === 'foregroundStyle' || m.name === 'foregroundColor')?.args[0]?.value, this.scheme, this.styles.tint) ?? this.color('primary') } : {}),
       },
@@ -1495,9 +1576,7 @@ class Converter {
 
       case 'TimelineView':
         // The schedule is a clock the preview does not run, so the content is drawn
-        // once, at the moment of the render. Its `context` is not supplied - a
-        // closure that reads `context.date` has nothing to read - so what is drawn is
-        // whatever the body produces without one. See the coverage matrix.
+        // once, for the moment of the render: its `context.date` is now.
         return {
           kind: 'stack',
           id: path,
@@ -1533,9 +1612,13 @@ class Converter {
         break
     }
 
+    // A custom view whose body stopped: what it is, and why, where it would have been.
+    const halted = stopped(view)
+    if (halted) return { kind: 'placeholder', id: path, placeholder: { kind: 'stopped', feature: halted.name, reason: halted.failure.message }, ...origin }
+
     const shape = SHAPES[view.name]
     if (shape) {
-      const radius = numberArg(labelled(view.args, 'cornerRadius'))
+      const radius = hasCornerRadii(view.args.map((a) => a.label)) ? largestCorner(view.args) : numberArg(labelled(view.args, 'cornerRadius'))
       const fill = resolveFillArg(modifierArg(view, 'fill', 0), this.scheme, this.styles.tint)
       const strokeName = view.modifiers.some((m) => m.name === 'strokeBorder') ? 'strokeBorder' : 'stroke'
       const hasStroke = view.modifiers.some((m) => m.name === strokeName)
@@ -1546,6 +1629,7 @@ class Converter {
         strokeStyle(view)?.lineWidth ??
         1
 
+      const trim = trimOf(view)
       return {
         kind: 'shape',
         id: path,
@@ -1553,6 +1637,7 @@ class Converter {
         cornerStyle: tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular',
         ...(radius !== null ? { cornerRadius: radius } : {}),
         ...(fill ? { fill } : {}),
+        ...(trim ? { trim } : {}),
         ...(strokeColor ? { stroke: { ...strokeStyle(view), color: strokeColor, width: Math.max(0, strokeWidth), usesForeground: !resolveColorArg(modifierArg(view, strokeName, 0), this.scheme, this.styles.tint), placement: strokeName === 'strokeBorder' ? 'inside' as const : 'center' as const } } : {}),
         ...origin,
       }
@@ -1563,10 +1648,7 @@ class Converter {
     return {
       kind: 'placeholder',
       id: path,
-      feature: view.name,
-      reason: UNIMPLEMENTED_VIEWS.has(view.name)
-        ? 'Real SwiftUI that the preview does not draw. It exports to Xcode unchanged.'
-        : 'Not recognised by the preview.',
+      placeholder: { kind: UNIMPLEMENTED_VIEWS.has(view.name) ? 'unsupported' : 'unknown', feature: view.name },
       ...origin,
     }
   }
@@ -2140,8 +2222,7 @@ class Converter {
       return {
         kind: 'placeholder',
         id: path,
-        feature: `Image("${assetName}")`,
-        reason: 'This named image is missing. Add it in Project resources.',
+        placeholder: { kind: 'missing', feature: assetName },
         ...origin,
       }
     }
@@ -2177,15 +2258,20 @@ class Converter {
         kind: 'image',
         id: `${path}icon`,
         glyph: symbol.glyph,
-      symbolScale: this.styles.imageScale === 'small' ? 0.8 : this.styles.imageScale === 'large' ? 1.3 : 1,
+        // In a list row iOS 27 draws a Label's icon a quarter larger than the row's text.
+        symbolScale: (this.listDepth > 0 ? 1.25 : 1) * (this.styles.imageScale === 'small' ? 0.8 : this.styles.imageScale === 'large' ? 1.3 : 1),
         resizable: false,
         approximated: symbol.approximated,
         ...(systemImage ? { symbol: systemImage } : {}),
       })
     }
+    // Centred in a column 24 pt wide, with the title 16 pt after it, at 72 on the phone.
+    // The column is a line of text tall: the icon reaches past it, and the row keeps
+    // the height its text gives it, 52 pt apart, as on the phone.
     if (this.listDepth > 0 && children[0]) children[0] = {
-      kind: 'modified', id: `${path}icon-column`, modifier: { kind: 'frame', width: 32, alignment: { horizontal: 'leading', vertical: 'center' } },
-      child: { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
+      kind: 'modified', id: `${path}icon-column`, modifier: { kind: 'frame', width: 24, height: bodyFont(this.typeScale).lineHeight, alignment: CENTER },
+      // A button's Label takes the button's colour instead, grey when it is disabled.
+      child: this.styles.buttonLabel ? children[0] : { kind: 'modified', id: `${path}icon-tint`, modifier: { kind: 'foregroundStyle', color: this.color('accentColor') }, child: children[0] },
     }
     if (title !== null && wantsTitle) children.push({ kind: 'text', id: `${path}title`, text: title })
     if (wantsTitle || !symbol) children.push(...this.convertList(view.children, path, 'horizontal'))
@@ -2194,7 +2280,7 @@ class Converter {
       kind: 'stack',
       id: path,
       axis: 'horizontal',
-      spacing: this.listDepth > 0 ? 8 : 6,
+      spacing: this.listDepth > 0 ? 16 : 6,
       alignment: CENTER,
       children,
       ...origin,
@@ -2202,10 +2288,12 @@ class Converter {
   }
 
   private button(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0))
+    const iconLabel = titleAndIconLabel(view)
+    const title = iconLabel ? null : stringArg(positional(view.args, 0))
     // `Button { save() } label: { … }` puts the content in a labelled argument,
     // because the unlabelled trailing closure is already the action.
-    const content = view.children.length > 0 ? view.children : argViews(view, 'label')
+    const content = iconLabel ? [iconLabel] : view.children.length > 0 ? view.children : argViews(view, 'label')
+    const iconAlone = title === null && this.toolbarIcon(content)
     const label: LayoutElement =
       title !== null
         ? { kind: 'text', id: `${path}label`, text: title, ...origin }
@@ -2215,7 +2303,7 @@ class Converter {
             axis: 'horizontal',
             spacing: 4,
             alignment: CENTER,
-            children: this.convertList(content, `${path}label`, 'horizontal'),
+            children: this.iconScaled(iconAlone, () => this.asButtonLabel(() => this.convertList(content, `${path}label`, 'horizontal'))),
             ...origin,
           }
 
@@ -2225,7 +2313,31 @@ class Converter {
       lineHeight: m.lineHeight + base.lineHeight - 22, weight: this.alertCancelWeight ? 600 : m.weight }
     const styled = controlFont(label, font)
 
-    return this.applyButtonStyle(view, styled, path)
+    return this.applyButtonStyle(view, styled, path, iconAlone)
+  }
+
+  /**
+   * Whether a toolbar control's label is an icon alone, a Label's included, which iOS 27
+   * draws at the large image scale in a 44-pt glass circle.
+   */
+  private toolbarIcon(content: readonly ViewValue[]): boolean {
+    const only = content.length === 1 ? content[0]! : null
+    return this.styles.container === 'toolbar' && !!only &&
+      (only.name === 'Image' || (only.name === 'Label' && withStyles(this.styles, only, this.scheme).label === 'iconOnly'))
+  }
+
+  /** What `build` converts as a button's label. */
+  private asButtonLabel<T>(build: () => T): T {
+    const outer = this.styles
+    this.styles = { ...outer, buttonLabel: true }
+    try { return build() } finally { this.styles = outer }
+  }
+
+  /** What `build` converts, at the large image scale when the label is a toolbar icon alone. */
+  private iconScaled<T>(iconAlone: boolean, build: () => T): T {
+    const outer = this.styles
+    if (iconAlone) this.styles = { ...outer, imageScale: outer.imageScale ?? 'large' }
+    try { return build() } finally { this.styles = outer }
   }
 
   /**
@@ -2237,20 +2349,9 @@ class Converter {
    * in an alert, in a confirmation dialog and in a swipe action, which is the one
    * place a colour is load-bearing rather than decorative.
    */
-  private buttonTint(view: ViewValue): RGBA {
+  private buttonTint(view: ViewValue, untinted = 'accentColor'): RGBA {
     if (tokenName(labelled(view.args, 'role')) === 'destructive') return this.color('red')
-    return resolveColorArg(modifierArg(view, 'tint', 0), this.scheme, this.styles.tint) ?? this.color('accentColor')
-  }
-
-  /**
-   * An explicit `.foregroundStyle` or `.foregroundColor` on a button: the label's
-   * colour, over both the role and the tint, as on iOS - it is how a destructive
-   * button is given another colour. Drawn in the tint before, so a button coloured
-   * this way came out blue, or red, whatever it asked for.
-   */
-  private buttonForeground(view: ViewValue): RGBA | null {
-    const value = modifierArg(view, 'foregroundStyle', 0) ?? modifierArg(view, 'foregroundColor', 0)
-    return value ? resolveColorArg(value, this.scheme, this.styles.tint) : null
+    return resolveColorArg(modifierArg(view, 'tint', 0), this.scheme, this.styles.tint) ?? this.styles.tint ?? this.color(untinted)
   }
 
   /**
@@ -2265,19 +2366,32 @@ class Converter {
    * `.plain` is the one that genuinely keeps the inherited foreground, and it is why
    * this cannot simply tint everything: `.plain` exists precisely to opt out.
    */
-  private applyButtonStyle(view: ViewValue, label: LayoutElement, path: string): LayoutElement {
+  private applyButtonStyle(view: ViewValue, label: LayoutElement, path: string, iconAlone = false): LayoutElement {
     if (modifierArg(view, 'buttonStyle', 0)?.kind === 'struct') return label
     const requested = this.styles.button ?? 'automatic'
     const style = requested === 'automatic' ? this.appearance.button.automatic[this.styles.container ?? 'content'] : requested
-    const tint = this.buttonTint(view)
-    const foreground = this.buttonForeground(view)
+    // The toolbar's glass items are the label colour in iOS 27, unless a tint is written.
+    const toolbar = this.styles.container === 'toolbar'
+    const tint = this.buttonTint(view, toolbar && style === 'glass' ? 'label' : 'accentColor')
 
+    // A foreground style set on the button, or on a view around it, is what iOS 27 draws
+    // its title in: over the tint, the role, and the white of a prominent button alike.
+    // Wrapped in the tint here, `.foregroundStyle(.white)` over an accent background
+    // drew the title in the accent, where it could not be seen.
+    const foreground = this.styles.foregroundSet === true
+    // A disabled button is grey in iOS 27, rather than its tint faded: its title by where
+    // it sits, and a bordered or prominent button's fill. A plain button, and one given a
+    // foreground style, still fade.
+    const disabled = isDisabled(view) && style !== 'plain' && !foreground
+    const greys = this.appearance.button.disabled[this.scheme]
+    const grey = toolbar ? greys.toolbar : this.listDepth > 0 ? greys.row : greys.title
+    if (disabled) this.greyedOut.add(path)
     if (style !== 'bordered' && style !== 'borderedProminent' && style !== 'glass' && style !== 'glassProminent') {
-      if (style === 'plain') return label
+      if (style === 'plain' || foreground) return label
       return {
         kind: 'modified',
         id: `${path}btntint`,
-        modifier: { kind: 'foregroundStyle', color: foreground ?? tint },
+        modifier: { kind: 'foregroundStyle', color: disabled ? grey : tint },
         child: label,
       }
     }
@@ -2287,29 +2401,41 @@ class Converter {
     const glass = style === 'glass' || style === 'glassProminent'
 
     const metrics = controlMetrics(this.styles.controlSize)
-    const padV = this.styles.container === 'toolbar' ? 11 : metrics.padY
-    const padH = this.styles.container === 'toolbar' ? 16 : metrics.padX
+    // In a toolbar's glass, measured in the iOS 27 simulator: 44 pt tall, an icon alone
+    // 44 pt wide, and text 16 pt in for a Button, 10 for a NavigationLink and 8 in a
+    // capsule shared with other items.
+    const toolbarGlass = toolbar && glass && !prominent
+    const padV = toolbar ? 11 : metrics.padY
+    const padH = toolbar ? (this.styles.toolbarGroup ? 8 : view.name === 'NavigationLink' ? 10 : 16) : metrics.padX
 
     const radius = this.styles.buttonBorderShape === 'roundedRectangle'
       ? this.appearance.button.roundedRectangleRadius
       : this.appearance.button.cornerRadius
 
-    const tinted: LayoutElement = {
+    const fill = disabled && !(glass && !prominent) ? this.color('secondarySystemFill') : null
+    const tinted: LayoutElement = foreground ? label : {
       kind: 'modified',
       id: `${path}btncolor`,
       modifier: {
         kind: 'foregroundStyle',
-        color: foreground ?? (prominent ? rgba(255, 255, 255) : tint),
+        color: disabled ? (fill ? greys.onFill : grey) : prominent ? rgba(255, 255, 255) : tint,
       },
       child: label,
     }
 
-    let padded: LayoutElement = {
-      kind: 'modified',
-      id: `${path}btnpad`,
-      modifier: { kind: 'padding', insets: insets(padV, padH, padV, padH) },
-      child: tinted,
-    }
+    let padded: LayoutElement = toolbarGlass
+      ? {
+          kind: 'modified',
+          id: `${path}btnpad`,
+          modifier: { kind: 'frame', ...(iconAlone ? { width: 44 } : {}), height: 44, alignment: CENTER },
+          child: iconAlone ? tinted : { kind: 'modified', id: `${path}btnpadh`, modifier: { kind: 'padding', insets: insets(0, padH, 0, padH) }, child: tinted },
+        }
+      : {
+          kind: 'modified',
+          id: `${path}btnpad`,
+          modifier: { kind: 'padding', insets: insets(padV, padH, padV, padH) },
+          child: tinted,
+        }
 
     if (this.styles.buttonBorderShape === 'circle') {
       padded = { kind: 'modified', id: `${path}circle-size`, modifier: { kind: 'square' }, child: padded }
@@ -2320,22 +2446,13 @@ class Converter {
     // inherited environment - so a bordered button has been drawing square corners
     // since the style was added, which no test asserted either way.
     if (glass) {
-      const background: LayoutElement = {
-        kind: 'modified', id: `${path}glass`,
-        modifier: { kind: 'material', ...this.appearance.materials.thinMaterial!, light: this.scheme === 'light' },
-        child: { kind: 'empty', id: `${path}glassbox` },
-      }
-      const surface: LayoutElement = {
-        kind: 'modified', id: `${path}glassbg`,
-        modifier: { kind: 'background', content: background },
-        child: prominent ? this.background(padded, `${path}btn`, { ...tint, a: tint.a * 0.85 }, radius, cornerStyle) : padded,
-      }
-      return { kind: 'modified', id: `${path}glassclip`, modifier: { kind: 'cornerRadius', radius, style: cornerStyle }, child: this.chromeOutline(surface, `${path}outline`, radius) }
+      if (toolbarGlass && this.styles.toolbarGroup) return padded
+      return this.glassSurface(padded, path, radius, cornerStyle, prominent ? fill ?? { ...tint, a: tint.a * 0.85 } : undefined)
     }
     return this.background(
       padded,
       `${path}btn`,
-      prominent ? tint : { ...tint, a: tint.a * (this.scheme === 'dark' ? 0.25 : 0.18) },
+      fill ?? (prominent ? tint : { ...tint, a: tint.a * (this.scheme === 'dark' ? 0.25 : 0.18) }),
       radius,
       cornerStyle,
     )
@@ -2343,6 +2460,7 @@ class Converter {
 
   private navigationLink(view: ViewValue, path: string, origin: object): LayoutElement {
     const title = stringArg(positional(view.args, 0))
+    const iconAlone = title === null && this.toolbarIcon(view.children)
     const label: LayoutElement =
       title !== null
         ? { kind: 'text', id: `${path}label`, text: title }
@@ -2352,12 +2470,13 @@ class Converter {
             axis: 'horizontal',
             spacing: 6,
             alignment: CENTER,
-            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+            children: this.iconScaled(iconAlone, () => this.convertList(view.children, `${path}label`, 'horizontal')),
           }
 
     // The disclosure chevron is what makes a link legible as one - inside a list.
-    // Outside one, a `NavigationLink` is however its label looks and nothing more,
-    // which is the whole reason people wrap cards in them.
+    // Outside one, iOS 27 draws a `NavigationLink` as it draws a button: tinted,
+    // unless its style is `.plain`, which is how a card wrapped in one keeps its look
+    // (measured in the simulator for D16).
     if (this.listDepth === 0) {
       return {
         kind: 'stack',
@@ -2365,7 +2484,7 @@ class Converter {
         axis: 'horizontal',
         spacing: 0,
         alignment: CENTER,
-        children: [label],
+        children: [this.applyButtonStyle(view, label, path, iconAlone)],
         ...origin,
       }
     }
@@ -2405,7 +2524,8 @@ class Converter {
 
   private toggle(view: ViewValue, path: string, origin: object): LayoutElement {
     const on = truthyBinding(labelled(view.args, 'isOn'))
-    const title = stringArg(positional(view.args, 0))
+    const iconLabel = titleAndIconLabel(view)
+    const title = iconLabel ? null : stringArg(positional(view.args, 0))
     const style = this.styles.toggle
 
     const label: LayoutElement =
@@ -2417,7 +2537,7 @@ class Converter {
             axis: 'horizontal',
             spacing: 6,
             alignment: CENTER,
-            children: this.convertList(view.children, `${path}label`, 'horizontal'),
+            children: this.convertList(iconLabel ? [iconLabel] : view.children, `${path}label`, 'horizontal'),
           }
 
     const track = switchControl(path, on, this.styles.tint ?? this.color('green'), this.color('tertiarySystemFill'))
@@ -2695,9 +2815,11 @@ class Converter {
     // which halves of it to draw.
     const date = view.name === 'DatePicker' ? asDate(selection ?? undefined) : null
     const selectedOption = view.name === 'Picker' ? view.children.find(child => boolArg(labelled(child.args, 'selected'))) : undefined
+    // A Picker shows the chosen row's content, and nothing when no row's tag matches
+    // its selection, as iOS 27 does: never the raw value, which isn't what iOS draws.
     const value = selectedOption ? textIn(selectedOption).join(' ') : date
       ? dateText(date.epochSeconds, datePickerStyleFor(view))
-      : selection
+      : selection && view.name !== 'Picker'
         ? displayValue(selection)
         : ''
 
@@ -2771,6 +2893,9 @@ class Converter {
             modifier: {
               kind: 'frame',
               maxWidth: Number.POSITIVE_INFINITY,
+              // The control is 32 pt tall in the iOS 27 simulator, whatever its labels'
+              // glyphs measure: a label is centred in what the padding leaves.
+              minHeight: CONTROL_PARTS.segmented.height - 2 * (CONTROL_PARTS.segmented.inset + CONTROL_PARTS.segmented.padY),
               alignment: CENTER,
             },
             child: this.convert(child, `${path}seg${index}c`, 'horizontal'),
@@ -3101,27 +3226,32 @@ class Converter {
     const describing = argViews(view, 'description')[0]
     const description = describing ? textIn(describing).join(' ') : ''
 
+    // As the iOS 27 simulator draws it, matched pixel for pixel by the same stack built
+    // from plain views: a 40-pt icon in the secondary colour, a bold title3 title 20 pt
+    // below it, the description in title3 3 pt below that, and 30 pt of space under the
+    // description, where the actions go, there even when there are none. The lines are
+    // centred and wrap 32 pt in from each side, and the whole is centred in the space
+    // the view is given.
     const children: LayoutElement[] = []
+    const after = (gap: number, id: string, child: LayoutElement): LayoutElement =>
+      children.length ? { kind: 'modified', id, modifier: { kind: 'padding', insets: insets(gap, 0, 0, 0) }, child } : child
 
     if (symbol) {
       children.push({
         kind: 'modified',
         id: `${path}iconf`,
-        // 52pt, which is roughly where iOS lands it: large enough to be the thing you
-        // see first, small enough not to become the subject.
-        modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 52 * bodyFont(this.typeScale).size / 17 } },
+        modifier: { kind: 'font', font: { ...bodyFont(this.typeScale), size: 40 * bodyFont(this.typeScale).size / 17 } },
         child: {
           kind: 'modified',
           id: `${path}iconc`,
-          modifier: { kind: 'foregroundStyle', color: this.color('tertiaryLabel') },
+          modifier: { kind: 'foregroundStyle', color: this.color('secondaryLabel') },
           child: this.symbolImage(`${path}icon`, symbol),
         },
       })
     }
-
-    if (title) children.push(this.styledText(`${path}title`, title, 'title2', 'label', 600))
+    if (title) children.push(after(20, `${path}titlegap`, this.styledText(`${path}title`, title, 'title3', 'label', 700)))
     if (description) {
-      children.push(this.styledText(`${path}desc`, description, 'body', 'secondaryLabel'))
+      children.push(after(title ? 3 : 20, `${path}descgap`, this.styledText(`${path}desc`, description, 'title3', 'secondaryLabel')))
     }
 
     return {
@@ -3134,13 +3264,23 @@ class Converter {
         alignment: CENTER,
       },
       child: {
-        kind: 'stack',
-        id: path,
-        axis: 'vertical',
-        spacing: 8,
-        alignment: CENTER,
-        children,
-        ...origin,
+        kind: 'modified',
+        id: `${path}inset`,
+        modifier: { kind: 'padding', insets: insets(0, 32, 30, 32) },
+        child: {
+          kind: 'modified',
+          id: `${path}centred`,
+          modifier: { kind: 'textStyle', alignment: 'center' },
+          child: {
+            kind: 'stack',
+            id: path,
+            axis: 'vertical',
+            spacing: 0,
+            alignment: CENTER,
+            children,
+            ...origin,
+          },
+        },
       },
     }
   }
@@ -3216,12 +3356,12 @@ class Converter {
     ] }
   }
 
-  /** Search geometry shared by the bottom bar, toolbar, and explicit drawer. */
-  searchField(text: string, placeholder: string, path: string, compact = false): LayoutElement {
-    return this.chromeContent(`${path}font`, () => this.searchFieldContent(text, placeholder, path, compact))
+  /** Search geometry shared by the bottom capsule, toolbar, and drawer. */
+  searchField(search: SearchField, placement: SearchPlacement): LayoutElement {
+    return this.chromeContent(`${search.path}font`, () => this.searchFieldContent(search, placement))
   }
 
-  private searchFieldContent(text: string, placeholder: string, path: string, compact: boolean): LayoutElement {
+  private searchFieldContent({ text, prompt: placeholder, path }: SearchField, placement: SearchPlacement): LayoutElement {
     const row: LayoutElement = {
       kind: 'stack',
       id: `${path}row`,
@@ -3275,6 +3415,17 @@ class Converter {
       child: row,
     }
 
+    if (placement === 'bottom') {
+      const capsule = this.glassCapsule({ kind: 'modified', id: `${path}height`, modifier: { kind: 'frame', minHeight: SURFACES.search.capsuleHeight, alignment: CENTER }, child: padded }, `${path}surface`, `${path}outline`)
+      // Centred on the tab bar's line, in the space a tab bar takes.
+      const centring = (SURFACES.tab.height - SURFACES.search.capsuleHeight) / 2
+      return {
+        kind: 'modified', id: `${path}outer`,
+        modifier: { kind: 'padding', insets: insets(centring, SURFACES.search.capsuleMargin, centring + SURFACES.tab.bottom, SURFACES.search.capsuleMargin) },
+        child: capsule,
+      }
+    }
+
     const surface: LayoutElement = {
       kind: 'modified', id: `${path}surface`,
       modifier: { kind: 'background', content: { kind: 'fill', id: `${path}surface-fill`, fill: { kind: 'solid', color: this.color('tertiarySystemFill') } } },
@@ -3282,18 +3433,31 @@ class Converter {
     }
     return {
       kind: 'modified', id: `${path}outer`,
-      modifier: { kind: 'padding', insets: compact ? ZERO_INSETS : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
+      modifier: { kind: 'padding', insets: placement === 'toolbar' ? ZERO_INSETS
+        : placement === 'drawer' ? insets(0, SURFACES.search.margin, SURFACES.search.drawerBottom, SURFACES.search.margin)
+        : insets(4, SURFACES.search.margin, SURFACES.search.bottom, SURFACES.search.margin) },
       child: { kind: 'modified', id: `${path}round`, modifier: { kind: 'cornerRadius', radius: SURFACES.search.radius, style: 'circular' }, child: surface },
     }
   }
 
+  /**
+   * `Link` and `ShareLink`, in the accent colour, as the iOS 27 simulator draws them: the
+   * label they were given, or their title. A share link with no label of its own is the
+   * share icon and its title, "Share…" when it has none.
+   */
   private link(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0)) ?? ''
+    const title = stringArg(positional(view.args, 0))
+    const content = view.children.length > 0 ? view.children
+      : view.name === 'ShareLink' ? [{ name: 'Label', args: [{ label: null, value: { kind: 'string', value: title ?? 'Share…' } }, { label: 'systemImage', value: { kind: 'string', value: 'square.and.arrow.up' } }], children: [], modifiers: [], action: null, span: view.span } satisfies ViewValue]
+      : []
+    const label: LayoutElement = content.length === 0
+      ? { kind: 'text', id: path, text: title ?? '', ...origin }
+      : { kind: 'stack', id: `${path}label`, axis: 'horizontal', spacing: 4, alignment: CENTER, children: content.map((child, index) => this.convert(child, `${path}l${index}`, 'horizontal')), ...origin }
     return {
       kind: 'modified',
       id: `${path}tint`,
       modifier: { kind: 'foregroundStyle', color: this.color('accentColor') },
-      child: { kind: 'text', id: path, text: title, ...origin },
+      child: label,
     }
   }
 
@@ -3316,7 +3480,16 @@ class Converter {
       case 'background': {
         const content = this.backgroundContent(args, modifier, `${id}bg`)
         const hasView = args.some((arg) => (arg.label === null || arg.label === 'content') && asView(arg.value))
-        return content ? { kind: 'background', content, ...(hasView ? { alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER } : {}) } : null
+        // `.background(.red)` and `.background(Color.red)` are the ShapeStyle form, which
+        // reaches into the safe area its view touches; a view given as the background,
+        // `.background { Color.red }`, doesn't. Both measured in the iOS 27 simulator.
+        const style = !hasView && !labelled(args, 'in') && args.some((arg) => arg.label === null)
+        return content ? {
+          kind: 'background',
+          content,
+          ...(hasView ? { alignment: alignmentFromToken(labelled(args, 'alignment')) ?? CENTER } : {}),
+          ...(style ? { ignoresSafeAreaEdges: edgeSet(labelled(args, 'ignoresSafeAreaEdges')) } : {}),
+        } : null
       }
 
       case 'overlay': {
@@ -3410,12 +3583,15 @@ class Converter {
         }
       }
 
-      case 'offset':
+      case 'offset': {
+        // `.offset(dragOffset)` - a CGSize, which is how every drag writes it.
+        const size = payloadOf<{ width: number; height: number }>(positional(args, 0), 'CGSize')
         return {
           kind: 'offset',
-          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? 0,
-          y: numberArg(labelled(args, 'y')) ?? 0,
+          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? size?.width ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? size?.height ?? 0,
         }
+      }
 
       case 'fixedSize': {
         const horizontal = boolArg(labelled(args, 'horizontal'))
@@ -3516,13 +3692,14 @@ class Converter {
         // Read directly off the shape or path they style, not applied as wrappers.
         return null
 
-      case 'ignoresSafeArea': {
-        // On a screen's root view the pipeline moves the whole screen to the device's
-        // edges; anywhere else only this view grows, which the layout engine does.
-        // `.safeAreaInset` was grouped here and is not: nothing read it, and it was in
-        // the unimplemented list at the same time - so it both warned and was claimed.
-        const edges = ignoredEdges(args)
-        return edges ? { kind: 'ignoresSafeArea', edges } : null
+      case 'ignoresSafeArea':
+      case 'edgesIgnoringSafeArea': {
+        // `.ignoresSafeArea(.keyboard)` is about a keyboard the preview never shows, so
+        // it changes nothing; it used to make the whole screen full-bleed.
+        const regions = modifier.name === 'ignoresSafeArea' ? tokenName(positional(args, 0)) : null
+        if (regions === 'keyboard') return null
+        const edges = modifier.name === 'ignoresSafeArea' ? labelled(args, 'edges') : positional(args, 0)
+        return { kind: 'ignoresSafeArea', edges: edgeSet(edges) }
       }
 
       case 'zIndex':
@@ -3564,12 +3741,14 @@ class Converter {
 
 
 
-      case 'position':
+      case 'position': {
+        const point = payloadOf<{ x: number; y: number }>(positional(args, 0), 'CGPoint')
         return {
           kind: 'position',
-          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? 0,
-          y: numberArg(labelled(args, 'y')) ?? numberArg(positional(args, 1)) ?? 0,
+          x: numberArg(labelled(args, 'x')) ?? numberArg(positional(args, 0)) ?? point?.x ?? 0,
+          y: numberArg(labelled(args, 'y')) ?? numberArg(positional(args, 1)) ?? point?.y ?? 0,
         }
+      }
 
       case 'layoutPriority': {
         const value = numberArg(positional(args, 0))
@@ -4007,15 +4186,13 @@ function textOf(view: ViewValue): string {
 }
 
 /**
- * A value rendered through a `FormatStyle`.
+ * A value rendered through a `FormatStyle`, as `formatted(_:)` writes it.
  *
  * An unrecognised style falls back to the plain description: the number is still
  * right, only its dressing is missing.
  */
 function formatted(value: SwiftValue, format: SwiftValue): string {
-  const n = value.kind === 'int' || value.kind === 'double' ? value.value : Number.NaN
-  if (Number.isNaN(n)) return displayValue(value)
-  return formatNumber(n, tokenName(format) ?? '') ?? displayValue(value)
+  return formatNumber(value, tokenName(format) ?? '') ?? displayValue(value)
 }
 
 function displayValue(value: SwiftValue): string {
@@ -4144,6 +4321,16 @@ function truthyBinding(value: SwiftValue | undefined): boolean {
   return resolved !== null && truthy(resolved)
 }
 
+const EDGE_SET_NAMES: ReadonlySet<string> = new Set(['top', 'bottom', 'leading', 'trailing', 'horizontal', 'vertical', 'all'])
+
+/** An `Edge.Set`: `.all` when none is given, one edge, `.horizontal`, `.vertical`, or a list. */
+function edgeSet(value: SwiftValue | undefined): SafeAreaEdges {
+  if (value === undefined) return { top: true, bottom: true, leading: true, trailing: true }
+  const names = value.kind === 'array' ? value.elements.map(tokenName) : [tokenName(value)]
+  const has = (edge: string, axis: string) => names.some((name) => name === edge || name === axis || name === 'all')
+  return { top: has('top', 'vertical'), bottom: has('bottom', 'vertical'), leading: has('leading', 'horizontal'), trailing: has('trailing', 'horizontal') }
+}
+
 function tokenName(value: SwiftValue | undefined): string | null {
   return payloadOf<TokenPayload>(value, TOKEN_TYPE)?.name ?? null
 }
@@ -4174,7 +4361,7 @@ function shapeOf(value: SwiftValue | undefined): { kind: ShapeKind; cornerRadius
       return {
         kind: shape,
         style: tokenName(labelled(view.args, 'style')) === 'continuous' ? 'continuous' : 'circular',
-        cornerRadius: numberArg(labelled(view.args, 'cornerRadius')) ?? 0,
+        cornerRadius: hasCornerRadii(view.args.map((a) => a.label)) ? largestCorner(view.args) : numberArg(labelled(view.args, 'cornerRadius')) ?? 0,
       }
     }
   }
@@ -4210,34 +4397,6 @@ function strokeStyle(view: ViewValue): StrokeStylePayload | undefined {
   return style ?? undefined
 }
 
-type EdgeFlags = { readonly top: boolean; readonly bottom: boolean; readonly leading: boolean; readonly trailing: boolean }
-
-const EDGE_SETS: Readonly<Record<string, EdgeFlags>> = {
-  all: { top: true, bottom: true, leading: true, trailing: true },
-  top: { top: true, bottom: false, leading: false, trailing: false },
-  bottom: { top: false, bottom: true, leading: false, trailing: false },
-  leading: { top: false, bottom: false, leading: true, trailing: false },
-  trailing: { top: false, bottom: false, leading: false, trailing: true },
-  horizontal: { top: false, bottom: false, leading: true, trailing: true },
-  vertical: { top: true, bottom: true, leading: false, trailing: false },
-}
-
-/**
- * The edges `.ignoresSafeArea(_:edges:)` asks for, or null for none.
- *
- * Only the keyboard region is declined: the preview has no keyboard, so ignoring its
- * safe area changes nothing.
- */
-function ignoredEdges(args: readonly ViewArg[]): EdgeFlags | null {
-  if (tokenName(positional(args, 0)) === 'keyboard') return null
-  const value = labelled(args, 'edges')
-  if (!value) return EDGE_SETS.all!
-  const names = value.kind === 'array' ? value.elements.map(element => tokenName(element)) : [tokenName(value)]
-  const sets = names.map(name => (name ? EDGE_SETS[name] : undefined) ?? EDGE_SETS.all!)
-  const edges = { top: sets.some(s => s.top), bottom: sets.some(s => s.bottom), leading: sets.some(s => s.leading), trailing: sets.some(s => s.trailing) }
-  return edges.top || edges.bottom || edges.leading || edges.trailing ? edges : null
-}
-
 function paddingInsets(args: readonly ViewArg[], defaultLength = IOS_27.metrics.padding): EdgeInsets {
   // `.padding()` with no arguments is the system default of 16.
   if (args.length === 0) return uniformInsets(defaultLength)
@@ -4251,31 +4410,15 @@ function paddingInsets(args: readonly ViewArg[], defaultLength = IOS_27.metrics.
   const bare = numberArg(positional(args, 0))
   if (bare !== null && args.length === 1) return uniformInsets(bare)
 
-  // `.padding(.horizontal, 24)` - an edge set plus a length.
+  // `.padding(.horizontal, 24)` or `.padding([.horizontal, .top], 20)` - an edge set
+  // plus a length. A list is a set too, and an empty one pads nothing.
   const edgeToken = positional(args, 0)
   const length = numberArg(positional(args, 1)) ?? numberArg(labelled(args, 'length')) ?? defaultLength
-
-  if (edgeToken?.kind === 'opaque' && edgeToken.typeName === TOKEN_TYPE) {
-    const edge = (edgeToken.payload as TokenPayload).name
-    switch (edge) {
-      case 'horizontal':
-        return insets(0, length, 0, length)
-      case 'vertical':
-        return insets(length, 0, length, 0)
-      case 'top':
-        return insets(length, 0, 0, 0)
-      case 'bottom':
-        return insets(0, 0, length, 0)
-      case 'leading':
-        return insets(0, length, 0, 0)
-      case 'trailing':
-        return insets(0, 0, 0, length)
-      case 'all':
-        return uniformInsets(length)
-      default:
-        return uniformInsets(length)
-    }
+  if (edgeToken?.kind === 'array' || EDGE_SET_NAMES.has(tokenName(edgeToken) ?? '')) {
+    const edges = edgeSet(edgeToken)
+    return insets(edges.top ? length : 0, edges.leading ? length : 0, edges.bottom ? length : 0, edges.trailing ? length : 0)
   }
+  if (tokenName(edgeToken) !== null) return uniformInsets(length)
 
   return uniformInsets(defaultLength)
 }
@@ -4336,6 +4479,22 @@ function stackAlignment(args: readonly ViewArg[], axis: Axis): Alignment {
 
 function zstackAlignment(args: readonly ViewArg[]): Alignment {
   return alignmentFromToken(labelled(args, 'alignment')) ?? CENTER
+}
+
+/**
+ * `Button("Add", systemImage: "plus")`, and `Menu` and `Toggle` written the same way:
+ * shorthand for a `Label` as the control's label. Without it only the title was drawn.
+ */
+function titleAndIconLabel(view: ViewValue): ViewValue | null {
+  if (!labelled(view.args, 'systemImage') || stringArg(positional(view.args, 0)) === null) return null
+  return {
+    name: 'Label',
+    args: view.args.filter((arg) => arg.label === null || arg.label === 'systemImage'),
+    children: [],
+    modifiers: [],
+    action: null,
+    span: view.span,
+  }
 }
 
 /**

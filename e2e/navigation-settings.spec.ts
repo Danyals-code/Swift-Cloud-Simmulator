@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { assertSource, replaceSource } from './designer-helpers'
+import { assertSource, openCounter, replaceSource } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 @main struct NavigationApp: App { var body: some Scene { WindowGroup { ContentView() } } }
@@ -40,8 +40,7 @@ const expectedDestination = (expression: string) => SOURCE.replace('NavigationLi
 
 async function open(page: Page, source = SOURCE, label = 'Open details') {
   await page.setViewportSize({ width: 1920, height: 1200 })
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   await replaceSource(page, source)
   await expect(page.getByTestId('render-tree').first().getByRole('button', { name: label, exact: true })).toBeVisible()
@@ -103,8 +102,7 @@ test('typing a known view name and pressing Enter applies its full destination e
   await assertSource(page, expectedDestination('AnotherView()'))
 })
 
-test('unknown views and missing inputs leave Swift unchanged; a complete input expression is retained', async ({ page, browserName }) => {
-  test.fixme(browserName === 'webkit', 'WebKit loses the first Apply destination click while suggestions are open: they close on mousedown and move the button (NavigationDestinationEditor.tsx:80)')
+test('unknown views and missing inputs leave Swift unchanged; a complete input expression is retained', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Choose destination', exact: true }).click()
   const required = page.getByRole('option', { name: /Required Needs title: String/ })
@@ -140,7 +138,7 @@ test('a visual destination change is one undoable and redoable Swift edit', asyn
   await sourceEditor.click()
   await page.keyboard.press('ControlOrMeta+z')
   await expect(sourceEditor).toHaveText(SOURCE, { useInnerText: true })
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.keyboard.press('ControlOrMeta+Shift+Z')
   await expect(sourceEditor).toHaveText(expected, { useInnerText: true })
   await page.getByTestId('workspace-design').click()
   await openLiveDestination(page, 'Another screen')

@@ -28,43 +28,24 @@ import {
   removeFolder,
   renameFile,
   renameFolder,
+  unusedProjectName,
   withFileText,
   type OpenedFile,
   type Project,
   type ProjectStore,
+  StaleProjectError,
   type ProjectSummary,
   type PromptMessage,
   validatePromptHistory,
 } from '@studio/project-model'
 import type { DeviceKey } from '@studio/sim-shell'
+import { STUDIO_BUILD } from './build'
+import { eventLog, type DesignEvent, type StudioEvent } from './eventLog'
+import { registerLiveWork, takeSafeStart } from './recovery'
+import { lastOpenedId, rememberLastOpened } from './lastOpened'
 import type { FileId, SourceSpan } from '@studio/shared'
 
 const AUTOSAVE_MS = 500
-
-/**
- * Which project to reopen.
- *
- * In `localStorage` rather than in the database, because it is a fact about this
- * browser rather than about any project: reopening the last one is a preference, and
- * losing it costs one click on the welcome sheet.
- */
-const LAST_OPENED_KEY = 'studio.lastOpened'
-
-function rememberLastOpened(id: string): void {
-  try {
-    localStorage.setItem(LAST_OPENED_KEY, id)
-  } catch {
-    // Private windows and blocked site data. The sheet still lists everything.
-  }
-}
-
-function lastOpenedId(): string | null {
-  try {
-    return localStorage.getItem(LAST_OPENED_KEY)
-  } catch {
-    return null
-  }
-}
 
 /**
  * Loading the templates.
@@ -108,13 +89,68 @@ let loading: Promise<void> | null = null
  * being written needs to be told, not to find out on the next reload.
  */
 let saveQueue: Promise<unknown> = Promise.resolve()
-function writeProject(project: Project): Promise<string | null> {
-  const write = saveQueue.then(async () => {
-    try { await persistence().save(project); return null }
-    catch (error) { return error instanceof Error && error.message ? `Could not save: ${error.message}` : 'Could not save to this browser’s storage.' }
+function writeProject(project: Project): Promise<SaveProblem | null> {
+  const write = saveQueue.then(async (): Promise<SaveProblem | null> => {
+    if (handedOver) return { message: 'Swift Web Studio is open in another tab, so this tab no longer saves.', outdated: true }
+    try { await persistence().save(project); saved.set(project.id, project); return null }
+    catch (error) {
+      if (error instanceof StaleProjectError) return { message: error.message, outdated: true }
+      return { message: error instanceof Error && error.message ? `Could not save: ${error.message}` : 'Could not save to this browser’s storage.', outdated: false }
+    }
   })
   saveQueue = write
   return write
+}
+
+/**
+ * Why a write failed. `outdated` when another tab has saved the project since this one
+ * last read it: trying again cannot work then, and only a reload brings the newer copy.
+ */
+interface SaveProblem { readonly message: string; readonly outdated: boolean }
+
+/** What a write puts on screen: its failure, or - when it worked - nothing. */
+function saveState(problem: SaveProblem | null): Pick<StudioState, 'saveError' | 'saveOutdated'> {
+  return { saveError: problem?.message ?? null, saveOutdated: problem?.outdated ?? false }
+}
+
+/**
+ * Each project as storage last had it from this tab: the object last written, or read.
+ *
+ * A flush of that same object has nothing to add, and it used to be written anyway -
+ * each time the tab was hidden *or shown* - which is how looking at an old tab put its
+ * copy back over the newer work of another. By project, because a switch writes the
+ * project it opens before it lets go of the one it leaves.
+ */
+const saved = new Map<string, Project>()
+
+/** Set once another tab has the studio: from then on this one writes nothing. */
+let handedOver = false
+
+/**
+ * Asks the browser not to clear this site's storage when space runs short.
+ *
+ * Browsers treat a site's storage as a cache they may empty unless asked otherwise.
+ * Chrome answers from how the site has been used and Firefox asks the person, so the
+ * answer changes nothing here and is not waited for.
+ */
+function requestPersistence(): void {
+  try { void navigator.storage?.persist?.().catch(() => {}) } catch { /* no storage manager */ }
+}
+
+/**
+ * How a switch to another project went.
+ *
+ * `'unsaved'` - the project being left could not be saved, so nothing changed. The
+ * caller asks first, then calls again with `leaveUnsaved` to go without it: storage
+ * that has stopped working must not also stop the next task from starting.
+ * `'failed'` - there was nothing to open: a template that did not arrive, files with
+ * nothing usable in them, a project no longer in this browser, or a later switch
+ * that overtook this one.
+ */
+export type SwitchResult = 'opened' | 'unsaved' | 'failed'
+export interface SwitchOptions {
+  /** Switch even though the project being left could not be saved. */
+  readonly leaveUnsaved?: boolean
 }
 
 /** Preview settings live outside the project: they describe how you are looking at it. */
@@ -127,6 +163,39 @@ export interface PreviewSettings {
   readonly zoom: string
 }
 
+/**
+ * What the first load found, which is what the welcome sheet reports.
+ *
+ * `'restored'` - work was already in this browser and is what you are looking at.
+ * `'shared'`   - the page was opened with a link carrying a project.
+ * `'fresh'`    - nothing was saved, so the starter project was laid down.
+ * `'recovered'` - after a crash, the saved project was skipped on purpose.
+ *
+ * The sheet needs all four: it offers to continue only in the first case, it does
+ * not open at all in the second, because following a link is already an explicit
+ * request to see *that* project, and in the last it opens on the saved projects so
+ * choosing one is the participant's decision rather than a repeat of the crash.
+ */
+export type ProjectOrigin = 'restored' | 'shared' | 'fresh' | 'recovered'
+
+/** An AI edit's hold on the project. */
+export interface AiHold {
+  /** The answer's change is being checked in a preview. */
+  checking(): void
+  /** The answer was broken, and the AI is asked once more (G2). */
+  fixing(): void
+  /** Applies the answer: the one change the project takes while it is held. */
+  commit(expected: Project, transaction: ProjectTransaction): string | null
+  /** Lets the project go, whether the edit landed, failed or stopped. */
+  release(): void
+}
+
+/** How far an AI edit has got: waiting for its answer, checking it in a preview, or asking once more (G2). */
+export type AiEditPhase = 'editing' | 'checking' | 'fixing'
+
+/** Why a change is refused while an AI edit holds the project. */
+export const AI_EDITING = 'The AI is editing this project. Wait for it, or press Stop.'
+
 export interface StudioState {
   project: Project | null
   documentRevision: number
@@ -134,7 +203,24 @@ export interface StudioState {
   canRedo: boolean
   documentSelection: DocumentSelection | null
   setDocumentSelection: (selection: DocumentSelection | null) => void
-  commitTransaction: (expected: Project, transaction: ProjectTransaction) => string | null
+  /**
+   * Applies a prepared change, unless the project moved on while it was prepared.
+   *
+   * `label` is how the event log records the change once it is made. Null when the
+   * caller records it: an AI edit, whose event says how long it took.
+   */
+  commitTransaction: (expected: Project, transaction: ProjectTransaction, label: DesignEvent | null) => string | null
+  /**
+   * An AI edit holding the project, from its request until its answer lands or it
+   * stops (G12). Until then nothing else changes the project: the answer is planned
+   * against the project as it was sent, and a change made while waiting used to throw
+   * the paid-for answer away.
+   */
+  aiEdit: { readonly phase: AiEditPhase } | null
+  /** Holds the project for an AI edit, which `stop` cancels. Null while another holds it. */
+  holdForAi: (stop: () => void) => AiHold | null
+  /** Stops the AI edit holding the project: its request is cancelled and the project is free again. */
+  stopAiEdit: () => void
   appendPromptMessages: (projectId: string, messages: readonly PromptMessage[]) => string | null
   replayDocument: (direction: 'undo' | 'redo') => { selection: DocumentSelection | null } | null
   activeFileId: FileId | null
@@ -142,18 +228,8 @@ export interface StudioState {
   openFileIds: FileId[]
   /** false until the first load resolves; avoids flashing the template over saved work */
   loaded: boolean
-  /**
-   * What the first load found, which is what the welcome sheet reports.
-   *
-   * `'restored'` - work was already in this browser and is what you are looking at.
-   * `'shared'`   - the page was opened with a link carrying a project.
-   * `'fresh'`    - nothing was saved, so the starter project was laid down.
-   *
-   * The sheet needs all three: it offers to continue only in the first case, and it
-   * does not open at all in the second, because following a link is already an
-   * explicit request to see *that* project.
-   */
-  origin: 'restored' | 'shared' | 'fresh' | null
+  /** What the first load found; null until it has run. */
+  origin: ProjectOrigin | null
   /**
    * Every project in this browser, newest first.
    *
@@ -172,10 +248,32 @@ export interface StudioState {
    * private window in more than one browser.
    */
   saveError: string | null
+  /** Whether that failure is another tab having saved since: only a reload helps then, not trying again. */
+  saveOutdated: boolean
+  /**
+   * Set when the saved projects could not be read at launch.
+   *
+   * Not a failed save, and it used to be reported as one: nothing typed since is at
+   * risk, but the work from before is out of reach until a reload reads it.
+   */
+  loadError: string | null
+  /** Whether saves outlive the page. False when the browser gave the studio nowhere to keep them. */
+  durable: boolean
   preview: PreviewSettings
 
   load: () => Promise<void>
   flush: () => Promise<void>
+  /**
+   * Stops writing for good: another tab has the studio. What this tab holds is saved
+   * first unless `save` is false - when the studio was taken from a tab that did not
+   * answer, its copy is the old one. A reload replaces it.
+   */
+  handOver: (options: { readonly save: boolean }) => Promise<void>
+  /**
+   * Whether closing the page now would lose work: an edit not yet written, a save
+   * that failed, or storage that keeps nothing past the page.
+   */
+  unsavedWork: () => boolean
   setFileText: (fileId: FileId, text: string) => void
   setActiveFile: (fileId: FileId) => void
   closeFile: (fileId: FileId) => void
@@ -200,23 +298,22 @@ export interface StudioState {
   /**
    * Creates a project from a template.
    *
-   * Async because the sources are a separate chunk. Returns false when that chunk
-   * could not be fetched - offline, or a deploy that moved it mid-session - so the
-   * caller can say so. A Create button that silently does nothing is worse than one
-   * that fails.
+   * Async because the sources are a separate chunk. Fails when that chunk could not
+   * be fetched - offline, or a deploy that moved it mid-session - so the caller can
+   * say so. A Create button that silently does nothing is worse than one that fails.
    */
-  applyTemplate: (templateId: string) => Promise<boolean>
+  applyTemplate: (templateId: string, options?: SwitchOptions) => Promise<SwitchResult>
   /** Reopens one of the projects in this browser. */
-  openProject: (id: string) => Promise<boolean>
+  openProject: (id: string, options?: SwitchOptions) => Promise<SwitchResult>
   /** Deletes a project. Refuses the one that is open - close it by opening another. */
   removeProject: (id: string) => Promise<void>
   /**
    * Replaces the project with one built from files off the user's disk.
    *
-   * Returns false when nothing usable was in the selection, so the caller can say so
-   * rather than presenting an empty project as a successful open.
+   * Fails when nothing usable was in the selection, so the caller can say so rather
+   * than presenting an empty project as a successful open.
    */
-  openFiles: (files: readonly OpenedFile[]) => Promise<boolean>
+  openFiles: (files: readonly OpenedFile[], options?: SwitchOptions) => Promise<SwitchResult>
   importProject: (expected: Project, incoming: Project) => Promise<string | null>
 }
 
@@ -226,17 +323,24 @@ export const useStudio = create<StudioState>((rawSet, get) => {
   let replaying = false
   let typingGroup: string | undefined
   let switchRequest = 0
+  /** The AI edit holding the project, and how to stop it. */
+  let aiHold: { readonly stop: () => void } | null = null
 
-  /** Save a stable snapshot, including typing that arrives during an IndexedDB write. */
-  async function saveBeforeSwitch(request: number, outgoingId: string | undefined): Promise<boolean> {
+  /**
+   * Saves the project being left, typing that arrives during the write included.
+   *
+   * Null when it may be left: saved, or `leaveUnsaved` says to go without. Otherwise
+   * why not - it could not be saved, or a later switch overtook this one.
+   */
+  async function leaveOutgoing(request: number, outgoingId: string | undefined, leaveUnsaved: boolean): Promise<'unsaved' | 'failed' | null> {
     while (request === switchRequest && get().project?.id === outgoingId) {
       const snapshot = get().project
       await get().flush()
-      if (request !== switchRequest || get().project?.id !== outgoingId) return false
+      if (request !== switchRequest || get().project?.id !== outgoingId) return 'failed'
       if (get().project !== snapshot) continue
-      return !get().saveError
+      return get().saveError && !leaveUnsaved ? 'unsaved' : null
     }
-    return false
+    return 'failed'
   }
   function set(patch: Partial<StudioState>): void {
     const previous = get()
@@ -263,6 +367,19 @@ export const useStudio = create<StudioState>((rawSet, get) => {
   }
 
   /**
+   * A project just made, numbered when one here already has its name.
+   *
+   * The list of projects is read when the set changes, not on a rename, so the open
+   * project goes by its name as it is now.
+   */
+  function withUnusedName(project: Project): Project {
+    const open = get().project
+    const taken = [...get().recents.filter(summary => summary.id !== open?.id).map(summary => summary.name), ...open ? [open.manifest.name] : []]
+    const name = unusedProjectName(project.manifest.name, taken)
+    return name === project.manifest.name ? project : { ...project, manifest: { ...project.manifest, name } }
+  }
+
+  /**
    * Swaps the whole project out: a template, or files opened off the disk.
    *
    * Every tab is closed rather than filtered, because none of them name a file that
@@ -270,26 +387,33 @@ export const useStudio = create<StudioState>((rawSet, get) => {
    * a decision, not a keystroke, and a reload half a second later must not bring the
    * old project back.
    */
-  async function replace(project: Project): Promise<boolean> {
+  async function replace(project: Project, created: StudioEvent, { leaveUnsaved = false }: SwitchOptions = {}): Promise<SwitchResult> {
     // Keep the latest keystrokes in the outgoing project's saved copy.
     const request = ++switchRequest, outgoingId = get().project?.id
-    if (!await saveBeforeSwitch(request, outgoingId)) return false
+    const blocked = await leaveOutgoing(request, outgoingId, leaveUnsaved)
+    if (blocked) return blocked
+    // A new project that cannot be written opens all the same. Storage that has
+    // stopped working says so on screen until a save works, and refusing to open
+    // anything would only add a second problem to the first.
     const problem = await writeProject(project)
-    if (request !== switchRequest) return false
-    if (problem) { set({ saveError: problem }); return false }
-    if (!await saveBeforeSwitch(request, outgoingId)) return false
+    if (request !== switchRequest) return 'failed'
+    const overtaken = await leaveOutgoing(request, outgoingId, leaveUnsaved)
+    if (overtaken) return overtaken
     const outgoing = get().project
     const first = project.files[0]?.id ?? null
+    // The switch happens now, and an AI answer planned against the project being left no longer fits anything.
+    get().stopAiEdit()
 
     set({
       project,
       activeFileId: first,
       openFileIds: first ? [first] : [],
       origin: 'restored',
-      lastSavedAt: Date.now(),
-      saveError: null,
+      lastSavedAt: problem ? null : Date.now(),
+      ...saveState(problem),
     })
     rememberLastOpened(project.id)
+    eventLog.record(project.id, created)
 
     /**
      * What happens to what was open.
@@ -302,6 +426,8 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     if (outgoing && outgoing.id !== project.id) {
       const untouched = outgoing.manifest.templateId !== undefined && isPristine(outgoing)
       if (untouched) {
+        // What happened while it was open belongs to the story of the one after it.
+        eventLog.handOn(outgoing.id, project.id)
         try {
           await persistence().remove(outgoing.id)
         } catch {
@@ -310,7 +436,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       }
     }
     await refreshRecents()
-    return true
+    return 'opened'
   }
 
   /** Re-reads the list the welcome sheet shows. Failure leaves the old list up. */
@@ -320,6 +446,20 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     } catch {
       // The sheet still offers the templates and the file picker.
     }
+  }
+
+  /** Applies a prepared change, unless the project moved on while it was prepared. */
+  function applyTransaction(expected: Project, transaction: ProjectTransaction, label: DesignEvent | null): string | null {
+    const current = get()
+    if (current.project !== expected) return 'The project changed while this edit was being prepared. Try again.'
+    const result = applyProjectTransaction(expected, current.documentRevision, transaction)
+    if (!result.ok) return result.reason
+    if (result.project !== expected) {
+      set({ project: result.project, ...(transaction.selection === undefined ? {} : { documentSelection: transaction.selection }) })
+      scheduleSave()
+      if (label) eventLog.record(expected.id, label)
+    }
+    return null
   }
 
   function commit(project: Project, activeFileId?: FileId): void {
@@ -343,6 +483,9 @@ export const useStudio = create<StudioState>((rawSet, get) => {
    * thing: "start this if it has not started".
    */
   async function firstLoad(): Promise<void> {
+    requestPersistence()
+    const durable = persistence().durable
+
     // A share link wins over whatever is stored, because following one is an
     // explicit request to see *that* project. The fragment is then cleared, so a
     // later reload does not silently discard whatever the user has since typed.
@@ -356,11 +499,17 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         openFileIds: first ? [first] : [],
         loaded: true,
         origin: 'shared',
+        durable,
       })
+      eventLog.record(shared.id, { type: 'session', action: 'loaded', origin: 'shared', build: STUDIO_BUILD.commit })
       const problem = await writeProject(shared)
-      if (problem) set({ saveError: problem })
+      if (problem) set(saveState(problem))
       return
     }
+
+    // After a crash, "Open another project" starts here without the project that was
+    // open, so a crash its content causes does not repeat on every reload.
+    const recovering = takeSafeStart()
 
     // A failed load must not leave the studio waiting forever on `loaded`. Falling
     // back to the starter project loses nothing that was not already unreachable.
@@ -370,15 +519,17 @@ export const useStudio = create<StudioState>((rawSet, get) => {
 
     try {
       summaries = await persistence().list()
-      // Whatever was open last, then the most recently touched, then the key every
-      // project used to share - which is how an install from before projects had
-      // their own ids still finds its work.
-      const wanted = lastOpenedId()
-      const id =
-        (wanted && summaries.some((p) => p.id === wanted) ? wanted : null) ??
-        summaries[0]?.id ??
-        LEGACY_PROJECT_ID
-      existing = await persistence().load(id)
+      if (!recovering) {
+        // Whatever was open last, then the most recently touched, then the key every
+        // project used to share - which is how an install from before projects had
+        // their own ids still finds its work.
+        const wanted = lastOpenedId()
+        const id =
+          (wanted && summaries.some((p) => p.id === wanted) ? wanted : null) ??
+          summaries[0]?.id ??
+          LEGACY_PROJECT_ID
+        existing = await persistence().load(id)
+      }
     } catch (error) {
       failure = error instanceof Error && error.message
         ? `Could not open saved work: ${error.message}`
@@ -393,30 +544,40 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       try {
         project = (await templates()).createDefaultProject()
       } catch {
-        set({ loaded: true, origin: 'fresh', saveError: 'Could not load the starter project. Check the connection and reload.' })
+        set({ loaded: true, origin: 'fresh', durable, loadError: 'Could not load the starter project. Check the connection and reload.' })
         return
       }
     }
     const first = project.files[0]?.id ?? null
+    // What was read is what is stored. After a failed read the starter is not written,
+    // but nothing has been typed into it either, so leaving it loses nothing.
+    if (existing || failure) saved.set(project.id, project)
 
+    const origin = recovering ? 'recovered' : existing ? 'restored' : 'fresh'
     set({
       project,
       activeFileId: first,
       openFileIds: first ? [first] : [],
       loaded: true,
-      origin: existing ? 'restored' : 'fresh',
+      origin,
       recents: summaries,
-      saveError: failure,
+      loadError: failure,
+      durable,
     })
-    rememberLastOpened(project.id)
+    eventLog.record(project.id, { type: 'session', action: 'loaded', origin, build: STUDIO_BUILD.commit })
+    // After a failed read the starter is only a place to stand. Remembering it would
+    // have the next reload open it instead of the work that could not be read.
+    if (!failure) rememberLastOpened(project.id)
 
     // Laying down the starter project deliberately does *not* move `lastSavedAt`:
     // the indicator answers "is what I typed written down", and starting the clock
     // before the user has typed anything makes it say yes while their first edits
-    // are still in the debounce.
+    // are still in the debounce. After a crash the starter is saved too, though it
+    // adds one to the list: saved, it is what a reload reopens, rather than the
+    // project that crashed.
     if (!existing && !failure) {
       const problem = await writeProject(project)
-      if (problem) set({ saveError: problem })
+      if (problem) set(saveState(problem))
       else await refreshRecents()
     }
   }
@@ -425,16 +586,34 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     documentRevision: 0,
     documentSelection: null,
     setDocumentSelection(selection) { set({ documentSelection: selection }) },
-    commitTransaction(expected, transaction) {
-      const current = get()
-      if (current.project !== expected) return 'The project changed while this edit was being prepared. Try again.'
-      const result = applyProjectTransaction(expected, current.documentRevision, transaction)
-      if (!result.ok) return result.reason
-      if (result.project !== expected) {
-        set({ project: result.project, ...(transaction.selection === undefined ? {} : { documentSelection: transaction.selection }) })
-        scheduleSave()
+    commitTransaction(expected, transaction, label) {
+      if (aiHold) return AI_EDITING
+      return applyTransaction(expected, transaction, label)
+    },
+    aiEdit: null,
+    holdForAi(stop) {
+      if (aiHold) return null
+      const hold = { stop }
+      aiHold = hold
+      set({ aiEdit: { phase: 'editing' } })
+      const holding = () => aiHold === hold
+      return {
+        checking: () => { if (holding()) set({ aiEdit: { phase: 'checking' } }) },
+        fixing: () => { if (holding()) set({ aiEdit: { phase: 'fixing' } }) },
+        commit: (expected, transaction) => holding() ? applyTransaction(expected, transaction, null) : 'The AI edit was stopped. No changes applied.',
+        release: () => {
+          if (!holding()) return
+          aiHold = null
+          set({ aiEdit: null })
+        },
       }
-      return null
+    },
+    stopAiEdit() {
+      const hold = aiHold
+      if (!hold) return
+      aiHold = null
+      set({ aiEdit: null })
+      hold.stop()
     },
     appendPromptMessages(projectId, messages) {
       const project = get().project
@@ -446,6 +625,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       return null
     },
     replayDocument(direction) {
+      if (aiHold) return null
       const current = get().project
       if (!current) return null
       const result = history.take(direction, current)
@@ -453,6 +633,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       replaying = true
       try { commit(result.project, result.selection?.file); set({ documentSelection: result.selection }) }
       finally { replaying = false }
+      eventLog.record(current.id, { type: 'history', direction })
       return { selection: result.selection }
     },
     project: null,
@@ -465,6 +646,9 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     recents: [],
     lastSavedAt: null,
     saveError: null,
+    saveOutdated: false,
+    loadError: null,
+    durable: true,
     preview: { colorScheme: 'light', typeScale: 1, zoom: 'fit' },
 
     load() {
@@ -475,23 +659,40 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       })
       return loading
     },
+    async handOver({ save }) {
+      get().stopAiEdit()
+      if (save) await get().flush()
+      handedOver = true
+      const open = get().project
+      if (open) eventLog.record(open.id, { type: 'session', action: 'handed-over' })
+      // What is queued still gets written, but the other tab does not wait for it.
+      void eventLog.stop()
+    },
+    unsavedWork() {
+      const { project, saveError, durable } = get()
+      // An AI edit still running would go with the page, after its provider billed for it.
+      return !handedOver && project !== null && (aiHold !== null || !durable || saveError !== null || saved.get(project.id) !== project)
+    },
     async flush() {
       if (saveTimer) {
         clearTimeout(saveTimer)
         saveTimer = null
       }
       const { project } = get()
-      if (!project) return
+      if (!project || saved.get(project.id) === project || handedOver) return
 
       const problem = await writeProject(project)
       // A completed older write says nothing about edits made while it was saving.
       if (get().project !== project) return
-      set(problem ? { saveError: problem } : { lastSavedAt: Date.now(), saveError: null })
+      set(problem ? saveState(problem) : { lastSavedAt: Date.now(), ...saveState(null) })
     },
 
     setFileText(fileId, text) {
+      if (aiHold) return
       const { project } = get()
-      if (!project || !project.files.some(f => f.id === fileId && f.text !== text)) return
+      const file = project?.files.find(f => f.id === fileId)
+      if (!project || !file || file.text === text) return
+      eventLog.typed(project.id, fileId, file.text, text)
       typingGroup = 'typing:' + fileId
       try { set({ project: withFileText(project, fileId, text) }) }
       finally { typingGroup = undefined }
@@ -523,6 +724,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     createFile(name, parentFolder) {
+      if (aiHold) return null
       const { project } = get()
       if (!project) return null
 
@@ -541,6 +743,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
      * so the file's current folder is the parent unless the name names another.
      */
     renameFile(fileId, name) {
+      if (aiHold) return false
       const { project } = get()
       if (!project) return false
 
@@ -557,15 +760,18 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     renameProject(name) {
+      if (aiHold) return false
       const project = get().project
       const normalized = normalizeProjectName(name)
       if (!project || !normalized) return false
       if (project.manifest.name === normalized) return true
       commit({ ...project, manifest: { ...project.manifest, name: normalized, templateId: undefined }, updatedAt: Date.now() })
+      eventLog.record(project.id, { type: 'project', action: 'renamed' })
       return true
     },
 
     deleteFile(fileId) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -577,6 +783,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     duplicateFile(fileId) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -589,6 +796,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     createFolder(name, parentFolder) {
+      if (aiHold) return null
       const { project } = get()
       if (!project) return null
 
@@ -603,6 +811,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     renameFolder(path, name) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -620,6 +829,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     deleteFolder(path) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -631,6 +841,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     moveFile(fileId, folder) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
 
@@ -645,6 +856,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     setDevice(device) {
+      if (aiHold) return
       const { project } = get()
       if (!project) return
       commit({ ...project, manifest: { ...project.manifest, device }, updatedAt: Date.now() })
@@ -655,6 +867,7 @@ export const useStudio = create<StudioState>((rawSet, get) => {
     },
 
     renameSymbol(spans, newName) {
+      if (aiHold) return 0
       const { project } = get()
       if (!project || spans.length === 0 || !newName) return 0
 
@@ -685,21 +898,29 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       return spans.length
     },
 
-    async applyTemplate(templateId) {
+    async applyTemplate(templateId, options) {
+      if (handedOver) return 'failed'
+      // What this template makes is already open, untouched: making it again would
+      // swap it for an identical copy and redraw everything, and for that moment the
+      // canvas showed one project while edits went to the other (B6).
+      const open = get().project
+      if (open?.manifest.templateId === templateId && isPristine(open)) return 'opened'
+
       let module: Awaited<ReturnType<typeof templates>>
       try {
         module = await templates()
       } catch {
-        return false
+        return 'failed'
       }
 
       const template = module.templateById(templateId)
-      if (!template) return false
+      if (!template) return 'failed'
 
-      return replace(module.createProjectFromTemplate(template))
+      return replace(withUnusedName(module.createProjectFromTemplate(template)), { type: 'project', action: 'created', template: templateId }, options)
     },
 
     async importProject(expected, incoming) {
+      if (handedOver) return 'Swift Web Studio is open in another tab. Use it there, or choose Use it here.'
       if (importGuard || get().project !== expected) return 'The current project changed. Reopen the archive to review it again.'
       await get().flush()
       if (get().saveError) return get().saveError
@@ -707,33 +928,42 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       importGuard = { id: expected.id, latest: expected }
       try {
         const problem = await writeProject(incoming)
-        if (problem) return problem
+        if (problem) return problem.message
         if (get().project !== expected) {
           if (incoming.id === expected.id) await writeProject(importGuard.latest)
           return 'The project changed during import. Its current work was preserved. Reopen the archive.'
         }
         const first = incoming.files[0]?.id ?? null
-        set({ project: incoming, activeFileId: first, openFileIds: first ? [first] : [], lastSavedAt: Date.now(), saveError: null, origin: 'restored' })
+        // The archive replaces the project now, and an AI answer planned against it no longer fits.
+        get().stopAiEdit()
+        set({ project: incoming, activeFileId: first, openFileIds: first ? [first] : [], lastSavedAt: Date.now(), ...saveState(null), origin: 'restored' })
         rememberLastOpened(incoming.id)
+        eventLog.record(incoming.id, { type: 'project', action: 'imported' })
         await refreshRecents()
         return null
       } finally { importGuard = null }
     },
 
-    async openFiles(files) {
+    async openFiles(files, options) {
+      if (handedOver) return 'failed'
       const project = projectFromFiles(files)
-      if (!project) return false
-      return replace(project)
+      if (!project) return 'failed'
+      return replace(withUnusedName(project), { type: 'project', action: 'created', files: files.length }, options)
     },
 
-    async openProject(id) {
+    async openProject(id, { leaveUnsaved = false } = {}) {
+      // What this tab holds is out of date once another has the studio. Switching from
+      // it used to delete the project left behind when it looked untouched - the very
+      // record the other tab was editing - and moved which project a reload opens.
+      if (handedOver) return 'failed'
       const request = ++switchRequest, outgoingId = get().project?.id
-      if (outgoingId === id) return true
+      if (outgoingId === id) return 'opened'
 
       // The project on screen is written before anything else is read: the debounce
       // may still be holding the last few keystrokes, and they belong to the project
       // being left rather than to the one being opened.
-      if (!await saveBeforeSwitch(request, outgoingId)) return false
+      const blocked = await leaveOutgoing(request, outgoingId, leaveUnsaved)
+      if (blocked) return blocked
 
       let opened: Project | null = null
       try {
@@ -744,10 +974,16 @@ export const useStudio = create<StudioState>((rawSet, get) => {
       if (!opened) {
         // The row was stale - deleted in another tab, or storage went away.
         await refreshRecents()
-        return false
+        return 'failed'
       }
-      if (!await saveBeforeSwitch(request, outgoingId)) return false
+      const overtaken = await leaveOutgoing(request, outgoingId, leaveUnsaved)
+      if (overtaken) return overtaken
+      // The switch happens now, and an AI answer planned against the project being left no longer fits anything.
+      get().stopAiEdit()
 
+      // What was just read is what is stored, so nothing about it is unsaved - even
+      // when the project left behind could not be.
+      saved.set(opened.id, opened)
       const first = opened.files[0]?.id ?? null
       set({
         project: opened,
@@ -755,25 +991,45 @@ export const useStudio = create<StudioState>((rawSet, get) => {
         openFileIds: first ? [first] : [],
         origin: 'restored',
         lastSavedAt: null,
+        ...saveState(null),
       })
       rememberLastOpened(id)
+      eventLog.record(id, { type: 'project', action: 'opened' })
       await refreshRecents()
-      return true
+      return 'opened'
     },
 
     async removeProject(id) {
+      if (handedOver) return
       // Deleting what is on screen would leave the studio holding a project that no
       // longer exists, and the next autosave would write it straight back.
       if (get().project?.id === id) return
 
       try {
         await persistence().remove(id)
+        eventLog.forget(id)
       } catch {
-        // Nothing useful to do: the row stays, and the list says so on the next read.
+        // Nothing useful to do: the row stays, with its events, and the list says so on the next read.
       }
       await refreshRecents()
     },
   }
+})
+
+// The recovery screen reads the open project from here - edits the autosave has not
+// written yet included - without importing the store itself.
+registerLiveWork({
+  project: () => useStudio.getState().project,
+  flush: async () => { await useStudio.getState().flush(); return useStudio.getState().saveError },
+  archive: async project => {
+    const { exportEditableZip } = await import('@studio/exporter')
+    return exportEditableZip(project, { build: STUDIO_BUILD, events: (await eventLog.file(project.id)).text })
+  },
+  logged: () => eventLog.flush(),
+  record: event => {
+    const open = useStudio.getState().project
+    if (open) eventLog.record(open.id, { type: 'recovery', ...event })
+  },
 })
 
 /**

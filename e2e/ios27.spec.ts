@@ -1,11 +1,12 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { PNG } from 'pngjs'
+import { openCounter, replaceSource } from './designer-helpers'
 import { readFileSync } from 'node:fs'
 
 const source = readFileSync(new URL('../tests/fixtures/ios27-screens.swift', import.meta.url), 'utf8')
 const preview = (page: Page) => page.getByTestId('render-tree')
 async function openFixture(page: Page) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   // Code opens with the preview pointing at views; the matrix taps it as an app.
   await page.getByTestId('live-toggle').click()
@@ -117,4 +118,81 @@ test('reference phone retains native paragraph word boundaries on macOS', async 
     'and keep the same margins when text size',
     'changes.',
   ])
+})
+
+test.describe('a grouped list card as the browser draws it', () => {
+  test.use({ deviceScaleFactor: 3 })
+
+  test('rounds its corners as the iOS 27 simulator does', async ({ page }) => {
+    await openCounter(page)
+    await page.getByTestId('workspace-develop').click()
+    await replaceSource(page, `import SwiftUI
+
+@main
+struct DemoApp: App {
+    var body: some Scene { WindowGroup { ContentView() } }
+}
+
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            List { Section { Text("One"); Text("Two"); Text("Three") } }
+                .navigationTitle("Corners")
+        }
+    }
+}`)
+    await expect(preview(page).getByText('Three', { exact: true })).toBeVisible()
+
+    // The card is 370 pt wide, which gives the preview's scale on the page.
+    const box = (await preview(page).locator('[data-node-id$="s0clip-clip"]').first().boundingBox())!
+    const scale = box.width / 370
+    // Whole CSS pixels, which both engines clip alike, measured from the card's own corner.
+    const clip = { x: Math.floor(box.x), y: Math.floor(box.y), width: Math.ceil(14 * scale) + 2, height: Math.ceil(26 * scale) + 2 }
+    const shot = PNG.sync.read(await page.screenshot({ clip }))
+    const ratio = shot.width / clip.width
+    // How far below the card's top its edge is, 4.5 pt in: 11.26 pt in the simulator, and
+    // 6 for the corner the preview drew before. The card is white on the grey.
+    const column = Math.round((box.x - clip.x + 4.5 * scale) * ratio)
+    const green = (y: number) => shot.data[(y * shot.width + column) * 4 + 1]!
+    const grey = green(0), edge = (grey + 255) / 2
+    let y = Math.round((box.y - clip.y) * ratio)
+    while (y < shot.height && green(y) < edge) y++
+    expect(Math.abs((y / ratio - (box.y - clip.y)) / scale - 11.26)).toBeLessThan(1)
+  })
+})
+
+test('the iPhone 18 Pro is drawn in its own artwork, which taps pass through', async ({ page }) => {
+  await openCounter(page)
+  await page.getByTestId('live-toggle').click()
+  await expect(page.getByTestId('page-gallery')).toHaveCount(0)
+  const frame = page.getByTestId('device-frame')
+  const art = frame.getByTestId('device-art')
+  const screen = frame.getByTestId('device-screen')
+
+  // The screen sits in the artwork's opening: 402 x 874 pt, 24 pt in and 23 pt down a 450 x 920 phone.
+  const outer = (await frame.boundingBox())!, inner = (await screen.boundingBox())!
+  const zoom = inner.width / 402
+  expect(inner.height / zoom).toBeCloseTo(874, 0)
+  expect((inner.x - outer.x) / zoom).toBeCloseTo(24, 0)
+  expect((inner.y - outer.y) / zoom).toBeCloseTo(23, 0)
+  expect(outer.width / zoom).toBeCloseTo(450, 0)
+  expect(outer.height / zoom).toBeCloseTo(920, 0)
+
+  // The black phone on the light workspace, served as an image, with the artwork's own island only.
+  await expect(art).toHaveCSS('background-image', /\/devices\/iphone-18-pro-black\.webp/)
+  expect((await page.request.get('/devices/iphone-18-pro-black.webp')).headers()['content-type']).toBe('image/webp')
+  await expect(frame.getByTestId('dynamic-island')).toHaveCount(0)
+
+  // A tap at the screen's edge reaches the app, and so does one on a button.
+  const edge = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-testid="device-screen"]') != null, [inner.x + 3 * zoom, inner.y + inner.height / 2])
+  expect(edge).toBe(true)
+  await preview(page).getByRole('button', { name: 'Plus', exact: true }).click()
+  await expect(preview(page).getByText('Count: 1', { exact: true })).toBeVisible()
+
+  // The dark workspace swaps in the silver phone, which a dark canvas does not swallow.
+  await page.getByTestId('workspace-more').click()
+  await page.getByTestId('workspace-more-menu-theme').click()
+  await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'dark')
+  await expect(art).toHaveCSS('background-image', /\/devices\/iphone-18-pro-silver\.webp/)
+  expect((await page.request.get('/devices/iphone-18-pro-silver.webp')).headers()['content-type']).toBe('image/webp')
 })

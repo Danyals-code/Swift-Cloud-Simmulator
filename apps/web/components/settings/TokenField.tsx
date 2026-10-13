@@ -53,7 +53,8 @@ export function TokenField({ field, label, tokens, busy = false, onChange, onCom
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  if (!style) return control && onChange ? <PropertyControl control={control} label={label} onChange={onChange} /> : null
+  // Keyed by the value, so an Undo that changes it draws the field afresh rather than the old draft (C6).
+  if (!style) return control && onChange ? <PropertyControl key={`${control.id}:${control.value}`} control={control} label={label} onChange={onChange} /> : null
   const kind = style.kind
   const choices = tokens.filter(token => token.kind === kind || kind === 'radius' && token.kind === 'spacing' && token.form === 'legacy')
   const linked = style.token ? choices.find(token => token.name === style.token) : undefined
@@ -83,7 +84,7 @@ export function TokenField({ field, label, tokens, busy = false, onChange, onCom
       </span>
     </div>
     {override && <span className={styles.note}>Overrides the App value</span>}
-    {!linked && control && onChange && <PropertyControl control={control} label={`${title} value`} onChange={onChange} />}
+    {!linked && control && onChange && <PropertyControl key={`${control.id}:${control.value}`} control={control} label={`${title} value`} onChange={onChange} />}
     {!linked && kind === 'color' && onCommand && <CustomColor value={tokenValue} disabled={busy || pending} onApply={hex => void run({ kind: 'style-local', property: style.property, value: hex })} />}
     {!linked && onCommand && kind !== 'shadow' && (saving
       ? <form className={styles.inline} onSubmit={event => { event.preventDefault(); if (nameHint(kind, name)) return; void run({ kind: 'style-create-link', property: style.property, name: name.trim(), style: kind, value: tokenValue, token: kind === 'font' ? { value: tokenValue, font: { style: tokenValue } } : { value: tokenValue } }) }}>

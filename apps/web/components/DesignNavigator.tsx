@@ -1,8 +1,8 @@
 'use client'
 
 import { Fragment, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
-import type { PagePreview } from '@studio/shared'
-import { designScreenPath, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
+import type { Diagnostic, PagePreview } from '@studio/shared'
+import { canRename, designScreenPath, DETACHED_GROUP, emptyScreensNote, SHEETS_GROUP, type DesignComponent, type DesignScreenNode, type DesignTree } from '../lib/designTree'
 import type { ScreenCommand } from '../lib/screens'
 import type { NavigatorLayout } from '../lib/layout'
 import { Icon, type IconName } from './ui/Icon'
@@ -23,6 +23,10 @@ export interface DesignNavigatorProps {
   /** The Main being edited, when a component definition is selected. */
   selectedComponent?: string
   busy: boolean
+  /** What the last compile found: an error is why a list of screens is empty. */
+  diagnostics: readonly Diagnostic[]
+  /** Shows a place in Code, for the error an empty list of screens names. */
+  onReveal: (file: string, offset: number) => void
   onTogglePanel: () => void
   onSelectApp: () => void
   onSelectScreen: (page: PagePreview) => void
@@ -52,7 +56,7 @@ const BASE = 8
  * above this component, so switching between the two never loses it.
  */
 export function DesignNavigator(props: DesignNavigatorProps) {
-  const { appName, tree, layout, onLayoutChange, level, selectedScreenId, selectedComponent, busy, onTogglePanel, onSelectApp, onSelectScreen, onSelectComponent, onInsertComponent, onScreenCommand, renderLayers } = props
+  const { appName, tree, layout, onLayoutChange, level, selectedScreenId, selectedComponent, busy, diagnostics, onReveal, onTogglePanel, onSelectApp, onSelectScreen, onSelectComponent, onInsertComponent, onScreenCommand, renderLayers } = props
   const [query, setQuery] = useState('')
   const [focus, setFocus] = useState(false)
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(['app', 'group:screens']))
@@ -61,6 +65,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const needle = query.trim().toLowerCase()
+  const empty = emptyScreensNote(busy, diagnostics)
   const path = useMemo(() => designScreenPath(tree, selectedScreenId), [tree, selectedScreenId])
   const isOpen = (id: string) => !!needle || (!closed.has(id) && (open.has(id) || path.includes(id)))
   const toggle = (id: string) => {
@@ -77,8 +82,10 @@ export function DesignNavigator(props: DesignNavigatorProps) {
   const matches = (node: DesignScreenNode): boolean => !needle || node.name.toLowerCase().includes(needle) || node.id === selectedScreenId || node.children.some(matches)
   const inFocus = (node: DesignScreenNode): boolean => !focus || !selectedScreenId || path.includes(node.id) || node.id === selectedScreenId
 
+  // A screen written inside another has no view to act on; one sharing its view with
+  // other screens is named by its title, so it isn't renamed on its own.
   const screenActions = (node: DesignScreenNode): MenuItem[] => node.view ? [
-    { value: 'rename', label: 'Rename…', disabled: busy },
+    ...(canRename(node) ? [{ value: 'rename', label: 'Rename…', disabled: busy }] : []),
     { value: 'duplicate', label: 'Duplicate', disabled: busy },
     { value: 'remove', label: 'Remove screen', disabled: busy, separated: true },
   ] : []
@@ -105,15 +112,15 @@ export function DesignNavigator(props: DesignNavigatorProps) {
 
   const screensGroup = (depth: number, withLayers: boolean) => <>
     {tree.lanes.map(lane => screenRows(lane.root, depth, withLayers))}
-    {!focus && !!tree.detached.length && <>
-      <GroupRow id="group:detached" depth={depth} label="Not linked yet" count={tree.detached.length} expanded={isOpen('group:detached')} onToggle={() => toggle('group:detached')} title="Screens nothing navigates to yet. Add a Navigate to action to connect one." />
-      {isOpen('group:detached') && tree.detached.map(node => screenRows(node, depth + 1, withLayers))}
+    {(!focus || path.includes(DETACHED_GROUP)) && !!tree.detached.length && <>
+      <GroupRow id={DETACHED_GROUP} depth={depth} label="Not linked yet" count={tree.detached.length} expanded={isOpen(DETACHED_GROUP)} onToggle={() => toggle(DETACHED_GROUP)} title="Screens nothing navigates to yet. Add a Navigate to action to connect one." />
+      {isOpen(DETACHED_GROUP) && tree.detached.map(node => screenRows(node, depth + 1, withLayers))}
     </>}
-    {!tree.lanes.length && !tree.detached.length && <p className={styles.empty}>{busy ? 'Drawing screens…' : 'No screens yet.'}</p>}
+    {!tree.lanes.length && !tree.detached.length && <p className={styles.empty}>{empty.text}{empty.at && <> <button type="button" className={styles.emptyAction} onClick={() => onReveal(empty.at!.file, empty.at!.offset)}>Show in Code</button></>}</p>}
   </>
   const sheetsGroup = (depth: number, withLayers: boolean) => !tree.sheets.length ? null : <>
-    <GroupRow id="group:sheets" depth={depth} label="Sheets" icon="sheet" count={tree.sheets.length} expanded={isOpen('group:sheets')} onToggle={() => toggle('group:sheets')} />
-    {isOpen('group:sheets') && tree.sheets.map(sheet => screenRows(sheet.screen, depth + 1, withLayers, sheet.openers.length > 1 ? `Opened from ${sheet.openers.length} screens` : undefined))}
+    <GroupRow id={SHEETS_GROUP} depth={depth} label="Sheets" icon="sheet" count={tree.sheets.length} expanded={isOpen(SHEETS_GROUP)} onToggle={() => toggle(SHEETS_GROUP)} />
+    {isOpen(SHEETS_GROUP) && tree.sheets.map(sheet => screenRows(sheet.screen, depth + 1, withLayers, sheet.openers.length > 1 ? `Opened from ${sheet.openers.length} screens` : undefined))}
   </>
   const componentsGroup = (depth: number) => <>
     <GroupRow id="group:components" depth={depth} label="Components" icon="component" count={tree.components.length} expanded={isOpen('group:components')} onToggle={() => toggle('group:components')} />
@@ -127,7 +134,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
   const addScreen = <button type="button" className={styles.add} aria-label="Add screen" title="Add screen" disabled={busy || pending} onClick={() => { setEditing({ view: null, name: 'New screen', layout: 'VStack' }); setError(null) }} data-testid="add-screen"><Icon name="plus" size={13} /></button>
   const form = editing && <form className={styles.form} onSubmit={event => { event.preventDefault(); void command(editing.view ? { kind: 'rename', view: editing.view, name: editing.name } : { kind: 'create', name: editing.name, layout: editing.layout }) }}>
     <label>{editing.view ? 'Screen name' : 'New screen name'}<input autoFocus aria-label="Screen name" maxLength={100} value={editing.name} onChange={event => setEditing({ ...editing, name: event.target.value })} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setEditing(null) } }} /></label>
-    {!editing.view && <label>Starts with<select aria-label="Screen layout" value={editing.layout} onChange={event => setEditing({ ...editing, layout: event.target.value as typeof editing.layout })}><option value="VStack">A column (top to bottom)</option><option value="HStack">A row (left to right)</option><option value="ZStack">Layers (front to back)</option></select></label>}
+    {!editing.view && <label>Starts with<select aria-label="Screen layout" value={editing.layout} onChange={event => setEditing({ ...editing, layout: event.target.value as typeof editing.layout })}><option value="VStack">A column (top to bottom)</option><option value="HStack">A row (left to right)</option><option value="ZStack">An overlap (front to back)</option></select></label>}
     <div><button type="submit" disabled={busy || pending || !editing.name.trim()}>{editing.view ? 'Rename' : 'Add screen'}</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></div>
   </form>
 
@@ -177,7 +184,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
         {!focus && componentsGroup(1)}
         <GroupRow id="group:screens" depth={1} label={tree.navigation === 'tabs' ? 'Tabs' : 'Screens'} icon={tree.navigation === 'tabs' ? 'tabs' : 'screens'} expanded={isOpen('group:screens')} onToggle={() => toggle('group:screens')} action={addScreen} />
         {isOpen('group:screens') && screensGroup(2, true)}
-        {!focus && sheetsGroup(1, true)}
+        {(!focus || path.includes(SHEETS_GROUP)) && sheetsGroup(1, true)}
       </>}
     </div>
     {feedback}

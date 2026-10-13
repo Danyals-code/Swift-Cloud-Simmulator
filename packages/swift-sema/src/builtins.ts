@@ -34,12 +34,16 @@ export const SUPPORTED_VIEWS: ReadonlySet<string> = new Set([
   'List', 'Section', 'Form',
   'NavigationStack', 'NavigationView', 'NavigationLink', 'TabView', 'Tab',
   'DisclosureGroup', 'AnyView', 'GroupBox', 'LabeledContent', 'ControlGroup',
-  'NavigationSplitView', 'TimelineView',
+  'NavigationSplitView', 'TimelineView', 'TabSection',
+  // content handed one value: a proxy, a first phase, an initial value
+  'ScrollViewReader', 'PhaseAnimator', 'KeyframeAnimator',
   // controls drawn plainly
   'DatePicker', 'ColorPicker', 'TextEditor', 'Menu', 'ShareLink', 'Gauge', 'AsyncImage',
   'ContentUnavailableView',
   // shapes and drawing
   'Rectangle', 'RoundedRectangle', 'Circle', 'Ellipse', 'Capsule', 'Path', 'Canvas',
+  // every corner drawn with the largest radius, and said so (D7a)
+  'UnevenRoundedRectangle',
   // styles
   'LinearGradient', 'RadialGradient', 'AngularGradient', 'GridItem',
   // gestures
@@ -177,7 +181,7 @@ export function isViewRoot(name: string): boolean {
  */
 export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // containers
-  'ScrollViewReader', 'EquatableView',
+  'EquatableView',
   // data-driven
   'Table', 'TableColumn', 'OutlineGroup', 'MultiDatePicker',
   // charts
@@ -191,11 +195,10 @@ export const UNIMPLEMENTED_VIEWS: ReadonlySet<string> = new Set([
   // in a file blanked the whole preview. `ContentUnavailableView` is the one that
   // found this: an empty-state view is written on the way to a first screen, not after
   // it.
-  'PhaseAnimator', 'KeyframeAnimator',
   'EditButton', 'PasteButton', 'RenameButton',
-  'UnevenRoundedRectangle', 'AnyShape',
+  'AnyShape',
   // iOS 18
-  'TabSection', 'MeshGradient',
+  'MeshGradient',
 ])
 
 /**
@@ -319,15 +322,62 @@ export const STYLE_TOKENS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['textFieldStyle', new Set(['automatic', 'plain', 'roundedBorder'])],
 ])
 
+/**
+ * The colour names the preview draws, as `Color.name`, `Color(.name)` or `UIColor.name`.
+ *
+ * Any other name draws clear, so the checker warns on it. The runtime's palette holds
+ * exactly these (a test keeps the two equal): the SwiftUI colours, UIKit's names for
+ * them, and the semantic colours, all as the iOS 27 simulator draws them.
+ */
+export const KNOWN_COLOR_NAMES: ReadonlySet<string> = new Set([
+  'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown',
+  'gray', 'black', 'white', 'clear', 'primary', 'secondary', 'tertiary', 'quaternary', 'quinary',
+  'accentColor', 'accent', 'tint',
+  'systemRed', 'systemOrange', 'systemYellow', 'systemGreen', 'systemMint', 'systemTeal', 'systemCyan',
+  'systemBlue', 'systemIndigo', 'systemPurple', 'systemPink', 'systemBrown',
+  'systemGray', 'systemGray2', 'systemGray3', 'systemGray4', 'systemGray5', 'systemGray6',
+  'label', 'secondaryLabel', 'tertiaryLabel', 'quaternaryLabel', 'placeholderText', 'link',
+  'separator', 'opaqueSeparator',
+  'systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground',
+  'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground',
+  'systemFill', 'secondarySystemFill', 'tertiarySystemFill', 'quaternarySystemFill',
+])
+
+/** The colours `Color` itself has: `Color.red`, and `.red` wherever a colour is expected. */
+export const SWIFTUI_COLOR_NAMES: ReadonlySet<string> = new Set([
+  'red', 'orange', 'yellow', 'green', 'mint', 'teal', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'brown',
+  'gray', 'black', 'white', 'clear', 'primary', 'secondary', 'accentColor',
+])
+
+/**
+ * The colours `UIColor` has, which SwiftUI reaches through the bridge: `Color(.systemGray6)`,
+ * `Color(uiColor: .label)`, `UIColor.darkGray`. Written as `Color.systemGray6` they don't
+ * exist, and Xcode rejects them. UIKit's fixed colours are its own: `Color(.red)` is
+ * `UIColor.red`, pure red, not `Color.red`.
+ */
+export const UIKIT_COLOR_NAMES: ReadonlySet<string> = new Set([
+  'systemRed', 'systemOrange', 'systemYellow', 'systemGreen', 'systemMint', 'systemTeal', 'systemCyan',
+  'systemBlue', 'systemIndigo', 'systemPurple', 'systemPink', 'systemBrown',
+  'systemGray', 'systemGray2', 'systemGray3', 'systemGray4', 'systemGray5', 'systemGray6',
+  'label', 'secondaryLabel', 'tertiaryLabel', 'quaternaryLabel', 'placeholderText', 'link',
+  'separator', 'opaqueSeparator',
+  'systemBackground', 'secondarySystemBackground', 'tertiarySystemBackground',
+  'systemGroupedBackground', 'secondarySystemGroupedBackground', 'tertiarySystemGroupedBackground',
+  'systemFill', 'secondarySystemFill', 'tertiarySystemFill', 'quaternarySystemFill',
+  'black', 'darkGray', 'lightGray', 'white', 'gray', 'red', 'green', 'blue', 'cyan', 'yellow',
+  'magenta', 'orange', 'purple', 'brown', 'clear', 'tintColor',
+])
+
 /** Types nameable in the preview - as a value (`Color.red`) or an annotation (`: Int`). */
 export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'String', 'Bool', 'Character',
   'Array', 'Dictionary', 'Set', 'Optional', 'Range', 'ClosedRange',
-  'Color', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
+  'Color', 'UIColor', 'Font', 'Alignment', 'HorizontalAlignment', 'VerticalAlignment',
   'Edge', 'EdgeInsets', 'Angle', 'UnitPoint', 'CGFloat', 'CGSize', 'CGPoint', 'CGRect',
   'Animation', 'AnyTransition', 'Axis', 'ContentMode', 'PresentationDetent',
-  'Material', 'StrokeStyle', 'GeometryProxy', 'Gradient', 'AnyShapeStyle',
-  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval',
+  'Material', 'StrokeStyle', 'GeometryProxy', 'ScrollViewProxy', 'Gradient', 'AnyShapeStyle',
+  'RectangleCornerRadii',
+  'ToolbarItemPlacement', 'Binding', 'UUID', 'Date', 'URL', 'TimeInterval', 'IndexSet',
   'ObservableObject', 'AnyObject', 'Error', 'DynamicTypeSize', 'ColorScheme',
   'Task', 'MainActor', 'Duration', 'Sendable', 'Comparable', 'Equatable', 'Hashable',
   'ViewModifier', 'ButtonStyle', 'LabelStyle', 'ToggleStyle', 'Configuration',
@@ -337,6 +387,8 @@ export const KNOWN_TYPES: ReadonlySet<string> = new Set([
   'LayoutDirection', 'UserInterfaceSizeClass', 'Locale',
   'View', 'App', 'Scene', 'Identifiable', 'Equatable', 'Hashable', 'Comparable', 'Codable',
   'Void', 'Any', 'AnyObject', 'Never',
+  // Foundation around dates: a timer never fires in the preview, and the checker says so.
+  'Timer', 'Calendar',
 ])
 
 /**
@@ -367,6 +419,8 @@ export const PROPERTY_WRAPPERS: ReadonlyMap<string, { supported: boolean }> = ne
   ['Binding', { supported: true }],
   ['StateObject', { supported: true }],
   ['ObservedObject', { supported: true }],
+  // `$model.name` projects through the reference an `@Observable` class already is.
+  ['Bindable', { supported: true }],
   ['EnvironmentObject', { supported: true }],
   ['Environment', { supported: true }],
   // A stored property on a class, which is a reference - so a change is visible
@@ -402,12 +456,39 @@ export const EXTENSIBLE_BUILTIN_TYPES: ReadonlySet<string> = new Set([
   'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL', 'Color', 'Font',
 ])
 
+/**
+ * The style types written before iOS 15, each the style its token names now:
+ * `.buttonStyle(PlainButtonStyle())` is `.buttonStyle(.plain)`.
+ */
+export const LEGACY_STYLE_TOKENS: ReadonlyMap<string, string> = new Map([
+  ['DefaultButtonStyle', 'automatic'], ['PlainButtonStyle', 'plain'], ['BorderlessButtonStyle', 'borderless'],
+  ['BorderedButtonStyle', 'bordered'], ['BorderedProminentButtonStyle', 'borderedProminent'],
+  ['DefaultListStyle', 'automatic'], ['PlainListStyle', 'plain'], ['GroupedListStyle', 'grouped'],
+  ['InsetListStyle', 'inset'], ['InsetGroupedListStyle', 'insetGrouped'], ['SidebarListStyle', 'sidebar'],
+  ['DefaultPickerStyle', 'automatic'], ['SegmentedPickerStyle', 'segmented'], ['MenuPickerStyle', 'menu'],
+  ['InlinePickerStyle', 'inline'], ['WheelPickerStyle', 'wheel'], ['NavigationLinkPickerStyle', 'navigationLink'],
+  ['DefaultDatePickerStyle', 'automatic'], ['CompactDatePickerStyle', 'compact'], ['GraphicalDatePickerStyle', 'graphical'], ['WheelDatePickerStyle', 'wheel'],
+  ['DefaultToggleStyle', 'automatic'], ['SwitchToggleStyle', 'switch'], ['ButtonToggleStyle', 'button'],
+  ['DefaultTextFieldStyle', 'automatic'], ['PlainTextFieldStyle', 'plain'], ['RoundedBorderTextFieldStyle', 'roundedBorder'],
+  ['DefaultTabViewStyle', 'automatic'], ['PageTabViewStyle', 'page'],
+  ['DefaultProgressViewStyle', 'automatic'], ['LinearProgressViewStyle', 'linear'], ['CircularProgressViewStyle', 'circular'],
+  ['DefaultLabelStyle', 'automatic'], ['IconOnlyLabelStyle', 'iconOnly'], ['TitleOnlyLabelStyle', 'titleOnly'], ['TitleAndIconLabelStyle', 'titleAndIcon'],
+  ['StackNavigationViewStyle', 'stack'], ['DoubleColumnNavigationViewStyle', 'columns'],
+])
+
+/** What a `KeyframeAnimator`'s `keyframes:` closure is written with. The preview never runs it. */
+export const KEYFRAME_TYPES: ReadonlySet<string> = new Set([
+  'KeyframeTrack', 'LinearKeyframe', 'CubicKeyframe', 'SpringKeyframe', 'MoveKeyframe', 'KeyframeTimeline',
+])
+
 export function isKnownGlobal(name: string): boolean {
   return (
     SUPPORTED_VIEWS.has(name) ||
     UNIMPLEMENTED_VIEWS.has(name) ||
     KNOWN_TYPES.has(name) ||
-    KNOWN_FUNCTIONS.has(name)
+    KNOWN_FUNCTIONS.has(name) ||
+    LEGACY_STYLE_TOKENS.has(name) ||
+    KEYFRAME_TYPES.has(name)
   )
 }
 

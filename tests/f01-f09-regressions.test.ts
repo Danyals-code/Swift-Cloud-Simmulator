@@ -91,7 +91,8 @@ it('F03 updates the second Design value and keeps inherited disabling through Gr
   text = set(text, 'Button', 'disabled', 'true')
   expect(text).toContain('.disabled(false).disabled(true)')
   expect(render(text).nodes.find(n => n.hitTarget)?.hitTarget?.enabled).toBe(false)
-  expect(render(text).nodes.some(n => n.opacity === 0.4)).toBe(true)
+  // Grey, as iOS 27 draws a disabled button, rather than its tint faded.
+  expect(render(text).nodes.find(n => n.text?.runs[0]?.text === 'Press')?.text?.runs[0]?.color).toEqual({ r: 60, g: 60, b: 67, a: 0.3 })
   const inherited = source('VStack { Group { Button("Press") { }.disabled(false) } }.disabled(false).disabled(true)')
   expect(render(inherited).nodes.find(n => n.hitTarget)?.hitTarget?.enabled).toBe(false)
 })
@@ -320,6 +321,10 @@ it('F09 exposes the existing system font and foregroundStyle and edits their eff
   const run = render(text).nodes.find(n => n.text)?.text?.runs[0]
   expect(run?.font.size).toBe(24)
   expect(run?.color.b).toBeGreaterThan(run?.color.r ?? 255)
+})
+it('reads a screen\'s Text color override under either name, as it is now written .foregroundStyle (D9)', () => {
+  expect(screenOverrideModifier(find(source('Text("Old").foregroundColor(.blue)'), 'Text'), 'foregroundStyle')?.name).toBe('foregroundColor')
+  expect(screenOverrideModifier(find(source('Text("New").foregroundStyle(.blue)'), 'Text'), 'foregroundStyle')?.name).toBe('foregroundStyle')
 })
 it('F09 selects the nearest enabled alias and sends advanced existing values to Code', () => {
   const text = source('Text("Override").foregroundStyle(.red).foregroundColor(.blue).font(.system(size: 20 + 20))')

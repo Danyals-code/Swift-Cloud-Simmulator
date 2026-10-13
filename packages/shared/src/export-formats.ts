@@ -9,6 +9,9 @@
 
 export type ExportFormat = 'xcodeproj' | 'swiftpm' | 'spm' | 'xcodegen'
 
+/** Every archive the studio hands over: the four formats, the complete Xcode bundle and the editable archive. */
+export type ArchiveFormat = ExportFormat | 'complete' | 'editable'
+
 export interface FormatInfo {
   readonly id: ExportFormat
   readonly name: string
@@ -22,7 +25,7 @@ export interface FormatInfo {
    * answers "which one is this" faster than any description of it can.
    */
   readonly shortName: string
-  /** What the download is called, minus the project name. */
+  /** How the download's name ends, after the app's name and the minute it was made. */
   readonly suffix: string
 }
 
@@ -32,7 +35,7 @@ export const EXPORT_FORMATS: readonly FormatInfo[] = [
     name: 'Xcode project',
     description: 'Open on a Mac and press Run.',
     shortName: '.xcodeproj',
-    suffix: '.zip',
+    suffix: '-xcodeproj.zip',
   },
   {
     id: 'swiftpm',

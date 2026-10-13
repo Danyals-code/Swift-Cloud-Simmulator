@@ -132,19 +132,20 @@ function AssetPreview({ asset, onClose }: { asset: ImageAsset; onClose: () => vo
   const [dark, setDark] = useState(false)
   const closeRef = useRef<HTMLButtonElement>(null), imageRef = useRef<HTMLImageElement>(null)
   const variant = dark && asset.dark ? asset.dark : asset.light
-  /** The size the image is drawn at, as a fraction of its pixels: what Fit came to. */
+  /** The size Fit draws the image at, as a fraction of its pixels; kept while zoomed. */
   const [shown, setShown] = useState(1)
   useEffect(() => {
     const image = imageRef.current
-    if (!image) return
+    if (!image || zoom !== 'fit') return
     const measure = () => setShown(image.clientWidth / variant.width || 1)
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(image)
     return () => observer.disconnect()
-  }, [variant])
+  }, [variant, zoom])
+  /** The same, for the key handler, which outlives renders. */
   const fitted = useRef(shown)
-  fitted.current = zoom === 'fit' ? shown : fitted.current
+  useEffect(() => { fitted.current = shown }, [shown])
   const step = (direction: 1 | -1) => setZoom(current => {
     // From Fit, a step goes to the next size from the one on screen.
     const now = current === 'fit' ? fitted.current : current

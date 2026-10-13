@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 /**
  * Phase 4 gates - the IDE experience.
@@ -22,10 +23,7 @@ import { expect, test, type Page } from '@playwright/test'
  * what is already open.
  */
 async function openStudio(page: Page) {
-  await page.goto('/')
-  await expect(page.getByTestId('template-gallery')).toBeVisible()
-  await page.getByTestId('gallery-dismiss').click()
-  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   if (await page.getByTestId('pane-toggle-debug').getAttribute('aria-pressed') === 'false') await page.getByTestId('pane-toggle-debug').click()
   // Code opens with the preview pointing at views; the inspector gates switch back.
@@ -253,8 +251,9 @@ test('gate 3 - the inspector names a view and reports its computed frame', async
 
   await expect(page.getByTestId('inspector-readout')).toContainText('Text')
   await expect(page.getByTestId('inspect-highlight')).toBeVisible()
-  // `.largeTitle` measures 41pt tall - the number a screenshot cannot tell you.
-  await expect(page.getByTestId('inspector-frame')).toContainText('41')
+  // A line of `.largeTitle` is 40.67 pt tall in the iOS 27 simulator - the number a
+  // screenshot cannot tell you.
+  await expect(page.getByTestId('inspector-frame')).toContainText('× 40.7')
 })
 
 test('gate 3 - clicking an inspected view jumps the editor to its source', async ({ page }) => {

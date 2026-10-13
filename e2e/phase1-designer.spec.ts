@@ -32,7 +32,8 @@ test('profile button labels and styles are editable and reset preserves the desi
   await page.getByTestId('template-card').click()
   await page.getByTestId('template-confirm').click()
   await expect(page.getByTestId('template-gallery')).toBeHidden()
-  await page.getByTestId('render-tree').getByRole('button', { name: 'Follow', exact: true }).click()
+  // The button sits in the profile card, which a plain click selects whole; ⌘ reaches the button (D1).
+  await page.getByTestId('render-tree').getByRole('button', { name: 'Follow', exact: true }).click({ modifiers: ['ControlOrMeta'] })
   const title = page.getByTestId('settings-basics').getByRole('textbox', { name: 'Title · otherwise', exact: true })
   await title.fill('Join club'); await title.press('Enter')
   const joined = page.getByTestId('settings-basics').getByRole('textbox', { name: /Title · when following is true/ })
@@ -45,7 +46,7 @@ test('profile button labels and styles are editable and reset preserves the desi
   await page.getByTestId('reset-preview').click()
   await expect(page.getByTestId('render-tree').getByText('Join club', { exact: true })).toBeVisible()
   await page.getByTestId('inspect-toggle').click()
-  await page.getByTestId('render-tree').getByRole('button', { name: 'Join club', exact: true }).click()
+  await page.getByTestId('render-tree').getByRole('button', { name: 'Join club', exact: true }).click({ modifiers: ['ControlOrMeta'] })
   await expect(title).toHaveValue('Join club')
   await expect(joined).toHaveValue('Joined')
   await expandCard(cards(page, 'buttonStyle'))

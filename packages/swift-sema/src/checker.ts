@@ -1,4 +1,5 @@
 import type { Diagnostic, DiagnosticCode, FixIt, SourceSpan } from '@studio/shared'
+import { CORNER_RADIUS_LABELS, SYMBOL_MAP, hasCornerRadii, symbolDefinition } from '@studio/shared'
 import type {
   Block,
   ConformanceModel,
@@ -8,22 +9,27 @@ import type {
   ClosureExpr,
   Expr,
   ExtensionDecl,
+  FuncDecl,
   Pattern,
   ProtocolDecl,
   SourceFileNode,
   Stmt,
   StructDecl,
+  TypealiasDecl,
   TypeRef,
   VarDecl,
 } from '@studio/swift-syntax'
-import { collectConformance, hoistNestedTypes } from '@studio/swift-syntax'
+import { argumentLabels, collectConformance, hoistNestedTypes, valueKind, walk, type TypeNames } from '@studio/swift-syntax'
 import {
   isKnownGlobal,
   isKnownModifier,
   isViewRoot,
   EXTENSIBLE_BUILTIN_TYPES,
   KNOWN_ATTRIBUTES,
+  KNOWN_COLOR_NAMES,
   KNOWN_TYPES,
+  SWIFTUI_COLOR_NAMES,
+  UIKIT_COLOR_NAMES,
   MODIFIER_LABELS,
   NON_MODIFIER_MEMBERS,
   PROPERTY_WRAPPERS,
@@ -47,8 +53,10 @@ import { Scope, type PropertyInfo, type SemanticModel, type TypeInfo } from './m
  * In practice that means this checker reports only what it is certain about:
  *
  * - an identifier that resolves nowhere at all (error)
+ * - a type alias that names itself, which Xcode refuses (error)
  * - a real SwiftUI view or modifier that the preview cannot draw yet (warning)
  * - a property wrapper outside the slice (warning)
+ * - two overloads the preview can't tell apart by their arguments (warning)
  * - entry-point problems (error)
  *
  * It deliberately does *not* check member existence, argument types, or arity.
@@ -75,9 +83,23 @@ export class Checker {
   private inViewExtension = 0
   /** Non-zero inside an extension on a built-in type, whose members are not listed here. */
   private inBuiltinExtension = 0
+  /**
+   * The callee a statement is rooted at: `RatingView(rating: 3).padding()` on a line of
+   * its own. In SwiftUI code only a view stands there, so only there is a capitalised
+   * call nothing declares taken for one.
+   */
+  private viewCallee: Expr | null = null
 
   /** Method names the project adds in an extension - its own modifiers. */
   private readonly declaredModifiers = new Set<string>()
+  /** Method names the project's own types declare, which no warning about SwiftUI's members is for. */
+  private readonly declaredMethods = new Set<string>()
+  /** Property names the project adds in an extension - `Color.brand` among them. */
+  private readonly declaredExtensionProperties = new Set<string>()
+  /** Shape calls a `.stroke` or `.strokeBorder` is written on, so a `.trim` among them is a trimmed stroke. */
+  private readonly stroked = new WeakSet<Expr>()
+  /** The same, for a dashed stroke, which the preview draws untrimmed. */
+  private readonly dashStroked = new WeakSet<Expr>()
   /** `typealias` names, which resolve as types anywhere the target would. */
   private readonly typeAliases = new Set<string>()
   /** Extension and protocol-default members, merged per type. Shared with the interpreter. */
@@ -106,6 +128,8 @@ export class Checker {
     const expanded = hoistNestedTypes(files)
     this.conformance = collectConformance(expanded)
     for (const file of expanded) this.collectDeclarations(file)
+    this.reportAliasCycles(files)
+    this.reportIndistinctOverloads(files)
 
     const entryPoint = this.resolveEntryPoint(files)
 
@@ -122,6 +146,9 @@ export class Checker {
   private collectDeclarations(file: SourceFileNode): void {
     for (const decl of file.declarations) {
       this.collectTypeParameters(decl)
+      if (decl.kind === 'structDecl' || decl.kind === 'enumDecl' || decl.kind === 'extensionDecl') {
+        for (const member of decl.members) if (member.kind === 'funcDecl') this.declaredMethods.add(member.name)
+      }
       if (decl.kind === 'structDecl') {
         const info = this.describeStruct(decl)
         if (this.types.has(info.name)) {
@@ -175,7 +202,82 @@ export class Checker {
         // before the extension that gives it the modifier.
         for (const member of decl.members) {
           if (member.kind === 'funcDecl') this.declaredModifiers.add(member.name)
+          if (member.kind === 'varDecl') this.declaredExtensionProperties.add(member.name)
         }
+      }
+    }
+  }
+
+  /**
+   * `typealias Count = Total` beside `typealias Total = Count` names no type at all,
+   * and Xcode refuses it, however the loop runs: `Total?` or `[Total]` loops as
+   * surely. Said once per loop, at the alias declared first, where swiftc says it.
+   */
+  private reportAliasCycles(files: readonly SourceFileNode[]): void {
+    const aliases = files.flatMap((file) => file.declarations.filter((decl): decl is TypealiasDecl => decl.kind === 'typealiasDecl'))
+    const declared = new Set(aliases.map((alias) => alias.name))
+    const names = new Map(aliases.map((alias) => [alias.name, namedIn(alias.target).filter((name) => declared.has(name))] as const))
+    const reaches = (from: string, to: string): boolean => {
+      const seen = new Set<string>()
+      const next = [...(names.get(from) ?? [])]
+      while (next.length) {
+        const name = next.pop()!
+        if (name === to) return true
+        if (seen.has(name)) continue
+        seen.add(name)
+        next.push(...(names.get(name) ?? []))
+      }
+      return false
+    }
+    const looped = new Set<string>()
+    for (const alias of aliases) {
+      if (looped.has(alias.name) || !reaches(alias.name, alias.name)) continue
+      for (const other of aliases) if (reaches(alias.name, other.name) && reaches(other.name, alias.name)) looped.add(other.name)
+      this.report(alias.nameSpan, 'error', 'unresolved_identifier', `Type alias '${alias.name}' references itself.`)
+    }
+  }
+
+  /**
+   * Two overloads the preview can't choose between by what they are called with.
+   *
+   * The preview has values rather than types, so of functions sharing a name and
+   * labels it runs the one its arguments suit (`valueKind`, which the interpreter
+   * scores by too). Where every parameter takes the same kind of value, as
+   * `size(_: Double)` and `size(_: CGFloat)` both take a number, nothing can tell
+   * them apart: it runs the first, and this says so at the second, where Xcode
+   * chooses by type. At the top level, in each type, and in each function body.
+   */
+  private reportIndistinctOverloads(files: readonly SourceFileNode[]): void {
+    const aliases = new Map(files.flatMap((file) => file.declarations.flatMap((decl) => (decl.kind === 'typealiasDecl' ? [[decl.name, decl.target] as const] : []))))
+    const names: TypeNames = {
+      alias: (name) => aliases.get(name),
+      declared: (name) => (this.types.has(name) || this.enums.has(name) ? 'type' : this.conformance.protocols.has(name) ? 'protocol' : this.typeParameterNames.has(name) ? 'generic' : undefined),
+    }
+    const scopes: FuncDecl[][] = [files.flatMap((file) => file.declarations.filter((decl): decl is FuncDecl => decl.kind === 'funcDecl'))]
+    for (const [name, type] of this.conformance.types) {
+      scopes.push(type.members.filter((member): member is FuncDecl => member.kind === 'funcDecl' && type.origin.get(member) === name))
+    }
+    for (const file of files) {
+      walk(file, (node) => {
+        if (node.kind !== 'block') return
+        scopes.push(node.statements.flatMap((stmt) => (stmt.kind === 'declStmt' && stmt.declaration.kind === 'funcDecl' ? [stmt.declaration] : [])))
+      })
+    }
+    const signature = (fn: FuncDecl) => ({ labels: argumentLabels(fn.params), kinds: fn.params.map((param) => valueKind(param.type, names)) })
+    for (const scope of scopes) {
+      const named = new Map<string, FuncDecl[]>()
+      for (const fn of scope) named.set(fn.name, [...(named.get(fn.name) ?? []), fn])
+      for (const group of named.values()) {
+        group.forEach((later, index) => {
+          const mine = signature(later)
+          const same = group.slice(0, index).some((earlier) => {
+            const theirs = signature(earlier)
+            return theirs.labels.length === mine.labels.length && theirs.labels.every((label, i) => label === mine.labels[i]) && theirs.kinds.every((kind, i) => kind === mine.kinds[i])
+          })
+          if (!same) return
+          const call = `${later.name}(${mine.labels.map((label) => `${label ?? '_'}:`).join('')})`
+          this.report(later.nameSpan, 'warning', 'unsupported_language_feature', `The preview can't tell ${call} from the one before it by what it is called with, so it runs that one. Xcode chooses by the argument's type.`, 'overloads told apart by type')
+        })
       }
     }
   }
@@ -569,9 +671,13 @@ export class Checker {
 
   private checkStatement(statement: Stmt, scope: Scope): void {
     switch (statement.kind) {
-      case 'exprStmt':
+      case 'exprStmt': {
+        const outer = this.viewCallee
+        this.viewCallee = rootCallee(statement.expression)
         this.checkExpression(statement.expression, scope)
+        this.viewCallee = outer
         return
+      }
 
       case 'declStmt': {
         const decl = statement.declaration
@@ -717,8 +823,10 @@ export class Checker {
         return
 
       case 'call': {
+        this.checkTrim(expr)
         this.checkCallee(expr.callee, scope)
         this.checkOverloadCoverage(expr, scope)
+        this.checkUnevenCorners(expr, scope)
         // A modifier is always *called*, so the coverage check belongs here rather
         // than on every member access. Doing it there flagged `Color.accentColor` as
         // the `.accentColor` modifier - a warning on correct code, which is the one
@@ -733,6 +841,23 @@ export class Checker {
             this.checkStyleToken(expr.callee.member, expr.args)
           }
         }
+        // `Color(.systemGray6)` and `Color(uiColor: .systemGray6)`, UIKit's colour by name.
+        const only = expr.args.length === 1 ? expr.args[0]! : null
+        if (
+          expr.callee.kind === 'identifier' && expr.callee.name === 'Color' &&
+          only && (only.label === null || only.label === 'uiColor') &&
+          only.value.kind === 'memberAccess' && only.value.base === null
+        ) {
+          this.checkColorName(only.value.member, only.value.memberSpan, 'uikit')
+        }
+        if (expr.callee.kind === 'memberAccess' && STYLE_MODIFIERS.has(expr.callee.member)) this.checkStyleColor(expr.args)
+        if (expr.callee.kind === 'identifier' && !scope.has(expr.callee.name) && !this.types.has(expr.callee.name)) this.checkSymbolNames(expr.args)
+        if (
+          expr.callee.kind === 'memberAccess' && expr.callee.base?.kind === 'identifier' && expr.callee.base.name === 'Timer' &&
+          !scope.has('Timer') && !this.types.has('Timer') && (expr.callee.member === 'publish' || expr.callee.member === 'scheduledTimer')
+        ) {
+          this.report(expr.span, 'warning', 'unsupported_language_feature', "The preview doesn't run timers, so this one never fires here. It runs in the app.", 'Timer')
+        }
         for (const arg of expr.args) this.checkExpression(arg.value, scope)
         if (expr.trailingClosure) this.checkExpression(expr.trailingClosure, scope)
         return
@@ -740,7 +865,11 @@ export class Checker {
 
       case 'memberAccess':
         // Only the base is resolved. Member existence needs real type information,
-        // and guessing produces false positives - see the class comment.
+        // and guessing produces false positives - see the class comment. Colours are
+        // the exception: `Color.name` is a name the preview draws, or it draws clear.
+        if (expr.base?.kind === 'identifier' && (expr.base.name === 'Color' || expr.base.name === 'UIColor')) {
+          this.checkColorName(expr.member, expr.memberSpan, expr.base.name === 'Color' ? 'swiftui' : 'uikit')
+        }
         if (expr.base) this.checkExpression(expr.base, scope)
         return
 
@@ -763,10 +892,9 @@ export class Checker {
 
       case 'stringLiteral':
         for (const segment of expr.segments) {
-          if (segment.kind === 'interpolation') {
-            this.checkExpression(segment.expression, scope)
-            if (segment.specifier) this.checkExpression(segment.specifier, scope)
-          }
+          if (segment.kind !== 'interpolation') continue
+          this.checkExpression(segment.expression, scope)
+          segment.options?.forEach((option) => this.checkExpression(option.value, scope))
         }
         return
 
@@ -836,12 +964,15 @@ export class Checker {
       if (callee.name === 'NavigationStack' && labels.has('path')) reason = 'bound navigation paths are not synchronized; use NavigationLink destinations in the preview'
       if (callee.name === 'TextField' && (labels.has('value') || labels.has('format') || labels.has('formatter'))) reason = 'value/format/formatter bindings are not implemented; use text: with a String binding'
       if (callee.name === 'TextField' && labels.has('axis')) reason = 'axis-based multiline fields are not implemented; use TextEditor for multiline editing'
-      if (callee.name === 'Link' || callee.name === 'ShareLink') reason = 'only the label is drawn; opening URLs and the system share sheet are not implemented'
+      if (callee.name === 'Link' || callee.name === 'ShareLink') reason = 'it is drawn, but tapping it opens nothing; opening URLs and the system share sheet are not implemented'
       if (callee.name === 'ToolbarItem' || callee.name === 'ToolbarItemGroup') {
         const placement = expr.args.find(arg => arg.label === 'placement')?.value
         if (placement?.kind === 'memberAccess' && ['keyboard', 'bottomBar', 'principal'].includes(placement.member)) reason = `the .${placement.member} placement is not implemented; its controls are omitted`
       }
-      if (callee.name === 'TimelineView') reason = 'the timeline runs only once and does not supply a context or advance its schedule'
+      if (callee.name === 'TimelineView') reason = 'the timeline runs only once, for the moment it is drawn, and does not advance its schedule'
+      if (callee.name === 'ScrollViewReader') reason = 'what it holds is drawn, and scrollTo does not scroll the preview'
+      if (callee.name === 'PhaseAnimator') reason = 'its content is drawn at the first phase, and does not animate through the others'
+      if (callee.name === 'KeyframeAnimator') reason = 'its content is drawn at the initial value, and the keyframes do not run'
       if (callee.name === 'AsyncImage') reason = 'remote loading and image phases are not implemented; only the placeholder is previewed'
     } else if (callee.kind === 'memberAccess' && rootsInAView(callee.base)) {
       feature = `.${callee.member}`
@@ -852,6 +983,23 @@ export class Checker {
       if (callee.member === 'background' && labels.has('fillStyle')) reason = 'the fillStyle argument is not applied in the preview'
     }
     if (feature && reason) this.report(expr.span, 'warning', callee.kind === 'identifier' ? 'unsupported_swiftui_view' : 'unsupported_swiftui_modifier', `${feature}: ${reason}. The source exports unchanged.`, feature)
+  }
+
+  /**
+   * A rectangle with a radius per corner is drawn with the largest one on every corner
+   * (D7a), so the preview says so rather than drawing the wrong shape without a word.
+   */
+  private checkUnevenCorners(expr: Extract<Expr, { kind: 'call' }>, scope: Scope): void {
+    const callee = expr.callee
+    const uneven = callee.kind === 'identifier'
+      ? callee.name === 'UnevenRoundedRectangle' && !scope.has(callee.name) && !this.types.has(callee.name)
+      : callee.kind === 'memberAccess' && callee.base === null && callee.member === 'rect' && hasCornerRadii(expr.args.map(arg => arg.label))
+    // Four corners written as one number are drawn exactly as written, one by one or as `cornerRadii:`.
+    const given = expr.args.find(arg => arg.label === 'cornerRadii')?.value
+    const written = given?.kind === 'call' ? given.args.map(arg => ({ label: arg.label && `${arg.label}Radius`, value: arg.value })) : expr.args
+    const radii = written.filter(arg => CORNER_RADIUS_LABELS.includes(arg.label ?? '')).map(arg => arg.value.kind === 'integerLiteral' || arg.value.kind === 'floatLiteral' ? arg.value.value : NaN)
+    if (!uneven || radii.length === 4 && radii.every(radius => radius === radii[0])) return
+    this.report(expr.span, 'warning', 'unsupported_swiftui_view', 'UnevenRoundedRectangle: its corners are drawn equal in the preview, all with the largest radius. Xcode draws each corner as written.', 'UnevenRoundedRectangle')
   }
 
   /** A callee gets view-coverage treatment before ordinary resolution. */
@@ -867,9 +1015,21 @@ export class Checker {
           callee.span,
           'warning',
           'unsupported_swiftui_view',
-          `'${callee.name}' is real SwiftUI that the preview does not draw. ` +
-            'It renders as a labelled placeholder and exports to Xcode unchanged.',
+          `'${callee.name}' isn't drawn in the preview yet, so it shows as a labelled box. Xcode draws it as written.`,
           callee.name,
+        )
+        return
+      }
+      // A view nothing declares, one the AI forgot to write or real SwiftUI the preview
+      // doesn't know, draws a placeholder rather than blanking the screen. A name a
+      // letter or two from a type or view is a typo instead, and stays an error.
+      const name = callee.name
+      if (callee === this.viewCallee && !shadowed && /^[A-Z]/.test(name) && name !== 'Self' && !isKnownGlobal(name) && !this.typeAliases.has(name) && this.inBuiltinExtension === 0 && !this.nearestTypeName(name)) {
+        this.report(
+          callee.span,
+          'warning',
+          'unresolved_identifier',
+          `Cannot find '${name}' in scope. The preview draws a placeholder for it. If it isn't part of SwiftUI and the project doesn't declare it, Xcode won't build it either.`,
         )
         return
       }
@@ -917,13 +1077,14 @@ export class Checker {
         span,
         'warning',
         'unsupported_swiftui_view',
-        `'${name}' is real SwiftUI that the preview does not draw.`,
+        `'${name}' isn't drawn in the preview yet. Xcode draws it as written.`,
         name,
       )
       return
     }
 
-    const suggestion = this.closestName(name, scope)
+    // A capitalised name is a type's, so a type is offered first: `Countr` is `Counter`, not a `counter`.
+    const suggestion = (/^[A-Z]/.test(name) ? this.nearestTypeName(name) : null) ?? this.nearestInScope(name, scope)
     this.report(
       span,
       'error',
@@ -934,34 +1095,14 @@ export class Checker {
     )
   }
 
-  /**
-   * The nearest name that is actually in scope, or null.
-   *
-   * Offered only when the edit distance is small relative to the name's length, so a
-   * three-letter typo does not suggest an unrelated three-letter name. A fix the user
-   * has to undo costs more than no fix, which is the same rule the rest of this file
-   * follows.
-   */
-  private closestName(name: string, scope: Scope): string | null {
-    const budget = name.length <= 4 ? 1 : 2
-    let best: string | null = null
-    let bestDistance = budget + 1
+  /** The nearest name that is actually in scope, or null. */
+  private nearestInScope(name: string, scope: Scope): string | null {
+    return nearestName(name, [...scope.allNames(), ...this.types.keys(), ...this.enums.keys(), ...SUPPORTED_VIEWS])
+  }
 
-    const consider = (candidate: string): void => {
-      if (candidate === name || Math.abs(candidate.length - name.length) > budget) return
-      const distance = editDistance(name.toLowerCase(), candidate.toLowerCase())
-      if (distance < bestDistance) {
-        bestDistance = distance
-        best = candidate
-      }
-    }
-
-    for (const candidate of scope.allNames()) consider(candidate)
-    for (const candidate of this.types.keys()) consider(candidate)
-    for (const candidate of this.enums.keys()) consider(candidate)
-    for (const candidate of SUPPORTED_VIEWS) consider(candidate)
-
-    return bestDistance <= budget ? best : null
+  /** The nearest type or view name, or null. Not a variable's: `Timer` is no typo of a `timer`. */
+  private nearestTypeName(name: string): string | null {
+    return nearestName(name, [...this.types.keys(), ...this.enums.keys(), ...this.typeAliases, ...SUPPORTED_VIEWS, ...UNIMPLEMENTED_VIEWS, ...KNOWN_TYPES])
   }
 
   /**
@@ -978,6 +1119,10 @@ export class Checker {
    * coverage contract exists to prevent.
    */
   private checkModifierCoverage(member: string, span: SourceSpan, onAView: boolean): void {
+    if ((member === 'repeatForever' || member === 'repeatCount') && !this.declaredMethods.has(member)) {
+      this.report(span, 'warning', 'unsupported_swiftui_modifier', `'.${member}' repeats the animation on iOS. The preview plays it once.`, `.${member}`)
+      return
+    }
     if (UNIMPLEMENTED_MODIFIERS.has(member)) {
       this.report(
         span,
@@ -1069,6 +1214,121 @@ export class Checker {
   }
 
   /**
+   * Warns on a `.trim` that isn't stroked: a filled shape, which the preview fills whole.
+   *
+   * The stroke is written after the trim - `.trim(…).offset(…).stroke(…)` - so the
+   * outer call marks the shape calls under it before they are checked.
+   */
+  private checkTrim(call: Expr & { kind: 'call' }): void {
+    if (call.callee.kind !== 'memberAccess') return
+    if (call.callee.member === 'stroke' || call.callee.member === 'strokeBorder') {
+      const marks = isDashed(call) ? this.dashStroked : this.stroked
+      for (let base = call.callee.base; base?.kind === 'call' && base.callee.kind === 'memberAccess'; base = base.callee.base) {
+        marks.add(base)
+      }
+    }
+    // A Path and a custom shape trim their own path, and `trim()` on anything else is
+    // the project's own method: only the shapes the preview draws itself are drawn whole.
+    if (call.callee.member !== 'trim' || this.stroked.has(call)) return
+    const shape = shapeAtRoot(call.callee.base)
+    if (!shape || !BUILT_IN_SHAPES.has(shape) || this.types.has(shape)) return
+    const dashed = this.dashStroked.has(call)
+    this.report(
+      call.callee.memberSpan,
+      'warning',
+      'unsupported_swiftui_modifier',
+      dashed
+        ? 'The preview draws this dashed outline whole: it trims only strokes without a dash pattern. Xcode dashes just the trimmed part.'
+        : 'The preview fills the whole shape here: it trims only strokes. Xcode fills just the trimmed part, closed by a straight line.',
+      dashed ? '.trim on a dashed stroke' : '.trim on a filled shape',
+    )
+  }
+
+  /**
+   * Warns on a colour name the preview doesn't know, which it draws as clear.
+   *
+   * Narrow on purpose, because a warning on correct code is worse than none: a property
+   * or function the project declares in an extension (`Color.brand`, how Tokens.swift
+   * writes a colour, or `Color.hex(…)`) is its own, a project type called `Color` is its
+   * own, and a capitalised member is a nested type (`Color.Resolved`), not a colour.
+   */
+  private checkColorName(name: string, span: SourceSpan, namespace: 'swiftui' | 'uikit'): void {
+    if (name === 'init' || /^[A-Z]/.test(name)) return
+    if (this.declaredExtensionProperties.has(name) || this.declaredModifiers.has(name)) return
+    if (this.types.has('Color') || this.types.has('UIColor')) return
+    if (namespace === 'uikit' ? UIKIT_COLOR_NAMES.has(name) || KNOWN_COLOR_NAMES.has(name) : SWIFTUI_COLOR_NAMES.has(name)) return
+    // `Color.systemGray6` draws here, from the same palette, and doesn't compile in Xcode.
+    if (namespace === 'swiftui' && UIKIT_COLOR_NAMES.has(name)) {
+      this.report(
+        span,
+        'warning',
+        'may_not_compile_in_xcode',
+        `Xcode has no Color.${name}: UIKit's colours are written Color(.${name}).`,
+        undefined,
+        [{ title: `Use Color(.${name})`, edits: [{ span: { ...span, start: span.start - 'Color.'.length }, newText: `Color(.${name})` }] }],
+      )
+      return
+    }
+    if (KNOWN_COLOR_NAMES.has(name)) return
+    this.report(
+      span,
+      'warning',
+      'unresolved_member',
+      `The preview doesn't know the colour '${name}', so it draws nothing there. ` +
+        'Check the spelling: Xcode uses the name as written.',
+    )
+  }
+
+  /**
+   * Warns on a leading-dot colour spelt wrong - `.foregroundStyle(.grey)` - which draws
+   * nothing. Only a name a letter or two from a colour is taken for one: the styles these
+   * modifiers take are too many to list, and a warning on one would be on correct code.
+   */
+  private checkStyleColor(args: readonly { label: string | null; value: Expr }[]): void {
+    const value = args[0]?.value
+    if (value?.kind !== 'memberAccess' || value.base !== null) return
+    const name = value.member
+    if (KNOWN_COLOR_NAMES.has(name) || this.declaredExtensionProperties.has(name)) return
+    const near = nearestName(name, KNOWN_COLOR_NAMES)
+    if (!near) return
+    this.report(
+      value.memberSpan,
+      'warning',
+      'unresolved_member',
+      `The preview doesn't know the colour '${name}', so it draws nothing there. Did you mean '${near}'?`,
+      undefined,
+      [{ title: `Use .${near}`, edits: [{ span: value.memberSpan, newText: near }] }],
+    )
+  }
+
+  /**
+   * Warns on an SF Symbol name the preview has no drawing for: it draws a question mark
+   * there. Only a literal name, given as `systemName:` or `systemImage:` to a call the
+   * project doesn't declare. Some real symbols are missing from the preview's set too,
+   * so the warning never says the name is wrong unless it is a letter or two from one
+   * the preview draws.
+   */
+  private checkSymbolNames(args: readonly { label: string | null; value: Expr }[]): void {
+    for (const arg of args) {
+      if (arg.label !== 'systemName' && arg.label !== 'systemImage') continue
+      const literal = arg.value
+      if (literal.kind !== 'stringLiteral' || literal.segments.some((segment) => segment.kind !== 'text')) continue
+      const name = literal.segments.map((segment) => (segment.kind === 'text' ? segment.value : '')).join('')
+      if (symbolDefinition(name)) continue
+      const near = nearestName(name, Object.keys(SYMBOL_MAP))
+      this.report(
+        literal.span,
+        'warning',
+        'unresolved_member',
+        `The preview has no drawing for the symbol '${name}' and shows a question mark. ` +
+          (near ? `Did you mean '${near}'? If '${name}' is right, it still shows in the app.` : 'If the name is right, it still shows in the app.'),
+        undefined,
+        near ? [{ title: `Use '${near}'`, edits: [{ span: literal.span, newText: JSON.stringify(near) }] }] : undefined,
+      )
+    }
+  }
+
+  /**
    * Warns on a style token the preview does not apply.
    *
    * The same rule as `checkBlendMode` above, generalised to every style modifier with
@@ -1152,6 +1412,36 @@ export class Checker {
   }
 }
 
+/** The callee of the call a chain of modifiers is rooted at: `RatingView` in `RatingView().padding()`. */
+function rootCallee(expr: Expr): Expr | null {
+  let current: Expr = expr
+  while (current.kind === 'call' && current.callee.kind === 'memberAccess' && current.callee.base) current = current.callee.base
+  return current.kind === 'call' && current.callee.kind === 'identifier' ? current.callee : null
+}
+
+/**
+ * The candidate nearest to a misspelt name, or null.
+ *
+ * Offered only when the edit distance is small relative to the name's length, so a
+ * three-letter typo does not suggest an unrelated three-letter name. A fix the user
+ * has to undo costs more than no fix, which is the same rule the rest of this file
+ * follows.
+ */
+function nearestName(name: string, candidates: Iterable<string>): string | null {
+  const budget = name.length <= 4 ? 1 : 2
+  let best: string | null = null
+  let bestDistance = budget + 1
+  for (const candidate of candidates) {
+    if (candidate === name || Math.abs(candidate.length - name.length) > budget) continue
+    const distance = editDistance(name.toLowerCase(), candidate.toLowerCase())
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = candidate
+    }
+  }
+  return best
+}
+
 /**
  * Levenshtein distance, bounded by the lengths involved.
  *
@@ -1218,3 +1508,47 @@ export function checkSourceFiles(files: readonly SourceFileNode[]): SemanticMode
 }
 
 export { SUPPORTED_VIEWS }
+
+/** The shapes the preview draws itself, rather than through a path. */
+const BUILT_IN_SHAPES: ReadonlySet<string> = new Set(['Circle', 'Ellipse', 'Rectangle', 'RoundedRectangle', 'Capsule'])
+
+/** `Circle` in `Circle().inset(by: 4)`: the call a chain of shape modifiers starts from. */
+function shapeAtRoot(expr: Expr | null): string | null {
+  let node = expr
+  while (node?.kind === 'call' && node.callee.kind === 'memberAccess') node = node.callee.base
+  return node?.kind === 'call' && node.callee.kind === 'identifier' ? node.callee.name : null
+}
+
+/** A stroke given `StrokeStyle(…, dash: […])` with at least one length. */
+function isDashed(stroke: Expr & { kind: 'call' }): boolean {
+  const style = stroke.args.find((arg) => arg.label === 'style')?.value
+  if (style?.kind !== 'call' || style.callee.kind !== 'identifier' || style.callee.name !== 'StrokeStyle') return false
+  const dash = style.args.find((arg) => arg.label === 'dash')?.value
+  return dash !== undefined && !(dash.kind === 'arrayLiteral' && dash.elements.length === 0)
+}
+
+/** Modifiers whose first argument is a colour or another style, as `.foregroundStyle(.gray)`. */
+const STYLE_MODIFIERS: ReadonlySet<string> = new Set(['foregroundStyle', 'foregroundColor', 'fill', 'stroke', 'strokeBorder', 'tint', 'background', 'border'])
+
+/** Every type name a type refers to, through optionals, collections, generics, tuples and functions. */
+function namedIn(type: TypeRef | null): string[] {
+  if (!type) return []
+  switch (type.kind) {
+    case 'namedType':
+      return [type.name, ...type.generics.flatMap(namedIn)]
+    case 'optionalType':
+      return namedIn(type.wrapped)
+    case 'arrayType':
+      return namedIn(type.element)
+    case 'dictionaryType':
+      return [...namedIn(type.key), ...namedIn(type.value)]
+    case 'someType':
+      return namedIn(type.constraint)
+    case 'functionType':
+      return [...type.params.flatMap(namedIn), ...namedIn(type.result)]
+    case 'tupleType':
+      return type.elements.flatMap(namedIn)
+    default:
+      return []
+  }
+}

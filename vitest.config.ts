@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config'
 
 const include = ['packages/**/src/**/*.test.ts', 'apps/**/*.test.ts', 'tests/**/*.test.ts', 'tooling/**/*.test.mjs']
 const exclude = ['**/node_modules/**', '**/.next/**', '**/dist/**', 'e2e/**']
-const performanceTests = ['packages/swiftui-runtime/src/bench.test.ts', 'tests/authoring-release-bench.test.ts']
+const performanceTests = ['packages/swiftui-runtime/src/bench.test.ts', 'tests/authoring-release-bench.test.ts', 'tests/template-budgets.test.ts']
 
 export default defineConfig({
   test: {

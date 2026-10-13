@@ -22,7 +22,7 @@
 6. Expose a labeled control with an explicit scope, a pending state, an actionable failure, and keyboard behavior.
 7. Test semantic effects, wrong-target/stale rejection, source preservation, undo/redo, native source validity, and actual browser behavior independently.
 
-`authoring-resources.ts` is the example for shared styles: immutable global/static Swift declarations are the values; metadata does not duplicate them. The three operations—shared update, link, and local override—stay distinct. Unsupported expressions remain source-owned.
+`authoring-resources.ts` is the example for shared styles: immutable global/static Swift declarations are the values; metadata does not duplicate them. The three operations (shared update, link, and local override) stay distinct. Unsupported expressions remain source-owned.
 
 ## Resources and persistence
 
@@ -32,15 +32,16 @@ Use the shared timeline for resource edits. Stored projects are cloned; writes a
 
 ## Archive contract
 
-- `.swiftstudio/project.json`: format/version, explicit project ID, app configuration, source path mapping and export baseline, stable asset IDs and paths.
+- `.swiftstudio/project.json`: format/version, explicit project ID, app configuration, source path mapping and export baseline, stable asset IDs and paths. An optional `generator` names the Studio build that wrote the archive (commit and build time); import drops it unread, so archives open across builds.
 - `.swiftstudio/studio.json`: optional designer-only metadata; no production layout values.
+- `.swiftstudio/events.jsonl`: the project's event log, one JSON object a line after a header line (format, version, project, build, events, dropped, and `partial` when only the exporting page's own events could be read). Import leaves it unread.
 - Swift and image files: normal standalone archive entries. No derived caches are required.
 - Source-baseline differences are expected during external editing. ZIP structure, CRC, and resource validation protect transport; baselines guide a visible merge and are not authentication.
 - Read the complete central directory before inflation. Reject traversal, duplicate/case-colliding paths, symlinks, encrypted entries, truncation, invalid UTF-8, excess entries, oversized expansion, and missing referenced images.
 - Limits: 48 MB archive bytes, 64 MB selected expansion, 512 entries, 8 MB Swift, 256 source files; per-resource limits live in `ASSET_LIMITS`. Unrelated binary entries are skipped without inflation.
 - Matching IDs allow file-level three-way reconciliation. Concurrent edits to one file need a choice; the importer never invents a text merge. Images and empty-group differences require explicit review. Source references to removed images are validated in the compiler worker before commit.
 
-Native export keeps source bytes unchanged. Asset catalogs work directly in the Xcode/XcodeGen app target. Package resources require the package's bundle: an unqualified `Image("Name")` normally searches the main bundle. See [SwiftUI image lookup](https://developer.apple.com/documentation/swiftui/image/init(_:bundle:)) and [Swift package resources](https://developer.apple.com/documentation/xcode/bundling-resources-with-a-swift-package). Do not rewrite exported source or claim package runtime parity without an intended-host test.
+Native export keeps source bytes unchanged, except for the studio's own markers: a hidden view's commented-out block and a switched-off modifier's `/*studio-off:1 …*/` comment are left out of the native formats' Swift (`withoutStudioMarkers` in `swift-syntax`, which only ever touches comments). The editable archive and `.swiftstudio/project.json` keep every file whole, and reopening an export restores that text when the Swift is otherwise unchanged. An export is never refused: a project that fails the archive's checks still goes out as its Swift, a `project-backup.json` holding the rest, and a `KNOWN-ISSUES.md` saying why. Asset catalogs work directly in the Xcode/XcodeGen app target. Package resources require the package's bundle: an unqualified `Image("Name")` normally searches the main bundle. See [SwiftUI image lookup](https://developer.apple.com/documentation/swiftui/image/init(_:bundle:)) and [Swift package resources](https://developer.apple.com/documentation/xcode/bundling-resources-with-a-swift-package). Do not otherwise rewrite exported source, or claim package runtime parity without an intended-host test.
 
 ## Verification
 

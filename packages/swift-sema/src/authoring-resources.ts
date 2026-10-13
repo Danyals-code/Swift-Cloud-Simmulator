@@ -1,3 +1,4 @@
+import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion, isAccentColorSetName } from '@studio/shared'
 import type { AuthoringNode, FontTokenValue, PreviewColorAsset, ResourceOperation, ShadowTokenValue, SharedStyle, StyleKind, StyleProperty, SourceSpan, SourceFile, TokenDefinition } from '@studio/shared'
 import { Parser, forEachChild, type Decl, type Expr, type ExtensionDecl, type Node, type VarDecl } from '@studio/swift-syntax'
 import { AUTHORING_COLORS, SYSTEM_COLORS, AUTHORING_FONTS, swiftString } from './design-controls'
@@ -61,7 +62,7 @@ function minimumFor(kind: StyleKind, value: string): number {
 }
 function checkedExpression(ctx: FeatureContext, kind: StyleKind, value: string): string {
   const minimum = minimumFor(kind, value)
-  if (Number.parseFloat(ctx.deploymentTarget ?? '17.0') < minimum) throw new Error(`This needs iOS ${minimum}, which is newer than this project’s iOS version. Choose another style, or ask a developer to raise it.`)
+  if (deploymentVersion(ctx.deploymentTarget) < minimum) throw new Error(`This needs iOS ${minimum}, which is newer than this project’s iOS version. Choose another style, or ask a developer to raise it.`)
   return styleExpression(kind, value)
 }
 function styleValue(text: string, type?: string): { kind: StyleKind; value: string } | undefined {
@@ -115,7 +116,7 @@ export function fontTokenValue(ctx: FeatureContext, expr: Expr): FontTokenValue 
   const size = expr.args.find(a => a.label === 'size')
   return size && numeric(ctx, size.value) && expr.args.every(a => a === size || a === weightArgument) ? { style: 'custom', size: Number(raw(ctx, size.value.span)), ...(weight ? { weight } : {}) } : undefined
 }
-export function fontExpression(font: FontTokenValue, deploymentTarget = '17.0'): string {
+export function fontExpression(font: FontTokenValue, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET): string {
   if (font.size !== undefined || font.style === 'custom') {
     if (!Number.isFinite(font.size) || font.size! < 1 || font.size! > 1000) throw new Error('A text size must be from 1 to 1000 points.')
     return `Font.system(size: ${Number(font.size)}${font.weight ? `, weight: .${font.weight}` : ''})`
@@ -124,7 +125,7 @@ export function fontExpression(font: FontTokenValue, deploymentTarget = '17.0'):
   if (font.weight && !FONT_WEIGHTS.includes(font.weight)) throw new Error('Choose a supported weight.')
   if (!font.weight) return `Font.system(.${font.style})`
   // `system(_:design:weight:)` is iOS 16; `.weight(_:)` spells the same font everywhere.
-  return Number.parseFloat(deploymentTarget) >= 16 ? `Font.system(.${font.style}, weight: .${font.weight})` : `Font.${font.style}.weight(.${font.weight})`
+  return deploymentVersion(deploymentTarget) >= 16 ? `Font.system(.${font.style}, weight: .${font.weight})` : `Font.${font.style}.weight(.${font.weight})`
 }
 
 function colorAndOpacity(ctx: FeatureContext, expr: Expr): { color: string; opacity: number } | undefined {
@@ -304,6 +305,8 @@ export function tokenNameProblem(ctx: FeatureContext, kind: StyleKind, name: str
   if (kind === 'spacing' && !name.startsWith('space')) return `Spacing tokens start with “space”, so they never mix with corner radii. Try ${suggestion}.`
   if (kind === 'radius' && !name.startsWith('radius')) return `Corner radius tokens start with “radius”. Try ${suggestion}.`
   if (FRAMEWORK_MEMBERS[kind].includes(name) || CONTEXTUAL.has(name)) return `“${name}” is already part of SwiftUI. Try ${suggestion}.`
+  // Its colour set would be the same folder as the app's own AccentColor in the export.
+  if (kind === 'color' && isAccentColorSetName(name)) return `“${name}” is the name Xcode gives the app’s accent colour. Try ${suggestion}.`
   if (name !== existing && (recipes(ctx).some(r => r.style.name === name) || allDeclarations(ctx).some(d => 'name' in d && d.name === name))) return `“${name}” is already used in this app. Choose another name.`
   if (['Color', 'Font', 'CGFloat', 'Double', 'SwiftUI', 'Bundle', 'ShadowToken', 'View'].includes(name)) return `Choose a name that is not a type. Try ${suggestion}.`
   return null
@@ -535,8 +538,15 @@ function migrateStyle(ctx: FeatureContext, name: string): ResourceEdit {
   return { patches: [...otherPatches, ...created.patches], created: created.created, colors: created.colors, ...(empty && declarationFile.id !== TOKENS_FILE ? { removed: [declarationFile.id] } : {}) }
 }
 
-/** The system colours a legacy style can name, as the sRGB value a colour set holds. */
-const AUTHORING_COLOR_HEX: Readonly<Record<string, string>> = { black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF3B30', orange: '#FF9500', yellow: '#FFCC00', green: '#34C759', mint: '#00C7BE', teal: '#30B0C7', cyan: '#32ADE6', blue: '#007AFF', indigo: '#5856D6', purple: '#AF52DE', pink: '#FF2D55', brown: '#A2845E' }
+/**
+ * The system colours a legacy style can name, as the sRGB value a colour set holds: the
+ * iOS 27 simulator's light values, so a colour doesn't change as it moves to
+ * `Tokens.swift`. `Color.blue` used to move as #007AFF, the blue from before iOS 26.
+ */
+export const AUTHORING_COLOR_HEX: Readonly<Record<string, string>> = { black: '#000000', white: '#FFFFFF', gray: '#8E8E93', red: '#FF383C', orange: '#FF8D28', yellow: '#FFCC00', green: '#34C759', mint: '#00C8B3', teal: '#00C3D0', cyan: '#00C0E8', blue: '#0088FF', indigo: '#6155F5', purple: '#CB30E0', pink: '#FF2D55', brown: '#AC7F5E' }
+
+/** The same colours in dark mode, where they change, as the preview draws them. */
+export const AUTHORING_COLOR_HEX_DARK: Readonly<Record<string, string>> = { red: '#FF453A', orange: '#FF9F0A', yellow: '#FFD60A', green: '#30D158', mint: '#63E6E2', teal: '#40C8E0', cyan: '#64D2FF', blue: '#0091FF', indigo: '#5E5CE6', purple: '#BF5AF2', pink: '#FF375F', brown: '#AC8E68' }
 
 function assetReferences(ctx: FeatureContext, op: Extract<ResourceOperation, { kind: 'asset-references' }>): SourcePatch[] {
   const patches: SourcePatch[] = []

@@ -74,8 +74,11 @@ export interface ProjectSummary {
  * avoid paying for later.
  */
 export interface ProjectStore {
+  /** Whether what it saves is still there once the page has closed. The in-memory fallback's is not. */
+  readonly durable: boolean
   list(): Promise<readonly ProjectSummary[]>
   load(id: string): Promise<Project | null>
+  /** Rejects with `StaleProjectError` when another tab has saved this project since this store last read or wrote it. */
   save(project: Project): Promise<void>
   remove(id: string): Promise<void>
 }
@@ -165,6 +168,20 @@ export function normalizeProjectName(name: string): string | null {
   if (/^\.+$/.test(trimmed)) return null
 
   return trimmed
+}
+
+/**
+ * `name`, or `name 2`, `name 3`: the first no other project has, in any letter case.
+ *
+ * Every blank design starts as MyDesignApp, and two projects of one name export to
+ * archives and Xcode projects nobody can tell apart.
+ */
+export function unusedProjectName(name: string, taken: readonly string[]): string {
+  const key = (candidate: string) => candidate.normalize('NFC').toLowerCase()
+  const used = new Set(taken.map(key))
+  let candidate = name
+  for (let n = 2; used.has(key(candidate)); n++) candidate = `${name} ${n}`
+  return candidate
 }
 
 /**

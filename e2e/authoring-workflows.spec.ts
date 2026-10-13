@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 struct Item: Identifiable { let id: String; var title: String }
@@ -21,8 +22,7 @@ struct ContentView: View {
     }
 }`
 async function open(page: Page, source = SOURCE) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(source)
@@ -160,7 +160,7 @@ test('row field binding writes real Swift storage and toggles only the selected 
   // Only top-level layers start expanded; the Toggle is inside the List's row design.
   const layers = page.getByTestId('logical-layers')
   await layers.getByRole('button', { name: 'Expand List', exact: true }).click()
-  await layers.getByRole('button', { name: 'Expand Vertical Stack', exact: true }).click()
+  await layers.getByRole('button', { name: 'Expand Column', exact: true }).click()
   await sourceRow(page, 'Toggle').click()
   await inspector(page).getByLabel('Row field', { exact: true }).selectOption('featured')
   await inspector(page).getByRole('button', { name: 'Use this field in every row', exact: true }).click()

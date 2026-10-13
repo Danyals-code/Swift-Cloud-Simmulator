@@ -1,0 +1,595 @@
+{
+  "source": "Built from tests/fixtures/ios27-under-bars.swift in a project the studio exported (deployment target 27.0) and compiled with Xcode 27.0 (27A266a) on macOS 27.0; run on the iPhone 18 Pro simulator (088B21CA-E114-42A3-948D-2C682861FDB1, iOS 27.0), light appearance forced with simctl ui, status bar overridden to 9:41; one launch per screen with -screen <name> through simctl launch and a simctl io screenshot 6 s after launch, on 2026-09-26. 1206x2622 pixels / 402x874 points at 3x.",
+  "fixtureSha256": "c24c19cd821f4083085a01401dbdaa114d49ade1d4cca98f8e85e02e09ebb9fa",
+  "captures": [
+    {
+      "file": "plain-large.png",
+      "sha256": "a51cff52b4ac5d32f72ae037c6cc92c27142032e541c1d72ecc60adb8b219036",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "plain-inline.png",
+      "sha256": "7a1e14f9dbb42218994c77a9175f7ad024768718cfeb8ce69d217c1cdef674ec",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "plain-bare.png",
+      "sha256": "b7dfe7856c39eeccbd59a4d91b580e831bb7e94db2410a091167137858489238",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "scroll-large.png",
+      "sha256": "a51cff52b4ac5d32f72ae037c6cc92c27142032e541c1d72ecc60adb8b219036",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "scroll-inline.png",
+      "sha256": "7a1e14f9dbb42218994c77a9175f7ad024768718cfeb8ce69d217c1cdef674ec",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-large.png",
+      "sha256": "4570a65af75384dac1137b5894947f90735b16ba564c76d7b9528c1da31a64ed",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-large-header.png",
+      "sha256": "ea7d3318deb5390be174760b03769b94e419bd7b646c158318f4b2f7f26dff3a",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-large-two.png",
+      "sha256": "f8a7e632ec6f579429482930dff79d3e30f54641063ba6ca3b9ad5da695a7308",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-large-two-headers.png",
+      "sha256": "2a402bf702cbfe544ee8620725d9f3a6ad3f6c35cfa92242964f885f426e40be",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-large-footer-plain.png",
+      "sha256": "7b6c40c2fa11ef98bf69195278a4844cc0865b319df9928c471bb66a0c8882c0",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-large-footer-header.png",
+      "sha256": "52a55bd91deaef3f5b85df7d5769fbea248ebe16a39f68ec49ad4853bbf12a5e",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-large-spacing.png",
+      "sha256": "229563526f8f7eae57ea9ee43a707723f12683efc8b3204becfcfb3267dc6377",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-large-spacing-headers.png",
+      "sha256": "cdecdf5e40c9418c265a84ce8c902e9ccc1ca90cbc97640837353acf65336dec",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-inline.png",
+      "sha256": "05ec43a219c7f33b0ef8e4ab05e89430b0370c2e9c7c5ebfca212781de2d94a6",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-inline-header.png",
+      "sha256": "7ec0721d6e16e5e536302a335f5cd6f67eaff29cad7a80b53080d246d28265a3",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-bare.png",
+      "sha256": "61cefffe046a4bd3b1c60e0dbd4a2ea2817da37a5710b95252eded4506c299f6",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-bare-header.png",
+      "sha256": "65e2bb95670faf0b4d84fa35c19fc55c5d283561ffc90443219b22f325ce4470",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-plain-large.png",
+      "sha256": "9873cd2c4c283443697b8651385b0c45b7fd06b2c6ca29ac996690fe1a4574c2",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-plain-large-headers.png",
+      "sha256": "6f6f9c3ad566835b8a291e58ff180fdd88ee183c3a1a74141d56959f7353b9ec",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-grouped-large-header.png",
+      "sha256": "288c5fd1836f7f67a59974132a7fe935a1bb3f5368e997a725c1bfb97f3f6e1a",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-grouped-large.png",
+      "sha256": "fc878337c72517ff1e63cfc7fa3e2679874d10f7d0d517aac2a08390f48c60b6",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "form-large-header.png",
+      "sha256": "df252cc9ef882000fc81256cce47f2e55db3f3b1d499396d564d8df73a19bcde",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "tab-list-large.png",
+      "sha256": "1b20f13479e5bf8c881779b969c1630cc7794abdb43747831e9e3258abdaf955",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-drawer.png",
+      "sha256": "a81e8dbf57d09665f92497310159b76dabaac4ddafa9bd08300f61aecfffc477",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "list-drawer-header.png",
+      "sha256": "e0b841d20e1b61beaf823f49db1e6837612d9641865c1de0b230d939e224a48f",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "sheet-form-inline.png",
+      "sha256": "93f394cb19a80f17bcc508f885c1c1db8c80e6928ceecd57213dad21525527ab",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "sheet-form-header-inline.png",
+      "sha256": "3597221197929e22a9d55fb21b66e3d5fed72d5ebe0f46e78d8c3af20d8bf30c",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "sheet-form-large.png",
+      "sha256": "01fff383df906c5adb150a5903a3476b14d5de2337ab9da7e945ece0c69c1b1b",
+      "size": [
+        1206,
+        2622
+      ]
+    },
+    {
+      "file": "sheet-form-bare.png",
+      "sha256": "e67cc8c6c608f43547ec15498672746d051eba6affb36814afdc9a8449051cc6",
+      "size": [
+        1206,
+        2622
+      ]
+    }
+  ],
+  "measured": {
+    "units": "Points from the top of the screen. Bands are read down the column at x = 300 pt, where the red band of plain content and the white cards of a list stand out from the background. Glyphs are the rows that hold ink across the screen, from the tallest letter to the baseline or the lowest descender.",
+    "contentTop": {
+      "plain-large": 168,
+      "plain-inline": 116,
+      "plain-bare": 62,
+      "scroll-large": 168,
+      "scroll-inline": 116
+    },
+    "largeTitleGlyphs": [
+      126.67,
+      152.33
+    ],
+    "inlineTitleGlyphs": [
+      77.33,
+      90.67
+    ],
+    "lists": {
+      "list-large": {
+        "cards": [
+          [
+            168,
+            272
+          ]
+        ]
+      },
+      "list-large-header": {
+        "cards": [
+          [
+            208.33,
+            312.33
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            181.67,
+            194.67
+          ]
+        ]
+      },
+      "list-large-two": {
+        "cards": [
+          [
+            168,
+            220
+          ],
+          [
+            255,
+            307
+          ]
+        ]
+      },
+      "list-large-two-headers": {
+        "cards": [
+          [
+            208.33,
+            260.33
+          ],
+          [
+            318.33,
+            370.33
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            182,
+            194.67
+          ],
+          [
+            292.33,
+            304.67
+          ]
+        ]
+      },
+      "list-large-footer-plain": {
+        "cards": [
+          [
+            168,
+            220
+          ],
+          [
+            267.33,
+            319.33
+          ]
+        ],
+        "footerGlyphs": [
+          231,
+          240.33
+        ]
+      },
+      "list-large-footer-header": {
+        "cards": [
+          [
+            168,
+            220
+          ],
+          [
+            290,
+            342
+          ]
+        ],
+        "footerGlyphs": [
+          231,
+          240.33
+        ],
+        "headerGlyphs": [
+          [
+            264,
+            276.33
+          ]
+        ]
+      },
+      "list-large-spacing": {
+        "cards": [
+          [
+            168,
+            220
+          ],
+          [
+            260,
+            312
+          ]
+        ]
+      },
+      "list-large-spacing-headers": {
+        "cards": [
+          [
+            208.33,
+            260.33
+          ],
+          [
+            340.67,
+            392.67
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            182,
+            194.67
+          ],
+          [
+            314.67,
+            327
+          ]
+        ]
+      },
+      "list-inline": {
+        "cards": [
+          [
+            151,
+            255
+          ]
+        ]
+      },
+      "list-inline-header": {
+        "cards": [
+          [
+            156.33,
+            260.33
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            129.67,
+            142.67
+          ]
+        ]
+      },
+      "list-bare": {
+        "cards": [
+          [
+            97,
+            201
+          ]
+        ]
+      },
+      "list-bare-header": {
+        "cards": [
+          [
+            102.33,
+            206.33
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            75.67,
+            88.67
+          ]
+        ]
+      },
+      "list-plain-large-headers": {
+        "cards": [
+          [
+            208.33,
+            260.33
+          ],
+          [
+            322.67,
+            374.67
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            182,
+            194.67
+          ],
+          [
+            296.67,
+            309
+          ]
+        ],
+        "note": "rows on white: a row runs from the separator above it, and the second row’s top is its text’s, 15.83 pt above it"
+      },
+      "list-grouped-large-header": {
+        "cards": [
+          [
+            208.33,
+            311.33
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            181.67,
+            194.67
+          ]
+        ]
+      },
+      "list-grouped-large": {
+        "cards": [
+          [
+            168,
+            271
+          ]
+        ]
+      },
+      "form-large-header": {
+        "cards": [
+          [
+            208.33,
+            312.33
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            182.33,
+            194.67
+          ]
+        ]
+      },
+      "tab-list-large": {
+        "cards": [
+          [
+            168,
+            272
+          ]
+        ]
+      },
+      "list-drawer": {
+        "searchField": [
+          116,
+          160
+        ],
+        "cards": [
+          [
+            170,
+            274
+          ]
+        ]
+      },
+      "list-drawer-header": {
+        "searchField": [
+          116,
+          160
+        ],
+        "cards": [
+          [
+            210.33,
+            314.33
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            183.67,
+            196.67
+          ]
+        ]
+      }
+    },
+    "drawerNote": "With .searchable(placement: .navigationBarDrawer(displayMode: .always)) the title is drawn inline, with the search field right under the bar; the field is the one measured as search-drawer in iphone18pro-misrenders.",
+    "plainList": {
+      "list-plain-large": {
+        "firstSeparator": [
+          168,
+          169
+        ],
+        "rowGlyphs": [
+          [
+            188.33,
+            200.67
+          ],
+          [
+            240,
+            252.67
+          ]
+        ]
+      }
+    },
+    "sheets": {
+      "note": "At the large detent a sheet runs from 62 pt, the width of the screen, with its content at its top edge, and its bars are 16 pt taller than a screen’s: an inline bar ends at 132 and a large one at 184.",
+      "sheet-form-inline": {
+        "cards": [
+          [
+            167,
+            219
+          ]
+        ],
+        "titleGlyphs": [
+          94.33,
+          106.67
+        ]
+      },
+      "sheet-form-header-inline": {
+        "cards": [
+          [
+            172.33,
+            224.33
+          ]
+        ],
+        "headerGlyphs": [
+          [
+            145.33,
+            158.67
+          ]
+        ]
+      },
+      "sheet-form-large": {
+        "cards": [
+          [
+            184,
+            236
+          ]
+        ],
+        "titleGlyphs": [
+          144,
+          168.33
+        ]
+      },
+      "sheet-form-bare": {
+        "cards": [
+          [
+            97,
+            149
+          ]
+        ]
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 .toolbar { height: 64px; flex-shrink: 0; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(max-content,1fr); align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar); z-index: 30; }
 .project { display: flex; align-items: center; min-width: 0; gap: 12px; }
-.home { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; color: var(--color-xc-text); cursor: pointer; flex-shrink: 0; }
+.home { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px 0 8px; border-radius: 8px; color: var(--color-xc-text); font-size: 13px; font-weight: 500; cursor: pointer; flex-shrink: 0; }
 .home:hover { background: var(--color-xc-bar-raised); }
 .projectCopy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .projectName { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -12,8 +12,9 @@
 .themeToggle { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 6px; color: var(--color-xc-text-2); cursor: pointer; }
 .themeToggle:hover { background: var(--color-xc-bar-raised); color: var(--color-xc-text); }
 .actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
-.share > button { height: 32px; padding: 0 13px; border: none; background: #0d78f2; color: #ffffff; border-radius: 7px; }
-.share > button:hover { background: var(--workspace-accent-hover); }
+/* Secondary: a share link carries no report, chat or log, so Export is what ends a task. */
+.share > button { height: 32px; padding: 0 13px; border: 1px solid var(--color-xc-line); background: transparent; color: var(--color-xc-text); border-radius: 7px; }
+.share > button:hover { background: var(--color-xc-bar-raised); }
 .exportGroup { display: flex; border: 1px solid var(--color-xc-line); border-radius: 7px; height: 32px; }
 .export { display: flex; gap: 9px; align-items: center; padding: 0 10px; cursor: pointer; font-size: 14px; }
 .exportMenu { width: 23px; display: grid; place-items: center; border-left: 1px solid var(--color-xc-line-soft); cursor: pointer; }
@@ -81,7 +82,12 @@
 .statesBadge { position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--color-xc-line); background: var(--color-xc-bar); color: var(--color-xc-text-2); font-size: 12px; cursor: pointer; white-space: nowrap; }
 .statesBadge:hover { background: var(--color-xc-select); color: var(--color-xc-accent); }
 .statePhone { position: absolute; }
+/* A device's artwork over its screen. The workspace theme picks the finish: a black phone vanishes into the dark canvas. */
+.deviceArt { position: absolute; pointer-events: none; background: var(--device-art-black) center / 100% 100% no-repeat; }
+:root[data-workspace-theme="dark"] .deviceArt { background-image: var(--device-art-silver); }
 .stateProblem { position: absolute; inset: auto 8px 8px; padding: 6px 8px; border-radius: 8px; background: var(--color-xc-bar); color: var(--color-xc-text-2); font-size: 12px; text-align: center; }
+.notDrawn { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.restartPhone { position: absolute; inset: 0; border: 0; padding: 0; background: transparent; cursor: pointer; }
 .pageCard { position: absolute; margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .statePhone > .pageCard { position: static; }
 .statePhone [data-busy] { opacity: 0.55; }
@@ -113,17 +119,6 @@
 .canvas[data-tool] { user-select: none; -webkit-user-select: none; }
 .canvas[data-tool] :global(img) { -webkit-user-drag: none; }
 .canvas[data-dragging], .canvas[data-dragging] * { cursor: grabbing !important; }
-.canvas[data-blocked], .canvas[data-blocked] * { cursor: no-drop !important; }
-.moveGhost[data-blocked] { opacity: 0.35; filter: grayscale(1); }
-.canvas :global([data-drag-source]) { opacity: 0.3 !important; transition: opacity 120ms ease-out; }
-/* A move in progress: the copy under the pointer, the container that would take it,
-   and the bar where it would land. Fixed to the window, drawn above everything. */
-/* The copy's own elements are inspectable views with pointer events of their own;
-   under the pointer, they would be what every lookup found. */
-.moveGhost, .moveGhost * { pointer-events: none !important; }
-.moveGhost { display: none; position: fixed; z-index: 2147483000; pointer-events: none; opacity: 0.6; overflow: visible; filter: drop-shadow(0 6px 16px rgb(0 0 0 / 0.22)); will-change: transform; }
-.moveTarget { display: none; position: fixed; z-index: 2147482999; pointer-events: none; box-shadow: 0 0 0 1.5px var(--workspace-accent, #0d78f2); border-radius: 2px; background: rgb(13 120 242 / 0.06); }
-.moveLine { display: none; position: fixed; z-index: 2147483001; pointer-events: none; border-radius: 2px; background: var(--workspace-accent, #0d78f2); box-shadow: 0 0 0 1px #fff; }
 .showAll { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--color-xc-text-2); }
 .showAll input { width: 13px; height: 13px; accent-color: var(--workspace-accent, #0d78f2); cursor: pointer; }
 .showAll[data-disabled] { color: var(--color-xc-text-3); cursor: default; }
@@ -145,6 +140,8 @@
 .dockHistory > button:hover:not(:disabled) { background: var(--color-xc-select); color: var(--color-xc-accent); }
 .dockHistory > button:disabled { opacity: .4; cursor: default; }
 .dockFeedback { position: absolute; bottom: calc(100% + 4px); left: 8px; right: 8px; padding: 8px 10px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 7px; font-size: 12px; color: var(--color-xc-text); box-shadow: 0 2px 8px #16162012; pointer-events: auto; }
+.dockFeedbackAction { display: block; margin-top: 6px; padding: 0; border: 0; background: transparent; color: var(--color-xc-accent); font: inherit; font-weight: 600; cursor: pointer; }
+.dockFeedbackAction:hover { text-decoration: underline; }
 .dockTools { grid-template-columns: repeat(3, 1fr); padding-bottom: 6px; border-bottom: 1px solid var(--color-xc-line-soft); }
 .dockModes { grid-template-columns: repeat(2, 1fr); gap: 3px; padding: 4px; border: 1px solid var(--color-xc-line); border-radius: 10px; background: var(--color-xc-bar-raised); }
 .dockModes > button { border: 0; border-radius: 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-weight: 500; }
@@ -163,16 +160,19 @@
 .previewStatus i[data-state='paused'] { background: var(--color-xc-warn); }
 .codeFooter { display: flex; justify-content: center; padding: 10px; background: var(--color-xc-bar-raised); border-top: 1px solid var(--color-xc-line-soft); }
 @media(max-width:1100px) { .toolbar { gap: 12px; padding: 0 12px; } }
+/* A narrow window, as with the instructions tiled beside the studio, keeps Settings beside
+   the canvas, narrower. Stacked above the canvas, the panel took most of a half-screen
+   window's height and left the phone a few percent of its size. */
 @media(max-width:900px) {
-  .preview[data-expanded='true'] { flex-direction: column; }
   .settingsSplit { display: none; }
-  .properties { order: -1; width: 100%; display: flex; flex-wrap: wrap; border-left: 0; border-bottom: 1px solid var(--color-xc-line); padding: 6px 12px; gap: 8px; flex-shrink: 0; overflow: visible; }
-  .properties > header, .properties h3, .dimensions, .propertySection:last-child { display: none; }
-  .propertySection { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; }
-  .propertyRow { margin: 0; }
-  .propertyRow > span { display: none; }
+  .properties { width: min(var(--settings-width, 300px), 40vw); }
   .toolbar { grid-template-columns: minmax(100px,1fr) auto auto; }
   .modes button { min-width: 50px; padding: 0 8px; }
+}
+/* Too narrow for two columns: Settings goes above the canvas, never more than half its height. */
+@media(max-width:600px) {
+  .preview[data-expanded='true'] { flex-direction: column; }
+  .properties { order: -1; width: 100%; max-height: 50%; border-left: 0; border-bottom: 1px solid var(--color-xc-line); }
 }
 @media(max-width:600px) { .toolbar { height: 58px; gap: 6px; padding: 0 8px; } .project { gap: 2px; } .home { width: 26px; } .projectName { font-size: 13px; } .saveStatus { font-size: 11px; } .share { display: none; } .export { font-size: 13px; padding: 0 8px; } .export > svg { display: none; } .modes button { min-width: 42px; font-size: 13px; padding: 0 5px; } .canvasHeading { padding: 0 16px; } }
 
@@ -186,23 +186,28 @@
 .propertyTabs > button:last-child { margin-left: auto; }
 .previewStatus { min-width: 104px; flex-shrink: 0; }
 .previewStatus i[data-state='updating'] { background: var(--color-xc-warn); }
+.previewStatus i[data-state='warning'] { background: var(--color-xc-warn); }
+.statusGroup { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.designWarnings > button { font-size: 12px; color: var(--color-xc-text-2); padding: 3px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.designWarnings > button:hover, .designWarnings > button[aria-expanded='true'] { background: var(--color-xc-bar-raised); color: var(--color-xc-text); }
+.warningList { position: fixed; z-index: 901; width: 320px; overflow-y: auto; display: grid; gap: 12px; padding: 12px; background: var(--color-xc-bar); border: 1px solid var(--color-xc-line); border-radius: 10px; box-shadow: 0 8px 24px #16162024; white-space: normal; }
+.warningList h4 { margin: 0; font-size: 11px; font-weight: 600; color: var(--color-xc-text-3); }
+.warningList section > div { display: grid; gap: 4px; padding-top: 8px; margin-top: 6px; border-top: 1px solid var(--color-xc-line-soft); }
+.warningList strong { font-size: 12px; font-weight: 600; color: var(--color-xc-text); }
+.warningList p { margin: 0; font-size: 12px; line-height: 1.4; color: var(--color-xc-text-2); }
+.warningList span { display: flex; gap: 12px; }
+.warningList span button { font-size: 12px; color: var(--color-xc-accent); cursor: pointer; }
+.warningList span button:disabled { color: var(--color-xc-text-3); cursor: default; }
 .canvas[data-fixed='true'] { cursor: default; touch-action: auto; }
-@media(max-width:900px) { .properties > header { display: flex; padding: 0 !important; height: 30px; border: 0; } .properties > header > button[role='tab'] { display: none; } }
 
 .navigatorTabs { gap: 2px; }
 .navigatorTabs button { padding-inline: 6px; }
 .navigatorTabs > button:first-child { width: 26px; padding: 4px; flex-shrink: 0; justify-content: center; }
 
 .designerSettings { padding: 16px 12px; display: grid; gap: 14px; min-width: 0; }
-@media(max-width:900px) {
-  .properties:has(.designerSettings) { display: block; max-height: 45vh; overflow: auto; padding: 0; }
-  .properties > .propertyTabs { display: flex; flex: 0 0 100%; }
-  .designerSettings { width: 100%; padding: 12px 16px; }
-  .designerSettings h3 { display: block; }
-}
 
 /* Destination picking covers the phone so it cannot navigate or change selection. */
-.navigationPickTarget { position: absolute; inset: 0; z-index: 1000002; border: 4px solid transparent; border-radius: 64px; background: rgb(0 0 0 / 12%); cursor: not-allowed; display: flex; align-items: center; justify-content: center; padding: 28px; }
+.navigationPickTarget { position: absolute; inset: 0; z-index: 1000002; border: 4px solid transparent; background: rgb(0 0 0 / 12%); cursor: not-allowed; display: flex; align-items: center; justify-content: center; padding: 28px; }
 .navigationPickTarget[data-available="true"] { border-color: var(--color-xc-accent); background: transparent; cursor: crosshair; }
 .navigationPickTarget[data-available="true"]:hover, .navigationPickTarget:focus-visible { background: rgb(10 132 255 / 12%); outline: 3px solid var(--color-xc-accent); outline-offset: 4px; }
 .navigationPickTarget > span { padding: 10px 16px; border-radius: 10px; color: var(--color-xc-text); background: var(--color-xc-bar); font-size: 15px; box-shadow: 0 2px 12px rgb(0 0 0 / 15%); }
@@ -236,7 +241,6 @@
 /* The settings rail's header: what is selected, and the button that hides the rail. */
 .settingsHeader { height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--color-xc-line-soft); }
 .settingsHeader > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-@media(max-width:900px) { .properties > .settingsHeader { display: flex; flex: 0 0 100%; } }
 
 /* Design's preview environment: one group, applying to every screen at once. */
 .environment { display: flex; align-items: center; gap: 6px; padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--color-xc-line-soft); }
@@ -245,8 +249,24 @@
 .previewToggle:hover:not(:disabled) { background: var(--color-xc-bar-raised); }
 .previewToggle[aria-pressed='true'] { border-color: var(--color-xc-accent); background: var(--color-xc-select); color: var(--color-xc-accent); }
 .previewToggle:disabled { opacity: .45; cursor: default; }
-@media(max-width:1180px) { .environment > :nth-child(3) { display: none; } }
-@media(max-width:1020px) { .environment { display: none; } }
+/* The pickers the toolbar has no room for, in the canvas heading instead (D15). */
+.headingEnvironment { display: inline-flex; align-items: center; gap: 6px; }
+.headingEnvironment > button, .headingEnvironment > div { height: 28px; }
+/* From the width at which the pickers move here (NO_ROOM_FOR_PICKERS in lib/paneLayout.ts), the heading wraps. */
+@media(max-width:1020px) {
+  .canvasHeading { height: auto; min-height: 45px; flex-wrap: wrap; row-gap: 6px; padding: 6px 12px; }
+  .canvasHeading > span:last-child { flex-wrap: wrap; justify-content: flex-end; gap: 6px 12px; }
+  .headingHint[data-idle] { display: none; }
+  .showAll { white-space: nowrap; }
+}
+
+/* A narrow window: Layers over the canvas when asked for, and a note asking for more room (D15). */
+.layersOver { position: absolute; top: 0; bottom: 0; left: 32px; z-index: 40; overflow: hidden; background: var(--color-xc-sidebar); border-right: 1px solid var(--color-xc-line); box-shadow: 8px 0 24px rgb(0 0 0 / 18%); }
+.layersBackdrop { position: absolute; inset: 0; z-index: 39; background: rgb(0 0 0 / 8%); cursor: default; }
+.narrowNote { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 5px 12px; border-bottom: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); color: var(--color-xc-text-2); font-size: 12px; }
+.narrowNote > span { flex: 1; min-width: 0; }
+.narrowNote > button { padding: 2px 8px; border-radius: 5px; color: var(--color-xc-accent); }
+.narrowNote > button:hover { background: var(--color-xc-line-soft); }
 
 /* Where the settings panel is: App › Screen › View. Each step selects that level. */
 .levelPath { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; font-weight: 500; color: var(--color-xc-text-3); }

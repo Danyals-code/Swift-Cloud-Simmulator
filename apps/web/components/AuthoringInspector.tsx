@@ -1,7 +1,7 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { AuthoringNode, ResourceOperation, SourceSpan } from '@studio/shared'
+import { isStructuralLayer, layoutParentOf, offersWhenTapped, stackLayoutOf, LAYOUT_WORDS, type AuthoringNode, type ResourceOperation, type SourceSpan } from '@studio/shared'
 import { AuthoringFeatures, type FeatureProps } from './AuthoringFeatures'
 import { PropertyControl, type PropertyChange } from './PropertyControl'
 import { LayoutGuide } from './LayoutGuide'
@@ -12,6 +12,7 @@ import { TokenField, valueFields } from './settings/TokenField'
 import { sourceLayerIsVisual, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
 import { authoringSettingsContext, settingsContextLabel, settingsVisualChildren } from '../lib/authoringSettings'
 import { MenuButton } from './ui/Menu'
+import { SHORTCUT_KEYS } from '../lib/shortcuts'
 import { Icon } from './ui/Icon'
 import styles from './AuthoringInspector.module.css'
 
@@ -30,7 +31,11 @@ const NAVIGATE_TYPES: readonly { type: 'push' | 'sheet' | 'cover'; label: string
   { type: 'cover', label: 'Full screen' },
 ]
 
-export function AuthoringInspector({ node, stale, onReveal, onChange, features }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange }) {
+/**
+ * `onCopy` and `onPaste` put Copy and Paste in the view menu, as ⌘C and ⌘V do (D6);
+ * Paste is off while nothing is copied.
+ */
+export function AuthoringInspector({ node, stale, onReveal, onChange, features, onCopy, onPaste }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void }) {
   const root = useRef<HTMLDivElement | null>(null)
   const focus = useRef<{ source: string; owner: string; control: string; label: string; caret: number | null; modifier?: string; button?: string } | null>(null)
   const [retained, setRetained] = useState(node)
@@ -82,10 +87,14 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
     ...links.map(owner => ({ node: owner, type: 'push' as const })),
     ...(presented && !links.length ? [{ node: selected, type: presented.name === 'sheet' ? 'sheet' as const : 'cover' as const }] : []),
   ]
-  const interaction = !!selected.behavior && (selected.behavior.canConfigureAction || !!selected.behavior.binding)
+  // A Button's action, a control's value, or any other view When tapped can make tappable (D16).
+  const interaction = offersWhenTapped(selected.behavior) || !!selected.behavior?.binding
   const advanced = !!selected.behavior && (selected.behavior.canConfigureAction || selected.behavior.states.length > 0) || !!selected.component
   // Only wrappers with something to set: a bare NavigationStack around every view is not news.
   const wrappers = context.surrounding.filter(owner => !!owner.modifiers?.length || owner.controls?.some(control => !/^(modifier:|add:|fill:)/.test(control.id)))
+  // Figma aligns a layer itself; SwiftUI has the stack around it do it (D4), so a view in one says where to look.
+  const stack = isStructuralLayer(selected) ? layoutParentOf(features?.snapshot?.nodes ?? [], selected) : undefined
+  const stackLayout = stack && stackLayoutOf(stack.name)
   const rememberFocus = (input: EventTarget) => {
     if (input instanceof HTMLButtonElement) {
       const modifier = input.closest<HTMLElement>('[data-modifier-key]')?.dataset.modifierKey
@@ -99,7 +108,16 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
     <fieldset disabled={stale} className={styles.inspectorFields}>
       <header className={styles.selectionHeader}>
         <div><strong>{title}</strong>{title !== type && <small>{type}</small>}</div>
-        {onReveal && <MenuButton label="View actions" items={[{ value: 'code', label: 'Open in Code', icon: 'code' }, ...(breadcrumbs.length ? [{ value: 'parent', label: `Select ${sourceLayerLabel(breadcrumbs.at(-1)!)}` }] : [])]} onSelect={value => { if (value === 'code') onReveal(selected.source); else if (value === 'parent') features?.onSelect?.(breadcrumbs.at(-1)!) }}><Icon name="ellipsis" size={15} /></MenuButton>}
+        {onReveal && <MenuButton label="View actions" items={[
+          { value: 'code', label: 'Open in Code', icon: 'code' },
+          ...(breadcrumbs.length ? [{ value: 'parent', label: `Select ${sourceLayerLabel(breadcrumbs.at(-1)!)}` }] : []),
+          ...(isStructuralLayer(selected) ? [{ value: 'copy', label: 'Copy', detail: SHORTCUT_KEYS.copy, disabled: !onCopy, separated: true }, { value: 'paste', label: 'Paste', detail: SHORTCUT_KEYS.paste, disabled: !onPaste }] : []),
+        ]} onSelect={value => {
+          if (value === 'code') onReveal(selected.source)
+          else if (value === 'parent') features?.onSelect?.(breadcrumbs.at(-1)!)
+          else if (value === 'copy') onCopy?.(selected)
+          else if (value === 'paste') onPaste?.(selected)
+        }}><Icon name="ellipsis" size={15} /></MenuButton>}
       </header>
       {template ? <p className={styles.scope}>Row design · changes apply to every row</p> : selected.kind === 'definition' && features?.snapshot ? <p className={styles.scope}>The Main · changes apply to every copy ({features.snapshot.nodes.filter(n => n.definitionId === selected.id).length})</p> : selected.runtimeIds.length > 1 ? <p className={styles.scope}>One design · changes apply to {selected.runtimeIds.length} places on screen</p> : null}
       {!!breadcrumbs.length && <nav className={styles.breadcrumbs} aria-label="Selection path">{breadcrumbs.map(ancestor => <button type="button" key={ancestor.id} onClick={() => features?.onSelect?.(ancestor)}>{sourceLayerLabel(ancestor)}</button>)}</nav>}
@@ -107,7 +125,9 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
           rather than as controls that quietly do nothing. */}
       {selected.kind === 'opaque' && <p className={styles.locked} data-testid="locked-block">
         <Icon name="lock" size={12} />
-        <span>Written in Swift. It runs and draws here, and it is kept exactly as written.</span>
+        <span>{selected.undrawn === 'unsupported' ? 'Written in Swift. The preview doesn’t draw it yet, and Xcode draws it as written. It is kept exactly as written.'
+          : selected.undrawn === 'unknown' ? 'Written in Swift. The preview doesn’t know this view and shows a labelled box in its place. It is kept exactly as written.'
+          : 'Written in Swift. It runs and draws here, and it is kept exactly as written.'}</span>
         {onReveal && <button type="button" className={styles.linkButton} onClick={() => onReveal(selected.source)}>Open in Code</button>}
       </p>}
 
@@ -119,6 +139,7 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features }
           : field.control && onChange ? <PropertyControl key={`${selected.id}:${field.control.id}:${field.control.value}`} control={field.control} onChange={onChange} /> : null)}
         {!basics.length && !selected.component && !['definition', 'template'].includes(selected.kind) && !interaction && <p className={styles.note}>{selected.properties.some(property => property.valueKind === 'data-binding' || property.valueKind === 'component-argument') ? 'Its content comes from data.' : 'Nothing to set when it is created.'}</p>}
         {features && <AuthoringFeatures key={`basics:${featureKey}`} node={selected} {...features} section="basics" />}
+        {stack && stackLayout && <p className={styles.note} data-testid="alignment-hint">{stackLayout === 'ZStack' ? 'Aligned' : 'Aligned and spaced'} by its {LAYOUT_WORDS[stackLayout]}. <button type="button" className={styles.linkButton} onClick={() => features?.onSelect?.(stack)}>Select {sourceLayerLabel(stack)}</button></p>}
         {interaction && features && <AuthoringFeatures key={`interaction:${featureKey}`} node={selected} {...features} section="interaction" />}
         {!!selected.fields?.length && features && <AuthoringFeatures key={`field:${dataKey}`} node={selected} {...features} section="field" />}
         {!!conditions.length && <div className={styles.shownWhen} data-testid="shown-when">{conditions.map(condition => {

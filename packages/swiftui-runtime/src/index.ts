@@ -10,7 +10,7 @@
  */
 
 export { compile, rerender, applyEvent, resetPipelineState, setFontMetrics, setTextMeasurements, relayout, setAllPages } from './pipeline'
-export { AppRuntime, actionId, type EvaluationResult, type RuntimeFailure } from './app-runtime'
+export { AppRuntime, actionId, type EvaluationResult } from './app-runtime'
 export { SwiftUIHost } from './swiftui-host'
 export { IdentityPath, StateStore, fingerprint } from './identity'
 export { viewsToLayout, type ConversionResult } from './to-layout'

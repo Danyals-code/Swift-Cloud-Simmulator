@@ -180,6 +180,17 @@ export interface ShapePayload {
   readonly cornerRadius?: number
   readonly fill?: Fill
   readonly stroke?: ShapeStroke
+  readonly trim?: ShapeTrim
+}
+
+/**
+ * `.trim(from:to:)` on a shape: the part of its outline to draw, as fractions of the
+ * outline's length from where SwiftUI's path starts. Applied when the shape is drawn,
+ * because its outline isn't known until its size is.
+ */
+export interface ShapeTrim {
+  readonly from: number
+  readonly to: number
 }
 
 /**
@@ -214,9 +225,36 @@ export interface FilterSpec {
  * exactly which construct is missing, and the same feature name goes to telemetry
  * so the coverage backlog is driven by real usage.
  */
-export interface PlaceholderPayload {
-  readonly feature: string
-  readonly reason: string
+export type PlaceholderPayload =
+  /**
+   * Real SwiftUI the preview has no drawing for yet, a view name it does not know, or an
+   * image the project does not have, named by `feature` as the code names it. Telemetry
+   * counts the views by it.
+   */
+  | { readonly kind: 'unsupported' | 'unknown' | 'missing'; readonly feature: string }
+  /**
+   * A view of the project's own whose code stopped, with the failure the AI is told about,
+   * or a notice in place of the whole screen, with its detail.
+   */
+  | { readonly kind: 'stopped' | 'notice'; readonly feature: string; readonly reason: string }
+
+/** Why a placeholder is drawn. */
+export type PlaceholderKind = PlaceholderPayload['kind']
+
+/** A name written in camel case, in words: `EditButton` is "Edit button", `buttonTitle` is "button title". */
+export function nameInWords(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(' ').map((word, index) => index ? word.toLowerCase() : word).join(' ')
+}
+
+/** What a placeholder says on the canvas, in a designer's words rather than Swift's (D12). */
+export function placeholderWords(placeholder: PlaceholderPayload): { readonly title: string; readonly detail: string } {
+  switch (placeholder.kind) {
+    case 'unsupported': return { title: nameInWords(placeholder.feature), detail: 'Not drawn in the preview yet. Xcode draws it as written.' }
+    case 'unknown': return { title: placeholder.feature, detail: 'The preview doesn’t know this view. Xcode builds it only if an Apple framework or the project declares it.' }
+    case 'stopped': return { title: nameInWords(placeholder.feature), detail: `Its code stopped: ${placeholder.reason.replace(/^(Swift runtime failure|Fatal error): /, '').replace(/\.?$/, '.')}` }
+    case 'missing': return { title: `Image “${placeholder.feature}”`, detail: 'This image is missing. Add it in Project resources.' }
+    case 'notice': return { title: placeholder.feature, detail: placeholder.reason }
+  }
 }
 
 export interface HitTarget {
@@ -410,6 +448,8 @@ export interface RenderNode {
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
   /** `.mask` with a gradient or a colour: the alpha everything inside this node is drawn through. */
   readonly mask?: Fill
+  /** A `GeometryReader`'s safe-area insets, which its proxy reports. Only on a reader's own node. */
+  readonly geometryInsets?: { readonly top: number; readonly leading: number; readonly bottom: number; readonly trailing: number }
   /**
    * `.blendMode` - how this node composites with what is already painted.
    *
@@ -444,6 +484,11 @@ export interface RenderTree {
   readonly nodes: readonly RenderNode[]
   /** monotonic; lets the renderer cheaply skip an unchanged tree */
   readonly revision: number
+  /**
+   * Set on a tree that only carries a message, because the code has errors or stopped
+   * running. The phone keeps showing the last tree that ran, dimmed, with this over it.
+   */
+  readonly notice?: { readonly title: string; readonly detail: string }
 }
 
 export const EMPTY_RENDER_TREE: RenderTree = {

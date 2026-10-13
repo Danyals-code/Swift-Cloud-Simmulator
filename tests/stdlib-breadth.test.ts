@@ -54,9 +54,9 @@ function nodes(result: CompileResult): readonly RenderNode[] {
   return result.renderTree?.nodes ?? []
 }
 
-/** Renders `Text("\(expr)")` and returns what it drew. */
+/** Renders `Text(verbatim: "\(expr)")`, Swift's own text for the value, and returns what it drew. */
 function evaluate(expr: string, extra = ''): string {
-  const result = run(app(`    var body: some View { Text("\\(${expr})") }`, extra))
+  const result = run(app(`    var body: some View { Text(verbatim: "\\(${expr})") }`, extra))
   expect(errors(result)).toEqual([])
   return texts(result).join('')
 }

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
 import { applyProjectTransaction, DocumentHistory, emptyStudioMetadata, projectFromFiles } from '@studio/project-model'
-import type { AuthoringNode, CompileRequest, DesignEditRequest, SourceFile } from '@studio/shared'
+import { groupLayoutOf, type AuthoringNode, type CompileRequest, type DesignEditRequest, type SourceFile } from '@studio/shared'
 import { screenCatalog } from '../apps/web/lib/screens'
 
 beforeEach(resetPipelineState)
@@ -85,6 +85,120 @@ describe('guided interactions', () => {
     expect(source).toContain('.padding(12)')
     expect(texts(tap(render(source), 'Details'))).toContain('Club details')
   })
+  it('pushes from a screen that is itself pushed onto the same stack, with no second NavigationStack (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            NavigationLink("Details") { DetailsScreen() }
+        }
+    }
+}
+struct DetailsScreen: View {
+    var body: some View {
+        VStack {
+            Button("More") { }
+        }
+    }
+}
+struct MoreScreen: View {
+    var body: some View {
+        Text("More details")
+    }
+}
+`
+    const pushed = edit(source, 'Button', { kind: 'guided-action', action: { type: 'navigate', destination: 'MoreScreen' }, replace: false })
+    expect(pushed.match(/NavigationStack/g)).toHaveLength(1)
+    expect(pushed).toContain('        VStack {\n            NavigationLink("More", destination: MoreScreen())\n        }')
+    expect(texts(tap(tap(render(pushed), 'Details'), 'More'))).toContain('More details')
+  })
+  it('pushes from a pushed screen that has a #Preview of its own, as screens made in the studio have, with no second stack (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            NavigationLink("Details") { DetailsScreen() }
+        }
+    }
+}
+struct DetailsScreen: View {
+    var body: some View {
+        VStack {
+            Button("More") { }
+        }
+    }
+}
+
+#Preview {
+    DetailsScreen()
+}
+struct MoreScreen: View {
+    var body: some View {
+        Text("More details")
+    }
+}
+`
+    const pushed = edit(source, 'Button', { kind: 'guided-action', action: { type: 'navigate', destination: 'MoreScreen' }, replace: false })
+    expect(pushed.match(/NavigationStack/g)).toHaveLength(1)
+    expect(texts(tap(tap(render(pushed), 'Details'), 'More'))).toContain('More details')
+  })
+  it('pushes from a screen that links back to the one before it, with no second stack (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            NavigationLink("Plans") { PlansScreen() }
+        }
+    }
+}
+struct PlansScreen: View {
+    var body: some View {
+        NavigationLink("Plan") { PlanScreen() }
+    }
+}
+struct PlanScreen: View {
+    var body: some View {
+        VStack {
+            NavigationLink("All plans") { PlansScreen() }
+            Button("Notes") { }
+        }
+    }
+}
+struct NotesScreen: View {
+    var body: some View {
+        Text("Plan notes")
+    }
+}
+`
+    const pushed = edit(source, 'Button', { kind: 'guided-action', action: { type: 'navigate', destination: 'NotesScreen' }, replace: false })
+    expect(pushed.match(/NavigationStack/g)).toHaveLength(1)
+    expect(texts(tap(tap(tap(render(pushed), 'Plans'), 'Plan'), 'Notes'))).toContain('Plan notes')
+  })
+  it('wraps a screen that needs a stack for its first push, with what it wraps indented inside it (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        VStack {
+            Text("Home")
+            Button("Details") { }
+        }
+    }
+}
+`
+    const pushed = edit(source, 'Button', { kind: 'guided-action', action: { type: 'navigate', destination: 'DetailsScreen' }, replace: false, createScreen: { name: 'DetailsScreen', title: 'Club details' } })
+    expect(pushed).toContain(`    var body: some View {
+        NavigationStack {
+            VStack {
+                Text("Home")
+                NavigationLink("Details", destination: DetailsScreen())
+            }
+        }
+    }`)
+  })
   it('creates and opens a sheet, preserving the current screen', () => {
     const source = edit(wrap('VStack { Text("Home"); Button("Join") {} }'), 'Button', { kind: 'guided-action', action: { type: 'sheet', destination: 'JoinScreen' }, replace: false, createScreen: { name: 'JoinScreen', title: 'Join the club' } })
     const result = tap(render(source), 'Join')
@@ -139,6 +253,64 @@ describe('layer organization', () => {
     render(result.changes[0]!.after)
     expect(plan(source, nodes[0]!, { kind: 'layer-wrap', ids: [nodes[0]!.id, nodes[2]!.id], layout: 'HStack' })).toMatchObject({ ok: false })
   })
+  describe('grouping the way the layers already sit, so nothing moves (D3)', () => {
+    const grouped = (stack: string, layout: 'VStack' | 'HStack' | 'ZStack', count = 2) => {
+      const source = wrap(`${stack} {\n    Text("A")\n    Text("B")\n    Text("C")\n}`)
+      const nodes = model(source).nodes.filter(n => n.name === 'Text')
+      const result = plan(source, nodes[0]!, { kind: 'layer-wrap', ids: nodes.slice(0, count).map(n => n.id), layout })
+      if (!result.ok) throw new Error(result.reason)
+      return result.changes[0]!.after
+    }
+    const expected = (stack: string, group: string) => wrap(`${stack} {\n    ${group} {\n        Text("A")\n        Text("B")\n    }\n    Text("C")\n}`)
+
+    it('takes the column\'s alignment and spacing', () => {
+      expect(grouped('VStack(alignment: .leading, spacing: 12)', 'VStack')).toBe(expected('VStack(alignment: .leading, spacing: 12)', 'VStack(alignment: .leading, spacing: 12)'))
+    })
+
+    it('takes a row\'s, and a lazy one\'s', () => {
+      expect(grouped('HStack(alignment: .top, spacing: 4)', 'HStack')).toBe(expected('HStack(alignment: .top, spacing: 4)', 'HStack(alignment: .top, spacing: 4)'))
+      expect(grouped('LazyVStack(spacing: 8)', 'VStack')).toBe(expected('LazyVStack(spacing: 8)', 'VStack(spacing: 8)'))
+    })
+
+    it('takes an overlap\'s alignment', () => {
+      expect(grouped('ZStack(alignment: .bottomTrailing)', 'ZStack')).toBe(expected('ZStack(alignment: .bottomTrailing)', 'ZStack(alignment: .bottomTrailing)'))
+    })
+
+    it('leaves out what the parent leaves out', () => {
+      expect(grouped('VStack', 'VStack')).toBe(expected('VStack', 'VStack'))
+    })
+
+    it('leaves out spacing in a scroll view or a list, which set none', () => {
+      expect(grouped('ScrollView', 'VStack')).toBe(expected('ScrollView', 'VStack'))
+      expect(grouped('ScrollView(.horizontal)', 'HStack')).toBe(expected('ScrollView(.horizontal)', 'HStack'))
+      expect(grouped('List', 'VStack')).toBe(expected('List', 'VStack'))
+    })
+
+    it('starts another way of stacking them at a spacing of 16, as before', () => {
+      expect(grouped('VStack(spacing: 12)', 'HStack')).toBe(expected('VStack(spacing: 12)', 'HStack(spacing: 16)'))
+    })
+
+    it('builds', () => {
+      render(grouped('VStack(alignment: .leading, spacing: 12)', 'VStack'))
+      render(grouped('ZStack(alignment: .bottomTrailing)', 'ZStack'))
+    })
+  })
+
+  it('names the stack a group goes into by how its parent lays the layers out (D3)', () => {
+    const layoutIn = (body: string, name = 'Text') => {
+      const snapshot = model(wrap(body))
+      const node = snapshot.nodes.find(n => n.name === name)!
+      return groupLayoutOf(snapshot.nodes, node)
+    }
+    expect(layoutIn('VStack { Text("A"); Text("B") }')).toBe('VStack')
+    expect(layoutIn('HStack { Text("A"); Text("B") }')).toBe('HStack')
+    expect(layoutIn('LazyHStack { Text("A"); Text("B") }')).toBe('HStack')
+    expect(layoutIn('ZStack { Text("A"); Text("B") }')).toBe('ZStack')
+    expect(layoutIn('ScrollView(.horizontal) { Text("A"); Text("B") }')).toBe('HStack')
+    expect(layoutIn('List { Text("A"); Text("B") }')).toBe('VStack')
+    expect(layoutIn('HStack { if true { Text("A"); Text("B") } }')).toBe('HStack')
+  })
+
   it('rejects a move that would silently bind to a different local value', () => {
     const source = wrap('VStack { let label = "Original"; Text(label); HStack { let label = "Other"; Text(label) } }')
     const node = selected(source, 'Text'), row = selected(source, 'HStack')

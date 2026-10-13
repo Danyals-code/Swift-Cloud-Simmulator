@@ -80,3 +80,11 @@ export type ResourceOperation =
   | { readonly kind: 'style-migrate'; readonly name: string }
   | { readonly kind: 'asset-references'; readonly from: string; readonly to: string | null }
   | { readonly kind: 'asset-use'; readonly name: string }
+
+/**
+ * Whether a colour set of this name is the one every Xcode app already has, AccentColor.
+ * Asset catalogs don't tell names apart by letter case, so neither does this.
+ */
+export function isAccentColorSetName(name: string): boolean {
+  return name.toLowerCase() === 'accentcolor'
+}

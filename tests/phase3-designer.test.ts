@@ -36,11 +36,13 @@ describe('component authoring and saved variants', () => {
   })
   it('does not replace a value linked to its screen or copy a captured action', () => {
     const source = app('VStack { Card(title: "Live".uppercased()) }', card)
-    expect(component(source).component?.reusable).toBe(false)
+    // A copy can still go anywhere (D6): the title means the same on any screen.
+    expect(component(source).component?.reusable).toBe(true)
     expect(plan(source, component(source), { kind: 'component-variant', variant: variant(source, [{ control: 'component:title', value: 'Lost' }]) })).toMatchObject({ ok: false })
     const action = app('VStack { Card(action: {}) }', 'struct Card: View { var action: () -> Void; var body: some View { Button("Tap", action: action) } }')
     expect(component(action).component?.variantControls).toEqual([])
-    expect(component(action).component?.reusable).toBe(false)
+    // A new copy starts with an empty action instead (D6).
+    expect(component(action).component?.reusable).toBe(true)
   })
   it('reuses portable components but refuses direct and indirect self nesting', () => {
     const source = app('VStack { Card(title: "One") }', card)
@@ -106,5 +108,65 @@ describe('conservative design review', () => {
     expect(reviewTree(tree(button)).findings).toEqual([])
     expect(reviewTree(tree({ ...button, frame, opacity: 0 })).findings).toEqual([])
     expect(reviewTree(tree({ ...button, frame, hitTarget: { role: 'button', enabled: false, handlerId: 'tap' } })).findings).toEqual([])
+  })
+})
+
+describe('D6: Insert copy puts a new copy anywhere, each input as a copy can have it on its own', () => {
+  /** Home holds the copies, whose inputs may come from Home; Settings is where a new one goes. */
+  const screens = (home: string, definitions: string) => `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    @State private var count = 0
+    var body: some View { VStack { ${home} } }
+}
+struct SettingsScreen: View { var body: some View { VStack { Text("Settings") } } }
+${definitions}`
+  const settings = (text: string) => model(text).nodes.find(n => n.name === 'VStack' && n.owner === 'SettingsScreen')!
+  /** The copy as it lands on Settings' one line: after its Text, before the stack, body and struct close. */
+  const inserted = (text: string, name: string) => {
+    const line = apply(text, settings(text), { kind: 'component-insert', component: name }).split('\n').find(l => l.startsWith('struct SettingsScreen'))!
+    return line.slice(line.indexOf('Text("Settings"); ') + 'Text("Settings"); '.length, line.lastIndexOf(' } } }'))
+  }
+  const badge = 'struct Badge: View { let title: String; let padding: CGFloat; var body: some View { Text(title).padding(padding) } }'
+
+  it('copies literal inputs, a CGFloat padding among them, which the settings panel can then change', () => {
+    const text = screens('Badge(title: "Starred", padding: 12)', badge)
+    expect(inserted(text, 'Badge')).toBe('Badge(title: "Starred", padding: 12)')
+    const copy = model(apply(text, settings(text), { kind: 'component-insert', component: 'Badge' })).nodes.find(n => n.name === 'Badge' && n.owner === 'SettingsScreen')!
+    expect(copy.controls?.find(control => control.id === 'component:padding')).toMatchObject({ kind: 'number', value: '12' })
+  })
+
+  it('starts an action empty, to be set in When tapped', () => {
+    const text = screens('TapRow(action: { count += 1 })', 'struct TapRow: View { let action: () -> Void; var body: some View { Button("Tap", action: action) } }')
+    expect(inserted(text, 'TapRow')).toBe('TapRow(action: { })')
+    expect(texts(apply(text, settings(text), { kind: 'component-insert', component: 'TapRow' }))).toContain('Tap')
+  })
+
+  it('makes a value from the copy\'s screen a sample, or the literal another copy uses', () => {
+    expect(inserted(screens('Badge(title: "Count \\(count)", padding: 12)', badge), 'Badge')).toBe('Badge(title: "Title", padding: 12)')
+    expect(inserted(screens('Badge(title: "Count \\(count)", padding: 12); Badge(title: "Loved", padding: 16)', badge), 'Badge')).toBe('Badge(title: "Loved", padding: 12)')
+  })
+
+  it('gives a binding input a constant, as Make component writes one for a value the view changes', () => {
+    const text = screens('Stat(count: $count)', 'struct Stat: View { @Binding var count: Int; var body: some View { Stepper("Count", value: $count) } }')
+    expect(inserted(text, 'Stat')).toBe('Stat(count: .constant(0))')
+    expect(texts(apply(text, settings(text), { kind: 'component-insert', component: 'Stat' }))).toContain('Count')
+  })
+
+  it('starts an action written after the call empty too', () => {
+    const text = screens('PrimaryButton(title: "Save") { count += 1 }', 'struct PrimaryButton: View { let title: String; let action: () -> Void; var body: some View { Button(title, action: action) } }')
+    expect(inserted(text, 'PrimaryButton')).toBe('PrimaryButton(title: "Save") { }')
+  })
+
+  it('gives an enum input its first case, and an optional one nothing', () => {
+    const tag = 'enum Style { case plain, bold }\nstruct Tag: View { let style: Style; let note: String?; var body: some View { Text(note ?? "Tag") } }'
+    const text = screens('Tag(style: count > 1 ? .bold : .plain, note: count > 1 ? "Many" : nil)', tag)
+    expect(inserted(text, 'Tag')).toBe('Tag(style: .plain, note: nil)')
+  })
+
+  it('says why when an input is something only its screen can give, which no sample fits', () => {
+    const text = screens('ForEach([Pet(name: "Rex")], id: \\.name) { pet in PetRow(pet: pet) }', 'struct Pet { let name: String }\nstruct PetRow: View { let pet: Pet; var body: some View { Text(pet.name) } }')
+    expect(plan(text, settings(text), { kind: 'component-insert', component: 'PetRow' }))
+      .toEqual({ ok: false, reason: 'PetRow’s pet comes from the screen it is on, and a copy elsewhere can’t have it. Duplicate a copy on that screen instead.' })
   })
 })

@@ -33,11 +33,12 @@ beforeEach(async () => {
 })
 
 describe('the first load', () => {
-  it('lays down exactly one starter project', async () => {
+  it('lays down exactly one starter project: the blank screen, not an example (B6)', async () => {
     await useStudio.getState().load()
 
     expect(await persistence.list()).toHaveLength(1)
-    expect(useStudio.getState().project?.manifest.name).toBe('CounterApp')
+    expect(useStudio.getState().project?.manifest.templateId).toBe('blank')
+    expect(useStudio.getState().project?.manifest.name).toBe('MyDesignApp')
     expect(useStudio.getState().origin).toBe('fresh')
   })
 
@@ -95,7 +96,7 @@ describe('creating a project from a template', () => {
     await useStudio.getState().applyTemplate('tasks')
 
     const kept = await persistence.list()
-    expect(kept.map((p) => p.name).sort()).toEqual(['CounterApp', 'TasksApp'])
+    expect(kept.map((p) => p.name).sort()).toEqual(['MyDesignApp', 'TasksApp'])
   })
 
   it('saves the last keystrokes when a template opens before autosave runs', async () => {
@@ -119,6 +120,50 @@ describe('creating a project from a template', () => {
     expect(kept.map((p) => p.name)).toEqual(['TasksApp'])
   })
 
+  it('keeps the untouched project when its own template is chosen again (B6)', async () => {
+    // A fresh browser opens on the blank screen, so "Create design" is most people's
+    // first click. Swapping the starter for an identical copy redrew everything, and
+    // for a moment the canvas showed one project while edits went to the other.
+    await useStudio.getState().load()
+    const starter = useStudio.getState().project!
+
+    expect(await useStudio.getState().applyTemplate('blank')).toBe('opened')
+
+    expect(useStudio.getState().project).toBe(starter)
+    expect(await persistence.list()).toHaveLength(1)
+  })
+
+  it('numbers a new design whose name a project here already has, so their exports can be told apart', async () => {
+    await useStudio.getState().load()
+    const first = useStudio.getState().project!
+    useStudio.getState().setFileText(first.files[0]!.id, '// the first app')
+    await useStudio.getState().flush()
+
+    await useStudio.getState().applyTemplate('blank')
+
+    expect(useStudio.getState().project!.manifest.name).toBe('MyDesignApp 2')
+  })
+
+  it('goes by the name the open project has now, not the one it was listed under', async () => {
+    await useStudio.getState().load()
+    useStudio.getState().renameProject('Kept work')
+
+    await useStudio.getState().applyTemplate('blank')
+
+    expect(useStudio.getState().project!.manifest.name).toBe('MyDesignApp')
+  })
+
+  it('numbers an opened or generated app named like one already here', async () => {
+    const app = { name: 'App.swift', text: 'import SwiftUI\n@main struct TripApp: App { var body: some Scene { WindowGroup { Text("Trip") } } }' }
+    await useStudio.getState().load()
+    await useStudio.getState().openFiles([app])
+    useStudio.getState().setFileText(useStudio.getState().project!.files[0]!.id, '// the first trip')
+
+    await useStudio.getState().openFiles([app])
+
+    expect(useStudio.getState().project!.manifest.name).toBe('TripApp 2')
+  })
+
   it('gives the new project its own id', async () => {
     await useStudio.getState().load()
     const before = useStudio.getState().project!.id
@@ -132,7 +177,7 @@ describe('creating a project from a template', () => {
     await useStudio.getState().load()
     const before = useStudio.getState().project!.id
 
-    expect(await useStudio.getState().applyTemplate('not-a-template')).toBe(false)
+    expect(await useStudio.getState().applyTemplate('not-a-template')).toBe('failed')
     expect(useStudio.getState().project!.id).toBe(before)
   })
 })
@@ -141,7 +186,7 @@ describe('the recents list', () => {
   it('reports a stale project without changing the current project', async () => {
     await useStudio.getState().load()
     const current = useStudio.getState().project!.id
-    expect(await useStudio.getState().openProject('missing')).toBe(false)
+    expect(await useStudio.getState().openProject('missing')).toBe('failed')
     expect(useStudio.getState().project!.id).toBe(current)
   })
   it('names every project in this browser', async () => {
@@ -154,7 +199,7 @@ describe('the recents list', () => {
     // so `updatedAt` and `createdAt` both tie and there is no "newest" to assert.
     // The order is exercised below, where the timestamps actually differ.
     expect(useStudio.getState().recents.map((p) => p.name).sort()).toEqual([
-      'CounterApp',
+      'MyDesignApp',
       'TasksApp',
     ])
   })
@@ -172,7 +217,7 @@ describe('the recents list', () => {
     await persistence.save({ ...aged, updatedAt: aged.updatedAt - 60_000 })
     await useStudio.getState().openProject(first.id)
 
-    expect(useStudio.getState().recents.map((p) => p.name)).toEqual(['TasksApp', 'CounterApp'])
+    expect(useStudio.getState().recents.map((p) => p.name)).toEqual(['TasksApp', 'MyDesignApp'])
   })
 
   it('reopens one without disturbing the other', async () => {
@@ -225,7 +270,7 @@ describe('renaming from the workspace', () => {
   it('reports invalid names without losing the current name', async () => {
     await useStudio.getState().load()
     expect(useStudio.getState().renameProject('../Bad')).toBe(false)
-    expect(useStudio.getState().project!.manifest.name).toBe('CounterApp')
+    expect(useStudio.getState().project!.manifest.name).toBe('MyDesignApp')
     const file = useStudio.getState().project!.files[0]!.id
     expect(useStudio.getState().renameFile(file, '../Bad.swift')).toBe(false)
     expect(useStudio.getState().renameFile(file, 'Renamed.swift')).toBe(true)

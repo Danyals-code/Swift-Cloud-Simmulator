@@ -135,7 +135,7 @@ it('F25 preserves decoration colors per attributed run and explicit resets', () 
  expect(html(text)).toContain('text-decoration:line-through')
 })
 it('F26 changes components from Design and edits time without changing the local day', () => {
- let text = source('VStack { DatePicker("When", selection: $chosen, displayedComponents: .date); Text("at \\(chosen.timeIntervalSince1970)") }')
+ let text = source('VStack { DatePicker("When", selection: $chosen, displayedComponents: .date); Text(verbatim: "at \\(chosen.timeIntervalSince1970)") }')
  text = control(text, 'DatePicker', 'date:components', 'Time')
  expect(text).toContain('displayedComponents: .hourAndMinute')
  let result = press(run(text), 'When')
@@ -153,7 +153,7 @@ it('F26 changes components from Design and edits time without changing the local
 it('F26 rejects time edits outside a DatePicker range and shows both editors for combined mode', () => {
  const from = new Date(1700000000000); from.setHours(12, 0, 0, 0)
  const to = new Date(from); to.setHours(14)
- const text = source(`VStack { DatePicker("When", selection: $chosen, in: Date(timeIntervalSince1970: ${from.getTime()/1000})...Date(timeIntervalSince1970: ${to.getTime()/1000})); Text("at \\(chosen.timeIntervalSince1970)") }`)
+ const text = source(`VStack { DatePicker("When", selection: $chosen, in: Date(timeIntervalSince1970: ${from.getTime()/1000})...Date(timeIntervalSince1970: ${to.getTime()/1000})); Text(verbatim: "at \\(chosen.timeIntervalSince1970)") }`)
  let result = press(run(text), 'When')
  expect(texts(result)).toContain('November 2023')
  const hit = result.renderTree!.nodes.find(n => n.hitTarget?.inputType === 'time')!.hitTarget!
@@ -265,7 +265,7 @@ it('F23 preserves trim geometry and inherited foreground for styled Path strokes
  const original = render(source(path + '.stroke(style: StrokeStyle(lineWidth: 4, dash: [10, 5])).foregroundStyle(.red)')).nodes.find(n => n.path)?.path
  const trimmed = render(source(path + '.trim(from: 0, to: 0.5).stroke(style: StrokeStyle(lineWidth: 4, dash: [10, 5])).foregroundStyle(.red)')).nodes.find(n => n.path)?.path
  expect(original?.d.match(/ A /g)).toHaveLength(2); expect(trimmed?.d.match(/ A /g)).toHaveLength(1); expect(trimmed?.d).not.toBe(original?.d)
- expect(trimmed?.stroke?.color).toMatchObject({r:255,g:59,b:48}); expect(trimmed?.stroke?.dash).toEqual([10,5])
+ expect(trimmed?.stroke?.color).toMatchObject({r:255,g:56,b:60}); expect(trimmed?.stroke?.dash).toEqual([10,5])
 })
 it('F27 previews changed Stepper increments and ProgressView fractions', () => {
  const stepper = control(source('Stepper("Count \\(count)", value: $count, in: 0...10, step: 2)'), 'Stepper', 'range:step', '3')

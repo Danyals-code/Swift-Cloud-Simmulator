@@ -247,7 +247,7 @@ struct CardStyle: ViewModifier {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground))
-            .cornerRadius(14)
+            .clipShape(.rect(cornerRadius: 14))
     }
 }
 
@@ -486,7 +486,7 @@ struct SessionView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .cornerRadius(18)
+                .clipShape(.rect(cornerRadius: 18))
 
                 LabeledContent("Effort") {
                     HStack(spacing: 3) {

@@ -151,3 +151,21 @@ it('names the layer that painted a node, for every node its layer claims', () =>
   expect(layerAncestors(pages, 'not-a-layer')).toEqual([])
   expect(layerForRenderNode(pages, null)).toBeUndefined()
 })
+
+it('lists what a Button is drawn with under it, so a view in a tappable card can be found on the canvas and in Layers (D16)', () => {
+  const result = run('VStack { Button { } label: { VStack { Text("Card title"); Text("Card detail") } }.buttonStyle(.plain) }')
+  expect(result.diagnostics).toEqual([])
+  const pages = result.viewHierarchy!
+  const button = all(pages).find(layer => layer.type === 'Button')!
+  expect(button.name).toBe('Card title')
+  expect(all(button.children).map(layer => `${layer.type} ${layer.name}`)).toEqual(['VStack VStack', 'Text Card title', 'Text Card detail'])
+
+  const title = all(button.children).find(layer => layer.name === 'Card title')!
+  const painted = result.renderTree!.nodes.find(node => node.text?.runs.some(run => run.text === 'Card title'))!
+  expect(layerForRenderNode(pages, painted)?.id).toBe(title.id)
+  expect([...layerRenderIds(title, result.renderTree, pages)]).toEqual([painted.id])
+  const source = result.authoring!.nodes.find(node => node.id === result.authoring!.runtimeToSource[title.id])
+  expect(source?.properties[0]?.expression).toBe('"Card title"')
+  // The whole card still answers for the Button, through its tap target.
+  expect(result.renderTree!.nodes.find(node => layerRenderIds(button, result.renderTree, pages).has(node.id))?.hitTarget?.handlerId).toBe(`action-${button.id}`)
+})

@@ -11,6 +11,7 @@ import type {
   ForInStmt,
   FuncDecl,
   InitDecl,
+  OptionalChainEnd,
   Param,
   Pattern,
   SourceFileNode,
@@ -24,13 +25,18 @@ import type {
 import {
   argumentLabels,
   collectConformance,
+  DECIMAL_TYPES,
   hoistNestedTypes,
+  valueKind,
   type ConformanceModel,
+  type TypeNames,
+  type ValueKind,
 } from '@studio/swift-syntax'
 import {
   bindingLValue,
   Environment,
   fieldLValue,
+  type Binding,
   type LValue,
 } from './environment'
 import {
@@ -38,6 +44,7 @@ import {
   ContinueSignal,
   ExecutionBudgetExceeded,
   FallthroughSignal,
+  NilChainSignal,
   ReturnSignal,
   SwiftThrow,
   SwiftTrap,
@@ -46,6 +53,8 @@ import {
   type StackFrame,
 } from './errors'
 import type { CallArgument, HostCall, InterpreterHost } from './host'
+import { leadingDotName } from './calendar'
+import { formatNumber, groupDigits, titleNumber } from './number-format'
 import { checkPreviewSize, checkRepeatedValue, PREVIEW_LIMITS } from './limits'
 import {
   BUILTIN_TYPE_NAMES,
@@ -89,6 +98,7 @@ import {
   type DictionaryValue,
   type EnumValue,
   type FunctionValue,
+  type DeclaredType,
   type ProjectionPayload,
   type StructValue,
   type SwiftValue,
@@ -109,7 +119,7 @@ export interface InterpreterOptions {
   readonly stepBudget?: number
 }
 
-const DEFAULT_STEP_BUDGET = 5_000_000
+export const DEFAULT_STEP_BUDGET = 5_000_000
 
 /**
  * Maximum interpreter call depth.
@@ -121,6 +131,13 @@ const DEFAULT_STEP_BUDGET = 5_000_000
  * about the user's code. No realistic preview recurses anywhere near this deep.
  */
 const MAX_CALL_DEPTH = 512
+
+/**
+ * How many instances may be built inside one another. Each costs the interpreter more
+ * JavaScript stack than a call, which ran out at about 200 in Node; a program nesting
+ * construction this deep is building itself forever.
+ */
+const MAX_INSTANCE_DEPTH = 100
 
 /** Swift's Int is 64-bit; JS numbers are exact only to 2^53. */
 const MAX_SAFE_INT = Number.MAX_SAFE_INTEGER
@@ -140,6 +157,10 @@ const MAX_SAFE_INT = Number.MAX_SAFE_INTEGER
  */
 export class Interpreter {
   private steps = 0
+  /** How many instances are being built inside one another. See `instantiate`. */
+  private instantiating = 0
+  /** The last place a step was taken, for a failure that carries no place of its own. */
+  private reached: SourceSpan = { file: '', start: 0, end: 0 }
   private readonly frames: StackFrame[] = []
   /** Declared result types, innermost last, so `return .case` knows its own type. */
   private readonly returnTypes: (string | null)[] = []
@@ -153,6 +174,14 @@ export class Interpreter {
   readonly enums = new Map<string, EnumDecl>()
   /** `typealias Num = Int` - the name each alias stands for. */
   private readonly typeAliases = new Map<string, string>()
+  /** The type each alias stands for, as written. */
+  private readonly aliasTypes = new Map<string, TypeRef>()
+  private readonly memberNameCache = new Map<string, ReadonlySet<string>>()
+  /** What a type name in a parameter means here, for telling overloads apart. */
+  private readonly typeNames: TypeNames = {
+    alias: (name) => this.aliasTypes.get(name),
+    declared: (name) => (this.types.has(name) || this.enums.has(name) ? 'type' : this.conformance.protocols.has(name) ? 'protocol' : undefined),
+  }
   /** `defer` blocks awaiting the exit of each lexical block. */
   private readonly deferred: { block: Block; scope: Environment }[][] = []
   private readonly staticStorage = new Map<VarDecl, SwiftValue>()
@@ -183,6 +212,7 @@ export class Interpreter {
     // model, the member tables and instantiation all see it the same way.
     const expanded = hoistNestedTypes(files)
     this.conformance = collectConformance(expanded)
+    this.memberNameCache.clear()
 
     for (const file of expanded) {
       for (const decl of file.declarations) {
@@ -190,14 +220,10 @@ export class Interpreter {
         else if (decl.kind === 'enumDecl') this.enums.set(decl.name, decl)
         else if (decl.kind === 'typealiasDecl') {
           this.typeAliases.set(decl.name, namedTypeOf(decl.target) ?? decl.name)
+          this.aliasTypes.set(decl.name, decl.target)
         }
         else if (decl.kind === 'funcDecl') {
-          this.globals.define(
-            decl.name,
-            { kind: 'function', decl, self: null, env: this.globals },
-            true,
-            decl.span,
-          )
+          this.globals.define(decl.name, withOverload(this.globals.own(decl.name)?.value, { kind: 'function', decl, self: null, env: this.globals }), true, decl.span)
         }
       }
     }
@@ -253,9 +279,114 @@ export class Interpreter {
     return this.conformance.types.get(typeName)?.superclass ?? null
   }
 
-  /** The type a member was written in, which is what `super` steps above. */
+  // ----------------------------------------------------------- overloads
+
+  /** How well arguments suit parameters: each one's fit added up, or -Infinity when one can't be its parameter's type. */
+  private suitability(params: readonly Param[], args: readonly CallArgument[]): number {
+    const declared = argumentLabels(params)
+    let next = 0
+    let total = 0
+    for (const arg of args) {
+      // A labelled argument skips the parameters it leaves to their defaults.
+      while (arg.label !== null && next < params.length && declared[next] !== arg.label && params[next]!.defaultValue) next++
+      const param = params[next++]
+      if (!param) break
+      const fit = this.fit(arg.value, param.type)
+      if (fit === 0) return -Infinity
+      total += fit
+    }
+    return total
+  }
+
+  /**
+   * How well a value suits a declared type: 3 when it is that type, 2 when it converts
+   * or conforms to it, 1 when the type says nothing a value can be checked against (a
+   * generic, `Any`, a framework type), and 0 when it can't be that type. The kinds are
+   * `valueKind`'s, which the checker's warning about overloads reads too.
+   */
+  private fit(value: SwiftValue, type: TypeRef | null): number {
+    return this.fitKind(value, valueKind(type, this.typeNames))
+  }
+
+  private fitKind(value: SwiftValue, kind: ValueKind): number {
+    if (kind === 'any') return 1
+    // A value given where an Optional is taken fits, a little less than where it isn't.
+    if (kind.startsWith('optional:')) return value.kind === 'nil' ? 3 : Math.max(0, this.fitKind(value, kind.slice('optional:'.length)) - 0.5)
+    if (value.kind === 'nil') return 0
+    switch (kind) {
+      case 'int':
+        return value.kind === 'int' ? 3 : 0
+      // A whole number is a Double where one is taken, as a literal is.
+      case 'decimal':
+        return value.kind === 'double' ? 3 : value.kind === 'int' ? 2 : 0
+      case 'string':
+        return value.kind === 'string' ? 3 : 0
+      case 'character':
+        return value.kind === 'string' ? 2 : 0
+      case 'bool':
+        return value.kind === 'bool' ? 3 : 0
+      case 'array':
+        return value.kind === 'array' ? 3 : 0
+      case 'dictionary':
+        return value.kind === 'dictionary' ? 3 : 0
+      case 'range':
+        return value.kind === 'range' ? 3 : 0
+      case 'function':
+        return value.kind === 'closure' || value.kind === 'function' ? 3 : 0
+    }
+    const name = kind.slice(kind.indexOf(':') + 1)
+    if (kind.startsWith('tuple:')) return value.kind === 'tuple' && value.elements.length === Number(name) ? 3 : 0
+    if (kind.startsWith('type:')) {
+      if (value.kind !== 'struct' && value.kind !== 'enum') return 0
+      if (value.typeName === name) return 3
+      for (let above = this.superclassOf(value.typeName); above; above = this.superclassOf(above)) if (above === name) return 2
+      return 0
+    }
+    // `extension Int: Displayable {}` makes a whole number one too.
+    if (kind.startsWith('protocol:')) return this.conformsTo(typeNameOf(value), name) ? 2 : 0
+    return value.kind === 'opaque' && value.typeName === name ? 3 : 1
+  }
+
+  /**
+   * The binding a bare name refers to, unless a member of the type it is written in
+   * shadows it.
+   *
+   * Swift looks in the scopes around a name first, then among the members of the
+   * type the code is written in, and only then at the top level. So inside a type,
+   * `title()` is its own method and `count` its own property even where a top-level
+   * `func title()` or `var count` exists: a top-level binding that a member shadows
+   * answers undefined here, and the caller goes on to the members. Reads, calls,
+   * writes and `$` projections all ask here, so they agree about which it is.
+   */
+  private unshadowedBinding(name: string, env: Environment): Binding | undefined {
+    const binding = env.lookup(name)
+    if (!binding || binding !== this.globals.lookup(name)) return binding
+    const self = env.resolveSelf()
+    if (!self) return binding
+    const own = (self.kind === 'struct' && self.fields.has(name)) || this.memberNames(self.typeName).has(name)
+    return own ? undefined : binding
+  }
+
+  /** The names of a type's properties and methods, kept per type: the members don't change between loads. */
+  private memberNames(typeName: string): ReadonlySet<string> {
+    let names = this.memberNameCache.get(typeName)
+    if (!names) {
+      names = new Set(this.membersOf(typeName).flatMap((m) => (m.kind === 'funcDecl' || m.kind === 'varDecl' ? [m.name] : [])))
+      this.memberNameCache.set(typeName, names)
+    }
+    return names
+  }
+
+  /**
+   * The type a member was written in, which is what `super` steps above: the type
+   * it was looked up in, or one that type inherits it from.
+   */
   private declaringTypeOf(lookupIn: string, member: Decl): string {
-    return this.conformance.types.get(lookupIn)?.origin.get(member) ?? lookupIn
+    for (let type: string | null = lookupIn; type; type = this.superclassOf(type)) {
+      const found = this.conformance.types.get(type)?.origin.get(member)
+      if (found) return found
+    }
+    return lookupIn
   }
 
   /**
@@ -271,6 +402,7 @@ export class Interpreter {
 
   resetSteps(): void {
     this.steps = 0
+    this.instantiating = 0
     this.frames.length = 0
   }
 
@@ -278,9 +410,21 @@ export class Interpreter {
     return this.steps
   }
 
+  /**
+   * Where execution last was.
+   *
+   * What an engine error - the JavaScript stack running out on recursion - is
+   * reported at: it is raised by the interpreter itself, not by the user's code, so
+   * it has no span of its own, and this is the line that was running.
+   */
+  get position(): SourceSpan {
+    return this.reached
+  }
+
   // ---------------------------------------------------------------- budgeting
 
   private tick(span: SourceSpan): void {
+    this.reached = span
     if (++this.steps > this.stepBudget) {
       throw new ExecutionBudgetExceeded(span, this.steps, [...this.frames].reverse())
     }
@@ -303,6 +447,21 @@ export class Interpreter {
   instantiate(typeName: string, args: readonly CallArgument[], span: SourceSpan): StructValue {
     const decl = this.types.get(typeName)
     if (!decl) throw new UnsupportedAtRuntime(typeName, span)
+    // `class Tree { var next = Tree() }` builds another as it is built, forever. The
+    // property initialisers run outside any call frame, so the call-depth limit never
+    // sees them: count the nesting here, and stop it as that limit does.
+    if (this.instantiating >= MAX_INSTANCE_DEPTH) {
+      throw new ExecutionBudgetExceeded(span, this.steps, [...this.frames].reverse().slice(0, 12), 'depth')
+    }
+    this.instantiating++
+    try {
+      return this.build(decl, typeName, args, span)
+    } finally {
+      this.instantiating--
+    }
+  }
+
+  private build(decl: StructDecl, typeName: string, args: readonly CallArgument[], span: SourceSpan): StructValue {
 
     const instance: StructValue = {
       kind: 'struct',
@@ -325,6 +484,7 @@ export class Interpreter {
     const initialiser = pickOverload(
       members.filter((m): m is InitDecl => m.kind === 'initDecl' && m.body !== null),
       labelsOf(args),
+      (candidate) => this.suitability(candidate.params, args),
     )
 
     if (initialiser) {
@@ -427,10 +587,7 @@ export class Interpreter {
       )
     }
 
-    const method = pickOverload(methodsNamed(members, member), labels)
-    if (method) return { kind: 'function', decl: method, self: null, env: this.globals.child(target) }
-
-    return undefined
+    return withCandidates(methodsNamed(members, member), labels, (decl) => ({ kind: 'function', decl, self: null, env: this.globals.child(target) }))
   }
 
   /**
@@ -449,18 +606,9 @@ export class Interpreter {
   ): FunctionValue | undefined {
     if (self.kind !== 'struct' && self.kind !== 'enum') return undefined
     const owner = lookupIn ?? self.typeName
-    const decl = pickOverload(methodsNamed(this.membersOf(owner), name), labels)
-    if (!decl) return undefined
-
-    return self.kind === 'struct'
-      ? {
-          kind: 'function',
-          decl,
-          self,
-          env: this.globals,
-          owner: this.declaringTypeOf(owner, decl),
-        }
-      : { kind: 'function', decl, self: null, env: this.globals.child(self) }
+    return withCandidates(methodsNamed(this.membersOf(owner), name), labels, (decl) => self.kind === 'struct'
+      ? { kind: 'function', decl, self, env: this.globals, owner: this.declaringTypeOf(owner, decl) }
+      : { kind: 'function', decl, self: null, env: this.globals.child(self) })
   }
 
   /** Reads a member from a struct: stored field, computed property, or bound method. */
@@ -502,18 +650,7 @@ export class Interpreter {
       )
     }
 
-    const method = pickOverload(methodsNamed(members, member), labels)
-    if (method) {
-      return {
-        kind: 'function',
-        decl: method,
-        self: target,
-        env: this.globals,
-        owner: this.declaringTypeOf(lookupIn, method),
-      }
-    }
-
-    return undefined
+    return withCandidates(methodsNamed(members, member), labels, (decl) => ({ kind: 'function', decl, self: target, env: this.globals, owner: this.declaringTypeOf(lookupIn, decl) }))
   }
 
   // ------------------------------------------------------------------- calls
@@ -601,8 +738,9 @@ export class Interpreter {
   runViewBuilder(closure: ClosureValue, args: readonly SwiftValue[] = []): SwiftValue[] {
     const env = (closure.env as Environment).child()
     if (closure.hasExplicitParams) {
+      const given = spreadTuple(closure, args)
       closure.params.forEach((param, i) => {
-        const value = args[i] ?? NIL
+        const value = given[i] ?? NIL
         const name = param.name.startsWith('$') && asProjection(value) ? param.name.slice(1) : param.name
         env.define(name, copyValue(value), true, param.span)
       })
@@ -694,14 +832,15 @@ export class Interpreter {
   }
 
   callFunction(fn: FunctionValue, args: readonly CallArgument[], span: SourceSpan): SwiftValue {
-    const decl = fn.decl
+    const decl = fn.overloads ? pickOverload(fn.overloads, labelsOf(args), (candidate) => this.suitability(candidate.params, args)) ?? fn.decl : fn.decl
+    const owner = decl === fn.decl || !fn.self ? fn.owner : this.declaringTypeOf(fn.self.typeName, decl)
     const env = (fn.env as Environment).child(fn.self)
 
     this.bindParameters(decl.params, args, env, span)
 
     if (!decl.body) return VOID
     const label = fn.self ? `${fn.self.typeName}.${decl.name}` : decl.name
-    this.owners.push(fn.owner ?? null)
+    this.owners.push(owner ?? null)
     try {
       return this.runBody(
         label,
@@ -774,8 +913,9 @@ export class Interpreter {
     const env = (closure.env as Environment).child()
 
     if (closure.hasExplicitParams) {
+      const given = spreadTuple(closure, args)
       closure.params.forEach((param, i) => {
-        const value = args[i] ?? NIL
+        const value = given[i] ?? NIL
         const name = param.name.startsWith('$') && asProjection(value) ? param.name.slice(1) : param.name
         env.define(name, copyValue(value), true, param.span)
       })
@@ -787,6 +927,55 @@ export class Interpreter {
     return this.runBody('closure', closure.body, env, span)
   }
 
+  /**
+   * A string literal, and asked for, its text as a `LocalizedStringKey` writes it: a
+   * number put into it with separators, and a Double with six decimals (`titleNumber`).
+   *
+   * An interpolation's `specifier:` and `format:` apply either way. Swift takes them only
+   * where the literal is a title, and a title's specifier puts separators in too. A
+   * format the preview cannot read or write, such as `.dateTime.month().day()`, leaves
+   * the value as Swift describes it rather than stopping the view.
+   */
+  private stringLiteral(expr: Expr & { kind: 'stringLiteral' }, env: Environment, asTitle = false): { readonly value: SwiftValue; readonly title?: string } {
+    const parts: (string | SwiftValue)[] = []
+    const styles: ({ readonly specifier?: SwiftValue | null; readonly format?: SwiftValue | null } | null)[] = []
+    for (const segment of expr.segments) {
+      if (segment.kind === 'text') {
+        parts.push(segment.value)
+        styles.push(null)
+        continue
+      }
+      parts.push(this.evaluate(segment.expression, env))
+      // Undefined for an option not written, and null for one the preview cannot read.
+      const option = (label: string): SwiftValue | null | undefined => {
+        const found = segment.options?.find((o) => o.label === label)
+        if (!found) return undefined
+        try {
+          return this.evaluate(found.value, env)
+        } catch (error) {
+          if (error instanceof SwiftTrap || error instanceof UnsupportedAtRuntime) return null
+          throw error
+        }
+      }
+      styles.push(segment.options ? { specifier: option('specifier'), format: option('format') } : null)
+    }
+    const hosted = parts.some((part) => typeof part !== 'string' && part.kind !== 'string') ? this.host.interpolate?.(parts, expr.span) : undefined
+    if (hosted !== undefined) return { value: { kind: 'string', value: hosted.text, styled: hosted.styled } }
+
+    const write = (title: boolean) => parts.map((part, i) => {
+      if (typeof part === 'string') return part
+      const style = styles[i]
+      if (style?.specifier?.kind === 'string') {
+        const written = formatString(style.specifier.value, [part])
+        return title ? groupDigits(written) : written
+      }
+      if (style?.format !== undefined) return (style.format && formatNumber(part, leadingDotName(style.format))) ?? describe(part, false)
+      return (title ? titleNumber(part) : null) ?? describe(part, false)
+    }).join('')
+    const interpolates = parts.some((part) => typeof part !== 'string')
+    return { value: str(write(false)), ...(asTitle && interpolates ? { title: write(true) } : {}) }
+  }
+
   private hostCall(args: readonly CallArgument[], trailing: ClosureValue | null, span: SourceSpan): HostCall {
     return {
       args,
@@ -794,7 +983,33 @@ export class Interpreter {
       span,
       invoke: (closure, closureArgs = []) => this.callClosure(closure, closureArgs, span),
       invokeBuilder: (closure, closureArgs = []) => this.runViewBuilder(closure, closureArgs),
+      member: (value, name) => this.readMember(value, name, span),
     }
+  }
+
+  /** What a type's stored property was declared as, where the declaration wrote a type. */
+  private declaredTypeOf(typeName: string, property: string): DeclaredType | undefined {
+    const annotation = this.membersOf(typeName).find((m): m is VarDecl => m.kind === 'varDecl' && m.name === property)?.typeAnnotation
+    if (!annotation) return undefined
+    const optional = annotation.kind === 'optionalType'
+    const named = optional ? annotation.wrapped : annotation
+    return { optional, ...(named.kind === 'namedType' ? { name: named.name } : {}) }
+  }
+
+  /**
+   * `value.name` for a value already in hand: a tuple's element, a property, stored or
+   * computed, an enum's `rawValue`, or a built-in one. Member access asks this before
+   * the host, and a key path or a `ForEach` id reads through it too.
+   */
+  private readMember(target: SwiftValue, member: string, span: SourceSpan): SwiftValue | undefined {
+    if (member === 'self') return target
+    if (target.kind === 'tuple') return tupleElement(target, member)
+    const own = target.kind === 'enum' ? this.memberOfEnum(target, member, span) : target.kind === 'struct' ? this.memberOfStruct(target, member, span) : undefined
+    if (own !== undefined) return unwrapProjection(own)
+    const builtin = getBuiltinProperty(target, member)
+    if (builtin !== undefined) return builtin
+    const extended = this.userMember(target, member, span)
+    return extended === undefined ? undefined : unwrapProjection(extended)
   }
 
   // -------------------------------------------------------------- statements
@@ -1196,7 +1411,7 @@ export class Interpreter {
     // `3` there is a `Double` literal and never an `Int` - so `Rect(width: 3).width`
     // is 3.0 and prints as such. Without this the value stays an Int and every
     // arithmetic result downstream loses its fractional formatting.
-    if (typeName === 'Double' && value.kind === 'int') return double(value.value)
+    if (DECIMAL_TYPES.has(typeName) && value.kind === 'int') return double(value.value)
 
     // `Tags(names: ["a"])` and `select(ids: [])` for a `Set` parameter or property: the
     // literal is an array literal, and the declared type is what makes it a set.
@@ -1366,12 +1581,8 @@ export class Interpreter {
       }
       case 'funcDecl': {
         const receiver = env.resolveSelf()
-        env.define(
-          decl.name,
-          { kind: 'function', decl, self: receiver?.kind === 'struct' ? receiver : null, env },
-          true,
-          decl.nameSpan,
-        )
+        const fn: FunctionValue = { kind: 'function', decl, self: receiver?.kind === 'struct' ? receiver : null, env }
+        env.define(decl.name, withOverload(env.own(decl.name)?.value, fn), true, decl.nameSpan)
         return
       }
       case 'structDecl':
@@ -1443,6 +1654,22 @@ export class Interpreter {
   // ------------------------------------------------------------- expressions
 
   evaluate(expr: Expr, env: Environment): SwiftValue {
+    return (expr as OptionalChainEnd).endsOptionalChain
+      ? this.throughChain(() => this.evaluateNode(expr, env), NIL)
+      : this.evaluateNode(expr, env)
+  }
+
+  /** Runs a whole optional chain: a `?` that meets nil anywhere inside gives `stopped` instead. */
+  private throughChain(run: () => SwiftValue, stopped: SwiftValue): SwiftValue {
+    try {
+      return run()
+    } catch (error) {
+      if (error instanceof NilChainSignal) return stopped
+      throw error
+    }
+  }
+
+  private evaluateNode(expr: Expr, env: Environment): SwiftValue {
     this.tick(expr.span)
 
     switch (expr.kind) {
@@ -1455,19 +1682,8 @@ export class Interpreter {
       case 'nilLiteral':
         return NIL
 
-      case 'stringLiteral': {
-        let out = ''
-        for (const segment of expr.segments) {
-          if (segment.kind === 'text') {
-            out += segment.value
-            continue
-          }
-          const value = this.evaluate(segment.expression, env)
-          const specifier = segment.specifier ? this.evaluate(segment.specifier, env) : null
-          out += specifier?.kind === 'string' ? formatString(specifier.value, [value]) : describe(value, false)
-        }
-        return str(out)
-      }
+      case 'stringLiteral':
+        return this.stringLiteral(expr, env).value
 
       case 'arrayLiteral':
         return array(expr.elements.map((e) => copyValue(this.evaluate(e, env))))
@@ -1527,7 +1743,11 @@ export class Interpreter {
         return this.evaluateBinary(expr.operator, expr.left, expr.right, expr.span, env)
 
       case 'assign':
-        return this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env)
+        // `selected?.done = true` writes nothing when `selected` is nil. The target is
+        // resolved as storage rather than evaluated, so it ends its chain here.
+        return (expr.target as OptionalChainEnd).endsOptionalChain
+          ? this.throughChain(() => this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env), VOID)
+          : this.evaluateAssign(expr.operator, expr.target, expr.value, expr.span, env)
 
       case 'ternary':
         return truthy(this.evaluate(expr.condition, env))
@@ -1573,8 +1793,12 @@ export class Interpreter {
       case 'keyPath':
         return keyPath(expr.components)
 
-      case 'optionalChain':
-        return this.evaluate(expr.operand, env)
+      case 'optionalChain': {
+        // `a?.b` asks nothing of a nil `a`: the rest of the chain is skipped.
+        const value = this.evaluate(expr.operand, env)
+        if (value.kind === 'nil') throw new NilChainSignal()
+        return value
+      }
 
       case 'errorExpr':
         throw new UnsupportedAtRuntime('this expression', expr.span)
@@ -1604,7 +1828,7 @@ export class Interpreter {
   }
 
   private evaluateIdentifier(name: string, span: SourceSpan, env: Environment): SwiftValue {
-    const binding = env.lookup(name)
+    const binding = this.unshadowedBinding(name, env)
     if (binding) return unwrapProjection(binding.value)
 
     // `Self.shared` - the type the code is written in, as a value. Resolved from the
@@ -1735,21 +1959,8 @@ export class Interpreter {
       if (builtinStatic !== undefined) return builtinStatic
     }
 
-    if (target.kind === 'enum') {
-      const value = this.memberOfEnum(target, member, span)
-      if (value !== undefined) return unwrapProjection(value)
-    }
-
-    if (target.kind === 'struct') {
-      const value = this.memberOfStruct(target, member, span)
-      if (value !== undefined) return unwrapProjection(value)
-    }
-
-    const builtin = getBuiltinProperty(target, member)
-    if (builtin !== undefined) return builtin
-
-    const extended = this.userMember(target, member, span)
-    if (extended !== undefined) return unwrapProjection(extended)
+    const read = this.readMember(target, member, span)
+    if (read !== undefined) return read
 
     const fromHost = this.host.getMember?.(target, member, span)
     if (fromHost !== undefined) return fromHost
@@ -1770,7 +1981,7 @@ export class Interpreter {
     if (projected) {
       const owner = projected.get()
       if (owner.kind === 'struct' && owner.fields.has(member)) {
-        return memberProjection(projected, member)
+        return memberProjection(projected, member, this.declaredTypeOf(owner.typeName, member))
       }
     }
 
@@ -1818,11 +2029,7 @@ export class Interpreter {
       )
     }
 
-    const method = pickOverload(
-      members.filter((m): m is FuncDecl => m.kind === 'funcDecl' && m.name === member && m.body !== null),
-      labels,
-    )
-    return method ? { kind: 'function', decl: method, self: null, env: scope } : undefined
+    return withCandidates(methodsNamed(members, member), labels, (decl) => ({ kind: 'function', decl, self: null, env: scope }))
   }
 
   /** The declaration of a computed property, when the member is one. */
@@ -1883,11 +2090,22 @@ export class Interpreter {
       return this.evaluateCall({ ...callee, name: target }, argExprs, trailing, span, env)
     }
 
-    const args: CallArgument[] = argExprs.map((arg) => ({
-      label: arg.label,
-      value: this.evaluate(arg.value, env),
-      span: arg.span,
-    }))
+    // `a?.f(x)` and `onPick?(x)` never evaluate `x` when the chain is nil, so a call
+    // inside an optional chain settles what it calls first. Other calls keep their order.
+    const chained = insideOptionalChain(callee)
+    const receiver =
+      chained && callee.kind === 'memberAccess' && callee.base ? this.resolveReceiver(callee.base, env) : undefined
+    const calledValue = chained && callee.kind !== 'memberAccess' ? this.evaluate(callee, env) : undefined
+
+    // A string literal given first and unlabelled may be a title, a `LocalizedStringKey`,
+    // which writes numbers for the locale. Its text as one goes along with it, for the
+    // views and modifiers that take a title to read.
+    const titled = argExprs.findIndex((arg) => arg.label === null)
+    const args: CallArgument[] = argExprs.map((arg, index) => {
+      if (index !== titled || arg.value.kind !== 'stringLiteral') return { label: arg.label, value: this.evaluate(arg.value, env), span: arg.span }
+      const { value, title } = this.stringLiteral(arg.value, env, true)
+      return { label: arg.label, value, span: arg.span, ...(title === undefined ? {} : { title }) }
+    })
     const trailingClosure = trailing ? this.makeClosure(trailing, env) : null
 
     /**
@@ -1913,7 +2131,7 @@ export class Interpreter {
 
     // A direct call to a global name: a user function, a user type, or the host's.
     if (callee.kind === 'identifier') {
-      const local = env.lookup(callee.name)
+      const local = this.unshadowedBinding(callee.name, env)
       if (local?.value.kind === 'function') return this.callFunction(local.value, allArgs, span)
       if (local?.value.kind === 'closure') {
         return this.callClosure(local.value, allArgs.map((a) => a.value), span)
@@ -1984,6 +2202,7 @@ export class Interpreter {
               `Cannot use mutating member on immutable value: 'self' is a 'let' constant`,
               span,
             ),
+          (value, name) => this.readMember(value, name, span),
         )
         if (onBuiltin !== undefined) return onBuiltin
 
@@ -1998,13 +2217,13 @@ export class Interpreter {
 
     // A method or modifier call: `value.member(args)`.
     if (callee.kind === 'memberAccess') {
-      const evaluate = () => this.evaluateMemberCall(callee.base, callee.member, callee.memberSpan, args, allArgs, trailingClosure, span, env)
+      const evaluate = () => this.evaluateMemberCall(callee.base, callee.member, callee.memberSpan, args, allArgs, trailingClosure, span, env, receiver)
       return callee.base && this.host.withMemberScope
         ? this.host.withMemberScope(callee.member, args, evaluate)
         : evaluate()
     }
 
-    const value = this.evaluate(callee, env)
+    const value = calledValue ?? this.evaluate(callee, env)
     if (value.kind === 'function') return this.callFunction(value, allArgs, span)
     if (value.kind === 'closure') return this.callClosure(value, allArgs.map((a) => a.value), span)
 
@@ -2019,6 +2238,12 @@ export class Interpreter {
     this.trap(`Cannot call value of type '${typeNameOf(value)}'`, span)
   }
 
+  /** A mutating method needs the *storage*, not a copy, or its writes are lost. */
+  private resolveReceiver(baseExpr: Expr, env: Environment): Receiver {
+    const lvalue = this.tryResolveLValue(baseExpr, env)
+    return { lvalue, target: lvalue ? lvalue.get() : this.evaluate(baseExpr, env) }
+  }
+
   private evaluateMemberCall(
     baseExpr: Expr | null,
     member: string,
@@ -2030,6 +2255,8 @@ export class Interpreter {
     trailingClosure: ClosureValue | null,
     span: SourceSpan,
     env: Environment,
+    /** Already resolved by a call inside an optional chain, which needed it first. */
+    receiver?: Receiver,
   ): SwiftValue {
     if (!baseExpr) {
       const extended = this.extensionStatic(member, memberSpan)
@@ -2045,9 +2272,7 @@ export class Interpreter {
       this.trap(`Cannot infer contextual base for '.${member}'`, memberSpan)
     }
 
-    // A mutating method needs the *storage*, not a copy, or its writes are lost.
-    const lvalue = this.tryResolveLValue(baseExpr, env)
-    const target = lvalue ? lvalue.get() : this.evaluate(baseExpr, env)
+    const { lvalue, target } = receiver ?? this.resolveReceiver(baseExpr, env)
 
     // `super.speak()` - same receiver, lookup starting one level up, so an override
     // can call the thing it overrode instead of itself.
@@ -2156,6 +2381,7 @@ export class Interpreter {
         }
         replacement = value
       },
+      (value, name) => this.readMember(value, name, span),
     )
     if (builtin !== undefined) {
       if (lvalue?.mutable && (replacement !== null || isMutatingMember(member))) lvalue.set(replacement ?? target)
@@ -2236,8 +2462,13 @@ export class Interpreter {
 
         return undefined
       }
+      // `CGFloat` and `Float` are both a Double here, as everywhere else in the preview.
+      // Without them `CGFloat(progress)`, which the AI writes for every ring and bar it
+      // draws, stopped the view, and a retry kept writing it.
       case 'Int':
-      case 'Double': {
+      case 'Double':
+      case 'CGFloat':
+      case 'Float': {
         const first = args[0]?.value
         if (!first) return undefined
 
@@ -2256,7 +2487,7 @@ export class Interpreter {
           if (!grammar.test(text)) return NIL
           const parsed = Number(text)
           if (!Number.isFinite(parsed)) return NIL
-          if (name === 'Double') return double(parsed)
+          if (name !== 'Int') return double(parsed)
           return Number.isSafeInteger(parsed) ? int(parsed) : NIL
         }
 
@@ -2488,7 +2719,7 @@ export class Interpreter {
    * onto nothing.
    */
   private projectionFor(name: string, env: Environment): SwiftValue | null {
-    const binding = env.lookup(name)
+    const binding = this.unshadowedBinding(name, env)
     if (binding) {
       // Re-projecting a binding gives back the same binding, not one wrapping it.
       return asProjection(binding.value) ? binding.value : projection(bindingLValue(binding, name))
@@ -2498,7 +2729,9 @@ export class Interpreter {
     if (self?.kind === 'struct' && self.fields.has(name)) {
       const current = self.fields.get(name)
       if (asProjection(current)) return current!
-      return projection(fieldLValue(self, name, `self.${name}`))
+      const field = fieldLValue(self, name, `self.${name}`)
+      const declared = this.declaredTypeOf(self.typeName, name)
+      return projection(declared ? { get: field.get, set: field.set, description: field.description, declared } : field)
     }
 
     return null
@@ -2508,7 +2741,7 @@ export class Interpreter {
   private tryResolveLValue(expr: Expr, env: Environment): LValue | null {
     switch (expr.kind) {
       case 'identifier': {
-        const binding = env.lookup(expr.name)
+        const binding = this.unshadowedBinding(expr.name, env)
         if (binding) return throughProjection(bindingLValue(binding, expr.name))
 
         const self = env.resolveSelf()
@@ -2539,9 +2772,8 @@ export class Interpreter {
 
         // Named by the path the user wrote - `bag.items` - rather than by the
         // receiver's value, which rendered a whole struct literal into the middle of
-        // a sentence about a constant.
-        const base = owner ? owner.description : describe(target, true)
-        const field = fieldLValue(target, expr.member, `${base}.${expr.member}`)
+        // a sentence about a constant. Written out only if a message needs it.
+        const field = fieldLValue(target, expr.member, () => `${owner ? owner.description : describe(target, true)}.${expr.member}`)
         const projected = throughProjection(field)
 
         // A projection is storage somewhere else reached through a nonmutating
@@ -3108,8 +3340,9 @@ function isStaticDecl(decl: { modifiers: readonly { name: string }[] }): boolean
  * on every access rather than capturing it keeps a computed `Binding(get:set:)`
  * behaving like the storage it stands for.
  */
-function memberProjection(outer: ProjectionPayload, field: string): SwiftValue {
+function memberProjection(outer: ProjectionPayload, field: string, declared: DeclaredType | undefined): SwiftValue {
   return projection({
+    ...(declared ? { declared } : {}),
     get: () => {
       const owner = outer.get()
       return owner.kind === 'struct' ? (owner.fields.get(field) ?? { kind: 'nil' }) : { kind: 'nil' }
@@ -3125,13 +3358,40 @@ function memberProjection(outer: ProjectionPayload, field: string): SwiftValue {
 }
 
 /**
- * Overload resolution, by argument label.
+ * A method, as its labels pick it, carrying the others of its name for the call to
+ * choose from by what it is given: two may share their labels and differ in type.
+ */
+function withCandidates(candidates: readonly FuncDecl[], labels: readonly (string | null)[] | undefined, value: (decl: FuncDecl) => FunctionValue): FunctionValue | undefined {
+  const decl = pickOverload(candidates, labels)
+  if (!decl) return undefined
+  const fn = value(decl)
+  return candidates.length > 1 ? { ...fn, overloads: candidates } : fn
+}
+
+/**
+ * A function declared under a name that may already stand for others.
+ *
+ * Swift overloads by labels and types, so a second `func label(_:)` beside the first is
+ * another function, not a replacement: the name comes to stand for both, and a call
+ * chooses between them.
+ */
+function withOverload(existing: SwiftValue | undefined, fn: FunctionValue): FunctionValue {
+  if (existing?.kind !== 'function') return fn
+  return { ...existing, overloads: [...(existing.overloads ?? [existing.decl]), fn.decl] }
+}
+
+/**
+ * Overload resolution, by argument label and then by argument.
  *
  * Swift identifies a function by its name *and* its labels, so `minutes(on:)` and
  * `minutes(of:)` are two functions. Where a call wrote its labels, they choose;
  * where they are not known - a method reached as a value, a `super` lookup with no
  * arguments - the first declared wins, which is what every lookup here did before
  * overloads were kept apart at all.
+ *
+ * Where the labels leave several, `suitability` ranks them by the call's arguments,
+ * as `label(_: Int)` and `label(_: String)` are told apart by what they are given; a
+ * tie goes to the one written first.
  *
  * Deliberately falls back rather than failing. A trailing closure arrives unlabelled
  * even when its parameter has a label, so a strict match would reject
@@ -3141,13 +3401,27 @@ function memberProjection(outer: ProjectionPayload, field: string): SwiftValue {
 export function pickOverload<T extends { readonly params: readonly Param[] }>(
   candidates: readonly T[],
   labels: readonly (string | null)[] | undefined,
+  suitability?: (candidate: T) => number,
 ): T | undefined {
   // A declaration that cannot take these labels at all is never the one being called:
   // `shadow(color:radius:)` inside `func shadow(_ token:)` is SwiftUI's modifier, not
-  // a recursive call with every parameter unbound.
+  // a recursive call with every parameter unbound. And with none left, nothing
+  // declared is: `Item(name:count:)` is then the memberwise initialiser.
   const possible = labels ? candidates.filter((decl) => labelsPossible(decl.params, labels)) : candidates
   if (possible.length <= 1 || !labels) return possible[0]
-  return possible.find((decl) => labelsMatch(decl.params, labels)) ?? possible[0]
+  const matching = possible.filter((decl) => labelsMatch(decl.params, labels))
+  const pool = matching.length > 0 ? matching : possible
+  if (!suitability) return pool[0]
+  let chosen = pool[0]!
+  let best = suitability(chosen)
+  for (const decl of pool.slice(1)) {
+    const score = suitability(decl)
+    if (score > best) {
+      chosen = decl
+      best = score
+    }
+  }
+  return chosen
 }
 
 /**
@@ -3182,6 +3456,37 @@ function labelsMatch(params: readonly Param[], written: readonly (string | null)
     if (!params[i]!.defaultValue) return false
   }
   return next === written.length
+}
+
+/**
+ * `{ index, item in }` given one `(offset, element)` tuple, as `enumerated()` and `zip`
+ * hand their elements over: Swift spreads a lone tuple across a closure's parameters.
+ */
+function spreadTuple(closure: ClosureValue, args: readonly SwiftValue[]): readonly SwiftValue[] {
+  const only = args.length === 1 ? args[0] : undefined
+  return closure.params.length > 1 && only?.kind === 'tuple' && only.elements.length === closure.params.length ? only.elements : args
+}
+
+/** A method call's receiver: its storage when it has one, and its value. */
+interface Receiver {
+  readonly lvalue: LValue | null
+  readonly target: SwiftValue
+}
+
+/** Whether `expr` is inside an optional chain that has not ended yet: `a?.b` in `a?.b.f()`. */
+function insideOptionalChain(expr: Expr): boolean {
+  let node: Expr | null = expr
+  while (node) {
+    if (node.kind === 'optionalChain') return true
+    if ((node as OptionalChainEnd).endsOptionalChain) return false
+    node =
+      node.kind === 'memberAccess' ? node.base
+      : node.kind === 'call' ? node.callee
+      : node.kind === 'subscript' ? node.base
+      : node.kind === 'forceUnwrap' ? node.operand
+      : null
+  }
+  return false
 }
 
 function labelsOf(args: readonly CallArgument[]): readonly (string | null)[] {

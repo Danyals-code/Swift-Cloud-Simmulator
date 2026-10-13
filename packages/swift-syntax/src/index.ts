@@ -14,11 +14,14 @@
 export * from './ast'
 export * from './tokens'
 export { Lexer, type LexResult } from './lexer'
-export { Parser, typeName, type ParseResult } from './parser'
+export { Parser, isSyntaxError, typeName, type ParseResult } from './parser'
 
 export * from './conformance'
+export * from './value-kinds'
+export * from './off-markers'
+export { HIDDEN_MARKER } from './studio-markers'
 export {
   viewSiteAt, deleteView, moveView, moveViewTo, insertView, copyView,
-  hideView, showView, hiddenViewsIn, HIDDEN_MARKER,
-  type ViewSite, type SourceEdit, type HiddenView,
+  hideView, showView, hiddenViewsIn,
+  type ViewSite, type SourceEdit, type HiddenView, type RefusalReason,
 } from './edits'

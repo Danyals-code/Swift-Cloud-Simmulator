@@ -1,22 +1,21 @@
-import type { ComponentSource, LogLevel, PageFailure, Size, SourceSpan, UIEvent } from '@studio/shared'
+import type { ComponentSource, LogLevel, Size, SourceSpan, UIEvent } from '@studio/shared'
 import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
   asProjection,
   bool,
   copyValue,
-  PreviewLimitExceeded,
+  holdsType,
   describe,
   double,
-  ExecutionBudgetExceeded,
   int,
   Interpreter,
   indexSet,
   opaque,
   pickOverload,
   str,
-  SwiftThrow,
   SwiftTrap,
+  NIL,
   UnsupportedAtRuntime,
   valuesEqual,
   type ClosureValue,
@@ -35,6 +34,7 @@ import {
   kindOfEvent,
   phaseOfEvent,
 } from './gestures'
+import { containable, toFailure } from './failures'
 import { SwiftUIHost } from './swiftui-host'
 import {
   asSwiftValue,
@@ -42,18 +42,15 @@ import {
   BUTTON_CONFIGURATION_TYPE,
   DIMENSIONS_TYPE,
   handlerIdFor,
+  stoppedView,
+  type ActionValue,
+  type RuntimeFailure,
   type AnimationPayload,
   type EnvironmentFrame,
+  type GeometryPayload,
   type ViewIntent,
   type ViewValue,
 } from './view-value'
-
-export interface RuntimeFailure {
-  readonly message: string
-  readonly span: SourceSpan
-  readonly frames: readonly string[]
-  readonly kind: 'trap' | 'budget' | 'unsupported'
-}
 
 export interface EvaluationResult {
   readonly views: readonly ViewValue[]
@@ -80,6 +77,8 @@ export interface EvaluationResult {
  */
 export class AppRuntime {
   private interpreter = new Interpreter()
+  /** The steps a pass may take, when not the interpreter's own: a gallery screen gets what the gallery has left. */
+  private stepBudget: number | undefined
   private host = new SwiftUIHost()
   private readonly state = new StateStore()
   /**
@@ -110,6 +109,8 @@ export class AppRuntime {
    * pass's instance. Harvesting only the current one would drop the write silently.
    */
   private previousLive = new Map<string, StructValue>()
+  /** Each type's stored properties or cases in the loaded program, by name: what a value made from it has. */
+  private storedShapes: ReadonlyMap<string, string> = new Map()
   /** What each interactive element does, from the last resolved screen. */
   private handlers: ReadonlyMap<string, ViewIntent> = new Map()
   /** Identifies the loaded program, so a real edit reloads and a tap does not. */
@@ -135,39 +136,41 @@ export class AppRuntime {
   /** Device and preview state the SwiftUI environment exposes to user code. */
   private environmentInputs: EnvironmentInputs = DEFAULT_ENVIRONMENT
 
-  /** Sizes each `GeometryReader` was measured at, from the last layout pass. */
-  private geometry = new Map<string, { width: number; height: number }>()
+  /** What each `GeometryReader` was measured at in the last layout pass: its size, place and safe area. */
+  private geometry = new Map<string, GeometryPayload>()
 
-  /** Paths whose `.onAppear` has already run, so it does not run every pass. */
+  /** The hooks, `.onAppear` and `.task` alike, that have run for this appearance, by key, so they don't run every pass. */
   private appeared = new Set<string>()
-  /** Values `.onChange(of:)` is watching, as of the last pass. */
+  /** Values `.onChange(of:)` and `.task(id:)` are watching, as of the last pass. */
   private watched = new Map<string, SwiftValue>()
   /** `.onDisappear` closures, kept from the pass that last saw each view. */
-  private disappearing = new Map<string, ClosureValue>()
+  private disappearing = new Map<string, ActionValue>()
 
 
   /**
    * Records what the layout pass actually measured, and says whether it moved.
    *
-   * A true answer means the sizes a `GeometryReader` reported to its closure were
-   * wrong, so the caller runs one more pass with the corrected ones. Two passes are
-   * enough because a reader is greedy: its size is whatever it was proposed, and the
-   * proposal does not depend on what its closure produced. The half-point tolerance
-   * stops sub-pixel jitter from looping forever.
+   * A true answer means what a `GeometryReader` reported to its closure - its size,
+   * where it is, its safe area - was wrong, so the caller runs one more pass with the
+   * corrected values. Two passes are enough because a reader is greedy: its size is
+   * whatever it was proposed, and the proposal does not depend on what its closure
+   * produced. The half-point tolerance stops sub-pixel jitter from looping forever.
    */
-  updateGeometry(measured: ReadonlyMap<string, { width: number; height: number }>): boolean {
+  updateGeometry(measured: ReadonlyMap<string, GeometryPayload>): boolean {
     let changed = false
+    const moved = (a: number, b: number) => Math.abs(a - b) > 0.5
 
-    for (const [key, size] of measured) {
+    for (const [key, next] of measured) {
       const previous = this.geometry.get(key)
       if (
         !previous ||
-        Math.abs(previous.width - size.width) > 0.5 ||
-        Math.abs(previous.height - size.height) > 0.5
+        moved(previous.width, next.width) || moved(previous.height, next.height) ||
+        moved(previous.x, next.x) || moved(previous.y, next.y) ||
+        (['top', 'leading', 'bottom', 'trailing'] as const).some((edge) => moved(previous.insets[edge], next.insets[edge]))
       ) {
         changed = true
       }
-      this.geometry.set(key, size)
+      this.geometry.set(key, next)
     }
 
     this.host.geometry = this.geometry
@@ -193,7 +196,7 @@ export class AppRuntime {
     if (programKey === this.programKey && this.entryTypeName) return
 
     this.loadedProgram = { files, model, key: programKey, screen }
-    this.interpreter = new Interpreter({ host: this.host })
+    this.interpreter = new Interpreter({ host: this.host, ...(this.stepBudget !== undefined ? { stepBudget: this.stepBudget } : {}) })
     this.host.expandStruct = (value) => this.expand(value)
     this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
     this.host.builderIdentity = (slot, branch, fn) => {
@@ -212,7 +215,7 @@ export class AppRuntime {
     try {
       this.interpreter.load(files)
     } catch (error) {
-      this.loadFailure = toFailure(error)
+      this.loadFailure = toFailure(error, this.interpreter.position)
     }
 
     this.entryTypeName = screen ?? model.entryPoint?.name ?? null
@@ -224,8 +227,23 @@ export class AppRuntime {
     this.rootTypeName = null
     this.programKey = programKey
 
-    // State boxes deliberately survive a reload. Whether each individual value
-    // survives is decided per-property by its initialiser fingerprint.
+    // State boxes deliberately survive a reload, and whether each value survives is
+    // decided per property by its initialiser. That is not enough when the edit is to a
+    // type a value was made from: a `Model` made before `var extra = 5` was added has
+    // no `extra`, and every view reading it stopped until Reset. So a value holding a
+    // type whose stored properties or cases changed starts afresh, and the rest, typed
+    // text or a count tapped up, stays.
+    const shapes = storedShapes(files)
+    const changed = new Set([...this.storedShapes].filter(([name, shape]) => shapes.get(name) !== shape).map(([name]) => name))
+    this.storedShapes = shapes
+    if (changed.size > 0) {
+      const stale = (value: SwiftValue) => holdsType(value, changed)
+      this.state.prune(stale)
+      for (const [key, entry] of this.defaults) if (stale(entry.value)) this.defaults.delete(key)
+      this.seeded.clear()
+      this.live = new Map()
+      this.previousLive = new Map()
+    }
   }
 
   /**
@@ -271,7 +289,7 @@ export class AppRuntime {
 
       const ui = resolveUI(views, {
         state: this.ui,
-        build: (closure, args, environment) => this.buildViews(closure, args, environment),
+        build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
         styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
         animation: this.animation,
       }, undefined, this.previewPrefix ? { prefix: this.previewPrefix } : undefined)
@@ -280,10 +298,13 @@ export class AppRuntime {
       // whatever is presented *now* rather than to whatever was when it was read.
       let presented = ui.overlay
       while (presented?.screen?.overlay) presented = presented.screen.overlay
-      const dismiss = presented?.dismiss ?? null
+      // On the screen on top: iOS goes back from a pushed screen, and closes a sheet or
+      // cover only from its first screen (D13).
+      const back = (presented?.screen ?? ui).navigationBar?.back
+      const dismiss: ViewIntent | null = back ? { kind: 'pop' } : presented?.dismiss ?? null
       this.host.dismissAction = dismiss
         ? () => {
-            this.perform(dismiss, { kind: 'tap', handlerId: '', location: { x: 0, y: 0 } })
+            this.perform(dismiss, { kind: 'tap', handlerId: back ?? '', location: { x: 0, y: 0 } })
           }
         : null
       this.state.endPass()
@@ -295,7 +316,7 @@ export class AppRuntime {
         views: [],
         ui: null,
         logs: this.host.takeLogs(),
-        failure: toFailure(error),
+        failure: toFailure(error, this.interpreter.position),
         rootTypeName: this.rootTypeName,
       }
     }
@@ -311,37 +332,38 @@ export class AppRuntime {
    * page's, because a press belongs to the app that is running, not to a picture of
    * one beside it.
    *
-   * Returns null when the pass cannot be composed that way, so a gallery of six
-   * pages is never the reason the preview goes blank.
+   * A page that can't be composed throws, and the gallery reports that page and
+   * draws the rest, so a gallery of six pages is never the reason the preview goes
+   * blank.
    */
-  resolvePage(views: readonly ViewValue[], tab: number, basePage = false): ResolvedUI | null {
-    try {
-      return resolveUI(
-        views,
-        {
-          state: this.ui,
-          includeViewHierarchy: basePage,
-          build: (closure, args, environment) => this.buildViews(closure, args, environment),
-          styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
-          animation: this.animation,
-        },
-        tab,
-        { basePage },
-      )
-    } catch {
-      return null
-    }
+  resolvePage(views: readonly ViewValue[], tab: number, basePage = false): ResolvedUI {
+    return resolveUI(
+      views,
+      {
+        state: this.ui,
+        includeViewHierarchy: basePage,
+        build: (closure, args, environment, name) => this.buildViews(closure, args, environment, name),
+        styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
+        animation: this.animation,
+      },
+      tab,
+      { basePage },
+    )
   }
 
   /**
    * Deferred page builders run in a separate interpreter. State objects are deeply
    * copied, so even an impure destination body cannot write through an environment
    * object into the app being edited. Actions and lifecycle callbacks never run.
+   *
+   * The evaluation comes back whether or not it stopped, so the gallery can say why a
+   * screen isn't drawn; `stepBudget` is what the gallery has left to give it.
    */
-  previewRuntime(screen?: string): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
+  previewRuntime(screen?: string, stepBudget?: number): { runtime: AppRuntime; evaluation: EvaluationResult } | null {
     const loaded = this.loadedProgram
     if (!loaded) return null
     const preview = new AppRuntime()
+    preview.stepBudget = stepBudget
     if (screen) preview.previewPrefix = 'design:' + screen
     preview.load(loaded.files, loaded.model, loaded.key, screen ?? loaded.screen)
     const copied = new Map<object, unknown>()
@@ -356,17 +378,24 @@ export class AppRuntime {
     preview.setEnvironment(this.environmentInputs)
     preview.setDefaultGeometry(this.host.defaultGeometry)
     preview.updateGeometry(this.geometry)
-    const evaluation = preview.evaluate()
-    return evaluation.failure ? null : { runtime: preview, evaluation }
+    return { runtime: preview, evaluation: preview.evaluate() }
   }
 
-  resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number, failures?: PageFailure[]): readonly NestedPage[] {
+  /** The steps taken since the last pass began, resolving included. */
+  get stepsUsed(): number {
+    return this.interpreter.stepsUsed
+  }
+
+  resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number): readonly NestedPage[] {
     return resolveNestedPages(views, {
       state: new UIState(),
-      build: (closure, args, environment) => this.buildViews(closure, args, environment),
+      // The canvas opens these with the state the app has now, so one that stops,
+      // `Text(selected!)` while nothing is selected, is a screen the app can't show
+      // yet rather than one that is broken: it is left out, not drawn as stopped.
+      build: (closure, args, environment) => this.runBuilder(closure, args, environment),
       styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
       animation: null,
-    }, tab, rootId, limit, failures)
+    }, tab, rootId, limit)
   }
 
   /**
@@ -414,7 +443,7 @@ export class AppRuntime {
     } catch (error) {
       // A trap inside an action is surfaced as a log rather than thrown, so one bad
       // tap cannot tear down the preview.
-      this.host.log(`Action failed: ${toFailure(error).message}`, spanOf(intent), 'error')
+      this.host.log(`Action failed: ${toFailure(error, this.interpreter.position).message}`, spanOf(intent), 'error')
     }
 
     this.animation = this.host.pendingAnimation
@@ -438,7 +467,7 @@ export class AppRuntime {
         const result = this.interpreter.callClosure(closure, [dimensions], closure.span)
         return result.kind === 'int' || result.kind === 'double' ? result.value : 0
       } catch (error) {
-        this.host.log(`Alignment guide failed: ${toFailure(error).message}`, closure.span, 'error')
+        this.host.log(`Alignment guide failed: ${toFailure(error, this.interpreter.position).message}`, closure.span, 'error')
         return 0
       }
     }
@@ -472,9 +501,10 @@ export class AppRuntime {
    * the state the view is about to draw from, and rendering the pass that discovered
    * it would show the screen as it was one instant before the app started.
    *
-   * A callback runs at most once per appearance, tracked by path - so a re-render
+   * A callback runs at most once per appearance, tracked by its key - so a re-render
    * does not re-fire it, and a view that leaves the tree and comes back does fire
-   * again, which is what SwiftUI does too.
+   * again, which is what SwiftUI does too. A `.task(id:)` also runs again when its id
+   * changes.
    */
   runLifecycle(hooks: readonly LifecycleHook[]): boolean {
     const seen = new Set<string>()
@@ -483,22 +513,25 @@ export class AppRuntime {
 
     for (const hook of hooks) {
       if (hook.kind === 'appear') {
-        seen.add(hook.path)
-        if (this.appeared.has(hook.path)) continue
-        this.appeared.add(hook.path)
-        this.invokeHook(hook.closure, [])
+        seen.add(hook.key)
+        const previous = this.watched.get(hook.key)
+        if (hook.watched !== undefined) this.watched.set(hook.key, copyValue(hook.watched))
+        const sameId = hook.watched === undefined || previous === undefined || valuesEqual(previous, hook.watched)
+        if (this.appeared.has(hook.key) && sameId) continue
+        this.appeared.add(hook.key)
+        this.invokeHook(hook.action, [])
         ran = true
         continue
       }
 
       if (hook.kind === 'change' && hook.watched !== undefined) {
-        seen.add(hook.path)
-        const previous = this.watched.get(hook.path)
-        this.watched.set(hook.path, copyValue(hook.watched))
+        seen.add(hook.key)
+        const previous = this.watched.get(hook.key)
+        this.watched.set(hook.key, copyValue(hook.watched))
         if (previous === undefined ? !hook.initial : valuesEqual(previous, hook.watched)) continue
-        const args = hook.closure.params.length >= 2
+        const args = parameterCount(hook.action) >= 2
           ? [previous ?? hook.watched, hook.watched] : [hook.watched]
-        this.invokeHook(hook.closure, args)
+        this.invokeHook(hook.action, args)
         ran = true
       }
     }
@@ -508,27 +541,27 @@ export class AppRuntime {
     // this pass's hooks. It is kept from the pass that last saw the view.
     for (const hook of hooks) {
       if (hook.kind !== 'disappear') continue
-      seen.add(hook.path)
+      seen.add(hook.key)
       // Also counted as present: a view may have `.onDisappear` without `.onAppear`,
       // and something has to record that it was here in order to notice it leaving.
-      this.appeared.add(hook.path)
-      this.disappearing.set(hook.path, hook.closure)
+      this.appeared.add(hook.key)
+      this.disappearing.set(hook.key, hook.action)
     }
 
-    for (const path of [...this.appeared]) {
-      if (seen.has(path)) continue
-      this.appeared.delete(path)
+    for (const key of [...this.appeared]) {
+      if (seen.has(key)) continue
+      this.appeared.delete(key)
 
-      const gone = this.disappearing.get(path)
+      const gone = this.disappearing.get(key)
       if (gone) {
-        this.disappearing.delete(path)
+        this.disappearing.delete(key)
         this.invokeHook(gone, [])
         ranDisappear = true
         ran = true
       }
     }
 
-    for (const path of this.watched.keys()) if (!seen.has(path)) this.watched.delete(path)
+    for (const key of this.watched.keys()) if (!seen.has(key)) this.watched.delete(key)
 
     if (ran) this.harvest(this.live)
     // A disappear closure wrote into the previous pass's instance - the one that
@@ -537,14 +570,21 @@ export class AppRuntime {
     return ran
   }
 
-  private invokeHook(closure: ClosureValue, args: readonly SwiftValue[]): void {
+  private invokeHook(action: ActionValue, args: readonly SwiftValue[]): void {
     try {
-      this.interpreter.callClosure(closure, args, closure.span)
+      this.run(action, args)
     } catch (error) {
       // A failing lifecycle callback is reported, not fatal: the screen it was about
       // to decorate is still worth showing.
-      this.host.log(`Lifecycle callback failed: ${toFailure(error).message}`, closure.span, 'error')
+      this.host.log(`Lifecycle callback failed: ${toFailure(error, this.interpreter.position).message}`, actionSpan(action), 'error')
     }
+  }
+
+  /** Runs what a control or modifier holds: a closure, or a function named as a value. */
+  private run(action: ActionValue, args: readonly SwiftValue[]): void {
+    const span = actionSpan(action)
+    if (action.kind === 'function') this.interpreter.callFunction(action, args.map((value) => ({ label: null, value, span })), span)
+    else this.interpreter.callClosure(action, args, span)
   }
 
   get stateSnapshot(): ReadonlyMap<string, { value: SwiftValue }> {
@@ -557,7 +597,7 @@ export class AppRuntime {
     switch (intent.kind) {
       case 'run':
         if (intent.dismiss) this.perform(intent.dismiss, event)
-        this.interpreter.callClosure(intent.closure, [], intent.closure.span)
+        this.run(intent.action, [])
         return
 
       case 'push': {
@@ -608,11 +648,7 @@ export class AppRuntime {
       }
 
       case 'delete': {
-        this.interpreter.callClosure(
-          intent.closure,
-          [indexSet([intent.offset])],
-          intent.closure.span,
-        )
+        this.run(intent.action, [indexSet([intent.offset])])
         // The row is gone, so nothing should stay swiped open behind it.
         this.ui.closeSwipes()
         return
@@ -686,18 +722,14 @@ export class AppRuntime {
       if (phase !== 'ended') {
         for (const update of part.updates) {
           if (!asProjection(update.binding)) continue
-          this.interpreter.callClosure(
-            update.closure,
-            [payload, update.binding, { kind: 'void' }],
-            update.closure.span,
-          )
+          this.run(update.action, [payload, update.binding, { kind: 'void' }])
         }
       }
 
       for (const handler of part.handlers) {
         const wanted = phase === 'ended' ? 'ended' : 'changed'
         if (handler.phase !== wanted) continue
-        this.interpreter.callClosure(handler.closure, [payload], handler.closure.span)
+        this.run(handler.action, [payload])
       }
     }
 
@@ -790,6 +822,13 @@ export class AppRuntime {
       const produced = this.interpreter.runViewBuilderBlock(body.accessor, env)
 
       return componentViews(this.viewsFrom(produced), instance)
+    } catch (error) {
+      // A view whose body stops is drawn as a placeholder saying why, and the rest of
+      // the screen goes on: a trap in one row must not blank the screen, and the Design
+      // canvas with it. Unlike iOS, which would crash, but the error is still reported
+      // where it happened.
+      if (!containable(error)) throw error
+      return componentViews([stoppedView(instance.typeName, toFailure(error, this.interpreter.position), instance.viewSource ?? decl.span)], instance)
     } finally {
       this.expandDepth--
       this.identity.pop()
@@ -928,7 +967,7 @@ export class AppRuntime {
    * them has unwound. Without it `@EnvironmentObject` on a detail screen resolves to
    * nothing, which is not a limitation the user can see coming.
    */
-  private buildViews(
+  private runBuilder(
     closure: ClosureValue,
     args: readonly SwiftValue[] = [],
     environment?: EnvironmentFrame,
@@ -936,6 +975,25 @@ export class AppRuntime {
     return this.host.environment.withFrame(environment, () =>
       this.viewsFrom(this.interpreter.runViewBuilder(closure, args)),
     )
+  }
+
+  /**
+   * `runBuilder`, for what the app has on screen: a sheet or a destination whose own
+   * closure stops - `Detail(item: items[0])` on an empty list - is drawn as stopped,
+   * as a view is, and the sheet can still be closed and the destination left.
+   */
+  private buildViews(
+    closure: ClosureValue,
+    args: readonly SwiftValue[] = [],
+    environment?: EnvironmentFrame,
+    name = 'Content',
+  ): readonly ViewValue[] {
+    try {
+      return this.runBuilder(closure, args, environment)
+    } catch (error) {
+      if (!containable(error)) throw error
+      return [stoppedView(name, toFailure(error, this.interpreter.position), closure.span)]
+    }
   }
 
   /**
@@ -1021,6 +1079,15 @@ export class AppRuntime {
 
       const environment = member.attributes.find((a) => a.name === 'Environment')
       if (environment) {
+        // `@Environment(Model.self)`: the object an ancestor gave with `.environment(model)`.
+        const type = environmentType(environment)
+        if (type) {
+          const object = this.host.environment.object(type)
+          if (object !== undefined) instance.fields.set(member.name, object)
+          else if (member.typeAnnotation?.kind === 'optionalType') instance.fields.set(member.name, NIL)
+          else throw new SwiftTrap(`No Observable object of type ${type} found. A View.environment(_:) for ${type} may be missing as an ancestor of this view.`, member.span, [])
+          continue
+        }
         const key = asKeyPath(keyPathArgument(environment))?.components[0]
         const value = key ? this.host.environment.value(key) : undefined
         if (value === undefined) throw new UnsupportedAtRuntime(`@Environment(${key ?? 'type-based lookup'})`, member.span)
@@ -1141,7 +1208,14 @@ function storageKey(property: VarDecl): string | null {
   return literal ? first.segments.map((segment) => (segment.kind === 'text' ? segment.value : '')).join('') : null
 }
 
+/** `@Environment(Model.self)`: the type it asks for, where the environment holds an `@Observable` object. */
+function environmentType(attribute: { args: readonly { value: unknown }[] }): string | undefined {
+  const first = attribute.args[0]?.value as { kind?: string; member?: string; base?: { kind?: string; name?: string } | null } | undefined
+  return first?.kind === 'memberAccess' && first.member === 'self' && first.base?.kind === 'identifier' ? first.base.name : undefined
+}
+
 /** `@Environment(\.colorScheme)` - the key path the attribute was given. */
+
 function keyPathArgument(attribute: { args: readonly { value: unknown }[] }): SwiftValue | undefined {
   const first = attribute.args[0]?.value as { kind?: string; components?: readonly string[] } | undefined
   if (first?.kind !== 'keyPath' || !first.components) return undefined
@@ -1195,49 +1269,21 @@ function valueForEvent(fallback: SwiftValue, event: UIEvent): SwiftValue {
 }
 
 function spanOf(intent: ViewIntent): SourceSpan {
-  return intent.kind === 'run' ? intent.closure.span : { file: '', start: 0, end: 0 }
+  return intent.kind === 'run' ? actionSpan(intent.action) : { file: '', start: 0, end: 0 }
+}
+
+/** Where an action is written: the closure, or the declaration of the function it names. */
+function actionSpan(action: ActionValue): SourceSpan {
+  return action.kind === 'function' ? action.decl.span : action.span
+}
+
+function parameterCount(action: ActionValue): number {
+  return action.kind === 'function' ? action.decl.params.length : action.params.length
 }
 
 /** Handler id for the view at a given tree path. */
 export function actionId(path: string): string {
   return handlerIdFor(path)
-}
-
-function toFailure(error: unknown): RuntimeFailure {
-  if (error instanceof SwiftTrap) {
-    return {
-      message: `Swift runtime failure: ${error.reason}`,
-      span: error.span,
-      frames: error.frames.map((f) => f.name),
-      kind: 'trap',
-    }
-  }
-  if (error instanceof PreviewLimitExceeded) {
-    return { message: error.message, span: error.span, frames: [], kind: 'budget' }
-  }
-  if (error instanceof ExecutionBudgetExceeded) {
-    return {
-      message: error.message,
-      span: error.span,
-      frames: error.frames.map((f) => f.name),
-      kind: 'budget',
-    }
-  }
-  if (error instanceof UnsupportedAtRuntime) {
-    return { message: error.message, span: error.span, frames: [], kind: 'unsupported' }
-  }
-  if (error instanceof SwiftThrow) {
-    // An error that reached the top of the tree was never caught. In a real app that
-    // is a fatal error; here it has to become a diagnostic, because anything this
-    // function does not recognise is re-thrown and takes the whole compile with it.
-    return {
-      message: `An error was thrown and never caught: ${describe(error.value as SwiftValue, false)}`,
-      span: error.span,
-      frames: [],
-      kind: 'trap',
-    }
-  }
-  throw error
 }
 
 export { describe }
@@ -1332,4 +1378,40 @@ function clonePreviewValue(value: SwiftValue, seen: Map<object, unknown>): Swift
   const result = copy(value) as SwiftValue
   for (const [key, item] of staged) seen.set(key, item)
   return result
+}
+
+/**
+ * Each type's stored shape, keyed by name: the stored properties of a struct or class,
+ * and the cases of an enum. Computed properties and methods are left out, since those
+ * are found by name when they run and a value made before the edit has them too.
+ */
+function storedShapes(files: readonly SourceFileNode[]): Map<string, string> {
+  const types = new Map<string, { readonly shape: string; readonly inherits: readonly string[] }>()
+  // A type declared inside another is known by both names, as the interpreter knows it:
+  // `Shelf.Book(…)` makes a `Shelf.Book` and `Book(…)` a `Book`.
+  const visit = (decl: Decl, owner: string | null): void => {
+    let shape: string
+    if (decl.kind === 'structDecl') {
+      const stored = decl.members.filter((m): m is VarDecl =>
+        m.kind === 'varDecl' && m.accessor === null && m.requirement === null && !m.modifiers.some((mod) => mod.name === 'static' || mod.name === 'class'))
+      shape = fingerprint({ reference: decl.isReference, stored })
+    } else if (decl.kind === 'enumDecl') {
+      shape = fingerprint(decl.cases)
+    } else return
+    const qualified = owner ? `${owner}.${decl.name}` : decl.name
+    const type = { shape, inherits: decl.inherits.map((inherited) => inherited.name) }
+    types.set(qualified, type)
+    if (!types.has(decl.name)) types.set(decl.name, type)
+    for (const member of decl.members) visit(member, qualified)
+  }
+  for (const file of files) for (const decl of file.declarations) visit(decl, null)
+  // A class holds the stored properties of the class it inherits from, so a change there
+  // changes it too. A protocol has no shape here, and a chain that comes back to a type
+  // it has passed, which Swift refuses, stops there.
+  const shapeOf = (name: string, seen: ReadonlySet<string>): string => {
+    const type = types.get(name)!
+    const above = type.inherits.filter((parent) => types.has(parent) && !seen.has(parent))
+    return [type.shape, ...above.map((parent) => shapeOf(parent, new Set([...seen, parent])))].join(' : ')
+  }
+  return new Map([...types.keys()].map((name) => [name, shapeOf(name, new Set([name]))]))
 }

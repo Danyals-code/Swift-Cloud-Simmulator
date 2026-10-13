@@ -22,20 +22,30 @@ const TEXT_STYLES: Readonly<Record<string, TextStyle>> = {
   caption2: { size: 11, lineHeight: 13, weight: 400 },
 }
 
+/**
+ * The light colours are measured in the iOS 27 simulator on iPhone 18 Pro
+ * (docs/parity/native/iphone18pro-misrenders). Seven hues had kept their values from
+ * before iOS 26 - teal was 48,176,199 against iOS 27's 0,195,208.
+ */
 const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
-  red: rgba(255, 59, 48),
-  orange: rgba(255, 149, 0),
+  red: rgba(255, 56, 60),
+  orange: rgba(255, 141, 40),
   yellow: rgba(255, 204, 0),
   green: rgba(52, 199, 89),
-  mint: rgba(0, 199, 190),
-  teal: rgba(48, 176, 199),
-  cyan: rgba(50, 173, 230),
+  mint: rgba(0, 200, 179),
+  teal: rgba(0, 195, 208),
+  cyan: rgba(0, 192, 232),
   blue: rgba(0, 136, 255),
-  indigo: rgba(88, 86, 214),
+  indigo: rgba(97, 85, 245),
   purple: rgba(203, 48, 224),
   pink: rgba(255, 45, 85),
-  brown: rgba(162, 132, 94),
+  brown: rgba(172, 127, 94),
   gray: rgba(142, 142, 147),
+  systemGray2: rgba(174, 174, 178),
+  systemGray3: rgba(199, 199, 204),
+  systemGray4: rgba(209, 209, 214),
+  systemGray5: rgba(229, 229, 234),
+  systemGray6: rgba(242, 242, 247),
   black: rgba(0, 0, 0),
   white: rgba(255, 255, 255),
   clear: rgba(0, 0, 0, 0),
@@ -52,6 +62,11 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
    */
   primary: rgba(0, 0, 0),
   secondary: rgba(60, 60, 67, 0.6),
+  // The rest of the hierarchy, `.foregroundStyle(.tertiary)` and down. They were
+  // missing, so the style was dropped and the text drew as black as the title.
+  tertiary: rgba(60, 60, 67, 0.3),
+  quaternary: rgba(60, 60, 67, 0.18),
+  quinary: rgba(60, 60, 67, 0.086),
   accentColor: rgba(0, 136, 255),
   accent: rgba(0, 136, 255),
   /**
@@ -67,7 +82,11 @@ const LIGHT_COLORS: Readonly<Record<string, RGBA>> = {
   label: rgba(0, 0, 0),
   secondaryLabel: rgba(60, 60, 67, 0.6),
   tertiaryLabel: rgba(60, 60, 67, 0.3),
+  quaternaryLabel: rgba(60, 60, 67, 0.18),
+  placeholderText: rgba(60, 60, 67, 0.3),
+  link: rgba(0, 122, 255),
   separator: rgba(60, 60, 67, 0.12),
+  opaqueSeparator: rgba(231, 231, 232),
   systemBackground: rgba(255, 255, 255),
   secondarySystemBackground: rgba(242, 242, 247),
   tertiarySystemBackground: rgba(255, 255, 255),
@@ -98,8 +117,17 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   purple: rgba(191, 90, 242),
   pink: rgba(255, 55, 95),
   brown: rgba(172, 142, 104),
+  // UIKit's published dark values, not measured: the study verifies light mode only.
+  systemGray2: rgba(99, 99, 102),
+  systemGray3: rgba(72, 72, 74),
+  systemGray4: rgba(58, 58, 60),
+  systemGray5: rgba(44, 44, 46),
+  systemGray6: rgba(28, 28, 30),
   primary: rgba(255, 255, 255),
   secondary: rgba(235, 235, 245, 0.6),
+  tertiary: rgba(235, 235, 245, 0.3),
+  quaternary: rgba(235, 235, 245, 0.18),
+  quinary: rgba(235, 235, 245, 0.086),
   accentColor: rgba(0, 145, 255),
   accent: rgba(0, 145, 255),
   tint: rgba(0, 145, 255),
@@ -107,7 +135,11 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   label: rgba(255, 255, 255),
   secondaryLabel: rgba(235, 235, 245, 0.6),
   tertiaryLabel: rgba(235, 235, 245, 0.3),
+  quaternaryLabel: rgba(235, 235, 245, 0.18),
+  placeholderText: rgba(235, 235, 245, 0.3),
+  link: rgba(9, 132, 255),
   separator: rgba(84, 84, 88, 0.6),
+  opaqueSeparator: rgba(56, 56, 58),
   systemBackground: rgba(0, 0, 0),
   secondarySystemBackground: rgba(28, 28, 30),
   tertiarySystemBackground: rgba(44, 44, 46),
@@ -118,6 +150,17 @@ const DARK_COLORS: Readonly<Record<string, RGBA>> = {
   secondarySystemFill: rgba(120, 120, 128, 0.32),
   tertiarySystemFill: rgba(118, 118, 128, 0.24),
   quaternarySystemFill: rgba(116, 116, 128, 0.18),
+}
+
+/**
+ * A disabled button's colours, measured in the iOS 27 simulator on iPhone 18 Pro. Its
+ * title turns a grey that depends on where it sits: on its own, in a list or form row,
+ * in the toolbar's glass, or on the grey fill a bordered or prominent button takes.
+ * Nothing fades.
+ */
+const DISABLED_BUTTON = {
+  light: { title: LIGHT_COLORS.tertiaryLabel!, row: rgba(0, 0, 0, 0.25), toolbar: rgba(60, 60, 67, 0.41), onFill: rgba(60, 60, 67, 0.225) },
+  dark: { title: DARK_COLORS.tertiaryLabel!, row: rgba(255, 255, 255, 0.25), toolbar: rgba(255, 255, 255, 0.23), onFill: rgba(235, 235, 245, 0.225) },
 }
 
 /** iOS 27 target. Metrics and materials are preview approximations pending native calibration. */
@@ -132,8 +175,8 @@ export const IOS_27 = {
     control: { top: 8, bottom: 8, leading: 8, trailing: 8 },
     image: { top: 6, bottom: 6, leading: 6, trailing: 6 },
   },
-  metrics: { padding: 16, spacerMinimum: 8, labelGap: 6, controlGap: 8, navigationBar: 54, largeTitle: 48, tabBar: 49, row: 44, rowInset: 16, separator: 0.5, stackSpacing: 8 },
-  button: { automatic: { content: 'borderless', list: 'borderless', form: 'borderless', toolbar: 'glass' }, paddingVertical: 7, paddingHorizontal: 14, cornerRadius: 999, roundedRectangleRadius: 8 },
+  metrics: { padding: 16, spacerMinimum: 8, labelGap: 6, controlGap: 8, navigationBar: 54, largeTitle: 52, tabBar: 49, row: 44, rowInset: 16, separator: 0.5, stackSpacing: 8 },
+  button: { automatic: { content: 'borderless', list: 'borderless', form: 'borderless', toolbar: 'glass' }, paddingVertical: 7, paddingHorizontal: 14, cornerRadius: 999, roundedRectangleRadius: 8, disabled: DISABLED_BUTTON },
   switch: CONTROL_PARTS.switch,
   materials: {
     ultraThinMaterial: { opacity: 0.3, blur: 8 },

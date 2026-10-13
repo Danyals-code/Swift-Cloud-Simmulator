@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
-import { authoringSettingsContext, settingsVisualChildren } from './authoringSettings'
+import { authoringSettingsContext, repeatsOverRange, settingsVisualChildren } from './authoringSettings'
 
 const model = (body: string, members = '') => {
   const text = `import SwiftUI
@@ -29,6 +29,20 @@ describe('contextual designer settings', () => {
     expect(settingsVisualChildren(snapshot, template).map(node => node.name)).toEqual(['HStack'])
     const destination = context.slots.find(node => node.name === 'Destination')!
     expect(settingsVisualChildren(snapshot, destination).map(node => node.name)).toEqual(['DetailView'])
+  })
+
+  it('finds the rows\' data under a titled section too, which is a layer of its own (D13)', () => {
+    const { snapshot } = model('List { Section("Books") { ForEach(items) { item in Text(item.title) } } }', records)
+    const list = snapshot.nodes.find(node => node.name === 'List')!
+    const context = authoringSettingsContext(snapshot, list)
+    expect(context.collections.map(node => node.name)).toEqual(['ForEach'])
+    expect(context.collections[0]?.collection?.records).toEqual([{ id: 'one', title: 'First' }])
+  })
+
+  it('offers "Use a collection" on the library\'s Repeat over a range, not on a Repeat over data (D13)', () => {
+    const { snapshot } = model('VStack { ForEach(0..<3, id: \\.self) { index in Text("Row \\(index)") }; ForEach(items) { item in Text(item.title) }; ForEach(1...2, id: \\.self) { n in Text("\\(n)") } }', records)
+    const repeats = snapshot.nodes.filter(node => node.name === 'ForEach')
+    expect(repeats.map(repeatsOverRange)).toEqual([true, false, true])
   })
 
   it('keeps repetition and navigation ownership on a deeply selected row view', () => {

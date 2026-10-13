@@ -1,4 +1,4 @@
-import { findViewCopies, planDesignEdit, validateResourceRemoval } from '@studio/swift-sema'
+import { copiedView, findViewCopies, planDesignEdit, validateResourceRemoval } from '@studio/swift-sema'
 import * as Comlink from 'comlink'
 import {
   applyEvent,
@@ -14,7 +14,7 @@ import {
   relayout,
   setAllPages,
 } from '@studio/swiftui-runtime'
-import { copyView, hiddenViewsIn, viewSiteAt } from '@studio/swift-syntax'
+import { hiddenViewsIn, viewSiteAt } from '@studio/swift-syntax'
 import type {
   CompileRequest,
   CompileResult,
@@ -22,6 +22,7 @@ import type {
   HiddenViewInfo,
   ViewSiteInfo,
   CompletionResult,
+  CopiedView,
   FileId,
   MeasuredFontData,
   SourceFile,
@@ -70,8 +71,8 @@ const api: CompilerApi = {
   async relayout(revision) { return relayout(revision) },
   async setAllPages(enabled, revision) { return setAllPages(enabled, revision) },
 
-  async copyView(text: string, file: FileId, offset: number): Promise<string | null> {
-    return copyView(text, file, offset)
+  async copyView(text: string, file: FileId, offset: number): Promise<CopiedView | { readonly refused: string }> {
+    return copiedView(text, file, offset)
   },
 
   async hiddenViews(files: readonly SourceFile[]): Promise<readonly HiddenViewInfo[]> {

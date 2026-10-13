@@ -1,8 +1,8 @@
-import { useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type UIEvent as ReactUIEvent } from 'react'
+import { createContext, useContext, useId, useState, useRef, useLayoutEffect, useEffect, useCallback, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react'
 import { ScrollIndicator } from './ScrollIndicator'
 import { ShapeView, VectorPathView } from './ShapeView'
 import { SliderView, ControlStyles } from './SliderView'
-import { symbolMetrics, shapePath } from '@studio/shared'
+import { placeholderWords, symbolMetrics, shapePath } from '@studio/shared'
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react'
 import {
   cssTransform,
@@ -19,6 +19,7 @@ import {
 import { symbolAsset, symbolStrokeScale } from './symbols'
 import { beginContextPress } from './context-press'
 import { finishExit, reconcilePresence, type PresentNode, type RenderGroups } from './transition-presence'
+import { editDraft, shownValue, NO_DRAFT, type ControlDraft, type ControlEdit } from './control-draft'
 
 const EMPTY_NODES: readonly RenderNode[] = []
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -32,14 +33,21 @@ const ignorePreviewEvent = () => undefined
 
 export interface RenderTreeViewProps {
   tree: RenderTree
-  /** Workspace layer selection, without intercepting preview interactions. */
-  selectedIds?: ReadonlySet<string>
-  /** Temporary canvas outlines for the source view under the Layers pointer. */
-  hoveredIds?: ReadonlySet<string>
+  /**
+   * Workspace layer selection, without intercepting preview interactions: the nodes of
+   * each selected view, outlined as one box, so a card is outlined as a card rather than
+   * as the words in it (D1).
+   */
+  selectedGroups?: readonly (readonly string[])[]
+  /**
+   * Temporary canvas outlines: each group is one view, under the Layers pointer or where a
+   * click would select it, outlined as one box.
+   */
+  hoveredGroups?: readonly (readonly string[])[]
   /** Optional workspace-owned offsets shared across live and design phone mounts. */
   scrollPositions?: Map<string, { left: number; top: number }>
   /** Raised when an interactive node is activated. */
-  onEvent?: (event: UIEvent) => void
+  onEvent?: EventSink
   /**
    * Dim the tree when it is stale - a parse error means we keep painting the last
    * good render rather than blanking the preview (requirement FR-6.3), and the user
@@ -57,10 +65,31 @@ export interface RenderTreeViewProps {
    */
   inspect?: {
     readonly hovered: string | null
-    onHover(node: RenderNode | null): void
-    onSelect(node: RenderNode): void
-    onEditText?(node: RenderNode, rect: { x: number; y: number; width: number; height: number }): void
+    /** What is drawn under the pointer, topmost first, as a click would find it, or null once it leaves. */
+    onHover(under: readonly RenderNode[] | null): void
+    /**
+     * A click: everything drawn under the pointer, topmost first, and the keys held. A
+     * Button's tap target is drawn over its label, so the views under it are the ones a
+     * deeper selection reaches (D1).
+     */
+    onSelect(under: readonly RenderNode[], keys: InspectKeys): void
+    /** A double-click, with where the topmost node is drawn, for an editor to sit over it. */
+    onDoubleClick?(under: readonly RenderNode[], rect: { x: number; y: number; width: number; height: number }): void
   }
+}
+
+/** The keys held with a click while inspecting; what they mean is the workspace's to say. */
+export interface InspectKeys {
+  /** ⌘ on a Mac, Ctrl elsewhere. */
+  readonly command: boolean
+  readonly shift: boolean
+}
+
+/** What a node reports while inspecting; the tree adds what else is under the pointer. */
+interface NodeInspect {
+  onHover(node: RenderNode | null, event?: ReactMouseEvent<HTMLElement>): void
+  onSelect(node: RenderNode, event: ReactMouseEvent<HTMLElement>): void
+  onDoubleClick?(node: RenderNode, event: ReactMouseEvent<HTMLElement>): void
 }
 
 /**
@@ -87,13 +116,14 @@ export const RenderTreeView = memo(function RenderTreeView({
   onEvent,
   stale = false,
   debugOutlines = false,
-  selectedIds,
-  hoveredIds,
+  selectedGroups,
+  hoveredGroups,
   scrollPositions,
   inspect,
 }: RenderTreeViewProps) {
   const reduceMotion = useSyncExternalStore(subscribeMotion, reducedMotion, serverMotion)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const [handoffs] = useState(() => new Map<string, Handoff>())
   useLayoutEffect(() => {
     const surface = surfaceRef.current
     if (!surface) return
@@ -115,7 +145,13 @@ export const RenderTreeView = memo(function RenderTreeView({
     const scroller = tree.chrome && surface.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(tree.chrome.scrollId)}"]`)
     updateChrome(surface, scroller?.scrollTop ?? 0, tree.chrome?.collapseDistance ?? 0)
   }, [tree, scrollPositions])
-  const hoveredNodes = stale ? [] : tree.nodes.filter(node => node.id === inspect?.hovered || hoveredIds?.has(node.id))
+  // Each outline is the nodes of one view, as this tree paints them; a hover moving on
+  // leaves the selection's outlines as they are.
+  const nodesById = useMemo(() => new Map(tree.nodes.map(node => [node.id, node])), [tree])
+  const selectedIds = useMemo(() => new Set(selectedGroups?.flat()), [selectedGroups])
+  const selectedOutlines = useMemo(() => painted(nodesById, selectedGroups ?? []), [nodesById, selectedGroups])
+  const inspected = inspect?.hovered ?? null
+  const hoveredOutlines = useMemo(() => stale ? [] : painted(nodesById, [...(inspected ? [[inspected]] : []), ...hoveredGroups ?? []]), [nodesById, hoveredGroups, inspected, stale])
 
   // Nodes grouped by the container they live in. Built once per tree rather than
   // searched per node, so a thousand-row list stays linear.
@@ -133,6 +169,37 @@ export const RenderTreeView = memo(function RenderTreeView({
     }
     return groups
   }, [tree])
+
+  /**
+   * A gesture while inspecting, with everything drawn where it happened, topmost first:
+   * the browser's own list, in this tree, starting with the node that heard it.
+   */
+  const lastHover = useRef('')
+  const nodeInspect = useMemo((): NodeInspect | undefined => {
+    if (!inspect) return undefined
+    const under = (node: RenderNode, event: ReactMouseEvent<HTMLElement>): RenderNode[] => {
+      const surface = surfaceRef.current
+      const nodes = new Map(tree.nodes.map(node => [node.id, node]))
+      const found = (surface?.ownerDocument.elementsFromPoint?.(event.clientX, event.clientY) ?? []).flatMap(element => {
+        const id = element instanceof HTMLElement && surface!.contains(element) ? element.dataset.nodeId : undefined
+        const hit = id ? nodes.get(id) : undefined
+        return hit ? [hit] : []
+      })
+      return [node, ...found.filter(item => item.id !== node.id)]
+    }
+    return {
+      // Said again only when what is under the pointer changes, however often it moves.
+      onHover: (node, event) => {
+        const found = node && event ? under(node, event) : null
+        const key = found?.map(item => item.id).join(' ') ?? ''
+        if (key === lastHover.current) return
+        lastHover.current = key
+        inspect.onHover(found)
+      },
+      onSelect: (node, event) => inspect.onSelect(under(node, event), { command: event.metaKey || event.ctrlKey, shift: event.shiftKey }),
+      ...(inspect.onDoubleClick ? { onDoubleClick: (node, event) => inspect.onDoubleClick!(under(node, event), event.currentTarget.getBoundingClientRect()) } : {}),
+    }
+  }, [inspect, tree])
 
   return (
     <div
@@ -163,9 +230,12 @@ export const RenderTreeView = memo(function RenderTreeView({
       <TransitionKeyframes />
       <ControlStyles />
 
-      <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={inspect} />
+      <ControlHandoffs.Provider value={handoffs}>
+        <RenderNodeGroup nodes={byParent.get('') ?? EMPTY_NODES} byParent={byParent} animate={!reduceMotion && !inspect && !stale} onEvent={onEvent} selectedIds={selectedIds} debugOutlines={debugOutlines} inspect={nodeInspect} />
+      </ControlHandoffs.Provider>
 
-      {hoveredNodes.map(node => <InspectHighlight key={node.id} node={node} tree={tree} />)}
+      {selectedOutlines.map((group, index) => <Outline key={`selected:${index}:${group[0]!.id}`} nodes={group} tree={tree} byId={nodesById} kind="selected" />)}
+      {hoveredOutlines.map((group, index) => <Outline key={`hovered:${index}:${group[0]!.id}`} nodes={group} tree={tree} byId={nodesById} kind="hovered" />)}
     </div>
   )
 })
@@ -224,10 +294,10 @@ function transitionAnimation(node: RenderNode, exiting = false): string | undefi
 }
 
 interface NodePresentation {
-  onEvent?: (event: UIEvent) => void
+  onEvent?: EventSink
   debugOutlines: boolean
   selectedIds?: ReadonlySet<string>
-  inspect?: RenderTreeViewProps['inspect']
+  inspect?: NodeInspect
   animate: boolean
 }
 
@@ -256,30 +326,42 @@ function PresentRenderNode({ entry, complete, ...presentation }: NodePresentatio
 }
 
 /**
- * The highlight rect. Drawn above everything and never itself hit-testable.
+ * One box around everything a view paints: what is selected, or hovered. Drawn above
+ * everything and never itself hit-testable, and a card is outlined as one card (D1).
  *
- * A node inside a scroll view is positioned in the scroller's space, so the highlight
- * has to walk back up to the screen to find where it actually appears - otherwise
- * hovering row 40 of a list outlines something near the top of the screen.
+ * A node inside a scroll view is positioned in the scroller's space, so the box has to
+ * walk back up to the screen to find where it actually appears - otherwise hovering row
+ * 40 of a list outlines something near the top of the screen.
  */
-function InspectHighlight({ node, tree }: { node: RenderNode; tree: RenderTree }) {
+/** Each group's nodes as the tree paints them, leaving out groups it paints none of. */
+function painted(byId: ReadonlyMap<string, RenderNode>, groups: readonly (readonly string[])[]): RenderNode[][] {
+  return groups.map(ids => ids.flatMap(id => byId.get(id) ?? [])).filter(group => group.length > 0)
+}
+
+function Outline({ nodes, tree, byId, kind }: { nodes: readonly RenderNode[]; tree: RenderTree; byId: ReadonlyMap<string, RenderNode>; kind: 'selected' | 'hovered' }) {
   const outline = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const element = outline.current
     const surface = element?.parentElement
-    const target = surface?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"]`)
-    if (!element || !surface || !target) return
+    const targets = nodes.flatMap(node => surface?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"]`) ?? [])
+    if (!element || !surface || !targets.length) return
     // Read painted bounds so scrolling, padding and transforms use the same geometry
     // in both hover directions. Clip to scrollports, just like the painted content.
     const update = () => {
-      const root = surface.getBoundingClientRect(), box = target.getBoundingClientRect()
+      const root = surface.getBoundingClientRect()
       const scaleX = root.width / tree.canvas.width, scaleY = root.height / tree.canvas.height
       if (!scaleX || !scaleY) return
-      let left = box.left, top = box.top, right = box.right, bottom = box.bottom
-      for (let parent = target.parentElement; parent && parent !== surface; parent = parent.parentElement) {
-        const style = getComputedStyle(parent), rect = parent.getBoundingClientRect()
-        if (/auto|scroll|hidden|clip/.test(style.overflowX)) { left = Math.max(left, rect.left); right = Math.min(right, rect.right) }
-        if (/auto|scroll|hidden|clip/.test(style.overflowY)) { top = Math.max(top, rect.top); bottom = Math.min(bottom, rect.bottom) }
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+      for (const target of targets) {
+        const box = target.getBoundingClientRect()
+        let l = box.left, t = box.top, r = box.right, b = box.bottom
+        for (let parent = target.parentElement; parent && parent !== surface; parent = parent.parentElement) {
+          const style = getComputedStyle(parent), rect = parent.getBoundingClientRect()
+          if (/auto|scroll|hidden|clip/.test(style.overflowX)) { l = Math.max(l, rect.left); r = Math.min(r, rect.right) }
+          if (/auto|scroll|hidden|clip/.test(style.overflowY)) { t = Math.max(t, rect.top); b = Math.min(b, rect.bottom) }
+        }
+        if (r <= l || b <= t) continue
+        left = Math.min(left, l); top = Math.min(top, t); right = Math.max(right, r); bottom = Math.max(bottom, b)
       }
       Object.assign(element.style, {
         left: `${(left - root.left) / scaleX}px`, top: `${(top - root.top) / scaleY}px`,
@@ -290,34 +372,37 @@ function InspectHighlight({ node, tree }: { node: RenderNode; tree: RenderTree }
     update()
     surface.addEventListener('scroll', update, true)
     const observer = new ResizeObserver(update)
-    observer.observe(surface); observer.observe(target)
+    observer.observe(surface)
+    targets.forEach(target => observer.observe(target))
     return () => { surface.removeEventListener('scroll', update, true); observer.disconnect() }
-  }, [node, tree])
-  let x = node.frame.x
-  let y = node.frame.y
-  let current = node
+  }, [nodes, tree])
 
-  for (let depth = 0; current.parent && depth < 32; depth++) {
-    const parent = tree.nodes.find((n) => n.id === current.parent)
-    if (!parent) break
-    x += parent.frame.x
-    y += parent.frame.y
-    current = parent
-  }
+  // Where the nodes are laid out, until the painted bounds are read.
+  const frames = nodes.map(node => {
+    let x = node.frame.x, y = node.frame.y, current = node
+    for (let depth = 0; current.parent && depth < 32; depth++) {
+      const parent = byId.get(current.parent)
+      if (!parent) break
+      x += parent.frame.x
+      y += parent.frame.y
+      current = parent
+    }
+    return { x, y, right: x + node.frame.width, bottom: y + node.frame.height }
+  })
+  const x = Math.min(...frames.map(frame => frame.x)), y = Math.min(...frames.map(frame => frame.y))
 
   return (
     <div
       ref={outline}
-      data-testid="inspect-highlight"
-      data-hovered-node-id={node.id}
+      data-testid={kind === 'hovered' ? 'inspect-highlight' : 'selection-outline'}
+      data-hovered-node-id={kind === 'hovered' ? nodes[0]!.id : undefined}
       style={{
         position: 'absolute',
         left: x,
         top: y,
-        width: node.frame.width,
-        height: node.frame.height,
-        outline: '1.5px solid rgb(0 122 255)',
-        background: 'rgb(0 122 255 / 0.12)',
+        width: Math.max(...frames.map(frame => frame.right)) - x,
+        height: Math.max(...frames.map(frame => frame.bottom)) - y,
+        ...(kind === 'hovered' ? { outline: '1.5px solid rgb(0 122 255)', background: 'rgb(0 122 255 / 0.12)' } : { outline: '2px solid rgb(0 122 255)', outlineOffset: -2 }),
         pointerEvents: 'none',
         zIndex: 2_000_000,
       }}
@@ -337,10 +422,10 @@ function RenderNodeView({
 }: {
   node: RenderNode
   byParent: ReadonlyMap<string, RenderNode[]>
-  onEvent?: (event: UIEvent) => void
+  onEvent?: EventSink
   debugOutlines: boolean
   selectedIds?: ReadonlySet<string>
-  inspect?: RenderTreeViewProps['inspect']
+  inspect?: NodeInspect
   animate: boolean
   exiting?: boolean
 }) {
@@ -463,7 +548,6 @@ function RenderNodeView({
         }
       : {}),
     ...(debugOutlines ? { outline: '1px solid rgb(0 122 255 / 0.35)', outlineOffset: -1 } : {}),
-    ...(selectedIds?.has(node.id) ? { outline: '2px solid rgb(0 122 255)', outlineOffset: -2 } : {}),
   }
 
   const handlerId = node.hitTarget?.handlerId
@@ -545,14 +629,16 @@ function RenderNodeView({
       aria-valuetext={node.a11y?.value}
       aria-description={node.a11y?.hint}
       aria-hidden={exiting || node.a11y?.hidden}
-      onPointerEnter={inspecting ? () => inspect.onHover(node) : undefined}
+      onPointerEnter={inspecting ? event => inspect.onHover(node, event) : undefined}
+      // A tap target is drawn over its label: moving over it moves over the label's views.
+      onPointerMove={inspecting && node.hitTarget ? event => inspect.onHover(node, event) : undefined}
       onPointerLeave={() => { setPressed(false); if (inspecting) inspect.onHover(null) }}
-      onDoubleClick={inspecting && inspect.onEditText ? event => { event.preventDefault(); event.stopPropagation(); inspect.onEditText?.(node, event.currentTarget.getBoundingClientRect()) } : undefined}
+      onDoubleClick={inspecting && inspect.onDoubleClick ? event => { event.preventDefault(); event.stopPropagation(); inspect.onDoubleClick?.(node, event) } : undefined}
       onClick={
         inspecting
           ? (e) => {
               e.stopPropagation()
-              inspect.onSelect(node)
+              inspect.onSelect(node, e)
             }
           : undefined
       }
@@ -578,7 +664,7 @@ function RenderNodeView({
                   : { kind: 'tap', handlerId, location })
               }
               if (role === 'drag') {
-                beginDrag(e, handlerId, at, onEvent)
+                beginDrag(e, handlerId, at, onEvent, e.currentTarget)
                 return
               }
               if (node.hitTarget?.contextMenuHandlerId) {
@@ -608,15 +694,22 @@ function RenderNodeView({
  * re-render during the drag replaces it.
  *
  * `translation` is cumulative from the start, as SwiftUI reports it.
+ *
+ * A press that never travels is a tap, and iOS gives a tap to the control under the
+ * finger rather than to the drag: a button in a row that swipes to delete, or a link
+ * in a card that drags. The drag's target is drawn over its content, so the tap is
+ * passed to the target beneath it.
  */
 function beginDrag(
   down: { clientX: number; clientY: number },
   handlerId: string,
   at: (event: { clientX: number; clientY: number }) => { x: number; y: number },
   onEvent: (event: UIEvent) => void,
+  layer: HTMLElement,
 ): void {
   const start = at(down)
   let moved = false
+  let farthest = 0
 
   const send = (
     phase: 'began' | 'changed' | 'ended',
@@ -634,6 +727,7 @@ function beginDrag(
   }
 
   const move = (event: PointerEvent) => {
+    farthest = Math.max(farthest, Math.hypot(event.clientX - down.clientX, event.clientY - down.clientY))
     if (!moved) {
       moved = true
       send('began', event)
@@ -646,11 +740,31 @@ function beginDrag(
     window.removeEventListener('pointerup', up)
     window.removeEventListener('pointercancel', up)
     send('ended', event)
+    if (event.type === 'pointerup' && farthest < TAP_SLOP) tapBeneath(layer, event)
   }
 
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)
   window.addEventListener('pointercancel', up)
+}
+
+/** How far a press may wander, in page pixels, and still be a tap. */
+const TAP_SLOP = 8
+
+/**
+ * Taps the first target under the point below `layer`, the way the browser would have
+ * without it: a field takes focus, anything else is pressed and let go. Only targets
+ * below it are looked at, so a tap never comes back up to a drag it already passed.
+ */
+function tapBeneath(layer: HTMLElement, at: { clientX: number; clientY: number }): void {
+  const stack = document.elementsFromPoint(at.clientX, at.clientY)
+  const beneath = stack.slice(stack.indexOf(layer) + 1).find((element): element is HTMLElement => element instanceof HTMLElement && element.dataset.handlerId !== undefined)
+  if (!beneath) return
+  const field = beneath.querySelector<HTMLElement>('input, textarea')
+  if (field) { field.focus(); return }
+  const press = { bubbles: true, cancelable: true, clientX: at.clientX, clientY: at.clientY, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true }
+  beneath.dispatchEvent(new PointerEvent('pointerdown', { ...press, buttons: 1 }))
+  beneath.dispatchEvent(new PointerEvent('pointerup', { ...press, buttons: 0 }))
 }
 
 /**
@@ -675,77 +789,179 @@ function ScrollContent({ node, children }: { node: RenderNode; children: ReactNo
   )
 }
 
-function renderControl(
-  node: RenderNode,
-  handlerId: string,
-  onEvent: ((event: UIEvent) => void) | undefined,
-): ReactNode {
+/**
+ * Where the preview's events go. The promise, when there is one, settles once the app
+ * has answered the event, which is when a control can show the app's value again.
+ */
+export type EventSink = (event: UIEvent) => void | Promise<void>
+
+/** A control the browser owns, drawn at a node the layout engine placed. */
+interface ControlProps {
+  readonly node: RenderNode
+  readonly handlerId: string
+  readonly onEvent: EventSink | undefined
+}
+
+function renderControl(node: RenderNode, handlerId: string, onEvent: EventSink | undefined): ReactNode {
+  return node.hitTarget!.role === 'textField'
+    ? <PreviewField node={node} handlerId={handlerId} onEvent={onEvent} />
+    : <PreviewSlider node={node} handlerId={handlerId} onEvent={onEvent} />
+}
+
+/**
+ * What a control that is replaced leaves for the one that replaces it.
+ *
+ * A view appearing above a field, `if !name.isEmpty { Text(...) }`, moves the field
+ * in the tree, so a new one is mounted where SwiftUI keeps the same field. What was
+ * typed, the caret and the focus move to it, matched by where the control is written.
+ */
+interface Handoff {
+  readonly draft: ControlDraft
+  readonly focused: boolean
+  readonly selection: readonly [number, number] | null
+  readonly at: number
+}
+
+const ControlHandoffs = createContext<Map<string, Handoff> | null>(null)
+
+/** A handoff older than this is for a control that went away, not one being replaced. */
+const HANDOFF_MS = 1000
+
+/**
+ * What a field or slider shows while its changes are on their way: its own draft
+ * until the app has answered them (see `control-draft`), then the app's value.
+ */
+function useControlDraft(node: RenderNode, send: (value: string) => void | Promise<void>) {
+  const appValue = node.hitTarget?.value ?? (node.hitTarget?.role === 'slider' ? '0' : '')
+  const [draft, setDraft] = useState<ControlDraft>(NO_DRAFT)
+  const latest = useRef<ControlDraft>(NO_DRAFT)
+  const sender = useRef(send)
+  useLayoutEffect(() => { sender.current = send })
+  const element = useRef<HTMLInputElement & HTMLTextAreaElement>(null)
+  const focused = useRef(false)
+  const apply = useCallback((change: ControlEdit): string | undefined => {
+    const next = editDraft(latest.current, change)
+    latest.current = next.draft
+    setDraft(next.draft)
+    return next.send
+  }, [])
+  const edit = useCallback((change: ControlEdit) => {
+    const value = apply(change)
+    if (value === undefined) return
+    const answered = () => { apply({ kind: 'answered' }) }
+    void Promise.resolve(sender.current(value)).then(answered, answered)
+  }, [apply])
+
+  const handoffs = useContext(ControlHandoffs)
+  const key = node.origin && `${node.origin.file}:${node.origin.start}:${node.origin.end}`
+  useLayoutEffect(() => {
+    const handoff = key ? handoffs?.get(key) : undefined
+    if (!key || !handoff) return
+    handoffs!.delete(key)
+    if (performance.now() - handoff.at > HANDOFF_MS) return
+    // The changes the old control sent went to a handler that is gone: send the text again.
+    if (handoff.draft.value !== null) edit({ kind: 'input', value: handoff.draft.value })
+    if (!handoff.focused) return
+    element.current?.focus({ preventScroll: true })
+    try {
+      if (handoff.selection) element.current?.setSelectionRange(...handoff.selection)
+    } catch {
+      // A range or a time field has no caret to put back.
+    }
+  }, [key, handoffs, edit])
+  useLayoutEffect(() => () => {
+    if (!key || !handoffs || (latest.current.value === null && !focused.current)) return
+    const target = element.current
+    let selection: Handoff['selection'] = null
+    try {
+      selection = target && target.selectionStart !== null && target.selectionEnd !== null ? [target.selectionStart, target.selectionEnd] : null
+    } catch {
+      // As above: no caret.
+    }
+    handoffs.set(key, { draft: latest.current, focused: focused.current, selection, at: performance.now() })
+  }, [key, handoffs])
+
+  const tracking = {
+    ref: element,
+    onFocus: () => { focused.current = true },
+    onBlur: () => { focused.current = false },
+  }
+  return { value: shownValue(draft, appValue), edit, tracking }
+}
+
+function PreviewField({ node, handlerId, onEvent }: ControlProps) {
   const hit = node.hitTarget!
   const font = hit.font
+  const { value, edit, tracking } = useControlDraft(node, (text) => onEvent?.({ kind: 'textChange', handlerId, value: text }))
+  const Field = hit.multiline ? 'textarea' : 'input'
+  return (
+    <Field
+      {...tracking}
+      className="swiftui-field"
+      type={hit.multiline ? undefined : hit.inputType ?? (hit.secure ? 'password' : 'text')}
+      step={hit.inputType === 'time' ? 60 : undefined}
+      disabled={!hit.enabled}
+      readOnly={!onEvent}
+      tabIndex={onEvent ? undefined : -1}
+      value={value}
+      placeholder={hit.placeholder ?? ''}
+      inputMode={hit.inputMode}
+      enterKeyHint={hit.enterKeyHint}
+      autoCapitalize={hit.autocapitalization}
+      autoCorrect={hit.autocorrection === undefined ? undefined : hit.autocorrection ? 'on' : 'off'}
+      spellCheck={hit.autocorrection}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.shiftKey || hit.multiline || !hit.submitHandlerId) return
+        event.preventDefault()
+        onEvent?.({ kind: 'tap', handlerId: hit.submitHandlerId, location: { x: 0, y: 0 } })
+      }}
+      aria-label={node.a11y?.label}
+      onChange={(e) => edit({ kind: 'input', value: e.target.value })}
+      onCompositionStart={() => edit({ kind: 'compositionStart' })}
+      onCompositionEnd={(e) => edit({ kind: 'compositionEnd', value: e.currentTarget.value })}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        border: 'none',
+        outline: 'none',
+        background: 'transparent',
+        padding: `${hit.multiline ? 8 : 0}px ${hit.multiline ? 5 : hit.inputInset ?? 0}px`,
+        resize: 'none',
+        textAlign: hit.textAlign === 'center' ? 'center' : hit.textAlign === 'trailing' ? 'end' : 'start',
+        '--field-placeholder': hit.placeholderColor ? cssColor(hit.placeholderColor) : 'GrayText',
+        boxSizing: 'border-box',
+        ...(font
+          ? {
+              fontFamily: font.family,
+              fontSize: font.size,
+              fontWeight: font.weight,
+              fontStyle: font.italic ? 'italic' : 'normal',
+              lineHeight: `${font.lineHeight}px`,
+            }
+          : {}),
+        ...(hit.color ? { color: cssColor(hit.color) } : {}),
+      } as CSSProperties}
+    />
+  )
+}
 
-  if (hit.role === 'textField') {
-    const Field = hit.multiline ? 'textarea' : 'input'
-    return (
-      <Field
-        className="swiftui-field"
-        type={hit.multiline ? undefined : hit.inputType ?? (hit.secure ? 'password' : 'text')}
-        step={hit.inputType === 'time' ? 60 : undefined}
-        disabled={!hit.enabled}
-        readOnly={!onEvent}
-        tabIndex={onEvent ? undefined : -1}
-        value={hit.value ?? ''}
-        placeholder={hit.placeholder ?? ''}
-        inputMode={hit.inputMode}
-        enterKeyHint={hit.enterKeyHint}
-        autoCapitalize={hit.autocapitalization}
-        autoCorrect={hit.autocorrection === undefined ? undefined : hit.autocorrection ? 'on' : 'off'}
-        spellCheck={hit.autocorrection}
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.shiftKey || hit.multiline || !hit.submitHandlerId) return
-          event.preventDefault()
-          onEvent?.({ kind: 'tap', handlerId: hit.submitHandlerId, location: { x: 0, y: 0 } })
-        }}
-        aria-label={node.a11y?.label}
-        onChange={(e) => onEvent?.({ kind: 'textChange', handlerId, value: e.target.value })}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          border: 'none',
-          outline: 'none',
-          background: 'transparent',
-          padding: `${hit.multiline ? 8 : 0}px ${hit.multiline ? 5 : hit.inputInset ?? 0}px`,
-          resize: 'none',
-          textAlign: hit.textAlign === 'center' ? 'center' : hit.textAlign === 'trailing' ? 'end' : 'start',
-          '--field-placeholder': hit.placeholderColor ? cssColor(hit.placeholderColor) : 'GrayText',
-          boxSizing: 'border-box',
-          ...(font
-            ? {
-                fontFamily: font.family,
-                fontSize: font.size,
-                fontWeight: font.weight,
-                fontStyle: font.italic ? 'italic' : 'normal',
-                lineHeight: `${font.lineHeight}px`,
-              }
-            : {}),
-          ...(hit.color ? { color: cssColor(hit.color) } : {}),
-        } as CSSProperties}
-      />
-    )
-  }
-
+function PreviewSlider({ node, handlerId, onEvent }: ControlProps) {
+  const hit = node.hitTarget!
+  const { value, edit, tracking } = useControlDraft(node, (position) => onEvent?.({ kind: 'slide', handlerId, value: Number(position) }))
   return (
     <input
+      {...tracking}
       className="swiftui-range"
       disabled={!hit.enabled}
       type="range"
-      value={hit.value ?? '0'}
+      value={value}
       min={hit.min ?? 0}
       max={hit.max ?? 1}
       step={hit.step && hit.step > 0 ? hit.step : 'any'}
       aria-label={node.a11y?.label}
-      onChange={(e) => onEvent?.({ kind: 'slide', handlerId, value: Number(e.target.value) })}
+      onChange={(e) => edit({ kind: 'input', value: e.target.value })}
       style={{
         position: 'absolute',
         inset: 0,
@@ -831,30 +1047,39 @@ function TextContent({ node }: { node: RenderNode }) {
   if (payload.lines && payload.lines.length > 0) {
     return (
       <>
-        {payload.lines.map((line, i) => (
-          <div
-            key={i}
-            style={{
-              ...typography,
-              position: 'absolute',
-              left: 0,
-              top: line.origin.y,
-              width: '100%',
-              height: line.height ?? first.font.lineHeight,
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: justify,
-            }}
-          >
-            {line.slices
-              ? line.slices.map((slice, j) => {
-                  const run = payload.runs[slice.run] ?? first
-                  return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
-                    top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
-                })
-              : <span dir="auto" style={{ position: 'relative', top: line.baseline - (line.fontBaseline ?? line.baseline) - (first.baselineOffset ?? 0) }}>{decoratedText(first, line.text)}</span>}
-          </div>
-        ))}
+        {payload.lines.map((line, i) => {
+          const height = line.height ?? first.font.lineHeight
+          // A line of one run is drawn in a box as tall as the line, so the text's box is
+          // its frame: a first or last line gives up half its leading, and a box as tall as
+          // the leading would reach into the view beside it. CSS centres the glyphs in the
+          // box, so the baseline moves by half of what the box gave up.
+          const fontBaseline = (line.fontBaseline ?? line.baseline) - (first.font.lineHeight - height) / 2
+          return (
+            <div
+              key={i}
+              style={{
+                ...typography,
+                ...(line.slices ? {} : { lineHeight: `${height}px` }),
+                position: 'absolute',
+                left: 0,
+                top: line.origin.y,
+                width: '100%',
+                height,
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: justify,
+              }}
+            >
+              {line.slices
+                ? line.slices.map((slice, j) => {
+                    const run = payload.runs[slice.run] ?? first
+                    return <span key={j} dir="auto" style={{ ...runStyle(run, node.frame), position: 'relative',
+                      top: line.baseline - (slice.baseline ?? line.baseline) - (run.baselineOffset ?? 0), bottom: 'auto' }}>{decoratedText(run, slice.text)}</span>
+                  })
+                : <span dir="auto" style={{ position: 'relative', top: line.baseline - fontBaseline - (first.baselineOffset ?? 0) }}>{decoratedText(first, line.text)}</span>}
+            </div>
+          )
+        })}
       </>
     )
   }
@@ -929,7 +1154,7 @@ function ImageContent({ node }: { node: RenderNode }) {
   const asset = image.symbol ? symbolAsset(image.symbol, maskId) : null
   if (image.bitmap) return <img src={image.bitmap.url} alt={image.bitmap.name} draggable={false} style={{ display: 'block', width: '100%', height: '100%', objectFit: 'fill', userSelect: 'none' }} />
   const metrics = symbolMetrics(image.symbol)
-  const title = image.symbol ? `${image.symbol} — ${asset?.source === 'ionicons' ? 'Ionicons approximation' : asset ? 'vector approximation' : 'unsupported symbol'}` : undefined
+  const title = image.symbol ? `${image.symbol} (${asset?.source === 'ionicons' ? 'Ionicons approximation' : asset ? 'vector approximation' : 'unsupported symbol'})` : undefined
   if (image.foregroundFill && asset) {
     const viewWidth = node.frame.width, viewHeight = node.frame.height
     return <svg width="100%" height="100%" viewBox={`0 0 ${viewWidth} ${viewHeight}`} aria-hidden>
@@ -1020,7 +1245,7 @@ function ShapeContent({ node }: { node: RenderNode }) {
  * wrong result - a preview that quietly lies is worse than one that admits a gap.
  */
 function PlaceholderContent({ node }: { node: RenderNode }) {
-  const { feature, reason } = node.placeholder!
+  const { title, detail } = placeholderWords(node.placeholder!)
 
   return (
     <div
@@ -1039,8 +1264,8 @@ function PlaceholderContent({ node }: { node: RenderNode }) {
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
       }}
     >
-      <span style={{ fontSize: 11, fontWeight: 700, color: 'rgb(180 95 0)' }}>{feature}</span>
-      <span style={{ fontSize: 10, lineHeight: '13px', color: 'rgb(120 70 10)' }}>{reason}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: 'rgb(180 95 0)' }}>{title}</span>
+      <span style={{ fontSize: 10, lineHeight: '13px', color: 'rgb(120 70 10)' }} title={detail}>{detail}</span>
     </div>
   )
 }

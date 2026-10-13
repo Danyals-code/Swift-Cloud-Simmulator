@@ -1,7 +1,8 @@
 import type { CallArgument } from './host'
 import { PREVIEW_LIMITS } from './limits'
+import { CALENDAR_TYPE, TIMER_TYPE, calendarValue, callCalendarMember, callTimerMember, formatDate, timerValue, leadingDotName } from './calendar'
+import { formatNumber } from './number-format'
 import {
-  applyKeyPath,
   array,
   asDate,
   asIndexSet,
@@ -30,6 +31,8 @@ import {
   VOID,
   type ClosureValue,
   type SwiftValue,
+  readKeyPath,
+  type KeyPathPayload,
 } from './values'
 
 type Invoke = (closure: ClosureValue, args: readonly SwiftValue[]) => SwiftValue
@@ -44,6 +47,14 @@ type Trap = (reason: string) => never
  * traps when the receiver is not assignable.
  */
 type ReplaceSelf = (value: SwiftValue) => void
+/** Reads `value.name` as the interpreter does. */
+type ReadMember = (value: SwiftValue, name: string) => SwiftValue | undefined
+
+/** What a range of integers does as the collection of them: `(0..<3).map { … }`. */
+const RANGE_SEQUENCE_MEMBERS: ReadonlySet<string> = new Set([
+  'map', 'compactMap', 'flatMap', 'filter', 'forEach', 'reduce', 'first', 'allSatisfy', 'sorted', 'reversed',
+  'shuffled', 'randomElement', 'enumerated', 'min', 'max', 'prefix', 'suffix', 'dropFirst', 'dropLast',
+])
 
 /**
  * Swift's rounding rule: halves go away from zero.
@@ -71,7 +82,7 @@ function roundedAwayFromZero(n: number): number {
 export function getBuiltinProperty(target: SwiftValue, member: string): SwiftValue | undefined {
   switch (target.kind) {
     case 'string': {
-      // Grapheme clusters, not code points - see `graphemes` in values.ts.
+      // Grapheme clusters, not code points - see `graphemes` in @studio/shared.
       const chars = graphemes(target.value)
       switch (member) {
         case 'count':
@@ -267,8 +278,11 @@ export function callBuiltinMember(
   invoke: Invoke,
   trap: Trap,
   replaceSelf: ReplaceSelf,
+  read: ReadMember,
 ): SwiftValue | undefined {
   const arg = (i: number): SwiftValue | undefined => args[i]?.value
+  /** A key path as a function, read as Swift reads it: computed properties and `rawValue` too. */
+  const keyPathFunction = (path: KeyPathPayload) => (element: SwiftValue): SwiftValue => readKeyPath(path, element, read)
   const labelled = (name: string): SwiftValue | undefined =>
     args.find((a) => a.label === name)?.value
 
@@ -286,7 +300,7 @@ export function callBuiltinMember(
     if (value?.kind === 'closure') return (element) => invoke(value, [element])
 
     const path = asKeyPath(value)
-    if (path) return (element) => applyKeyPath(path, element)
+    if (path) return keyPathFunction(path)
 
     trap(`'${member}' requires a closure or key path argument`)
   }
@@ -297,12 +311,18 @@ export function callBuiltinMember(
     return value
   }
 
+  // `12345.formatted()` and `total.formatted(.currency(code: "USD"))`, an Int and a Double alike.
+  if (member === 'formatted' && (target.kind === 'int' || target.kind === 'double')) {
+    const written = formatNumber(target, leadingDotName(arg(0)))
+    return written === null ? undefined : str(written)
+  }
+
   switch (target.kind) {
     case 'string':
       return stringMethod(target.value, member, arg, labelled, replaceSelf, trap)
 
     case 'array':
-      return arrayMethod(target, member, args, arg, labelled, closureArg, unaryArg, invoke, trap)
+      return arrayMethod(target, member, args, arg, labelled, closureArg, unaryArg, keyPathFunction, invoke, trap)
 
     case 'dictionary':
       switch (member) {
@@ -405,9 +425,7 @@ export function callBuiltinMember(
         case 'rounded': {
           // `.rounded(.up)` and friends. The bare form rounds halves away from zero,
           // which is Swift's rule and not `Math.round`'s.
-          const rule = arg(0)
-          const name = rule?.kind === 'opaque' ? String((rule.payload as { name?: string }).name ?? '') : ''
-          switch (name) {
+          switch (leadingDotName(arg(0))) {
             case 'up':
               return double(Math.ceil(target.value))
             case 'down':
@@ -441,22 +459,22 @@ export function callBuiltinMember(
 
     case 'range': {
       const value = arg(0)
+      // `contains(where:)` is the collection's question, answered below with the rest;
+      // read as a value, the closure compared unequal to every element.
       if (member === 'contains' && value && value.kind !== 'closure' && !labelled('where')) {
         const n = target.boundType === 'Date' ? asDate(value)?.epochSeconds ?? NaN : numericValue(value)
         return bool(n >= target.lower && (target.closed ? n <= target.upper : n < target.upper))
       }
-
-      // `(1...5).map { … }` and `(0..<count).filter { … }`. A range of Ints is a
-      // collection, and every other collection member it has, it has as its elements
-      // would. A range of Doubles or Dates is not a sequence in Swift.
-      if (target.boundType === 'Date' || !Number.isInteger(target.lower) || !Number.isInteger(target.upper) || isMutatingMember(member)) return undefined
-      const end = target.closed ? target.upper + 1 : target.upper
-      if (end - target.lower > PREVIEW_LIMITS.collectionElements) trap('Range exceeds the preview limit of 100,000 elements')
-      const elements = Array.from({ length: Math.max(0, end - target.lower) }, (_, i) => int(target.lower + i))
-      return arrayMethod(array(elements), member, args, arg, labelled, closureArg, unaryArg, invoke, trap)
+      // `(0..<3).map { … }`: for everything else a range of integers is the collection of them.
+      if (target.boundType === 'Date' || !(RANGE_SEQUENCE_MEMBERS.has(member) || member === 'contains')) return undefined
+      const count = Math.max(0, target.upper - target.lower + (target.closed ? 1 : 0))
+      if (!Number.isSafeInteger(count) || count > PREVIEW_LIMITS.collectionElements) trap(`A range of ${count.toLocaleString()} elements exceeds the preview limit of ${PREVIEW_LIMITS.collectionElements.toLocaleString()}`)
+      return callBuiltinMember(array(Array.from({ length: count }, (_, i) => int(target.lower + i))), member, args, invoke, trap, replaceSelf, read)
     }
 
     case 'opaque': {
+      if (target.typeName === TIMER_TYPE) return callTimerMember(target, member)
+      if (target.typeName === CALENDAR_TYPE) return callCalendarMember(member, args)
       const date = asDate(target)
       if (date) {
         switch (member) {
@@ -472,11 +490,7 @@ export function callBuiltinMember(
             // The locale-formatted form, which is what `formatted()` is for. The
             // locale is the browser's, so this is the only member of `Date` whose
             // answer legitimately differs between two machines.
-            return str(
-              new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-                new Date(date.epochSeconds * 1000),
-              ),
-            )
+            return formatDate(date.epochSeconds, args)
           case 'description':
             return str(dateDescription(date.epochSeconds))
           default:
@@ -544,12 +558,18 @@ function stringMethod(
       return bool(value.endsWith(text(arg(0))))
     case 'contains':
       return bool(value.includes(text(arg(0))))
-    // What nearly every `.searchable` filter calls. Case-insensitive here; the
-    // diacritic folding `localizedStandardContains` also does is close enough for a
-    // preview's sample data, and far better than the filter failing outright.
-    case 'localizedCaseInsensitiveContains':
-    case 'localizedStandardContains':
-      return bool(value.toLocaleLowerCase().includes(text(arg(0)).toLocaleLowerCase()))
+    // How a search box filters: without case, and for the standard form without accents
+    // too. So the iOS 27 simulator answers: "Café" does not contain "cafe" the first way
+    // and does the second, and neither way finds an empty string in anything.
+    case 'localizedCaseInsensitiveContains': {
+      const needle = text(arg(0))
+      return bool(needle !== '' && value.toLocaleLowerCase('en-US').includes(needle.toLocaleLowerCase('en-US')))
+    }
+    case 'localizedStandardContains': {
+      const fold = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('en-US')
+      const needle = text(arg(0))
+      return bool(needle !== '' && fold(value).includes(fold(needle)))
+    }
     case 'replacingOccurrences': {
       const of = labelled('of')
       const with_ = labelled('with')
@@ -630,6 +650,7 @@ function arrayMethod(
   labelled: (name: string) => SwiftValue | undefined,
   closureArg: (i?: number) => ClosureValue,
   unaryArg: (i?: number) => (value: SwiftValue) => SwiftValue,
+  keyPathFunction: (path: KeyPathPayload) => (value: SwiftValue) => SwiftValue,
   invoke: Invoke,
   trap: Trap,
 ): SwiftValue | undefined {
@@ -649,7 +670,7 @@ function arrayMethod(
     if (named?.kind === 'closure') return (element) => invoke(named, [element])
 
     const path = asKeyPath(named)
-    if (path) return (element) => applyKeyPath(path, element)
+    if (path) return keyPathFunction(path)
 
     const last = args[args.length - 1]
     if (last && !last.label && last.value.kind === 'closure') {
@@ -1108,16 +1129,8 @@ function arrayMethod(
         ? NIL
         : [...target.elements].sort(compareValues)[target.elements.length - 1]!
     case 'enumerated':
-      return array(
-        target.elements.map((e, i) => ({
-          kind: 'struct' as const,
-          typeName: 'EnumeratedElement',
-          fields: new Map<string, SwiftValue>([
-            ['offset', int(i)],
-            ['element', e],
-          ]),
-        })),
-      )
+      // `(offset:element:)` tuples, as Swift's are, so `{ index, item in }` takes them apart.
+      return array(target.elements.map((e, i) => tuple([int(i), e], ['offset', 'element'])))
     default:
       return undefined
   }
@@ -1173,7 +1186,7 @@ const INT_MIN = -Number.MAX_SAFE_INTEGER
  */
 export const BUILTIN_TYPE_NAMES: ReadonlySet<string> = new Set([
   'Int', 'Double', 'Float', 'CGFloat', 'Bool', 'String', 'Character',
-  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL',
+  'Array', 'Dictionary', 'Set', 'Date', 'UUID', 'URL', 'Timer', 'Calendar',
 ])
 
 /** `Int.max`, `Double.pi`, `Date.now` - a static read on a built-in type. */
@@ -1198,6 +1211,9 @@ export function staticBuiltinProperty(typeName: string, member: string): SwiftVa
       return double(0)
     case 'Date.now':
       return dateValue(Date.now() / 1000)
+    case 'Calendar.current':
+    case 'Calendar.autoupdatingCurrent':
+      return calendarValue()
     case 'Date.distantPast':
       return dateValue(-62_135_596_800)
     case 'Date.distantFuture':
@@ -1214,6 +1230,8 @@ export function callStaticBuiltin(
   args: readonly CallArgument[],
   trap: Trap,
 ): SwiftValue | undefined {
+  // `Timer.publish(every:on:in:)` and `Timer.scheduledTimer(...)`: a timer that never fires here.
+  if (typeName === 'Timer' && (member === 'publish' || member === 'scheduledTimer')) return timerValue()
   if (member !== 'random') return undefined
 
   if (typeName === 'Bool') return bool(Math.random() < 0.5)

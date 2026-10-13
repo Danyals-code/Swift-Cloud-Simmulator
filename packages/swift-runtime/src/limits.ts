@@ -9,6 +9,12 @@ export const PREVIEW_LIMITS = {
   copiedValues: 1_000_000,
   collectionViews: 1_000,
   totalViews: 10_000,
+  /** Console lines per result: the first half and the last half are kept. */
+  consoleLines: 2_000,
+  /** Characters of one console line; the rest is counted. */
+  consoleLineLength: 2_000,
+  /** Errors kept from between the first half and the last half; the rest are counted. */
+  consoleErrors: 100,
 } as const
 
 export function checkPreviewSize(size: number, maximum: number, what: string, span: SourceSpan): void {

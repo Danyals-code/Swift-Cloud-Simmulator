@@ -404,7 +404,7 @@ describe('a view name the preview does not draw', () => {
    * degrades the way `Chart` and `Map` already did.
    */
   it('warns and draws a placeholder rather than blanking the screen', () => {
-    const result = compileSource(app('        PhaseAnimator([1, 2]) { _ in Text("x") }'))
+    const result = compileSource(app('        EditButton()'))
 
     expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
     expect(result.diagnostics.map((d) => d.code)).toContain('unsupported_swiftui_view')
@@ -503,7 +503,7 @@ function runColor(source: string, text: string): string {
 }
 
 const BLUE = '0,136,255,1'
-const RED = '255,59,48,1'
+const RED = '255,56,60,1'
 const BLACK = '0,0,0,1'
 
 describe('what colour a label is when nothing has said', () => {
@@ -545,13 +545,14 @@ describe('a button label', () => {
     expect(runColor(app('        Button("Tap") { }'), 'Tap')).toBe(BLUE)
   })
 
-  it('is the accent colour in a toolbar, which is where it is most visible', () => {
-    const source = app(`        NavigationStack {
+  it('is the label colour in a toolbar\'s glass unless a tint is written, as in the iOS 27 simulator', () => {
+    const source = (tint: string) => app(`        NavigationStack {
             Text("body")
                 .navigationTitle("Mail")
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Edit") { } } }
-        }`)
-    expect(runColor(source, 'Edit')).toBe(BLUE)
+        }${tint}`)
+    expect(runColor(source(''), 'Edit')).toBe('0,0,0,1')
+    expect(runColor(source('.tint(.blue)'), 'Edit')).toBe(BLUE)
   })
 
   it('is red for a destructive role', () => {
@@ -787,8 +788,10 @@ describe('inset grouped sections', () => {
     expect(cards[1]!.frame.y - (cards[0]!.frame.y + cards[0]!.frame.height)).toBeGreaterThan(8)
   })
 
-  it('keeps the profile top margin above the first card', () => {
-    expect(sectionCards(TWO_SECTIONS)[0]!.frame.y - device.safeArea.top).toBe(10)
+  // With no bar above it, iOS 27 puts a first section without a header 35 pt down, as
+  // far as the gap between two such sections (iphone18pro-under-bars, list-bare).
+  it('puts the first card as far below the top as iOS 27 does', () => {
+    expect(sectionCards(TWO_SECTIONS)[0]!.frame.y - device.safeArea.top).toBe(35)
   })
 
   /**

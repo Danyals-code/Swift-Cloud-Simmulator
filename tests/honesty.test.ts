@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, SourceFile } from '@studio/shared'
 import { applyEvent, compile, referencesFor, rerender, resetPipelineState } from '@studio/swiftui-runtime'
-import { DEVICES, getDevice } from '@studio/sim-shell'
+import { DEFAULT_DEVICE, DEVICES, getDevice } from '@studio/sim-shell'
 import { decodeProject, encodeProject, type Project } from '@studio/project-model'
 
 /**
@@ -266,7 +266,7 @@ describe('a failure is reported where the user is looking', () => {
 
 describe('untrusted input does not take the studio down', () => {
   it('falls back to a real device for an unknown key', () => {
-    expect(getDevice('not-a-device' as never).key).toBe('iphone-15')
+    expect(getDevice('not-a-device' as never).key).toBe(DEFAULT_DEVICE)
   })
 
   it('survives a share link naming a device this build does not have', () => {

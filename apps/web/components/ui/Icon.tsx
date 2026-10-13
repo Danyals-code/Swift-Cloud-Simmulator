@@ -77,6 +77,15 @@ const STROKE: Readonly<Record<string, string>> = {
   code: 'M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5',
   'new-folder':
     'M2.25 4.75c0-.83.67-1.5 1.5-1.5h2.1c.4 0 .78.16 1.06.44l.9.9h4.94c.83 0 1.5.67 1.5 1.5v5.16c0 .83-.67 1.5-1.5 1.5H3.75c-.83 0-1.5-.67-1.5-1.5V4.75ZM8 7.75v3.5M6.25 9.5h3.5',
+  // How a stack lines its views up, as Figma draws it (D4).
+  'align-left': 'M2.5 2.5v11M5 5h8M5 8h5M5 11h6.5',
+  'align-center-x': 'M8 2.5v11M4 5h8M5.5 8h5M4.75 11h6.5',
+  'align-right': 'M13.5 2.5v11M3 5h8M6 8h5M4.5 11h6.5',
+  'align-top': 'M2.5 2.5h11M5 5v8M8 5v5M11 5v6.5',
+  'align-center-y': 'M2.5 8h11M5 4v8M8 5.5v5M11 4.75v6.5',
+  'align-bottom': 'M2.5 13.5h11M5 3v8M8 6v5M11 4.5v6.5',
+  'align-baseline': 'M4 10.5 7 4l3 6.5M5.2 8.25h3.6M2.5 12.5h11',
+  'align-baseline-last': 'M3 3.5h8M4 10.5l3-4.5 3 4.5M2.5 12.5h11',
 }
 
 /** Solid paths, filled rather than stroked. */

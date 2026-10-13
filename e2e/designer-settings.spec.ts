@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { addModifier, assertSource, cardAction, cards, expandCard } from './designer-helpers'
+import { addModifier, assertSource, cardAction, cards, expandCard, openCounter } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 @main struct DesignerApp: App { var body: some Scene { WindowGroup { ContentView() } } }
@@ -26,8 +26,7 @@ struct ContentView: View {
     }
 }`
 async function open(page: Page, source = SOURCE, visible = 'Card') {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -96,7 +95,7 @@ test('repeated modifier occurrences edit independently, reorder, duplicate, remo
   await editor.click()
   await page.keyboard.press('ControlOrMeta+z')
   await expect(editor).toHaveText(beforeRemove, { useInnerText: true })
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.keyboard.press('ControlOrMeta+Shift+Z')
   await expect(editor).toHaveText(expected, { useInnerText: true })
   await expect(page.getByTestId('render-tree').getByText('Unchanged', { exact: true })).toBeVisible()
 })

@@ -1,10 +1,10 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import { buildAuthoringModel, planDesignEdit } from '@studio/swift-sema'
+import { buildAuthoringModel, planDesignBatch, planDesignEdit } from '@studio/swift-sema'
 import { Parser } from '@studio/swift-syntax'
 import { applyProjectTransaction, DocumentHistory, emptyStudioMetadata, projectFromFiles } from '@studio/project-model'
 import { buildExportBundle } from '@studio/exporter'
 import { compile, resetPipelineState } from '@studio/swiftui-runtime'
-import type { AuthoringNode, DesignEditPlan, SourceFile } from '@studio/shared'
+import type { AuthoringNode, DesignEditPlan, DesignEditRequest, DropPosition, SourceFile } from '@studio/shared'
 
 const wrap = (body: string, declarations = '') => `import SwiftUI\n@main struct TestApp: App { var body: some Scene { WindowGroup { ContentView() } } }\nstruct ContentView: View { ${declarations}\nvar body: some View { ${body} } }`
 const files = (text: string): SourceFile[] => [{ id: 'Sources/App.swift', text }]
@@ -64,8 +64,8 @@ describe('R03/R04 minimal source recipes', () => {
     ['Font size', '24', '.font(.system(size: 24))'],
     ['Padding', '12', '.padding(12)'],
     ['Background', 'blue', '.background(Color.blue)'],
-    ['Text color', 'white', '.foregroundColor(Color.white)'],
-    ['Corner radius', '8', '.cornerRadius(8)'],
+    ['Text color', 'white', '.foregroundStyle(Color.white)'],
+    ['Corner radius', '8', '.clipShape(.rect(cornerRadius: 8))'],
     ['Opacity', '0.8', '.opacity(0.8)'],
     ['Accessibility label', 'Card', '.accessibilityLabel("Card")'],
     ['Accessibility identifier', 'card', '.accessibilityIdentifier("card")'],
@@ -79,7 +79,20 @@ describe('R03/R04 minimal source recipes', () => {
     const source = wrap('Text("A").padding(8)')
     const filled = edited(source, 'Width sizing', 'Fill')
     expect(filled).toBe(source.replace('.padding(8)', '.padding(8).frame(maxWidth: .infinity)'))
-    expect(edited(filled, 'Width sizing', 'Content')).toBe(source)
+    expect(edited(filled, 'Width sizing', 'Hug')).toBe(source)
+  })
+  it('names each axis\'s sizing Hug, Fill or Fixed, as Figma does (D2)', () => {
+    const sizing = target(wrap('Text("A")')).controls?.find(c => c.label === 'Width sizing')
+    expect(sizing).toMatchObject({ value: 'Hug', options: ['Hug', 'Fill', 'Fixed'] })
+    const framed = target(wrap('Text("A").frame(height: 60)')).controls?.find(c => c.label === 'Height sizing')
+    expect(framed).toMatchObject({ value: 'Fixed', options: ['Hug', 'Fill', 'Fixed'] })
+    expect(framed?.description).toMatch(/^Hug removes this axis constraint\./)
+  })
+  it('leaves filling and hugging to that control, with no second way in the modifier picker (D2)', () => {
+    const offered = target(wrap('Text("A")')).modifierCatalog?.filter(entry => !entry.hidden).map(entry => entry.label)
+    expect(offered).toContain('Aspect ratio')
+    expect(offered).not.toContain('Flexible size')
+    expect(offered).not.toContain('Ideal size')
   })
   it('changes row/column/overlay constructors without moving child code', () => {
     const source = wrap('VStack { Text("A"); Text("B") }.padding(12)')
@@ -169,7 +182,7 @@ describe('R10/R16 source → preview → export', () => {
 it('converts mixed frame dimensions without producing an invalid Swift overload', () => {
   const source = wrap('Text("A").padding(8).frame(width: 240, height: 120, alignment: .leading).background(.blue)')
   expect(edited(source, 'Width sizing', 'Fill')).toBe(source.replace('.frame(width: 240, height: 120, alignment: .leading)', '.frame(height: 120, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)'))
-  expect(edited(source, 'Height sizing', 'Content')).toBe(source.replace(', height: 120', ''))
+  expect(edited(source, 'Height sizing', 'Hug')).toBe(source.replace(', height: 120', ''))
   expect(edited(edited(wrap('Text("A")'), 'Width sizing', 'Fixed'), 'frame · width', '180')).toContain('.frame(width: 180)')
 })
 
@@ -288,7 +301,7 @@ it('prepares independent Apple compiler fixtures from the actual writer output',
     ['Text("A")', 'Accessibility label', 'Card', 'Text'],
     ['Text("A")', 'Accessibility identifier', 'card', 'Text'],
     ['Text("A").frame(width: 120, height: 60, alignment: .leading)', 'Width sizing', 'Fill', 'Text'],
-    ['Text("A").frame(width: 120, height: 60, alignment: .leading)', 'Height sizing', 'Content', 'Text'],
+    ['Text("A").frame(width: 120, height: 60, alignment: .leading)', 'Height sizing', 'Hug', 'Text'],
     ['Text("A")', 'Height sizing', 'Fill', 'Text'],
     ['VStack(spacing: 12) { Text("A") }', 'Alignment', 'leading', 'VStack'],
     ['VStack { Text("A"); Text("B") }', 'Layout', 'Stack', 'VStack'],
@@ -296,10 +309,25 @@ it('prepares independent Apple compiler fixtures from the actual writer output',
     ['RoundedRectangle(cornerRadius: 8)', 'Shape corner radius', '12', 'RoundedRectangle'],
     ['Rectangle().fill(Color.blue)', 'fill', 'red', 'Rectangle'],
     ['Spacer()', 'Minimum spacing', '8', 'Spacer'],
+    ['HStack(spacing: 8) { Text("A"); Text("B") }', 'Spacing', 'auto', 'HStack'],
+    ['VStack { Text("A"); Spacer(minLength: 20); Text("B") }', 'Spacing', 'auto', 'VStack'],
+    ['HStack { Text("A"); Spacer(); Text("B") }.frame(maxWidth: .infinity)', 'Spacing', '12', 'HStack'],
   ] as const
+  // Groups, written the way the layers sat (D3): the first two views of each stack.
+  const groups = [
+    ['VStack(alignment: .leading, spacing: 12) { Text("A"); Text("B"); Text("C") }', 'VStack'],
+    ['HStack(alignment: .firstTextBaseline, spacing: 4) { Text("A"); Text("B") }', 'HStack'],
+    ['ZStack(alignment: .bottomTrailing) { Text("A"); Text("B") }', 'ZStack'],
+    ['ScrollView { Text("A"); Text("B") }', 'VStack'],
+  ] as const
+  const grouped = (body: string, layout: 'VStack' | 'HStack' | 'ZStack') => {
+    const source = wrap(body), texts = buildAuthoringModel({ files: files(source), projectId: 'p', revision: 1 }).nodes.filter(n => n.name === 'Text')
+    const result = planDesignEdit({ projectId: 'p', baseRevision: 1, scope: texts[0]!.owner, files: files(source), target: texts[0]!.source, fingerprint: texts[0]!.fingerprint, operation: { kind: 'layer-wrap', ids: texts.slice(0, 2).map(n => n.id), layout } })
+    if (!result.ok) throw new Error(result.reason)
+    return result.changes[0]!.after
+  }
   const output: string[] = ['import SwiftUI']
-  for (const [index, [body, label, value, name]] of forms.entries()) {
-    const source = edited(wrap(body), label, value, name)
+  for (const [index, source] of [...forms.map(([body, label, value, name]) => edited(wrap(body), label, value, name)), ...groups.map(([body, layout]) => grouped(body, layout))].entries()) {
     const node = buildAuthoringModel({ files: files(source), projectId: 'p', revision: 1 }).nodes.find(n => n.owner === 'ContentView' && n.kind === 'view')!
     const expression = source.slice(node.source.start, node.source.end)
     output.push(`struct NativeWriterForm${index}: View { var body: some View { ${expression} } }`)
@@ -311,7 +339,7 @@ it('prepares independent Apple compiler fixtures from the actual writer output',
     mkdirSync(dirname(destination), { recursive: true })
     writeFileSync(destination, output.join('\n\n') + '\n')
   }
-  expect(output).toHaveLength(forms.length + 1)
+  expect(output).toHaveLength(forms.length + groups.length + 1)
 })
 
 it.each([
@@ -349,4 +377,479 @@ it('retains a frame’s alignment when switching its width to Fill', () => {
   expect(result.diagnostics.filter(d => d.severity === 'error')).toEqual([])
   const text = result.renderTree!.nodes.find(n => n.text?.runs.some(r => r.text === 'A'))!
   expect(text.frame.x).toBeCloseTo(0, 3)
+})
+
+/** A structural edit - Add, Delete, Hide, Move - planned the way Layers and the canvas plan one. */
+function restructure(text: string, operation: DesignEditRequest['operation'], name: string, index = 0): DesignEditPlan {
+  const node = target(text, name, index)
+  return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation })
+}
+function restructured(text: string, operation: DesignEditRequest['operation'], name: string, index = 0): string {
+  const result = restructure(text, operation, name, index)
+  if (!result.ok) throw new Error(result.reason)
+  const next = result.changes[0]?.after ?? text
+  expect(Parser.parse(next, 'Sources/App.swift').diagnostics).toEqual([])
+  return next
+}
+
+describe('C1: adding into a container keeps what is already inside it', () => {
+  it('keeps a hidden only child, and adds the new view after it', () => {
+    const hidden = restructured(wrap('VStack {\n    Text("Secret")\n}'), { kind: 'hide' }, 'Text')
+    const added = restructured(hidden, { kind: 'insert', snippet: 'Text("New")' }, 'VStack')
+    expect(added).toContain('VStack {\n    // hidden by Swift Web Studio\n    // Text("Secret")\n    // end hidden view\n    Text("New")\n}')
+  })
+  it('keeps a ForEach’s parameter when its last row is deleted and another is added', () => {
+    const emptied = restructured(wrap('List {\n    ForEach(items, id: \\.self) { item in\n        Text(item)\n    }\n}', 'let items = ["A", "B"]'), { kind: 'delete' }, 'Text')
+    const added = restructured(emptied, { kind: 'insert', snippet: 'Text("New")' }, 'ForEach')
+    expect(added).toContain('ForEach(items, id: \\.self) { item in\n        Text("New")\n    }')
+  })
+  it('keeps a comment that is all a container holds, and adds the new view after it', () => {
+    const added = restructured(wrap('VStack {\n    // A header goes here\n}'), { kind: 'insert', snippet: 'Text("New")' }, 'VStack')
+    expect(added).toContain('VStack {\n    // A header goes here\n    Text("New")\n}')
+  })
+  it('keeps a hidden only child when another layer is moved into its container', () => {
+    const hidden = restructured(wrap('VStack {\n    Text("Title")\n    HStack {\n        Text("Secret")\n    }\n}'), { kind: 'hide' }, 'Text', 1)
+    const moved = restructured(hidden, { kind: 'layer-reparent', ids: [target(hidden, 'Text').id], destination: target(hidden, 'HStack').id }, 'Text')
+    expect(moved).toContain('HStack {\n        // hidden by Swift Web Studio\n        // Text("Secret")\n        // end hidden view\n        Text("Title")\n    }')
+  })
+})
+
+describe('C2: a view written as an argument is part of the view that takes it', () => {
+  const card = wrap('VStack {\n    Text("Card")\n        .padding()\n        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray))\n    Text("Other")\n}')
+  const refusal = (slot: string) => `The ${slot} is part of the view it is attached to, so it can’t be moved, wrapped, copied, hidden or deleted on its own. Select that view instead.`
+
+  it.each<[string, DesignEditRequest['operation']]>([
+    ['delete', { kind: 'delete' }],
+    ['hide', { kind: 'hide' }],
+    ['move', { kind: 'move', direction: 1 }],
+    ['drag', { kind: 'moveTo', targetOffset: card.indexOf('Text("Other")'), position: 'after' }],
+    ['add beside', { kind: 'insert', snippet: 'Text("New")' }],
+    ['duplicate', { kind: 'layer-duplicate' }],
+    ['wrap', { kind: 'layer-wrap', ids: [target(card, 'RoundedRectangle').id], layout: 'VStack' }],
+    ['move into', { kind: 'layer-reparent', ids: [target(card, 'RoundedRectangle').id], destination: target(card, 'VStack').id }],
+  ])('refuses to %s an overlay’s shape on its own, and says why', (_, operation) => {
+    expect(restructure(card, operation, 'RoundedRectangle')).toEqual({ ok: false, reason: refusal('overlay') })
+  })
+
+  it('edits an overlay shape’s own settings', () => {
+    expect(edited(card, 'Shape corner radius', '20', 'RoundedRectangle')).toBe(card.replace('cornerRadius: 12', 'cornerRadius: 20'))
+  })
+
+  // The row is the first Text in the model; the header is the second.
+  const section = wrap('List {\n    Section(header: Text("Header")) {\n        Text("Row")\n    }\n}')
+  it('refuses to delete a section header written as an argument, and says why', () => {
+    expect(restructure(section, { kind: 'delete' }, 'Text', 1)).toEqual({ ok: false, reason: refusal('header') })
+  })
+
+  it('refuses to delete a navigation link’s destination written as an argument, and says why', () => {
+    const link = wrap('NavigationStack {\n    NavigationLink(destination: Text("Detail")) {\n        Text("Go")\n    }\n}')
+    const detail = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(link) }).nodes.filter(n => n.name === 'Text' && n.kind !== 'definition').findIndex(n => n.source.start === link.indexOf('Text("Detail")'))
+    expect(restructure(link, { kind: 'delete' }, 'Text', detail)).toEqual({ ok: false, reason: refusal('destination') })
+  })
+
+  it('edits a section header’s own text', () => {
+    expect(edited(section, 'Text', 'Title', 'Text', 1)).toBe(section.replace('"Header"', '"Title"'))
+  })
+})
+
+describe('C3: a switched-off last modifier stays with its view', () => {
+  /** Switches off a view's last modifier, the way the switch on its card does. */
+  function switchOffLast(text: string, name: string, index = 0): string {
+    const modifier = target(text, name, index).modifiers!.at(-1)!
+    return restructured(text, { kind: 'modifier-toggle', modifier: modifier.id, enabled: false }, name, index)
+  }
+  const stack = switchOffLast(wrap('VStack {\n    Text("A")\n        .bold()\n        .padding()\n    Text("B")\n}'), 'Text')
+
+  it('moves with its view', () => {
+    expect(restructured(stack, { kind: 'move', direction: 1 }, 'Text')).toContain('VStack {\n    Text("B")\n    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n}')
+  })
+
+  it('stays with its view when a view is added after it', () => {
+    expect(restructured(stack, { kind: 'insert', snippet: 'Text("New")' }, 'Text')).toContain('    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("New")\n    Text("B")\n')
+  })
+
+  it('goes with its view when the view is deleted', () => {
+    expect(restructured(stack, { kind: 'delete' }, 'Text')).toContain('VStack {\n    Text("B")\n}')
+  })
+
+  it('is copied with its view when the view is duplicated', () => {
+    expect(restructured(stack, { kind: 'layer-duplicate' }, 'Text')).toContain('    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("A")\n        .bold()\n        /*studio-off:1 ".padding()"*/\n    Text("B")\n')
+  })
+
+  it('comes back with its view when the view is hidden and shown again', () => {
+    const hidden = restructured(stack, { kind: 'hide' }, 'Text')
+    const marker = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(hidden) }).nodes.find(n => n.name === 'VStack')!
+    const shown = planDesignEdit({ projectId: 'p', baseRevision: 1, scope: marker.owner, files: files(hidden), target: { file: 'Sources/App.swift', start: hidden.indexOf('    // hidden by'), end: hidden.indexOf('    // hidden by') }, fingerprint: '', operation: { kind: 'show' } })
+    expect(shown.ok && shown.changes[0]!.after).toBe(stack)
+  })
+
+  it('stays inside the empty state its collection is wrapped in', () => {
+    const source = switchOffLast(wrap('List(products) { item in Text(item.title) }\n    .padding()', '@State private var products: [Product] = [Product(id: "p1", title: "First")]') + '\nstruct Product: Identifiable { let id: String; var title: String }\n', 'List')
+    expect(restructured(source, { kind: 'empty-state', text: 'Nothing here' }, 'List')).toContain('    /*studio-off:1 ".padding()"*/\n    }\n}')
+  })
+
+  it('stays inside the navigation stack its screen is wrapped in when a button opens a new screen', () => {
+    const source = switchOffLast(wrap('VStack {\n    Button("Details") {}\n}\n.padding(12)'), 'VStack')
+    const result = restructure(source, { kind: 'guided-action', action: { type: 'navigate', destination: 'DetailsScreen' }, replace: false, createScreen: { name: 'DetailsScreen', title: 'Club details' } }, 'Button')
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.changes.find(change => change.file === 'Sources/App.swift')!.after).toContain('/*studio-off:1 ".padding(12)"*/\n}')
+  })
+
+  it('stays inside the navigation stack its screen is wrapped in for a new link', () => {
+    const source = switchOffLast(wrap('VStack {\n    Text("A")\n}\n.padding()'), 'VStack')
+    expect(restructured(source, { kind: 'insert', snippet: 'NavigationLink("Next") { Text("Detail") }' }, 'Text')).toContain('    /*studio-off:1 ".padding()"*/\n}')
+  })
+})
+
+describe('C4: dragging a view after, or into, its own container', () => {
+  // The blank screen once a designer has added two lines of text, with the #Preview that follows it.
+  const blank = `import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Title")
+                Text("Subtitle")
+            }
+            .padding(24)
+        }
+    }
+}
+
+#Preview {
+    HomeScreen()
+}
+`
+  const drag = (position: DropPosition, name = 'Text', index = 0) =>
+    restructured(blank, { kind: 'moveTo', targetOffset: blank.indexOf('VStack(spacing'), position }, name, index)
+
+  it('moves a view dropped after its own container out, to just after it', () => {
+    expect(drag('after')).toBe(blank.replace('                Text("Title")\n', '').replace('            .padding(24)\n', '            .padding(24)\n            Text("Title")\n'))
+  })
+
+  it('makes a view dropped into its own container that container’s last child', () => {
+    expect(drag('inside')).toBe(blank.replace('                Text("Title")\n                Text("Subtitle")\n', '                Text("Subtitle")\n                Text("Title")\n'))
+  })
+
+  it('moves a view dropped before its own container out, to just before it', () => {
+    expect(drag('before', 'Text', 1)).toBe(blank.replace('                Text("Subtitle")\n', '').replace('            VStack(spacing: 16) {\n', '            Text("Subtitle")\n            VStack(spacing: 16) {\n'))
+  })
+})
+
+describe('C10: a syntax error stops edits only to the file it is in', () => {
+  const HOME = 'Sources/Features/Home/HomeScreen.swift'
+  const home: SourceFile = { id: HOME, text: 'import SwiftUI\nstruct HomeScreen: View {\n    var body: some View {\n        VStack {\n            Text("Hello")\n        }\n    }\n}\n' }
+  // Half-typed code in a draft: `Text("x"` with its parenthesis still open.
+  const draft: SourceFile = { id: 'Sources/Features/Draft/Draft.swift', text: 'import SwiftUI\nstruct Draft: View {\n    var body: some View {\n        Text("x"\n    }\n}\n' }
+  const request = (project: SourceFile[], name: string, operation: DesignEditRequest['operation']): DesignEditRequest => {
+    const node = buildAuthoringModel({ projectId: 'p', revision: 1, files: project }).nodes.find(n => n.name === name && n.kind !== 'definition' && n.source.file === HOME)!
+    return { projectId: 'p', baseRevision: 1, scope: node.owner, files: project, target: node.source, fingerprint: node.fingerprint, operation }
+  }
+  const changedFiles = (plan: DesignEditPlan) => plan.ok ? plan.changes.map(change => change.file) : plan.reason
+
+  it('adds a view to a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignEdit(request([home, draft], 'VStack', { kind: 'insert', snippet: 'Text("New")' })))).toEqual([HOME])
+  })
+
+  it('changes a setting on a screen while another file does not parse', () => {
+    const text = buildAuthoringModel({ projectId: 'p', revision: 1, files: [home, draft] }).nodes.find(n => n.name === 'Text' && n.source.file === HOME)!.controls!.find(c => c.label === 'Text')!
+    expect(changedFiles(planDesignEdit(request([home, draft], 'Text', { kind: 'property', control: text.id, value: 'Hi' })))).toEqual([HOME])
+  })
+
+  it('adds a modifier on a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignEdit(request([home, draft], 'Text', { kind: 'modifier-add', name: 'padding' })))).toEqual([HOME])
+  })
+
+  it('plans a batch on a screen while another file does not parse', () => {
+    expect(changedFiles(planDesignBatch([request([home, draft], 'VStack', { kind: 'insert', snippet: 'Text("New")' })]))).toEqual([HOME])
+  })
+
+  it('offers and changes a component’s input while another file does not parse', () => {
+    const screens: SourceFile = { id: HOME, text: 'import SwiftUI\nstruct HomeScreen: View {\n    var body: some View {\n        Badge(title: "New")\n    }\n}\nstruct Badge: View {\n    let title: String\n    var body: some View { Text(title) }\n}\n' }
+    const badge = buildAuthoringModel({ projectId: 'p', revision: 1, files: [screens, draft] }).nodes.find(n => n.name === 'Badge' && n.kind === 'component')!
+    expect(badge.controls?.some(control => control.id === 'component:title')).toBe(true)
+    const plan = planDesignEdit(request([screens, draft], 'Badge', { kind: 'property', control: 'component:title', value: 'Sale' }))
+    expect(plan.ok && plan.changes[0]!.after).toBe(screens.text.replace('Badge(title: "New")', 'Badge(title: "Sale")'))
+  })
+
+  it('points at the error already in a file a change also writes, where it is before the change', () => {
+    // A spacing token is written into Tokens.swift, above a line still being typed at its end.
+    const tokens: SourceFile = { id: 'Sources/DesignSystem/Tokens.swift', text: 'import SwiftUI\n\nextension CGFloat {\n    static let space8: CGFloat = 8\n}\n\nlet draft = (\n' }
+    expect(planDesignEdit(request([home, tokens], 'Text', { kind: 'style-create', name: 'space24', style: 'spacing', value: '24' })))
+      .toEqual({ ok: false, reason: 'Tokens.swift has an error on line 8, so its design can’t be changed until it’s fixed in Code.', location: { file: tokens.id, offset: tokens.text.length } })
+  })
+
+  it('refuses to change a file that does not parse, naming it and the line, and says where', () => {
+    const broken: SourceFile = { id: HOME, text: home.text.replace('Text("Hello")', 'Text("Hello"') }
+    expect(planDesignEdit(request([broken], 'VStack', { kind: 'insert', snippet: 'Text("New")' }))).toEqual({
+      ok: false,
+      reason: 'HomeScreen.swift has an error on line 6, so its design can’t be changed until it’s fixed in Code.',
+      location: { file: HOME, offset: broken.text.indexOf('}', broken.text.indexOf('Text("Hello"')) },
+    })
+  })
+})
+
+describe('C11: a structural change is checked before it is kept', () => {
+  /** The view written at `needle`, planned for the way Layers and the canvas plan one. */
+  function restructureAt(text: string, needle: string, operation: DesignEditRequest['operation']): DesignEditPlan {
+    const node = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(text) }).nodes.find(n => n.source.start === text.indexOf(needle) && n.kind !== 'branch')!
+    return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation })
+  }
+
+  it('refuses a drop onto a helper that holds one view, which no layer stands for (C5)', () => {
+    // The canvas drops onto what it draws; "Header" is drawn by `header`, not by `body`.
+    const source = wrap('VStack {\n    header\n    Text("Body")\n}', 'var header: some View {\n    Text("Header")\n}')
+    expect(restructureAt(source, 'Text("Body")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Header")'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'Drop it on a layer of this screen. That spot is drawn by a helper in the Swift code, where a view could repeat or disappear.' })
+  })
+
+  it('refuses a canvas drop onto a view a helper draws, which repeats it and loses it from Layers (C5)', () => {
+    // It builds: the helper is a view builder. But it draws "Title" once for every swatch.
+    const source = wrap('VStack {\n    swatch("Red")\n    swatch("Blue")\n    Text("Title")\n}', '@ViewBuilder func swatch(_ name: String) -> some View {\n    Text(name)\n}')
+    expect(restructureAt(source, 'Text("Title")', { kind: 'moveTo', targetOffset: source.indexOf('Text(name)'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'Drop it on a layer of this screen. That spot is drawn by a helper in the Swift code, where a view could repeat or disappear.' })
+  })
+
+  it('refuses a view placed beside one written after return, which iOS would never show (C5)', () => {
+    // With a `return`, `body` stops being a view builder: a view beside it is built and thrown away.
+    const source = wrap('let title = "Plan"\nreturn VStack {\n    Text(title)\n}')
+    expect(restructureAt(source, 'VStack', { kind: 'layer-duplicate' }))
+      .toEqual({ ok: false, reason: '`ContentView` returns its one view, so a view beside it would not show on iOS. Nothing was changed.' })
+  })
+
+  it('refuses moving a component\'s view out onto a screen, which would change every copy (C5)', () => {
+    const source = wrap('VStack {\n    Card()\n    Text("Other")\n}') + '\nstruct Card: View {\n    var body: some View {\n        Text("Card")\n    }\n}\n'
+    expect(restructureAt(source, 'Text("Card")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Other")'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'Move it within Card. A view moved into or out of a component would change every copy of it.' })
+  })
+
+  it('refuses dropping a screen\'s view into a component\'s row, which every row would then show (C5)', () => {
+    const source = wrap('List {\n    Text("Total")\n    ExpenseRow()\n    ExpenseRow()\n}') + '\nstruct ExpenseRow: View {\n    var body: some View {\n        HStack {\n            Text("Rent")\n        }\n    }\n}\n'
+    expect(restructureAt(source, 'Text("Total")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Rent")'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'Move it within ContentView. A view moved into or out of a component would change every copy of it.' })
+  })
+
+  it('refuses dropping a view into a repeated row, which would draw it once for every row (C5)', () => {
+    const source = wrap('VStack {\n    Text("Header")\n    ForEach(0..<3) { index in\n        Text("Row")\n    }\n}')
+    expect(restructureAt(source, 'Text("Header")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Row")'), position: 'after' }))
+      .toEqual({ ok: false, reason: 'Move within the same screen or repeated row to preserve its values and conditions.' })
+  })
+
+  it('still moves a view within its own screen on the canvas (C5)', () => {
+    const source = wrap('VStack {\n    Text("First")\n    Text("Second")\n}')
+    expect(restructureAt(source, 'Text("First")', { kind: 'moveTo', targetOffset: source.indexOf('Text("Second")'), position: 'after' })).toMatchObject({ ok: true })
+  })
+})
+
+describe('D13: a control added from the library works in the preview at once', () => {
+  it('binds a toggle to a new value on its screen, instead of a constant that never switches', () => {
+    const added = restructured(wrap('VStack {\n    Text("Settings")\n}'), { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(added).toContain('@State private var isOn: Bool = true')
+    expect(added).toContain('Toggle("Toggle", isOn: $isOn)')
+    expect(added).not.toContain('.constant')
+  })
+
+  it.each([
+    ['text field', 'TextField("Placeholder", text: .constant(""))', '@State private var text: String = ""', 'TextField("Placeholder", text: $text)'],
+    ['slider', 'Slider(value: .constant(0.5))', '@State private var value: Double = 0.5', 'Slider(value: $value)'],
+    ['stepper', 'Stepper("Stepper", value: .constant(1))', '@State private var count: Int = 1', 'Stepper("Stepper", value: $count)'],
+    ['date picker', 'DatePicker("Date", selection: .constant(Date()))', '@State private var date: Date = Date()', 'DatePicker("Date", selection: $date)'],
+    ['color picker', 'ColorPicker("Colour", selection: .constant(.blue))', '@State private var color: Color = .blue', 'ColorPicker("Colour", selection: $color)'],
+  ])('binds a %s to a new value of its own type', (_control, snippet, member, control) => {
+    const added = restructured(wrap('VStack {\n    Text("Form")\n}'), { kind: 'insert', snippet }, 'Text')
+
+    expect(added).toContain(member)
+    expect(added).toContain(control)
+  })
+
+  it('names a second one apart from the first', () => {
+    const once = restructured(wrap('VStack {\n    Text("Settings")\n}'), { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+    const twice = restructured(once, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(twice).toContain('@State private var isOn2: Bool = true')
+    expect(twice).toContain('Toggle("Toggle", isOn: $isOn2)')
+  })
+
+  it.each([
+    ['a list of records', 'List(items) { item in\n    Text(item.title)\n}', 'List'],
+    ['the library\'s Repeat', 'ForEach(0..<3, id: \\.self) { index in\n    Text("Row \\(index)")\n}', 'ForEach'],
+  ])('keeps the constant when %s is selected, as the control goes into its rows', (_what, body, selected) => {
+    const source = wrap(body, '@State private var items: [Item] = [Item(id: 1, title: "One")]') + '\nstruct Item: Identifiable { let id: Int; var title: String }\n'
+    const added = restructured(source, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, selected)
+
+    expect(added).toContain('Toggle("Toggle", isOn: .constant(true))')
+    expect(added).not.toContain('@State private var isOn')
+  })
+
+  it('keeps the constant in a list\'s row design, which Saves to binds to the row\'s field', () => {
+    const source = wrap('List(items) { item in\n    Text(item.title)\n}', '@State private var items: [Item] = [Item(id: 1, title: "One")]') + '\nstruct Item: Identifiable { let id: Int; var title: String }\n'
+    const added = restructured(source, { kind: 'insert', snippet: 'Toggle("Toggle", isOn: .constant(true))' }, 'Text')
+
+    expect(added).toContain('Toggle("Toggle", isOn: .constant(true))')
+    expect(added).not.toContain('@State private var isOn')
+  })
+})
+
+describe('C7: a refused edit says why, in words for the one edit that was refused', () => {
+  it('says a view is already first, rather than that the edit has no valid destination', () => {
+    expect(restructure(wrap('VStack {\n    Text("A")\n    Text("B")\n}'), { kind: 'move', direction: -1 }, 'Text'))
+      .toEqual({ ok: false, reason: 'This is already the first view here.' })
+  })
+
+  it('says the only view of a screen cannot be deleted', () => {
+    expect(restructure(wrap('Text("Alone")'), { kind: 'delete' }, 'Text'))
+      .toEqual({ ok: false, reason: 'This is the only view here, and this spot can’t be left empty. Add another view first, or delete what holds it.' })
+  })
+
+  it('says a view cannot be dropped into one that holds none', () => {
+    const source = wrap('VStack {\n    Text("A")\n    Text("B")\n}')
+    expect(restructure(source, { kind: 'moveTo', targetOffset: source.indexOf('Text("B")'), position: 'inside' }, 'Text'))
+      .toEqual({ ok: false, reason: 'Text can’t hold other views. Drop it before or after instead.' })
+  })
+})
+
+describe('D6: a view pasted onto another screen brings the values it reads', () => {
+  const screens = (settingsValues = '') => `import SwiftUI
+@main struct TestApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }
+struct HomeScreen: View {
+    @State private var count = 0
+    var body: some View {
+        VStack {
+            Text("Count \\(count)")
+        }
+    }
+}
+struct SettingsScreen: View {
+${settingsValues}    var body: some View {
+        VStack {
+            Text("Settings")
+        }
+    }
+}
+`
+  const paste = (text: string, snippet: string, values: readonly string[]) => {
+    const node = buildAuthoringModel({ projectId: 'p', revision: 1, files: files(text) }).nodes.find(n => n.name === 'Text' && n.owner === 'SettingsScreen')!
+    return planDesignEdit({ projectId: 'p', baseRevision: 1, scope: node.owner, files: files(text), target: node.source, fingerprint: node.fingerprint, operation: { kind: 'paste', snippet, values } })
+  }
+  const settingsOf = (plan: ReturnType<typeof paste>) => {
+    if (!plan.ok) throw new Error(plan.reason)
+    return plan.changes[0]!.after.slice(plan.changes[0]!.after.indexOf('struct SettingsScreen'))
+  }
+
+  it('adds the value to the screen it lands on, with the view', () => {
+    expect(settingsOf(paste(screens(), 'Text("Count \\(count)")', ['@State private var count = 0']))).toBe(`struct SettingsScreen: View {
+    @State private var count = 0
+    var body: some View {
+        VStack {
+            Text("Settings")
+            Text("Count \\(count)")
+        }
+    }
+}
+`)
+  })
+
+  it('uses a value of the same name and kind the screen already has', () => {
+    const settings = settingsOf(paste(screens('    @State private var count = 5\n'), 'Text("Count \\(count)")', ['@State private var count = 0']))
+    expect(settings.match(/var count/g)).toHaveLength(1)
+    expect(settings).toContain('@State private var count = 5')
+  })
+
+  it('says why when the screen has a value of that name of another kind', () => {
+    expect(paste(screens('    let count = "many"\n'), 'Text("Count \\(count)")', ['@State private var count = 0']))
+      .toEqual({ ok: false, reason: 'SettingsScreen already has a `count` of another kind, so this view’s `count` can’t come along. Rename one of them in Code.' })
+  })
+
+  it('says why when the view reads something that does not exist where it lands', () => {
+    expect(paste(screens(), 'Button("Close") { dismiss() }', []))
+      .toEqual({ ok: false, reason: 'This view reads `dismiss`, which doesn’t exist where it was pasted. Paste it where `dismiss` is, or change it in Code.' })
+  })
+
+  it('says why when the screen has a function of that name', () => {
+    expect(paste(screens('    func count() -> Int { 1 }\n'), 'Text("Count \\(count)")', ['@State private var count = 0']))
+      .toEqual({ ok: false, reason: 'SettingsScreen already has a `count` of another kind, so this view’s `count` can’t come along. Rename one of them in Code.' })
+  })
+
+  it('tells values that are more than a number or words apart by what they are made from', () => {
+    const pet = '    struct Pet {}\n    @State private var when = Pet()\n'
+    expect(paste(screens(pet), 'Text(when, style: .date)', ['@State private var when = Date()']))
+      .toEqual({ ok: false, reason: 'SettingsScreen already has a `when` of another kind, so this view’s `when` can’t come along. Rename one of them in Code.' })
+    expect(settingsOf(paste(screens('    @State private var when = Date()\n'), 'Text(when, style: .date)', ['@State private var when = Date(timeIntervalSince1970: 0)'])).match(/var when/g)).toHaveLength(1)
+  })
+
+  it('pastes a control as it was copied, rather than binding it anew as the library does', () => {
+    expect(settingsOf(paste(screens(), 'Toggle("On", isOn: .constant(true))', []))).toContain('Toggle("On", isOn: .constant(true))')
+  })
+})
+
+describe('D4: Auto spacing puts a Spacer between each pair of views, as Figma\'s Auto does', () => {
+  const lines = (stack: string, views: readonly string[], after = '') => wrap(`${stack} {\n${views.map(view => `    ${view}`).join('\n')}\n}${after}`)
+  const spacing = (text: string, name = 'HStack') => target(text, name).controls?.find(c => c.label === 'Spacing')
+
+  it('spaces a row out, and makes it fill its width so the gaps show', () => {
+    const source = lines('HStack(spacing: 8)', ['Text("A")', 'Text("B")', 'Text("C")'])
+    const spaced = edited(source, 'Spacing', 'auto', 'HStack')
+    expect(spaced).toBe(lines('HStack(spacing: 8)', ['Text("A")', 'Spacer()', 'Text("B")', 'Spacer()', 'Text("C")'], '.frame(maxWidth: .infinity)'))
+    expect(spacing(spaced)).toMatchObject({ value: 'auto', options: ['auto'] })
+    expect(spacing(source)).toMatchObject({ value: '8', options: ['auto'] })
+  })
+
+  it('makes a column fill its height', () => {
+    expect(edited(lines('VStack', ['Text("A")', 'Text("B")']), 'Spacing', 'auto', 'VStack')).toBe(lines('VStack', ['Text("A")', 'Spacer()', 'Text("B")'], '.frame(maxHeight: .infinity)'))
+  })
+
+  it('keeps a size the stack already has along that axis', () => {
+    expect(edited(lines('HStack', ['Text("A")', 'Text("B")'], '.frame(width: 300)'), 'Spacing', 'auto', 'HStack')).toBe(lines('HStack', ['Text("A")', 'Spacer()', 'Text("B")'], '.frame(width: 300)'))
+  })
+
+  it('keeps a stack written on one line to one line, and a note where it was', () => {
+    expect(edited(wrap('HStack { Text("A"); Text("B") }'), 'Spacing', 'auto', 'HStack')).toBe(wrap('HStack { Text("A"); Spacer(); Text("B") }.frame(maxWidth: .infinity)'))
+    expect(edited(lines('HStack', ['Text("A")', '// the price', 'Text("B")']), 'Spacing', 'auto', 'HStack')).toBe(lines('HStack', ['Text("A")', 'Spacer()', '// the price', 'Text("B")'], '.frame(maxWidth: .infinity)'))
+  })
+
+  it('takes the Spacers out again when a number is picked, and keeps the size', () => {
+    const spaced = lines('HStack(spacing: 8)', ['Text("A")', 'Spacer()', 'Text("B")', 'Spacer()', 'Text("C")'], '.frame(maxWidth: .infinity)')
+    expect(edited(spaced, 'Spacing', '12', 'HStack')).toBe(lines('HStack(spacing: 12)', ['Text("A")', 'Text("B")', 'Text("C")'], '.frame(maxWidth: .infinity)'))
+    const unspaced = lines('HStack', ['Text("A")', 'Spacer()', 'Text("B")'])
+    expect(edited(unspaced, 'Spacing', '4', 'HStack')).toBe(lines('HStack(spacing: 4)', ['Text("A")', 'Text("B")']))
+    expect(edited(wrap('HStack { Text("A"); Spacer(); Text("B") }'), 'Spacing', '4', 'HStack')).toBe(wrap('HStack(spacing: 4) { Text("A"); Text("B") }'))
+  })
+
+  it('reads a Spacer only at one end, or two in a row, as a number, not Auto', () => {
+    expect(spacing(lines('HStack', ['Text("A")', 'Text("B")', 'Spacer()']))?.value).toBe('')
+    expect(spacing(lines('HStack', ['Text("A")', 'Spacer()', 'Spacer()', 'Text("B")']))?.value).toBe('')
+    expect(spacing(lines('HStack', ['Text("A")', 'Spacer(minLength: 0)', 'Text("B")']))?.value).toBe('')
+  })
+
+  it('says why a stack that repeats its views from data, or holds one view, cannot be spaced out', () => {
+    expect(plan(lines('HStack', ['ForEach(0..<3, id: \\.self) { index in', '    Text("\\(index)")', '}']), 'Spacing', 'auto', 'HStack')).toEqual({ ok: false, reason: 'Auto spacing puts a Spacer between views written one by one, and this Row repeats its views from data. Set a number instead.' })
+    expect(plan(lines('VStack', ['Text("A")']), 'Spacing', 'auto', 'VStack')).toEqual({ ok: false, reason: 'Auto spacing needs two or more views in the Column.' })
+  })
+
+  it('replaces the Spacers a stack already has, so every gap is the same', () => {
+    const source = lines('HStack', ['Image(systemName: "star")', 'Text("A")', 'Spacer()'])
+    const spaced = edited(source, 'Spacing', 'auto', 'HStack')
+    expect(spaced).toBe(lines('HStack', ['Image(systemName: "star")', 'Spacer()', 'Text("A")'], '.frame(maxWidth: .infinity)'))
+    expect(spacing(spaced)?.value).toBe('auto')
+    expect(edited(lines('HStack', ['Text("A")', 'Spacer(minLength: 20)', 'Text("B")']), 'Spacing', 'auto', 'HStack')).toBe(lines('HStack', ['Text("A")', 'Spacer()', 'Text("B")'], '.frame(maxWidth: .infinity)'))
+    expect(edited(wrap('HStack { Text("A"); Spacer(); Text("B"); Spacer() }'), 'Spacing', 'auto', 'HStack')).toBe(wrap('HStack { Text("A"); Spacer(); Text("B") }.frame(maxWidth: .infinity)'))
+  })
+
+  it('says why a stack a scroll view scrolls along has no room to spread out, unless it has a size', () => {
+    const scrolled = (stack: string, scroll = 'ScrollView', after = '') => wrap(`${scroll} {\n${stack} {\n    Text("A")\n    Text("B")\n}${after}\n}`)
+    expect(plan(scrolled('VStack'), 'Spacing', 'auto', 'VStack')).toEqual({ ok: false, reason: 'A scroll view that scrolls up and down leaves a Column no height to spread its views over. Set a number, or give the Column a fixed height.' })
+    expect(plan(scrolled('HStack', 'ScrollView(.horizontal)'), 'Spacing', 'auto', 'HStack')).toEqual({ ok: false, reason: 'A scroll view that scrolls sideways leaves a Row no width to spread its views across. Set a number, or give the Row a fixed width.' })
+    expect(plan(scrolled('HStack'), 'Spacing', 'auto', 'HStack')).toMatchObject({ ok: true })
+    expect(plan(scrolled('VStack', 'ScrollView', '.frame(height: 400)'), 'Spacing', 'auto', 'VStack')).toMatchObject({ ok: true })
+  })
+
+  it('builds, and spreads the views out', () => {
+    const spaced = edited(lines('HStack', ['Text("A")', 'Text("B")']), 'Spacing', 'auto', 'HStack')
+    const result = compile({ files: files(spaced), canvas: { width: 393, height: 852 }, colorScheme: 'light', revision: 1 })
+    expect(result.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    const a = result.renderTree!.nodes.find(n => n.text?.runs[0]?.text === 'A')!, b = result.renderTree!.nodes.find(n => n.text?.runs[0]?.text === 'B')!
+    expect(b.frame.x - (a.frame.x + a.frame.width)).toBeGreaterThan(300)
+  })
 })

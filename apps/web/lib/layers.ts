@@ -10,8 +10,12 @@ export function findLayer(layers: readonly ViewLayer[], id: string): ViewLayer |
 
 /** Prefer a control's full hit frame. Containers without paint highlight their contents. */
 export function layerRenderIds(layer: ViewLayer | undefined, tree: RenderTree | null | undefined, hierarchy: readonly ViewLayer[] = layer ? [layer] : []): ReadonlySet<string> {
-  if (!layer || !tree) return new Set()
-  const ids = new Set<string>()
+  return layer ? layerRenderGroups([layer], tree, hierarchy)[0] ?? new Set() : new Set()
+}
+
+/** What each layer paints, as `layerRenderIds` finds it, with one ownership index for all of them. */
+export function layerRenderGroups(layers: readonly ViewLayer[], tree: RenderTree | null | undefined, hierarchy: readonly ViewLayer[] = layers): ReadonlySet<string>[] {
+  if (!tree) return layers.map(() => new Set())
   const nodes = new Map(tree.nodes.map(node => [node.id, node]))
   const hits = new Map(tree.nodes.filter(node => node.hitTarget).map(node => [node.hitTarget!.handlerId, node]))
   // Longest view-path ownership distinguishes ForEach keys such as "a" and "ab"
@@ -43,15 +47,18 @@ export function layerRenderIds(layer: ViewLayer | undefined, tree: RenderTree | 
       owned.set(owner, group)
     }
   }
-  const visit = (item: ViewLayer) => {
-    const hit = hits.get(`action-${item.id}`)
-    const node = hit ?? nodes.get(item.id)
-    if (node && node.frame.width > 0 && node.frame.height > 0) ids.add(node.id)
-    else if (item.children.length) item.children.forEach(visit)
-    else for (const painted of owned.get(item.id) ?? []) ids.add(painted.id)
-  }
-  visit(layer)
-  return ids
+  return layers.map(layer => {
+    const ids = new Set<string>()
+    const visit = (item: ViewLayer) => {
+      const hit = hits.get(`action-${item.id}`)
+      const node = hit ?? nodes.get(item.id)
+      if (node && node.frame.width > 0 && node.frame.height > 0) ids.add(node.id)
+      else if (item.children.length) item.children.forEach(visit)
+      else for (const painted of owned.get(item.id) ?? []) ids.add(painted.id)
+    }
+    visit(layer)
+    return ids
+  })
 }
 
 /**
@@ -114,5 +121,21 @@ export function insertionLayer(layers: readonly ViewLayer[], selected?: ViewLaye
     if (layer.source && !layer.page && layer.type !== 'Tab') return layer
     return layer.children.map(editable).find(Boolean)
   }
-  return page.children.map(editable).find(Boolean) ?? (page.source ? page : undefined)
+  const content = page.children.map(editable).find(Boolean)
+  return content ? heldContent(content) : page.source ? page : undefined
+}
+
+/**
+ * What a screen's content is when it is wrapped: a ScrollView around one stack, or a
+ * Group around the branch it shows, such as the list beside an empty state. A new view
+ * belongs in that, with its siblings, not beside it outside the stack's padding.
+ */
+function heldContent(layer: ViewLayer): ViewLayer {
+  let content = layer
+  while (content.type === 'ScrollView' || content.type === 'Group') {
+    const held = content.children.filter(child => child.source)
+    if (held.length !== 1) break
+    content = held[0]!
+  }
+  return content
 }

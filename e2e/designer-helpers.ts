@@ -1,4 +1,13 @@
 import { expect, type Locator, type Page } from '@playwright/test'
+import { unzipSync } from 'fflate'
+
+/** The event log an archive carries: its text, its header line, and its events (G5). */
+export function eventLogIn(zip: Uint8Array): { text: string; header: Record<string, unknown>; events: Record<string, unknown>[] } {
+  const entry = Object.entries(unzipSync(zip)).find(([path]) => path.endsWith('/.swiftstudio/events.jsonl'))?.[1]
+  const text = entry ? new TextDecoder().decode(entry) : ''
+  const [header = {}, ...events] = text.trimEnd().split('\n').filter(Boolean).map(line => JSON.parse(line))
+  return { text, header, events }
+}
 
 /**
  * Replaces the whole open file through CodeMirror's own select-all.
@@ -11,6 +20,43 @@ export async function replaceSource(page: Page, source: string) {
   await page.getByTestId('editor').locator('.cm-content').click()
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText(source)
+}
+
+/**
+ * Opens the studio on the Counter example: one file, with state and two buttons.
+ *
+ * A fresh browser starts on the blank screen (B6). Tests written against the Counter
+ * choose it from Features, the way anybody would.
+ */
+export async function openCounter(page: Page) {
+  await page.goto('/')
+  await page.getByTestId('gallery-source-feature').click()
+  await page.getByTestId('template-counter').click()
+  await page.getByTestId('template-confirm').click()
+  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await expect(page.getByTestId('project-name')).toHaveText('CounterApp')
+  // Drawn, and idle: until then the canvas and Layers are still settling on the new
+  // project, and a click can land on what was open before or be undone by the redraw.
+  await expect(page.getByTestId('render-tree').getByText('Hello, World!', { exact: true }).first()).toBeVisible()
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
+}
+
+/** Opens the studio on `source`, back in Design once `drawn` is on the canvas and all is idle. */
+export async function openInDesign(page: Page, source: string, drawn: string) {
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, source)
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('render-tree').getByText(drawn, { exact: true }).first()).toBeVisible()
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
+}
+
+/** The Swift as it stands now, read in Code, and back to Design. */
+export async function sourceInCode(page: Page): Promise<string> {
+  await page.getByTestId('workspace-develop').click()
+  const text = await page.getByTestId('editor').locator('.cm-content').innerText()
+  await page.getByTestId('workspace-design').click()
+  return text
 }
 
 export function cards(page: Page, name: string): Locator {

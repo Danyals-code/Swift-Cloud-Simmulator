@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { assertSource, replaceSource } from './designer-helpers'
+import { assertSource, openCounter, replaceSource } from './designer-helpers'
 
 const SOURCE = `import SwiftUI
 struct Book: Identifiable { let id: String; let title: String }
@@ -40,8 +40,7 @@ struct BookRow: View {
 }`
 
 async function open(page: Page, source = SOURCE, expandList = true) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   await replaceSource(page, source)
   await expect(mainPreview(page).getByText('First book', { exact: true })).toBeVisible()
@@ -96,7 +95,6 @@ async function expectRowHighlights(page: Page, rows: Locator, parts: readonly Lo
 }
 
 test('primary Layers keeps shared designs compact and collection/navigation settings editable', async ({ page }) => {
-  test.fixme(true, 'Product bug: a titled Section is now a visual layer, so the List no longer finds the ForEach(books) collection inside it (authoringSettings.ts:20) and shows static-list settings instead of Repeat for each item / records')
   await open(page, SOURCE, false)
   await expect(row(page, 'List')).toHaveAttribute('aria-expanded', 'false')
   await expect(row(page, 'BookRow')).toHaveCount(0)
@@ -174,6 +172,11 @@ test('a repeated visual component highlights every rendered row and either row r
     preview.getByText('First book', { exact: true }), preview.getByText('Second book', { exact: true }),
     ...await icons.all(),
   ])
+  // On the canvas a row is part of its list, as a click picks what sits in the screen (D1)...
+  await preview.getByRole('button', { name: /First book/ }).hover()
+  await expect(row(page, 'List')).toHaveAttribute('data-hovered', 'true')
+  // ...and once a row is selected, either row is picked at that depth.
+  await book.click()
   for (const name of ['First book', 'Second book']) {
     await preview.getByRole('button', { name: new RegExp(name) }).hover()
     await expect(book).toHaveAttribute('data-hovered', 'true')
@@ -319,9 +322,11 @@ test('hover outlines track a scrolled List and remain clipped to its visible vie
     return /^Book \d+$/.test(element.getAttribute('aria-label') ?? '') && bounds.top > viewport!.top + 3 && bounds.bottom < viewport!.bottom - 3
   })?.getAttribute('aria-label'), viewport)
   expect(visibleTitle).toBeTruthy()
+  // With a row selected, the canvas picks rows (D1): the row's own views, outlined as one box in it.
+  await row(page, 'BookRow').click()
   const target = preview.getByRole('button', { name: visibleTitle!, exact: true })
   await target.hover()
   await expect(row(page, 'BookRow')).toHaveAttribute('data-hovered', 'true')
   await expect(highlights(page)).toHaveCount(1)
-  await expectOverlayMatches(highlights(page), target)
+  await expectRowHighlights(page, target, [preview.getByText(visibleTitle!, { exact: true })])
 })

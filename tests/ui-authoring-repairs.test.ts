@@ -72,7 +72,7 @@ describe('editable card layout', () => {
     const text = source('GroupBox("Title") { Text("Body") }.shadow(radius: 4)')
     const changed = after(text, node(text, 'GroupBox'), { kind: 'card-customize', color: '#DBEAFE' })
     expect(changed).toContain('.background(Color(red: 0.859, green: 0.918, blue: 0.996))')
-    expect(changed).toContain('.cornerRadius(8).shadow(radius: 4)')
+    expect(changed).toContain('.clipShape(.rect(cornerRadius: 8)).shadow(radius: 4)')
     expect(changed).toContain('Text("Title").font(.headline)')
     expect(changed).toContain('Text("Body")')
     expect(node(changed, 'VStack').styles?.some(style => style.kind === 'color' && style.value?.toUpperCase() === '#DBEAFE')).toBe(true)
@@ -83,7 +83,7 @@ describe('editable card layout', () => {
     const changed = after(text, node(text, 'GroupBox'), { kind: 'card-customize' })
     expect(changed).not.toContain('secondarySystemBackground')
     expect(changed).toContain('.background(Color.red)')
-    expect(changed).toMatch(/\.background\(Color.red\)\s*\.cornerRadius\(8\).opacity\(0.8\)/)
+    expect(changed).toMatch(/\.background\(Color.red\)\s*\.clipShape\(\.rect\(cornerRadius: 8\)\)\.opacity\(0.8\)/)
     render(changed)
   })
   it('replaces an existing color without stacking opaque card surfaces', () => {
@@ -104,7 +104,7 @@ describe('editable card layout', () => {
     const changed = after(text, node(text, 'GroupBox'), { kind: 'card-customize' })
     expect(changed).toContain('Text(title).font(.headline)')
     expect(changed).toContain('// keep this explanation')
-    expect(changed).toContain('.cornerRadius(8).opacity(0.8); Text("Sibling")')
+    expect(changed).toContain('.clipShape(.rect(cornerRadius: 8)).opacity(0.8); Text("Sibling")')
     const card = model(changed).nodes.filter(item => item.name === 'VStack')[1]!
     expect(card.controls?.find(control => control.id === 'alignment')?.value).toBe('leading')
     expect(card.modifiers?.find(modifier => modifier.name === 'padding')?.controls.some(control => control.value === '16')).toBe(true)

@@ -645,12 +645,19 @@ clean Problems pane is indistinguishable from a right one until it reaches a Mac
 A member key carries its argument labels now, and the call site picks the overload
 whose labels it wrote. Where they match nothing the first declaration still wins, which
 is what the lookup did before and what a trailing closure needs - `sheet(isPresented:)`
-written the way everybody writes it arrives with no label at all. Parameter *types* are
-the other half of Swift's rule and are deliberately still not modelled: the interpreter
-is untyped, and guessing between two untyped candidates would be worse than picking the
-one written last. The matrix says so.
+written the way everybody writes it arrives with no label at all.
 
-Pinned by `packages/swift-runtime/src/overloads.test.ts`.
+Parameter *types* are the other half of Swift's rule, and since the study build they are
+modelled too. The key carries them, so `f(_ x: Int)` and `f(_ x: String)` are both
+kept, and top-level and local functions are kept as a set rather than the last one
+written. A call runs the declaration its arguments' values suit best: a whole number an
+`Int`, text a `String`, a project type its own, anything a generic. Where values can't
+tell two apart, such as `Double` and `CGFloat`, the first runs and the checker warns at
+the second. A type's own method is also found before a top-level function of the same
+name, which used to shadow it.
+
+Pinned by `packages/swift-runtime/src/overloads.test.ts` and the overload tests in
+`tests/study-regressions.test.ts`.
 
 ### 11.2 - properties answered a call
 

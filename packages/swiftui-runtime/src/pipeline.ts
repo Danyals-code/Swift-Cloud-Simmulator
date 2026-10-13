@@ -1,30 +1,35 @@
 import { SURFACES } from './appearance/surfaces'
 import { primaryScroll, scrollInsets } from './containers/screen'
+import { attachedSheet, sheetContentTop } from './containers/sheet'
 import type { ScreenLayout } from './to-layout'
 import {
   APPEARANCE_CALIBRATION,
   bindAuthoringRuntime,
   hasBlockingError,
+  pageViews,
   rgba,
+  viewsDrawing,
   type CompileRequest,
   type AuthoringSnapshot,
   type CompileResult,
   type Diagnostic,
   type LogEntry,
   type MeasuredTextData,
-  type PageFailure,
   type PagePreview,
   type Rect,
   type RenderNode,
   type RenderTree,
+  type SourceSpan,
   type UIEvent,
 } from '@studio/shared'
+import { DEFAULT_STEP_BUDGET } from '@studio/swift-runtime'
 import { Parser, type SourceFileNode } from '@studio/swift-syntax'
 import { buildAuthoringModel, scenarioFiles, Checker, lintStrictness, type SemanticModel } from '@studio/swift-sema'
 import {
   CENTER,
   FontMetricsTable,
   LayoutEngine,
+  ZERO_INSETS,
   type LayoutElement,
   type LayoutEnvironment,
   type MeasuredFont,
@@ -36,7 +41,9 @@ import type { EnvironmentInputs } from './view-environment'
 import { bodyFont, colorForName, labelColor, setAssetColors, systemBackground } from './style'
 import { appendPlaced, placedToRenderTree } from './to-render'
 import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from './to-layout'
-import type { OverlayKind } from './presentation'
+import { stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind } from './presentation'
+import { exhausts, toFailure } from './failures'
+import type { GeometryPayload, RuntimeFailure } from './view-value'
 
 /**
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
@@ -76,7 +83,7 @@ export function relayout(revision: number): CompileResult {
   const { analysis, request } = lastAnalysis
   const next = { ...request, revision }
   lastAnalysis = { analysis, request: next }
-  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, null, performance.now(), 0, 0)
+  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, errorsNotice(next, analysis), performance.now(), 0, 0)
   return finish(next, analysis, lastEvaluation, performance.now(), 0)
 }
 
@@ -210,7 +217,6 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
           callGuide,
         }).element,
         background: systemBackground(scheme),
-        ignoresSafeArea: false,
         navigationBar: null,
         tabBar: null,
         overlay: null,
@@ -228,21 +234,34 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   const bottomTabs = regular ? 0 : tabHeight
   const bottomSearch = screen.search?.placement === 'bottom' ? screen.search.height : 0
   const topSearch = screen.search?.placement === 'top' ? screen.search.height : 0
-  const scroll = !screen.ignoresSafeArea ? primaryScroll(screen.content) : null
+  // The bars at the bottom stop short of the screen's edge, over the home indicator.
+  const bottomBarsEnd = canvas.height - Math.max(0, safeArea.bottom - SURFACES.tab.safeAreaOverlap)
+  const scroll = primaryScroll(screen.content)
   const collapseDistance = scroll && screen.navigationBar?.large ? Math.max(0, barHeight - NAV_BAR_HEIGHT) : 0
   const content = scroll ? scrollInsets(screen.content, { top: collapseDistance, leading: 0, bottom: bottomTabs + bottomSearch + safeArea.bottom, trailing: 0 }) : screen.content
-  const contentBounds: Rect = screen.ignoresSafeArea
-    ? { x: 0, y: 0, width: canvas.width, height: canvas.height }
-    : { x: safeArea.leading, y: safeArea.top + topTabs + topSearch + barHeight - collapseDistance,
-        width: canvas.width - safeArea.leading - safeArea.trailing,
-        height: Math.max(0, canvas.height - safeArea.top - topTabs - topSearch - barHeight + collapseDistance - (scroll ? 0 : safeArea.bottom + bottomTabs + bottomSearch)) }
-  // What a view with `.ignoresSafeArea` grows between: the content's bounds, below
-  // the bars, and the whole device. A screen that ignores it already has the second.
-  const safe = screen.ignoresSafeArea ? null : { inner: contentBounds, outer: { x: 0, y: 0, width: canvas.width, height: canvas.height } }
-  const placed = engine.layout(content, contentBounds, { ...env, safeArea: safe }, CENTER)
+  const contentBounds: Rect = {
+    x: safeArea.leading, y: safeArea.top + topTabs + topSearch + barHeight - collapseDistance,
+    width: canvas.width - safeArea.leading - safeArea.trailing,
+    height: Math.max(0, canvas.height - safeArea.top - topTabs - topSearch - barHeight + collapseDistance - (scroll ? 0 : safeArea.bottom + bottomTabs + bottomSearch)),
+  }
+  // A view reaches out of the safe area on its own, where it touches an edge, and
+  // `.ignoresSafeArea()` on one view no longer makes the whole screen full-bleed.
+  const screenRect: Rect = { x: 0, y: 0, width: canvas.width, height: canvas.height }
+  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER)
   let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
+  // At rest the bar has no colour of its own in iOS 27, so what reaches under it shows
+  // through. Where nothing does, it keeps the screen's colour, which looks the same.
+  // A collapsing title keeps its surface for when the content scrolls beneath it, in
+  // the colour of what is under it.
+  const underBar = tree.nodes
+    .filter((node) => !node.parent && node.id !== 'screen' && node.frame.y < contentBounds.y - 0.5)
+    .sort((a, b) => b.z - a.z)
+  const beneath = underBar.find((node) => node.background?.kind === 'solid')?.background
   if (screen.navigationBar) {
-    const bar = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
+    const laidOut = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
+    const bar = !underBar.length ? laidOut
+      : collapseDistance && beneath ? laidOut.map((node) => node.id === 'navbar-bgf' && node.paint.kind === 'fill' ? { ...node, paint: { ...node.paint, fill: beneath } } : node)
+      : laidOut.filter((node) => node.id !== 'navbar-bgf')
     tree = appendPlaced(tree, bar, BAR_Z)
     tree = { ...tree, nodes: tree.nodes.map(node => {
       if (node.id === 'navbar-title') return { ...node, ...(collapseDistance ? { chromeRole: 'inlineTitle' as const } : {}), opacity: screen.navigationBar!.large ? 0 : node.opacity }
@@ -252,11 +271,12 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     }) }
   }
   if (screen.tabBar) {
-    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : canvas.height - Math.max(0, safeArea.bottom - SURFACES.tab.safeAreaOverlap) - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER)
+    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : bottomBarsEnd - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER)
     tree = appendPlaced(tree, bar, BAR_Z + 1000)
   }
   if (screen.search) {
-    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? canvas.height - safeArea.bottom - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
+    // At the bottom it sits where a tab bar would.
+    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? bottomBarsEnd - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
     tree = appendPlaced(tree, search, BAR_Z + 2000)
   }
   if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
@@ -307,8 +327,9 @@ function presentOverlay(
   const dimNodes = placedToRenderTree(nodes, canvas, 0).nodes.slice(1).map(n => ({ ...n, blocksPointer: true }))
   if (overlay.screen) {
     const sheet = overlay.kind === 'sheet' || overlay.kind === 'popover'
-    const top = sheet ? (overlay.showsDragIndicator !== false ? 10 : 12) : safeArea.top
-    const bottom = overlay.kind === 'cover' ? safeArea.bottom : Math.max(12, safeArea.bottom - SURFACES.sheet.margin)
+    const attached = attachedSheet(overlay, canvas.width)
+    const top = sheet ? sheetContentTop(overlay, attached, !!overlay.screen.navigationBar) : safeArea.top
+    const bottom = overlay.kind === 'cover' || attached ? safeArea.bottom : Math.max(12, safeArea.bottom - SURFACES.sheet.margin)
     const nested = composeScreen(engine, overlay.screen, { width: rect.width, height: rect.height }, { top, leading: 0, trailing: 0, bottom }, env)
     const prefix = 'overlay/'
     const radius = sheet ? overlay.cornerRadius ?? SURFACES.sheet.radius : 0
@@ -413,6 +434,8 @@ function overlayRect(
     return { x: (canvas.width - width) / 2, y: safeArea.top, width, height: canvas.height - safeArea.top - safeArea.bottom - 8 }
   }
 
+  if (attachedSheet(overlay, canvas.width)) return { x: 0, y: safeArea.top, width: canvas.width, height: canvas.height - safeArea.top }
+
   const margin = SURFACES.sheet.margin
   const available = Math.max(0, canvas.height - safeArea.top - SURFACES.sheet.top - margin)
   const detentHeight = (value: number) => Math.min(available, value < 0 ? -value + Math.max(0, safeArea.bottom - margin) : (canvas.height - safeArea.bottom) * value + safeArea.bottom)
@@ -447,10 +470,51 @@ function noticeTree(request: CompileRequest, title: string, detail: string): Ren
       frame: { x: pad, y: (request.safeArea?.top ?? 0) + 24, width, height: 92 },
       z: 1,
       opacity: 1,
-      placeholder: { feature: title, reason: detail },
+      placeholder: { kind: 'notice', feature: title, reason: detail },
     },
   ]
-  return { canvas: request.canvas, nodes, revision: ++revision }
+  return { canvas: request.canvas, nodes, revision: ++revision, notice: { title, detail } }
+}
+
+/**
+ * What the phone shows while the code has errors: how many, and the first.
+ *
+ * The same on every redraw, a compile or not: switching Edit and Preview, Reset and a
+ * font refinement redraw the program the worker already has, and a null tree there
+ * was a blank phone.
+ */
+function errorsNotice(request: CompileRequest, analysis: Analysis): RenderTree {
+  const errors = analysis.diagnostics.filter((d) => d.severity === 'error')
+  return noticeTree(request, `${errors.length} error${errors.length === 1 ? '' : 's'}`, errors[0]?.message ?? 'Fix the errors to run.')
+}
+
+/**
+ * A warning for what the preview left out around a screen's containers, pointing at
+ * where it is written. A floating button in a `ZStack` beside a NavigationStack
+ * would otherwise vanish with nothing to say why.
+ */
+function notDrawnWarning(item: NotDrawn): Diagnostic {
+  return item.modifier
+    ? {
+        span: item.span,
+        severity: 'warning',
+        code: 'unsupported_swiftui_modifier',
+        feature: `.${item.modifier} on ${item.container}`,
+        message: `The preview doesn't draw .${item.modifier} written on the ${item.container}. It still appears in the app.`,
+      }
+    : {
+        span: item.span,
+        severity: 'warning',
+        code: 'unsupported_swiftui_view',
+        feature: `views beside ${item.container}`,
+        message: `The preview doesn't show views beside the ${item.container}, only what is inside it. This one still appears in the app.`,
+      }
+}
+
+/** Each item once for its place in the source, or once for each message said there when `perMessage`. */
+function oncePerPlace<T extends { readonly span: SourceSpan; readonly message: string }>(items: readonly T[], perMessage: boolean): T[] {
+  const key = (item: T) => `${item.span.file}:${item.span.start}:${item.span.end}${perMessage ? `:${item.message}` : ''}`
+  return [...new Map(items.map((item) => [key(item), item])).values()]
 }
 
 function toResult(
@@ -462,7 +526,8 @@ function toResult(
   evaluateMs: number,
   layoutMs: number,
   pages?: readonly PagePreview[],
-  pageFailures?: readonly PageFailure[],
+  notDrawnPages: readonly Diagnostic[] = [],
+  galleryWarnings: readonly Diagnostic[] = [],
 ): CompileResult {
   const total = performance.now() - startedAt
 
@@ -473,16 +538,19 @@ function toResult(
     at: total,
   }))
 
-  const diagnostics = [...analysis.diagnostics]
-  if (evaluation?.failure) {
+  // A sheet can be resolved more than once in a pass, so each place is said once.
+  const resolved = oncePerPlace([...(evaluation?.ui?.notDrawn ?? []).map(notDrawnWarning), ...(evaluation?.ui?.warnings ?? []), ...galleryWarnings], false)
+  // Tabs a ForEach built share one source, so a screen not drawn is told apart by its name too.
+  const notDrawn = oncePerPlace(notDrawnPages, true)
+  const diagnostics = [...analysis.diagnostics, ...resolved, ...notDrawn]
+  // A view that stopped is drawn as a placeholder, and said once however many times it stopped.
+  const failures = oncePerPlace([...(evaluation?.failure ? [evaluation.failure] : []), ...stoppedFailures(evaluation?.ui)], true)
+  for (const failure of failures) {
     diagnostics.push({
-      span: evaluation.failure.span,
+      span: failure.span,
       severity: 'error',
-      code: evaluation.failure.kind === 'budget' ? 'execution_budget_exceeded' : 'runtime_trap',
-      message:
-        evaluation.failure.frames.length > 0
-          ? `${evaluation.failure.message} (in ${evaluation.failure.frames[0]})`
-          : evaluation.failure.message,
+      code: failure.kind === 'budget' ? 'execution_budget_exceeded' : 'runtime_trap',
+      message: failure.frames.length > 0 ? `${failure.message} (in ${failure.frames[0]})` : failure.message,
     })
   }
 
@@ -497,7 +565,7 @@ function toResult(
     renderTree,
     viewHierarchy: evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],
     ...(pages ? { pages } : {}),
-    ...(pageFailures?.length ? { pageFailures } : {}),
+    ...(notDrawn.length ? { pagesNotDrawn: notDrawn.map((warning) => warning.message) } : {}),
     logs,
     textMeasurement: renderTree && !evaluation?.failure ? { ...metrics.measurementState, generation: fontGeneration } : undefined,
     timings: {
@@ -522,22 +590,7 @@ export function compile(request: CompileRequest): CompileResult {
 
   // Evaluation needs a well-formed program. Running one with parse errors would
   // produce failures that describe the broken parse rather than the user's code.
-  if (hasBlockingError(analysis.diagnostics)) {
-    const errors = analysis.diagnostics.filter((d) => d.severity === 'error')
-    return toResult(
-      request,
-      analysis,
-      null,
-      noticeTree(
-        request,
-        `${errors.length} error${errors.length === 1 ? '' : 's'}`,
-        errors[0]?.message ?? 'Fix the errors to run.',
-      ),
-      startedAt,
-      0,
-      0,
-    )
-  }
+  if (hasBlockingError(analysis.diagnostics)) return toResult(request, analysis, null, errorsNotice(request, analysis), startedAt, 0, 0)
 
   const evaluateStart = performance.now()
   let evaluationFiles = analysis.files
@@ -582,9 +635,7 @@ export function rerender(revision: number): CompileResult {
   lastAnalysis = { request: next, analysis }
 
   const startedAt = performance.now()
-  if (hasBlockingError(analysis.diagnostics)) {
-    return toResult(next, analysis, null, null, startedAt, 0, 0)
-  }
+  if (hasBlockingError(analysis.diagnostics)) return toResult(next, analysis, null, errorsNotice(next, analysis), startedAt, 0, 0)
 
   const evaluateStart = performance.now()
   let evaluation = runtime.evaluate()
@@ -644,10 +695,9 @@ function finish(
 
   // After the geometry retry, so a reader in a page the device is not showing
   // cannot report a size back into the live one.
-  const pageFailures: PageFailure[] = []
-  const pages = request.allPages ? renderPages(request, evaluation, renderTree, pageFailures) : undefined
+  const gallery = request.allPages ? renderPages(request, evaluation, renderTree) : undefined
 
-  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, pages, pageFailures)
+  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, gallery?.pages, gallery?.notDrawn, gallery?.warnings)
 }
 
 /**
@@ -660,102 +710,196 @@ function finish(
  */
 const GALLERY_LIMIT = 12
 
+/** The pages the gallery drew, and a warning at each screen it couldn't draw. */
+interface Gallery {
+  readonly pages?: readonly PagePreview[]
+  readonly notDrawn: readonly Diagnostic[]
+  /** What running each screen it draws found, as the live screen's own warnings are (D11). */
+  readonly warnings?: readonly Diagnostic[]
+}
+
+/** Why a screen is missing once the gallery's one step budget is spent. */
+const BUDGET_SPENT = 'drawing the screens took all the time the preview gives the canvas'
+
 /**
  * Every page, drawn on its own.
  *
  * The live root tree is reused when it is still on its main screen. A pushed or
  * presented live screen keeps running separately while the design gallery shows
  * its main page and related screens as independent phones.
+ *
+ * Each page is drawn on its own guard: one that stops, or lays out at a size the
+ * canvas can't draw, is left out with a warning at its source, and the others still
+ * draw. Every page shares one step budget, standalone design screens included, as a
+ * fresh one each would multiply the worst case toward the worker's deadline; once it
+ * is spent the rest are reported rather than tried, since each would stop on its
+ * first step.
  */
 function renderPages(
   request: CompileRequest,
   evaluation: EvaluationResult,
   active: RenderTree,
-  failures: PageFailure[],
-): readonly PagePreview[] | undefined {
+): Gallery {
   const pages = (evaluation.ui?.viewHierarchy ?? []).filter((layer) => layer.type === 'Page')
-  if (!pages.length) return undefined
+  if (!pages.length) return { notDrawn: [] }
 
   const out: PagePreview[] = []
+  const notDrawn: Diagnostic[] = []
+  const warnings: Diagnostic[] = []
+  let spent = false
+  /** Says a screen, or the screens a page opens, isn't drawn, and why. */
+  const skip = (missing: string, source: SourceSpan | undefined, cause: unknown): void => {
+    if (exhausts(cause)) spent = true
+    const span = source ?? { file: request.files[0]?.id ?? '', start: 0, end: 0 }
+    const reason = spent ? BUDGET_SPENT : cause instanceof InvalidLayout ? cause.message : isFailure(cause) ? cause.message : toFailure(cause, span).message
+    notDrawn.push({ span, severity: 'warning', code: spent ? 'execution_budget_exceeded' : 'runtime_trap', message: `${missing} on the Design canvas: ${reason}.` })
+  }
+  const screen = (name: string) => `"${name}" isn't drawn`
   const limit = Number.isFinite(request.galleryLimit) ? Math.max(1, Math.min(128, Math.floor(request.galleryLimit!))) : GALLERY_LIMIT
-  const preview = runtime.previewRuntime()
+  const drawing = runtime.previewRuntime()
+  const preview = drawing && !drawing.evaluation.failure ? drawing : null
   let remainingChildren = limit
   for (const [index, page] of pages.slice(0, limit).entries()) {
+    if (spent) { skip(screen(page.name), page.source, null); continue }
     const isActive = page.page?.active === true
-    const ui = preview?.runtime.resolvePage(preview.evaluation.views, index, true)
-      ?? (isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index))
-    if (!ui) continue
-    const isLiveRoot = isActive && !evaluation.ui?.navigationBar?.canGoBack && !evaluation.ui?.overlay
-    const tree = isLiveRoot ? active : render(request, { ...evaluation, ui }, true, preview?.runtime)
-    out.push({
-      id: page.id,
-      rootId: page.id,
-      kind: 'root',
-      name: page.name,
-      active: isActive,
-      ...(page.source ? { source: page.source } : {}),
-      ...(page.page?.handlerId ? { handlerId: page.page.handlerId } : {}),
-      ...(page.page?.icon ? { icon: page.page.icon } : {}),
-      viewHierarchy: ui.viewHierarchy?.filter(layer => layer.id === page.id) ?? [page],
-      tree,
-    })
+    try {
+      const ui = preview?.runtime.resolvePage(preview.evaluation.views, index, true)
+        ?? (isActive ? evaluation.ui : runtime.resolvePage(evaluation.views, index))
+      if (!ui) continue
+      warnings.push(...ui.warnings ?? [])
+      const isLiveRoot = isActive && !evaluation.ui?.navigationBar?.canGoBack && !evaluation.ui?.overlay
+      const tree = isLiveRoot ? active : drawable(render(request, { ...evaluation, ui }, true, preview?.runtime))
+      out.push({
+        id: page.id,
+        rootId: page.id,
+        kind: 'root',
+        name: page.name,
+        active: isActive,
+        ...(page.source ? { source: page.source } : {}),
+        ...(page.page?.handlerId ? { handlerId: page.page.handlerId } : {}),
+        ...(page.page?.icon ? { icon: page.page.icon } : {}),
+        viewHierarchy: ui.viewHierarchy?.filter(layer => layer.id === page.id) ?? [page],
+        tree,
+      })
+    } catch (error) {
+      skip(screen(page.name), page.source, error)
+      continue
+    }
     if (!preview || !remainingChildren) continue
-    const nested = preview.runtime.resolveNestedPages(preview.evaluation.views, index, page.id, remainingChildren, failures)
+    let nested: readonly NestedPage[]
+    try {
+      nested = preview.runtime.resolveNestedPages(preview.evaluation.views, index, page.id, remainingChildren)
+    } catch (error) {
+      skip(`The screens ${page.name} opens aren't drawn`, page.source, error)
+      continue
+    }
     for (const child of nested) {
       if (!out.some(parent => parent.id === child.parentId)) continue
-      let childTree: RenderTree
+      if (spent) { skip(screen(child.name), child.source, null); continue }
       try {
-        childTree = render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime)
-        if (childTree.nodes.some(node => !Object.values(node.frame).every(Number.isFinite) || node.frame.width < 0 || node.frame.height < 0)) {
-          failures.push({ name: child.name, kind: child.kind, message: 'The preview produced an invalid layout size for this screen.', source: child.source })
-          continue
-        }
+        const childTree = drawable(render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime))
+        warnings.push(...child.ui.warnings ?? [])
+        out.push({
+          id: child.id, parentId: child.parentId, rootId: child.rootId,
+          kind: child.kind, name: child.name, source: child.source, active: false,
+          viewHierarchy: child.ui.viewHierarchy?.map(layer => ({ ...layer, id: child.id })),
+          tree: childTree,
+        })
       } catch (error) {
-        failures.push({ name: child.name, kind: child.kind, message: error instanceof Error ? error.message : 'It could not be laid out.', source: child.source })
-        continue
+        skip(screen(child.name), child.source, error)
       }
-      out.push({
-        id: child.id, parentId: child.parentId, rootId: child.rootId,
-        kind: child.kind, name: child.name, source: child.source, active: false,
-        viewHierarchy: child.ui.viewHierarchy?.map(layer => ({ ...layer, id: child.id })),
-        tree: childTree,
-      })
     }
     remainingChildren -= nested.length
   }
+  // Design screens nothing links to yet run in a program of their own, on what the
+  // pages above left of the budget.
+  let budget = DEFAULT_STEP_BUDGET - (preview?.runtime.stepsUsed ?? 0)
   const renamedIds = new Map<string, string>()
-  for (const screen of (request.designScreens ?? []).slice(0, limit)) {
-    const definition = lastAnalysis?.analysis.authoring.nodes.find(n => n.kind === 'definition' && n.name === screen.view)
+  const views = pageViews(out)
+  for (const design of (request.designScreens ?? []).slice(0, limit)) {
+    const definition = lastAnalysis?.analysis.authoring.nodes.find(n => n.kind === 'definition' && n.name === design.view)
     if (!definition) continue
-    const existingIndex = out.findIndex(page => page.viewHierarchy?.[0]?.children[0]?.componentSources?.at(-1)?.name === screen.view)
-    if (existingIndex >= 0) {
-      const page = out[existingIndex]!, id = 'screen:' + screen.view
+    const own = out.filter(page => views.get(page.id) === design.view)
+    if (own.length) {
+      const page = own[0]!, id = 'screen:' + design.view
+      // A view drawing several pages, one list as two tabs, leaves each its own title.
+      const name = own.length === 1 ? design.name : page.name
       renamedIds.set(page.id, id)
-      out[existingIndex] = { ...page, id, name: screen.name, viewHierarchy: page.viewHierarchy?.map(layer => ({ ...layer, id, name: screen.name })) }
+      out[out.indexOf(page)] = { ...page, id, name, viewHierarchy: page.viewHierarchy?.map(layer => ({ ...layer, id, name })) }
       continue
     }
-    const detached = runtime.previewRuntime(screen.view)
-    if (!detached?.evaluation.ui) continue
-    const id = 'screen:' + screen.view
+    // A view holding tabs or sheets written in place is on the canvas already, around them.
+    if (out.some(page => viewsDrawing(page).some(view => view.name === design.view))) continue
+    if (spent || budget <= 0) { spent = true; skip(screen(design.name), definition.source, null); continue }
+    const detached = runtime.previewRuntime(design.view, budget)
+    if (!detached) continue
+    const id = 'screen:' + design.view
     try {
-      const tree = render(request, detached.evaluation, true, detached.runtime)
-      if (tree.nodes.some(n => !Object.values(n.frame).every(Number.isFinite))) continue
-      out.push({ id, rootId: id, kind: 'root', standalone: true, name: screen.name, active: false, source: definition.source,
+      const failure = detached.evaluation.failure
+      if (failure) {
+        if (detached.runtime.stepsUsed >= budget) spent = true
+        skip(screen(design.name), definition.source, failure)
+        continue
+      }
+      if (!detached.evaluation.ui) continue
+      const tree = drawable(render(request, detached.evaluation, true, detached.runtime))
+      warnings.push(...detached.evaluation.ui.warnings ?? [])
+      out.push({ id, rootId: id, kind: 'root', standalone: true, name: design.name, active: false, source: definition.source,
         viewHierarchy: detached.evaluation.ui.viewHierarchy?.map(layer => ({ ...layer, id })), tree })
-    } catch { /* A failed standalone screen does not invalidate the running app. */ }
+    } catch (error) {
+      // A failed standalone screen does not invalidate the running app.
+      if (detached.runtime.stepsUsed >= budget) spent = true
+      skip(screen(design.name), definition.source, error)
+    } finally {
+      budget -= detached.runtime.stepsUsed
+    }
   }
-  return out.map(page => ({ ...page, rootId: renamedIds.get(page.rootId ?? '') ?? page.rootId, parentId: renamedIds.get(page.parentId ?? '') ?? page.parentId }))
+  return {
+    pages: out.map(page => {
+      // A design screen's page, and a standalone one, is its view's by its id.
+      const view = page.id.startsWith('screen:') ? page.id.slice(7) : views.get(page.id)
+      return { ...page, ...(view ? { view } : {}), rootId: renamedIds.get(page.rootId ?? '') ?? page.rootId, parentId: renamedIds.get(page.parentId ?? '') ?? page.parentId }
+    }),
+    notDrawn,
+    warnings,
+  }
 }
 
-/** The measured size of every geometry reader in a tree, keyed as it reported. */
-function geometryFrom(tree: RenderTree): Map<string, { width: number; height: number }> {
-  const sizes = new Map<string, { width: number; height: number }>()
-  for (const node of tree.nodes) {
-    if (!node.id.startsWith('geo:')) continue
-    sizes.set(node.id.slice(4), { width: node.frame.width, height: node.frame.height })
+/** A page whose layout has a size the canvas can't draw. */
+class InvalidLayout extends Error {}
+
+/** The tree, once every frame in it is a size the canvas can draw: finite, and not negative. */
+function drawable(tree: RenderTree): RenderTree {
+  if (tree.nodes.some((node) => !Object.values(node.frame).every(Number.isFinite) || node.frame.width < 0 || node.frame.height < 0)) {
+    throw new InvalidLayout("its layout has a size the canvas can't draw")
   }
-  return sizes
+  return tree
 }
+
+/** Whether what stopped a screen is already a failure the runtime described. */
+function isFailure(cause: unknown): cause is RuntimeFailure {
+  return typeof cause === 'object' && cause !== null && !(cause instanceof Error) && 'message' in cause && 'span' in cause && 'kind' in cause
+}
+
+/** What every geometry reader in a tree was measured at, its size, place on the screen and safe area, keyed as it reported. */
+function geometryFrom(tree: RenderTree): Map<string, GeometryPayload> {
+  const measured = new Map<string, GeometryPayload>()
+  // A sheet's nodes are prefixed with `overlay/`, and its readers are measured too.
+  const readers = tree.nodes.filter((node) => node.id.includes('geo:'))
+  if (readers.length === 0) return measured
+  const byId = new Map(tree.nodes.map((node) => [node.id, node]))
+  for (const node of readers) {
+    // Where it is on the screen: its frame is in its parent's space, and so on up.
+    let { x, y } = node.frame
+    for (let up = node.parent ? byId.get(node.parent) : undefined; up; up = up.parent ? byId.get(up.parent) : undefined) {
+      x += up.frame.x
+      y += up.frame.y
+    }
+    measured.set(node.id.slice(node.id.indexOf('geo:') + 4), { width: node.frame.width, height: node.frame.height, x, y, insets: node.geometryInsets ?? ZERO_INSETS })
+  }
+  return measured
+}
+
 
 /**
  * What `@Environment` reports, from what the preview controls are set to.

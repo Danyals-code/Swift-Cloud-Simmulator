@@ -39,6 +39,16 @@ describe('isPristine', () => {
 
     expect(isPristine(extra)).toBe(false)
   })
+
+  it('is false once there is an AI conversation, with every file as it was made (B4)', () => {
+    // Somebody who only chatted, or whose AI edits were undone back to the template,
+    // still has something to lose: the conversation is study data.
+    const project = createProjectFromTemplate(TEMPLATES[0]!, 0)
+    const chatted = { ...project, chatHistory: [{ id: 'm1', role: 'user' as const, content: 'Make it blue', createdAt: 1, provider: 'openai' as const, model: 'gpt-5.4-mini', kind: 'edit' as const }] }
+
+    expect(isPristine(chatted)).toBe(false)
+    expect(isPristine({ ...project, chatHistory: [] })).toBe(true)
+  })
 })
 
 describe('the App and Feature split', () => {

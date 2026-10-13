@@ -1,26 +1,27 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AuthoringNode, DesignEditRequest, ExportFormat, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
-import { validatePreviewScenario, reconcileAuthoringSelection, LAYER_MOVE_CONTAINERS, layerMoveProblem, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
-import { AXES, type CanvasMove, type MoveContainer } from '../lib/canvasMove'
-import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { ArchiveFormat, AuthoringNode, CopiedView, DesignEditRequest, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
+import { groupLayoutOf, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
+import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink, type Project, type StudioMetadata } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
-import { getDevice } from '@studio/sim-shell'
-import type { FileId, PagePreview, PreviewScenario, RenderNode, SourceSpan, UIEvent, ViewLayer } from '@studio/shared'
-import { useStudio, type PreviewSettings } from '../lib/store'
-import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
+import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
+import type { DropPosition, FileId, PagePreview, PreviewScenario, RenderNode, RenderTree, SourcePoint, SourceSpan, ViewLayer } from '@studio/shared'
+import { AI_EDITING, useStudio, type PreviewSettings } from '../lib/store'
+import type { HiddenViewInfo, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
 import { draggingFiles, imageViewSnippet, importImageFiles } from '../lib/images'
 import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-model'
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
 import { findLayer, insertionLayer, layerForRenderNode, layerRenderIds } from '../lib/layers'
+import { canvasDrop, canvasParent, canvasPick, type CanvasScene, type CanvasSelection } from '../lib/canvasSelection'
 import { navigationDestinationForPage } from '../lib/navigationPicker'
 import { useNavigationPicker } from '../lib/useNavigationPicker'
-import { authoringRenderIds, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
+import { authoringRenderGroups, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
 import { useCompiler } from '../lib/useCompiler'
+import { phoneView } from '../lib/phoneView'
 /**
  * Problems, output, timings and coverage, fetched when the panel is opened.
  *
@@ -30,19 +31,21 @@ import { useCompiler } from '../lib/useCompiler'
  */
 const ConsolePane = dynamic(() => import('./ConsolePane').then((m) => m.ConsolePane), { ssr: false })
 import { InspectorReadout } from './InspectorReadout'
-import { DevicePane } from './DevicePane'
+import { DevicePane, type CanvasDropTarget, type InlineTextTarget } from './DevicePane'
+import type { InspectKeys } from '@studio/swiftui-render-dom'
 import { AuthoringInspector } from './AuthoringInspector'
 import type { FeatureProps } from './AuthoringFeatures'
 import { DesignNavigator, type DesignLevel, type HierarchyView } from './DesignNavigator'
 import { AssetsFolder, ProjectFiles, type AssetsFolderProps } from './ProjectFiles'
 import { StudioSidebar } from './StudioSidebar'
-import { LogicalLayers } from './LogicalLayers'
+import { AiEditBanner } from './AiEditBanner'
+import { LogicalLayers, type MultiSelection } from './LogicalLayers'
 import { AppSettings } from './settings/AppSettings'
 import { AppNavigationSettings } from './settings/AppNavigationSettings'
 import { ScreenSettings } from './settings/ScreenSettings'
 import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
 import { designScreens, designTree, type DesignTree } from '../lib/designTree'
-import { sourceLayerLabel } from '../lib/sourceLayers'
+import { sourceLayerAround, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { FileSwitcher } from './FileSwitcher'
@@ -52,18 +55,38 @@ const DesignReview = dynamic(() => import('./DesignReview').then(m => m.DesignRe
 import { scenarioKey, scenarioScreen, screenCatalog, screenDefinition, type ScreenCommand, type DesignScreen } from '../lib/screens'
 import { Navigator } from './Navigator'
 import { TabBar } from './TabBar'
-import { TemplateGallery } from './TemplateGallery'
-import { Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
+import { TemplateGallery, type GallerySource } from './TemplateGallery'
+import { DesignWarnings, Toolbar, PreviewStatus, PreviewTools } from './Toolbar'
+import { designWarnings, type DesignWarning } from '../lib/designWarnings'
+import { BUILD_DETAILS, BUILD_NAME } from '../lib/build'
+import { eventLog, type StudioChange } from '../lib/eventLog'
+import { designEvent, refusedClipboard, studioChange } from '../lib/designEvents'
+import { NOTHING_COPIED, busyEditProblem } from '../lib/editRefusals'
+import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
+import { PaneBoundary } from './PaneBoundary'
+import { ErrorBanner } from './ErrorBanner'
+import { StorageBanner } from './StorageBanner'
+import { saveNote, storageProblem } from '../lib/storageProblem'
+import { keyFocus, shortcutFor, SHORTCUT_KEYS } from '../lib/shortcuts'
+import { COMFORTABLE_WIDTH, environmentPlacement, paneLayout, type EnvironmentPicker } from '../lib/paneLayout'
+import { OpenElsewhere } from './OpenElsewhere'
+import { startStudioTab, studioTabState, subscribeStudioTab } from '../lib/activeTab'
 import styles from './Workspace.module.css'
 import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
+const NO_IDS: readonly string[] = []
 const NO_DIAGNOSTICS: never[] = []
+const NO_GROUPS: readonly (readonly string[])[] = []
+const NO_MULTI_SELECTION = { page: '', files: [], ids: [] }
 const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], components: [] }
 
-/** The narrowest the editor is allowed to get before the side panes start yielding. */
-const EDITOR_MIN = 300
+/** Changes the studio's own records for `project`: one Undo step, named `op` in the event log. */
+function commitStudioRecords(project: Project, after: StudioMetadata, op: StudioChange): string | null {
+  const state = useStudio.getState()
+  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after } }, studioChange(op))
+}
 
 export function Studio() {
   const project = useStudio((s) => s.project)
@@ -73,8 +96,14 @@ export function Studio() {
   const origin = useStudio((s) => s.origin)
   const lastSavedAt = useStudio((s) => s.lastSavedAt)
   const saveError = useStudio((s) => s.saveError)
+  const saveOutdated = useStudio((s) => s.saveOutdated)
+  const loadError = useStudio((s) => s.loadError)
+  const durable = useStudio((s) => s.durable)
+  const storage = useMemo(() => storageProblem({ saveError, saveOutdated, durable, loadError }), [saveError, saveOutdated, durable, loadError])
   const previewSettings = useStudio((s) => s.preview)
   const canUndo = useStudio((s) => s.canUndo)
+  /** An AI edit holds the project: editing waits until its answer lands (G12). */
+  const aiEditing = useStudio((s) => s.aiEdit !== null)
   const canRedo = useStudio((s) => s.canRedo)
 
   const load = useStudio((s) => s.load)
@@ -101,7 +130,8 @@ export function Studio() {
 
   const [layerSelection, setLayerSelection] = useState<{ projectId: string; id: string; anchor?: AuthoringSelection } | null>(null)
   /** The node the inspector's pointer is over. Null whenever it is over nothing. */
-  const [hoveredNode, setHoveredNode] = useState<RenderNode | null>(null)
+  const [hoveredUnder, setHoveredUnder] = useState<readonly RenderNode[] | null>(null)
+  const hoveredNode = hoveredUnder?.[0] ?? null
   const [hoveredAuthoring, setHoveredAuthoring] = useState<{ node: AuthoringNode; runtimeId?: string; projectId?: string } | null>(null)
   const [designPageSelection, setDesignPageSelection] = useState<{ projectId: string; id: string } | null>(null)
   const hoverProjectId = project?.id
@@ -110,7 +140,7 @@ export function Studio() {
   // closed its layers in the tree as the pointer crossed the canvas - the focus moves
   // on a click, as it does in any design tool.
   const [hoveredPage, setHoveredPage] = useState<string | undefined>()
-  const hoverPreview = useCallback((node: RenderNode | null, pageId?: string) => { setHoveredNode(node); setHoveredPage(node ? pageId : undefined) }, [])
+  const hoverPreview = useCallback((under: readonly RenderNode[] | null, pageId?: string) => { setHoveredUnder(under); setHoveredPage(under ? pageId : undefined) }, [])
   const setNavigatorTab = useLayout(s => s.setNavigatorTab)
   const navigatorLayout = useLayout(s => s.navigatorLayout)
   const setNavigatorLayout = useLayout(s => s.setNavigatorLayout)
@@ -153,6 +183,11 @@ export function Studio() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [pageFocusEpoch, setPageFocusEpoch] = useState(0)
+  /**
+   * The layers selected together in Layers, for its bar and for ⌘G (D3): kept here so that
+   * ⌘G reaches them wherever the focus is, and for the page they were chosen on.
+   */
+  const [multiSelection, setMultiSelection] = useState<MultiSelection & { readonly page: string }>(NO_MULTI_SELECTION)
   /** What the source says can be done to the selection, which the controls are drawn from. */
   const [siteInfo, setSiteInfo] = useState<{ key: string; info: ViewSiteInfo | null } | null>(null)
   /**
@@ -164,9 +199,12 @@ export function Studio() {
    */
   const [pendingSelect, setPendingSelect] = useState<{ projectId: string; file: FileId; offset: number; text: string } | null>(null)
   /** Raised when an edit could not be made, so the canvas can say why. */
-  const [editNote, setEditNote] = useState<string | null>(null)
+  /** What the last edit said; a refusal that points into the source - a syntax error Code can show - carries where. */
+  const [editNote, setEditNote] = useState<string | { readonly text: string; readonly location: SourcePoint } | null>(null)
   /** Hierarchy's two views: the app's layers, or its files - Assets and Swift. */
   const [hierarchyView, setHierarchyView] = useState<HierarchyView>('layers')
+  const noteText = typeof editNote === 'string' ? editNote : editNote?.text
+  const noteLocation = typeof editNote === 'string' ? undefined : editNote?.location
   const [exporting, setExporting] = useState(false)
   const exportInProgress = useRef(false)
   /** Serializes source planning; typing can still invalidate an in-flight plan. */
@@ -174,7 +212,7 @@ export function Studio() {
   const [preparingEdit, setPreparingEdit] = useState(false)
   const [committedEditRevision, setCommittedEditRevision] = useState(0)
   /** A view copied from Layers or the canvas, as the Swift that draws it. */
-  const [clipboard, setClipboard] = useState<string | null>(null)
+  const [clipboard, setClipboard] = useState<CopiedView | null>(null)
   const [hidden, setHidden] = useState<{ key: string; views: readonly HiddenViewInfo[] }>({ key: '', views: [] })
   const [centerOn, setCenterOn] = useState<{ id: string; nonce: number } | null>(null)
   const centerNonce = useRef(0)
@@ -190,6 +228,8 @@ export function Studio() {
    * looking at a project they did not pick.
    */
   const [galleryAtLaunch, setGalleryAtLaunch] = useState(false)
+  /** Where the sheet opens when it was asked for: the projects, or a new one. */
+  const [gallerySource, setGallerySource] = useState<GallerySource | undefined>(undefined)
   const greeted = useRef(false)
   const [caret, setCaret] = useState(0)
   const splitRef = useRef<HTMLDivElement | null>(null)
@@ -197,9 +237,12 @@ export function Studio() {
   const [reveal, setReveal] = useState<{ offset: number; nonce: number } | null>(null)
   const revealNonce = useRef(0)
 
+  /** Whether this tab has the studio, or another tab does (B1). Nothing loads until it is this one. */
+  const tab = useSyncExternalStore(subscribeStudioTab, studioTabState, () => 'checking' as const)
+  useEffect(() => { startStudioTab(options => useStudio.getState().handOver(options)) }, [])
   useEffect(() => {
-    void load()
-  }, [load])
+    if (tab === 'active') void load()
+  }, [tab, load])
 
   /**
    * The sheet at launch.
@@ -212,6 +255,12 @@ export function Studio() {
   useEffect(() => {
     if (!loaded || greeted.current || origin === 'shared') return
     greeted.current = true
+    // Coming back to saved work - or after a crash, when the next project opened should
+    // be a choice - leads to the projects rather than to a new one (B6). The untouched
+    // starter on its own is not work yet; a rename is, as it is everywhere else.
+    const { project: opened, recents: saved } = useStudio.getState()
+    const untouched = !!opened && opened.manifest.templateId !== undefined && isPristine(opened)
+    setGallerySource(origin === 'recovered' || (origin === 'restored' && (!untouched || saved.length > 1)) ? 'open' : 'design')
     setGalleryAtLaunch(true)
     setGalleryOpen(true)
   }, [loaded, origin])
@@ -243,25 +292,57 @@ export function Studio() {
 
   const toggleInspect = useCallback(() => setDesigning(!inspecting), [setDesigning, inspecting])
 
-  const openGallery = useCallback(() => {
+  /**
+   * A change a panel asks the store for. While an AI edit holds the project the store
+   * refuses it; this says why, rather than failing silently or as if the name were wrong.
+   */
+  const unlessAiEditing = <A extends unknown[], R>(change: (...args: A) => R, refused: R) => (...args: A): R => {
+    if (!useStudio.getState().aiEdit) return change(...args)
+    setEditNote(AI_EDITING)
+    return refused
+  }
+
+  const openGallery = useCallback((source: GallerySource) => {
+    // Opening another project would stop the AI edit and throw away its paid answer (G12).
+    if (useStudio.getState().aiEdit) { setEditNote(AI_EDITING); return }
+    setGallerySource(source)
     setGalleryAtLaunch(false)
     setGalleryOpen(true)
   }, [])
 
   // Debounced autosave can lose the last edit when a tab is closed or backgrounded,
-  // so force the pending write at both of the points the browser gives us.
+  // so force the pending writes, the project's and the event log's, at both of the
+  // points the browser gives us. Only when the tab is hidden: coming back to one has
+  // nothing new to write, and used to put this tab's copy back over whatever another
+  // tab had saved meanwhile (B1).
   useEffect(() => {
-    const onHide = () => void flush()
-    document.addEventListener('visibilitychange', onHide)
-    window.addEventListener('pagehide', onHide)
+    const leaving = () => { void flush(); void eventLog.flush() }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') leaving() }
+    const onPageHide = leaving
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
     return () => {
-      document.removeEventListener('visibilitychange', onHide)
-      window.removeEventListener('pagehide', onHide)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
     }
   }, [flush])
 
+  // Closing or reloading while work is not saved asks first (B3): a pending save may
+  // not finish as the page goes, and a failing one never will. Not when a recovery
+  // surface is reloading because somebody chose to there - they have been asked.
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (tab !== 'active' || leavingOnPurpose() || !useStudio.getState().unsavedWork()) return
+      void flush()
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [tab, flush])
+
   const images = useMemo(() => project?.assets?.map(asset => ({ name: asset.name, width: asset.light.width / asset.scale, height: asset.light.height / asset.scale, light: imageDataURL(asset.light), dark: asset.dark ? imageDataURL(asset.dark) : undefined })), [project?.assets])
-  const device = getDevice(project?.manifest.device ?? 'iphone-15')
+  const device = getDevice(project?.manifest.device ?? DEFAULT_DEVICE)
   const files = project?.files ?? NO_FILES
   const [scenarioSelection, setScenarioSelection] = useState<{ projectId: string; key: string } | null>(null)
   const scenario = scenarioSelection?.projectId === project?.id ? project?.studio?.scenarios.find(s => scenarioKey(s) === scenarioSelection?.key) : undefined
@@ -285,6 +366,16 @@ export function Studio() {
 
   /** The authoring snapshot on its own, so memoized work depends on it and not the whole result. */
   const snapshot = result?.authoring
+
+  /**
+   * The last screen that ran, per project and state, so that while the code has errors
+   * the phone keeps it, dimmed, under the notice (FR-6.3).
+   */
+  const phoneKey = JSON.stringify([project?.id, scenario ?? null])
+  const [lastRan, setLastRan] = useState<{ key: string; tree: RenderTree } | null>(null)
+  const latestTree = result?.renderTree ?? null
+  if (latestTree && !latestTree.notice && (lastRan?.tree !== latestTree || lastRan.key !== phoneKey)) setLastRan({ key: phoneKey, tree: latestTree })
+  const phone = phoneView(latestTree, lastRan?.key === phoneKey ? lastRan.tree : null, workerError)
 
   const activeFile = useMemo(
     () => (project && activeFileId ? findFile(project, activeFileId) : undefined),
@@ -323,53 +414,16 @@ export function Studio() {
   }, [loaded])
 
   /**
-   * What the side panes actually get.
-   *
-   * Their stored widths and even their visibility are a preference, not a promise.
-   * Below about 780px there is no arrangement in which a navigator, an editor and a
-   * phone all have a usable width, so one of them has to go - and a preview squeezed
-   * to 300px beside a 104px editor serves nobody. The preview yields first: a
-   * narrower phone is still a phone, while an editor that fits eight characters is
-   * not an editor.
-   *
-   * The preference is kept rather than written back, so widening the window brings
-   * the pane back exactly as it was.
+   * Layers asked for in a Design window too narrow to set it beside the canvas, where it is
+   * drawn over the canvas instead (D15). Never stored: the window decides, not a preference.
    */
-  const layout = useMemo(() => {
-    const navMin = PANE_LIMITS.navigator.min
-    const previewMin = PANE_LIMITS.preview.min
-
-    // Only the *combination* is refused. A single side pane the user asked for is
-    // always shown, even if the editor then has to go under its comfortable
-    // minimum: hiding the one thing somebody just switched on is worse than a
-    // narrow editor, and they can close it again in one keystroke.
-    const showNavigator = shown.navigator && !(mode === 'design' && available < 820)
-    if (mode === 'design') return { nav: showNavigator ? navigatorWidth : 0, preview: 0, showNavigator, showPreview: true }
-    const showPreview =
-      shown.preview &&
-      !(
-        showNavigator &&
-        Number.isFinite(available) &&
-        available < navMin + previewMin + EDITOR_MIN
-      )
-
-    const nav = showNavigator ? navigatorWidth : 0
-    const prev = showPreview ? previewWidth : 0
-    const overflow = nav + prev + EDITOR_MIN - available
-
-    if (!Number.isFinite(overflow) || overflow <= 0) {
-      return { nav, preview: prev, showNavigator, showPreview }
-    }
-
-    const fromPreview = Math.min(overflow, Math.max(0, prev - previewMin))
-    const rest = overflow - fromPreview
-    return {
-      nav: Math.max(navMin, nav - Math.max(0, rest)),
-      preview: prev - fromPreview,
-      showNavigator,
-      showPreview,
-    }
-  }, [available, navigatorWidth, previewWidth, shown.navigator, shown.preview, mode])
+  const [layersOver, setLayersOver] = useState(false)
+  /** The narrow-window note, dismissed for this visit. */
+  const [narrowNoted, setNarrowNoted] = useState(false)
+  const layout = useMemo(() => paneLayout({ available, mode, shown, widths: { navigator: navigatorWidth, preview: previewWidth }, layersOver }),
+    [available, navigatorWidth, previewWidth, shown, mode, layersOver])
+  // Closed once the window has room for it beside the canvas, so narrowing again does not reopen it.
+  if (layersOver && !layout.narrow) setLayersOver(false)
 
   /**
    * Toggling a pane.
@@ -385,6 +439,12 @@ export function Studio() {
     (pane: PaneKey) => setPane(pane, !shown[pane]),
     [setPane, shown],
   )
+
+  /** The left panel's button and ⌘0: over the canvas in a narrow Design window, the stored choice otherwise (D15). */
+  const toggleLeftPanel = useCallback(() => {
+    if (layout.narrow) setLayersOver(open => !open)
+    else togglePane('navigator')
+  }, [layout.narrow, togglePane])
 
   const openSource = useCallback((fileId: FileId) => {
     setActiveFile(fileId)
@@ -412,70 +472,6 @@ export function Studio() {
   /** Reset interaction state while leaving the document and its undo history intact. */
   const run = useCallback(() => { void reset().then(() => { setPreviewResetEpoch(value => value + 1); setEditNote('Preview reset. Your design is unchanged.') }).catch(() => setEditNote('Could not reset the preview. Try again.')) }, [reset])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
-      const typing = (e.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"], .cm-editor')
-
-      /**
-       * The two switches, on one key each.
-       *
-       * Tab moves between designing the app and using it; the backquote moves
-       * between the two workspaces. Both are plain keys, so both stand aside for
-       * anything with a cursor in it - Tab in a form is a Tab.
-       */
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
-        if (e.key === 'Tab' && !e.shiftKey) {
-          e.preventDefault()
-          setDesigning(!inspecting)
-          return
-        }
-        if (e.key === '`') {
-          e.preventDefault()
-          setMode(mode === 'design' ? 'develop' : 'design')
-          return
-        }
-      }
-
-      if (!(e.ctrlKey || e.metaKey)) return
-      const key = e.key.toLowerCase()
-
-      // Xcode's own bindings, which is the point: muscle memory is most of what
-      // "feels like Xcode" means once the pixels are right.
-      if (key === '/') {
-        e.preventDefault()
-        setShortcutsOpen(true)
-      } else if (key === '0') {
-        e.preventDefault()
-        togglePane('navigator')
-      } else if (key === 'y' && e.shiftKey) {
-        e.preventDefault()
-        togglePane('debug')
-      } else if (key === 'enter' && e.altKey) {
-        e.preventDefault()
-        togglePane('preview')
-      } else if (key === 'b') {
-        e.preventDefault()
-        togglePane('preview')
-      } else if ((key === 'o' && e.shiftKey) || key === 'p') {
-        e.preventDefault()
-        setSwitcherOpen(true)
-      } else if (key === 'i') {
-        e.preventDefault()
-        toggleInspect()
-      } else if (key === 'a' && e.shiftKey) {
-        e.preventDefault()
-        if (mode === 'design' && inspecting) setAllPages((on) => !on)
-      } else if (key === 'r') {
-        e.preventDefault()
-        run()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [togglePane, run, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, toggleInspect, mode, inspecting, setDesigning, setMode])
-
-
 
   const handleChange = useCallback(
     (text: string) => {
@@ -492,11 +488,15 @@ export function Studio() {
     [activeFileId, setFileText, result?.authoring, pendingSelect, stale, project],
   )
 
-  const handleEvent = useCallback((event: UIEvent) => void dispatch(event), [dispatch])
   const designPages = mode === 'design' && inspecting ? result?.pages : undefined
   const designPage = designPages?.find(page => project?.id === designPageSelection?.projectId && page.id === designPageSelection?.id)
     ?? designPages?.find(page => page.active) ?? designPages?.[0]
   useEffect(() => { if (inspecting) focusedDesignPage.current = designPage }, [inspecting, designPage])
+  // What the person is looking at, in each project's event log: Design or Code, editing or trying the app.
+  const projectId = project?.id
+  useEffect(() => {
+    if (projectId) eventLog.record(projectId, { type: 'mode', mode: mode === 'develop' ? 'code' : 'design', preview: !inspecting })
+  }, [projectId, mode, inspecting])
   const livePage = result?.viewHierarchy?.find(layer => layer.type === 'Presentation') ?? result?.viewHierarchy?.find(layer => layer.page?.active)
   const pageHierarchy = useMemo(() => designPage?.viewHierarchy ?? (livePage ? [livePage] : undefined), [designPage?.viewHierarchy, livePage])
   const focusedPage = designPage ?? livePage
@@ -556,6 +556,22 @@ export function Studio() {
     setInspectorTab('settings')
   }, [project, stale, result?.authoring, setInspectorTab, layerSelection?.anchor?.runtimeId, designPages, designRootId])
 
+  /**
+   * A warning's layer, found where it is drawn (D11): the canvas goes to the screen it is
+   * on first, keeping the one in view when it is drawn there too.
+   */
+  const findWarning = useCallback((warning: DesignWarning) => {
+    const node = warning.node
+    if (!node || !project) return
+    const drawnOn = (page: PagePreview | ViewLayer) => node.runtimeIds.find(id => findLayer('tree' in page ? page.viewHierarchy ?? [] : [page], id))
+    const page = focusedPage && drawnOn(focusedPage) ? focusedPage : designPages?.find(drawnOn)
+    if (page && page.id !== focusedPage?.id) {
+      setDesignPageSelection({ projectId: project.id, id: page.id })
+      setCenterOn({ id: page.id, nonce: ++centerNonce.current })
+    }
+    selectAuthoring(node, page ? drawnOn(page) : undefined)
+  }, [project, focusedPage, designPages, selectAuthoring])
+
   const saveScenario = useCallback((name: string, inputs: readonly PreviewInput[]): string | null => {
     const state = useStudio.getState(), snapshot = result?.authoring
     if (!project || state.project !== project || stale || !snapshot) return 'Wait for the current source to finish compiling.'
@@ -564,7 +580,7 @@ export function Studio() {
     if (problem) return problem
     const before = project.studio, metadata = before ?? emptyStudioMetadata()
     const after = { ...metadata, scenarios: [...metadata.scenarios.filter(s => scenarioKey(s) !== scenarioKey(scenario)), scenario] }
-    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after } })
+    const error = commitStudioRecords(project, after, 'state-save')
     if (!error) setScenarioSelection({ projectId: project.id, key: scenarioKey(scenario) })
     return error
   }, [project, stale, result?.authoring])
@@ -582,14 +598,15 @@ export function Studio() {
   const selectedLayerId = editedLayer?.id
     ?? (layerSelection?.anchor ? sourceRuntimeSelection.layer?.id ?? null
       : layerSelection?.projectId === project?.id ? layerSelection?.id ?? null : null)
-  const selectedRenderIds = useMemo(() => {
-    if (mode !== 'design') return new Set<string>()
+  /** The selection as the canvas draws it: one group of nodes for each place it is drawn, outlined as one box (D1). */
+  const selectedRenderGroups = useMemo(() => {
+    if (mode !== 'design') return NO_GROUPS
     const trees = designPages?.map(page => page.tree) ?? [result?.renderTree]
-    const exact = sourceRuntimeSelection.exact ? sourceRuntimeSelection.layer?.id : undefined
-    return new Set(trees.flatMap(tree => [...(exact
-      ? layerRenderIds(findLayer(layers, exact), tree, layers)
-      : authoringRenderIds(authoringNode, result?.authoring, pageHierarchy ?? layers, tree))]))
+    const exact = sourceRuntimeSelection.exact ? sourceRuntimeSelection.layer : undefined
+    return trees.flatMap(tree => exact ? [[...layerRenderIds(exact, tree, layers)]].filter(group => group.length > 0)
+      : authoringRenderGroups(authoringNode, result?.authoring, pageHierarchy ?? layers, tree))
   }, [mode, designPages, result?.renderTree, result?.authoring, sourceRuntimeSelection, layers, authoringNode, pageHierarchy])
+  const selectedRenderIds = useMemo(() => new Set(selectedRenderGroups.flat()), [selectedRenderGroups])
   const selectLayer = (layer: ViewLayer, page: ViewLayer) => {
     if (stale || !project) return
     setPendingSelect(null)
@@ -613,7 +630,7 @@ export function Studio() {
     setPageFocusEpoch(value => value + 1)
     setLayerSelection(null)
     setPendingSelect(null)
-    setHoveredNode(null)
+    setHoveredUnder(null)
     setHoveredAuthoring(null)
     setCenterOn({ id: page.id, nonce: ++centerNonce.current })
   }, [project])
@@ -624,7 +641,7 @@ export function Studio() {
     setFocusLevel({ projectId: project.id, level: 'app' })
     setLayerSelection(null)
     setPendingSelect(null)
-    setHoveredNode(null)
+    setHoveredUnder(null)
     setHoveredAuthoring(null)
     setEditNote(null)
   }, [project])
@@ -643,19 +660,22 @@ export function Studio() {
    * screen and one statement in the file, and it is the file that decides whether
    * "move down" means anything. So the parser is asked, once per selection.
    */
+  const selectedSource = authoringNode?.source ?? selectedLayer?.source
+  // A copy of a component and its Main's outermost view are found at the same layer.
+  const siteKey = selectedLayerId ? `${selectedLayerId}|${authoringNode?.id ?? ''}` : null
   useEffect(() => {
-    const source = selectedLayer?.source
+    const source = selectedSource
     const file = source && project ? findFile(project, source.file) : undefined
-    if (!source || !file || !selectedLayerId) return
+    if (!source || !file || !siteKey) return
     let live = true
     void describeView(file.text, source.file, source.start)
-      .then((info) => { if (live) setSiteInfo({ key: selectedLayerId, info }) })
+      .then((info) => { if (live) setSiteInfo({ key: siteKey, info }) })
     return () => { live = false }
-  }, [selectedLayer, selectedLayerId, project, describeView])
+  }, [selectedSource, siteKey, project, describeView])
 
   // Keyed by the selection it was asked about, so an answer that arrives after the
   // selection moved on describes nothing rather than the wrong view.
-  const site = siteInfo?.key === selectedLayerId ? siteInfo.info : null
+  const site = siteInfo?.key === siteKey ? siteInfo.info : null
 
   /**
    * Performs an edit, and keeps hold of what it edited.
@@ -668,14 +688,27 @@ export function Studio() {
    */
   const performDesignEdit = useCallback(async (target: SourceSpan, fingerprint: string | undefined, scope: string, operation: DesignEditRequest['operation'], screenUpdate?: readonly DesignScreen[], scenarioFrom?: (authoring: AuthoringSnapshot | undefined) => PreviewScenario | null, assets?: readonly ImageAsset[], keepSelection = false): Promise<string | null> => {
     const state = useStudio.getState()
-    if (!project || state.project !== project || stale) return 'The source is updating. Try again when the preview is ready.'
-    if (editingRef.current) return 'An edit is already being prepared. Try again.'
+    // The layer the edit lands on, or the hidden view Show brings back.
+    const landsOn = result?.authoring?.nodes.find(node => node.source.file === target.file && node.source.start === target.start && node.source.end === target.end)
+      ?? hidden.views.find(view => view.file === target.file && view.offset === target.start)
+    const label = designEvent(operation, landsOn)
+    // Said where the designer is looking and logged, as the planner's refusals are (C7).
+    const blocked = busyEditProblem({ current: !!project && state.project === project, stale, applying: editingRef.current })
+    if (blocked || !project) {
+      setEditNote(blocked)
+      if (project) eventLog.record(project.id, { ...label, refused: true })
+      return blocked
+    }
     editingRef.current = true
     setPreparingEdit(true)
     try {
       if (assets) validateAssets(assets)
       const plan = await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, authoringRevision: result?.authoring?.revision, scope, deploymentTarget: project.manifest.deploymentTarget, files: project.files, colors: project.colors, componentDescriptions: project.studio?.components, target, fingerprint, operation })
-      if (!plan.ok) { setEditNote(plan.reason); return plan.reason }
+      if (!plan.ok) {
+        eventLog.record(project.id, { ...label, refused: true })
+        setEditNote(plan.location ? { text: plan.reason, location: plan.location } : plan.reason)
+        return plan.reason
+      }
       // Context settings edit the navigation owner while the designer keeps the
       // visible label/row selected. Reconcile it against the exact planned source.
       const afterFiles = project.files.map(file => ({ ...file, text: plan.changes.find(change => change.file === file.id)?.after ?? file.text }))
@@ -702,8 +735,8 @@ export function Studio() {
       const savedScenario = scenarioFrom?.(plan.authoring) ?? null
       const scenarios = savedScenario ? [...metadata.scenarios.filter(item => scenarioKey(item) !== scenarioKey(savedScenario)), savedScenario] : undefined
       const transaction = { ...selectedPlan, ...colorChange, ...(assets ? { assets: { before: project.assets, after: assets } } : {}), ...(screens || scenarios || JSON.stringify(labels) !== JSON.stringify(metadata.labels) ? { studio: { before, after: { ...metadata, ...(screens ? { screens } : {}), ...(scenarios ? { scenarios } : {}), labels } } } : {}) }
-      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction)
-      if (problem) { setEditNote(problem); return problem }
+      const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction, label)
+      if (problem) { setEditNote(problem); eventLog.record(project.id, { ...label, refused: true }); return problem }
       if (savedScenario) setScenarioSelection({ projectId: project.id, key: scenarioKey(savedScenario) })
       if (changed) setCommittedEditRevision(revision => revision + 1)
       if (plan.changes.length && !selectionChanged && !preserveSelection) {
@@ -715,10 +748,10 @@ export function Studio() {
         const text = selected && useStudio.getState().project?.files.find(f => f.id === selected.file)?.text
         setPendingSelect(selected && typeof text === 'string' ? { ...selected, projectId: project.id, text } : null)
       }
-      setEditNote(changed ? operation.kind === 'insert' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
+      setEditNote(changed ? operation.kind === 'insert' || operation.kind === 'paste' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
       return null
     } finally { editingRef.current = false; setPreparingEdit(false) }
-  }, [project, stale, planDesignEdit, result, authoringNode])
+  }, [project, stale, planDesignEdit, result, authoringNode, hidden.views])
 
   /**
    * Giving a screen its first state.
@@ -738,9 +771,11 @@ export function Studio() {
   }, [snapshot, performDesignEdit])
 
   const screens = useMemo(() => screenCatalog(result?.authoring, designPages, project?.studio?.screens), [result?.authoring, designPages, project?.studio?.screens])
+  // The canvas's warnings in a designer's words, beside its status (D11).
+  const warningRows = useMemo(() => mode === 'design' ? designWarnings(allDiagnostics, result?.authoring, screens) : [], [mode, allDiagnostics, result?.authoring, screens])
   const updateScreens = async (command: ScreenCommand): Promise<string | null> => {
     if (!project || stale || preparingEdit) return 'Wait for the preview to finish updating.'
-    const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
+    const metadata = project.studio ?? emptyStudioMetadata()
     const name = 'name' in command ? command.name.trim() : ''
     if ('name' in command && (!name || name.length > 100)) return 'Enter a screen name of 1–100 characters.'
     if (command.kind === 'rename' || command.kind === 'up' || command.kind === 'down') {
@@ -748,7 +783,7 @@ export function Studio() {
       if (index < 0) return 'Select an existing screen.'
       if (command.kind === 'rename') next[index] = { ...next[index]!, name }
       else { const to = index + (command.kind === 'up' ? -1 : 1); if (to < 0 || to >= next.length) return null; [next[index], next[to]] = [next[to]!, next[index]!] }
-      return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, screens: next } } })
+      return commitStudioRecords(project, { ...metadata, screens: next }, command.kind === 'rename' ? 'screen-rename' : 'screen-move')
     }
     const node = command.kind === 'create' ? result?.authoring?.nodes.find(n => n.kind === 'definition') : result?.authoring?.nodes.find(n => n.kind === 'definition' && n.name === command.view)
     if (!node) return 'Wait for the screen definitions to finish loading.'
@@ -765,10 +800,10 @@ export function Studio() {
   const renameLayer = (node: AuthoringNode, label: string): string | null => {
     if (!project || stale || preparingEdit) return 'Wait for the preview to finish updating.'
     if (label.trim().length > 100) return 'Use a layer name of 100 characters or fewer.'
-    const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
+    const metadata = project.studio ?? emptyStudioMetadata()
     const labels = metadata.labels.filter(l => !(l.owner === node.owner && l.fingerprint === node.fingerprint && (l.offset === undefined || l.offset === node.source.start)))
     if (label.trim()) labels.push({ owner: node.owner, fingerprint: node.fingerprint, offset: node.source.start, label: label.trim() })
-    return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, labels } } })
+    return commitStudioRecords(project, { ...metadata, labels }, 'layer-rename')
   }
 
   /**
@@ -844,7 +879,7 @@ export function Studio() {
       if (operation && !node) return 'Compile the source before changing image references.'
       const plan = operation && node ? await planDesignEdit({ projectId: project.id, baseRevision: state.documentRevision, scope: node.owner, files: project.files, colors: project.colors, target: node.source, fingerprint: node.fingerprint, operation }) : { ok: true as const, projectId: project.id, baseRevision: state.documentRevision, changes: [] }
       if (!plan.ok) return plan.reason
-      return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } })
+      return useStudio.getState().commitTransaction(project, { ...plan, selection: undefined, assets: { before: project.assets, after: assets } }, studioChange('images'))
     } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
   }, [project, stale, snapshot, planDesignEdit])
 
@@ -868,17 +903,25 @@ export function Studio() {
   const deleteScenario = useCallback((key: string) => {
     const state = useStudio.getState()
     if (!project || state.project !== project || !project.studio) return
-    const error = state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before: project.studio, after: { ...project.studio, scenarios: project.studio.scenarios.filter(s => scenarioKey(s) !== key) } } })
+    const error = commitStudioRecords(project, { ...project.studio, scenarios: project.studio.scenarios.filter(s => scenarioKey(s) !== key) }, 'state-delete')
     if (error) setEditNote(error); else setScenarioSelection(current => current?.projectId === project.id && current.key === key ? null : current)
   }, [project])
 
-  const applyEdit = useCallback(async (edit: ViewEdit, layer?: ViewLayer) => {
+  /** An edit refused before it reaches the planner: said where the designer is looking, and logged (C7). */
+  const refuseEdit = useCallback((operation: DesignEditRequest['operation'], reason: string, node?: AuthoringNode) => {
+    setEditNote(reason)
+    if (project) eventLog.record(project.id, { ...designEvent(operation, node), refused: true })
+  }, [project])
+
+  const applyEdit = useCallback(async (edit: DesignEditRequest['operation'], layer?: ViewLayer) => {
     const target = layer ?? selectedLayer
     const model = result?.authoring
-    const node = model?.nodes.find(n => n.id === model.runtimeToSource[target?.id ?? ''])
-    if (!node) { setEditNote('Select a supported source view to edit.'); return }
+    // The selection is its source view: a copy of a component is drawn by its Main's
+    // views, and the layer it is found at on screen would name the Main's (D1).
+    const node = target === selectedLayer && authoringNode ? authoringNode : model?.nodes.find(n => n.id === model.runtimeToSource[target?.id ?? ''])
+    if (!node) { refuseEdit(edit, 'Select a supported source view to edit.'); return }
     await performDesignEdit(node.source, node.fingerprint, node.owner, edit)
-  }, [selectedLayer, result?.authoring, performDesignEdit])
+  }, [selectedLayer, authoringNode, result?.authoring, performDesignEdit, refuseEdit])
 
   const changeProperty = useCallback(async (control: string, value: string) => {
     if (!authoringNode) return 'Select the view again.'
@@ -925,7 +968,7 @@ export function Studio() {
     const first = added[0]
     const problem = !first ? null : target ? await placeImage(first.name, target, added) : await updateAssets([...(project.assets ?? []), ...added])
     const rest = added.slice(1).map(asset => asset.name).join(', ')
-    const outcome = problem ?? (!first ? null : !target ? `Added ${added.map(asset => asset.name).join(', ')} to Assets. Drag one onto a view to place it.` : rest ? `Placed ${first.name}. ${rest} ${added.length > 2 ? 'are' : 'is'} in Assets.` : null)
+    const outcome = problem ?? (!first ? null : !target ? `Added ${added.map(asset => asset.name).join(', ')} to Assets. Drag one onto a view to place it.` : rest ? `Placed ${first.name}. ${rest} ${added.length > 2 ? 'are' : 'is'} in Assets.` : `Placed ${first.name}.`)
     setEditNote([outcome, ...problems].filter(Boolean).join(' ') || null)
   }, [project, layers, placeImage, updateAssets])
 
@@ -938,7 +981,7 @@ export function Studio() {
     onManage: () => { setMode('design'); selectApp() },
   }
 
-  const canAdd = !!addTargetLayer?.source && !stale
+  const canAdd = !!addTargetLayer?.source && !stale && !aiEditing
 
   const selection = selectedLayer && site
     ? {
@@ -954,6 +997,7 @@ export function Studio() {
     : null
 
   const replayEdit = useCallback((direction: 'undo' | 'redo') => {
+    if (useStudio.getState().aiEdit) { setEditNote(AI_EDITING); return }
     const replayed = useStudio.getState().replayDocument(direction)
     if (!replayed) { setEditNote('No document edit to ' + direction); return }
     const current = useStudio.getState().project
@@ -966,19 +1010,29 @@ export function Studio() {
   const undo = useCallback(() => replayEdit('undo'), [replayEdit])
   const redo = useCallback(() => replayEdit('redo'), [replayEdit])
 
-  /** Copies the selected view as the Swift that draws it, for a paste anywhere. */
-  const copySelection = useCallback(async () => {
-    const source = selectedLayer?.source
+  /** A copy or paste the studio refused: said, and logged as a refused edit is (C7). */
+  const refuseClipboard = useCallback((op: 'copy' | 'paste', reason: string, target?: AuthoringNode) => {
+    setEditNote(reason)
+    if (project) eventLog.record(project.id, refusedClipboard(op, target))
+  }, [project])
+
+  /**
+   * Copies the view at `source` as the Swift that draws it, for a paste anywhere, with
+   * the values of its screen it reads, which a paste onto another screen brings (D6).
+   */
+  const copyAt = useCallback(async (source: SourceSpan | undefined, name: string, node?: AuthoringNode) => {
     const file = source && project ? findFile(project, source.file) : undefined
     if (!source || !file) return
-    const snippet = await copyView(file.text, source.file, source.start)
-    if (!snippet) return
-    setClipboard(snippet)
-    setEditNote(`Copied ${selectedLayer!.name}`)
+    const copied = await copyView(file.text, source.file, source.start)
+    if (!copied || 'refused' in copied) { refuseClipboard('copy', copied?.refused ?? 'This view could not be copied. Try again.', node); return }
+    setClipboard(copied)
+    setEditNote(`Copied ${name}`)
     // Best effort, and never waited on: a studio clipboard is what Paste reads, and
     // the system one is a courtesy for pasting into the editor or somewhere else.
-    try { await navigator.clipboard.writeText(snippet) } catch { /* not granted, or not secure */ }
-  }, [copyView, project, selectedLayer])
+    try { await navigator.clipboard.writeText(copied.snippet) } catch { /* not granted, or not secure */ }
+  }, [copyView, project, refuseClipboard])
+  const copySelection = useCallback(() => authoringNode ? copyAt(authoringNode.source, sourceLayerLabel(authoringNode), authoringNode) : copyAt(selectedLayer?.source, selectedLayer?.name ?? ''), [copyAt, selectedLayer, authoringNode])
+  const copyLayer = useCallback((node: AuthoringNode) => void copyAt(node.source, sourceLayerLabel(node), node), [copyAt])
 
   /**
    * Pasting the same view a third time is worth a word, once.
@@ -990,14 +1044,17 @@ export function Studio() {
   const pasteCounts = useRef(new Map<string, number>())
   const [pasteNudge, setPasteNudge] = useState<string | null>(null)
   const dismissedNudges = useRef(new Set<string>())
-  const pasteClipboard = useCallback(() => {
-    if (!clipboard) return
-    const shape = clipboard.replace(/\s+/g, ' ').trim()
+  /** Pastes what was copied beside or into `target`, a layer in Layers, or else where Add would put a view. */
+  const pasteClipboard = useCallback((target?: AuthoringNode) => {
+    if (!clipboard) { refuseClipboard('paste', NOTHING_COPIED); return }
+    const shape = clipboard.snippet.replace(/\s+/g, ' ').trim()
     const pastes = (pasteCounts.current.get(shape) ?? 0) + 1
     pasteCounts.current.set(shape, pastes)
     if (pastes >= 3 && !dismissedNudges.current.has(shape)) setPasteNudge(shape)
-    void applyEdit({ kind: 'insert', snippet: clipboard }, addTargetLayer)
-  }, [clipboard, applyEdit, addTargetLayer])
+    const paste = { kind: 'paste' as const, snippet: clipboard.snippet, values: clipboard.values }
+    if (target) void performDesignEdit(target.source, target.fingerprint, target.owner, paste)
+    else void applyEdit(paste, addTargetLayer)
+  }, [clipboard, applyEdit, addTargetLayer, performDesignEdit, refuseClipboard])
 
   /**
    * Showing a hidden view again.
@@ -1025,54 +1082,100 @@ export function Studio() {
     return () => { live = false }
   }, [project, stale, result?.revision, hiddenViews, hidden.key])
 
+  /** The page Layers shows, which layers selected together belong to. */
+  const layersPage = `${focusedPage?.id}:${pageFocusEpoch}`
+  const selectedTogether = multiSelection.page === layersPage && multiSelection.files === project?.files ? multiSelection.ids : NO_IDS
+
+  /** ⌘G (D3): the layers selected together in Layers, or else the selected view, grouped the way they already sit. */
+  const groupSelection = useCallback(() => {
+    const model = result?.authoring
+    // As Layers counts them: the layers selected together, or else the selected one.
+    const ids = selectedTogether.length ? selectedTogether : authoringNode ? [authoringNode.id] : []
+    const first = model?.nodes.find(node => node.id === ids[0])
+    if (!model || !first) { refuseEdit({ kind: 'layer-wrap', ids, layout: 'VStack' }, 'Select the views to group, on the canvas or in Layers.'); return }
+    void performDesignEdit(first.source, first.fingerprint, first.owner, { kind: 'layer-wrap', ids, layout: groupLayoutOf(model.nodes, first) })
+  }, [result?.authoring, selectedTogether, authoringNode, refuseEdit, performDesignEdit])
+
+  /** What the canvas outlines as selected (D1): the views selected together, or the one selection. */
+  const selectionOutlines = useMemo(() => {
+    if (mode !== 'design' || selectedTogether.length < 2) return selectedRenderGroups
+    const trees = designPages?.map(page => page.tree) ?? [result?.renderTree]
+    const together = selectedTogether.flatMap(id => result?.authoring?.nodes.find(node => node.id === id) ?? [])
+    return trees.flatMap(tree => together.flatMap(node => authoringRenderGroups(node, result?.authoring, layers, tree)))
+  }, [mode, selectedTogether, selectedRenderGroups, designPages, result?.renderTree, result?.authoring, layers])
+
+  /** The screens the canvas draws, as the selection rule reads them (D1). */
+  const canvasScene = useMemo((): CanvasScene | undefined => snapshot && !stale && snapshot.projectId === project?.id ? { snapshot, layers } : undefined, [snapshot, stale, project?.id, layers])
+  /** The view that is selected, where it is drawn. */
+  const canvasSelected = useMemo((): CanvasSelection | null => authoringNode ? { node: authoringNode, runtimeId: selectedLayerId } : null, [authoringNode, selectedLayerId])
+
+  /** Selects a view the canvas picked, at the place it was picked. */
+  const selectPick = useCallback((pick: CanvasSelection) => {
+    const snapshot = result?.authoring
+    if (!project || stale || !snapshot) return
+    setPendingSelect(null); setEditNote(null); setFocusLevel(null)
+    useStudio.getState().setDocumentSelection({ file: pick.node.source.file, offset: pick.node.source.start })
+    setLayerSelection({ projectId: project.id, id: pick.runtimeId ?? pick.node.runtimeIds[0] ?? '', anchor: { snapshot, nodeId: pick.node.id, files: project.files, ...(pick.runtimeId ? { runtimeId: pick.runtimeId } : {}) } })
+  }, [project, stale, result?.authoring])
+
+  /** Escape (D1): the view around the selection, and nothing once above the screen's own stack. */
+  const selectParent = useCallback(() => {
+    const parent = canvasScene && canvasSelected ? canvasParent(canvasScene, canvasSelected) : undefined
+    if (parent) selectPick(parent)
+    else setLayerSelection(null)
+  }, [canvasScene, canvasSelected, selectPick])
+
   /**
-   * The designing keys, which carry no modifier.
-   *
-   * Held apart from the Xcode chords above because they must never fire while
-   * somebody is typing: V, A and D are letters, and Backspace in a text field is a
-   * backspace. Anything with a focused field or an open sheet is left alone.
+   * The keys, as `shortcutFor` reads them (D5): one table for both workspaces, by where the
+   * focus is, so nothing pressed in a field reaches the view. A dialog or sheet that is
+   * open has the keys to itself, and a key a control has already handled is its own.
    */
   useEffect(() => {
-    if (mode !== 'design' || !inspecting) return
     const onKey = (e: KeyboardEvent) => {
-      if (galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
-      const target = e.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"], .cm-editor')) return
-
-      const key = e.key.toLowerCase()
-      // The editing chords. Undo is the studio's here rather than the editor's,
-      // because the editor is not the thing being typed into.
-      if (e.ctrlKey || e.metaKey) {
-        if (key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo() }
-        else if (key === 'y' && !e.shiftKey) { e.preventDefault(); redo() }
-        else if (key === 'c') { if (selectedLayer) { e.preventDefault(); void copySelection() } }
-        else if (key === 'v') { if (clipboard) { e.preventDefault(); pasteClipboard() } }
-        else if (key === 'h') { if (selectedLayer) { e.preventDefault(); void applyEdit({ kind: 'hide' }) } }
-        return
-      }
-
-      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault()
-        void applyEdit({ kind: 'move', direction: e.key === 'ArrowUp' ? -1 : 1 })
-      } else if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (!selectedLayer) return
-        e.preventDefault()
-        void applyEdit({ kind: 'delete' })
-      } else if (key === 'v') {
-        setTool('select')
-      } else if (key === 'd') {
-        setTool(tool === 'delete' ? 'select' : 'delete')
-      } else if (key === 'a') {
-        if (canAdd) { e.preventDefault(); setAdding(true) }
-      } else if (e.key === 'Escape') {
-        if (tool === 'delete') setTool('select')
-        else setLayerSelection(null)
+      if (e.defaultPrevented || galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
+      const shortcut = shortcutFor({ key: e.key, mod: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey }, { workspace: mode, editing: inspecting, focus: keyFocus(e.target), selected: !!selectedLayer || selectedTogether.length > 1 })
+      if (!shortcut) return
+      // Escape is left for the canvas's own uses of it, such as cancelling a destination pick.
+      if (shortcut !== 'escape') e.preventDefault()
+      switch (shortcut) {
+        case 'undo': undo(); break
+        case 'redo': redo(); break
+        case 'copy': void copySelection(); break
+        case 'paste': pasteClipboard(); break
+        case 'duplicate': void applyEdit({ kind: 'layer-duplicate' }); break
+        case 'hide': void applyEdit({ kind: 'hide' }); break
+        case 'delete': void applyEdit({ kind: 'delete' }); break
+        case 'move-up': case 'move-down': void applyEdit({ kind: 'move', direction: shortcut === 'move-up' ? -1 : 1 }); break
+        case 'add': if (canAdd) setAdding(true); break
+        case 'select-tool': setTool('select'); break
+        case 'escape':
+          if (layout.layersOver) setLayersOver(false)
+          else if (inspecting && tool === 'delete') setTool('select')
+          else if (inspecting && selectedTogether.length > 1) setMultiSelection(NO_MULTI_SELECTION)
+          else if (inspecting) selectParent()
+          break
+        case 'all-screens': setAllPages(on => !on); break
+        case 'save':
+          // What was typed in a field goes in first, as leaving the field would put it.
+          if (keyFocus(e.target) === 'text') (e.target as HTMLElement).blur()
+          void flush().then(() => setEditNote(saveNote(storageProblem(useStudio.getState()))))
+          break
+        case 'restart-preview': run(); break
+        case 'open-file': setSwitcherOpen(true); break
+        case 'shortcuts': setShortcutsOpen(true); break
+        case 'left-panel': toggleLeftPanel(); break
+        case 'right-panel': togglePane('preview'); break
+        case 'problems': togglePane('debug'); break
+        case 'inspect': case 'preview': toggleInspect(); break
+        case 'workspace': setMode(mode === 'design' ? 'develop' : 'design'); break
+        case 'group': groupSelection(); break
+        case 'hold': break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
-      undo, redo, copySelection, pasteClipboard, clipboard])
+      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver, groupSelection, selectedTogether, selectParent])
 
   /**
    * Undo and redo, over the edits the canvas made.
@@ -1081,101 +1184,36 @@ export function Studio() {
    * that cannot drift: replaying an *operation* backwards would have to know what
    * the file looked like when it ran, and after a second edit it no longer does.
    */
-  /**
-   * A drop, from the tree or from the canvas.
-   *
-   * One operation for both, because both are saying the same thing: put this view
-   * beside that one. The source's own offset and the target's are all the parser
-   * needs, and it is the parser that decides whether the result is a file that
-   * still compiles.
-   */
-
-  /**
-   * The canvas's drag, in the terms the file understands.
-   *
-   * A press picks up the view its layer draws. The containers that can take it are
-   * found by walking up from the layer under the pointer, with the same rules Layers
-   * uses, and the drop is the same edit: a move before or after a sibling, or into an
-   * empty container. Only a container's own children are slots - a view under an `if`
-   * belongs to the condition, and dropping beside it must not move into the branch.
-   */
-  const canvasMove = useMemo<CanvasMove | undefined>(() => {
-    const model = result?.authoring
-    if (!model || mode !== 'design') return undefined
-    const nodes = new Map(model.nodes.map(node => [node.id, node]))
-    const parents = new Map<string, ViewLayer>()
-    const index = (items: readonly ViewLayer[]) => { for (const item of items) { for (const child of item.children) parents.set(child.id, item); index(item.children) } }
-    index(layers)
-    const treeFor = (pageId?: string) => (pageId ? designPages?.find(page => page.id === pageId)?.tree : undefined) ?? designPage?.tree ?? result?.renderTree
-    /** The view a layer draws, as the file has it; a repeated row is its ForEach. */
-    const authoringFor = (layer: ViewLayer | undefined) => {
-      const node = layer ? nodes.get(model.runtimeToSource[layer.id] ?? '') : undefined
-      return node?.kind === 'template' ? nodes.get(node.parentId ?? '') : node
-    }
-    const isView = (node: AuthoringNode | undefined): node is AuthoringNode => !!node && ['view', 'component', 'collection'].includes(node.kind) && node.name !== 'WindowGroup'
-    const renderIds = (layer: ViewLayer, pageId?: string) => [...layerRenderIds(layer, treeFor(pageId), layers)]
+  /** What the canvas shows while dragging: the view the drop goes beside, or the stack it goes into (D1). */
+  const dropTargetAt = useCallback((over: readonly RenderNode[], source: readonly RenderNode[] | 'selection'): CanvasDropTarget | null => {
+    const drop = canvasScene && canvasDrop(canvasScene, over, source, canvasSelected)
+    if (!drop || drop.to.node.id === drop.from.node.id) return null
+    const tree = designPages?.find(page => page.tree.nodes.some(node => node.id === over[0]?.id))?.tree ?? result?.renderTree
     return {
-      pick(rendered, pageId) {
-        const layer = rendered === 'selection' ? selectedLayer : layerForRenderNode(layers, rendered)
-        const node = authoringFor(layer)
-        // A screen keeps its root layout; everything inside it can move.
-        if (!layer || !isView(node) || nodes.get(node.parentId ?? '')?.kind === 'definition') return null
-        // A row's own layout is drawn once per item of its data; there is no one row to move.
-        if (nodes.get(node.parentId ?? '')?.kind === 'template') { setEditNote('Rows come from the list\'s data. Drag a view inside a row, or select the list to move all of it.'); return null }
-        return { id: node.id, label: sourceLayerLabel(node), renderIds: renderIds(layer, pageId) }
-      },
-      targets(source, over, pageId) {
-        const from = nodes.get(source.id)
-        if (!from) return []
-        const out: MoveContainer[] = []
-        for (let layer: ViewLayer | undefined = layerForRenderNode(layers, over); layer; layer = parents.get(layer.id)) {
-          const node = authoringFor(layer)
-          if (!node) continue
-          // Everything found so far is inside the dragged view, which cannot take itself.
-          if (node.id === from.id) { out.length = 0; continue }
-          if (node.id !== from.parentId && (!LAYER_MOVE_CONTAINERS.has(node.name) || layerMoveProblem(model.nodes, [from.id], node))) continue
-          // A ForEach draws one layer per row; together they are one slot, the ForEach.
-          const children: { id: string; renderIds: string[] }[] = []
-          for (const child of layer.children) {
-            const childNode = authoringFor(child)
-            if (!isView(childNode) || childNode.parentId !== node.id) continue
-            const ids = renderIds(child, pageId), last = children[children.length - 1]
-            if (last?.id === childNode.id) last.renderIds.push(...ids)
-            else children.push({ id: childNode.id, renderIds: ids })
-          }
-          out.push({ id: node.id, label: sourceLayerLabel(node), axis: AXES[node.name] ?? 'vertical', renderIds: renderIds(layer, pageId), children })
-        }
-        return out
-      },
-      blocked(source, over) {
-        const from = nodes.get(source.id)
-        if (!from || !over) return 'Drop it inside a stack, list or form on this screen.'
-        // The innermost container under the pointer is the one the drop was meant for.
-        for (let layer: ViewLayer | undefined = layerForRenderNode(layers, over); layer; layer = parents.get(layer.id)) {
-          const node = authoringFor(layer)
-          if (node && LAYER_MOVE_CONTAINERS.has(node.name) && node.id !== from.id) return layerMoveProblem(model.nodes, [from.id], node) ?? 'It cannot go here.'
-        }
-        return 'Drop it inside a stack, list or form on this screen.'
-      },
-      drop(source, container, at) {
-        const from = nodes.get(source.id), into = nodes.get(container.id)
-        if (!from || !into) return
-        const slots = container.children.filter(child => child.id !== source.id).flatMap(child => nodes.get(child.id) ?? [])
-        const anchor = slots[at] ?? slots[slots.length - 1]
-        const operation: DesignEditRequest['operation'] = anchor
-          ? { kind: 'moveTo', targetOffset: anchor.source.start, position: slots[at] ? 'before' : 'after' }
-          : { kind: 'layer-reparent', ids: [from.id], destination: into.id }
-        void performDesignEdit(from.source, from.fingerprint, from.owner, operation).then(problem => { if (problem) setEditNote(problem) })
-      },
+      name: sourceLayerType(drop.to.node),
+      inside: drop.inside,
+      axis: snapshot && groupLayoutOf(snapshot.nodes, drop.to.node) === 'HStack' ? 'horizontal' : 'vertical',
+      renderIds: [...layerRenderIds(findLayer(layers, drop.to.runtimeId), tree, layers)],
     }
-  }, [result?.authoring, result?.renderTree, mode, layers, designPages, designPage?.tree, selectedLayer, performDesignEdit])
+  }, [canvasScene, canvasSelected, snapshot, designPages, result?.renderTree, layers])
 
-  /** The layer under the inspector's pointer, while Layers is there to show it. */
-  // Layers shows the focused screen; a view on another phone has no row there to light.
-  const hoveredLayerId = useMemo(
-    () => (inspecting && mode === 'design' && !stale && hoveredNode && (!hoveredPage || !focusedPage || hoveredPage === focusedPage.id) && (result?.renderTree?.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file) || designPages?.some(page => page.tree.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file))) ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
-    [inspecting, mode, stale, result?.renderTree, designPages, layers, hoveredNode, hoveredPage, focusedPage],
+  /** A drop on the canvas, named in the terms the file understands. */
+  const reorderNodes = useCallback((source: readonly RenderNode[] | 'selection', over: readonly RenderNode[], position: DropPosition) => {
+    const drop = canvasScene && canvasDrop(canvasScene, over, source, canvasSelected)
+    const move = { kind: 'moveTo' as const, targetOffset: drop?.to.node.source.start ?? 0, position }
+    if (!drop) { refuseEdit(move, 'That spot isn’t a view to drop beside. Drop it on a layer instead.'); return }
+    const { from, to } = drop
+    if (from.node.id === to.node.id) { refuseEdit(move, 'A view can’t be dropped onto itself.', from.node); return }
+    if (from.node.source.file !== to.node.source.file) { refuseEdit(move, 'A view can only be moved within the file it is written in.', from.node); return }
+    void performDesignEdit(from.node.source, from.node.fingerprint, from.node.owner, move)
+  }, [canvasScene, canvasSelected, refuseEdit, performDesignEdit])
+
+  /** What a click would select where the inspector's pointer is (D1), while Layers is there to show it. */
+  const hoveredPick = useMemo(
+    () => (inspecting && mode === 'design' && !stale && canvasScene && hoveredNode && (result?.renderTree?.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file) || designPages?.some(page => page.tree.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file))) ? canvasPick(canvasScene, hoveredUnder ?? [], 'click', canvasSelected) : undefined),
+    [inspecting, mode, stale, canvasScene, canvasSelected, result?.renderTree, designPages, hoveredNode, hoveredUnder],
   )
+  const hoveredLayerId = hoveredPick?.runtimeId ?? null
 
   const selectedSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, selectedLayerId), [result?.authoring, layers, selectedLayerId])
   const hoveredSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, hoveredLayerId), [result?.authoring, layers, hoveredLayerId])
@@ -1185,13 +1223,18 @@ export function Studio() {
     const node = result?.authoring?.nodes.find(node => node.id === previous.id && node.fingerprint === previous.fingerprint && node.source.file === previous.source.file && node.source.start === previous.source.start && node.source.end === previous.source.end)
     return node ? { ...hoveredAuthoring, node } : null
   }, [inspecting, mode, stale, hoveredAuthoring, project?.id, result?.authoring])
-  const hoveredRenderIds = useMemo(() => {
-    if (!liveHoveredAuthoring) return new Set<string>()
-    const { node, runtimeId } = liveHoveredAuthoring
+  /** What is outlined under the pointer, one box for each place a view is drawn. */
+  const hoveredRenderGroups = useMemo(() => {
     const tree = designPage?.tree ?? result?.renderTree
-    return runtimeId ? layerRenderIds(findLayer(pageHierarchy ?? layers, runtimeId), tree, pageHierarchy ?? layers)
-      : authoringRenderIds(node, result?.authoring, pageHierarchy ?? layers, tree)
-  }, [liveHoveredAuthoring, designPage?.tree, result?.renderTree, result?.authoring, pageHierarchy, layers])
+    const one = (ids: ReadonlySet<string>) => ids.size ? [[...ids]] : NO_GROUPS
+    // On the canvas, what a click would select is outlined, as Figma outlines it (D1), on
+    // the phone the pointer is over - which hover no longer makes the focused one.
+    const pointed = (hoveredPage && designPages?.find(page => page.id === hoveredPage)?.tree) || tree
+    if (!liveHoveredAuthoring) return hoveredPick ? one(layerRenderIds(findLayer(layers, hoveredPick.runtimeId), pointed, layers)) : NO_GROUPS
+    const { node, runtimeId } = liveHoveredAuthoring
+    return runtimeId ? one(layerRenderIds(findLayer(pageHierarchy ?? layers, runtimeId), tree, pageHierarchy ?? layers))
+      : authoringRenderGroups(node, result?.authoring, pageHierarchy ?? layers, tree)
+  }, [liveHoveredAuthoring, hoveredPick, hoveredPage, designPages, designPage?.tree, result?.renderTree, result?.authoring, pageHierarchy, layers])
 
   /**
    * Clicking a view while inspecting.
@@ -1201,33 +1244,65 @@ export function Studio() {
    * and the panel that *can* answer is Layers - so the click selects the view
    * there and leaves you where you were. The editor is still pointed at the right
    * line, so switching to Code afterwards lands on it.
+   *
+   * What a click selects is Figma's (D1): the view in the screen's main stack, or at
+   * the depth already gone into; the innermost with ⌘; with Shift it joins the views
+   * selected together, as Shift-click does in Layers, for ⌘G.
    */
   const inspectSelect = useCallback(
-    (node: RenderNode, pageId?: string) => {
+    (under: readonly RenderNode[], keys: InspectKeys, pageId?: string) => {
+      const node = under[0]
+      if (!node) return
       if (pageId && project) setDesignPageSelection({ projectId: project.id, id: pageId })
       if (mode !== 'design') {
         revealSource(node)
         return
       }
+      const pick = canvasScene ? canvasPick(canvasScene, under, keys.command ? 'deep' : 'click', canvasSelected) : undefined
       if (tool === 'delete') {
-        const target = layerForRenderNode(layers, node)
-        if (target) void applyEdit({ kind: 'delete' }, target)
+        if (pick) void performDesignEdit(pick.node.source, pick.node.fingerprint, pick.node.owner, { kind: 'delete' })
         return
       }
-      if (node.origin) {
-        if (node.origin.file !== activeFileId) setActiveFile(node.origin.file)
-        setReveal({ offset: node.origin.start, nonce: ++revealNonce.current })
-      }
-      const layer = layerForRenderNode(layers, node)
-      if (!layer || !project) return
+      if (!pick || !project) return
       setNavigatorTab('layers')
       setPane('navigator', true)
-      setPendingSelect(null)
-      setEditNote(null)
-      captureLayer(layer)
+      if (keys.shift) {
+        const together = selectedTogether.length ? selectedTogether : authoringNode ? [authoringNode.id] : []
+        const ids = together.includes(pick.node.id) ? together.filter(id => id !== pick.node.id) : [...together, pick.node.id]
+        setMultiSelection({ files: project.files, ids, page: layersPage })
+        if (!authoringNode) selectPick(pick)
+        return
+      }
+      if (pick.node.source.file !== activeFileId) setActiveFile(pick.node.source.file)
+      setReveal({ offset: pick.node.source.start, nonce: ++revealNonce.current })
+      // A view chosen on the canvas is the selection now, not the layers chosen together in Layers.
+      setMultiSelection(NO_MULTI_SELECTION)
+      selectPick(pick)
     },
-    [mode, revealSource, layers, project, activeFileId, setActiveFile, setNavigatorTab, setPane, tool, applyEdit, captureLayer],
+    [mode, revealSource, project, activeFileId, setActiveFile, setNavigatorTab, setPane, tool, performDesignEdit, canvasScene, canvasSelected, selectedTogether, authoringNode, layersPage, selectPick],
   )
+
+  /**
+   * A double-click on the canvas (D1): text is edited where it is drawn, as it always
+   * was; anything else goes one level in from the selection. Answers the text to edit.
+   */
+  const inspectDoubleClick = useCallback((under: readonly RenderNode[], pageId?: string): InlineTextTarget | null => {
+    if (!canvasScene || !project) return null
+    if (pageId) setDesignPageSelection({ projectId: project.id, id: pageId })
+    const deep = canvasPick(canvasScene, under, 'deep')
+    const control = deep?.node.controls?.find(item => ['content', 'title'].includes(item.id) && item.kind === 'text')
+    const text = deep && control ? { node: deep.node, control: control.id, value: control.value } : null
+    // Code's inspector shows the Swift, and edits text in place as it always did.
+    if (mode !== 'design') {
+      if (under[0]) revealSource(under[0])
+      return text
+    }
+    const next = text ? deep : canvasPick(canvasScene, under, 'drill', canvasSelected)
+    if (!next) return null
+    setMultiSelection(NO_MULTI_SELECTION)
+    selectPick(next)
+    return text
+  }, [mode, canvasScene, canvasSelected, project, selectPick, revealSource])
 
 
   /** The rename in progress, if F2 found something to rename. */
@@ -1257,6 +1332,10 @@ export function Studio() {
     }
   }, [project, flush])
 
+  // The tint written at the app's root, for the export's AccentColor: from the compile
+  // of the project on screen, and none while that compile is still to come.
+  const accent = result?.authoring && result.authoring.projectId === project?.id && !stale ? result.authoring.accent : undefined
+
   /**
    * Loaded on click, not on first paint.
    *
@@ -1264,28 +1343,24 @@ export function Studio() {
    * about thirty kilobytes that runs once per session at most, and it was in the
    * initial bundle for the sake of one function reference. The menu itself is plain
    * data and stays static, so the button still knows its options before the code
-   * behind them exists.
+   * behind them exists. Every step of an export has a deadline, so it always ends
+   * and the button always comes back.
    */
   const handleExport = useCallback(
-    (format: ExportFormat | 'complete') => {
+    (format: ArchiveFormat) => {
       if (!project || exportInProgress.current) return
       exportInProgress.current = true; setExporting(true); setEditNote(null)
       void (async () => {
-        await flush()
-        if (format === 'complete') {
-          const { exportCompleteProject } = await import('../lib/exportCompleteProject')
-          const count = await exportCompleteProject(project, previewSettings)
-          setEditNote(`Xcode bundle downloaded with ${count} screen ${count === 1 ? 'image' : 'images'}, report and chat history.`)
-        } else {
-          const { downloadProjectZip } = await import('@studio/exporter')
-          downloadProjectZip(project, format)
-          setEditNote('Project downloaded.')
-        }
+        const [{ exportNote, exportProject }, { browserExportSteps }] = await Promise.all([import('../lib/exportProject'), import('../lib/browserExport')])
+        setEditNote(exportNote(format, await exportProject(project, format, previewSettings, browserExportSteps(flush), accent)))
       })().catch(error => setEditNote(error instanceof Error ? error.message : 'Could not export this project.')).finally(() => { exportInProgress.current = false; setExporting(false) })
     },
-    [project, flush, previewSettings],
+    [project, flush, previewSettings, accent],
   )
 
+  // Nothing of the studio is left to use in a tab without it: what it holds is out of
+  // date, and the sheets behind an overlay could still be reached from the keyboard.
+  if (tab === 'elsewhere') return <OpenElsewhere />
   if (!loaded || !project) {
     return (
       <main className="grid h-dvh place-items-center bg-xc-editor text-[12px] text-xc-text-3">
@@ -1293,6 +1368,7 @@ export function Studio() {
       </main>
     )
   }
+  crashIfTesting('app', project.id)
 
   const errors = allDiagnostics.filter((d) => d.severity === 'error').length
   const warnings = allDiagnostics.filter((d) => d.severity === 'warning').length
@@ -1328,14 +1404,14 @@ export function Studio() {
                 the same thing there - what the pointer is over, and what a click on
                 it will do, which in Code is open its source. */}
             <InspectorReadout node={hoveredNode} active action={mode === 'design' ? 'select' : 'reveal'} />
-            {editNote ? <span className={styles.note} role="status" data-testid="edit-note">{editNote}</span> : null}
+            {noteText ? <span className={styles.note} role="status" data-testid="edit-note">{noteText}</span> : null}
             {selection && mode === 'design' ? (
               <div className={styles.selection} data-testid="selection-controls">
                 <span className={styles.selectionName}>{selection.name}</span>
                 <span className={styles.selectionKind}>{selection.type}</span>
                 <button type="button" data-testid="move-up" disabled={!selection.canMoveUp} title="Move up (⌥↑)" aria-label="Move up" onClick={() => void applyEdit({ kind: 'move', direction: -1 })}><Icon name="chevron-up-down" size={13} /><span>Up</span></button>
                 <button type="button" data-testid="move-down" disabled={!selection.canMoveDown} title="Move down (⌥↓)" aria-label="Move down" onClick={() => void applyEdit({ kind: 'move', direction: 1 })}><Icon name="chevron-up-down" size={13} /><span>Down</span></button>
-                <button type="button" data-testid="hide-selection" title="Hide (⌘H)" aria-label="Hide" onClick={() => void applyEdit({ kind: 'hide' })}><Icon name="eye" size={13} /></button>
+                <button type="button" data-testid="hide-selection" title={`Hide (${SHORTCUT_KEYS.hide})`} aria-label="Hide" onClick={() => void applyEdit({ kind: 'hide' })}><Icon name="eye" size={13} /></button>
                 <button type="button" data-testid="delete-selection" disabled={!selection.canDelete} title="Delete (⌫)" aria-label="Delete" onClick={() => void applyEdit({ kind: 'delete' })}><Icon name="xmark" size={12} /></button>
               </div>
             ) : null}
@@ -1354,20 +1430,29 @@ export function Studio() {
                 onFindCopies: (node: AuthoringNode) => findCopies(project.files, node.source, { deploymentTarget: project.manifest.deploymentTarget, screens: screenViews }), onSaveVariant: variant => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale || preparingEdit) return 'Wait for the current design to finish updating.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, variants: [...(metadata.variants ?? []).filter(v => v.owner !== variant.owner || v.name !== variant.name), variant] } } })
+                  return commitStudioRecords(project, { ...metadata, variants: [...(metadata.variants ?? []).filter(v => v.owner !== variant.owner || v.name !== variant.name), variant] }, 'variant-save')
                 }, onDeleteVariant: (owner, name) => {
                   const state = useStudio.getState(), before = project.studio
                   if (state.project !== project || !before || stale || preparingEdit) return 'Wait for the current design to finish updating.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...before, variants: before.variants?.filter(v => v.owner !== owner || v.name !== name) } } })
+                  return commitStudioRecords(project, { ...before, variants: before.variants?.filter(v => v.owner !== owner || v.name !== name) }, 'variant-delete')
                 }, onPickNavigation: navigationPicker.start, assets: project.assets, snapshot: result?.authoring, onSelect: selectAuthoring, onPreview: saveScenario, descriptions: project.studio?.components, onDescribe: description => {
                   const state = useStudio.getState(), before = project.studio, metadata = before ?? emptyStudioMetadata()
                   if (state.project !== project || stale) return 'Wait for the current source to compile.'
-                  return state.commitTransaction(project, { projectId: project.id, baseRevision: state.documentRevision, changes: [], studio: { before, after: { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] } } })
+                  return commitStudioRecords(project, { ...metadata, components: [...metadata.components.filter(c => c.owner !== description.owner), description] }, 'component-describe')
                 }, onNodeCommand: (node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation), onNodeChange: (node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }), onCommand: operation => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, operation) : Promise.resolve('Select a source layer first.') }
-  const busy = stale || preparingEdit
+  /** Editing waits for the edit being prepared, and for an AI edit holding the project. */
+  const editingPaused = preparingEdit || aiEditing
+  const busy = stale || editingPaused
   const revealSpan = (span: SourceSpan) => revealSpanIn(span.file, span.start)
+  /**
+   * What each panel is drawn from. A panel that crashed tries again when one of these
+   * changes. Panels drawn from the compiler key on the compile's revision: it changes
+   * once the Undo or edit has been compiled, which is when a retry can succeed, and
+   * not for each text measurement that refines the same compile.
+   */
+  const drawnFrom = { navigator: [result?.revision, mode], settings: [result?.revision, mode, level, authoringNode?.id], editor: [project, activeFileId, mode], preview: [result?.revision, mode] }
   /** The right-hand panel shows the App, the focused screen, or the selected view. */
-  const settingsPanel = level === 'app'
+  const settingsPanel = <PaneBoundary area="settings" resetKeys={drawnFrom.settings}>{level === 'app'
     ? <AppSettings project={project} tree={tree} snapshot={result?.authoring} screenViews={screens.map(screen => screen.view)} busy={busy} onRenameApp={useStudio.getState().renameProject} onResource={resourceCommand} onAssets={updateAssets} onSelect={selectAuthoring}
         navigation={<AppNavigationSettings navigation={result?.authoring?.navigation} screens={screens} busy={busy} onCommand={navigationCommand} onReveal={revealSpan} />} />
     : level === 'screen'
@@ -1377,15 +1462,25 @@ export function Studio() {
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }, undefined, undefined, undefined, true)}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, true)} onSelect={selectAuthoring} onReveal={revealSpan} />
         : <p className="text-[12px] text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
-      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} />
+      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} />}</PaneBoundary>
   const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
     <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
     {level !== 'app' && focusedScreen && <><span aria-hidden>›</span><button type="button" aria-current={level === 'screen' ? 'page' : undefined} onClick={() => openPage(focusedScreen.page)} data-testid="level-screen">{focusedScreen.name}</button></>}
     {level === 'view' && authoringNode && <><span aria-hidden>›</span><span aria-current="page" data-testid="level-view">{sourceLayerLabel(authoringNode)}</span></>}
   </nav>
 
-  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo} canRedo={canRedo} note={editNote} />
-  const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
+  const showLeftPanel = <button type="button" className={styles.panelToggle} data-testid="pane-toggle-navigator" aria-pressed="false" aria-label="Show left panel" title="Show left panel" onClick={toggleLeftPanel}><Icon name="sidebar-left" size={16} /></button>
+  /** Design's preview environment, in the toolbar or the canvas heading as the window allows (D15). */
+  const environment = environmentPlacement(available)
+  const picker = (which: EnvironmentPicker) => which === 'device' ? <DevicePicker key={which} device={device} onChange={unlessAiEditing(setDevice, undefined)} />
+    : which === 'appearance' ? <AppearancePicker key={which} preview={previewSettings} onChange={setPreview} />
+    : <TextSizePicker key={which} preview={previewSettings} onChange={setPreview} />
+
+  const previewTools = <PreviewTools inspecting={inspecting} onSetInspecting={setDesigning} showEditActions={mode === 'design'} showModeSwitch={mode !== 'design'} tool={tool} onSetTool={setTool} onAdd={() => setAdding(true)} canAdd={canAdd && !preparingEdit} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} onUndo={undo} onRedo={redo} onReset={run} canUndo={canUndo && !aiEditing} canRedo={canRedo && !aiEditing} note={noteText} noteAction={noteLocation ? { label: 'Show in Code', onClick: () => revealSpanIn(noteLocation.file, noteLocation.offset) } : null} />
+  const previewStatus = <span className={styles.statusGroup}>
+    <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
+    <DesignWarnings warnings={warningRows} onFind={findWarning} onShow={warning => revealSpanIn(warning.span.file, warning.span.start)} />
+  </span>
 
   return (
     <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text"
@@ -1407,12 +1502,16 @@ export function Studio() {
         onThemeChange={setTheme}
         onOpenGallery={openGallery}
         onRenameProject={useStudio.getState().renameProject}
+        renameDisabled={aiEditing}
         onShortcuts={() => setShortcutsOpen(true)}
+        onCopyBuild={() => {
+          void navigator.clipboard.writeText(BUILD_DETAILS).then(() => setEditNote(`${BUILD_NAME} copied.`), () => setEditNote(BUILD_DETAILS))
+        }}
         onReview={() => { setDesigning(true); setReviewOpen(true) }}
         reviewDisabled={stale || preparingEdit || !result?.renderTree}
         projectName={project.manifest.name}
         savedAt={lastSavedAt}
-        saveError={saveError}
+        storage={storage}
         // The toggles report the preference, so each is a switch that always
         // responds; `suppressed` is how a pane that is on but has no room says so.
         panes={new Set((Object.keys(shown) as PaneKey[]).filter((key) => shown[key]))}
@@ -1422,19 +1521,29 @@ export function Studio() {
         onTogglePane={togglePane}
         onExport={handleExport}
         exporting={exporting}
-        onDownloadEditable={() => { void import('@studio/exporter').then(async module => { await flush(); module.downloadEditableProject(project) }).catch(error => setEditNote(error instanceof Error ? error.message : 'Could not download the editable project.')) }}
         onShare={handleShare}
-        environment={<><DevicePicker device={device} onChange={setDevice} /><AppearancePicker preview={previewSettings} onChange={setPreview} /><TextSizePicker preview={previewSettings} onChange={setPreview} /></>}
+        environment={environment.toolbar.length ? <>{environment.toolbar.map(picker)}</> : undefined}
         previewing={!inspecting}
         onSetPreviewing={previewing => setDesigning(!previewing)}
         previewDisabled={stale || preparingEdit}
       />
+      <StorageBanner problem={storage} onRetry={() => void flush()} />
+      <AiEditBanner />
+      {available < COMFORTABLE_WIDTH && !narrowNoted && <p className={styles.narrowNote} role="note" data-testid="narrow-window">
+        <span>This window is narrow. The studio works best at {COMFORTABLE_WIDTH.toLocaleString('en-US')} px wide or more.</span>
+        <button type="button" onClick={() => setNarrowNoted(true)}>Dismiss</button>
+      </p>}
 
-      <div ref={splitRef} className="flex min-h-0 flex-1">
-        {layout.showNavigator ? (
+      <div ref={splitRef} className="relative flex min-h-0 flex-1">
+        {/* A narrow window keeps its rail, under Layers drawn over the canvas too, so the canvas does not move. */}
+        {layout.narrow && <div className={styles.panelRail}>{!layout.layersOver && showLeftPanel}</div>}
+        {layout.showNavigator || layout.narrow ? (
           <>
-            <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
-              <StudioSidebar key={project.id} stale={stale || preparingEdit} previewProblems={result?.diagnostics ?? NO_DIAGNOSTICS} onCollapse={() => togglePane('navigator')} onApplied={() => { setCommittedEditRevision(value => value + 1); setEditNote('Prompt edits applied. Use Undo to reverse them.') }} selection={authoringNode && !stale ? { label: sourceLayerLabel(authoringNode), file: authoringNode.source.file, start: authoringNode.source.start, end: authoringNode.source.end, owner: authoringNode.owner } : null}>
+            {layout.layersOver && <button type="button" className={styles.layersBackdrop} aria-label="Close Layers" tabIndex={-1} onClick={() => setLayersOver(false)} />}
+            {/* Kept, hidden, while a narrow window closes it: an unsent prompt and the open tab are still there. */}
+            <div style={{ width: layout.narrow ? navigatorWidth : layout.nav }} className={layout.narrow ? styles.layersOver : 'shrink-0 overflow-hidden'} hidden={layout.narrow && !layout.layersOver} data-testid={layout.layersOver ? 'layers-over' : undefined}>
+              <PaneBoundary area="navigator" resetKeys={drawnFrom.navigator}>
+              <StudioSidebar key={project.id} design={mode === 'design'} stale={stale || preparingEdit} previewProblems={result?.diagnostics ?? NO_DIAGNOSTICS} onCollapse={toggleLeftPanel} onApplied={() => { setCommittedEditRevision(value => value + 1); setEditNote('Prompt edits applied. Use Undo to reverse them.') }} selection={authoringNode && !stale ? { label: sourceLayerLabel(authoringNode), file: authoringNode.source.file, start: authoringNode.source.start, end: authoringNode.source.end, owner: authoringNode.owner } : null}>
               {mode === 'design' ? <DesignNavigator
                 tabbed
                 key={project.id}
@@ -1445,8 +1554,10 @@ export function Studio() {
                 level={level}
                 selectedScreenId={focusedScreen?.id}
                 selectedComponent={authoringNode?.kind === 'definition' ? authoringNode.name : undefined}
-                busy={stale || preparingEdit}
-                onTogglePanel={() => togglePane('navigator')}
+                busy={busy}
+                diagnostics={allDiagnostics}
+                onReveal={revealSpanIn}
+                onTogglePanel={toggleLeftPanel}
                 onSelectApp={selectApp}
                 onSelectScreen={openPage}
                 onSelectComponent={component => { if (component.definition) selectAuthoring(component.definition); else setEditNote(`${component.name} is built in Swift the studio does not read. Open it in Code.`) }}
@@ -1455,11 +1566,13 @@ export function Studio() {
                 view={hierarchyView}
                 onViewChange={setHierarchyView}
                 renderFiles={() => <ProjectFiles assets={assetsFolder} tree={fileTree} activeFileId={activeFileId} onOpenFile={openSource} />}
-                renderLayers={options => result?.authoring ? <LogicalLayers key={`${focusedPage?.id}:${pageFocusEpoch}`} {...options}
+                renderLayers={options => result?.authoring ? <LogicalLayers key={layersPage} {...options}
                   labels={project.studio?.labels} onRename={renameLayer} pageId={focusedPage?.id} pageName={focusedPage?.name} pageSource={focusedPage?.source} runtimeLayers={pageHierarchy}
                   selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={result.authoring} files={project.files} selection={layerSelection?.anchor}
-                  selected={authoringNode?.id} selectedAncestors={selectedSources} hovered={liveHoveredAuthoring?.node.id ?? hoveredSources[0]} hoveredAncestors={hoveredSources.slice(1)}
-                  onHover={hoverAuthoring} stale={stale || preparingEdit} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
+                  selected={authoringNode?.id} selectedAncestors={selectedSources} hovered={liveHoveredAuthoring?.node.id ?? hoveredPick?.node.id ?? hoveredSources[0]} hoveredAncestors={hoveredSources.slice(1)}
+                  onHover={hoverAuthoring} stale={busy} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
+                  onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined}
+                  multiple={multiSelection.page === layersPage ? multiSelection : NO_MULTI_SELECTION} onMultipleChange={next => setMultiSelection({ ...next, page: layersPage })}
                   hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-2 text-[12px] text-xc-text-3">Building the view hierarchy…</p>}
               /> : <Navigator tabbed
                 key={project.id}
@@ -1476,7 +1589,7 @@ export function Studio() {
                 authoringSelection={layerSelection?.anchor}
                 selectedAuthoringId={authoringNode?.id}
                 selectedAuthoringAncestors={selectedSources}
-                hoveredAuthoringId={liveHoveredAuthoring?.node.id ?? hoveredSources[0]}
+                hoveredAuthoringId={liveHoveredAuthoring?.node.id ?? hoveredPick?.node.id ?? hoveredSources[0]}
                 hoveredAuthoringAncestors={hoveredSources.slice(1)}
                 onHoverAuthoring={hoverAuthoring}
                 onEditAuthoring={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
@@ -1488,7 +1601,7 @@ export function Studio() {
                 onHideLayer={(layer) => void applyEdit({ kind: 'hide' }, layer)}
                 onShowHidden={showHidden}
                 layersEditable={false}
-                stale={stale || preparingEdit}
+                stale={busy}
                 onSelectLayer={selectLayer}
                 tree={fileTree}
                 activeFileId={activeFileId}
@@ -1496,21 +1609,22 @@ export function Studio() {
                 diagnostics={allDiagnostics}
                 canDelete={files.length > 1}
                 onSelect={openSource}
-                onCreateFile={(name, parent) => { setMode('develop'); return createFile(name, parent) }}
-                onCreateFolder={createFolder}
-                onTogglePanel={() => togglePane('navigator')}
-                onRenameFile={renameFile}
-                onRenameFolder={renameFolder}
-                onDeleteFile={deleteFile}
-                onDeleteFolder={deleteFolder}
-                onDuplicateFile={duplicateFile}
-                onMoveFile={moveFile}
+                onCreateFile={unlessAiEditing((name: string, parent?: string) => { setMode('develop'); return createFile(name, parent) }, null)}
+                onCreateFolder={unlessAiEditing(createFolder, null)}
+                onTogglePanel={toggleLeftPanel}
+                onRenameFile={unlessAiEditing(renameFile, true)}
+                onRenameFolder={unlessAiEditing(renameFolder, undefined)}
+                onDeleteFile={unlessAiEditing(deleteFile, undefined)}
+                onDeleteFolder={unlessAiEditing(deleteFolder, undefined)}
+                onDuplicateFile={unlessAiEditing(duplicateFile, undefined)}
+                onMoveFile={unlessAiEditing(moveFile, undefined)}
                 onRevealDiagnostic={revealSpanIn}
-                onOpenTemplates={openGallery}
+                onOpenTemplates={() => openGallery('design')}
               />}
               </StudioSidebar>
+              </PaneBoundary>
             </div>
-            <Splitter
+            {!layout.narrow && <Splitter
               orientation="col"
               size={layout.nav}
               onResize={(size) => setSize('navigator', size)}
@@ -1519,14 +1633,14 @@ export function Studio() {
               direction={1}
               label="Navigator width"
               onToggle={() => togglePane('navigator')}
-            />
+            />}
           </>
-        ) : <div className={styles.panelRail}><button type="button" className={styles.panelToggle} data-testid="pane-toggle-navigator" aria-pressed="false" aria-label="Show left panel" title="Show left panel" onClick={() => togglePane('navigator')}><Icon name="sidebar-left" size={16} /></button></div>}
+        ) : <div className={styles.panelRail}>{showLeftPanel}</div>}
 
         <div className="flex min-w-0 flex-1 flex-col" style={mode === 'design' ? { display: 'none' } : undefined}>
           <TabBar
             key={project.id}
-            onRenameFile={renameFile}
+            onRenameFile={unlessAiEditing(renameFile, true)}
             openFileIds={openFileIds}
             activeFileId={activeFileId}
             filesWithErrors={filesWithErrors}
@@ -1555,6 +1669,7 @@ export function Studio() {
           ) : null}
 
           <div className="min-h-0 flex-1">
+            <PaneBoundary area="editor" resetKeys={drawnFrom.editor}>
             {activeFile ? (
               <EditorPane
                 // Remount editor selection per file; undo belongs to the project timeline.
@@ -1564,6 +1679,7 @@ export function Studio() {
                 onChange={handleChange}
                 onUndo={undo}
                 onRedo={redo}
+                readOnly={aiEditing}
                 onSave={() => void flush()}
                 reveal={reveal}
                 fileId={activeFile.id}
@@ -1575,6 +1691,7 @@ export function Studio() {
             ) : (
               <p className="p-4 text-[12px] text-xc-text-3">No file selected.</p>
             )}
+            </PaneBoundary>
           </div>
 
           {mode !== 'design' ? debugArea : null}
@@ -1594,11 +1711,12 @@ export function Studio() {
             />}
             <div style={mode === 'design' ? { flex: 1, minWidth: 0 } : { width: layout.preview }} className="flex shrink-0 flex-col overflow-hidden">
               <div className="min-h-0 flex-1">
+              <PaneBoundary area="preview" resetKeys={drawnFrom.preview} keep={previewTools}>
               <DevicePane
                 expanded={mode === 'design'}
                 projectId={project.id}
                 previewIdentity={previewIdentity}
-                panelLayout={`${layout.showNavigator}:${shown.preview}`}
+                panelLayout={`${layout.showNavigator && !layout.layersOver}:${shown.preview}`}
                 showSettings={shown.preview}
                 settingsWidth={settingsWidth}
                 onSettingsResize={(size) => setSize('settings', size)}
@@ -1609,6 +1727,7 @@ export function Studio() {
                 canvas={canvas}
                 selectedPageId={designPage?.id}
                 pageCount={pageCount}
+                pagesNotDrawn={designPages ? result?.pagesNotDrawn : undefined}
                 onSelectPage={openPage}
                 allPages={allPages || pickingNavigation}
                 navigationPicker={navigationPageTargets ? {
@@ -1627,22 +1746,29 @@ export function Studio() {
                 settingsPanel={settingsPanel}
                 settingsTitle={settingsTitle}
                 onSelectBackground={mode === 'design' ? selectApp : undefined}
-                canvasMove={canvasMove}
+                onReorderNodes={reorderNodes}
+                dropTargetAt={dropTargetAt}
                 centerOn={centerOn}
                 status={previewStatus}
-                onDeviceChange={setDevice}
+                onDeviceChange={unlessAiEditing(setDevice, undefined)}
+                environment={mode === 'design' && environment.heading.length ? <>{environment.heading.map(picker)}</> : undefined}
                 tools={previewTools}
                 device={device}
-                tree={result?.renderTree ?? null}
-                selectedRenderIds={selectedRenderIds}
-                hoveredRenderIds={hoveredRenderIds}
-                stale={stale || preparingEdit}
-                onEvent={handleEvent}
+                tree={phone.tree}
+                notice={phone.notice}
+                onRestart={phone.stopped ? run : undefined}
+                revision={result?.revision}
+                selectedRenderGroups={selectionOutlines}
+                hoveredRenderGroups={hoveredRenderGroups}
+                stale={stale || preparingEdit || phone.dimmed}
+                onEvent={dispatch}
                 inspecting={inspecting}
-                onRevealSource={inspectSelect}
+                onInspectSelect={inspectSelect}
+                onInspectDoubleClick={inspectDoubleClick}
                 preview={previewSettings}
                 onPreviewChange={(settings: Partial<PreviewSettings>) => setPreview(settings)}
               />
+              </PaneBoundary>
               </div>
             </div>
           </>
@@ -1653,10 +1779,13 @@ export function Studio() {
       </div>
       {reviewOpen && <DesignReview key={project.id} name={project.manifest.name} pages={designPages ?? []} selectedPageId={designPage?.id} options={{ projectId: project.id, files: project.files, images, colors: project.colors, scenario, designScreens: project.studio?.screens, componentDescriptions: project.studio?.components, deploymentTarget: project.manifest.deploymentTarget, previewTarget: project.manifest.previewTarget }} onClose={() => setReviewOpen(false)} onInspect={source => {
         setReviewOpen(false)
-        const node = result?.authoring?.nodes.filter(n => n.kind !== 'definition' && n.source.file === source.file && n.source.start <= source.start && n.source.end >= source.end).sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
+        const node = sourceLayerAround(result?.authoring, source)
         if (node) selectAuthoring(node)
       }} />}
       {shortcutsOpen ? <ShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}
+      {/* Failures outside any panel. Outside the inert workspace, so it stays usable
+          while a sheet is open. */}
+      <ErrorBanner />
       {adding ? (
         <AddView
           target={addTarget}
@@ -1693,25 +1822,27 @@ export function Studio() {
           origin={origin}
           savedAt={lastSavedAt}
           atLaunch={galleryAtLaunch}
+          initialSource={gallerySource}
           onClose={() => setGalleryOpen(false)}
-          onChoose={async (templateId) => {
-            const made = await applyTemplate(templateId)
-            // Kept open on failure: the sheet is where the message goes, and closing
-            // it would leave somebody looking at a project they did not ask for.
-            if (made) { setGalleryOpen(false); setMode('design'); setDesigning(true) }
+          onChoose={async (templateId, options) => {
+            const made = await applyTemplate(templateId, options)
+            // Kept open otherwise: the sheet is where the message goes, and closing it
+            // would leave somebody looking at a project they did not ask for.
+            if (made === 'opened') { setGalleryOpen(false); setMode('design'); setDesigning(true) }
             return made
           }}
           onOpenProject={openProject}
           onRemoveProject={(id) => void removeProject(id)}
-          onOpenFiles={async (picked, history) => {
-            const opened = await openFiles(picked)
+          onOpenFiles={async (picked, { history, ...options } = {}) => {
+            const result = await openFiles(picked, options)
+            const opened = result === 'opened'
             if (opened && history?.length) {
               const current = useStudio.getState()
               if (current.project) current.appendPromptMessages(current.project.id, history)
               await flush()
             }
             if (opened) setGalleryOpen(false)
-            return opened
+            return result
           }}
         />
       ) : null}

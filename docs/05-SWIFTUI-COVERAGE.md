@@ -14,8 +14,11 @@ containers and system APIs item by item, with native comparison limitations.
 name does not guarantee every overload, modifier combination, or Swift language feature.
 The status rows are a feature inventory, not a measured percentage of SwiftUI compatibility.
 
-Known unsupported view names produce placeholders and diagnostics. Unknown framework names can
-still produce unresolved-identifier errors. Recognized unsupported modifiers warn; unknown
+Known unsupported view names produce placeholders and diagnostics. So does a capitalised name the
+preview doesn't know, written where a view goes: it draws a labelled placeholder with a warning, and
+what it was given is not run. A name close to a type the project or SwiftUI declares stays an error
+that offers that type, and elsewhere, as in `let formatter = DateFormatter()`, an unknown name is
+still an unresolved-identifier error. Recognized unsupported modifiers warn; unknown
 modifiers warn when the checker can establish that the receiver is a view. The Coverage panel
 records these reports locally. It cannot detect all silent semantic differences.
 
@@ -32,12 +35,12 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
 | `VStack` / `HStack` / `ZStack` | ✅ | 3 | alignment, spacing |
-| `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine |
+| `Spacer` | ✅ | 3 | minLength; the canonical test of the layout engine. The views beside it take what they need first and it keeps back only its minimum, so a long label stays on one line beside it, as in the iOS 27 simulator |
 | `Divider` | ✅ | 6 | hairline across its stack's axis |
 | `Group` | ✅ | 3 | a modifier on one applies to each *child*, as SwiftUI's does - it is not a container, so `Group { … }.font(.caption)` is the same as writing the font on both |
-| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths; binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
-| `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's |
-| `GeometryReader` | ✅ | 7 | reports its real size through `size` and `frame(in:)`, and is its own coordinate space |
+| `ForEach` | 🟡 | 6 | ranges, `Identifiable`, `id:` key paths, a computed `id` and `\.rawValue` included; each row is tagged with its id, as SwiftUI tags it. Every row keeps its own identity: ids that differ only in punctuation ("C", "C++"), several rows drawn for one element, and an id two elements share, which warns as SwiftUI does. Binding collection closures (`ForEach($items) { $item in }`) are unsupported. Preview limit: 1,000 elements, with a diagnostic instead of truncation |
+| `ScrollView` | ✅ | 6 | both axes; scrolls natively, so the physics are the browser's. Vertical content keeps its own height at the top, centred across, as in iOS 27 |
+| `GeometryReader` | ✅ | 7 | reports its real size through `size` and where it is on the screen through `frame(in: .global)`, in a sheet too, and through `safeAreaInsets` the insets of the edges it touches, bars included, as iOS 27 does. A reader inside another reader reads no insets. It is its own coordinate space. A named coordinate space is read as the screen |
 | `LazyVStack` / `LazyHStack` | 🟡 | 6 | laid out as stacks: correct, and not virtualised. A 200-row stack measures in 7.6 ms against a 120 ms budget, so the cost is real and not yet worth the identity complexity |
 | `LazyVGrid` / `LazyHGrid` | ✅ | 6 | fixed, flexible and adaptive columns |
 | `Grid` / `GridRow` | ✅ | 7 | columns align across rows |
@@ -50,21 +53,21 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Text` | ✅ | 3 | interpolation, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes |
-| `Label` | ✅ | 6 | icon then title |
-| `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations; unknown names use an explicit fallback, not Apple artwork |
+| `Text` | ✅ | 3 | interpolation, with `specifier:` and `format:` inside it too, `verbatim:`, `format:` number styles (`.number`, `.percent`, `.currency(code:)`), and a `Date` with `style:` (`.time`, `.date`, `.relative`, `.offset`, `.timer`). `Text + Text` concatenates, and each half keeps its own face, colour and attributes, as does a `Text` interpolated into a `Text`. Interpolated into a `Button`'s or a navigation title, it is drawn as its words, without its styling. A title written as a literal, a `Text`'s or a `Button`'s, a `Label`'s, a `Section`'s or a navigation title, writes a number put into it as iOS 27 does: 2,000, and a Double with six decimals, 3.500000; a `String`, `verbatim:` and a project's own views keep Swift's text, 2000 |
+| `Label` | ✅ | 6 | icon then title. In a list row, as iOS 27 draws it, the icon is a quarter larger than the row's text, tinted and centred in a 24-pt column, with the title at 72 on the phone |
+| `Image(systemName:)` | 🟡 | 6 | mapped Ionicons approximations, and shapes drawn here after the iOS 27 simulator's glyph where no Ionicon is close (a cup and saucer, a flame, a waveform, a closed book, outlined charts); unknown names use an explicit fallback, not Apple artwork |
 | `Image("asset")` | ✗ | - | a project file here is text; there is no asset catalogue to resolve a name against, so there is nothing to draw. Reported as unavailable rather than guessed at |
 | `GroupBox` | ✅ | - | a titled card: the label above, the contents on a rounded secondary panel |
 | `LabeledContent` | ✅ | - | label leading, value trailing in the secondary colour; both the `value:` and content forms |
-| `ContentUnavailableView` | ✅ | 13 | the empty state: a large symbol over a title over a description. `.search` is the stock spelling and carries its own text |
+| `ContentUnavailableView` | ✅ | 13 | the empty state as iOS 27 draws it: a 40-pt symbol in the secondary colour, a bold title3 title, and a title3 description in centred lines 32 pt in from each side, centred with 30 pt of space under it. `.search` is the stock spelling and carries its own text. The form built from content closures, and its actions, are not drawn |
 | `ControlGroup` | 🟡 | - | its controls in a row. Drawn as the toolbar form, not the segmented form a menu gives it |
-| `ScrollViewReader` | ⬜ | - | recognised and drawn as a labelled placeholder, not reported as an unknown name |
+| `ScrollViewReader` | 🟡 | - | what it holds is drawn, and handed a proxy whose `scrollTo` does nothing: there is no channel from the worker to the browser's scroll position. Warns at the reader |
 | `AsyncImage` | 🟡 | 7 | draws its `placeholder:`, because there is no network in the worker. Its content closure is not run: there is no `Image` to hand it |
-| `Link` / `ShareLink` | 🟡 | 6 | label only, with an explicit warning; does not open a URL or a share sheet. `URL(string:)` exists, so the `destination:` can be written |
+| `Link` / `ShareLink` | 🟡 | 6 | drawn as iOS 27 draws them: the title or the label given, in the accent colour, and a share link without a label is the share icon and "Share…". Tapping opens nothing, and says so. `URL(string:)` exists, so the `destination:` can be written |
 | `ProgressView` | ✅ | 6 | determinate bar filling from its leading edge; `.circular` and the indeterminate form are the turning activity indicator |
 | `Gauge` | 🟡 | 7 | linear labelled bars and value-dependent circular arcs/markers; native metrics and all label/style arrangements remain approximate |
 | `Canvas` | ✅ | 7 | `fill` and `stroke`; drawings become the same vector nodes a `Path` does |
-| `TimelineView` | 🟡 | - | its content is drawn once, at the moment of the render. The schedule is a clock the preview does not run, and the `context` is not supplied |
+| `TimelineView` | 🟡 | - | its content is drawn once, for the moment of the render: `context.date` is now. The schedule is a clock the preview does not run |
 | `Chart` (Swift Charts) | ⬜ | - | needs a mark model and a plottable-value protocol of its own, which is a package rather than a view |
 | `Map` (MapKit) | ✗ | - | Needs a licensed tile source; placeholder with a note |
 | `UIViewRepresentable` | ✗ | - | Cannot run UIKit; labelled placeholder |
@@ -73,37 +76,37 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `Button` | ✅ | 3 | |
+| `Button` | ✅ | 3 | every action form: a trailing closure, `action:` with a closure or a named function, `action:label:`, and with `role:` or `systemImage:` |
 | `Toggle` | ✅ | 6 | |
 | `Slider` | ✅ | 6 | |
 | `Stepper` | ✅ | 6 | each half is its own target; `step:` and `in:` are both honoured |
 | `TextField` / `SecureField` | 🟡 | 6 | String-backed inputs with a caret; `SecureField` masks using a password input. Numeric value/format/formatter bindings and axis-based multiline fields warn as unsupported |
 | `TextEditor` | 🟡 | 7 | editable multiline textarea with String binding, wrapping and scrolling; native selection, keyboard and advanced TextEditor APIs remain incomplete |
-| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. The popup is drawn at the bottom rather than anchored to the control |
+| `Picker` | 🟡 | 6 | opens onto its options, ticks the chosen one, writes the selection. `.segmented`, `.inline` and `.wheel` draw them in place instead. A row selects by its `.tag`, or over `ForEach` by its id, when that has the selection's type, as measured in iOS 27: an enum whose `id` is a `String` selects nothing, and nor do `ForEach`'s own tags for an Optional selection. Where no row can be selected it warns, and a menu picker shows no value. The popup is drawn at the bottom rather than anchored to the control |
 | `DatePicker` | 🟡 | 7 | a formatted row that opens onto a calendar: pick a day, page the month. `displayedComponents:` chooses date, time or both. No time-of-day editor, so the row's time is the binding's own |
 | `ColorPicker` | 🟡 | 7 | opens onto SwiftUI's named colours as swatches. Not a continuous surface - see approximations |
-| `Menu` | 🟡 | 7 | opens onto its buttons; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
+| `Menu` | 🟡 | 7 | opens onto its buttons, over `ForEach` too; pressing one runs its action. Drawn at the bottom rather than anchored to the control |
 
 ## Collections and navigation
 
 | View | Status | Phase | Notes |
 | --- | --- | --- | --- |
-| `List` | 🟡 | 6 | plain/grouped/sidebar styles; binding collection closures are unsupported |
+| `List` | 🟡 | 6 | plain/grouped/sidebar styles; binding collection closures are unsupported. A row's separator starts under its first text, as iOS 27 draws it: a Label's title, the text beside an icon, or the row's inset with no text |
 | `Section` | ✅ | 6 | header and footer, the footer in the secondary colour under the card |
 | `Form` | ✅ | 6 | the grouped-list form |
-| `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included |
+| `.onDelete` | ✅ | 7 | swipe a row to reveal it; `remove(atOffsets:)` included, given the place of the element the row was drawn for; `perform:` takes a closure or a named function, as do `.onAppear`, `.task` and `.onTapGesture` |
 | `.onMove` | ⬜ | - | warns; no reorder UI or modifier callback. The array move helper is separate |
 | `.swipeActions` | ⬜ | - | warns; custom actions are ignored. Standard delete requires `.onDelete` |
-| `.searchable` | ✅ | 7 | a field above the content, with its magnifying glass, writing its binding |
+| `.searchable` | ✅ | 7 | a field with its magnifying glass, writing its binding. On a phone it is at the bottom of the screen, or under the title in a tab app, and on iPad in the toolbar. Written on the NavigationStack, it searches the stack's root screen only, and on a TabView without a search tab it draws nothing, as in iOS 27 |
 | `.refreshable` | ⬜ | - | pull-to-refresh callback is not implemented |
 | `DisclosureGroup` | ✅ | 7 | opens and closes; `isExpanded:` is read where the user gave one |
 | `Table` / `OutlineGroup` | ⬜ | - | a labelled placeholder. The closure of a view the preview does not draw is no longer run, so a `TableColumn`'s row parameter cannot trap |
 | `NavigationStack` + `NavigationLink` | 🟡 | 6 | destination/value links work. Bound `NavigationStack(path:)` is not synchronized and now warns |
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
-| `.toolbar` | 🟡 | 6 | leading/trailing items work; keyboard, bottomBar and principal placements warn and are omitted |
+| `.toolbar` | 🟡 | 6 | leading/trailing items work, drawn as iOS 27 draws them: a Label as its icon alone in a 44-pt glass circle, text in a 44-pt capsule, the label colour unless a tint is written, and items side by side in one capsule. A NavigationLink in the toolbar pushes. Keyboard, bottomBar and principal placements warn and are omitted |
 | `.toolbarBackground` | 🟡 | - | navigation bar only: `.hidden` paints no bar background, so the content behind shows, and a colour or gradient paints that. `.visible` and the other bars draw as before. A view extending under the bar with `.ignoresSafeArea` also clears the bar, as iOS does at the top of the content |
-| `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, and `.page`, whose dots are also the way through - a preview has no swipe |
+| `TabView` | ✅ | 6 | tab bar with `.tabItem` or `Tab`, bound or unbound selection, pages from `ForEach` selected by their ids, a `TabSection`'s tabs in the bar with the others, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
 
@@ -132,10 +135,10 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.padding` | ✅ | 3 | all edge-set forms |
 | `.fixedSize` | ✅ | 6 | both the whole-view and per-axis forms |
 | `.layoutPriority` | ✅ | 7 | the highest-priority group takes its space first |
-| `.offset` | ✅ | 6 | paint-time, so neighbours do not move |
-| `.position` | ✅ | 7 | centres the view on a point in its parent's space |
+| `.offset` | ✅ | 6 | paint-time, so neighbours do not move; `x:y:` or a `CGSize` |
+| `.position` | ✅ | 7 | centres the view on a point in its parent's space; `x:y:` or a `CGPoint` |
 | `.aspectRatio` / `.scaledToFit` / `.scaledToFill` | ✅ | 7 | |
-| `.ignoresSafeArea` | ✅ | 7 | on a screen's root, for every edge, the whole screen moves to the device's edges. Anywhere else, or for named edges, only that view grows - the edges of it that meet the safe area - so its siblings stay inside. The keyboard region does nothing; the preview has no keyboard |
+| `.ignoresSafeArea` | ✅ | 7 | per view, as in iOS 27: a view reaches into the safe area only across the edges it touches, and moves rather than grows. `.keyboard` alone changes nothing; `.edgesIgnoringSafeArea` is read the same way |
 | `.safeAreaInset` | ✅ | - | all four edges; the content is *inset*, not overlaid, so a bar drawn this way does not cover the last row |
 | `.alignmentGuide` | ✅ | - | the stack aligns guides rather than edges, so a guide can be replaced. `d.width`, `d.height` and `d[.leading]` and friends all read |
 | `.containerRelativeFrame` | 🟡 | - | takes the container's size along the named axes, divided by `count`. The container is whatever proposed the size, which is the scroll view or stack above it |
@@ -145,7 +148,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | Modifier | Status | Phase |
 | --- | --- | --- |
 | `.foregroundStyle` / `.foregroundColor` | ✅ | 3 |
-| `.background` (colour, gradient, shape, view) | ✅ | 6 | materials, content builders, alignment, and built-in shape clipping via `in:`; `fillStyle:` warns as unsupported |
+| `.background` (colour, gradient, shape, view) | ✅ | 6 | materials, content builders, alignment, and built-in shape clipping via `in:`; `fillStyle:` warns as unsupported. A colour, gradient or material reaches into the safe area its view touches, as the ShapeStyle form does in iOS 27; a view given as the background stays inside |
 | `.overlay` | ✅ | 6 | view arguments and content builders, including interactive content and alignment |
 | `.font` (text styles and `.system(size:weight:design:)`) | ✅ | 6 | |
 | `.bold` / `.italic` / `.fontWeight` | ✅ | 6 | compose with `.font` in either order |
@@ -184,13 +187,14 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 
 | Item | Status | Phase |
 | --- | --- | --- |
-| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 |
+| `Rectangle` `RoundedRectangle` `Circle` `Ellipse` `Capsule` | ✅ | 3 | a `.continuous` corner is iOS 27's curve, measured in the simulator: it reaches 1.53 times the radius along each edge, squeezed into half a side that is too short. Grouped list and form cards and alerts use it. A sheet's clip and the glass outlines are still circular |
+| `UnevenRoundedRectangle`, `.rect(topLeadingRadius:…)`, `RectangleCornerRadii` | 🟡 | - | drawn, clipped and filled with the largest radius on every corner; the checker says so where uneven corners are written (D7a) |
 | `Path` (custom) | ✅ | 7 | lines, curves, arcs, rects and ellipses, serialised to SVG |
 | `.fill` / `.stroke` | 🟡 | 7 | takes a colour, a gradient or a `StrokeStyle`'s `lineWidth`; a `StrokeStyle` dash pattern is not drawn |
-| `.trim` | 🟡 | 7 | exact for arcs - progress rings - approximate elsewhere |
-| `.strokeBorder` | ⬜ | - |
+| `.trim` | 🟡 | 7 | on shapes and paths, from where iOS 27 starts each shape (3 o'clock; a rectangle's top-left corner) and in an arc's own direction. On the built-in shapes, strokes only: a trimmed fill, or a trimmed stroke with a dash pattern, is drawn whole and warns. A path's arcs are trimmed whether filled or stroked |
+| `.strokeBorder` | ✅ | 7 | drawn inside the shape's edge; a Design panel Border is one (D8) |
 | Custom `Shape` conformances | ✅ | 11 | `struct Arc: Shape { func path(in rect: CGRect) -> Path }`, with `.fill`, `.stroke` and `.trim` on the path it draws and `.frame` on the box it draws into. The rect is the one the shape was laid out in last pass, converging on the next - the same answer `GeometryReader` gives to the same ordering problem. `rect.minX` and the rest are derived, as `CGRect` derives them |
-| `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 |
+| `Color` literals and semantic colours (`.primary`, `.secondary`, `.accentColor`) | ✅ | 3 | and the iOS 27 system, label, fill and grey colours by any of their names (`Color(.systemGray6)`, `Color(uiColor:)`, `UIColor.systemGray6`), the hierarchy down to `.quinary` including a colour's own (`.blue.secondary`), and `hue:saturation:brightness:`; measured in the iOS 27 simulator. An unknown name warns |
 | Dark-mode colour resolution | ✅ | 4 |
 | `LinearGradient` | ✅ | 6 | named unit points |
 | `RadialGradient` / `AngularGradient` | 🟡 | 6 | accepted and drawn as a linear gradient |
@@ -208,11 +212,12 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `@GestureState` / `.updating` | ✅ | 7 | transient, reverting when the gesture ends |
 | `.simultaneously(with:)` | ✅ | 7 | each gesture responds to its own kind of input |
 | `.sequenced` / `.exclusively` | 🟡 | 7 | accepted; treated as simultaneous |
-| `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render |
-| `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency |
+| `.onAppear` / `.onDisappear` | ✅ | 7 | run once per appearance, not per render. Several on one view all run, in the order written |
+| `.task` | 🟡 | 7 | run synchronously; the preview has no concurrency. `.task(id:)` runs again when its id changes |
+| `.id(_:)` | ✅ | - | a new id is a new view: its state starts over, and its appear and disappear hooks run, when the id changes |
 | `.onChange(of:)` | ✅ | 7 | one-value and explicit zero/two-parameter callbacks; `initial: true` runs on first appearance. Independent modifiers track independent previous values |
 | `.onReceive` | ⬜ | - | needs Combine, which needs publishers and a scheduler the preview does not have |
-| `.disabled` / `.allowsHitTesting` | ✅ | 7 |
+| `.disabled` / `.allowsHitTesting` | ✅ | 7 | a disabled button is grey, as iOS 27 draws it: its title by where it sits (on its own, in a row, in the toolbar), and a bordered or prominent button's fill too. A plain button, one with its own foreground style, and other controls fade |
 | `.focused` | ⬜ | - | warns; `@FocusState` storage exists but native focus synchronization is absent |
 | `.onSubmit` / `.keyboardType` / `.submitLabel` | 🟡 | - | common text-field Enter submission and browser input/return-key hints, including inherited modifiers; no iOS keyboard rendering or complete submit-scope semantics |
 | `.textInputAutocapitalization` / `.autocorrectionDisabled` | 🟡 | - | browser input hints; actual behavior depends on the browser and keyboard |
@@ -227,12 +232,14 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | --- | --- | --- | --- |
 | `withAnimation` | ✅ | 6 | animates every change in its transaction, for one frame |
 | `.animation(_:value:)` | ✅ | 6 | animates its subtree only when `value` changes, and not on the first render |
+| `Animation` - `.delay`, `.speed`, `.repeatForever`, `.repeatCount` | 🟡 | - | a delay and a speed change the one animation the preview plays; a repeat plays once, and says so where it is written |
 | Curves: `.linear .easeIn .easeOut .easeInOut` | ✅ | 6 | CSS timing functions |
 | `.spring` (and `.bouncy` / `.snappy` / `.smooth`) | 🟡 | 6 | an overshooting bezier, not a real solver |
 | `.transition` (`.slide .opacity .scale .move`) | 🟡 | 7 | entry only; exit would need the renderer to outlive the view |
 | `AnyTransition.combined(with:)` | 🟡 | - | constructs, and the preview draws the first of the two: the render tree carries one transition kind per node |
 | `matchedGeometryEffect` | ✗ | - | FLIP across an identity change needs the renderer to own both trees at once - the same shadow copy exit transitions need |
 | `.phaseAnimator` / `.keyframeAnimator` | ✗ | - | both drive frames from a clock the preview does not run |
+| `PhaseAnimator` / `KeyframeAnimator` views | 🟡 | - | the content is drawn at rest: at the first phase, and at the initial value. The animation needs the same clock, and warns |
 | `Animatable` / `animatableData` | ✗ | - | interpolating an arbitrary value needs an animation system that owns the frames; ours is CSS keyframes, deliberately |
 | Custom `ViewModifier` + `.modifier(…)` | ✅ | 8 | `body(content:)` is called with the view as a value |
 | `extension View { func … }` | ✅ | 8 | the idiom for a reusable modifier chain |
@@ -247,13 +254,14 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `Scene` phases | 🟡 | - | `scenePhase` reads `.active`, because the preview's one window is always on screen |
 | `@State` | 🟡 | 3 | declaration initialization works; `_value = State(initialValue:)` in a custom initializer is unsupported |
 | `@Binding` (and `$value` projections) | 🟡 | 6 | ordinary control/custom-view projections work; collection binding closures do not |
-| Key paths (`\.self`, `\.id`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`); **not where a closure is expected**, so `map(\.name)` is rejected |
+| Key paths (`\.self`, `\.id`) | 🟡 | 6 | applied where a view takes one (`ForEach(id:)`) and as a function (`map(\.name)`), reading computed properties, `rawValue` and tuple labels as Swift does. Not writable key paths |
 | `@StateObject` / `@ObservedObject` / `ObservableObject` / `@Published` | ✅ | 7 | a class is a reference, so a change is seen everywhere. `$store.property` projects a `Binding` into the model, so `Slider(value: $ledger.monthlyBudget)` writes where it reads - the dynamic member lookup SwiftUI puts on the wrapper |
 | `@AppStorage` / `@SceneStorage` | 🟡 | - | keyed by the string, so views sharing a key share a value and it outlives the view that wrote it. Held for the session rather than on disk - see approximations |
 | `@FocusState` | 🟡 | - | storage the code reads and writes |
 | `Binding(get:set:)` / `.constant` | ✅ | - | a projection built from the user's closures, or one that reads a value and swallows writes; a control cannot tell either from `$value` |
 | `.environmentObject` / `@EnvironmentObject` | ✅ | 11 | reaches views expanded while the modifier is in scope, *and* the deferred ones - a pushed `navigationDestination`, a presented `.sheet`, a `.toolbar` - which capture the frame they were written in and restore it when they run. Before that, a detail screen reading an `@EnvironmentObject` trapped |
 | `.environment(\.key, …)` | ✅ | 7 | same scoping rule |
+| `@Observable` / `@Bindable` / `.environment(model)` / `@Environment(Model.self)` | ✅ | - | an `@Observable` class is a reference, so a change is seen everywhere, and `@Bindable` projects `$model.name`, `@Bindable var model = model` in a body included. `.environment(model)` hands the model down by its type, by the same scoping rule. A view asking for a type no ancestor gave stops, as the app does, unless its property is optional. On a screen a link pushes, it stops when that screen is pushed, as the app does |
 | `colorScheme`, `dynamicTypeSize` | ✅ | 4 |
 | `locale`, `layoutDirection` | 🟡 | 7 | reported; there is no RTL layout or localisation yet |
 | `horizontalSizeClass` / `verticalSizeClass` | ✅ | 7 | derived from the device size |
@@ -313,7 +321,8 @@ The subset the interpreter runs. Full detail in [04-SWIFT-SUBSET.md](04-SWIFT-SU
 | Bitwise operators `&` `\|` `^` `<<` `>>` | ✅ | - | 64-bit, computed in `BigInt` |
 | `_ = expr` | ✅ | - | the discard; evaluates the expression and throws the answer away |
 | Extensions on built-in types | ✅ | - | `extension String { var shout: String { uppercased() } }`; the receiver's own members are in scope unqualified |
-| Overloading by argument label | ✅ | - | `minutes(on:)` and `minutes(of:)` are two members, chosen by the labels the call writes. Overloading by parameter *type* alone is not: the interpreter is untyped, so `f(_ x: Int)` and `f(_ x: String)` still collapse to whichever was written last |
+| Overloading by argument label | ✅ | - | `minutes(on:)` and `minutes(of:)` are two functions, top level, local or members, chosen by the labels the call writes |
+| Overloading by parameter type | 🟡 | - | `f(_ x: Int)` and `f(_ x: String)` are both kept, and a call runs the one its arguments' values suit: a whole number an `Int`, text a `String`, a project type its own. Where the values can't tell them apart (`Double` and `CGFloat`, both a number), the preview runs the first and warns at the second, where Xcode goes by the argument's declared type. Inside a type, its own members are found before top-level ones of the same name, for a read, a call, a write and a `$` binding alike, as in Swift |
 | A method and a property sharing a name | ✅ | - | `var spent` and `func spent(on:)` coexist as they do in Swift; a call reaches the method and a read reaches the property |
 
 ## Standard library and Foundation
@@ -327,9 +336,8 @@ missing without anything saying so.
 | `String` - `count`, `uppercased`, `hasPrefix`, `contains`, `split`, `replacingOccurrences`, `trimmingCharacters` | ✅ | 2 | counted and sliced by grapheme cluster, so `"👋🏽".count` is 1 |
 | `String` - `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `starts(with:)`, `append` | ✅ | - | |
 | `String` - `unicodeScalars` | ✅ | - | code points, which is the whole difference from `count` |
-| `String` - `localizedCaseInsensitiveContains`, `localizedStandardContains` | 🟡 | - | case-insensitive; no diacritic folding |
-| `"\(value, specifier: "%.2f")"` | ✅ | - | the format is applied; it used to be dropped, drawing every digit |
-| `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | `reduce(into:)` too, whose closure takes the accumulator `inout` - the standard way to build a dictionary from a sequence |
+| `String` - `localizedCaseInsensitiveContains`, `localizedStandardContains` | ✅ | - | how a search box filters: without case, and the standard form without accents too, as iOS 27 answers; an empty string is in nothing |
+| `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | `reduce(into:)` too, whose closure takes the accumulator `inout` - the standard way to build a dictionary from a sequence. `enumerated()` gives `(offset:element:)` tuples, and a closure with a parameter for each takes one apart, as `{ index, item in }` does. A range of integers answers the same methods: `(0..<3).map { … }` |
 | `Array` - `allSatisfy`, `flatMap`, `dropFirst`, `dropLast`, `first(where:)`, `last(where:)`, `lastIndex`, `randomElement`, `shuffled` | ✅ | - | `shuffled` is Fisher-Yates, not the biased one-line sort |
 | `Array` - `append`, `insert`, `remove`, `removeAll`, `removeFirst`, `removeLast`, `popLast`, `sort`, `reverse`, `shuffle`, `swapAt`, `replaceSubrange`, `removeSubrange` | ✅ | - | mutating, and refused on a `let` as Xcode refuses them |
 | `Dictionary` - subscript, `default:`, `keys`, `values`, `updateValue`, `removeValue` | ✅ | 2 | |
@@ -339,8 +347,9 @@ missing without anything saying so.
 | `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation, parameter or property drop duplicates, and assignment keeps a set a set; iteration is in insertion order rather than Swift's unspecified hash order |
 | `Set` - `union`, `intersection`, `subtracting`, `symmetricDifference`, `formUnion`, `formIntersection`, `subtract`, `formSymmetricDifference`, `isSubset`, `isSuperset`, `isStrictSubset`, `isStrictSuperset`, `isDisjoint`, `remove(_:)`, `update(with:)` | ✅ | - | any sequence as the other operand; `filter` answers a set; two sets compare equal regardless of order. An array has none of these, as in Swift |
 | A range of `Int`s as a collection - `map`, `filter`, `reduce`, `contains(where:)` and the rest | ✅ | - | `(1...5).map { … }`; ranges of `Double` and `Date` are not sequences, as in Swift |
-| `Int` / `Double` - `formatted()`, `formatted(.number / .percent / .currency(code:))` | ✅ | - | the same styles `Text(_:format:)` draws |
 | `Int` / `Double` conversion from `String` | ✅ | - | failable, matched to Swift's grammar: `" 42"`, `"4_2"` and `"0x10"` are nil |
+| `CGFloat`, `Float` | ✅ | - | a Double, as everywhere in the preview: `CGFloat(x)`, `Float(x)`, and a whole-number literal given to either, so `let w: CGFloat = 3` prints 3.0 |
+| `Int` / `Double` - `formatted()`, `.number`, `.percent`, `.currency(code:)` | ✅ | - | as Foundation writes them in en-US, measured in the iOS 27 simulator: separators and up to six decimals, a Double's percent multiplied by 100 and an Int's not, and currency rounded half to even from the number as written. `Text(_:format:)` writes the same |
 | `Int.max` / `Int.min` | 🟡 | - | 2^53 - 1, not 2^63 - 1 - see approximations |
 | `Int.random(in:)`, `Double.random(in:)`, `Bool.random()` | ✅ | - | |
 | `Double` - `rounded()`, `rounded(.up/.down/.towardZero)`, `squareRoot`, `truncatingRemainder`, `isMultiple(of:)` | ✅ | - | halves round away from zero, as Swift's do |
@@ -349,10 +358,12 @@ missing without anything saying so.
 | `type(of:)`, `fatalError`, `assert`, `precondition` | ✅ | - | a failed assertion is a trap reported on its line |
 | Bitwise `&`, `\|`, `^`, `<<`, `>>` | ✅ | - | computed in `BigInt`, so a shift past 32 bits is not truncated |
 | `UUID` | ✅ | - | random, and prints as its `uuidString` |
-| `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, `formatted()`, comparison, `Date.now`. No calendar: there is no `Calendar`, no `DateComponents` and no `DateFormatter` |
+| `Date` | 🟡 | - | `timeIntervalSince1970`, `addingTimeInterval`, `timeIntervalSince`, comparison, `Date.now`. `formatted()` is Foundation's default, a numeric date and a short time, and `formatted(date:time:)` takes the parts it is given. No `DateFormatter` |
+| `Calendar` | 🟡 | - | `Calendar.current`, in the preview's time zone: `component(_:from:)`, `date(byAdding:value:to:)`, `startOfDay(for:)`, `isDateInToday` and its neighbours, `isDate(_:inSameDayAs:)`, `isDate(_:equalTo:toGranularity:)` by year, month, week (starting on Sunday), day, hour, minute or second, and `dateComponents` from one date or between two, largest unit first |
+| `Timer` | 🟡 | - | `Timer.publish(every:on:in:).autoconnect()` with `.onReceive`, and `Timer.scheduledTimer`, are accepted and never fire: the preview draws one moment, and warns where a timer is made |
 | `URL` | 🟡 | - | `URL(string:)` is failable and the string is kept as written; `absoluteString`, `path`, `host`, `scheme`, `query`, `lastPathComponent`, `pathExtension`, `appendingPathComponent`. Nothing is fetched |
 | `Codable` over JSON | ⬜ | - | listed in Phase 2's scope and never built |
-| `Calendar`, `DateFormatter`, `NumberFormatter`, `Measurement` | ⬜ | - | `Text`'s `format:` styles cover what view code usually needs |
+| `DateFormatter`, `NumberFormatter`, `Measurement` | ⬜ | - | `Text`'s `format:` styles cover what view code usually needs |
 
 ## Known approximations
 
@@ -402,10 +413,9 @@ Listed in the exported README so nothing is a surprise on the Mac:
     bound would hand back a value that prints plausibly and traps on the first arithmetic done
     with it. `Int.max` is written almost exclusively as the starting point for a minimum, where
     either bound behaves identically. The same limit is why `1 << 60` traps rather than rounding.
-13. **A `Date` has no calendar.** Intervals, comparison and formatting work; there is no
-    `Calendar`, `DateComponents` or `DateFormatter`, so "the start of this month" cannot be
-    computed. `Text(date, style: .relative)` and `.timer` are computed once, at render, because
-    the preview has no clock to tick them with.
+13. **Time stands still.** `Text(date, style: .relative)` and `.timer` are computed once, at
+    render, because the preview has no clock to tick them with, and a `Timer` never fires for
+    the same reason. The common `Calendar` members work; there is no `DateFormatter`.
 14. **Locale-formatted output is the browser's.** `Date.formatted()`, `Text(date, style:)` and
     `Text(_, format:)` go through `Intl`, so the separators, the order and the currency symbols
     are the platform's real ones rather than a transcription - and two machines in different
@@ -444,6 +454,41 @@ Listed in the exported README so nothing is a surprise on the Mac:
     alternative was a textual sweep that renamed unrelated symbols, and a rename that misses
     a use leaves a name the compiler will point at, where one that renames the wrong symbol
     leaves code that compiles and is wrong.
+21. **Views beside a NavigationStack or a TabView are not drawn.** A screen is the content of
+    its container, so a floating button in a `ZStack` beside the stack, a banner above a
+    TabView, and an `.overlay` or `.safeAreaInset` written on the stack are left out. Each one
+    warns where it is written. Sheets, alerts and search written on the containers do show.
+22. **A trimmed fill is drawn whole.** `.trim` cuts strokes; iOS fills just the trimmed part of
+    a filled shape, closed by a straight line. The fill warns.
+23. **Gradients blend in sRGB.** Measured in the iOS 27 simulator, a gradient blends in Oklab,
+    which keeps a red-to-blue gradient from greying in the middle. The end colours and their
+    positions are the same.
+24. **A tab app's search field shows from the start.** iOS 27 keeps it folded under the title
+    until the list is pulled down, and the preview draws it as it is then.
+25. **A search drawer shown always keeps a large title.** With
+    `.navigationBarDrawer(displayMode: .always)`, iOS 27 makes the title inline, and the
+    preview keeps it large.
+26. **A class instance prints without its module.** `print(node)` shows `Node` where the
+    app shows `MyApp.Node`: the module is the exported target's name, which the preview
+    never sees. Its properties are never printed, as in Swift.
+27. **Recursion stops sooner than on a device.** Each Swift call costs the interpreter
+    several JavaScript frames, so a recursion a few hundred calls deep stops the preview
+    with "Call depth exceeded" at the line it reached, where an iPhone would go deeper.
+28. **A view that traps is drawn as stopped; iOS would crash.** A trap in a view's
+    `body` (an index out of range, a nil unwrapped, a model no ancestor gave) draws that
+    view as a placeholder naming it and the reason, and the rest of the screen keeps
+    working, so one bad row doesn't take the Design canvas with it. A sheet, a destination,
+    a toolbar, a context menu or a tab item whose own closure traps is drawn the same way,
+    as "Sheet stopped" and so on, and a stopped sheet can still be closed. The error is
+    reported at its line, once the view is on screen: a destination's only when it is
+    pushed. The Design canvas leaves out a sheet or a destination that traps with the state
+    the app has now, as the app can't show it yet. A trap in a view's stored property, as
+    it is created, stops the view that creates it.
+29. **A busy preview merges a control's changes.** While the app is still answering one
+    event, the next keystrokes in a field, moves of a slider or a drag, and scrolls are
+    merged into the latest, so a heavy screen keeps up. `.onChange(of:)` then runs once
+    for the merge, where iOS runs it for each change. Nothing typed is lost: a field shows
+    what was typed until the app has answered it, then the app's value.
 
 ## The strictness pass (R5)
 
@@ -457,11 +502,13 @@ because a false positive would teach people to ignore the panel.
 | Mixed numeric arithmetic | `let w: Int = 10; let s: Double = 1.5; w * s` | `scale * 2` - an integer literal takes its type from context |
 | `Text` given a non-string | `Text(count)` | `Text("\(count)")` |
 | Property wrapper on a `let` | `@State private let count = 0` | the same wrapper on a `var` |
-| Assignment to a `let` | `let total = 0; total = 1` | writing an `inout` parameter, which is the caller's storage |
+| Assignment to a `let` | `let total = 0; total = 1` | writing an `inout` parameter, which is the caller's storage, or the property an `if let` shadows, outside that `if`'s own branch |
 | Non-`mutating` method writing a property | `func bump() { count += 1 }` on a plain stored `var` | the same method writing a `@State`, `@Binding` or any other wrapped property: their setters are **nonmutating**, which is what lets `body` write them |
 | `ForEach` without identity | `ForEach(items)` where the element is not `Identifiable` | a range, or an explicit `id:` |
 | Omitted argument labels | `greet("Ada")` for `func greet(name:)` | a parameter declared `_` |
 | Missing `return` | a multi-statement `func` body with a return type and no `return` anywhere | a body whose returns are inside a `switch`, `while`, `repeat`, `do`/`catch`, `guard`'s `else` or an `else if` chain |
+| Code in a view's body | a `for`, `while` or `repeat` loop, an assignment, a `break`, `defer`, `do`/`catch` or a function, in `body`, a `@ViewBuilder` member or a view's content closure (`VStack { }`, `ForEach`, `.sheet { }`) | a body with a `return`, which is ordinary code; `let`/`var` with a value, `if`, `switch` and `do`; any of it in a button's action, an `onAppear`, a sheet's `onDismiss`, a menu's `primaryAction` or a closure that is called |
+| `specifier:` or `format:` in a String | `let text = "\(km, specifier: "%.1f") km"`; the same in a `String` property, an assignment to a String, `Text(verbatim:)`, a `String` parameter of the project's own view or function, or beside a `+` | a title, such as `Text`, `Label`, a navigation title or `.badge`, and a `LocalizedStringKey`, which take both |
 
 The right-hand column is the half that matters. A pass that cries wolf is worse than no
 pass, because people stop reading the panel and then the true warnings go unread too -
@@ -470,8 +517,7 @@ the commonest shape in SwiftUI and offered a fix-it that broke the file it was a
 
 ## Additional confirmed gaps from the September 2026 audit
 
-- `@Bindable` is not implemented as a property wrapper.
-- Custom `EnvironmentKey.defaultValue` and type-based environment lookup are not implemented.
+- Custom `EnvironmentKey.defaultValue` is not implemented.
   Missing environment values now stop with an unsupported-runtime diagnostic instead of `nil`.
 - `.safeAreaPadding`, `.gridCellColumns`, and `.symbolEffect` are explicitly recognized as unsupported.
 - `AsyncImage` and `TimelineView` now warn about their existing partial behavior.

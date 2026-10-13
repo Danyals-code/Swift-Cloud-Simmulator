@@ -1,5 +1,5 @@
 import type { AuthoringNode, AuthoringSnapshot, RenderTree, ViewLayer } from '@studio/shared'
-import { findLayer, layerAncestors, layerRenderIds } from './layers'
+import { findLayer, layerAncestors, layerRenderGroups, layerRenderIds } from './layers'
 
 /** Canvas ancestry crosses component call sites, unlike the source definition tree. */
 export function hoveredSourceIds(snapshot: AuthoringSnapshot | undefined, layers: readonly ViewLayer[], runtimeId: string | null): readonly string[] {
@@ -35,6 +35,20 @@ export function authoringRenderIds(node: AuthoringNode | null | undefined, snaps
   }
   collect(layers)
   return layerRenderIds({ id: '__source_hover__', name: '', type: '', children: roots }, tree, layers)
+}
+
+/**
+ * What a source view paints, one group for each place it is drawn: a row design once per
+ * row, so each row is outlined as a row (D1).
+ */
+export function authoringRenderGroups(node: AuthoringNode | null | undefined, snapshot: AuthoringSnapshot | undefined, layers: readonly ViewLayer[], tree: RenderTree | null | undefined): readonly (readonly string[])[] {
+  if (!node || !snapshot || !tree || !snapshot.nodes.includes(node)) return []
+  const drawn = node.runtimeIds.flatMap(id => findLayer(layers, id) ?? [])
+  if (!drawn.length) {
+    const ids = authoringRenderIds(node, snapshot, layers, tree)
+    return ids.size ? [[...ids]] : []
+  }
+  return layerRenderGroups(drawn, tree, layers).map(ids => [...ids]).filter(group => group.length > 0)
 }
 
 /** Resolve a source selection without trusting a runtime path reused after an edit. */

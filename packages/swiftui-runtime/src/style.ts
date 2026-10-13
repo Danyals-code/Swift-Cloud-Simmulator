@@ -1,4 +1,4 @@
-import { dynamicTypeForScale, type DynamicTypeSize } from '@studio/shared'
+import { dynamicTypeForScale, textLineHeight, type DynamicTypeSize } from '@studio/shared'
 import { typographyAt } from './appearance/typography'
 import { IOS_27 } from './appearance/ios27'
 import {
@@ -100,9 +100,20 @@ export const LABEL_COLOR = labelColor('light')
 export const SYSTEM_BACKGROUND = systemBackground('light')
 export const ACCENT_COLOR = LIGHT_COLORS.accentColor!
 
+/**
+ * UIKit's names for the SwiftUI colours: `Color(.systemRed)` is `Color.red`, as the
+ * iOS 27 simulator draws them.
+ */
+const UIKIT_NAMES: Readonly<Record<string, string>> = {
+  systemRed: 'red', systemOrange: 'orange', systemYellow: 'yellow', systemGreen: 'green',
+  systemMint: 'mint', systemTeal: 'teal', systemCyan: 'cyan', systemBlue: 'blue',
+  systemIndigo: 'indigo', systemPurple: 'purple', systemPink: 'pink', systemBrown: 'brown',
+  systemGray: 'gray',
+}
+
 export function colorForName(name: string, scheme: ColorScheme = 'light', tint?: RGBA): RGBA | null {
   if (tint && ['tint', 'accent', 'accentColor'].includes(name)) return tint
-  return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[name] ?? null
+  return (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)[UIKIT_NAMES[name] ?? name] ?? null
 }
 
 /** A colour set from the project's asset catalog: one value per appearance. */
@@ -284,8 +295,8 @@ export function resolveFontArg(value: SwiftValue | undefined, scale: number | Dy
 
   // `.title.bold()`, `.body.weight(.semibold)`, `.caption.italic()` - a text style
   // with a face change on it. Encoded as the style's own name plus the changes rather
-  // than resolved to a point size here, so the style keeps the line height Apple
-  // designed for it: `.title` leads at 34, where 28 * 1.29 would round to 36.
+  // than resolved to a point size here, so the style keeps the leading Apple designed
+  // for it: `.title`'s lines are 34 pt apart, a 28 pt system font's 33.67.
   if (name.startsWith('style:')) {
     const [style, weight, design, italic] = name.slice('style:'.length).split(':')
     const base = fontForToken(style ?? 'body', scale)
@@ -307,7 +318,7 @@ export function resolveFontArg(value: SwiftValue | undefined, scale: number | Dy
       size: points,
       weight: FONT_WEIGHTS[weight ?? 'regular'] ?? 400,
       italic: false,
-      lineHeight: Math.round(points * 1.29),
+      lineHeight: textLineHeight(points),
     }
   }
 

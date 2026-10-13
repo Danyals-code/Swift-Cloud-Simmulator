@@ -21,7 +21,8 @@ extension ShapeStyle where Self == Color {
     static var brandColor: Color { Color("brandColor") }
 }`
 const BRAND: RGBA = { r: 255, g: 0, b: 89, a: 1 }
-const RED: RGBA = { r: 255, g: 59, b: 48, a: 1 }
+// iOS 27's system red, as the simulator draws it.
+const RED: RGBA = { r: 255, g: 56, b: 60, a: 1 }
 
 function run(source: string, allPages = false): CompileResult {
   resetPipelineState()

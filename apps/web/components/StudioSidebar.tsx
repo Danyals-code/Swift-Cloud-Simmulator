@@ -8,7 +8,7 @@ import { Icon } from './ui/Icon'
 import styles from './Workspace.module.css'
 
 const PromptEditor = dynamic(() => import('./PromptEditor').then(module => module.PromptEditor), { ssr: false, loading: () => <p className="p-3 text-xs">Loading Prompt Editing…</p> })
-export function StudioSidebar({ children, selection, stale, previewProblems, onApplied, onCollapse }: { children: ReactNode; selection: PromptSelection | null; stale: boolean; previewProblems: readonly Diagnostic[]; onApplied: () => void; onCollapse: () => void }) {
+export function StudioSidebar({ children, selection, stale, previewProblems, onApplied, onCollapse }: { children: ReactNode; /** Design or Code: the Hierarchy tab holds layers and files in both. */ design: boolean; selection: PromptSelection | null; stale: boolean; previewProblems: readonly Diagnostic[]; onApplied: () => void; onCollapse: () => void }) {
   const [tab, setTab] = useState<'layers' | 'prompt'>('layers'), [opened, setOpened] = useState(false)
   const choose = (next: 'layers' | 'prompt') => { setTab(next); if (next === 'prompt') setOpened(true) }
   return <div className={styles.sidebar}>

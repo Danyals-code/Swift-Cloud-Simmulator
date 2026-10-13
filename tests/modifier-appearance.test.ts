@@ -127,4 +127,18 @@ describe('modifier ordering guidance', () => {
     expect(modifierGuidance(modifiers, 1)?.message).toContain('cover its color')
     expect(modifierGuidance(modifiers, 3)?.message).toContain('Another corner modifier')
   })
+  it.each([
+    ['on the edge', 'stroke', 'The clip below cuts off the outer half of this border. Move the border after the clip to draw it whole.'],
+    ['outside the edge', 'strokeBorder', 'The clip below hides this border, which is outside the edge. Move the border after the clip to show it.'],
+  ])('offers to move a border %s after the clip that cuts it (D8)', (_, stroke, message) => {
+    const border = stroke === 'stroke' ? `RoundedRectangle(cornerRadius: 12).stroke(Color.gray, lineWidth: 2)` : `RoundedRectangle(cornerRadius: 14).strokeBorder(Color.gray, lineWidth: 2).padding(-2)`
+    const modifiers = node(wrap(`Text("Card").padding(16).overlay { ${border} }.clipShape(.rect(cornerRadius: 12)).clipped()`)).modifiers!
+    expect(modifiers.map(modifier => modifier.name)).toEqual(['padding', 'border', 'clipShape', 'clipped'])
+    expect(modifierGuidance(modifiers, 1)).toEqual({ message, moveAfter: 3 })
+  })
+  it('leaves a border inside the edge above the clip, which draws it whole (D8)', () => {
+    const modifiers = node(wrap('Text("Card").padding(16).overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.gray, lineWidth: 2) }.clipShape(.rect(cornerRadius: 12))')).modifiers!
+    expect(modifiers.map(modifier => modifier.name)).toEqual(['padding', 'border', 'clipShape'])
+    expect(modifierGuidance(modifiers, 1)).toBeUndefined()
+  })
 })

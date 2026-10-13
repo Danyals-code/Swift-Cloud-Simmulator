@@ -99,6 +99,19 @@ function continuesDeclaration(token: Token): boolean {
   )
 }
 
+/** The last step of a postfix expression that contains a `?` (see `OptionalChainEnd`). */
+function endOptionalChain(expr: Expr): Expr {
+  switch (expr.kind) {
+    case 'memberAccess':
+    case 'call':
+    case 'subscript':
+    case 'forceUnwrap':
+      return { ...expr, endsOptionalChain: true }
+    default:
+      return expr
+  }
+}
+
 /**
  * Recursive-descent parser for the supported Swift subset.
  *
@@ -108,6 +121,13 @@ function continuesDeclaration(token: Token): boolean {
  * skips to the next declaration or statement boundary. Between them, a broken
  * region costs one diagnostic and the rest of the file still yields a usable tree.
  */
+/** The codes the lexer and parser report. A file with one of these does not parse, and nothing rewrites it. */
+const SYNTAX_ERRORS: ReadonlySet<string> = new Set(['expected_token', 'unexpected_token', 'unterminated_string', 'unterminated_block'])
+
+export function isSyntaxError(diagnostic: Diagnostic): boolean {
+  return diagnostic.severity === 'error' && SYNTAX_ERRORS.has(diagnostic.code)
+}
+
 export class Parser {
   private index = 0
   private readonly diagnostics: Diagnostic[] = []
@@ -1806,6 +1826,7 @@ export class Parser {
   private parsePostfix(allowTrailing: boolean): Expr {
     const start = this.current
     let expr = this.parsePrimary(allowTrailing)
+    let chained = false
 
     for (;;) {
       // Member access continues across newlines - this is what makes SwiftUI's
@@ -1826,7 +1847,9 @@ export class Parser {
       }
 
       /**
-       * Optional chaining: `?` immediately followed by `.`, with no space between.
+       * Optional chaining: `?` immediately followed by `.`, `[` or `(`, with no space
+       * between - `a?.b`, `list?[0]`, and `onDismiss?()`, which is how a component
+       * calls a callback it may not have been given.
        *
        * The whitespace is what tells `a?.b` from `a ? .b : c`, and Swift reads it the
        * same way. Without the check, the ternary's then-branch is swallowed as a
@@ -1838,10 +1861,11 @@ export class Parser {
         this.current.text === '?' &&
         !this.current.spaceBefore &&
         !this.current.spaceAfter &&
-        this.peek().text === '.'
+        ['.', '[', '('].includes(this.peek().text)
       ) {
         this.advance()
         expr = { kind: 'optionalChain', span: this.spanFrom(start), operand: expr }
+        chained = true
         continue
       }
 
@@ -1914,7 +1938,7 @@ export class Parser {
         continue
       }
 
-      return expr
+      return chained ? endOptionalChain(expr) : expr
     }
   }
 
@@ -2207,18 +2231,21 @@ export class Parser {
       const lexed = Lexer.tokenize(segment.value, this.file, segment.span.start)
       const sub = new Parser(lexed.tokens, this.file)
       const expression = sub.parseExpression(true)
-      // `\(price, specifier: "%.2f")` - SwiftUI's interpolation for a Text. Reading only
-      // the value dropped the rest without a word, so 3.14159 drew in full where the
-      // code asks for 3.14.
-      let specifier: Expr | undefined
-      if (sub.check(',') && sub.peek().text === 'specifier' && sub.peek(2).text === ':') {
-        sub.advance()
-        sub.advance()
-        sub.advance()
-        specifier = sub.parseExpression(true)
+      // `\(price, specifier: "%.2f")` and `\(total, format: .currency(code: "USD"))`:
+      // what a Text's interpolation takes after the value. Left unread, the value drew
+      // raw, with no word that the rest had been dropped.
+      const options: Argument[] = []
+      while (sub.match(',')) {
+        if (!((sub.current.kind === 'identifier' || sub.current.kind === 'keyword') && sub.peek().text === ':')) break
+        const start = sub.current
+        const labelToken = sub.advance()
+        sub.advance() // ':'
+        const value = sub.parseExpression(true)
+        options.push({ label: labelToken.text, labelSpan: labelToken.span, value, span: sub.spanFrom(start) })
       }
+      if (!sub.atEnd) sub.error(sub.current.span, 'unexpected_token', `Expected ')' to end the interpolation, found '${sub.current.text}'.`)
       this.diagnostics.push(...lexed.diagnostics, ...sub.diagnostics)
-      segments.push(specifier ? { kind: 'interpolation', expression, specifier, span: segment.span } : { kind: 'interpolation', expression, span: segment.span })
+      segments.push({ kind: 'interpolation', expression, ...(options.length ? { options } : {}), span: segment.span })
     }
 
     return segments

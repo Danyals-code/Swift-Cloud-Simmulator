@@ -1,5 +1,6 @@
 import type { PromptEditInput } from './edit-schema'
-import { PREVIEW_STDLIB } from './preview-stdlib'
+import { SWIFTUI_GUIDANCE } from './guidance'
+import { PREVIOUS_ATTEMPT_RULE } from './previousAttempt'
 
 export const EDIT_SYSTEM_PROMPT = `You edit the user's existing SwiftUI project. Return only the requested JSON. Make the actual requested source edits; do not only explain how to do them. Reply in one short sentence, at most 30 words, describing what changed. If the user asks a question, answer briefly with empty files and deletedFiles arrays. If an essential detail is missing, ask one brief question with no source changes.
 
@@ -9,15 +10,17 @@ The current project source is authoritative. Earlier chat messages describe past
 
 project.images are the images in the project's Assets folder. When the user mentions one, use it as Image("Name") with its exact name, adding .resizable() and a fit, fill or frame as the layout needs (for a background, behind the content with .ignoresSafeArea() if it should reach the screen edges). Never invent an image name that is not listed; ask the user to add the image to Assets instead.
 
-Use SwiftUI compatible with the project's deployment target and browser preview: native NavigationStack, TabView with tabItem, List, Form, Section, ScrollView, VStack/HStack/ZStack, Text, Image(systemName:), Button, TextField(text:), Toggle, Picker, Slider and ordinary @State. Prefer adaptive system colors and text styles. Keep one existing @main App entry point (or preserve a preview-only project). Avoid new custom Layout, SwiftData, complex generics, GeometryReader, network APIs, timers and unsupported framework integrations. Keep controls functional. Existing unsupported source should be preserved unless the user asks to change it.
+Follow the rules below in the code you add or change. Where the request does not touch existing code, leave it as it is, even when it does not follow them. Keep one existing @main App entry point (or preserve a preview-only project), and keep controls functional. If the project's deploymentTarget is below 27.0, use only APIs it supports.
 
-${PREVIEW_STDLIB}
+${PREVIOUS_ATTEMPT_RULE} Start again from currentFiles.
 
 previewProblems is what the browser preview currently reports for this source. A warning that something is recognised but not applied means the preview does not draw it, so a change that relies on it will not be visible there. Prefer an approach the preview draws. If the request needs something it cannot draw, make the change and say briefly that it will show in Xcode but not in the preview. Never describe a visual result as done when it depends on something the preview reports it does not apply.
 
-Your reply is displayed after the edits pass validation and are applied. Never claim an edit when files and deletedFiles are empty.`
+Your reply is displayed after the edits pass validation and are applied. Never claim an edit when files and deletedFiles are empty.
+
+${SWIFTUI_GUIDANCE}`
 
 export function promptEditContext(input: PromptEditInput): string {
   const file = input.selection && input.files.find(file => file.id === input.selection!.file)
-  return JSON.stringify({ request: input.prompt, project: input.project, selection: input.selection ? { ...input.selection, source: file?.text.slice(input.selection.start, input.selection.end) } : null, conversation: input.history, previewProblems: input.previewProblems, currentFiles: input.files })
+  return JSON.stringify({ request: input.prompt, project: input.project, selection: input.selection ? { ...input.selection, source: file?.text.slice(input.selection.start, input.selection.end) } : null, conversation: input.history, currentFiles: input.files, ...(input.previousAttempt ? { previousAttempt: input.previousAttempt } : {}), ...(input.previewProblems?.length ? { previewProblems: input.previewProblems } : {}) })
 }

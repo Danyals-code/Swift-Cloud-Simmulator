@@ -12,9 +12,9 @@ import { FREE_FUNCTIONS, STDLIB_MEMBERS, type StdlibMember } from '@studio/swift
 export function previewStdlibList(): string {
   const types = new Map<readonly StdlibMember[], string[]>()
   for (const [name, members] of STDLIB_MEMBERS) types.set(members, [...(types.get(members) ?? []), name])
-  const lines = [...types].map(([members, names]) => `- ${names.join(', ')}: ${[...new Set(members.map(member => member.name))].join(', ')}`)
-  lines.push(`- Free functions: ${[...FREE_FUNCTIONS.keys()].join(', ')}`)
-  lines.push(`- Making values: ${PREVIEW_INITIALIZERS.join(', ')}`)
+  const lines = [...types].map(([members, names]) => `  - ${names.join(', ')}: ${[...new Set(members.map(member => member.name))].join(', ')}`)
+  lines.push(`  - Free functions: ${[...FREE_FUNCTIONS.keys()].join(', ')}`)
+  lines.push(`  - Making values: ${PREVIEW_INITIALIZERS.join(', ')}`)
   return lines.join('\n')
 }
 
@@ -39,16 +39,15 @@ export const PREVIEW_UNSUPPORTED: readonly (readonly [name: string, probe: strin
   ['Dictionary.first', '["a": 1].first'],
   ['Array.lazy', '[1].lazy'],
   ['Array.count(where:)', '[1].count(where: { $0 > 0 })'],
-  ['Calendar', 'Calendar.current'],
   ['.dateTime format styles', 'Date().formatted(.dateTime.month())'],
 ]
 
 /**
- * What generated code may call, and what to write instead of the rest.
+ * What generated code may call, as one rule of the shared SwiftUI guidance (G1).
  *
  * Code outside this list compiles in Xcode and stops the preview with "has no
  * member", which is the failure a model cannot see coming: the code is correct
- * Swift. Saying which members exist is cheaper than repairing the screen after.
+ * Swift. Saying which members exist is cheaper than a second request to repair it.
  */
-export const PREVIEW_STDLIB = `Preview standard library: the browser preview interprets Swift and runs only the standard-library members listed here. Anything else on these types (for example ${PREVIEW_UNSUPPORTED.map(([name]) => name).join(', ')}) stops the preview with "has no member" even though Xcode accepts it. Stay within the list; when something is missing, write a small loop or helper function instead. Format numbers with Text(value, format: .currency(code:) / .percent / .number), value.formatted(...) with the same styles, String(format:), or "\\(value, specifier: "%.1f")". Format dates with Text(date, style: .date) or date.formatted(). A Set<T> is supported, including insert, remove, contains, union, intersection, subtracting and the subset checks; call .sorted() before showing one, since a set has no order.
+export const PREVIEW_STDLIB = `- Standard library: the preview runs only these members on these types. Anything else on them (for example ${PREVIEW_UNSUPPORTED.map(([name]) => name).join(', ')}) stops the preview with "has no member" even though Xcode accepts it, so stay within the list and write a small loop or helper where something is missing. Set<T> is supported, including insert, remove, contains, union, intersection, subtracting and the subset checks; call .sorted() before showing one, since a set has no order.
 ${previewStdlibList()}`

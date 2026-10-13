@@ -30,7 +30,7 @@ const nodes = (result: CompileResult) => result.renderTree!.nodes
 const textNode = (result: CompileResult, text: string) => nodes(result).find((n) => n.text?.runs.some((r) => r.text === text))!
 const color = (result: CompileResult, text: string) => textNode(result, text).text!.runs[0]!.color
 const purple = { r: 203, g: 48, b: 224, a: 1 }
-const red = { r: 255, g: 59, b: 48, a: 1 }
+const red = { r: 255, g: 56, b: 60, a: 1 }
 function tap(result: CompileResult, label: string) {
   const hit = nodes(result).find((n) => n.hitTarget && n.a11y?.label === label)!.hitTarget!
   expect(applyEvent({ kind: 'tap', handlerId: hit.handlerId, location: { x: 0, y: 0 } })).toBe(true)
@@ -39,14 +39,14 @@ function tap(result: CompileResult, label: string) {
 
 describe('iOS 27 target persistence', () => {
   const project = () => projectFromFiles([{ name: 'App.swift', text: 'import SwiftUI\nstruct A: View { var body: some View { Text("Hello") } }' }])!
-  it('uses iOS 27 without changing the exported deployment target or source', async () => {
+  it('keeps iOS 27, as preview and as deployment target, through a save and a share link', async () => {
     const original = project()
     const store = new MemoryProjectStore()
     await store.save(original)
     const loaded = (await store.load(original.id))!
     const decoded = decodeProject(encodeProject(loaded)!, 0)!
     expect(decoded.manifest.previewTarget).toEqual(DEFAULT_PREVIEW_TARGET)
-    expect(decoded.manifest.deploymentTarget).toBe('17.0')
+    expect(decoded.manifest.deploymentTarget).toBe('27.0')
     expect(decoded.files).toEqual(original.files)
   })
   it('migrates old stored projects without modifying their source', async () => {
@@ -119,7 +119,8 @@ describe('inherited visual environment', () => {
   it('keeps disabled controls visible and inert, even if a child tries to enable itself', () => {
     const result = run('VStack { Button("Disabled") {}.disabled(false); Slider(value: $amount); TextField("Name", text: $text) }.disabled(true)')
     expect(nodes(result).filter((n) => n.hitTarget).every((n) => !n.hitTarget!.enabled)).toBe(true)
-    expect(textNode(result, 'Disabled').opacity).toBeLessThan(1)
+    // Grey, as iOS 27 draws a disabled button, rather than its tint faded.
+    expect(textNode(result, 'Disabled').text!.runs[0]!.color).toEqual({ r: 60, g: 60, b: 67, a: 0.3 })
     const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: result.renderTree!, onEvent: () => {} }))
     expect(markup).toContain('type="range"')
     expect(markup.match(/disabled=""/g)?.length).toBe(2)
@@ -130,6 +131,12 @@ describe('inherited visual environment', () => {
     expect(nodes(result).some((n) => n.material?.blur === 12)).toBe(true)
     const detail = tap(result, 'Open')
     expect(color(detail, 'Detail')).toEqual(purple)
+  })
+  it('tints a link outside a List as iOS 27 tints a button, and keeps its colour with the plain style or in a List (D16)', () => {
+    const result = run('NavigationStack { VStack { Text("Body"); NavigationLink { Text("Detail") } label: { Text("Card") }; NavigationLink { Text("Detail") } label: { Text("Plain card") }.buttonStyle(.plain); List { NavigationLink { Text("Detail") } label: { Text("Row") } } }.tint(.purple) }')
+    expect(color(result, 'Card')).toEqual(purple)
+    expect(color(result, 'Plain card')).toEqual(color(result, 'Body'))
+    expect(color(result, 'Row')).toEqual(color(result, 'Body'))
   })
   it('preserves inherited styles in a deferred sheet', () => {
     const result = run('VStack { Button("Present") { show = true } }.sheet(isPresented: $show) { Button("Sheet button") {} }.tint(.purple)')
@@ -207,6 +214,12 @@ describe('Ionicons adapter', () => {
     expect(symbolAsset('star.circle.fill')?.body).toContain('mask=')
     expect(symbolDefinition('eye.slash.unknown')).toBeNull()
     expect(symbolAsset('<script>alert(1)</script>')).toBeNull()
+  })
+  it('has no drawing for a name Apple ships no symbol by, since Xcode draws nothing for it (G1)', () => {
+    // Checked against the SF Symbols names and their aliases in macOS 27's CoreGlyphs on 2026-09-24.
+    for (const name of ['gear.fill', 'calendar.fill', 'timer.fill', 'battery.100.fill', 'sparkles.fill', 'wand.and.stars.fill', 'hourglass.fill', 'house.square', 'house.square.fill']) {
+      expect(symbolDefinition(name), name).toBeNull()
+    }
   })
   it('measures and paints inherited imageScale from the same metadata', () => {
     const small = run('VStack { Image(systemName: "star") }.imageScale(.small)')

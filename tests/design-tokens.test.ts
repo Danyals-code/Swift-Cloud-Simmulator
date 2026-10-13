@@ -160,6 +160,14 @@ describe('writing tokens', () => {
     expect(refuse('small', 'color', '#000000')).toContain('SwiftUI')
   })
 
+  it('refuses a colour Xcode would take for the app’s own accent colour, however it is spelled', () => {
+    // Every Xcode app has an AccentColor colour set; a token's set of that name, in any
+    // letter case, would be the same folder in the export.
+    const files = project('Text("A")')
+    const result = plan(files, node(files, 'Text'), { kind: 'style-create', name: 'accentcolor', style: 'color', value: '#FF0000' })
+    expect(result.ok ? '' : result.reason).toContain('Xcode')
+  })
+
   it('links a field with dot syntax and refuses a spacing token in a corner field', () => {
     const files = project('Text("A").foregroundStyle(.blue).cornerRadius(4)')
     const text = node(files, 'Text')
@@ -199,7 +207,7 @@ describe('writing tokens', () => {
     const colour = planned(files, node(files, 'Text', []), { kind: 'style-migrate', name: 'brandColor' }, [])
     expect(colour.files.find(f => f.id === 'Sources/App.swift')!.text).toContain('.foregroundColor(Color.brandColor)')
     expect(colour.result.changes.find(c => c.file === 'Sources/Styles/brandColor.swift')).toMatchObject({ deleted: true })
-    expect(colour.colors).toEqual([{ name: 'brandColor', light: '#007AFF' }])
+    expect(colour.colors).toEqual([{ name: 'brandColor', light: '#0088FF' }])
     const spacing = planned(colour.files, node(colour.files, 'Text', colour.colors), { kind: 'style-migrate', name: 'cardSpacing' }, colour.colors)
     expect(spacing.files.find(f => f.id === 'Sources/App.swift')!.text).toContain('.padding(CGFloat.spaceCard)')
     expect(spacing.files.find(f => f.id === 'Sources/DesignSystem/Tokens.swift')!.text).toContain('static let spaceCard: CGFloat = 12')

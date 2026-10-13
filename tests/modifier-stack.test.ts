@@ -33,7 +33,8 @@ describe('the v1 catalog', () => {
   const cases: readonly [string, string, readonly string[]][] = [
     ['offset', '.offset(x: 0, y: 0)', ['offset · x', 'offset · y']],
     ['clipShape', '.clipShape(.rect(cornerRadius: 12))', ['cornerRadius']],
-    ['border', '.border(Color.gray, width: 1)', ['border', 'width']],
+    // A border follows the view's corners, square here (D8).
+    ['border', '.overlay(Rectangle().strokeBorder(Color.gray, lineWidth: 1))', ['border · color', 'width', 'position']],
     ['shadow', '.shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)', ['radius', 'x', 'y']],
     ['blur', '.blur(radius: 4)', ['radius']],
     ['bold', '.bold()', []], ['italic', '.italic()', []], ['underline', '.underline()', []], ['strikethrough', '.strikethrough()', []],

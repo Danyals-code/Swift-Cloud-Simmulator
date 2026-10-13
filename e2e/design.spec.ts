@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { openCounter, replaceSource } from './designer-helpers'
 
 /**
  * Designing on the canvas.
@@ -76,8 +77,7 @@ async function openProblems(page: Page) {
 
 /** Opens the studio on a known screen, in Design with the Edit tool. */
 async function openDesign(page: Page) {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -95,9 +95,24 @@ async function openDesign(page: Page) {
 }
 
 /** Design's Layers: the focused screen's views, inside the left panel's outline. */
+/**
+ * Where a view is once the canvas has stopped redrawing it: two reads in a row that
+ * agree. A single read can land mid-redraw, when the view is briefly not there at all.
+ */
+async function settledBox(locator: Locator) {
+  let box = await locator.boundingBox()
+  await expect.poll(async () => {
+    const next = await locator.boundingBox()
+    const settled = !!box && !!next && box.x === next.x && box.y === next.y && box.width === next.width && box.height === next.height
+    box = next
+    return settled
+  }).toBe(true)
+  return box!
+}
+
 const layers = (page: Page) => page.getByTestId('logical-layers')
 
-/** A row in Layers by the name it reads as: "Beta, Text", or "Vertical Stack". */
+/** A row in Layers by the name it reads as: "Beta, Text", or "Column". */
 const layer = (page: Page, name: string) => layers(page).getByRole('treeitem', { name, exact: true })
 
 /** The Problems tab under the canvas, which badges a count when the file does not compile. */
@@ -217,9 +232,99 @@ test('dragging a view on the canvas moves it in the file', async ({ page }) => {
   expect(text).toMatch(/Text\("Alpha"\)\s*\n\s*\.font\(\.title\)/)
 })
 
-test('a drag can carry a view into another container', async ({ page }) => {
+/** The blank screen, once two lines of text have been added to it. */
+const BLANK = `import SwiftUI
+@main struct BlankApp: App { var body: some Scene { WindowGroup { HomeScreen() } } }
+struct HomeScreen: View {
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text("Title")
+                Text("Subtitle")
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(.systemBackground))
+        }
+    }
+}
+
+#Preview {
+    HomeScreen()
+}`
+
+test('a view dropped in its stack’s empty space becomes the stack’s last view (C4)', async ({ page }) => {
+  // One file to paste the whole app into.
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  const editor = page.getByTestId('editor').locator('.cm-content')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.insertText(BLANK)
+  const preview = page.getByTestId('render-tree')
+  await expect(preview.getByText('Subtitle', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+  // Design redraws the phone for editing; measure it once it has.
+  await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true')
+  await expect(preview.getByText('Title', { exact: true })).toBeVisible()
+  await expect(preview.getByText('Subtitle', { exact: true })).toBeVisible()
+
+  const title = await settledBox(preview.getByText('Title', { exact: true }))
+  const subtitle = await settledBox(preview.getByText('Subtitle', { exact: true }))
+  // Well below the last line: the stack's own empty space, which fills the screen.
+  const x = subtitle.x + subtitle.width / 2, y = subtitle.y + subtitle.height * 8
+  await page.mouse.move(title.x + title.width / 2, title.y + title.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(x, y, { steps: 5 })
+  await page.mouse.move(x, y + 1)
+  // The canvas says what the drop will do before it happens.
+  await expect(page.getByRole('region', { name: 'Preview', exact: true })).toContainText('Drop inside Column')
+  await page.mouse.up()
+
+  await expect.poll(() => source(page)).toMatch(/VStack\(spacing: 16\) \{\n\s*Text\("Subtitle"\)\n\s*Text\("Title"\)\n\s*\}/)
+  expect(await source(page)).toMatch(/#Preview \{\n\s*HomeScreen\(\)\n\}/)
+})
+
+test('a refused edit to a file that does not parse offers to show the error in Code (C10)', async ({ page }) => {
+  // A designer's project: the app in one file, the Home screen in another.
   await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await page.getByTestId('template-blank').click()
+  await page.getByTestId('template-confirm').click()
+  await expect(page.getByTestId('template-gallery')).toBeHidden()
+  // Designing Home first, as a designer does before visiting Code: its page is drawn.
+  await expect(page.getByTestId('design-screen').getByRole('button', { name: 'Home', exact: true })).toBeVisible()
+  await page.getByTestId('workspace-develop').click()
+  await page.getByTestId('file-rail').getByText('HomeScreen.swift').click()
+  const editor = page.getByTestId('editor').locator('.cm-content')
+  await expect(editor).toContainText('struct HomeScreen')
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  // "Oops" is still missing its closing parenthesis, which the parser notices on line 8.
+  await page.keyboard.insertText(`import SwiftUI
+
+struct HomeScreen: View {
+    var body: some View {
+        VStack {
+            Text("Hello")
+            Text("Oops"
+        }
+    }
+}`)
+  await page.getByTestId('workspace-design').click()
+  // While a file does not parse, its layers are named by type alone.
+  const hello = layer(page, 'Text').first()
+  await hello.click()
+  await hello.getByRole('button', { name: 'Actions for Text', exact: true }).click()
+  await page.getByTestId('source-layer-actions-menu-delete').click()
+
+  await expect(page.getByTestId('design-feedback')).toHaveText('HomeScreen.swift has an error on line 8, so its design can’t be changed until it’s fixed in Code.')
+  await page.getByRole('button', { name: 'Show in Code', exact: true }).click()
+  await expect(page.getByTestId('editor')).toBeVisible()
+  await expect(page.getByTestId('editor').locator('.cm-lineNumbers .cm-activeLineGutter')).toHaveText('8')
+})
+
+test('a drag can carry a view into another container', async ({ page }) => {
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -229,7 +334,7 @@ test('a drag can carry a view into another container', async ({ page }) => {
   await page.getByTestId('workspace-design').click()
 
   const alpha = layer(page, 'Alpha, Text')
-  const stack = layer(page, 'Horizontal Stack')
+  const stack = layer(page, 'Row')
   // Siblings to begin with: the text and the stack sit at one level.
   const level = Number(await stack.getAttribute('aria-level'))
   await expect(alpha).toHaveAttribute('aria-level', String(level))
@@ -244,8 +349,7 @@ test('a drag can carry a view into another container', async ({ page }) => {
 })
 
 test('a selected container is dragged from anywhere inside it', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -256,8 +360,8 @@ test('a selected container is dragged from anywhere inside it', async ({ page })
 
   // Choose the stack in Layers, then drag it by one of its children: the drag moves
   // what is selected, which is how a whole section is carried rather than a word.
-  await layer(page, 'Horizontal Stack').click()
-  await expect(layer(page, 'Horizontal Stack')).toHaveAttribute('aria-selected', 'true')
+  await layer(page, 'Row').click()
+  await expect(layer(page, 'Row')).toHaveAttribute('aria-selected', 'true')
   const inner = (await page.getByTestId('render-tree').getByText('Inner', { exact: true }).boundingBox())!
   const alpha = (await page.getByTestId('render-tree').getByText('Alpha', { exact: true }).boundingBox())!
   await page.mouse.move(inner.x + inner.width / 2, inner.y + inner.height / 2)
@@ -298,7 +402,7 @@ test('undo and redo walk back through the canvas edits', async ({ page }) => {
 
   await page.keyboard.press('ControlOrMeta+z')
   await expect.poll(() => order(page)).toEqual(['Alpha', 'Beta', 'Gamma'])
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await page.keyboard.press('ControlOrMeta+Shift+Z')
   await expect.poll(() => order(page)).toEqual(['Beta', 'Alpha', 'Gamma'])
 
   // A delete comes back too, with the text it took away.
@@ -324,17 +428,22 @@ test('copy and paste put a second one of something beside it', async ({ page }) 
   expect((await source(page)).match(/\.font\(\.title\)/g)).toHaveLength(2)
 })
 
-test('Tab switches the canvas and the backquote switches the workspace', async ({ page }) => {
+test('Preview is one button, Tab moves the focus, and the backquote switches the workspace', async ({ page }) => {
   await openDesign(page)
   // One switch in the top bar: while editing it offers Preview...
   await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByTestId('device-pane')).toHaveAttribute('data-tool', 'select')
 
+  // Tab moves the focus, as on any page, rather than switching the canvas (D5).
   await page.keyboard.press('Tab')
+  await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
+  await expect(page.getByTestId('device-pane')).toHaveAttribute('data-tool', 'select')
+
+  await page.getByTestId('live-toggle').click()
   // ...and while previewing it is pressed, and stops the preview.
   await expect(page.getByTestId('inspect-toggle')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('device-pane')).not.toHaveAttribute('data-tool')
-  await page.keyboard.press('Tab')
+  await page.getByTestId('inspect-toggle').click()
   await expect(page.getByTestId('live-toggle')).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByTestId('device-pane')).toHaveAttribute('data-tool', 'select')
 
@@ -400,17 +509,58 @@ test('Add opens a palette that says where the view will land, and puts it there'
 
 test('Add puts a view inside the container that is selected', async ({ page }) => {
   await openDesign(page)
-  await layer(page, 'Vertical Stack').click()
-  await expect(layer(page, 'Vertical Stack')).toHaveAttribute('aria-selected', 'true')
+  await layer(page, 'Column').click()
+  await expect(layer(page, 'Column')).toHaveAttribute('aria-selected', 'true')
 
   await page.getByTestId('add-view').click()
-  await expect(page.getByTestId('add-view-target')).toHaveText('Into Vertical Stack')
+  await expect(page.getByTestId('add-view-target')).toHaveText('Into Column')
   await page.getByTestId('add-view-search').fill('divider')
   await page.keyboard.press('Enter')
 
   await expect.poll(() => source(page)).toContain('Divider()')
   const text = await source(page)
   expect(text.indexOf('Text("Gamma")')).toBeLessThan(text.indexOf('Divider()'))
+})
+
+/** A screen as the AI writes one: a list of records, with a toolbar and a sheet. */
+const RECORDS = `import SwiftUI
+@main struct DesignApp: App { var body: some Scene { WindowGroup { NavigationStack { ContentView() } } } }
+struct Item: Identifiable { let id: Int; var name: String }
+struct ContentView: View {
+    @State private var items: [Item] = [Item(id: 1, name: "Espresso"), Item(id: 2, name: "Latte")]
+    @State private var showingForm = false
+    var body: some View {
+        List(items) { item in
+            Text(item.name)
+        }
+        .navigationTitle("Menu")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New") { showingForm = true }
+            }
+        }
+        .sheet(isPresented: $showingForm) {
+            Text("Form")
+        }
+    }
+}`
+
+test('Add with nothing selected makes the view the last row of a screen\'s list of records', async ({ page }) => {
+  await openCounter(page)
+  await page.getByTestId('workspace-develop').click()
+  await replaceSource(page, RECORDS)
+  await expect(page.getByTestId('render-tree').getByText('Latte', { exact: true })).toBeVisible()
+  await page.getByTestId('workspace-design').click()
+  await expect(page.getByTestId('status-view')).toHaveAttribute('aria-busy', 'false')
+
+  await page.getByTestId('add-view').click()
+  await expect(page.getByTestId('add-view-target')).toHaveText('Into this screen')
+  await page.getByTestId('add-view-text').click()
+  await expect(page.getByTestId('add-view-palette')).toHaveCount(0)
+
+  await expect(page.getByTestId('render-tree').getByText('Text', { exact: true })).toBeVisible()
+  const text = await source(page)
+  expect(text).toContain('List {\n            ForEach(items) { item in\n                Text(item.name)\n            }\n            Text("Text")\n        }')
 })
 
 test('the Delete tool takes out the view that is clicked', async ({ page }) => {
@@ -429,8 +579,7 @@ test('the Delete tool takes out the view that is clicked', async ({ page }) => {
 })
 
 test('an edit that cannot be made says so and changes nothing', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -454,7 +603,8 @@ struct ContentView: View {
   await expect(page.getByTestId('delete-selection')).toBeDisabled()
 
   await page.keyboard.press('Backspace')
-  await expect(page.getByTestId('edit-note')).toContainText('would leave invalid view content')
+  // Why, for this edit rather than for any (C7).
+  await expect(page.getByTestId('edit-note')).toContainText('This is the only view here, and this spot can’t be left empty.')
   await expect(page.getByTestId('render-tree').getByText('Only', { exact: true })).toBeVisible()
   expect(await source(page)).toBe(originalSource)
 })
@@ -492,11 +642,7 @@ test('the canvas zooms with the wheel and can be dragged anywhere, at any zoom',
 })
 
 test('choosing a page in Layers brings it into view', async ({ page }) => {
-  // Product bug: the outline and the lane headers read "One" three times, while the phones
-  // read One, Two, Three. Chosen by position, the third row does centre the right page.
-  test.fixme(true, 'Layers names every inline TabView tab after the first ("One"), so "Three" cannot be chosen (designTree.ts:66-69, screens.ts:27)')
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -585,8 +731,7 @@ test('the canvas bar is one line, inside the panel that reports on the app', asy
 })
 
 test('the wheel belongs to the canvas while designing and to the app while previewing', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -649,8 +794,7 @@ struct ContentView: View {
 })
 
 test('leaving Edit with the gallery open leaves the live page exactly where it was', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()
@@ -675,8 +819,7 @@ test('leaving Edit with the gallery open leaves the live page exactly where it w
 })
 
 test('the simulated app scrolls without a scrollbar down the side of the phone', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click()

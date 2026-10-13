@@ -119,6 +119,11 @@ export class StateStore {
     this.touched.add(key)
   }
 
+  /** Drops every box whose value `stale` answers for, so its view seeds it afresh. */
+  prune(stale: (value: SwiftValue) => boolean): void {
+    for (const [key, box] of this.boxes) if (stale(box.value)) this.boxes.delete(key)
+  }
+
   beginPass(): void {
     this.touched = new Set()
   }
@@ -156,7 +161,8 @@ export class StateStore {
  *
  * Spans shift whenever anything above a declaration changes, so comparing them would
  * report every edit as an initialiser change. Comparing structure and literal values
- * detects only the edit that actually matters.
+ * detects only the edit that actually matters. Every span is a `span` or a key ending in
+ * `Span`, such as a `for` loop's `variableSpan`.
  */
 export function fingerprint(node: unknown): string {
   if (node === null || node === undefined) return 'nil'
@@ -164,10 +170,7 @@ export function fingerprint(node: unknown): string {
   if (Array.isArray(node)) return `[${node.map(fingerprint).join(',')}]`
 
   const entries = Object.entries(node as Record<string, unknown>)
-    .filter(
-      ([key]) =>
-        key !== 'span' && key !== 'memberSpan' && key !== 'nameSpan' && key !== 'labelSpan',
-    )
+    .filter(([key]) => key !== 'span' && !key.endsWith('Span'))
     .map(([key, value]) => `${key}=${fingerprint(value)}`)
   return `{${entries.join(',')}}`
 }

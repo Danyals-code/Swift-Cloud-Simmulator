@@ -1,15 +1,32 @@
 import { newProjectId, normalizeProject, normalizeProjectName, normalizeFileName, normalizeFolderPath, readColorSet, readImage, readStudioMetadata, validateAssets, validateColors, type ColorAsset, type Project, type ProjectManifest, type ImageAsset, type StudioMetadata } from '@studio/project-model'
 import { DEVICES } from '@studio/sim-shell'
 import { isPreviewTarget, type SourceFile } from '@studio/shared'
+import { withoutStudioMarkers } from '@studio/swift-syntax/markers'
 import { encodeText, type ExportBundle } from './bundle'
 import { importSourceAssets } from './import-assets'
 import { validatePromptHistory } from '@studio/project-model'
 
 export const PROJECT_DOCUMENT = '.swiftstudio/project.json'
 interface ResourceEntry { id: string; name: string; scale: 1 | 2 | 3; light: string; dark?: string }
+/** The Studio build an export came from: the commit it was built from, and when. */
+export interface StudioBuild { readonly commit: string; readonly builtAt: string }
+/** What the studio writes beside the project it hands over. */
+export interface HandoffExtras {
+  /** The build making the export. */
+  readonly build?: StudioBuild
+  /** The project's event log, as JSON lines. Reading an archive leaves it where it is. */
+  readonly events?: string
+}
+/** Where an archive keeps the event log, below its root. */
+export const EVENT_LOG = '.swiftstudio/events.jsonl'
 export interface Handoff {
   readonly version: 1
   readonly format: 'swift-web-studio'
+  /**
+   * Which build wrote the archive, for the people who look inside it. Reading drops it
+   * unchecked, so older and newer builds open each other's archives alike.
+   */
+  readonly generator?: { readonly name: 'Swift Web Studio'; readonly build: StudioBuild }
   readonly project: Omit<Project, 'files' | 'assets' | 'studio' | 'colors'>
   readonly sources: readonly { readonly id: string; readonly path: string; readonly base: string }[]
   readonly assets: readonly ResourceEntry[]
@@ -43,12 +60,13 @@ export function validatePortableProject(value: unknown): asserts value is Projec
   validateColors((value.colors ?? []) as ColorAsset[])
 }
 /** Source files and resources stay outside the optional Studio metadata. */
-export function attachHandoff(project: Project, bundle: ExportBundle, root: string, sourcePath: (id: string) => string, catalogPath: string): ExportBundle {
+export function attachHandoff(project: Project, bundle: ExportBundle, root: string, sourcePath: (id: string) => string, catalogPath: string, { build, events }: HandoffExtras = {}): ExportBundle {
   const normalized = normalizeProject(project)
   validatePortableProject(normalized)
   const files = new Map(bundle)
   const document: Handoff = {
     version: 1, format: 'swift-web-studio',
+    ...(build ? { generator: { name: 'Swift Web Studio', build: { commit: build.commit, builtAt: build.builtAt } } } : {}),
     project: { schemaVersion: 1, id: project.id, manifest: project.manifest, folders: project.folders, createdAt: project.createdAt, updatedAt: project.updatedAt, ...(project.chatHistory ? { chatHistory: project.chatHistory } : {}) },
     sources: project.files.map(f => ({ id: f.id, path: sourcePath(f.id), base: f.text })),
     assets: (project.assets ?? []).map(a => ({ id: a.id, name: a.name, scale: a.scale, light: `${catalogPath}/${a.name}.imageset/light.${a.light.mime === 'image/png' ? 'png' : 'jpg'}`, ...(a.dark ? { dark: `${catalogPath}/${a.name}.imageset/dark.${a.dark.mime === 'image/png' ? 'png' : 'jpg'}` } : {}) })),
@@ -58,6 +76,7 @@ export function attachHandoff(project: Project, bundle: ExportBundle, root: stri
   const put = (path: string, bytes: Uint8Array) => { if (files.has(path)) throw new Error('The project conflicts with an export metadata path.'); files.set(path, bytes) }
   put(`${root}/${PROJECT_DOCUMENT}`, encodeText(JSON.stringify(document)))
   if (project.studio) put(`${root}/.swiftstudio/studio.json`, encodeText(JSON.stringify(project.studio)))
+  if (events !== undefined) put(`${root}/${EVENT_LOG}`, encodeText(events))
   return files
 }
 export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project: Project; handoff: Handoff } | null {
@@ -80,7 +99,11 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
     if (!object(s) || typeof s.id !== 'string' || typeof s.base !== 'string' || typeof s.path !== 'string' || !s.path.endsWith('.swift')) throw new Error('Invalid source reference.')
     if (!safePath(s.path) || !s.path.startsWith(root)) throw new Error('Invalid source reference.')
     // A removed Swift file is a reviewed deletion. A missing binary resource remains an error.
-    return entries.has(s.path) ? [{ id: s.id, text: decodeText(read(s.path)) }] : []
+    if (!entries.has(s.path)) return []
+    // Xcode's copy goes out without the studio's markers. Unchanged there, it is the recorded
+    // text, markers and all; changed there, it is what the developer left.
+    const text = decodeText(read(s.path))
+    return [{ id: s.id, text: text !== s.base && withoutStudioMarkers(s.base) === text ? s.base : text }]
   })
   const roots = new Set(value.sources.flatMap(s => {
     const source = s as { id: string; path: string }
@@ -129,7 +152,9 @@ export function readHandoff(entries: ReadonlyMap<string, Uint8Array>): { project
   // Baselines are untrusted too. They are used only for a visible merge proposal.
   const baseline = { ...project, manifest: value.baseManifest, studio: value.baseStudio, files: value.sources.map(s => ({ id: (s as { id: string }).id, text: (s as { base: string }).base })) }
   validatePortableProject(baseline)
-  return { project, handoff: value as unknown as Handoff }
+  const { generator: _written, ...handoff } = value
+  void _written
+  return { project, handoff: handoff as unknown as Handoff }
 }
 
 export interface ImportConflict { readonly key: string; readonly label: string; readonly local: string; readonly incoming: string }

@@ -351,5 +351,11 @@ export function templatesOfKind(kind: TemplateKind): readonly TemplateInfo[] {
   return TEMPLATE_CATALOG.filter((t) => t.kind === kind)
 }
 
-/** The id the gallery opens on when there is nothing else to open. */
-export const STARTER_TEMPLATE_ID = 'counter'
+/**
+ * The project laid down when there is nothing else to open.
+ *
+ * The blank screen rather than an example: somebody who closes the first sheet to
+ * look around should land where their own design starts, not inside a counter app
+ * they would have to take apart first.
+ */
+export const STARTER_TEMPLATE_ID = 'blank'

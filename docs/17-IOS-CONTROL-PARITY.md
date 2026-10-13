@@ -1,4 +1,4 @@
-# iPhone control parity — screenshot follow-up, 2026-09-17
+# iPhone control parity: screenshot follow-up, 2026-09-17
 
 The supplied screenshots showed real default-shape differences, not just missing glass.
 This pass focuses on the iPhone renderer. Materials remain blur approximations and symbols

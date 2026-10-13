@@ -1,4 +1,4 @@
-import type { Point, CornerStyle, ShapeStroke, SliderPayload, FilterSpec, Fill, Rect, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type { Point, CornerStyle, PlaceholderPayload, Rect, ShapeStroke, ShapeTrim, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -122,6 +122,11 @@ export interface TextElement extends ElementBase {
    * every label in every app goes down.
    */
   readonly runs?: readonly TextRunSpec[]
+  /**
+   * Text the system draws, such as an alert's title and message: its first and last
+   * lines keep their half-leading, as UIKit's labels do. A SwiftUI `Text` gives it up.
+   */
+  readonly keepsLeading?: true
 }
 
 /**
@@ -147,6 +152,7 @@ export interface ShapeElement extends ElementBase {
   /** `.fill(…)`; without one the shape takes the inherited foreground colour. */
   readonly fill?: Fill
   readonly stroke?: ShapeStroke
+  readonly trim?: ShapeTrim
 }
 
 export interface SliderElement extends ElementBase {
@@ -275,8 +281,7 @@ export interface PathElement extends ElementBase {
 
 export interface PlaceholderElement extends ElementBase {
   readonly kind: 'placeholder'
-  readonly feature: string
-  readonly reason: string
+  readonly placeholder: PlaceholderPayload
 }
 
 export interface EmptyElement extends ElementBase {
@@ -312,7 +317,13 @@ export type LayoutModifier =
       readonly maxHeight?: number
       readonly alignment: Alignment
     }
-  | { readonly kind: 'background'; readonly content: LayoutElement; readonly alignment?: Alignment }
+  /**
+   * `ignoresSafeAreaEdges` is the ShapeStyle background's own: `.background(.red)`
+   * reaches into the safe area its view touches, and `.background { Color.red }` doesn't.
+   */
+  | { readonly kind: 'background'; readonly content: LayoutElement; readonly alignment?: Alignment; readonly ignoresSafeAreaEdges?: SafeAreaEdges }
+  /** `.ignoresSafeArea(edges:)`: the view reaches into the safe area on the edges it touches. */
+  | { readonly kind: 'ignoresSafeArea'; readonly edges: SafeAreaEdges }
   | { readonly kind: 'font'; readonly font: ResolvedFont }
   /** `.fontWeight` / `.bold` / `.italic`: adjust the inherited face, keep its size. */
   | {
@@ -359,7 +370,17 @@ export type LayoutModifier =
   | { readonly kind: 'square' }
   | { readonly kind: 'inputFrame'; readonly minHeight: number; readonly paddingY: number }
   | { readonly kind: 'controlFont'; readonly font: ResolvedFont }
-  | { readonly kind: 'overlay'; readonly content: LayoutElement; readonly alignment: Alignment }
+  | {
+      readonly kind: 'overlay'
+      readonly content: LayoutElement
+      readonly alignment: Alignment
+      /**
+       * Starts the overlay at the leading edge of the leftmost text the child drew, or
+       * `otherwise` in when it drew none. A list row's separator, which iOS starts under
+       * the row's text.
+       */
+      readonly underFirstText?: { readonly otherwise: number }
+    }
   | {
       readonly kind: 'border'
       readonly color: RGBA
@@ -436,19 +457,6 @@ export type LayoutModifier =
       readonly edge: 'top' | 'bottom' | 'leading' | 'trailing'
       readonly content: LayoutElement
       readonly spacing: number
-    }
-  /**
-   * `.ignoresSafeArea(edges:)` - this view, and only this view, grows out to the
-   * device's edges wherever it meets the safe area.
-   *
-   * Its parent still lays it out inside the safe area, so its siblings stay where
-   * they were. That is the difference from ignoring the safe area for a whole
-   * screen, and the reason a background written this way does not drag a list up
-   * under the navigation bar with it.
-   */
-  | {
-      readonly kind: 'ignoresSafeArea'
-      readonly edges: { readonly top: boolean; readonly bottom: boolean; readonly leading: boolean; readonly trailing: boolean }
     }
   /**
    * A fraction of the width the parent offered.
@@ -571,6 +579,14 @@ export interface TransitionHint {
   readonly duration: number
 }
 
+/** Which of a view's edges may reach into the safe area. */
+export interface SafeAreaEdges {
+  readonly top: boolean
+  readonly bottom: boolean
+  readonly leading: boolean
+  readonly trailing: boolean
+}
+
 /**
  * Values inherited down the tree.
  *
@@ -580,17 +596,14 @@ export interface TransitionHint {
  * `VStack { Text(…) }.font(.largeTitle)` size its text correctly.
  */
 export interface LayoutEnvironment {
+  /**
+   * The screen's safe area: where content is laid out, and the whole screen a view
+   * touching its edge may reach out to. Unset inside a scroll view, whose content
+   * never reaches out.
+   */
+  readonly safeArea?: { readonly inner: Rect; readonly outer: Rect }
   /** Nearest window/scroll viewport, independent of intervening layout proposals. */
   readonly containerSize?: { readonly width: number | null; readonly height: number | null }
-  /**
-   * The screen's safe area and the whole screen, in the coordinates of the frames
-   * being placed - what `.ignoresSafeArea` grows a view between.
-   *
-   * Set by whoever lays out a screen. A box whose children are placed relative to it
-   * shifts both, and a scroll view clears them: its content is not at the screen's
-   * edges whatever its coordinates say.
-   */
-  readonly safeArea?: { readonly inner: Rect; readonly outer: Rect } | null
   readonly fontExplicit?: boolean
   readonly cornerStyle?: CornerStyle
   readonly displayScale?: number

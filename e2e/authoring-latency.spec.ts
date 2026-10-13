@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 
 declare global {
   interface Window { __authoringLatency?: { mode: 'selection' | 'input' | 'edit'; start: number; expected?: string; painted?: Promise<number> } }
@@ -35,7 +36,7 @@ test('authoring latency: 100 real UI samples after five warmups, 2,000 lines and
   test.skip(browserName !== 'chromium', 'Latency budgets are calibrated for Chromium; WebKit is tracked under F9')
   test.setTimeout(180_000)
   expect(source.split('\n').length).toBeGreaterThan(2000)
-  await page.goto('/'); await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   const editor = page.getByTestId('editor').locator('.cm-content')
   await editor.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText(source)

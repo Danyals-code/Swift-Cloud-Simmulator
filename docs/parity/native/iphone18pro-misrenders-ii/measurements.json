@@ -1,0 +1,133 @@
+{
+ "source": "Built from tests/fixtures/ios27-misrenders-ii.swift, exported with the repo's own exporter (projectFromFiles + buildExportBundle, deploymentTarget 27.0) and compiled with Xcode 27.0 (27A266a) on macOS 27.0; run on the iPhone 18 Pro simulator (088B21CA-E114-42A3-948D-2C682861FDB1, iOS 27.0), light appearance forced with simctl ui, status bar overridden to 9:41; one launch per screen with -screen <name> through simctl launch --console-pty, which keeps the app's printed PROBE, FRAME and HOOK lines, and a simctl io screenshot 3 s after launch, on 2026-09-23. 1206x2622 pixels / 402x874 points at 3x.",
+ "fixtureSha256": "86f822634cd6e60c1cf68373657965cbb86c27f09237708b456f871baa40fe14",
+ "captures": [
+  {"file": "geo-header.png", "sha256": "35f1d26b685b291ec90f2fef4ea8ec960bdb2e51242c8e65d19dcb196d04aa66", "size": [1206, 2622]},
+  {"file": "geo-ignoring.png", "sha256": "c34fbc7642bc17c7208fb5ff1e28eb6681f9d44256bf45f33ab7e4756e7421de", "size": [1206, 2622]},
+  {"file": "geo-inline.png", "sha256": "bf97fa21275ea480b111efab4a4330bc00dafdfb4fc03151d1e337a7c0d4c565", "size": [1206, 2622]},
+  {"file": "geo-nav.png", "sha256": "39e71ff6703f54c4c38924572fb1f65643dfdbd7f15ce269fa5c12c4f8ecbbc6", "size": [1206, 2622]},
+  {"file": "geo-padded.png", "sha256": "dbec14e889fcc364fd32266ad1f9c315283c6dfde432097f1eb0fe1dbc3cc617", "size": [1206, 2622]},
+  {"file": "geo-root.png", "sha256": "b87e5d6c9f7fe884bc6dca7eea4730bf8a1f75dc3c6b8d5c47474fe61ba7ef4e", "size": [1206, 2622]},
+  {"file": "geo-scroll.png", "sha256": "0cbbc3a20405168f75c726a78d39066cea53b542b7d57ef1b03fbcb88b73da2f", "size": [1206, 2622]},
+  {"file": "geo-tab.png", "sha256": "b1cb1996adbf5a7e463cae9ff654ae63de4c6e3f8c926589813b8d96279ba61b", "size": [1206, 2622]},
+  {"file": "hooks.png", "sha256": "44ec30f8770a6a4ee15dcec46259553a2d985743e2ef7585c0f33e2f52e036c9", "size": [1206, 2622]},
+  {"file": "links.png", "sha256": "d6d97fc7223e19b8a48cd9efb27caead12e745ff8b633918611fe9437f11bb5e", "size": [1206, 2622]},
+  {"file": "scroll-fixed.png", "sha256": "888801798a42ca0274cb4e9060b90b548b17820932b22b98bb060126311ac8ee", "size": [1206, 2622]},
+  {"file": "scroll-text.png", "sha256": "5c20b8313d898dda4dc6acfb3be359d9d3cd4db3d1f9242c48ffb37953f995c2", "size": [1206, 2622]},
+  {"file": "symbol-unknown.png", "sha256": "6a92934daa1c6d97d4d90c1ffcca006a07a92073d69cef5546df997a79c2b62d", "size": [1206, 2622]},
+  {"file": "tags-menu.png", "sha256": "0264c0253583af5657fd2130f88f1f24034b01b24f5d9fba549f7bf4a1544429", "size": [1206, 2622]},
+  {"file": "tags-optional.png", "sha256": "bad14b2e4483229eee75769935c5c98e2be211e29936f7be439a68c85d5d6ae3", "size": [1206, 2622]},
+  {"file": "tags-segmented.png", "sha256": "5cd0d7ddf78cedb61d4bc1690b569be448643b28cfeb3abf7bd5ef78fb0f7b0a", "size": [1206, 2622]},
+  {"file": "tags-tabview.png", "sha256": "06d4a6f6ad0931b66674c2296849939697dee79b1de379664e05c155f9bf8a04", "size": [1206, 2622]},
+  {"file": "text-in-text.png", "sha256": "d95725099d9fce8db0b6c776eeb2859db449064be35faf07e35ced71aed8d38d", "size": [1206, 2622]}
+ ],
+ "measured": {
+  "units": "points on a 402x874 pt screen; frames are [x, y, width, height] in the screen, as frame(in: .global) reports them",
+  "pickerTags": {
+   "note": "every picker starts on its middle row (chocolate, or id 2): middle means that row is drawn selected, none that no row is; read from the captures",
+   "segmented": {
+    "A Identifiable, id: Self": "middle",
+    "B Identifiable, id: String": "none",
+    "C id: \\.self": "middle",
+    "D id: \\.rawValue, enum selection": "none",
+    "E id: \\.rawValue, String selection": "middle",
+    "H struct, let id: Int": "middle",
+    "I ForEach(0..<3), Int selection": "middle"
+   },
+   "optional": {
+    "G1 Optional, implicit, id: Self": "none",
+    "G2 Optional, implicit, id: \\.self": "none",
+    "G3 String?, implicit, id: \\.rawValue": "none",
+    "K1 Optional, .tag(f)": "middle",
+    "K2 Optional, .tag(f, includeOptional: false)": "none",
+    "L Optional, .tag(Optional(f))": "middle"
+   },
+   "menuLabels": {
+    "note": "the value a menu picker's row shows beside its chevrons; empty when no row matches",
+    "A match": "chocolate",
+    "B String id": "",
+    "S no such row": "",
+    "H Int id": "chocolate",
+    "M String tag": "chocolate",
+    "G Optional": ""
+   },
+   "menuLabelsNote": "M's rows carry an explicit .tag(rawValue), a String, on an enum selection, and still show chocolate: a row keeps ForEach's own tag of the id's type beside it, and the picker reads the one of its selection's type",
+   "tabView": {
+    "shownPage": "Page chocolate",
+    "selectedTabItem": "chocolate",
+    "note": "TabView(selection:) over ForEach pages with no .tag opens on the selection's page"
+   }
+  },
+  "hooks": {
+   "printed": ["HOOK D task 1", "HOOK D task 2", "HOOK C appear 1", "HOOK C appear 2", "HOOK B task", "HOOK B appear", "HOOK A appear", "HOOK A task"],
+   "note": "every hook runs, both .onAppear and both .task on one view too; a view's own run in the order they are written; sibling views run bottom first"
+  },
+  "geometryReader": {
+   "geo-root": {
+    "insets": {"top": 62, "leading": 0, "bottom": 34, "trailing": 0},
+    "global": [0, 62, 402, 778]
+   },
+   "geo-ignoring": {
+    "insets": {"top": 0, "leading": 0, "bottom": 0, "trailing": 0},
+    "global": [0, 0, 402, 874]
+   },
+   "geo-padded": {
+    "insets": {"top": 0, "leading": 0, "bottom": 0, "trailing": 0},
+    "global": [16, 78, 370, 746]
+   },
+   "geo-header": {
+    "insets": {"top": 0, "leading": 0, "bottom": 0, "trailing": 0},
+    "global": [16, 186, 370, 638]
+   },
+   "geo-tab": {
+    "insets": {"top": 62, "leading": 0, "bottom": 83, "trailing": 0},
+    "global": [0, 62, 402, 729]
+   },
+   "geo-scroll": {
+    "insets": {"top": 0, "leading": 0, "bottom": 0, "trailing": 0},
+    "global": [0, 62, 402, 200]
+   },
+   "geo-nav": {
+    "insets": {"top": 168, "leading": 0, "bottom": 34, "trailing": 0},
+    "global": [0, 168, 402, 672],
+    "readFrom": "the drawn text; the printed line comes before layout, all zeros"
+   },
+   "geo-inline": {
+    "insets": {"top": 116, "leading": 0, "bottom": 34, "trailing": 0},
+    "global": [0, 116, 402, 724],
+    "readFrom": "the drawn text; the printed line comes before layout, all zeros"
+   }
+  },
+  "geometryReaderNote": "safeAreaInsets are the insets of the edges the reader touches, bars included (168 under a large title, 83 above a tab bar); a reader that doesn't touch an edge, or ignores the safe area, or scrolls, reports 0 there",
+  "links": {
+   "frames": {
+    "timeline": [166, 554, 70, 20],
+    "share-label": [166, 509, 68, 21],
+    "share-title": [165, 462, 71, 22],
+    "share-item": [158, 415, 84, 22],
+    "link-label": [172, 371, 57, 20],
+    "link-title": [186, 327, 29, 20]
+   },
+   "drawn": {
+    "link-title": "Site, accent",
+    "link-label": "globe and Site, accent",
+    "share-item": "square.and.arrow.up and Share…, accent",
+    "share-title": "square.and.arrow.up and Share, accent",
+    "share-label": "paperplane and Send, accent",
+    "timeline": "the time, as Text(date, style: .time)"
+   }
+  },
+  "unknownSymbol": {
+   "frames": {"symbol-right": [200, 440, 11, 20], "symbol-unknown": [200, 451, 0, 0], "symbol-left": [190, 440, 9, 20]},
+   "note": "Image(systemName: \"not.a.symbol\") draws nothing and takes no space: 0x0 between its neighbours"
+  },
+  "scrollView": {
+   "frames": {"scroll-text": [193, 62, 16, 20], "scroll-fixed": [0, 62, 402, 200]},
+   "note": "a lone child of a ScrollView sits at the top of the safe area, centred across"
+  },
+  "textInText": {
+   "frames": {"text-in-text": [146, 440, 109, 20]},
+   "drawn": "Bold and plain on one line, Bold in bold"
+  }
+ }
+}

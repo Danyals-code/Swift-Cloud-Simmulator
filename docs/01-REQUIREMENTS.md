@@ -142,7 +142,8 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 | FR-7.5 | Copy single file, and copy whole project, to clipboard | Must |
 | FR-7.6 | Push to a GitHub repo via OAuth | Could |
 | FR-7.7 | Exported bundle includes assets catalogue, Info.plist values, deployment target, and a README with build instructions | Must |
-| FR-7.8 | Export must be byte-identical to editor content for all `.swift` files (verified by test) | Must |
+| FR-7.8 | Export must be byte-identical to editor content for all `.swift` files, apart from the studio's own markers for hidden views and switched-off modifiers, which the native formats leave out (verified by test) | Must |
+| FR-7.9 | Every archive carries the project's event log, `.swiftstudio/events.jsonl`: timestamped design edits with their change and layer type, bursts of typing, Undo and Redo, AI requests and how each ended, mode switches, reloads, recoveries and exports, with the build. Prompts are kept as written; the designer's code, text and values, and API keys, never are | Must |
 
 ### FR-8 - Persistence and sharing
 
@@ -228,7 +229,7 @@ Full matrix in [05-SWIFTUI-COVERAGE.md](05-SWIFTUI-COVERAGE.md). Summary:
 | R2 | **Apple asset licensing.** SF Pro and SF Symbols are not licensed for web redistribution; neither are device bezel images. | High | Ship an open font stack metric-matched to SF, and map SF Symbol *names* to an open icon set. Draw device frames in CSS, not Apple artwork. Show a "preview approximates system fonts and symbols" note. |
 | R3 | **Scope explosion.** SwiftUI's surface area is enormous and growing. | High | The coverage matrix is the contract; everything outside it renders a labelled placeholder. Telemetry drives what gets built next, not guesswork. |
 | R4 | **Trademark.** "Xcode", "SwiftUI", "iPhone" are Apple marks. | Medium | Nominative use only; no Apple logos; clear "not affiliated with Apple" footer; product name avoids "Xcode" and "Playground". |
-| R5 | **Interpreter correctness drift.** Preview says fine, Xcode says error. | High | **Mitigated in Phase 6:** a strictness lint pass flags eight classes of construct the interpreter tolerates and swiftc rejects, each with a fix-it, reported as `may_not_compile_in_xcode`. Plus the golden-test corpus, and the optional Phase 7 real-swiftc verification service for the rest. |
+| R5 | **Interpreter correctness drift.** Preview says fine, Xcode says error. | High | **Mitigated in Phase 6:** a strictness lint pass flags ten classes of construct the interpreter tolerates and swiftc rejects, most with a fix-it, reported as `may_not_compile_in_xcode`. Plus the golden-test corpus, and the optional Phase 7 real-swiftc verification service for the rest. |
 | R6 | Text measurement differences (web text shaping vs CoreText) cause layout drift. | Medium | Centralise all measurement in one module with a metric-compatible font; snapshot-test line breaking. |
 | R7 | Vercel serverless limits (bundle size, execution time) make server-side Swift impossible. | Medium | Accepted: core is 100% client-side. Any real toolchain work lives in a separate long-running service, off the critical path. |
 | R8 | Interpreting a large view tree on every keystroke becomes slow. | Medium | Incremental reparse, memoised type resolution, dependency-tracked re-render so only subtrees whose observed state changed are invalidated. |

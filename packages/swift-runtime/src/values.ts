@@ -54,6 +54,12 @@ export interface BoolValue {
 export interface StringValue {
   readonly kind: 'string'
   readonly value: string
+  /**
+   * The styled text an interpolation of a `Text` stands for:
+   * `"\(Text("Bold").bold()) go"`. `Text` draws that, and everything else, a Button's
+   * title or a navigation title, reads the plain `value`.
+   */
+  readonly styled?: SwiftValue
 }
 
 /** Mutable in place; copied at every assignment and argument boundary. */
@@ -142,6 +148,12 @@ export interface ClosureValue {
 export interface FunctionValue {
   readonly kind: 'function'
   readonly decl: FuncDecl
+  /**
+   * Every function this name stands for where it was declared, `decl` among them, when
+   * there is more than one: `minutes(on:)` and `minutes(of:)`, or `label(_: Int)` and
+   * `label(_: String)`. A call chooses from them by what it is called with.
+   */
+  readonly overloads?: readonly FuncDecl[]
   /** Bound receiver for a method call, else null. */
   readonly self: StructValue | null
   readonly env: unknown
@@ -195,22 +207,7 @@ export interface NilValue {
   readonly kind: 'nil'
 }
 
-/**
- * Splits a string the way Swift's `String` does - by grapheme cluster.
- *
- * Spreading a string (`[...text]`) splits by *code point*, which gets "👋🏽" wrong: the
- * emoji and its skin-tone modifier are two code points but one character. Swift's
- * `count` is 1; naive JS says 2, and `.first` returns half an emoji.
- */
-const GRAPHEMES =
-  typeof Intl !== 'undefined' && 'Segmenter' in Intl
-    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-    : null
-
-export function graphemes(text: string): string[] {
-  if (!GRAPHEMES) return [...text]
-  return Array.from(GRAPHEMES.segment(text), (s) => s.segment)
-}
+export { graphemes } from '@studio/shared'
 
 // ------------------------------------------------------------- constructors
 
@@ -424,19 +421,15 @@ export function asKeyPath(value: SwiftValue | undefined): KeyPathPayload | null 
 }
 
 /**
- * Applies a key path to a value.
+ * Applies a key path to a value, reading each member as `read` does.
  *
  * `\.self` is the identity path, which is why it is the idiomatic `ForEach(_:id:)`
- * argument for an array of plain strings. Anything else walks stored fields.
+ * argument for an array of plain strings. Anything else is read as Swift reads it:
+ * the interpreter's reader takes a stored or computed property, a `rawValue` or a
+ * tuple's element alike.
  */
-export function applyKeyPath(path: KeyPathPayload, value: SwiftValue): SwiftValue {
-  let current = value
-  for (const component of path.components) {
-    if (component === 'self') continue
-    if (current.kind !== 'struct') return NIL
-    current = current.fields.get(component) ?? NIL
-  }
-  return current
+export function readKeyPath(path: KeyPathPayload, value: SwiftValue, read: (value: SwiftValue, member: string) => SwiftValue | undefined): SwiftValue {
+  return path.components.reduce<SwiftValue>((current, component) => component === 'self' ? current : read(current, component) ?? NIL, value)
 }
 
 // --------------------------------------------------------------- projections
@@ -458,6 +451,21 @@ export interface ProjectionPayload {
   set(value: SwiftValue): void
   /** For diagnostics: `count`, `self.isOn`. */
   readonly description: string
+  /** What the bound property was declared as, where its declaration wrote a type. */
+  readonly declared?: DeclaredType
+}
+
+/**
+ * A property's declared type: `var choice: Flavor?` is an Optional `Flavor`.
+ *
+ * Its value alone can't say so. A present optional is held as the value itself, and a
+ * nil one has no type at all, while a `Picker` needs both: its rows' own tags answer
+ * only a selection of their own type, and never an Optional one.
+ */
+export interface DeclaredType {
+  readonly optional: boolean
+  /** The type's name, Optional or not, where it is a plain name: `Flavor`. */
+  readonly name?: string
 }
 
 export function projection(payload: ProjectionPayload): OpaqueValue {
@@ -484,6 +492,26 @@ export function unwrapProjection(value: SwiftValue): SwiftValue {
 }
 
 // ------------------------------------------------------------------ copying
+
+/** Whether `value`, or anything it holds, was made from one of `types`. */
+export function holdsType(value: SwiftValue, types: ReadonlySet<string>, seen = new Set<object>()): boolean {
+  switch (value.kind) {
+    case 'struct':
+      if (types.has(value.typeName)) return true
+      if (seen.has(value.fields)) return false
+      seen.add(value.fields)
+      return [...value.fields.values()].some((field) => holdsType(field, types, seen))
+    case 'enum':
+      return types.has(value.typeName) || value.associated.some((payload) => holdsType(payload, types, seen))
+    case 'array':
+    case 'tuple':
+      return value.elements.some((element) => holdsType(element, types, seen))
+    case 'dictionary':
+      return [...value.entries.values()].some((entry) => holdsType(entry, types, seen))
+    default:
+      return false
+  }
+}
 
 /**
  * Produces an independent copy for value types, and returns reference types as-is.
@@ -581,6 +609,29 @@ export function typeNameOf(value: SwiftValue): string {
  * inside collections - which is Swift's actual, slightly inconsistent behaviour.
  */
 export function describe(value: SwiftValue, insideCollection = false): string {
+  return render(value, insideCollection, null)
+}
+
+/**
+ * A value as a key: the same for two values SwiftUI treats as one identity - two
+ * `ForEach` rows, a `.tag` and a selection, two `.id(…)`s, two dictionary keys.
+ *
+ * Not `describe`, which prints a class instance by its type alone, as Swift does:
+ * every row of one class would then be the same row. Here an instance is its
+ * properties, as a struct is, which is also what a class hashing its own fields
+ * compares. An object met again inside itself is named rather than entered, so a
+ * parent and a child that point at each other still end.
+ */
+export function identityKey(value: SwiftValue, insideCollection = false): string {
+  return render(value, insideCollection, new Set())
+}
+
+/**
+ * `describe` and `identityKey`, which differ only at a class instance: printed by its
+ * type when `entered` is null, and otherwise written out by its properties, with the
+ * instances being written out so far in `entered`.
+ */
+function render(value: SwiftValue, insideCollection: boolean, entered: Set<StructValue> | null): string {
   switch (value.kind) {
     case 'int':
       return String(value.value)
@@ -591,29 +642,39 @@ export function describe(value: SwiftValue, insideCollection = false): string {
     case 'string':
       return insideCollection ? `"${value.value}"` : value.value
     case 'array':
-      return `[${value.elements.map((e) => describe(e, true)).join(', ')}]`
+      return `[${value.elements.map((e) => render(e, true, entered)).join(', ')}]`
     case 'tuple': {
       // Swift prints a tuple with its labels: `(x: 1, y: 2)`.
       const parts = value.elements.map((e, i) => {
         const label = value.labels[i]
-        return label ? `${label}: ${describe(e, true)}` : describe(e, true)
+        return label ? `${label}: ${render(e, true, entered)}` : render(e, true, entered)
       })
       return `(${parts.join(', ')})`
     }
     case 'dictionary': {
       if (value.entries.size === 0) return '[:]'
-      const parts = [...value.entries].map(([k, v]) => `"${k}": ${describe(v, true)}`)
+      const parts = [...value.entries].map(([k, v]) => `"${k}": ${render(v, true, entered)}`)
       return `[${parts.join(', ')}]`
     }
     case 'struct': {
-      const fields = [...value.fields].map(([k, v]) => `${k}: ${describe(v, true)}`)
-      return `${value.typeName}(${fields.join(', ')})`
+      // Swift prints a class instance by its type alone, and never walks its
+      // properties, which is also what keeps a parent and child that point at
+      // each other from recursing forever.
+      if (value.reference && !entered) return value.typeName
+      if (entered?.has(value)) return `${value.typeName}(…)`
+      if (value.reference) entered?.add(value)
+      try {
+        const fields = [...value.fields].map(([k, v]) => `${k}: ${render(v, true, entered)}`)
+        return `${value.typeName}(${fields.join(', ')})`
+      } finally {
+        entered?.delete(value)
+      }
     }
     case 'enum':
       // Swift prints an enum case by its name alone, payload in parentheses.
       return value.associated.length === 0
         ? value.caseName
-        : `${value.caseName}(${value.associated.map((v) => describe(v, true)).join(', ')})`
+        : `${value.caseName}(${value.associated.map((v) => render(v, true, entered)).join(', ')})`
     case 'closure':
     case 'function':
       return '(Function)'
@@ -801,7 +862,7 @@ export function valuesEqual(a: SwiftValue, b: SwiftValue): boolean {
 
 /** Dictionary keys are stringified; the slice only uses String and Int keys. */
 export function dictionaryKey(value: SwiftValue): string {
-  return value.kind === 'string' ? value.value : describe(value, false)
+  return value.kind === 'string' ? value.value : identityKey(value)
 }
 
 export type { Param }

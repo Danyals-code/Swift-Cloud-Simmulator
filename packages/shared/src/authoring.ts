@@ -47,6 +47,23 @@ export interface AuthoringNode {
   readonly navigation?: NavigationSettings
   readonly fields?: readonly string[]
   readonly extraction?: { readonly allowed: boolean; readonly reason: string }
+  /**
+   * Set on a view written as an argument - `.overlay(Circle())`, `Section(header: Text("A"))` -
+   * rather than as a statement of its own. It is part of the view that takes it, so it
+   * cannot be moved, copied, hidden or deleted on its own.
+   */
+  readonly argument?: true
+  /**
+   * Set on a view the preview draws as a labelled box (D12): real SwiftUI it has no drawing
+   * for yet, or a name it does not know, which only an Apple framework or the project can declare.
+   */
+  readonly undrawn?: 'unsupported' | 'unknown'
+}
+
+/** The app's accent, as the hex its colour set holds in light and dark. */
+export interface AppAccent {
+  readonly light: string
+  readonly dark: string
 }
 
 export interface AuthoringSnapshot {
@@ -59,6 +76,8 @@ export interface AuthoringSnapshot {
   readonly inputs?: readonly StateInput[]
   /** The app's own navigation: its style, and the tabs when it has them. */
   readonly navigation?: AppNavigationModel
+  /** The tint written at the app's root, which the export writes into AccentColor. */
+  readonly accent?: AppAccent
   readonly diagnostics: readonly Diagnostic[]
   readonly runtimeToSource: Readonly<Record<string, string>>
 }

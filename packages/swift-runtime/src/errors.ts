@@ -117,6 +117,15 @@ export class BreakSignal { constructor(readonly label?: string) {} }
 export class ContinueSignal { constructor(readonly label?: string) {} }
 
 /**
+ * A `?` met nil: unwind to where its optional chain ends, which evaluates to nil.
+ *
+ * A signal for the same reason as the others: the rest of the chain - `.b.c()` after
+ * `a?` - must not run, and it can be any number of member accesses, calls and
+ * subscripts deep. The parser marks where the chain ends (`OptionalChainEnd`).
+ */
+export class NilChainSignal {}
+
+/**
  * `fallthrough` - carry on into the next `switch` case's body.
  *
  * A signal rather than a flag because the statement can sit inside an `if` inside the

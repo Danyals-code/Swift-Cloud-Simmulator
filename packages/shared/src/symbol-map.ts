@@ -10,18 +10,21 @@ export interface SymbolDefinition {
 }
 
 export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
+  "square.and.pencil.circle": { "icon": "#squareandpencil", "container": "circle" },
+  "mug.fill": { "icon": "#mugfill" },
+  "chart.bar.fill": { "icon": "#chartbarfill", "viewBox": "-24 0 560 512", "widthEm": 1.29 },
   "rectangle.on.rectangle": { "icon": "copy-outline" },
   "rectangle.on.rectangle.fill": { "icon": "copy" },
   "book": { "icon": "book-outline" },
   "book.fill": { "icon": "book" },
-  "book.closed": { "icon": "book-outline" },
+  "book.closed": { "icon": "#bookclosed" },
   "book.closed.fill": { "icon": "book" },
   "shippingbox": { "icon": "cube-outline" },
   "shippingbox.fill": { "icon": "cube" },
-  "suitcase": { "icon": "briefcase-outline" },
+  "suitcase": { "icon": "#suitcase" },
   "suitcase.fill": { "icon": "briefcase" },
   "cup.and.saucer": { "icon": "cafe-outline" },
-  "cup.and.saucer.fill": { "icon": "cafe" },
+  "cup.and.saucer.fill": { "icon": "#cupandsaucerfill", "viewBox": "-40 0 592 512", "widthEm": 1.36 },
   "books.vertical": { "icon": "library-outline" },
   "books.vertical.fill": { "icon": "library" },
   "mountain.2": {
@@ -79,9 +82,7 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
     "mirrored": true,
     "icon": "refresh"
   },
-  "arrow.uturn.backward": {
-    "icon": "arrow-undo"
-  },
+  "arrow.uturn.backward": { "icon": "#arrowuturnbackward" },
   "arrow.uturn.forward": {
     "icon": "arrow-redo"
   },
@@ -112,9 +113,7 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "pencil": {
     "icon": "pencil"
   },
-  "square.and.pencil": {
-    "icon": "create"
-  },
+  "square.and.pencil": { "icon": "#squareandpencil" },
   "music.note": {
     "icon": "musical-note"
   },
@@ -133,12 +132,8 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "paperclip": {
     "icon": "attach"
   },
-  "waveform": {
-    "icon": "pulse"
-  },
-  "thermometer": {
-    "icon": "thermometer"
-  },
+  "waveform": { "icon": "#waveform" },
+  "thermometer": { "icon": "#thermometer" },
   "iphone": {
     "icon": "phone-portrait"
   },
@@ -151,15 +146,9 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "airplane": {
     "icon": "airplane"
   },
-  "chart.pie": {
-    "icon": "pie-chart"
-  },
-  "chart.bar": {
-    "icon": "bar-chart"
-  },
-  "chart.line.uptrend.xyaxis": {
-    "icon": "trending-up"
-  },
+  "chart.pie": { "icon": "#chartpie" },
+  "chart.bar": { "icon": "#chartbar", "viewBox": "-24 0 560 512", "widthEm": 1.29 },
+  "chart.line.uptrend.xyaxis": { "icon": "#chartlineuptrendxyaxis" },
   "list.bullet": {
     "icon": "list"
   },
@@ -169,9 +158,7 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "slider.horizontal.3": {
     "icon": "options"
   },
-  "square.grid.2x2": {
-    "icon": "grid"
-  },
+  "square.grid.2x2": { "icon": "#squaregrid2x2" },
   "text.alignleft": {
     "icon": "#alignleft"
   },
@@ -265,9 +252,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "gear": {
     "icon": "settings-outline"
   },
-  "gear.fill": {
-    "icon": "settings"
-  },
   "gearshape": {
     "icon": "settings-outline"
   },
@@ -325,9 +309,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "calendar": {
     "icon": "calendar-outline"
   },
-  "calendar.fill": {
-    "icon": "calendar"
-  },
   "clock": {
     "icon": "time-outline"
   },
@@ -336,9 +317,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   },
   "timer": {
     "icon": "timer-outline"
-  },
-  "timer.fill": {
-    "icon": "timer"
   },
   "bookmark": {
     "icon": "bookmark-outline"
@@ -367,9 +345,7 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "flame": {
     "icon": "flame-outline"
   },
-  "flame.fill": {
-    "icon": "flame"
-  },
+  "flame.fill": { "icon": "#flamefill" },
   "drop": {
     "icon": "water-outline"
   },
@@ -379,9 +355,7 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "leaf": {
     "icon": "leaf-outline"
   },
-  "leaf.fill": {
-    "icon": "leaf"
-  },
+  "leaf.fill": { "icon": "#leaffill" },
   "globe": {
     "icon": "globe-outline"
   },
@@ -406,9 +380,7 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "camera.fill": {
     "icon": "camera"
   },
-  "photo": {
-    "icon": "image-outline"
-  },
+  "photo": { "icon": "#photo" },
   "photo.fill": {
     "icon": "image"
   },
@@ -481,9 +453,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "battery.100": {
     "icon": "battery-full-outline"
   },
-  "battery.100.fill": {
-    "icon": "battery-full"
-  },
   "cart": {
     "icon": "cart-outline"
   },
@@ -535,14 +504,8 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "sparkles": {
     "icon": "sparkles-outline"
   },
-  "sparkles.fill": {
-    "icon": "sparkles"
-  },
   "wand.and.stars": {
     "icon": "color-wand-outline"
-  },
-  "wand.and.stars.fill": {
-    "icon": "color-wand"
   },
   "hand.thumbsup": {
     "icon": "thumbs-up-outline"
@@ -576,9 +539,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   },
   "hourglass": {
     "icon": "hourglass-outline"
-  },
-  "hourglass.fill": {
-    "icon": "hourglass"
   },
   "alarm": {
     "icon": "alarm-outline"
@@ -654,6 +614,16 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   },
   "star.circle": {
     "icon": "star-outline",
+    "container": "circle",
+    "filled": false
+  },
+  "1.circle": {
+    "icon": "#digit1",
+    "container": "circle",
+    "filled": false
+  },
+  "2.circle": {
+    "icon": "#digit2",
     "container": "circle",
     "filled": false
   },
@@ -740,16 +710,6 @@ export const SYMBOL_MAP: Readonly<Record<string, SymbolDefinition>> = {
   "house.circle.fill": {
     "icon": "home",
     "container": "circle",
-    "filled": true
-  },
-  "house.square": {
-    "icon": "home-outline",
-    "container": "square",
-    "filled": false
-  },
-  "house.square.fill": {
-    "icon": "home",
-    "container": "square",
     "filled": true
   },
   "plus.square": {

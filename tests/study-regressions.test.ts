@@ -1,6 +1,19 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { CompileRequest, CompileResult } from '@studio/shared'
-import { compile, fontForToken, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
+import { placeholderWords, rgba, shapePath, type CompileRequest, type CompileResult, type RenderNode, type ViewLayer } from '@studio/shared'
+import { applyEvent, colorForName, compile, fontForToken, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
+import { KNOWN_COLOR_NAMES, buildAuthoringModel } from '@studio/swift-sema'
+import { IOS_27 } from '../packages/swiftui-runtime/src/appearance/ios27'
+import { AUTHORING_COLOR_HEX } from '../packages/swift-sema/src/authoring-resources'
+import { DEVICES } from '@studio/sim-shell'
+import { normalizeProject, projectFromFiles } from '@studio/project-model'
+import { TEMPLATES, createProjectFromTemplate } from '@studio/project-model/templates'
+import { VIEW_CATALOG } from '../apps/web/lib/viewCatalog'
+import { ancestors, worldFrame } from './render-geometry'
 
 /**
  * Regressions named after the study-build plan's items (feasibility-revised.md), so
@@ -19,6 +32,59 @@ struct ContentView: View {
   expect(result.diagnostics).toEqual([])
   expect(result.renderTree).not.toBeNull()
   return result
+}
+
+let revision = 1
+
+/** An app whose `ContentView` has these members - state and helpers as well as `body` - and these declarations. */
+const viewSource = (members: string, declarations = '') => `import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
+${declarations}
+struct ContentView: View {
+${members}
+}`
+
+const compileView = (source: string, options: Partial<CompileRequest> = {}) =>
+  compile({ files: [{ id: 'App.swift', text: source }], canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: revision++, ...options })
+
+/** A whole `ContentView`, which must draw with nothing to report. */
+function runView(members: string, declarations = '', options: Partial<CompileRequest> = {}): CompileResult {
+  const result = compileView(viewSource(members, declarations), options)
+  expect(result.diagnostics).toEqual([])
+  expect(result.renderTree).not.toBeNull()
+  return result
+}
+
+/** What a view reports: each diagnostic, with the source it points at and the replacement it offers. */
+function reported(members: string, declarations = '') {
+  const source = viewSource(members, declarations)
+  return compileView(source).diagnostics.map(d => ({ severity: d.severity, message: d.message, at: source.slice(d.span.start, d.span.end), fix: d.fixIts?.[0]?.edits[0]?.newText }))
+}
+
+/** What the iOS 27 simulator drew on iPhone 18 Pro, light (docs/parity/native/iphone18pro-misrenders). */
+const native = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders/measurements.json', import.meta.url), 'utf8')).measured
+/** What the same simulator drew for the second set of fixes (docs/parity/native/iphone18pro-misrenders-ii). */
+const nativeII = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-misrenders-ii/measurements.json', import.meta.url), 'utf8')).measured
+/** What the same simulator drew running tests/fixtures/ios27-runtime.swift (docs/parity/native/iphone18pro-runtime). */
+const runtimeCapture = JSON.parse(readFileSync(new URL('../docs/parity/native/iphone18pro-runtime/measurements.json', import.meta.url), 'utf8'))
+
+/** A `runView` on the iPhone 18 Pro the native values were measured on, with its safe area. */
+const screen = (members: string, declarations = '') => runView(members, declarations, { safeArea: DEVICES['iphone-18-pro'].safeArea })
+
+const nodes = (r: CompileResult): readonly RenderNode[] => r.renderTree?.nodes ?? []
+const texts = (r: CompileResult): string[] => nodes(r).flatMap(n => n.text?.runs.map(run => run.text) ?? [])
+const controls = (r: CompileResult) => nodes(r).filter(n => n.hitTarget).map(n => n.a11y?.label)
+const symbols = (r: CompileResult): string[] => nodes(r).flatMap(n => (n.image?.symbol ? [n.image.symbol] : []))
+/** Where the text is drawn on the screen, following any containers it is placed inside. */
+const placed = (r: CompileResult, value: string) =>
+  worldFrame(nodes(r), nodes(r).find(n => n.text?.runs.some(run => run.text === value))!)
+
+/** Presses the control with this accessible name, as a person finds it, and draws the result. */
+function tap(r: CompileResult, label: string): CompileResult {
+  const target = nodes(r).find(n => n.hitTarget && n.a11y?.label === label)
+  expect(target, `no control named "${label}"; the screen has ${JSON.stringify(controls(r))}`).toBeDefined()
+  applyEvent({ kind: 'tap', handlerId: target!.hitTarget!.handlerId, location: { x: 0, y: 0 } })
+  return rerender(revision++)
 }
 
 const fontOf = (r: CompileResult, value: string) =>
@@ -53,5 +119,2663 @@ describe('E1: styling modifiers do not replace inherited fonts', () => {
     const r = run('VStack { Text("Scaled").dynamicTypeSize(.accessibility3); Text("Default") }')
     expect(fontOf(r, 'Scaled').size).toBe(fontForToken('body', 'accessibility3')!.size)
     expect(fontOf(r, 'Default').size).toBe(fontForToken('body', 'large')!.size)
+  })
+})
+
+describe('A6: a long print run keeps its start and end', () => {
+  const messages = (r: CompileResult) => r.logs.map(log => log.message)
+
+  it('keeps the first and last thousand lines of a print loop, and says how many it left out', () => {
+    const r = run('Text("x").onAppear { for i in 0..<5000 { print(i) } }')
+    const lines = messages(r)
+    expect(lines).toHaveLength(2001)
+    expect(lines.slice(0, 3)).toEqual(['0', '1', '2'])
+    expect(lines[999]).toBe('999')
+    expect(lines[1000]).toBe('3,000 lines not shown')
+    expect(lines[1001]).toBe('4000')
+    expect(lines[2000]).toBe('4999')
+    expect(r.logs[1000]!.level).toBe('log')
+  })
+
+  it('keeps an error from the middle of the run, where it happened', () => {
+    const r = run(`VStack {
+      Text("a").onAppear { for i in 0..<1500 { print("a\\(i)") }; let empty: [Int] = []; print(empty[1]) }
+      Text("b").onAppear { for i in 0..<1500 { print("b\\(i)") } }
+    }`)
+    const lines = messages(r)
+    expect(lines.slice(998, 1004)).toEqual(['a998', 'a999', '500 lines not shown', lines[1001], '500 lines not shown', 'b500'])
+    expect(r.logs[1001]!.level).toBe('error')
+    expect(lines[1001]).toContain('Index out of range')
+    expect(lines.at(-1)).toBe('b1499')
+    expect(lines).toHaveLength(2003)
+  })
+
+  it('keeps only the first hundred errors from the middle, so repeated failures cannot undo the cap', () => {
+    const r = run(`ForEach(0..<60, id: \\.self) { row in
+      ForEach(0..<50, id: \\.self) { column in
+        Text("x").onAppear { let empty: [Int] = []; print(empty[row * 50 + column]) }
+      }
+    }`)
+    const lines = messages(r)
+    expect(r.logs.filter(log => log.level === 'error')).toHaveLength(2100)
+    expect(lines).toHaveLength(2101)
+    expect(lines[1100]).toBe('900 lines not shown')
+  })
+
+  it('shortens one enormous line, and says by how much', () => {
+    const r = run('Text("x").onAppear { print(String(repeating: "x", count: 100_000)) }')
+    expect(messages(r)).toEqual([`${'x'.repeat(2000)} … 98,000 more characters`])
+  })
+})
+
+describe('optional chaining in the preview', () => {
+  it('draws an empty state written with ?. instead of stopping', () => {
+    const r = runView(`let items: [Item] = []
+      var body: some View { Text(items.first?.name ?? "No items yet") }`, 'struct Item { var name: String }')
+    expect(texts(r)).toEqual(['No items yet'])
+  })
+
+  it('writes through ?. into state when there is a value, and does nothing when there is none', () => {
+    const r = runView(`@State private var selected: Task? = nil
+      var body: some View {
+        VStack {
+          Text(selected?.done == true ? "Done" : "Open")
+          Button("Finish") { selected?.done = true }
+          Button("New") { selected = Task() }
+        }
+      }`, 'struct Task { var done = false }')
+    const untouched = tap(r, 'Finish')
+    expect(untouched.diagnostics).toEqual([])
+    expect(texts(untouched)).toContain('Open')
+    expect(texts(tap(tap(untouched, 'New'), 'Finish'))).toContain('Done')
+  })
+})
+
+describe('E2: every way of writing a Button action fires', () => {
+  const forms: Record<string, string> = {
+    'a trailing closure': 'Button("Go") { n += 1 }',
+    'an action closure': 'Button("Go", action: { n += 1 })',
+    'a method as the action': 'Button("Go", action: bump)',
+    "Xcode's template form": 'Button(action: { n += 1 }) { Text("Go") }',
+    'action and label': 'Button(action: bump, label: { Text("Go") })',
+    'a role and an action': 'Button("Go", role: .destructive, action: bump)',
+    'a symbol and an action': 'Button("Go", systemImage: "plus", action: bump)',
+  }
+
+  it.each(Object.entries(forms))('with %s', (_, button) => {
+    const r = runView(`@State private var n = 0
+      func bump() { n += 1 }
+      var body: some View { VStack { Text("n=\\(n)"); ${button} } }`)
+    expect(texts(tap(r, 'Go'))).toContain('n=1')
+  })
+
+  it('closes an alert whose only button is written with action:', () => {
+    // An alert can't be dismissed any other way, so a button that doesn't fire traps
+    // the participant under it.
+    const r = runView(`@State private var showing = true
+      var body: some View {
+        Text("Home").alert("Saved", isPresented: $showing) {
+          Button("OK", role: .cancel, action: {})
+        }
+      }`)
+    expect(texts(r)).toContain('Saved')
+    expect(texts(tap(r, 'OK'))).not.toContain('Saved')
+  })
+})
+
+describe('E2: modifiers given a function or a closure argument to run', () => {
+  it('runs .onAppear(perform:), .task(_:) and .onTapGesture(perform:)', () => {
+    const r = runView(`@State private var log: [String] = []
+      func appeared() { log.append("appear") }
+      func load() { log.append("task") }
+      func tapped() { log.append("tap") }
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Text("A").onAppear(perform: appeared)
+          Text("B").onAppear(perform: { log.append("closure") })
+          Text("C").task(load)
+          Text("Tap me").onTapGesture(perform: tapped)
+        }
+      }`)
+    expect(texts(r)).toContain('appear,closure,task')
+    expect(texts(tap(r, 'Tap me'))).toContain('appear,closure,task,tap')
+  })
+
+  it('runs a gesture handler given as a named function', () => {
+    const r = runView(`@State private var log: [String] = []
+      func tapped() { log.append("tap") }
+      func dropped(_ value: DragGesture.Value) { log.append("drop") }
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Text("Tap").gesture(TapGesture().onEnded(tapped))
+          Text("Drag").gesture(DragGesture().onEnded(dropped))
+        }
+      }`)
+    const tapped = tap(r, 'Tap')
+    expect(texts(tapped)).toContain('tap')
+    const handle = nodes(tapped).find(n => n.hitTarget && n.a11y?.label === 'Drag')!
+    applyEvent({ kind: 'drag', handlerId: handle.hitTarget!.handlerId, phase: 'ended', location: { x: 40, y: 0 }, startLocation: { x: 0, y: 0 }, translation: { x: 40, y: 0 } })
+    expect(texts(rerender(revision++))).toContain('tap,drop')
+  })
+
+  it('deletes the swiped row with .onDelete(perform:), as Xcode writes it', () => {
+    const r = runView(`@State private var items = ["One", "Two", "Three"]
+      func deleteItems(at offsets: IndexSet) { items.remove(atOffsets: offsets) }
+      var body: some View {
+        List {
+          ForEach(items, id: \\.self) { item in Text(item) }
+            .onDelete(perform: deleteItems)
+        }
+      }`)
+    const row = nodes(r).filter(n => n.hitTarget?.role === 'drag')[1]!
+    applyEvent({ kind: 'drag', handlerId: row.hitTarget!.handlerId, phase: 'ended', location: { x: -90, y: 0 }, startLocation: { x: 0, y: 0 }, translation: { x: -90, y: 0 } })
+    const after = tap(rerender(revision++), 'Delete')
+    expect(texts(after)).toEqual(expect.arrayContaining(['One', 'Three']))
+    expect(texts(after)).not.toContain('Two')
+  })
+})
+
+describe('E8: offset and position take a size or a point', () => {
+  it('moves a view by a CGSize offset, as a drag writes it', () => {
+    const still = placed(runView('var body: some View { Text("Moved") }'), 'Moved')
+    const moved = placed(runView(`@State private var dragOffset = CGSize(width: 10, height: 20)
+      var body: some View { Text("Moved").offset(dragOffset) }`), 'Moved')
+    expect({ x: moved.x - still.x, y: moved.y - still.y }).toEqual({ x: 10, y: 20 })
+  })
+
+  it('places a view at a CGPoint where the x: y: form places it', () => {
+    const byNumbers = placed(runView('var body: some View { Text("Here").position(x: 100, y: 120) }'), 'Here')
+    const byPoint = placed(runView('var body: some View { Text("Here").position(CGPoint(x: 100, y: 120)) }'), 'Here')
+    expect(byPoint).toEqual(byNumbers)
+    expect(byPoint.x + byPoint.width / 2).toBeCloseTo(100, 0)
+  })
+})
+
+describe('backgrounds and overlays given as a closure or a custom view', () => {
+  /** Every painted layer or shape, by size and paint, which is what a designer sees of a background. */
+  const paint = (r: CompileResult) =>
+    nodes(r).filter(n => n.background ?? n.shape?.fill).map(n => ({ width: n.frame.width, height: n.frame.height, paint: n.background ?? n.shape?.fill }))
+
+  it('draws a colour or a gradient in a background closure as the argument form does', () => {
+    const gradient = 'LinearGradient(colors: [.red, .blue], startPoint: .top, endPoint: .bottom)'
+    for (const style of ['Color.red', gradient]) {
+      const argument = runView(`var body: some View { Text("Card").padding().background(${style}) }`)
+      const closure = runView(`var body: some View { Text("Card").padding().background { ${style} } }`)
+      expect(paint(closure)).toEqual(paint(argument))
+      expect(paint(closure).length).toBeGreaterThan(1)
+    }
+  })
+
+  it('draws a custom view given to an overlay, as an argument or in a closure', () => {
+    const badge = 'struct Badge: View { var body: some View { Text("New") } }'
+    for (const overlay of ['.overlay(Badge())', '.overlay { Badge() }', '.overlay(Badge(), alignment: .topTrailing)']) {
+      const r = runView(`var body: some View { Color.blue.frame(width: 100, height: 100)${overlay} }`, badge)
+      expect(texts(r), overlay).toContain('New')
+    }
+  })
+})
+
+describe('controls written with a title and systemImage:', () => {
+  it('draw the icon beside the title, as a Label does', () => {
+    const controls = [
+      'Button("Add", systemImage: "plus") { }',
+      'Menu("Add", systemImage: "plus") { Button("One") { } }',
+      'Toggle("Add", systemImage: "plus", isOn: .constant(true))',
+    ]
+    for (const control of controls) {
+      const r = runView(`var body: some View { ${control} }`)
+      expect(symbols(r), control).toEqual(['plus'])
+      expect(texts(r), control).toContain('Add')
+    }
+  })
+})
+
+describe('E3: presentations and search written on a NavigationStack or a TabView', () => {
+  it('opens a sheet on the stack from a toolbar button, the everyday flow', () => {
+    const r = runView(`@State private var adding = false
+      var body: some View {
+        NavigationStack {
+          Text("Home")
+            .navigationTitle("Home")
+            .toolbar { Button("Add") { adding = true } }
+        }
+        .sheet(isPresented: $adding) { Text("New item") }
+      }`)
+    expect(texts(r)).not.toContain('New item')
+    expect(texts(tap(r, 'Add'))).toContain('New item')
+  })
+
+  const presentations: Record<string, string> = {
+    'a sheet': '.sheet(isPresented: .constant(true)) { Text("Presented") }',
+    'a full-screen cover': '.fullScreenCover(isPresented: .constant(true)) { Text("Presented") }',
+    'an alert': '.alert("Presented", isPresented: .constant(true)) { Button("OK") { } }',
+    'a confirmation dialog': '.confirmationDialog("Presented", isPresented: .constant(true), titleVisibility: .visible) { Button("One") { } }',
+  }
+  const tab = '.tabItem { Label("Home", systemImage: "house") }'
+  const placements: Record<string, (modifier: string) => string> = {
+    'the NavigationStack': (m) => `NavigationStack { Text("Home") }${m}`,
+    'the TabView': (m) => `TabView { Text("Home")${tab} }${m}`,
+    "a tab page's own NavigationStack": (m) => `TabView { NavigationStack { Text("Home") }${m}${tab} }`,
+    "a sheet's own NavigationStack": (m) => `Text("Home").sheet(isPresented: .constant(true)) { NavigationStack { Text("Sheet") }${m} }`,
+  }
+  const cases = Object.entries(presentations).flatMap(([kind, modifier]) =>
+    Object.entries(placements).map(([where, build]) => [kind, where, build(modifier)] as const))
+
+  it.each(cases)('shows %s written on %s', (_, __, body) => {
+    expect(texts(runView(`var body: some View { ${body} }`))).toContain('Presented')
+  })
+
+  it('lists a sheet written on the TabView as a page of the Design gallery', () => {
+    const r = runView(`@State private var adding = false
+      var body: some View {
+        TabView {
+          NavigationStack { Text("Home").toolbar { Button("Add") { adding = true } } }
+            .tabItem { Label("Home", systemImage: "house") }
+        }
+        .sheet(isPresented: $adding) { Text("New item") }
+      }`, '', { allPages: true })
+    const sheets = (r.pages ?? []).filter(page => page.kind === 'sheet')
+    expect(sheets.flatMap(page => page.tree.nodes.flatMap(n => n.text?.runs.map(run => run.text) ?? []))).toContain('New item')
+  })
+
+  /** The warnings, each with the source it points at. */
+  function warned(members: string) {
+    const source = viewSource(members)
+    return compileView(source).diagnostics.map(d => ({ severity: d.severity, message: d.message, at: source.slice(d.span.start, d.span.end) }))
+  }
+
+  it('warns, at the view, that a view beside a NavigationStack or a TabView is not drawn', () => {
+    expect(warned(`var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+          NavigationStack { Text("Home") }
+          Button("New") { }
+        }
+      }`)).toEqual([{ severity: 'warning', at: 'Button("New") { }', message: expect.stringContaining('beside the NavigationStack') }])
+    expect(warned(`var body: some View {
+        VStack {
+          Text("Offline banner")
+          TabView { Text("Home").tabItem { Label("Home", systemImage: "house") } }
+        }
+      }`)).toEqual([{ severity: 'warning', at: 'Text("Offline banner")', message: expect.stringContaining('beside the TabView') }])
+  })
+
+  it('warns about a view beside a NavigationStack inside a sheet too', () => {
+    expect(warned(`var body: some View {
+        Text("Home").sheet(isPresented: .constant(true)) {
+          ZStack { NavigationStack { Text("Sheet") }; Button("New") { } }
+        }
+      }`)).toEqual([{ severity: 'warning', at: 'Button("New") { }', message: expect.stringContaining('beside the NavigationStack') }])
+  })
+
+  it('warns that an overlay written on a NavigationStack is not drawn', () => {
+    expect(warned('var body: some View { NavigationStack { Text("Home") }.overlay(Text("Badge")) }'))
+      .toEqual([{ severity: 'warning', at: '.overlay(Text("Badge"))', message: expect.stringContaining('.overlay') }])
+  })
+
+  const stacks = Object.entries(placements).filter(([where]) => where !== 'the TabView')
+  it.each(stacks)('shows a search field written on %s', (_, build) => {
+    const r = runView(`var body: some View { ${build('.searchable(text: .constant(""), prompt: "Find things")')} }`)
+    expect(controls(r)).toContain('Find things')
+  })
+
+  // Both checked in the iOS 27 simulator on iPhone 18 Pro (docs/parity/native).
+  it('searches only the root screen of the stack it is written on, not a pushed one', () => {
+    const r = runView(`var body: some View {
+        NavigationStack { NavigationLink("Open") { Text("Detail") } }
+          .searchable(text: .constant(""), prompt: "Find things")
+      }`)
+    expect(controls(r)).toContain('Find things')
+    expect(controls(tap(r, 'Open'))).not.toContain('Find things')
+  })
+
+  it('draws no search field for a TabView without a search tab', () => {
+    const r = runView(`var body: some View {
+        TabView { Text("Home").tabItem { Label("Home", systemImage: "house") } }
+          .searchable(text: .constant(""), prompt: "Find things")
+      }`)
+    expect(controls(r)).not.toContain('Find things')
+  })
+
+  /** Where a person types into the search field. */
+  const searchBox = (r: CompileResult) => worldFrame(nodes(r), nodes(r).find(n => n.hitTarget?.role === 'textField')!)
+  /** The rounded surface the search field is drawn on. */
+  function searchCapsule(r: CompileResult) {
+    const field = nodes(r).find(n => n.hitTarget?.role === 'textField')!
+    return worldFrame(nodes(r), ancestors(nodes(r), field).find(n => n.clip && n.cornerRadius)!)
+  }
+  /** Each edge within a point of the measured [left, top, right, bottom], which take in the antialiased rim. */
+  function expectEdges(frame: { x: number; y: number; width: number; height: number }, measured: readonly number[]) {
+    const edges = [frame.x, frame.y, frame.x + frame.width, frame.y + frame.height]
+    expect(Math.max(...edges.map((edge, i) => Math.abs(edge - measured[i]!))), `drawn at ${edges.join(', ')}`).toBeLessThanOrEqual(1)
+  }
+
+  // Measured in the iOS 27 simulator on iPhone 18 Pro.
+  it.each([
+    ['the NavigationStack', 'search-root', 'NavigationStack { List { Text("Row") }.navigationTitle("Home") }.searchable(text: .constant(""))'],
+    ['the List inside it', 'search-content', 'NavigationStack { List { Text("Row") }.navigationTitle("Home").searchable(text: .constant("")) }'],
+  ])('puts a search field written on %s at the bottom of the screen when there is no tab bar', (_, capture, body) => {
+    const measured = native.presentations[capture].searchField
+    const r = screen(`var body: some View { ${body} }`)
+    expectEdges(searchCapsule(r), [measured.leftXPt, measured.topYPt, measured.rightXPt, measured.bottomYPt])
+    const box = searchBox(r), [, placeholderTop, , placeholderBottom] = measured.placeholderGlyphs
+    expect(box.y + box.height / 2).toBeCloseTo((placeholderTop + placeholderBottom) / 2, 0)
+    const magnifier = nodes(r).find(n => n.image?.symbol === 'magnifyingglass')!
+    expect(Math.abs(worldFrame(nodes(r), magnifier).x - measured.magnifierGlyph[0])).toBeLessThanOrEqual(1)
+  })
+
+  // iOS 27 folds it away at launch until the list is pulled down (search-tab-content), and
+  // the preview draws it shown, as it was measured in a tab app on 2026-09-16.
+  it("keeps a tab page's search field under its title, where iOS 27 shows it once pulled down", () => {
+    const r = screen(`var body: some View {
+        TabView {
+          NavigationStack { List { Text("Row") }.navigationTitle("Library").searchable(text: .constant("")) }
+            .tabItem { Label("Home", systemImage: "house") }
+        }
+      }`)
+    expectEdges(searchCapsule(r), native.presentations['search-tab-content'].afterPullingDown.searchFieldBoundsPt)
+  })
+
+  it("keeps a tab page's search field above its list when the stack has no title", () => {
+    const r = screen(`var body: some View {
+        TabView {
+          NavigationStack { List { Text("Row") } }.searchable(text: .constant(""))
+            .tabItem { Label("Home", systemImage: "house") }
+        }
+      }`)
+    expect(searchBox(r).y).toBeLessThan(placed(r, 'Row').y)
+  })
+})
+
+describe('E5: colours match the iOS 27 simulator', () => {
+  /** The swatch's colour as it shows on the white page, as the simulator was measured. */
+  function onWhite(style: string): number[] {
+    const r = runView(`var body: some View { Rectangle().fill(${style}).frame(width: 50, height: 50) }`)
+    const swatch = nodes(r).find(n => n.frame.width === 50 && n.frame.height === 50)!
+    const paint = swatch.shape?.fill ?? swatch.background
+    expect(paint?.kind, style).toBe('solid')
+    const { r: red, g, b, a } = (paint as { color: { r: number; g: number; b: number; a: number } }).color
+    return [red, g, b].map(channel => Math.round(channel * a + 255 * (1 - a)))
+  }
+
+  it.each(Object.entries(native.colors.onWhite as Record<string, number[]>))('draws %s as the simulator does', (style, measured) => {
+    const drawn = onWhite(style)
+    drawn.forEach((channel, i) => expect(Math.abs(channel - measured[i]!), `${style}: drew ${drawn}, measured ${measured}`).toBeLessThanOrEqual(1))
+  })
+
+  it('warns where a colour name is one the preview does not know, and nowhere else', () => {
+    const warnings = (body: string, declarations = '') =>
+      compileView(viewSource(`var body: some View { ${body} }`, declarations)).diagnostics.map(d => `${d.severity}: ${d.message}`)
+    for (const typo of ['Color(.systemGrey6)', 'Color.systemGrey6', 'Color(UIColor.systemGrey6)', 'Color(uiColor: .systemGrey6)']) {
+      expect(warnings(`Rectangle().fill(${typo})`), typo).toEqual([expect.stringMatching(/^warning: .*'systemGrey6'/)])
+    }
+    expect(warnings('Rectangle().fill(Color(.systemGray6))')).toEqual([])
+    expect(warnings('Rectangle().fill(Color.brand)', 'extension Color { static let brand = Color.blue }')).toEqual([])
+    expect(warnings('Rectangle().fill(Color.hex("#FF0000"))', 'extension Color { static func hex(_ value: String) -> Color { Color.red } }')).toEqual([])
+    expect(warnings('Rectangle().fill(Color(.sRGB, red: 1, green: 0, blue: 0))')).toEqual([])
+  })
+
+  it('knows exactly the colour names the palette draws', () => {
+    for (const name of KNOWN_COLOR_NAMES) {
+      expect(colorForName(name, 'light'), name).not.toBeNull()
+      expect(colorForName(name, 'dark'), name).not.toBeNull()
+    }
+    expect([...Object.keys(IOS_27.colors.light)].filter(name => !KNOWN_COLOR_NAMES.has(name))).toEqual([])
+  })
+
+  it('moves a system colour into the asset catalog as the colour it draws', () => {
+    for (const [name, hex] of Object.entries(AUTHORING_COLOR_HEX)) {
+      const { r, g, b } = colorForName(name)!
+      expect(hex, name).toBe('#' + [r, g, b].map(channel => channel.toString(16).padStart(2, '0')).join('').toUpperCase())
+    }
+  })
+
+  it('reads a level written on a leading-dot colour, `.blue.secondary`, as on Color.blue', () => {
+    expect(onWhite('.blue.secondary')).toEqual(onWhite('Color.blue.secondary'))
+    expect(onWhite('.blue.tertiary')).toEqual(onWhite('Color.blue.tertiary'))
+  })
+
+  const warningsFor = (body: string) =>
+    compileView(viewSource(`var body: some View { ${body} }`)).diagnostics.map(d => `${d.severity}: ${d.message}`)
+
+  it("draws UIKit's own colours through the bridge, as UIKit defines them", () => {
+    expect(onWhite('Color(.red)')).toEqual([255, 0, 0])
+    expect(onWhite('Color(.magenta)')).toEqual([255, 0, 255])
+    expect(onWhite('Color(uiColor: .darkGray)')).toEqual([85, 85, 85])
+    expect(onWhite('Color(UIColor.lightGray)')).toEqual([170, 170, 170])
+    expect(onWhite('Color(uiColor: UIColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))')).toEqual([51, 102, 153])
+    expect(onWhite('Color(uiColor: .tintColor)')).toEqual(onWhite('Color.accentColor'))
+  })
+
+  it('warns that Xcode has no Color.systemGray6 or Color.label, which the preview still draws', () => {
+    expect(warningsFor('Rectangle().fill(Color.systemGray6)')).toEqual([expect.stringMatching(/^warning: .*Color\(\.systemGray6\)/)])
+    expect(warningsFor('Text("x").foregroundStyle(Color.label)')).toEqual([expect.stringMatching(/^warning: .*Color\(\.label\)/)])
+  })
+
+  it('warns on a leading-dot colour spelt wrong, and not on the styles it could be mistaken for', () => {
+    expect(warningsFor('Text("x").foregroundStyle(.grey)')).toEqual([expect.stringMatching(/^warning: .*'grey'.*'gray'/)])
+    expect(warningsFor('Rectangle().fill(.gren)')).toEqual([expect.stringMatching(/^warning: .*'gren'.*'green'/)])
+    for (const style of ['.tint', '.ultraThinMaterial', '.bar', '.link', '.primary']) {
+      expect(warningsFor(`Text("x").foregroundStyle(${style})`), style).toEqual([])
+    }
+  })
+
+  it('draws a UIKit colour written with UIColor as the Color it names', () => {
+    const expected = onWhite('Color(.systemGray6)')
+    expect(onWhite('Color(UIColor.systemGray6)')).toEqual(expected)
+    expect(onWhite('Color(uiColor: .systemGray6)')).toEqual(expected)
+    expect(onWhite('Color(uiColor: UIColor.systemGray6)')).toEqual(expected)
+  })
+})
+
+// Where each shape's path starts and which way it runs, and what a trimmed fill draws,
+// are measured in the iOS 27 simulator (docs/parity/native/iphone18pro-misrenders).
+describe('E6: trim draws the part of the path iOS 27 draws', () => {
+  /** The first SVG path drawn, with the attributes that decide which part of it shows. */
+  function drawn(body: string) {
+    const html = renderToStaticMarkup(createElement(RenderTreeView, { tree: runView(`var body: some View { ${body} }`).renderTree!, onEvent: () => {} }))
+    const path = /<path [^>]*>/.exec(html)?.[0]
+    const attribute = (name: string) => path && new RegExp(`${name}="([^"]*)"`).exec(path)?.[1]
+    return { path, start: attribute('d')?.match(/^M ([-\d.]+) ([-\d.]+)/)?.slice(1).map(Number), pathLength: attribute('pathLength'), dash: attribute('stroke-dasharray'), offset: attribute('stroke-dashoffset') }
+  }
+
+  it.each([
+    ['a circle, at 3 o\'clock', 'Circle()', 110, 110, [110, 55]],
+    ['an ellipse, at 3 o\'clock', 'Ellipse()', 110, 60, [110, 30]],
+    ['a rounded rectangle, halfway down its right side', 'RoundedRectangle(cornerRadius: 24)', 110, 110, [110, 55]],
+    ['a capsule, halfway down its right side', 'Capsule()', 110, 60, [110, 30]],
+    ['a rectangle, at its top-left corner', 'Rectangle()', 110, 60, [0, 0]],
+  ])('starts %s, and strokes only the trimmed part', (_, shape, width, height, start) => {
+    const trimmed = drawn(`${shape}.trim(from: 0.25, to: 0.5).stroke(Color.red, lineWidth: 8).frame(width: ${width}, height: ${height})`)
+    expect(trimmed.start).toEqual(start)
+    // What SVG draws: one dash, starting at minus the offset along a path measured as 1,
+    // with a gap too long for a second dash to start within it.
+    const [dash, gap] = (trimmed.dash ?? '').split(' ').map(Number)
+    const from = -Number(trimmed.offset)
+    expect(Number(trimmed.pathLength)).toBe(1)
+    expect([from, from + dash!]).toEqual([0.25, 0.5])
+    expect(from + dash! + gap!).toBeGreaterThanOrEqual(1)
+  })
+
+  it('draws nothing for an empty trim', () => {
+    expect(drawn('Circle().trim(from: 0, to: 0).stroke(Color.red, lineWidth: 8).frame(width: 110, height: 110)').path).toBeUndefined()
+  })
+
+  const arc = (clockwise: boolean) =>
+    `Path { p in p.addArc(center: CGPoint(x: 55, y: 55), radius: 45, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: ${clockwise}) }.stroke(Color.red, lineWidth: 8)`
+  const pathOf = (body: string) => nodes(runView(`var body: some View { ${body} }`)).find(n => n.path)!.path!.d
+
+  it('draws addArc(clockwise: false) as the quarter from 12 to 3 o\'clock, clockwise on screen', () => {
+    expect(pathOf(arc(false))).toBe('M 55 10 A 45 45 0 0 1 100 55')
+  })
+
+  it('draws addArc(clockwise: true) as the other three quarters, counterclockwise on screen', () => {
+    expect(pathOf(arc(true))).toBe('M 55 10 A 45 45 0 1 0 100 55')
+  })
+
+  // 1 / 0 is infinite, and looped forever in the worker; 0 / 0 is not a number, and drew a stray arc.
+  it.each(['1.0', '0.0'])('draws nothing, rather than hanging, for an arc whose angle divides %s by zero', (done) => {
+    const r = runView(`@State private var done = ${done}
+      let goal = 0.0
+      var body: some View {
+        Path { p in p.addArc(center: CGPoint(x: 55, y: 55), radius: 45, startAngle: .degrees(-90), endAngle: .degrees(-90 + 360 * done / goal), clockwise: true) }
+          .stroke(Color.red, lineWidth: 8)
+      }`)
+    expect(nodes(r).find(n => n.path)?.path?.d ?? '').not.toContain('A')
+  })
+
+  it("draws the Drawing template's ring counterclockwise from 12 o'clock, ending at 36 degrees at 65%", () => {
+    const ring = `Path { path in
+        path.addArc(center: CGPoint(x: 70, y: 70), radius: 63, startAngle: .degrees(-90), endAngle: .degrees(270), clockwise: true)
+      }
+      .trim(from: 0, to: 0.65)
+      .stroke(Color.accentColor, lineWidth: 14)`
+    expect(pathOf(ring)).toBe('M 70 7 A 63 63 0 1 0 120.97 107.03')
+  })
+
+  it('warns where a trim is drawn whole, on a filled or dashed shape, and nowhere else', () => {
+    const warnings = (body: string, declarations = '') =>
+      compileView(viewSource(`var body: some View { ${body} }`, declarations)).diagnostics.map(d => `${d.severity}: ${d.message}`)
+    expect(warnings('Circle().trim(from: 0, to: 0.5).fill(Color.red)')).toEqual([expect.stringMatching(/^warning: .*trim/)])
+    expect(warnings('Circle().trim(from: 0, to: 0.5).stroke(Color.red, style: StrokeStyle(lineWidth: 4, dash: [4, 2]))'))
+      .toEqual([expect.stringMatching(/^warning: .*dash/)])
+    expect(warnings('Circle().trim(from: 0, to: 0.5).offset(x: 2, y: 0).stroke(Color.red)')).toEqual([])
+    // A path is trimmed, filled or not, and a project's own `trim()` is its own.
+    expect(warnings('Path { p in p.addArc(center: CGPoint(x: 50, y: 50), radius: 40, startAngle: .degrees(0), endAngle: .degrees(360), clockwise: false) }.trim(from: 0, to: 0.5).fill(Color.red)')).toEqual([])
+    expect(warnings('Text("  name ".trim())', 'extension String { func trim() -> String { self } }')).toEqual([])
+  })
+})
+
+// What reaches under the safe area, as the iOS 27 simulator draws it on iPhone 18 Pro
+// (docs/parity/native/iphone18pro-misrenders): the safe area runs from 62 to 840.
+describe('E4: what reaches under the safe area, and what stays inside it', () => {
+  const full = (content: string) => `VStack { Text("Top"); Spacer(); Text("Bottom") }.frame(maxWidth: .infinity, maxHeight: .infinity)${content}`
+
+  /** The colour a designer sees at a point: the topmost opaque paint there. */
+  function colourAt(r: CompileResult, x: number, y: number) {
+    const all = nodes(r)
+    const seen = all
+      .filter(n => { const f = worldFrame(all, n); return x >= f.x && x < f.x + f.width && y >= f.y && y < f.y + f.height })
+      .filter(n => { const paint = n.background ?? n.shape?.fill; return paint?.kind === 'solid' && paint.color.a === 1 })
+      .sort((a, b) => b.z - a.z)[0]
+    const paint = seen?.background ?? seen?.shape?.fill
+    return paint?.kind === 'solid' ? `${paint.color.r},${paint.color.g},${paint.color.b}` : 'nothing'
+  }
+  const measured = native.colors.onWhite as Record<string, number[]>
+  const RED = measured['Color.red']!.join(',')
+  const BLUE = measured['Color.blue']!.join(',')
+  const WHITE = measured['Color(.systemBackground)']!.join(',')
+  /** Where the colour reaches down the middle of the screen, top and bottom. */
+  const reach = (r: CompileResult, colour: string) => ({ top: colourAt(r, 201, 5) === colour, bottom: colourAt(r, 201, 870) === colour })
+
+  it.each(['.background(Color.red)', '.background(.red)', '.background(Color.red.ignoresSafeArea())'])(
+    'paints %s on a full-screen view to both screen edges, and leaves its text inside', (background) => {
+      const r = screen(`var body: some View { ${full(background)} }`)
+      expect(reach(r, RED)).toEqual({ top: true, bottom: true })
+      expect(placed(r, 'Top').y).toBeGreaterThanOrEqual(62)
+      expect(placed(r, 'Bottom').y + placed(r, 'Bottom').height).toBeLessThanOrEqual(840)
+    })
+
+  it('blends a gradient that reaches the edges across its own view, as the simulator does', () => {
+    const r = screen(`var body: some View { ${full('.background(LinearGradient(colors: [.red, .blue], startPoint: .top, endPoint: .bottom))')} }`)
+    const layer = nodes(r).find(n => n.background?.kind === 'linearGradient')!
+    const frame = worldFrame(nodes(r), layer)
+    const gradient = layer.background as { start: { y: number }; end: { y: number } }
+    // Measured: the colour changes only between 62 and 840, and holds its ends beyond.
+    expect([frame.y, frame.y + frame.height]).toEqual([0, 874])
+    expect(frame.y + gradient.start.y * frame.height).toBeCloseTo(62, 5)
+    expect(frame.y + gradient.end.y * frame.height).toBeCloseTo(840, 5)
+  })
+
+  it('keeps a background written as a closure inside the safe area', () => {
+    const r = screen(`var body: some View { ${full('.background { Color.red }')} }`)
+    expect(reach(r, RED)).toEqual({ top: false, bottom: false })
+    expect(colourAt(r, 201, 70)).toBe(RED)
+  })
+
+  it('leaves content where it is under .ignoresSafeArea(.keyboard)', () => {
+    const r = screen(`var body: some View { ${full('.background { Color.red }.ignoresSafeArea(.keyboard)')} }`)
+    expect(placed(r, 'Top').y).toBeGreaterThanOrEqual(62)
+    expect(reach(r, RED)).toEqual({ top: false, bottom: false })
+  })
+
+  it.each(['.ignoresSafeArea()', '.edgesIgnoringSafeArea(.all)'])(
+    'draws a colour with %s under the whole screen, and the stack beside it inside', (ignoring) => {
+      const r = screen(`var body: some View { ZStack { Color.blue${ignoring}; VStack { Text("Title"); Spacer(); Text("Footer") } } }`)
+      expect(reach(r, BLUE)).toEqual({ top: true, bottom: true })
+      expect(placed(r, 'Title').y).toBeGreaterThanOrEqual(62)
+      expect(placed(r, 'Footer').y + placed(r, 'Footer').height).toBeLessThanOrEqual(840)
+    })
+
+  it('moves a fixed-height view that ignores the top safe area up, without growing it', () => {
+    const r = screen('var body: some View { VStack(spacing: 0) { Color.red.frame(height: 200).ignoresSafeArea(edges: .top); Spacer() } }')
+    // Measured: red from 0 to 200, and the white page below.
+    expect([colourAt(r, 201, 1), colourAt(r, 201, 199), colourAt(r, 201, 201)]).toEqual([RED, RED, WHITE])
+  })
+
+  it('shows a background that reaches under the navigation bar through it', () => {
+    const r = screen(`var body: some View { NavigationStack { ${full('.background(Color.red)')}.navigationTitle("Title") } }`)
+    expect([colourAt(r, 201, 30), colourAt(r, 201, 100), colourAt(r, 201, 870)]).toEqual([RED, RED, RED])
+  })
+
+  it('shows it behind a large title over a scroll view too, the way the AI writes a list screen', () => {
+    const r = screen(`var body: some View {
+        NavigationStack {
+          ScrollView { VStack { ForEach(0..<30, id: \\.self) { Text("Row \\($0)") } } }
+            .frame(maxWidth: .infinity)
+            .background(Color.red)
+            .navigationTitle("Title")
+        }
+      }`)
+    expect([colourAt(r, 201, 30), colourAt(r, 201, 100)]).toEqual([RED, RED])
+  })
+})
+
+describe('E9: padding on the edges it names', () => {
+  /** The padding around a 100-point square, read off the background drawn around both. */
+  function paddingOf(padding: string) {
+    const r = runView(`var body: some View { Color.red.frame(width: 100, height: 100)${padding}.background(Color.blue) }`)
+    const painted = nodes(r).filter(n => n.id !== 'screen' && n.background?.kind === 'solid').map(n => worldFrame(nodes(r), n))
+    const square = painted.find(f => f.width === 100 && f.height === 100)!
+    const around = painted.find(f => f !== square)!
+    return { top: square.y - around.y, leading: square.x - around.x, bottom: around.y + around.height - square.y - square.height, trailing: around.x + around.width - square.x - square.width }
+  }
+
+  it.each([
+    ['[.horizontal, .top], 20', { top: 20, leading: 20, bottom: 0, trailing: 20 }],
+    ['[.leading, .trailing, .top, .bottom], 8', { top: 8, leading: 8, bottom: 8, trailing: 8 }],
+    ['[.leading, .bottom]', { top: 0, leading: 16, bottom: 16, trailing: 0 }],
+    ['[], 20', { top: 0, leading: 0, bottom: 0, trailing: 0 }],
+    ['Edge.Set.top, 8', { top: 8, leading: 0, bottom: 0, trailing: 0 }],
+    ['Edge.Set([.top, .leading]), 8', { top: 8, leading: 8, bottom: 0, trailing: 0 }],
+    ['.init(top: 1, leading: 2, bottom: 3, trailing: 4)', { top: 1, leading: 2, bottom: 3, trailing: 4 }],
+    ['.horizontal, 10', { top: 0, leading: 10, bottom: 0, trailing: 10 }],
+  ])('pads .padding(%s) on the edges it names', (args, expected) => {
+    expect(paddingOf(`.padding(${args})`)).toEqual(expected)
+  })
+})
+
+describe('E10: every appear hook on a view runs, and .task(id:) runs again for a new id', () => {
+  const printed: string[] = nativeII.hooks.printed
+  /** What the simulator printed for one view of the fixture's hooks screen, in its order. */
+  const ranOn = (view: string) => printed.filter(line => line.startsWith(`HOOK ${view} `)).map(line => line.slice(`HOOK ${view} `.length)).join(',')
+
+  it.each([
+    ['A', '.onAppear { log.append("appear") }.task { log.append("task") }'],
+    ['B', '.task { log.append("task") }.onAppear { log.append("appear") }'],
+    ['C', '.onAppear { log.append("appear 1") }.onAppear { log.append("appear 2") }'],
+    ['D', '.task { log.append("task 1") }.task { log.append("task 2") }'],
+  ])('runs every hook of view %s on the simulator\'s hooks screen, in the order it ran them', (view, hooks) => {
+    const r = runView(`@State private var log: [String] = []
+      var body: some View { VStack { Text(log.joined(separator: ",")); Text("${view}")${hooks} } }`)
+    expect(texts(r)).toContain(ranOn(view))
+  })
+
+  it('runs .task(id:) again when its id changes, and not for another change', () => {
+    const r = runView(`@State private var value = 0
+      @State private var other = 0
+      @State private var log: [String] = []
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Button("Next") { value += 1 }
+          Button("Other") { other += 1 }
+          Text("\\(other)").task(id: value) { log.append("task \\(value)") }
+        }
+      }`)
+    expect(texts(r)).toContain('task 0')
+    const next = tap(r, 'Next')
+    expect(texts(next)).toContain('task 0,task 1')
+    expect(texts(tap(next, 'Other'))).toContain('task 0,task 1')
+  })
+
+  it('runs both of two .onDisappear hooks when the view goes', () => {
+    const r = runView(`@State private var shown = true
+      @State private var log: [String] = []
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Button("Hide") { shown = false }
+          if shown { Text("A").onDisappear { log.append("gone 1") }.onDisappear { log.append("gone 2") } }
+        }
+      }`)
+    expect(texts(tap(r, 'Hide'))).toContain('gone 1,gone 2')
+  })
+
+  it('runs no hook again when an edit adds a modifier before them', () => {
+    const source = (extra: string) => `@State private var log: [String] = []
+      @State private var value = 0
+      var body: some View {
+        VStack {
+          Text(log.joined(separator: ","))
+          Text("A")${extra}.onChange(of: value, initial: true) { log.append("change") }.onAppear { log.append("appear") }
+        }
+      }`
+    const before = texts(runView(source('')))[0]!
+    expect(before.split(',').sort()).toEqual(['appear', 'change'])
+    expect(texts(runView(source('.padding()')))[0]).toBe(before)
+  })
+})
+
+describe('E15: new projects start on the iPhone 18 Pro, targeting iOS 27', () => {
+  it('starts every template, and every set of files opened as a project, there', () => {
+    const opened = projectFromFiles([{ name: 'App.swift', text: viewSource('var body: some View { Text("Hi") }') }])!
+    for (const project of [...TEMPLATES.map(template => createProjectFromTemplate(template)), opened]) {
+      expect([project.manifest.device, project.manifest.deploymentTarget], project.manifest.name).toEqual(['iphone-18-pro', '27.0'])
+    }
+  })
+
+  it('leaves a saved project on the device and iOS version it has', () => {
+    const saved = createProjectFromTemplate(TEMPLATES[0]!)
+    const old = normalizeProject({ ...saved, manifest: { ...saved.manifest, device: 'iphone-15', deploymentTarget: '17.0' } })
+    expect([old.manifest.device, old.manifest.deploymentTarget]).toEqual(['iphone-15', '17.0'])
+  })
+})
+
+describe('E16a: an SF Symbol name the preview has no drawing for warns at the name', () => {
+  it.each(['Image(systemName: "hose")', 'Label("Home", systemImage: "hose")', 'Button("Home", systemImage: "hose") { }'])(
+    'warns at the name in %s, offering the nearest one it draws', (view) => {
+      expect(reported(`var body: some View { ${view} }`)).toEqual([{ severity: 'warning', message: expect.stringContaining("If 'hose' is right, it still shows in the app."), at: '"hose"', fix: '"house"' }])
+    })
+
+  it('says a name nothing is near may still be a real symbol', () => {
+    const [warning, ...rest] = reported('var body: some View { Image(systemName: "figure.climbing.rope") }')
+    expect(rest).toEqual([])
+    expect(warning).toMatchObject({ severity: 'warning', at: '"figure.climbing.rope"', fix: undefined })
+    expect(warning!.message).toContain('the app')
+  })
+
+  it('does not warn for a name it draws, or one it can only know by running', () => {
+    expect(reported('var body: some View { Image(systemName: "house") }')).toEqual([])
+    expect(reported('let name = "nope"\n var body: some View { Image(systemName: name) }')).toEqual([])
+    expect(reported('let n = 1\n var body: some View { Image(systemName: "\\(n).circle") }')).toEqual([])
+    expect(reported('var body: some View { Icon(systemName: "nope") }', 'struct Icon: View { let systemName: String; var body: some View { Text(systemName) } }')).toEqual([])
+  })
+
+  it('draws both icons of the Library\'s Tabs snippet', () => {
+    const snippet = VIEW_CATALOG.find(item => item.id === 'tabview')!.snippet
+    expect(reported(`var body: some View { ${snippet} }`)).toEqual([])
+    const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: runView(`var body: some View { ${snippet} }`).renderTree! }))
+    expect(markup).not.toContain('unsupported symbol')
+  })
+})
+
+describe('E14: an @Observable model shared through @Bindable and the environment', () => {
+  const model = '@Observable final class Model { var name = ""; var count = 0 }'
+  /** Types into the text field with this placeholder, as a person does, and draws the result. */
+  function type(r: CompileResult, placeholder: string, value: string): CompileResult {
+    const field = nodes(r).find(n => n.hitTarget?.role === 'textField' && n.a11y?.label === placeholder)!
+    applyEvent({ kind: 'textChange', handlerId: field.hitTarget!.handlerId, value })
+    return rerender(revision++)
+  }
+
+  it('writes through a child view\'s @Bindable model into the parent\'s', () => {
+    const r = runView(`@State private var model = Model()
+      var body: some View { VStack { Text("Hello \\(model.name)"); Editor(model: model) } }`, `${model}
+      struct Editor: View {
+        @Bindable var model: Model
+        var body: some View { TextField("Name", text: $model.name) }
+      }`)
+    expect(texts(type(r, 'Name', 'Ada'))).toContain('Hello Ada')
+  })
+
+  it('hands a model given with .environment(model) to a pushed screen that asks for its type', () => {
+    const r = runView(`@State private var model = Model()
+      var body: some View {
+        NavigationStack { NavigationLink("Open") { Detail() } }
+          .environment(model)
+      }`, `${model}
+      struct Detail: View {
+        @Environment(Model.self) private var model
+        var body: some View { Button("Add \\(model.count)") { model.count += 1 } }
+      }`)
+    expect(texts(tap(tap(r, 'Open'), 'Add 0'))).toContain('Add 1')
+  })
+
+  it('binds to it with @Bindable var model = model inside body, as Apple writes it', () => {
+    const r = runView(`@State private var model = Model()
+      var body: some View { VStack { Text("Hello \\(model.name)"); Detail() }.environment(model) }`, `${model}
+      struct Detail: View {
+        @Environment(Model.self) private var model
+        var body: some View {
+          @Bindable var model = model
+          TextField("Name", text: $model.name)
+        }
+      }`)
+    expect(texts(type(r, 'Name', 'Ada'))).toContain('Hello Ada')
+  })
+
+  it('reads a model given to the whole app on its WindowGroup', () => {
+    const source = `import SwiftUI
+${model}
+@main struct Demo: App {
+  @State private var model = Model()
+  var body: some Scene { WindowGroup { ContentView().environment(model) } }
+}
+struct ContentView: View {
+  @Environment(Model.self) private var model
+  var body: some View { Text("Count \\(model.count)") }
+}`
+    const r = compileView(source)
+    expect(r.diagnostics).toEqual([])
+    expect(texts(r)).toContain('Count 0')
+  })
+
+  it('draws a view no ancestor gave the model as stopped, saying why, and reads nil when it may be missing', () => {
+    const missing = compileView(viewSource('@Environment(Model.self) private var model\n var body: some View { Text("Count \\(model.count)") }', model))
+    expect(missing.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    expect(nodes(missing).find(n => n.placeholder)?.placeholder).toMatchObject({ kind: 'stopped', feature: 'ContentView', reason: expect.stringContaining('No Observable object of type Model found') })
+    const optional = runView('@Environment(Model.self) private var model: Model?\n var body: some View { Text(model == nil ? "No model" : "Model") }', model)
+    expect(texts(optional)).toContain('No model')
+  })
+
+  it.each([
+    ['a title', 'NavigationLink("Open") { Detail() }'],
+    ['destination:', 'NavigationLink(destination: Detail()) { Text("Open") }'],
+    ['a label: closure', 'NavigationLink { Detail() } label: { Text("Open") }'],
+  ])('draws a link with %s to a screen missing its model, and says so only when it is pushed, as iOS runs it then', (_, link) => {
+    const r = runView(`var body: some View { NavigationStack { ${link} } }`, `${model}
+      struct Detail: View {
+        @Environment(Model.self) private var model
+        var body: some View { Text("Count \\(model.count)") }
+      }`)
+    expect(controls(r)).toContain('Open')
+    const pushed = tap(r, 'Open')
+    expect(pushed.diagnostics.map(d => d.message).join('\n')).toContain('No Observable object of type Model found')
+    expect(nodes(pushed).find(n => n.placeholder)?.placeholder?.feature).toBe('Detail')
+  })
+})
+
+describe("E11a: a view the preview doesn't know draws a placeholder, not a blank screen", () => {
+  it('warns at a view nothing declares, and draws the rest of the screen around a placeholder for it', () => {
+    const members = 'var body: some View { VStack { Text("Title"); RatingView(rating: 3) } }'
+    expect(reported(members)).toEqual([{ severity: 'warning', message: expect.stringContaining("Cannot find 'RatingView' in scope"), at: 'RatingView', fix: undefined }])
+    const r = compileView(viewSource(members))
+    expect(texts(r)).toContain('Title')
+    expect(nodes(r).some(n => n.placeholder?.feature === 'RatingView')).toBe(true)
+  })
+
+  it('says it may still build, since it may be part of SwiftUI', () => {
+    const [warning] = reported('var body: some View { GlassEffectContainer { Text("Inside") } }')
+    expect(warning!.message).toContain("If it isn't part of SwiftUI")
+  })
+
+  it('draws what is around it, and never what it was given', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Title"); Mystery { Text("Inside") } } }'))
+    expect(texts(r)).toContain('Title')
+    expect(texts(r)).not.toContain('Inside')
+  })
+
+  it('keeps a near-typo of a view an error, with its fix', () => {
+    expect(reported('var body: some View { Buton("Save") { } }')).toEqual([{ severity: 'error', message: expect.stringContaining("Did you mean 'Button'?"), at: 'Buton', fix: 'Button' }])
+  })
+
+  it('offers a type, not a variable, for a misspelt type', () => {
+    expect(reported('@State private var counter = 0\n var body: some View { Countr(value: counter) }', 'struct Counter: View { let value: Int; var body: some View { Text("\\(value)") } }'))
+      .toEqual([{ severity: 'error', message: expect.stringContaining("Did you mean 'Counter'?"), at: 'Countr', fix: 'Counter' }])
+  })
+
+  it('keeps a capitalised call that is not written as a view an error, as it was', () => {
+    expect(reported('@State private var store = PantryStore()\n var body: some View { Text("Pantry") }')).toEqual([{ severity: 'error', message: "Cannot find 'PantryStore' in scope.", at: 'PantryStore', fix: undefined }])
+    expect(reported('var body: some View { Text(DateFormatter().string(from: Date())) }')).toMatchObject([{ severity: 'error', at: 'DateFormatter' }])
+  })
+
+  it.each([
+    ['Button("Save") { }', '.buttonStyle(PlainButtonStyle())', '.buttonStyle(.plain)'],
+    ['Button("Save") { }', '.buttonStyle(BorderedProminentButtonStyle())', '.buttonStyle(.borderedProminent)'],
+    ['Picker("Size", selection: .constant(1)) { Text("S").tag(1); Text("M").tag(2) }', '.pickerStyle(SegmentedPickerStyle())', '.pickerStyle(.segmented)'],
+    ['List { Text("Row") }', '.listStyle(InsetGroupedListStyle())', '.listStyle(.insetGrouped)'],
+    ['TextField("Name", text: .constant(""))', '.textFieldStyle(RoundedBorderTextFieldStyle())', '.textFieldStyle(.roundedBorder)'],
+  ])('draws %s with the old-style %s as it does with %s', (view, old, modern) => {
+    const drawn = (style: string) => JSON.stringify(runView(`var body: some View { ${view}${style} }`).renderTree!.nodes)
+    expect(drawn(old)).toBe(drawn(modern))
+  })
+
+  it('does not stop at the keyframes a KeyframeAnimator is written with', () => {
+    const r = compileView(viewSource(`var body: some View {
+        KeyframeAnimator(initialValue: 1.0) { value in Text("Pulse").scaleEffect(value) } keyframes: { _ in
+          KeyframeTrack { LinearKeyframe(1.2, duration: 0.2); CubicKeyframe(1.0, duration: 0.3) }
+        }
+      }`))
+    expect(r.diagnostics.filter(d => d.severity === 'error' || d.message.startsWith('Cannot find'))).toEqual([])
+    expect(r.renderTree).not.toBeNull()
+  })
+})
+
+describe('pilot rehearsal: a label beside a Spacer keeps to one line, as in the iOS 27 simulator', () => {
+  const linesOf = (r: CompileResult, words: string) => r.renderTree!.nodes.find(n => n.text?.runs.map(run => run.text).join('') === words)?.text?.lines?.length
+
+  it('draws a row\'s text on one line when the row has room for it beside the Spacer', () => {
+    const r = runView(`var body: some View {
+        VStack { HStack { Text("A label that is longer than half of the row"); Spacer() } }.padding(24)
+      }`)
+    expect(linesOf(r, 'A label that is longer than half of the row')).toBe(1)
+  })
+
+  it('draws a toggle\'s label on one line when the row has room for it', () => {
+    const r = runView(`@State private var on = true
+      var body: some View { VStack { Toggle("Email me reminders every week", isOn: $on) }.padding(24) }`)
+    expect(linesOf(r, 'Email me reminders every week')).toBe(1)
+  })
+})
+
+describe('pilot rehearsal: a line of text is as tall as in the iOS 27 simulator', () => {
+  // Each style's single line, measured on iPhone 18 Pro (iOS 27) as a full-width row with
+  // a background, top to bottom: the font's own line height, on the screen's 1/3 pt grid.
+  const MEASURED = { largeTitle: 122 / 3, title: 101 / 3, title2: 79 / 3, title3: 24, headline: 61 / 3, body: 61 / 3, callout: 58 / 3, subheadline: 18, footnote: 47 / 3, caption: 43 / 3, caption2: 40 / 3 }
+
+  it.each(Object.entries(MEASURED))('draws a line of .%s as tall as the simulator does', (style, height) => {
+    const r = runView(`var body: some View { Text("Line").font(.${style}) }`)
+    expect(r.renderTree!.nodes.find(n => n.text?.runs[0]?.text === 'Line')!.frame.height).toBeCloseTo(height, 2)
+  })
+
+  it('draws a line of a font given a size as tall as its text style of that size', () => {
+    const r = runView('var body: some View { Text("Line").font(.system(size: 28)) }')
+    expect(r.renderTree!.nodes.find(n => n.text?.runs[0]?.text === 'Line')!.frame.height).toBeCloseTo(MEASURED.title, 2)
+  })
+
+  // Several lines, measured the same way: a style's further lines are its leading apart,
+  // and a font given only a size has no leading beyond its glyphs.
+  it.each([
+    ['.body', 2, 127 / 3],
+    ['.body', 3, 193 / 3],
+    ['.footnote', 3, 155 / 3],
+    ['.title', 4, 407 / 3],
+    ['.system(size: 17)', 4, 244 / 3],
+  ] as const)('draws %s over %i lines as tall as the simulator does', (font, count, height) => {
+    const words = Array.from({ length: count }, (_, i) => `Line ${i + 1}`).join('\\n')
+    const r = runView(`var body: some View { Text("${words}").font(${font}) }`)
+    const node = r.renderTree!.nodes.find(n => n.text?.runs[0]?.text.startsWith('Line 1'))!
+    expect(node.text!.lines).toHaveLength(count)
+    expect(node.frame.height).toBeCloseTo(height, 2)
+  })
+})
+
+describe('pilot rehearsal: a text field\'s placeholder is as light as in the iOS 27 simulator', () => {
+  const field = (r: CompileResult, placeholder: string) =>
+    r.renderTree!.nodes.find(n => n.hitTarget?.role === 'textField' && n.hitTarget.placeholder === placeholder)!.hitTarget!
+
+  it.each([
+    ['light', { r: 60, g: 60, b: 67, a: 0.3 }],
+    ['dark', { r: 235, g: 235, b: 245, a: 0.3 }],
+  ] as const)('draws the placeholder in iOS\'s placeholder colour in %s mode', (colorScheme, color) => {
+    const r = runView(`@State private var name = ""
+      var body: some View { Form { TextField("Your name", text: $name); SecureField("Password", text: $name) } }`, '', { colorScheme })
+    expect(field(r, 'Your name').placeholderColor).toEqual(color)
+    expect(field(r, 'Password').placeholderColor).toEqual(color)
+  })
+
+  it('keeps a search field\'s prompt as strong as its magnifying glass', () => {
+    const r = runView(`@State private var query = ""
+      var body: some View { NavigationStack { List { Text("Row") }.searchable(text: $query) } }`)
+    expect(field(r, 'Search').placeholderColor).toEqual({ r: 60, g: 60, b: 67, a: 0.6 })
+  })
+})
+
+describe('pilot rehearsal: a full-height sheet is drawn where the iOS 27 simulator draws it', () => {
+  const sheetOnStack = native.presentations['sheet-on-stack']
+
+  it('runs the sheet from under the status bar to the bottom, the width of the screen', () => {
+    const r = screen('var body: some View { NavigationStack { Text("Root").navigationTitle("Home") }.sheet(isPresented: .constant(true)) { Text("Sheet") } }')
+    const sheet = nodes(r).find(n => n.id === 'overlay-surface')!
+    expect(sheet.frame).toEqual({ x: sheetOnStack.sheetLeftRightAtY450[0], y: sheetOnStack.sheetTopYPt, width: sheetOnStack.sheetLeftRightAtY450[1], height: 874 - sheetOnStack.sheetTopYPt })
+    // Its content fills the sheet down to the home indicator, and a lone text is in its middle.
+    const text = worldFrame(nodes(r), nodes(r).find(n => n.text?.runs[0]?.text === 'Sheet')!)
+    expect(text.y + text.height / 2).toBeCloseTo(sheetOnStack.text[0].centreYPt, 0)
+  })
+
+  it('keeps a medium sheet floating in from the edges, as measured', () => {
+    const r = screen('var body: some View { Text("Home").sheet(isPresented: .constant(true)) { Text("Sheet").presentationDetents([.medium]) } }')
+    expect(nodes(r).find(n => n.id === 'overlay-surface')!.frame).toMatchObject({ x: 8, width: 386 })
+  })
+})
+
+describe('pilot rehearsal: content starts under a bar, and a list spaces its sections, as in the iOS 27 simulator', () => {
+  const root = new URL('../docs/parity/native/iphone18pro-under-bars/', import.meta.url)
+  const manifest = JSON.parse(readFileSync(new URL('measurements.json', root), 'utf8'))
+  const fixture = readFileSync(new URL('./fixtures/ios27-under-bars.swift', import.meta.url), 'utf8')
+  const measured = manifest.measured
+
+  it('keeps the captures and the fixture they were made from', () => {
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe(manifest.fixtureSha256)
+    for (const capture of manifest.captures) {
+      expect(createHash('sha256').update(readFileSync(new URL(capture.file, root))).digest('hex'), capture.file).toBe(capture.sha256)
+    }
+  })
+
+  /** The fixture's screen of that name, drawn on iPhone 18 Pro, and a node's place on it. */
+  function drawn(name: string) {
+    const body = fixture.match(new RegExp(`case "${name}":\\n\\s+(.+)\\n`))![1]
+    const helpers = fixture.slice(fixture.indexOf('struct Band'), fixture.indexOf('struct RootView'))
+    const all = nodes(screen(`var body: some View { ${body} }`, helpers))
+    return { all, at: (node: RenderNode) => worldFrame(all, node) }
+  }
+  const cardTops = ({ all, at }: ReturnType<typeof drawn>) => all.filter(n => /s\d+bgf$/.test(n.id)).map(n => at(n).y)
+
+  it.each(Object.entries(measured.contentTop as Record<string, number>))('starts the content of %s at %d pt', (name, top) => {
+    const screen = drawn(name)
+    expect(screen.at(screen.all.find(n => n.kind === 'shape')!).y).toBeCloseTo(top, 1)
+  })
+
+  it.each([
+    'list-large', 'list-large-header', 'list-large-two', 'list-large-two-headers', 'list-large-footer-plain', 'list-large-footer-header',
+    'list-large-spacing', 'list-large-spacing-headers',
+    'list-inline', 'list-inline-header', 'list-bare', 'list-bare-header', 'list-plain-large-headers', 'list-grouped-large-header',
+    'list-grouped-large', 'form-large-header', 'tab-list-large',
+  ])('puts the cards of %s where the simulator does', name => {
+    const tops = cardTops(drawn(name)), expected = measured.lists[name].cards.map(([top]: number[]) => top)
+    expect(tops).toHaveLength(expected.length)
+    tops.forEach((top, i) => expect(top, `card ${i + 1}`).toBeCloseTo(expected[i], 0))
+  })
+
+  it.each(['sheet-form-bare', 'sheet-form-inline', 'sheet-form-header-inline', 'sheet-form-large'])('puts the first card of %s where the simulator does', name => {
+    expect(cardTops(drawn(name))[0]).toBeCloseTo(measured.sheets[name].cards[0][0], 0)
+  })
+
+  // With the search field always in the bar's drawer, iOS 27 draws the title inline and
+  // the preview a large title, so the first card is measured from the field above it.
+  it.each(['list-drawer', 'list-drawer-header'])('puts the first card of %s as far below the search field as the simulator does', name => {
+    const screen = drawn(name), field = screen.at(screen.all.find(n => n.id.endsWith('surface-fill'))!)
+    const { searchField: [, fieldBottom], cards: [[top]] } = measured.lists[name]
+    expect(cardTops(screen)[0]! - (field.y + field.height)).toBeCloseTo(top - fieldBottom, 0)
+  })
+})
+
+describe('E11a: the Foundation the AI writes around its views: Timer, Calendar and formatted dates', () => {
+  /** Noon UTC on 9 September 2001: the same calendar day in every time zone from UTC-11 to UTC+11. */
+  const noon = 'Date(timeIntervalSince1970: 1_000_036_800)'
+
+  it('draws a view driven by a timer as it first draws, and says the timer does not fire here', () => {
+    const r = compileView(viewSource(`@State private var seconds = 0
+      let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+      var body: some View { Text("\\(seconds) s").onReceive(timer) { _ in seconds += 1 } }`))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(r.diagnostics.map(d => d.message)).toContainEqual(expect.stringContaining("doesn't run timers"))
+    expect(texts(r)).toContain('0 s')
+  })
+
+  it('schedules a timer that never fires here, and invalidates it', () => {
+    const r = compileView(viewSource(`@State private var count = 0
+      @State private var timer: Timer?
+      var body: some View {
+        Text("\\(count) ticks")
+          .onAppear { timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in count += 1 } }
+          .onDisappear { timer?.invalidate() }
+      }`))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(r)).toContain('0 ticks')
+  })
+
+  it("reads a date's parts, adds to it and counts days between two with Calendar.current", () => {
+    const r = runView(`let date = ${noon}
+      var body: some View {
+        VStack {
+          Text(verbatim: "\\(Calendar.current.component(.year, from: date))-\\(Calendar.current.component(.month, from: date))-\\(Calendar.current.component(.day, from: date))")
+          Text(verbatim: "\\(Calendar.current.dateComponents([.day], from: date, to: Calendar.current.date(byAdding: .day, value: 3, to: date)!).day ?? 0) days")
+          Text(Calendar.current.isDateInToday(Date()) ? "today" : "not today")
+          Text(Calendar.current.isDate(date, inSameDayAs: Calendar.current.startOfDay(for: date)) ? "same day" : "other day")
+        }
+      }`)
+    expect(texts(r)).toEqual(expect.arrayContaining(['2001-9-9', '3 days', 'today', 'same day']))
+  })
+
+  it('asks whether two dates share a month, a year, a day or a week, as a budget totals this month', () => {
+    const r = runView(`let date = ${noon}
+      func later(_ unit: Calendar.Component, _ value: Int) -> Date { Calendar.current.date(byAdding: unit, value: value, to: date)! }
+      var body: some View {
+        VStack {
+          Text(Calendar.current.isDate(date, equalTo: later(.day, 5), toGranularity: .month) ? "same month" : "other month")
+          Text(Calendar.current.isDate(date, equalTo: later(.day, 25), toGranularity: .month) ? "same month" : "other month")
+          Text(Calendar.current.isDate(date, equalTo: later(.month, 2), toGranularity: .year) ? "same year" : "other year")
+          Text(Calendar.current.isDate(date, equalTo: Calendar.current.startOfDay(for: date), toGranularity: .day) ? "same day" : "other day")
+          Text(Calendar.current.isDate(date, equalTo: later(.day, 1), toGranularity: .day) ? "same day" : "other day")
+          Text(Calendar.current.isDate(date, equalTo: later(.day, 6), toGranularity: .weekOfYear) ? "same week" : "other week")
+          Text(Calendar.current.isDate(date, equalTo: later(.day, -1), toGranularity: .weekOfYear) ? "same week" : "other week")
+        }
+      }`)
+    // 9 September 2001 is a Sunday, the first day of its week in the United States calendar.
+    expect(texts(r)).toEqual(['same month', 'other month', 'same year', 'same day', 'other day', 'same week', 'other week'])
+  })
+
+  it('formats a date with the parts it is asked for', () => {
+    const r = runView(`let date = ${noon}
+      var body: some View {
+        VStack {
+          Text(date.formatted(date: .abbreviated, time: .omitted))
+          Text(date.formatted(date: .long, time: .omitted))
+          Text(date.formatted(date: .numeric, time: .omitted))
+        }
+      }`)
+    expect(texts(r)).toEqual(['Sep 9, 2001', 'September 9, 2001', '9/9/2001'])
+  })
+
+  it('formats a date given no arguments as a numeric date and a short time, as iOS does', () => {
+    const [text] = texts(runView(`let date = ${noon}\n var body: some View { Text(date.formatted()) }`))
+    expect(text).toMatch(/^9\/9\/2001, \d{1,2}:00[\s\u202f][AP]M$/)
+  })
+})
+
+describe('E12: what a GeometryReader reports, where it is placed', () => {
+  const measured = nativeII.geometryReader
+  /** What a reader placed on the phone reports: its top and bottom insets and its frame on the screen. */
+  function reads(place: (reader: string) => string) {
+    const reader = 'GeometryReader { geo in Text("\\(Int(geo.safeAreaInsets.top)) \\(Int(geo.safeAreaInsets.bottom)) \\(Int(geo.frame(in: .global).minX)) \\(Int(geo.frame(in: .global).minY)) \\(Int(geo.size.width)) \\(Int(geo.size.height))") }'
+    const r = screen(`var body: some View { ${place(reader)} }`)
+    const shown = texts(r).find(text => /^\d+ \d+ \d+ \d+ \d+ \d+$/.test(text))
+    expect(shown, `drew ${JSON.stringify(texts(r))}, logged ${JSON.stringify(r.logs.map(log => log.message))}`).toBeDefined()
+    const [top, bottom, x, y, width, height] = shown!.split(' ').map(Number) as [number, number, number, number, number, number]
+    return { insets: { top, bottom }, global: [x, y, width, height] }
+  }
+  const expected = (name: string) => ({ insets: { top: measured[name].insets.top, bottom: measured[name].insets.bottom }, global: measured[name].global })
+
+  it.each([
+    ['geo-root', (reader: string) => reader],
+    ['geo-ignoring', (reader: string) => `${reader}.ignoresSafeArea()`],
+    ['geo-padded', (reader: string) => `VStack { ${reader} }.padding()`],
+    ['geo-nav', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title") }`],
+    ['geo-inline', (reader: string) => `NavigationStack { ${reader}.navigationTitle("Title").navigationBarTitleDisplayMode(.inline) }`],
+  ])('reports what the simulator reports on its %s screen', (name, place) => {
+    expect(reads(place)).toEqual(expected(name))
+  })
+
+  it('reports what the simulator reports on its geo-scroll screen', () => {
+    expect(reads((reader) => `ScrollView { ${reader}.frame(height: 200) }`)).toEqual(expected('geo-scroll'))
+  })
+
+  it.each([
+    ['geo-header', (reader: string) => `VStack { Text("Header").frame(height: 100); ${reader} }.padding()`],
+  ])('reports the insets the simulator reports on its %s screen', (name, place) => {
+    expect(reads(place).insets).toEqual(expected(name).insets)
+  })
+
+  it('reports the size and place a sheet draws a reader at', () => {
+    const r = screen('var body: some View { Text("Home").sheet(isPresented: .constant(true)) { GeometryReader { geo in Text("\\(Int(geo.size.width)) \\(Int(geo.size.height)) \\(Int(geo.frame(in: .global).minX)) \\(Int(geo.frame(in: .global).minY))") } } }')
+    const reader = nodes(r).find(n => n.id.includes('geo:'))!
+    const drawn = worldFrame(nodes(r), reader)
+    expect(texts(r)).toContain([drawn.width, drawn.height, drawn.x, drawn.y].map(Math.round).join(' '))
+  })
+
+  // Over a tab bar the preview's own bar stands in for iOS's, which is not quite the same
+  // height, so the inset over it is checked by how it relates to where the reader was, and
+  // the top inset as measured (geo-tab).
+  it('reports what the simulator reports on its geo-tab screen, from the preview\'s own tab bar', () => {
+    const measured = expected('geo-tab')
+    const drawn = reads(reader => `TabView { ${reader}.tabItem { Label("One", systemImage: "house") } }`)
+    /** How far the inset over the bar is from the reader's distance to the bottom of the screen. */
+    const offBy = (insets: { bottom: number }, [, y, , height]: readonly number[]) => insets.bottom - (874 - y! - height!)
+    expect(drawn.insets.top).toBe(measured.insets.top)
+    expect(offBy(drawn.insets, drawn.global)).toBe(offBy(measured.insets, measured.global))
+  })
+})
+
+describe('E12: .id, links and a timeline, as iOS 27 draws them', () => {
+  const counter = 'struct Counter: View { @State private var taps = 0; var body: some View { Button("Taps \\(taps)") { taps += 1 } } }'
+
+  it('starts a view over, with its state fresh, when its .id changes', () => {
+    const r = runView(`@State private var version = 0
+      var body: some View { VStack { Counter().id(version); Button("Reset") { version += 1 } } }`, counter)
+    const tapped = tap(tap(r, 'Taps 0'), 'Taps 1')
+    expect(texts(tapped)).toContain('Taps 2')
+    expect(texts(tap(tapped, 'Reset'))).toContain('Taps 0')
+  })
+
+  it('runs the appear and disappear hooks of a view whose .id changes, as a new view', () => {
+    const r = runView(`@State private var version = 0
+      @State private var log: [String] = []
+      var body: some View { VStack { Text(log.joined(separator: ",")); Button("Reset") { version += 1 }; Child(log: $log).id(version) } }`,
+      'struct Child: View { @Binding var log: [String]; var body: some View { Text("Child").onAppear { log.append("appear") }.onDisappear { log.append("gone") } } }')
+    expect(texts(r)[0]).toBe('appear')
+    expect(texts(tap(r, 'Reset'))[0]!.split(',').sort()).toEqual(['appear', 'appear', 'gone'])
+  })
+
+  it('keeps its state while the .id stays the same', () => {
+    const r = runView(`@State private var version = 0
+      @State private var other = 0
+      var body: some View { VStack { Counter().id(version); Button("Other \\(other)") { other += 1 } } }`, counter)
+    expect(texts(tap(tap(r, 'Taps 0'), 'Other 0'))).toContain('Taps 1')
+  })
+
+  // Measured in the iOS 27 simulator (docs/parity/native/iphone18pro-misrenders-ii, links).
+  it.each([
+    ['Link("Site", destination: url)', [], ['Site']],
+    ['Link(destination: url) { Label("Site", systemImage: "globe") }', ['globe'], ['Site']],
+    ['ShareLink(item: url)', ['square.and.arrow.up'], ['Share…']],
+    ['ShareLink("Share", item: url)', ['square.and.arrow.up'], ['Share']],
+    ['ShareLink(item: url) { Label("Send", systemImage: "paperplane") }', ['paperplane'], ['Send']],
+  ])('draws %s with the icon and words the simulator draws', (link, icons, words) => {
+    const r = compileView(viewSource(`let url = URL(string: "https://example.com")!\n var body: some View { ${link} }`))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect([symbols(r), texts(r)]).toEqual([icons, words])
+  })
+
+  it("draws a TimelineView's content for the moment it is drawn", () => {
+    const r = compileView(viewSource('var body: some View { TimelineView(.periodic(from: .now, by: 1)) { context in Text(context.date, style: .time) } }'))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(r).some(text => /^\d{1,2}:\d{2}/.test(text))).toBe(true)
+  })
+})
+
+describe("E7: a Picker or TabView over ForEach selects by its rows' own tags, as iOS 27 does", () => {
+  const tags = nativeII.pickerTags
+  const types = `enum FlavorSelf: String, CaseIterable, Identifiable { case vanilla, chocolate, strawberry; var id: Self { self } }
+enum FlavorRaw: String, CaseIterable, Identifiable { case vanilla, chocolate, strawberry; var id: String { rawValue } }
+enum Plain: String, CaseIterable { case vanilla, chocolate, strawberry }
+struct Scoop: Identifiable { let id: Int; let name: String }`
+  const scoops = 'let scoops = [Scoop(id: 1, name: "vanilla"), Scoop(id: 2, name: "chocolate"), Scoop(id: 3, name: "strawberry")]'
+  /** Each case of the simulator's tags screens: the selection's type and start, and the rows. */
+  const cases: Record<string, [string, string]> = {
+    A: ['FlavorSelf = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue) }'],
+    B: ['FlavorRaw = .chocolate', 'ForEach(FlavorRaw.allCases) { Text($0.rawValue) }'],
+    C: ['Plain = .chocolate', 'ForEach(Plain.allCases, id: \\.self) { Text($0.rawValue) }'],
+    D: ['Plain = .chocolate', 'ForEach(Plain.allCases, id: \\.rawValue) { Text($0.rawValue) }'],
+    E: ['String = "chocolate"', 'ForEach(Plain.allCases, id: \\.rawValue) { Text($0.rawValue) }'],
+    H: ['Int = 2', 'ForEach(scoops) { Text($0.name) }'],
+    I: ['Int = 1', 'ForEach(0..<3) { Text(Plain.allCases[$0].rawValue) }'],
+    G1: ['FlavorSelf? = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue) }'],
+    G2: ['Plain? = .chocolate', 'ForEach(Plain.allCases, id: \\.self) { Text($0.rawValue) }'],
+    G3: ['String? = "chocolate"', 'ForEach(Plain.allCases, id: \\.rawValue) { Text($0.rawValue) }'],
+    K1: ['FlavorSelf? = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue).tag($0) }'],
+    K2: ['FlavorSelf? = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue).tag($0, includeOptional: false) }'],
+    L: ['FlavorSelf? = .chocolate', 'ForEach(FlavorSelf.allCases) { Text($0.rawValue).tag(Optional($0)) }'],
+  }
+  /** What the simulator drew for a case: 'middle' when its middle row was selected, 'none' when none was. */
+  const measuredFor = (letter: string): string => Object.entries({ ...tags.segmented, ...tags.optional } as Record<string, string>).find(([caption]) => caption.startsWith(`${letter} `))![1]
+  const pickerSource = (letter: string, style = '.pickerStyle(.segmented)') => {
+    const [type, rows] = cases[letter]!
+    return compileView(viewSource(`@State private var choice: ${type}\n ${scoops}\n var body: some View { Picker("Flavor", selection: $choice) { ${rows} }${style} }`, types))
+  }
+  /** The option a segmented picker draws on its selected pill, or null when none is selected. */
+  function selectedSegment(r: CompileResult): string | null {
+    const all = nodes(r)
+    const pills = all.filter(n => n.id !== 'screen' && n.background?.kind === 'solid' && n.background.color.r === 255 && n.background.color.g === 255 && n.background.color.b === 255).map(n => worldFrame(all, n))
+    const option = all.filter(n => n.text).find(n => {
+      const f = worldFrame(all, n), x = f.x + f.width / 2, y = f.y + f.height / 2
+      return pills.some(p => x >= p.x && x <= p.x + p.width && y >= p.y && y <= p.y + p.height)
+    })
+    return option?.text?.runs.map(run => run.text).join('') ?? null
+  }
+
+  it.each(Object.keys(cases))('selects what the simulator selects for case %s', (letter) => {
+    const r = pickerSource(letter)
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(selectedSegment(r)).toBe(measuredFor(letter) === 'middle' ? 'chocolate' : null)
+  })
+
+  it('selects a row by tapping it only where its tag fits the selection', () => {
+    expect(selectedSegment(tap(pickerSource('A'), 'strawberry'))).toBe('strawberry')
+    expect(selectedSegment(tap(pickerSource('B'), 'strawberry'))).toBe(null)
+  })
+
+  it.each(Object.entries(tags.menuLabels as Record<string, string>).filter(([caption]) => caption !== 'note'))(
+    "shows what the simulator shows beside the menu picker %s", (caption, shown) => {
+      const rows: Record<string, [string, string]> = {
+        'A match': cases.A!, 'B String id': cases.B!, 'H Int id': cases.H!, 'G Optional': cases.G1!,
+        'S no such row': ['String = "mint"', 'ForEach(Plain.allCases, id: \\.rawValue) { Text($0.rawValue) }'],
+        'M String tag': ['Plain = .chocolate', 'ForEach(Plain.allCases, id: \\.self) { Text($0.rawValue).tag($0.rawValue) }'],
+      }
+      const [type, options] = rows[caption]!
+      const r = compileView(viewSource(`@State private var choice: ${type}\n ${scoops}\n var body: some View { Form { Picker("Flavor", selection: $choice) { ${options} } } }`, types))
+      expect(texts(r).filter(text => text && text !== 'Flavor')).toEqual(shown ? [shown] : [])
+    })
+
+  it('opens a TabView over ForEach pages on the page of its selection', () => {
+    const r = runView(`@State private var tab: FlavorSelf = .chocolate
+      var body: some View {
+        TabView(selection: $tab) {
+          ForEach(FlavorSelf.allCases) { flavor in
+            Text("Page \\(flavor.rawValue)").tabItem { Label(flavor.rawValue, systemImage: "circle") }
+          }
+        }
+      }`, types)
+    expect(texts(r)).toContain(tags.tabView.shownPage)
+  })
+
+  it('warns at a Picker none of whose rows its selection can match', () => {
+    const [warning, ...rest] = reported('@State private var choice: FlavorRaw = .chocolate\n var body: some View { Picker("Flavor", selection: $choice) { ForEach(FlavorRaw.allCases) { Text($0.rawValue) } } }', types)
+    expect(rest).toEqual([])
+    expect(warning).toMatchObject({ severity: 'warning', message: expect.stringContaining("can't select any of its rows") })
+  })
+
+  it("treats a model's Optional property as Optional, as it does a view's own", () => {
+    const r = compileView(viewSource(`@State private var model = Model()
+      var body: some View { Picker("Flavor", selection: $model.flavor) { ForEach(FlavorSelf.allCases) { Text($0.rawValue) } }.pickerStyle(.segmented) }`,
+      `${types}\n@Observable final class Model { var flavor: FlavorSelf? = .chocolate }`))
+    expect(selectedSegment(r)).toBe(null)
+    expect(r.diagnostics.map(d => d.message)).toContainEqual(expect.stringContaining("can't select any of its rows"))
+  })
+
+  it('selects no row of another type while an Optional selection is nil', () => {
+    const r = compileView(viewSource('@State private var choice: String? = nil\n var body: some View { Picker("Size", selection: $choice) { Text("S").tag(1); Text("M").tag(2) }.pickerStyle(.segmented) }', types))
+    expect(selectedSegment(tap(r, 'M'))).toBe(null)
+  })
+
+  it('says nothing about a Picker whose rows its selection matches', () => {
+    expect(reported('@State private var choice: FlavorSelf = .chocolate\n var body: some View { Picker("Flavor", selection: $choice) { ForEach(FlavorSelf.allCases) { Text($0.rawValue) } } }', types)).toEqual([])
+  })
+
+  it("gives each row of ForEach(…, id: \\.rawValue) its own action", () => {
+    const r = runView(`@State private var picked = "none"
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(Plain.allCases, id: \\.rawValue) { flavor in Button(flavor.rawValue) { picked = flavor.rawValue } }
+        }
+      }`, types)
+    expect(texts(tap(r, 'vanilla'))).toContain('Picked vanilla')
+  })
+
+  it('opens a Menu over ForEach onto its rows', () => {
+    const r = runView('var body: some View { Menu("Flavours") { ForEach(Plain.allCases, id: \\.self) { flavor in Button(flavor.rawValue) { } } } }', types)
+    expect(controls(tap(r, 'Flavours'))).toEqual(expect.arrayContaining(['vanilla', 'chocolate', 'strawberry']))
+  })
+})
+
+describe('lists written over enumerated() and zip', () => {
+  it('draws a numbered list from ForEach over enumerated(), the way the AI numbers rows', () => {
+    const r = runView(`let names = ["Ada", "Grace"]
+      var body: some View {
+        VStack {
+          ForEach(Array(names.enumerated()), id: \\.offset) { index, name in Text("\\(index + 1). \\(name)") }
+          ForEach(Array(zip(names.indices, names)), id: \\.0) { index, name in Text("\\(name) at \\(index)") }
+        }
+      }`)
+    expect(texts(r)).toEqual(['1. Ada', '2. Grace', 'Ada at 0', 'Grace at 1'])
+  })
+})
+
+describe('a ScrollView puts a lone child at its top, as iOS 27 does', () => {
+  const measured = nativeII.scrollView.frames
+  const at = (r: CompileResult, node: RenderNode) => { const f = worldFrame(nodes(r), node); return [f.x, f.y, f.width, f.height] }
+
+  it('draws a fixed-height view where the simulator draws it', () => {
+    const r = screen('var body: some View { ScrollView { Color.red.frame(height: 200) } }')
+    const red = nodes(r).find(n => n.id !== 'screen' && n.background?.kind === 'solid' && n.frame.height === 200)!
+    expect(at(r, red)).toEqual(measured['scroll-fixed'])
+  })
+
+  it('draws a lone Text at the top, centred across, and its own height', () => {
+    const r = screen('var body: some View { ScrollView { Text("Hi") } }')
+    const [x, y, width, height] = measured['scroll-text']
+    const text = placed(r, 'Hi')
+    expect(Math.abs(text.y - y)).toBeLessThanOrEqual(1)
+    expect(Math.abs(text.x + text.width / 2 - (x + width / 2))).toBeLessThanOrEqual(1)
+    // The preview's body line is 22 points to iOS's 20, the same in every view.
+    expect(Math.abs(text.height - height)).toBeLessThanOrEqual(2)
+  })
+})
+
+describe('Text interpolated into Text', () => {
+  // Measured in the iOS 27 simulator (docs/parity/native/iphone18pro-misrenders-ii, textInText).
+  it('draws the inner Text as part of the sentence, with its own styling', () => {
+    const r = runView('var body: some View { Text("\\(Text("Bold").bold()) and plain") }')
+    const runs = nodes(r).find(n => n.text)!.text!.runs
+    expect(runs.map(run => run.text).join('')).toBe('Bold and plain')
+    expect(runs.map(run => [run.text, run.font.weight >= 600])).toEqual([['Bold', true], [' and plain', false]])
+  })
+
+  it('still gives a title that is not a Text the words, as a Button or a navigation title', () => {
+    const r = runView('var body: some View { NavigationStack { Button("\\(Text("Bold").bold()) go") { }.navigationTitle("\\(Text("Home")) screen") } }')
+    expect(controls(r)).toContain('Bold go')
+    expect(texts(r)).toContain('Home screen')
+  })
+})
+
+describe('F4: an internal error is reported where it happened, and never stops the worker', () => {
+  const tagClass = `final class Tag: Hashable {
+    let name: String
+    init(_ name: String) { self.name = name }
+    static func == (a: Tag, b: Tag) -> Bool { a.name == b.name }
+    func hash(into hasher: inout Hasher) { hasher.combine(name) }
+  }`
+
+  it('keeps class instances apart as ForEach rows, though each prints as its type', () => {
+    const r = compileView(viewSource(`@State private var picked = "none"
+      let tags = [Tag("Nuts"), Tag("Fudge")]
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(tags, id: \\.self) { tag in Button(tag.name) { picked = tag.name } }
+        }
+      }`, tagClass))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(tap(r, 'Nuts'))).toContain('Picked Nuts')
+  })
+
+  it('writes through a force-unwrapped object whose parent points back at it', () => {
+    const r = runView(`var body: some View { Text(rename()) }
+      func rename() -> String {
+        let root = Node()
+        let leaf: Node? = Node()
+        root.child = leaf
+        leaf!.parent = root
+        leaf!.name = "Renamed"
+        return root.child!.name
+      }`, 'final class Node { var name = ""; var parent: Node?; var child: Node? }')
+    expect(texts(r)).toEqual(['Renamed'])
+  })
+
+  it('reports recursion that never ends where it recurses, instead of stopping the worker', () => {
+    const body = 'n == 0 ? 0 : 1 + steps(n - 1)'
+    const source = viewSource(`var body: some View { Text("\\(steps(-1))") }
+      func steps(_ n: Int) -> Int { ${body} }`)
+    const r = compileView(source)
+    const [error, ...others] = r.diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('recursion that never ends')
+    const at = source.indexOf(body)
+    expect(error!.span.start).toBeGreaterThanOrEqual(at)
+    expect(error!.span.end).toBeLessThanOrEqual(at + body.length)
+  })
+
+  it('reports a class that builds another of itself as it is built, where it does', () => {
+    const declaration = 'final class Tree { var next = Tree() }'
+    const source = viewSource('var body: some View { Text("\\(Tree().next === nil)") }', declaration)
+    const [error, ...others] = compileView(source).diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('recursion that never ends')
+    expect(source.slice(error!.span.start, error!.span.end)).toBe('Tree()')
+    expect(error!.span.start).toBe(source.indexOf(declaration) + declaration.indexOf('Tree()'))
+  })
+
+  it('reports a type alias loop that runs through optionals too', () => {
+    expect(reported('var body: some View { Text("x") }', 'typealias Count = Total?\ntypealias Total = Count?').map(d => [d.severity, d.message, d.at])).toEqual([
+      ['error', "Type alias 'Count' references itself.", 'Count'],
+    ])
+  })
+
+  it('reports a type alias that names itself as Xcode does, at the alias', () => {
+    // swiftc: "type alias 'Count' references itself", once, at the first of the two.
+    expect(reported('var body: some View { Text("\\(Count.self)") }', 'typealias Count = Total\ntypealias Total = Count')).toEqual([
+      { severity: 'error', message: "Type alias 'Count' references itself.", at: 'Count', fix: undefined },
+    ])
+  })
+})
+
+describe('F11: a view that stops draws a placeholder where it is, and the rest of the screen still works', () => {
+  const broken = 'struct Broken: View { let items: [Int] = []; var body: some View { Text("\\(items[0])") } }'
+  const stopped = (r: CompileResult) => nodes(r).filter(n => n.placeholder).map(n => n.placeholder)
+
+  it('draws the views around one that stops, and reports the line it stopped at', () => {
+    const source = viewSource('var body: some View { VStack { Text("Top"); Broken(); Text("Bottom") } }', broken)
+    const r = compileView(source)
+    expect(texts(r)).toEqual(expect.arrayContaining(['Top', 'Bottom']))
+    expect(stopped(r)).toEqual([{ kind: 'stopped', feature: 'Broken', reason: 'Swift runtime failure: Index out of range' }])
+    const markup = renderToStaticMarkup(createElement(RenderTreeView, { tree: r.renderTree!, onEvent: () => {} }))
+    expect(markup).toContain('Broken')
+    expect(markup).toContain('Its code stopped: Index out of range.')
+    const [error, ...others] = r.diagnostics.filter(d => d.severity === 'error')
+    expect(others).toEqual([])
+    expect(error!.message).toContain('Index out of range')
+    expect(source.slice(error!.span.start, error!.span.end)).toContain('items[0]')
+  })
+
+  it('keeps the rest of the screen interactive', () => {
+    const r = compileView(viewSource(`@State private var count = 0
+      var body: some View { VStack { Broken(); Button("Add") { count += 1 }; Text("Count \\(count)") } }`, broken))
+    expect(texts(tap(r, 'Add'))).toContain('Count 1')
+  })
+
+  it("draws a sheet whose content stops as stopped, and can still close it", () => {
+    const r = runView(`@State private var show = false
+      let items: [String] = []
+      var body: some View { Button("Open") { show = true }.sheet(isPresented: $show) { Detail(item: items[0]) } }`,
+      'struct Detail: View { let item: String; var body: some View { Text(item) } }')
+    const opened = tap(r, 'Open')
+    expect(stopped(opened)).toEqual([{ kind: 'stopped', feature: 'Sheet', reason: 'Swift runtime failure: Index out of range' }])
+    expect(stopped(tap(opened, 'Close sheet'))).toEqual([])
+  })
+
+  it('draws a pushed navigationDestination whose content stops as stopped, and can still go back', () => {
+    const r = runView(`let items: [String] = []
+      var body: some View {
+        NavigationStack {
+          NavigationLink("Open", value: 3).navigationTitle("Home").navigationDestination(for: Int.self) { index in Detail(item: items[index]) }
+        }
+      }`, 'struct Detail: View { let item: String; var body: some View { Text(item) } }')
+    const pushed = tap(r, 'Open')
+    expect(stopped(pushed)).toEqual([{ kind: 'stopped', feature: 'Destination', reason: 'Swift runtime failure: Index out of range' }])
+    expect(controls(tap(pushed, 'Home'))).toContain('Open')
+  })
+
+  it('names the stopped view in the layers, and selects it from its placeholder', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Top"); Broken().padding() } }', broken))
+    const layers = (items: readonly ViewLayer[]): string[] => items.flatMap(item => [item.name, ...layers(item.children)])
+    expect(layers(r.viewHierarchy ?? [])).toEqual(['Main page', 'VStack', 'Top', 'Broken'])
+    const placeholder = nodes(r).find(n => n.placeholder)!
+    const authoring = r.authoring!
+    expect(authoring.nodes.find(n => n.id === authoring.runtimeToSource[placeholder.id])).toMatchObject({ kind: 'component', name: 'Broken' })
+  })
+
+  it('draws a pushed destination whose own content stops as stopped, and can still go back', () => {
+    const r = runView(`let items: [Int] = []
+      var body: some View { NavigationStack { NavigationLink("Open") { Text("\\(items[5])") }.navigationTitle("Home") } }`)
+    const pushed = tap(r, 'Open')
+    expect(nodes(pushed).find(n => n.placeholder)?.placeholder).toMatchObject({ kind: 'stopped', feature: 'Destination', reason: expect.stringContaining('Index out of range') })
+    expect(texts(tap(pushed, 'Home'))).toContain('Home')
+  })
+})
+
+describe('D12: a view the preview cannot draw says what it is, in a designer\'s words', () => {
+  const placeholders = (r: CompileResult) => nodes(r).filter(n => n.placeholder).map(n => n.placeholder!)
+  const drawn = (r: CompileResult) => renderToStaticMarkup(createElement(RenderTreeView, { tree: r.renderTree!, onEvent: () => {} }))
+
+  it('names real SwiftUI the preview does not draw yet, and says Xcode draws it', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Top"); EditButton() } }'))
+
+    expect(placeholders(r)).toMatchObject([{ kind: 'unsupported', feature: 'EditButton' }])
+    expect(placeholderWords(placeholders(r)[0]!)).toEqual({ title: 'Edit button', detail: 'Not drawn in the preview yet. Xcode draws it as written.' })
+    expect(drawn(r)).toContain('Not drawn in the preview yet. Xcode draws it as written.')
+  })
+
+  it('says when it does not know a view, and that Xcode builds it only if a framework or the project declares it', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Text("Top"); FancyWidget() } }'))
+
+    expect(placeholders(r)).toMatchObject([{ kind: 'unknown', feature: 'FancyWidget' }])
+    expect(placeholderWords(placeholders(r)[0]!)).toEqual({ title: 'FancyWidget', detail: 'The preview doesn’t know this view. Xcode builds it only if an Apple framework or the project declares it.' })
+  })
+
+  it('names a missing image and where to add it', () => {
+    const r = runView('var body: some View { Image("hero") }')
+
+    expect(placeholders(r)).toMatchObject([{ kind: 'missing', feature: 'hero' }])
+    expect(placeholderWords(placeholders(r)[0]!)).toEqual({ title: 'Image “hero”', detail: 'This image is missing. Add it in Project resources.' })
+  })
+
+  it('marks a view the preview does not draw in Design, so its settings do not say it draws here', () => {
+    const files = [{ id: 'App.swift', text: viewSource('var body: some View { VStack { EditButton(); Text("Top") } }') }]
+    const designed = buildAuthoringModel({ projectId: 'p', revision: 1, files }).nodes
+
+    expect(designed.find(n => n.name === 'EditButton')).toMatchObject({ kind: 'opaque', undrawn: 'unsupported' })
+    expect(designed.find(n => n.name === 'Text')?.undrawn).toBeUndefined()
+    // As the checker says: a box for a name it does not know, and none for Color, which the preview draws.
+    const drawnHere = compileView(viewSource('var body: some View { VStack { FancyWidget(); Color(red: 1, green: 0, blue: 0) } }')).authoring!.nodes
+    expect(drawnHere.find(n => n.name === 'FancyWidget')).toMatchObject({ kind: 'opaque', undrawn: 'unknown' })
+    expect(drawnHere.find(n => n.name === 'Color')?.undrawn).toBeUndefined()
+  })
+
+  it('says a view of the project\'s own stopped, and why, without Swift\'s own words', () => {
+    const r = compileView(viewSource('var body: some View { VStack { Broken() } }', 'struct Broken: View { let items: [Int] = []; var body: some View { Text("\\(items[0])") } }'))
+
+    expect(placeholderWords(placeholders(r)[0]!)).toEqual({ title: 'Broken', detail: 'Its code stopped: Index out of range.' })
+    expect(placeholderWords({ kind: 'stopped', feature: 'ProfileCard', reason: 'Fatal error: Unexpectedly found nil' })).toEqual({ title: 'Profile card', detail: 'Its code stopped: Unexpectedly found nil.' })
+  })
+})
+
+describe('F3: every ForEach row keeps its own identity', () => {
+  /** Swipes a row open, as a person drags it leftwards, and draws the result. */
+  const swipeOpen = (row: RenderNode) => {
+    applyEvent({ kind: 'drag', handlerId: row.hitTarget!.handlerId, phase: 'ended', location: { x: -90, y: 0 }, startLocation: { x: 0, y: 0 }, translation: { x: -90, y: 0 } })
+    return rerender(revision++)
+  }
+
+  it('gives rows whose ids differ only in punctuation their own actions', () => {
+    const r = runView(`@State private var picked = "none"
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(["C", "C++", "C#"], id: \\.self) { language in Button(language) { picked = language } }
+        }
+      }`)
+    expect(texts(tap(r, 'C++'))).toContain('Picked C++')
+    expect(texts(tap(r, 'C'))).toContain('Picked C')
+  })
+
+  it('keeps an empty id apart from the id "0"', () => {
+    const r = runView(`@State private var picked = "none"
+      var body: some View { VStack { Text("Picked [\\(picked)]"); ForEach(["", "0"], id: \\.self) { value in Button("Pick \\(value)") { picked = value } } } }`)
+    expect(texts(tap(r, 'Pick 0'))).toContain('Picked [0]')
+    expect(texts(tap(r, 'Pick '))).toContain('Picked []')
+  })
+
+  it('deletes the element a swiped row belongs to when each element draws two rows', () => {
+    const r = runView(`@State private var items = ["A", "B", "C"]
+      var body: some View {
+        List {
+          ForEach(items, id: \\.self) { item in Text(item); Text(item + " detail") }
+            .onDelete { offsets in items.remove(atOffsets: offsets) }
+        }
+      }`)
+    const rows = nodes(r).filter(n => n.hitTarget?.role === 'drag')
+    expect(new Set(rows.map(row => row.hitTarget!.handlerId)).size).toBe(6)
+    const after = tap(swipeOpen(rows[3]!), 'Delete')
+    expect(texts(after).filter(t => t !== 'Delete')).toEqual(['A', 'A detail', 'C', 'C detail'])
+  })
+
+  it('warns at a ForEach whose rows share an id, and still keeps their actions apart', () => {
+    const members = `@State private var picked = "none"
+      let pets = [Pet(id: 1, name: "Rex"), Pet(id: 1, name: "Tom")]
+      var body: some View {
+        VStack {
+          Text("Picked \\(picked)")
+          ForEach(pets) { pet in Button(pet.name) { picked = pet.name } }
+        }
+      }`
+    const pet = 'struct Pet: Identifiable { let id: Int; let name: String }'
+    const [warning, ...others] = reported(members, pet)
+    expect(others).toEqual([])
+    expect(warning).toMatchObject({ severity: 'warning', message: expect.stringContaining('have the id 1') })
+    expect(warning!.at.startsWith('ForEach(pets)')).toBe(true)
+    expect(texts(tap(compileView(viewSource(members, pet)), 'Rex'))).toContain('Picked Rex')
+  })
+})
+
+describe('F12: containers that hand their content a value draw it', () => {
+  const placeholders = (r: CompileResult) => nodes(r).filter(n => n.placeholder).map(n => n.placeholder!.feature)
+  const warnings = (r: CompileResult) => r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)
+
+  it('draws what a ScrollViewReader holds, and says scrollTo does not scroll the preview', () => {
+    const r = compileView(viewSource('var body: some View { ScrollViewReader { proxy in ScrollView { Text("Inside reader"); Button("Top") { proxy.scrollTo(0) } } } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toContain('Inside reader')
+    expect(warnings(r)).toEqual([expect.stringContaining('scrollTo')])
+    expect(tap(r, 'Top').logs.filter(log => log.level === 'error')).toEqual([])
+  })
+
+  it('draws a PhaseAnimator at its first phase', () => {
+    const r = compileView(viewSource('var body: some View { PhaseAnimator([false, true]) { on in Text(on ? "On" : "Off") } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toEqual(['Off'])
+    expect(warnings(r)).toEqual([expect.stringContaining('first phase')])
+  })
+
+  it('draws a KeyframeAnimator at its initial value', () => {
+    const r = compileView(viewSource('var body: some View { KeyframeAnimator(initialValue: 1.0) { value in Text(verbatim: "Scale \\(value)") } keyframes: { _ in LinearKeyframe(2.0, duration: 1) } }'))
+    expect(placeholders(r)).toEqual([])
+    expect(texts(r)).toEqual(['Scale 1.0'])
+    expect(warnings(r)).toEqual([expect.stringContaining('initial value')])
+  })
+
+  it("puts a TabSection's tabs in the tab bar in order, and leaves its title out, as iOS 27 does", () => {
+    // The app the simulator ran, unchanged since.
+    const fixture = readFileSync(new URL('./fixtures/ios27-runtime.swift', import.meta.url), 'utf8')
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe(runtimeCapture.fixtureSha256)
+    const r = compileView(fixture)
+    expect(r.diagnostics).toEqual([])
+    const measured = runtimeCapture.measured.tabSection
+    expect(controls(r)).toEqual(measured.tabBar)
+    expect(texts(r).includes('More')).toBe(measured.sectionTitleShown)
+    expect(texts(tap(r, 'Two'))).toContain('Tab two')
+  })
+})
+
+describe("F6: the Design gallery draws the screens it can, and says which it couldn't", () => {
+  /** Four tabs whose toolbars each take about a million steps: each screen draws alone, and together they outrun one budget. */
+  const heavyTabs = viewSource(`var body: some View {
+      TabView {
+        ForEach(1...4, id: \\.self) { tab in
+          NavigationStack { List { NavigationLink("Go") { Text("Detail \\(tab)") } }.navigationTitle("Tab \\(tab)").toolbar { ToolbarItem { Text(heavy(tab)) } } }
+            .tabItem { Label("Tab \\(tab)", systemImage: "star") }
+        }
+      }
+    }`, 'func heavy(_ tag: Int) -> String { var total = 0; for i in 0..<150000 { total += i % 7 }; return "Busy \\(tag)" }')
+
+  it('draws the live screen alone', () => {
+    expect(texts(compileView(heavyTabs))).toContain('Busy 1')
+  })
+
+  it('draws the gallery up to its budget, and warns at each screen it could not draw', () => {
+    const r = compileView(heavyTabs, { allPages: true })
+    expect(r.renderTree).not.toBeNull()
+    expect(texts(r)).toContain('Busy 1')
+    const drawn = (r.pages ?? []).map(page => page.name)
+    const skipped = r.diagnostics.filter(d => d.severity === 'warning' && d.message.includes('drawn on the Design canvas'))
+    expect(drawn.length).toBeGreaterThan(0)
+    // The tabs share the ForEach's source, and each one missing is still said.
+    expect(skipped.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(skipped.map(d => d.message)).size).toBe(skipped.length)
+    // The canvas says why, beside the count, as the Design mode has no list of warnings.
+    expect(r.pagesNotDrawn).toEqual(skipped.map(d => d.message))
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+  })
+
+  it('says so when the screens a page opens use up the budget', () => {
+    const r = compileView(viewSource(`var body: some View { NavigationStack { NavigationLink("Go") { Detail() }.navigationTitle("Home") } }`,
+      `func heavy() -> String { var total = 0; for i in 0..<800000 { total += i % 7 }; return "Busy" }
+struct Detail: View { var body: some View { Text("Detail").toolbar { ToolbarItem { Text(heavy()) } } } }`), { allPages: true })
+    expect(controls(r)).toContain('Go')
+    expect(r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)).toEqual([expect.stringContaining("The screens Home opens aren't drawn on the Design canvas")])
+  })
+
+  it('gives design screens nothing links to the one budget the gallery has, and says which it could not draw', () => {
+    const heavy = (name: string) => `struct ${name}: View { var body: some View { Text(heavy("${name}")) } }`
+    const r = compileView(viewSource('var body: some View { Text("Home") }',
+      `func heavy(_ tag: String) -> String { var total = 0; for i in 0..<450000 { total += i % 7 }; return tag }\n${heavy('FirstScreen')}\n${heavy('SecondScreen')}`),
+      { allPages: true, designScreens: [{ view: 'FirstScreen', name: 'First' }, { view: 'SecondScreen', name: 'Second' }] })
+    expect((r.pages ?? []).map(page => page.name)).toContain('First')
+    expect((r.pages ?? []).map(page => page.name)).not.toContain('Second')
+    expect(r.diagnostics.filter(d => d.severity === 'warning').map(d => d.message)).toEqual([expect.stringContaining('"Second" isn\'t drawn on the Design canvas')])
+    expect(r.pagesNotDrawn).toEqual([expect.stringContaining('"Second" isn\'t drawn on the Design canvas')])
+  })
+})
+
+describe('F7: with a syntax error, every redraw shows the errors, never a blank phone', () => {
+  const notice = (r: CompileResult) => nodes(r).find(n => n.placeholder)?.placeholder
+
+  it('shows the error notice again on a redraw that re-parses nothing', () => {
+    compileView(viewSource('var body: some View { Text("Hello") }'))
+    const broken = compileView(viewSource('var body: some View { Text("Hello" }'))
+    expect(notice(broken)?.feature).toBe('1 error')
+    // Switching Edit and Preview, or Reset, redraws the program the worker already has.
+    expect(notice(rerender(revision++))).toEqual(notice(broken))
+    resetPipelineState()
+    expect(notice(rerender(revision++))).toEqual(notice(broken))
+  })
+
+  it('marks a tree that only carries a message, so the phone can keep the last one that ran', () => {
+    const good = compileView(viewSource('var body: some View { Text("Hello") }'))
+    expect(good.renderTree!.notice).toBeUndefined()
+    const broken = compileView(viewSource('var body: some View { Text("Hello" }'))
+    expect(broken.renderTree!.notice).toEqual({ title: '1 error', detail: "Expected ')' to close an argument list, found '}'." })
+  })
+})
+
+describe('functions that share a name run the one Swift runs', () => {
+  it('runs the overload the argument types choose, top level and in the view, with nothing to report', () => {
+    const r = runView(`var body: some View { VStack { Text(label(1)); Text(label("one")); Text(badge(2)); Text(badge(true)) } }
+      func badge(_ count: Int) -> String { "count \\(count)" }
+      func badge(_ on: Bool) -> String { on ? "on" : "off" }`,
+      'func label(_ value: Int) -> String { "whole \\(value)" }\nfunc label(_ value: String) -> String { "text \\(value)" }')
+    expect(texts(r)).toEqual(['whole 1', 'text one', 'count 2', 'on'])
+  })
+
+  it("warns where two overloads differ only in types the preview can't tell apart, and runs the first", () => {
+    // Xcode calls the CGFloat one: the argument is declared a CGFloat.
+    const members = 'let side: CGFloat = 2\n var body: some View { Text(size(side)) }'
+    const declarations = 'func size(_ value: Double) -> String { "double" }\nfunc size(_ value: CGFloat) -> String { "cgfloat" }'
+    expect(reported(members, declarations)).toEqual([{
+      severity: 'warning',
+      message: "The preview can't tell size(_:) from the one before it by what it is called with, so it runs that one. Xcode chooses by the argument's type.",
+      at: 'size',
+      fix: undefined,
+    }])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['double'])
+  })
+
+  it('says nothing where the values tell the overloads apart, and runs the one Swift runs', () => {
+    const members = 'var body: some View { VStack { Text(tag("a")); Text(show(Box())) } }'
+    const declarations = `func tag(_ value: Character) -> String { "character" }
+func tag(_ value: String) -> String { "string" }
+protocol Sized {}
+protocol Named {}
+struct Box: Named {}
+func show(_ value: Sized) -> String { "sized" }
+func show(_ value: Named) -> String { "named" }`
+    expect(reported(members, declarations)).toEqual([])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['string', 'named'])
+  })
+
+  it('warns inside a function too, naming what the preview does as a feature', () => {
+    const members = `var body: some View { Text(measure()) }
+      func measure() -> String {
+        func size(_ value: Double) -> String { "double" }
+        func size(_ value: CGFloat) -> String { "cgfloat" }
+        let side: CGFloat = 2
+        return size(side)
+      }`
+    const warnings = compileView(viewSource(members)).diagnostics.filter(d => d.severity === 'warning')
+    expect(warnings.map(d => [d.message.startsWith("The preview can't tell size(_:)"), d.feature])).toEqual([[true, 'overloads told apart by type']])
+  })
+
+  it("reads, writes and binds a view's own state over a top-level variable of the same name", () => {
+    const r = compileView(viewSource(`@State private var count = 0
+      @State private var name = "Local"
+      var body: some View { VStack { Text("Count \\(count)"); Button("Add") { count += 1 }; TextField("Name", text: $name); Text("Name \\(name)") } }`,
+      'var count = 100\nvar name = "Global"'))
+    expect(texts(r)).toEqual(expect.arrayContaining(['Count 0', 'Name Local']))
+    expect(texts(tap(r, 'Add'))).toContain('Count 1')
+    const field = nodes(r).find(n => n.hitTarget?.role === 'textField')!
+    applyEvent({ kind: 'textChange', handlerId: field.hitTarget!.handlerId, value: 'Typed' })
+    expect(texts(rerender(revision++))).toContain('Name Typed')
+  })
+
+  it('tells a concrete parameter from a generic one, and says nothing', () => {
+    const members = 'var body: some View { VStack { Text(show(1)); Text(show("one")) } }'
+    const declarations = 'func show(_ value: Int) -> String { "whole" }\nfunc show<T>(_ value: T) -> String { "anything" }'
+    expect(reported(members, declarations)).toEqual([])
+    expect(texts(compileView(viewSource(members, declarations)))).toEqual(['whole', 'anything'])
+  })
+})
+
+describe('D13: the flows Design writes behave in the preview as they do on iOS 27', () => {
+  /** A pushed screen that closes itself, as "When tapped › Back / Close" writes it. */
+  const detail = `struct Detail: View {
+    @Environment(\\.dismiss) private var dismiss
+    var body: some View { Button("Close") { dismiss() }.navigationTitle("Detail") }
+  }`
+
+  it('goes back one screen when a pushed screen dismisses itself', () => {
+    const r = runView('var body: some View { NavigationStack { NavigationLink("Open") { Detail() }.navigationTitle("Home") } }', detail)
+
+    const back = tap(tap(r, 'Open'), 'Close')
+
+    expect(texts(back)).toContain('Open')
+    expect(texts(back)).not.toContain('Close')
+  })
+
+  const pushedFrom = (rootTitle: string) => tap(runView(`var body: some View { NavigationStack { NavigationLink("Open") { Text("Body").navigationTitle("Detail") }${rootTitle} } }`), 'Open')
+  /** The largest size "Detail" is drawn at: a large title is also drawn small, for when it scrolls away. */
+  const titleSize = (r: CompileResult) => Math.max(...nodes(r).filter(n => n.text?.runs.some(run => run.text === 'Detail')).map(n => n.text!.runs[0]!.font.size))
+
+  it('titles a screen pushed from one with no title inline, as iOS 27 does', () => {
+    expect(titleSize(pushedFrom(''))).toBe(17)
+  })
+
+  it('titles a screen pushed from a titled one large, as iOS 27 does', () => {
+    expect(titleSize(pushedFrom('.navigationTitle("Home")'))).toBe(34)
+  })
+
+  it('titles a screen pushed after a pushed one with no title inline, as iOS 27 does', () => {
+    const r = runView('var body: some View { NavigationStack { List { NavigationLink("Middle") { Middle() } }.navigationTitle("Home") } }',
+      'struct Middle: View { var body: some View { List { NavigationLink("Open") { Text("Body").navigationTitle("Detail") } } } }')
+
+    expect(titleSize(tap(tap(r, 'Middle'), 'Open'))).toBe(17)
+  })
+
+  it('goes back within a sheet\'s own stack, and leaves the sheet open', () => {
+    const r = runView(`@State private var showing = false
+      var body: some View { Button("Show") { showing = true }.sheet(isPresented: $showing) { NavigationStack { NavigationLink("Open") { Detail() } } } }`, detail)
+
+    const back = tap(tap(tap(r, 'Show'), 'Open'), 'Close')
+
+    expect(texts(back)).toContain('Open')
+    expect(texts(back)).not.toContain('Close')
+  })
+})
+
+describe('pilot: an `else if` in a view body', () => {
+  const chain = (running: boolean, done: boolean) => `@State private var isRunning = ${running}
+    @State private var done = ${done}
+    var body: some View {
+      VStack {
+        if isRunning {
+          Text("Running")
+        } else if done {
+          Text("Done")
+        } else {
+          Text("Ready")
+        }
+      }
+    }`
+
+  it('draws the branch it chooses', () => {
+    expect(texts(runView(chain(false, false)))).toEqual(['Ready'])
+    expect(texts(runView(chain(false, true)))).toEqual(['Done'])
+    expect(texts(runView(chain(true, true)))).toEqual(['Running'])
+  })
+
+  it('shows in Layers as a condition inside the first one\'s otherwise branch', () => {
+    const layers = buildAuthoringModel({ projectId: 'p', revision: 1, files: [{ id: 'App.swift', text: viewSource(chain(false, false)) }] }).nodes
+    const byId = new Map(layers.map(layer => [layer.id, layer]))
+    const path = (name: string) => {
+      const names: string[] = []
+      for (let layer = layers.find(l => l.kind === 'view' && l.name === 'Text' && l.properties.some(p => p.name === 'content' && p.expression === `"${name}"`)); layer; layer = layer.parentId ? byId.get(layer.parentId) : undefined) names.unshift(layer.name)
+      return names
+    }
+
+    expect(new Set(layers.map(layer => layer.id)).size).toBe(layers.length)
+    expect(path('Running')).toEqual(['ContentView', 'VStack', 'Condition', 'Text'])
+    expect(path('Done')).toEqual(['ContentView', 'VStack', 'Condition', 'Otherwise', 'Condition', 'Text'])
+    expect(path('Ready')).toEqual(['ContentView', 'VStack', 'Condition', 'Otherwise', 'Condition', 'Otherwise', 'Text'])
+  })
+})
+
+describe('pilot: a button takes the foreground style it is given, as iOS 27 draws it', () => {
+  const buttons = () => runView(`var body: some View {
+      NavigationStack {
+        VStack {
+          Button("White") {}.foregroundStyle(.white).background(Color.blue)
+          Button("Red") {}.foregroundStyle(.red)
+          Button("Colour") {}.foregroundColor(.red)
+          Button("Borderless") {}.buttonStyle(.borderless).foregroundStyle(.red)
+          Button("Bordered") {}.buttonStyle(.bordered).foregroundStyle(.red)
+          Button("Prominent") {}.buttonStyle(.borderedProminent).foregroundStyle(.red)
+          VStack { Button("Inherited") {} }.foregroundStyle(.red)
+          Button("Tinted") {}.tint(.green).foregroundStyle(.red)
+          Button("Delete", role: .destructive) {}.foregroundStyle(.orange)
+          NavigationLink("Link") { Text("Next") }.foregroundStyle(.orange)
+          Button("Unstyled") {}
+          NavigationLink("Unstyled link") { Text("Next") }
+        }
+      }
+    }`)
+  const colour = (r: CompileResult, label: string) => nodes(r).find(n => n.text?.runs.some(run => run.text === label))!.text!.runs[0]!.color
+
+  it('draws the title white on a background, where it was the accent on the accent', () => {
+    expect(colour(buttons(), 'White')).toEqual({ r: 255, g: 255, b: 255, a: 1 })
+  })
+
+  it('lets the foreground style win over the tint, whatever the style, the role or where it is set', () => {
+    const r = buttons()
+    for (const label of ['Red', 'Colour', 'Borderless', 'Bordered', 'Prominent', 'Inherited', 'Tinted']) expect(colour(r, label), label).toEqual(colorForName('red'))
+    for (const label of ['Delete', 'Link']) expect(colour(r, label), label).toEqual(colorForName('orange'))
+  })
+
+  it('keeps the accent for a button or link given no foreground style', () => {
+    const r = buttons()
+    expect(colour(r, 'Unstyled')).toEqual({ r: 0, g: 136, b: 255, a: 1 })
+    expect(colour(r, 'Unstyled link')).toEqual({ r: 0, g: 136, b: 255, a: 1 })
+  })
+})
+
+describe('pilot: Swift the AI writes runs as it does on iOS 27', () => {
+  /** What a String expression comes to, drawn verbatim. Expected values are the iOS 27 simulator's. */
+  const shows = (expression: string, members = '') => texts(runView(`${members}\n var body: some View { Text(verbatim: ${expression}) }`))[0]
+
+  it.each([
+    ['12345.formatted()', '12,345'],
+    ['42.formatted()', '42'],
+    ['(-1234567).formatted()', '-1,234,567'],
+    ['1234.5.formatted()', '1,234.5'],
+    ['3.14159265.formatted()', '3.141593'],
+    ['2.0.formatted()', '2'],
+    ['1234567.891.formatted()', '1,234,567.891'],
+    ['123456789.123.formatted()', '123,456,789.123'],
+    ['(-0.5).formatted()', '-0.5'],
+    ['0.0000001.formatted()', '0'],
+    ['3.14159265.formatted(.number)', '3.141593'],
+    ['1234.5678.formatted(.number)', '1,234.5678'],
+    ['1234567.formatted(.number)', '1,234,567'],
+    ['0.256.formatted(.percent)', '25.6%'],
+    ['0.12345.formatted(.percent)', '12.345%'],
+    ['1.5.formatted(.percent)', '150%'],
+    ['25.formatted(.percent)', '25%'],
+  ])('formats %s as %s', (expression, expected) => {
+    expect(shows(expression)).toBe(expected)
+  })
+
+  it.each([
+    ['342.5.formatted(.currency(code: "USD"))', '$342.50'],
+    ['342.5.formatted(.currency(code: "EUR"))', '€342.50'],
+    ['342.5.formatted(.currency(code: "GBP"))', '£342.50'],
+    ['342.5.formatted(.currency(code: "JPY"))', '¥342'],
+    ['(-12.3).formatted(.currency(code: "USD"))', '-$12.30'],
+    ['1234567.891.formatted(.currency(code: "USD"))', '$1,234,567.89'],
+    ['1500.formatted(.currency(code: "USD"))', '$1,500.00'],
+    ['0.005.formatted(.currency(code: "USD"))', '$0.00'],
+    ['2.675.formatted(.currency(code: "USD"))', '$2.68'],
+    ['2.665.formatted(.currency(code: "USD"))', '$2.66'],
+    ['1234.5.formatted(.currency(code: "EUR"))', '€1,234.50'],
+  ])('formats %s as %s', (expression, expected) => {
+    expect(shows(expression)).toBe(expected)
+  })
+
+  it('draws `Text(_:format:)` as `formatted(_:)` writes it', () => {
+    expect(texts(runView(`var body: some View {
+      VStack {
+        Text(3.14159265, format: .number)
+        Text(0.12345, format: .percent)
+        Text(25, format: .percent)
+        Text(0.005, format: .currency(code: "USD"))
+      }
+    }`))).toEqual(['3.141593', '12.345%', '25%', '$0.00'])
+  })
+
+  it.each([
+    ['"\\(CGFloat(3))"', '3.0'],
+    ['"\\(CGFloat(7) * 2)"', '14.0'],
+    ['"\\(CGFloat(4) / 3)"', '1.3333333333333333'],
+    ['"\\(Float(2.5))"', '2.5'],
+    ['"\\(Float(3))"', '3.0'],
+    ['"\\(Int(CGFloat(2.9)))"', '2'],
+  ])('makes %s %s', (expression, expected) => {
+    expect(shows(expression)).toBe(expected)
+  })
+
+  it('makes a whole-number literal given to a CGFloat a CGFloat', () => {
+    expect(shows('"\\(width)"', 'let width: CGFloat = 3')).toBe('3.0')
+  })
+
+  it.each([
+    ['"The Batman".localizedCaseInsensitiveContains("batman")', 'true'],
+    ['"The Batman".localizedCaseInsensitiveContains("")', 'false'],
+    ['"Café".localizedCaseInsensitiveContains("cafe")', 'false'],
+    ['"Café".localizedStandardContains("cafe")', 'true'],
+    ['"The Batman".localizedStandardContains("BAT")', 'true'],
+    ['"The Batman".localizedStandardContains("")', 'false'],
+  ])('answers %s with %s', (expression, expected) => {
+    expect(shows(`"\\(${expression})"`)).toBe(expected)
+  })
+
+  it('says nothing about a project\'s own method that shares a name with a repeat', () => {
+    const r = compileView(viewSource(`var body: some View { Text(verbatim: "\\(Habit().repeatCount(for: 2))") }`, 'struct Habit { func repeatCount(for weeks: Int) -> Int { weeks * 7 } }'))
+
+    expect(r.diagnostics).toEqual([])
+    expect(texts(r)).toEqual(['14'])
+  })
+
+  it('keeps running an animation that repeats, and says the preview plays it once', () => {
+    const r = compileView(viewSource(`@State private var pulse = false
+      var body: some View {
+        VStack {
+          Circle().frame(width: 20, height: 20).scaleEffect(pulse ? 1.2 : 1)
+            .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: pulse)
+          Button(pulse ? "Stop" : "Start") {
+            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false).delay(0.1).speed(2)) { pulse.toggle() }
+          }
+          Text("Twice").animation(.spring().repeatCount(2, autoreverses: true), value: pulse)
+        }
+      }`))
+
+    expect(r.diagnostics.map(d => d.message)).toEqual([
+      "'.repeatForever' repeats the animation on iOS. The preview plays it once.",
+      "'.repeatForever' repeats the animation on iOS. The preview plays it once.",
+      "'.repeatCount' repeats the animation on iOS. The preview plays it once.",
+    ])
+    expect(nodes(r).filter(n => n.placeholder?.kind === 'stopped')).toEqual([])
+    expect(texts(tap(r, 'Start'))).toContain('Stop')
+  })
+})
+
+describe('pilot: an edit to the app\'s data keeps the preview drawing', () => {
+  const app = (model: string, content: string, members = '') => `import SwiftUI
+@Observable final class Model {
+${model}
+}
+@main struct Demo: App {
+  @State private var model = Model()
+  var body: some Scene { WindowGroup { ContentView().environment(model) } }
+}
+struct ContentView: View {
+  @Environment(Model.self) private var model
+  @State private var taps = 0
+${members}
+  var body: some View {
+    VStack {
+${content}
+      Button("Tap \\(taps)") { taps += 1 }
+    }
+  }
+}`
+  const stopped = (r: CompileResult) => nodes(r).filter(n => n.placeholder?.kind === 'stopped').map(n => n.placeholder)
+  const draw = (source: string) => {
+    const r = compileView(source)
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    return r
+  }
+
+  it('draws a property an edit adds to a model held in state', () => {
+    draw(app('  var count = 1', '      Text("Count \\(model.count)")'))
+
+    const r = draw(app('  var count = 1\n  var extra = 5', '      Text("Count \\(model.count)")\n      Text("Extra \\(model.extra)")'))
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toEqual(expect.arrayContaining(['Count 1', 'Extra 5']))
+  })
+
+  it('draws a property an edit adds to the structs in a list held in state', () => {
+    const cars = (fields: string, row: string) => draw(`import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct Car: Identifiable {
+  let id: Int
+  var name: String
+${fields}
+}
+struct ContentView: View {
+  @State private var cars = [Car(id: 1, name: "Wagon")]
+  var body: some View {
+    List(cars) { car in
+${row}
+    }
+  }
+}`)
+    cars('', '      Text(car.name)')
+
+    const r = cars('  var dueSoon = false', '      Text(car.dueSoon ? "Soon" : "Later")')
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toContain('Later')
+  })
+
+  it('draws a property an edit adds to a type declared inside another, however it was made', () => {
+    const shelf = (fields: string, row: string) => draw(`import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct Shelf {
+  struct Book: Identifiable {
+    let id: Int
+    var title: String
+${fields}
+  }
+}
+struct ContentView: View {
+  @State private var books = [Shelf.Book(id: 1, title: "Dune")]
+  var body: some View {
+    List(books) { book in
+${row}
+    }
+  }
+}`)
+    shelf('', '      Text(book.title)')
+
+    const r = shelf('    var pages = 412', '      Text("\\(book.title), \\(book.pages) pages")')
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toContain('Dune, 412 pages')
+  })
+
+  it('keeps what was done in the preview when an edit changes only what the data does', () => {
+    const first = draw(app('  var count = 0\n  func bump() { count += 1 }', '      Button("Bump \\(model.count)") { model.bump() }'))
+    expect(texts(tap(first, 'Bump 0'))).toContain('Bump 1')
+
+    const r = draw(app('  var count = 0\n  func bump() { count += 2 }', '      Button("Bump \\(model.count)") { model.bump() }'))
+
+    expect(texts(r)).toContain('Bump 1')
+    expect(texts(tap(r, 'Bump 1'))).toContain('Bump 3')
+  })
+
+  it('starts only the data whose type changed afresh', () => {
+    const first = draw(app('  var count = 0\n  func bump() { count += 1 }', '      Button("Bump \\(model.count)") { model.bump() }'))
+    tap(first, 'Bump 0')
+    const tapped = tap(rerender(revision++), 'Tap 0')
+    expect(texts(tapped)).toEqual(expect.arrayContaining(['Bump 1', 'Tap 1']))
+
+    const r = draw(app('  var count = 0\n  var step = 1\n  func bump() { count += step }', '      Button("Bump \\(model.count)") { model.bump() }'))
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toEqual(expect.arrayContaining(['Bump 0', 'Tap 1']))
+  })
+
+  it('draws a property an edit adds to the class a model inherits from', () => {
+    const inherited = (fields: string, content: string) => draw(`import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView() } } }
+class Base {
+  var count = 1
+${fields}
+}
+final class Model: Base {}
+struct ContentView: View {
+  @State private var model = Model()
+  var body: some View {
+    VStack {
+${content}
+    }
+  }
+}`)
+    inherited('', '      Text("Count \\(model.count)")')
+
+    const r = inherited('  var limit = 3', '      Text("Count \\(model.count) of \\(model.limit)")')
+
+    expect(stopped(r)).toEqual([])
+    expect(texts(r)).toContain('Count 1 of 3')
+  })
+
+  it('keeps what was done in the preview when an edit moves code with a loop in it', () => {
+    const steps = '  var steps: [Int] = {\n    var all: [Int] = []\n    for step in 1...3 { all.append(step) }\n    return all\n  }()'
+    const order = `  @State private var order: [Int] = {
+    var all: [Int] = []
+    for place in 1...3 { all.append(place) }
+    return all
+  }()`
+    const content = '      Button("Bump \\(model.count)") { model.bump() }\n      Button("Order \\(order.count)") { order.append(0) }'
+    const first = draw(app(`  var count = 0\n${steps}\n  func bump() { count += 1 }`, content, order))
+    tap(first, 'Bump 0')
+    expect(texts(tap(rerender(revision++), 'Order 3'))).toEqual(expect.arrayContaining(['Bump 1', 'Order 4']))
+
+    const r = draw(app(`  var count = 0\n  func reset() { count = 0 }\n${steps}\n  func bump() { count += 1 }`, content, order))
+
+    expect(texts(r)).toEqual(expect.arrayContaining(['Bump 1', 'Order 4']))
+  })
+})
+
+describe('pilot: a number in a title is written as iOS 27 writes it', () => {
+  // A string literal given as a title is a `LocalizedStringKey`, which writes a number
+  // for the locale: separators, and a Double with six decimals. A String writes it as
+  // Swift does. Every expected text here is the iOS 27 simulator's.
+  const numbers = ['n = 2000', 'big = 1234567', 'neg = -1234', 'small = 7', 'd = 3.5', 'whole = 2.0', 'bigDouble = 1234.5', 'negDouble = -1234.5', 'pi = 3.14159']
+    .map(binding => `    let ${binding}`).join('\n') + `
+    let f: Float = 2.5
+    let cg: CGFloat = 1.5
+    let typed: CGFloat = 3
+    let label = "Var \\(n)"`
+  const drawn = (body: string, declarations = '') => texts(runView(`${numbers}\n  var body: some View {\n${body}\n  }`, declarations))
+
+  it('writes whole numbers with separators and every decimal with six places, in a Text written as a literal', () => {
+    expect(drawn(`    VStack {
+      Text("Int \\(n)")
+      Text("Big \\(big)")
+      Text("Neg \\(neg)")
+      Text("Small \\(small)")
+      Text("Double \\(d)")
+      Text("Whole \\(whole)")
+      Text("Big double \\(bigDouble)")
+      Text("Neg double \\(negDouble)")
+      Text("Float \\(f)")
+      Text("CGFloat \\(cg)")
+      Text("Typed \\(typed)")
+      Text("Mixed \\(n) of \\(d)")
+    }`)).toEqual(['Int 2,000', 'Big 1,234,567', 'Neg -1,234', 'Small 7', 'Double 3.500000', 'Whole 2.000000', 'Big double 1,234.500000',
+      'Neg double -1,234.500000', 'Float 2.500000', 'CGFloat 1.500000', 'Typed 3.000000', 'Mixed 2,000 of 3.500000'])
+  })
+
+  it('applies a specifier or a format written into the interpolation', () => {
+    expect(drawn(`    VStack {
+      Text("Spec \\(pi, specifier: "%.2f")")
+      Text("Spec big \\(bigDouble, specifier: "%.2f")")
+      Text("Spec int \\(n, specifier: "%d")")
+      Text("Pct \\(0.256 * 100, specifier: "%.1f")%")
+      Text("Price \\(342.5, format: .currency(code: "USD"))")
+    }`)).toEqual(['Spec 3.14', 'Spec big 1,234.50', 'Spec int 2,000', 'Pct 25.6%', 'Price $342.50'])
+  })
+
+  it('writes the value as Swift does when the preview cannot read its format, rather than stopping', () => {
+    const written = drawn(`    let day = Date(timeIntervalSince1970: 0)
+    return VStack {
+      Text("Pi \\(pi, format: .number.precision(.fractionLength(1)))")
+      Text("Day \\(day, format: .dateTime.month().day())")
+    }`)
+
+    expect(written[0]).toBe('Pi 3.14159')
+    expect(written[1]).toMatch(/^Day 1970/)
+  })
+
+  it('keeps Swift\'s own text for a String, however it reaches the view', () => {
+    expect(drawn(`    VStack {
+      Text(verbatim: "Verbatim \\(n)")
+      Text("Concat " + "\\(n)")
+      Text(label)
+      Text("Formatted \\(n.formatted())")
+      Text("Inner \\("x\\(n)")")
+      Row(title: "Row \\(n)")
+    }`, 'struct Row: View { let title: String; var body: some View { Text(title) } }')).toEqual(
+      ['Verbatim 2000', 'Concat 2000', 'Var 2000', 'Formatted 2,000', 'Inner x2000', 'Row 2000'])
+  })
+
+  it('writes the titles of the other views and modifiers that take one as a Text does', () => {
+    const r = compileView(viewSource(`${numbers}
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Section \\(n)") {
+          Label("Label \\(n)", systemImage: "star")
+          Button("Button \\(n)") {}
+          Toggle("Toggle \\(n)", isOn: .constant(true))
+          TextField("Field \\(n)", text: .constant(""))
+          LabeledContent("Labeled \\(n)", value: "Value \\(n)")
+          Stepper("Stepper \\(n)", value: .constant(1))
+          Link("Link \\(n)", destination: URL(string: "https://example.com")!)
+        }
+      }
+      .navigationTitle("Title \\(n)")
+    }
+  }`))
+
+    expect(r.diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(texts(r)).toEqual(expect.arrayContaining(['Section 2,000', 'Label 2,000', 'Button 2,000', 'Toggle 2,000', 'Labeled 2,000', 'Value 2000', 'Stepper 2,000', 'Link 2,000', 'Title 2,000']))
+    expect(nodes(r).some(n => n.hitTarget?.role === 'textField' && n.hitTarget.placeholder === 'Field 2,000')).toBe(true)
+  })
+})
+
+describe('pilot B1: an empty state as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro, and matched pixel for pixel by the
+  // same stack built from plain views: a 40-pt icon in the secondary colour, a bold
+  // title3 title 20 pt below it, the description in title3 3 pt below that, its lines
+  // centred and wrapped 32 pt in from each side, and 30 pt of space under it, the whole
+  // centred in the view.
+  const secondary = colorForName('secondaryLabel')!
+  const empty = (description: string, symbol = 'books.vertical') => screen(`  var body: some View {
+    ContentUnavailableView("No Books", systemImage: "${symbol}", description: Text("${description}"))
+  }`)
+  const textNode = (r: CompileResult, start: string) => nodes(r).find(n => n.text?.runs.some(run => run.text.startsWith(start)))!
+  const frameOf = (r: CompileResult, node: RenderNode) => worldFrame(nodes(r), node)
+  const parts = (r: CompileResult, description: string) => {
+    const icon = nodes(r).find(n => n.image?.symbol)!, title = textNode(r, 'No '), text = textNode(r, description)
+    return { icon, title, text, frames: { icon: frameOf(r, icon), title: frameOf(r, title), text: frameOf(r, text) } }
+  }
+
+  it('draws the icon, the title and the description in the sizes and colours iOS 27 gives them', () => {
+    const { icon, title, text } = parts(empty('Add a book to start your reading list.'), 'Add a book')
+
+    expect(icon.image!.font.size).toBe(40)
+    expect(icon.image!.color).toEqual(secondary)
+    expect(title.text!.runs[0]!.font).toMatchObject({ size: 20, weight: 700 })
+    expect(title.text!.runs[0]!.color).toEqual(colorForName('label'))
+    expect(text.text!.runs[0]!.font).toMatchObject({ size: 20, weight: 400, lineHeight: 25 })
+    expect(text.text!.runs[0]!.color).toEqual(secondary)
+  })
+
+  it('stacks them 20 and 3 pt apart, centred in the screen with 30 pt under the description', () => {
+    const { frames } = parts(empty('Add a book to start your reading list.'), 'Add a book')
+
+    expect(frames.title.y - (frames.icon.y + frames.icon.height)).toBeCloseTo(20, 1)
+    expect(frames.text.y - (frames.title.y + frames.title.height)).toBeCloseTo(3, 1)
+    // The safe area runs from 62 to 840, so its middle is 451.
+    expect((frames.icon.y + frames.text.y + frames.text.height + 30) / 2).toBeCloseTo(451, 1)
+    // Where the simulator puts the title and the description. The icon's box differs by
+    // symbol, 47.2 pt here and 50.33 on the phone, and half of that moves the text.
+    expect(Math.abs(frames.title.y - 445.67)).toBeLessThan(2)
+    expect(Math.abs(frames.text.y - 472.67)).toBeLessThan(2)
+  })
+
+  it('wraps a long description 32 pt in from each side, in centred lines', () => {
+    const { text, frames } = parts(empty('Tap the plus button to add the first book you are reading. It will show up here with your progress and your notes.', 'tray'), 'Tap the plus')
+
+    expect(text.text!.alignment).toBe('center')
+    expect(text.text!.lines!.length).toBeGreaterThan(2)
+    expect(frames.text.x).toBeGreaterThanOrEqual(32)
+    expect(frames.text.x + frames.text.width).toBeLessThanOrEqual(370)
+    expect(frames.text.x + frames.text.width / 2).toBeCloseTo(201, 0)
+  })
+
+  it('keeps the description centred and wrapped under a height limit, above a Form', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      VStack(spacing: 0) {
+        ContentUnavailableView("No Spot Saved", systemImage: "location.fill", description: Text("Enter your level, spot number and a note below, then save."))
+          .frame(maxHeight: 220)
+        Form { Section("Your Spot") { Text("Level") } }
+      }
+      .navigationTitle("Where Did I Park?")
+    }
+  }`)
+    const { text, frames } = parts(r, 'Enter your level')
+
+    expect(text.text!.alignment).toBe('center')
+    expect(text.text!.lines!.length).toBe(2)
+    expect(frames.text.x).toBeGreaterThanOrEqual(32)
+    expect(frames.text.x + frames.text.width).toBeLessThanOrEqual(370)
+    // In the simulator the view is 220 pt tall from y 168, and its group is centred in it.
+    expect((frames.icon.y + frames.text.y + frames.text.height + 30) / 2).toBeCloseTo(168 + 110, 0)
+  })
+})
+
+describe('pilot B3: a disabled button is grey, as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro, light. A disabled button's title
+  // turns a grey that depends on where it sits, and a bordered or prominent button's
+  // fill turns the system grey. Nothing fades, and the toolbar keeps its glass.
+  const titled = (r: CompileResult, value: string) => nodes(r).find(n => n.text?.runs.some(run => run.text === value))!
+  const colorOf = (r: CompileResult, value: string) => titled(r, value).text!.runs[0]!.color
+  const fillBehind = (r: CompileResult, value: string) => {
+    const text = placed(r, value)
+    const inside = (n: RenderNode) => { const f = worldFrame(nodes(r), n); return f.x <= text.x && f.y <= text.y && f.x + f.width >= text.x + text.width && f.y + f.height >= text.y + text.height }
+    return nodes(r).filter(n => n.background?.kind === 'solid' && inside(n)).map(n => n.background!.kind === 'solid' ? n.background!.color : null).at(-1)
+  }
+
+  it('greys the title of a button in a form row and in the toolbar, and leaves the enabled ones tinted', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      Form {
+        Button("Save Spot") { }.disabled(true)
+        Button("Enabled Row") { }
+      }
+      .navigationTitle("Disabled")
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) { Button("Save") { }.disabled(true) }
+      }
+    }
+  }`)
+
+    expect(colorOf(r, 'Save Spot')).toEqual(rgba(0, 0, 0, 0.25))
+    expect(colorOf(r, 'Save')).toEqual(rgba(60, 60, 67, 0.41))
+    expect(colorOf(r, 'Enabled Row')).toEqual(colorForName('accentColor'))
+    expect(titled(r, 'Save Spot').opacity).toBe(1)
+    expect(titled(r, 'Save').opacity).toBe(1)
+  })
+
+  it('greys a disabled button\'s icon with its title, where its label is a Label in a form row', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      Form {
+        Button { } label: { Label("Save Spot", systemImage: "star") }.disabled(true)
+        Button { } label: { Label("Park", systemImage: "star.fill") }
+      }
+    }
+  }`)
+    const icon = (symbol: string) => nodes(r).find(n => n.image?.symbol === symbol)!
+
+    expect(colorOf(r, 'Save Spot')).toEqual(rgba(0, 0, 0, 0.25))
+    expect(icon('star').image!.color).toEqual(rgba(0, 0, 0, 0.25))
+    expect(icon('star').opacity).toBe(1)
+    // An enabled one keeps its tint on both halves.
+    expect(colorOf(r, 'Park')).toEqual(colorForName('accentColor'))
+    expect(icon('star.fill').image!.color).toEqual(colorForName('accentColor'))
+  })
+
+  it('greys a button on its own, and the fill and title of a bordered or prominent one', () => {
+    const r = screen(`  var body: some View {
+    VStack(spacing: 24) {
+      Button("Plain off") { }.disabled(true)
+      Button("Bordered off") { }.buttonStyle(.bordered).disabled(true)
+      Button("Prominent off") { }.buttonStyle(.borderedProminent).disabled(true)
+      Button("Prominent on") { }.buttonStyle(.borderedProminent)
+    }
+  }`)
+
+    expect(colorOf(r, 'Plain off')).toEqual(colorForName('tertiaryLabel'))
+    for (const title of ['Bordered off', 'Prominent off']) {
+      expect(colorOf(r, title), title).toEqual(rgba(60, 60, 67, 0.225))
+      expect(fillBehind(r, title), title).toEqual(rgba(120, 120, 128, 0.16))
+      expect(titled(r, title).opacity, title).toBe(1)
+    }
+    expect(fillBehind(r, 'Prominent on')).toEqual(colorForName('accentColor'))
+  })
+})
+
+describe('pilot B6: list rows as iOS 27 draws them', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro. A Label's icon in a row is a
+  // quarter larger than the row's text and centred 12 pt in, with the title at 72. Each
+  // separator starts under the row's first text: 72 under a Label, in a NavigationLink
+  // too, under the text beside an icon, and at 32 under text alone.
+  const rows = () => screen(`  var body: some View {
+    NavigationStack {
+      List {
+        Label("Books", systemImage: "books.vertical")
+        NavigationLink { Text("x") } label: { Label("Linked", systemImage: "books.vertical") }
+        NavigationLink { Text("x") } label: { HStack { Image(systemName: "books.vertical"); Text("Stacked") } }
+        Label("Star", systemImage: "star")
+        Text("Text only")
+        NavigationLink("Plain link") { Text("x") }
+      }
+      .navigationTitle("Rows")
+    }
+  }`)
+  const separators = (r: CompileResult) => nodes(r)
+    .filter(n => n.background?.kind === 'solid' && n.background.color.a === colorForName('separator')!.a && worldFrame(nodes(r), n).height <= 1)
+    .map(n => worldFrame(nodes(r), n))
+    .sort((a, b) => a.y - b.y)
+
+  it('draws a Label\'s icon a quarter larger than the row\'s text, centred 12 pt in, with its title at 72', () => {
+    const r = rows()
+    const icons = nodes(r).filter(n => n.image?.symbol === 'books.vertical' || n.image?.symbol === 'star')
+
+    for (const title of ['Books', 'Linked', 'Star']) expect(placed(r, title).x, title).toBeCloseTo(72, 1)
+    const labelled = icons.filter(n => n.image!.color.b === 255)
+    expect(labelled).toHaveLength(3)
+    for (const icon of labelled) {
+      expect(icon.image!.font.size * (icon.image!.symbolScale ?? 1)).toBeCloseTo(17 * 1.25, 1)
+      const f = worldFrame(nodes(r), icon)
+      expect(f.x + f.width / 2).toBeCloseTo(44, 0)
+    }
+  })
+
+  it('starts a separator under the text of a row drawn faded, however it is faded', () => {
+    const r = screen(`  var body: some View {
+    NavigationStack {
+      List {
+        Label("Faded", systemImage: "star").opacity(0.5)
+        NavigationLink { Text("x") } label: { Label("Off", systemImage: "star") }.disabled(true)
+        Text("Last")
+      }
+    }
+  }`)
+
+    expect(separators(r).map(line => line.x)).toEqual([expect.closeTo(72, 1), expect.closeTo(72, 1)])
+  })
+
+  it('starts each separator under the row\'s first text', () => {
+    const r = rows()
+    const lines = separators(r)
+
+    expect(lines).toHaveLength(5)
+    // The line is snapped to the device's pixels, a third of a point.
+    expect(lines.map(line => line.x)).toEqual([72, 72, placed(r, 'Stacked').x, 72, 32].map(x => expect.closeTo(Math.round(x * 3) / 3, 1)))
+    for (const line of lines) expect(line.x + line.width).toBeCloseTo(370, 0)
+    // Rows keep iOS's pitch, the larger icon reaching past a line of text without growing its row.
+    for (const [i, line] of lines.slice(1).entries()) expect(line.y - lines[i]!.y).toBeCloseTo(52, 0)
+  })
+})
+
+describe('pilot B2: the toolbar as iOS 27 draws it', () => {
+  // Measured in the iOS 27 simulator on iPhone 18 Pro. A Label in the toolbar shows its
+  // icon only, at the large image scale, in a 44-pt glass circle. Text sits in a glass
+  // capsule 44 pt tall, 16 pt in for a Button and 10 for a NavigationLink. Items are the
+  // label colour unless a tint is written, and items side by side share one capsule:
+  // 3 pt in at its ends, 10 pt apart, an icon 44 pt wide and text 8 pt in.
+  const bar = (items: string, tint = '', inner = '') => screen(`  var body: some View {
+    NavigationStack {
+      Text("Body")
+        .navigationTitle("Tools")
+        .toolbar {
+${items}
+        }${inner}
+    }${tint}
+  }`)
+  const colorOf = (r: CompileResult, value: string) => nodes(r).find(n => n.text?.runs.some(run => run.text === value))!.text!.runs[0]!.color
+  const glass = (r: CompileResult) => nodes(r).filter(n => n.clip && n.id.includes('glass')).map(n => worldFrame(nodes(r), n)).sort((a, b) => a.x - b.x)
+  const label = colorForName('label')!
+
+  it('draws a Label as its icon alone, in a 44-pt glass circle, in the label colour', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add Item", systemImage: "plus") } }')
+    const icon = nodes(r).find(n => n.image?.symbol === 'plus')!
+
+    expect(texts(r)).not.toContain('Add Item')
+    expect(icon.image!.symbolScale).toBeCloseTo(1.3, 2)
+    expect(icon.image!.color).toEqual(label)
+    expect(glass(r)).toEqual([expect.objectContaining({ x: 342, width: 44, height: 44 })])
+  })
+
+  it('pads a Button\'s text 16 pt and a NavigationLink\'s 10 pt, 44 pt tall, in the label colour', () => {
+    const r = bar(`          ToolbarItem(placement: .topBarLeading) { NavigationLink("Skip") { Text("Next") } }
+          ToolbarItem(placement: .topBarTrailing) { Button("History") { } }`)
+    const [skip, history] = glass(r)
+
+    expect(skip).toMatchObject({ x: 16, height: 44 })
+    expect(skip!.width).toBeCloseTo(placed(r, 'Skip').width + 20, 1)
+    expect(history!.width).toBeCloseTo(placed(r, 'History').width + 32, 1)
+    expect(history!.x + history!.width).toBeCloseTo(386, 1)
+    expect(colorOf(r, 'Skip')).toEqual(label)
+    expect(colorOf(r, 'History')).toEqual(label)
+  })
+
+  it('draws the items in a tint that is written, on the stack or on its content', () => {
+    const teal = colorForName('teal')!
+    const items = `          ToolbarItem(placement: .topBarLeading) { Button("Save") { } }
+          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add", systemImage: "plus") } }`
+
+    for (const r of [bar(items, '\n    .tint(.teal)'), bar(items, '', '\n        .tint(.teal)')]) {
+      expect(colorOf(r, 'Save')).toEqual(teal)
+    }
+    expect(nodes(bar(items, '\n    .tint(.teal)')).find(n => n.image?.symbol === 'plus')!.image!.color).toEqual(teal)
+  })
+
+  it('puts items side by side in one capsule', () => {
+    const r = bar(`          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Settings", systemImage: "gearshape") } }
+          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Share", systemImage: "square.and.arrow.up") } }
+          ToolbarItem(placement: .topBarLeading) { Button { } label: { Label("Add", systemImage: "plus") } }
+          ToolbarItem(placement: .topBarTrailing) { Button("Edit") { } }
+          ToolbarItem(placement: .topBarTrailing) { Button { } label: { Label("Add", systemImage: "plus") } }`)
+    const [icons, mixed] = glass(r)
+
+    expect(glass(r)).toHaveLength(2)
+    expect(icons).toMatchObject({ x: 16, width: 3 + 44 + 10 + 44 + 10 + 44 + 3, height: 44 })
+    expect(mixed!.width).toBeCloseTo(3 + 8 + placed(r, 'Edit').width + 8 + 10 + 44 + 3, 1)
+    expect(mixed!.x + mixed!.width).toBeCloseTo(386, 1)
+  })
+
+  it('draws a NavigationLink to a Label as its icon alone too, as restaurant\'s Cart and pomodoro\'s Settings are written', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { NavigationLink { Text("Cart") } label: { Label("Cart", systemImage: "cart") } }')
+    const icon = nodes(r).find(n => n.image?.symbol === 'cart')!
+
+    expect(texts(r)).not.toContain('Cart')
+    expect(icon.image!.symbolScale).toBeCloseTo(1.3, 2)
+    expect(glass(r)).toEqual([expect.objectContaining({ x: 342, width: 44, height: 44 })])
+  })
+
+  it('pushes a NavigationLink\'s destination when it is tapped in the toolbar', () => {
+    const r = bar('          ToolbarItem(placement: .topBarTrailing) { NavigationLink("History") { Text("Past sessions") } }')
+
+    expect(controls(r)).toContain('History')
+    expect(texts(tap(r, 'History'))).toContain('Past sessions')
+  })
+})
+
+describe('pilot B13: a continuous corner as iOS 27 draws it', () => {
+  // How far below a shape's top its edge is, at each distance in from its left side,
+  // traced from the iOS 27 simulator on iPhone 18 Pro. The curve reaches 1.53 times the
+  // radius along each edge, and where a side is too short, as on a one-row card or a
+  // 44-pt square, the part along that edge is squeezed into half of it.
+  const measured: readonly (readonly [string, number, number, number, readonly number[]])[] = [
+    ['a card', 26, 200, 120, [14.93, 11.26, 6.64, 3.82, 1.96, 0.97]],
+    ['a one-row card', 26, 370, 52, [14.62, 11.25, 6.64, 3.82, 1.96, 0.96]],
+    ['a 44-pt square', 22, 44, 44, [11.61, 8.57, 4.57, 2.16, 0.66, 0.06]],
+    ['a short bar', 20, 120, 40, [10.22, 7.25, 3.59, 1.58, 0.62, 0.24]],
+    ['a small radius', 12, 120, 40, [4.57, 2.57, 0.63, 0.14, 0.03, 0]],
+  ]
+  const across = [2.5, 4.5, 8.5, 12.5, 16.5, 20.5]
+
+  /** The outline's points, sampling each cubic, from the path data `shapePath` writes. */
+  const outline = (d: string) => {
+    const tokens = d.match(/[MVHCZ]|-?[\d.]+(e-?\d+)?/g)!
+    const points: [number, number][] = []
+    let at: [number, number] = [0, 0], i = 0, command = ''
+    const next = () => Number(tokens[i++])
+    while (i < tokens.length) {
+      if (/[MVHCZ]/.test(tokens[i]!)) command = tokens[i++]!
+      if (command === 'M') at = [next(), next()]
+      else if (command === 'V') at = [at[0], next()]
+      else if (command === 'H') at = [next(), at[1]]
+      else if (command === 'C') {
+        const [a, b, c, d]: [number, number][] = [at, [next(), next()], [next(), next()], [next(), next()]]
+        const bezier = (t: number, k: 0 | 1) => (1 - t) ** 3 * a![k] + 3 * (1 - t) ** 2 * t * b![k] + 3 * (1 - t) * t ** 2 * c![k] + t ** 3 * d![k]
+        for (let t = 0; t <= 1; t += 1 / 400) points.push([bezier(t, 0), bezier(t, 1)])
+        at = d!
+      } else if (command === 'Z') break
+      points.push(at)
+    }
+    return points
+  }
+  const depthAt = (points: readonly [number, number][], width: number, height: number, x: number) => {
+    const corner = points.filter(([px, py]) => px <= width / 2 && py <= height / 2)
+    const nearest = corner.reduce((best, p) => Math.abs(p[0] - x) < Math.abs(best[0] - x) ? p : best)
+    return Math.abs(nearest[0] - x) > 0.5 ? 0 : nearest[1]
+  }
+
+  it.each(measured)('curves %s as the simulator does, within half a point', (_, radius, width, height, depths) => {
+    const points = outline(shapePath('roundedRectangle', width, height, radius, 'continuous'))
+
+    across.forEach((x, i) => expect(Math.abs(depthAt(points, width, height, x) - depths[i]!), `${x} pt in`).toBeLessThan(0.45))
+  })
+})
+
+describe('pilot B10: the app\'s accent, for the export', () => {
+  // In the iOS 27 simulator, Color.accentColor follows a tint written on a navigation
+  // container, and stays the system blue under a tint written on its content, as in
+  // streaks. The preview draws the root tint everywhere, so the export writes it into
+  // AccentColor, and the phone shows it everywhere too.
+  const accentOf = (app: string, views: string) => buildAuthoringModel({ projectId: 'p', revision: 1, files: [{ id: 'App.swift', text: `import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ${app} } } }
+${views}` }] }).accent
+  const teal = { light: '#00C3D0', dark: '#40C8E0' }
+
+  it('is the tint written on the content of the root view\'s navigation stack, as in streaks', () => {
+    expect(accentOf('HomeView()', `struct HomeView: View {
+  var body: some View {
+    NavigationStack {
+      ScrollView { Circle().fill(Color.accentColor) }
+        .navigationTitle("Streaks")
+        .tint(.teal)
+    }
+  }
+}`)).toEqual(teal)
+  })
+
+  it('is the tint written on the window\'s view, or on the tab view the root view is', () => {
+    expect(accentOf('ContentView().tint(Color.indigo)', 'struct ContentView: View { var body: some View { Text("x") } }')).toEqual({ light: '#6155F5', dark: '#5E5CE6' })
+    expect(accentOf('ContentView()', `struct ContentView: View {
+  var body: some View {
+    TabView { Text("A").tabItem { Label("A", systemImage: "star") } }
+      .tint(.teal)
+  }
+}`)).toEqual(teal)
+  })
+
+  it('follows a token the project declares to the colour it was given', () => {
+    expect(accentOf('ContentView().tint(.brand)', `struct ContentView: View { var body: some View { Text("x") } }
+extension Color { static let brand = Color.teal }`)).toEqual(teal)
+    const model = buildAuthoringModel({ projectId: 'p', revision: 1, colors: [{ name: 'Brand', light: '#112233', dark: '#445566' }], files: [{ id: 'App.swift', text: `import SwiftUI
+@main struct Demo: App { var body: some Scene { WindowGroup { ContentView().tint(Theme.accent) } } }
+struct ContentView: View { var body: some View { Text("x") } }
+enum Theme { static let accent = Color("Brand") }` }] })
+    expect(model.accent).toEqual({ light: '#112233', dark: '#445566' })
+  })
+
+  it('is none when no tint is written at the root, or only on one control inside a screen', () => {
+    expect(accentOf('ContentView()', 'struct ContentView: View { var body: some View { Text("x") } }')).toBeUndefined()
+    expect(accentOf('ContentView()', `struct ContentView: View {
+  var body: some View {
+    VStack { Button("Delete") { }.tint(.red) }
+  }
+}`)).toBeUndefined()
+  })
+})
+
+describe('pilot B8: the symbols the AI apps drew, as look-alikes of iOS 27\'s', () => {
+  // Apple's artwork cannot ship on the web, so each is drawn here after the iOS 27
+  // simulator's glyph, checked beside it: 14 were another shape (a mug for a cup and
+  // saucer, a drop for a flame, an open book for a closed one) and 3 were the "?" box.
+  const drawn = ['cup.and.saucer.fill', 'flame.fill', 'suitcase', 'waveform', 'arrow.uturn.backward', 'book.closed', 'chart.bar', 'chart.line.uptrend.xyaxis', 'thermometer', 'leaf.fill', 'chart.pie', 'square.grid.2x2', 'square.and.pencil', 'photo', 'chart.bar.fill', 'mug.fill', 'square.and.pencil.circle']
+
+  it.each(drawn)('draws %s as a shape of its own', name => {
+    const asset = symbolAsset(name)
+
+    expect(asset).not.toBeNull()
+    expect(asset!.source).toBe('fallback')
+  })
+
+  it.each(['chart.pie', 'square.grid.2x2', 'chart.bar', 'suitcase', 'book.closed'])('draws %s in outline, as iOS does', name => {
+    expect(symbolAsset(name)!.body).not.toContain('fill="currentColor"')
+  })
+
+  it('gives the cup and saucer the width of its saucer', () => {
+    expect(symbolAsset('cup.and.saucer.fill')!.viewBox).toBe('-40 0 592 512')
   })
 })

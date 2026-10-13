@@ -37,12 +37,12 @@ describe('the preview standard library the model is told about', () => {
 
   it('names every member and free function the editor table has, which the runtime is tested against', () => {
     for (const [type, members] of STDLIB_MEMBERS) {
-      const line = PREVIEW_STDLIB.split('\n').find(text => text.startsWith('- ') && text.slice(2).split(':')[0]!.split(', ').includes(type))
+      const line = PREVIEW_STDLIB.split('\n').map(text => text.trim()).find(text => text.startsWith('- ') && text.slice(2).split(':')[0]!.split(', ').includes(type))
       expect(line, type).toBeDefined()
       for (const member of members) expect(line!.split(': ')[1]!.split(', '), `${type}.${member.name}`).toContain(member.name)
     }
     for (const name of FREE_FUNCTIONS.keys()) expect(PREVIEW_STDLIB).toContain(name)
-    expect(PREVIEW_STDLIB).toMatch(/- Set: .*\bsubtracting\b/)
+    expect(PREVIEW_STDLIB).toMatch(/ {2}- Set: .*\bsubtracting\b/)
   })
 
   it.each(PREVIEW_INITIALIZERS)('runs %s, which it offers as a way to make a value', expression => {

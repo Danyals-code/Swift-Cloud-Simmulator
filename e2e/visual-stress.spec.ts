@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
+import { openCounter } from './designer-helpers'
 import { readFileSync } from 'node:fs'
 
 const source = readFileSync(new URL('../tests/fixtures/ios27-visual-stress.swift', import.meta.url), 'utf8')
 
 test('visual stress fixture: alert editing and fixed-height colored sheet', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   // Code opens with the preview pointing at views; this test taps it as an app.
   await page.getByTestId('live-toggle').click()
@@ -40,8 +40,7 @@ test('visual stress fixture: alert editing and fixed-height colored sheet', asyn
 
 
 test('context-menu gestures preserve button actions and text fields submit', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTestId('gallery-dismiss').click()
+  await openCounter(page)
   await page.getByTestId('workspace-develop').click()
   // Code opens with the preview pointing at views; this test taps it as an app.
   await page.getByTestId('live-toggle').click()

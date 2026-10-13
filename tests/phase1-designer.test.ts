@@ -98,6 +98,39 @@ describe('working screen links from the insertion library', () => {
     expect(applyEvent({ kind: 'tap', handlerId: target.hitTarget!.handlerId, location: { x: 0, y: 0 } })).toBe(true)
     expect(rerender(2).renderTree!.nodes.flatMap(n => n.text?.runs.map(r => r.text) ?? [])).toContain('Details')
   })
+  it('adds a link to a pushed screen with a #Preview of its own onto the stack it is on (D13)', () => {
+    const source = `import SwiftUI
+@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            NavigationLink("Details") { DetailsScreen() }
+        }
+    }
+}
+struct DetailsScreen: View {
+    var body: some View {
+        VStack {
+            Text("Start")
+        }
+    }
+}
+
+#Preview {
+    DetailsScreen()
+}
+`
+    const result = plan(source, 'Text', { kind: 'insert', snippet })
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.changes[0]!.after!.match(/NavigationStack/g)).toHaveLength(1)
+  })
+  it('indents what it wraps as the screen is indented, with tabs where it uses tabs (D13)', () => {
+    const source = 'import SwiftUI\n@main struct DemoApp: App { var body: some Scene { WindowGroup { ContentView() } } }\nstruct ContentView: View {\n\tvar body: some View {\n\t\tVStack {\n\t\t\tText("Start")\n\t\t}\n\t}\n}\n'
+    const result = plan(source, 'Text', { kind: 'insert', snippet })
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.changes[0]!.after).toContain('\tvar body: some View {\n\t\tNavigationStack {\n\t\t\tVStack {\n\t\t\t\tText("Start")\n')
+    expect(result.changes[0]!.after).toContain('\t\t\t}\n\t\t}\n\t}\n}\n')
+  })
   it.each(['NavigationStack', 'NavigationView'])('uses the existing %s', container => {
     const changed = edit(wrap(`${container} { VStack { Text("Start") } }`), 'VStack', { kind: 'insert', snippet })
     expect(changed.match(/NavigationStack|NavigationView/g)).toHaveLength(1)

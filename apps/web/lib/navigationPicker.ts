@@ -1,4 +1,5 @@
 import type { AuthoringSnapshot, NavigationDestination, PagePreview, SourceFile, ViewLayer } from '@studio/shared'
+import { sourceDefinitionAround } from './sourceLayers'
 
 /** Pick the screen's component, never a component nested inside its content. */
 export function navigationDestinationForPage(page: PagePreview, destinations: readonly NavigationDestination[], snapshot: AuthoringSnapshot | undefined, files: readonly SourceFile[]): { destination?: NavigationDestination; reason?: string } {
@@ -11,7 +12,7 @@ export function navigationDestinationForPage(page: PagePreview, destinations: re
     }
   }
   const root = content(page.viewHierarchy ?? [])
-  const owner = root?.source && snapshot?.nodes.filter(node => node.kind === 'definition' && node.source.file === root.source!.file && node.source.start <= root.source!.start && node.source.end >= root.source!.end).sort((a, b) => (a.source.end - a.source.start) - (b.source.end - b.source.start))[0]
+  const owner = root?.source && sourceDefinitionAround(snapshot, root.source)
   const component = [...(root?.componentSources ?? [])].reverse().find(component => component.name === owner?.name)
   if (!component) return { reason: 'This screen is defined inline. Choose a reusable screen from Navigate to.' }
   const expression = files.find(file => file.id === component.source.file)?.text.slice(component.source.start, component.source.end).trim()
