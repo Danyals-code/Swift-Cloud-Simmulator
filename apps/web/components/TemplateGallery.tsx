@@ -20,7 +20,7 @@ import styles from './TemplateGallery.module.css'
 
 const ImportReview = dynamic(() => import('./ImportReview').then(m => m.ImportReview))
 
-const PromptCreator = dynamic(() => import('./PromptCreator').then(m => m.PromptCreator), { loading: () => <p className="p-8 text-xc-text-2">Loading project creator…</p> })
+const PromptCreator = dynamic(() => import('./PromptCreator').then(m => m.PromptCreator), { loading: () => <p className="px-6 text-body text-xc-text-3">Loading project creator…</p> })
 
 /** Welcome window and project browser. Template sources load only after selection. */
 
@@ -63,9 +63,9 @@ export interface TemplateGalleryProps {
 const SOURCES: readonly { key: GallerySource; label: string; icon: IconName; hint: string }[] = [
   { key: 'design', label: 'Start designing', icon: 'inspect', hint: 'Start with a blank screen or an editable profile card' },
   { key: 'open', label: 'Your projects', icon: 'folder', hint: 'Continue a project or import Swift files' },
-  { key: 'prompt', label: 'Agentic Coding', icon: 'new-file', hint: 'Describe an app and generate its first version' },
+  { key: 'prompt', label: 'Create with AI', icon: 'new-file', hint: 'Describe an app and generate its first version' },
   { key: 'app', label: 'App templates', icon: 'screens', hint: 'Complete apps with connected screens' },
-  { key: 'feature', label: 'Features', icon: 'grid', hint: 'Small examples of one SwiftUI concept' },
+  { key: 'feature', label: 'Examples', icon: 'grid', hint: 'Small examples of one SwiftUI concept' },
 ]
 
 export function TemplateGallery({
@@ -284,28 +284,24 @@ export function TemplateGallery({
                 data-testid={`gallery-source-${item.key}`}
                 className={styles.navItem}
               >
-                <Icon name={item.icon} size={17} />
+                <Icon name={item.icon} size={16} />
                 <span>{item.label}</span>
                 {(item.key === 'app' || item.key === 'feature') && <small>{item.key === 'app' ? apps.length : features.length}</small>}
               </button>
             ))}
           </nav>
-          <div className={styles.sidebarNote}>
-            <strong>Swift Web Studio</strong>
-            <p>Local projects.<br />Live preview. Xcode export.</p>
-          </div>
         </aside>
 
         <div className={styles.main}>
           <header className={styles.header}>
             <div>
-              <h2>{source === 'design' ? 'Start designing' : source === 'open' ? 'Your projects' : source === 'app' ? 'App templates' : source === 'prompt' ? 'Agentic Coding' : 'Feature examples'}</h2>
+              <h2>{source === 'design' ? 'Start designing' : source === 'open' ? 'Your projects' : source === 'app' ? 'App templates' : source === 'prompt' ? 'Create with AI' : 'Examples'}</h2>
               <p className={styles.subtitle}>
                 {source === 'design' ? 'Start with a blank screen or make a starter your own.' : source === 'open' ? 'Continue working or import a Swift project.' : source === 'app' ? 'A starting point with connected screens and working interactions.' : source === 'prompt' ? 'Describe your app. Review its first version. Make it yours.' : 'SwiftUI examples to explore. Some advanced behaviors require Code.'}
               </p>
             </div>
             <button type="button" className={styles.close} onClick={onClose} disabled={creating} aria-label="Close welcome screen" data-testid="gallery-dismiss">
-              <Icon name="xmark" size={17} />
+              <Icon name="xmark" size={14} />
             </button>
           </header>
           {imported && onImport ? <ImportReview {...imported} incoming={imported.project} onCancel={() => setImported(null)} onApply={onImport} /> : source === 'prompt' ? <PromptCreator onOpenFiles={(files, history) => switching(options => onOpenFiles(files, { ...options, history }))} onBusy={setGenerationBusy} onDraft={setDraftWaiting} onConfirmDiscard={discard => setDiscarding(() => discard)} /> : source === 'open' ? (
@@ -330,11 +326,11 @@ export function TemplateGallery({
           ) : (
             <>
               <div className={styles.catalogBar}>
-                <span>{shown.length} {source === 'design' ? 'design starters' : source === 'app' ? 'app templates' : 'feature examples'}</span>
+                <span>{shown.length} {source === 'design' ? 'starter' : source === 'app' ? 'app template' : 'example'}{shown.length === 1 ? '' : 's'}</span>
                 <label className={styles.search}>
-                  <Icon name="search" size={15} />
-                  <input aria-label="Search templates" placeholder={source === 'design' ? 'Find a starter…' : source === 'app' ? 'Find an app…' : 'Find a feature…'} value={query} onChange={(event) => setQuery(event.target.value)} />
-                  {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><Icon name="xmark" size={13} /></button>}
+                  <Icon name="search" size={14} />
+                  <input aria-label="Search templates" placeholder={source === 'design' ? 'Find a starter…' : source === 'app' ? 'Find an app…' : 'Find an example…'} value={query} onChange={(event) => setQuery(event.target.value)} />
+                  {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><Icon name="xmark" size={10} weight={2} /></button>}
                 </label>
               </div>
               <div className={styles.catalog}>
@@ -344,21 +340,22 @@ export function TemplateGallery({
                       disabled={creating} onSelect={() => setSelected(item.id)} onConfirm={() => choose(item)} />
                   ))}
                 </div>
-                {shown.length === 0 && <div className={styles.empty} role="status"><Icon name="search" size={28} /><strong>No templates found</strong><p>Try “navigation”, “settings”, or “list”.</p><button type="button" onClick={() => setQuery('')}>Show all templates</button></div>}
+                {shown.length === 0 && <div className={styles.empty} role="status"><Icon name="search" size={24} /><strong>No templates found</strong><p>Try “navigation”, “settings”, or “list”.</p><button type="button" onClick={() => setQuery('')}>Show all templates</button></div>}
               </div>
               <TemplateDetail template={template} />
             </>
           )}
-          {source !== 'prompt' && <footer className={styles.footer}>
+          {/* The import review has its own actions; two rows of buttons ask the same question twice. */}
+          {source !== 'prompt' && !imported && <footer className={styles.footer}>
             <span className={styles.footerNote} role={createError ? 'alert' : undefined}>
-              {createError ?? (source === 'open' ? 'Projects are saved in this browser.' : 'Creates a new project, ready to edit and preview.')}
+              {createError ?? (source === 'open' ? 'Saved in this browser. Nothing is uploaded.' : 'Creates a new project, ready to edit and preview.')}
             </span>
             <div className={styles.actions}>
               <button type="button" className={styles.secondary} onClick={onClose} disabled={creating} data-testid="gallery-cancel">{atLaunch ? 'Not now' : 'Cancel'}</button>
               <button type="button" className={styles.primary} disabled={creating || (source !== 'open' && !template)} data-testid="template-confirm"
                 onClick={source === 'open' ? onClose : () => { if (template) choose(template) }}>
                 {creating ? 'Creating…' : source === 'design' ? 'Create design' : source === 'open' ? 'Continue editing' : source === 'app' ? 'Create app' : 'Open example'}
-                <Icon name="chevron-right" size={14} />
+                <Icon name="chevron-right" size={12} />
               </button>
             </div>
           </footer>}
@@ -379,6 +376,7 @@ export function TemplateGallery({
           cancel="Keep draft"
           confirm="Discard"
           testId="discard-draft-confirm"
+          destructive
           onCancel={() => setDiscarding(null)}
           onConfirm={() => {
             discarding()
@@ -395,6 +393,7 @@ export function TemplateGallery({
           cancel="Keep it"
           confirm="Delete"
           testId="delete-confirm"
+          destructive
           onCancel={() => setDeleting(null)}
           onConfirm={() => {
             onRemoveProject(deleting.id)
@@ -466,11 +465,11 @@ function OpenPane({
 }) {
   return (
     <div className={styles.openPane}>
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-xc-text-3">
+      <h3 className={styles.sectionLabel}>
         In this browser
       </h3>
 
-      <ul className="mt-2 space-y-1.5" data-testid="gallery-recents">
+      <ul className={styles.recents} data-testid="gallery-recents">
         {recents.map((summary) => (
           <RecentRow
             key={summary.id}
@@ -483,35 +482,31 @@ function OpenPane({
         ))}
       </ul>
 
-      <p className="mt-1.5 text-[11px] leading-relaxed text-xc-text-3">
+      {origin === 'recovered' || origin === 'shared' || recents.length > 1 ? <p className={styles.note}>
         {origin === 'recovered'
           ? 'Swift Web Studio closed unexpectedly, so nothing was reopened. Choose a project to open, or start a new one.'
           : origin === 'shared'
           ? 'The project open now arrived in a link. It is yours once you edit it.'
-          : recents.length > 1
-            ? 'Imported and generated projects are kept. Untouched catalog templates can be recreated from App templates.'
-            : 'Nothing here has left this browser.'}
-      </p>
+          : 'Templates you haven’t edited aren’t kept here. Start them again from App templates.'}
+      </p> : null}
 
-      <h3 className="mt-6 text-[10px] font-semibold uppercase tracking-wider text-xc-text-3">
+      <h3 className={styles.sectionLabel}>
         From your computer
       </h3>
 
-      <div className="mt-2 rounded-[8px] border border-dashed border-white/12 bg-xc-line-soft p-4">
-        <p className="text-[11.5px] leading-relaxed text-xc-text-2">
-          Open <span className="font-mono text-[11px] text-xc-text">.swift</span> files from
-          your project, or an exported{' '}
-          <span className="font-mono text-[11px] text-xc-text">.zip</span> archive. Your files stay on this device.
+      <div className={styles.importBox}>
+        <p>
+          Open <span className="font-mono">.swift</span> files, or a{' '}
+          <span className="font-mono">.zip</span> exported from the studio.
         </p>
-        <span className="mt-3 flex items-center gap-2">
+        <span className={styles.importRow}>
           <PushButton onClick={onBrowse} icon="folder" testId="gallery-browse">
             Choose files…
           </PushButton>
-          <span className="text-[11px] text-xc-text-3">Nothing is uploaded anywhere.</span>
         </span>
         {error ? (
-          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-xc-error" role="alert">
-            <Icon name="error" size={12} />
+          <p className={styles.openError} role="alert">
+            <Icon name="error" size={14} />
             {error}
           </p>
         ) : null}
@@ -542,24 +537,20 @@ function RecentRow({
   onRemove: () => void
 }) {
   return (
-    <li className="group/row flex items-center gap-1">
+    <li className={styles.recentRow}>
       <button
         type="button"
         onClick={onOpen}
         data-testid={open ? 'gallery-continue' : `gallery-open-${summary.id}`}
         aria-current={open ? 'true' : undefined}
-        className={`flex min-w-0 flex-1 items-center gap-3 rounded-[8px] border p-3 text-left transition-colors ${
-          open
-            ? 'border-xc-accent/60 bg-xc-accent/10'
-            : 'border-xc-line bg-xc-line-soft hover:border-xc-accent/60 hover:bg-xc-line-soft'
-        }`}
+        className={styles.recent}
       >
-        <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[7px] bg-xc-line-soft text-[13px] font-medium text-xc-text">
+        <span className={styles.recentInitial}>
           {summary.name.slice(0, 1).toUpperCase()}
         </span>
-        <span className="min-w-0">
-          <span className="block truncate text-[12.5px] text-xc-text">{summary.name}</span>
-          <span className="block truncate text-[11px] text-xc-text-3">
+        <span className={styles.recentCopy}>
+          <span className={styles.recentName}>{summary.name}</span>
+          <span className={styles.recentMeta}>
             {summary.fileCount} {summary.fileCount === 1 ? 'file' : 'files'}
             {' · '}
             {open
@@ -569,7 +560,7 @@ function RecentRow({
               : `edited ${relative(summary.updatedAt)}`}
           </span>
         </span>
-        <Icon name="chevron-right" size={12} className="ml-auto shrink-0 text-xc-text-3" />
+        <Icon name="chevron-right" size={12} className={styles.recentChevron} />
       </button>
 
       <button
@@ -579,7 +570,7 @@ function RecentRow({
         aria-label={`Delete ${summary.name}`}
         title={open ? 'Open another project first' : `Delete ${summary.name} from this browser`}
         data-testid={`gallery-remove-${summary.id}`}
-        className="grid h-[30px] w-[26px] shrink-0 place-items-center rounded-[6px] text-xc-text-3 opacity-0 transition-opacity hover:bg-xc-line-soft hover:text-xc-error focus-visible:opacity-100 disabled:pointer-events-none group-hover/row:opacity-100"
+        className={styles.remove}
       >
         <Icon name="xmark" size={12} />
       </button>
@@ -625,14 +616,15 @@ function TemplateCard({ template, selected, disabled, onSelect, onConfirm }: {
   const [symbol, color] = TEMPLATE_ART[template.id] ?? ['code-slash', '#7ab8ff']
   return (
     <button type="button" onClick={onSelect} onDoubleClick={onConfirm} aria-pressed={selected} disabled={disabled}
-      data-testid={`template-${template.id}`} className={template.kind === 'app' ? styles.appCard : styles.featureCard}>
+      // The Gallery example would otherwise share `template-gallery` with the sheet itself.
+      data-testid={template.id === 'gallery' ? 'template-gallery-example' : `template-${template.id}`} className={template.kind === 'app' ? styles.appCard : styles.featureCard}>
       <span className={styles.templateIcon} style={{ color, backgroundColor: `${color}18` }}><GallerySymbol name={symbol} /></span>
       <span className={styles.cardCopy}>
         <span className={styles.cardTitle}>{template.name}</span>
         <span className={styles.cardTagline}>{template.tagline}</span>
         {template.kind === 'app' && <span className={styles.cardMeta}>{template.highlights?.length ?? 3} screens · {template.files.length} files</span>}
       </span>
-      <span className={styles.selectedMark}>{selected && <Icon name="check" size={12} />}</span>
+      <span className={styles.selectedMark}>{selected && <Icon name="check" size={10} weight={2.25} />}</span>
     </button>
   )
 }
@@ -682,9 +674,9 @@ function UnsavedConfirm({ projectName, onStay, onSwitch }: { projectName: string
   const { status, busy, download } = useRecoveryActions()
   return (
     <Dialog icon="error" title={`“${projectName}” is not saved`} testId="unsaved-confirm" wide onDismiss={onStay}>
-      <p className="mt-1.5 text-[11.5px] leading-relaxed text-xc-text-2">This browser could not save your latest changes to it. Download a copy before you switch, or those changes will be lost.</p>
-      {status ? <p className="mt-2 text-[11px] text-xc-text-3" role="status">{status}</p> : null}
-      <span className={`${recovery.actions} mt-4 justify-center`}>
+      <p className={styles.dialogBody}>This browser could not save your latest changes to it. Download a copy before you switch, or those changes will be lost.</p>
+      {status ? <p className={styles.dialogNote} role="status">{status}</p> : null}
+      <span className={`${recovery.actions} ${styles.dialogActions}`}>
         <button type="button" onClick={onStay}>Stay here</button>
         <button type="button" onClick={onSwitch}>Switch anyway</button>
         <button type="button" data-primary disabled={busy} onClick={download}>Download this project</button>
@@ -701,6 +693,7 @@ function Confirm({
   cancel,
   confirm,
   testId,
+  destructive = false,
   onCancel,
   onConfirm,
 }: {
@@ -711,18 +704,20 @@ function Confirm({
   cancel: string
   confirm: string
   testId: string
+  /** Confirming deletes or discards something that cannot come back. */
+  destructive?: boolean
   onCancel: () => void
   onConfirm: () => void
 }) {
   return (
     <Dialog icon={icon} title={title} testId={testId} onDismiss={onCancel}>
-      <p className="mt-1.5 text-[11.5px] leading-relaxed text-xc-text-2">{body}</p>
-      <p className="mt-2 text-[11px] text-xc-text-3">{note}</p>
-      <span className="mt-4 flex items-center justify-center gap-2">
+      <p className={styles.dialogBody}>{body}</p>
+      <p className={styles.dialogNote}>{note}</p>
+      <span className={styles.dialogActions}>
         <PushButton onClick={onCancel} testId={`${testId}-cancel`}>
           {cancel}
         </PushButton>
-        <PushButton onClick={onConfirm} active testId={`${testId}-button`}>
+        <PushButton onClick={onConfirm} variant={destructive ? 'danger' : 'primary'} testId={`${testId}-button`}>
           {confirm}
         </PushButton>
       </span>
@@ -746,7 +741,7 @@ function Dialog({ icon, title, testId, wide = false, onDismiss, children }: {
 }) {
   return (
     <div
-      className="fixed inset-0 z-[960] grid place-items-center bg-black/40"
+      className={styles.dialogBackdrop}
       onPointerDown={(event) => { event.stopPropagation(); onDismiss() }}
       data-testid={testId}
     >
@@ -755,16 +750,13 @@ function Dialog({ icon, title, testId, wide = false, onDismiss, children }: {
         aria-modal="true"
         aria-label={title}
         onPointerDown={(event) => event.stopPropagation()}
-        className={`${wide ? 'w-[min(420px,90vw)]' : 'w-[min(380px,90vw)]'} rounded-[10px] border border-xc-line bg-xc-bar p-5 text-center shadow-[0_28px_80px_rgb(0_0_0/0.65)]`}
+        className={styles.dialog}
+        data-wide={wide || undefined}
       >
-        <span
-          className={`mx-auto grid h-[34px] w-[34px] place-items-center rounded-full ${
-            icon === 'error' ? 'bg-xc-error/15 text-xc-error' : 'bg-xc-warn/15 text-xc-warn'
-          }`}
-        >
-          <Icon name={icon} size={17} />
+        <span className={styles.dialogIcon} data-tone={icon === 'error' ? 'error' : undefined}>
+          <Icon name={icon} size={16} />
         </span>
-        <h3 className="mt-3 text-[13px] font-semibold text-xc-text">{title}</h3>
+        <h3 className={styles.dialogTitle}>{title}</h3>
         {children}
       </div>
     </div>

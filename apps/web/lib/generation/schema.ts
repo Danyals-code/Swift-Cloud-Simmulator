@@ -36,7 +36,7 @@ export function parseOptions(value: unknown): GenerationOptions {
   if (!record(value) || !['openai', 'anthropic'].includes(String(value.provider))) throw new Error('Choose OpenAI or Anthropic.')
   if (typeof value.prompt !== 'string' || value.prompt.trim().length < 20 || value.prompt.length > 6000) throw new Error('Describe your app in 20–6,000 characters.')
   if (typeof value.model !== 'string' || !/^[a-zA-Z0-9._:-]{1,100}$/.test(value.model)) throw new Error('Enter a valid model ID.')
-  if (!Number.isInteger(value.pageCount) || Number(value.pageCount) < 1 || Number(value.pageCount) > 6) throw new Error('Choose between 1 and 6 pages.')
+  if (!Number.isInteger(value.pageCount) || Number(value.pageCount) < 1 || Number(value.pageCount) > 6) throw new Error('Choose between 1 and 6 screens.')
   if (!['tabs', 'stack'].includes(String(value.navigation)) || !['blue', 'indigo', 'teal', 'orange', 'purple'].includes(String(value.accent))) throw new Error('Choose a navigation style and accent color.')
   if (typeof value.sampleData !== 'boolean' || typeof value.includeSettings !== 'boolean') throw new Error('Invalid project options.')
   const previousAttempt = parsePreviousAttempt(value.previousAttempt)
@@ -62,14 +62,14 @@ export function parseGeneratedApp(value: unknown, expectedPages?: number): Gener
     paths.add(f.path.toLowerCase())
     if (typeof f.code !== 'string' || !f.code.trim() || f.code.length > 60000) throw new Error('The response contained an empty or oversized file.')
     total += f.code.length
-    if (total > 240000) throw new Error('This app is too large. Try fewer pages or a smaller scope.')
+    if (total > 240000) throw new Error('This app is too large. Try fewer screens or a smaller scope.')
     return { path: f.path, code: f.code }
   })
-  if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > 6) throw new Error('The generated page count does not match your request. Try generating again.')
+  if (!Array.isArray(value.pages) || value.pages.length < 1 || value.pages.length > 6) throw new Error('The generated screen count does not match your request. Try generating again.')
   // A page either way is how the AI often reads "3 pages": a detail screen counted or not (G2).
-  if (expectedPages !== undefined && Math.abs(value.pages.length - expectedPages) > 1) throw new Error(`The app has ${value.pages.length} ${value.pages.length === 1 ? 'page' : 'pages'}, and ${expectedPages} ${expectedPages === 1 ? 'was' : 'were'} asked for.`)
+  if (expectedPages !== undefined && Math.abs(value.pages.length - expectedPages) > 1) throw new Error(`The app has ${value.pages.length} ${value.pages.length === 1 ? 'screen' : 'screens'}, and ${expectedPages} ${expectedPages === 1 ? 'was' : 'were'} asked for.`)
   const pages = value.pages.map((p) => {
-    if (!record(p) || typeof p.title !== 'string' || !p.title.trim() || p.title.length > 100 || typeof p.file !== 'string' || !files.some(f => f.path === p.file)) throw new Error('A generated page refers to a missing file.')
+    if (!record(p) || typeof p.title !== 'string' || !p.title.trim() || p.title.length > 100 || typeof p.file !== 'string' || !files.some(f => f.path === p.file)) throw new Error('A generated screen refers to a missing file.')
     return { title: p.title, file: p.file }
   })
   // Check the entry point without mistaking commented examples for real declarations.

@@ -1,42 +1,60 @@
-.panel { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--color-xc-text); background: var(--color-xc-sidebar); font-size: 12px; }
-.header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 12px; border-bottom: 1px solid var(--color-xc-line); }
-.header > div { display: grid; gap: 4px; }
-.header strong { font-size: 13px; }
-.header small { color: var(--color-xc-text-3); font-size: 11px; }
-.header button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 5px; color: var(--color-xc-text-2); }
-.header button:hover { background: var(--color-xc-line-soft); }
-.connection { display: grid; gap: 10px; flex-shrink: 0; max-height: 50%; overflow: auto; margin: 0; padding: 12px; border: 0; border-bottom: 1px solid var(--color-xc-line); }
-.connection legend { padding-top: 12px; font-weight: 600; }
-.connection label { display: grid; gap: 5px; color: var(--color-xc-text-2); }
-.connection input, .connection select { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--color-xc-line); border-radius: 5px; background: var(--color-xc-panel); color: var(--color-xc-text); font: inherit; }
-.connection p, .empty p { font-size: 11px; color: var(--color-xc-text-3); line-height: 1.6; margin: 0; }
-.conversation { flex: 1; min-height: 80px; overflow: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 14px; }
-.empty { margin: auto 0; display: grid; gap: 12px; padding: 16px 2px; }
-.empty > svg { color: var(--color-xc-accent); }
-.empty h3 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
-.message { min-width: 0; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 8px; background: var(--color-xc-panel); }
-.message[data-role="user"] { background: var(--color-xc-select); border-color: transparent; }
-.message > div { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-.message strong { font-size: 11px; }
-.message > div > span { font-size: 10px; color: var(--color-xc-text-3); }
-.message p { margin: 6px 0 0; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.message[data-status="failed"] { border-color: var(--color-xc-error); }
-.message small { display: block; font-size: 10px; overflow-wrap: anywhere; color: var(--color-xc-text-3); }
-.messageContext { margin-top: 6px; }
-.message details { margin-top: 8px; font-size: 10px; color: var(--color-xc-text-3); }
-.message summary { cursor: pointer; }
-.message details small { padding-top: 4px; }
-.progress { display: flex; align-items: center; gap: 7px; color: var(--color-xc-text-2); font-size: 11px; }
-.composer { display: grid; flex-shrink: 0; gap: 8px; padding: 12px; border-top: 1px solid var(--color-xc-line); background: var(--color-xc-sidebar); }
-.promptLabel { font-size: 11px; color: var(--color-xc-text-2); }
-.composer textarea { width: 100%; min-height: 80px; max-height: 200px; resize: vertical; padding: 10px; border: 1px solid var(--color-xc-line); border-radius: 8px; background: var(--color-xc-panel); color: var(--color-xc-text); font: inherit; line-height: 1.5; }
-.selection { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 7px; border-radius: 5px; color: var(--color-xc-accent); background: var(--color-xc-select); }
-.selection > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.selection button { margin-left: auto; font-size: 16px; flex-shrink: 0; width: 20px; height: 20px; }
-.composerActions { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-.composerActions small, .saved { color: var(--color-xc-text-3); font-size: 10px; line-height: 1.4; }
-.composerActions button { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 7px 10px; background: var(--color-xc-accent); color: #fff; font-size: 12px; }
+.panel { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--color-xc-text); background: var(--color-xc-sidebar); font-size: var(--text-body); line-height: var(--text-body--line-height); }
 .panel button { cursor: pointer; }
-.panel button:disabled { opacity: .45; cursor: default; }
-.panel input:focus-visible, .panel select:focus-visible, .panel textarea:focus-visible, .panel button:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 2px; }
-.error { font-size: 11px; line-height: 1.5; color: var(--color-xc-error); margin: 0; }
+.panel button:disabled { opacity: .4; cursor: default; }
+
+/* What the panel is, and the connection behind it. */
+.header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; min-height: var(--pane-header-height); padding: 4px 6px 4px 16px; border-bottom: 1px solid var(--color-xc-line); }
+.header > div { display: grid; gap: 2px; min-width: 0; }
+.header strong { font-weight: 600; }
+.header small { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
+.header button { display: grid; place-items: center; flex-shrink: 0; width: var(--control-height); height: var(--control-height); border-radius: var(--radius-md); color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.header button:hover, .header button[aria-expanded='true'] { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.connection { display: grid; gap: 8px; flex-shrink: 0; max-height: 50%; overflow: auto; margin: 0; padding: 0 16px 16px; border: 0; border-bottom: 1px solid var(--color-xc-line); }
+.connection legend { padding: 12px 0 4px; font-weight: 600; }
+.connection label { display: grid; gap: 4px; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+.connection input, .connection select { width: 100%; min-width: 0; height: var(--control-height); }
+.connect { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0; margin: 12px 12px 0; padding: 8px 8px 8px 12px; border-radius: var(--radius-lg); background: var(--color-xc-select); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text); }
+.connect > span { flex: 1; min-width: 140px; }
+.connect > button { height: var(--control-height-sm); padding: 0 10px; border-radius: var(--radius-md); background: var(--color-xc-accent-fill); color: #fff; font-weight: 500; transition: background-color var(--duration-fast); }
+.connect > button:hover { background: var(--color-xc-accent-hover); }
+.connection p { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
+
+/* The conversation: each message a block, yours tinted. */
+.conversation { flex: 1; min-height: 80px; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.empty { margin: auto 0; display: grid; gap: 8px; padding: 16px 0; }
+.empty > svg { margin-bottom: 4px; color: var(--color-xc-accent); }
+.empty h3 { margin: 0; font-size: var(--text-title3); line-height: var(--text-title3--line-height); font-weight: 600; }
+.empty p { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
+.message { min-width: 0; padding: 8px 12px 12px; border: 1px solid transparent; border-radius: var(--radius-lg); background: var(--color-xc-bar-raised); }
+.message[data-role='user'] { background: var(--color-xc-select); }
+.message[data-status='failed'] { border-color: color-mix(in srgb, var(--color-xc-error) 40%, transparent); }
+.message > div { display: flex; gap: 8px; align-items: center; justify-content: space-between; min-height: 18px; }
+.message strong { font-size: var(--text-caption); line-height: var(--text-caption--line-height); font-weight: 600; color: var(--color-xc-text-2); }
+/* The outcome, as a badge. */
+.message > div > span { padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-xc-fill); font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-2); }
+.message[data-status='applied'] > div > span { background: color-mix(in srgb, var(--color-xc-ok) 14%, transparent); color: var(--color-xc-ok); }
+.message[data-status='failed'] > div > span { background: color-mix(in srgb, var(--color-xc-error) 12%, transparent); color: var(--color-xc-error); }
+.message p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message small { display: block; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); overflow-wrap: anywhere; color: var(--color-xc-text-3); }
+.messageContext { margin-top: 4px; }
+.message details { margin-top: 8px; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+.message summary { cursor: pointer; }
+.message details small { padding: 4px 0 0 16px; font-family: var(--font-mono); }
+.progress { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+
+/* The composer: what the change is about, the prompt, and Send. */
+.composer { display: grid; flex-shrink: 0; gap: 8px; padding: 12px 16px 16px; border-top: 1px solid var(--color-xc-line); background: var(--color-xc-sidebar); }
+.promptLabel { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+.composer textarea { width: 100%; min-height: 80px; max-height: 200px; resize: vertical; }
+.selection { display: flex; align-items: center; gap: 6px; max-width: 100%; height: var(--control-height); padding: 0 2px 0 8px; border-radius: var(--radius-md); color: var(--color-xc-accent); background: var(--color-xc-select); }
+.selection > svg { flex-shrink: 0; }
+.selection > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection button { display: grid; place-items: center; flex-shrink: 0; width: var(--control-height-sm); height: var(--control-height-sm); margin-left: auto; border-radius: var(--radius-sm); font-size: var(--text-title3); line-height: 1; color: var(--color-xc-accent); transition: background-color var(--duration-fast); }
+.selection button:hover { background: color-mix(in srgb, var(--color-xc-accent) 14%, transparent); }
+.composerActions { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.composerActions small, .saved { font-size: var(--text-caption); line-height: var(--text-caption--line-height); color: var(--color-xc-text-3); }
+.composerActions button { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; height: var(--control-height); padding: 0 12px; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); transition: background-color var(--duration-fast); }
+.composerActions button:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
+.composerActions button[type='submit'] { padding-right: 8px; background: var(--color-xc-accent-fill); color: #fff; font-weight: 500; }
+.composerActions button[type='submit']:hover:not(:disabled) { background: var(--color-xc-accent-hover); }
+.error { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-error); }

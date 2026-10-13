@@ -39,6 +39,12 @@ interface TabContainer {
   readonly file: string
 }
 
+/** The view the app's window shows, which holds every screen. */
+export function appRoot(ctx: FeatureContext): string | undefined {
+  const window = windowContent(ctx), shown = window?.content && viewCallChain(window.content)?.base.callee
+  return shown?.kind === 'identifier' ? shown.name : undefined
+}
+
 /** The `@main` App struct, and what its WindowGroup shows, modifiers and all. */
 export function windowContent(ctx: FeatureContext): { app: StructDecl; content?: Expr } | undefined {
   const app = allDeclarations(ctx).find((d): d is StructDecl => d.kind === 'structDecl' && d.attributes.some(a => a.name === 'main'))

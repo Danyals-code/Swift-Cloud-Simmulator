@@ -92,11 +92,20 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, m
   // One Export menu: the four native formats, the editable archive, and - in Design -
   // the review sheet that exports PNGs. Two buttons that both "save the project
   // somewhere" were one decision presented as two.
+  // What a designer hands over first, then what reopens here, then images; the
+  // formats only a developer asks for come last.
+  const format = (id: string, separated = false) => {
+    const f = EXPORT_FORMATS.find(candidate => candidate.id === id)!
+    return { value: f.id, label: f.id === 'xcodeproj' ? 'Xcode project only' : f.name, detail: f.shortName, title: f.description, separated, disabled: exporting }
+  }
   const exportItems = [
-    { value: 'complete', label: 'Complete Xcode bundle', detail: 'Default', title: 'Xcode project, every screen PNG, settings report, prompts and chat history', disabled: exporting },
-    ...EXPORT_FORMATS.map((f, index) => ({ value: f.id, label: f.id === 'xcodeproj' ? 'Xcode project only' : f.name, detail: f.shortName, title: f.description, separated: index === 0, disabled: exporting })),
+    { value: 'complete', label: 'Xcode project and images', detail: 'Default', title: 'Xcode project, every screen PNG, settings report, prompts and chat history', disabled: exporting },
+    format('xcodeproj'),
+    format('swiftpm'),
     { value: 'editable', label: 'Editable archive', detail: '.swiftstudio.zip', title: 'Swift, images, app settings and designer metadata, to reopen here later', separated: true, disabled: exporting },
     ...(design && onReview ? [{ value: 'review', label: 'Review & export images…', title: 'Check contrast and touch targets, present screens, or export PNGs', disabled: reviewDisabled }] : []),
+    format('spm', true),
+    format('xcodegen'),
   ]
   const chooseExport = (value: string) => {
     if (value === 'review') onReview?.()
@@ -104,7 +113,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, m
   }
   return <header data-testid="toolbar" className={styles.toolbar} data-mode={mode}>
     <div className={styles.project}>
-      <button type="button" onClick={() => onOpenGallery('open')} title="Your projects, and new ones from templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={19} /><span>Projects</span></button>
+      <button type="button" onClick={() => onOpenGallery('open')} title="Your projects, and new ones from templates" data-testid="app-icon" className={styles.home}><Icon name="screens" size={16} /><span>Projects</span></button>
       <div className={styles.projectCopy}><ProjectName key={projectName} name={projectName} onRename={onRenameProject} disabled={renameDisabled} /><SaveIndicator storage={storage} savedAt={savedAt} /></div>
     </div>
     <nav className={styles.modes} aria-label="Workspace view">
@@ -112,12 +121,12 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, m
     </nav>
     <div className={styles.actions}>
       {design && environment && <div className={styles.environment} role="group" aria-label="Preview environment" data-testid="preview-environment">{environment}</div>}
-      {design && onSetPreviewing && <button type="button" className={styles.previewToggle} data-testid={previewing ? 'inspect-toggle' : 'live-toggle'} aria-pressed={previewing} disabled={previewDisabled} title={previewing ? 'Back to editing' : 'Try the app: tap, scroll and navigate'} onClick={() => onSetPreviewing(!previewing)}><Icon name={previewing ? 'stop' : 'run'} size={13} />{previewing ? 'Stop preview' : 'Preview'}</button>}
+      {design && onSetPreviewing && <button type="button" className={styles.previewToggle} data-testid={previewing ? 'inspect-toggle' : 'live-toggle'} aria-pressed={previewing} disabled={previewDisabled} title={previewing ? 'Back to editing' : 'Try the app: tap, scroll and navigate'} onClick={() => onSetPreviewing(!previewing)}><Icon name={previewing ? 'stop' : 'run'} size={14} />{previewing ? 'Stop preview' : 'Preview'}</button>}
       {!design && <span className={styles.paneControls}><PaneToggles options={debugPane} shown={panes} suppressed={suppressed} onToggle={key => onTogglePane(key as PaneKey)} /></span>}
       <span className={styles.share}><ShareButton onShare={onShare} /></span>
       <div className={styles.exportGroup}>
-        <button type="button" onClick={() => onExport('complete')} disabled={exporting} aria-busy={exporting} data-testid="export-button" title="Export Xcode project, screen PNGs, settings report and AI conversation" className={styles.export}>{exporting ? 'Exporting…' : 'Export'}<Icon name="download" size={14} /></button>
-        <MenuButton items={exportItems} onSelect={chooseExport} label="Export options" title="Other formats, the editable archive, and images" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={11} /></MenuButton>
+        <button type="button" onClick={() => onExport('complete')} disabled={exporting} aria-busy={exporting} data-testid="export-button" title="Export Xcode project, screen PNGs, settings report and AI conversation" className={styles.export}><Icon name="download" size={14} />{exporting ? 'Exporting…' : 'Export'}</button>
+        <MenuButton items={exportItems} onSelect={chooseExport} label="Export options" title="Other formats, the editable archive, and images" testId="export-format" className={styles.exportMenu}><Icon name="chevron-down" size={12} weight={2} /></MenuButton>
       </div>
       <MenuButton items={[
         { value: 'new', label: 'New project…', icon: 'plus' },
@@ -126,7 +135,7 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, m
         { value: 'shortcuts', label: 'Keyboard shortcuts', detail: '⌘/', icon: 'keyboard' },
         ...(design ? [{ value: 'problems', label: 'Problems and output', detail: '⌘⇧Y', separated: true }] : []),
         { value: 'build', label: BUILD_NAME, detail: BUILD_DATE, title: `${BUILD_DETAILS}. Choose to copy it.`, icon: 'info' as const, separated: true },
-      ]} onSelect={value => { if (value === 'new') onOpenGallery('design'); else if (value === 'projects') onOpenGallery('open'); else if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug'); else if (value === 'build') onCopyBuild() }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={17} /></MenuButton>
+      ]} onSelect={value => { if (value === 'new') onOpenGallery('design'); else if (value === 'projects') onOpenGallery('open'); else if (value === 'theme') onThemeChange(theme === 'dark' ? 'light' : 'dark'); else if (value === 'shortcuts') onShortcuts(); else if (value === 'problems') onTogglePane('debug'); else if (value === 'build') onCopyBuild() }} label="More" title="Workspace options" testId="workspace-more" className={styles.themeToggle}><Icon name="ellipsis" size={16} /></MenuButton>
     </div>
   </header>
 }
@@ -135,8 +144,10 @@ export function Toolbar({ onOpenGallery, projectName, savedAt, storage = null, m
 function SaveIndicator({ storage, savedAt }: { storage: StorageProblem | null; savedAt: number | null }) {
   const [label, title] = unsaved(storage) ? ['Could not save', storage?.kind === 'failing' ? storage.detail : 'Another tab has saved this project since.']
     : storage?.kind === 'memory' ? ['Not saved', 'This browser keeps nothing once the tab closes.']
-    : [savedAt ? 'Saved locally' : 'Local project', undefined]
-  return <span data-testid="save-indicator" title={title} className={title ? styles.saveError : styles.saveStatus}>{label}</span>
+    // Nothing to keep yet: an untouched template is not added to Your projects until it changes.
+    : savedAt ? ['Saved locally', undefined] : ['Not saved yet', 'Make a change to keep it in Your projects.']
+  const problem = unsaved(storage) || storage?.kind === 'memory'
+  return <span data-testid="save-indicator" title={title} className={problem ? styles.saveError : styles.saveStatus}>{label}</span>
 }
 
 function ProjectName({ name, onRename, disabled }: { name: string; onRename: (name: string) => boolean; disabled: boolean }) {
@@ -152,9 +163,13 @@ function ProjectName({ name, onRename, disabled }: { name: string; onRename: (na
     if (!onRename(draft)) { finished.current = false; setError(true); input.current?.focus(); return }
     setEditing(false)
   }
-  return editing ? <input ref={input} className={styles.projectNameInput} data-testid="project-name-input" aria-label="App name" aria-invalid={error} title={error ? 'Use a name without path separators or special filename characters.' : 'Enter to save, Escape to cancel'} value={draft}
-    onChange={e => { setDraft(e.target.value); setError(false) }} onBlur={finish}
-    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); finish() } else if (e.key === 'Escape') { finished.current = true; setEditing(false); setDraft(name) } }} />
+  return editing ? <>
+    <input ref={input} className={styles.projectNameInput} data-testid="project-name-input" aria-label="App name" aria-invalid={error} aria-describedby={error ? 'project-name-error' : undefined} title="Enter to save, Escape to cancel" value={draft}
+      onChange={e => { setDraft(e.target.value); setError(false) }} onBlur={finish}
+      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); finish() } else if (e.key === 'Escape') { finished.current = true; setEditing(false); setDraft(name) } }} />
+    {/* Said where the eye is, rather than in a tooltip nobody hovers for. */}
+    {error && <span id="project-name-error" role="alert" className={styles.nameError}>Use a name without slashes or other characters a file name can’t have.</span>}
+  </>
     : <button type="button" className={styles.projectName} data-testid="project-name" disabled={disabled} title="Double-click to rename app" aria-label={`App name: ${name}. Double-click or press Enter to rename.`}
       onDoubleClick={() => { finished.current = false; setEditing(true) }}
       onKeyDown={e => { if (e.key === 'F2' || e.key === 'Enter') { e.preventDefault(); finished.current = false; setEditing(true) } }}>{name}</button>
@@ -172,18 +187,17 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
   // The workspace is called Design; what the pointer does inside it is called Edit,
   // so that no word names two different things.
   const designing = mode === 'design' ? 'Edit' : 'Inspect'
-  // Two rows of one width: three tools over the switch they belong to. The rows are
-  // grids rather than rows of natural-width buttons, so "Delete" and "Live Preview"
-  // line up down the edge instead of ending wherever their words happen to.
+  // One floating row: history as icons (their names are in the tooltips), then the
+  // tools or the switch, each group divided from the last by a hairline.
   return <div className={styles.toolDock} aria-label="Preview tools">
     {note && <div className={styles.dockFeedback}>
       <span role="status" data-testid="design-feedback">{note}</span>
       {noteAction && <button type="button" className={styles.dockFeedbackAction} onClick={noteAction.onClick}>{noteAction.label}</button>}
     </div>}
     <div className={`${styles.dockRow} ${styles.dockHistory}`} role="group" aria-label="History and preview">
-      <button type="button" onClick={onUndo} disabled={busy || !canUndo} aria-label="Undo" title="Undo the last document change (⌘Z)" data-testid="design-undo"><Icon name="undo" size={13} />Undo</button>
-      <button type="button" onClick={onRedo} disabled={busy || !canRedo} aria-label="Redo" title="Redo the last undone change (⌘⇧Z)" data-testid="design-redo"><Icon name="redo" size={13} />Redo</button>
-      <button type="button" onClick={onReset} disabled={busy} aria-label="Reset preview" title="Restart app interactions without changing your design" data-testid="reset-preview"><Icon name="refresh" size={13} />Reset</button>
+      <button type="button" onClick={onUndo} disabled={busy || !canUndo} aria-label="Undo" title="Undo the last document change (⌘Z)" data-testid="design-undo"><Icon name="undo" size={15} /></button>
+      <button type="button" onClick={onRedo} disabled={busy || !canRedo} aria-label="Redo" title="Redo the last undone change (⌘⇧Z)" data-testid="design-redo"><Icon name="redo" size={15} /></button>
+      <button type="button" onClick={onReset} disabled={busy} aria-label="Reset preview" title="Restart app interactions without changing your design" data-testid="reset-preview"><Icon name="refresh" size={15} /></button>
     </div>
     {showEditActions && inspecting ? (
       <div className={`${styles.dockRow} ${styles.dockTools}`} role="group" aria-label="Edit actions">
@@ -195,8 +209,8 @@ export function PreviewTools({ inspecting, onSetInspecting, showEditActions = fa
       </div>
     ) : null}
     {showModeSwitch && <div className={`${styles.dockRow} ${styles.dockModes}`}>
-      <PushButton disabled={busy} onClick={() => onSetInspecting(true)} active={inspecting} label={designing} title={mode === 'design' ? 'Arrange, add and delete views' : 'Point at a view to find its code (Tab)'} testId="inspect-toggle" icon="inspect">{designing}</PushButton>
-      <PushButton disabled={busy} onClick={() => onSetInspecting(false)} active={!inspecting} label="Preview" title={mode === 'design' ? 'Tap, scroll and use the app' : 'Tap, scroll and use the app (Tab)'} testId="live-toggle" icon="run">Preview</PushButton>
+      <PushButton disabled={busy} onClick={() => onSetInspecting(true)} active={inspecting} label={designing} title={mode === 'design' ? 'Arrange, add and delete views' : 'Point at a view to find its code (⌘I)'} testId="inspect-toggle" icon="inspect">{designing}</PushButton>
+      <PushButton disabled={busy} onClick={() => onSetInspecting(false)} active={!inspecting} label="Preview" title={mode === 'design' ? 'Tap, scroll and use the app' : 'Tap, scroll and use the app (⌘I)'} testId="live-toggle" icon="run">Preview</PushButton>
     </div>}
   </div>
 }
@@ -281,7 +295,7 @@ function ShareButton({ onShare }: { onShare: ToolbarProps['onShare'] }) {
     result === 'copied'
       ? 'Link copied'
       : result === 'too-large'
-        ? 'Use Export › Editable archive'
+        ? 'Too large to share'
         : result === 'failed'
           ? 'Copy failed'
           : 'Share'
@@ -289,9 +303,10 @@ function ShareButton({ onShare }: { onShare: ToolbarProps['onShare'] }) {
   return (
     <PushButton
       onClick={() => void onShare().then(setResult)}
-      title="Copy a link that carries this project - no account, no server"
+      title={result === 'too-large' ? 'This project is too large for a link. Use Export › Editable archive instead.' : 'Copy a link that carries this project - no account, no server'}
       testId="share-button"
       icon="share"
+      variant="plain"
     >
       {label}
     </PushButton>

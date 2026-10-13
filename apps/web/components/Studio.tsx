@@ -44,7 +44,7 @@ import { AppSettings } from './settings/AppSettings'
 import { AppNavigationSettings } from './settings/AppNavigationSettings'
 import { ScreenSettings } from './settings/ScreenSettings'
 import { AppearancePicker, DevicePicker, TextSizePicker } from './PreviewEnvironment'
-import { designScreens, designTree, type DesignTree } from '../lib/designTree'
+import { designScreens, designTree, liveDesignScreen, screenRemovalRefusal, type DesignTree } from '../lib/designTree'
 import { sourceLayerAround, sourceLayerLabel, sourceLayerType } from '../lib/sourceLayers'
 const EditorPane = dynamic(() => import('./EditorPane').then(m => m.EditorPane), { ssr: false })
 import { ShortcutsDialog } from './ShortcutsDialog'
@@ -62,6 +62,7 @@ import { BUILD_DETAILS, BUILD_NAME } from '../lib/build'
 import { eventLog, type StudioChange } from '../lib/eventLog'
 import { designEvent, refusedClipboard, studioChange } from '../lib/designEvents'
 import { NOTHING_COPIED, busyEditProblem } from '../lib/editRefusals'
+import { pasteEdit } from '../lib/pasteTarget'
 import { crashIfTesting, leavingOnPurpose } from '../lib/recovery'
 import { PaneBoundary } from './PaneBoundary'
 import { ErrorBanner } from './ErrorBanner'
@@ -774,7 +775,9 @@ export function Studio() {
   // The canvas's warnings in a designer's words, beside its status (D11).
   const warningRows = useMemo(() => mode === 'design' ? designWarnings(allDiagnostics, result?.authoring, screens) : [], [mode, allDiagnostics, result?.authoring, screens])
   const updateScreens = async (command: ScreenCommand): Promise<string | null> => {
-    if (!project || stale || preparingEdit) return 'Wait for the preview to finish updating.'
+    // Duplicate and Remove say why they did not happen in the canvas note, as every planned edit does.
+    const refuse = (message: string) => { if (command.kind === 'duplicate' || command.kind === 'remove') setEditNote(message); return message }
+    if (!project || stale || preparingEdit) return refuse('Wait for the preview to finish updating.')
     const metadata = project.studio ?? emptyStudioMetadata()
     const name = 'name' in command ? command.name.trim() : ''
     if ('name' in command && (!name || name.length > 100)) return 'Enter a screen name of 1–100 characters.'
@@ -786,7 +789,7 @@ export function Studio() {
       return commitStudioRecords(project, { ...metadata, screens: next }, command.kind === 'rename' ? 'screen-rename' : 'screen-move')
     }
     const node = command.kind === 'create' ? result?.authoring?.nodes.find(n => n.kind === 'definition') : result?.authoring?.nodes.find(n => n.kind === 'definition' && n.name === command.view)
-    if (!node) return 'Wait for the screen definitions to finish loading.'
+    if (!node) return refuse('Wait for the screen definitions to finish loading.')
     if (command.kind === 'remove') return performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'screen-remove' }, screens.filter(s => s.view !== command.view))
     const title = command.kind === 'create' ? name : (screens.find(s => s.view === command.view)?.name ?? 'Screen') + ' copy'
     const base = (title.replace(/[^a-zA-Z0-9 ]/g, '').split(/ +/).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('').replace(/^[0-9]+/, '') || 'New') + 'Screen'
@@ -817,7 +820,8 @@ export function Studio() {
   if (liveTree && project && lastTree?.tree !== liveTree) setLastTree({ projectId: project.id, tree: liveTree })
   const tree = liveTree ?? (lastTree && lastTree.projectId === project?.id ? lastTree.tree : EMPTY_TREE)
   const treeScreens = useMemo(() => designScreens(tree), [tree])
-  const focusedScreen = treeScreens.find(screen => screen.id === designPage?.id) ?? treeScreens.find(screen => screen.id === focusedPage?.id) ?? treeScreens[0]
+  // In Preview it is the screen the running app shows: a pushed one, not the tab it was pushed from.
+  const focusedScreen = treeScreens.find(screen => screen.id === designPage?.id) ?? (designPage ? undefined : liveDesignScreen(tree, result?.viewHierarchy, result?.authoring)) ?? treeScreens.find(screen => screen.id === focusedPage?.id) ?? treeScreens[0]
   // Keep the view inspector mounted while its source is recompiling. Switching
   // briefly to screen settings used to reset every modifier and scroll position.
   const updatingSelectedView = stale && layerSelection?.projectId === project?.id && !!layerSelection?.anchor
@@ -1044,17 +1048,17 @@ export function Studio() {
   const pasteCounts = useRef(new Map<string, number>())
   const [pasteNudge, setPasteNudge] = useState<string | null>(null)
   const dismissedNudges = useRef(new Set<string>())
-  /** Pastes what was copied beside or into `target`, a layer in Layers, or else where Add would put a view. */
+  /** Pastes what was copied beside `target`, a layer in Layers, or the selection, as `pasteEdit` places it; with nothing selected, into the screen. */
   const pasteClipboard = useCallback((target?: AuthoringNode) => {
     if (!clipboard) { refuseClipboard('paste', NOTHING_COPIED); return }
     const shape = clipboard.snippet.replace(/\s+/g, ' ').trim()
     const pastes = (pasteCounts.current.get(shape) ?? 0) + 1
     pasteCounts.current.set(shape, pastes)
     if (pastes >= 3 && !dismissedNudges.current.has(shape)) setPasteNudge(shape)
-    const paste = { kind: 'paste' as const, snippet: clipboard.snippet, values: clipboard.values }
+    const paste = pasteEdit(result?.authoring?.nodes ?? [], target ?? (addTargetLayer === selectedLayer ? authoringNode : undefined), clipboard)
     if (target) void performDesignEdit(target.source, target.fingerprint, target.owner, paste)
     else void applyEdit(paste, addTargetLayer)
-  }, [clipboard, applyEdit, addTargetLayer, performDesignEdit, refuseClipboard])
+  }, [clipboard, applyEdit, addTargetLayer, selectedLayer, authoringNode, result?.authoring, performDesignEdit, refuseClipboard])
 
   /**
    * Showing a hidden view again.
@@ -1133,7 +1137,7 @@ export function Studio() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
-      const shortcut = shortcutFor({ key: e.key, mod: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey }, { workspace: mode, editing: inspecting, focus: keyFocus(e.target), selected: !!selectedLayer || selectedTogether.length > 1 })
+      const shortcut = shortcutFor({ key: e.key, mod: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey }, { workspace: mode, editing: inspecting, focus: keyFocus(e.target), selected: !!selectedLayer || selectedTogether.length > 1, screen: level === 'screen' })
       if (!shortcut) return
       // Escape is left for the canvas's own uses of it, such as cancelling a destination pick.
       if (shortcut !== 'escape') e.preventDefault()
@@ -1145,6 +1149,7 @@ export function Studio() {
         case 'duplicate': void applyEdit({ kind: 'layer-duplicate' }); break
         case 'hide': void applyEdit({ kind: 'hide' }); break
         case 'delete': void applyEdit({ kind: 'delete' }); break
+        case 'screen-delete': setEditNote((focusedScreen && screenRemovalRefusal(focusedScreen, tree)) || 'To remove a screen, use Remove in its settings.'); break
         case 'move-up': case 'move-down': void applyEdit({ kind: 'move', direction: shortcut === 'move-up' ? -1 : 1 }); break
         case 'add': if (canAdd) setAdding(true); break
         case 'select-tool': setTool('select'); break
@@ -1166,7 +1171,7 @@ export function Studio() {
         case 'left-panel': toggleLeftPanel(); break
         case 'right-panel': togglePane('preview'); break
         case 'problems': togglePane('debug'); break
-        case 'inspect': case 'preview': toggleInspect(); break
+        case 'inspect': toggleInspect(); break
         case 'workspace': setMode(mode === 'design' ? 'develop' : 'design'); break
         case 'group': groupSelection(); break
         case 'hold': break
@@ -1175,7 +1180,7 @@ export function Studio() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
-      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver, groupSelection, selectedTogether, selectParent])
+      undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver, groupSelection, selectedTogether, selectParent, level, focusedScreen, tree])
 
   /**
    * Undo and redo, over the edits the canvas made.
@@ -1363,7 +1368,7 @@ export function Studio() {
   if (tab === 'elsewhere') return <OpenElsewhere />
   if (!loaded || !project) {
     return (
-      <main className="grid h-dvh place-items-center bg-xc-editor text-[12px] text-xc-text-3">
+      <main className="grid h-dvh place-items-center bg-xc-editor text-footnote text-xc-text-3">
         Loading project…
       </main>
     )
@@ -1404,7 +1409,6 @@ export function Studio() {
                 the same thing there - what the pointer is over, and what a click on
                 it will do, which in Code is open its source. */}
             <InspectorReadout node={hoveredNode} active action={mode === 'design' ? 'select' : 'reveal'} />
-            {noteText ? <span className={styles.note} role="status" data-testid="edit-note">{noteText}</span> : null}
             {selection && mode === 'design' ? (
               <div className={styles.selection} data-testid="selection-controls">
                 <span className={styles.selectionName}>{selection.name}</span>
@@ -1461,7 +1465,7 @@ export function Studio() {
             onSelectScenario={key => setScenarioSelection(key ? { projectId: project.id, key } : null)} onSaveScenario={saveScenario} onDeleteScenario={deleteScenario} onCreateStateValue={createStateValue} onScreenCommand={updateScreens}
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }, undefined, undefined, undefined, true)}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, true)} onSelect={selectAuthoring} onReveal={revealSpan} />
-        : <p className="text-[12px] text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
+        : <p className="text-footnote text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
       : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} />}</PaneBoundary>
   const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
     <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
@@ -1573,7 +1577,7 @@ export function Studio() {
                   onHover={hoverAuthoring} stale={busy} onSelect={selectAuthoring} onEdit={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation)}
                   onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined}
                   multiple={multiSelection.page === layersPage ? multiSelection : NO_MULTI_SELECTION} onMultipleChange={next => setMultiSelection({ ...next, page: layersPage })}
-                  hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-2 text-[12px] text-xc-text-3">Building the view hierarchy…</p>}
+                  hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-3 text-footnote text-xc-text-3">Building the view hierarchy…</p>}
               /> : <Navigator tabbed
                 key={project.id}
                 assets={<AssetsFolder {...assetsFolder} />}
@@ -1689,7 +1693,7 @@ export function Studio() {
                 onCaret={setCaret}
               />
             ) : (
-              <p className="p-4 text-[12px] text-xc-text-3">No file selected.</p>
+              <p className="px-4 py-3 text-footnote text-xc-text-3">No file selected.</p>
             )}
             </PaneBoundary>
           </div>
@@ -1873,7 +1877,7 @@ function RenameBar({
 
   return (
     <form
-      className="flex h-[30px] shrink-0 items-center gap-2.5 border-b border-xc-line bg-xc-bar px-2.5 text-[11.5px]"
+      className="flex h-10 shrink-0 items-center gap-3 border-b border-xc-line bg-xc-bar px-3 text-body"
       data-testid="rename-bar"
       onSubmit={(e) => {
         e.preventDefault()
@@ -1881,9 +1885,9 @@ function RenameBar({
         else onCancel()
       }}
     >
-      <Icon name="new-file" size={13} className="text-xc-text-3" />
-      <span className="text-xc-text-2">
-        Rename <span className="font-mono text-xc-text">{rename.name}</span>
+      <Icon name="new-file" size={14} className="shrink-0 text-xc-text-3" />
+      <span className="shrink-0 text-xc-text-2">
+        Rename <span className="font-mono text-footnote text-xc-text">{rename.name}</span>
       </span>
       <input
         autoFocus
@@ -1895,13 +1899,13 @@ function RenameBar({
         spellCheck={false}
         aria-label="New name"
         data-testid="rename-input"
-        className="h-[20px] w-48 rounded-[5px] border border-xc-accent bg-xc-panel px-2 font-mono text-xc-text outline-none"
+        className="h-7 w-48 font-mono text-footnote"
       />
-      <span className="text-xc-text-3" data-testid="rename-count">
+      <span className="shrink-0 text-xc-text-2" data-testid="rename-count">
         {rename.spans.length} {rename.spans.length === 1 ? 'occurrence' : 'occurrences'} in{' '}
         {files} {files === 1 ? 'file' : 'files'}
       </span>
-      <span className="ml-auto text-xc-text-3">Enter to rename · Esc to cancel</span>
+      <span className="ml-auto truncate text-caption text-xc-text-3">Enter to rename · Esc to cancel</span>
     </form>
   )
 }

@@ -2,10 +2,12 @@
 
 import { useState } from 'react'
 import { offersWhenTapped, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type BehaviorAction, type DesignValue } from '@studio/shared'
+import { screenLabel } from '../lib/screens'
 import { sourceLayerLabel } from '../lib/sourceLayers'
 import styles from './AuthoringInspector.module.css'
 
 const readable = (value: string) => value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/Screen$/, '').replace(/^./, c => c.toUpperCase())
+/** A screen as the canvas names it: `PreferencesView` is Preferences. */
 function uniqueName(label: string, snapshot?: AuthoringSnapshot, suffix = '') {
   const base = label.replace(/[^A-Za-z0-9 ]/g, '').split(/ +/).map((part, index) => index ? part.charAt(0).toUpperCase() + part.slice(1) : part).join('').replace(/^[0-9]+/, '') || 'newValue'
   let name = base + suffix, index = 2
@@ -16,7 +18,8 @@ function uniqueName(label: string, snapshot?: AuthoringSnapshot, suffix = '') {
 export function GuidedInteraction({ node, snapshot, onSelect, onCommand, busy }: { node: AuthoringNode; snapshot?: AuthoringSnapshot; onSelect?: (node: AuthoringNode) => void; onCommand: (op: AuthoringOperation) => Promise<void>; busy: boolean }) {
   const info = node.behavior!
   const [kind, setKind] = useState<'navigate' | 'sheet' | 'cover' | 'dismiss' | 'toggle' | 'set'>('navigate')
-  const [destination, setDestination] = useState(info.destinations[0] ?? '__new'), [screenName, setScreenName] = useState('Details')
+  // Nothing is chosen while there are screens to choose from, so Save waits for one.
+  const [destination, setDestination] = useState(info.destinations.length ? '' : '__new'), [screenName, setScreenName] = useState('Details')
   const [state, setState] = useState(info.states[0]?.name ?? '__new'), [valueName, setValueName] = useState('joined'), [valueType, setValueType] = useState<'Bool' | 'String' | 'Double'>('Bool')
   const [initial, setInitial] = useState('false'), [value, setValue] = useState(''), [activeTitle, setActiveTitle] = useState('Joined'), [replace, setReplace] = useState(false)
   const current = info.states.find(s => s.name === state), type = current?.type ?? valueType
@@ -49,7 +52,7 @@ export function GuidedInteraction({ node, snapshot, onSelect, onCommand, busy }:
         <optgroup label="Change a value"><option value="toggle">Switch on / off</option><option value="set">Set a value</option></optgroup>
       </select></label>
       {kind === 'dismiss' ? <p>Closes this screen if it was presented, or goes back one step if it was pushed.</p> : kind === 'navigate' || kind === 'sheet' || kind === 'cover' ? <>
-        <label>Screen<select aria-label="Interaction screen" value={destination} onChange={e => setDestination(e.target.value)}>{info.destinations.map(name => <option key={name} value={name}>{readable(name)}</option>)}<option value="__new">+ Create a screen…</option></select></label>
+        <label>Screen<select aria-label="Interaction screen" value={destination} onChange={e => setDestination(e.target.value)}>{!destination && <option value="" disabled>Choose…</option>}{info.destinations.map(name => <option key={name} value={name}>{readable(screenLabel(name))}</option>)}<option value="__new">+ Create a screen…</option></select></label>
         {destination === '__new' && <label>New screen name<input aria-label="Interaction screen name" value={screenName} maxLength={100} onChange={e => setScreenName(e.target.value)} /></label>}
         <p>{kind === 'navigate' ? 'Opens this screen with a Back button. Navigation is set up automatically.' : kind === 'cover' ? 'Covers the whole screen. Give it a Back / Close button so people can leave.' : 'Opens this screen above the current one. Drag down to close it.'}</p>
       </> : <>
@@ -64,7 +67,7 @@ export function GuidedInteraction({ node, snapshot, onSelect, onCommand, busy }:
         {!!linked.length && <div className={styles.dependencies} aria-label="Affected controls">{linked.map(layer => <button type="button" key={layer.id} onClick={() => onSelect?.(layer)}>{sourceLayerLabel(layer)}</button>)}</div>}
       </>}
       {hasAction && <label><input type="checkbox" checked={replace} onChange={e => setReplace(e.target.checked)} />Replace this button’s existing action</label>}
-      <button type="button" disabled={busy || hasAction && !replace || invalidNumber || (kind === 'navigate' || kind === 'sheet' || kind === 'cover') && destination === '__new' && !screenName.trim() || (kind === 'toggle' || kind === 'set') && state === '__new' && !valueName.trim()} onClick={apply}>Save</button>
+      <button type="button" disabled={busy || hasAction && !replace || invalidNumber || (kind === 'navigate' || kind === 'sheet' || kind === 'cover') && (!destination || destination === '__new' && !screenName.trim()) || (kind === 'toggle' || kind === 'set') && state === '__new' && !valueName.trim()} onClick={apply}>Save</button>
     </>}
     {!taps && !!info.states.length && <details><summary>Values used on this screen</summary>{info.states.map(input => {
       const dependencies = snapshot?.nodes.filter(n => info.dependencies?.find(d => d.state === input.name)?.nodeIds.includes(n.id)) ?? []

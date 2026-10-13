@@ -236,9 +236,10 @@ export type ViewEdit =
   /**
    * A view copied with Copy, with the declarations of the values of its screen it reads,
    * which come along to a screen without them (D6). It lands as it was copied, where a
-   * view from the library is made ready to use.
+   * view from the library is made ready to use. `beside` puts it after a container rather
+   * than into it.
    */
-  | { readonly kind: 'paste'; readonly snippet: string; readonly values: readonly string[] }
+  | { readonly kind: 'paste'; readonly snippet: string; readonly values: readonly string[]; readonly beside?: true }
   /** A drag: put this view before or after another one, wherever that one is, or inside it as its last child. */
   | { readonly kind: 'moveTo'; readonly targetOffset: number; readonly position: DropPosition }
   | { readonly kind: 'hide' }

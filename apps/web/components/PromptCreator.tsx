@@ -30,6 +30,12 @@ type AppOptions = Omit<GenerationOptions, 'provider' | 'model'>
 const INITIAL: AppOptions = { prompt: '', pageCount: 3, navigation: 'tabs', accent: 'indigo', sampleData: true, includeSettings: false }
 
 /**
+ * What was typed, for as long as the tab is open. Closing the sheet with Escape, or
+ * looking at another source and coming back, used to throw the description away.
+ */
+let remembered: AppOptions = INITIAL
+
+/**
  * Create with AI.
  *
  * The connection is the tab's, shared with Prompt Editing (G3), and a draft is kept
@@ -47,7 +53,10 @@ export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }
 }) {
   const [kept] = useState(loadDraft)
   const { connection, chooseProvider, setModel, setKey } = useAiConnection()
-  const [options, setOptions] = useState(INITIAL)
+  const [options, setOptions] = useState(() => remembered)
+  // Open until there is a key to hide; after that it is one line saying which provider.
+  const [connectionOpen, setConnectionOpen] = useState(() => !connection.key)
+  useEffect(() => { remembered = options }, [options])
   const [revealKey, setRevealKey] = useState(false)
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -70,10 +79,11 @@ export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }
   async function generate() {
     if (controller.current) return
     setError(null)
+    if (options.prompt.trim().length < 20) { setError('Describe your app in a sentence or two (at least 20 characters).'); document.getElementById('app-prompt')?.focus(); return }
+    if (!connection.key.trim()) { setConnectionOpen(true); setError('Add your API key under AI connection.'); requestAnimationFrame(() => document.getElementById('provider-key')?.focus()); return }
     let input: GenerationOptions
     try {
       input = parseOptions({ ...options, provider: connection.provider, model: connection.model })
-      if (!connection.key.trim()) throw new Error('Enter your provider API key.')
     } catch (e) { setError(e instanceof Error ? e.message : 'Check your project options.'); return }
     const request = new AbortController()
     controller.current = request
@@ -137,47 +147,52 @@ export function PromptCreator({ onOpenFiles, onBusy, onDraft, onConfirmDiscard }
         const project = openProjectId()
         if (stamp && project) createAttempts.draftOpened(stamp, project)
         clearDraft()
+        // The app it described is open now; the next one starts from an empty form.
+        remembered = INITIAL
       }
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open this project.') }
     finally { setPhase('idle'); onBusy(false) }
   }
 
   if (draft) return <div ref={review} tabIndex={-1} className={styles.review} data-testid="generated-review" aria-label="Generated project review">
-    <div className={styles.summary}><span className={styles.check}><Icon name="check" size={18} /></span><div><h3>{draft.name}</h3><p>{draft.summary}</p></div></div>
+    <div className={styles.summary}><span className={styles.check}><Icon name="check" size={16} weight={2} /></span><div><h3>{draft.name}</h3><p>{draft.summary}</p></div></div>
     <div className={styles.pages}>{draft.pages.map((p, i) => <span key={`${p.file}:${i}`}>{p.title}</span>)}</div>
     <p className={styles.validation} role="status">{issues.length ? 'The preview found problems in this draft. You can open it and fix them, or go back to the prompt.' : 'Every screen passed the preview check.'}</p>
     {issues.length > 0 && <details className={styles.issues} open><summary>{issues.length} preview {issues.length === 1 ? 'problem' : 'problems'}</summary><ul>{issues.map(i => <li key={i}>{i}</li>)}</ul></details>}
     <div className={styles.files}><nav aria-label="Generated files">{draft.files.map((file, i) => <button type="button" key={file.path} aria-pressed={selectedFile === i} onClick={() => setSelectedFile(i)}><Icon name="new-file" size={14} />{file.path.replace('Sources/', '')}</button>)}</nav><pre tabIndex={0} aria-label="Generated Swift source"><code>{draft.files[selectedFile]?.code}</code></pre></div>
     {error && <p role="alert" className={styles.error}>{error}</p>}
-    <footer className={styles.footer}><span>{draft.files.length} Swift files · Opens as a separate project</span><div><button type="button" className={styles.secondary} disabled={busy} onClick={() => onConfirmDiscard(() => { if (stamp) createAttempts.draftDiscarded(stamp); clearDraft(); setDraft(null); setStamp(undefined); setError(null) })}>Back to prompt</button><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()} data-testid="open-generated">{busy ? 'Opening…' : issues.length ? 'Open draft' : 'Open project'}<Icon name="chevron-right" size={13} /></button></div></footer>
+    <footer className={styles.footer}><span>{draft.files.length} Swift {draft.files.length === 1 ? 'file' : 'files'} · Opens as a separate project</span><div><button type="button" className={styles.secondary} disabled={busy} onClick={() => onConfirmDiscard(() => { if (stamp) createAttempts.draftDiscarded(stamp); clearDraft(); setDraft(null); setStamp(undefined); setError(null) })}>Back to prompt</button><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()} data-testid="open-generated">{busy ? 'Opening…' : issues.length ? 'Open draft' : 'Open project'}<Icon name="chevron-right" size={12} /></button></div></footer>
   </div>
 
-  return <form className={styles.form} onSubmit={e => { e.preventDefault(); void generate() }} data-testid="prompt-creator">
+  // Checked in `generate`, which says what is missing in a sentence rather than in the browser's bubble.
+  return <form className={styles.form} noValidate onSubmit={e => { e.preventDefault(); void generate() }} data-testid="prompt-creator">
     <div className={styles.content}>
       <div className={styles.brief}>
         <label className={styles.label} htmlFor="app-prompt">App description</label>
         <textarea id="app-prompt" value={options.prompt} onChange={e => update('prompt', e.target.value)} disabled={busy} minLength={20} maxLength={6000} required placeholder="A travel planner for weekend trips. Show an itinerary, saved places, and a packing checklist. Let me add stops and mark items as packed. Keep the design calm and simple." />
         <p className={styles.hint}>Describe who it’s for, the screens you need, and what people can do.</p>
+        <details className={styles.connectionGroup} open={connectionOpen} onToggle={event => setConnectionOpen(event.currentTarget.open)}>
+        <summary>AI connection{!connectionOpen && connection.key ? <small>{connection.provider === 'openai' ? 'OpenAI' : 'Anthropic'} · {connection.model}</small> : null}</summary>
         <div className={styles.connection}>
           <label className={styles.label}>Provider<select value={connection.provider} disabled={busy} onChange={e => { chooseProvider(e.target.value as Provider); setRevealKey(false) }}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
           <label className={styles.label}>Model<input value={connection.model} disabled={busy} required maxLength={100} spellCheck={false} onChange={e => setModel(e.target.value)} /></label>
         </div>
         <label className={styles.label} htmlFor="provider-key">API key</label>
         <div className={styles.key}><input id="provider-key" type={revealKey ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={connection.key} onChange={e => setKey(e.target.value)} disabled={busy} placeholder={connection.provider === 'openai' ? 'sk-…' : 'sk-ant-…'} required maxLength={512} /><button type="button" disabled={busy} onClick={() => setRevealKey(v => !v)} aria-label={revealKey ? 'Hide API key' : 'Show API key'}>{revealKey ? 'Hide' : 'Show'}</button></div>
-        <p className={styles.hint}>Your key is kept in this browser tab until you close it, and never in a project. Your description and options go through this server to {connection.provider === 'openai' ? 'OpenAI' : 'Anthropic'}. Your provider bills API usage.</p>
+        <p className={styles.hint}>Kept in this tab only, never in a project. Your description is sent to {connection.provider === 'openai' ? 'OpenAI' : 'Anthropic'}, which bills your key.</p>
+        </details>
       </div>
       <aside className={styles.options} aria-label="Project options">
         <h3>Project options</h3>
-        <label className={styles.label}>Pages<select value={options.pageCount} disabled={busy} onChange={e => update('pageCount', Number(e.target.value))}>{[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n} {n === 1 ? 'page' : 'pages'}</option>)}</select></label>
-        <p className={styles.hint}>Includes detail, form, and settings screens.</p>
+        <label className={styles.label}>Screens<select value={options.pageCount} disabled={busy} onChange={e => update('pageCount', Number(e.target.value))}>{[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n} {n === 1 ? 'screen' : 'screens'}</option>)}</select></label>
         <label className={styles.label}>Navigation<select value={options.navigation} disabled={busy || options.pageCount === 1} onChange={e => update('navigation', e.target.value as GenerationOptions['navigation'])}><option value="tabs">Tab bar</option><option value="stack">Navigation stack</option></select></label>
         <fieldset disabled={busy} className={styles.accents}><legend>Accent color</legend>{(['indigo','blue','teal','orange','purple'] as const).map(color => <label key={color} title={color}><input type="radio" name="accent" value={color} checked={options.accent === color} onChange={() => update('accent', color)} aria-label={color} /><span style={{ background: { indigo:'#6666d9', blue:'#3388ee', teal:'#279f9b', orange:'#dd873b', purple:'#9b65d1' }[color] }} /></label>)}</fieldset>
         <label className={styles.toggle}><span><strong>Sample content</strong><small>Start with realistic example data</small></span><input type="checkbox" checked={options.sampleData} disabled={busy} onChange={e => update('sampleData', e.target.checked)} /></label>
-        <label className={styles.toggle}><span><strong>Settings page</strong><small>Included in your page count</small></span><input type="checkbox" checked={options.includeSettings} disabled={busy} onChange={e => update('includeSettings', e.target.checked)} /></label>
+        <label className={styles.toggle}><span><strong>Settings screen</strong><small>Counts as one of the screens</small></span><input type="checkbox" checked={options.includeSettings} disabled={busy} onChange={e => update('includeSettings', e.target.checked)} /></label>
         <p className={styles.scope}>Creates a first version with SwiftUI screens and local interactions. Services such as login and payments need separate implementation.</p>
       </aside>
     </div>
     <div className={styles.bottom}>{error && <p role="alert" className={styles.error}>{error}</p>}{busy && <p role="status" aria-live="polite" className={styles.progress}><Icon name="refresh" size={14} className="animate-spin" />{PROGRESS[phase]}</p>}</div>
-    <footer className={styles.footer}><span>Review the generated files before opening.</span><div>{busy && <button type="button" className={styles.secondary} onClick={cancel}>Cancel generation</button>}<button className={styles.primary} type="submit" disabled={busy}>{busy ? 'Working…' : 'Generate app'}<Icon name="chevron-right" size={13} /></button></div></footer>
+    <footer className={styles.footer}><span>Review the generated files before opening.</span><div>{busy && <button type="button" className={styles.secondary} onClick={cancel}>Cancel generation</button>}<button className={styles.primary} type="submit" disabled={busy}>{busy ? 'Working…' : 'Generate app'}<Icon name="chevron-right" size={12} /></button></div></footer>
   </form>
 }

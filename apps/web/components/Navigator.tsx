@@ -72,8 +72,11 @@ type Editing =
   | { readonly mode: 'new-folder'; readonly parent: string }
   | { readonly mode: 'rename'; readonly target: string; readonly isFolder: boolean }
 
-const INDENT = 13
-const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text-[14px]'
+/** Each level is 16px further in, from 4px at the top, as in Design's outline. */
+const INDENT = 16
+const ROW = 'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-body transition-colors duration-[120ms]'
+/** A plain icon button: no fill until the pointer is on it. */
+const ICON_BUTTON = 'inline-flex shrink-0 items-center justify-center rounded-md text-xc-text-2 transition-colors duration-[120ms] hover:bg-xc-fill hover:text-xc-text aria-expanded:bg-xc-fill aria-expanded:text-xc-text'
 
 /**
  * The project navigator.
@@ -163,37 +166,40 @@ export function Navigator({
       data-testid="file-rail"
       aria-label="Project navigator"
     >
-      <header className={`${styles.tabs} ${styles.navigatorTabs} h-[46px] shrink-0 border-b border-xc-line px-1.5`}>
-        {!tabbed && <button type="button" data-testid="pane-toggle-navigator" aria-pressed="true" title="Collapse left panel (⌘0)" aria-label="Collapse left panel" onClick={onTogglePanel}><Icon name="sidebar-left" size={15} /></button>}
-        <NavTab active={tab === 'project'} onClick={() => setTab('project')} label="Project">
-          <span className="text-[14px] font-medium">Files</span>
-        </NavTab>
-        <NavTab active={tab === 'layers'} onClick={() => setTab('layers')} label="Layers">
-          <span className="text-[14px] font-medium">Layers</span>
-        </NavTab>
-        <NavTab active={tab === 'issues'} onClick={() => setTab('issues')} label="Issues">
-          <span className="text-[14px] font-medium">Issues</span>
-          {errors + warnings > 0 ? (
-            <span
-              className={`rounded-full px-1 text-[11px] leading-[13px] ${
-                errors > 0 ? 'bg-xc-error/25 text-xc-error' : 'bg-xc-warn/25 text-xc-warn'
-              }`}
-            >
-              {errors + warnings}
-            </span>
-          ) : null}
-        </NavTab>
+      <header className="flex h-10 shrink-0 items-center gap-1.5 border-b border-xc-line px-2">
+        {!tabbed && <button type="button" data-testid="pane-toggle-navigator" aria-pressed="true" title="Collapse left panel (⌘0)" aria-label="Collapse left panel" onClick={onTogglePanel} className={`${ICON_BUTTON} size-7`}><Icon name="sidebar-left" size={15} /></button>}
+        {/* A segmented control, the same as Design's Layers and Files. */}
+        <span className={`${styles.tabs} shrink-0 rounded-md bg-xc-fill p-0.5`}>
+          <NavTab active={tab === 'project'} onClick={() => setTab('project')} label="Project">
+            <span>Files</span>
+          </NavTab>
+          <NavTab active={tab === 'layers'} onClick={() => setTab('layers')} label="Layers">
+            <span>Layers</span>
+          </NavTab>
+          <NavTab active={tab === 'issues'} onClick={() => setTab('issues')} label="Issues">
+            <span>Issues</span>
+            {errors + warnings > 0 ? (
+              <span
+                className={`rounded-sm px-1.5 py-0.5 text-caption tabular-nums ${
+                  errors > 0 ? 'bg-xc-error/15 text-xc-error' : 'bg-xc-warn/15 text-xc-warn'
+                }`}
+              >
+                {errors + warnings}
+              </span>
+            ) : null}
+          </NavTab>
+        </span>
 
-        <span className="ml-auto" hidden={tab !== 'project'}>
+        <span className="ml-auto flex" hidden={tab !== 'project'}>
           <MenuButton
             items={newItems}
             onSelect={(value) => startNew(value)}
             label="New file or group"
             title="Add a file, a group, or start from a template"
             testId="new-file"
-            className="inline-flex h-[20px] w-[22px] items-center justify-center rounded-[5px] text-xc-text-2 transition-colors hover:bg-xc-line-soft hover:text-xc-text"
+            className={`${ICON_BUTTON} size-6`}
           >
-            <Icon name="plus" size={13} weight={1.8} />
+            <Icon name="plus" size={14} />
           </MenuButton>
         </span>
       </header>
@@ -202,7 +208,7 @@ export function Navigator({
       {tab === 'project' ? (
         <>
           <div
-            className="min-h-0 flex-1 overflow-auto px-1.5 py-1.5"
+            className="min-h-0 flex-1 overflow-auto p-2"
             // Dropping on empty space below the tree means the root group. Files from
             // outside are images for Assets, which the studio takes wherever they land.
             onDragOver={(event) => {
@@ -275,7 +281,7 @@ export function Navigator({
         <>
         {!runtimeLayers && authoring && onSelectAuthoring ? <LogicalLayers labels={layerLabels} onRename={onRenameLayer} key={`${pageId}:${pageFocusEpoch}`} pageId={pageId} pageName={pageName} pageSource={pageSource} runtimeLayers={pageLayers} selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={authoring} files={authoringFiles} selection={authoringSelection} selected={selectedAuthoringId} selectedAncestors={selectedAuthoringAncestors} hovered={hoveredAuthoringId} hoveredAncestors={hoveredAuthoringAncestors} onHover={onHoverAuthoring} stale={stale} onSelect={onSelectAuthoring} onEdit={onEditAuthoring} hidden={hiddenViews} onShow={onShowHidden} editable={layersEditable} /> : <Layers pages={layers} selectedId={selectedLayerId} hoveredId={hoveredLayerId} stale={stale} onSelect={onSelectLayer}
           onReorder={onReorderLayer} hidden={hiddenViews} onHide={onHideLayer} onShow={onShowHidden} editable={layersEditable} />}
-        <div className="flex shrink-0 items-center justify-between border-t border-xc-line-soft px-3 py-2 text-[11px] text-xc-text-3" aria-label="Developer layer inspection"><span>Developer</span><button type="button" aria-pressed={runtimeLayers} onClick={() => setRuntimeLayers(value => !value)} className="rounded px-1 py-0.5 hover:bg-xc-line-soft">{runtimeLayers ? 'Back to design layers' : 'Runtime detail'}</button></div>
+        <div className="flex h-8 shrink-0 items-center justify-between border-t border-xc-line-soft pl-4 pr-2 text-caption text-xc-text-3" aria-label="Developer layer inspection"><span className="font-semibold">Developer</span><button type="button" aria-pressed={runtimeLayers} onClick={() => setRuntimeLayers(value => !value)} className={`${ICON_BUTTON} h-6 px-2 text-footnote`}>{runtimeLayers ? 'Back to design layers' : 'Runtime detail'}</button></div>
         </>
       ) : (
         <IssueList diagnostics={diagnostics} onReveal={onRevealDiagnostic} />
@@ -493,18 +499,18 @@ function Tree({
                 }}
                 style={{ paddingLeft: depth * INDENT + 4 }}
                 data-testid={`group-${node.path}`}
-                className={`${ROW} transition-colors ${
+                className={`${ROW} text-xc-text ${
                   isDropTarget
-                    ? 'bg-xc-accent/30 text-xc-text'
+                    ? 'bg-xc-select shadow-[inset_0_0_0_2px_var(--color-xc-accent)]'
                     : selectedFolder === node.path
-                      ? 'bg-xc-select text-xc-text'
-                      : 'text-xc-text hover:bg-xc-line-soft'
+                      ? 'bg-xc-select'
+                      : 'hover:bg-xc-fill'
                 }`}
               >
                 {/*
-                  The triangle is its own control, as it is in every file tree:
+                  The chevron is its own control, as it is in every file tree:
                   clicking the row selects the group - which is what decides where
-                  "New File" puts things - and only the triangle opens it.
+                  "New File" puts things - and only the chevron opens it.
                 */}
                 <span
                   role="button"
@@ -515,18 +521,18 @@ function Tree({
                     event.stopPropagation()
                     onToggleFolder(node.path)
                   }}
-                  className="-my-1 grid h-[22px] w-[12px] shrink-0 place-items-center"
+                  className="grid h-6 w-4 shrink-0 place-items-center text-xc-text-3"
                 >
                   <Icon
-                    name={open ? 'disclosure-open' : 'disclosure-closed'}
-                    size={10}
-                    className={selectedFolder === node.path ? 'text-xc-text/80' : 'text-xc-text-3'}
+                    name="chevron-right"
+                    size={12}
+                    className={`transition-transform duration-[120ms] ${open ? 'rotate-90' : ''}`}
                   />
                 </span>
                 <Icon
                   name="folder"
                   size={14}
-                  className={selectedFolder === node.path ? 'text-xc-text' : 'text-[#8ab4f8]'}
+                  className={`shrink-0 ${selectedFolder === node.path ? 'text-xc-accent' : 'text-xc-text-3'}`}
                 />
                 <span className="truncate">{node.name}</span>
               </button>
@@ -594,15 +600,13 @@ function FileRow({
       }}
       aria-current={active ? 'true' : undefined}
       style={{ paddingLeft: depth * INDENT + 4 }}
-      className={`${ROW} transition-colors ${
-        active ? 'bg-xc-select text-xc-text' : 'text-xc-text hover:bg-xc-line-soft'
-      }`}
+      className={`${ROW} text-xc-text ${active ? 'bg-xc-select' : 'hover:bg-xc-fill'}`}
     >
-      <span className="w-[10px] shrink-0" />
+      <span className="w-4 shrink-0" />
       <SwiftFileIcon error={hasError} />
       <span className="truncate">{node.name}</span>
       {hasError ? (
-        <Icon name="error" size={11} weight={2} className="ml-auto shrink-0 text-xc-error" />
+        <Icon name="error" size={12} weight={2} className="ml-auto shrink-0 text-xc-error" />
       ) : null}
     </button>
   )
@@ -668,8 +672,8 @@ function NavTab({
 /** Xcode's navigator filter, in the same place Xcode puts it. */
 function FilterField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <div className="flex h-[34px] shrink-0 items-center gap-1.5 border-t border-xc-line px-2">
-      <Icon name="search" size={12} className="shrink-0 text-xc-text-3" />
+    <div className="group flex h-10 shrink-0 items-center gap-2 border-t border-xc-line px-3">
+      <Icon name="search" size={14} className="shrink-0 text-xc-text-3 group-focus-within:text-xc-accent" />
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -680,10 +684,10 @@ function FilterField({ value, onChange }: { value: string; onChange: (value: str
         spellCheck={false}
         aria-label="Filter files"
         data-testid="navigator-filter"
-        className="min-w-0 flex-1 bg-transparent text-[14px] text-xc-text placeholder:text-xc-text-3"
+        className="h-full min-h-0 min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none"
       />
       {value ? (
-        <ToolButton icon="xmark" label="Clear filter" onClick={() => onChange('')} size={11} />
+        <ToolButton icon="xmark" label="Clear filter" onClick={() => onChange('')} size={12} />
       ) : null}
     </div>
   )
@@ -715,20 +719,20 @@ function IssueList({
 
   if (byFile.length === 0) {
     return (
-      <p className="p-3 text-[14px] text-xc-text-3" data-testid="issue-navigator">
+      <p className="px-4 py-3 text-footnote text-xc-text-3" data-testid="issue-navigator">
         No issues.
       </p>
     )
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto px-1.5 py-1.5" data-testid="issue-navigator">
+    <div className="min-h-0 flex-1 overflow-auto p-2" data-testid="issue-navigator">
       {byFile.map(([file, items]) => (
-        <div key={file} className="mb-1.5">
-          <div className="flex items-center gap-1.5 px-1 py-1 text-[14px] text-xc-text">
+        <div key={file} className="mb-2">
+          <div className="flex h-7 items-center gap-1.5 px-2 text-body text-xc-text">
             <SwiftFileIcon error={items.some((d) => d.severity === 'error')} />
             <span className="truncate">{fileBasename(file)}</span>
-            <span className="ml-auto text-[13px] text-xc-text-3">{items.length}</span>
+            <span className="ml-auto text-caption text-xc-text-3 tabular-nums">{items.length}</span>
           </div>
 
           <ul>
@@ -737,13 +741,13 @@ function IssueList({
                 <button
                   type="button"
                   onClick={() => onReveal(diagnostic.span.file, diagnostic.span.start)}
-                  className="flex w-full items-start gap-1.5 rounded-[5px] py-1 pl-5 pr-1.5 text-left text-[13px] leading-snug text-xc-text-2 transition-colors hover:bg-xc-line-soft"
+                  className="flex min-h-7 w-full items-start gap-1.5 rounded-md py-1.5 pl-7 pr-2 text-left text-footnote text-xc-text-2 transition-colors duration-[120ms] hover:bg-xc-fill hover:text-xc-text"
                 >
                   <Icon
                     name={diagnostic.severity === 'error' ? 'error' : 'warning'}
-                    size={11}
+                    size={12}
                     weight={2}
-                    className={`mt-px shrink-0 ${
+                    className={`mt-0.5 shrink-0 ${
                       diagnostic.severity === 'error' ? 'text-xc-error' : 'text-xc-warn'
                     }`}
                   />
@@ -793,7 +797,7 @@ export function NameField({
   }, [initial])
 
   return (
-    <div style={{ paddingLeft: depth * INDENT + 4 }} className="py-px pr-1.5">
+    <div style={{ paddingLeft: depth * INDENT + 4 }} className="py-0.5 pr-2">
       <input
         ref={ref}
         value={value}
@@ -817,9 +821,9 @@ export function NameField({
         title={error ? 'Use a unique file name without path separators.' : undefined}
         aria-invalid={error}
         aria-label="File or group name"
-        className="h-[22px] w-full rounded-[4px] border border-xc-accent bg-xc-panel px-1.5 text-[14px] text-xc-text outline-none"
+        className="h-6 w-full px-1.5"
       />
-      {error ? <span role="alert" className="text-[11px] text-xc-error">Choose a valid, unique name.</span> : null}
+      {error ? <span role="alert" className="block px-1.5 pt-1 text-caption text-xc-error">Choose a valid, unique name.</span> : null}
     </div>
   )
 }

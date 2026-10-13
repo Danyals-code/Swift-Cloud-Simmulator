@@ -1151,8 +1151,9 @@ export class Checker {
       span,
       'warning',
       'unsupported_swiftui_modifier',
+      // A typo reads exactly like a modifier the preview lacks, and only one of them builds.
       `The preview does not recognise the modifier '.${member}', so it is ignored here. ` +
-        'It is exported to Xcode unchanged.',
+        "If it isn't a SwiftUI modifier, Xcode won't build the app.",
       `.${member}`,
     )
   }

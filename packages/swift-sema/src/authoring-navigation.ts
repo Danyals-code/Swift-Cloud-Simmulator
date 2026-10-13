@@ -3,6 +3,7 @@ import { forEachChild, Parser, type CallExpr, type ClosureExpr, type Expr, type 
 import { callOf, expressionOf, hasComments, insertMember, lineIndent, modifierIndent, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
 import { viewCallChain } from './design-controls'
 import { enumCases } from './authoring-components'
+import { appRoot } from './authoring-navigation-app'
 
 /**
  * Whether a link at `node` pushes: whether it is shown inside a navigation stack (D13).
@@ -270,8 +271,10 @@ function destinationChoices(ctx: FeatureContext, site: Site, current: string): N
   const bindings = lexicalBindings(ctx, site.node)
   const result: NavigationDestination[] = []
   const parsedCurrent = parseDestination(current), currentBase = parsedCurrent && viewCallChain(parsedCurrent)?.base
+  // The view the window shows holds every screen; pointing a link at it nests the whole app in itself.
+  const root = appRoot(ctx)
   for (const declaration of ctx.ast.flatMap(file => file.declarations).filter((item): item is StructDecl => item.kind === 'structDecl' && item.inherits.some(type => ['View', 'SwiftUI.View'].includes(type.name)))) {
-    if (!namedStruct(ctx, declaration.name) || declaration.name === site.node.owner) continue
+    if (!namedStruct(ctx, declaration.name) || declaration.name === site.node.owner || declaration.name === root && viewName(parsedCurrent) !== root) continue
     const requirements = parameters(ctx, declaration) ?? []
     const arguments_: string[] = []
     for (const requirement of requirements.filter(requirement => requirement.required)) {

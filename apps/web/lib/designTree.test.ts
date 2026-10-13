@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { Diagnostic } from '@studio/shared'
-import { compile, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
-import { designScreenPath, designTree, emptyScreensNote } from './designTree'
+import { SCREEN_REMOVAL_REFUSALS, type Diagnostic } from '@studio/shared'
+import { applyEvent, compile, rerender, resetPipelineState, setFontMetrics } from '@studio/swiftui-runtime'
+import { templateById } from '@studio/project-model/templates'
+import { designScreenPath, designScreens, designTree, emptyScreensNote, liveDesignScreen, screenRemovalRefusal } from './designTree'
 import { screenCatalog, type DesignScreen } from './screens'
 
 /**
@@ -171,5 +172,75 @@ describe('the way the Design panel opens to a screen', () => {
     const edit = tree.sheets[0]!.screen
 
     expect(designScreenPath(tree, edit.id)).toEqual(['group:sheets', edit.id])
+  })
+})
+
+/**
+ * The screen Preview is showing, in the tree Design drew. Layers lists the running
+ * screen's views under it, and the settings and their breadcrumb describe it, so a
+ * screen pushed in Preview used to be filed under the tab it was pushed from.
+ */
+describe('the screen Preview is showing', () => {
+  const files = [...templateById('dispatch')!.files]
+  function designed(saved: readonly DesignScreen[] = []) {
+    resetPipelineState()
+    setFontMetrics([])
+    const result = compile({ projectId: 'dispatch', files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true, designScreens: saved })
+    return designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, saved))
+  }
+  function running() {
+    resetPipelineState()
+    return compile({ projectId: 'dispatch', files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1 })
+  }
+  function tap(result: ReturnType<typeof compile>, label: string) {
+    const target = result.renderTree!.nodes.find(node => node.hitTarget && node.a11y?.label === label)
+    expect(target, label).toBeDefined()
+    expect(applyEvent({ kind: 'tap', handlerId: target!.hitTarget!.handlerId, location: { x: 0, y: 0 } })).toBe(true)
+    return rerender(2)
+  }
+  const shown = (tree: ReturnType<typeof designed>, result: ReturnType<typeof compile>) => {
+    const screen = liveDesignScreen(tree, result.viewHierarchy, result.authoring)
+    return screen && [screen.name, screen.presentation, screen.depth]
+  }
+
+  it('is the screen a tapped row pushed, not the tab it was pushed from', () => {
+    const tree = designed()
+    expect(shown(tree, tap(running(), 'Preferences'))).toEqual(['Preferences', 'push', 1])
+  })
+
+  // A screen given a name in the studio is drawn with an id of its own, which the running tab does not share.
+  it('is the open tab, named as Design names it, before and after switching tabs', () => {
+    const tree = designed([{ view: 'OverviewView', name: 'Today' }, { view: 'ProjectsView', name: 'Work' }])
+    expect(tree.lanes.map(lane => lane.root.id)).toEqual(['screen:OverviewView', 'screen:ProjectsView', 'page:v-0-2'])
+    const live = running()
+    expect(shown(tree, live)).toEqual(['Today', 'root', 0])
+    expect(shown(tree, tap(live, 'Projects'))).toEqual(['Work', 'root', 0])
+  })
+
+  it('is the sheet presented over the tab', () => {
+    const tree = designed()
+    expect(shown(tree, tap(running(), 'New task'))).toEqual(['New task', 'sheet', 1])
+  })
+})
+
+describe('the screens Remove cannot take', () => {
+  const files = [...templateById('dispatch')!.files]
+  function designed() {
+    resetPipelineState()
+    setFontMetrics([])
+    const result = compile({ projectId: 'dispatch', files, canvas: { width: 402, height: 874 }, colorScheme: 'light', revision: 1, allPages: true })
+    return designTree(result.pages, result.authoring, screenCatalog(result.authoring, result.pages, []))
+  }
+  const refusal = (tree: ReturnType<typeof designed>, name: string) => {
+    const screen = designScreens(tree).find(node => node.name === name)
+    expect(screen, name).toBeDefined()
+    return screenRemovalRefusal(screen!, tree)
+  }
+
+  it('says why, in the words the planner uses: tabs, and screens something opens', () => {
+    const tree = designed()
+    expect(refusal(tree, 'Overview')).toBe(SCREEN_REMOVAL_REFUSALS.tab)
+    expect(refusal(tree, 'Preferences')).toBe(SCREEN_REMOVAL_REFUSALS.opened)
+    expect(refusal(tree, 'New task')).toBe(SCREEN_REMOVAL_REFUSALS.opened)
   })
 })

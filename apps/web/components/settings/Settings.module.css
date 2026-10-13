@@ -2,83 +2,111 @@
    parts - a section, a row of label and control, a token chip - so the three levels
    read as one panel whose contents change, not three panels. */
 
-.panel { display: grid; gap: 0; min-width: 0; font-size: 12px; color: var(--color-xc-text); }
-.section { display: grid; gap: 8px; padding: 12px 0 14px; border-bottom: 1px solid var(--color-xc-line-soft); min-width: 0; }
-.section:first-child { padding-top: 2px; }
-.section:last-child { border-bottom: 0; }
-.sectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
-.sectionHeader h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--color-xc-text); }
+.panel { display: grid; gap: 0; min-width: 0; font-size: var(--text-body); color: var(--color-xc-text); }
+.section { display: grid; gap: 8px; min-width: 0; padding: 16px 0; border-bottom: 1px solid var(--color-xc-line-soft); }
+.section:last-child { border-bottom: 0; padding-bottom: 0; }
+.section + .note { padding-top: 16px; }
+.sectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--control-height-sm); margin-bottom: 4px; }
+.sectionHeader h3 { margin: 0; font-size: var(--text-body); line-height: var(--text-body--line-height); font-weight: 600; color: var(--color-xc-text); }
 .sectionHeader > span { display: inline-flex; align-items: center; gap: 4px; }
-.iconButton { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: var(--color-xc-text-2); cursor: pointer; }
-.iconButton:hover:not(:disabled) { background: var(--color-xc-line-soft); color: var(--color-xc-text); }
+/* A plain square button: add, remove, move, choose a symbol. */
+.iconButton { display: grid; place-items: center; flex-shrink: 0; width: var(--control-height-sm); height: var(--control-height-sm); border-radius: var(--radius-md); color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast); }
+.iconButton:hover:not(:disabled) { background: var(--color-xc-fill); color: var(--color-xc-text); }
 .iconButton[aria-pressed='true'], .iconButton[aria-expanded='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
-.iconButton:disabled { opacity: .35; cursor: default; }
+.iconButton:disabled { opacity: .4; }
+label.iconButton:has(input:disabled) { opacity: .4; }
 
 .row { composes: row from "../ui/Field.module.css"; }
-
-.field, .row input, .row select { box-sizing: border-box; width: 100%; min-width: 0; height: 28px; border: 1px solid var(--color-xc-line); border-radius: 6px; padding: 0 8px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; }
-.row input[type='color'] { padding: 2px; width: 32px; height: 26px; flex-shrink: 0; }
-.row input:focus-visible, .row select:focus-visible, .field:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 1px; }
+.row input[type='color'] { flex-shrink: 0; }
 .inline { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.inline > input:not([type='color']), .inline > select { flex: 1; }
-.unit { color: var(--color-xc-text-3); font-size: 11px; flex-shrink: 0; }
+.inline > input:not([type='color']), .inline > select { flex: 1; min-width: 0; }
+.unit { flex-shrink: 0; font-size: var(--text-footnote); color: var(--color-xc-text-3); }
 
-.note { margin: 0; color: var(--color-xc-text-3); font-size: 11px; line-height: 1.5; }
-.warning { margin: 0; color: var(--color-xc-warn-text, #8a5a00); font-size: 11px; line-height: 1.5; }
-.error { margin: 0; color: var(--color-xc-error); font-size: 11px; line-height: 1.5; }
-.actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); color: var(--color-xc-text); font-size: 12px; cursor: pointer; }
-.button:hover:not(:disabled) { background: var(--color-xc-line-soft); }
-.button:disabled { opacity: .45; cursor: default; }
-.primary { composes: button; border-color: transparent; background: var(--color-xc-accent); color: #fff; }
-.primary:hover:not(:disabled) { background: var(--workspace-accent-hover, var(--color-xc-accent)); }
-.link { color: var(--color-xc-accent); cursor: pointer; font-size: 12px; text-align: left; padding: 0; }
-.link:disabled { opacity: .45; cursor: default; }
+.note { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
+.warning { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-warn); }
+.error { margin: 0; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-error); }
+.note code { font-size: var(--text-footnote); }
 
-/* Token rows in the App panel. */
+/* Push buttons: secondary, primary for the one that saves a form, red text to remove. */
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.button { display: inline-flex; align-items: center; justify-content: center; justify-self: start; gap: 6px; height: var(--control-height); padding: 0 12px; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); font-size: var(--text-body); white-space: nowrap; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.button:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
+.button:disabled { opacity: .4; }
+.button > svg { color: var(--color-xc-text-2); }
+.primary { composes: button; background: var(--color-xc-accent-fill); color: #fff; font-weight: 500; }
+.primary:hover:not(:disabled) { background: var(--color-xc-accent-hover); }
+.destructive { composes: button; color: var(--color-xc-error); }
+.link { padding: 0; color: var(--color-xc-accent); font: inherit; text-align: left; }
+.link:hover:not(:disabled) { text-decoration: underline; }
+.link:disabled { opacity: .4; }
+/* A value that comes from elsewhere, drawn as the field it would be: click to set it here. */
+.inherit { display: block; width: 100%; min-width: 0; min-height: var(--control-height); padding: 4px 8px; border-radius: var(--radius-md); background: var(--color-xc-field); color: var(--color-xc-text-2); font-size: var(--text-body); line-height: var(--text-body--line-height); text-align: left; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.inherit:hover:not(:disabled) { background: var(--color-xc-fill-strong); color: var(--color-xc-text); }
+.inherit:disabled { opacity: .4; }
+.badge { justify-self: start; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-xc-select); color: var(--color-xc-accent); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+
+/* Token rows in the App panel: list rows that open into a tinted group. */
 .tokenList { display: grid; gap: 2px; }
-.tokenRow { display: grid; gap: 8px; border-radius: 6px; }
-.tokenRow[data-open] { background: var(--color-xc-bar-raised); padding: 0 8px 10px; margin: 2px -8px; }
-.tokenSummary { display: flex; align-items: center; gap: 8px; min-height: 30px; width: 100%; text-align: left; cursor: pointer; border-radius: 6px; }
-.tokenSummary:hover { background: var(--color-xc-line-soft); }
+.tokenRow { display: grid; gap: 8px; min-width: 0; border-radius: var(--radius-lg); }
+.tokenRow[data-open] { padding: 0 8px 12px; background: var(--color-xc-bar-raised); }
+.tokenRow[data-open]:not(:has(> .tokenSummary)) { padding-top: 12px; }
+.tokenRow[data-open] > .tokenSummary { width: calc(100% + 16px); margin: 0 -8px; }
+.tokenSummary { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--row-height); padding: 0 8px; border-radius: var(--radius-md); color: var(--color-xc-text); text-align: left; transition: background-color var(--duration-fast); }
+.tokenSummary:hover { background: var(--color-xc-fill); }
 .tokenRow[data-open] .tokenSummary:hover { background: transparent; }
-.tokenSummary > strong { font-weight: 500; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tokenSummary > small { margin-left: auto; flex-shrink: 0; color: var(--color-xc-text-3); font-size: 11px; }
-.swatch { width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .14); background-image: linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%), linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%); background-size: 8px 8px; background-position: 0 0, 4px 4px; position: relative; overflow: hidden; }
+.tokenSummary > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-footnote); font-weight: 400; }
+.tokenSummary > small { margin-left: auto; flex-shrink: 0; font-size: var(--text-caption); color: var(--color-xc-text-3); }
+.swatch { position: relative; flex-shrink: 0; width: 16px; height: 16px; overflow: hidden; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-xc-text) 14%, transparent); background-image: linear-gradient(45deg, var(--color-xc-fill-strong) 25%, transparent 25%, transparent 75%, var(--color-xc-fill-strong) 75%), linear-gradient(45deg, var(--color-xc-fill-strong) 25%, transparent 25%, transparent 75%, var(--color-xc-fill-strong) 75%); background-size: 8px 8px; background-position: 0 0, 4px 4px; }
 .swatch > i { position: absolute; inset: 0; }
 .swatch[data-split] > i:last-child { left: 50%; }
-.glyph { display: grid; place-items: center; width: 16px; height: 16px; flex-shrink: 0; border-radius: 4px; background: var(--color-xc-line-soft); color: var(--color-xc-text-2); font-size: 9px; font-weight: 600; }
-.legacy { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--color-xc-line-soft); color: var(--color-xc-text-3); }
+.glyph { display: grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; border-radius: var(--radius-sm); background: var(--color-xc-fill); color: var(--color-xc-text-2); font-size: var(--text-caption); line-height: 1; font-weight: 600; }
+.legacy { flex-shrink: 0; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-xc-fill); color: var(--color-xc-text-2); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
 .uses { display: grid; gap: 2px; max-height: 140px; overflow: auto; }
-.uses button { text-align: left; padding: 3px 6px; border-radius: 4px; color: var(--color-xc-accent); cursor: pointer; font-size: 11px; }
-.uses button:hover { background: var(--color-xc-line-soft); }
+.uses button { min-height: var(--control-height-sm); padding: 0 8px; border-radius: var(--radius-md); color: var(--color-xc-text); font-size: var(--text-footnote); text-align: left; transition: background-color var(--duration-fast); }
+.uses button:hover { background: var(--color-xc-fill); }
 
 /* A value field's token picker: a token first, a raw value only when chosen. */
-.tokenField { display: grid; gap: 6px; min-width: 0; }
+.tokenField { display: grid; gap: 4px; min-width: 0; }
 .tokenPicker { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.tokenPicker > select { flex: 1; min-width: 0; height: 28px; border: 1px solid var(--color-xc-line); border-radius: 6px; padding: 0 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; }
-.tokenPicker > select[data-linked] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--color-xc-accent); }
-.rawFlag { flex-shrink: 0; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--color-xc-warn) 30%, transparent); color: var(--color-xc-text-2); }
-.override { flex-shrink: 0; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--color-xc-select); color: var(--color-xc-accent); }
+.tokenPicker > select { flex: 1; }
+.tokenPicker > select[data-linked] { font-family: var(--font-mono); font-size: var(--text-footnote); color: var(--color-xc-accent); }
+/* Under the control column, as help text is. */
+.tokenField > .badge, .tokenField > form, .tokenField > .note, .tokenField > .error { margin-left: calc(max(80px, 38%) + 8px); }
+/* Save as token: a plain button, quiet until it is wanted, its text on the field's. */
+.tokenField > .tokenAction { margin-left: calc(max(80px, 38%) + 8px); }
+.tokenAction { composes: button; height: var(--control-height-sm); padding: 0 8px; background: transparent; color: var(--color-xc-text-2); }
+.tokenAction:hover:not(:disabled) { background: var(--color-xc-fill); color: var(--color-xc-text); }
 
-/* Screen and App cards. */
-.lede { display: grid; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--color-xc-line-soft); }
-.lede strong { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
-.lede small { color: var(--color-xc-text-3); font-size: 11px; }
-.tabs { display: grid; gap: 4px; }
-.tabRow { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; }
-.tabRow input, .tabRow select { height: 26px; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 5px; padding: 0 6px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); font: inherit; font-size: 11px; }
-.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; border-radius: 7px; background: var(--color-xc-bar-raised); }
-.segmented button { height: 24px; border-radius: 5px; font-size: 11px; color: var(--color-xc-text-2); cursor: pointer; }
-.segmented button[aria-pressed='true'] { background: var(--color-xc-bar); color: var(--color-xc-text); box-shadow: 0 1px 3px #16162018; }
-.segmented button:disabled { opacity: .4; cursor: default; }
+/* Screen and App: the title of what is selected. */
+.lede { display: grid; gap: 2px; padding-bottom: 16px; border-bottom: 1px solid var(--color-xc-line-soft); }
+.lede strong { font-size: var(--text-title3); line-height: var(--text-title3--line-height); letter-spacing: var(--text-title3--letter-spacing); font-weight: 600; overflow-wrap: anywhere; }
+.lede small { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+/* A tab: its symbol and name, with the screen it shows underneath, and its order. */
+.tabs { display: grid; gap: 12px; }
+.tabRow { display: grid; grid-template-columns: var(--control-height) minmax(0, 1fr) auto; grid-template-areas: 'icon name actions' '. screen screen'; gap: 4px 6px; align-items: center; min-width: 0; }
+.tabRow > :nth-child(1) { grid-area: icon; width: var(--control-height); height: var(--control-height); }
+.tabRow > :nth-child(2) { grid-area: name; min-width: 0; }
+.tabRow > :nth-child(3) { grid-area: screen; min-width: 0; }
+.tabRow > :nth-child(4) { grid-area: actions; gap: 2px; }
+/* Icon has no up chevron: the down one, turned. */
+.flip { transform: rotate(180deg); }
+.tabRow input, .tabRow select { width: 100%; min-width: 0; height: var(--control-height); }
+.tabRow > span:not(.inline) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--color-xc-fill); }
+.segmented button { height: var(--control-height-sm); border-radius: var(--radius-thumb); color: var(--color-xc-text-2); font-size: var(--text-body); transition: background-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast); }
+.segmented button:hover:not(:disabled) { color: var(--color-xc-text); }
+.segmented button[aria-pressed='true'] { background: var(--color-xc-thumb); color: var(--color-xc-text); box-shadow: var(--shadow-thumb); }
+.segmented button:disabled { opacity: .4; }
+/* A screen's states: rows, the one on show selected. */
 .states { display: grid; gap: 2px; }
-.stateRow { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 6px; border-radius: 6px; cursor: pointer; text-align: left; width: 100%; }
-.stateRow:hover { background: var(--color-xc-line-soft); }
-.stateRow[aria-pressed='true'] { background: var(--color-xc-select); color: var(--color-xc-accent); }
-.stateRow > small { margin-left: auto; color: var(--color-xc-text-3); font-size: 11px; }
-.imageRow { display: flex; align-items: center; gap: 8px; min-height: 30px; }
-.imageRow img { width: 28px; height: 28px; object-fit: contain; border-radius: 4px; background: var(--color-xc-line-soft); }
-.imageRow > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fileInput { font-size: 11px; }
-.fileInput input { display: block; margin-top: 6px; max-width: 100%; font-size: 11px; }
+.stateRow { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: var(--row-height); padding: 0 8px; border-radius: var(--radius-md); color: var(--color-xc-text); text-align: left; transition: background-color var(--duration-fast); }
+.stateRow:hover { background: var(--color-xc-fill); }
+.stateRow[aria-pressed='true'] { background: var(--color-xc-select); }
+.stateRow > small { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-caption); color: var(--color-xc-text-3); }
+.states > .inline { gap: 2px; }
+/* A form inside a section: adding a tab. */
+.form { display: grid; gap: 8px; min-width: 0; padding: 12px; border-radius: var(--radius-lg); background: var(--color-xc-bar-raised); }
+.fileInput { display: grid; gap: 4px; font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-2); }
+.fileInput input { max-width: 100%; font-size: var(--text-footnote); color: var(--color-xc-text-3); }
+.fileInput input::file-selector-button { height: var(--control-height-sm); margin-right: 8px; padding: 0 8px; border: 0; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); font: inherit; font-size: var(--text-body); }
+.fileInput input::file-selector-button:hover { background: var(--color-xc-fill-strong); }

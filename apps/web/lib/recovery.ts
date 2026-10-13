@@ -220,6 +220,9 @@ export function saveFile(name: string, type: string, bytes: Uint8Array): void {
  * cancellations, which are something the studio chose to do.
  */
 export function isReportable(event: ErrorEvent | PromiseRejectionEvent): boolean {
+  // The dev server's hot reload drops and re-adds stylesheet chunks while files are
+  // edited; that is the tooling, not the studio, and never happens in a build.
+  if (process.env.NODE_ENV === 'development' && /\bchunk\b/i.test(String((event as ErrorEvent).message ?? (event as PromiseRejectionEvent).reason))) return false
   if (event.type === 'error') return (event as ErrorEvent).error != null
   const reason = (event as PromiseRejectionEvent).reason
   return !(reason instanceof DOMException && reason.name === 'AbortError')

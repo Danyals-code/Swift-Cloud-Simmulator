@@ -5,24 +5,33 @@ import { Icon, type IconName } from './Icon'
 /**
  * The control vocabulary.
  *
- * Three shapes, which between them cover everything in the chrome: a square icon
- * button, a bordered push button, and a segmented control. Keeping them here
- * rather than as class strings repeated per call site is what makes the toolbar
- * read as one row of controls instead of eight separately-invented ones - the
- * specific failure the old toolbar had, where a bordered button, a raw `<select>`
- * and a saturated blue split button sat side by side.
+ * Four shapes, which between them cover everything in the chrome: a square icon
+ * button, a push button, a segmented control, and the pane toggles. Keeping them
+ * here rather than as class strings repeated per call site is what makes the
+ * toolbar read as one row of controls instead of eight separately-invented ones.
  *
- * Heights are 22px throughout, which is AppKit's small control size and what a
- * 38px toolbar is built around.
+ * Every one is 28px tall with 6px corners and 13px SF, so a popup, a segmented control
+ * and a button side by side line up exactly. Filled controls share one translucent
+ * fill; a segment inside one is 24px with the inner corner (`--radius-thumb`).
  */
 
 const BASE =
-  'inline-flex h-[22px] items-center justify-center gap-1.5 rounded-[5px] text-[14px] leading-none transition-colors disabled:pointer-events-none disabled:opacity-40'
+  'inline-flex h-7 shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-body transition-[background-color,color,box-shadow] duration-[120ms] disabled:pointer-events-none disabled:opacity-40'
 
-const QUIET = 'text-xc-text-2 hover:bg-xc-line-soft hover:text-xc-text active:bg-xc-line-soft'
+const PLAIN = 'text-xc-text-2 hover:bg-xc-fill hover:text-xc-text active:bg-xc-fill-strong'
 
-const BORDERED =
-  'border border-xc-line bg-xc-line-soft px-2.5 text-xc-text hover:bg-xc-line-soft active:bg-xc-line-soft'
+const VARIANTS = {
+  /** A filled grey button: AppKit's default push button. */
+  secondary: 'bg-xc-fill px-3 text-xc-text hover:bg-xc-fill-strong active:bg-xc-fill-strong',
+  /** The one action a sheet or toolbar ends on. */
+  primary: 'bg-xc-accent-fill px-3 font-medium text-white hover:bg-xc-accent-hover active:brightness-95',
+  /** No fill until the pointer is on it, as a toolbar item. */
+  plain: `px-2.5 ${PLAIN}`,
+  /** The confirm button of a dialog that deletes or discards something for good. */
+  danger: 'bg-xc-danger-fill px-3 font-medium text-white hover:brightness-110 active:brightness-95',
+} as const
+
+export type ButtonVariant = keyof typeof VARIANTS
 
 export interface ToolButtonProps {
   icon: IconName
@@ -59,8 +68,8 @@ export function ToolButton({
       aria-pressed={active}
       title={title ?? label}
       data-testid={testId}
-      className={`${BASE} w-[26px] ${
-        active ? 'bg-xc-line-soft text-xc-text' : tone ? `${tone} hover:bg-xc-line-soft` : QUIET
+      className={`${BASE} w-7 ${
+        active ? 'bg-xc-fill text-xc-accent' : tone ? `${tone} hover:bg-xc-fill` : PLAIN
       }`}
     >
       <Icon name={icon} size={size} />
@@ -73,13 +82,15 @@ export interface PushButtonProps {
   onClick?: () => void
   title?: string
   label?: string
+  /** A toggle that is on: drawn selected, and reported as pressed. */
   active?: boolean
   disabled?: boolean
   testId?: string
   icon?: IconName
+  variant?: ButtonVariant
 }
 
-/** A bordered push button - AppKit's default, and the studio's only text button. */
+/** A push button - the studio's only text button. */
 export function PushButton({
   children,
   onClick,
@@ -89,6 +100,7 @@ export function PushButton({
   disabled = false,
   testId,
   icon,
+  variant = 'secondary',
 }: PushButtonProps) {
   return (
     <button
@@ -102,20 +114,24 @@ export function PushButton({
       // whether inspecting is on - which is the only thing it is there to say.
       aria-pressed={active}
       data-testid={testId}
-      className={`${BASE} ${
-        active
-          ? 'border border-xc-accent/70 bg-xc-accent/25 px-2.5 text-xc-text'
-          : BORDERED
-      }`}
+      className={`${BASE} ${active ? 'bg-xc-select px-3 text-xc-accent' : VARIANTS[variant]}`}
     >
-      {icon ? <Icon name={icon} size={13} /> : null}
-      {children}
+      {icon ? <Icon name={icon} size={14} /> : null}
+      {/* Its own element, so a cramped toolbar can drop the words and keep the icon. */}
+      <span data-label>{children}</span>
     </button>
   )
 }
 
+/** The track every segmented control and toggle group sits in. */
+const TRACK = 'inline-flex h-7 shrink-0 items-center gap-0.5 rounded-md bg-xc-fill p-0.5'
+const SEGMENT = 'inline-flex h-6 items-center justify-center gap-1.5 rounded-[var(--radius-thumb)] text-body transition-[background-color,color,box-shadow] duration-[120ms]'
+const SEGMENT_ON = 'bg-xc-thumb text-xc-text shadow-[var(--shadow-thumb)]'
+const SEGMENT_OFF = 'text-xc-text-2 hover:text-xc-text'
+
 export interface SegmentedControlProps {
-  options: readonly { value: string; label: string; icon?: IconName; title?: string }[]
+  /** `iconOnly` draws the icon alone; the label still names the segment for assistive tech. */
+  options: readonly { value: string; label: string; icon?: IconName; title?: string; iconOnly?: boolean }[]
   value: string
   onChange: (value: string) => void
   label: string
@@ -127,7 +143,7 @@ export interface SegmentedControlProps {
  *
  * One `aria-pressed` button per segment rather than a radio group, because that is
  * how the pane toggles behave: they are three independent switches drawn adjacent,
- * not three states of one setting. `MultiSegmented` below is that case; this one is
+ * not three states of one setting. `PaneToggles` below is that case; this one is
  * the exclusive choice.
  */
 export function SegmentedControl({
@@ -138,12 +154,7 @@ export function SegmentedControl({
   testId,
 }: SegmentedControlProps) {
   return (
-    <div
-      role="group"
-      aria-label={label}
-      data-testid={testId}
-      className="inline-flex h-[22px] items-center gap-px rounded-[5px] border border-xc-line bg-xc-line-soft p-px"
-    >
+    <div role="group" aria-label={label} data-testid={testId} className={TRACK}>
       {options.map((option) => {
         const selected = option.value === value
         return (
@@ -152,15 +163,12 @@ export function SegmentedControl({
             type="button"
             onClick={() => onChange(option.value)}
             aria-pressed={selected}
+            aria-label={option.iconOnly ? option.label : undefined}
             title={option.title ?? option.label}
-            className={`inline-flex h-[18px] items-center gap-1 rounded-[4px] px-2 text-[13px] leading-none transition-colors ${
-              selected
-                ? 'bg-xc-panel text-xc-text shadow-[0_1px_3px_rgb(0_0_0/0.08)]'
-                : 'text-xc-text-2 hover:text-xc-text'
-            }`}
+            className={`${SEGMENT} ${option.iconOnly ? 'w-8' : 'px-2.5'} ${selected ? SEGMENT_ON : SEGMENT_OFF}`}
           >
-            {option.icon ? <Icon name={option.icon} size={12} /> : null}
-            {option.label}
+            {option.icon ? <Icon name={option.icon} size={option.iconOnly ? 15 : 13} /> : null}
+            {option.iconOnly ? null : option.label}
           </button>
         )
       })}
@@ -178,7 +186,7 @@ export interface PaneTogglesProps {
 }
 
 /**
- * Xcode's pane toggles: three independent switches drawn as one segmented block.
+ * Xcode's pane toggles: independent switches drawn as one group.
  *
  * Distinct from `SegmentedControl` because any combination can be on at once -
  * modelling it as an exclusive choice would make hiding the navigator also show
@@ -186,12 +194,7 @@ export interface PaneTogglesProps {
  */
 export function PaneToggles({ options, shown, suppressed, onToggle }: PaneTogglesProps) {
   return (
-    <div
-      role="group"
-      aria-label="Panes"
-      data-testid="pane-toggles"
-      className="inline-flex h-[22px] items-center gap-px rounded-[5px] border border-xc-line bg-xc-line-soft p-px"
-    >
+    <div role="group" aria-label="Panes" data-testid="pane-toggles" className="inline-flex items-center gap-0.5">
       {options.map((option) => {
         const on = shown.has(option.key)
         // On but with nowhere to go. Drawn as a pressed-and-dimmed switch rather
@@ -211,15 +214,15 @@ export function PaneToggles({ options, shown, suppressed, onToggle }: PaneToggle
             // On is accent-tinted, as selected is everywhere else in the studio -
             // a chosen tab, a chosen layer, an armed tool. Suppressed keeps the grey,
             // because it is on without being in effect.
-            className={`inline-flex h-[18px] w-[26px] items-center justify-center rounded-[4px] transition-colors ${
+            className={`${BASE} w-7 ${
               cramped
-                ? 'bg-xc-line-soft text-xc-text-3'
+                ? 'bg-xc-fill text-xc-text-3'
                 : on
-                  ? 'bg-xc-select text-xc-accent'
-                  : 'text-xc-text-3 hover:text-xc-text-2'
+                  ? 'bg-xc-fill text-xc-accent'
+                  : PLAIN
             }`}
           >
-            <Icon name={option.icon} size={14} />
+            <Icon name={option.icon} size={15} />
           </button>
         )
       })}

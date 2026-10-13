@@ -67,7 +67,6 @@ export function AddView({ target, onChoose, onClose, assets, onImage }: Props) {
           <span className={styles.target} data-testid="add-view-target">{target}</span>
         </header>
 
-        <p className={styles.catalogNote}>Pick a view to add it. Select it afterwards to change it in the settings panel. Links set up navigation for you.</p>
         <div className={styles.list} ref={listRef} role="listbox" aria-label="Views">
           {results.map((snippet, index) => (
             <button

@@ -110,25 +110,30 @@ export function PromptEditor({ selection, stale, previewProblems, onApplied }: {
   }
 
   return <section className={styles.panel} aria-label="Prompt Editing" data-testid="prompt-editor">
-    <header className={styles.header}><div><strong>Prompt Editing</strong><small>Edit your app by describing it.</small></div><button type="button" aria-label="AI connection settings" aria-expanded={connectionOpen} onClick={() => setConnectionOpen(open => !open)}><Icon name="settings" size={15} /></button></header>
+    <header className={styles.header}><div><small>Describe a change, and the canvas and Swift update together.</small></div><button type="button" aria-label="AI connection settings" aria-expanded={connectionOpen} onClick={() => setConnectionOpen(open => !open)}><Icon name="settings" size={16} /></button></header>
     {connectionOpen && <fieldset className={styles.connection} disabled={busy}><legend>AI connection</legend>
       <label>Provider<select value={provider} onChange={event => chooseProvider(event.target.value as Provider)}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option></select></label>
       <label>Model<input value={model} maxLength={100} spellCheck={false} onChange={event => setModel(event.target.value)} /></label>
-      <label>API key<input type="password" autoComplete="off" spellCheck={false} value={apiKey} maxLength={512} onChange={event => setKey(event.target.value)} placeholder="Paste your API key" /></label>
-      <p>The key is kept in this browser tab until you close it, and never in the project. Your prompt, recent chat, project source and preview warnings are sent to {provider === 'openai' ? 'OpenAI' : 'Anthropic'} when you send. API usage is billed by your provider.</p>
+      <label>API key<input type="password" autoComplete="off" spellCheck={false} value={apiKey} maxLength={512} onChange={event => setKey(event.target.value)} placeholder={provider === 'openai' ? 'sk-…' : 'sk-ant-…'} /></label>
+      <p>Kept in this tab only, never in the project. When you send, your prompt, recent chat, source and preview warnings go to {provider === 'openai' ? 'OpenAI' : 'Anthropic'}, which bills your key.</p>
     </fieldset>}
+    {/* Before anything is typed, rather than as an error after Send. */}
+    {!connectionOpen && !apiKey.trim() && <div className={styles.connect} data-testid="prompt-connect">
+      <span>Connect an AI provider to edit with prompts.</span>
+      <button type="button" onClick={() => setConnectionOpen(true)}>Add API key</button>
+    </div>}
     <div className={styles.conversation} ref={conversation} role="log" aria-label="Prompt conversation" aria-live="polite">
-      {!project?.chatHistory?.length && <div className={styles.empty}><Icon name="text-lines" size={24} /><h3>What would you like to change?</h3><p>Select a view on the canvas to target it, or describe a change to the whole app.</p><p>Edits update the canvas and Swift together. Use Undo to reverse them.</p></div>}
+      {!project?.chatHistory?.length && <div className={styles.empty}><Icon name="text-lines" size={24} /><h3>What would you like to change?</h3><p>Select a view on the canvas to change just that, or describe a change to the whole app. Undo reverses any edit.</p></div>}
       {project?.chatHistory?.map(message => <article key={message.id} className={styles.message} data-role={message.role} data-status={message.status}>
         <div><strong>{message.role === 'user' ? 'You' : 'AI'}</strong>{message.status === 'applied' && <span>Applied</span>}{message.status === 'failed' && <span>Not applied</span>}{message.status === 'cancelled' && <span>Cancelled</span>}</div>
         {message.selection && <small className={styles.messageContext}>{message.selection.label}</small>}
         <p>{message.content}</p>
         {!!message.changedFiles?.length && <details><summary>{message.changedFiles.length} {message.changedFiles.length === 1 ? 'file' : 'files'} changed</summary>{message.changedFiles.map(file => <small key={file}>{file}</small>)}</details>}
       </article>)}
-      {aiEdit && <p className={styles.progress} role="status"><Icon name="refresh" size={13} className="animate-spin" />{PROGRESS[aiEdit.phase]}</p>}
+      {aiEdit && <p className={styles.progress} role="status"><Icon name="refresh" size={14} className="animate-spin" />{PROGRESS[aiEdit.phase]}</p>}
     </div>
     <form className={styles.composer} onSubmit={event => { event.preventDefault(); void send() }}>
-      {context && <div className={styles.selection} data-testid="prompt-selection" title={`${context.owner} · ${context.file}`}><Icon name="focus" size={12} /><span>{context.label}</span><button type="button" aria-label="Remove selection context" onClick={() => setDismissedSelection(selectionKey)}>×</button></div>}
+      {context && <div className={styles.selection} data-testid="prompt-selection" title={`${context.owner} · ${context.file}`}><Icon name="focus" size={14} /><span>{context.label}</span><button type="button" aria-label="Remove selection context" onClick={() => setDismissedSelection(selectionKey)}>×</button></div>}
       <label className={styles.promptLabel} htmlFor="edit-prompt">Describe a change</label>
       <textarea id="edit-prompt" value={prompt} maxLength={6000} rows={3} disabled={busy} placeholder={context ? `Change ${context.label}…` : 'What should we change?'} onChange={event => setPrompt(event.target.value)} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} />
       {error && <p className={styles.error} role="alert">{error}</p>}

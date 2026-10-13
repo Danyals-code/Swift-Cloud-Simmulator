@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { keyFocus, shortcutFor, type KeyFocus, type KeyPlace, type KeyPress } from './shortcuts'
+import { formatShortcut, keyFocus, shortcutFor, type KeyFocus, type KeyPlace, type KeyPress } from './shortcuts'
 
 /**
  * What each key does, by where the focus is (D5). Keys used to fire from wherever the
@@ -129,6 +129,15 @@ describe('Design, with nothing selected', () => {
     expect(does('Mod+z', nothing)).toBe('undo')
     expect(does('a', nothing)).toBe('add')
   })
+
+  it('answers Backspace on a screen with where a screen is removed, from the page or its row', () => {
+    for (const focus of ['page', 'control'] as const) {
+      expect(does('Backspace', { ...editing(focus, false), screen: true })).toBe('screen-delete')
+      expect(does('Delete', { ...editing(focus, false), screen: true })).toBe('screen-delete')
+    }
+    expect(does('Backspace', { ...editing('choice', false), screen: true })).toBe('hold')
+    expect(does('Backspace', { workspace: 'design', editing: false, focus: 'page', selected: false, screen: true })).toBe('hold')
+  })
 })
 
 describe('Design, in Preview', () => {
@@ -156,10 +165,16 @@ describe('Design, in Preview', () => {
 describe('Code', () => {
   const code = (focus: KeyFocus, editingCode = true): KeyPlace => ({ workspace: 'develop', editing: editingCode, focus, selected: false })
 
-  it('switches Inspect and Preview with Tab only when nothing has the focus', () => {
-    expect(does('Tab', code('page'))).toBe('preview')
-    expect(does('Tab', code('page', false))).toBe('preview')
-    for (const focus of ['control', 'choice', 'text', 'code'] as const) expect(does('Tab', code(focus)), focus).toBeNull()
+  it('leaves Tab to move the focus, as Design does: ⌘I switches Inspect and Preview', () => {
+    for (const focus of ['page', 'control', 'choice', 'text', 'code'] as const) {
+      expect(does('Tab', code(focus)), focus).toBeNull()
+      expect(does('Tab', code(focus, false)), focus).toBeNull()
+    }
+  })
+
+  it('leaves ⌘/ to the code editor, which comments the line as Xcode does', () => {
+    expect(does('Mod+/', code('code'))).toBeNull()
+    expect(does('Mod+/', code('page'))).toBe('shortcuts')
   })
 
   it('keeps its Xcode chords, in the code editor too', () => {
@@ -222,5 +237,22 @@ describe('where the focus is', () => {
     expect(keyFocus(element('DIV'))).toBe('control')
     expect(keyFocus(element('BODY'))).toBe('page')
     expect(keyFocus(null)).toBe('page')
+  })
+})
+
+describe('the shortcuts list', () => {
+  it('writes chords as the Mac does: modifiers in ⌃⌥⇧⌘ order, run into the key', () => {
+    expect(formatShortcut('Mod Shift Z', true)).toBe('⇧⌘Z')
+    expect(formatShortcut('Mod Alt Enter', true)).toBe('⌥⌘↩')
+    expect(formatShortcut('Backspace', true)).toBe('⌫')
+    expect(formatShortcut('Mod Click', true)).toBe('⌘ Click')
+    expect(formatShortcut('Alt ↑ / Alt ↓', true)).toBe('⌥↑ / ⌥↓')
+    expect(formatShortcut('F2 / Double-click', true)).toBe('F2 / Double-click')
+  })
+
+  it('writes them with Ctrl and plus signs elsewhere', () => {
+    expect(formatShortcut('Mod Shift Z', false)).toBe('Ctrl+Shift+Z')
+    expect(formatShortcut('Mod C / Mod V', false)).toBe('Ctrl+C / Ctrl+V')
+    expect(formatShortcut('A', false)).toBe('A')
   })
 })

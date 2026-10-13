@@ -23,6 +23,20 @@ import { useLayout } from '../lib/layout'
 
 const externalDocument = Annotation.define<boolean>()
 
+/** CodeMirror's search labels are lowercase; the rest of the studio is Title Case. */
+const EDITOR_PHRASES = {
+  next: 'Next',
+  previous: 'Previous',
+  all: 'All',
+  'match case': 'Match Case',
+  regexp: 'Regex',
+  'by word': 'Whole Word',
+  replace: 'Replace',
+  'replace all': 'Replace All',
+  close: 'Close',
+  go: 'Go',
+}
+
 /**
  * What the editor may ask the compiler worker about a caret position.
  *
@@ -219,6 +233,7 @@ export function EditorPane({
         },
       })),
       StreamLanguage.define(swift),
+      EditorState.phrases.of(EDITOR_PHRASES),
       editorTheme,
       appearance.current.of(EditorView.darkTheme.of(theme === 'dark')),
       typing.current.of(EditorState.readOnly.of(readOnly)),
@@ -389,16 +404,16 @@ function toCompletion(symbol: SymbolInfo): Completion {
 
 function tooltipFor(symbol: SymbolInfo): HTMLElement {
   const dom = document.createElement('div')
-  dom.className = 'px-2 py-1 text-xs leading-relaxed'
+  dom.className = 'max-w-[420px] px-3 py-2 text-footnote'
 
   const signature = document.createElement('div')
-  signature.className = 'font-mono'
+  signature.className = 'font-mono text-xc-text'
   signature.textContent = symbol.detail ? `${symbol.name}: ${symbol.detail}` : symbol.name
   dom.appendChild(signature)
 
   if (symbol.doc) {
     const note = document.createElement('div')
-    note.className = 'mt-1 opacity-70'
+    note.className = 'mt-1 text-xc-text-2'
     note.textContent = symbol.doc
     dom.appendChild(note)
   }

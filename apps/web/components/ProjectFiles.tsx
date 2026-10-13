@@ -21,8 +21,10 @@ export interface AssetsFolderProps {
   onManage: () => void
 }
 
-const INDENT = 14
-const BASE = 8
+const INDENT = 16
+const BASE = 4
+/** Where a row without a disclosure starts its icon: past the chevron's slot and the gap after it. */
+const LEAF = 22
 
 /** Data URLs are a few megabytes of base64 for a large image, so each is made once per variant. */
 const thumbnails = new WeakMap<ImageVariant, string>()
@@ -71,17 +73,17 @@ export function AssetsFolder({ images, colors, busy, onImport, onInsert, onManag
     }}>
     <div className={styles.row} style={{ paddingLeft: BASE }}>
       <button type="button" className={styles.label} aria-expanded={open} onClick={() => setOpen(value => !value)}>
-        <span className={styles.disclosure}><Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} /></span>
+        <span className={styles.disclosure}><Icon name="chevron-right" size={12} /></span>
         <Icon name="folder" size={14} /><span>Assets</span>{count > 0 && <small>{count}</small>}
       </button>
       <label className={styles.add} title="Add PNG or JPEG images" aria-label="Add images" aria-disabled={disabled || undefined}>
-        <Icon name="plus" size={13} />
+        <Icon name="plus" size={14} />
         <input type="file" accept="image/png,image/jpeg" multiple hidden disabled={disabled} data-testid="assets-import"
           onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; if (files.length) { setOpen(true); void run(() => onImport(files)) } }} />
       </label>
     </div>
     {open && <ul className={styles.items} role="group" aria-label="Assets">
-      {images.map(asset => <li key={asset.id} className={styles.row} style={{ paddingLeft: BASE + INDENT + 16 }} data-testid="asset-image"
+      {images.map(asset => <li key={asset.id} className={styles.row} style={{ paddingLeft: BASE + INDENT + LEAF }} data-testid="asset-image"
         draggable={!disabled} tabIndex={0} aria-label={`${asset.name}, image`}
         title={`Double-click to look closer. Drag onto a view to place it, or into code for ${imageReference(asset.name)}`}
         onDoubleClick={() => setPreviewing(asset)}
@@ -91,7 +93,7 @@ export function AssetsFolder({ images, colors, busy, onImport, onInsert, onManag
           event.dataTransfer.setData('text/plain', imageReference(asset.name))
           event.dataTransfer.effectAllowed = 'copy'
         }}>
-        <img src={thumbnail(asset.light)} alt="" width={18} height={18} className={styles.thumb} draggable={false} />
+        <img src={thumbnail(asset.light)} alt="" width={16} height={16} className={styles.thumb} draggable={false} />
         <span className={styles.name}>{asset.name}</span>
         <small>{asset.light.width / asset.scale} × {asset.light.height / asset.scale}</small>
         <span className={styles.actions}><MenuButton label={`Actions for ${asset.name}`} items={[
@@ -106,11 +108,11 @@ export function AssetsFolder({ images, colors, busy, onImport, onInsert, onManag
           else onManage()
         }}><Icon name="ellipsis" size={14} /></MenuButton></span>
       </li>)}
-      {colors.map(color => <li key={`color:${color.name}`} className={styles.row} style={{ paddingLeft: BASE + INDENT + 16 }} data-testid="asset-color">
+      {colors.map(color => <li key={`color:${color.name}`} className={styles.row} style={{ paddingLeft: BASE + INDENT + LEAF }} data-testid="asset-color">
         <span className={styles.swatch} style={{ background: color.light }} aria-hidden="true" />
         <span className={styles.name}>{color.name}</span><small>Colour</small>
       </li>)}
-      {!count && <li className={styles.empty} style={{ paddingLeft: BASE + INDENT + 16 }}>Drop PNG or JPEG images here, or use +.</li>}
+      {!count && <li className={styles.empty} style={{ paddingLeft: BASE + INDENT + LEAF }}>Drop PNG or JPEG images here, or use +.</li>}
     </ul>}
     {(working || message) && <p className={message?.error ? styles.error : styles.status} role={message?.error ? 'alert' : 'status'}>{working ? 'Adding…' : message?.text}</p>}
     {previewing && <AssetPreview key={previewing.id} asset={images.find(asset => asset.id === previewing.id) ?? previewing} onClose={() => setPreviewing(null)} />}
@@ -207,14 +209,14 @@ export function ProjectFiles({ assets, tree, activeFileId, onOpenFile }: Project
     ? <li key={`folder:${node.path}`}>
         <div className={styles.row} style={{ paddingLeft: BASE + depth * INDENT }}>
           <button type="button" className={styles.label} aria-expanded={!closed.has(node.path)} onClick={() => toggle(node.path)}>
-            <span className={styles.disclosure}><Icon name={closed.has(node.path) ? 'chevron-right' : 'chevron-down'} size={12} /></span>
+            <span className={styles.disclosure}><Icon name="chevron-right" size={12} /></span>
             <Icon name="folder" size={14} /><span>{node.name}</span>
           </button>
         </div>
         {!closed.has(node.path) && <ul className={styles.items} role="group">{rows(node.children, depth + 1)}</ul>}
       </li>
     : <li key={node.id}>
-        <div className={styles.row} style={{ paddingLeft: BASE + depth * INDENT + 16 }} aria-current={node.id === activeFileId || undefined}>
+        <div className={styles.row} style={{ paddingLeft: BASE + depth * INDENT + LEAF }} aria-current={node.id === activeFileId || undefined}>
           <button type="button" className={styles.label} title="Open in Code" onClick={() => onOpenFile(node.id)}><Icon name="code" size={14} /><span>{node.name}</span></button>
         </div>
       </li>)

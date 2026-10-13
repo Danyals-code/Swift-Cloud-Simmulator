@@ -1,45 +1,58 @@
-.backdrop { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; padding-top: 12vh; background: #16161f26; backdrop-filter: blur(2px); }
-.palette { display: flex; flex-direction: column; width: min(560px, calc(100vw - 32px)); max-height: 66vh; border: 1px solid var(--color-xc-line); border-radius: 14px; background: var(--color-xc-bar); box-shadow: 0 24px 60px #16162033; overflow: hidden; }
-.field { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 52px; border-bottom: 1px solid var(--color-xc-line); color: var(--color-xc-text-3); flex-shrink: 0; }
-.field input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; font-size: 16px; color: var(--color-xc-text); }
-.target { flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 8px; border-radius: 6px; background: var(--color-xc-line-soft); font-size: 12px; color: var(--color-xc-text-2); }
-.list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; }
-.row { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 7px; text-align: left; cursor: pointer; }
-.row[data-active='true'] { background: var(--color-xc-select); }
-.name { font-size: 14px; font-weight: 600; color: var(--color-xc-text); flex-shrink: 0; }
-.row[data-active='true'] .name { color: var(--color-xc-accent); }
-.hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--color-xc-text-3); }
-.group { flex-shrink: 0; font-size: 11px; color: var(--color-xc-text-3); }
-.empty { margin: 0; padding: 18px 12px; font-size: 13px; color: var(--color-xc-text-3); }
-.footer { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-top: 1px solid var(--color-xc-line-soft); background: var(--color-xc-bar-raised); font-size: 11.5px; color: var(--color-xc-text-3); flex-shrink: 0; }
+/**
+ * The quick-open palettes: Add a view, Add an image, Go to file and the shortcuts.
+ * Spotlight's shape: a borderless search row, the results, and a strip of hints.
+ *
+ * The keyframes are global, so their names go through `--appear`: a module would
+ * scope a name written straight into `animation` and play nothing. Closing is a
+ * transition back the way it came.
+ */
+.backdrop { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; padding: 12vh 16px 16px; background: color-mix(in srgb, var(--workspace-scrim) 50%, transparent); --appear: xc-fade-in; animation: var(--appear) var(--duration-base) var(--ease-out); transition: opacity var(--duration-fast) var(--ease-in-out); }
+.palette { align-self: flex-start; display: flex; flex-direction: column; width: min(560px, 100%); max-height: 66vh; overflow: hidden; border-radius: var(--radius-xl); background: var(--color-xc-panel); color: var(--color-xc-text); box-shadow: var(--shadow-popover); --appear: xc-pop-in; animation: var(--appear) var(--duration-base) var(--ease-out); transition: opacity var(--duration-fast) var(--ease-in-out), transform var(--duration-fast) var(--ease-in-out); }
+.backdrop[data-closing] { opacity: 0; pointer-events: none; }
+.backdrop[data-closing] .palette { opacity: 0; transform: translateY(-4px) scale(.98); }
+@media (prefers-reduced-motion: reduce) { .backdrop[data-closing] .palette { transform: none; } }
 
-.backdrop { animation: spotlight-backdrop-in 160ms ease-out both; }
-.palette { animation: spotlight-in 180ms cubic-bezier(.2,.8,.2,1) both; align-self: flex-start; }
-.backdrop[data-closing] { animation: spotlight-backdrop-out 140ms ease-in both; pointer-events: none; }
-.backdrop[data-closing] .palette { animation: spotlight-out 140ms ease-in both; }
-.catalogNote { margin: 0; padding: 10px 14px 4px; font-size: 12px; line-height: 1.5; color: var(--color-xc-text-3); }
-.shortcutRow { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px; border-radius: 7px; }
-.shortcutRow:nth-child(even) { background: var(--color-xc-line-soft); }
+/* The search row: no field of its own, the palette is the field. */
+.field { display: flex; flex-shrink: 0; align-items: center; gap: 12px; height: 48px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--color-xc-line-soft); color: var(--color-xc-text-3); }
+.field input, .field input:hover, .field input:focus-visible { flex: 1; min-width: 0; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; outline: none; color: var(--color-xc-text); font-size: var(--text-title3); letter-spacing: var(--text-title3--letter-spacing); }
+.field strong { flex: 1; color: var(--color-xc-text); font-size: var(--text-title3); letter-spacing: var(--text-title3--letter-spacing); font-weight: 600; }
+.target { flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-xc-fill); color: var(--color-xc-text-2); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.close, .back { display: grid; place-items: center; flex-shrink: 0; width: var(--control-height-sm); height: var(--control-height-sm); border-radius: var(--radius-md); color: var(--color-xc-text-3); cursor: default; transition: background-color var(--duration-fast), color var(--duration-fast); }
+.close:hover, .back:hover:not(:disabled) { background: var(--color-xc-fill); color: var(--color-xc-text); }
+.back { margin-left: -6px; font-size: var(--text-title3); }
+
+.catalogNote { margin: 0; padding: 12px 16px 4px; color: var(--color-xc-text-3); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+.list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; }
+.row { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 10px; border-radius: var(--radius-md); text-align: left; cursor: default; }
+.row[data-active='true'] { background: var(--color-xc-select); }
+.name { flex-shrink: 0; color: var(--color-xc-text); font-size: var(--text-body); font-weight: 600; }
+.hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-xc-text-2); font-size: var(--text-body); }
+.group { flex-shrink: 0; color: var(--color-xc-text-3); font-size: var(--text-caption); }
+.empty { margin: 0; padding: 12px 16px; color: var(--color-xc-text-3); font-size: var(--text-footnote); }
+.footer { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; padding: 0 16px; border-top: 1px solid var(--color-xc-line-soft); background: var(--color-xc-bar-raised); color: var(--color-xc-text-3); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+
+/* Keyboard shortcuts: groups in two columns, name on the left and keys on the right. */
+.palette:has(> .shortcutList) { width: min(760px, 100%); }
+.shortcutList { display: block; columns: 2; column-gap: 24px; padding: 8px 12px 12px; }
+.shortcutList > section { break-inside: avoid; padding-bottom: 12px; }
+.shortcutGroup { margin: 0; padding: 8px 10px 4px; color: var(--color-xc-text-3); font-size: var(--text-caption); line-height: var(--text-caption--line-height); font-weight: 600; }
+.shortcutRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; padding: 4px 10px; border-radius: var(--radius-md); }
 .shortcutRow > div { min-width: 0; }
-.shortcutContext { display: block; margin-top: 3px; font-size: 11px; color: var(--color-xc-text-3); }
-.shortcutRow kbd { flex-shrink: 0; font-size: 12px; color: var(--color-xc-text-2); border: 1px solid var(--color-xc-line); background: var(--color-xc-bar); border-radius: 5px; padding: 3px 6px; }
-@keyframes spotlight-in { from { opacity: 0; transform: translateY(-8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@keyframes spotlight-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-5px) scale(.985); } }
-@keyframes spotlight-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes spotlight-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
-@media(prefers-reduced-motion: reduce) { .backdrop, .palette, .backdrop[data-closing], .backdrop[data-closing] .palette { animation: none; } }
-.back { padding: 6px 9px; border-radius: 6px; font-size: 18px; color: var(--color-xc-text-2); }
-.back:hover { background: var(--color-xc-line-soft); }
-.field strong { flex: 1; color: var(--color-xc-text); }
+.shortcutRow .name { display: block; font-weight: 400; }
+.shortcutContext { display: block; color: var(--color-xc-text-3); font-size: var(--text-caption); line-height: var(--text-caption--line-height); }
+.shortcutRow kbd { flex-shrink: 0; font-family: var(--font-sans); padding: 2px 6px; border-radius: var(--radius-sm); background: var(--color-xc-fill); color: var(--color-xc-text-2); font-size: var(--text-caption); line-height: var(--text-caption--line-height); white-space: nowrap; }
+@media (max-width: 640px) { .shortcutList { columns: 1; } }
+
+/* Add an image. */
 .imageTools { padding: 16px 16px 4px; }
-.upload { padding: 9px 14px; border-radius: 8px; background: var(--color-xc-accent); color: white; font-weight: 600; }
-.imageTools p { margin: 8px 0; color: var(--color-xc-text-3); font-size: 12px; line-height: 1.5; }
-.imageGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; padding: 12px 16px 20px; overflow-y: auto; min-height: 0; }
+.upload { height: var(--control-height); padding: 0 12px; border-radius: var(--radius-md); background: var(--color-xc-accent-fill); color: #fff; font-size: var(--text-body); font-weight: 500; cursor: default; transition: background-color var(--duration-fast); }
+.upload:hover:not(:disabled) { background: var(--color-xc-accent-hover); }
+.imageTools p { margin: 8px 0 0; color: var(--color-xc-text-3); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+.imageGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; min-height: 0; padding: 12px 16px 16px; overflow-y: auto; }
 .imageGrid > .empty { grid-column: 1 / -1; padding: 12px 0; }
-.imageChoice { display: flex; flex-direction: column; gap: 8px; padding: 8px; min-width: 0; border: 1px solid var(--color-xc-line); border-radius: 10px; background: var(--color-xc-bar-raised); color: var(--color-xc-text); text-align: left; }
-.imageChoice:hover { border-color: var(--color-xc-accent); background: var(--color-xc-select); }
-.imageChoice img { width: 100%; height: 86px; object-fit: contain; border-radius: 5px; }
-.imageChoice span { width: 100%; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.imageError { margin: 4px 16px; color: var(--color-xc-error, #b42318); font-size: 13px; }
-.imageChoice:focus-visible, .upload:focus-visible, .back:focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 3px; }
-.imageChoice:disabled, .upload:disabled { opacity: .55; cursor: wait; }
+.imageChoice { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 8px; border: 1px solid var(--color-xc-line); border-radius: var(--radius-lg); background: var(--color-xc-bar); color: var(--color-xc-text); text-align: left; cursor: default; transition: border-color var(--duration-fast), background-color var(--duration-fast); }
+.imageChoice:hover:not(:disabled) { border-color: var(--color-xc-accent); background: var(--color-xc-select); }
+.imageChoice img { width: 100%; height: 88px; object-fit: contain; border-radius: var(--radius-sm); }
+.imageChoice span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-footnote); }
+.imageError { margin: 4px 16px; color: var(--color-xc-error); font-size: var(--text-footnote); }
+.imageChoice:disabled, .upload:disabled { opacity: .4; cursor: wait; }

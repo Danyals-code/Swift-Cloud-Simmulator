@@ -1,39 +1,66 @@
-.dialog { position: fixed; inset: 16px; width: calc(100vw - 32px); max-width: 1680px; height: calc(100dvh - 32px); max-height: none; margin: auto; padding: 0 24px 24px; color: var(--xc-text, #172033); background: var(--xc-editor, #f5f6f8); border: 1px solid var(--xc-border, #d2d6df); border-radius: 16px; overflow: auto; box-shadow: 0 24px 80px #0005; }
-.dialog::backdrop { background: #0f172a99; }
-.dialog button, .dialog select { font: inherit; font-size: 13px; border: 1px solid var(--xc-border, #ced3de); border-radius: 7px; background: var(--xc-editor, #fff); color: inherit; padding: 7px 10px; }
-.dialog button { cursor: pointer; }
-.dialog button:hover:not(:disabled) { background: color-mix(in srgb, #5276e8 12%, transparent); }
-.dialog button:focus-visible, .dialog select:focus-visible { outline: 2px solid #5276e8; outline-offset: 2px; }
-.dialog button[aria-pressed=true] { color: #fff; background: #365cca; border-color: #365cca; }
-.dialog button:disabled { opacity: .45; cursor: default; }
-.header { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 22px 0 16px; }
-.header h1 { margin: 0; font-size: 20px; font-weight: 650; }
-.header p, .context, .footer { font-size: 13px; line-height: 1.5; opacity: .8; }
-.header p { margin: 4px 0 0; }
-.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--xc-border, #d2d6df); font-size: 13px; }
-.toolbar label { display: flex; gap: 8px; align-items: center; }
-.toolbar [role=group] { display: flex; gap: 4px; margin-right: 10px; }
-.context { margin: 12px 0 18px; }
-.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start; }
-.grid[data-mode=present] { display: block; max-width: 720px; margin: auto; }
-.condition { padding: 16px; border: 1px solid var(--xc-border, #d2d6df); border-radius: 12px; background: color-mix(in srgb, #8290ad 5%, transparent); min-width: 0; }
+/**
+ * Review and export images: a full-window sheet of three comparisons.
+ *
+ * The keyframes are global, so their names go through `--appear`: a module would
+ * scope a name written straight into `animation` and play nothing.
+ */
+.dialog { position: fixed; inset: 24px; width: calc(100vw - 48px); max-width: 1680px; height: calc(100dvh - 48px); max-height: none; margin: auto; padding: 0 24px 24px; overflow: auto; border: 0; border-radius: var(--radius-2xl); background: var(--color-xc-bar); color: var(--color-xc-text); font-size: var(--text-body); line-height: var(--text-body--line-height); box-shadow: var(--shadow-sheet); --appear: xc-sheet-in; animation: var(--appear) var(--duration-base) var(--ease-out); }
+.dialog::backdrop { background: var(--workspace-scrim); --appear: xc-fade-in; animation: var(--appear) var(--duration-base) var(--ease-out); }
+
+/* The sheet's own buttons are push buttons (never the previewed app's); the mode
+   switch and the findings say otherwise below. */
+.header button, .toolbar button, .exportActions button, .findings button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--control-height); padding: 0 12px; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); font-size: var(--text-body); white-space: nowrap; cursor: default; transition: background-color var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast); }
+.header button:hover:not(:disabled), .toolbar button:hover:not(:disabled), .exportActions button:hover:not(:disabled), .findings button:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
+.header button:disabled, .toolbar button:disabled, .exportActions button:disabled, .findings button:disabled { opacity: .4; }
+
+.header { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 24px 0 16px; }
+.header h1 { margin: 0; font-size: var(--text-title1); line-height: var(--text-title1--line-height); letter-spacing: var(--text-title1--letter-spacing); font-weight: 700; }
+.header p { margin: 4px 0 0; color: var(--color-xc-text-2); }
+.context, .footer { color: var(--color-xc-text-3); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--color-xc-line); }
+.toolbar label { display: flex; align-items: center; gap: 8px; margin-left: 8px; color: var(--color-xc-text-2); }
+.toolbar select { min-width: 160px; }
+.toolbar > span { min-width: 40px; color: var(--color-xc-text-2); text-align: center; font-variant-numeric: tabular-nums; }
+/* Compare | Present: a segmented control. */
+.toolbar [role='group'] { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--color-xc-fill); }
+.toolbar [role='group'] button { height: var(--control-height-sm); padding: 0 12px; border-radius: var(--radius-thumb); background: transparent; color: var(--color-xc-text-2); }
+.toolbar [role='group'] button:hover:not(:disabled, [aria-pressed='true']) { background: transparent; color: var(--color-xc-text); }
+.toolbar [role='group'] button[aria-pressed='true'] { background: var(--color-xc-thumb); color: var(--color-xc-text); box-shadow: var(--shadow-thumb); }
+.context { margin: 12px 0 16px; }
+
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.grid[data-mode='present'] { display: block; max-width: 720px; margin: auto; }
+.condition { min-width: 0; padding: 16px; border-radius: var(--radius-xl); background: var(--color-xc-bar-raised); }
 .condition[hidden] { display: none; }
-.controls { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 10px; margin: 0; padding: 0; border: 0; }
-.controls label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.condition > p { margin: 8px 0 0; font-size: var(--text-footnote); }
+.condition > p[role='alert'] { color: var(--color-xc-error); }
+.controls { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 8px 12px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.controls label { display: flex; flex-direction: column; gap: 4px; color: var(--color-xc-text-2); font-size: var(--text-footnote); }
 .controls label:first-child { grid-column: 1 / -1; }
-.controls select { min-width: 0; width: 100%; }
-.status { font-size: 12px; min-height: 32px; margin: 12px 0; opacity: .75; }
+.controls select { width: 100%; min-width: 0; }
+.status { min-height: 32px; margin: 12px 0; color: var(--color-xc-text-3); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
 .screenHost { display: flex; width: 100%; justify-content: center; }
-.screenFrame { position: relative; overflow: hidden; box-shadow: 0 4px 20px #0002; outline: 1px solid #9994; }
-.highlight { position: absolute; outline: 3px solid #ef4444; outline-offset: -2px; background: #ef444416; pointer-events: none; z-index: 2000001; }
-.exportActions { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 12px; }
-.findings { padding-top: 12px; border-top: 1px solid var(--xc-border, #d2d6df); font-size: 12px; }
-.findings summary { font-weight: 600; cursor: pointer; font-size: 13px; }
-.findings p { line-height: 1.5; margin: 8px 0; }
-.findings ul { list-style: none; padding: 0; margin: 0; max-height: 380px; overflow: auto; }
-.findings li { padding: 12px 0; border-top: 1px solid var(--xc-border, #d2d6df); }
-.findings li > button:first-child { text-align: left; width: 100%; }
-.footer { padding-top: 12px; }
-.footer a { text-decoration: underline; }
+.screenFrame { position: relative; overflow: hidden; isolation: isolate; box-shadow: var(--shadow-float); }
+.highlight { position: absolute; z-index: 2000001; outline: 2px solid var(--color-xc-error); outline-offset: -2px; background: color-mix(in srgb, var(--color-xc-error) 12%, transparent); pointer-events: none; }
+.exportActions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 12px; }
+
+.findings { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-xc-line); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); }
+.findings summary { font-size: var(--text-body); font-weight: 600; }
+.findings p { margin: 8px 0; color: var(--color-xc-text-2); }
+.findings ul { max-height: 380px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.findings li { padding: 8px 0; border-top: 1px solid var(--color-xc-line-soft); }
+.findings li p { margin: 2px 8px 4px; }
+/* A finding: a row that marks its view on the phone, and a link to its layer. */
+.findings li > button:first-child { justify-content: flex-start; width: 100%; height: auto; min-height: var(--row-height); padding: 4px 8px; background: transparent; font-weight: 600; text-align: left; white-space: normal; }
+.findings li > button:first-child:hover:not(:disabled) { background: var(--color-xc-fill); }
+.findings li > button:first-child[aria-pressed='true']:not(:disabled) { background: var(--color-xc-select); }
+.findings li > button + p + button { height: auto; margin-left: 8px; padding: 0; background: transparent; color: var(--color-xc-accent); font-size: var(--text-footnote); }
+.findings li > button + p + button:hover:not(:disabled) { background: transparent; text-decoration: underline; }
+
+.footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-xc-line); }
+.footer p { margin: 0 0 4px; }
+.footer a { color: var(--color-xc-accent); text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
 .exportOnly { position: fixed; left: -100000px; top: 0; pointer-events: none; }
-@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .dialog { padding: 0 14px 16px; } }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .dialog { padding: 0 16px 16px; } }

@@ -14,7 +14,7 @@
  */
 
 /** Stroked paths, on a 16x16 grid. */
-const STROKE: Readonly<Record<string, string>> = {
+const STROKE = {
   undo: 'M6 3 2.5 6.5 6 10M3 6.5h6a4 4 0 0 1 0 8',
   redo: 'M10 3 13.5 6.5 10 10M13 6.5H7a4 4 0 0 0 0 8',
   keyboard: 'M2.5 3.5h11v9h-11v-9ZM5 6h.1M8 6h.1M11 6h.1M5 8h.1M8 8h.1M11 8h.1M5 10h6',
@@ -86,17 +86,7 @@ const STROKE: Readonly<Record<string, string>> = {
   'align-bottom': 'M2.5 13.5h11M5 3v8M8 6v5M11 4.5v6.5',
   'align-baseline': 'M4 10.5 7 4l3 6.5M5.2 8.25h3.6M2.5 12.5h11',
   'align-baseline-last': 'M3 3.5h8M4 10.5l3-4.5 3 4.5M2.5 12.5h11',
-}
-
-/** Solid paths, filled rather than stroked. */
-const FILL: Readonly<Record<string, string>> = {
-  run: 'M5 3.4a.6.6 0 0 1 .92-.5l6.3 4.1a.6.6 0 0 1 0 1l-6.3 4.1a.6.6 0 0 1-.92-.5V3.4Z',
-  stop: 'M4.4 4.4c0-.55.45-1 1-1h5.2c.55 0 1 .45 1 1v5.2c0 .55-.45 1-1 1H5.4c-.55 0-1-.45-1-1V4.4Z',
-  'disclosure-closed': 'M6 3.8 10.6 8 6 12.2V3.8Z',
-  'disclosure-open': 'M3.8 6H12.2L8 10.6 3.8 6Z',
-  dot: 'M8 5.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z',
-  'stack-v': 'M3 3.25h10v3.25H3V3.25ZM3 9.5h10v3.25H3V9.5Z',
-  'stack-h': 'M3.25 3v10h3.25V3H3.25ZM9.5 3v10h3.25V3H9.5Z',
+  // Layer kinds and other line drawings. Stroked like the rest of the family.
   'stack-z': 'M2.5 5.5 8 2.75l5.5 2.75L8 8.25 2.5 5.5ZM2.5 10.5 8 13.25l5.5-2.75',
   rows: 'M2.5 4h11M2.5 8h11M2.5 12h11',
   'list-rows': 'M3 3.5h2v2H3v-2ZM7 4.5h6M3 7h2v2H3V7ZM7 8h6M3 10.5h2v2H3v-2ZM7 11.5h6',
@@ -104,12 +94,27 @@ const FILL: Readonly<Record<string, string>> = {
   button: 'M2.5 5.5h11c.55 0 1 .45 1 1v3c0 .55-.45 1-1 1h-11c-.55 0-1-.45-1-1v-3c0-.55.45-1 1-1Z',
   image: 'M2.5 3.5h11v9h-11v-9ZM2.5 10l3-2.5 2.5 2 2.5-2 3 2.5M10.5 6a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z',
   scroll: 'M8 2.5v11M5.5 5 8 2.5 10.5 5M5.5 11 8 13.5 10.5 11',
-  section: 'M2.5 3.5h11v3h-11v-3ZM2.5 8.5h11v4h-11v-4Z',
-  shape: 'M8 2.5 13.5 13H2.5L8 2.5Z',
   spacer: 'M2.5 3v10M13.5 3v10M5 8h6M5 8l1.5-1.5M5 8l1.5 1.5M11 8 9.5 6.5M11 8l-1.5 1.5',
   nav: 'M2.5 4.5h11M6 8l-2.5 2.5M3.5 10.5 6 13M3.5 10.5h10',
   eye: 'M1.75 8S4.3 3.75 8 3.75 14.25 8 14.25 8 11.7 12.25 8 12.25 1.75 8 1.75 8ZM8 6.25a1.75 1.75 0 1 0 0 3.5 1.75 1.75 0 0 0 0-3.5Z',
   'eye-off': 'M6.3 6.4a1.75 1.75 0 0 0 2.4 2.4M4.2 4.6C2.6 5.8 1.75 8 1.75 8S4.3 12.25 8 12.25c1 0 1.9-.3 2.7-.75M12 10c1.4-1.1 2.25-2 2.25-2S11.7 3.75 8 3.75c-.4 0-.8.05-1.15.13M2.5 2.5l11 11',
+  /** The preview's appearance: SF Symbols' sun.max and moon. */
+  sun: 'M8 5.25a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5ZM8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.58 3.58l1.06 1.06M11.36 11.36l1.06 1.06M3.58 12.42l1.06-1.06M11.36 4.64l1.06-1.06',
+  moon: 'M13.25 9.6A5.5 5.5 0 0 1 6.4 2.75a5.5 5.5 0 1 0 6.85 6.85Z',
+  /** Settings: a gear, as SF Symbols' gearshape. */
+  settings:
+    'M12.69 6.57 14.18 6.8v2.4l-1.49.23-.36.87.89 1.22-1.7 1.7-1.22-.89-.87.36-.23 1.49H6.8l-.23-1.49-.87-.36-1.22.89-1.7-1.7.89-1.22-.36-.87-1.49-.23V6.8l1.49-.23.36-.87-.89-1.22 1.7-1.7 1.22.89.87-.36.23-1.49h2.4l.23 1.49.87.36 1.22-.89 1.7 1.7-.89 1.22.36.87ZM8 5.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 0 0 0-4.2Z',
+}
+
+/** Solid paths, filled rather than stroked. */
+const FILL = {
+  run: 'M5 3.4a.6.6 0 0 1 .92-.5l6.3 4.1a.6.6 0 0 1 0 1l-6.3 4.1a.6.6 0 0 1-.92-.5V3.4Z',
+  stop: 'M4.4 4.4c0-.55.45-1 1-1h5.2c.55 0 1 .45 1 1v5.2c0 .55-.45 1-1 1H5.4c-.55 0-1-.45-1-1V4.4Z',
+  dot: 'M8 5.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z',
+  'stack-v': 'M3 3.25h10v3.25H3V3.25ZM3 9.5h10v3.25H3V9.5Z',
+  'stack-h': 'M3.25 3v10h3.25V3H3.25ZM9.5 3v10h3.25V3H9.5Z',
+  section: 'M2.5 3.5h11v3h-11v-3ZM2.5 8.5h11v4h-11v-4Z',
+  shape: 'M8 2.5 13.5 13H2.5L8 2.5Z',
 }
 
 export type IconName = keyof typeof STROKE | keyof typeof FILL
@@ -124,8 +129,8 @@ export interface IconProps {
 }
 
 export function Icon({ name, size = 14, className, weight = 1.5 }: IconProps) {
-  const stroke = STROKE[name]
-  const fill = FILL[name]
+  const stroke = (STROKE as Readonly<Record<string, string | undefined>>)[name]
+  const fill = (FILL as Readonly<Record<string, string | undefined>>)[name]
 
   return (
     <svg

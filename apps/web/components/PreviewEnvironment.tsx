@@ -36,7 +36,7 @@ export function DevicePicker({ device, onChange, className }: { device: DeviceSp
 }
 
 export function AppearancePicker({ preview, onChange }: { preview: PreviewSettings; onChange: (settings: Partial<PreviewSettings>) => void }) {
-  return <SegmentedControl label="Appearance" testId="scheme-toggle" options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} value={preview.colorScheme} onChange={value => onChange({ colorScheme: value as 'light' | 'dark' })} />
+  return <SegmentedControl label="Appearance" testId="scheme-toggle" options={[{ value: 'light', label: 'Light', icon: 'sun', iconOnly: true, title: 'Preview in Light appearance' }, { value: 'dark', label: 'Dark', icon: 'moon', iconOnly: true, title: 'Preview in Dark appearance' }]} value={preview.colorScheme} onChange={value => onChange({ colorScheme: value as 'light' | 'dark' })} />
 }
 
 export function TextSizePicker({ preview, onChange, className }: { preview: PreviewSettings; onChange: (settings: Partial<PreviewSettings>) => void; className?: string }) {
@@ -45,5 +45,5 @@ export function TextSizePicker({ preview, onChange, className }: { preview: Prev
 
 export function ZoomPicker({ preview, scale, onChange, className }: { preview: PreviewSettings; scale: number; onChange: (settings: Partial<PreviewSettings>) => void; className?: string }) {
   const items = ZOOMS.some(item => item.value === preview.zoom) ? ZOOMS : [...ZOOMS, { value: preview.zoom, label: `${Math.round(Number(preview.zoom) * 100)}%` }]
-  return <PopupButton items={items} value={preview.zoom} onChange={value => onChange({ zoom: value })} label="Zoom" title={`Zoom: ${Math.round(scale * 100)}%`} testId="zoom-select" className={className} />
+  return <PopupButton items={items} value={preview.zoom} onChange={value => onChange({ zoom: value })} label="Zoom" title={`Zoom: ${Math.round(scale * 100)}%. Scroll to pan, ⌘-scroll or pinch to zoom.`} testId="zoom-select" className={className} display={`${Math.round(scale * 100)}%`} />
 }

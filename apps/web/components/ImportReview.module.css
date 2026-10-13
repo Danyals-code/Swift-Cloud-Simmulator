@@ -1,16 +1,28 @@
-.review { padding: 20px; overflow: auto; display: grid; gap: 16px; min-height: 0; font-size: 12px; }
-.review h3 { font-size: 16px; font-weight: 600; }
-.review p { color: var(--color-xc-text-2); line-height: 1.6; }
-.versions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; margin: 10px 0; }
-.versions pre { max-height: 200px; overflow: auto; padding: 10px; border: 1px solid var(--color-xc-line); background: var(--color-xc-bar-raised); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.review fieldset { border: 1px solid var(--color-xc-line); border-radius: 6px; padding: 10px; min-width: 0; }
-.review select { background: var(--color-xc-bar-raised); color: var(--color-xc-text); margin-left: 8px; padding: 6px; border: 1px solid var(--color-xc-line); border-radius: 5px; }
-.actions { display: flex; flex-wrap: wrap; gap: 12px; }
-.actions button { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--color-xc-line); }
-.actions button:last-child { background: var(--color-xc-accent); color: white; }
-.actions button:disabled { opacity: .5; }
-.review :is(button,select,summary):focus-visible { outline: 2px solid var(--color-xc-accent); outline-offset: 3px; }
-.review [role="alert"] { color: var(--color-xc-error); }
-.images { display: grid; gap: 8px; }
-.images img { width: 80px; height: 60px; object-fit: contain; border: 1px solid var(--color-xc-line); }
-@media(max-width: 700px) { .versions { grid-template-columns: 1fr; } }
+/* Reviewing an imported archive, in place of the launch sheet's content. */
+.review { flex: 1; display: grid; align-content: start; gap: 16px; min-height: 0; padding: 0 24px 24px; overflow: auto; font-size: var(--text-body); line-height: var(--text-body--line-height); }
+.review h3 { margin: 0; font-size: var(--text-title3); line-height: var(--text-title3--line-height); letter-spacing: var(--text-title3--letter-spacing); font-weight: 600; }
+.review p { margin: 0; color: var(--color-xc-text-2); }
+.review h3 + p + p { margin-top: -12px; color: var(--color-xc-text-3); font-size: var(--text-footnote); }
+.review summary { font-weight: 600; }
+.review details > div { margin-top: 12px; }
+.review details strong { font-family: var(--font-mono); font-size: var(--text-footnote); font-weight: 400; }
+.versions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 8px 0; }
+.versions h4 { margin: 0 0 4px; font-size: var(--text-footnote); font-weight: 600; color: var(--color-xc-text-2); }
+.versions pre { max-height: 200px; margin: 0; padding: 8px 12px; overflow: auto; border-radius: var(--radius-md); background: var(--color-xc-bar-raised); font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); white-space: pre-wrap; overflow-wrap: anywhere; }
+.versions p { margin-top: 4px; font-size: var(--text-footnote); color: var(--color-xc-text-3); }
+.review fieldset { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--color-xc-line); border-radius: var(--radius-lg); }
+.review legend { padding: 0 4px; font-weight: 600; }
+.review fieldset > label { display: flex; align-items: center; gap: 8px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.actions button { height: var(--control-height); padding: 0 12px; border-radius: var(--radius-md); background: var(--color-xc-fill); color: var(--color-xc-text); font-size: var(--text-body); white-space: nowrap; cursor: default; transition: background-color var(--duration-fast); }
+.actions button:hover:not(:disabled) { background: var(--color-xc-fill-strong); }
+.actions button:last-child { background: var(--color-xc-accent-fill); color: #fff; font-weight: 500; }
+.actions button:last-child:hover:not(:disabled) { background: var(--color-xc-accent-hover); }
+.actions button:disabled { opacity: .4; }
+.review [role='status'] { color: var(--color-xc-text-3); font-size: var(--text-footnote); }
+.review [role='alert'] { color: var(--color-xc-error); }
+.images { display: grid; gap: 8px; margin-top: 8px; }
+.images figure { margin: 0; }
+.images figcaption { font-size: var(--text-footnote); color: var(--color-xc-text-2); }
+.images img { width: 80px; height: 60px; object-fit: contain; border-radius: var(--radius-sm); background: var(--color-xc-bar-raised); }
+@media (max-width: 700px) { .versions { grid-template-columns: 1fr; } }

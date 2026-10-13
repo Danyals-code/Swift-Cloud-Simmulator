@@ -1,120 +1,227 @@
 @import 'tailwindcss';
 
-/* Workspace appearance is independent of the simulated app. */
-@theme {
+/**
+ * The studio's design tokens.
+ *
+ * Every size, colour, radius and shadow in the chrome comes from here, so the panels,
+ * sheets and menus read as one application rather than as a collection of screens.
+ * The values follow macOS: SF Pro at 13px for everything a person reads and operates,
+ * 11 and 12 for what supports it, 15 and above only for titles; 28px controls on a
+ * 4px grid; Apple's label, fill and separator colours.
+ *
+ * `static` keeps every variable in the stylesheet, because the CSS modules read them
+ * with `var()` and Tailwind would otherwise drop the ones no utility class uses.
+ *
+ * Workspace appearance is independent of the simulated app.
+ */
+@theme static {
+  /* Type. SF Pro on Apple devices, Inter (self-hosted, see layout.tsx) elsewhere. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', var(--font-ui), 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* The type scale, with SF's own tracking at each size. Nothing in the chrome uses
+     another size: a 14px label beside a 13px one is the first thing that reads as
+     unfinished. */
+  --text-caption: 11px;
+  --text-caption--line-height: 14px;
+  --text-caption--letter-spacing: 0.06px;
+  --text-footnote: 12px;
+  --text-footnote--line-height: 16px;
+  --text-footnote--letter-spacing: 0px;
+  --text-body: 13px;
+  --text-body--line-height: 18px;
+  --text-body--letter-spacing: -0.08px;
+  --text-title3: 15px;
+  --text-title3--line-height: 20px;
+  --text-title3--letter-spacing: -0.23px;
+  --text-title2: 17px;
+  --text-title2--line-height: 22px;
+  --text-title2--letter-spacing: -0.43px;
+  --text-title1: 22px;
+  --text-title1--line-height: 28px;
+  --text-title1--letter-spacing: -0.26px;
+
+  /* Corners: 4 for chips, 6 for controls and rows, 8 for cards and menus, 12 for
+     popovers and palettes, 16 for sheets. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+
   /* Surfaces, lightest chrome to darkest canvas. */
   --color-xc-bar: #ffffff;
-  --color-xc-bar-raised: #f4f4f5;
+  --color-xc-bar-raised: #f5f5f7;
   --color-xc-sidebar: #ffffff;
-  --color-xc-editor: #fafafa;
-  --color-xc-canvas: #e9e9ec;
+  --color-xc-editor: #ffffff;
+  --color-xc-canvas: #f0f0f3;
   --color-xc-panel: #ffffff;
 
   /* Separators. `line` divides panes, `line-soft` divides rows inside one. */
-  --color-xc-line: #e5e5e8;
+  --color-xc-line: #e3e3e7;
   --color-xc-line-soft: #ededf0;
 
-  --color-xc-text: #26262b;
-  --color-xc-text-2: #66666e;
-  --color-xc-text-3: #777780;
+  /* Labels: primary, secondary, tertiary. */
+  --color-xc-text: #1d1d1f;
+  --color-xc-text-2: #6e6e73;
+  --color-xc-text-3: #7a7a80;
 
-  --color-xc-accent: #0d78f2;
-  --color-xc-select: #e6f1ff;
-  --color-xc-select-off: #eeeeF2;
+  /* Fills, translucent so they read the same on any surface: a control's resting
+     fill, and the same fill hovered or pressed. */
+  --color-xc-fill: rgb(116 116 128 / 0.1);
+  --color-xc-fill-strong: rgb(116 116 128 / 0.17);
+  --color-xc-field: rgb(116 116 128 / 0.08);
+  /* The selected thumb of a segmented control. */
+  --color-xc-thumb: #ffffff;
 
-  --color-xc-error: #c83a32;
-  --color-xc-warn: #996b10;
-  --color-xc-ok: #22834a;
-  /* Swift's own orange, for the source-file glyph. */
-  --color-xc-swift: #777780;
+  /* Accent: text, icons and borders; and the fill of a primary button. */
+  --color-xc-accent: #0071e3;
+  --color-xc-accent-fill: #0071e3;
+  --color-xc-accent-hover: #0077ed;
+  --color-xc-select: #e8f1fc;
+  --color-xc-select-off: #ebebef;
+
+  --color-xc-error: #d70015;
+  /* A destructive confirmation's fill, white text on it in both appearances. */
+  --color-xc-danger-fill: #d70015;
+  --color-xc-warn: #a05a00;
+  --color-xc-ok: #248a3d;
+  --color-xc-swift: #7a7a80;
 }
 
 :root {
   color-scheme: light;
-  --workspace-dots: #bcbcc44a;
-  --workspace-scrim: #2626303d;
-  --workspace-accent-hover: #0868d8;
+
+  /* Fixed metrics. A control is 28px wherever it is; 24px inside a row or a pane
+     header that has to stay compact; 32px only in a sheet's footer. */
+  --control-height: 28px;
+  --control-height-sm: 24px;
+  --control-height-lg: 32px;
+  --row-height: 28px;
+  /* A segment's corner inside a 6px control with 2px of padding: concentric with it. */
+  --radius-thumb: 5px;
+  --toolbar-height: 52px;
+  --pane-header-height: 40px;
+
+  --shadow-thumb: 0 1px 2px rgb(0 0 0 / 0.1), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-float: 0 0 0 0.5px rgb(0 0 0 / 0.1), 0 4px 16px rgb(0 0 0 / 0.08);
+  --shadow-popover: 0 0 0 0.5px rgb(0 0 0 / 0.12), 0 10px 32px rgb(0 0 0 / 0.14);
+  --shadow-sheet: 0 0 0 0.5px rgb(0 0 0 / 0.12), 0 24px 80px rgb(0 0 0 / 0.22);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-xc-accent) 32%, transparent);
+
+  /* Motion: quick for state changes, a little longer for things that appear. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+
+  --chevron-up-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%236e6e73' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.25 8 3.25l3 3M5 9.75l3 3 3-3'/%3E%3C/svg%3E");
+  --chevron-right-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.25 3.5 10.75 8l-4.5 4.5'/%3E%3C/svg%3E");
+  --checkmark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8.5 6.75 11.25 12 5'/%3E%3C/svg%3E");
+
+  --workspace-dots: rgb(0 0 0 / 0.07);
+  --workspace-scrim: rgb(0 0 0 / 0.2);
+  --workspace-accent-hover: var(--color-xc-accent-hover);
   --workspace-scrollbar: rgb(0 0 0 / 0.18);
-  --workspace-scrollbar-hover: rgb(0 0 0 / 0.28);
+  --workspace-scrollbar-hover: rgb(0 0 0 / 0.3);
+
   --editor-background: #ffffff;
-  --editor-text: #353540;
-  --editor-caret: #22222b;
-  --editor-selection: #dcecff;
-  --editor-selectionMatch: #eaf3ff;
-  --editor-currentLine: #f6f7fa;
+  --editor-text: #262626;
+  --editor-caret: #1d1d1f;
+  --editor-selection: #d7e7fc;
+  --editor-selectionMatch: #e8f1fc;
+  --editor-currentLine: #f5f8fd;
   --editor-gutter: #ffffff;
-  --editor-gutterText: #93939e;
-  --editor-gutterActive: #353540;
+  --editor-gutterText: #a1a1a6;
+  --editor-gutterActive: #1d1d1f;
   --editor-panel: #ffffff;
-  --editor-panelBorder: #e0e0e6;
-  --editor-comment: #93939e;
-  --editor-string: #a44939;
-  --editor-number: #6854af;
-  --editor-keyword: #9650a0;
-  --editor-preprocessor: #a36825;
-  --editor-attribute: #946936;
-  --editor-typeDeclaration: #267f91;
-  --editor-otherDeclaration: #277084;
-  --editor-projectType: #276f78;
-  --editor-projectMember: #357e6c;
-  --editor-systemType: #7658a3;
-  --editor-systemMember: #7658a3;
-  --editor-url: #0d78f2;
-  --editor-invalid: #c83a32;
-  --editor-backgroundColor: #0a84ff;
+  --editor-panelBorder: #e3e3e7;
+  --editor-comment: #707f8c;
+  --editor-string: #c41a16;
+  --editor-number: #1c00cf;
+  --editor-keyword: #9b2393;
+  --editor-preprocessor: #643820;
+  --editor-attribute: #815f03;
+  --editor-typeDeclaration: #0b4f79;
+  --editor-otherDeclaration: #0f68a0;
+  --editor-projectType: #1c464a;
+  --editor-projectMember: #326d74;
+  --editor-systemType: #3900a0;
+  --editor-systemMember: #6c36a9;
+  --editor-url: #0e0eff;
+  --editor-invalid: #d70015;
+  --editor-backgroundColor: #0071e3;
   --editor-color: #ffffff;
 }
 
-:root[data-workspace-theme="dark"] {
+:root[data-workspace-theme='dark'] {
   color-scheme: dark;
   --color-xc-bar: #242426;
-  --color-xc-bar-raised: #303033;
+  --color-xc-bar-raised: #2c2c2f;
   --color-xc-sidebar: #242426;
   --color-xc-editor: #202022;
-  --color-xc-canvas: #19191b;
-  --color-xc-panel: #2a2a2d;
-  --color-xc-line: #3c3c40;
-  --color-xc-line-soft: #343438;
-  --color-xc-text: #ededf0;
-  --color-xc-text-2: #b9b9c1;
-  --color-xc-text-3: #a0a0aa;
-  --color-xc-accent: #529dff;
-  --color-xc-select: #253e5d;
-  --color-xc-select-off: #38383e;
-  --color-xc-error: #ff827a;
-  --color-xc-warn: #e4b55f;
-  --color-xc-ok: #75c897;
-  --color-xc-swift: #a0a0aa;
-  --workspace-dots: #54545b55;
-  --workspace-scrim: #00000080;
-  --workspace-accent-hover: #287fe8;
+  --color-xc-canvas: #18181a;
+  --color-xc-panel: #2c2c2f;
+  --color-xc-line: #3a3a3d;
+  --color-xc-line-soft: #313134;
+  --color-xc-text: #f5f5f7;
+  --color-xc-text-2: #a1a1a6;
+  --color-xc-text-3: #8e8e93;
+  --color-xc-fill: rgb(118 118 128 / 0.24);
+  --color-xc-fill-strong: rgb(118 118 128 / 0.34);
+  --color-xc-field: rgb(118 118 128 / 0.2);
+  --color-xc-thumb: #5b5b60;
+  --color-xc-accent: #3b9bff;
+  --color-xc-accent-fill: #0a84ff;
+  --color-xc-accent-hover: #2b8fff;
+  --color-xc-select: #1f3a5c;
+  --color-xc-select-off: #38383c;
+  --color-xc-error: #ff6961;
+  --color-xc-warn: #ffb340;
+  --color-xc-ok: #30d158;
+  --color-xc-swift: #8e8e93;
+
+  --shadow-thumb: 0 1px 2px rgb(0 0 0 / 0.3), 0 0 0 0.5px rgb(0 0 0 / 0.2);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.2);
+  --shadow-float: 0 0 0 0.5px rgb(255 255 255 / 0.1), 0 4px 16px rgb(0 0 0 / 0.35);
+  --shadow-popover: 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 10px 32px rgb(0 0 0 / 0.45);
+  --shadow-sheet: 0 0 0 0.5px rgb(255 255 255 / 0.12), 0 24px 80px rgb(0 0 0 / 0.55);
+
+  --chevron-up-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%23a1a1a6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.25 8 3.25l3 3M5 9.75l3 3 3-3'/%3E%3C/svg%3E");
+
+  --workspace-dots: rgb(255 255 255 / 0.07);
+  --workspace-scrim: rgb(0 0 0 / 0.5);
   --workspace-scrollbar: rgb(255 255 255 / 0.2);
-  --workspace-scrollbar-hover: rgb(255 255 255 / 0.3);
+  --workspace-scrollbar-hover: rgb(255 255 255 / 0.32);
+
   --editor-background: #202022;
-  --editor-text: #d9d9e0;
-  --editor-caret: #eeeeF2;
-  --editor-selection: #304b6b;
-  --editor-selectionMatch: #2b394b;
-  --editor-currentLine: #29292e;
+  --editor-text: #dfdfe0;
+  --editor-caret: #f5f5f7;
+  --editor-selection: #3a4d66;
+  --editor-selectionMatch: #2c3a4c;
+  --editor-currentLine: #29292d;
   --editor-gutter: #202022;
-  --editor-gutterText: #898995;
-  --editor-gutterActive: #ededf0;
-  --editor-panel: #2a2a2d;
-  --editor-panelBorder: #3c3c40;
-  --editor-comment: #92929f;
-  --editor-string: #df9c88;
-  --editor-number: #b7a1ed;
-  --editor-keyword: #d39edc;
-  --editor-preprocessor: #d6b183;
-  --editor-attribute: #d6b183;
-  --editor-typeDeclaration: #85c6d0;
-  --editor-otherDeclaration: #8abac9;
-  --editor-projectType: #7fc4c6;
-  --editor-projectMember: #90c8b6;
-  --editor-systemType: #b7a1dc;
-  --editor-systemMember: #b7a1dc;
-  --editor-url: #77b4ff;
-  --editor-invalid: #ff827a;
+  --editor-gutterText: #747478;
+  --editor-gutterActive: #f5f5f7;
+  --editor-panel: #2c2c2f;
+  --editor-panelBorder: #3a3a3d;
+  --editor-comment: #7f8c98;
+  --editor-string: #fc6a5d;
+  --editor-number: #d0bf69;
+  --editor-keyword: #fc5fa3;
+  --editor-preprocessor: #fd8f3f;
+  --editor-attribute: #bf8555;
+  --editor-typeDeclaration: #5dd8ff;
+  --editor-otherDeclaration: #41a1c0;
+  --editor-projectType: #9ef1dd;
+  --editor-projectMember: #67b7a4;
+  --editor-systemType: #d0a8ff;
+  --editor-systemMember: #a167e6;
+  --editor-url: #6699ff;
+  --editor-invalid: #ff6961;
+  --editor-backgroundColor: #0a84ff;
+  --editor-color: #ffffff;
 }
 
 html,
@@ -126,9 +233,10 @@ body {
   margin: 0;
   background: var(--color-xc-editor);
   color: var(--color-xc-text);
-  font-family: -apple-system, BlinkMacSystemFont, var(--font-ui), 'Segoe UI', system-ui,
-    sans-serif;
-  font-size: 14px;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
@@ -139,6 +247,12 @@ body {
   color: initial;
   font-family: initial;
   font-size: initial;
+  line-height: initial;
+  letter-spacing: initial;
+}
+
+:where(:not([data-testid='render-tree'], [data-testid='render-tree'] *))::selection {
+  background: color-mix(in srgb, var(--color-xc-accent) 24%, transparent);
 }
 
 /**
@@ -146,20 +260,217 @@ body {
  *
  * A visible ring on keyboard focus and nothing on a mouse click, which is what
  * `:focus-visible` is for and what every native control on both platforms does.
- * Set once here so no component has to remember it.
+ * Set once here so no component has to remember it. The ring is macOS's: a soft
+ * band of accent around the control, following its own corners. In the components
+ * layer at zero specificity, so a field's own ring below, or a module's, replaces it.
  *
  * `tabindex="-1"` is excluded. Those are containers a dialog or a menu focuses
  * programmatically so the keyboard has somewhere to land; they are not reachable
  * by tabbing, so a ring around them marks nothing - it just draws a blue border
  * around the whole sheet.
  */
-:focus {
-  outline: none;
+@layer components {
+  :where(:focus) {
+    outline: none;
+  }
+  :where(:focus-visible:not([tabindex='-1'])) {
+    outline: 3px solid color-mix(in srgb, var(--color-xc-accent) 45%, transparent);
+    outline-offset: 0;
+  }
 }
-:focus-visible:not([tabindex='-1']) {
-  outline: 2px solid var(--color-xc-accent);
-  outline-offset: -1px;
-  border-radius: 4px;
+
+/**
+ * The studio's own form controls, drawn once.
+ *
+ * Fields, popups, checkboxes, radios and disclosure triangles look the same in every
+ * panel and sheet: a quiet filled field at 28px, a macOS popup chevron, an accent
+ * checkbox. In the components layer, so they beat Tailwind's preflight reset (base)
+ * while a module, which is unlayered, still wins; and never inside the simulated
+ * app, which draws iOS's controls.
+ */
+@layer components {
+  :where(
+      input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='hidden']),
+      select,
+      textarea
+    ):where(:not([data-testid='render-tree'] *)) {
+    box-sizing: border-box;
+    min-height: var(--control-height-sm);
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background-color: var(--color-xc-field);
+    color: var(--color-xc-text);
+    font: inherit;
+    font-size: var(--text-body);
+    letter-spacing: var(--text-body--letter-spacing);
+    transition:
+      border-color var(--duration-fast) var(--ease-in-out),
+      box-shadow var(--duration-fast) var(--ease-in-out),
+      background-color var(--duration-fast) var(--ease-in-out);
+  }
+  :where(input, textarea):where(:not([data-testid='render-tree'] *))::placeholder {
+    color: var(--color-xc-text-3);
+    opacity: 1;
+  }
+  :where(input, select, textarea):where(:not([data-testid='render-tree'] *)):hover:not(:disabled, :focus) {
+    border-color: var(--color-xc-line);
+  }
+  :where(
+      input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file']),
+      select,
+      textarea
+    ):where(:not([data-testid='render-tree'] *)):focus-visible {
+    outline: none;
+    border-color: var(--color-xc-accent);
+    background-color: var(--color-xc-panel);
+    box-shadow: var(--focus-ring);
+  }
+  :where(input, select, textarea):where(:not([data-testid='render-tree'] *))[aria-invalid='true'] {
+    border-color: var(--color-xc-error);
+  }
+  :where(input, select, textarea):where(:not([data-testid='render-tree'] *)):disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  :where(textarea):where(:not([data-testid='render-tree'] *)) {
+    padding: 6px 8px;
+    line-height: var(--text-body--line-height);
+  }
+
+  /* A popup button, as AppKit draws one: the value and an up-down chevron. */
+  :where(select):where(:not([data-testid='render-tree'] *)) {
+    appearance: none;
+    -webkit-appearance: none;
+    height: var(--control-height);
+    padding-right: 26px;
+    background-image: var(--chevron-up-down);
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    background-size: 14px 14px;
+    text-overflow: ellipsis;
+    cursor: default;
+  }
+
+  :where(input[type='checkbox'], input[type='radio']):where(:not([data-testid='render-tree'] *)) {
+    appearance: none;
+    -webkit-appearance: none;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    border: 1px solid color-mix(in srgb, var(--color-xc-text) 28%, transparent);
+    border-radius: var(--radius-sm);
+    background: var(--color-xc-panel) center / 12px 12px no-repeat;
+    vertical-align: -2px;
+    cursor: default;
+    transition:
+      background-color var(--duration-fast) var(--ease-in-out),
+      border-color var(--duration-fast) var(--ease-in-out);
+  }
+  :where(input[type='radio']):where(:not([data-testid='render-tree'] *)) {
+    border-radius: 50%;
+  }
+  :where(input[type='checkbox']):where(:not([data-testid='render-tree'] *)):checked {
+    border-color: var(--color-xc-accent-fill);
+    background-color: var(--color-xc-accent-fill);
+    background-image: var(--checkmark);
+  }
+  :where(input[type='radio']):where(:not([data-testid='render-tree'] *)):checked {
+    border-color: var(--color-xc-accent-fill);
+    background: radial-gradient(circle, #fff 0 2.5px, var(--color-xc-accent-fill) 3px);
+  }
+  :where(input[type='checkbox'], input[type='radio']):where(:not([data-testid='render-tree'] *)):disabled {
+    opacity: 0.45;
+  }
+  :where(input[type='range']):where(:not([data-testid='render-tree'] *)) {
+    accent-color: var(--color-xc-accent-fill);
+  }
+
+  :where(input[type='color']):where(:not([data-testid='render-tree'] *)) {
+    box-sizing: border-box;
+    width: 28px;
+    height: var(--control-height);
+    padding: 3px;
+    border: 1px solid var(--color-xc-line);
+    border-radius: var(--radius-md);
+    background: var(--color-xc-panel);
+    cursor: default;
+  }
+  :where(input[type='color']):where(:not([data-testid='render-tree'] *))::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+  :where(input[type='color']):where(:not([data-testid='render-tree'] *))::-webkit-color-swatch {
+    border: 0;
+    border-radius: 3px;
+    box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.16);
+  }
+  :where(input[type='color']):where(:not([data-testid='render-tree'] *))::-moz-color-swatch {
+    border: 0;
+    border-radius: 3px;
+  }
+
+  /* Disclosure: a chevron that turns, rather than the browser's triangle. */
+  :where(summary):where(:not([data-testid='render-tree'] *)) {
+    list-style: none;
+    cursor: default;
+    user-select: none;
+  }
+  :where(summary):where(:not([data-testid='render-tree'] *))::-webkit-details-marker {
+    display: none;
+  }
+  :where(summary):where(:not([data-testid='render-tree'] *))::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    vertical-align: -0.5px;
+    background-color: var(--color-xc-text-3);
+    -webkit-mask: var(--chevron-right-mask) center / contain no-repeat;
+    mask: var(--chevron-right-mask) center / contain no-repeat;
+    transition: transform var(--duration-fast) var(--ease-in-out);
+  }
+  :where(details[open] > summary):where(:not([data-testid='render-tree'] *))::before {
+    transform: rotate(90deg);
+  }
+
+  :where(code, kbd, pre, samp):where(:not([data-testid='render-tree'] *)) {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Things that appear: a menu, a popover, a sheet. Short, and only a fade on reduced
+   motion. CSS modules rename keyframes they mention by name, so a module sets
+   `--appear: xc-pop-in` and writes `animation: var(--appear) ...`. */
+@keyframes xc-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+@keyframes xc-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+@keyframes xc-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes xc-pop-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes xc-sheet-in {
+    from {
+      opacity: 0;
+    }
+  }
 }
 
 /**

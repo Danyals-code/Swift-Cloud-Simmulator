@@ -302,17 +302,17 @@ export function moveView(text: string, file: FileId, offset: number, direction: 
  * Adds a view beside, or inside, the view at `offset`.
  *
  * A container takes it as its last child, because selecting a stack and pressing Add
- * means "put one in here"; anything else takes it as its next sibling. The snippet is
- * re-indented to wherever it lands, so a multi-line one arrives formatted rather than
- * flattened against the left margin.
+ * means "put one in here"; anything else takes it as its next sibling, and so does a
+ * container `beside` it, as a paste goes. The snippet is re-indented to wherever it
+ * lands, so a multi-line one arrives formatted rather than flattened against the left margin.
  */
-export function insertView(text: string, file: FileId, offset: number, snippet: string, refuse?: RefusalReason, options: { readonly asListRow?: boolean } = {}): SourceEdit | null {
+export function insertView(text: string, file: FileId, offset: number, snippet: string, refuse?: RefusalReason, options: { readonly asListRow?: boolean; readonly beside?: boolean } = {}): SourceEdit | null {
   const found = siteAt(text, file, offset)
   if (!found) return refused(refuse, 'A view can’t go beside this one, which is part of the code around it. Select what holds it instead.')
   const list = options.asListRow ? dataList(found.stmt) : null
   if (list) return insertListRow(text, list, snippet, refuse)
 
-  const content = contentBlockOf(found.stmt)
+  const content = options.beside ? null : contentBlockOf(found.stmt)
   const reference = content?.statements[content.statements.length - 1]
 
   if (content && reference) {

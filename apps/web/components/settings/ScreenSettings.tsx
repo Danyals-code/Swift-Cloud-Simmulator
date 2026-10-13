@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { LAYOUT_WORDS, stackLayoutOf, type AuthoringNode, type AuthoringOperation, type AuthoringSnapshot, type DesignValue, type PreviewInput, type PreviewScenario, type ResourceOperation, type SharedStyle, type SourceSpan, type StateInput } from '@studio/shared'
-import { canRename, type DesignScreenNode, type DesignTree } from '../../lib/designTree'
+import { canRename, screenRemovalRefusal, type DesignScreenNode, type DesignTree } from '../../lib/designTree'
 import type { ScreenCommand } from '../../lib/screens'
 import { screenOverrideModifier, screenRoot, screenTitleControl, scenarioKey, scenarioScreen } from '../../lib/screens'
 import { PropertyControl } from '../PropertyControl'
@@ -64,6 +64,9 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
   const title = screenTitleControl(snapshot, definition)
   const presentation = describePresentation(screen, tree)
   const run = async (task: Promise<string | null>) => setError(await task)
+  // Duplicate and Remove are planned edits: a refusal shows at the foot of the canvas, as every one does, so it is not said here again.
+  const plan = async (task: Promise<string | null>) => { setError(null); await task }
+  const removedElsewhere = screenRemovalRefusal(screen, tree)
   const resource = (node: AuthoringNode) => (operation: ResourceOperation) => onNodeCommand(node, operation)
   const background = root ? valueFields(root, root.controls ?? []).find(field => field.style?.label === 'background' || field.control?.label.startsWith('background')) : undefined
   return <div className={styles.panel} data-testid="screen-settings">
@@ -75,7 +78,7 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
       {title ? <PropertyControl key={`${title.node.id}:${title.control.value}`} control={title.control} label="Title" onChange={(id, value) => onNodeChange(title.node, id, value)} />
         : root && <p className={styles.note}>No title bar title. Add a Title modifier to the screen’s first view to show one.</p>}
       {background && root && <TokenField field={background} label="Background" tokens={tokens} busy={busy} onChange={(id, value) => onNodeChange(root, id, value)} onCommand={resource(root)} />}
-      {root && <button type="button" className={styles.link} onClick={() => onSelect(root)}>Edit {rootLabel(root)} settings</button>}
+      {root && <button type="button" className={styles.button} onClick={() => onSelect(root)}>Edit {rootLabel(root)} settings</button>}
     </section>
     {root && <section className={styles.section} aria-label="Overrides">
       <div className={styles.sectionHeader}><h3>Overrides</h3></div>
@@ -87,20 +90,22 @@ export function ScreenSettings({ screen, tree, snapshot, tokens, busy, scenarios
           return <div key={item.modifier} data-testid={`screen-override-${item.modifier}`}>
             {fields.length > 1 && <div className={styles.sectionHeader}><h3>{item.label}</h3></div>}
             {fields.map((field, index) => <TokenField key={field.control?.id ?? field.style?.property ?? index} field={field} label={fields.length === 1 ? item.label : undefined} tokens={tokens} busy={busy} override onChange={(id, value) => onNodeChange(root, id, value)} onCommand={resource(root)} />)}
-            {!fields.length && <div className={styles.row}><span>{item.label} · Set on this screen</span><button type="button" className={styles.link} onClick={() => onReveal(existing.source)}>Open in Code</button></div>}
+            {!fields.length && <div className={styles.row}><span>{item.label} · Set on this screen</span><button type="button" className={styles.button} onClick={() => onReveal(existing.source)}>Open in Code</button></div>}
           </div>
         }
         const available = root.modifierCatalog?.find(entry => entry.name === item.modifier)?.available
-        return <div key={item.modifier} className={styles.row}><span>{item.label}</span><button type="button" className={styles.link} disabled={busy || !available} title={available ? undefined : 'This screen’s first view cannot take this override yet.'} onClick={() => void run(onNodeCommand(root, { kind: 'modifier-add', name: item.modifier }))}>From App · Override</button></div>
+        return <div key={item.modifier} className={styles.row}><span>{item.label}</span><button type="button" className={styles.inherit} disabled={busy || !available} title={available ? undefined : 'This screen’s first view cannot take this override yet.'} onClick={() => void run(onNodeCommand(root, { kind: 'modifier-add', name: item.modifier }))}>From App · Override</button></div>
       })}
     </section>}
     <ScreenStates key={screen.id} screen={screen} snapshot={snapshot} busy={busy} scenarios={scenarios} active={activeScenario} onSelect={onSelectScenario} onSave={onSaveScenario} onDelete={onDeleteScenario} onCreateValue={onCreateStateValue} />
     <section className={styles.section} aria-label="Screen actions">
       <div className={styles.actions}>
-        {screen.view && <button type="button" className={styles.button} disabled={busy} onClick={() => void run(onScreenCommand({ kind: 'duplicate', view: screen.view! }))}>Duplicate</button>}
-        {screen.view && <button type="button" className={styles.button} disabled={busy} onClick={() => void run(onScreenCommand({ kind: 'remove', view: screen.view! }))}>Remove</button>}
-        {code && <button type="button" className={styles.button} onClick={() => onReveal(code)}><Icon name="code" size={12} />Open in Code</button>}
+        {screen.view && <button type="button" className={styles.button} disabled={busy} onClick={() => void plan(onScreenCommand({ kind: 'duplicate', view: screen.view! }))}>Duplicate</button>}
+        {screen.view && <button type="button" className={styles.destructive} disabled={busy || !!removedElsewhere} title={removedElsewhere} onClick={() => void plan(onScreenCommand({ kind: 'remove', view: screen.view! }))}>Remove</button>}
+        {code && <button type="button" className={styles.button} onClick={() => onReveal(code)}><Icon name="code" size={14} />Open in Code</button>}
       </div>
+      {/* Said, not only in the tooltip of a button the keyboard cannot reach. */}
+      {screen.view && removedElsewhere && <p className={styles.note}>{removedElsewhere}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
     </section>
   </div>
@@ -110,6 +115,8 @@ function rootLabel(node: AuthoringNode): string {
   const layout = stackLayoutOf(node.name)
   return layout ? LAYOUT_WORDS[layout].toLowerCase() : ({ List: 'list', ScrollView: 'scroll area', Form: 'form' } as Record<string, string>)[node.name] ?? 'first view'
 }
+
+/** Why Remove is off: the planner refuses a tab, the screen the app starts on, and a screen another one opens. */
 
 function describePresentation(screen: DesignScreenNode, tree: DesignTree): string {
   const byId = new Map<string, DesignScreenNode>()
@@ -169,12 +176,12 @@ function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onS
     if (!problem) setAdding(false)
   }
   return <section className={styles.section} aria-label="States" data-testid="screen-states">
-    <div className={styles.sectionHeader}><h3>States</h3><span><button type="button" className={styles.iconButton} aria-label="Add state" title="Add a state" aria-expanded={adding} disabled={busy || !screen.view} onClick={() => { setAdding(!adding); setError(null) }}><Icon name="plus" size={13} /></button></span></div>
+    <div className={styles.sectionHeader}><h3>States</h3><span><button type="button" className={styles.iconButton} aria-label="Add state" title="Add a state" aria-expanded={adding} disabled={busy || !screen.view} onClick={() => { setAdding(!adding); setError(null) }}><Icon name="plus" size={14} /></button></span></div>
     <div className={styles.states}>
       <button type="button" className={styles.stateRow} aria-pressed={!own.some(scenario => scenarioKey(scenario) === active)} onClick={() => onSelect('')}>Default<small>App data</small></button>
       {own.map(scenario => <div key={scenario.name} className={styles.inline}>
         <button type="button" className={styles.stateRow} aria-pressed={scenarioKey(scenario) === active} onClick={() => onSelect(scenarioKey(scenario))}>{scenario.name}<small>{scenario.inputs?.map(item => Array.isArray(item.value) ? `${item.name}: ${item.value.length} items` : `${item.name}: ${String(item.value)}`).join(', ')}</small></button>
-        <button type="button" className={styles.iconButton} aria-label={`Delete state ${scenario.name}`} disabled={busy} onClick={() => onDelete(scenarioKey(scenario))}><Icon name="xmark" size={11} /></button>
+        <button type="button" className={styles.iconButton} aria-label={`Delete state ${scenario.name}`} disabled={busy} onClick={() => onDelete(scenarioKey(scenario))}><Icon name="xmark" size={12} /></button>
       </div>)}
     </div>
     {!inputs.length && !collections.length && !adding && <p className={styles.note}>A state shows this screen with different content: loading, empty, signed out. Add one and the screen gets a switch it can read.</p>}

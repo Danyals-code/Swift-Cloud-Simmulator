@@ -1,11 +1,12 @@
 import { Lexer, type CallExpr, type StructDecl } from '@studio/swift-syntax'
 import { deploymentVersion, tappableProblem } from '@studio/shared'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
-import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, literal, modifierIndent, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
-import { emptyComponents, enumCases, namedActions } from './authoring-components'
+import { enumCases, namedActions } from './authoring-components'
 import { styleExpression } from './authoring-resources'
 import { insideNavigationStack } from './authoring-navigation'
+import { appRoot } from './authoring-navigation-app'
 import { viewCallChain } from './design-controls'
 
 export function stateInputs(ctx: FeatureContext, node: AuthoringNode): StateInput[] {
@@ -118,7 +119,28 @@ export function behaviorSettings(ctx: FeatureContext, node: AuthoringNode): Beha
   const canConfigureAction = (withTitle || labelledButton(call)) && !!call.trailingClosure && call.trailingClosure.params.length === 0
   // Any other view When tapped can make tappable, as a card or a row is (D16).
   const canMakeTappable = !canConfigureAction && !tappableProblem(ctx.nodes, node)
-  return { states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? emptyComponents(ctx).filter(n => n !== node.owner) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
+  return { states: inputs, dependencies: stateDependencies(ctx, node.owner, inputs), collections, actions: node.name === 'Button' ? namedActions(ctx, node).map(f => f.name) : [], destinations: node.name === 'Button' || canMakeTappable ? tapDestinations(ctx, node) : [], canConfigureAction, canMakeTappable, titled: withTitle && call.args[0]!.value.kind === 'stringLiteral', currentAction: node.name === 'Button' && call.trailingClosure ? raw(ctx, call.trailingClosure.body.span) : undefined, binding: argument ? { label, type, current: raw(ctx, argument.value.span), newName: newValueName(ctx, node, node.name, type) } : undefined }
+}
+
+/** The objects a view reads from its surroundings, by type. */
+const environmentObjects = (ctx: FeatureContext, decl: StructDecl | undefined) => decl?.members.flatMap(m => m.kind === 'varDecl' && m.typeAnnotation && m.attributes.some(a => a.name === 'EnvironmentObject') ? [raw(ctx, m.typeAnnotation.span).replace(/\s/g, '')] : []) ?? []
+const screenCache = new WeakMap<FeatureContext, { root?: string; screens: { name: string; reads: string[] }[] }>()
+/**
+ * The screens a tap on `node` can open: made with no values, or needing only an object
+ * its own screen reads from its surroundings, which a pushed or presented screen
+ * inherits. Never the view the app's window shows, which holds every screen, and never
+ * the screen the tap is on.
+ */
+function tapDestinations(ctx: FeatureContext, node: AuthoringNode): string[] {
+  let cached = screenCache.get(ctx)
+  if (!cached) {
+    const standalone = (d: StructDecl) => !d.generics.length && !d.members.some(m => m.kind === 'initDecl' || m.kind === 'varDecl' && !m.accessor && !m.initializer && !m.attributes.some(a => ['State', 'Environment', 'EnvironmentObject'].includes(a.name)))
+    const screens = ctx.ast.flatMap(f => f.declarations).flatMap(d => d.kind === 'structDecl' && d.inherits.some(t => t.name === 'View') && standalone(d) && namedStruct(ctx, d.name) === d ? [{ name: d.name, reads: environmentObjects(ctx, d) }] : [])
+    cached = { root: appRoot(ctx), screens }
+    screenCache.set(ctx, cached)
+  }
+  const around = new Set(environmentObjects(ctx, ownerOf(ctx, node)))
+  return cached.screens.filter(screen => screen.name !== node.owner && screen.name !== cached.root && screen.reads.every(type => around.has(type))).map(screen => screen.name)
 }
 
 /** `Button { … } label: { … }`: the action is the trailing closure, and what it shows is its label (D16). */

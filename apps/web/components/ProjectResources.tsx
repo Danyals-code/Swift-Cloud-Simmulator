@@ -38,7 +38,7 @@ export function ImageResources({ project, stale, onAssets }: ImageResourcesProps
     return onAssets([...(project.assets ?? []).filter(a => a.id !== next.id), next])
   }
   return <section className={styles.section} data-testid="project-resources" aria-label="Images">
-    <div className={styles.sectionHeader}><h3>Images</h3><span><label className={styles.iconButton} title="Add a PNG or JPEG image" aria-label="Add image"><Icon name="plus" size={13} /><input aria-label="Add bundled image" type="file" accept="image/png,image/jpeg" disabled={disabled} hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void run(() => importFile(file)) }} /></label></span></div>
+    <div className={styles.sectionHeader}><h3>Images</h3><span><label className={styles.iconButton} title="Add a PNG or JPEG image" aria-label="Add image"><Icon name="plus" size={14} /><input aria-label="Add bundled image" type="file" accept="image/png,image/jpeg" disabled={disabled} hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void run(() => importFile(file)) }} /></label></span></div>
     {!(project.assets ?? []).length && <p className={styles.note}>PNG or JPEG, up to 4 MB each. Pick one in an Image’s settings once it is added.</p>}
     {(project.assets ?? []).map(asset => <AssetEditor key={`${asset.id}:${asset.name}:${asset.scale}`} asset={asset} assets={project.assets ?? []} open={open === asset.id} onToggle={() => setOpen(open === asset.id ? null : asset.id)} disabled={disabled} onEdit={(assets, op) => run(() => onAssets(assets, op))} onFile={(file, dark) => run(() => importFile(file, asset, dark))} />)}
     {busy && <p className={styles.note} role="status">Updating images…</p>}{error && <p className={styles.error} role="alert">{error}</p>}
@@ -51,7 +51,7 @@ function AssetEditor({ asset, assets, open, onToggle, disabled, onEdit, onFile }
   const replace = (updated: ImageAsset) => assets.map(a => a.id === asset.id ? updated : a)
   return <div className={styles.tokenRow} data-open={open || undefined}>
     <button type="button" className={styles.tokenSummary} aria-expanded={open} onClick={onToggle}>
-      <img src={previews.light} alt="" width={16} height={16} style={{ objectFit: 'contain', borderRadius: 3 }} />
+      <img src={previews.light} alt="" width={16} height={16} style={{ objectFit: 'contain', borderRadius: 4 }} />
       <strong>{asset.name}</strong><small>{asset.light.width / asset.scale} × {asset.light.height / asset.scale} pt{asset.dark ? ' · dark' : ''}</small>
     </button>
     {open && <>
@@ -64,7 +64,7 @@ function AssetEditor({ asset, assets, open, onToggle, disabled, onEdit, onFile }
         <button type="button" className={styles.button} disabled={disabled} onClick={() => void onEdit([...assets, { ...asset, id: crypto.randomUUID(), name: unusedAssetName(assets, asset.name) }])}>Duplicate</button>
       </div>
       <div className={styles.row}><span>When deleting</span><select aria-label={`${asset.name} replacement`} value={replacement} onChange={e => setReplacement(e.target.value)}><option value="">Only if unused</option>{assets.filter(a => a.id !== asset.id).map(a => <option key={a.id} value={a.name}>Use {a.name} instead</option>)}</select></div>
-      <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled} onClick={() => void onEdit(assets.filter(a => a.id !== asset.id), { kind: 'asset-references', from: asset.name, to: replacement || null })}>Delete image</button></div>
+      <div className={styles.actions}><button type="button" className={styles.destructive} disabled={disabled} onClick={() => void onEdit(assets.filter(a => a.id !== asset.id), { kind: 'asset-references', from: asset.name, to: replacement || null })}>Delete image</button></div>
     </>}
   </div>
 }

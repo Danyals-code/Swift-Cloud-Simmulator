@@ -195,8 +195,20 @@ export function sourceLayerVisibleId(snapshot: AuthoringSnapshot, id: string | u
   return top.length === 1 ? top[0]!.node.id : undefined
 }
 
-/** Project Swift structure into visual views while retaining original source identities. */
-export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceLayerNavigation, selected: string | undefined, query: string, runtime?: SourceLayerRuntimeContext) {
+/** A hidden view, and the row it is listed under: none puts it at the top of the tree. */
+export interface SourceLayerHiddenRow {
+  readonly view: HiddenViewInfo
+  readonly owner?: string
+}
+
+/**
+ * Project Swift structure into visual views while retaining original source identities.
+ *
+ * Hidden views have no node of their own. Each one is listed under the row that
+ * holds it, and that row and its parents stay open, unless the designer closed
+ * them, so a hidden view is never drawn under a row whose other children are not.
+ */
+export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceLayerNavigation, selected: string | undefined, query: string, runtime?: SourceLayerRuntimeContext, hidden: readonly HiddenViewInfo[] = []) {
   const nodes = new Map(snapshot.nodes.map(n => [n.id, n]))
   const runtimeIds = runtime?.visibleRuntimeIds ? new Set(runtime.visibleRuntimeIds) : runtime?.runtimeLayers ? new Set<string>() : undefined
   const pageRoots: string[] = []
@@ -284,15 +296,27 @@ export function sourceLayerRows(snapshot: AuthoringSnapshot, navigation: SourceL
     matches.set(id, found)
     return found
   }
+  const scope = entry ? [entry] : pageRoots.map(id => nodes.get(id)!)
+  const shownHidden = hidden.filter(view => entry ? view.file === entry.source.file && view.offset >= entry.source.start && view.offset <= entry.source.end : sourceLayerHiddenInScope(snapshot, view, scope))
+  const hiddenOwners = shownHidden.map(view => {
+    let owner = nodes.get(sourceLayerHiddenOwner(snapshot, view) ?? '')
+    while (owner && !sourceLayerIsVisual(owner)) owner = nodes.get(owner.parentId ?? '')
+    return owner?.id
+  })
+  const holdingHidden = new Set(hiddenOwners.flatMap(id => id ? [id, ...sourceLayerAncestors(nodes, id)] : []))
   const rows: SourceLayerRow[] = []
   const visit = (id: string, depth: number) => {
     const node = nodes.get(id)
     if (!node || needle && !match(id)) return
     const children = childIds.get(id) ?? []
-    const expanded = !!children.length && (!!needle || revealed.has(id) || !navigation.closed.has(id) && (depth === 0 && !shared.has(id) || navigation.opened?.has(id) === true))
+    const expanded = !!children.length && (!!needle || revealed.has(id) || !navigation.closed.has(id) && (depth === 0 && !shared.has(id) || navigation.opened?.has(id) === true || holdingHidden.has(id)))
     rows.push({ node, depth, expanded, shared: shared.has(id), parentId: parentIds.get(id), children })
     if (expanded) children.forEach(child => visit(child, depth + 1))
   }
   roots.forEach(id => visit(id, 0))
-  return { rows, screens, entry, scope: (entry ? [entry] : pageRoots.map(id => nodes.get(id)!)) }
+  const hiddenRows: SourceLayerHiddenRow[] = shownHidden.map((view, index) => {
+    const owner = sourceLayerVisibleId(snapshot, hiddenOwners[index], rows)
+    return owner ? { view, owner } : { view }
+  })
+  return { rows, screens, entry, scope, hidden: hiddenRows }
 }

@@ -1,4 +1,4 @@
-import type { AuthoringNode, AuthoringSnapshot, Diagnostic, PagePreview } from '@studio/shared'
+import { SCREEN_REMOVAL_REFUSALS, type AuthoringNode, type AuthoringSnapshot, type Diagnostic, type PagePreview, type ViewLayer } from '@studio/shared'
 import { screenDefinition, type DesignScreen } from './screens'
 
 /** How a screen is reached from the one before it. `root` starts a lane. */
@@ -151,6 +151,54 @@ export function designScreens(tree: DesignTree): DesignScreenNode[] {
   return out
 }
 
+/**
+ * The screen Preview is showing, found in the tree Design drew: the tab that is open,
+ * the screen pushed onto it, or the sheet presented over it. Undefined when it is not
+ * one of the tree's screens.
+ *
+ * The running app names its tab by the tab's own page, and a pushed or presented
+ * screen only by its title and the views it draws, so one is matched by the Swift
+ * view that draws it, then by its title, among the screens that tab can push or the
+ * sheets.
+ */
+export function liveDesignScreen(tree: DesignTree, live: readonly ViewLayer[] | undefined, snapshot: AuthoringSnapshot | undefined): DesignScreenNode | undefined {
+  const tab = live?.find(layer => layer.type === 'Page' && layer.page?.active)
+  if (!tab) return undefined
+  const roots = tree.lanes.map(lane => lane.root)
+  const root = roots.find(screen => screen.page.id === tab.id || !!tab.page?.handlerId && screen.page.handlerId === tab.page.handlerId) ?? (roots.length === 1 ? roots[0] : undefined)
+  const below = (screens: readonly DesignScreenNode[]): DesignScreenNode[] => screens.flatMap(screen => [screen, ...below(screen.children)])
+  // A sheet is over everything; an alert or a menu is not a screen, and leaves the one under it.
+  const presented = live?.find(layer => layer.type === 'Presentation')
+  const sheet = presented && matchScreen(below(tree.sheets.map(item => item.screen)), presented, snapshot)
+  if (sheet) return sheet
+  const pushed = tab.children.find(layer => layer.type === 'Destination')
+  if (!root || !pushed) return root
+  return matchScreen(below(root.children), pushed, snapshot)
+}
+
+/** One of `screens` drawing `shown`: by the Swift view that draws its first view, then by its title. */
+function matchScreen(screens: readonly DesignScreenNode[], shown: ViewLayer, snapshot: AuthoringSnapshot | undefined): DesignScreenNode | undefined {
+  const view = ownerOfFirstView(shown.children, snapshot)
+  const byView = view ? screens.filter(screen => screen.view === view) : []
+  const titled = (list: readonly DesignScreenNode[]) => list.filter(screen => screen.name === shown.name || screen.page.name === shown.name)
+  if (byView.length) return titled(byView)[0] ?? byView[0]
+  const byTitle = titled(screens)
+  return byTitle.length === 1 ? byTitle[0] : undefined
+}
+
+/** The Swift view written around the first view a running screen draws, skipping navigation chrome. */
+function ownerOfFirstView(layers: readonly ViewLayer[], snapshot: AuthoringSnapshot | undefined): string | undefined {
+  if (!snapshot) return undefined
+  for (const layer of layers) {
+    if (layer.type.startsWith('_')) continue
+    const node = snapshot.nodes.find(item => item.id === snapshot.runtimeToSource[layer.id])
+    if (node && node.kind !== 'definition') return node.owner
+    const inner = ownerOfFirstView(layer.children, snapshot)
+    if (inner) return inner
+  }
+  return undefined
+}
+
 /** The outline's rows that list the sheets, and the screens nothing links to yet. */
 export const SHEETS_GROUP = 'group:sheets'
 export const DETACHED_GROUP = 'group:detached'
@@ -192,4 +240,12 @@ export function emptyScreensNote(busy: boolean, diagnostics: readonly Diagnostic
   const error = diagnostics.find((d) => d.severity === 'error')
   if (!error) return { text: 'No screens yet.' }
   return { text: `Fix the error in ${error.span.file.split('/').pop()} to see the screens.`, at: { file: error.span.file, offset: error.span.start } }
+}
+
+/** Why a screen cannot be removed from its settings, or nothing when it can. */
+export function screenRemovalRefusal(screen: DesignScreenNode, tree: DesignTree): string | undefined {
+  const lane = tree.lanes.find(candidate => candidate.root.id === screen.id)
+  if (lane) return lane.tab ? SCREEN_REMOVAL_REFUSALS.tab : SCREEN_REMOVAL_REFUSALS.start
+  const opened = tree.sheets.some(sheet => sheet.screen.id === screen.id) || designScreens(tree).some(node => node.children.some(child => child.id === screen.id))
+  return opened ? SCREEN_REMOVAL_REFUSALS.opened : undefined
 }

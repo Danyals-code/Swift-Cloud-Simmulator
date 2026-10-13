@@ -24,9 +24,6 @@ type Tab = 'problems' | 'console' | 'timings' | 'coverage'
 /** One shared empty array, so "nothing yet" keeps a stable identity. */
 const EMPTY: readonly never[] = []
 
-const MONO =
-  'font-[ui-monospace,"SF_Mono",SFMono-Regular,Menlo,"JetBrains_Mono",Consolas,monospace]'
-
 /**
  * The debug area.
  *
@@ -69,7 +66,8 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-xc-editor" data-testid="console">
-      <header className="flex h-[26px] shrink-0 items-center gap-0.5 border-b border-xc-line bg-xc-bar px-1.5">
+      <header className="flex h-9 shrink-0 items-center gap-3 border-b border-xc-line bg-xc-bar px-2">
+        <div className="inline-flex h-7 shrink-0 items-center gap-0.5 rounded-md bg-xc-fill p-0.5">
         <TabButton active={tab === 'problems'} onClick={() => setTab('problems')}>
           Problems
           {errors > 0 ? <Badge tone="error">{errors}</Badge> : null}
@@ -85,10 +83,11 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
         <TabButton active={tab === 'coverage'} onClick={() => setTab('coverage')}>
           Coverage
         </TabButton>
+        </div>
 
         {tab === 'problems' || tab === 'console' ? (
-          <span className="ml-auto flex h-[18px] min-w-0 items-center gap-1.5 rounded-[5px] border border-xc-line bg-xc-bar-raised px-1.5">
-            <Icon name="filter" size={11} className="shrink-0 text-xc-text-3" />
+          <span className="relative ml-auto flex min-w-0 items-center">
+            <Icon name="filter" size={12} className="pointer-events-none absolute left-2 text-xc-text-3" />
             <input
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
@@ -99,17 +98,17 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
               spellCheck={false}
               aria-label="Filter output"
               data-testid="console-filter"
-              className="w-[130px] min-w-0 bg-transparent text-[13px] text-xc-text placeholder:text-xc-text-3"
+              className="h-6 w-40 min-w-0 pl-6"
             />
           </span>
         ) : null}
       </header>
 
-      <div className={`min-h-0 flex-1 overflow-auto px-1.5 py-1 text-[11.5px] ${MONO}`}>
+      <div className="min-h-0 flex-1 overflow-auto">
         {workerError ? (
-          <p className="mb-1.5 rounded-[5px] border border-xc-error/30 bg-xc-error/10 px-2 py-1.5 text-xc-error">
+          <p className="mx-2 mt-2 rounded-lg bg-xc-error/10 px-3 py-2 text-footnote text-xc-error">
             Compiler worker: {workerError}
-            <span className="block opacity-70">It will be restarted on your next edit.</span>
+            <span className="block text-xc-text-2">It will be restarted on your next edit.</span>
           </p>
         ) : null}
 
@@ -119,25 +118,27 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
           ) : shownDiagnostics.length === 0 ? (
             <Empty>No problems match “{filter}”.</Empty>
           ) : (
-            <ul>
+            <ul className="p-1">
               {shownDiagnostics.map((d, i) => (
                 <li key={i}>
                   <button
                     type="button"
                     onClick={() => onRevealSpan(d.span.file, d.span.start)}
-                    className="flex w-full items-start gap-2 rounded-[4px] px-1.5 py-[3px] text-left transition-colors hover:bg-xc-line-soft"
+                    className="flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-body leading-5 transition-colors duration-[120ms] hover:bg-xc-fill"
                   >
-                    <Icon
-                      name={d.severity === 'error' ? 'error' : d.severity === 'warning' ? 'warning' : 'info'}
-                      size={12}
-                      weight={2}
-                      className={`mt-[2px] shrink-0 ${SEVERITY_TONE[d.severity]}`}
-                    />
-                    <span className="min-w-0 flex-1 leading-snug">
-                      <span className="text-xc-text">{d.message}</span>
-                      <span className="ml-2 text-xc-text-3">{d.code}</span>
+                    <span className="flex h-5 shrink-0 items-center">
+                      <Icon
+                        name={d.severity === 'error' ? 'error' : d.severity === 'warning' ? 'warning' : 'info'}
+                        size={14}
+                        weight={1.75}
+                        className={SEVERITY_TONE[d.severity]}
+                      />
                     </span>
-                    <span className="shrink-0 pl-2 text-xc-text-3">
+                    <span className="min-w-0 flex-1">
+                      <span className="text-xc-text">{d.message}</span>
+                      <span className="ml-2 text-caption text-xc-text-3">{d.code}</span>
+                    </span>
+                    <span className="shrink-0 pl-2 text-caption leading-5 text-xc-text-3">
                       {fileBasename(d.span.file)}
                     </span>
                   </button>
@@ -149,14 +150,14 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
 
         {tab === 'console' ? (
           logs.length === 0 ? (
-            <Empty>Nothing logged. `print()` output will appear here.</Empty>
+            <Empty>Nothing logged yet. Output from <code className="text-xc-text-2">print()</code> appears here.</Empty>
           ) : shownLogs.length === 0 ? (
             <Empty>No output matches “{filter}”.</Empty>
           ) : (
-            <ul>
+            <ul className="px-1 py-2 font-mono text-footnote">
               {shownLogs.map((log, i) => (
-                <li key={i} className="flex gap-2 px-1.5 py-[2px] leading-snug">
-                  <span className="shrink-0 text-xc-text-3">{log.at.toFixed(1)}ms</span>
+                <li key={i} className="flex gap-3 px-2 py-0.5 leading-[18px]">
+                  <span className="shrink-0 tabular-nums text-xc-text-3">{log.at.toFixed(1)}ms</span>
                   <span className={log.level === 'error' ? 'text-xc-error' : 'text-xc-text'}>
                     {log.message}
                   </span>
@@ -172,7 +173,7 @@ export function ConsolePane({ result, workerError, onRevealSpan }: ConsolePanePr
           !result ? (
             <Empty>No compile yet.</Empty>
           ) : (
-            <div><Timings timings={result.timings} /><p className="px-3 py-1 text-[13px] text-xc-text-2">Text measurement: {!result.textMeasurement ? 'unavailable' : result.textMeasurement.provisional ? 'estimated in part' : 'measured'}</p></div>
+            <div><Timings timings={result.timings} /><p className="px-4 pb-3 text-footnote text-xc-text-2">Text measurement: {!result.textMeasurement ? 'unavailable' : result.textMeasurement.provisional ? 'estimated in part' : 'measured'}</p></div>
           )
         ) : null}
       </div>
@@ -203,32 +204,32 @@ function Timings({ timings }: { timings: CompileResult['timings'] }) {
   const peak = Math.max(...stages.map(([, value]) => value), 0.01)
 
   return (
-    <div className="px-1.5 py-1">
+    <div className="px-4 py-2 text-body tabular-nums">
       {stages.map(([label, value]) => (
-        <div key={label} className="flex items-center gap-2 py-[2px]">
-          <span className="w-16 shrink-0 text-xc-text-3">{label}</span>
-          <span className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-xc-line-soft">
+        <div key={label} className="flex h-6 items-center gap-3">
+          <span className="w-16 shrink-0 text-xc-text-2">{label}</span>
+          <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-xc-fill">
             <span
               className={`block h-full rounded-full ${value > 40 ? 'bg-xc-warn' : 'bg-xc-accent'}`}
               style={{ width: `${Math.max(1.5, (value / peak) * 100)}%` }}
             />
           </span>
-          <span className="w-[68px] shrink-0 text-right text-xc-text">{value.toFixed(2)} ms</span>
+          <span className="w-20 shrink-0 text-right text-xc-text">{value.toFixed(2)} ms</span>
         </div>
       ))}
 
-      <div className="mt-1.5 flex items-center gap-2 border-t border-xc-line pt-1.5">
-        <span className="w-16 shrink-0 text-xc-text-3">total</span>
+      <div className="mt-1 flex h-7 items-center gap-3 border-t border-xc-line-soft pt-1">
+        <span className="w-16 shrink-0 text-xc-text-2">total</span>
         <span className="min-w-0 flex-1" />
         <span
-          className={`w-[68px] shrink-0 text-right ${
+          className={`w-20 shrink-0 text-right font-semibold ${
             timings.total > 120 ? 'text-xc-warn' : 'text-xc-text'
           }`}
         >
           {timings.total.toFixed(2)} ms
         </span>
       </div>
-      <p className="mt-1.5 px-0 text-[10.5px] text-xc-text-3">
+      <p className="mt-1 text-footnote text-xc-text-3">
         Budget is 120 ms for the full pipeline; anything above it is reported rather than
         hidden.
       </p>
@@ -266,29 +267,29 @@ function CoveragePanel() {
 
   return (
     <div data-testid="coverage-panel">
-      <p className="px-1.5 py-1 text-xc-text-3">
+      <p className="px-4 py-3 text-footnote text-xc-text-3">
         {entries.length} feature{entries.length === 1 ? '' : 's'} the preview could not draw,{' '}
         {total} time{total === 1 ? '' : 's'}. Counted locally; never sent anywhere.
       </p>
 
-      <ul>
+      <ul className="px-1">
         {entries.map((entry) => (
           <li
             key={entry.feature}
-            className="flex items-center gap-2 rounded-[4px] px-1.5 py-[3px] hover:bg-xc-line-soft"
+            className="flex h-7 items-center gap-3 rounded-md px-2 text-body transition-colors duration-[120ms] hover:bg-xc-fill"
           >
-            <span className="w-8 shrink-0 text-right text-xc-warn">{entry.count}</span>
+            <span className="w-8 shrink-0 text-right tabular-nums text-xc-warn">{entry.count}</span>
             <span className="min-w-0 flex-1 truncate text-xc-text">{entry.feature}</span>
-            <span className="shrink-0 text-xc-text-3">{entry.kind}</span>
-            <span className="w-16 shrink-0 text-right text-xc-text-3">
+            <span className="shrink-0 text-caption text-xc-text-3">{entry.kind}</span>
+            <span className="w-20 shrink-0 text-right text-caption text-xc-text-3">
               {entry.recognised ? 'known gap' : 'unrecognised'}
             </span>
           </li>
         ))}
       </ul>
 
-      <span className="mt-2 inline-block">
-        <ToolButton icon="refresh" label="Clear counts" onClick={clearCoverage} size={12} />
+      <span className="mx-2 mb-2 mt-1 inline-block">
+        <ToolButton icon="refresh" label="Clear counts" onClick={clearCoverage} size={14} />
       </span>
     </div>
   )
@@ -308,8 +309,8 @@ function TabButton({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex h-[18px] items-center gap-1.5 rounded-[5px] px-2 text-[11.5px] transition-colors ${
-        active ? 'bg-xc-line-soft text-xc-text' : 'text-xc-text-3 hover:text-xc-text-2'
+      className={`inline-flex h-6 items-center justify-center gap-1.5 rounded-[var(--radius-thumb)] px-2.5 text-body transition-[background-color,color,box-shadow] duration-[120ms] ${
+        active ? 'bg-xc-thumb text-xc-text shadow-[var(--shadow-thumb)]' : 'text-xc-text-2 hover:text-xc-text'
       }`}
     >
       {children}
@@ -317,16 +318,19 @@ function TabButton({
   )
 }
 
+/** A count in a tab: Xcode's issue counts, the severity's glyph and a number; a plain chip otherwise. */
 function Badge({ tone, children }: { tone: 'error' | 'warning' | 'quiet'; children: React.ReactNode }) {
-  const style =
-    tone === 'error'
-      ? 'bg-xc-error/25 text-xc-error'
-      : tone === 'warning'
-        ? 'bg-xc-warn/25 text-xc-warn'
-        : 'bg-xc-line-soft text-xc-text-3'
-  return <span className={`rounded-full px-1 text-[11px] leading-[13px] ${style}`}>{children}</span>
+  if (tone === 'quiet') {
+    return <span className="rounded-sm bg-xc-fill px-1.5 text-caption tabular-nums text-xc-text-2">{children}</span>
+  }
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-caption tabular-nums ${tone === 'error' ? 'text-xc-error' : 'text-xc-warn'}`}>
+      <Icon name={tone} size={12} weight={1.75} />
+      {children}
+    </span>
+  )
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="px-1.5 py-1 text-xc-text-3">{children}</p>
+  return <p className="px-4 py-3 text-footnote text-xc-text-3">{children}</p>
 }

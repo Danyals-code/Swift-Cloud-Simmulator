@@ -7,7 +7,7 @@ test('Start designing is the first source, and where a browser with no work yet 
   const sources = page.getByRole('navigation', { name: 'Source', exact: true }).getByRole('button')
   await expect(sources.nth(0)).toHaveText('Start designing')
   await expect(sources.nth(1)).toHaveText('Your projects')
-  await expect(sources.nth(2)).toHaveText('Agentic Coding')
+  await expect(sources.nth(2)).toHaveText('Create with AI')
   await expect(sources.nth(3)).toContainText('App templates')
   await expect(page.getByTestId('gallery-source-design')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('template-blank')).toBeVisible()

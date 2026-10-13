@@ -17,6 +17,7 @@ import type { CanvasTool } from './Toolbar'
 import type { AuthoringNode, NavigationDestination, DropPosition } from '@studio/shared'
 import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../lib/pageLayout'
 import { deviceChrome, type DeviceChrome } from '../lib/deviceChrome'
+import { galleryChangeView, viewCentredOn } from '../lib/canvasView'
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
 import type { FeatureProps } from './AuthoringFeatures'
 import { InlineTextEditor } from './InlineTextEditor'
@@ -310,11 +311,15 @@ export function DevicePane({
   const worldRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef({ x: 0, y: 0, scale: 1 })
 
+  // The zoom the canvas is really drawn at, for the zoom menu to show: Fit, or a screen
+  // brought into view, is a percentage of its own. A pan leaves it alone, so it re-renders nothing.
+  const [shownScale, setShownScale] = useState(1)
   const applyView = useCallback(() => {
     const world = worldRef.current
     if (!world) return
     const { x, y, scale } = viewRef.current
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
+    setShownScale(scale)
   }, [])
   /** A world drawn again after a crash picks up the view where the old one left it. */
   const attachWorld = useCallback((world: HTMLDivElement | null) => {
@@ -378,14 +383,15 @@ export function DevicePane({
 
   // A screen chosen in the tree cannot be shown while its lane is collapsed, so the
   // lane opens with it. Done as the request arrives rather than in an effect, so the
-  // canvas is drawn once, already open.
+  // canvas is drawn once, already open; a screen just added is asked for before it is
+  // first drawn, and its lane opens when it arrives.
   const [centredNonce, setCentredNonce] = useState(centerOn?.nonce ?? 0)
-  if (centerOn && centerOn.nonce !== centredNonce) {
+  const centreLane = centerOn && centerOn.nonce !== centredNonce ? layout?.slots.find(slot => slot.page.id === centerOn.id)?.lane : undefined
+  if (centerOn && centreLane !== undefined) {
     setCentredNonce(centerOn.nonce)
-    const lane = layout?.slots.find(slot => slot.page.id === centerOn.id)?.lane
-    if (lane !== undefined && collapsedLanes.has(lane)) setCollapsedLanes(previous => {
+    if (collapsedLanes.has(centreLane)) setCollapsedLanes(previous => {
       const next = new Set(previous)
-      next.delete(lane)
+      next.delete(centreLane)
       return next
     })
   }
@@ -492,6 +498,8 @@ export function DevicePane({
   const lastFit = useRef({ zoom: '', width: 0, height: 0, left: 0, top: 0, panelLayout, expanded, projectId, device: device.key, allPages })
   const liveOffset = useRef({ x: 0, y: 0 })
   const wasGallery = useRef(gallery)
+  /** Whether this workspace has drawn its screens yet. */
+  const screensDrawn = useRef(gallery)
   const pickingDestination = !!navigationPicker
   const beforeDestinationPick = useRef<{ projectId: string; device: string; view: { x: number; y: number; scale: number } } | null>(null)
 
@@ -545,6 +553,7 @@ export function DevicePane({
       // Every Code preview and new project starts fitted and centered.
       if (newWorkspace && preview.zoom !== 'fit') onPreviewChange({ zoom: 'fit' })
       if (newWorkspace) {
+        screensDrawn.current = gallery
         viewRef.current = { x: (pane.width - arrangement.width * fitScale) / 2, y: (pane.height - arrangement.height * fitScale) / 2, scale: fitScale }
         applyView()
       } else centreView()
@@ -560,6 +569,9 @@ export function DevicePane({
 
     if (wasGallery.current !== gallery || was.allPages !== allPages) {
       wasGallery.current = gallery
+      const first = gallery && !screensDrawn.current
+      if (gallery) screensDrawn.current = true
+      if (galleryChangeView({ first, zoom: preview.zoom }) === 'fit') { centreView(); return }
       const current = viewRef.current
       viewRef.current = {
         ...current,
@@ -787,27 +799,28 @@ export function DevicePane({
   }, [grabbing, applyView])
 
   /**
-   * Bringing a page into view when Layers picks one.
+   * Bringing a page into view when Layers picks one, or a screen is added.
    *
    * By nonce rather than by id, so choosing the same page twice re-centres it: the
-   * second press means "show me that one" just as much as the first did.
+   * second press means "show me that one" just as much as the first did. A screen just
+   * added is asked for before it is first drawn, so the request waits for it.
    */
+  const centred = useRef<number | null>(null)
   useEffect(() => {
-    if (!expanded || !centerOn) return
+    if (!expanded) { centred.current = null; return }
+    if (!centerOn || centred.current === centerOn.nonce) return
     const element = containerRef.current
     const card = element?.querySelector<HTMLElement>(`[data-page-id="${CSS.escape(centerOn.id)}"]`)
-      ?? element?.querySelector<HTMLElement>('[data-canvas-phone]')
+      ?? (gallery ? null : element?.querySelector<HTMLElement>('[data-canvas-phone]'))
     if (!element || !card) return
+    centred.current = centerOn.nonce
     // Offsets are in the world's own coordinates, which is the space the transform
     // is expressed in - so this does not depend on where the canvas is right now.
     const { scale: at } = viewRef.current
-    viewRef.current = {
-      x: element.clientWidth / 2 - (card.offsetLeft + card.offsetWidth / 2) * at,
-      y: element.clientHeight / 2 - (card.offsetTop + card.offsetHeight / 2) * at,
-      scale: at,
-    }
+    viewRef.current = viewCentredOn({ left: card.offsetLeft, top: card.offsetTop, width: card.offsetWidth, height: card.offsetHeight }, { width: element.clientWidth, height: element.clientHeight }, at, PANE_PADDING)
     applyView()
-  }, [centerOn, expanded, applyView])
+    if (viewRef.current.scale !== at) onPreviewChange({ zoom: String(Number(viewRef.current.scale.toFixed(4))) })
+  }, [centerOn, expanded, gallery, layout, applyView, onPreviewChange])
 
   const [inlineText, setInlineText] = useState<{ node: AuthoringNode; control: string; value: string; x: number; y: number; width: number } | null>(null)
   const inlineEditor = inlineText && inspecting && authoringFeatures?.onNodeChange ? <InlineTextEditor key={`${inlineText.node.id}:${inlineText.control}`} {...inlineText} onClose={() => setInlineText(null)} onSave={value => authoringFeatures.onNodeChange!(inlineText.node, inlineText.control, value)} /> : null
@@ -850,7 +863,7 @@ export function DevicePane({
   const devicePicker = <DevicePicker device={device} onChange={onDeviceChange} />
   const schemePicker = <AppearancePicker preview={preview} onChange={onPreviewChange} />
   const typePicker = <TextSizePicker preview={preview} onChange={onPreviewChange} />
-  const zoomPicker = <ZoomPicker preview={preview} scale={scale} onChange={onPreviewChange} />
+  const zoomPicker = <ZoomPicker preview={preview} scale={shownScale} onChange={onPreviewChange} />
 
   const collapsePanel = <button type="button" className={styles.panelToggle} data-testid="pane-toggle-preview" aria-pressed="true" aria-label={expanded ? 'Collapse preview settings' : 'Collapse preview'} title={expanded ? 'Collapse preview settings' : 'Collapse preview'} onClick={onToggleSettings}><Icon name="sidebar-right" size={16} /></button>
 
@@ -872,14 +885,15 @@ export function DevicePane({
                 // The reasons are here, a hover away, and in the warnings list beside the status (D11).
                 ? <>{drawnScreens} {drawnScreens === 1 ? 'screen' : 'screens'} · <span className={styles.notDrawn} tabIndex={0} title={pagesNotDrawn.join('\n')} data-testid="pages-not-drawn">{pagesNotDrawn.length} not drawn</span></>
                 : drawnScreens < (pageCount ?? pages!.length)
-                ? `${drawnScreens} of ${pageCount ?? pages!.length} screens · scroll to explore`
-                : `${drawnScreens} ${drawnScreens === 1 ? 'screen' : 'screens'} · scroll to explore · ⌘/Ctrl-scroll to zoom`
-              : inspecting ? 'Click to select · double-click to go in · ⌘-click for the innermost' : 'Interactive preview'
+                ? `${drawnScreens} of ${pageCount ?? pages!.length} screens`
+                : `${drawnScreens} ${drawnScreens === 1 ? 'screen' : 'screens'}`
+              // How to pan and zoom is in the zoom menu's tooltip and the shortcuts list.
+              : inspecting ? 'Click to select · double-click to go in' : null
           }</span>
           {navigationPicker && <button type="button" className={styles.cancelPick} onClick={navigationPicker.onCancel}>Cancel pick</button>}
           {/* Off in Live Preview, and said so rather than hidden: it is a thing the
               canvas can do, in the mode where a click means "open this page". */}
-          <label className={styles.showAll} data-disabled={!inspecting || undefined} title={inspecting ? 'Show all screens and their connected destinations (⌘⇧A)' : 'Switch to Edit to explore screens'}>
+          <label className={styles.showAll} data-disabled={!inspecting || undefined} title={inspecting ? 'Show all screens and their connected destinations (⌘⇧A)' : 'Stop the preview to see all screens'}>
             <input type="checkbox" data-testid="show-all-pages" checked={allPages && inspecting} disabled={!inspecting || !!navigationPicker} onChange={(event) => onToggleAllPages?.(event.target.checked)} />
             Show all screens
           </label>

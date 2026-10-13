@@ -47,7 +47,7 @@ describe('screen authoring', () => {
     const copied = edit(source, 'ContentView', { kind: 'screen-duplicate', name: 'SecondScreen' })
     expect(copied.match(/@State var joined = false/g)).toHaveLength(2)
     expect(edit(copied, 'SecondScreen', { kind: 'screen-remove' })).toContain('struct ContentView')
-    expect(plan(source, selected(source, 'ContentView'), { kind: 'screen-remove' })).toMatchObject({ ok: false, reason: expect.stringContaining('used') })
+    expect(plan(source, selected(source, 'ContentView'), { kind: 'screen-remove' })).toMatchObject({ ok: false, reason: 'The app starts on this screen, so it cannot be removed.' })
     expect(plan(source, selected(source, 'ContentView'), { kind: 'screen-duplicate', name: 'ContentView' })).toMatchObject({ ok: false })
   })
   it('undoes sources and screen names/order together', () => {

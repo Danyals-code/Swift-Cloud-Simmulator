@@ -44,8 +44,8 @@ export interface DesignNavigatorProps {
 
 export type HierarchyView = 'layers' | 'files'
 
-const INDENT = 14
-const BASE = 8
+const INDENT = 16
+const BASE = 4
 
 /**
  * Design's left panel: App > Screens > Views.
@@ -131,7 +131,7 @@ export function DesignNavigator(props: DesignNavigatorProps) {
         onAction={value => { if (value === 'edit') onSelectComponent(component); else if (value === 'insert' && onInsertComponent) void onInsertComponent(component).then(setError) }} />)
       : <p className={styles.empty} style={{ paddingLeft: BASE + (depth + 1) * INDENT }}>Select a view and choose Make component to reuse it.</p>)}
   </>
-  const addScreen = <button type="button" className={styles.add} aria-label="Add screen" title="Add screen" disabled={busy || pending} onClick={() => { setEditing({ view: null, name: 'New screen', layout: 'VStack' }); setError(null) }} data-testid="add-screen"><Icon name="plus" size={13} /></button>
+  const addScreen = <button type="button" className={styles.add} aria-label="Add screen" title="Add screen" disabled={busy || pending} onClick={() => { setEditing({ view: null, name: 'New screen', layout: 'VStack' }); setError(null) }} data-testid="add-screen"><Icon name="plus" size={14} /></button>
   const form = editing && <form className={styles.form} onSubmit={event => { event.preventDefault(); void command(editing.view ? { kind: 'rename', view: editing.view, name: editing.name } : { kind: 'create', name: editing.name, layout: editing.layout }) }}>
     <label>{editing.view ? 'Screen name' : 'New screen name'}<input autoFocus aria-label="Screen name" maxLength={100} value={editing.name} onChange={event => setEditing({ ...editing, name: event.target.value })} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setEditing(null) } }} /></label>
     {!editing.view && <label>Starts with<select aria-label="Screen layout" value={editing.layout} onChange={event => setEditing({ ...editing, layout: event.target.value as typeof editing.layout })}><option value="VStack">A column (top to bottom)</option><option value="HStack">A row (left to right)</option><option value="ZStack">An overlap (front to back)</option></select></label>}
@@ -146,8 +146,8 @@ export function DesignNavigator(props: DesignNavigatorProps) {
     </span> : <strong>Layers</strong>}
     {view === 'layers' && <>
     <span className={styles.switch} role="group" aria-label="Panel layout">
-      <button type="button" aria-pressed={layout === 'merged'} title="One tree: App, screens and views together" aria-label="One tree" data-testid="navigator-layout-merged" onClick={() => onLayoutChange('merged')}><Icon name="outline" size={13} /></button>
-      <button type="button" aria-pressed={layout === 'split'} title="Three panels: App, Screens and Layers" aria-label="Three panels" data-testid="navigator-layout-split" onClick={() => onLayoutChange('split')}><Icon name="panels" size={13} /></button>
+      <button type="button" aria-pressed={layout === 'merged'} title="One tree: App, screens and views together" aria-label="One tree" data-testid="navigator-layout-merged" onClick={() => onLayoutChange('merged')}><Icon name="outline" size={14} /></button>
+      <button type="button" aria-pressed={layout === 'split'} title="Three panels: App, Screens and Layers" aria-label="Three panels" data-testid="navigator-layout-split" onClick={() => onLayoutChange('split')}><Icon name="panels" size={14} /></button>
     </span>
     <button type="button" className={styles.icon} aria-pressed={focus} title={focus ? 'Show every screen' : 'Focus on this screen'} aria-label="Focus on this screen" data-testid="focus-screen" disabled={!selectedScreenId} onClick={() => setFocus(value => !value)}><Icon name="focus" size={14} /></button>
     </>}
@@ -210,7 +210,7 @@ function Row({ id, depth, icon, label, detail, selected, current, expandable, ex
   actions?: readonly MenuItem[]; onAction?: (value: string) => void; testId?: string; title?: string
 }) {
   return <div className={styles.row} role="treeitem" aria-level={depth + 1} aria-selected={!!selected} aria-expanded={expandable ? !!expanded : undefined} data-current={current || undefined} data-row-id={id} data-testid={testId} style={{ paddingLeft: `min(${BASE + depth * INDENT}px, 35%)` }}>
-    <button type="button" tabIndex={-1} className={styles.disclosure} disabled={!expandable} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`} onClick={onToggle}>{expandable && <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />}</button>
+    <button type="button" tabIndex={-1} className={styles.disclosure} disabled={!expandable} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`} onClick={onToggle}>{expandable && <Icon name="chevron-right" size={12} />}</button>
     <button type="button" className={styles.label} data-outline-row="true" title={title} onClick={onClick}
       onKeyDown={event => { if (event.key === 'ArrowRight' && expandable && !expanded) { event.preventDefault(); onToggle?.() } else if (event.key === 'ArrowLeft' && expandable && expanded) { event.preventDefault(); onToggle?.() } }}>
       <Icon name={icon} size={14} /><span>{label}</span>{detail && <small>{detail}</small>}
@@ -222,8 +222,8 @@ function Row({ id, depth, icon, label, detail, selected, current, expandable, ex
 function GroupRow({ id, depth, label, icon = 'section', count, expanded, onToggle, action, title }: { id: string; depth: number; label: string; icon?: IconName; count?: number; expanded: boolean; onToggle: () => void; action?: ReactNode; title?: string }) {
   return <div className={styles.group} role="treeitem" aria-level={depth + 1} aria-expanded={expanded} aria-selected={false} data-row-id={id} style={{ paddingLeft: `min(${BASE + depth * INDENT}px, 35%)` }} title={title}>
     <button type="button" className={styles.groupToggle} data-outline-row="true" onClick={onToggle} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`}>
-      <span className={styles.disclosure}><Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} /></span>
-      <Icon name={icon} size={13} /><span>{label}</span>{count !== undefined && <small>{count}</small>}
+      <span className={styles.disclosure}><Icon name="chevron-right" size={12} /></span>
+      <Icon name={icon} size={14} /><span>{label}</span>{count !== undefined && <small>{count}</small>}
     </button>
     {action}
   </div>

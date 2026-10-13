@@ -59,6 +59,8 @@ export function TokenField({ field, label, tokens, busy = false, onChange, onCom
   const choices = tokens.filter(token => token.kind === kind || kind === 'radius' && token.kind === 'spacing' && token.form === 'legacy')
   const linked = style.token ? choices.find(token => token.name === style.token) : undefined
   const title = label ?? control?.label ?? style.label
+  // With no tokens of this kind the picker could only say "Custom": the value is the field.
+  const picking = !!linked || choices.length > 0 || (!control && kind !== 'color')
   const run = async (operation: ResourceOperation) => {
     if (!onCommand || pending) return
     setPending(true); setError(null)
@@ -68,7 +70,7 @@ export function TokenField({ field, label, tokens, busy = false, onChange, onCom
   const rawValue = style.value ?? control?.value ?? ''
   const tokenValue = kind === 'color' ? (/^#/.test(rawValue) ? rawValue.toUpperCase() : SYSTEM_COLOR_SWATCHES[rawValue]?.slice(0, 7) ?? '#000000') : rawValue
   return <div className={styles.tokenField} data-testid="token-field" data-kind={kind}>
-    <div className={styles.row}>
+    {picking && <div className={styles.row}>
       <span title={title}>{title}</span>
       <span className={styles.tokenPicker}>
         <select title={linked ? `${linked.name}: ${linked.value}` : `Custom: ${rawValue || 'default'}`} aria-label={`${title} token`} data-linked={linked ? true : undefined} value={linked ? linked.name : CUSTOM} disabled={busy || pending || !onCommand}
@@ -82,28 +84,28 @@ export function TokenField({ field, label, tokens, busy = false, onChange, onCom
           <option value={CUSTOM}>Custom</option>
         </select>
       </span>
-    </div>
-    {override && <span className={styles.note}>Overrides the App value</span>}
-    {!linked && control && onChange && <PropertyControl key={`${control.id}:${control.value}`} control={control} label={`${title} value`} onChange={onChange} />}
-    {!linked && kind === 'color' && onCommand && <CustomColor value={tokenValue} disabled={busy || pending} onApply={hex => void run({ kind: 'style-local', property: style.property, value: hex })} />}
+    </div>}
+    {override && <span className={styles.badge}>Overrides the App value</span>}
+    {!linked && control && onChange && <PropertyControl key={`${control.id}:${control.value}`} control={control} label={`${title} value`} caption={picking ? undefined : title} onChange={onChange} />}
+    {!linked && kind === 'color' && onCommand && <CustomColor label={picking || control ? 'Custom color' : title} value={tokenValue} disabled={busy || pending} onApply={hex => void run({ kind: 'style-local', property: style.property, value: hex })} />}
     {!linked && onCommand && kind !== 'shadow' && (saving
       ? <form className={styles.inline} onSubmit={event => { event.preventDefault(); if (nameHint(kind, name)) return; void run({ kind: 'style-create-link', property: style.property, name: name.trim(), style: kind, value: tokenValue, token: kind === 'font' ? { value: tokenValue, font: { style: tokenValue } } : { value: tokenValue } }) }}>
           <input aria-label="New token name" autoFocus value={name} spellCheck={false} onChange={event => { setName(event.target.value); setError(null) }} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setSaving(false) } }} />
           <button type="submit" className={styles.button} disabled={pending || !!nameHint(kind, name)}>Save</button>
         </form>
-      : <button type="button" className={styles.link} disabled={busy || pending || !rawValue} onClick={() => { setSaving(true); setName(suggestedName(kind, tokens.map(t => t.name), rawValue)) }}>Save as token…</button>)}
+      : <button type="button" className={styles.tokenAction} disabled={busy || pending || !rawValue} onClick={() => { setSaving(true); setName(suggestedName(kind, tokens.map(t => t.name), rawValue)) }}>Save as token…</button>)}
     {saving && nameHint(kind, name) && <p className={styles.note}>{nameHint(kind, name)}</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
   </div>
 }
 
 /** Any colour, not only the system ones: committed when the picker closes, not per drag. */
-function CustomColor({ value, disabled, onApply }: { value: string; disabled: boolean; onApply: (hex: string) => void }) {
+function CustomColor({ label, value, disabled, onApply }: { label: string; value: string; disabled: boolean; onApply: (hex: string) => void }) {
   const [draft, setDraft] = useState(value)
   const [base, setBase] = useState(value)
   if (base !== value) { setBase(value); setDraft(value) }
   const valid = /^#[0-9a-f]{6}$/i.test(draft)
-  return <div className={styles.row}><span>Custom color</span><span className={styles.inline}>
+  return <div className={styles.row}><span>{label}</span><span className={styles.inline}>
     <input type="color" aria-label="Custom color swatch" value={valid ? draft : '#000000'} disabled={disabled} onChange={event => setDraft(event.target.value.toUpperCase())} onBlur={() => { if (valid && draft.toUpperCase() !== value.toUpperCase()) onApply(draft) }} />
     <input aria-label="Custom color hex" value={draft} disabled={disabled} spellCheck={false} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && valid) onApply(draft.toUpperCase()) }} onBlur={() => { if (valid && draft.toUpperCase() !== value.toUpperCase()) onApply(draft.toUpperCase()) }} />
   </span></div>

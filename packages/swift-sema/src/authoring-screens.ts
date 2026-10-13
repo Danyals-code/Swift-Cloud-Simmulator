@@ -1,4 +1,4 @@
-import { deploymentVersion } from '@studio/shared'
+import { deploymentVersion, SCREEN_REMOVAL_REFUSALS } from '@studio/shared'
 import type { AuthoringNode, AuthoringOperation, DesignValue, SourceFile, SourceSpan } from '@studio/shared'
 import { afterOffMarkers, forEachChild, Lexer, Parser, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
@@ -8,6 +8,7 @@ import { tappablePatch } from './authoring-structure'
 import { emptyComponents } from './authoring-components'
 import { allDeclarations, applyPatches, callOf, identifier, insertMember, namedStruct, ownerOf, patch, raw, shadowsMember, shapedProject, sourceRoot, swiftValue, type FeatureContext, type SourcePatch } from './authoring-context'
 import { insideNavigationStack, navigationStackPatches } from './authoring-navigation'
+import { appNavigation, appRoot } from './authoring-navigation-app'
 
 type ScreenOperation = Extract<AuthoringOperation, { kind: 'screen-create' | 'screen-duplicate' | 'screen-remove' }>
 
@@ -41,8 +42,9 @@ export function screenEdit(ctx: FeatureContext, node: AuthoringNode, operation: 
     return { patches: [{ file: file.id, start: file.text.length, end: file.text.length, text }] }
   }
   const owner = namedStruct(ctx, node.name)
-  if (node.kind !== 'definition' || !owner || !emptyComponents(ctx).includes(owner.name)) throw new Error('Select a screen with a standalone view definition.')
+  if (node.kind !== 'definition' || !owner) throw new Error('This screen is written inside other code. Open it in Code to change it.')
   if (operation.kind === 'screen-duplicate') {
+    if (!emptyComponents(ctx).includes(owner.name)) throw new Error('This screen needs values from where it is opened. Duplicate it in Code.')
     const text = raw(ctx, owner.span)
     const start = owner.nameSpan.start - owner.span.start, end = owner.nameSpan.end - owner.span.start
     const copied = text.slice(0, start) + operation.name + text.slice(end)
@@ -65,13 +67,15 @@ export function screenEdit(ctx: FeatureContext, node: AuthoringNode, operation: 
     }
     return { patches: [{ file: file.id, start: file.text.length, end: file.text.length, text: '\n\n' + copied + '\n' }] }
   }
+  const elsewhere = removalRefusal(ctx, owner.name)
+  if (elsewhere) throw new Error(elsewhere)
   const references = ctx.files.flatMap(f => Lexer.tokenize(f.text, f.id).tokens.filter(t => t.kind === 'identifier' && t.text === owner.name && !(f.id === owner.span.file && t.span.start >= owner.span.start && t.span.end <= owner.span.end)))
   // A `#Preview` that only shows this screen goes with it rather than being left
   // behind as code that no longer compiles.
   const previews = ownPreviews(ctx, owner.name)
   const inPreview = (reference: { span: SourceSpan }) => previews.some(preview => preview.file === reference.span.file && reference.span.start >= preview.start && reference.span.end <= preview.end)
   const outside = references.filter(reference => !inPreview(reference))
-  if (outside.length) throw new Error('This screen is used by the app or another screen. Change its incoming destinations before removing it.')
+  if (outside.length) throw new Error(SCREEN_REMOVAL_REFUSALS.opened)
   const patches = [patch(owner.span, ''), ...previews.map(preview => ({ ...preview, text: '' }))]
   // A screen that had its own file leaves no empty file behind.
   const after = applyPatches(ctx, patches)
@@ -81,6 +85,13 @@ export function screenEdit(ctx: FeatureContext, node: AuthoringNode, operation: 
     return !left.replace(/import\s+\w+|\s+/g, '')
   }).map(file => file.id)
   return { patches, ...(removed.length ? { removed } : {}) }
+}
+
+/** Why a screen is removed somewhere else, when it is. */
+function removalRefusal(ctx: FeatureContext, view: string): string | undefined {
+  if (appNavigation(ctx).tabs.some(tab => tab.screen === view)) return SCREEN_REMOVAL_REFUSALS.tab
+  if (appRoot(ctx) === view) return SCREEN_REMOVAL_REFUSALS.start
+  return undefined
 }
 
 /**
