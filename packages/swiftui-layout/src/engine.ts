@@ -179,6 +179,8 @@ export interface PlacedNode {
   readonly blendMode?: string
   readonly redacted?: boolean
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
+  /** `.mask` with a gradient or colour: the alpha this box's content is drawn through. */
+  readonly mask?: Fill
   readonly a11y?: {
     readonly label?: string
     readonly value?: string
@@ -614,6 +616,10 @@ export class LayoutEngine {
           height: resolve(proposal.height, 0, UNBOUNDED),
         }
 
+      case 'ignoresSafeArea':
+        // Its parent sizes it as though it kept to the safe area; only placement grows it.
+        return this.measure(element.child, proposal, inner)
+
       default:
         return this.measure(element.child, proposal, inner)
     }
@@ -922,7 +928,8 @@ export class LayoutEngine {
     parent: string | null,
   ): number {
     const vertical = element.axis === 'vertical'
-    env = { ...env, containerSize: { width: bounds.width, height: bounds.height } }
+    // Scrolled content is never at the screen's edges, so nothing in it grows to them.
+    env = { ...env, containerSize: { width: bounds.width, height: bounds.height }, safeArea: null }
     const proposal: ProposedSize = { width: bounds.width, height: bounds.height }
     const content = this.measure(element.content, scrollProposal(element, proposal), env)
 
@@ -1380,14 +1387,22 @@ export class LayoutEngine {
           shadow: modifier,
           ...(parent ? { parent } : {}),
         })
-        return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, inner, out, z + 1, shadowId)
+        return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, within(inner, bounds), out, z + 1, shadowId)
+      }
+
+      case 'mask': {
+        // Masked as one: the content is drawn into a box of its own and that box takes
+        // the mask's alpha, so a gradient fades the whole view rather than each part.
+        const maskId = `${element.id}-mask`
+        out.push({ id: maskId, frame: bounds, z, opacity: 1, cornerRadius: 0, paint: { kind: 'hit' }, mask: modifier.fill, ...(parent ? { parent } : {}) })
+        return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, within(inner, bounds), out, z + 1, maskId)
       }
 
       case 'opacity': {
         // Composite once after drawing the whole view, including overlapping children.
         const opacityId = `${element.id}-opacity`
         out.push({ id: opacityId, frame: bounds, z, opacity: inner.opacity, cornerRadius: 0, paint: { kind: 'hit' }, ...(parent ? { parent } : {}) })
-        return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, inner, out, z + 1, opacityId)
+        return this.place(element.child, { x: 0, y: 0, width: bounds.width, height: bounds.height }, within(inner, bounds), out, z + 1, opacityId)
       }
 
       case 'cornerRadius':
@@ -1411,7 +1426,7 @@ export class LayoutEngine {
         return this.place(
           element.child,
           { x: 0, y: 0, width: bounds.width, height: bounds.height },
-          inner,
+          within(inner, bounds),
           out,
           z + 1,
           clipId,
@@ -1459,7 +1474,7 @@ export class LayoutEngine {
         return this.place(
           element.child,
           { x: 0, y: 0, width: bounds.width, height: bounds.height },
-          inner,
+          within(inner, bounds),
           out,
           z + 1,
           id,
@@ -1506,7 +1521,7 @@ export class LayoutEngine {
         const next = this.place(
           element.child,
           { x: 0, y: 0, width: bounds.width, height: bounds.height },
-          inner,
+          within(inner, bounds),
           out,
           z + 1,
           id,
@@ -1552,7 +1567,7 @@ export class LayoutEngine {
         return this.place(
           element.child,
           { x: 0, y: 0, width: bounds.width, height: bounds.height },
-          inner,
+          within(inner, bounds),
           out,
           z + 1,
           transformId,
@@ -1660,10 +1675,32 @@ export class LayoutEngine {
         return next + 1
       }
 
+      case 'ignoresSafeArea': {
+        // Each requested edge that lies on the safe area's edge moves out to the
+        // screen's; an edge inset from it, by padding or a sibling, stays put.
+        const area = inner.safeArea
+        if (!area) return this.place(element.child, bounds, inner, out, z, parent)
+        const on = (a: number, b: number) => Math.abs(a - b) < 0.5
+        const { inner: safe, outer: screen } = area
+        const left = modifier.edges.leading && on(bounds.x, safe.x) ? screen.x : bounds.x
+        const top = modifier.edges.top && on(bounds.y, safe.y) ? screen.y : bounds.y
+        const right = modifier.edges.trailing && on(bounds.x + bounds.width, safe.x + safe.width) ? screen.x + screen.width : bounds.x + bounds.width
+        const bottom = modifier.edges.bottom && on(bounds.y + bounds.height, safe.y + safe.height) ? screen.y + screen.height : bounds.y + bounds.height
+        return this.place(element.child, { x: left, y: top, width: right - left, height: bottom - top }, inner, out, z, parent)
+      }
+
       default:
         return this.place(element.child, bounds, inner, out, z, parent)
     }
   }
+}
+
+/** The environment for children placed relative to `box`: the same safe area, seen from inside it. */
+function within(env: LayoutEnvironment, box: Rect): LayoutEnvironment {
+  const area = env.safeArea
+  if (!area) return env
+  const shift = (rect: Rect): Rect => ({ ...rect, x: rect.x - box.x, y: rect.y - box.y })
+  return { ...env, safeArea: { inner: shift(area.inner), outer: shift(area.outer) } }
 }
 
 // -------------------------------------------------------------------- helpers

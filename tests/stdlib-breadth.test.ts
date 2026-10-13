@@ -583,6 +583,106 @@ describe('Dictionary members', () => {
   })
 })
 
+describe('Set members', () => {
+  const sorted = (expr: string) => evaluate(`${expr}.sorted()`)
+
+  it('combines sets, and takes an array or a range as the other operand', () => {
+    expect(sorted('Set([1, 2, 3]).union([3, 4])')).toBe('[1, 2, 3, 4]')
+    expect(sorted('Set([1, 2, 3]).intersection(Set([2, 3, 9]))')).toBe('[2, 3]')
+    expect(sorted('Set([1, 2, 3]).subtracting(2...3)')).toBe('[1]')
+    expect(sorted('Set([1, 2, 3]).symmetricDifference([3, 4])')).toBe('[1, 2, 4]')
+    expect(evaluate('Set([1, 2]).union([2, 2, 3]).count')).toBe('3')
+  })
+
+  it('answers the subset questions', () => {
+    expect(evaluate('Set([1, 2]).isSubset(of: [1, 2, 3])')).toBe('true')
+    expect(evaluate('Set([1, 2]).isSubset(of: [1, 2])')).toBe('true')
+    expect(evaluate('Set([1, 2]).isStrictSubset(of: [1, 2])')).toBe('false')
+    expect(evaluate('Set([1, 2, 3]).isSuperset(of: [3])')).toBe('true')
+    expect(evaluate('Set([1, 2, 3]).isStrictSuperset(of: [1, 2, 3])')).toBe('false')
+    expect(evaluate('Set([1, 2]).isDisjoint(with: [3, 4])')).toBe('true')
+    expect(evaluate('Set([1, 2]).isDisjoint(with: [2])')).toBe('false')
+  })
+
+  it('changes a set in place, and removes an element by value', () => {
+    expect(runStatements([
+      '      var s: Set<String> = ["a", "b"]',
+      '      s.formUnion(["b", "c"])',
+      '      s.subtract(["a"])',
+      '      let gone = s.remove("b")',
+      '      let absent = s.remove("zzz")',
+      '      s.formSymmetricDifference(["c", "d"])',
+      '      return "\\(s.sorted()) \\(gone ?? "-") \\(absent ?? "-")"',
+    ].join('\n'))).toBe('["d"] b -')
+    expect(runStatements([
+      '      var s = Set([1, 2, 3])',
+      '      s.formIntersection([2, 3, 4])',
+      '      return "\\(s.sorted())"',
+    ].join('\n'))).toBe('[2, 3]')
+  })
+
+  it('stays a set through filter, assignment, a parameter and a memberwise init', () => {
+    expect(evaluate('Set([1, 2, 3]).filter { $0 > 1 }.subtracting([2]).count')).toBe('1')
+    expect(runStatements([
+      '      var s: Set<Int> = [1]',
+      '      s = [5, 5, 6]',
+      '      return "\\(s.count) \\(ids(of: [7, 7]).count) \\(Tags(names: ["x", "x"]).names.union(["y"]).count)"',
+    ].join('\n'), 'func ids(of ids: Set<Int>) -> Set<Int> { ids }\nstruct Tags { var names: Set<String> }')).toBe('2 1 2')
+  })
+
+  it('compares two sets without regard to order', () => {
+    expect(evaluate('Set([1, 2]) == Set([2, 1])')).toBe('true')
+    expect(evaluate('[1, 2] == [2, 1]')).toBe('false')
+  })
+
+  it('runs the category list a generated screen wrote', () => {
+    const extra = 'struct Site { let category: String }'
+    expect(runStatements([
+      '      let sites = [Site(category: "Fort"), Site(category: "Temple"), Site(category: "Fort")]',
+      '      var set = Set(sites.map { $0.category })',
+      '      set.insert("All")',
+      '      return (["All"] + set.subtracting(["All"]).sorted()).joined(separator: ",")',
+    ].join('\n'), extra)).toBe('All,Fort,Temple')
+  })
+
+  it('leaves the set algebra off an array, as Swift does', () => {
+    expect(failure(app('    var body: some View { Text("\\([1, 2].subtracting([1]).count)") }'))).toContain("has no member 'subtracting'")
+  })
+})
+
+describe('what generated screens reach for', () => {
+  it('searches without regard to case, the way a .searchable filter does', () => {
+    expect(evaluate('"Red Fort".localizedCaseInsensitiveContains("fort")')).toBe('true')
+    expect(evaluate('"Red Fort".localizedStandardContains("RED")')).toBe('true')
+    expect(evaluate('"Red Fort".localizedCaseInsensitiveContains("temple")')).toBe('false')
+  })
+
+  it('uses a range of Ints as a collection', () => {
+    expect(evaluate('(1...3).map { $0 * 2 }')).toBe('[2, 4, 6]')
+    expect(evaluate('(0..<10).filter { $0.isMultiple(of: 3) }')).toBe('[0, 3, 6, 9]')
+    expect(evaluate('(1...4).reduce(0, +)')).toBe('10')
+    expect(evaluate('(1...4).contains(where: { $0 > 3 })')).toBe('true')
+  })
+
+  it('formats a number the way Text(_:format:) does', () => {
+    expect(evaluate('(12.5).formatted(.currency(code: "EUR"))')).toBe('€12.50')
+    expect(evaluate('(0.256).formatted(.percent)')).toBe('25.6%')
+    expect(evaluate('(1234.5).formatted()')).toBe('1,234.5')
+    expect(evaluate('(42).formatted()')).toBe('42')
+  })
+
+  it('applies an interpolation specifier rather than dropping it', () => {
+    const drawn = (body: string) => {
+      const result = run(app(`    var body: some View { ${body} }`))
+      expect(errors(result)).toEqual([])
+      return texts(result).join('')
+    }
+    expect(drawn('Text("\\(3.14159, specifier: "%.2f")")')).toBe('3.14')
+    expect(drawn('Text("Total: \\(12.5, specifier: "%.1f") km")')).toBe('Total: 12.5 km')
+    expect(drawn('Text("\\(7, specifier: "%03d")")')).toBe('007')
+  })
+})
+
 // ------------------------------------------------------------------ 5.11
 
 describe('a key path where a closure is expected', () => {

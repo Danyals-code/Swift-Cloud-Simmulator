@@ -1,6 +1,9 @@
 'use client'
 
 import { scenarioKey } from '../lib/screens'
+import { ASSET_DRAG_TYPE, draggingFiles } from '../lib/images'
+import { dropSlot, unionBox, type Box, type CanvasMove, type MoveContainer, type MoveSource } from '../lib/canvasMove'
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RenderTreeView, symbolAsset } from '@studio/swiftui-render-dom'
 import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree, type UIEvent } from '@studio/shared'
@@ -17,6 +20,19 @@ import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../li
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
 import type { FeatureProps } from './AuthoringFeatures'
 import { InlineTextEditor } from './InlineTextEditor'
+
+/** A press on a view, which becomes a move once the pointer has travelled. */
+interface MoveGesture {
+  readonly pointerId: number
+  readonly start: { readonly x: number; readonly y: number }
+  last: { x: number; y: number }
+  readonly node: RenderNode | 'selection'
+  readonly pageId?: string
+  source: MoveSource | null
+  elements: HTMLElement[]
+  slot: { readonly container: MoveContainer; readonly index: number } | null
+  frame: number
+}
 
 export interface DevicePaneProps {
   authoringFeatures?: Omit<FeatureProps, 'node'>
@@ -51,6 +67,11 @@ export interface DevicePaneProps {
   onRevealSource: (node: RenderNode, pageId?: string) => void
   /** What the pointer is over while inspecting, so the workspace can follow it. */
   onHoverNode?: (node: RenderNode | null, pageId?: string) => void
+  /**
+   * An image dropped on the canvas: files from outside the studio, or a row dragged
+   * from the Assets folder. `node` is the view it landed on, null for empty canvas.
+   */
+  onDropImage?: (image: { files: readonly File[] } | { asset: string }, node: RenderNode | null, pageId?: string) => void
   /**
    * Tab columns with each tab's related screens underneath.
    *
@@ -99,14 +120,8 @@ export interface DevicePaneProps {
     /** Everything it paints, so a drag can start from anywhere inside it. */
     readonly renderIds?: readonly string[]
   } | null
-  /**
-   * A view dragged onto another one, which is a move in the file.
-   *
-   * The source is `'selection'` when the drag began inside what is selected: a
-   * container paints through its children, so the node under the pointer is never
-   * the container itself, and dragging a stack has to mean the stack.
-   */
-  onReorderNodes?: (source: RenderNode | 'selection', target: RenderNode, position: 'before' | 'after') => void
+  /** How a drag on the canvas moves a view in the file: what it picks up, where it can go, the drop. */
+  canvasMove?: CanvasMove
   /** The page to bring into view, when Layers picks one. */
   centerOn?: { readonly id: string; readonly nonce: number } | null
   /** What the preview is doing, drawn at the head of the canvas. */
@@ -188,6 +203,7 @@ export function DevicePane({
   inspecting,
   onRevealSource,
   onHoverNode,
+  onDropImage,
   pages,
   canvas,
   selectedPageId,
@@ -199,7 +215,7 @@ export function DevicePane({
   belowCanvas,
   tool = 'select',
   selection,
-  onReorderNodes,
+  canvasMove,
   centerOn,
   status,
   preview,
@@ -213,14 +229,27 @@ export function DevicePane({
 
   /** The hover as of now, for handlers that run outside React's render. */
   const hoverRef = useRef<RenderNode | null>(null)
+  /** The press or drag in progress on a view; see `onViewPointerDown`. */
+  const gesture = useRef<MoveGesture | null>(null)
 
   // One call site for the hover, so the pane and the workspace cannot disagree
   // about what the pointer is over.
   const setHovered = useCallback((node: RenderNode | null, pageId?: string) => {
+    // A move draws its own target; hover would flicker under the copy that follows the pointer.
+    if (gesture.current?.source && node) return
     hoverRef.current = node
     setHoveredNode(node)
     onHoverNode?.(node, pageId)
   }, [onHoverNode])
+
+  /** The rendered view an element belongs to, and the phone it is on. */
+  const droppedOn = (target: EventTarget | null): { node: RenderNode | null; pageId?: string } => {
+    const element = target instanceof Element ? target : null
+    const id = element?.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId
+    const pageId = element?.closest<HTMLElement>('[data-page-id]')?.dataset.pageId
+    const nodes = pageId ? pages?.find(page => page.id === pageId)?.tree?.nodes : tree?.nodes
+    return { node: (id && nodes?.find(node => node.id === id)) || null, ...(pageId ? { pageId } : {}) }
+  }
 
   // Derived rather than cleared in an effect: a stale highlight must not survive
   // leaving inspector mode, and "only meaningful while inspecting" is a property of
@@ -565,75 +594,183 @@ export function DevicePane({
   }, [pickingDestination, expanded, inspecting, gallery, onPreviewChange, applyView])
 
   /**
-   * Dragging a view onto another one moves it in the file.
+   * Dragging a view moves it in the file, the way a design tool moves a layer in an
+   * auto layout frame.
    *
-   * What is dragged is the *selection* when the press lands inside it, and whatever
-   * is under the pointer otherwise. That is the rule a layer editor follows: the
-   * first click chooses the innermost thing, and the drag that follows moves the
-   * thing you chose - so a whole list can be carried once it is selected, without
-   * the pointer having to find its edge.
+   * A press picks up the selection when it lands inside it, and what is under the
+   * pointer otherwise: a container paints through its children, so once a stack is
+   * chosen, dragging it from anywhere has to mean the stack. Nothing moves until the
+   * pointer has travelled a few pixels, so a click stays a click. Then a copy of the
+   * view follows the pointer, the original dims in place, and the container that
+   * would take it is outlined with a bar where it would land, across a column and
+   * down a row. Escape puts everything back. The copy, outline and bar are drawn
+   * straight to the DOM once a frame, so the canvas is not re-rendered as it moves.
    */
-  const viewDrag = useRef<{ node: RenderNode | 'selection'; x: number; y: number } | null>(null)
-  const [dragTarget, setDragTarget] = useState<{ name: string; position: 'before' | 'after' } | null>(null)
+  const ghostRef = useRef<HTMLDivElement>(null)
+  const targetRef = useRef<HTMLDivElement>(null)
+  const lineRef = useRef<HTMLDivElement>(null)
+  /** What is being moved, for the heading; null when nothing is. */
+  const [moving, setMoving] = useState<string | null>(null)
+  /** Why the view cannot be dropped where the pointer is; null while it can. */
+  const [blocked, setBlocked] = useState<string | null>(null)
+  /** The click a drag ends with is not a selection. */
+  const suppressClick = useRef(false)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  /** The window listeners outlive renders; they read these. */
+  const latest = useRef({ canvasMove, droppedOn, setHovered })
+  useEffect(() => { latest.current = { canvasMove, droppedOn, setHovered } })
 
-  const onViewPointerDown = useCallback((event: React.PointerEvent) => {
-    if (navigationPicker || !expanded || stale || !inspecting || tool !== 'select' || !onReorderNodes || event.button !== 0) return
+  const onViewPointerDown = (event: React.PointerEvent) => {
+    suppressClick.current = false
+    if (navigationPicker || !expanded || stale || !inspecting || tool !== 'select' || !canvasMove || event.button !== 0 || spaceRef.current) return
     const element = containerRef.current
     if (!element) return
-
     const within = (selection?.renderIds ?? []).some((id) => {
       const box = element.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`)?.getBoundingClientRect()
-      return !!box
-        && event.clientX >= box.left && event.clientX <= box.right
-        && event.clientY >= box.top && event.clientY <= box.bottom
+      return !!box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom
     })
-
-    const node: RenderNode | 'selection' | null = within ? 'selection' : hoverRef.current
-    if (!node) return
-    viewDrag.current = { node, x: event.clientX, y: event.clientY }
-  }, [navigationPicker, expanded, stale, inspecting, tool, onReorderNodes, selection])
+    const { node, pageId } = droppedOn(event.target)
+    if (!within && !node) return
+    // Text would otherwise start a selection, and an image the browser's own drag.
+    event.preventDefault()
+    const at = { x: event.clientX, y: event.clientY }
+    gesture.current = { pointerId: event.pointerId, start: at, last: at, node: within ? 'selection' : node!, ...(pageId ? { pageId } : {}), source: null, elements: [], slot: null, frame: 0 }
+  }
 
   useEffect(() => {
-    /** What the drop would do, from where the pointer is over the target. */
-    const dropAt = (event: PointerEvent, source: RenderNode | 'selection') => {
-      const over = hoverRef.current
-      if (!over || (source !== 'selection' && over.id === source.id)) return null
-      const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(over.id)}"]`)
-      const box = element?.getBoundingClientRect()
-      return {
-        node: over,
-        position: (box && event.clientY > box.top + box.height / 2 ? 'after' : 'before') as 'before' | 'after',
+    const scopeFor = (pageId?: string): ParentNode =>
+      (pageId ? containerRef.current?.querySelector(`[data-page-id="${CSS.escape(pageId)}"]:not([data-state])`) : null) ?? containerRef.current ?? document
+    const elementsOf = (scope: ParentNode, ids: readonly string[]) =>
+      ids.flatMap(id => { const element = scope.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`); return element ? [element] : [] })
+    const boxOf = (scope: ParentNode, ids: readonly string[]): Box | null =>
+      unionBox(elementsOf(scope, ids).map(element => element.getBoundingClientRect()).filter(rect => rect.width > 0 || rect.height > 0))
+    const show = (element: HTMLElement | null, box: Box | null) => {
+      if (!element) return
+      if (!box) { element.style.display = 'none'; return }
+      Object.assign(element.style, { display: 'block', left: `${box.left}px`, top: `${box.top}px`, width: `${box.right - box.left}px`, height: `${box.bottom - box.top}px` })
+    }
+
+    /** A copy still sliding back from the last drag, finished at once if another starts. */
+    let settling: { timer: number; finish: () => void } | null = null
+    const settle = () => { if (!settling) return; const { timer, finish } = settling; settling = null; clearTimeout(timer); finish() }
+
+    /** Picks the view up: the copy that follows the pointer, and the original dimmed. */
+    const begin = (g: MoveGesture): boolean => {
+      settle()
+      const source = latest.current.canvasMove?.pick(g.node, g.pageId)
+      const ghost = ghostRef.current
+      if (!source || !ghost) return false
+      const elements = elementsOf(scopeFor(g.pageId), source.renderIds)
+      const area = (element: HTMLElement) => { const rect = element.getBoundingClientRect(); return rect.width * rect.height }
+      const outer = elements.reduce<HTMLElement | null>((best, element) => !best || area(element) > area(best) ? element : best, null)
+      if (!outer) return false
+      const rect = outer.getBoundingClientRect()
+      const copy = outer.cloneNode(true) as HTMLElement
+      // A copy, not the view: nothing in it may be found, selected or read out as the original.
+      for (const element of [copy, ...copy.querySelectorAll<HTMLElement>('*')]) {
+        for (const name of ['data-node-id', 'data-handler-id', 'data-layer-selected', 'id', 'tabindex', 'role', 'aria-label']) element.removeAttribute(name)
       }
+      Object.assign(copy.style, { left: '0px', top: '0px', margin: '0px', outline: 'none', transformOrigin: '0 0', transform: `scale(${rect.width / (outer.offsetWidth || rect.width) || 1})` })
+      ghost.replaceChildren(copy)
+      show(ghost, rect)
+      ghost.style.transform = 'translate(0px, 0px)'
+      for (const element of elements) element.setAttribute('data-drag-source', '')
+      g.source = source; g.elements = elements
+      latest.current.setHovered(null)
+      setMoving(source.label)
+      return true
     }
 
-    const moved = (event: PointerEvent, drag: { x: number; y: number }) =>
-      Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) >= 6
-
-    const move = (event: PointerEvent) => {
-      const drag = viewDrag.current
-      if (!drag || !moved(event, drag)) return
-      const drop = dropAt(event, drag.node)
-      setDragTarget(drop ? { name: drop.node.inspect?.name ?? drop.node.kind, position: drop.position } : null)
+    /** Follows the pointer: the copy, and the container and slot it would land in. */
+    const update = () => {
+      const g = gesture.current
+      if (!g?.source) return
+      g.frame = 0
+      const { x, y } = g.last
+      if (ghostRef.current) ghostRef.current.style.transform = `translate(${x - g.start.x}px, ${y - g.start.y}px)`
+      const { node, pageId } = latest.current.droppedOn(document.elementFromPoint(x, y))
+      const move = latest.current.canvasMove
+      const container = node ? move?.targets(g.source, node, pageId)[0] : undefined
+      const scope = scopeFor(pageId)
+      const box = container ? boxOf(scope, container.renderIds) : null
+      if (!container || !box || !move) {
+        g.slot = null; show(targetRef.current, null); show(lineRef.current, null)
+        ghostRef.current?.setAttribute('data-blocked', '')
+        setBlocked(move ? move.blocked(g.source, node, pageId) : null)
+        return
+      }
+      ghostRef.current?.removeAttribute('data-blocked')
+      setBlocked(null)
+      // A child that is not drawn - scrolled away, or hidden - cannot be measured; the
+      // slot is found among the ones that are, and counted among all of them.
+      const others = container.children.filter(child => child.id !== g.source!.id)
+      const visible = others.flatMap((child, index) => { const childBox = boxOf(scope, child.renderIds); return childBox ? [{ index, box: childBox }] : [] })
+      const slot = dropSlot(container.axis, box, visible.map(child => child.box), { x, y })
+      const index = slot.index < visible.length ? visible[slot.index]!.index : visible.length ? visible[visible.length - 1]!.index + 1 : others.length
+      g.slot = { container, index }
+      show(targetRef.current, box)
+      show(lineRef.current, slot.line)
     }
 
-    const up = (event: PointerEvent) => {
-      const drag = viewDrag.current
-      viewDrag.current = null
-      setDragTarget(null)
-      if (!drag || !moved(event, drag)) return
-      const drop = dropAt(event, drag.node)
-      if (drop) onReorderNodes?.(drag.node, drop.node, drop.position)
+    const end = (drop: boolean) => {
+      const g = gesture.current
+      gesture.current = null
+      if (!g?.source) return
+      cancelAnimationFrame(g.frame)
+      show(targetRef.current, null); show(lineRef.current, null)
+      setMoving(null); setBlocked(null)
+      suppressClick.current = true
+      const ghost = ghostRef.current
+      const finish = () => {
+        for (const element of g.elements) element.removeAttribute('data-drag-source')
+        if (!ghost) return
+        ghost.replaceChildren(); ghost.removeAttribute('data-blocked'); ghost.style.transition = ''; show(ghost, null)
+      }
+      const moves = drop && !!g.slot && g.slot.container.children.findIndex(child => child.id === g.source!.id) !== g.slot.index
+      // Nothing to land on, or called off: the copy goes back to where the view still is.
+      if (!moves && ghost && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        ghost.style.transition = 'transform 160ms cubic-bezier(.2,.8,.2,1)'
+        ghost.style.transform = 'translate(0px, 0px)'
+        settling = { timer: window.setTimeout(() => { settling = null; finish() }, 170), finish }
+      } else finish()
+      if (!moves || !g.slot) return
+      const { container, index } = g.slot
+      latest.current.canvasMove?.drop(g.source, container, index)
     }
 
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', up)
+    const onMove = (event: PointerEvent) => {
+      const g = gesture.current
+      if (!g || event.pointerId !== g.pointerId) return
+      g.last = { x: event.clientX, y: event.clientY }
+      if (!g.source) {
+        if (Math.abs(g.last.x - g.start.x) + Math.abs(g.last.y - g.start.y) < 4) return
+        if (!begin(g)) { gesture.current = null; return }
+      }
+      if (!g.frame) g.frame = requestAnimationFrame(update)
+    }
+    const onUp = (event: PointerEvent) => {
+      const g = gesture.current
+      if (!g || event.pointerId !== g.pointerId) return
+      if (g.source) { g.last = { x: event.clientX, y: event.clientY }; cancelAnimationFrame(g.frame); update() }
+      end(true)
+    }
+    const onCancel = (event: PointerEvent) => { if (gesture.current?.pointerId === event.pointerId) end(false) }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && gesture.current?.source) { event.preventDefault(); event.stopPropagation(); end(false) } }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('keydown', onKey, true)
     return () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', up)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('keydown', onKey, true)
+      end(false)
+      settle()
     }
-  }, [onReorderNodes])
+  }, [])
 
   /**
    * Dragging the canvas moves it, from anywhere that is not a phone.
@@ -778,6 +915,11 @@ export function DevicePane({
 
   return (<>
     {inlineEditor}
+    {mounted && createPortal(<div aria-hidden="true">
+      <div ref={ghostRef} className={styles.moveGhost} data-testid="move-ghost" />
+      <div ref={targetRef} className={styles.moveTarget} data-testid="move-target" />
+      <div ref={lineRef} className={styles.moveLine} data-testid="move-line" />
+    </div>, document.body)}
     <section className={styles.preview} aria-label="Preview" data-expanded={expanded}>
       <div className={styles.stage}>
       {expanded ? <div className={styles.canvasHeading}>
@@ -786,8 +928,8 @@ export function DevicePane({
           <span>{
             navigationPicker
               ? 'Pick a highlighted screen · Escape to cancel'
-              : dragTarget
-              ? `Drop ${dragTarget.position} ${dragTarget.name}`
+              : moving
+              ? blocked ? `Can't drop ${moving} here · ${blocked}` : `Moving ${moving} · release to drop, Esc to cancel`
               : gallery
               ? drawnScreens < (pageCount ?? pages!.length)
                 ? `${drawnScreens} of ${pageCount ?? pages!.length} screens · scroll to explore`
@@ -819,12 +961,36 @@ export function DevicePane({
         data-testid="device-pane"
         data-fixed={!expanded}
         data-tool={inspecting ? tool : undefined}
-        data-dragging={dragTarget ? true : undefined}
+        data-dragging={moving ? true : undefined}
+        data-blocked={moving && blocked ? true : undefined}
+        onClickCapture={(event) => { if (suppressClick.current) { suppressClick.current = false; event.stopPropagation(); event.preventDefault() } }}
         onPointerDown={(event) => { skipNavigationPickClick.current = event.button === 1 || spaceRef.current; onPanStart(event); onViewPointerDown(event) }}
         onPointerUp={onBackgroundUp}
         // The pointer can leave the device without crossing any node's boundary -
         // straight off the bezel - so the pane itself has to clear the highlight.
         onPointerLeave={() => setHovered(null)}
+        // A drag is not a pointer move, so the view it would land on is found from the
+        // element under it, and highlighted the way hovering highlights it.
+        onDragOver={(event) => {
+          if (!onDropImage || stale || !(draggingFiles(event.dataTransfer) || event.dataTransfer.types.includes(ASSET_DRAG_TYPE))) return
+          event.preventDefault()
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = 'copy'
+          const { node, pageId } = droppedOn(event.target)
+          if (node?.id !== hoverRef.current?.id) setHovered(node, pageId)
+        }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHovered(null) }}
+        onDrop={(event) => {
+          if (!onDropImage || stale) return
+          const asset = event.dataTransfer.getData(ASSET_DRAG_TYPE)
+          const files = Array.from(event.dataTransfer.files)
+          if (!asset && !files.length) return
+          event.preventDefault()
+          event.stopPropagation()
+          const { node, pageId } = droppedOn(event.target)
+          setHovered(null)
+          onDropImage(asset ? { asset } : { files }, node, pageId)
+        }}
       >
         {/* The world. Everything in it is laid out at its natural size and this one
             transform decides where and how big it appears, which is what lets the

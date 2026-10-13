@@ -21,6 +21,18 @@ describe('designer authoring hierarchy', () => {
     expect(model(source('if loading { Text("Loading") }', '@State var loading = false')).nodes.filter(node => node.kind === 'branch')).toHaveLength(1)
   })
 
+  it('nests an else-if chain without a branch becoming its own parent', () => {
+    const snapshot = model(source('if count == 0 { Text("None") } else if count == 1 { Text("One") } else { Text("Many") }', '@State var count = 1'))
+    const byId = new Map(snapshot.nodes.map(node => [node.id, node]))
+    expect(new Set(snapshot.nodes.map(node => node.id)).size).toBe(snapshot.nodes.length)
+    const [outer, inner] = snapshot.nodes.filter(node => node.name === 'Condition')
+    const [first, last] = snapshot.nodes.filter(node => node.name === 'Otherwise')
+    expect(first!.parentId).toBe(outer!.id)
+    expect(inner!.parentId).toBe(first!.id)
+    expect(last!.parentId).toBe(inner!.id)
+    expect(byId.get(last!.children[0]!)?.controls?.find(control => control.id === 'content')?.value).toBe('Many')
+  })
+
   it('keeps switch cases separate, including the default content', () => {
     const snapshot = model(source('switch count { case 1: Text("One")\ndefault: Text("Other") }', '@State var count = 1'))
     const match = snapshot.nodes.find(node => node.name === 'Switch')!

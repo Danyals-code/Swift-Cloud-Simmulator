@@ -22,6 +22,7 @@ import {
   type SwiftValue,
 } from '@studio/swift-runtime'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
+import { formatNumber } from './number-format'
 import { colorForName, fontForToken } from './style'
 import { DISMISS_TYPE, EnvironmentStack, OPEN_URL_TYPE } from './view-environment'
 import {
@@ -975,6 +976,13 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   callMember(target: SwiftValue, member: string, call: HostCall): SwiftValue | undefined {
+    // `price.formatted(.currency(code: "USD"))`, `share.formatted(.percent)` and the
+    // plain `count.formatted()`: the styles `Text(_:format:)` draws, as a String.
+    if ((target.kind === 'int' || target.kind === 'double') && member === 'formatted') {
+      const style = call.args[0]?.value
+      const text = formatNumber(target.value, style ? tokenNameOf(style) ?? '' : 'number')
+      if (text !== null) return { kind: 'string', value: text }
+    }
     if (target.kind === 'type' && (target.name === 'Gradient' && member === 'Stop' || target.name === 'Gradient.Stop' && member === 'init')) return this.gradientStop(call)
     // `.modifier(Shadowed())` - a custom `ViewModifier`. Its `body(content:)` takes
     // the view it is applied to and returns a new one, so the content is handed over
@@ -1340,6 +1348,12 @@ export class SwiftUIHost implements InterpreterHost {
   }
 
   private eagerContent(member: string, call: HostCall): ViewArg[] {
+    if (member === 'mask') {
+      // `.mask { LinearGradient(...) }`: what the closure draws is the mask, and a
+      // gradient or colour there is a view too - `toViews` wraps it as the one it is.
+      const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'mask')?.value)
+      return content ? this.toViews(call.invokeBuilder(content)).map((value) => ({ label: 'content', value: view(value) })) : []
+    }
     if (!['safeAreaInset', 'background', 'overlay'].includes(member)) return []
     const content = call.trailingClosure ?? asClosure(call.args.find((arg) => arg.label === 'content')?.value)
     if (!content) return []

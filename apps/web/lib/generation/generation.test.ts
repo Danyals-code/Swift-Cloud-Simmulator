@@ -8,7 +8,9 @@ const key = 'sk-test-not-a-real-key-123456789'
 function request(body: unknown = options, headers: Record<string, string> = {}) {
   return new Request('http://localhost/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}`, Origin: 'http://localhost', ...headers }, body: JSON.stringify(body) })
 }
-const openaiResponse = (value: unknown = app) => Response.json({ status: 'completed', output: [{ type: 'reasoning', summary: [] }, { type: 'message', content: [{ type: 'output_text', text: JSON.stringify(value) }] }] })
+const sse = (...events: object[]) => new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+const openaiResponse = (value: unknown = app) => sse({ type: 'response.output_item.added', item: { type: 'reasoning' } }, { type: 'response.output_text.delta', delta: JSON.stringify(value) }, { type: 'response.completed', response: { status: 'completed' } })
+const anthropicResponse = (value: unknown = app) => sse({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }, { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: JSON.stringify(value) } }, { type: 'message_delta', delta: { stop_reason: 'end_turn' } })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('generated project boundaries', () => {
@@ -43,18 +45,21 @@ describe('generation endpoint', () => {
     expect(url).toBe('https://api.openai.com/v1/responses')
     const body = JSON.parse(init.body)
     expect(body.store).toBe(false)
+    expect(body.stream).toBe(true)
     expect(body.text.format.type).toBe('json_schema')
     expect(body.text.format.strict).toBe(true)
     expect(init.body).not.toContain(key)
     expect(body.input).toContain(options.prompt)
   })
   it('uses Anthropic messages and its current JSON-output format', async () => {
-    const fetch = vi.fn().mockResolvedValue(Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(app) }] })); vi.stubGlobal('fetch', fetch)
-    expect((await POST(request({ ...options, provider: 'anthropic', model: 'claude-sonnet-5' }))).status).toBe(200)
+    const fetch = vi.fn().mockResolvedValue(anthropicResponse()); vi.stubGlobal('fetch', fetch)
+    const response = await POST(request({ ...options, provider: 'anthropic', model: 'claude-sonnet-5' }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ app })
     const [url, init] = fetch.mock.calls[0]!
     expect(url).toBe('https://api.anthropic.com/v1/messages')
     expect(init.headers['x-api-key']).toBe(key)
-    expect(JSON.parse(init.body).output_config.format.type).toBe('json_schema')
+    expect(JSON.parse(init.body)).toMatchObject({ max_tokens: 24000, stream: true, output_config: { effort: 'medium', format: { type: 'json_schema' } } })
     expect(init.body).not.toContain(key)
   })
   it('rejects foreign origins without contacting a provider', async () => {
@@ -77,14 +82,27 @@ describe('generation endpoint', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
   it.each([
-    { status: 'incomplete', output: [] },
-    { status: 'completed', output: [{ content: [{ type: 'refusal', refusal: 'No' }] }] },
-    { status: 'completed', output: [{ content: [{ type: 'output_text', text: 'not JSON' }] }] },
-  ])('does not return a broken or refused draft', async body => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(body)))
+    [{ type: 'response.incomplete', response: { incomplete_details: null } }],
+    [{ type: 'response.refusal.delta', delta: 'No' }, { type: 'response.completed', response: {} }],
+    [{ type: 'response.output_text.delta', delta: 'not JSON' }, { type: 'response.completed', response: {} }],
+    [{ type: 'response.output_text.delta', delta: JSON.stringify(app) }],
+    [{ type: 'response.output_text.delta', delta: JSON.stringify(app) }, { type: 'error', message: 'overloaded' }],
+  ])('does not return a broken, cut-off or refused draft', async (...events) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sse(...events)))
     const response = await POST(request())
     expect(response.status).toBe(422)
     expect(await response.json()).not.toHaveProperty('app')
+  })
+  it.each([
+    ['anthropic', { type: 'message_delta', delta: { stop_reason: 'max_tokens' } }, 'length limit'],
+    ['openai', { type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' } } }, 'length limit'],
+    ['anthropic', { type: 'message_delta', delta: { stop_reason: 'refusal' } }, 'declined'],
+    ['openai', { type: 'response.incomplete', response: { incomplete_details: { reason: 'content_filter' } } }, 'declined'],
+  ] as const)('tells a %s draft that ran out of room from a declined one', async (provider, event, error) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sse(event)))
+    const response = await POST(request({ ...options, provider, model: provider === 'anthropic' ? 'claude-sonnet-5' : options.model }))
+    expect(response.status).toBe(422)
+    expect((await response.json()).error).toContain(error)
   })
   it('keeps the request abort signal connected to the provider', async () => {
     const controller = new AbortController()

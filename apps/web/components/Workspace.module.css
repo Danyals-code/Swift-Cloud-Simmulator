@@ -108,6 +108,22 @@
 /* What a click will take, in the colour of taking it. The highlight is the
    inspector's own element, so the delete tool only has to recolour it. */
 .canvas[data-tool='delete'] :global([data-testid='inspect-highlight']) { outline-color: var(--color-xc-error) !important; background: rgb(255 59 48 / 0.16) !important; }
+/* Editing views, not reading them: a press on text must not start a text selection,
+   and a press on an image must not start the browser's own image drag. */
+.canvas[data-tool] { user-select: none; -webkit-user-select: none; }
+.canvas[data-tool] :global(img) { -webkit-user-drag: none; }
+.canvas[data-dragging], .canvas[data-dragging] * { cursor: grabbing !important; }
+.canvas[data-blocked], .canvas[data-blocked] * { cursor: no-drop !important; }
+.moveGhost[data-blocked] { opacity: 0.35; filter: grayscale(1); }
+.canvas :global([data-drag-source]) { opacity: 0.3 !important; transition: opacity 120ms ease-out; }
+/* A move in progress: the copy under the pointer, the container that would take it,
+   and the bar where it would land. Fixed to the window, drawn above everything. */
+/* The copy's own elements are inspectable views with pointer events of their own;
+   under the pointer, they would be what every lookup found. */
+.moveGhost, .moveGhost * { pointer-events: none !important; }
+.moveGhost { display: none; position: fixed; z-index: 2147483000; pointer-events: none; opacity: 0.6; overflow: visible; filter: drop-shadow(0 6px 16px rgb(0 0 0 / 0.22)); will-change: transform; }
+.moveTarget { display: none; position: fixed; z-index: 2147482999; pointer-events: none; box-shadow: 0 0 0 1.5px var(--workspace-accent, #0d78f2); border-radius: 2px; background: rgb(13 120 242 / 0.06); }
+.moveLine { display: none; position: fixed; z-index: 2147483001; pointer-events: none; border-radius: 2px; background: var(--workspace-accent, #0d78f2); box-shadow: 0 0 0 1px #fff; }
 .showAll { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--color-xc-text-2); }
 .showAll input { width: 13px; height: 13px; accent-color: var(--workspace-accent, #0d78f2); cursor: pointer; }
 .showAll[data-disabled] { color: var(--color-xc-text-3); cursor: default; }

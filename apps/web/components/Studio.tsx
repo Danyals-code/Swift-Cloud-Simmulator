@@ -3,7 +3,8 @@
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuthoringNode, DesignEditRequest, ExportFormat, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
-import { validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
+import { validatePreviewScenario, reconcileAuthoringSelection, LAYER_MOVE_CONTAINERS, layerMoveProblem, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
+import { AXES, type CanvasMove, type MoveContainer } from '../lib/canvasMove'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { getDevice } from '@studio/sim-shell'
@@ -11,7 +12,7 @@ import type { FileId, PagePreview, PreviewScenario, RenderNode, SourceSpan, UIEv
 import { useStudio, type PreviewSettings } from '../lib/store'
 import type { HiddenViewInfo, ViewEdit, ViewSiteInfo } from '@studio/shared'
 import { AddView } from './AddView'
-import { imageViewSnippet } from '../lib/images'
+import { draggingFiles, imageViewSnippet, importImageFiles } from '../lib/images'
 import { imageDataURL, validateAssets, type ImageAsset } from '@studio/project-model'
 import type { CanvasTool } from './Toolbar'
 import { useLayout, PANE_LIMITS, type PaneKey } from '../lib/layout'
@@ -32,7 +33,8 @@ import { InspectorReadout } from './InspectorReadout'
 import { DevicePane } from './DevicePane'
 import { AuthoringInspector } from './AuthoringInspector'
 import type { FeatureProps } from './AuthoringFeatures'
-import { DesignNavigator, type DesignLevel } from './DesignNavigator'
+import { DesignNavigator, type DesignLevel, type HierarchyView } from './DesignNavigator'
+import { AssetsFolder, ProjectFiles, type AssetsFolderProps } from './ProjectFiles'
 import { StudioSidebar } from './StudioSidebar'
 import { LogicalLayers } from './LogicalLayers'
 import { AppSettings } from './settings/AppSettings'
@@ -57,6 +59,7 @@ import { Splitter } from './ui/Splitter'
 import { Icon } from './ui/Icon'
 
 const NO_FILES: never[] = []
+const NO_DIAGNOSTICS: never[] = []
 const EMPTY_TREE: DesignTree = { navigation: 'none', lanes: [], sheets: [], detached: [], components: [] }
 
 /** The narrowest the editor is allowed to get before the side panes start yielding. */
@@ -103,10 +106,11 @@ export function Studio() {
   const [designPageSelection, setDesignPageSelection] = useState<{ projectId: string; id: string } | null>(null)
   const hoverProjectId = project?.id
   const hoverAuthoring = useCallback((node: AuthoringNode | null, runtimeId?: string) => setHoveredAuthoring(node ? { node, runtimeId, projectId: hoverProjectId } : null), [hoverProjectId])
-  const hoverPreview = useCallback((node: RenderNode | null, pageId?: string) => {
-    setHoveredNode(node)
-    if (node && pageId && hoverProjectId) setDesignPageSelection(previous => previous?.projectId === hoverProjectId && previous.id === pageId ? previous : { projectId: hoverProjectId, id: pageId })
-  }, [hoverProjectId])
+  // Hover points; it never chooses. Focusing the screen under the pointer opened and
+  // closed its layers in the tree as the pointer crossed the canvas - the focus moves
+  // on a click, as it does in any design tool.
+  const [hoveredPage, setHoveredPage] = useState<string | undefined>()
+  const hoverPreview = useCallback((node: RenderNode | null, pageId?: string) => { setHoveredNode(node); setHoveredPage(node ? pageId : undefined) }, [])
   const setNavigatorTab = useLayout(s => s.setNavigatorTab)
   const navigatorLayout = useLayout(s => s.navigatorLayout)
   const setNavigatorLayout = useLayout(s => s.setNavigatorLayout)
@@ -161,6 +165,8 @@ export function Studio() {
   const [pendingSelect, setPendingSelect] = useState<{ projectId: string; file: FileId; offset: number; text: string } | null>(null)
   /** Raised when an edit could not be made, so the canvas can say why. */
   const [editNote, setEditNote] = useState<string | null>(null)
+  /** Hierarchy's two views: the app's layers, or its files - Assets and Swift. */
+  const [hierarchyView, setHierarchyView] = useState<HierarchyView>('layers')
   const [exporting, setExporting] = useState(false)
   const exportInProgress = useRef(false)
   /** Serializes source planning; typing can still invalidate an in-flight plan. */
@@ -842,6 +848,23 @@ export function Studio() {
     } catch (e) { return e instanceof Error ? e.message : 'Could not update images.' } finally { editingRef.current = false }
   }, [project, stale, snapshot, planDesignEdit])
 
+  /** Picked or dropped images that are not being placed: into the Assets folder, and nowhere else. */
+  const importImages = useCallback(async (files: readonly File[]): Promise<string | null> => {
+    if (!project) return 'Open a project first.'
+    const { added, problems } = await importImageFiles(files, project.assets ?? [])
+    if (!added.length) return problems.join(' ') || 'There were no images to add.'
+    const problem = await updateAssets([...(project.assets ?? []), ...added])
+    return problem ?? (problems.length ? `Added ${added.map(asset => asset.name).join(', ')}. ${problems.join(' ')}` : null)
+  }, [project, updateAssets])
+
+  /** Images dropped outside the canvas and the Assets folder still belong in Assets. */
+  const dropToAssets = useCallback(async (files: readonly File[]) => {
+    if (!files.length) return
+    const problem = await importImages(files)
+    setEditNote(problem ?? `Added ${files.length === 1 ? files[0]!.name : `${files.length} images`} to Assets.`)
+    if (!problem) { setHierarchyView('files'); setPane('navigator', true) }
+  }, [importImages, setPane])
+
   const deleteScenario = useCallback((key: string) => {
     const state = useStudio.getState()
     if (!project || state.project !== project || !project.studio) return
@@ -874,6 +897,46 @@ export function Studio() {
    * a screen nobody has clicked into yet.
    */
   const addTargetLayer = useMemo(() => insertionLayer(pageHierarchy ?? layers, selectedLayer), [selectedLayer, pageHierarchy, layers])
+
+  /**
+   * Puts an Image of an Assets image into `target`. `added` are images arriving with
+   * it, committed in the same undo step so the Image never names a missing asset.
+   */
+  const placeImage = useCallback(async (name: string, target: ViewLayer | undefined, added: readonly ImageAsset[] = []): Promise<string | null> => {
+    const model = result?.authoring
+    const node = model?.nodes.find(item => item.id === model.runtimeToSource[target?.id ?? ''])
+    if (!node) return 'Select a view or stack on the canvas first.'
+    if (!added.length && !project?.assets?.some(item => item.name === name)) return 'This image is no longer in the project.'
+    return performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'insert', snippet: imageViewSnippet(name) }, undefined, undefined, added.length ? [...(project?.assets ?? []), ...added] : undefined)
+  }, [result?.authoring, project, performDesignEdit])
+
+  /**
+   * A drop on the canvas. It goes where the view under it would take a new view - the
+   * same place Add would put one with that view selected. Files are added to Assets
+   * first; on empty canvas that is all that happens.
+   */
+  const dropImage = useCallback(async (image: { files: readonly File[] } | { asset: string }, rendered: RenderNode | null, pageId?: string) => {
+    if (!project) return
+    const dropped = rendered ? layerForRenderNode(layers, rendered) : undefined
+    const target = dropped ? insertionLayer(layers, dropped) : undefined
+    if (target && pageId) setDesignPageSelection({ projectId: project.id, id: pageId })
+    if ('asset' in image) { setEditNote(target ? await placeImage(image.asset, target) : `Drop ${image.asset} onto a view to place it.`); return }
+    const { added, problems } = await importImageFiles(image.files, project.assets ?? [])
+    const first = added[0]
+    const problem = !first ? null : target ? await placeImage(first.name, target, added) : await updateAssets([...(project.assets ?? []), ...added])
+    const rest = added.slice(1).map(asset => asset.name).join(', ')
+    const outcome = problem ?? (!first ? null : !target ? `Added ${added.map(asset => asset.name).join(', ')} to Assets. Drag one onto a view to place it.` : rest ? `Placed ${first.name}. ${rest} ${added.length > 2 ? 'are' : 'is'} in Assets.` : null)
+    setEditNote([outcome, ...problems].filter(Boolean).join(' ') || null)
+  }, [project, layers, placeImage, updateAssets])
+
+  const assetsFolder: AssetsFolderProps = {
+    images: project?.assets ?? [],
+    colors: project?.colors ?? [],
+    busy: stale || preparingEdit,
+    onImport: importImages,
+    onInsert: name => placeImage(name, addTargetLayer),
+    onManage: () => { setMode('design'); selectApp() },
+  }
 
   const canAdd = !!addTargetLayer?.source && !stale
 
@@ -1026,28 +1089,92 @@ export function Studio() {
    * needs, and it is the parser that decides whether the result is a file that
    * still compiles.
    */
-  const reorderLayers = useCallback((layer: ViewLayer, target: ViewLayer, position: 'before' | 'after') => {
-    const from = layer.source
-    const to = target.source
-    if (!from || !to || from.file !== to.file) {
-      setEditNote('A view can only be moved within the file it is written in')
-      return
-    }
-    void applyEdit({ kind: 'moveTo', targetOffset: to.start, position }, layer)
-  }, [applyEdit])
 
-  /** A drop on the canvas, named in the terms the file understands. */
-  const reorderNodes = useCallback((source: RenderNode | 'selection', target: RenderNode, position: 'before' | 'after') => {
-    const from = source === 'selection' ? selectedLayer : layerForRenderNode(layers, source)
-    const to = layerForRenderNode(layers, target)
-    if (!from || !to || from.id === to.id) return
-    reorderLayers(from, to, position)
-  }, [layers, reorderLayers, selectedLayer])
+  /**
+   * The canvas's drag, in the terms the file understands.
+   *
+   * A press picks up the view its layer draws. The containers that can take it are
+   * found by walking up from the layer under the pointer, with the same rules Layers
+   * uses, and the drop is the same edit: a move before or after a sibling, or into an
+   * empty container. Only a container's own children are slots - a view under an `if`
+   * belongs to the condition, and dropping beside it must not move into the branch.
+   */
+  const canvasMove = useMemo<CanvasMove | undefined>(() => {
+    const model = result?.authoring
+    if (!model || mode !== 'design') return undefined
+    const nodes = new Map(model.nodes.map(node => [node.id, node]))
+    const parents = new Map<string, ViewLayer>()
+    const index = (items: readonly ViewLayer[]) => { for (const item of items) { for (const child of item.children) parents.set(child.id, item); index(item.children) } }
+    index(layers)
+    const treeFor = (pageId?: string) => (pageId ? designPages?.find(page => page.id === pageId)?.tree : undefined) ?? designPage?.tree ?? result?.renderTree
+    /** The view a layer draws, as the file has it; a repeated row is its ForEach. */
+    const authoringFor = (layer: ViewLayer | undefined) => {
+      const node = layer ? nodes.get(model.runtimeToSource[layer.id] ?? '') : undefined
+      return node?.kind === 'template' ? nodes.get(node.parentId ?? '') : node
+    }
+    const isView = (node: AuthoringNode | undefined): node is AuthoringNode => !!node && ['view', 'component', 'collection'].includes(node.kind) && node.name !== 'WindowGroup'
+    const renderIds = (layer: ViewLayer, pageId?: string) => [...layerRenderIds(layer, treeFor(pageId), layers)]
+    return {
+      pick(rendered, pageId) {
+        const layer = rendered === 'selection' ? selectedLayer : layerForRenderNode(layers, rendered)
+        const node = authoringFor(layer)
+        // A screen keeps its root layout; everything inside it can move.
+        if (!layer || !isView(node) || nodes.get(node.parentId ?? '')?.kind === 'definition') return null
+        // A row's own layout is drawn once per item of its data; there is no one row to move.
+        if (nodes.get(node.parentId ?? '')?.kind === 'template') { setEditNote('Rows come from the list\'s data. Drag a view inside a row, or select the list to move all of it.'); return null }
+        return { id: node.id, label: sourceLayerLabel(node), renderIds: renderIds(layer, pageId) }
+      },
+      targets(source, over, pageId) {
+        const from = nodes.get(source.id)
+        if (!from) return []
+        const out: MoveContainer[] = []
+        for (let layer: ViewLayer | undefined = layerForRenderNode(layers, over); layer; layer = parents.get(layer.id)) {
+          const node = authoringFor(layer)
+          if (!node) continue
+          // Everything found so far is inside the dragged view, which cannot take itself.
+          if (node.id === from.id) { out.length = 0; continue }
+          if (node.id !== from.parentId && (!LAYER_MOVE_CONTAINERS.has(node.name) || layerMoveProblem(model.nodes, [from.id], node))) continue
+          // A ForEach draws one layer per row; together they are one slot, the ForEach.
+          const children: { id: string; renderIds: string[] }[] = []
+          for (const child of layer.children) {
+            const childNode = authoringFor(child)
+            if (!isView(childNode) || childNode.parentId !== node.id) continue
+            const ids = renderIds(child, pageId), last = children[children.length - 1]
+            if (last?.id === childNode.id) last.renderIds.push(...ids)
+            else children.push({ id: childNode.id, renderIds: ids })
+          }
+          out.push({ id: node.id, label: sourceLayerLabel(node), axis: AXES[node.name] ?? 'vertical', renderIds: renderIds(layer, pageId), children })
+        }
+        return out
+      },
+      blocked(source, over) {
+        const from = nodes.get(source.id)
+        if (!from || !over) return 'Drop it inside a stack, list or form on this screen.'
+        // The innermost container under the pointer is the one the drop was meant for.
+        for (let layer: ViewLayer | undefined = layerForRenderNode(layers, over); layer; layer = parents.get(layer.id)) {
+          const node = authoringFor(layer)
+          if (node && LAYER_MOVE_CONTAINERS.has(node.name) && node.id !== from.id) return layerMoveProblem(model.nodes, [from.id], node) ?? 'It cannot go here.'
+        }
+        return 'Drop it inside a stack, list or form on this screen.'
+      },
+      drop(source, container, at) {
+        const from = nodes.get(source.id), into = nodes.get(container.id)
+        if (!from || !into) return
+        const slots = container.children.filter(child => child.id !== source.id).flatMap(child => nodes.get(child.id) ?? [])
+        const anchor = slots[at] ?? slots[slots.length - 1]
+        const operation: DesignEditRequest['operation'] = anchor
+          ? { kind: 'moveTo', targetOffset: anchor.source.start, position: slots[at] ? 'before' : 'after' }
+          : { kind: 'layer-reparent', ids: [from.id], destination: into.id }
+        void performDesignEdit(from.source, from.fingerprint, from.owner, operation).then(problem => { if (problem) setEditNote(problem) })
+      },
+    }
+  }, [result?.authoring, result?.renderTree, mode, layers, designPages, designPage?.tree, selectedLayer, performDesignEdit])
 
   /** The layer under the inspector's pointer, while Layers is there to show it. */
+  // Layers shows the focused screen; a view on another phone has no row there to light.
   const hoveredLayerId = useMemo(
-    () => (inspecting && mode === 'design' && !stale && hoveredNode && (result?.renderTree?.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file) || designPages?.some(page => page.tree.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file))) ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
-    [inspecting, mode, stale, result?.renderTree, designPages, layers, hoveredNode],
+    () => (inspecting && mode === 'design' && !stale && hoveredNode && (!hoveredPage || !focusedPage || hoveredPage === focusedPage.id) && (result?.renderTree?.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file) || designPages?.some(page => page.tree.nodes.some(node => node.id === hoveredNode.id && node.origin?.start === hoveredNode.origin?.start && node.origin?.end === hoveredNode.origin?.end && node.origin?.file === hoveredNode.origin?.file))) ? layerForRenderNode(layers, hoveredNode)?.id ?? null : null),
+    [inspecting, mode, stale, result?.renderTree, designPages, layers, hoveredNode, hoveredPage, focusedPage],
   )
 
   const selectedSources = useMemo(() => hoveredSourceIds(result?.authoring, layers, selectedLayerId), [result?.authoring, layers, selectedLayerId])
@@ -1261,7 +1388,17 @@ export function Studio() {
   const previewStatus = <PreviewStatus inspecting={inspecting} tool={tool} mode={mode} busy={stale || preparingEdit} errors={errors} warnings={warnings} workerError={workerError} />
 
   return (
-    <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text">
+    <main data-testid="workspace" data-mode={mode} className="flex h-dvh flex-col overflow-hidden bg-xc-editor text-xc-text"
+      // An image dropped anywhere goes into Assets, rather than the browser opening it
+      // in place of the studio. The canvas and the Assets folder take their own drops.
+      onDragOver={event => { if (draggingFiles(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }}
+      onDrop={event => { if (draggingFiles(event.dataTransfer)) { event.preventDefault(); void dropToAssets(Array.from(event.dataTransfer.files)) } }}
+      // Caught on the way down: the code editor would paste the image's bytes into the Swift as text.
+      onDropCapture={event => {
+        if (!draggingFiles(event.dataTransfer) || !(event.target instanceof Element) || !event.target.closest('.cm-editor')) return
+        event.preventDefault(); event.stopPropagation()
+        void dropToAssets(Array.from(event.dataTransfer.files))
+      }}>
       <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen}>
       <Toolbar
         mode={mode}
@@ -1297,7 +1434,7 @@ export function Studio() {
         {layout.showNavigator ? (
           <>
             <div style={{ width: layout.nav }} className="shrink-0 overflow-hidden">
-              <StudioSidebar key={project.id} design={mode === 'design'} stale={stale || preparingEdit} onCollapse={() => togglePane('navigator')} onApplied={() => { setCommittedEditRevision(value => value + 1); setEditNote('Prompt edits applied. Use Undo to reverse them.') }} selection={authoringNode && !stale ? { label: sourceLayerLabel(authoringNode), file: authoringNode.source.file, start: authoringNode.source.start, end: authoringNode.source.end, owner: authoringNode.owner } : null}>
+              <StudioSidebar key={project.id} stale={stale || preparingEdit} previewProblems={result?.diagnostics ?? NO_DIAGNOSTICS} onCollapse={() => togglePane('navigator')} onApplied={() => { setCommittedEditRevision(value => value + 1); setEditNote('Prompt edits applied. Use Undo to reverse them.') }} selection={authoringNode && !stale ? { label: sourceLayerLabel(authoringNode), file: authoringNode.source.file, start: authoringNode.source.start, end: authoringNode.source.end, owner: authoringNode.owner } : null}>
               {mode === 'design' ? <DesignNavigator
                 tabbed
                 key={project.id}
@@ -1315,6 +1452,9 @@ export function Studio() {
                 onSelectComponent={component => { if (component.definition) selectAuthoring(component.definition); else setEditNote(`${component.name} is built in Swift the studio does not read. Open it in Code.`) }}
                 onInsertComponent={component => authoringNode ? performDesignEdit(authoringNode.source, authoringNode.fingerprint, authoringNode.owner, { kind: 'component-insert', component: component.name }) : Promise.resolve('Select a layer where the copy should go.')}
                 onScreenCommand={updateScreens}
+                view={hierarchyView}
+                onViewChange={setHierarchyView}
+                renderFiles={() => <ProjectFiles assets={assetsFolder} tree={fileTree} activeFileId={activeFileId} onOpenFile={openSource} />}
                 renderLayers={options => result?.authoring ? <LogicalLayers key={`${focusedPage?.id}:${pageFocusEpoch}`} {...options}
                   labels={project.studio?.labels} onRename={renameLayer} pageId={focusedPage?.id} pageName={focusedPage?.name} pageSource={focusedPage?.source} runtimeLayers={pageHierarchy}
                   selectedRuntimeId={selectedLayerId} hoveredRuntimeId={hoveredLayerId} snapshot={result.authoring} files={project.files} selection={layerSelection?.anchor}
@@ -1323,6 +1463,7 @@ export function Studio() {
                   hidden={hidden.views} onShow={showHidden} editable={inspecting} /> : <p className="px-4 py-2 text-[12px] text-xc-text-3">Building the view hierarchy…</p>}
               /> : <Navigator tabbed
                 key={project.id}
+                assets={<AssetsFolder {...assetsFolder} />}
                 layerLabels={project.studio?.labels}
                 onRenameLayer={renameLayer}
                 pageFocusEpoch={pageFocusEpoch}
@@ -1463,6 +1604,7 @@ export function Studio() {
                 onSettingsResize={(size) => setSize('settings', size)}
                 onToggleSettings={() => togglePane('preview')}
                 onHoverNode={pickingNavigation ? undefined : hoverPreview}
+                onDropImage={pickingNavigation ? undefined : (image, node, pageId) => void dropImage(image, node, pageId)}
                 pages={designPages}
                 canvas={canvas}
                 selectedPageId={designPage?.id}
@@ -1485,7 +1627,7 @@ export function Studio() {
                 settingsPanel={settingsPanel}
                 settingsTitle={settingsTitle}
                 onSelectBackground={mode === 'design' ? selectApp : undefined}
-                onReorderNodes={reorderNodes}
+                canvasMove={canvasMove}
                 centerOn={centerOn}
                 status={previewStatus}
                 onDeviceChange={setDevice}
@@ -1519,14 +1661,7 @@ export function Studio() {
         <AddView
           target={addTarget}
           assets={project.assets ?? []}
-          onImage={async (name, asset) => {
-            const model = result?.authoring
-            const target = addTargetLayer ?? selectedLayer
-            const node = model?.nodes.find(item => item.id === model.runtimeToSource[target?.id ?? ''])
-            if (!node) return 'Select a view or stack on the canvas first.'
-            if (!asset && !project.assets?.some(item => item.name === name)) return 'This image is no longer in the project.'
-            return performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'insert', snippet: imageViewSnippet(name) }, undefined, undefined, asset ? [...(project.assets ?? []), asset] : undefined)
-          }}
+          onImage={(name, asset) => placeImage(name, addTargetLayer ?? selectedLayer, asset ? [asset] : [])}
           onClose={() => setAdding(false)}
           onChoose={(snippet) => {
             setAdding(false)

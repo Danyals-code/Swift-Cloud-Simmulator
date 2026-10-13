@@ -1,8 +1,9 @@
 import { EDIT_SCHEMA, parsePromptEditInput, parsePromptEditResult, promptEditChanges } from '../../../lib/generation/edit-schema'
 import { EDIT_SYSTEM_PROMPT, promptEditContext } from '../../../lib/generation/edit-prompt'
+import { readProviderStream, streamDeadline } from '../../../lib/generation/providerStream'
 
 export const runtime = 'nodejs'
-export const maxDuration = 180
+export const maxDuration = 300
 const headers = { 'Cache-Control': 'no-store' }
 const fail = (error: string, status = 400) => Response.json({ error }, { status, headers })
 
@@ -29,13 +30,14 @@ export async function POST(request: Request): Promise<Response> {
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
     input = parsePromptEditInput(JSON.parse(new TextDecoder().decode(bytes)))
   } catch (error) { return fail(error instanceof SyntaxError ? 'The request is not valid JSON.' : error instanceof Error ? error.message : 'Invalid request.') }
-  const timeout = AbortSignal.timeout(165000), signal = AbortSignal.any([request.signal, timeout])
+  // The answer streams, so a long edit runs until the route's limit; a stream silent for two minutes is stuck.
+  const deadline = streamDeadline(request.signal, 290000, 120000)
   try {
     const openai = input.provider === 'openai'
     const response = await fetch(openai ? 'https://api.openai.com/v1/responses' : 'https://api.anthropic.com/v1/messages', {
-      method: 'POST', signal, cache: 'no-store', redirect: 'error',
+      method: 'POST', signal: deadline.signal, cache: 'no-store', redirect: 'error',
       headers: openai ? { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` } : { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify(openai ? { model: input.model, store: false, instructions: EDIT_SYSTEM_PROMPT, input: promptEditContext(input), max_output_tokens: 16000, text: { format: { type: 'json_schema', name: 'swiftui_edit', strict: true, schema: EDIT_SCHEMA } } } : { model: input.model, max_tokens: 16000, system: EDIT_SYSTEM_PROMPT, messages: [{ role: 'user', content: promptEditContext(input) }], output_config: { format: { type: 'json_schema', schema: EDIT_SCHEMA } } }),
+      body: JSON.stringify(openai ? { model: input.model, store: false, stream: true, instructions: EDIT_SYSTEM_PROMPT, input: promptEditContext(input), max_output_tokens: 24000, text: { format: { type: 'json_schema', name: 'swiftui_edit', strict: true, schema: EDIT_SCHEMA } } } : { model: input.model, max_tokens: 24000, stream: true, system: EDIT_SYSTEM_PROMPT, messages: [{ role: 'user', content: promptEditContext(input) }], output_config: { effort: 'medium', format: { type: 'json_schema', schema: EDIT_SCHEMA } } }),
     })
     if (!response.ok) {
       await response.body?.cancel()
@@ -44,19 +46,18 @@ export async function POST(request: Request): Promise<Response> {
       if ([400, 404, 422].includes(response.status)) return fail('This model could not process the request. Check its ID and structured-output support.', 400)
       return fail('The provider is unavailable. Try again later.', 502)
     }
-    const output = await response.json()
-    if (openai ? output.status !== 'completed' : output.stop_reason !== 'end_turn') return fail('The edit was incomplete. Try a smaller change. No changes applied.', 422)
-    const blocks = openai ? (output.output ?? []).flatMap((item: { content?: unknown[] }) => item.content ?? []) : output.content ?? []
-    if (blocks.some((block: { type: string }) => block.type === 'refusal')) return fail('The provider declined this request. No changes applied.', 422)
+    const { text, stop } = await readProviderStream(response.body, deadline.alive)
+    if (stop === 'declined') return fail('The provider declined this request. No changes applied.', 422)
+    if (stop === 'length') return fail('The response hit its length limit before the edit was finished. Try a smaller change. No changes applied.', 422)
+    if (stop !== 'done') return fail('The edit was incomplete. Try again. No changes applied.', 422)
     try {
-      const text = blocks.filter((block: { type: string }) => block.type === (openai ? 'output_text' : 'text')).map((block: { text: string }) => block.text).join('')
       const edit = parsePromptEditResult(JSON.parse(text))
       promptEditChanges(input.files, edit)
       return Response.json({ edit }, { headers })
     } catch (error) { return fail(error instanceof SyntaxError ? 'The AI returned an unreadable edit. No changes applied.' : error instanceof Error ? error.message : 'Invalid edit.', 422) }
   } catch {
     if (request.signal.aborted) return fail('Cancelled. No changes applied.', 499)
-    if (timeout.aborted) return fail('The edit took too long. Try a smaller change.', 504)
+    if (deadline.expired()) return fail('The edit took too long. Try a smaller change.', 504)
     return fail('Could not reach the provider. No changes applied.', 502)
-  }
+  } finally { deadline.stop() }
 }

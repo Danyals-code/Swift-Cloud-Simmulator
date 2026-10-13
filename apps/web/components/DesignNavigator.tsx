@@ -31,7 +31,14 @@ export interface DesignNavigatorProps {
   onScreenCommand: (command: ScreenCommand) => Promise<string | null>
   /** The focused screen's view tree: embedded in the outline, or as its own panel. */
   renderLayers: (options: { embedded: boolean; query: string; indent: number }) => ReactNode
+  /** Which of the Hierarchy panel's two views is showing: the app's layers, or its files. */
+  view?: HierarchyView
+  onViewChange?: (view: HierarchyView) => void
+  /** The project's files - its Assets folder and its Swift - for the Files view. */
+  renderFiles?: () => ReactNode
 }
+
+export type HierarchyView = 'layers' | 'files'
 
 const INDENT = 14
 const BASE = 8
@@ -124,17 +131,27 @@ export function DesignNavigator(props: DesignNavigatorProps) {
     <div><button type="submit" disabled={busy || pending || !editing.name.trim()}>{editing.view ? 'Rename' : 'Add screen'}</button><button type="button" onClick={() => setEditing(null)}>Cancel</button></div>
   </form>
 
+  const view = props.renderFiles ? props.view ?? 'layers' : 'layers'
   const header = <header className={styles.header}>
     {!props.tabbed && <button type="button" className={styles.icon} data-testid="pane-toggle-navigator" aria-pressed="true" title="Collapse left panel (⌘0)" aria-label="Collapse left panel" onClick={onTogglePanel}><Icon name="sidebar-left" size={15} /></button>}
-    <strong>{props.tabbed ? 'View hierarchy' : 'Layers'}</strong>
+    {props.renderFiles ? <span className={styles.views} role="tablist" aria-label="Hierarchy">
+      {(['layers', 'files'] as const).map(option => <button key={option} type="button" role="tab" aria-selected={view === option} data-testid={`hierarchy-${option}`} onClick={() => props.onViewChange?.(option)}>{option === 'layers' ? 'Layers' : 'Files'}</button>)}
+    </span> : <strong>Layers</strong>}
+    {view === 'layers' && <>
     <span className={styles.switch} role="group" aria-label="Panel layout">
       <button type="button" aria-pressed={layout === 'merged'} title="One tree: App, screens and views together" aria-label="One tree" data-testid="navigator-layout-merged" onClick={() => onLayoutChange('merged')}><Icon name="outline" size={13} /></button>
       <button type="button" aria-pressed={layout === 'split'} title="Three panels: App, Screens and Layers" aria-label="Three panels" data-testid="navigator-layout-split" onClick={() => onLayoutChange('split')}><Icon name="panels" size={13} /></button>
     </span>
     <button type="button" className={styles.icon} aria-pressed={focus} title={focus ? 'Show every screen' : 'Focus on this screen'} aria-label="Focus on this screen" data-testid="focus-screen" disabled={!selectedScreenId} onClick={() => setFocus(value => !value)}><Icon name="focus" size={14} /></button>
+    </>}
   </header>
   const appRow = <Row id="app" depth={0} icon="app" label={appName} detail="App" selected={level === 'app'} expandable={layout === 'merged'} expanded={layout === 'merged' && isOpen('app')} onToggle={() => toggle('app')} onClick={onSelectApp} testId="design-app" title="App settings: tokens, navigation and images" />
   const feedback = <>{form}{error && <p className={styles.error} role="alert">{error}</p>}</>
+
+  if (view === 'files') return <nav className={styles.navigator} aria-label="Files" data-testid="design-navigator" data-view="files">
+    {header}
+    {props.renderFiles?.()}
+  </nav>
 
   if (layout === 'split') return <nav className={styles.navigator} aria-label="Layers" data-testid="design-navigator" data-layout="split">
     {header}

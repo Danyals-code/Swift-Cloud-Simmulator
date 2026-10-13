@@ -140,6 +140,21 @@ export interface PagePreview {
   readonly viewHierarchy?: readonly ViewLayer[]
 }
 
+/**
+ * A related screen the gallery found but could not draw, and why.
+ *
+ * Before this the screen was left out without a word: a sheet whose body traps
+ * simply was not in the gallery, and a check of every screen passed a project that
+ * fails the moment the sheet is opened.
+ */
+export interface PageFailure {
+  readonly name: string
+  readonly kind: 'destination' | 'sheet' | 'cover' | 'popover'
+  readonly message: string
+  /** The line that failed when known, else the declaration of the route. */
+  readonly source?: SourceSpan
+}
+
 export interface CompileResult {
   readonly revision: number
   readonly authoring?: AuthoringSnapshot
@@ -158,6 +173,8 @@ export interface CompileResult {
    * their own hierarchy because their views are absent from the live screen.
    */
   readonly pages?: readonly PagePreview[]
+  /** Related screens `allPages` could not draw. Absent when every one drew. */
+  readonly pageFailures?: readonly PageFailure[]
   readonly logs: readonly LogEntry[]
   readonly timings: CompileTimings
   /** Pending shaped runs are resolved in one bounded main-thread batch. */

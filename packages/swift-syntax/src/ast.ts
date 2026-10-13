@@ -700,7 +700,13 @@ export interface StringLiteralExpr extends NodeBase {
 
 export type StringExprSegment =
   | { readonly kind: 'text'; readonly value: string; readonly span: SourceSpan }
-  | { readonly kind: 'interpolation'; readonly expression: Expr; readonly span: SourceSpan }
+  | {
+      readonly kind: 'interpolation'
+      readonly expression: Expr
+      /** The `specifier:` of SwiftUI's `\(value, specifier: "%.2f")`, when written. */
+      readonly specifier?: Expr
+      readonly span: SourceSpan
+    }
 
 export interface ArrayLiteralExpr extends NodeBase {
   readonly kind: 'arrayLiteral'
@@ -984,7 +990,10 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
       return
     case 'stringLiteral':
       node.segments.forEach((s) => {
-        if (s.kind === 'interpolation') visit(s.expression)
+        if (s.kind === 'interpolation') {
+          visit(s.expression)
+          if (s.specifier) visit(s.specifier)
+        }
       })
       return
     case 'arrayLiteral':

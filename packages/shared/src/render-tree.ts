@@ -408,6 +408,8 @@ export interface RenderNode {
   readonly filter?: FilterSpec
   /** `.regularMaterial` and friends: a translucent, blurred backdrop. */
   readonly material?: { readonly opacity: number; readonly blur: number; readonly light: boolean }
+  /** `.mask` with a gradient or a colour: the alpha everything inside this node is drawn through. */
+  readonly mask?: Fill
   /**
    * `.blendMode` - how this node composites with what is already painted.
    *

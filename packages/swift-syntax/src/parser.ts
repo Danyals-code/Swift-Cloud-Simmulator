@@ -2207,8 +2207,18 @@ export class Parser {
       const lexed = Lexer.tokenize(segment.value, this.file, segment.span.start)
       const sub = new Parser(lexed.tokens, this.file)
       const expression = sub.parseExpression(true)
+      // `\(price, specifier: "%.2f")` - SwiftUI's interpolation for a Text. Reading only
+      // the value dropped the rest without a word, so 3.14159 drew in full where the
+      // code asks for 3.14.
+      let specifier: Expr | undefined
+      if (sub.check(',') && sub.peek().text === 'specifier' && sub.peek(2).text === ':') {
+        sub.advance()
+        sub.advance()
+        sub.advance()
+        specifier = sub.parseExpression(true)
+      }
       this.diagnostics.push(...lexed.diagnostics, ...sub.diagnostics)
-      segments.push({ kind: 'interpolation', expression, span: segment.span })
+      segments.push(specifier ? { kind: 'interpolation', expression, specifier, span: segment.span } : { kind: 'interpolation', expression, span: segment.span })
     }
 
     return segments

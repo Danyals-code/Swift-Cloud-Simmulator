@@ -1,4 +1,4 @@
-import type { Point, CornerStyle, ShapeStroke, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import type { Point, CornerStyle, ShapeStroke, SliderPayload, FilterSpec, Fill, Rect, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -438,6 +438,19 @@ export type LayoutModifier =
       readonly spacing: number
     }
   /**
+   * `.ignoresSafeArea(edges:)` - this view, and only this view, grows out to the
+   * device's edges wherever it meets the safe area.
+   *
+   * Its parent still lays it out inside the safe area, so its siblings stay where
+   * they were. That is the difference from ignoring the safe area for a whole
+   * screen, and the reason a background written this way does not drag a list up
+   * under the navigation bar with it.
+   */
+  | {
+      readonly kind: 'ignoresSafeArea'
+      readonly edges: { readonly top: boolean; readonly bottom: boolean; readonly leading: boolean; readonly trailing: boolean }
+    }
+  /**
    * A fraction of the width the parent offered.
    *
    * What a determinate `ProgressView` or `Gauge` fill is, and the one shape of frame
@@ -457,6 +470,13 @@ export type LayoutModifier =
       readonly count: number
       readonly spacing: number
     }
+  /**
+   * `.mask` with a gradient or a colour - the subtree is drawn through its alpha.
+   *
+   * The fade of an image into its background is written this way, and a view used
+   * as a mask in general is not drawn: only these two have an alpha CSS can take.
+   */
+  | { readonly kind: 'mask'; readonly fill: Fill }
   /** `.blendMode` - how the subtree composites with what is under it. */
   | { readonly kind: 'blendMode'; readonly mode: string }
   /** `.redacted(reason:)` - draw the shape of the content, not the content. */
@@ -562,6 +582,15 @@ export interface TransitionHint {
 export interface LayoutEnvironment {
   /** Nearest window/scroll viewport, independent of intervening layout proposals. */
   readonly containerSize?: { readonly width: number | null; readonly height: number | null }
+  /**
+   * The screen's safe area and the whole screen, in the coordinates of the frames
+   * being placed - what `.ignoresSafeArea` grows a view between.
+   *
+   * Set by whoever lays out a screen. A box whose children are placed relative to it
+   * shifts both, and a scroll view clears them: its content is not at the screen's
+   * edges whatever its coordinates say.
+   */
+  readonly safeArea?: { readonly inner: Rect; readonly outer: Rect } | null
   readonly fontExplicit?: boolean
   readonly cornerStyle?: CornerStyle
   readonly displayScale?: number

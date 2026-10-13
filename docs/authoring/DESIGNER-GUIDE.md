@@ -10,7 +10,7 @@ Design has one panel on the right, and it shows whatever is selected.
 2. **Screen** — how the screen is reached, its title, values it overrides for everything inside it, and its states.
 3. **View** — Basics, then the modifier stack, in the order the code runs.
 
-The tree on the left shows the same app: the App, its Components, one lane per tab, the sheets, and screens nothing links to yet. Files appear in Code mode only.
+The left panel's **Hierarchy** tab has two views. **Layers** shows the same app as a tree: the App, its Components, one lane per tab, the sheets, and screens nothing links to yet. **Files** shows the project: the **Assets** folder - images and colours, everything bundled that is not Swift - and the Swift folders. A Swift file opens in Code. The other tab is **Prompt Editing**.
 
 ## Tokens
 
@@ -39,6 +39,8 @@ The canvas is laid out from the navigation, never by hand, so it always matches 
 - **Columns** are navigation steps: a screen reached from the one to its left sits one column right. When a screen leads to several, the first stays in the row and each other one starts a **branch row** below.
 - Arrows are labeled with how they navigate: solid for a push, dashed for a sheet or full-screen cover. A sheet opened from several screens is drawn once, with an arrow from each opener.
 - **States** stack below a screen inside its tinted frame. Anything inside the frame is a state of that screen; anything outside it is a different screen. A frame shows "+2 states" until it is opened, and **Show all states** in the canvas heading opens every one.
+
+**Moving views.** Drag a view to move it in the file. A click stays a click until the pointer has moved a few pixels; then a copy follows the pointer, the stack, list, form or section it would land in is outlined, and a bar shows where - across a column, down a row. Pressing inside the selection carries the selection, so a chosen stack can be moved from anywhere in it. Where it cannot land the copy greys out and the canvas header says why; released there, or with Escape, it goes back. A list's rows come from its data and are not dragged one by one. Hovering only points: the screen in focus, and its layers, change on a click.
 
 A state is a set of preview inputs — no app data changes, and the screen's layout is shared by every state. Add one in **Screen → States**. A screen with nothing to switch yet gets its first switch from the same form: name the state "Loading" and the screen gains a `loading` value, off by default and on in that state, in one step you can undo. Use it in **Shown when**, or in any value field, to change what the screen shows.
 
@@ -71,9 +73,16 @@ New screens get their own folder under `Features/`; components go to `DesignSyst
 
 ## Images
 
-Open **App → Images**.
+Images live in the **Assets** folder (**Hierarchy → Files**, and at the top of Code's file tree). There are several ways in, and all of them end there:
 
-- Import PNG or JPEG files. Add an Image from the Add palette, select it, and choose its **Bundled image**. This can replace an existing system symbol.
+- Drop PNG or JPEG files on the Assets folder, or use its **+**.
+- Drop a file on a view on the canvas: it is added to Assets and placed as an `Image` where Add would put a new view with that view selected, in one undo step. Dropped on empty canvas, it is only added to Assets.
+- Drop it anywhere else in the studio, including the code editor: it is added to Assets.
+- **Add → Image → Upload image…**, or **App → Images**.
+
+Double-click an image in Assets, or press Enter on it, to see it up close: it opens fitted to the window, a click shows it at its real size, `+` and `-` zoom, and Escape closes it. Drag an image from Assets onto a view to place it, or into the code editor, where it lands as `Image("Name")`. Prompt Editing knows the Assets images by name, so "use Sunset as the background" works. A file that is not a PNG or JPEG is refused by name; the rest of the drop still comes in.
+
+**App → Images** is where an image is renamed, given a dark version, duplicated or deleted. Select an Image and choose its **Bundled image** to change which one it shows; this can replace an existing system symbol.
 - Each image has a stable ID, name, and 1×/2×/3× pixel scale. Its optional dark variant must have the same pixel dimensions as the default image.
 - Rename updates supported literal `Image`/`Label` references in the same undo step. Duplicate requires a new name. A referenced image needs an explicit replacement before deletion. Dynamic names or custom bundles require a code review.
 

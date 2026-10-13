@@ -5,6 +5,7 @@ import type {
   Condition,
   Decl,
   EnumDecl,
+  ClosureExpr,
   Expr,
   ExtensionDecl,
   Pattern,
@@ -728,6 +729,7 @@ export class Checker {
           if (onAView) {
             this.checkArgumentLabels(expr.callee.member, expr.args)
             this.checkBlendMode(expr.callee.member, expr.args)
+            this.checkMask(expr.callee.member, expr.args, expr.trailingClosure)
             this.checkStyleToken(expr.callee.member, expr.args)
           }
         }
@@ -761,7 +763,10 @@ export class Checker {
 
       case 'stringLiteral':
         for (const segment of expr.segments) {
-          if (segment.kind === 'interpolation') this.checkExpression(segment.expression, scope)
+          if (segment.kind === 'interpolation') {
+            this.checkExpression(segment.expression, scope)
+            if (segment.specifier) this.checkExpression(segment.specifier, scope)
+          }
         }
         return
 
@@ -1019,6 +1024,33 @@ export class Checker {
    * Only a literal `.mode` is checked. A mode held in a variable has no value here,
    * and guessing at one would warn on correct code.
    */
+  /**
+   * `.mask` is drawn when the mask is a gradient or a colour - what fades an image
+   * into its background - and not for any other view, which says so here rather than
+   * leaving the content drawn unmasked without a word.
+   */
+  private checkMask(member: string, args: readonly { label: string | null; value: Expr }[], trailing: ClosureExpr | null): void {
+    if (member !== 'mask') return
+    const statement = trailing?.body.statements.length === 1 ? trailing.body.statements[0] : undefined
+    const mask = args.find(arg => arg.label === null || arg.label === 'mask')?.value
+      ?? (statement?.kind === 'exprStmt' ? statement.expression : statement?.kind === 'returnStmt' ? statement.value ?? undefined : undefined)
+    if (!mask) return
+    let root: Expr = mask
+    while (root.kind === 'call' && root.callee.kind === 'memberAccess' && root.callee.base) root = root.callee.base
+    const name = root.kind === 'call' && root.callee.kind === 'identifier' ? root.callee.name
+      : root.kind === 'memberAccess' && root.base?.kind === 'identifier' ? root.base.name
+      : root.kind === 'memberAccess' && !root.base ? 'Color'
+      : null
+    if (name && ['LinearGradient', 'RadialGradient', 'AngularGradient', 'EllipticalGradient', 'Color'].includes(name)) return
+    this.report(
+      mask.span,
+      'warning',
+      'unsupported_swiftui_modifier',
+      "'.mask' is drawn by the preview for a gradient or a colour; this mask is not, so the view is shown unmasked. It is exported to Xcode unchanged.",
+      '.mask',
+    )
+  }
+
   private checkBlendMode(member: string, args: readonly { label: string | null; value: Expr }[]): void {
     if (member !== 'blendMode') return
 

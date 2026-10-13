@@ -1,4 +1,33 @@
-import { assetName, readImage, type ImageAsset, type ImageVariant } from '@studio/project-model'
+import { ASSET_LIMITS, assetName, readImage, type ImageAsset, type ImageVariant } from '@studio/project-model'
+
+/** What an Assets row carries when it is dragged: the image's name. */
+export const ASSET_DRAG_TYPE = 'application/x-studio-asset'
+
+/** Whether a drag holds files from outside the studio, rather than something dragged within it. */
+export function draggingFiles(transfer: DataTransfer | null): boolean {
+  return !!transfer && Array.from(transfer.types).includes('Files')
+}
+
+/**
+ * Images from a picker or a drop, decoded and named, ready to add to the Assets folder.
+ *
+ * A drop can hold anything, so each file is checked rather than the batch: the ones
+ * that are not usable are reported by name, and the rest still come in.
+ */
+export async function importImageFiles(files: readonly File[], existing: readonly Pick<ImageAsset, 'name'>[]): Promise<{ added: ImageAsset[]; problems: string[] }> {
+  const added: ImageAsset[] = [], problems: string[] = []
+  for (const file of files) {
+    if (!['image/png', 'image/jpeg'].includes(file.type) && !/\.(png|jpe?g)$/i.test(file.name)) { problems.push(`${file.name} is not a PNG or JPEG image.`); continue }
+    if (file.size > ASSET_LIMITS.variantBytes) { problems.push(`${file.name} is larger than 4 MB.`); continue }
+    try {
+      const light = await decodeImportedImage(new Uint8Array(await file.arrayBuffer()))
+      added.push({ id: crypto.randomUUID(), name: importedImageName(file.name, [...existing, ...added]), scale: 1, light })
+    } catch (error) {
+      problems.push(`${file.name}: ${error instanceof Error ? error.message : 'it could not be read.'}`)
+    }
+  }
+  return { added, problems }
+}
 
 /** Keep filenames friendly while avoiding reserved names and catalog collisions. */
 export function importedImageName(filename: string, assets: readonly Pick<ImageAsset, 'name'>[]): string {

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 const generated = {
   name: 'ReadingApp', summary: 'A quiet place for your reading goals.',
@@ -56,4 +56,97 @@ test('generation can be cancelled without opening a project', async ({ page }) =
   release()
   await expect(page.getByRole('button', { name: 'Generate app', exact: true })).toBeEnabled()
   await expect(page.getByTestId('generated-review')).toHaveCount(0)
+})
+
+const heritageEntry = 'import SwiftUI\n@main\nstruct HeritageApp: App { var body: some Scene { WindowGroup { HomeView() } } }\nstruct HomeView: View {\n    @State private var adding = false\n    var body: some View {\n        NavigationStack {\n            List { Button("Add site") { adding = true } }\n                .navigationTitle("Sites")\n                .sheet(isPresented: $adding) { AddSiteView() }\n        }\n    }\n}'
+const addSite = (expression: string) => `import SwiftUI\nstruct AddSiteView: View {\n    let regions = ["North": 2, "South": 1]\n    var body: some View { Text(${expression}) }\n}`
+const heritage = {
+  name: 'HeritageApp', summary: 'Heritage sites to visit.', pages: [{ title: 'Sites', file: 'Sources/HeritageApp.swift' }],
+  files: [{ path: 'Sources/HeritageApp.swift', code: heritageEntry }, { path: 'Sources/AddSiteView.swift', code: addSite('regions.first?.key ?? ""') }],
+}
+const repairEdit = (reply: string, expression: string) => ({ json: { edit: { reply, files: [{ path: 'Sources/AddSiteView.swift', code: addSite(expression) }], deletedFiles: [] } } })
+
+async function generateHeritage(page: Page) {
+  await page.route('**/api/generate', route => route.fulfill({ json: { app: heritage } }))
+  await page.goto('/')
+  await page.getByTestId('gallery-source-prompt').click()
+  await page.getByLabel('App description', { exact: true }).fill('A guide to heritage sites with a form to add one.')
+  await page.getByRole('combobox', { name: 'Pages', exact: true }).selectOption('1')
+  await page.getByLabel('API key', { exact: true }).fill('sk-test-repair-key-123456')
+  await page.getByRole('button', { name: 'Generate app', exact: true }).click()
+}
+
+test('a draft whose sheet fails in the preview is repaired automatically, with one AI request, before opening', async ({ page }) => {
+  let repairs = 0
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/edit', async route => {
+    repairs++
+    const body = route.request().postDataJSON()
+    expect(body.prompt).toContain('previewProblems')
+    expect(body.previewProblems[0]).toMatchObject({ severity: 'error', file: 'Sources/AddSiteView.swift' })
+    expect(body.previewProblems[0].message).toContain("has no member 'first'")
+    expect(body.files.map((file: { id: string }) => file.id)).toEqual(['Sources/HeritageApp.swift', 'Sources/AddSiteView.swift'])
+    expect(body.history[0].content).toContain('A guide to heritage sites with a form to add one.')
+    expect(route.request().headers().authorization).toBe('Bearer sk-test-repair-key-123456')
+    await held
+    await route.fulfill(repairEdit('Read the first region from the sorted keys.', 'regions.keys.sorted().first ?? ""'))
+  })
+  await generateHeritage(page)
+
+  // The draft and its error show while the repair works, with no click needed.
+  const review = page.getByTestId('generated-review')
+  await expect(review.getByRole('status')).toHaveText(/This draft has 1 preview error/)
+  await expect(review.getByRole('listitem')).toHaveText(/AddSiteView\.swift:4 · Swift runtime failure: .*has no member 'first'.*opening the sheet/)
+  await expect(page.getByTestId('repair-generated')).toHaveText('Fixing…')
+  await expect(page.getByTestId('repair-generated')).toBeDisabled()
+  await expect(page.getByTestId('repair-note')).toHaveText(/Fixing this error with one request to OpenAI/)
+  release()
+
+  await expect(review.getByRole('status')).toHaveText('Every screen passed the preview check. Review the flows after opening.')
+  await expect(page.getByTestId('repair-reply')).toHaveText('AI repair: Read the first region from the sorted keys.')
+  await expect(page.getByTestId('repair-generated')).toHaveCount(0)
+  await expect(page.getByTestId('open-generated')).toHaveText('Open project')
+  expect(repairs).toBe(1)
+  await page.getByTestId('open-generated').click()
+  await expect(page.getByTestId('template-gallery')).toHaveCount(0)
+  await expect(page.getByTestId('render-tree').first()).toContainText('Add site')
+})
+
+test('the automatic repair runs once; another is the person’s choice', async ({ page }) => {
+  let repairs = 0
+  await page.route('**/api/edit', async route => {
+    repairs++
+    await route.fulfill(repairs === 1
+      ? repairEdit('Showed the first region’s count.', 'String(regions.first?.value ?? 0)')
+      : repairEdit('Read the first region from the sorted keys.', 'regions.keys.sorted().first ?? ""'))
+  })
+  await generateHeritage(page)
+
+  const review = page.getByTestId('generated-review')
+  await expect(page.getByTestId('repair-generated')).toHaveText('Try again with AI')
+  await expect(page.getByTestId('repair-generated')).toBeEnabled()
+  await expect(review.getByRole('status')).toHaveText(/This draft has 1 preview error/)
+  await expect(page.getByTestId('repair-note')).toHaveText(/^Errors remain after the repair\. Sends the files/)
+  await expect(page.getByTestId('repair-reply')).toHaveText('AI repair: Showed the first region’s count.')
+  expect(repairs).toBe(1)
+
+  await page.getByTestId('repair-generated').click()
+  await expect(review.getByRole('status')).toHaveText('Every screen passed the preview check. Review the flows after opening.')
+  expect(repairs).toBe(2)
+})
+
+test('cancelling the automatic repair keeps the draft as it was generated', async ({ page }) => {
+  await page.route('**/api/edit', () => { /* never answers */ })
+  await generateHeritage(page)
+  const review = page.getByTestId('generated-review')
+  await expect(page.getByTestId('repair-generated')).toHaveText('Fixing…')
+  await review.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page.getByTestId('repair-generated')).toHaveText('Try again with AI')
+  await expect(review.getByRole('status')).toHaveText(/This draft has 1 preview error/)
+  await expect(review.getByRole('alert')).toHaveCount(0)
+  await expect(review.getByLabel('Generated Swift source')).toBeVisible()
+  await page.getByRole('button', { name: 'AddSiteView.swift' }).click()
+  await expect(review.getByLabel('Generated Swift source')).toContainText('regions.first?.key')
+  await expect(page.getByTestId('open-generated')).toHaveText('Open draft')
 })

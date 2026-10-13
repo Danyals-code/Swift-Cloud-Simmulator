@@ -1,4 +1,4 @@
-import type { SourceSpan, ViewLayer } from '@studio/shared'
+import type { PageFailure, SourceSpan, ViewLayer } from '@studio/shared'
 import { layerLabel, tabIcon, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
@@ -159,6 +159,8 @@ export interface ResolvedUI {
   /** True when the content asked to extend under the device's edges. */
   readonly ignoresSafeArea: boolean
   readonly navigationBar: NavigationBar | null
+  /** The navigation stack's visual environment: what a screen pushed onto it inherits. */
+  readonly environment?: readonly ModifierValue[]
   readonly tabBar: TabBar | null
   readonly overlay: Overlay | null
   readonly handlers: ReadonlyMap<string, ViewIntent>
@@ -357,10 +359,26 @@ export interface NestedPage {
   readonly ui: ResolvedUI
 }
 
-/** Discover real routes with real sample values; never invoke their button actions. */
-export function resolveNestedPages(views: readonly ViewValue[], ctx: ResolveContext, tab: number, rootId: string, limit: number): readonly NestedPage[] {
+/**
+ * Discover real routes with real sample values; never invoke their button actions.
+ *
+ * A route that fails to build is left out of the answer and, when `failures` is
+ * given, recorded there with the reason - once per route.
+ */
+export function resolveNestedPages(views: readonly ViewValue[], ctx: ResolveContext, tab: number, rootId: string, limit: number, failures?: PageFailure[]): readonly NestedPage[] {
   const resolver = new Resolver(ctx, tab, 'v', true)
-  return resolver.nestedPages(views, rootId, Math.max(0, limit))
+  return resolver.nestedPages(views, rootId, Math.max(0, limit), failures)
+}
+
+/**
+ * What a failed route says, in the wording a failure of the live screen uses, and
+ * where: the line that failed when the error knows it, else the route itself.
+ */
+function routeFailure(error: unknown, route: SourceSpan): { message: string; source: SourceSpan } {
+  if (!(error instanceof Error)) return { message: 'It could not be built.', source: route }
+  const { frames, span } = error as { frames?: readonly { name: string }[]; span?: SourceSpan }
+  const message = error.name === 'SwiftTrap' ? `Swift runtime failure: ${error.message}` : error.message
+  return { message: frames?.[0]?.name ? `${message} (in ${frames[0].name})` : message, source: span?.file ? span : route }
 }
 
 class Resolver {
@@ -438,8 +456,9 @@ class Resolver {
       viewHierarchy: pageLayers,
       content: screen.content,
       search: this.findSearchField(screen.content),
-      ignoresSafeArea: collectModifier(screen.content, 'ignoresSafeArea') !== null,
+      ignoresSafeArea: rootIgnoresSafeArea(screen.content),
       navigationBar: screen.navigationBar,
+      ...(nav ? { environment: visualModifiers(nav) } : {}),
       tabBar: withTabs.tabBar,
       overlay,
       handlers: this.handlers,
@@ -449,7 +468,7 @@ class Resolver {
   }
 
   /** One example per destination declaration, with bounded recursive discovery. */
-  nestedPages(views: readonly ViewValue[], rootId: string, limit: number): readonly NestedPage[] {
+  nestedPages(views: readonly ViewValue[], rootId: string, limit: number, failures?: PageFailure[]): readonly NestedPage[] {
     const root = this.run(views)
     const out: NestedPage[] = []
     const seen = new Set<string>()
@@ -491,13 +510,21 @@ class Resolver {
           seen.add(key)
           out.push({ id, parentId: current.parentId, rootId, kind, name, source, ui })
           queue.push({ ui, scope: nestedResolver.previewScope, parentId: id, depth: current.depth + 1 })
-        } catch { /* A destination lacking valid data does not blank other pages. */ }
+        } catch (error) {
+          // A destination lacking valid data does not blank other pages, but it is
+          // said: a screen that cannot be built here is one that fails when opened.
+          const failure = { name: fallback, kind, ...routeFailure(error, source) }
+          if (failures && !failures.some(known => known.kind === kind && known.message === failure.message && known.source?.file === failure.source.file && known.source.start === failure.source.start)) failures.push(failure)
+        }
       }
       const visitLinks = (content: readonly ViewValue[]) => {
         for (const view of content) {
           if (view.name === 'NavigationLink') {
             const builder = this.destinationBuilder(view, current.scope)
-            add('destination', builder?.span ?? view.span, () => (this.destinationFor(view, current.scope) ?? []).map(content => inheritVisualStyle(content, visualModifiers(view))), labelTextOf(view) || 'Details')
+            // A pushed screen is drawn under the navigation stack, so it takes the stack's
+            // environment, not modifiers written on the link.
+            const environment = current.ui.environment ?? visualModifiers(view)
+            add('destination', builder?.span ?? view.span, () => (this.destinationFor(view, current.scope) ?? []).map(content => inheritVisualStyle(content, environment)), labelTextOf(view) || 'Details')
           }
           visitLinks(view.children)
         }
@@ -1186,7 +1213,9 @@ class Resolver {
         name: ['NavigationStack', 'NavigationView', 'NavigationSplitView'].includes(view.name) ? 'Group' : view.name,
         children: view.children.map(content),
       })
-      screen = this.stampList(destination.map(content), `n${depth + 1}`, visualModifiers(link ?? stack))
+      // The stack's environment, not the link's: `.buttonStyle(.plain)` on a list row's
+      // link styles that row, and must not turn every button on the pushed screen plain.
+      screen = this.stampList(destination.map(content), `n${depth + 1}`, visualModifiers(stack))
       const requestedMode = tokenName(collectModifier(screen, 'navigationBarTitleDisplayMode')?.args[0]?.value)
       if (requestedMode && requestedMode !== 'automatic') displayMode = requestedMode
       titles.push(titleOf(screen, labelTextOf(link!) || 'Back'))
@@ -1494,7 +1523,7 @@ class Resolver {
         background: collectModifier(overlayViews, 'presentationBackground')?.args[0]?.value,
         backgroundInteraction: backgroundInteractionOf(overlayViews),
         ...(kind === 'dialog' && view.intent && view.path ? { anchorId: handlerIdFor(view.path) } : {}),
-        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content), ignoresSafeArea: collectModifier(resolved.content, 'ignoresSafeArea') !== null },
+        screen: { ...resolved, overlay: this.findOverlay(resolved.content, depth + 1) ?? this.menuOverlay(resolved.content), tabBar: tabbed.tabBar, search: this.findSearchField(resolved.content), ignoresSafeArea: rootIgnoresSafeArea(resolved.content) },
         title: kind === 'dialog' && tokenName(labelled(modifier.args, 'titleVisibility')) !== 'visible' ? '' : stringArg(modifier.args.find((a) => a.label === null)?.value) ?? '',
         message: this.messageOf(modifier),
         dismiss,
@@ -1696,6 +1725,24 @@ function collectModifier(views: readonly ViewValue[], name: string): ModifierVal
     if (modifier.name === name) return modifier
   }
   return null
+}
+
+/**
+ * Whether the screen's own root ignores the safe area, which moves the whole screen
+ * to the device's edges.
+ *
+ * Written further in, or for only some edges, the modifier grows only its own view's
+ * edges, and the layout engine does that. Searching the whole tree, as this once did,
+ * let a background with `.ignoresSafeArea()` pull every sibling up under the
+ * navigation bar with it.
+ */
+function rootIgnoresSafeArea(views: readonly ViewValue[]): boolean {
+  const everyEdge = (modifier: ModifierValue) => {
+    const edges = modifier.args.find(arg => arg.label === 'edges')?.value
+    return tokenName(modifier.args.find(arg => arg.label === null)?.value) !== 'keyboard' && (!edges || tokenName(edges) === 'all')
+  }
+  return views.some(view => view.modifiers.some(m => m.name === 'ignoresSafeArea' && everyEdge(m))
+    || (view.modifiers.length === 0 && view.children.length === 1 && rootIgnoresSafeArea(view.children)))
 }
 
 function* allModifiers(

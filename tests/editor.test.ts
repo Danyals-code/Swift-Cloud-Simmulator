@@ -56,6 +56,8 @@ function run(body: string): readonly string[] {
  */
 const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   String: {
+    localizedCaseInsensitiveContains: 'r.localizedCaseInsensitiveContains("B")',
+    localizedStandardContains: 'r.localizedStandardContains("b")',
     count: 'r.count',
     isEmpty: 'r.isEmpty',
     first: 'r.first',
@@ -136,6 +138,21 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     reduce: 'r.reduce(0) { $0 + $1 }',
     allSatisfy: 'r.allSatisfy { $0 > 0 }',
     randomElement: 'r.randomElement()',
+    remove: 'r.remove(1)',
+    update: 'r.update(with: 4)',
+    union: 'r.union([4])',
+    intersection: 'r.intersection([1])',
+    subtracting: 'r.subtracting([1])',
+    symmetricDifference: 'r.symmetricDifference([1, 4])',
+    formUnion: 'r.formUnion([4])',
+    formIntersection: 'r.formIntersection([1])',
+    subtract: 'r.subtract([1])',
+    formSymmetricDifference: 'r.formSymmetricDifference([1])',
+    isSubset: 'r.isSubset(of: [1])',
+    isStrictSubset: 'r.isStrictSubset(of: [1])',
+    isSuperset: 'r.isSuperset(of: [1])',
+    isStrictSuperset: 'r.isStrictSuperset(of: [1])',
+    isDisjoint: 'r.isDisjoint(with: [1])',
   },
   Dictionary: {
     count: 'r.count',
@@ -154,6 +171,7 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     description: 'r.description',
     magnitude: 'r.magnitude',
     isMultiple: 'r.isMultiple(of: 2)',
+    formatted: 'r.formatted()',
     quotientAndRemainder: 'r.quotientAndRemainder(dividingBy: 2).quotient',
   },
   Double: {
@@ -165,6 +183,7 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     squareRoot: 'r.squareRoot()',
     truncatingRemainder: 'r.truncatingRemainder(dividingBy: 2.0)',
     isMultiple: 'r.isMultiple(of: 2.0)',
+    formatted: 'r.formatted(.percent)',
   },
   Bool: {
     description: 'r.description',
@@ -197,6 +216,10 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     lowerBound: 'r.lowerBound',
     upperBound: 'r.upperBound',
     contains: 'r.contains(1)',
+    map: 'r.map { $0 * 2 }',
+    filter: 'r.filter { $0 > 0 }',
+    reduce: 'r.reduce(0, +)',
+    forEach: 'r.forEach { _ = $0 }',
   },
   ClosedRange: {
     count: 'r.count',
@@ -204,6 +227,10 @@ const EXERCISES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     lowerBound: 'r.lowerBound',
     upperBound: 'r.upperBound',
     contains: 'r.contains(1)',
+    map: 'r.map { $0 * 2 }',
+    filter: 'r.filter { $0 > 0 }',
+    reduce: 'r.reduce(0, +)',
+    forEach: 'r.forEach { _ = $0 }',
   },
 }
 

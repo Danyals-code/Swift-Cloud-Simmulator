@@ -1,4 +1,4 @@
-import type { ComponentSource, LogLevel, Size, SourceSpan, UIEvent } from '@studio/shared'
+import type { ComponentSource, LogLevel, PageFailure, Size, SourceSpan, UIEvent } from '@studio/shared'
 import type { Block, Decl, FuncDecl, SourceFileNode, StructDecl, VarDecl } from '@studio/swift-syntax'
 import {
   asKeyPath,
@@ -360,13 +360,13 @@ export class AppRuntime {
     return evaluation.failure ? null : { runtime: preview, evaluation }
   }
 
-  resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number): readonly NestedPage[] {
+  resolveNestedPages(views: readonly ViewValue[], tab: number, rootId: string, limit: number, failures?: PageFailure[]): readonly NestedPage[] {
     return resolveNestedPages(views, {
       state: new UIState(),
       build: (closure, args, environment) => this.buildViews(closure, args, environment),
       styleButton: (style, label, isPressed) => this.styleButton(style, label, isPressed),
       animation: null,
-    }, tab, rootId, limit)
+    }, tab, rootId, limit, failures)
   }
 
   /**

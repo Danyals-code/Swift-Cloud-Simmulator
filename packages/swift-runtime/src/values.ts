@@ -729,10 +729,10 @@ export function valuesEqual(a: SwiftValue, b: SwiftValue): boolean {
     }
     case 'array': {
       const other = b as ArrayValue
-      return (
-        a.elements.length === other.elements.length &&
-        a.elements.every((e, i) => valuesEqual(e, other.elements[i]!))
-      )
+      if (a.elements.length !== other.elements.length) return false
+      // Two sets are equal when they hold the same elements, in whatever order.
+      if (a.unique || other.unique) return a.elements.every((e) => other.elements.some((o) => valuesEqual(e, o)))
+      return a.elements.every((e, i) => valuesEqual(e, other.elements[i]!))
     }
     case 'dictionary': {
       const other = b as DictionaryValue

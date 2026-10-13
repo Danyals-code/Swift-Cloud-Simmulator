@@ -12,6 +12,7 @@ import {
   type Diagnostic,
   type LogEntry,
   type MeasuredTextData,
+  type PageFailure,
   type PagePreview,
   type Rect,
   type RenderNode,
@@ -235,7 +236,10 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     : { x: safeArea.leading, y: safeArea.top + topTabs + topSearch + barHeight - collapseDistance,
         width: canvas.width - safeArea.leading - safeArea.trailing,
         height: Math.max(0, canvas.height - safeArea.top - topTabs - topSearch - barHeight + collapseDistance - (scroll ? 0 : safeArea.bottom + bottomTabs + bottomSearch)) }
-  const placed = engine.layout(content, contentBounds, env, CENTER)
+  // What a view with `.ignoresSafeArea` grows between: the content's bounds, below
+  // the bars, and the whole device. A screen that ignores it already has the second.
+  const safe = screen.ignoresSafeArea ? null : { inner: contentBounds, outer: { x: 0, y: 0, width: canvas.width, height: canvas.height } }
+  const placed = engine.layout(content, contentBounds, { ...env, safeArea: safe }, CENTER)
   let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
   if (screen.navigationBar) {
     const bar = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
@@ -458,6 +462,7 @@ function toResult(
   evaluateMs: number,
   layoutMs: number,
   pages?: readonly PagePreview[],
+  pageFailures?: readonly PageFailure[],
 ): CompileResult {
   const total = performance.now() - startedAt
 
@@ -492,6 +497,7 @@ function toResult(
     renderTree,
     viewHierarchy: evaluation?.failure ? [] : evaluation?.ui?.viewHierarchy ?? [],
     ...(pages ? { pages } : {}),
+    ...(pageFailures?.length ? { pageFailures } : {}),
     logs,
     textMeasurement: renderTree && !evaluation?.failure ? { ...metrics.measurementState, generation: fontGeneration } : undefined,
     timings: {
@@ -638,9 +644,10 @@ function finish(
 
   // After the geometry retry, so a reader in a page the device is not showing
   // cannot report a size back into the live one.
-  const pages = request.allPages ? renderPages(request, evaluation, renderTree) : undefined
+  const pageFailures: PageFailure[] = []
+  const pages = request.allPages ? renderPages(request, evaluation, renderTree, pageFailures) : undefined
 
-  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, pages)
+  return toResult(request, analysis, evaluation, renderTree, startedAt, evaluateMs, performance.now() - layoutStart, pages, pageFailures)
 }
 
 /**
@@ -664,6 +671,7 @@ function renderPages(
   request: CompileRequest,
   evaluation: EvaluationResult,
   active: RenderTree,
+  failures: PageFailure[],
 ): readonly PagePreview[] | undefined {
   const pages = (evaluation.ui?.viewHierarchy ?? []).filter((layer) => layer.type === 'Page')
   if (!pages.length) return undefined
@@ -692,14 +700,20 @@ function renderPages(
       tree,
     })
     if (!preview || !remainingChildren) continue
-    const nested = preview.runtime.resolveNestedPages(preview.evaluation.views, index, page.id, remainingChildren)
+    const nested = preview.runtime.resolveNestedPages(preview.evaluation.views, index, page.id, remainingChildren, failures)
     for (const child of nested) {
       if (!out.some(parent => parent.id === child.parentId)) continue
       let childTree: RenderTree
       try {
         childTree = render(request, { ...preview.evaluation, ui: child.ui }, true, preview.runtime)
-        if (childTree.nodes.some(node => !Object.values(node.frame).every(Number.isFinite) || node.frame.width < 0 || node.frame.height < 0)) continue
-      } catch { continue }
+        if (childTree.nodes.some(node => !Object.values(node.frame).every(Number.isFinite) || node.frame.width < 0 || node.frame.height < 0)) {
+          failures.push({ name: child.name, kind: child.kind, message: 'The preview produced an invalid layout size for this screen.', source: child.source })
+          continue
+        }
+      } catch (error) {
+        failures.push({ name: child.name, kind: child.kind, message: error instanceof Error ? error.message : 'It could not be laid out.', source: child.source })
+        continue
+      }
       out.push({
         id: child.id, parentId: child.parentId, rootId: child.rootId,
         kind: child.kind, name: child.name, source: child.source, active: false,

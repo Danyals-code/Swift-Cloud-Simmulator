@@ -1,8 +1,9 @@
 import { parseGeneratedApp, parseOptions, PROJECT_SCHEMA } from '../../../lib/generation/schema'
 import { SYSTEM_PROMPT, userPrompt } from '../../../lib/generation/prompt'
+import { readProviderStream, streamDeadline } from '../../../lib/generation/providerStream'
 
 export const runtime = 'nodejs'
-export const maxDuration = 180
+export const maxDuration = 300
 const HEADERS = { 'Cache-Control': 'no-store' }
 const fail = (error: string, status = 400) => Response.json({ error }, { status, headers: HEADERS })
 
@@ -34,23 +35,24 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     return fail(error instanceof SyntaxError ? 'The request is not valid JSON.' : error instanceof Error ? error.message : 'Invalid request.')
   }
-  const timeout = AbortSignal.timeout(165000)
-  const signal = AbortSignal.any([request.signal, timeout])
+  // The answer streams, so a long generation runs until the route's limit; a stream silent for two minutes is stuck.
+  const deadline = streamDeadline(request.signal, 290000, 120000)
   try {
     const openai = options.provider === 'openai'
     const response = await fetch(openai ? 'https://api.openai.com/v1/responses' : 'https://api.anthropic.com/v1/messages', {
-      method: 'POST', signal, cache: 'no-store', redirect: 'error',
+      method: 'POST', signal: deadline.signal, cache: 'no-store', redirect: 'error',
       headers: openai
         ? { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }
         : { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify(openai ? {
-        model: options.model, store: false, instructions: SYSTEM_PROMPT,
-        input: userPrompt(options), max_output_tokens: 16000,
+        model: options.model, store: false, stream: true, instructions: SYSTEM_PROMPT,
+        input: userPrompt(options), max_output_tokens: 24000,
         text: { format: { type: 'json_schema', name: 'swiftui_project', strict: true, schema: PROJECT_SCHEMA } },
       } : {
-        model: options.model, max_tokens: 16000, system: SYSTEM_PROMPT,
+        model: options.model, max_tokens: 24000, stream: true, system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userPrompt(options) }],
-        output_config: { format: { type: 'json_schema', schema: PROJECT_SCHEMA } },
+        // Current Claude models think by default, and thinking spends max_tokens; medium leaves room for the project.
+        output_config: { effort: 'medium', format: { type: 'json_schema', schema: PROJECT_SCHEMA } },
       }),
     })
     if (!response.ok) {
@@ -61,18 +63,17 @@ export async function POST(request: Request): Promise<Response> {
       if ([400, 404, 422].includes(response.status)) return fail('The provider could not use this model or structured-output request. Check the model ID and its capabilities.', 400)
       return fail('The provider is unavailable. Please try again later.', 502)
     }
-    const result = await response.json()
-    if ((openai && result.status !== 'completed') || (!openai && result.stop_reason !== 'end_turn')) return fail('Generation did not finish. Try fewer pages or a smaller scope. Your current project is unchanged.', 422)
-    const blocks = openai ? (result.output ?? []).flatMap((item: { content?: unknown[] }) => item.content ?? []) : result.content ?? []
-    if (blocks.some((b: { type: string }) => b.type === 'refusal')) return fail('The provider declined this request. Revise the app description.', 422)
-    const output = blocks.filter((b: { type: string }) => b.type === (openai ? 'output_text' : 'text')).map((b: { text: string }) => b.text).join('')
+    const { text: output, stop } = await readProviderStream(response.body, deadline.alive)
+    if (stop === 'declined') return fail('The provider declined this request. Revise the app description.', 422)
+    if (stop === 'length') return fail('The response hit its length limit before the app was finished. Try fewer pages or a smaller scope. Your current project is unchanged.', 422)
+    if (stop !== 'done') return fail('Generation did not finish. Try again. Your current project is unchanged.', 422)
     let app
     try { app = parseGeneratedApp(JSON.parse(output), options.pageCount) }
     catch (error) { return fail(error instanceof SyntaxError ? 'The provider returned an unreadable project. Try generating again.' : error instanceof Error ? error.message : 'Invalid project.', 422) }
     return Response.json({ app }, { headers: HEADERS })
   } catch {
     if (request.signal.aborted) return fail('Generation was cancelled.', 499)
-    if (timeout.aborted) return fail('Generation took too long. Try a smaller app or fewer pages.', 504)
+    if (deadline.expired()) return fail('Generation took too long. Try a smaller app or fewer pages.', 504)
     return fail('Could not reach the provider. Check your connection and try again.', 502)
-  }
+  } finally { deadline.stop() }
 }

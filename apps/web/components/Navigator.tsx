@@ -9,11 +9,14 @@ import type { AuthoringNode, AuthoringSelection, AuthoringSnapshot, DesignEditRe
 import type { Diagnostic, FileId } from '@studio/shared'
 import { Icon } from './ui/Icon'
 import { ContextMenu, MenuButton, type MenuItem } from './ui/Menu'
+import { draggingFiles } from '../lib/images'
 import styles from './Workspace.module.css'
 import { ToolButton } from './ui/Control'
 
 export interface NavigatorProps {
   tabbed?: boolean
+  /** The Assets folder, drawn above the Swift so the project's two kinds of file sit side by side. */
+  assets?: ReactNode
   pageFocusEpoch?: number
   screens?: ReactNode
   layerLabels?: readonly { owner: string; fingerprint: string; label: string; offset?: number }[]
@@ -86,7 +89,7 @@ const ROW = 'flex h-[30px] w-full items-center gap-1.5 rounded-[5px] pr-1.5 text
  * out of the way when you are looking for one file by name.
  */
 export function Navigator({
-  tree, screens, pageFocusEpoch, layerLabels, onRenameLayer, tabbed = false,
+  tree, screens, pageFocusEpoch, layerLabels, onRenameLayer, tabbed = false, assets,
   pageId, pageName, pageSource, pageLayers,
   authoring, authoringFiles, authoringSelection, selectedAuthoringId, selectedAuthoringAncestors, hoveredAuthoringId, hoveredAuthoringAncestors, onHoverAuthoring, onSelectAuthoring, onEditAuthoring,
   layers, selectedLayerId, hoveredLayerId, stale, onSelectLayer, onReorderLayer, hiddenViews, onHideLayer, onShowHidden, layersEditable,
@@ -200,8 +203,10 @@ export function Navigator({
         <>
           <div
             className="min-h-0 flex-1 overflow-auto px-1.5 py-1.5"
-            // Dropping on empty space below the tree means the root group.
+            // Dropping on empty space below the tree means the root group. Files from
+            // outside are images for Assets, which the studio takes wherever they land.
             onDragOver={(event) => {
+              if (draggingFiles(event.dataTransfer)) return
               event.preventDefault()
               setDropTarget('Sources')
             }}
@@ -216,6 +221,7 @@ export function Navigator({
               setMenu({ at: { x: event.clientX, y: event.clientY }, node: null })
             }}
           >
+            {assets}
             <Tree
               nodes={shown}
               depth={0}
@@ -473,11 +479,13 @@ function Tree({
                   onContextMenu(node, { x: event.clientX, y: event.clientY })
                 }}
                 onDragOver={(event) => {
+                  if (draggingFiles(event.dataTransfer)) return
                   event.preventDefault()
                   event.stopPropagation()
                   onDropTargetChange(node.path)
                 }}
                 onDrop={(event) => {
+                  if (draggingFiles(event.dataTransfer)) return
                   event.preventDefault()
                   event.stopPropagation()
                   const fileId = event.dataTransfer.getData('text/studio-file')

@@ -42,7 +42,17 @@
 .check { color: var(--color-xc-ok); padding-top: 2px; }
 .pages { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 18px 32px; font-size: 13px; color: var(--color-xc-text-3); }
 .validation { font-size: 13px; color: var(--color-xc-ok); margin: 0 32px 14px; }
+.validation[data-state='warning'] { color: var(--color-xc-warn); }
+.validation[data-state='error'] { color: var(--color-xc-error); }
+.repaired { margin: -6px 32px 14px; font-size: 13px; line-height: 1.6; color: var(--color-xc-text-2); }
 .issues { color: var(--color-xc-warn); margin: 0 32px 14px; font-size: 13px; }
+.issues li[data-severity='error'] { color: var(--color-xc-error); }
+.issues li { overflow-wrap: anywhere; }
+.repair { display: flex; align-items: center; gap: 12px; margin: 0 32px 16px; }
+.repair .secondary { gap: 8px; flex-shrink: 0; }
+.repair > span { color: var(--color-xc-text-3); font-size: 12px; line-height: 1.5; }
+.link { color: var(--color-xc-accent); font-size: 13px; cursor: pointer; flex-shrink: 0; }
+.link:hover { text-decoration: underline; }
 .issues ul { padding: 6px 0 0 16px; line-height: 1.7; max-height: 90px; overflow: auto; }
 .files { flex: 1; min-height: 130px; display: grid; grid-template-columns: 210px minmax(0, 1fr); border-top: 1px solid var(--color-xc-line); }
 .files nav { padding: 12px 8px; overflow: auto; border-right: 1px solid var(--color-xc-line); }
@@ -51,4 +61,4 @@
 .files pre { margin: 0; padding: 18px; background: var(--color-xc-editor); overflow: auto; font: 13px/1.7 ui-monospace, 'SF Mono', Menlo, monospace; tab-size: 4; color: var(--color-xc-text); }
 .review > .error { margin: 12px 32px; }
 @media (max-width: 760px) { .content { gap: 20px; padding: 0 20px 20px; grid-template-columns: minmax(0,1fr) 180px; } .options { padding-left: 18px; } .footer { padding: 14px 20px; } .footer > span { display: none; } .footer { justify-content: flex-end; } }
-@media (max-width: 560px) { .content { grid-template-columns: 1fr; } .options { padding: 0; border-left: 0; } .form textarea { min-height: 130px; } .files { grid-template-columns: 130px minmax(0,1fr); } .files pre { font-size: 12px; } .summary, .pages { padding: 0 20px; margin-left: 0; margin-right: 0; } }
+@media (max-width: 560px) { .content { grid-template-columns: 1fr; } .options { padding: 0; border-left: 0; } .form textarea { min-height: 130px; } .files { grid-template-columns: 130px minmax(0,1fr); } .files pre { font-size: 12px; } .summary, .pages { padding: 0 20px; margin-left: 0; margin-right: 0; } .repair { flex-wrap: wrap; margin: 0 20px 14px; } }

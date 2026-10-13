@@ -102,6 +102,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.navigationDestination` | 🟡 | 6 | `for:` with a metatype, resolved on link push. `isPresented:` and `item:` overloads warn as unsupported |
 | `.navigationTitle` | ✅ | 6 | large and inline, with `navigationBarTitleDisplayMode` |
 | `.toolbar` | 🟡 | 6 | leading/trailing items work; keyboard, bottomBar and principal placements warn and are omitted |
+| `.toolbarBackground` | 🟡 | - | navigation bar only: `.hidden` paints no bar background, so the content behind shows, and a colour or gradient paints that. `.visible` and the other bars draw as before. A view extending under the bar with `.ignoresSafeArea` also clears the bar, as iOS does at the top of the content |
 | `TabView` | ✅ | 6 | tab bar with `.tabItem`, bound or unbound selection, and `.page`, whose dots are also the way through - a preview has no swipe |
 | `NavigationSplitView` | 🟡 | - | collapsed sidebar stack on every device; no iPad multi-column layout |
 | Back gesture | ✗ | - | the preview offers the back *button*; an edge swipe has no analogue here |
@@ -134,7 +135,7 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.offset` | ✅ | 6 | paint-time, so neighbours do not move |
 | `.position` | ✅ | 7 | centres the view on a point in its parent's space |
 | `.aspectRatio` / `.scaledToFit` / `.scaledToFill` | ✅ | 7 | |
-| `.ignoresSafeArea` | ✅ | 7 | resolved by the pipeline, which owns the device's edges |
+| `.ignoresSafeArea` | ✅ | 7 | on a screen's root, for every edge, the whole screen moves to the device's edges. Anywhere else, or for named edges, only that view grows - the edges of it that meet the safe area - so its siblings stay inside. The keyboard region does nothing; the preview has no keyboard |
 | `.safeAreaInset` | ✅ | - | all four edges; the content is *inset*, not overlaid, so a bar drawn this way does not cover the last row |
 | `.alignmentGuide` | ✅ | - | the stack aligns guides rather than edges, so a guide can be replaced. `d.width`, `d.height` and `d[.leading]` and friends all read |
 | `.containerRelativeFrame` | 🟡 | - | takes the container's size along the named axes, divided by `count`. The container is whatever proposed the size, which is the scroll view or stack above it |
@@ -155,12 +156,12 @@ approximations** below. "Partial" with nothing said is indistinguishable from a 
 | `.border` | ✅ | 6 |
 | `.rotationEffect` / `.scaleEffect` | ✅ | 6 | paint-time, so layout keeps the untransformed size |
 | `.blur` / `.saturation` / `.brightness` / `.contrast` / `.grayscale` | ✅ | 7 |
-| `.mask` | ⬜ | - | needs an arbitrary view as a mask image, which CSS can only do for a shape |
+| `.mask` | 🟡 | - | a gradient or a colour, as an argument or in the closure - the fade of an image into its background. Any other view as a mask warns and is drawn unmasked |
 | `.blendMode` | 🟡 | - | the sixteen modes CSS shares with SwiftUI; `.plusLighter` and the `sourceAtop` family warn rather than drawing the nearest one |
 | `.hueRotation` / `.colorMultiply` | ✅ | - | the multiply is an overlay, since no CSS filter multiplies by a colour |
 | `.rotation3DEffect` | ✅ | - | a real rotation with a perspective, about the axis vector given |
 | `.redacted` / `.unredacted` | ✅ | - | text and images become bars of the size the engine laid out for them |
-| `.tint` / `.accentColor` | ✅ | 6 |
+| `.tint` / `.accentColor` | ✅ | 6 | a destructive button stays red whatever its tint, as on iOS; its own `.foregroundStyle` recolours it. A screen pushed by a link takes the stack's styles, not ones written on the link - a row's `.buttonStyle(.plain)` no longer greys the buttons on the screen it opens |
 | `.buttonStyle` | 🟡 | 6 | `.bordered` and `.borderedProminent`; others fall back to plain. `.controlSize` scales it and `.buttonBorderShape` rounds it |
 | `.toggleStyle` | ✅ | - | `.switch`, `.button` and `.checkbox` each draw differently, and all three stay pressable |
 | `.pickerStyle` | 🟡 | - | segmented/menu/inline selection; wheel is a dimmed column. Navigation-link and palette styles warn. Menu displays the selected label |
@@ -326,6 +327,8 @@ missing without anything saying so.
 | `String` - `count`, `uppercased`, `hasPrefix`, `contains`, `split`, `replacingOccurrences`, `trimmingCharacters` | ✅ | 2 | counted and sliced by grapheme cluster, so `"👋🏽".count` is 1 |
 | `String` - `capitalized`, `prefix`, `suffix`, `dropFirst`, `dropLast`, `reversed`, `components`, `padding`, `starts(with:)`, `append` | ✅ | - | |
 | `String` - `unicodeScalars` | ✅ | - | code points, which is the whole difference from `count` |
+| `String` - `localizedCaseInsensitiveContains`, `localizedStandardContains` | 🟡 | - | case-insensitive; no diacritic folding |
+| `"\(value, specifier: "%.2f")"` | ✅ | - | the format is applied; it used to be dropped, drawing every digit |
 | `Array` - `count`, `map`, `filter`, `compactMap`, `reduce`, `sorted`, `contains`, `firstIndex`, `forEach`, `joined`, `enumerated`, `min`, `max`, `prefix`, `suffix` | ✅ | 2 | `reduce(into:)` too, whose closure takes the accumulator `inout` - the standard way to build a dictionary from a sequence |
 | `Array` - `allSatisfy`, `flatMap`, `dropFirst`, `dropLast`, `first(where:)`, `last(where:)`, `lastIndex`, `randomElement`, `shuffled` | ✅ | - | `shuffled` is Fisher-Yates, not the biased one-line sort |
 | `Array` - `append`, `insert`, `remove`, `removeAll`, `removeFirst`, `removeLast`, `popLast`, `sort`, `reverse`, `shuffle`, `swapAt`, `replaceSubrange`, `removeSubrange` | ✅ | - | mutating, and refused on a `let` as Xcode refuses them |
@@ -333,7 +336,10 @@ missing without anything saying so.
 | `Dictionary` - `sorted`, `mapValues`, `filter`, `map`, `contains` | ✅ | - | over `(key: , value: )` pairs; `filter` answers a dictionary and `sorted` an array |
 | `Dictionary(grouping:by:)`, `Dictionary(uniqueKeysWithValues:)` | ✅ | 11 | grouping keeps the order the groups were first met, which is what a sectioned list wants and what Swift's hash order promises nothing about |
 | `counts[key, default: 0] += 1` | ✅ | 11 | the default belongs to the read half of a compound assignment; without it the first occurrence of every key read nil |
-| `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation drop duplicates; iteration is in insertion order rather than Swift's unspecified hash order |
+| `Set` | 🟡 | 2 | `Set(_:)` and a `Set` annotation, parameter or property drop duplicates, and assignment keeps a set a set; iteration is in insertion order rather than Swift's unspecified hash order |
+| `Set` - `union`, `intersection`, `subtracting`, `symmetricDifference`, `formUnion`, `formIntersection`, `subtract`, `formSymmetricDifference`, `isSubset`, `isSuperset`, `isStrictSubset`, `isStrictSuperset`, `isDisjoint`, `remove(_:)`, `update(with:)` | ✅ | - | any sequence as the other operand; `filter` answers a set; two sets compare equal regardless of order. An array has none of these, as in Swift |
+| A range of `Int`s as a collection - `map`, `filter`, `reduce`, `contains(where:)` and the rest | ✅ | - | `(1...5).map { … }`; ranges of `Double` and `Date` are not sequences, as in Swift |
+| `Int` / `Double` - `formatted()`, `formatted(.number / .percent / .currency(code:))` | ✅ | - | the same styles `Text(_:format:)` draws |
 | `Int` / `Double` conversion from `String` | ✅ | - | failable, matched to Swift's grammar: `" 42"`, `"4_2"` and `"0x10"` are nil |
 | `Int.max` / `Int.min` | 🟡 | - | 2^53 - 1, not 2^63 - 1 - see approximations |
 | `Int.random(in:)`, `Double.random(in:)`, `Bool.random()` | ✅ | - | |

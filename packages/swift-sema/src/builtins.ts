@@ -58,7 +58,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'alignmentGuide', 'safeAreaInset', 'containerRelativeFrame',
   'layoutPriority', 'aspectRatio', 'scaledToFit', 'scaledToFill',
   // appearance
-  'background', 'overlay', 'border', 'shadow', 'cornerRadius', 'opacity',
+  'background', 'overlay', 'border', 'shadow', 'cornerRadius', 'opacity', 'mask',
   'foregroundStyle', 'foregroundColor', 'tint', 'resizable',
   // typography
   'font', 'bold', 'italic', 'fontWeight', 'fontDesign',
@@ -75,7 +75,7 @@ export const SUPPORTED_MODIFIERS: ReadonlySet<string> = new Set([
   'accessibilityLabel', 'accessibilityValue', 'accessibilityHint', 'accessibilityHidden',
   'allowsHitTesting',
   // navigation and presentation
-  'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar',
+  'navigationTitle', 'navigationBarTitleDisplayMode', 'navigationDestination', 'toolbar', 'toolbarBackground',
   'sheet', 'fullScreenCover', 'alert', 'confirmationDialog', 'presentationDetents',
   'presentationCornerRadius', 'presentationDragIndicator', 'presentationBackground', 'interactiveDismissDisabled',
   'popover', 'tabItem', 'tag', 'tabViewStyle',
@@ -214,7 +214,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   // layout
   'safeAreaPadding', 'gridCellColumns', 'coordinateSpace',
   // painting and effects
-  'mask', 'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
+  'compositingGroup', 'drawingGroup', 'geometryGroup', 'visualEffect', 'zIndex',
 
   // symbols and images
   'symbolRenderingMode', 'symbolVariant', 'symbolEffect', 'interpolation',
@@ -224,7 +224,7 @@ export const UNIMPLEMENTED_MODIFIERS: ReadonlySet<string> = new Set([
   'refreshable', 'scrollDismissesKeyboard', 'scrollTargetBehavior', 'scrollPosition',
   'scrollDisabled', 'listSectionSeparator',
   // presentation and chrome
-  'navigationBarBackButtonHidden', 'toolbarBackground', 'statusBarHidden',
+  'navigationBarBackButtonHidden', 'statusBarHidden',
   'popoverTip',
   'searchScopes', 'searchSuggestions', 'onMove', 'swipeActions',
   'fileImporter', 'fileExporter',

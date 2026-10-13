@@ -1,4 +1,4 @@
-import { ancestors } from './render-geometry'
+import { ancestors, worldFrame } from './render-geometry'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { CompileRequest, CompileResult, RenderNode, RenderTree } from '@studio/shared'
 import { applyEvent, compile, rerender, resetPipelineState } from '@studio/swiftui-runtime'
@@ -232,5 +232,63 @@ struct RootView: View {
     )!
     expect(fill.frame.y).toBe(0)
     expect(fill.frame.height).toBe(device.height)
+  })
+
+  const titled = (content: string, modifiers = '') => `import SwiftUI
+
+@main
+struct EdgeApp: App {
+    var body: some Scene {
+        WindowGroup { RootView() }
+    }
+}
+
+struct RootView: View {
+    @State private var query = ""
+    var body: some View {
+        NavigationStack {
+            ${content}
+            .navigationTitle("Trips")
+            ${modifiers}
+        }
+    }
+}
+`
+  const node = (result: CompileResult, match: (n: RenderNode) => boolean) => {
+    const nodes = result.renderTree?.nodes ?? []
+    const found = nodes.find(match)!
+    return worldFrame(nodes, found)
+  }
+
+  it('grows only its own view, so a background behind the title leaves the content below the bar', () => {
+    const result = run(titled(`ZStack {
+                LinearGradient(colors: [.indigo, .white], startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+                VStack { Text("First"); Spacer() }
+            }`, '.searchable(text: $query)'))
+    const gradient = node(result, n => n.background?.kind === 'linearGradient')
+    const title = node(result, n => n.id === 'navbar-large-title')
+    const search = node(result, n => n.hitTarget?.role === 'textField')
+    const first = node(result, n => !!n.text?.runs.some(run => run.text === 'First'))
+    expect(gradient).toMatchObject({ y: 0, height: device.height, width: device.width })
+    expect(first.y).toBeGreaterThanOrEqual(title.y + title.height)
+    expect(first.y).toBeGreaterThanOrEqual(search.y + search.height)
+    // The bar paints nothing, so the gradient shows behind the title as it does on iOS.
+    expect(result.renderTree?.nodes.some(n => n.id === 'navbar-bgf')).toBe(false)
+  })
+
+  it('grows only the edges it names', () => {
+    const result = run(titled('Color.orange.ignoresSafeArea(edges: .bottom)'))
+    const fill = node(result, n => n.background?.kind === 'solid' && n.background.color.r === 255 && n.background.color.g < 200)
+    expect(fill.y).toBeGreaterThan(0)
+    expect(fill.y + fill.height).toBe(device.height)
+  })
+
+  it('applies .toolbarBackground to the navigation bar it names', () => {
+    const bar = (modifier: string) => run(titled('List { Text("Row") }', modifier)).renderTree?.nodes.find(n => n.id === 'navbar-bgf')
+    expect(bar('.toolbarBackground(.hidden, for: .navigationBar)')).toBeUndefined()
+    expect(bar('.toolbarBackground(Color.orange, for: .navigationBar)')?.background).toMatchObject({ kind: 'solid', color: { r: 255 } })
+    expect(bar('.toolbarBackground(.hidden, for: .tabBar)')).toBeDefined()
+    expect(run(titled('List { Text("Row") }', '.toolbarBackground(.hidden, for: .navigationBar)')).diagnostics).toEqual([])
   })
 })

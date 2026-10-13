@@ -1,6 +1,7 @@
 import type { AuthoringNode } from './authoring'
 
-export const LAYER_MOVE_CONTAINERS: ReadonlySet<string> = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'Group', 'ScrollView'])
+/** Containers a layer can be moved into. A Form's or List's rows and a Section's are a column like any stack's. */
+export const LAYER_MOVE_CONTAINERS: ReadonlySet<string> = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'Group', 'ScrollView', 'List', 'Form', 'Section'])
 
 /** Structural eligibility shared by the picker, drag targets, and source writer.
  * The writer additionally checks syntax, adjacency, and local bindings. */

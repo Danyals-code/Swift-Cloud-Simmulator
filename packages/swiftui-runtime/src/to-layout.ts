@@ -1,9 +1,10 @@
-import { prependSearch } from './containers/screen'
+import { prependSearch, primaryScroll } from './containers/screen'
 import { buildList } from './containers/list'
 import { SURFACES, listAppearance } from './appearance/surfaces'
 import { controlMetrics, CONTROL_PARTS } from './appearance/controls'
 import { controlFont, switchControl } from './controls/primitives'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
+import { formatNumber } from './number-format'
 import { appearanceFor, IOS_27 } from './appearance/ios27'
 import {
   type PreviewTarget,
@@ -253,17 +254,21 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
   const drawerSearch = ui.search && (['navigationBarDrawer', 'sidebar'].includes(ui.search.placement) || ui.search.placement === 'automatic' && (options.viewportWidth ?? 393) < 600 && !!ui.navigationBar)
+  // A drawer belongs to the navigation bar. Over a scroll view it scrolls with the
+  // content, so it goes in it; over anything else it stays with the bar, so the
+  // content's safe area - what `.ignoresSafeArea` measures from - starts below it.
+  const drawerInContent = drawerSearch && !!primaryScroll(joinRoot(body, 'vertical'))
   const toolbarSearch = ui.search && !drawerSearch && (options.viewportWidth ?? 393) >= 600 && ui.navigationBar
     ? converter.searchField(ui.search.text, ui.search.prompt, ui.search.path, true) : null
-  const search = ui.search && !drawerSearch && !toolbarSearch
-    ? { element: converter.searchField(ui.search.text, ui.search.prompt, ui.search.path), placement: ((options.viewportWidth ?? 393) >= 600 ? 'top' : 'bottom') as 'top' | 'bottom', height: SURFACES.search.height + 12 } : undefined
-  const content = ui.search && drawerSearch
+  const search = ui.search && !drawerInContent && !toolbarSearch
+    ? { element: converter.searchField(ui.search.text, ui.search.prompt, ui.search.path), placement: (drawerSearch || (options.viewportWidth ?? 393) >= 600 ? 'top' : 'bottom') as 'top' | 'bottom', height: SURFACES.search.height + 12 } : undefined
+  const content = ui.search && drawerInContent
     ? prependSearch(joinRoot(body, 'vertical'), converter.searchField(ui.search.text, ui.search.prompt, ui.search.path))
     : joinRoot(body, 'vertical')
 
   const navigationBar = ui.navigationBar
     ? {
-        element: converter.navigationBar(ui.navigationBar, toolbarSearch),
+        element: converter.navigationBar(ui.navigationBar, toolbarSearch, navigationBarFill(ui.content, scheme)),
         large: ui.navigationBar.large,
         height: NAV_BAR_HEIGHT + (ui.navigationBar.large ? Math.max(LARGE_TITLE_HEIGHT, fontForToken('largeTitle', options.dynamicTypeSize ?? options.typeScale ?? 1)!.lineHeight + 7) : 0),
       }
@@ -301,6 +306,47 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
     overlay,
     hitTargets,
   }
+}
+
+/**
+ * What the navigation bar paints behind its title: a fill, `null` for nothing, or
+ * `undefined` for the default.
+ *
+ * The default is the screen's own background, standing in for the transparent bar
+ * iOS draws at the top of its content. The stand-in cannot match a view that runs on
+ * under the bar with `.ignoresSafeArea` - a gradient behind a large title came out
+ * white - so then the bar paints nothing and the view shows through, as on a device.
+ * `.toolbarBackground(.hidden, for: .navigationBar)` asks for the same thing, and a
+ * style there paints that style.
+ */
+function navigationBarFill(views: readonly ViewValue[], scheme: ColorScheme): Fill | null | undefined {
+  let explicit: Fill | null | undefined
+  let underBar = false
+  const visit = (list: readonly ViewValue[]) => {
+    for (const view of list) {
+      for (const modifier of view.modifiers) {
+        if (modifier.name === 'toolbarBackground' && explicit === undefined && stylesNavigationBar(modifier.args)) {
+          const value = positional(modifier.args, 0)
+          const token = tokenName(value)
+          if (token === 'hidden') explicit = null
+          else if (token !== 'visible' && token !== 'automatic') explicit = resolveFillArg(value, scheme) ?? undefined
+        }
+        if (modifier.name === 'ignoresSafeArea' && ignoredEdges(modifier.args)?.top) underBar = true
+      }
+      visit(view.children)
+    }
+  }
+  visit(views)
+  return explicit !== undefined ? explicit : underBar ? null : undefined
+}
+
+/** Whether a toolbar modifier's `for:` bars include the navigation bar; with no `for:`, they do. */
+function stylesNavigationBar(args: readonly ViewArg[]): boolean {
+  const index = args.findIndex(arg => arg.label === 'for')
+  if (index < 0) return true
+  // `for:` is variadic: the bars after the first arrive unlabelled.
+  const bars = [args[index]!, ...args.slice(index + 1).filter(arg => arg.label === null)].map(arg => tokenName(arg.value))
+  return bars.some(bar => bar === 'navigationBar' || bar === 'automatic')
 }
 
 /** Grouped lists supply a screen surface. Other backgrounds paint only their view's bounds. */
@@ -533,11 +579,11 @@ class Converter {
   }
 
   /** The navigation bar: a translucent strip with a title and its bar buttons. */
-  navigationBar(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null = null): LayoutElement {
+  navigationBar(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null = null, fill?: Fill | null): LayoutElement {
     const outer = this.styles
     this.styles = withStyles(outer, bar.view, this.scheme)
     this.styles = { ...this.styles, container: 'toolbar' }
-    try { return this.navigationBarContent(bar, search) } finally { this.styles = outer }
+    try { return this.navigationBarContent(bar, search, fill) } finally { this.styles = outer }
   }
 
   /** System bar controls keep a compact font; content still follows Dynamic Type. */
@@ -548,7 +594,7 @@ class Converter {
     finally { this.styles = outer }
   }
 
-  private navigationBarContent(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null): LayoutElement {
+  private navigationBarContent(bar: ResolvedUI['navigationBar'] & object, search: LayoutElement | null, fill: Fill | null | undefined): LayoutElement {
     const inline: LayoutElement = {
       kind: 'zstack',
       id: 'navbar-inline',
@@ -628,12 +674,15 @@ class Converter {
       is transparent and the content's own background runs behind it, which is why
       no seam exists there; matching the background is the same result without
       having to let the content scroll under the bar.
+
+      Matching only works against a solid colour, so `fill` overrides it: `null`
+      paints nothing, for content that already runs under the bar, and a fill paints
+      what `.toolbarBackground` asked for.
     */
-    return this.background(
-      this.fill(inset, 'navbar-fill', { horizontal: 'center', vertical: 'top' }),
-      'navbar-bg',
-      this.screenBackground,
-    )
+    const filled = this.fill(inset, 'navbar-fill', { horizontal: 'center', vertical: 'top' })
+    if (fill === null) return filled
+    if (!fill || fill.kind === 'solid') return this.background(filled, 'navbar-bg', fill?.color ?? this.screenBackground)
+    return { kind: 'modified', id: 'navbar-bg', modifier: { kind: 'background', content: { kind: 'fill', id: 'navbar-bgf', fill } }, child: filled }
   }
 
   /**
@@ -2194,6 +2243,17 @@ class Converter {
   }
 
   /**
+   * An explicit `.foregroundStyle` or `.foregroundColor` on a button: the label's
+   * colour, over both the role and the tint, as on iOS - it is how a destructive
+   * button is given another colour. Drawn in the tint before, so a button coloured
+   * this way came out blue, or red, whatever it asked for.
+   */
+  private buttonForeground(view: ViewValue): RGBA | null {
+    const value = modifierArg(view, 'foregroundStyle', 0) ?? modifierArg(view, 'foregroundColor', 0)
+    return value ? resolveColorArg(value, this.scheme, this.styles.tint) : null
+  }
+
+  /**
    * `.bordered` and `.borderedProminent` are shape-and-fill; the rest is a tint.
    *
    * A button's label is the accent colour in SwiftUI, and that is most of what makes
@@ -2210,13 +2270,14 @@ class Converter {
     const requested = this.styles.button ?? 'automatic'
     const style = requested === 'automatic' ? this.appearance.button.automatic[this.styles.container ?? 'content'] : requested
     const tint = this.buttonTint(view)
+    const foreground = this.buttonForeground(view)
 
     if (style !== 'bordered' && style !== 'borderedProminent' && style !== 'glass' && style !== 'glassProminent') {
       if (style === 'plain') return label
       return {
         kind: 'modified',
         id: `${path}btntint`,
-        modifier: { kind: 'foregroundStyle', color: tint },
+        modifier: { kind: 'foregroundStyle', color: foreground ?? tint },
         child: label,
       }
     }
@@ -2238,7 +2299,7 @@ class Converter {
       id: `${path}btncolor`,
       modifier: {
         kind: 'foregroundStyle',
-        color: prominent ? rgba(255, 255, 255) : tint,
+        color: foreground ?? (prominent ? rgba(255, 255, 255) : tint),
       },
       child: label,
     }
@@ -3304,6 +3365,15 @@ class Converter {
         return value === null ? null : { kind: 'opacity', value }
       }
 
+      case 'mask': {
+        // A gradient or a colour masks by its alpha. A gradient written in the
+        // modifier's closure arrives as the view it is, a Color view carrying it.
+        const value = positional(args, 0) ?? labelled(args, 'mask') ?? labelled(args, 'content')
+        const masking = value?.kind === 'opaque' && value.typeName === 'View' ? value.payload as ViewValue : null
+        const fill = resolveFillArg(masking?.name === 'Color' ? positional(masking.args, 0) : value, this.scheme, this.styles.tint)
+        return fill ? { kind: 'mask', fill } : null
+      }
+
       case 'cornerRadius': {
         const radius = numberArg(args[0]?.value)
         return radius === null ? null : { kind: 'cornerRadius', radius }
@@ -3446,11 +3516,14 @@ class Converter {
         // Read directly off the shape or path they style, not applied as wrappers.
         return null
 
-      case 'ignoresSafeArea':
-        // Read by the pipeline, which owns the device's edges. `.safeAreaInset` was
-        // grouped here and is not: nothing read it, and it was in the unimplemented
-        // list at the same time - so it both warned and was claimed to be handled.
-        return null
+      case 'ignoresSafeArea': {
+        // On a screen's root view the pipeline moves the whole screen to the device's
+        // edges; anywhere else only this view grows, which the layout engine does.
+        // `.safeAreaInset` was grouped here and is not: nothing read it, and it was in
+        // the unimplemented list at the same time - so it both warned and was claimed.
+        const edges = ignoredEdges(args)
+        return edges ? { kind: 'ignoresSafeArea', edges } : null
+      }
 
       case 'zIndex':
       case 'id':
@@ -3716,6 +3789,7 @@ class Converter {
       case 'tag':
       case 'navigationTitle':
       case 'navigationBarTitleDisplayMode':
+      case 'toolbarBackground':
       case 'navigationDestination':
       case 'toolbar':
       case 'sheet':
@@ -3935,31 +4009,13 @@ function textOf(view: ViewValue): string {
 /**
  * A value rendered through a `FormatStyle`.
  *
- * `Intl` does the work, so the grouping separators and currency symbols are the
- * platform's real ones rather than a transcription. An unrecognised style falls back
- * to the plain description: the number is still right, only its dressing is missing.
+ * An unrecognised style falls back to the plain description: the number is still
+ * right, only its dressing is missing.
  */
 function formatted(value: SwiftValue, format: SwiftValue): string {
-  const name = tokenName(format) ?? ''
   const n = value.kind === 'int' || value.kind === 'double' ? value.value : Number.NaN
   if (Number.isNaN(n)) return displayValue(value)
-
-  // `.currency(code:)` arrives as `currency:USD`, the same way `.system(size:)` does.
-  const [style, detail] = name.split(':')
-
-  switch (style) {
-    case 'currency':
-      return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: detail || 'USD',
-      }).format(n)
-    case 'percent':
-      return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(n)
-    case 'number':
-      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(n)
-    default:
-      return displayValue(value)
-  }
+  return formatNumber(n, tokenName(format) ?? '') ?? displayValue(value)
 }
 
 function displayValue(value: SwiftValue): string {
@@ -4152,6 +4208,34 @@ function strokeStyle(view: ViewValue): StrokeStylePayload | undefined {
   )
 
   return style ?? undefined
+}
+
+type EdgeFlags = { readonly top: boolean; readonly bottom: boolean; readonly leading: boolean; readonly trailing: boolean }
+
+const EDGE_SETS: Readonly<Record<string, EdgeFlags>> = {
+  all: { top: true, bottom: true, leading: true, trailing: true },
+  top: { top: true, bottom: false, leading: false, trailing: false },
+  bottom: { top: false, bottom: true, leading: false, trailing: false },
+  leading: { top: false, bottom: false, leading: true, trailing: false },
+  trailing: { top: false, bottom: false, leading: false, trailing: true },
+  horizontal: { top: false, bottom: false, leading: true, trailing: true },
+  vertical: { top: true, bottom: true, leading: false, trailing: false },
+}
+
+/**
+ * The edges `.ignoresSafeArea(_:edges:)` asks for, or null for none.
+ *
+ * Only the keyboard region is declined: the preview has no keyboard, so ignoring its
+ * safe area changes nothing.
+ */
+function ignoredEdges(args: readonly ViewArg[]): EdgeFlags | null {
+  if (tokenName(positional(args, 0)) === 'keyboard') return null
+  const value = labelled(args, 'edges')
+  if (!value) return EDGE_SETS.all!
+  const names = value.kind === 'array' ? value.elements.map(element => tokenName(element)) : [tokenName(value)]
+  const sets = names.map(name => (name ? EDGE_SETS[name] : undefined) ?? EDGE_SETS.all!)
+  const edges = { top: sets.some(s => s.top), bottom: sets.some(s => s.bottom), leading: sets.some(s => s.leading), trailing: sets.some(s => s.trailing) }
+  return edges.top || edges.bottom || edges.leading || edges.trailing ? edges : null
 }
 
 function paddingInsets(args: readonly ViewArg[], defaultLength = IOS_27.metrics.padding): EdgeInsets {
