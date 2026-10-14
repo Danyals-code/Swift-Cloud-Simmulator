@@ -22,6 +22,14 @@ import { finishExit, reconcilePresence, type PresentNode, type RenderGroups } fr
 import { editDraft, shownValue, NO_DRAFT, type ControlDraft, type ControlEdit } from './control-draft'
 
 const EMPTY_NODES: readonly RenderNode[] = []
+
+/**
+ * The canvas's selection blue, in one place: the outline drawn around what is selected or
+ * hovered, here, and the canvas's handles, which set it as a CSS variable.
+ */
+export const SELECTION_COLOR = 'rgb(0 122 255)'
+/** How thick the selection outline is, in the tree's points, drawn inside the box. */
+export const SELECTION_OUTLINE = 2
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 function subscribeMotion(notify: () => void) {
   const query = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -39,6 +47,11 @@ export interface RenderTreeViewProps {
    * as the words in it (D1).
    */
   selectedGroups?: readonly (readonly string[])[]
+  /**
+   * The selected groups this tree outlines, when not all of them: a view whose outline the
+   * canvas draws itself, at its handles, is still marked selected here but not outlined.
+   */
+  selectedOutlines?: readonly (readonly string[])[]
   /**
    * Temporary canvas outlines: each group is one view, under the Layers pointer or where a
    * click would select it, outlined as one box.
@@ -117,6 +130,7 @@ export const RenderTreeView = memo(function RenderTreeView({
   stale = false,
   debugOutlines = false,
   selectedGroups,
+  selectedOutlines: outlinedGroups,
   hoveredGroups,
   scrollPositions,
   inspect,
@@ -149,7 +163,7 @@ export const RenderTreeView = memo(function RenderTreeView({
   // leaves the selection's outlines as they are.
   const nodesById = useMemo(() => new Map(tree.nodes.map(node => [node.id, node])), [tree])
   const selectedIds = useMemo(() => new Set(selectedGroups?.flat()), [selectedGroups])
-  const selectedOutlines = useMemo(() => painted(nodesById, selectedGroups ?? []), [nodesById, selectedGroups])
+  const selectedOutlines = useMemo(() => painted(nodesById, outlinedGroups ?? selectedGroups ?? []), [nodesById, outlinedGroups, selectedGroups])
   const inspected = inspect?.hovered ?? null
   const hoveredOutlines = useMemo(() => stale ? [] : painted(nodesById, [...(inspected ? [[inspected]] : []), ...hoveredGroups ?? []]), [nodesById, hoveredGroups, inspected, stale])
 
@@ -402,7 +416,7 @@ function Outline({ nodes, tree, byId, kind }: { nodes: readonly RenderNode[]; tr
         top: y,
         width: Math.max(...frames.map(frame => frame.right)) - x,
         height: Math.max(...frames.map(frame => frame.bottom)) - y,
-        ...(kind === 'hovered' ? { outline: '1.5px solid rgb(0 122 255)', background: 'rgb(0 122 255 / 0.12)' } : { outline: '2px solid rgb(0 122 255)', outlineOffset: -2 }),
+        ...(kind === 'hovered' ? { outline: `1.5px solid ${SELECTION_COLOR}`, background: `color-mix(in srgb, ${SELECTION_COLOR} 12%, transparent)` } : { outline: `${SELECTION_OUTLINE}px solid ${SELECTION_COLOR}`, outlineOffset: -SELECTION_OUTLINE }),
         pointerEvents: 'none',
         zIndex: 2_000_000,
       }}

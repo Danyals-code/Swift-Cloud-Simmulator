@@ -1,4 +1,4 @@
-import { sameLength, type Alignment9, type AxisSize, type Insets, type LayerChange, type LayerLayout, type LayerValue, type Length, type Offset } from '@studio/shared'
+import { alignmentOf, alignmentSides, sameLength, type Alignment9, type AxisSize, type HorizontalSide, type Insets, type LayerChange, type LayerLayout, type LayerValue, type Length, type Offset, type SourceSpan, type VerticalSide } from '@studio/shared'
 import type { CallExpr, Expr } from '@studio/swift-syntax'
 import { SLOT } from '../authoring-modifiers'
 import { buttonLabel, type ButtonLabel } from '../design-controls'
@@ -171,7 +171,8 @@ const disagree = (axis: Axis) => `Two frames set this view’s ${axis}. Change i
 
 const infinite = (value: Expr) => value.kind === 'memberAccess' && value.member === 'infinity' && (!value.base || value.base.kind === 'identifier' && ['CGFloat', 'Double', 'Float'].includes(value.base.name))
 
-function alignmentOf(value: Expr): Alignment9 | undefined {
+/** The alignment a frame argument names, `.leading` or `Alignment.topLeading`; undefined for anything else. */
+function alignmentWritten(value: Expr): Alignment9 | undefined {
   if (value.kind !== 'memberAccess' || value.base && !(value.base.kind === 'identifier' && value.base.name === 'Alignment')) return undefined
   return ALIGNMENTS.find(name => name === value.member)
 }
@@ -182,7 +183,7 @@ function frameOf(call: CallExpr, ctx: LayerContext, id?: string): FrameRead {
   for (const arg of call.args) {
     const label = arg.label ?? ''
     if (label === 'alignment') {
-      alignment = alignmentOf(arg.value)
+      alignment = alignmentWritten(arg.value)
       if (!alignment) problem ??= SIZE_SWIFT
       continue
     }
@@ -300,20 +301,12 @@ interface SizeRead {
   readonly cap?: SlotRun
   /** The frame that pins the view in its Overlap, in its own chain. */
   readonly pinRun?: SlotRun
+  /** The size frames' run, in the chain they are in, when there is one. */
+  readonly sizeRun?: SlotRun
+  /** A Button with no frame of its own takes its size on a label written whole, in the label form. */
+  readonly whole?: true
   /** Why the size, alignment and pin cannot be changed here. */
   readonly blocked?: string
-}
-
-type Vertical = 'top' | 'center' | 'bottom'
-type Horizontal = 'leading' | 'center' | 'trailing'
-function split(alignment: Alignment9): [Vertical, Horizontal] {
-  const vertical: Vertical = alignment.startsWith('top') ? 'top' : alignment.startsWith('bottom') ? 'bottom' : 'center'
-  const horizontal: Horizontal = /leading/i.test(alignment) ? 'leading' : /trailing/i.test(alignment) ? 'trailing' : 'center'
-  return [vertical, horizontal]
-}
-function joined(vertical: Vertical, horizontal: Horizontal): Alignment9 {
-  if (vertical === 'center') return horizontal
-  return horizontal === 'center' ? vertical : `${vertical}${horizontal === 'leading' ? 'Leading' : 'Trailing'}`
 }
 
 function readSize(slots: ChainSlots, ctx: LayerContext): SizeRead {
@@ -364,14 +357,14 @@ function readSize(slots: ChainSlots, ctx: LayerContext): SizeRead {
   // The alignment: each frame aligns along the axes it sizes, in the middle unless it says otherwise.
   const aligning = [...site.frames, ...room ? [room] : []]
   const meaningful = AXES.some(axis => aligning.some(frame => constrains(frame, axis)))
-  let vertical: Vertical | undefined, horizontal: Horizontal | undefined
+  let vertical: VerticalSide | undefined, horizontal: HorizontalSide | undefined
   for (const frame of aligning) {
-    const [v, h] = split(frame.alignment ?? 'center')
+    const [v, h] = alignmentSides(frame.alignment ?? 'center')
     if (constrains(frame, 'width')) { if (horizontal && horizontal !== h) blocked ??= ALIGN_TWICE; horizontal = h }
     if (constrains(frame, 'height')) { if (vertical && vertical !== v) blocked ??= ALIGN_TWICE; vertical = v }
   }
   const alignedBy = aligning.filter(frame => frame.alignment).flatMap(frame => frame.id ? [frame.id] : [])
-  const aligned = joined(vertical ?? 'center', horizontal ?? 'center')
+  const aligned = alignmentOf(vertical ?? 'center', horizontal ?? 'center')
   const alignment: LayerValue<Alignment9 | null> = blocked ? { ...inCode(meaningful ? aligned : null, alignedBy, blocked), ...(alignedBy.length ? {} : { state: 'absent' }) }
     : !meaningful ? absent(null, ALIGN_HUG)
     : { value: aligned, state: aligning.some(frame => frame.alignment) ? 'literal' : 'absent', ...(alignedBy.length ? { from: alignedBy } : {}) }
@@ -393,13 +386,12 @@ function readSize(slots: ChainSlots, ctx: LayerContext): SizeRead {
     : !pinRun ? absent(null, ctx.overlapSized ? undefined : PIN_UNSIZED)
     : runHasComment(slots, pinRun, ctx.text) ? inCode(pinned!, pinFrom, SIZE_COMMENT)
     : { value: pinned!, state: 'literal', from: pinFrom }
-  return { width: sized('width'), height: sized('height'), alignment, pin, site, frames, ...(room ? { cap: roomRuns[0] } : {}), ...(pinRun ? { pinRun } : {}), ...(blocked ? { blocked } : {}) }
+  return { width: sized('width'), height: sized('height'), alignment, pin, site, frames, ...(room ? { cap: roomRuns[0] } : {}), ...(pinRun ? { pinRun } : {}), ...(sizeRuns[0] ? { sizeRun: sizeRuns[0] } : {}), ...(label?.kind === 'whole' ? { whole: true } : {}), ...(blocked ? { blocked } : {}) }
 }
 
 const sameOptional = (a: Length | undefined, b: Length | undefined) => a === undefined || b === undefined ? a === b : sameLength(a, b)
 const sameAxis = (a: AxisSize, b: AxisSize) => a.mode === b.mode && sameOptional(a.size, b.size) && sameOptional(a.min, b.min) && sameOptional(a.max, b.max)
 const flexible = (size: AxisSize) => size.mode === 'fill' || size.mode === 'hug' && size.min !== undefined
-const sizes = (size: AxisSize) => size.mode !== 'hug' || size.min !== undefined || size.max !== undefined
 
 function checkLength(length: Length | undefined): void {
   if (typeof length === 'number' && (!Number.isFinite(length) || length < 0)) throw new Error('A size is a number of points, 0 or more.')
@@ -424,12 +416,22 @@ function nextAxis(axis: Axis, next: AxisSize | undefined, current: AxisSize, mea
   return { mode: next.mode, ...(next.min !== undefined ? { min: next.min } : {}), ...(next.max !== undefined ? { max: next.max } : {}) }
 }
 
-/** An alignment as a frame writes it, for the axes the frame sizes; nothing for the middle. */
-function alignmentArgument(alignment: Alignment9 | null, horizontal: boolean, vertical: boolean): string {
-  if (!alignment) return ''
-  const [v, h] = split(alignment)
-  const written = joined(vertical ? v : 'center', horizontal ? h : 'center')
-  return written === 'center' ? '' : `, alignment: .${written}`
+/** An alignment as a frame writes it, for the axes the frame sizes; none for the middle. */
+function frameAlignment(alignment: Alignment9 | null, horizontal: boolean, vertical: boolean): Alignment9 | undefined {
+  if (!alignment) return undefined
+  const [v, h] = alignmentSides(alignment)
+  const written = alignmentOf(vertical ? v : 'center', horizontal ? h : 'center')
+  return written === 'center' ? undefined : written
+}
+
+/**
+ * A frame the Layout section writes, as data: each argument in the order it is written,
+ * and the alignment, along only the axes the frame sizes. The writer prints it, and a
+ * drag's draft lays the same frames out before anything is written (Wave 2b).
+ */
+export interface FrameParts {
+  readonly args: readonly (readonly [label: string, value: Length | 'infinity'])[]
+  readonly alignment?: Alignment9
 }
 
 /**
@@ -437,24 +439,37 @@ function alignmentArgument(alignment: Alignment9 | null, horizontal: boolean, ve
  * and a Hug's minimum, and both when the axes differ, the Fixed one first. SwiftUI has
  * no `frame(width:maxHeight:)`.
  */
-function sizeCalls(width: AxisSize, height: AxisSize, alignment: Alignment9 | null): string[] {
+export function sizeFrames(width: AxisSize, height: AxisSize, alignment: Alignment9 | null): FrameParts[] {
   const fixed = AXES.filter(axis => (axis === 'width' ? width : height).mode === 'fixed')
   const flex = AXES.filter(axis => flexible(axis === 'width' ? width : height))
   const of = (axis: Axis) => axis === 'width' ? width : height
-  const frame = (args: string[], axes: readonly Axis[]) => `.frame(${args.join(', ')}${alignmentArgument(alignment, axes.includes('width'), axes.includes('height'))})`
-  const fixedFrame = fixed.length ? [frame(fixed.map(axis => `${axis}: ${lengthSource(of(axis).size!)}`), fixed)] : []
+  const frame = (args: FrameParts['args'], axes: readonly Axis[]): FrameParts => {
+    const aligned = frameAlignment(alignment, axes.includes('width'), axes.includes('height'))
+    return { args, ...(aligned ? { alignment: aligned } : {}) }
+  }
+  const fixedFrame = fixed.length ? [frame(fixed.map(axis => [axis, of(axis).size!] as const), fixed)] : []
   const flexFrame = flex.length ? [frame(flex.flatMap(axis => {
     const size = of(axis), name = axis === 'width' ? 'Width' : 'Height'
-    return [...size.min !== undefined ? [`min${name}: ${lengthSource(size.min)}`] : [], ...size.mode === 'fill' ? [`max${name}: ${size.max !== undefined ? lengthSource(size.max) : '.infinity'}`] : []]
+    return [...size.min !== undefined ? [[`min${name}`, size.min] as const] : [], ...size.mode === 'fill' ? [[`max${name}`, size.max ?? 'infinity'] as const] : []]
   }), flex)] : []
   return [...fixedFrame, ...flexFrame]
 }
 
 /** The frame after the surface that holds a Hug's maximum, as a chat bubble's. */
-function capCalls(width: AxisSize, height: AxisSize, alignment: Alignment9 | null): string[] {
+export function capFrames(width: AxisSize, height: AxisSize, alignment: Alignment9 | null): FrameParts[] {
   const capped = AXES.filter(axis => { const size = axis === 'width' ? width : height; return size.mode === 'hug' && size.max !== undefined })
-  return capped.length ? [`.frame(${capped.map(axis => `max${axis === 'width' ? 'Width' : 'Height'}: ${lengthSource((axis === 'width' ? width : height).max!)}`).join(', ')}${alignmentArgument(alignment, capped.includes('width'), capped.includes('height'))})`] : []
+  if (!capped.length) return []
+  const aligned = frameAlignment(alignment, capped.includes('width'), capped.includes('height'))
+  return [{ args: capped.map(axis => [`max${axis === 'width' ? 'Width' : 'Height'}`, (axis === 'width' ? width : height).max!] as const), ...(aligned ? { alignment: aligned } : {}) }]
 }
+
+/** A frame as Swift. */
+const frameCall = (frame: FrameParts) => `.frame(${frame.args.map(([label, value]) => `${label}: ${value === 'infinity' ? '.infinity' : lengthSource(value)}`).join(', ')}${frame.alignment ? `, alignment: .${frame.alignment}` : ''})`
+const sizeCalls = (width: AxisSize, height: AxisSize, alignment: Alignment9 | null) => sizeFrames(width, height, alignment).map(frameCall)
+const capCalls = (width: AxisSize, height: AxisSize, alignment: Alignment9 | null) => capFrames(width, height, alignment).map(frameCall)
+
+/** Whether a size sets anything, and so whether its frames' alignment means anything. */
+export const setsSize = (size: AxisSize) => size.mode !== 'hug' || size.min !== undefined || size.max !== undefined
 
 /** The frame that puts a layer in a corner or at an edge of its Overlap. */
 const pinCalls = (pin: Alignment9 | null) => pin ? [`.frame(maxWidth: .infinity, maxHeight: .infinity${pin === 'center' ? '' : `, alignment: .${pin}`})`] : []
@@ -475,7 +490,7 @@ function writeSize(slots: ChainSlots, change: Extract<LayerChange, { section: 'l
   }
   const width = nextAxis('width', change.width, read.width.value, change.measured)
   const height = nextAxis('height', change.height, read.height.value, change.measured)
-  const meaningful = sizes(width) || sizes(height)
+  const meaningful = setsSize(width) || setsSize(height)
   const asked = change.alignment !== undefined ? change.alignment : read.alignment.value
   if (change.alignment && change.alignment !== 'center' && !meaningful) throw new Error(ALIGN_HUG)
   const alignment = meaningful ? asked ?? 'center' : null
@@ -577,4 +592,82 @@ export function writeLayout(slots: ChainSlots, change: Extract<LayerChange, { se
   const ranked = edits.map(([edit, rank]): [Patch | null, number] => [edit && 'calls' in edit ? null : edit, rank])
   if (whole.length) ranked.push([labelPatch(whole[0]!.write, whole.flatMap(edit => edit.calls)), 0])
   return inOrder(ranked)
+}
+
+/**
+ * Where a value of a drag on the canvas goes: in place of a run of calls, before a call
+ * (`insert` is the chain's length for its end), or onto a Button's label written in the
+ * label form, its title or its views grouped in an HStack. `chain` says whose chain the
+ * indices are in, the view's own or its Button label's.
+ */
+export type DraftPlace =
+  | { readonly chain: 'view' | 'label'; readonly replace: readonly number[] }
+  | { readonly chain: 'view' | 'label'; readonly insert: number }
+  | { readonly chain: 'title' | 'views' }
+
+/** A modifier chain as the preview finds it again: where its view starts, and each call. */
+export interface DraftChain {
+  /** The view's expression; its evaluated view starts where it does. */
+  readonly view: SourceSpan
+  /** Each call in the chain, in order: an evaluated modifier carries the span of the call it came from. */
+  readonly calls: readonly SourceSpan[]
+}
+
+export const draftChain = (slots: Pick<ChainSlots, 'expr' | 'modifiers'>): DraftChain => ({ view: slots.expr.span, calls: slots.modifiers.map(call => call.span) })
+
+export interface LayoutDraftPlaces {
+  /** A Button's label of one view, whose chain takes its padding and size (`chain: 'label'`). */
+  readonly label?: DraftChain
+  readonly padding?: DraftPlace
+  readonly margin?: DraftPlace
+  readonly offset?: DraftPlace
+  /**
+   * The size frames, the frame after the surface that caps a Hug (always a run that is
+   * there: a drag never adds a cap), and the alignment the frames are written with.
+   */
+  readonly size?: { readonly place: DraftPlace; readonly cap?: DraftPlace; readonly alignment: Alignment9 | null }
+}
+
+/**
+ * Where each value a drag sets would be written, worked out once as the drag starts so the
+ * canvas can follow the pointer without planning an edit. It is the writer's own reading
+ * of the chain, place for place, so the draft lands where `writeLayout` writes: a value
+ * the writer refuses has no place, and a Button's padding and size go on its label.
+ */
+export function layoutDraftPlaces(slots: ChainSlots, ctx: LayerContext): LayoutDraftPlaces {
+  const label = isButton(ctx) ? labelOf(slots, ctx) : undefined
+  // A label in the label form is written whole: from its title, or around its views.
+  const base = slots.base
+  const closure = base.args.some(arg => arg.label === 'label' && arg.value.kind === 'closure') || base.args.some(arg => arg.label === 'action') && !!base.trailingClosure
+  const whole: DraftPlace = { chain: closure ? 'views' : 'title' }
+  /** A run of `kind` rewritten in place, or a new one where its slot puts it. */
+  const at = (on: ChainSlots, kind: 'padding' | 'margin', chain: 'view' | 'label', within: LayerContext): DraftPlace | undefined => {
+    if (readInsets(on, kind, within).disabledReason) return undefined
+    const run = runsOf(on, kind)[0]
+    return run ? { chain, replace: run.indices } : within.locked ? undefined : { chain, insert: insertionIndex(on, SLOT[kind]) }
+  }
+  const padding = !isButton(ctx) ? at(slots, 'padding', 'view', ctx)
+    : label?.kind === 'chain' ? at(label.slots, 'padding', 'label', label.ctx) : label ? whole : undefined
+  const offsetRun = callsNamed(slots, ['offset'])[0]
+  const offset: DraftPlace | undefined = readOffset(slots, ctx).disabledReason ? undefined
+    : offsetRun ? { chain: 'view', replace: offsetRun.indices } : ctx.locked ? undefined : { chain: 'view', insert: insertionIndex(slots, SLOT.offset) }
+
+  const read = readSize(slots, ctx)
+  let size: LayoutDraftPlaces['size']
+  if (!read.blocked) {
+    const chain = read.frames.label ? 'label' : 'view'
+    const pin = !read.frames.label ? read.pinRun?.indices[0] ?? Infinity : Infinity
+    const place: DraftPlace | undefined = read.whole ? whole
+      : read.sizeRun ? { chain, replace: read.sizeRun.indices }
+      : read.frames.ctx.locked ? undefined : { chain, insert: Math.min(insertionIndex(read.frames.slots, SLOT.size), pin) }
+    if (place) size = { place, ...(read.cap ? { cap: { chain, replace: read.cap.indices } } : {}), alignment: read.alignment.value }
+  }
+  const margin = at(slots, 'margin', 'view', ctx)
+  return {
+    ...(label?.kind === 'chain' ? { label: draftChain(label.slots) } : {}),
+    ...(padding ? { padding } : {}),
+    ...(margin ? { margin } : {}),
+    ...(offset ? { offset } : {}),
+    ...(size ? { size } : {}),
+  }
 }

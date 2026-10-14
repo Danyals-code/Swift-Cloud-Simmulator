@@ -1,4 +1,4 @@
-import type { Point, CornerRadii, CornerStyle, PlaceholderPayload, Rect, ShapeOutline, ShapeStroke, ShapeTrim, SliderPayload, FilterSpec, Fill, ResolvedFont, RGBA, ShapeKind, Size, SourceSpan } from '@studio/shared'
+import { alignmentOf, alignmentSides, type Alignment9, type Point, type CornerRadii, type CornerStyle, type PlaceholderPayload, type Rect, type ShapeOutline, type ShapeStroke, type ShapeTrim, type SliderPayload, type FilterSpec, type Fill, type ResolvedFont, type RGBA, type ShapeKind, type Size, type SourceSpan } from '@studio/shared'
 
 /**
  * The layout engine's input.
@@ -30,6 +30,14 @@ export interface Alignment {
 }
 
 export const CENTER: Alignment = { horizontal: 'center', vertical: 'center' }
+
+/** The alignment an `Alignment` member names, `.topLeading` or `.center`; null for any other name. */
+export function alignmentNamed(name: string): Alignment | null {
+  const [vertical, horizontal] = alignmentSides(name as Alignment9)
+  // The sides of a name that is no alignment join back into a different name.
+  if (alignmentOf(vertical, horizontal) !== name) return null
+  return name === 'center' ? CENTER : { horizontal, vertical }
+}
 
 export type LayoutElement =
   | StackElement
@@ -799,4 +807,67 @@ export function insets(
 
 export function uniformInsets(length: number): EdgeInsets {
   return { top: length, leading: length, bottom: length, trailing: length }
+}
+
+/** What a modifier draws beside the view it wraps: a background's, an overlay's or an inset's content. */
+export function modifierContent(modifier: LayoutModifier): LayoutElement | undefined {
+  return 'content' in modifier ? modifier.content : undefined
+}
+
+/**
+ * The elements an element holds: a stack's, grid's or table's children, a scroll view's
+ * content, and a modifier's child and what it draws beside it.
+ */
+export function childrenOf(element: LayoutElement): readonly LayoutElement[] {
+  switch (element.kind) {
+    case 'stack':
+    case 'zstack':
+    case 'grid':
+    case 'firstFit':
+      return element.children
+    case 'table':
+      return element.rows.flat()
+    case 'scroll':
+      return [element.content]
+    case 'modified': {
+      const content = modifierContent(element.modifier)
+      return content ? [element.child, content] : [element.child]
+    }
+    default:
+      return []
+  }
+}
+
+/** The element with each element it holds passed through `change`; the same object when none changed. */
+export function withChildren(element: LayoutElement, change: (element: LayoutElement) => LayoutElement): LayoutElement {
+  const list = (items: readonly LayoutElement[]) => {
+    const next = items.map(change)
+    return next.some((item, index) => item !== items[index]) ? next : items
+  }
+  switch (element.kind) {
+    case 'stack':
+    case 'zstack':
+    case 'grid':
+    case 'firstFit': {
+      const children = list(element.children)
+      return children === element.children ? element : { ...element, children }
+    }
+    case 'table': {
+      const rows = element.rows.map(list)
+      return rows.some((row, index) => row !== element.rows[index]) ? { ...element, rows } : element
+    }
+    case 'scroll': {
+      const content = change(element.content)
+      return content === element.content ? element : { ...element, content }
+    }
+    case 'modified': {
+      const child = change(element.child)
+      const content = modifierContent(element.modifier)
+      const held = content && change(content)
+      if (child === element.child && held === content) return element
+      return { ...element, child, ...(held !== content ? { modifier: { ...element.modifier, content: held } as LayoutModifier } : {}) }
+    }
+    default:
+      return element
+  }
 }

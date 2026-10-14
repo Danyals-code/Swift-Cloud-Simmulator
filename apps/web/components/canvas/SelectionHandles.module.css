@@ -1,0 +1,95 @@
+/*
+ * The selected view's handles: tool chrome over the canvas, in the selection outline's own
+ * colour, `--selection`, which the render tree draws its outline in and sets here, so the
+ * handles and the outline read as one.
+ */
+.handles {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* The selection's outline, around the handles' box: the render tree's own look, square cornered. */
+.outline {
+  position: absolute;
+  outline: 2px solid var(--selection);
+  outline-offset: -2px;
+}
+
+/* Where a drag puts the view, while a slow screen's drafts catch up with the pointer. */
+.ghost {
+  position: absolute;
+  border: 1px dashed var(--selection);
+  background: color-mix(in srgb, var(--selection) 6%, transparent);
+}
+
+/*
+ * A 6 px square on each corner and edge, in a 10 px grab area that leans 2 px outside the
+ * view (`--dx`, `--dy`): a band just inside the edge, and a view just past it, stay reachable.
+ */
+.resize {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: calc(-5px + var(--dy) * 2px) 0 0 calc(-5px + var(--dx) * 2px);
+  pointer-events: auto;
+  touch-action: none;
+}
+.resize::after {
+  content: '';
+  position: absolute;
+  left: calc(2px - var(--dx) * 2px);
+  top: calc(2px - var(--dy) * 2px);
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--selection);
+  background: var(--color-canvas-knob);
+  box-shadow: var(--shadow-thumb);
+}
+
+/* Padding inside the view, and the gaps between a stack's views, hatched as Figma marks them. */
+.band {
+  position: absolute;
+  background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--selection) 20%, transparent) 0 1px, color-mix(in srgb, var(--selection) 6%, transparent) 1px 5px);
+}
+
+/* The grip a band or a gap is dragged by: a short bar, in a grab area placed for it. */
+.grip {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+}
+.grip::after {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  background: var(--selection);
+  box-shadow: 0 0 0 1px var(--color-canvas-knob);
+}
+.grip[data-axis='vertical'] { cursor: ns-resize; }
+.grip[data-axis='vertical']::after { inset: calc(50% - 1.5px) 2px; }
+.grip[data-axis='horizontal'] { cursor: ew-resize; }
+.grip[data-axis='horizontal']::after { inset: 2px calc(50% - 1.5px); }
+
+/* The 9-dot pin, beside the view's bottom trailing corner, as a small floating panel. */
+.pin {
+  position: absolute;
+  z-index: 2;
+  translate: -100% 0;
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  background: var(--color-xc-panel);
+  box-shadow: var(--shadow-float);
+}
+.offer {
+  height: var(--control-height-sm);
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-caption);
+  color: var(--color-xc-accent);
+  white-space: nowrap;
+}
+.offer:hover { background: var(--color-xc-fill); }

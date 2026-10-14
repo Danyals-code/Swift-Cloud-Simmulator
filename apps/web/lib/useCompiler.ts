@@ -19,8 +19,10 @@ import type {
   DesignEditRequest,
   DesignEditPlan,
   ViewSiteInfo,
+  LayerDraft,
 } from '@studio/shared'
 import type { DeviceSpec } from '@studio/sim-shell'
+import { sameStart } from '@studio/shared'
 import { measureFontsWhenReady, measureTextBatch } from './fontMetrics'
 import { PreviewEvents } from './previewEvents'
 import { recordCoverage } from './telemetry'
@@ -28,6 +30,26 @@ import { WorkerRequests } from './workerRequests'
 
 /** Edit-to-recompile debounce. Long enough to coalesce a fast typist's burst, short enough to feel live. */
 const DEBOUNCE_MS = 150
+
+/**
+ * A drag's live preview (Wave 2b): the page laid out again with a draft of the selected
+ * view's values, which nothing writes. Each resolves to nothing, rather than failing, when
+ * the worker has no program or stopped, and the drag carries on without a preview.
+ */
+export interface LayerDrafts {
+  /** Starts a draft of the view at `target`; false when there is no program to draft in. */
+  begin(target: SourceSpan): Promise<boolean>
+  /** The page laid out with `draft`, or null. Never painted by the compiler: the canvas shows it. */
+  update(draft: LayerDraft): Promise<CompileResult | null>
+  /** Ends the draft in the worker; the page as it was is still the one painted. */
+  end(): Promise<void>
+}
+
+/**
+ * The worker already measures exactly this span: the same view, by where it starts, and
+ * the same reach, so a span an edit lengthened is told to the worker again.
+ */
+const measuring = (a: SourceSpan | null | undefined, b: SourceSpan | null | undefined) => a === b || sameStart(a, b) && a!.end === b!.end
 
 export interface CompilerState {
   result: CompileResult | null
@@ -167,6 +189,10 @@ export function useCompiler({
    * session.
    */
   const fontsRef = useRef<Promise<MeasuredFontData[]> | null>(null)
+  /** The view the canvas has selected, whose geometry every result carries; told to each new worker. */
+  const measureRef = useRef<SourceSpan | null>(null)
+  /** The compile on its way, by revision, 0 for none: a relayout for the selection's geometry waits for its answer instead. */
+  const compilingRef = useRef(0)
 
   const ensureWorker = useCallback((): WorkerHandle => {
     if (handleRef.current) return handleRef.current
@@ -181,6 +207,7 @@ export function useCompiler({
     fontsRef.current ??= measureFontsWhenReady()
     handle.ready = fontsRef.current.then(async (fonts) => {
       if (fonts.length > 0) await handle.api.setFontMetrics(fonts)
+      if (measureRef.current) await handle.api.setMeasureTarget(measureRef.current)
     })
     handle.worker.addEventListener('error', (event) => {
       // Handled here, as the worker error the preview shows; not re-reported on the page.
@@ -224,6 +251,7 @@ export function useCompiler({
     // A compile is also how a stopped preview starts again: it is no longer stopped,
     // only busy, until the answer is drawn or the worker fails again.
     setState((s) => ({ ...s, stale: !!s.result, workerError: null }))
+    compilingRef.current = revision
 
     try {
       await handle.ready
@@ -259,6 +287,8 @@ export function useCompiler({
       }))
       handleRef.current = null
       return false
+    } finally {
+      if (compilingRef.current === revision) compilingRef.current = 0
     }
   }, [refine, colorScheme, device, ensureWorker, files, typeScale, dynamicTypeSize, previewTarget, projectId, deploymentTarget, scenario, componentDescriptions, designScreens, previewScreen, images, colors, contextKey])
 
@@ -502,10 +532,68 @@ export function useCompiler({
     [ensureWorker, files],
   )
 
+  /**
+   * The view the canvas's handles are on (Wave 2b), or null. A setting in the worker, so
+   * every later result carries its geometry. The page already drawn is redrawn for it with
+   * no draft, which lays out only the trees the view is in and runs nothing, unless a
+   * compile is on its way, whose answer will carry it.
+   */
+  const latestResult = useRef<CompileResult | null>(null)
+  useEffect(() => { latestResult.current = state.result }, [state.result])
+  const setMeasureTarget = useCallback((target: SourceSpan | null) => {
+    if (measuring(measureRef.current, target)) return
+    measureRef.current = target
+    const handle = handleRef.current
+    if (!handle) return
+    void (async () => {
+      try {
+        await handle.ready
+        if (handle !== handleRef.current || !measuring(measureRef.current, target)) return
+        await handle.api.setMeasureTarget(target)
+        if (!target || !handle.compiled || compilingRef.current || paintedRef.current < 0 || sameStart(latestResult.current?.geometry?.view, target)) return
+        await refine(await handle.api.endLayerDraft(++revisionRef.current), handle)
+      } catch { /* The normal compile path reports a worker failure. */ }
+    })()
+  }, [refine])
+
+  /**
+   * After an edit to the measured view, the view it became: told before the edit's compile
+   * is sent, so that compile's answer already carries the handles' geometry.
+   */
+  const followMeasureTarget = useCallback((from: SourceSpan, to: SourceSpan) => {
+    if (!sameStart(measureRef.current, from)) return
+    measureRef.current = to
+    const handle = handleRef.current
+    if (handle) void handle.api.setMeasureTarget(to).catch(() => { /* reported by the compile */ })
+  }, [])
+
+  const layerDrafts = useMemo((): LayerDrafts => {
+    // Drafts are laid out at the painted revision: a view of the same program, so nothing
+    // in flight is overtaken, and never accepted as the compiler's own result.
+    const live = () => { const handle = handleRef.current; return handle?.compiled ? handle : null }
+    return {
+      begin: async (target) => {
+        const handle = live()
+        if (!handle) return false
+        try { await handle.api.beginLayerDraft(target, paintedRef.current); return true } catch { return false }
+      },
+      update: async (draft) => {
+        const handle = live()
+        if (!handle) return null
+        try { return await handle.api.updateLayerDraft(draft, paintedRef.current) } catch { return null }
+      },
+      end: async () => {
+        const handle = live()
+        if (!handle) return
+        try { await handle.api.endLayerDraft(paintedRef.current) } catch { /* the page as it was is what is painted */ }
+      },
+    }
+  }, [])
+
   const sourceStale = compiledFiles !== files || compiledContext !== contextKey
   return useMemo(
-    () => ({ ...state, stale: state.stale || sourceStale, dispatch, reset, recompile: runCompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews }),
-    [state, sourceStale, dispatch, reset, runCompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews],
+    () => ({ ...state, stale: state.stale || sourceStale, dispatch, reset, recompile: runCompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews, setMeasureTarget, followMeasureTarget, layerDrafts }),
+    [state, sourceStale, dispatch, reset, runCompile, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews, setMeasureTarget, followMeasureTarget, layerDrafts],
   )
 }
 

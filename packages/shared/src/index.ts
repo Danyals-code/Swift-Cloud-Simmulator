@@ -32,3 +32,5 @@ export * from './layer-moves'
 export * from './screen-removal'
 
 export * from './layer'
+
+export * from './geometry'

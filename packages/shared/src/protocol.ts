@@ -8,6 +8,7 @@ import type { PreviewTarget } from './appearance'
 import type { Diagnostic } from './diagnostics'
 import type { FileId, SourceSpan } from './source'
 import type { Point, RenderTree } from './render-tree'
+import type { LayerDraft, ViewGeometry } from './geometry'
 
 /**
  * The worker RPC surface.
@@ -155,6 +156,8 @@ export interface CompileResult {
    * FR-6.3, because the user is mid-keystroke most of the time.
    */
   readonly renderTree: RenderTree | null
+  /** Where the view `setMeasureTarget` names is drawn, box by box, for the canvas's handles (Wave 2b). */
+  readonly geometry?: ViewGeometry
   readonly viewHierarchy?: readonly ViewLayer[]
   /**
    * Every page, composed and laid out, when `allPages` asked for them.
@@ -303,6 +306,28 @@ export interface CompilerApi {
   setFontMetrics(fonts: readonly MeasuredFontData[]): Promise<void>
   setTextMeasurements(data: readonly MeasuredTextData[], revision: number, generation?: number): Promise<CompileResult | null>
   relayout(revision: number): Promise<CompileResult>
+  /**
+   * The view the canvas has selected, whose geometry every result then carries; null for
+   * none. A setting rather than an argument, so a tap or a font refinement that redraws
+   * the page brings the handles along.
+   */
+  setMeasureTarget(target: SourceSpan | null): Promise<void>
+  /**
+   * Starts a drag on the selected view, which becomes the measure target: works out once
+   * where each value of the draft goes in its chain, so each frame of the drag only lays
+   * the page out again. `revision` is taken as every draft call takes one, and not needed.
+   */
+  beginLayerDraft(target: SourceSpan, revision: number): Promise<void>
+  /**
+   * The page laid out with the draft, which the drag shows; nothing is written. Without
+   * `authoring`: a draft changes no source, so the last result's model still holds.
+   */
+  updateLayerDraft(draft: LayerDraft, revision: number): Promise<CompileResult>
+  /**
+   * Ends the drag: the page as it is, after an Escape, or until the written edit arrives.
+   * With no drag, it is how a newly selected view's geometry arrives without compiling.
+   */
+  endLayerDraft(revision: number): Promise<CompileResult>
   /**
    * Turns the page gallery on or off and re-renders at once.
    *

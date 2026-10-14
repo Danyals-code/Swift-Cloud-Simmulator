@@ -60,6 +60,22 @@ export function stackLayoutOf(name: string): StackLayout | undefined {
   return name === 'VStack' || name === 'LazyVStack' ? 'VStack' : name === 'HStack' || name === 'LazyHStack' ? 'HStack' : name === 'ZStack' ? 'ZStack' : undefined
 }
 
+/**
+ * A stack's Spacing as its control holds it: a number, empty for SwiftUI's default, or
+ * `auto` for Figma's Auto, a Spacer between each pair of its views (D4). Undefined for a
+ * view with no Spacing.
+ */
+export function stackSpacing(node: Pick<AuthoringNode, 'controls'>): { readonly value: string; readonly auto: boolean } | undefined {
+  const value = node.controls?.find(control => control.id === 'spacing')?.value
+  return value === undefined ? undefined : { value, auto: spreadOut(value) }
+}
+
+/** The Spacing value that spreads a stack's views out with a Spacer between each pair (D4). */
+export const AUTO_SPACING = 'auto'
+
+/** Whether a stack's Spacing is Auto rather than a number. */
+export const spreadOut = (value: string | undefined): boolean => value === AUTO_SPACING
+
 /** What lays a layer out: its parent, past the conditions, repeats and groups that only pass their views on. */
 export function layoutParentOf(nodes: readonly AuthoringNode[], node: AuthoringNode): AuthoringNode | undefined {
   const byId = new Map(nodes.map(item => [item.id, item]))

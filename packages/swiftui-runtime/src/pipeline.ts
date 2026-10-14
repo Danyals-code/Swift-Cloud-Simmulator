@@ -7,11 +7,13 @@ import {
   bindAuthoringRuntime,
   pageViews,
   rgba,
+  sameStart,
   viewsDrawing,
   type CompileRequest,
   type AuthoringSnapshot,
   type CompileResult,
   type Diagnostic,
+  type LayerDraft,
   type LogEntry,
   type MeasuredTextData,
   type PagePreview,
@@ -20,15 +22,19 @@ import {
   type RenderTree,
   type SourceSpan,
   type UIEvent,
+  type ViewGeometry,
+  type ViewInstance,
 } from '@studio/shared'
 import { DEFAULT_STEP_BUDGET } from '@studio/swift-runtime'
 import { Parser, type SourceFileNode } from '@studio/swift-syntax'
-import { buildAuthoringModel, scenarioFiles, Checker, lintStrictness, type SemanticModel } from '@studio/swift-sema'
+import { buildAuthoringModel, layerDraftSites, scenarioFiles, Checker, lintStrictness, type LayerDraftSites, type SemanticModel } from '@studio/swift-sema'
 import {
+  applyLayoutDraft,
   CENTER,
   FontMetricsTable,
   LayoutEngine,
   ZERO_INSETS,
+  type LayoutDraftEdit,
   type LayoutElement,
   type LayoutEnvironment,
   type MeasuredFont,
@@ -43,7 +49,8 @@ import { screenToLayout, NAV_BAR_HEIGHT, TAB_BAR_HEIGHT, viewsToLayout } from '.
 import { stoppedFailures, type NestedPage, type NotDrawn, type OverlayKind } from './presentation'
 import { runnableProgram, setAsideRan, type Runnable } from './set-aside'
 import { exhausts, toFailure } from './failures'
-import type { GeometryPayload, RuntimeFailure } from './view-value'
+import type { GeometryPayload, RuntimeFailure, ViewValue } from './view-value'
+import { draftEdits, findViews, instancesIn, Placements, watchedIds, type ConvertedView, type PassRoot } from './canvas-geometry'
 
 /**
  * The pipeline: parse -> check -> evaluate -> **compose** -> lay out -> render.
@@ -68,6 +75,31 @@ let revision = 0
 let lastEvaluation: EvaluationResult | null = null
 let lastAnalysis: { request: CompileRequest; analysis: Analysis } | null = null
 
+/**
+ * The view the canvas has selected, whose geometry every result carries (Wave 2b). A
+ * setting rather than part of a request, so a tap or a font refinement that redraws the
+ * page brings the handles along.
+ */
+let measureTarget: SourceSpan | null = null
+/** Where its drag's values go in its chain, worked out once for each analysis. */
+let sitesFor: { readonly analysis: Analysis; readonly target: SourceSpan; readonly sites: LayerDraftSites | null } | null = null
+/**
+ * The drag in progress, drawn into every layout until it ends or the source changes. Its
+ * engine keeps what the last frame measured, so a frame measures only what the drag moved.
+ */
+let draft: { values: LayerDraft | null; engine: LayoutEngine | null } | null = null
+
+/** A tree of a result, with what it was laid out from, so a draft lays it out again and nothing more. */
+interface Drawn {
+  readonly tree: RenderTree
+  readonly input: ScreenInput
+  readonly instances: readonly ViewInstance[]
+}
+/** The trees the pass in progress drew. */
+let drawing: Drawn[] = []
+/** The last full result, and its trees. */
+let drawn: { readonly result: CompileResult; readonly trees: readonly Drawn[] } | null = null
+
 /** z ranges, so bars always paint over content and presentations over everything. */
 const BAR_Z = 100_000
 const OVERLAY_Z = 200_000
@@ -75,6 +107,7 @@ const OVERLAY_Z = 200_000
 export function setFontMetrics(fonts: readonly MeasuredFont[], measurer?: RunMeasurer, collectRequests = false): void {
   fontGeneration++
   metrics = new FontMetricsTable(fonts, measurer, collectRequests)
+  if (draft) draft.engine = null
 }
 
 /** Font-only refinement reuses the evaluated view and preserves live state. */
@@ -102,7 +135,59 @@ export function setAllPages(enabled: boolean, revision: number): CompileResult |
 export function setTextMeasurements(data: readonly MeasuredTextData[], revision: number, generation = fontGeneration): CompileResult | null {
   if (generation !== fontGeneration || lastAnalysis?.request.revision !== revision) return null
   metrics.setRuns(data)
+  if (draft) draft.engine = null
   return relayout(revision)
+}
+
+/**
+ * The view the canvas has selected, by its authoring node's source; null for none. Every
+ * result then carries where it is drawn; `endLayerDraft` returns that for the page as it
+ * is, without running anything again.
+ */
+export function setMeasureTarget(target: SourceSpan | null): void {
+  measureTarget = target
+}
+
+/**
+ * A drag starts on `target`, which becomes the selected view: where each of its values
+ * goes in the view's chain is worked out now, once, so each frame of the drag only lays
+ * the page out again.
+ *
+ * `revision` is accepted as every draft call takes one, and is not needed: the places are
+ * worked out for the program the worker has, and nothing is drawn until the first update.
+ */
+export function beginLayerDraft(target: SourceSpan, revision: number): void {
+  void revision
+  measureTarget = target
+  draft = { values: null, engine: null }
+  currentSites()
+}
+
+/**
+ * The page laid out with a drag's values, from the last evaluation: nothing is parsed,
+ * checked, planned or run. Only the trees the view is drawn in are laid out again, and in
+ * them only what the drag changed is measured again. The draft is drawn into every redraw
+ * until it ends or the source changes; after that, this draws the page as it is.
+ *
+ * The result has no `authoring`: a draft changes no source, the last result's model still
+ * holds, and copying it to the page each frame would cost more than the layout does.
+ */
+export function updateLayerDraft(values: LayerDraft, revision: number): CompileResult {
+  if (draft) draft.values = values
+  const { authoring: _unchanged, ...drawing } = redraw(revision)
+  void _unchanged
+  return drawing
+}
+
+/**
+ * Ends the drag: the page as it is, after an Escape or until the written edit's compile
+ * arrives. With no drag it is the page as it is with the selected view's geometry, laid
+ * out again from what the last result was converted from: how a newly selected view's
+ * handles appear without compiling or running anything.
+ */
+export function endLayerDraft(revision: number): CompileResult {
+  draft = null
+  return redraw(revision)
 }
 
 export function resetPipelineState(): void {
@@ -169,6 +254,17 @@ function rootEnvironment(request: CompileRequest): LayoutEnvironment {
   }
 }
 
+/** A screen converted for layout, and what it is laid out against. */
+interface ScreenInput {
+  readonly screen: ScreenLayout
+  readonly canvas: { readonly width: number; readonly height: number }
+  readonly safeArea: { readonly top: number; readonly leading: number; readonly bottom: number; readonly trailing: number }
+  readonly env: LayoutEnvironment
+  readonly scheme: 'light' | 'dark'
+  /** Every view the conversion met, by path: where the selected view's elements are found. */
+  readonly views: ReadonlyMap<string, ConvertedView>
+}
+
 /**
  * Lays out the composed screen.
  *
@@ -185,13 +281,20 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
   // hand back the last page's requests and leave every other tree's strings on the
   // built-in estimates for as long as nothing else asked.
   if (!accumulate) metrics.beginLayout()
-  const engine = new LayoutEngine(metrics)
+  const laidOut = layoutScreen(convertScreen(request, evaluation, drawingRuntime), new LayoutEngine(metrics), draft?.values ?? null, false)
+  drawing.push(laidOut)
+  return laidOut.tree
+}
+
+function convertScreen(request: CompileRequest, evaluation: EvaluationResult, drawingRuntime: AppRuntime): ScreenInput {
   // `withAnimation { … }` animates every change in its transaction, so the hint goes
   // on the root environment and every node below inherits it for exactly one frame.
   const env = withAnimation(rootEnvironment(request), evaluation)
   const scheme = request.colorScheme
   const canvas = request.canvas
   const safeArea = request.safeArea ?? { top: 0, leading: 0, bottom: 0, trailing: 0 }
+  const views = new Map<string, ConvertedView>()
+  const onView = (view: ViewValue, path: string, element: LayoutElement) => { views.set(path, { view, element }) }
 
   const ui = evaluation.ui
   // The layout pass runs `.alignmentGuide` closures, which needs the interpreter -
@@ -208,6 +311,7 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
         safeArea,
         viewportWidth: canvas.width,
         callGuide,
+        onView,
       })
     : {
         content: viewsToLayout(evaluation.views, {
@@ -218,6 +322,7 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
         dynamicTypeSize: request.dynamicTypeSize,
         displayScale: request.displayScale,
           callGuide,
+          onView,
         }).element,
         background: systemBackground(scheme),
         navigationBar: null,
@@ -226,10 +331,72 @@ function render(request: CompileRequest, evaluation: EvaluationResult, accumulat
         hitTargets: new Map<string, string>(),
       }
 
-  return { ...composeScreen(engine, screen, canvas, safeArea, env), colorScheme: scheme, calibration: APPEARANCE_CALIBRATION.status }
+  return { screen, canvas, safeArea, env, scheme, views }
 }
 
-function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { width: number; height: number }, safeArea: { top: number; leading: number; bottom: number; trailing: number }, env: LayoutEnvironment): RenderTree {
+/**
+ * Lays out a converted screen, with a drag's values when there is one, and finds where
+ * the selected view is drawn in it. `reuse` keeps what the engine measured last time, for
+ * a draft's frames, which change only the dragged view. With `onlyWithView`, a screen the
+ * view is not drawn in is not laid out at all.
+ */
+function layoutScreen(input: ScreenInput, engine: LayoutEngine, values: LayerDraft | null, reuse: boolean, onlyWithView: true): Drawn | undefined
+function layoutScreen(input: ScreenInput, engine: LayoutEngine, values: LayerDraft | null, reuse: boolean): Drawn
+function layoutScreen(input: ScreenInput, engine: LayoutEngine, values: LayerDraft | null, reuse: boolean, onlyWithView = false): Drawn | undefined {
+  const sites = currentSites()
+  let found = sites ? findViews(passRoots(input.screen), input.views, sites) : []
+  if (onlyWithView && !found.length) return undefined
+  let screen = input.screen
+  if (sites && values && found.length) {
+    const drafted = draftEdits(found, sites, values)
+    if (drafted.edits.length) {
+      screen = draftScreen(screen, drafted.edits)
+      found = drafted.found
+    }
+  }
+  const placements = found.length ? new Placements(watchedIds(found)) : undefined
+  const tree: RenderTree = { ...composeScreen(engine, screen, input.canvas, input.safeArea, input.env, { placements, prefix: '', root: null, reuse }), colorScheme: input.scheme, calibration: APPEARANCE_CALIBRATION.status }
+  return { tree, input, instances: placements ? instancesIn(found, placements, tree) : [] }
+}
+
+/** How one layout pass names its nodes, who is told where its elements go, and whether it reuses measurements. */
+interface LayoutPass extends Pick<PassRoot, 'prefix' | 'root'> {
+  readonly placements?: Placements
+  readonly reuse?: boolean
+}
+
+const PLAIN: LayoutPass = { prefix: '', root: null }
+
+const passOptions = (pass: LayoutPass) => ({ ...(pass.placements ? { observer: pass.placements.observer(pass) } : {}), ...(pass.reuse ? { reuseMeasurements: true } : {}) })
+
+/**
+ * Each tree of a screen that a view the canvas selects can be in: its content, its bars and
+ * search field, and a sheet's screen, whose nodes are named under `overlay/` and placed in
+ * its surface. `change` may return a new tree, and the screen is rebuilt around it.
+ * `composeScreen` lays each of them out against a rect of its own.
+ */
+function eachTree(screen: ScreenLayout, change: (root: PassRoot) => LayoutElement, prefix = '', root: string | null = null): ScreenLayout {
+  const at = (element: LayoutElement) => change({ element, prefix, root })
+  return {
+    ...screen,
+    content: at(screen.content),
+    navigationBar: screen.navigationBar && { ...screen.navigationBar, element: at(screen.navigationBar.element) },
+    tabBar: screen.tabBar && at(screen.tabBar),
+    ...(screen.search ? { search: { ...screen.search, element: at(screen.search.element) } } : {}),
+    overlay: screen.overlay && { ...screen.overlay, ...(screen.overlay.screen ? { screen: eachTree(screen.overlay.screen, change, `${prefix}overlay/`, `${prefix}overlay-surface`) } : {}) },
+  }
+}
+
+function passRoots(screen: ScreenLayout): PassRoot[] {
+  const roots: PassRoot[] = []
+  eachTree(screen, root => { roots.push(root); return root.element })
+  return roots
+}
+
+/** The screen with a draft's edits made in each of its trees. */
+const draftScreen = (screen: ScreenLayout, edits: readonly LayoutDraftEdit[]) => eachTree(screen, ({ element }) => applyLayoutDraft(element, edits))
+
+function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { width: number; height: number }, safeArea: { top: number; leading: number; bottom: number; trailing: number }, env: LayoutEnvironment, pass: LayoutPass = PLAIN): RenderTree {
   const barHeight = screen.navigationBar?.height ?? 0
   const tabHeight = screen.tabBar ? TAB_BAR_HEIGHT : 0
   const regular = canvas.width >= 600
@@ -250,7 +417,7 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
   // A view reaches out of the safe area on its own, where it touches an edge, and
   // `.ignoresSafeArea()` on one view no longer makes the whole screen full-bleed.
   const screenRect: Rect = { x: 0, y: 0, width: canvas.width, height: canvas.height }
-  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER)
+  const placed = engine.layout(content, contentBounds, { ...env, safeArea: { inner: contentBounds, outer: screenRect } }, CENTER, passOptions(pass))
   let tree = placedToRenderTree(placed, canvas, ++revision, screen.background)
   // At rest the bar has no colour of its own in iOS 27, so what reaches under it shows
   // through. Where nothing does, it keeps the screen's colour, which looks the same.
@@ -261,7 +428,7 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     .sort((a, b) => b.z - a.z)
   const beneath = underBar.find((node) => node.background?.kind === 'solid')?.background
   if (screen.navigationBar) {
-    const laidOut = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER)
+    const laidOut = engine.layout(screen.navigationBar.element, { x: 0, y: topTabs, width: canvas.width, height: safeArea.top + barHeight }, env, CENTER, passOptions(pass))
     const bar = !underBar.length ? laidOut
       : collapseDistance && beneath ? laidOut.map((node) => node.id === 'navbar-bgf' && node.paint.kind === 'fill' ? { ...node, paint: { ...node.paint, fill: beneath } } : node)
       : laidOut.filter((node) => node.id !== 'navbar-bgf')
@@ -274,15 +441,15 @@ function composeScreen(engine: LayoutEngine, screen: ScreenLayout, canvas: { wid
     }) }
   }
   if (screen.tabBar) {
-    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : bottomBarsEnd - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER)
+    const bar = engine.layout(screen.tabBar, { x: 0, y: regular ? safeArea.top : bottomBarsEnd - tabHeight, width: canvas.width, height: tabHeight }, env, CENTER, passOptions(pass))
     tree = appendPlaced(tree, bar, BAR_Z + 1000)
   }
   if (screen.search) {
     // At the bottom it sits where a tab bar would.
-    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? bottomBarsEnd - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER)
+    const search = engine.layout(screen.search.element, { x: 0, y: bottomSearch ? bottomBarsEnd - bottomTabs - bottomSearch : safeArea.top + topTabs + barHeight, width: canvas.width, height: screen.search.height }, env, CENTER, passOptions(pass))
     tree = appendPlaced(tree, search, BAR_Z + 2000)
   }
-  if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
+  if (screen.overlay) tree = { ...tree, nodes: [...tree.nodes.map(n => n.parent || allowsBackgroundInteraction(screen.overlay!, canvas, safeArea) ? n : { ...n, inert: true }), ...presentOverlay(engine, screen.overlay, canvas, safeArea, env, pass).map(n => ({ ...n, z: n.z + OVERLAY_Z }))] }
   return { ...tree, ...(scroll && collapseDistance ? { chrome: { scrollId: scroll.id, collapseDistance } } : {}) }
 }
 
@@ -301,6 +468,7 @@ function presentOverlay(
   canvas: { width: number; height: number },
   safeArea: { top: number; leading: number; bottom: number; trailing: number },
   env: LayoutEnvironment,
+  pass: LayoutPass = PLAIN,
 ): RenderNode[] {
   const nodes: PlacedNode[] = []
   const interactiveBackground = allowsBackgroundInteraction(overlay, canvas, safeArea)
@@ -333,7 +501,8 @@ function presentOverlay(
     const attached = attachedSheet(overlay, canvas.width)
     const top = sheet ? sheetContentTop(overlay, attached, !!overlay.screen.navigationBar) : safeArea.top
     const bottom = overlay.kind === 'cover' || attached ? safeArea.bottom : Math.max(12, safeArea.bottom - SURFACES.sheet.margin)
-    const nested = composeScreen(engine, overlay.screen, { width: rect.width, height: rect.height }, { top, leading: 0, trailing: 0, bottom }, env)
+    // Its nodes are named under `overlay/`, and its root ones placed in the sheet's surface.
+    const nested = composeScreen(engine, overlay.screen, { width: rect.width, height: rect.height }, { top, leading: 0, trailing: 0, bottom }, env, { ...pass, prefix: `${pass.prefix}overlay/`, root: `${pass.prefix}overlay-surface` })
     const prefix = 'overlay/'
     const radius = sheet ? overlay.cornerRadius ?? SURFACES.sheet.radius : 0
     const surface: RenderNode = { id: 'overlay-surface', kind: 'layer', frame: rect, z: 1, opacity: 1, blocksPointer: true, ...(overlay.background ? { background: overlay.background } : overlay.material ? { material: overlay.material } : sheet ? { material: { opacity: 0.5, blur: 28, light: overlay.light } } : {}), clip: true, border: { width: 0.5, color: { ...env.foregroundColor, a: 0.2 }, cornerRadius: radius }, cornerRadius: radius, cornerStyle: 'continuous',
@@ -351,6 +520,7 @@ function presentOverlay(
       : overlay.kind === 'dialog' ? { horizontal: 'center', vertical: 'top' } : overlay.kind === 'menu'
         ? { horizontal: 'center', vertical: 'bottom' }
         : { horizontal: 'leading', vertical: 'top' },
+    pass.reuse ? { reuseMeasurements: true } : {},
   )
 
   // The dim layer is z 0 here; the surface must sit above it.
@@ -520,6 +690,65 @@ function oncePerPlace<T extends { readonly span: SourceSpan; readonly message: s
   return [...new Map(items.map((item) => [key(item), item])).values()]
 }
 
+/** Where the selected view's chains are, and where a drag's values go in them, for the analysis in hand. */
+function currentSites(): LayerDraftSites | null {
+  if (!measureTarget || !lastAnalysis) return null
+  const { analysis, request } = lastAnalysis
+  if (sitesFor?.analysis === analysis && sameStart(sitesFor.target, measureTarget)) return sitesFor.sites
+  const sites = layerDraftSites({ trees: analysis.files, files: request.files, nodes: analysis.authoring.nodes, target: measureTarget, deploymentTarget: request.deploymentTarget })
+  sitesFor = { analysis, target: measureTarget, sites }
+  return sites
+}
+
+/** Where the selected view is drawn in a result: on each page of a gallery, or on the one phone. */
+function geometryOf(result: CompileResult, instancesOf: (tree: RenderTree) => readonly ViewInstance[] | undefined): ViewGeometry | undefined {
+  if (!measureTarget || !result.renderTree) return undefined
+  const sites = currentSites()
+  const instances = !sites ? []
+    : result.pages?.length ? result.pages.flatMap(page => (instancesOf(page.tree) ?? []).map(instance => ({ ...instance, page: page.id })))
+    : [...instancesOf(result.renderTree) ?? []]
+  return { view: sites?.view.view ?? measureTarget, instances }
+}
+
+/**
+ * The last full result drawn again with the drag in progress, or as it is when there is
+ * none: each tree the selected view is in is laid out again from the elements it was
+ * converted to, and the rest are kept.
+ */
+function redraw(revision: number): CompileResult {
+  if (!drawn || !lastAnalysis) return relayout(revision)
+  const startedAt = performance.now()
+  // A draft is drawn at the revision on screen; a newer one the worker has seen stays its own.
+  if (revision > lastAnalysis.request.revision) lastAnalysis = { ...lastAnalysis, request: { ...lastAnalysis.request, revision } }
+  const values = draft?.values ?? null
+  const engine = draft ? draft.engine ??= new LayoutEngine(metrics) : new LayoutEngine(metrics)
+  // A tree the view is not drawn in is kept as it is, and so is one a draft could not lay out.
+  const redrawn = new Map<RenderTree, Drawn>()
+  for (const tree of drawn.trees) {
+    const laidOut = layoutScreen(tree.input, engine, values, !!draft, true)
+    if (laidOut) redrawn.set(tree.tree, valid(laidOut.tree) ? laidOut : tree)
+  }
+  const base = drawn.result
+  const swap = (tree: RenderTree) => redrawn.get(tree)?.tree ?? tree
+  const pages = base.pages?.map(page => swap(page.tree) === page.tree ? page : { ...page, tree: swap(page.tree) })
+  const renderTree = base.renderTree && swap(base.renderTree)
+  const instances = new Map([...redrawn.values()].map(laidOut => [laidOut.tree, laidOut.instances]))
+  const result: CompileResult = {
+    ...base,
+    revision,
+    ...(base.authoring ? { authoring: { ...base.authoring, revision } } : {}),
+    renderTree,
+    ...(pages ? { pages } : {}),
+    textMeasurement: { ...metrics.measurementState, generation: fontGeneration },
+    timings: { parse: 0, check: 0, evaluate: 0, layout: performance.now() - startedAt, total: performance.now() - startedAt },
+  }
+  const geometry = geometryOf(result, tree => instances.get(tree))
+  return geometry ? { ...result, geometry } : result
+}
+
+/** Whether every frame in a tree is a size the canvas can draw. */
+const valid = (tree: RenderTree) => tree.nodes.every((node) => Object.values(node.frame).every(Number.isFinite) && node.frame.width >= 0 && node.frame.height >= 0)
+
 function toResult(
   request: CompileRequest,
   analysis: Analysis,
@@ -583,6 +812,9 @@ function toResult(
 
 export function compile(request: CompileRequest): CompileResult {
   setAssetColors(request.colors)
+  // New source: a drag's places were in the old one, and so were the trees a draft redraws.
+  draft = null
+  drawn = null
   if (lastAnalysis?.request.projectId !== request.projectId || JSON.stringify(lastAnalysis?.request.scenario) !== JSON.stringify(request.scenario)) {
     runtime.reset(false)
     lastEvaluation = null
@@ -650,7 +882,30 @@ export function rerender(revision: number): CompileResult {
   return finish(next, analysis, evaluation, startedAt, performance.now() - evaluateStart, appeared)
 }
 
+/**
+ * Draws the evaluated program, and keeps the trees it drew for a draft to lay out again,
+ * with the selected view's geometry in them.
+ */
 function finish(
+  request: CompileRequest,
+  analysis: Analysis,
+  evaluation: EvaluationResult,
+  startedAt: number,
+  evaluateMs: number,
+  appeared = false,
+): CompileResult {
+  drawing = []
+  const result = draw(request, analysis, evaluation, startedAt, evaluateMs, appeared)
+  const byTree = new Map(drawing.map(laidOut => [laidOut.tree, laidOut]))
+  drawing = []
+  if (draft) draft.engine = null
+  const trees = [...new Set([result.renderTree, ...(result.pages ?? []).map(page => page.tree)].flatMap(tree => tree && byTree.get(tree) ? [byTree.get(tree)!] : []))]
+  drawn = result.renderTree && trees.length ? { result, trees } : null
+  const geometry = geometryOf(result, tree => byTree.get(tree)?.instances)
+  return geometry ? { ...result, geometry } : result
+}
+
+function draw(
   request: CompileRequest,
   analysis: Analysis,
   evaluation: EvaluationResult,
@@ -689,7 +944,7 @@ function finish(
   // always right.
   if (runtime.updateGeometry(geometryFrom(renderTree))) {
     const corrected = runtime.evaluate()
-    if (corrected.failure) return finish(request, analysis, corrected, startedAt, evaluateMs)
+    if (corrected.failure) return draw(request, analysis, corrected, startedAt, evaluateMs)
     if (!corrected.failure) {
       evaluation = corrected
       renderTree = render(request, corrected)

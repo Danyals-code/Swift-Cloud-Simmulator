@@ -34,6 +34,22 @@ export interface LayerValue<T> {
 
 export type Alignment9 = 'topLeading' | 'top' | 'topTrailing' | 'leading' | 'center' | 'trailing' | 'bottomLeading' | 'bottom' | 'bottomTrailing'
 
+export type VerticalSide = 'top' | 'center' | 'bottom'
+export type HorizontalSide = 'leading' | 'center' | 'trailing'
+
+/** An alignment's two sides: `.bottomTrailing` is bottom and trailing. */
+export function alignmentSides(alignment: Alignment9): readonly [VerticalSide, HorizontalSide] {
+  const vertical: VerticalSide = alignment.startsWith('top') ? 'top' : alignment.startsWith('bottom') ? 'bottom' : 'center'
+  const horizontal: HorizontalSide = /leading/i.test(alignment) ? 'leading' : /trailing/i.test(alignment) ? 'trailing' : 'center'
+  return [vertical, horizontal]
+}
+
+/** The alignment with these two sides. */
+export function alignmentOf(vertical: VerticalSide, horizontal: HorizontalSide): Alignment9 {
+  if (vertical === 'center') return horizontal
+  return horizontal === 'center' ? vertical : `${vertical}${horizontal === 'leading' ? 'Leading' : 'Trailing'}`
+}
+
 export interface Insets {
   readonly top: Length
   readonly leading: Length

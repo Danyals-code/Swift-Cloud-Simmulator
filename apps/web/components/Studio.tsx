@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ArchiveFormat, AuthoringNode, CopiedView, DesignEditRequest, NavigationOperation, PreviewInput, ResourceOperation } from '@studio/shared'
-import { groupLayoutOf, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot } from '@studio/shared'
+import { groupLayoutOf, layoutParentOf, sameStart, validatePreviewScenario, reconcileAuthoringSelection, type AuthoringSelection, type AuthoringSnapshot, type AxisSize } from '@studio/shared'
 import { emptyStudioMetadata, buildFileTree, encodeProject, isPristine, shareLink, type Project, type StudioMetadata } from '@studio/project-model'
 import { findFile } from '@studio/project-model'
 import { DEFAULT_DEVICE, getDevice } from '@studio/sim-shell'
@@ -22,6 +22,8 @@ import { useNavigationPicker } from '../lib/useNavigationPicker'
 import { authoringRenderGroups, hoveredSourceIds, resolveAuthoringRuntimeSelection } from '../lib/authoringHover'
 import { drawnSize } from '../lib/drawnSize'
 import { useCompiler } from '../lib/useCompiler'
+import type { DragCommit } from '../lib/canvasDrag'
+import { clampNumber } from '../lib/numberScrub'
 import { phoneView } from '../lib/phoneView'
 /**
  * Problems, output, timings and coverage, fetched when the panel is opened.
@@ -32,7 +34,7 @@ import { phoneView } from '../lib/phoneView'
  */
 const ConsolePane = dynamic(() => import('./ConsolePane').then((m) => m.ConsolePane), { ssr: false })
 import { InspectorReadout } from './InspectorReadout'
-import { DevicePane, type CanvasDropTarget, type InlineTextTarget } from './DevicePane'
+import { DevicePane, type CanvasDropTarget, type CanvasHandles, type InlineTextTarget } from './DevicePane'
 import type { InspectKeys } from '@studio/swiftui-render-dom'
 import { AuthoringInspector } from './AuthoringInspector'
 import type { FeatureProps } from './AuthoringFeatures'
@@ -222,6 +224,8 @@ export function Studio() {
   const setTool = useCallback((next: CanvasTool) => { setToolState(next); setEditNote(null) }, [])
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  /** A sheet or dialog is over the workspace: it has the keys, the workspace is inert under it, and the canvas's handles hide. */
+  const sheetOpen = galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen
   /**
    * Whether the sheet on screen opened by itself.
    *
@@ -352,7 +356,7 @@ export function Studio() {
   const [previewResetEpoch, setPreviewResetEpoch] = useState(0)
   const previewIdentity = useMemo(() => JSON.stringify([project?.id, project?.files, scenario ?? null, previewResetEpoch]), [project?.id, project?.files, scenario, previewResetEpoch])
 
-  const { result, stale, workerError, dispatch, reset, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews } = useCompiler({
+  const { result, stale, workerError, dispatch, reset, language, planDesignEdit, validateResourceRemoval, describeView, copyView, findCopies, hiddenViews, setMeasureTarget, followMeasureTarget, layerDrafts } = useCompiler({
     projectId: project?.id,
     deploymentTarget: project?.manifest.deploymentTarget,
     images, colors: project?.colors, scenario, componentDescriptions: project?.studio?.components, designScreens: project?.studio?.screens, previewScreen: standalonePreview,
@@ -748,6 +752,9 @@ export function Studio() {
       const transaction = { ...selectedPlan, ...colorChange, ...(assets ? { assets: { before: project.assets, after: assets } } : {}), ...(screens || scenarios || JSON.stringify(labels) !== JSON.stringify(metadata.labels) ? { studio: { before, after: { ...metadata, ...(screens ? { screens } : {}), ...(scenarios ? { scenarios } : {}), labels } } } : {}) }
       const problem = useStudio.getState().commitTransaction(project, selectionChanged || preserveSelection ? { ...transaction, selection: undefined } : transaction, label)
       if (problem) { setEditNote(problem); eventLog.record(project.id, { ...label, refused: true }); return problem }
+      // The canvas's handles follow the edited view into the compile the edit makes (Wave 2b).
+      const followed = plan.selection && plan.authoring?.nodes.find(n => sameStart(n.source, { file: plan.selection!.file, start: plan.selection!.offset }) && n.kind !== 'definition')
+      if (changed && followed) followMeasureTarget(target, followed.source)
       if (savedScenario) setScenarioSelection({ projectId: project.id, key: scenarioKey(savedScenario) })
       if (changed) setCommittedEditRevision(revision => revision + 1)
       if (plan.changes.length && !selectionChanged && !preserveSelection) {
@@ -762,7 +769,7 @@ export function Studio() {
       setEditNote(changed ? operation.kind === 'insert' || operation.kind === 'paste' ? 'View added. You can edit its properties or undo this change.' : operation.kind === 'delete' ? 'View deleted. Undo is available.' : operation.kind === 'behavior' ? 'Interaction updated. Switch to Preview to try it.' : 'Design updated.' : null)
       return null
     } finally { editingRef.current = false; setPreparingEdit(false) }
-  }, [project, stale, planDesignEdit, result, authoringNode, hidden.views])
+  }, [project, stale, planDesignEdit, result, authoringNode, hidden.views, followMeasureTarget])
 
   /**
    * Giving a screen its first state.
@@ -1146,7 +1153,7 @@ export function Studio() {
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen) return
+      if (e.defaultPrevented || sheetOpen) return
       const shortcut = shortcutFor({ key: e.key, mod: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey }, { workspace: mode, editing: inspecting, focus: keyFocus(e.target), selected: !!selectedLayer || selectedTogether.length > 1, screen: level === 'screen' })
       if (!shortcut) return
       // Escape is left for the canvas's own uses of it, such as cancelling a destination pick.
@@ -1189,7 +1196,7 @@ export function Studio() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mode, inspecting, galleryOpen, switcherOpen, adding, shortcutsOpen, reviewOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
+  }, [mode, inspecting, sheetOpen, applyEdit, selectedLayer, canAdd, tool, setTool,
       undo, redo, copySelection, pasteClipboard, flush, run, togglePane, toggleLeftPanel, toggleInspect, setMode, layout.layersOver, groupSelection, selectedTogether, selectParent, level, focusedScreen, tree])
 
   /**
@@ -1222,6 +1229,55 @@ export function Studio() {
     if (from.node.source.file !== to.node.source.file) { refuseEdit(move, 'A view can only be moved within the file it is written in.', from.node); return }
     void performDesignEdit(from.node.source, from.node.fingerprint, from.node.owner, move)
   }, [canvasScene, canvasSelected, refuseEdit, performDesignEdit])
+
+  /**
+   * The selected view, measured for the canvas's handles (Wave 2b): one view, selected on
+   * its own while designing. Kept while the canvas catches up with an edit, which follows
+   * the view itself, so the handles come back with the edit's own compile.
+   */
+  const measured = mode === 'design' && inspecting && selectedTogether.length < 2 && authoringNode?.layer && authoringNode.kind !== 'definition' ? authoringNode.source : null
+  useEffect(() => { if (!stale) setMeasureTarget(measured) }, [measured, stale, setMeasureTarget])
+  const latestSelection = useRef(authoringNode)
+  useEffect(() => { latestSelection.current = authoringNode })
+  /** A drag, or a burst of arrow keys, written as one edit: the view's layer, or its stack's spacing control. */
+  const commitDrag = useCallback(async (node: AuthoringNode, commit: DragCommit) => {
+    const before = useStudio.getState().project?.files
+    const operation: DesignEditRequest['operation'] = commit.kind === 'layer' ? { kind: 'layer-set', changes: commit.changes } : { kind: 'property', control: 'spacing', value: String(commit.value) }
+    // A burst written after the selection moved on leaves the new selection as it is.
+    const current = latestSelection.current
+    const elsewhere = !sameStart(current?.source, node.source)
+    const refused = await performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, elsewhere)
+    return refused ? { refused, changed: false } : { changed: useStudio.getState().project?.files !== before }
+  }, [performDesignEdit])
+  const handleGeometry = result?.geometry
+  /**
+   * The Overlap around the selected view, when it hugs and so can't take a pin (plan
+   * recommendation 7): given its drawn size, as Fixed on each axis that hugs, with the view
+   * kept selected. Offered on the canvas and in the Layout section.
+   */
+  const sizeOverlap = useMemo(() => {
+    const layout = authoringNode?.layer?.layout
+    const overlap = authoringNode && snapshot && layout?.context.parent === 'overlap' && layout.pin.disabledReason ? layoutParentOf(snapshot.nodes, authoringNode) : undefined
+    const room = measured && sameStart(handleGeometry?.view, measured) ? handleGeometry?.instances.find(instance => instance.parent?.kind === 'overlap')?.parent?.rect : undefined
+    const axes = overlap?.layer?.layout
+    if (!overlap || !room || !axes) return undefined
+    const fixed = (axis: 'width' | 'height'): { width?: AxisSize; height?: AxisSize } => axes[axis].value.mode === 'hug' && !axes[axis].disabledReason
+      ? { [axis]: { mode: 'fixed', size: clampNumber(room[axis], { integer: true, min: 0 }) } } : {}
+    const change = { ...fixed('width'), ...fixed('height') }
+    if (!change.width && !change.height) return undefined
+    return () => performDesignEdit(overlap.source, overlap.fingerprint, overlap.owner, { kind: 'layer-set', changes: [{ section: 'layout', ...change }] }, undefined, undefined, undefined, true)
+  }, [authoringNode, snapshot, measured, handleGeometry, performDesignEdit])
+  const canvasHandles = useMemo((): CanvasHandles | null => {
+    // The worker names the view by where it starts, which is what tells two views apart.
+    if (!measured || !authoringNode || !handleGeometry || !sameStart(handleGeometry.view, measured) || aiEditing) return null
+    return {
+      node: authoringNode, geometry: handleGeometry, drafts: layerDrafts, commit: commitDrag,
+      reorder: direction => void applyEdit({ kind: 'move', direction }),
+      note: reason => refuseEdit({ kind: 'layer-set', changes: [] }, reason, authoringNode),
+      sizeOverlap,
+      covered: sheetOpen || layout.layersOver,
+    }
+  }, [measured, authoringNode, handleGeometry, aiEditing, layerDrafts, commitDrag, applyEdit, refuseEdit, sizeOverlap, sheetOpen, layout.layersOver])
 
   /** What a click would select where the inspector's pointer is (D1), while Layers is there to show it. */
   const hoveredPick = useMemo(
@@ -1476,7 +1532,7 @@ export function Studio() {
             onNodeChange={(node, control, value) => performDesignEdit(node.source, node.fingerprint, node.owner, { kind: 'property', control, value }, undefined, undefined, undefined, true)}
             onNodeCommand={(node, operation) => performDesignEdit(node.source, node.fingerprint, node.owner, operation, undefined, undefined, undefined, true)} onSelect={selectAuthoring} onReveal={revealSpan} />
         : <p className="text-footnote text-xc-text-3" role={busy ? 'status' : undefined}>{busy ? 'Drawing screens…' : 'Select a screen, a view, or the App.'}</p>
-      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} measure={selectedSize} />}</PaneBoundary>
+      : <AuthoringInspector key={project.id} features={authoringFeatures} onChange={changeProperty} node={authoringNode} stale={busy} onReveal={revealSpan} onCopy={copyLayer} onPaste={clipboard ? pasteClipboard : undefined} measure={selectedSize} sizeOverlap={sizeOverlap} />}</PaneBoundary>
   const settingsTitle = <nav className={styles.levelPath} aria-label="Settings level" data-level={level}>
     <button type="button" aria-current={level === 'app' ? 'page' : undefined} onClick={selectApp} data-testid="level-app">App</button>
     {level !== 'app' && focusedScreen && <><span aria-hidden>›</span><button type="button" aria-current={level === 'screen' ? 'page' : undefined} onClick={() => openPage(focusedScreen.page)} data-testid="level-screen">{focusedScreen.name}</button></>}
@@ -1508,7 +1564,7 @@ export function Studio() {
         event.preventDefault(); event.stopPropagation()
         void dropToAssets(Array.from(event.dataTransfer.files))
       }}>
-      <div className="flex min-h-0 flex-1 flex-col" inert={galleryOpen || switcherOpen || adding || shortcutsOpen || reviewOpen}>
+      <div className="flex min-h-0 flex-1 flex-col" inert={sheetOpen}>
       <Toolbar
         mode={mode}
         onModeChange={setMode}
@@ -1763,6 +1819,7 @@ export function Studio() {
                 onReorderNodes={reorderNodes}
                 dropTargetAt={dropTargetAt}
                 centerOn={centerOn}
+                handles={mode === 'design' ? canvasHandles : null}
                 status={previewStatus}
                 onDeviceChange={unlessAiEditing(setDevice, undefined)}
                 environment={mode === 'design' && environment.heading.length ? <>{environment.heading.map(picker)}</> : undefined}

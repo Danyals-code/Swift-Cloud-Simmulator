@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import type { AuthoringNode } from '@studio/shared'
+import { spreadOut, type AuthoringNode } from '@studio/shared'
 import { propertyOptionLabel } from './PropertyControl'
 import styles from './AuthoringInspector.module.css'
 
@@ -10,7 +10,7 @@ export function LayoutGuide({ node }: { node: AuthoringNode }) {
   const alignment = node.controls?.find(control => control.id === 'alignment')?.value ?? 'center'
   const spacing = node.controls?.find(control => control.id === 'spacing')?.value
   // Auto spreads the views out with Spacers, as Figma's Auto does (D4); no value at all is SwiftUI's default.
-  const auto = spacing === 'auto'
+  const auto = spreadOut(spacing)
   const unset = spacing === undefined || spacing.trim() === ''
   const amount = unset || auto ? 8 : Number(spacing)
   const horizontal = /leading/i.test(alignment) ? 'start' : /trailing/i.test(alignment) ? 'end' : 'center'

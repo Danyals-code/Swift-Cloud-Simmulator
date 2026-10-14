@@ -15,4 +15,5 @@
 export * from './proposal'
 export * from './elements'
 export * from './metrics'
-export { LayoutEngine, type PlacedNode, type PaintSpec } from './engine'
+export { LayoutEngine, type LayoutOptions, type PlaceObserver, type PlacedNode, type PaintSpec } from './engine'
+export * from './draft'

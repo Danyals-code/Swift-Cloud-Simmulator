@@ -9,7 +9,7 @@
  * SwiftUI - this package translates between the two.
  */
 
-export { compile, rerender, applyEvent, resetPipelineState, setFontMetrics, setTextMeasurements, relayout, setAllPages } from './pipeline'
+export { compile, rerender, applyEvent, resetPipelineState, setFontMetrics, setTextMeasurements, relayout, setAllPages, setMeasureTarget, beginLayerDraft, updateLayerDraft, endLayerDraft } from './pipeline'
 export { AppRuntime, actionId, type EvaluationResult } from './app-runtime'
 export { SwiftUIHost } from './swiftui-host'
 export { IdentityPath, StateStore, fingerprint } from './identity'

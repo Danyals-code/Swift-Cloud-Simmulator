@@ -38,6 +38,7 @@ import {
 } from '@studio/swift-runtime'
 import { BLEND_MODES, UNIMPLEMENTED_VIEWS } from '@studio/swift-sema'
 import {
+  alignmentNamed,
   CENTER,
   insets,
   uniformInsets,
@@ -253,6 +254,13 @@ export interface ConversionOptions {
    * not know what is on the other side.
    */
   readonly callGuide?: (closure: ClosureValue, size: Size) => number
+  /**
+   * Told each view once it is converted: its path, which its elements are named by
+   * (`${path}m${index}` for each of its modifiers), and the element it became. How the
+   * pipeline finds where a view the canvas has selected is drawn, and which of its
+   * elements each modifier made.
+   */
+  readonly onView?: (view: ViewValue, path: string, element: LayoutElement) => void
 }
 
 export function viewsToLayout(
@@ -263,6 +271,7 @@ export function viewsToLayout(
   const hitTargets = new Map<string, string>()
   const converter = new Converter(hitTargets, options.colorScheme ?? 'light', options.dynamicTypeSize ?? options.typeScale ?? 1, ZERO_INSETS, undefined, appearanceFor(options.previewTarget), options.displayScale ?? 3, options.viewportWidth ?? 393, options.sheetSurface, options.images)
   converter.useGuideRunner(options.callGuide ?? null)
+  converter.onView = options.onView
   const children = converter.convertList(views, 'v', rootAxis)
 
   return { element: joinRoot(children, rootAxis), hitTargets }
@@ -284,6 +293,7 @@ export function screenToLayout(ui: ResolvedUI, options: ConversionOptions = {}):
   const background = screenBackground(ui.content, scheme, options.viewportWidth ?? 393, options.sheetSurface) ?? (options.sheetSurface ? rgba(0, 0, 0, 0) : systemBackground(scheme))
   const converter = new Converter(hitTargets, scheme, options.dynamicTypeSize ?? options.typeScale ?? 1, safeArea, background, appearanceFor(options.previewTarget), options.displayScale ?? 3, options.viewportWidth ?? 393, options.sheetSurface, options.images)
   converter.useGuideRunner(options.callGuide ?? null)
+  converter.onView = options.onView
 
   const body = converter.convertList(ui.content, 'v', 'vertical')
 
@@ -593,6 +603,9 @@ class Converter {
   useGuideRunner(run: ((closure: ClosureValue, size: Size) => number) | null): void {
     this.callGuide = run
   }
+
+  /** Told each view converted, with its path and the element it became. */
+  onView: ((view: ViewValue, path: string, element: LayoutElement) => void) | undefined
 
   /**
    * The control styles in force, inherited like the font.
@@ -1184,7 +1197,9 @@ class Converter {
     const outer = this.styles
     this.styles = withStyles(outer, view, this.scheme)
     try {
-      return this.convertInner(view, path, parentAxis)
+      const element = this.convertInner(view, path, parentAxis)
+      this.onView?.(view, path, element)
+      return element
     } finally {
       this.styles = outer
     }
@@ -4572,20 +4587,7 @@ function frameModifier(args: readonly ViewArg[]): LayoutModifier {
 
 function alignmentFromToken(value: SwiftValue | undefined): Alignment | null {
   const name = tokenName(value)
-  if (!name) return null
-
-  const map: Readonly<Record<string, Alignment>> = {
-    topLeading: { horizontal: 'leading', vertical: 'top' },
-    top: { horizontal: 'center', vertical: 'top' },
-    topTrailing: { horizontal: 'trailing', vertical: 'top' },
-    leading: { horizontal: 'leading', vertical: 'center' },
-    center: CENTER,
-    trailing: { horizontal: 'trailing', vertical: 'center' },
-    bottomLeading: { horizontal: 'leading', vertical: 'bottom' },
-    bottom: { horizontal: 'center', vertical: 'bottom' },
-    bottomTrailing: { horizontal: 'trailing', vertical: 'bottom' },
-  }
-  return map[name] ?? null
+  return name ? alignmentNamed(name) : null
 }
 
 /** A `VStack` takes a horizontal alignment; an `HStack` takes a vertical one. */
