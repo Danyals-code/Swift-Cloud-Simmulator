@@ -20,7 +20,7 @@ const NO_TOKENS: readonly SharedStyle[] = []
  * `layer-set` edit, so a change made here is one undo step however many modifiers it
  * touches. The modifier stack below still shows the chain as code.
  */
-export function LayerSections({ node, onCommand, tokens = NO_TOKENS, disabled = false, measure }: { node: AuthoringNode; onCommand?: FeatureChange; tokens?: readonly SharedStyle[]; disabled?: boolean; measure?: SectionProps['measure'] }) {
+export function LayerSections({ node, onCommand, tokens = NO_TOKENS, disabled = false, measure, sizeOverlap }: { node: AuthoringNode; onCommand?: FeatureChange; tokens?: readonly SharedStyle[]; disabled?: boolean; measure?: SectionProps['measure']; sizeOverlap?: SectionProps['sizeOverlap'] }) {
   const [pending, setPending] = useState(false)
   const set = useCallback(async (changes: readonly LayerChange[]) => {
     if (!onCommand) return 'Select the view again.'
@@ -31,7 +31,7 @@ export function LayerSections({ node, onCommand, tokens = NO_TOKENS, disabled = 
   }, [onCommand])
   const layer = node.layer
   if (!layer || !onCommand) return null
-  const props = { node, layer, set, busy: disabled || pending, tokens, command: onCommand, measure }
+  const props = { node, layer, set, busy: disabled || pending, tokens, command: onCommand, measure, sizeOverlap }
   return <div data-testid="settings-layer">
     <LayoutSection {...props} />
     <FillSection {...props} />

@@ -109,8 +109,13 @@ const KB = 1024
  *              reach, system UI, states and motion). Raised once for those
  *              waves, by decision, rather than PR by PR; each PR still reports
  *              its own growth, and the largest-chunk gate is unchanged.
+ *   Canvas handles - 796.1 KB actual after Wave 2a's layer sections. Wave 2b
+ *              adds direct manipulation on the canvas: resize, padding and
+ *              spacing handles, dragging to an offset and arrow-key nudging,
+ *              with a live draft layout in the worker, estimated at 15 KB.
+ *              Raised to 830 KB by decision, for 2b and some headroom.
  */
-const BUDGET_KB = 800
+const BUDGET_KB = 830
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.

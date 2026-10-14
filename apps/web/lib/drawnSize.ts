@@ -1,4 +1,4 @@
-import type { LayerLayout, Length, RenderNode, RenderTree, Size, ViewLayer } from '@studio/shared'
+import { screenOrigin, type LayerLayout, type Length, type RenderTree, type Size, type ViewLayer } from '@studio/shared'
 import { findLayer } from './layers'
 
 /**
@@ -26,7 +26,7 @@ export function drawnSize(tree: RenderTree, hierarchy: readonly ViewLayer[], run
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
   for (const node of painted) {
     if (node.frame.width <= 0 || node.frame.height <= 0) continue
-    const { x, y } = origin(node, byId)
+    const { x, y } = screenOrigin(node, byId)
     left = Math.min(left, x)
     top = Math.min(top, y)
     right = Math.max(right, x + node.frame.width)
@@ -37,14 +37,6 @@ export function drawnSize(tree: RenderTree, hierarchy: readonly ViewLayer[], run
 
 function flatten(items: readonly ViewLayer[]): string[] {
   return items.flatMap(item => [item.id, ...flatten(item.children)])
-}
-
-/** A node's place on the canvas: its frame is relative to the container it is positioned inside. */
-function origin(node: RenderNode, byId: ReadonlyMap<string, RenderNode>, depth = 0): { x: number; y: number } {
-  const parent = node.parent ? byId.get(node.parent) : undefined
-  if (!parent || depth > 64) return { x: node.frame.x, y: node.frame.y }
-  const base = origin(parent, byId, depth + 1)
-  return { x: base.x + node.frame.x, y: base.y + node.frame.y }
 }
 
 /**

@@ -13,6 +13,10 @@ import {
   setTextMeasurements,
   relayout,
   setAllPages,
+  setMeasureTarget,
+  beginLayerDraft,
+  updateLayerDraft,
+  endLayerDraft,
 } from '@studio/swiftui-runtime'
 import { hiddenViewsIn, viewSiteAt } from '@studio/swift-syntax'
 import type {
@@ -69,6 +73,14 @@ const api: CompilerApi = {
   },
   async setTextMeasurements(data, revision, generation) { return setTextMeasurements(data, revision, generation) },
   async relayout(revision) { return relayout(revision) },
+  // Wave 2b: the selected view's geometry, and a drag's draft. Every result carries
+  // `geometry` once a target is set; `endLayerDraft` also brings a new target's geometry
+  // without running anything again. `useCompiler` calls these through its Comlink remote,
+  // and wraps the three draft calls as its `LayerDrafts` for the canvas.
+  async setMeasureTarget(target) { setMeasureTarget(target) },
+  async beginLayerDraft(target, revision) { beginLayerDraft(target, revision) },
+  async updateLayerDraft(draft, revision) { return updateLayerDraft(draft, revision) },
+  async endLayerDraft(revision) { return endLayerDraft(revision) },
   async setAllPages(enabled, revision) { return setAllPages(enabled, revision) },
 
   async copyView(text: string, file: FileId, offset: number): Promise<CopiedView | { readonly refused: string }> {

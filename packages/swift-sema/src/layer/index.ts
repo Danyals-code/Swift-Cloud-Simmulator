@@ -23,6 +23,9 @@ export { edgeSetMembers, layerContext, layerProject, parentKind, type LayerConte
 
 const LOCKED = 'This view has a modifier the studio does not know. Change its layout and style in Code until its return type is known.'
 
+/** The context a chain is read and written in: nothing new goes into one with a modifier the studio does not know. */
+export const chainContext = (slots: ChainSlots, ctx: Omit<LayerContext, 'locked'>): LayerContext => ({ ...ctx, ...(slots.unknown ? { locked: LOCKED } : {}) })
+
 const claim = (claimed: Record<string, LayerSectionId>, value: LayerValue<unknown> | undefined, section: LayerSectionId) => {
   for (const id of value?.from ?? []) claimed[id] ??= section
 }
@@ -30,7 +33,7 @@ const claim = (claimed: Record<string, LayerSectionId>, value: LayerValue<unknow
 export function readLayer(expr: Expr, ctx: Omit<LayerContext, 'locked'>): LayerProperties | undefined {
   const slots = chainSlots(expr, ctx.text, ctx.names)
   if (!slots) return undefined
-  const full: LayerContext = { ...ctx, ...(slots.unknown ? { locked: LOCKED } : {}) }
+  const full = chainContext(slots, ctx)
   const layout = readLayout(slots, full)
   const claimed: Record<string, LayerSectionId> = {}
   for (const value of [layout.width, layout.height, layout.alignment, layout.padding, layout.margin, layout.offset, layout.pin]) claim(claimed, value, 'layout')
@@ -101,7 +104,7 @@ export function writeLayer(expr: Expr, changes: readonly LayerChange[], ctx: Omi
     }
     const slots = current && chainSlots(current, text, index ? undefined : ctx.names)
     if (!slots) throw new Error('This view no longer has an editable modifier chain. Select it again.')
-    const patches = writeSection(slots, change, { ...ctx, text, owner, ...(slots.unknown ? { locked: LOCKED } : {}) })
+    const patches = writeSection(slots, change, chainContext(slots, { ...ctx, text, owner }))
     let delta = 0, shift = 0
     for (const patch of [...patches].sort((a, b) => b.start - a.start)) {
       // A Button is sized on its label, inside its own call (Layout).

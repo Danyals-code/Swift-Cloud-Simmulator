@@ -27,6 +27,19 @@ export interface LineColumn {
   readonly column: number
 }
 
+/**
+ * Whether two spans name the same view. A view is known by where it starts: an edit to
+ * its modifiers moves its end, never its start.
+ */
+export function sameStart(a: Pick<SourceSpan, 'file' | 'start'> | null | undefined, b: Pick<SourceSpan, 'file' | 'start'> | null | undefined): boolean {
+  return !!a && !!b && a.file === b.file && a.start === b.start
+}
+
+/** A key for the view a span starts, the same however far its modifiers reach. */
+export function startKey(at: Pick<SourceSpan, 'file' | 'start'>): string {
+  return `${at.file}:${at.start}`
+}
+
 export function span(file: FileId, start: number, end: number): SourceSpan {
   return { file, start, end }
 }

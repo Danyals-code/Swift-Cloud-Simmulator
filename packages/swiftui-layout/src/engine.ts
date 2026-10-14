@@ -49,6 +49,7 @@ import {
   type MeasureOptions,
   type MeasuredRun,
   type TextLineBox,
+  type TextMeasurement,
 } from './metrics'
 import type { ProposedDimension, ProposedSize } from './proposal'
 
@@ -232,6 +233,25 @@ function readerInsets(bounds: Rect, area: LayoutEnvironment['safeArea']): EdgeIn
 const TOP_LEADING: Alignment = { horizontal: 'leading', vertical: 'top' }
 
 /**
+ * Told each element's rect as it is placed, in the space of the node it is placed inside
+ * (`space`, null for the screen's). How the canvas learns where a selected view's padding,
+ * frames and offset are, which leave no node of their own; the caller keeps only the few
+ * elements it asked about, so a layout with an observer costs a call per element.
+ */
+export type PlaceObserver = (element: LayoutElement, rect: Rect, space: string | null) => void
+
+export interface LayoutOptions {
+  readonly observer?: PlaceObserver
+  /**
+   * Keeps what the last layout measured, for a layout of the same tree with a few
+   * elements replaced, as a drag's draft is: an element is measured once, by identity,
+   * so only what the draft changed and what holds it are measured again. The caller
+   * must not reuse measurements across a change of fonts.
+   */
+  readonly reuseMeasurements?: boolean
+}
+
+/**
  * The SwiftUI layout engine.
  *
  * Two passes, exactly as SwiftUI describes them:
@@ -250,6 +270,12 @@ const TOP_LEADING: Alignment = { horizontal: 'leading', vertical: 'top' }
 export class LayoutEngine {
   /** Memoised `(element, proposal, font) -> size`, cleared per layout run. */
   private cache = new Map<LayoutElement, Map<string, Size>>()
+  /**
+   * Each text's lines at each width it was measured or placed at, kept with the sizes:
+   * breaking lines is most of what a layout costs, and a layout that keeps its
+   * measurements places every text it did not change at the width it had last time.
+   */
+  private texts = new Map<TextElement, Map<string, TextMeasurement>>()
 
   constructor(private readonly metrics: FontMetricsTable = new FontMetricsTable()) {}
 
@@ -266,20 +292,33 @@ export class LayoutEngine {
     bounds: Rect,
     env: LayoutEnvironment,
     alignment: Alignment = TOP_LEADING,
+    options: LayoutOptions = {},
   ): PlacedNode[] {
-    this.cache = new Map()
+    if (!options.reuseMeasurements) {
+      this.cache = new Map()
+      this.texts = new Map()
+    }
+    this.observer = options.observer
 
     env = { ...env, containerSize: { width: bounds.width, height: bounds.height } }
     const nodes: PlacedNode[] = []
     const size = this.measure(root, { width: bounds.width, height: bounds.height }, env)
 
-    this.place(root, alignedRect(bounds, size, alignment), env, nodes, 0, null)
+    try {
+      this.place(root, alignedRect(bounds, size, alignment), env, nodes, 0, null)
+    } finally {
+      this.observer = undefined
+    }
     return nodes
   }
+
+  /** The observer of the layout in progress, if it has one. */
+  private observer: PlaceObserver | undefined
 
   /** Exposed for tests and the inspector: what size would this element report? */
   measureElement(element: LayoutElement, proposal: ProposedSize, env: LayoutEnvironment): Size {
     this.cache = new Map()
+    this.texts = new Map()
     return this.measure(element, proposal, { ...env, containerSize: env.containerSize ?? finiteContainer(proposal) })
   }
 
@@ -300,23 +339,37 @@ export class LayoutEngine {
     return size
   }
 
+  /** A text's lines at `maxWidth`, broken once per width as a size is measured once per proposal. */
+  private textLines(element: TextElement, env: LayoutEnvironment, maxWidth: number, runs?: readonly PaintedRun[]): TextMeasurement {
+    const { font } = env
+    const key = `${maxWidth}|${font.size}|${font.weight}|${font.family}|${font.italic}|${font.lineHeight}|${env.lineLimit ?? ''}|${env.lineSpacing ?? 0}|${env.tracking ?? 0}`
+    let perElement = this.texts.get(element)
+    if (!perElement) {
+      perElement = new Map()
+      this.texts.set(element, perElement)
+    }
+    const hit = perElement.get(key)
+    if (hit) return hit
+    const measured = measureRuns(
+      measuredRuns(runs ?? paintedRuns(element, env)),
+      env.font,
+      maxWidth,
+      this.metrics,
+      env.lineLimit,
+      env.lineSpacing ?? 0,
+      textOptions(env, element),
+    )
+    perElement.set(key, measured)
+    return measured
+  }
+
   private computeSize(element: LayoutElement, proposal: ProposedSize, env: LayoutEnvironment): Size {
     switch (element.kind) {
       case 'empty':
         return { width: 0, height: 0 }
 
       case 'text': {
-        const maxWidth = resolve(proposal.width, Number.POSITIVE_INFINITY, UNBOUNDED)
-        const runs = paintedRuns(element, env)
-        const measured = measureRuns(
-          measuredRuns(runs),
-          env.font,
-          maxWidth,
-          this.metrics,
-          env.lineLimit,
-          env.lineSpacing ?? 0,
-          textOptions(env, element),
-        )
+        const measured = this.textLines(element, env, resolve(proposal.width, Number.POSITIVE_INFINITY, UNBOUNDED))
         return { width: measured.width, height: measured.height }
       }
 
@@ -748,6 +801,7 @@ export class LayoutEngine {
     z: number,
     parent: string | null,
   ): number {
+    this.observer?.(element, bounds, parent)
     switch (element.kind) {
       // A spacer occupies space but paints nothing; an empty view does neither.
       case 'empty':
@@ -756,15 +810,7 @@ export class LayoutEngine {
 
       case 'text': {
         const runs = paintedRuns(element, env)
-        const measured = measureRuns(
-          measuredRuns(runs),
-          env.font,
-          bounds.width,
-          this.metrics,
-          env.lineLimit,
-          env.lineSpacing ?? 0,
-          textOptions(env, element),
-        )
+        const measured = this.textLines(element, env, bounds.width, runs)
         // `.minimumScaleFactor` shrank the text to make it fit, so the painted runs
         // take the same factor. Measuring at one size and painting at another is the
         // one thing a measured layout exists to rule out.
@@ -1158,8 +1204,7 @@ export class LayoutEngine {
   /** Baselines propagate through padding, frames, and nested stacks. */
   private baselineOf(element: LayoutElement, size: Size, env: LayoutEnvironment, last: boolean): number {
     if (element.kind === 'text') {
-      const measured = measureRuns(measuredRuns(paintedRuns(element, env)), env.font, size.width,
-        this.metrics, env.lineLimit, env.lineSpacing ?? 0, textOptions(env, element))
+      const measured = this.textLines(element, env, size.width)
       if (!measured.lines.length) return size.height
       const index = last ? measured.lines.length - 1 : 0
       return measured.lines.slice(0, index).reduce((sum, line) => sum + line.height + (env.lineSpacing ?? 0), 0) + measured.lines[index]!.baseline

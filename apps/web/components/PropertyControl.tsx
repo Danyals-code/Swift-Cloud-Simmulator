@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
-import { LAYOUT_WORDS, type Alignment9, type DesignControl } from '@studio/shared'
+import { AUTO_SPACING, LAYOUT_WORDS, spreadOut, type Alignment9, type DesignControl } from '@studio/shared'
 import { Icon, type IconName } from './ui/Icon'
 import { COLOR_NAME_LABELS } from '../lib/colorValue'
 import styles from './AuthoringInspector.module.css'
@@ -152,7 +152,7 @@ export function PropertyControl({ control, onChange, label = control.label, capt
   const choices = choicesFor(control)
   const places = control.id === 'alignment' && control.options?.includes('topLeading')
   // Auto beside the number: a Spacer between each pair of views (D4).
-  const auto = control.id === 'spacing' && control.options?.includes('auto')
+  const auto = control.id === 'spacing' && control.options?.includes(AUTO_SPACING)
   /** A number's field with its unit at the end, as the layer sections' fields show one. */
   const withUnit = (field: ReactElement) => control.kind === 'number' && control.unit ? <span className={styles.unit}>{field}<span aria-hidden="true">{control.unit}</span></span> : field
   /** A share of one is dragged in percent; other sliders run from 0 to 1. */
@@ -167,8 +167,8 @@ export function PropertyControl({ control, onChange, label = control.label, capt
         {control.value === '' && <option value="" disabled>Use inherited / default</option>}
         {control.options?.map(option => <option key={option} value={option}>{propertyOptionLabel(option)}</option>)}
       </select> : control.kind === 'text' && /^(content|title)(:|$)/.test(control.id) ? <textarea {...input} readOnly={busy} rows={2} aria-description="Enter to apply. Shift+Enter for a new line." onChange={event => change(event.target.value)} /> : auto ? <span className={styles.spacing}>
-        {withUnit(<input {...input} value={draft === 'auto' ? '' : draft} readOnly={busy} type="text" inputMode="decimal" placeholder={draft === 'auto' ? 'Auto' : 'Default'} onChange={event => change(event.target.value)} />)}
-        <button type="button" aria-pressed={draft === 'auto'} disabled={busy} title="Spread the views out, with a Spacer between each pair. Type a number to go back." onClick={() => choose('auto')}>Auto</button>
+        {withUnit(<input {...input} value={spreadOut(draft) ? '' : draft} readOnly={busy} type="text" inputMode="decimal" placeholder={spreadOut(draft) ? 'Auto' : 'Default'} onChange={event => change(event.target.value)} />)}
+        <button type="button" aria-pressed={spreadOut(draft)} disabled={busy} title="Spread the views out, with a Spacer between each pair. Type a number to go back." onClick={() => choose(AUTO_SPACING)}>Auto</button>
       </span> : withUnit(<input {...input} readOnly={busy} type={/^date:(from|through)$/.test(control.id) ? "datetime-local" : "text"} inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.kind === 'number' ? 'Default' : 'Enter value'} onChange={event => change(event.target.value)} />)}
     </label>}
     {control.min === 0 && control.max === 1 && <input

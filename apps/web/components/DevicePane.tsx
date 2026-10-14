@@ -5,7 +5,7 @@ import { ASSET_DRAG_TYPE, draggingFiles } from '../lib/images'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RenderTreeView, symbolAsset, type EventSink, type InspectKeys } from '@studio/swiftui-render-dom'
 import { stateProblem } from '../lib/stateProblem'
-import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree } from '@studio/shared'
+import { EMPTY_RENDER_TREE, type PagePreview, type PreviewScenario, type RenderNode, type RenderTree, type ViewInstance } from '@studio/shared'
 import type { DeviceKey, DeviceSpec } from '@studio/sim-shell'
 import styles from './Workspace.module.css'
 import type { PreviewSettings } from '../lib/store'
@@ -19,6 +19,9 @@ import { CANVAS, canvasLayout, type CanvasArrow, type CanvasLayout } from '../li
 import { deviceChrome, type DeviceChrome } from '../lib/deviceChrome'
 import { galleryChangeView, viewCentredOn } from '../lib/canvasView'
 import { useCompiler, type CompilerOptions } from '../lib/useCompiler'
+import { dragged, dragStartFor, handleLayout, moveBlocked, type DragStart } from '../lib/canvasDrag'
+import { SelectionHandles, placeView } from './canvas/SelectionHandles'
+import { useHandleSession, type CanvasHandles } from './canvas/useHandleSession'
 import type { FeatureProps } from './AuthoringFeatures'
 import { InlineTextEditor } from './InlineTextEditor'
 import { PaneBoundary } from './PaneBoundary'
@@ -149,6 +152,8 @@ export interface DevicePaneProps {
   centerOn?: { readonly id: string; readonly nonce: number } | null
   /** What the preview is doing, drawn at the head of the canvas. */
   status?: React.ReactNode
+  /** The selected view's handles (Wave 2b), when one view is selected and measured. */
+  handles?: CanvasHandles | null
   preview: PreviewSettings
   onPreviewChange: (settings: Partial<PreviewSettings>) => void
 }
@@ -160,6 +165,8 @@ export interface CanvasDropTarget {
   readonly axis: 'horizontal' | 'vertical'
   readonly renderIds: readonly string[]
 }
+
+export type { CanvasHandles } from './canvas/useHandleSession'
 
 /** The text a double-click edits in place, and the control it is written with. */
 export interface InlineTextTarget { readonly node: AuthoringNode; readonly control: string; readonly value: string }
@@ -182,6 +189,8 @@ export interface CanvasInputs {
   /** Everything a state phone needs to compile, minus what the pane already knows. */
   readonly compile: Omit<CompilerOptions, 'device' | 'colorScheme' | 'typeScale' | 'dynamicTypeSize' | 'scenario' | 'allPages' | 'previewScreen'>
 }
+
+const NO_OUTLINES: readonly (readonly string[])[] = []
 
 /** Breathing room around the phone in the pane. */
 const PANE_PADDING = 28
@@ -229,7 +238,7 @@ export function DevicePane({
   environment,
   tools,
   device,
-  tree,
+  tree: committedTree,
   notice,
   onRestart,
   pagesNotDrawn,
@@ -243,7 +252,7 @@ export function DevicePane({
   onInspectDoubleClick,
   onHoverNode,
   onDropImage,
-  pages,
+  pages: committedPages,
   canvas,
   selectedPageId,
   navigationPicker,
@@ -258,10 +267,35 @@ export function DevicePane({
   dropTargetAt,
   centerOn,
   status,
+  handles: handlesProp,
   preview,
   onPreviewChange,
 }: DevicePaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  // By what they are rather than by array, which the workspace builds afresh each time it draws.
+  const selectedKey = selection?.renderIds?.join(' ') ?? ''
+  const selectedIds = useMemo(() => new Set(selectedKey.split(' ')), [selectedKey])
+  /** The selected view's handles at work (Wave 2b): drags, arrow keys, and the draft they show. */
+  const handleSession = useHandleSession({
+    handles: handlesProp ?? null, revision, stale, canvasRef: containerRef, focusedPage: selectedPageId, selected: selectedIds,
+    keys: expanded && inspecting && tool === 'select' && !navigationPicker,
+  })
+  const { handles, geometry } = handleSession
+  const tree = handleSession.draft?.renderTree ?? committedTree
+  const pages = handleSession.draft?.pages ?? committedPages
+  /**
+   * The copy of the selected view the handles draw the selection outline around, by its
+   * page and anchor. The render tree leaves that copy's outline to them, since the handles'
+   * box is the view's own, padding and fill included, as Figma's selection box is.
+   */
+  const [ownOutline, setOwnOutline] = useState<{ readonly page?: string; readonly anchor: string } | null>(null)
+  const onOutline = useCallback((next: { readonly page?: string; readonly anchor: string } | null) =>
+    setOwnOutline(previous => previous?.page === next?.page && previous?.anchor === next?.anchor ? previous : next), [])
+  const outlinedElsewhere = useMemo(() => {
+    if (!ownOutline || !selectedRenderGroups) return selectedRenderGroups
+    const others = selectedRenderGroups.filter(group => !group.includes(ownOutline.anchor))
+    return others.length < selectedRenderGroups.length ? others : NO_OUTLINES
+  }, [selectedRenderGroups, ownOutline])
   const [pane, setPane] = useState({ width: 0, height: 0, left: 0, top: 0, arrangeWidth: 0, arrangeHeight: 0, panelLayout, expanded, projectId })
   const gallery = expanded && !!pages?.length
   const scrollMemory = useMemo(() => ({ identity: previewIdentity, positions: new Map<string, { left: number; top: number }>() }), [previewIdentity])
@@ -314,13 +348,17 @@ export function DevicePane({
   // The zoom the canvas is really drawn at, for the zoom menu to show: Fit, or a screen
   // brought into view, is a percentage of its own. A pan leaves it alone, so it re-renders nothing.
   const [shownScale, setShownScale] = useState(1)
+  /** What follows the view as it pans and zooms without re-rendering: the selection's handles. */
+  const [viewListeners] = useState(() => new Set<() => void>())
+  const subscribeView = useCallback((listener: () => void) => { viewListeners.add(listener); return () => { viewListeners.delete(listener) } }, [viewListeners])
   const applyView = useCallback(() => {
     const world = worldRef.current
     if (!world) return
     const { x, y, scale } = viewRef.current
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
     setShownScale(scale)
-  }, [])
+    viewListeners.forEach(listener => listener())
+  }, [viewListeners])
   /** A world drawn again after a crash picks up the view where the old one left it. */
   const attachWorld = useCallback((world: HTMLDivElement | null) => {
     worldRef.current = world
@@ -646,6 +684,8 @@ export function DevicePane({
     return () => element.removeEventListener('wheel', onWheel)
   }, [pickingDestination, expanded, inspecting, gallery, onPreviewChange, applyView])
 
+  const startFor = useCallback((instance: ViewInstance): DragStart | null => handles ? dragStartFor(handles.node, instance) : null, [handles])
+
   /**
    * Dragging a view onto another one moves it in the file.
    *
@@ -658,7 +698,7 @@ export function DevicePane({
   const [dragTarget, setDragTarget] = useState<{ name: string; position: DropPosition } | null>(null)
 
   const onViewPointerDown = useCallback((event: React.PointerEvent) => {
-    if (navigationPicker || !expanded || stale || !inspecting || tool !== 'select' || !onReorderNodes || event.button !== 0) return
+    if (navigationPicker || !expanded || stale || !inspecting || tool !== 'select' || event.button !== 0) return
     const element = containerRef.current
     if (!element) return
 
@@ -669,10 +709,21 @@ export function DevicePane({
         && event.clientY >= box.top && event.clientY <= box.bottom
     })
 
+    // Inside an Overlap the selected view's body moves it, by its offset or a pinned view's
+    // margin (Wave 2b); ⌘-drag still reorders it, as a drag does everywhere else.
+    if (within && handles && geometry && !(event.metaKey || event.ctrlKey)) {
+      const placed = placeView(element, geometry, selectedPageId, selectedIds)
+      const start = placed && dragStartFor(handles.node, placed.instance)
+      // One whose offset can't be moved here says why once it is dragged, rather than reordering.
+      const blocked = start && moveBlocked(start)
+      if (blocked) { handleSession.refuse(event, blocked); return }
+      if (placed && start && handleLayout(start).move && handleSession.begin({ kind: 'move' }, event, placed, true)) return
+    }
+
     const node = within ? 'selection' : hoverRef.current
-    if (!node?.length) return
+    if (!onReorderNodes || !node?.length) return
     viewDrag.current = { node, x: event.clientX, y: event.clientY }
-  }, [navigationPicker, expanded, stale, inspecting, tool, onReorderNodes, selection])
+  }, [navigationPicker, expanded, stale, inspecting, tool, onReorderNodes, selection, handles, geometry, selectedPageId, selectedIds, handleSession])
 
   useEffect(() => {
     // Worked out again only when what is under the pointer changes, not at every move.
@@ -695,8 +746,7 @@ export function DevicePane({
       }
     }
 
-    const moved = (event: PointerEvent, drag: { x: number; y: number }) =>
-      Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) >= 6
+    const moved = (event: PointerEvent, drag: { x: number; y: number }) => dragged(drag, { x: event.clientX, y: event.clientY })
 
     const move = (event: PointerEvent) => {
       const drag = viewDrag.current
@@ -771,7 +821,7 @@ export function DevicePane({
   const onBackgroundUp = useCallback((event: React.PointerEvent) => {
     const press = backgroundPress.current
     backgroundPress.current = null
-    if (!press || !inspecting || navigationPicker || Math.abs(event.clientX - press.x) + Math.abs(event.clientY - press.y) > 4) return
+    if (!press || !inspecting || navigationPicker || dragged(press, { x: event.clientX, y: event.clientY })) return
     onSelectBackground?.()
   }, [inspecting, navigationPicker, onSelectBackground])
 
@@ -823,8 +873,18 @@ export function DevicePane({
   }, [centerOn, expanded, gallery, layout, applyView, onPreviewChange])
 
   const [inlineText, setInlineText] = useState<{ node: AuthoringNode; control: string; value: string; x: number; y: number; width: number } | null>(null)
+  /** The handles show on the selected view while designing, unless something is over the canvas or it is out of date. */
+  const showHandles = expanded && inspecting && tool === 'select' && !navigationPicker && !inlineText && !dragTarget && !handles?.covered && (!stale || !!handleSession.draft)
+  /** The selection outline the handles draw stays while an edit compiles, and under anything over the canvas. */
+  const outlineHandles = expanded && inspecting
+  /** A draft shows undimmed while the edit it becomes is on its way, so the page does not flicker. */
+  const shownStale = stale && !handleSession.draft
   const inlineEditor = inlineText && inspecting && authoringFeatures?.onNodeChange ? <InlineTextEditor key={`${inlineText.node.id}:${inlineText.control}`} {...inlineText} onClose={() => setInlineText(null)} onSave={value => authoringFeatures.onNodeChange!(inlineText.node, inlineText.control, value)} /> : null
-  const screenFor = (tree: RenderTree | null, live: boolean, at: number, page?: PagePreview) => (
+  const screenFor = (tree: RenderTree | null, live: boolean, at: number, page?: PagePreview, state = false) => {
+    // The copy the handles outline is still marked selected, but not outlined twice. A state
+    // phone is a compile of its own, which keeps its outline.
+    const outlined = !state && ownOutline && page?.id === ownOutline.page ? outlinedElsewhere : selectedRenderGroups
+    return (
     <div style={{ colorScheme: preview.colorScheme, position: 'absolute', top: 0, left: 0, transform: `scale(${at})`, transformOrigin: 'top left' }}>
       <DeviceFrame device={device} chrome={chrome}>
         <RenderTreeView
@@ -832,9 +892,10 @@ export function DevicePane({
           scrollPositions={scrollMemory.positions}
           tree={tree ?? EMPTY_RENDER_TREE}
           {...(selectedRenderGroups ? { selectedGroups: selectedRenderGroups } : {})}
+          {...(outlined !== selectedRenderGroups && outlined ? { selectedOutlines: outlined } : {})}
           {...(inspecting && !stale && hoveredRenderGroups ? { hoveredGroups: hoveredRenderGroups } : {})}
           {...(live ? { onEvent } : {})}
-          stale={stale}
+          stale={shownStale}
           {...(inspecting && !navigationPicker
             ? {
                 inspect: {
@@ -858,7 +919,8 @@ export function DevicePane({
         {device.homeIndicator ? <HomeIndicator device={device} colorScheme={preview.colorScheme} /> : null}
       </DeviceFrame>
     </div>
-  )
+    )
+  }
 
   const devicePicker = <DevicePicker device={device} onChange={onDeviceChange} />
   const schemePicker = <AppearancePicker preview={preview} onChange={onPreviewChange} />
@@ -1021,7 +1083,7 @@ export function DevicePane({
                       preview={preview}
                       active={canvas.activeState === scenarioKey(scenario)}
                       {...(canvas.onSelectState ? { onSelect: () => canvas.onSelectState!(page, scenario) } : {})}
-                      draw={tree => screenFor(tree, false, 1, page)}
+                      draw={tree => screenFor(tree, false, 1, page, true)}
                     />
                   </div>
                 : state ? null
@@ -1061,6 +1123,10 @@ export function DevicePane({
           )}
         </div>
         </PaneBoundary>
+        {outlineHandles && handles && geometry && <SelectionHandles canvasRef={containerRef} geometry={geometry} focusedPage={selectedPageId} selected={selectedIds}
+          interactive={showHandles} startFor={startFor} subscribe={subscribeView} dragging={handleSession.dragging} ghost={handleSession.ghost} onOutline={onOutline}
+          onHandleDown={(handle, event, placed) => void handleSession.begin(handle, event, placed)} onHug={handleSession.hug}
+          pin={handles.node.layer?.layout.context.parent === 'overlap' ? { value: handles.node.layer.layout.pin.value, reason: handles.node.layer.layout.pin.disabledReason, onChoose: handleSession.pin, offer: handles.sizeOverlap } : undefined} />}
       </div>
 
       <footer className={styles.canvasFooter}>{tools}</footer>

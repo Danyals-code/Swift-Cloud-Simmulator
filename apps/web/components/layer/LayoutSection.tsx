@@ -6,6 +6,7 @@ import { NumberField } from '../controls/NumberField'
 import { Icon } from '../ui/Icon'
 import { Choices, PLACES } from '../PropertyControl'
 import { fixedStart } from '../../lib/drawnSize'
+import { withMode } from '../../lib/axisSize'
 import { chip, IconButton, Note, numberOf, Section, tokenOf } from './parts'
 import { useLayerWrite, type SectionChange, type SectionProps } from './section'
 import shared from './LayerSection.module.css'
@@ -14,6 +15,9 @@ import styles from './LayoutSection.module.css'
 type LayoutChange = SectionChange<'layout'>
 type Axis = 'width' | 'height'
 type Side = keyof Insets
+
+/** The offer, on the canvas and here, that makes room for a pin in an Overlap that hugs. */
+export const OVERLAP_SIZE = 'Give the Overlap its current size'
 
 const MODES: readonly (readonly [AxisSize['mode'], string])[] = [['hug', 'Hug'], ['fill', 'Fill'], ['fixed', 'Fixed']]
 const SIDES: readonly (readonly [Side, string])[] = [['top', 'Top'], ['leading', 'Start'], ['bottom', 'Bottom'], ['trailing', 'End']]
@@ -32,9 +36,9 @@ const without = (size: AxisSize, key: 'min' | 'max'): AxisSize => ({ mode: size.
  * token shows the token as a chip, and typing a number replaces it; one the panel cannot
  * rewrite is shown with the reason, and is changed in Code.
  */
-export function LayoutSection({ node, layer, set, busy, measure }: SectionProps) {
+export function LayoutSection({ node, layer, set, busy, measure, sizeOverlap }: SectionProps) {
   const layout = layer.layout
-  const { write, error } = useLayerWrite((change: LayoutChange) => ({ section: 'layout', ...change }), { set, busy })
+  const { write, attempt, error } = useLayerWrite((change: LayoutChange) => ({ section: 'layout', ...change }), { set, busy })
   const limitsSet = [layout.width.value, layout.height.value].some(size => size.mode !== 'fixed' && (size.min !== undefined || size.max !== undefined))
   const [limitsOpen, setLimitsOpen] = useState(limitsSet)
   /** An axis switched to Fixed with no size to start from: its field waits for one. */
@@ -54,8 +58,7 @@ export function LayoutSection({ node, layer, set, busy, measure }: SectionProps)
       // Fixed starts from the drawn size, or the maximum or minimum it had; with none, the field asks for one.
       if (mode === 'fixed' && !start && size.max === undefined && size.min === undefined) { setAsking(axis); return }
       // A minimum and maximum go along between Hug and Fill; a Hug's maximum needs a fill to hug.
-      const kept = size.mode === 'fixed' ? {} : { ...size.min !== undefined ? { min: size.min } : {}, ...size.max !== undefined && (mode === 'fill' || layout.context.surface) ? { max: size.max } : {} }
-      void write(mode === 'fixed' ? { ...axisChange(axis, { mode }), ...start ? { measured: start } : {} } : axisChange(axis, { mode, ...kept }))
+      void write({ ...axisChange(axis, withMode(size, mode, layout.context.surface)), ...mode === 'fixed' && start ? { measured: start } : {} })
     }
     return <div className={shared.row} key={axis}><span>{words.title}</span>
       <div className={styles.sizing}>
@@ -98,6 +101,10 @@ export function LayoutSection({ node, layer, set, busy, measure }: SectionProps)
       <Places label="Pin" title="Pin" value={layout.pin.value} disabled={busy || !!layout.pin.disabledReason} onChoose={pin => void write({ pin })}
         none={<button type="button" className={styles.none} aria-pressed={!layout.pin.value} disabled={busy || !layout.pin.value} onClick={() => void write({ pin: null })}>None</button>} />
       <Note>{layout.pin.disabledReason}</Note>
+      {/* An Overlap that hugs can't take a pin: offered its drawn size, as Fixed (plan recommendation 7). */}
+      {sizeOverlap && layout.pin.disabledReason && <div className={shared.row}><span aria-hidden="true" />
+        <button type="button" className={styles.none} disabled={busy} onClick={() => void attempt(sizeOverlap)}>{OVERLAP_SIZE}</button>
+      </div>}
     </>}
   </Section>
 }

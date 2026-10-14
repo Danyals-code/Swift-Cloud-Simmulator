@@ -16,6 +16,11 @@ export interface SectionProps {
   readonly tokens: readonly SharedStyle[]
   /** Another kind of edit, for a value a layer change cannot make, such as a native Card's own fill. */
   readonly command: FeatureChange
+  /**
+   * Gives the Overlap the view is in its drawn size, as Fixed, when it hugs and so can't take
+   * a pin (plan recommendation 7); resolves to the reason it was refused, or null.
+   */
+  readonly sizeOverlap?: () => Promise<string | null>
 }
 
 /** One section's change, without the section it goes to. */

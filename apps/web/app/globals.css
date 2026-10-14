@@ -73,6 +73,8 @@
   --color-xc-field: rgb(116 116 128 / 0.08);
   /* The selected thumb of a segmented control. */
   --color-xc-thumb: #ffffff;
+  /* The canvas's resize knobs and grips' rims: white in either appearance, as Figma's are. */
+  --color-canvas-knob: #ffffff;
 
   /* Accent: text, icons and borders; and the fill of a primary button. */
   --color-xc-accent: #0071e3;

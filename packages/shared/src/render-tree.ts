@@ -632,3 +632,19 @@ export function cssTransform(t: TransformSpec, size: Size): string {
   const [a,b,c,d,e,f,g,h,i] = rotationProjection(t, size)
   return `matrix3d(${[a,b,0,c,d,e,0,f,0,0,1,0,g,h,0,i].join(', ')})`
 }
+
+/**
+ * Where a node is on its screen, nothing scrolled: a node's frame is in the space of the
+ * node it is placed in, a scroll view's or a clip's, and that node's in its own parent's.
+ * At most 65 parents are followed, so a tree that names itself as its own ancestor ends.
+ */
+export function screenOrigin(node: RenderNode, byId: ReadonlyMap<string, RenderNode>): Point {
+  let x = node.frame.x, y = node.frame.y
+  let parent = node.parent ? byId.get(node.parent) : undefined
+  for (let depth = 0; parent && depth <= 64; depth++) {
+    x += parent.frame.x
+    y += parent.frame.y
+    parent = parent.parent ? byId.get(parent.parent) : undefined
+  }
+  return { x, y }
+}

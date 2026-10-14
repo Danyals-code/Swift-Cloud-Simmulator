@@ -35,7 +35,7 @@ const NAVIGATE_TYPES: readonly { type: 'push' | 'sheet' | 'cover'; label: string
  * `onCopy` and `onPaste` put Copy and Paste in the view menu, as ⌘C and ⌘V do (D6);
  * Paste is off while nothing is copied.
  */
-export function AuthoringInspector({ node, stale, onReveal, onChange, features, onCopy, onPaste, measure }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void; measure?: Size }) {
+export function AuthoringInspector({ node, stale, onReveal, onChange, features, onCopy, onPaste, measure, sizeOverlap }: { features?: Omit<FeatureProps, 'node'>; node?: AuthoringNode; stale?: boolean; onReveal?: (span: SourceSpan) => void; onChange?: PropertyChange; onCopy?: (node: AuthoringNode) => void; onPaste?: (node: AuthoringNode) => void; measure?: Size; sizeOverlap?: () => Promise<string | null> }) {
   const root = useRef<HTMLDivElement | null>(null)
   const focus = useRef<{ source: string; owner: string; control: string; label: string; caret: number | null; modifier?: string; button?: string } | null>(null)
   const [retained, setRetained] = useState(node)
@@ -152,7 +152,7 @@ export function AuthoringInspector({ node, stale, onReveal, onChange, features, 
         })}</div>}
       </section>
 
-      {!['definition', 'template', 'branch'].includes(selected.kind) && <LayerSections key={`layer:${sourceKey}`} node={selected} onCommand={features?.onCommand} tokens={tokens} disabled={stale} measure={stale ? undefined : measure} />}
+      {!['definition', 'template', 'branch'].includes(selected.kind) && <LayerSections key={`layer:${sourceKey}`} node={selected} onCommand={features?.onCommand} tokens={tokens} disabled={stale} measure={stale ? undefined : measure} sizeOverlap={sizeOverlap} />}
 
       {!['definition', 'template', 'branch'].includes(selected.kind) && <section className={styles.settingsSection}>
         <ModifierStack disabled={stale} snapshot={features?.snapshot} key={sourceKey} node={selected} onChange={onChange} onCommand={features?.onCommand} onReveal={onReveal} features={features}
