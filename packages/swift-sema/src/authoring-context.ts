@@ -49,48 +49,83 @@ export function allDeclarations(ctx: FeatureContext): Decl[] {
   return result
 }
 /**
- * What `ownerOf` and `namedStruct` found, for each context: a view's settings ask both many
- * times over, and each answer is a search of every declaration in the project.
+ * What the settings of every view look up, worked out once for each context: the structs of
+ * each file, the declarations by name, the layers by id, and the answers already given.
+ * Each was a search of the whole project for every view that asked.
  */
-const ownerCache = new WeakMap<FeatureContext, Map<string, StructDecl | undefined>>()
-const structCache = new WeakMap<FeatureContext, Map<string, StructDecl | undefined>>()
-const remembered = <T>(cache: WeakMap<FeatureContext, Map<string, T>>, ctx: FeatureContext, key: string, find: () => T): T => {
-  let found = cache.get(ctx)
-  if (!found) cache.set(ctx, found = new Map())
-  if (!found.has(key)) found.set(key, find())
-  return found.get(key)!
+interface ContextIndex {
+  structs?: ReadonlyMap<string, readonly StructDecl[]>
+  topStructs?: ReadonlyMap<string, readonly StructDecl[]>
+  declared?: ReadonlyMap<unknown, number>
+  layers?: ReadonlyMap<string, AuthoringNode>
+  readonly owners: Map<string, StructDecl | undefined>
+  readonly named: Map<string, StructDecl | undefined>
+  readonly containing: Map<string, readonly Node[]>
+}
+const indexCache = new WeakMap<FeatureContext, ContextIndex>()
+function indexOf(ctx: FeatureContext): ContextIndex {
+  let index = indexCache.get(ctx)
+  if (!index) indexCache.set(ctx, index = { owners: new Map(), named: new Map(), containing: new Map() })
+  return index
+}
+/** A span as a key: its offsets first, as a file name may hold any character. */
+const spanKey = (span: SourceSpan) => `${span.start}:${span.end}:${span.file}`
+/** Each value in `items` under its key, in their order. */
+function grouped<K, T>(items: readonly T[], key: (item: T) => K | undefined): Map<K, T[]> {
+  const groups = new Map<K, T[]>()
+  for (const item of items) {
+    const at = key(item)
+    if (at === undefined) continue
+    const group = groups.get(at)
+    if (group) group.push(item)
+    else groups.set(at, [item])
+  }
+  return groups
 }
 
 export function ownerOf(ctx: FeatureContext, node: AuthoringNode): StructDecl | undefined {
+  const index = indexOf(ctx), key = spanKey(node.source)
+  if (index.owners.has(key)) return index.owners.get(key)
   const { file, start, end } = node.source
-  return remembered(ownerCache, ctx, JSON.stringify([file, start, end]), () => {
-    const matches = allDeclarations(ctx).filter((d): d is StructDecl => d.kind === 'structDecl' && d.span.file === file && d.span.start <= start && d.span.end >= end)
-    const inside = matches.sort((a, b) => (a.span.end - a.span.start) - (b.span.end - b.span.start))[0]
-    if (inside) return inside
+  index.structs ??= grouped(allDeclarations(ctx).filter((d): d is StructDecl => d.kind === 'structDecl'), d => d.span.file)
+  const matches = (index.structs.get(file) ?? []).filter(d => d.span.start <= start && d.span.end >= end)
+  let owner = matches.sort((a, b) => (a.span.end - a.span.start) - (b.span.end - b.span.start))[0]
+  if (!owner) {
     // A helper in `private extension ContentView { … }` belongs to ContentView, wherever that is (Wave 3a).
     const extension = ctx.ast.flatMap(f => f.declarations).find((d): d is ExtensionDecl => d.kind === 'extensionDecl' && d.span.file === file && d.span.start <= start && d.span.end >= end)
-    return extension ? namedStruct(ctx, extension.name) : undefined
-  })
+    owner = extension ? namedStruct(ctx, extension.name) : undefined
+  }
+  index.owners.set(key, owner)
+  return owner
 }
 export function expressionOf(ctx: FeatureContext, node: AuthoringNode): Expr | undefined {
   let expressions = expressionCache.get(ctx)
-  const key = (span: SourceSpan) => JSON.stringify([span.file, span.start, span.end])
   if (!expressions) {
     expressions = new Map()
     // A helper read as a property is a view with no call of its own (Wave 3a).
-    const visit = (n: Node) => { if (n.kind === 'call' || isViewBase(n as Expr)) expressions!.set(key(n.span), n as Expr); forEachChild(n, visit) }
+    const visit = (n: Node) => { if (n.kind === 'call' || isViewBase(n as Expr)) expressions!.set(spanKey(n.span), n as Expr); forEachChild(n, visit) }
     ctx.ast.forEach(visit)
     expressionCache.set(ctx, expressions)
   }
-  return expressions.get(key(node.source))
+  return expressions.get(spanKey(node.source))
 }
 export function callOf(ctx: FeatureContext, node: AuthoringNode): CallExpr | undefined { const e = expressionOf(ctx, node); return e ? viewCallChain(e)?.base : undefined }
 export function namedStruct(ctx: FeatureContext, name: string): StructDecl | undefined {
-  return remembered(structCache, ctx, name, () => {
-    // Nested or duplicate names require qualified resolution, outside this recipe.
-    const declarations = ctx.ast.flatMap(f => f.declarations).filter((d): d is StructDecl => d.kind === 'structDecl' && d.name === name)
-    return declarations.length === 1 && allDeclarations(ctx).filter(d => 'name' in d && d.name === name).length === 1 ? declarations[0] : undefined
-  })
+  const index = indexOf(ctx)
+  if (index.named.has(name)) return index.named.get(name)
+  index.topStructs ??= grouped(ctx.ast.flatMap(f => f.declarations).filter((d): d is StructDecl => d.kind === 'structDecl'), d => d.name)
+  index.declared ??= [...grouped(allDeclarations(ctx), d => 'name' in d ? d.name as unknown : undefined)].reduce((counts, [declared, all]) => counts.set(declared, all.length), new Map<unknown, number>())
+  // Nested or duplicate names require qualified resolution, outside this recipe.
+  const declarations = index.topStructs.get(name) ?? []
+  const found = declarations.length === 1 && index.declared.get(name) === 1 ? declarations[0] : undefined
+  index.named.set(name, found)
+  return found
+}
+/** The layer with an id, the first if more than one has it, as `find` gives it. */
+export function layerById(ctx: FeatureContext, id: string | undefined): AuthoringNode | undefined {
+  const index = indexOf(ctx)
+  index.layers ??= new Map([...ctx.nodes].reverse().map(layer => [layer.id, layer]))
+  return id === undefined ? undefined : index.layers.get(id)
 }
 export function scalarType(type: TypeRef | null, initial?: Expr | null): { type: RecordField['type']; optional: boolean } | undefined {
   if (type?.kind === 'optionalType') { const inner = scalarType(type.wrapped); return inner && { ...inner, optional: true } }
@@ -196,16 +231,49 @@ export function applyPatches(ctx: FeatureContext, patches: readonly SourcePatch[
 
 /** A local binding must never be mistaken for an owner's stored property. */
 export function shadowsMember(ctx: FeatureContext, node: AuthoringNode, name: string): boolean {
-  let shadowed = false
+  const start = node.source.start
+  return around(ctx, node.source).some(item =>
+    item.kind === 'closure' && item.params.some(p => p.name.replace(/^\$/, '') === name)
+    || item.kind === 'block' && item.statements.some(s => s.span.start < start && s.kind === 'declStmt' && s.declaration.kind === 'varDecl' && s.declaration.name === name)
+    || item.kind === 'ifStmt' && item.conditions.some(c => c.kind === 'optionalBinding' && c.name === name))
+}
+/** The syntax around a span, outermost first: found once for each span, as each of its names is asked about. */
+function around(ctx: FeatureContext, span: SourceSpan): readonly Node[] {
+  const index = indexOf(ctx), key = spanKey(span)
+  let found = index.containing.get(key)
+  if (found) return found
+  const items: Node[] = []
   const visit = (item: Node) => {
-    if (item.span.file !== node.source.file || item.span.start > node.source.start || item.span.end < node.source.end) return
-    if (item.kind === 'closure' && item.params.some(p => p.name.replace(/^\$/, '') === name)) shadowed = true
-    if (item.kind === 'block' && item.statements.some(s => s.span.start < node.source.start && s.kind === 'declStmt' && s.declaration.kind === 'varDecl' && s.declaration.name === name)) shadowed = true
-    if (item.kind === 'ifStmt' && item.conditions.some(c => c.kind === 'optionalBinding' && c.name === name)) shadowed = true
-    forEachChild(item, visit)
+    if (item.span.file !== span.file || item.span.start > span.start || item.span.end < span.end) return
+    items.push(item)
+    if (item.kind === 'sourceFile') topLevelAround(item, span).forEach(visit)
+    else forEachChild(item, visit)
   }
   ctx.ast.forEach(visit)
-  return shadowed
+  index.containing.set(key, found = items)
+  return found
+}
+/** Whether a file's declarations follow one another, each ending before the next begins. */
+const inOrder = new WeakMap<SourceFileNode, boolean>()
+/**
+ * The declarations of a file that can hold a span, in their order. In a file whose
+ * declarations follow one another, only those ending at or after its start can, and they
+ * are the last to begin at or before it; any other file's are all looked at.
+ */
+function topLevelAround(file: SourceFileNode, span: SourceSpan): readonly Decl[] {
+  const declarations = file.declarations
+  let ordered = inOrder.get(file)
+  if (ordered === undefined) inOrder.set(file, ordered = declarations.every((d, i) => d.span.start <= d.span.end && (i === 0 || declarations[i - 1]!.span.end <= d.span.start)))
+  if (!ordered) return declarations
+  let low = 0, high = declarations.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (declarations[middle]!.span.start <= span.start) low = middle + 1
+    else high = middle
+  }
+  let first = low
+  while (first > 0 && declarations[first - 1]!.span.end >= span.start) first--
+  return declarations.slice(first, low)
 }
 export function hasComments(ctx: FeatureContext, span: SourceSpan): boolean {
   // The lexer omits comments but token ranges still expose only trivia between tokens.

@@ -754,12 +754,16 @@ class StrictnessLinter {
     }
   }
 
+  /** Each method name's first declaration, in the order the types and their methods are listed. */
+  private functions: Map<string, FuncDecl> | undefined
+
+  /** Every call asks, so the methods of every type are listed by name once rather than searched for each. */
   private findFunction(name: string): FuncDecl | null {
-    for (const type of this.model.types.values()) {
-      const found = type.methods.find((m) => m.name === name)
-      if (found) return found
+    if (!this.functions) {
+      this.functions = new Map()
+      for (const type of this.model.types.values()) for (const method of type.methods) if (!this.functions.has(method.name)) this.functions.set(method.name, method)
     }
-    return null
+    return this.functions.get(name) ?? null
   }
 
   // ------------------------------------------------------------- inference

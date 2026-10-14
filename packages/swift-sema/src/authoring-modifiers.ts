@@ -284,8 +284,9 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
     callIndex++
     const name = borders[index] ? 'border' : nameOf(call), start = call.callee.kind === 'memberAccess' && call.callee.base ? call.callee.base.span.end : call.span.start
     const expression = text.slice(start, call.span.end).trim()
+    const own = `modifier:${callIndex}:`
     const controls = (node.controls ?? []).filter(control => {
-      if (control.id.startsWith(`modifier:${callIndex}:`)) return true
+      if (control.id.startsWith(own)) return true
       if (!control.id.startsWith('fill:') || name !== 'frame') return false
       const axis = control.id.slice(5), upper = axis[0]!.toUpperCase() + axis.slice(1)
       return call.args.some(a => [axis, `min${upper}`, `max${upper}`].includes(a.label ?? ''))
@@ -296,10 +297,14 @@ export function modifierModel(node: AuthoringNode, expr: Expr, text: string, { d
     const linked = node.properties.find(p => p.source && p.source.start >= start && p.source.end <= call.span.end && p.valueKind === 'token')
     const drawn = SUPPORTED_MODIFIERS.has(name) || !isAppleCall(name)
     const summary = controls.filter(c => !c.id.startsWith('fill:')).map(c => c.value || 'Default').join(' · ') || (linked ? linked.expression : !drawn ? NOT_DRAWN : category(name) === 'custom' ? 'Custom modifier' : call.trailingClosure ? category(name) === 'behavior' ? 'Configured action' : 'View content' : call.args.length ? 'Linked or advanced value' : 'On')
-    const { reason: _unused, ...caps } = capabilitiesOf(reason)
-    void _unused
+    const { remove, duplicate, moveUp, moveDown, toggle } = capabilitiesOf(reason)
     const fillsIn = onlyStroke(segment)
-    return { id: JSON.stringify([source.file, call.span.start, call.span.end, expression]), name, label: friendly(name), category: category(name), summary, expression, source: { ...call.span, start }, controls, propertyIds, enabled: true, ...drawn ? {} : { drawn: false as const }, capabilities: { edit: editable && controls.length > 0, ...caps, ...(fillsIn ? { toggle: false } : {}), reason: fillsIn ? 'Switched off, this stroke would leave the shape filled in. Change it in Code.' : reason } }
+    // Written out in full, in the order the keys always had: a spread between keys sends
+    // every key after it down V8's slow path, once for every modifier of every view.
+    const capabilities = { edit: editable && controls.length > 0, remove, duplicate, moveUp, moveDown, toggle: fillsIn ? false : toggle, reason: fillsIn ? 'Switched off, this stroke would leave the shape filled in. Change it in Code.' : reason }
+    const id = JSON.stringify([source.file, call.span.start, call.span.end, expression]), label = friendly(name), shown = category(name), at = { ...call.span, start }
+    return drawn ? { id, name, label, category: shown, summary, expression, source: at, controls, propertyIds, enabled: true, capabilities }
+      : { id, name, label, category: shown, summary, expression, source: at, controls, propertyIds, enabled: true, drawn: false as const, capabilities }
   })
   // A project's own modifier may return anything, so nothing is added beside it; Apple's return `some View`.
   const unknown = segments.some(segment => segment.call && !isAppleCall(nameOf(segment.call)))
