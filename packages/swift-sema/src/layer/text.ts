@@ -2,11 +2,12 @@ import { TEXT_STYLES, type ColorValue, type FontValue, type LayerChange, type La
 import type { CallExpr, Expr, VarDecl } from '@studio/swift-syntax'
 import { modifierName } from '../authoring-border'
 import { SLOT } from '../authoring-modifiers'
+import { keepsText } from '../builtins'
 import { STYLE_OPTIONS } from '../design-advanced-controls'
 import { insertCalls, insertionIndex, lineEnding, lineStart, replaceRun, type Patch } from './chain-edit'
 import { colorSource, readColor, sameColor } from './color'
 import { callsNamed, type ChainSlots, type SlotRun } from './slots'
-import type { LayerContext } from './context'
+import { runRefusal, type LayerContext } from './context'
 import { numberOf } from './values'
 
 /**
@@ -158,21 +159,20 @@ function readTextColor(slots: ChainSlots, ctx: LayerContext): LayerValue<ColorVa
 
 export function readText(slots: ChainSlots, ctx: LayerContext): LayerText | undefined {
   if (!TEXT_VIEWS.has(ctx.node.name)) return undefined
+  // A run of joined text is part of a paragraph: its alignment, spacing and case are the whole text's (Wave 3a).
+  const paragraph = <T>(value: LayerValue<T | null>, word: string): LayerValue<T | null> => ctx.run ? { ...value, disabledReason: runRefusal(`Set its ${word} on the whole text, in parentheses, in Code.`) } : value
   return {
     font: readFont(slots, ctx),
     color: readTextColor(slots, ctx),
-    alignment: readOne(slots, ['multilineTextAlignment'], ctx, value => memberIn(value, ['leading', 'center', 'trailing']) as 'leading' | 'center' | 'trailing' | undefined, 'alignment'),
+    alignment: paragraph(readOne(slots, ['multilineTextAlignment'], ctx, value => memberIn(value, ['leading', 'center', 'trailing']) as 'leading' | 'center' | 'trailing' | undefined, 'alignment'), 'alignment'),
     tracking: readOne(slots, ['tracking', 'kerning'], ctx, number(ctx), 'letter spacing'),
-    lineSpacing: readOne(slots, ['lineSpacing'], ctx, number(ctx), 'line spacing'),
-    textCase: readOne(slots, ['textCase'], ctx, value => memberIn(value, STYLE_OPTIONS.textCase!) as 'uppercase' | 'lowercase' | undefined, 'case'),
+    lineSpacing: paragraph(readOne(slots, ['lineSpacing'], ctx, number(ctx), 'line spacing'), 'line spacing'),
+    textCase: paragraph(readOne(slots, ['textCase'], ctx, value => memberIn(value, STYLE_OPTIONS.textCase!) as 'uppercase' | 'lowercase' | undefined, 'case'), 'case'),
     ...(ctx.target < 14 ? { scalingUnavailable: 'Scaling with text size needs iOS 14. Raise the deployment target to use it.' } : {}),
   }
 }
 
 // ---------------------------------------------------------------- writing
-
-/** Modifiers that keep a `Text` a `Text`, so the Text-only ones after them still apply below iOS 16. */
-const KEEPS_TEXT: ReadonlySet<string> = new Set(['font', 'fontWeight', 'bold', 'italic', 'tracking', 'kerning', 'baselineOffset', 'underline', 'strikethrough', 'foregroundColor', 'monospacedDigit'])
 
 /** The calls that write a font: the font itself, and on iOS 16 and later its weight, design and italic beside it. */
 export function fontCalls(font: FontValue, inherited: string, size: string | null, ctx: LayerContext): string[] {
@@ -266,10 +266,10 @@ function writeFont(slots: ChainSlots, change: Partial<FontValue>, ctx: LayerCont
   return [...patches, replaceRun(slots, runs[0]!, calls, ctx.text), ...runs.slice(1).map(run => replaceRun(slots, run, [], ctx.text))]
 }
 
-/** Where a new Text-only modifier goes below iOS 16: while the chain is still a `Text`. */
-function textOnlyIndex(slots: ChainSlots): number {
+/** Where a new Text-only modifier goes below iOS 16: while the chain is still a `Text` (`keepsText`). */
+function textOnlyIndex(slots: ChainSlots, target: number): number {
   let index = 0
-  while (index < slots.names.length && KEEPS_TEXT.has(slots.names[index]!)) index++
+  while (index < slots.names.length && keepsText(slots.names[index]!, target)) index++
   return index
 }
 
@@ -288,8 +288,10 @@ const SIMPLE: readonly { readonly field: 'tracking' | 'alignment' | 'lineSpacing
  */
 function colorCall(slots: ChainSlots, color: ColorValue, ctx: LayerContext): string {
   const at = callsNamed(slots, COLOR_CALLS)[0]?.indices[0]
-  const keepsText = ctx.target < 16 && ctx.node.name === 'Text' && at !== undefined && slots.names[at] === 'foregroundColor' && at < textOnlyIndex(slots)
-  return ctx.target >= 15 && !keepsText ? `.foregroundStyle(${colorSource(color, 'ShapeStyle', ctx)})` : `.foregroundColor(${colorSource(color, 'Color', ctx)})`
+  const staysText = ctx.target < 16 && ctx.node.name === 'Text' && at !== undefined && slots.names[at] === 'foregroundColor' && at < textOnlyIndex(slots, ctx.target)
+  // A run of joined text must stay a Text, which `foregroundStyle` keeps it only from iOS 17 (Wave 3a).
+  const style = ctx.run ? keepsText('foregroundStyle', ctx.target) : ctx.target >= 15 && !staysText
+  return style ? `.foregroundStyle(${colorSource(color, 'ShapeStyle', ctx)})` : `.foregroundColor(${colorSource(color, 'Color', ctx)})`
 }
 
 export function writeText(slots: ChainSlots, change: TextChange, ctx: LayerContext): Patch[] {
@@ -319,7 +321,7 @@ export function writeText(slots: ChainSlots, change: TextChange, ctx: LayerConte
   }
   if ((added.length || textOnly.length) && ctx.locked) throw new Error(ctx.locked)
   if (textOnly.length && ctx.node.name !== 'Text') throw new Error('Letter spacing on this view needs iOS 16. Set it on its Text, or raise the deployment target.')
-  if (textOnly.length) patches.push(insertCalls(slots, textOnlyIndex(slots), textOnly, ctx.text))
+  if (textOnly.length) patches.push(insertCalls(slots, textOnlyIndex(slots, ctx.target), textOnly, ctx.text))
   if (added.length) patches.push(insertCalls(slots, insertionIndex(slots, SLOT.text), added, ctx.text))
   return mergeInserts(patches)
 }

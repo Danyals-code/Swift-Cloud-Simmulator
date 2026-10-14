@@ -142,3 +142,23 @@ struct LibraryView: View { var body: some View { Text("Library") } }
     expect(authoringSettingsContext(snapshot, tabs).conditions.map(node => node.properties[0]?.expression)).toEqual(['ready'])
   })
 })
+
+describe('a view in a helper', () => {
+  /** The Text the `header` helper draws. */
+  const inHeader = (snapshot: ReturnType<typeof model>['snapshot']) => {
+    const helper = snapshot.nodes.find(node => node.kind === 'definition' && node.name === 'header')!
+    return snapshot.nodes.find(node => node.id === helper.children[0])!
+  }
+  it('is shown when the place the helper is used is, and sits in what holds that place', () => {
+    const { snapshot } = model('VStack { if ready { header } }', '@State var ready = true\nvar header: some View { Text("Header") }')
+    const context = authoringSettingsContext(snapshot, inHeader(snapshot))
+    expect(context.conditions.map(condition => condition.properties[0]?.expression)).toEqual(['ready'])
+    expect(context.ancestors.filter(node => node.kind !== 'branch' && node.kind !== 'definition').map(node => node.name)).toEqual(['VStack', 'header'])
+  })
+
+  it('says nothing of a place when the helper is used in several', () => {
+    const { snapshot } = model('VStack { if ready { header }; header }', '@State var ready = true\nvar header: some View { Text("Header") }')
+    const context = authoringSettingsContext(snapshot, inHeader(snapshot))
+    expect(context.conditions).toEqual([])
+  })
+})

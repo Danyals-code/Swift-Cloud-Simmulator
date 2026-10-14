@@ -23,6 +23,8 @@ export interface AuthoringProperty {
   readonly capability?: string
   readonly writable: boolean
   readonly reason: string
+  /** Set on a value read from a helper's parameter (Wave 3a): each place that calls the helper gives it. */
+  readonly helperArgument?: true
 }
 
 export interface AuthoringNode {
@@ -61,6 +63,38 @@ export interface AuthoringNode {
   readonly undrawn?: 'unsupported' | 'unknown'
   /** The view as a layer: its layout, fill, corners, stroke, text and effects, read from its modifiers. */
   readonly layer?: LayerProperties
+  /**
+   * Where the preview draws the view from, when that is not where its source starts: a
+   * joined text in parentheses, `(A + B).font(.title)`, is drawn from its sum (Wave 3a).
+   */
+  readonly drawnFrom?: SourceSpan
+  /**
+   * Set on a helper's own node and on each call of it (Wave 3a): a computed `some View` or
+   * a function that returns one, whose views are read once where it is declared.
+   */
+  readonly helper?: true
+  /** On a helper's own node, how many places its views are drawn from, through the helpers that call it too. */
+  readonly places?: number
+  /**
+   * Set on a run of texts joined with `+` (Wave 3a): part of one Text, it keeps only what
+   * keeps a Text a Text.
+   */
+  readonly textRun?: true
+}
+
+/** A helper's own node (Wave 3a), which its views hang from: a definition the authoring model marks as one. */
+export function isHelperDefinition(node: Pick<AuthoringNode, 'kind' | 'helper'>): boolean {
+  return node.kind === 'definition' && !!node.helper
+}
+
+/** A call of a helper (Wave 3a), which points at its views as a component's copy points at its Main. */
+export function isHelperCall(node: Pick<AuthoringNode, 'kind' | 'helper'>): boolean {
+  return node.kind === 'component' && !!node.helper
+}
+
+/** Where a helper's views are drawn, in the words every place that says so uses: `Used in 2 places`. */
+export function helperPlaces(places: number): string {
+  return places > 1 ? `Used in ${places} places` : places ? 'Used in 1 place' : 'Not used anywhere yet'
 }
 
 /** The app's accent, as the hex its colour set holds in light and dark. */
@@ -90,8 +124,20 @@ export function bindAuthoringRuntime(snapshot: AuthoringSnapshot, layers: readon
   const sites = new Map<string, AuthoringNode[]>()
   for (const node of snapshot.nodes) {
     if (node.kind === 'definition' || node.kind === 'branch' || node.kind === 'template') continue
-    const key = JSON.stringify([node.source.file, node.source.start])
+    const drawn = node.drawnFrom ?? node.source
+    const key = JSON.stringify([drawn.file, drawn.start])
     sites.set(key, [...(sites.get(key) ?? []), node])
+  }
+  /**
+   * Of views written at one place, the one a layer is: the smallest whose source reaches as
+   * far as the layer's, as a joined text and its first run start together (Wave 3a).
+   */
+  const narrowest = (nodes: readonly AuthoringNode[], layer: ViewLayer): AuthoringNode | undefined => {
+    const end = layer.source?.end ?? 0
+    const reaching = nodes.filter(node => (node.drawnFrom ?? node.source).end >= end)
+    const size = (node: AuthoringNode) => (node.drawnFrom ?? node.source).end - (node.drawnFrom ?? node.source).start
+    const smallest = reaching.reduce<AuthoringNode | undefined>((best, node) => !best || size(node) < size(best) ? node : best, undefined)
+    return smallest && reaching.filter(node => size(node) === size(smallest)).length === 1 ? smallest : undefined
   }
   const runtimeToSource: Record<string, string> = Object.create(null)
   const runtimeIds = new Map<string, string[]>()
@@ -99,7 +145,7 @@ export function bindAuthoringRuntime(snapshot: AuthoringSnapshot, layers: readon
     for (const item of items) {
       const candidates = item.source ? sites.get(JSON.stringify([item.source.file, item.source.start])) ?? [] : []
       const matching = candidates.filter(n => n.name === item.type)
-      const node = matching.length === 1 ? matching[0] : candidates.length === 1 ? candidates[0] : undefined
+      const node = matching.length === 1 ? matching[0] : matching.length > 1 ? narrowest(matching, item) : candidates.length === 1 ? candidates[0] : undefined
       if (node) {
         runtimeToSource[item.id] = node.id
         runtimeIds.set(node.id, [...(runtimeIds.get(node.id) ?? []), item.id])

@@ -1,7 +1,7 @@
 import { validDesignValue } from '@studio/shared'
 import type { AuthoringNode, ComponentDescription, DesignValue, PreviewColorAsset, RecordField, SourceFile, SourceSpan } from '@studio/shared'
-import { forEachChild, Lexer, type CallExpr, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
-import { swiftString, viewCallChain } from './design-controls'
+import { forEachChild, Lexer, type CallExpr, type Decl, type Expr, type ExtensionDecl, type Node, type SourceFileNode, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
+import { isViewBase, swiftString, viewCallChain } from './design-controls'
 
 export interface SourcePatch { readonly file: string; readonly start: number; readonly end: number; readonly text: string }
 export interface FeatureContext {
@@ -50,14 +50,19 @@ export function allDeclarations(ctx: FeatureContext): Decl[] {
 }
 export function ownerOf(ctx: FeatureContext, node: AuthoringNode): StructDecl | undefined {
   const matches = allDeclarations(ctx).filter((d): d is StructDecl => d.kind === 'structDecl' && d.span.file === node.source.file && d.span.start <= node.source.start && d.span.end >= node.source.end)
-  return matches.sort((a, b) => (a.span.end - a.span.start) - (b.span.end - b.span.start))[0]
+  const inside = matches.sort((a, b) => (a.span.end - a.span.start) - (b.span.end - b.span.start))[0]
+  if (inside) return inside
+  // A helper in `private extension ContentView { … }` belongs to ContentView, wherever that is (Wave 3a).
+  const extension = ctx.ast.flatMap(file => file.declarations).find((d): d is ExtensionDecl => d.kind === 'extensionDecl' && d.span.file === node.source.file && d.span.start <= node.source.start && d.span.end >= node.source.end)
+  return extension ? namedStruct(ctx, extension.name) : undefined
 }
 export function expressionOf(ctx: FeatureContext, node: AuthoringNode): Expr | undefined {
   let expressions = expressionCache.get(ctx)
   const key = (span: SourceSpan) => JSON.stringify([span.file, span.start, span.end])
   if (!expressions) {
     expressions = new Map()
-    const visit = (n: Node) => { if (n.kind === 'call') expressions!.set(key(n.span), n); forEachChild(n, visit) }
+    // A helper read as a property is a view with no call of its own (Wave 3a).
+    const visit = (n: Node) => { if (n.kind === 'call' || isViewBase(n as Expr)) expressions!.set(key(n.span), n as Expr); forEachChild(n, visit) }
     ctx.ast.forEach(visit)
     expressionCache.set(ctx, expressions)
   }

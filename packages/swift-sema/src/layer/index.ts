@@ -1,14 +1,15 @@
 import type { LayerChange, LayerProperties, LayerSectionId, LayerValue, SourceSpan } from '@studio/shared'
-import { Parser, forEachChild, type CallExpr, type Expr, type Node, type StructDecl } from '@studio/swift-syntax'
+import { Parser, chainBase, forEachChild, type Expr, type Node, type StructDecl } from '@studio/swift-syntax'
 import { applyPatch, type Patch } from './chain-edit'
 import { readCorners, writeCorners } from './corners'
 import { readEffects, writeEffects } from './effects'
 import { readFill, writeFill } from './fill'
 import { readLayout, writeLayout } from './layout'
 import { chainSlots, type ChainSlots } from './slots'
+import { isViewBase, markViewBase, viewCallChain } from '../design-controls'
 import { readStroke, writeStroke } from './stroke'
 import { readText, writeText } from './text'
-import type { LayerContext } from './context'
+import { runRefusal, type LayerContext } from './context'
 
 export { edgeSetMembers, layerContext, layerProject, parentKind, type LayerContext, type LayerProject } from './context'
 
@@ -49,9 +50,8 @@ export function readLayer(expr: Expr, ctx: Omit<LayerContext, 'locked'>): LayerP
   claim(claimed, effects.blur, 'effects')
   return {
     layout,
-    fill,
-    corners,
-    stroke,
+    // A run of joined text has no fill, corners or stroke of its own to set (Wave 3a).
+    ...(full.run ? { textRun: true as const } : { fill, corners, stroke }),
     ...(text ? { text } : {}),
     effects,
     claimed,
@@ -61,6 +61,7 @@ export function readLayer(expr: Expr, ctx: Omit<LayerContext, 'locked'>): LayerP
 }
 
 function writeSection(slots: ChainSlots, change: LayerChange, ctx: LayerContext): Patch[] {
+  if (ctx.run && change.section !== 'text') throw new Error(runRefusal('Put the joined text in parentheses in Code to change all of it.'))
   switch (change.section) {
     case 'layout': return writeLayout(slots, change, ctx)
     case 'effects': return writeEffects(slots, change, ctx)
@@ -73,15 +74,32 @@ function writeSection(slots: ChainSlots, change: LayerChange, ctx: LayerContext)
 }
 
 /** The call written exactly over `span`, in any of `trees`: the view a request names, found again. */
-export function callAt(trees: readonly Node[], span: SourceSpan): CallExpr | undefined {
-  let found: CallExpr | undefined
+export function callAt(trees: readonly Node[], span: SourceSpan): Expr | undefined {
+  let found: Expr | undefined
   const visit = (node: Node): void => {
     if (found) return
-    if (node.kind === 'call' && node.span.file === span.file && node.span.start === span.start && node.span.end === span.end) found = node
+    // A helper read as a property is a view with no call of its own (Wave 3a).
+    if ((node.kind === 'call' || isViewBase(node as Expr)) && node.span.file === span.file && node.span.start === span.start && node.span.end === span.end) found = node as Expr
     else forEachChild(node, visit)
   }
   trees.forEach(visit)
   return found
+}
+
+/**
+ * The view written at `span` in a file parsed again. A view written as no call, a helper
+ * read as a property or a joined text in parentheses, is read as one again (`markViewBase`).
+ */
+function viewAgain(tree: Node, span: SourceSpan, was: Expr): Expr | undefined {
+  const base = chainBase(was), marked = isViewBase(base) ? viewCallChain(base)!.base.span : undefined
+  if (marked) {
+    const visit = (node: Node): void => {
+      if (node.kind === base.kind && node.span.file === span.file && node.span.start === base.span.start && node.span.end === base.span.end) markViewBase(node as Expr, marked)
+      else if (node.span.start <= base.span.start && node.span.end >= base.span.end) forEachChild(node, visit)
+    }
+    visit(tree)
+  }
+  return callAt([tree], span)
 }
 
 /**
@@ -99,7 +117,7 @@ export function writeLayer(expr: Expr, changes: readonly LayerChange[], ctx: Omi
   for (const [index, change] of changes.entries()) {
     if (index > 0) {
       const tree = Parser.parse(text, file).sourceFile
-      current = callAt([tree], { file, start, end })
+      current = viewAgain(tree, { file, start, end }, expr)
       owner = owner && tree.declarations.find((decl): decl is StructDecl => decl.kind === 'structDecl' && decl.name === owner!.name)
     }
     const slots = current && chainSlots(current, text, index ? undefined : ctx.names)

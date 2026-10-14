@@ -1,6 +1,6 @@
 import { deploymentVersion, nameInWords } from '@studio/shared'
 import type { AuthoringNode, ComponentSettings, ComponentVariant, DesignControl, SourceFile } from '@studio/shared'
-import { Parser, insertView, forEachChild, type FuncDecl, type Node, type TypeRef, type VarDecl } from '@studio/swift-syntax'
+import { Parser, callParameter, fitsParameters, insertView, forEachChild, type Attribute, type CallExpr, type Expr, type FuncDecl, type InitDecl, type Node, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
 import { readsNoValue } from './authoring-clipboard'
 import { AUTHORING_COLORS, swiftString, validateControlValue, designControlRecipes } from './design-controls'
 import { applyPatches, allDeclarations, callOf, expressionOf, identifier, insertMember, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch, sourceRoot } from './authoring-context'
@@ -40,17 +40,38 @@ export function emptyComponents(ctx: FeatureContext): string[] {
 }
 
 export interface ComponentRecipe { control: DesignControl; portable: boolean; write(value: string): SourcePatch }
+
+/** A value a call of a component gives it: by the label it is written with, its type, and its own value when the call leaves it out. */
+interface ComponentInput { readonly name: string; readonly typeAnnotation: TypeRef | null; readonly attributes: readonly Attribute[]; readonly initializer: Expr | null }
+
+/**
+ * What a call of a component writes its values as: the stored properties its memberwise
+ * initialiser takes, or the labelled parameters of the one `init` of its own the call
+ * fits (Wave 3a). Undefined when it fits none of those, or several.
+ */
+function componentInputs(decl: StructDecl, call: CallExpr): ComponentInput[] | undefined {
+  const inits = decl.members.filter((m): m is InitDecl => m.kind === 'initDecl')
+  if (!inits.length) return decl.members.filter((m): m is VarDecl => m.kind === 'varDecl' && !m.accessor && !m.modifiers.some(x => ['static', 'private', 'fileprivate'].includes(x.name)) && !(m.isLet && m.initializer) && !m.attributes.some(a => a.name !== 'Binding'))
+  const fitting = inits.filter(init => fitsParameters(init.params.map(callParameter), call))
+  return fitting.length === 1 ? fitting[0]!.params.flatMap(param => {
+    const name = callParameter(param).label
+    return name ? [{ name, typeAnnotation: param.type, attributes: param.attributes, initializer: param.defaultValue }] : []
+  }) : undefined
+}
+
 export function componentRecipes(ctx: FeatureContext, node: AuthoringNode): ComponentRecipe[] {
   if (node.kind !== 'component') return []
   const call = callOf(ctx, node), decl = namedStruct(ctx, node.name)
-  if (!call || !decl || decl.isReference || decl.generics.length || decl.members.some(m => m.kind === 'initDecl')) return []
-  const fields = decl.members.filter((m): m is VarDecl => m.kind === 'varDecl' && !m.accessor && !m.modifiers.some(x => ['static', 'private', 'fileprivate'].includes(x.name)) && !(m.isLet && m.initializer) && !m.attributes.some(a => a.name !== 'Binding'))
-  if (call.args.some(a => !fields.some(f => f.name === a.label))) return []
+  const fields = call && decl && !decl.isReference ? componentInputs(decl, call) : undefined
+  if (!call || !decl || !fields || call.args.some(a => !fields.some(f => f.name === a.label))) return []
+  /** A type a generic container is given at its call, `Content`, which takes no literal. */
+  const generic = (type: TypeRef | null) => type?.kind === 'namedType' && decl.generics.some(parameter => parameter.name === type.name)
   const descriptions = ctx.descriptions?.filter(d => d.owner === node.name) ?? []
   const description = descriptions.length === 1 && descriptions[0]?.signature === signature(ctx, decl) && descriptions[0].properties.every(p => fields.some(f => f.name === p.name)) ? descriptions[0] : undefined
   const result: ComponentRecipe[] = []
   for (const field of fields) {
-    if (field.attributes.length) continue // Binding ownership belongs to the call site's state, never a literal override.
+    // Binding ownership belongs to the call site's state, and a view type to what the call gives it: never a literal override.
+    if (field.attributes.length || generic(field.typeAnnotation)) continue
     const argument = call.args.find(a => a.label === field.name)
     const expr = argument?.value ?? field.initializer
     const type = field.typeAnnotation

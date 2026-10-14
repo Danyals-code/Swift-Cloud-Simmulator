@@ -1,0 +1,59 @@
+/* Words with values among them: one field, drawn as the studio's fields are, with a run of
+   words to type in on either side of each value and the values as chips. */
+.parts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background-color: var(--color-xc-field);
+  color: var(--color-xc-text);
+  font-size: var(--text-body);
+  cursor: text;
+  transition: border-color var(--duration-fast) var(--ease-in-out), box-shadow var(--duration-fast) var(--ease-in-out), background-color var(--duration-fast) var(--ease-in-out);
+}
+.parts:hover:not(:focus-within, [aria-disabled='true']) { border-color: var(--color-xc-line); }
+.parts:focus-within { border-color: var(--color-xc-accent); background-color: var(--color-xc-panel); box-shadow: var(--focus-ring); }
+.parts[aria-invalid='true'] { border-color: var(--color-xc-error); }
+.parts[aria-disabled='true'] { opacity: 0.5; cursor: default; }
+
+/* A run of words is as wide as what is typed in it, with room for the caret when empty:
+   the input and a hidden copy of its words share one cell, and the copy sizes it. */
+.words { display: inline-grid; min-width: 4px; max-width: 100%; }
+.words::after { content: attr(data-words) ' '; grid-area: 1 / 1; visibility: hidden; white-space: pre; overflow: hidden; padding: 0 1px; font: inherit; }
+.words > input {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 20px;
+  padding: 0 1px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+}
+.words > input:hover, .words > input:focus-visible { border: 0; background: transparent; box-shadow: none; }
+
+/* A value from the code, which is changed in Code. */
+.value {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: 20px;
+  padding: 0 6px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-xc-fill-strong);
+  color: var(--color-xc-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: default;
+}

@@ -1852,7 +1852,8 @@ class Converter {
    * label-and-value rather than as two labels.
    */
   private labeledContent(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label') ?? ''
+    const { text: title, label } = titleOf(view)
+    const titleId = label[0]?.path ?? `${path}l`
     const valueArg = labelled(view.args, 'value')
     const value = valueArg ? (stringArg(valueArg) ?? displayValue(valueArg)) : null
 
@@ -1877,7 +1878,7 @@ class Converter {
       spacing: 8,
       alignment: CENTER,
       children: [
-        this.styledText(`${path}l`, title, 'body', 'label'),
+        this.styledText(titleId, title, 'body', 'label'),
         { kind: 'spacer', id: `${path}sp`, axis: 'horizontal', minLength: 0 },
         trailing,
       ],
@@ -2878,7 +2879,8 @@ class Converter {
   }
 
   private picker(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0)) ?? argText(view, 'label') ?? ''
+    const { text: title, label } = titleOf(view)
+    const titleId = label[0]?.path ?? `${path}label`
     const selection = bindingValue(labelled(view.args, 'selection'))
     // A `DatePicker` shows a *formatted* date, which is the whole point of the row.
     // `displayValue` on a Date gives `2025-06-15 15:06:40 +0000` - a plausible-looking
@@ -2911,7 +2913,7 @@ class Converter {
       spacing: 8,
       alignment: CENTER,
       children: [
-        { kind: 'text', id: `${path}label`, text: title },
+        { kind: 'text', id: titleId, text: title },
         { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
         {
           kind: 'modified',
@@ -3230,7 +3232,8 @@ class Converter {
   }
 
   private disclosureGroup(view: ViewValue, path: string, origin: object): LayoutElement {
-    const title = stringArg(positional(view.args, 0)) ?? ''
+    // `DisclosureGroup { … } label: { … }` is headed by the label's own views (Wave 3a).
+    const { text: title, label } = titleOf(view)
     // Stamped by the resolver, which owns the open/closed state. A group drawn
     // without one has not been through it, so it draws closed rather than guessing.
     const expanded = truthyBinding(labelled(view.args, 'isExpanded'))
@@ -3242,7 +3245,7 @@ class Converter {
       spacing: 8,
       alignment: CENTER,
       children: [
-        { kind: 'text', id: `${path}title`, text: title },
+        ...label.length ? this.convertList(label, `${path}label`, 'horizontal') : [{ kind: 'text' as const, id: `${path}title`, text: title }],
         { kind: 'spacer', id: `${path}gap`, axis: 'horizontal', minLength: 8 },
         {
           kind: 'modified',
@@ -4266,8 +4269,22 @@ function defaultSpacing(): number {
   return IOS_27.metrics.stackSpacing
 }
 
-/** `Text("a") + Text("b")` is not supported yet; the first argument is the content. */
-function textOf(view: ViewValue): string {
+/**
+ * A control's title: the words written first, `Picker("Size", …)`, or those of its `label:`
+ * views (Wave 3a). `label` holds those views when the title is written as them: each is
+ * drawn under its own path, which a click on the title then finds.
+ */
+function titleOf(view: ViewValue): { readonly text: string; readonly label: readonly ViewValue[] } {
+  const written = stringArg(positional(view.args, 0))
+  return { text: written ?? argText(view, 'label') ?? '', label: written === null ? argViews(view, 'label') : [] }
+}
+
+/**
+ * The words a Text draws from its first argument: words as written, or a value as its
+ * `format:` or `style:` writes it. Texts joined with `+` have no argument of their own:
+ * their runs draw them.
+ */
+export function textOf(view: ViewValue): string {
   const first = positional(view.args, 0)
   if (first?.kind === 'string') return first.value
 

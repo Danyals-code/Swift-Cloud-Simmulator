@@ -131,6 +131,14 @@ export interface InterpreterHost {
   ): SwiftValue | undefined
 
   /**
+   * What a helper of a view drew (Wave 3a): a computed `some View` property, or a method
+   * that returns one, read or called at `span`. The host may say where its views were
+   * drawn from, as it does a component's, and answers what stands for them; undefined
+   * leaves the value as it is.
+   */
+  helperView?(name: string, value: SwiftValue, span: SourceSpan): SwiftValue | undefined
+
+  /**
    * `target[index]` where the interpreter does not own `target`.
    *
    * `d[.leading]` inside an `.alignmentGuide` closure is the case: `d` is a

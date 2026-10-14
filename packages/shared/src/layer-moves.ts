@@ -1,4 +1,4 @@
-import type { AuthoringNode } from './authoring'
+import { isHelperDefinition, type AuthoringNode } from './authoring'
 import type { DropPosition } from './protocol'
 
 /** Containers a layer can be moved into. A Form's or List's rows and a Section's are a column like any stack's. */
@@ -37,14 +37,27 @@ export function tappableProblem(nodes: readonly AuthoringNode[], node: Authoring
   if (!isStructuralLayer(node)) return argumentLayerProblem(nodes, node) ?? 'Select a view on a screen.'
   if (TAKES_TAPS.has(node.name)) return 'It takes taps already. Set what it does under When tapped.'
   if (HOLDS_SCREENS.has(node.name)) return 'A view that scrolls can’t be tapped as a whole. Make a view inside it tappable.'
+  return tapsAround(nodes, node, true, new Set())
+}
+
+/**
+ * Why the views around `node` stop it being made tappable. A helper's views are drawn
+ * where it is used (Wave 3a), so the walk goes on from each place, and the screen's
+ * content is the screen, under whatever holds only it: a NavigationStack, a ScrollView.
+ */
+function tapsAround(nodes: readonly AuthoringNode[], node: AuthoringNode, only: boolean, seen: ReadonlySet<string>): string | null {
   const byId = indexOf(nodes)
-  // The screen's content is the screen, under whatever holds only it: a NavigationStack, a ScrollView.
-  let only = true
   for (let child = node, parent = byId.get(node.parentId ?? ''); parent; child = parent, parent = byId.get(parent.parentId ?? '')) {
+    // A repeat stands for many rows, however few are written.
+    const alone = only && parent.kind !== 'collection' && parent.kind !== 'template' && parent.children.length === 1 && parent.children[0] === child.id
+    if (isHelperDefinition(parent)) {
+      if (seen.has(parent.id)) return null
+      const uses = nodes.filter(item => item.definitionId === parent!.id)
+      return uses.map(use => tapsAround(nodes, use, alone && uses.length === 1, new Set([...seen, parent!.id]))).find(Boolean) ?? null
+    }
     if (parent.kind === 'definition') return only ? 'The screen itself can’t be tapped. Make a view on it tappable.' : null
     if (parent.name === 'Button' || parent.name === 'NavigationLink') return 'It is inside something tappable already. Select that to set what a tap does.'
-    // A repeat stands for many rows, however few are written.
-    only &&= parent.kind !== 'collection' && parent.kind !== 'template' && parent.children.length === 1 && parent.children[0] === child.id
+    only = alone
   }
   return null
 }
@@ -103,8 +116,10 @@ export function layerMoveProblem(nodes: readonly AuthoringNode[], ids: readonly 
   if (!first || selected.some(node => !node || !isStructuralLayer(node) || node.parentId !== first.parentId || node.owner !== first.owner || node.source.file !== first.source.file)) return 'Select layers with the same parent.'
   if (!['view', 'collection'].includes(destination.kind) || !LAYER_MOVE_CONTAINERS.has(destination.name) || destination.owner !== first.owner || destination.source.file !== first.source.file) return 'Choose a layout container on this screen.'
   if (selected.some(node => node && destination.source.start >= node.source.start && destination.source.end <= node.source.end)) return 'A layer cannot be moved inside itself or its children.'
-  if (layerScope(byId, first) !== layerScope(byId, destination)) return LEAVES_SCOPE
-  if (byId.get(first.parentId ?? '')?.kind === 'definition') return 'The screen must keep its root layout.'
+  if (layerScope(byId, first) !== layerScope(byId, destination)) return leavesScope(byId, first, destination)
+  // A helper that builds several views can hand one to another of them; a screen keeps its root.
+  const parent = byId.get(first.parentId ?? '')
+  if (parent?.kind === 'definition' && !isHelperDefinition(parent)) return 'The screen must keep its root layout.'
   const siblings = byId.get(first.parentId ?? '')?.children ?? []
   const positions = selected.map(node => siblings.indexOf(node!.id)).sort((a, b) => a - b)
   if (positions.some((position, index) => position < 0 || index > 0 && position !== positions[index - 1]! + 1)) return 'Select adjacent layers to keep their layout order predictable.'
@@ -112,6 +127,22 @@ export function layerMoveProblem(nodes: readonly AuthoringNode[], ids: readonly 
 }
 
 const LEAVES_SCOPE = 'Move within the same screen or repeated row to preserve its values and conditions.'
+
+/** Why a view can't go from where `from` is to where `to` is, naming the helper when one of them is in one. */
+function leavesScope(byId: ReadonlyMap<string, AuthoringNode>, from: AuthoringNode, to: AuthoringNode): string {
+  const helper = [from, to].map(node => helperAround(byId, node)).find(Boolean)
+  return helper ? `Move it within ${helper.name}, or out of it in Code. A view moved into or out of a helper would change every place it is used.` : LEAVES_SCOPE
+}
+
+/** The helper a layer is drawn in, if it is in one. */
+function helperAround(byId: ReadonlyMap<string, AuthoringNode>, node: AuthoringNode): AuthoringNode | undefined {
+  const seen = new Set<string>()
+  for (let parent = byId.get(node.parentId ?? ''); parent && !seen.has(parent.id); parent = byId.get(parent.parentId ?? '')) {
+    seen.add(parent.id)
+    if (isHelperDefinition(parent)) return parent
+  }
+  return undefined
+}
 
 /** What layers are drawn in, rather than layers: a screen or component, a repeated row, a condition or slot. */
 const SCOPE_KINDS: ReadonlySet<string> = new Set(['definition', 'template', 'branch'])
@@ -138,5 +169,5 @@ export function canvasDropProblem(nodes: readonly AuthoringNode[], node: Authori
   if (onto.owner !== node.owner || onto.source.file !== node.source.file) return `Move it within ${node.owner}. A view moved into or out of a component would change every copy of it.`
   // Inside a list's rows is inside its row design; anywhere else is where the view dropped on is drawn.
   const rows = position === 'inside' && onto.kind === 'collection' ? nodes.find(item => item.parentId === onto.id && item.kind === 'template') : undefined
-  return layerScope(byId, node) === (rows?.id ?? layerScope(byId, onto)) ? null : LEAVES_SCOPE
+  return layerScope(byId, node) === (rows?.id ?? layerScope(byId, onto)) ? null : leavesScope(byId, node, onto)
 }

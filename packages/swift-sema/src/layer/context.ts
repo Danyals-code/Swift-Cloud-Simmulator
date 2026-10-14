@@ -26,7 +26,12 @@ export interface LayerContext {
   readonly overlapSized?: boolean
   /** Why nothing new can be placed in this chain, when something in it is not known well enough. */
   readonly locked?: string
+  /** The view is a run of texts joined with `+` (Wave 3a): only what keeps a Text a Text is written on it. */
+  readonly run?: boolean
 }
+
+/** Why a run of joined text takes nothing but text styles, for `what` the change is about. */
+export const runRefusal = (what: string) => `Part of joined text takes text styles only. ${what}`
 
 /** A native Card (`GroupBox`) draws its own surface, which Card fill turns into an editable layer. */
 export const cardRefusal = (ctx: Pick<LayerContext, 'node'>): string | undefined => ctx.node.kind === 'view' && ctx.node.name === 'GroupBox'
@@ -58,6 +63,7 @@ export function layerContext(project: LayerProject, node: AuthoringNode, parent:
     edges: project.edges, target: project.target, node, parent: parentKind(parent),
     inButton: node.name === 'Button' || parent?.name === 'Button',
     owner: project.structs.get(node.owner.split('.')[0]!),
+    run: !!node.textRun,
     overlapSized: parentKind(parent) === 'overlap' && !!parent?.layer && [parent.layer.layout.width, parent.layer.layout.height].every(axis => axis.value.mode !== 'hug'),
   }
 }

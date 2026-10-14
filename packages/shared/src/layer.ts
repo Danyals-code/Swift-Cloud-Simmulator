@@ -204,6 +204,11 @@ export interface LayerProperties {
   readonly locked?: string
   /** The chain's span, for the structural check of a layer change. */
   readonly chain?: SourceSpan
+  /**
+   * A run of texts joined with `+` (Wave 3a): only its Text section applies, as only the
+   * modifiers that keep a Text a Text can be written on it.
+   */
+  readonly textRun?: true
 }
 
 /**

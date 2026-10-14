@@ -4,6 +4,8 @@ import type { SourceSpan } from './source'
 export interface ComponentSource {
   readonly name: string
   readonly source: SourceSpan
+  /** A helper of a view, `header` or `stats(count:)`, rather than a view of its own (Wave 3a). */
+  readonly helper?: true
 }
 
 /** Serializable, evaluated SwiftUI hierarchy. Never contains executable closures. */

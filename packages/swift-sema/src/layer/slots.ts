@@ -1,7 +1,6 @@
-import { authoringCapability } from '@studio/shared'
 import type { CallExpr, Expr } from '@studio/swift-syntax'
 import { borderOf, cornersOf, modifierName } from '../authoring-border'
-import { SUPPORTED_MODIFIERS } from '../builtins'
+import { APPLE_VIEW_MODIFIERS, DYNAMIC_CALLS, IMAGE_CALLS, SHAPE_CALLS, SHAPE_PAINTS } from '../builtins'
 import { viewCallChain } from '../design-controls'
 
 /**
@@ -18,12 +17,6 @@ const SURFACE = new Set(['background', 'clipShape', 'cornerRadius', 'border', 'g
 
 /** Views that are shapes, which take `.fill` and `.stroke` of their own. */
 export const SHAPE_VIEWS: ReadonlySet<string> = new Set(['Rectangle', 'RoundedRectangle', 'UnevenRoundedRectangle', 'Capsule', 'Circle', 'Ellipse'])
-/** Calls only a Shape takes, and the shape it returns: once any other modifier is applied it is no longer a shape. */
-export const SHAPE_CALLS: ReadonlySet<string> = new Set(['trim', 'inset', 'rotation', 'scale', 'offset', 'transform', 'size'])
-/** A shape's own paint, which ends its shape calls. */
-const SHAPE_PAINTS: ReadonlySet<string> = new Set(['fill', 'stroke', 'strokeBorder'])
-/** Calls only an Image takes, which come first for the same reason. */
-export const IMAGE_CALLS: ReadonlySet<string> = new Set(['resizable', 'renderingMode', 'interpolation', 'antialiased'])
 /** How a resizable image fits its frame, which stays with it: padding between the two would change its proportions. */
 const IMAGE_FIT: ReadonlySet<string> = new Set(['scaledToFit', 'scaledToFill', 'aspectRatio'])
 
@@ -46,12 +39,15 @@ export interface ChainSlots {
   /** The first and last surface modifier, or null when nothing paints a surface. */
   readonly surface: { readonly first: number; readonly last: number } | null
   readonly runs: readonly SlotRun[]
-  /** A modifier whose type the studio does not know: nothing new is placed in this chain. */
+  /**
+   * A modifier the project declares, whose type the studio cannot see: nothing new is
+   * placed in this chain. Apple's own return `some View`, so writing beside them is safe.
+   */
   readonly unknown: boolean
   /**
    * How many calls at the start of the chain belong to the view's own type: an Image's
-   * `.resizable()` and how it fits, a shape's `.trim` and its paint. Nothing new is
-   * placed before them.
+   * `.resizable()` and how it fits, a shape's `.trim` and its paint, a ForEach's
+   * `.onDelete`. Nothing new is placed before them.
    */
   readonly baseEnd: number
   /**
@@ -77,8 +73,10 @@ export function chainSlots(expr: Expr, text: string, known?: readonly string[]):
   const surfaces = names.flatMap((name, index) => SURFACE.has(name) ? [index] : [])
   const surface = surfaces.length ? { first: surfaces[0]!, last: surfaces.at(-1)! } : null
   const shape = isShapeView({ base }), image = base.callee.kind === 'identifier' && base.callee.name === 'Image'
+  const dynamic = base.callee.kind === 'identifier' && base.callee.name === 'ForEach'
+  const own = (name: string) => image ? IMAGE_CALLS.has(name) || IMAGE_FIT.has(name) : shape ? SHAPE_CALLS.has(name) || SHAPE_PAINTS.has(name) : dynamic && DYNAMIC_CALLS.has(name)
   let baseEnd = 0
-  while (baseEnd < names.length && (image ? IMAGE_CALLS.has(names[baseEnd]!) || IMAGE_FIT.has(names[baseEnd]!) : shape && (SHAPE_CALLS.has(names[baseEnd]!) || SHAPE_PAINTS.has(names[baseEnd]!)))) baseEnd++
+  while (baseEnd < names.length && own(names[baseEnd]!)) baseEnd++
   const ownSurface = !surface && (shape || base.callee.kind === 'identifier' && base.callee.name === 'Button')
   const margin = ownSurface ? names.indexOf('padding', baseEnd) : -1
   const kindOf = (name: string, index: number): SlotKind => {
@@ -95,7 +93,7 @@ export function chainSlots(expr: Expr, text: string, known?: readonly string[]):
     if (last && last.kind === kind && kind !== 'other' && last.indices.at(-1) === index - 1 && names[index - 1] === names[index]) runs[runs.length - 1] = { kind, indices: [...last.indices, index], calls: [...last.calls, call] }
     else runs.push({ kind, indices: [index], calls: [call] })
   }
-  const unknown = modifiers.some((call, index) => names[index] !== 'border' && (!SUPPORTED_MODIFIERS.has(names[index]!) || !authoringCapability(names[index]!, 'modifier', call.args.map(arg => arg.label))))
+  const unknown = names.some((name, index) => index >= baseEnd && name !== 'border' && !APPLE_VIEW_MODIFIERS.has(name))
   return { expr, base, modifiers, names, surface, runs, unknown, baseEnd, ownSurface }
 }
 

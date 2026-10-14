@@ -40,6 +40,12 @@ function suggestions(node: AuthoringNode): readonly string[] {
   return ['padding', 'background', 'clipShape']
 }
 const EMPTY_MODIFIERS: readonly AuthoringModifier[] = []
+/** What a card with nothing to set says about its modifier. */
+function aboutModifier(modifier: AuthoringModifier): string {
+  if (modifier.drawn === false) return 'Not drawn in the preview. Xcode applies it as written.'
+  if (modifier.category === 'custom') return 'A custom modifier from your code.'
+  return modifier.summary === 'On' ? 'No settings. Switch it off or remove it to undo.' : 'This value is an expression or view defined in Swift. Open in Code to edit its contents.'
+}
 const PRESENTATIONS: Readonly<Record<string, string>> = { sheet: 'Sheet', fullScreenCover: 'Full screen', navigationDestination: 'Push', popover: 'Popover' }
 /**
  * A control a layer section above already shows: Width and Height sizing (Layout), and a
@@ -237,7 +243,7 @@ export function ModifierStack({ node, snapshot, onChange, onCommand, onReveal, f
               ? <TokenField key={`style:${field.style.property}:${field.style.token ?? field.style.value}`} field={field} label={field.control ? controlLabel(field.control, modifier) : modifier.label} tokens={tokens} busy={busy} onChange={onChange} onCommand={resource} />
               : field.control && onChange ? <PropertyControl key={`control:${field.control.id}:${field.control.value}`} control={field.control} label={controlLabel(field.control, modifier)} onChange={onChange} /> : <span key={fieldIndex} />)}
             {slot && <NavigationDestinationEditor key={`${slot.id}:${slot.navigation?.destination}`} owner={slot} features={features} onReveal={onReveal} />}
-            {!modifier.controls.length && !slot && !valueFields(node, [], modifier.propertyIds).length && <p className={styles.note}>{modifier.category === 'custom' ? 'A custom modifier from your code.' : modifier.summary === 'On' ? 'No settings. Switch it off or remove it to undo.' : 'This value is an expression or view defined in Swift. Open in Code to edit its contents.'}</p>}
+            {!modifier.controls.length && !slot && !valueFields(node, [], modifier.propertyIds).length && <p className={styles.note}>{aboutModifier(modifier)}</p>}
           </>}
           {modifier.capabilities.reason && <p className={styles.note}>{modifier.controls.length && !modifier.capabilities.moveUp && !modifier.capabilities.moveDown ? 'Values are editable. This one stays in place to keep its layout and behavior.' : modifier.capabilities.reason}</p>}
         </div>}

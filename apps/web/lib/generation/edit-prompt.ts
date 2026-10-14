@@ -14,7 +14,7 @@ Follow the rules below in the code you add or change. Where the request does not
 
 ${PREVIOUS_ATTEMPT_RULE} Start again from currentFiles.
 
-previewProblems is what the browser preview currently reports for this source. A warning that something is recognised but not applied means the preview does not draw it, so a change that relies on it will not be visible there. Prefer an approach the preview draws. If the request needs something it cannot draw, make the change and say briefly that it will show in Xcode but not in the preview. Never describe a visual result as done when it depends on something the preview reports it does not apply.
+previewProblems is what the browser preview currently reports for this source. A warning that something is recognized but not applied means the preview does not draw it, so a change that relies on it will not be visible there. Prefer an approach the preview draws. If the request needs something it cannot draw, make the change and say briefly that it will show in Xcode but not in the preview. Never describe a visual result as done when it depends on something the preview reports it does not apply.
 
 Your reply is displayed after the edits pass validation and are applied. Never claim an edit when files and deletedFiles are empty.
 

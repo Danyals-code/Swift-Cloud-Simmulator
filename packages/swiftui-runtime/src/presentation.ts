@@ -1,6 +1,6 @@
-import type { Diagnostic, SourceSpan, ViewLayer } from '@studio/shared'
+import { LAYERED_LABEL_VIEWS, type Diagnostic, type SourceSpan, type ViewLayer } from '@studio/shared'
 import { exhausts } from './failures'
-import { layerLabel, tabIcon, viewLayers } from './view-hierarchy'
+import { labelArgView, layerLabel, tabIcon, viewLayers } from './view-hierarchy'
 import { inheritVisualStyle, visualModifiers } from './inherited-style'
 import {
   asDate,
@@ -21,7 +21,6 @@ import {
   asSwiftValue,
   asView,
   handlerIdFor,
-  labelView,
   payloadOf,
   ANIMATION_TYPE,
   COLOR_TYPE,
@@ -704,7 +703,7 @@ class Resolver {
       // `Button { … } label: { … }` keeps what it is drawn with among its arguments, as
       // its content closure is the action. Those views are stamped where the layout
       // draws them, so a view in a tappable card has an identity of its own (D16).
-      const args = restyled.name === 'Button' ? this.stampLabel(restyled.args, path) : restyled.args
+      const args = LAYERED_LABEL_VIEWS.has(restyled.name) ? this.stampLabel(restyled.args, path) : restyled.args
       // Layers are view subtrees too: register their controls and lifecycle hooks.
       const modifiers = restyled.modifiers.map((modifier, m) => {
         if (!['background', 'overlay', 'safeAreaInset'].includes(modifier.name)) return modifier
@@ -726,13 +725,17 @@ class Resolver {
     }
   }
 
-  /** A Button's `label:` views, stamped in order under `…label`, the prefix the layout draws them with. */
+  /**
+   * The views a control is drawn with from its arguments, a `label:` or a Label's `icon:`,
+   * stamped in order under `…label` or `…icon`, the prefix the layout draws them with. A
+   * label then has an identity of its own, and a click on the canvas finds it (Wave 3a).
+   */
   private stampLabel(args: readonly ViewArg[], path: string): readonly ViewArg[] {
-    const labels = args.flatMap(arg => labelView(arg) ?? [])
-    if (!labels.length) return args
-    const stamped = this.stampList(labels, `${path}label`)
-    let next = 0
-    return args.map(arg => labelView(arg) ? { ...arg, value: opaque('View', stamped[next++]!) } : arg)
+    const stamped = new Map<string, ViewValue[]>()
+    for (const part of new Set(args.flatMap(arg => labelArgView(arg) ? [arg.label!] : []))) {
+      stamped.set(part, this.stampList(args.flatMap(arg => arg.label === part ? labelArgView(arg) ?? [] : []), `${path}${part}`))
+    }
+    return args.map(arg => labelArgView(arg) ? { ...arg, value: opaque('View', stamped.get(arg.label!)!.shift()!) } : arg)
   }
 
   /**

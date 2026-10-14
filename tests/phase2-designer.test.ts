@@ -249,7 +249,7 @@ describe('layer organization', () => {
     const result = plan(source, nodes[0]!, { kind: 'layer-wrap', ids: nodes.slice(0, 2).map(n => n.id), layout: 'HStack' })
     if (!result.ok) throw new Error(result.reason)
     expect(result.changes[0]?.after).toContain('// keep comment')
-    expect(result.changes[0]?.after).toContain('HStack(spacing: 16)')
+    expect(result.changes[0]?.after).toContain('HStack {')
     render(result.changes[0]!.after)
     expect(plan(source, nodes[0]!, { kind: 'layer-wrap', ids: [nodes[0]!.id, nodes[2]!.id], layout: 'HStack' })).toMatchObject({ ok: false })
   })
@@ -286,8 +286,8 @@ describe('layer organization', () => {
       expect(grouped('List', 'VStack')).toBe(expected('List', 'VStack'))
     })
 
-    it('starts another way of stacking them at a spacing of 16, as before', () => {
-      expect(grouped('VStack(spacing: 12)', 'HStack')).toBe(expected('VStack(spacing: 12)', 'HStack(spacing: 16)'))
+    it('keeps the gap they had when stacking them another way', () => {
+      expect(grouped('VStack(spacing: 12)', 'HStack')).toBe(expected('VStack(spacing: 12)', 'HStack(spacing: 12)'))
     })
 
     it('builds', () => {

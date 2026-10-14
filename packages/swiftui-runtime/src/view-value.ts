@@ -405,6 +405,23 @@ export function labelView(arg: ViewArg): ViewValue | null {
   return arg.label === 'label' ? asView(arg.value) : null
 }
 
+/** Views a call drew, a component's or a helper's, each saying so down to its last descendant. */
+export function sourcedViews(views: readonly ViewValue[], owner: ComponentSource): ViewValue[] {
+  const annotate = (view: ViewValue): ViewValue => ({
+    ...view,
+    componentSources: [owner, ...(view.componentSources ?? [])],
+    children: view.children.map(annotate),
+    modifiers: view.modifiers.map(modifier => ({
+      ...modifier,
+      args: modifier.args.map(argument => {
+        const child = asView(argument.value)
+        return child ? { ...argument, value: asSwiftValue(annotate(child)) } : argument
+      }),
+    })),
+  })
+  return views.map(annotate)
+}
+
 export function payloadOf<T>(value: SwiftValue | undefined, typeName: string): T | null {
   if (!value || value.kind !== 'opaque' || value.typeName !== typeName) return null
   return value.payload as T

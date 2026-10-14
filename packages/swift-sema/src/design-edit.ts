@@ -2,9 +2,10 @@ import { customizeCard, editsCardSurface } from './authoring-card'
 import { followCorners } from './authoring-border'
 import { editModifier } from './authoring-modifiers'
 import { featureEdit } from './authoring-features'
-import { argumentLayerProblem, canvasDropProblem, deploymentVersion, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
+import { argumentLayerProblem, canvasDropProblem, deploymentVersion, isHelperDefinition, type DesignEditPlan, type DesignEditRequest, type PreviewColorAsset, type SourceFile, type SourceChange, type ModifierOperation } from '@studio/shared'
 import { Parser, afterOffMarkers, forEachChild, deleteView, isSyntaxError, moveView, moveViewTo, insertView, hideView, showView, type Node } from '@studio/swift-syntax'
 import { buildAuthoringModel } from './authoring'
+import { removeHelper } from './authoring-helpers'
 import { modifierArgumentProblem, structuralEditProblem, type StructuralKind } from './structural-check'
 import { applyPatches, type FeatureContext } from './authoring-context'
 import { pastedValues } from './authoring-clipboard'
@@ -56,6 +57,15 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     }
     return finishDesignPlan(request, files, selection, colors)
   }
+  // A helper nothing calls goes from Design whole, once nothing else reads its name (Wave 3a).
+  if (node && operation.kind === 'delete' && isHelperDefinition(node)) {
+    try {
+      const removed = removeHelper(file.text, ast, node, model.nodes.filter(n => n.definitionId === node.id).length)
+      return finish(request.files.map(f => f.id === file.id ? { ...f, text: removed.text } : f), { file: file.id, offset: removed.offset })
+    } catch (error) { return reject(error instanceof Error ? error.message : 'This helper could not be removed. Remove it in Code.') }
+  }
+  // A run of texts joined with `+` takes only what keeps a Text a Text (Wave 3a).
+  if (node?.textRun && (operation.kind === 'make-component' || operation.kind === 'extract-component')) return reject('Part of joined text stays a Text in its sum. Make the whole text a component instead.')
   if (node && operation.kind.startsWith('modifier-')) {
     const expression = callAt(ast, node.source)
     if (!expression) return reject('This view no longer has an editable modifier chain.')

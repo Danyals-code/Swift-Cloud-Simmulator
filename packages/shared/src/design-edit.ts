@@ -31,6 +31,26 @@ export interface DesignControl {
   readonly description: string
 }
 
+/**
+ * The words of a text with values among them, as a `…:parts` control holds them (Wave 3a):
+ * a JSON array that starts and ends with words and has the Swift of one value between each
+ * pair, `["Total: ", "count", ""]`. Null for anything else.
+ */
+export function readTextParts(value: string): string[] | null {
+  try {
+    const parts: unknown = JSON.parse(value)
+    return Array.isArray(parts) && parts.length % 2 === 1 && parts.every(part => typeof part === 'string') ? parts : null
+  } catch { return null }
+}
+
+/** Words and values as a `…:parts` control holds them (`readTextParts`). */
+export const writeTextParts = (parts: readonly string[]): string => JSON.stringify(parts)
+
+/** The words and values of a control that holds them (`readTextParts`), or null for any other control. */
+export function textPartsOf(control: Pick<DesignControl, 'id' | 'kind' | 'value'>): string[] | null {
+  return control.kind === 'text' && control.id.endsWith(':parts') ? readTextParts(control.value) : null
+}
+
 export interface DesignEditRequest {
   readonly projectId: string
   readonly baseRevision: number

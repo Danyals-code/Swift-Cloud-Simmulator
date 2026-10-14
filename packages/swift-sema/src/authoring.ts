@@ -4,24 +4,24 @@ import { borderOf, cornersOf } from './authoring-border'
 import { enrichAuthoring } from './authoring-features'
 import type { ComponentDescription, PreviewColorAsset } from '@studio/shared'
 import {
-  authoringCapability,
+  MODIFIER_SLOTS, VIEW_PARTS, authoringCapability,
   type AuthoringNode, type AuthoringProperty, type AuthoringSnapshot,
   type Diagnostic, type PropertyValueKind, type SourceFile, type SourceSpan,
 } from '@studio/shared'
 import { Lexer, Parser, forEachChild, isSyntaxError, type Block, type Decl, type Expr, type Node, type SourceFileNode, type StructDecl, type VarDecl } from '@studio/swift-syntax'
 import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from './builtins'
-import { colorOpacityParts, designControlRecipes, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
+import { containerContent, helperCall, helperContent, helperReach, setByEveryInit, viewHelpers, writtenParameters, type MutableNode, type ViewHelper } from './authoring-helpers'
+import { joinedText } from './authoring-runs'
+import { colorOpacityParts, designControlRecipes, markViewBase, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
 
-type MutableNode = Omit<AuthoringNode, 'children' | 'properties'> & { children: string[]; properties: AuthoringProperty[] }
-interface Binding { kind: PropertyValueKind; source: SourceSpan }
+/** What a name in scope reads: its kind of value, where it is declared, and whether a helper's call gives it. */
+interface Binding { kind: PropertyValueKind; source: SourceSpan; helper?: true }
 type Scope = ReadonlyMap<string, Binding>
 
 const READ_ONLY = 'Read-only in this version. Use the source to change this property.'
 
 // Reading view-builder content does not grant a writer for the container overload.
 const CONTENT_VIEWS = new Set(['VStack', 'HStack', 'ZStack', 'LazyVStack', 'LazyHStack', 'LazyVGrid', 'LazyHGrid', 'Grid', 'GridRow', 'ViewThatFits', 'GeometryReader', 'ScrollView', 'ForEach', 'List', 'Section', 'Form', 'NavigationStack', 'NavigationView', 'NavigationSplitView', 'NavigationLink', 'TabView', 'Tab', 'Group', 'GroupBox', 'DisclosureGroup', 'ControlGroup', 'AnyView', 'WindowGroup', 'ToolbarItem', 'ToolbarItemGroup', 'Picker'])
-const CONTENT_SLOTS: Readonly<Record<string, string>> = { background: 'Background', overlay: 'Overlay', toolbar: 'Toolbar', sheet: 'Sheet', fullScreenCover: 'Full screen cover', navigationDestination: 'Destination', safeAreaInset: 'Safe area inset' }
-
 
 function callName(expr: Expr): string | null {
   if (expr.kind === 'identifier') return expr.name
@@ -43,7 +43,7 @@ function referencePath(expr: Expr): string[] | null {
 const TOKEN_HOSTS = new Set(['Color', 'ShapeStyle', 'CGFloat', 'Double', 'Font', 'ShadowToken'])
 
 /** A conservative classification: a runtime value never authorizes a source edit. */
-function classify(expr: Expr, scope: Scope, tokens: ReadonlyMap<string, readonly VarDecl[]>, declaredNames: ReadonlySet<string>, contextual: ReadonlyMap<string, readonly VarDecl[]> = new Map()): { kind: PropertyValueKind; declaration?: SourceSpan } {
+function classify(expr: Expr, scope: Scope, tokens: ReadonlyMap<string, readonly VarDecl[]>, declaredNames: ReadonlySet<string>, contextual: ReadonlyMap<string, readonly VarDecl[]> = new Map()): { kind: PropertyValueKind; declaration?: SourceSpan; helper?: true } {
   if (['integerLiteral', 'floatLiteral', 'booleanLiteral', 'nilLiteral'].includes(expr.kind)) return { kind: 'literal' }
   // `.accent`, `.space16`: a token read with dot syntax. Xcode spells a colour twice -
   // on Color and on ShapeStyle - and the stored member is the token.
@@ -60,7 +60,7 @@ function classify(expr: Expr, scope: Scope, tokens: ReadonlyMap<string, readonly
   if (path) {
     const root = path[0] === 'self' ? path[1] : path[0]
     const binding = root ? scope.get(root) ?? scope.get(root.replace(/^\$/, '')) : undefined
-    if (binding) return { kind: root?.startsWith('$') ? 'data-binding' : binding.kind, declaration: binding.source }
+    if (binding) return { kind: root?.startsWith('$') ? 'data-binding' : binding.kind, declaration: binding.source, ...binding.helper ? { helper: true as const } : {} }
     const declarations = tokens.get(path.join('.')) ?? []
     if (declarations.length === 1) {
       const declaration = declarations[0]!
@@ -101,6 +101,8 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   const roots: string[] = []
   const declaredNames = new Set<string>()
   const definitions = new Map<string, { decl: StructDecl; node: MutableNode }[]>()
+  /** Each View struct by its owner name; null where two share one, whose helpers are then not told apart. */
+  const views = new Map<string, StructDecl | null>()
   const previews: { body: Block; node: MutableNode }[] = []
   const tokens = new Map<string, VarDecl[]>()
   const contextual = new Map<string, VarDecl[]>()
@@ -127,6 +129,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       if (decl.kind === 'structDecl' && decl.inherits.some(t => ['View', 'App', 'SwiftUI.View', 'SwiftUI.App'].includes(t.name))) {
         const node = add('definition', decl.name, decl.span, name)
         definitions.set(decl.name, [...(definitions.get(decl.name) ?? []), { decl, node }])
+        if (!decl.inherits.some(t => t.name === 'App' || t.name === 'SwiftUI.App')) views.set(name, views.has(name) ? null : decl)
       }
       for (const member of decl.members) index(member, `${name}.`)
     } else if (decl.kind === 'macroDecl' && decl.name === 'Preview' && decl.body) {
@@ -147,6 +150,26 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
   }
   for (const file of parsed) for (const decl of file.declarations) index(decl)
+  /** Each View struct by its owner name, of those no other view shares a name with. */
+  const viewDecls = new Map([...views].flatMap(([owner, decl]) => decl ? [[owner, decl] as const] : []))
+  const helpers = viewHelpers(viewDecls, parsed)
+  /** Each helper's own node, made where it is first called, and read in turn after the bodies (Wave 3a). */
+  const helperNodes = new Map<ViewHelper, MutableNode>()
+  const helperQueue: ViewHelper[] = []
+  const helperNode = (helper: ViewHelper): MutableNode => {
+    let node = helperNodes.get(helper)
+    if (!node) {
+      helperNodes.set(helper, node = Object.assign(add('definition', helper.name, helper.decl.span, helper.owner), { helper: true as const }))
+      helperQueue.push(helper)
+    }
+    return node
+  }
+  const isSwiftUIText = (call: Expr) => call.kind === 'call' && callName(call.callee) === 'Text' && !definitions.has('Text')
+  /** The helper `expr` calls, from a view of `owner`'s, unless a value of the same name in `scope` hides it. */
+  const helperAt = (expr: Expr, owner: string, scope: Scope) => helperCall(expr, helpers.get(owner) ?? [], (name, declared) => {
+    const binding = scope.get(name)
+    return !!binding && (binding.source.file !== declared.file || binding.source.start !== declared.start)
+  })
 
   /** `node` and the layers above it, nearest first. A layer met twice ends the walk, so an id that repeats cannot make it run forever. */
   function* upFrom(node: MutableNode | undefined): Generator<MutableNode> {
@@ -168,19 +191,43 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       scope: node.kind === 'component' ? 'instance' : repeated ? 'template' : 'definition',
       capability, writable: false,
       reason: invalid ? 'Source diagnostics overlap this view. Resolve them before editing.' : reason ?? (value.kind === 'computed' ? 'Computed in Swift. Preserve the expression and edit its inputs or source.' : value.kind === 'unsupported' ? 'This expression cannot be resolved safely.' : READ_ONLY),
+      ...'helper' in value && value.helper ? { helperArgument: true } : {},
     }
   }
 
-  function expression(expr: Expr, parent: MutableNode, scope: Scope, { argument = false } = {}): void {
+  /** `argument` says the view is written as another's argument, and `run` that it is a run of texts joined with `+`. */
+  function expression(expr: Expr, parent: MutableNode, scope: Scope, { argument = false, run = false } = {}): void {
+    // A helper's call points at its views, as a component's copy points at its Main. Read
+    // as a property, it is where its modifiers start, as a call would be.
+    const helper = helperAt(expr, parent.owner, scope)
+    if (helper && !helper.call) markViewBase(helper.base)
+    // Texts joined with `+` are one Text, whose runs are Texts (Wave 3a). Written bare, the
+    // sum has no modifiers of its own: one after it would style its last run only.
+    const joined = joinedText(expr, texts.get(expr.span.file) ?? '', isSwiftUIText)
+    if (joined && !joined.parenthesised) {
+      const group = add('view', 'Text', expr.span, parent.owner, parent)
+      if (argument) Object.assign(group, { argument: true })
+      group.properties.push(property(group, 'Source', expr, scope, undefined, 'Put the joined text in parentheses in Code to style all of it.'))
+      for (const part of joined.runs) expression(part, group, scope, { run: true })
+      return
+    }
+    if (joined?.parenthesised) markViewBase(joined.sum, joined.parenthesised)
     const chain = viewCallChain(expr)
     if (!chain) { add('opaque', 'Custom expression', expr.span, parent.owner, parent); return }
-    const name = callName(chain.base.callee)
+    const name = joined ? 'Text' : helper ? helper.helper.name : callName(chain.base.callee)
     if (!name) { add('opaque', 'Custom expression', expr.span, parent.owner, parent); return }
-    const custom = definitions.get(name) ?? []
+    const custom = helper ? [{ node: helperNode(helper.helper) }] : definitions.get(name) ?? []
     const builtin = custom.length === 0 && SUPPORTED_VIEWS.has(name)
     const capability = builtin ? authoringCapability(name, 'view', chain.base.args.map(a => a.label)) : undefined
     const node = add(custom.length === 1 ? 'component' : name === 'ForEach' || name === 'List' && chain.base.args.length > 0 ? 'collection' : builtin ? 'view' : 'opaque', name, expr.span, parent.owner, parent)
     if (custom.length === 1) Object.assign(node, { definitionId: custom[0]!.node.id })
+    if (helper) Object.assign(node, { helper: true })
+    // A run is part of the text it is joined into, which it can't leave or be wrapped out of.
+    if (run) Object.assign(node, { textRun: true, argument: true })
+    if (joined) {
+      Object.assign(node, { drawnFrom: joined.sum.span })
+      for (const part of joined.runs) expression(part, node, scope, { run: true })
+    }
     // Real SwiftUI with no drawing yet, or a name the checker says the preview draws a box for (D12).
     const unknown = !custom.length && diagnostics.some(d => d.code === 'unresolved_identifier' && d.severity === 'warning' && d.span.file === expr.span.file && d.span.start === expr.span.start)
     if (!custom.length && UNIMPLEMENTED_VIEWS.has(name) || unknown) Object.assign(node, { undrawn: UNIMPLEMENTED_VIEWS.has(name) ? 'unsupported' : 'unknown' })
@@ -229,7 +276,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }
-    Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget, !!node.controls))
+    Object.assign(node, modifierModel(node, expr, texts.get(node.source.file) ?? '', { deploymentTarget: input.deploymentTarget, allowEdits: !!node.controls }))
     // The same chain read as a layer: one value per Figma property (Wave 2).
     if (node.controls) {
       const layer = readLayer(expr, layerContext(layers, node, parent, texts.get(node.source.file) ?? ''))
@@ -237,17 +284,19 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
     const explicitLabel = builtin && ['NavigationLink', 'Button'].includes(name) ? chain.base.args.find(argument => argument.label === 'label' && argument.value.kind === 'closure')?.value : undefined
     const closure = explicitLabel?.kind === 'closure' ? explicitLabel : chain.base.trailingClosure
-    if (closure && (capability?.content || builtin && (CONTENT_VIEWS.has(name) || name === 'Button' && (!!explicitLabel || chain.base.args.some(arg => arg.label === 'action'))))) {
+    const parts = builtin ? VIEW_PARTS[name] : undefined
+    const ownViews = closure && (capability?.content || builtin && (CONTENT_VIEWS.has(name) || !!parts?.views || name === 'Button' && (!!explicitLabel || chain.base.args.some(arg => arg.label === 'action')))) ? closure : undefined
+    if (ownViews) {
       if (node.kind === 'collection') {
-        const template = add('template', 'Row template', closure.span, parent.owner, node)
+        const template = add('template', 'Row template', ownViews.span, parent.owner, node)
         const locals = new Map(scope)
-        const params = closure.params.length ? closure.params : [{ name: '$0', span: closure.span }]
+        const params = ownViews.params.length ? ownViews.params : [{ name: '$0', span: ownViews.span }]
         for (const param of params) locals.set(param.name.replace(/^\$/, ''), { kind: 'data-binding', source: param.span })
-        block(closure.body, template, locals)
+        block(ownViews.body, template, locals)
       } else {
         const locals = new Map(scope)
-        for (const param of closure.params) locals.set(param.name.replace(/^\$/, ''), { kind: 'computed', source: param.span })
-        block(closure.body, node, locals)
+        for (const param of ownViews.params) locals.set(param.name.replace(/^\$/, ''), { kind: 'computed', source: param.span })
+        block(ownViews.body, node, locals)
       }
     }
     // With multiple trailing closures, NavigationLink's first closure is the
@@ -258,19 +307,32 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
       if (destination.kind === 'closure') block(destination.body, slot, scope)
       else expression(destination, slot, scope, { argument: true })
     }
-    // Section headers/footers are content slots, not repeated rows or actions.
-    if (name === 'Section' && capability) for (const arg of chain.base.args) {
-      if (!['header', 'footer'].includes(arg.label ?? '')) continue
-      const slot = add('branch', arg.label === 'header' ? 'Header' : 'Footer', arg.value.span, parent.owner, node)
-      if (arg.value.kind === 'closure') block(arg.value.body, slot, scope)
-      else expression(arg.value, slot, scope, { argument: true })
+    // Its other parts, each a slot of its own in the order written (Wave 3a): a Section's
+    // header, a Toggle's label, a Label's icon. Actions and plain values are not views.
+    const written = parts ? [...chain.base.args.map(arg => ({ part: parts.slots[arg.label ?? ''], value: arg.value })), { part: parts.slots.trailing, value: chain.base.trailingClosure }] : []
+    for (const { part, value } of written.sort((a, b) => (a.value?.span.start ?? 0) - (b.value?.span.start ?? 0))) {
+      if (!part || !value || value === ownViews || value.kind !== 'closure' && value.kind !== 'call' && !helperAt(value, parent.owner, scope)) continue
+      const slot = add('branch', part, value.span, parent.owner, node)
+      if (value.kind !== 'closure') { expression(value, slot, scope, { argument: true }); continue }
+      const locals = new Map(scope)
+      for (const param of value.params) locals.set(param.name.replace(/^\$/, ''), { kind: 'computed', source: param.span })
+      block(value.body, slot, locals)
+    }
+    // A container of the project's own is given views where it is called: its Content (Wave 3a).
+    const container = custom.length === 1 && 'decl' in custom[0]! ? custom[0].decl : undefined
+    const given = helper?.call ? helperContent(helper.helper, helper.call) : container ? containerContent(container, chain.base) : []
+    for (const { property, value } of given) {
+      if (value.kind !== 'closure' && value.kind !== 'call' && !helperAt(value, parent.owner, scope)) continue
+      const slot = add('branch', property.charAt(0).toUpperCase() + property.slice(1), value.span, parent.owner, node)
+      if (value.kind === 'closure') block(value.body, slot, scope)
+      else expression(value, slot, scope, { argument: true })
     }
     // A visual slot has its own layer; action closures and scalar colors are not views,
     // and a border is a setting of the view it outlines (D8).
     const corners = cornersOf(chain, texts.get(node.source.file) ?? '')
     for (const modifier of chain.modifiers) {
       const name = modifier.callee.kind === 'memberAccess' ? modifier.callee.member : ''
-      const label = CONTENT_SLOTS[name]
+      const label = MODIFIER_SLOTS[name]
       if (!label || borderOf(modifier, corners, texts.get(node.source.file) ?? '')) continue
       const closure = modifier.trailingClosure ?? modifier.args.find(arg => arg.label === 'content' && arg.value.kind === 'closure')?.value
       if (closure?.kind === 'closure') {
@@ -284,7 +346,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
         const contentName = content && callName(content.base.callee)
         // Color styling stays in its modifier. Qualification must not resolve to a local Color component.
         const builtinColor = contentName === 'Color' && (!definitions.has('Color') || content?.base.callee.kind === 'memberAccess' && content.base.callee.base?.kind === 'identifier' && content.base.callee.base.name === 'SwiftUI')
-        if (argument && contentName && !builtinColor && (SUPPORTED_VIEWS.has(contentName) || definitions.has(contentName))) {
+        if (argument && (helperAt(argument, parent.owner, scope) || contentName && !builtinColor && (SUPPORTED_VIEWS.has(contentName) || definitions.has(contentName)))) {
           const slot = add('branch', label, argument.span, parent.owner, node)
           expression(argument, slot, scope, { argument: true })
         }
@@ -329,19 +391,41 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     }
   }
 
+  /** What a view's own code reads by name: its properties, as `body` and its helpers see them. */
+  const scopes = new Map<string, Scope>()
   for (const candidates of definitions.values()) for (const { decl, node } of candidates) {
     const scope = new Map<string, Binding>()
     for (const member of decl.members) {
       if (member.kind !== 'varDecl' || member.name === 'body') continue
       const wrapped = member.attributes.some(a => ['State', 'Binding', 'ObservedObject', 'StateObject', 'Environment', 'EnvironmentObject', 'Bindable'].includes(a.name))
       const memberwise = !member.accessor && !member.initializer && !member.modifiers.some(m => ['private', 'fileprivate', 'static'].includes(m.name)) && !decl.members.some(m => m.kind === 'initDecl')
-      scope.set(member.name, { kind: wrapped ? 'data-binding' : memberwise ? 'component-argument' : 'computed', source: member.nameSpan })
+      // Given where the view is used: by its memberwise init, or by every init of its own, as written.
+      scope.set(member.name, { kind: wrapped ? 'data-binding' : memberwise || !member.accessor && setByEveryInit(decl, member.name) ? 'component-argument' : 'computed', source: member.nameSpan })
     }
+    if (views.get(node.owner) === decl) scopes.set(node.owner, scope)
     for (const member of decl.members) {
       if (member.kind === 'varDecl' && member.name === 'body' && member.accessor) block(member.accessor, node, scope)
     }
   }
   for (const preview of previews) block(preview.body, preview.node, new Map())
+  // A helper is read once, after the bodies that call it; one called only from another
+  // helper joins the queue as that one is read, and one nothing calls is read last, so
+  // Layers can list it as not used. Its parameters are values each call gives it: set
+  // where it is used when every call writes them out, and data otherwise.
+  const written = writtenParameters(helpers, viewDecls)
+  let read = 0
+  const readHelpers = () => {
+    for (; read < helperQueue.length; read++) {
+      const helper = helperQueue[read]!
+      const scope = new Map(scopes.get(helper.owner))
+      for (const param of helper.params) scope.set(param.internalName, { kind: written.has(param) ? 'component-argument' : 'data-binding', source: param.span, helper: true })
+      block(helper.body, helperNodes.get(helper)!, scope)
+    }
+  }
+  readHelpers()
+  for (const own of helpers.values()) own.forEach(helperNode)
+  readHelpers()
+  helperReach(nodes, [...helperNodes.values()])
   // Unsupported declarations remain represented, including their exact source ranges.
   const collectOpaque = (node: Node): void => {
     if (['unsupportedDecl', 'errorDecl', 'unsupportedStmt', 'errorStmt', 'errorExpr'].includes(node.kind)) {

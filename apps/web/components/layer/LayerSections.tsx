@@ -32,12 +32,13 @@ export function LayerSections({ node, onCommand, tokens = NO_TOKENS, disabled = 
   const layer = node.layer
   if (!layer || !onCommand) return null
   const props = { node, layer, set, busy: disabled || pending, tokens, command: onCommand, measure, sizeOverlap }
+  // A run of joined text is part of one Text: only its text styles are its own (Wave 3a).
   return <div data-testid="settings-layer">
-    <LayoutSection {...props} />
+    {!layer.textRun && <LayoutSection {...props} />}
     <FillSection {...props} />
     <CornersSection {...props} />
     <StrokeSection {...props} />
     <TextSection {...props} />
-    <EffectsSection {...props} />
+    {!layer.textRun && <EffectsSection {...props} />}
   </div>
 }

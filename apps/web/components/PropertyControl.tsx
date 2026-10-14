@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
-import { AUTO_SPACING, LAYOUT_WORDS, spreadOut, type Alignment9, type DesignControl } from '@studio/shared'
+import { AUTO_SPACING, LAYOUT_WORDS, spreadOut, textPartsOf, writeTextParts, type Alignment9, type DesignControl } from '@studio/shared'
 import { Icon, type IconName } from './ui/Icon'
 import { COLOR_NAME_LABELS } from '../lib/colorValue'
 import styles from './AuthoringInspector.module.css'
+import own from './PropertyControl.module.css'
 
 const RANGE_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
 const OPTION_LABELS: Record<string, string> = {
@@ -33,10 +34,13 @@ function stored(control: DesignControl, typed: string): string {
 /** A value as a card's summary reads it: a choice by its name, and a percentage or an angle with its sign. */
 export function propertyValueLabel(control: DesignControl): string {
   if (control.kind === 'select' || control.kind === 'toggle') return propertyOptionLabel(control.value)
+  const parts = textPartsOf(control)
+  if (parts) return parts.map((part, index) => index % 2 ? `{${part}}` : part).join('') || 'Default'
   return control.value ? shown(control, control.value) + (control.unit === '%' || control.unit === '°' ? control.unit : '') : 'Default'
 }
 
 export type PropertyChange = (control: string, value: string) => Promise<string | null>
+interface PropertyControlProps { control: DesignControl; onChange: PropertyChange; label?: string; caption?: string }
 
 /** Each choice of a stack's Layout and Alignment, in the order Figma shows them, with its glyph (D4); a Text's alignment is `across`. */
 export const CHOICES = {
@@ -72,7 +76,69 @@ function choicesFor(control: DesignControl): readonly (readonly [string, IconNam
 }
 
 /** `label` names the control for assistive tech; `caption`, when given, is what the row shows instead. */
-export function PropertyControl({ control, onChange, label = control.label, caption }: { control: DesignControl; onChange: PropertyChange; label?: string; caption?: string }) {
+export function PropertyControl(props: PropertyControlProps) {
+  return textPartsOf(props.control) ? <TextPartsControl {...props} /> : <ValueControl {...props} />
+}
+
+/**
+ * Words with values among them: one field, with a run of words to type in on either side
+ * of each value, and each value a chip showing its Swift, which is changed in Code. All
+ * the words are written at once, on Enter or when focus leaves the field, and Escape
+ * puts back what the code has.
+ */
+function TextPartsControl({ control, onChange, label = control.label, caption }: PropertyControlProps) {
+  const initial = textPartsOf(control)!
+  const [draft, setDraft] = useState(initial)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const latest = useRef(initial)
+  const committing = useRef(false)
+  const busy = pending || !!control.disabledReason
+  const values = initial.filter((_, index) => index % 2)
+  function change(index: number, words: string) {
+    const next = latest.current.map((part, at) => at === index ? words : part)
+    latest.current = next; setDraft(next); setError(null)
+  }
+  async function commit() {
+    const value = writeTextParts(latest.current)
+    if (committing.current || value === control.value) return
+    committing.current = true
+    setPending(true)
+    try { setError(await onChange(control.id, value)) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not apply this value.') }
+    finally { committing.current = false; setPending(false) }
+  }
+  function keyDown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      latest.current = initial; setDraft(initial); setError(null)
+    } else if (event.key === 'Enter') {
+      event.preventDefault()
+      void commit()
+    }
+  }
+  /** What a run of words is called: where it sits among the values. */
+  const named = (index: number) => {
+    const before = values[index / 2 - 1], after = values[index / 2]
+    return before === undefined ? `${label} before ${after}` : after === undefined ? `${label} after ${before}` : `${label} between ${before} and ${after}`
+  }
+  return <div className={styles.control} data-testid="design-control">
+    <div className={styles.controlLabel}><span>{caption ?? label}</span>
+      <div role="group" aria-label={label} data-control-id={control.id} aria-invalid={!!error} aria-disabled={busy || undefined} className={own.parts}
+        onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) void commit() }}>
+        {draft.map((part, index) => index % 2
+          ? <span key={index} className={own.value} title={`\\(${part}) is a value from the code. Change it in Code.`}>{part}</span>
+          : <span key={index} className={own.words} data-words={part}><input aria-label={named(index)} value={part} readOnly={busy} size={1} spellCheck={false} onChange={event => change(index, event.target.value)} onKeyDown={keyDown} /></span>)}
+      </div>
+    </div>
+    {control.disabledReason && <p className={styles.note}>{control.disabledReason}</p>}
+    {error && <p role="alert" className={styles.error}>{error}</p>}
+    {pending && <small role="status">Applying…</small>}
+  </div>
+}
+
+function ValueControl({ control, onChange, label = control.label, caption }: PropertyControlProps) {
   // The field works in what it shows, and a commit turns that back into Swift's value.
   const initial = shown(control, control.value)
   const [draft, setDraft] = useState(initial)

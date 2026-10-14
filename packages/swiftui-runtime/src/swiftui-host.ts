@@ -69,6 +69,7 @@ import {
   SCROLL_PROXY_TYPE,
   isView,
   payloadOf,
+  sourcedViews,
   SHADOW_STYLE_TYPE,
   STROKE_STYLE_TYPE,
   STYLE_TYPE,
@@ -344,6 +345,12 @@ export class SwiftUIHost implements InterpreterHost {
    * reordered, rather than staying with the position.
    */
   scopeIdentity: (<T>(key: string, fn: () => T) => T) | null = null
+
+  /** A helper's views, which say where they were drawn from as a component's do (Wave 3a). */
+  helperView(name: string, value: SwiftValue, span: SourceSpan): SwiftValue | undefined {
+    const views = this.toViews([value])
+    return views.length === 1 ? view(sourcedViews(views, { name, source: span, helper: true })[0]!) : undefined
+  }
   builderIdentity: (<T>(slot: string, branch: string, fn: () => T) => T) | null = null
 
   withBuilderScope(slot: string, branch: string, build: () => SwiftValue[]): readonly SwiftValue[] {
@@ -1391,10 +1398,13 @@ export class SwiftUIHost implements InterpreterHost {
     if (!a || !b) return undefined
     if (!isTextLike(a) || !isTextLike(b)) return undefined
 
+    // `A + B + C` is `(A + B) + C`: one Text of three runs, as Design reads it (Wave 3a). A
+    // sum with modifiers of its own, written in parentheses, stays a run of its own.
+    const joined = a.name === 'Text' && !a.args.length && a.children.length > 0 && !a.modifiers.length
     return view({
       name: 'Text',
       args: [],
-      children: [a, b],
+      children: joined ? [...a.children, b] : [a, b],
       modifiers: [],
       action: null,
       span,

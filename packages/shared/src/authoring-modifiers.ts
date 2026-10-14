@@ -18,6 +18,11 @@ export interface AuthoringModifier {
    * text kept in the comment, so switching it on restores it byte for byte.
    */
   readonly enabled?: boolean
+  /**
+   * False for one of Apple's modifiers the preview does not draw (Wave 3a): Xcode applies
+   * it as written, and its card says so.
+   */
+  readonly drawn?: false
   readonly capabilities: {
     readonly edit: boolean
     readonly remove: boolean

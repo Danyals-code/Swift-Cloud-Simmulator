@@ -274,7 +274,7 @@ describe('What the preview does not apply, it says; what is cheap, it applies', 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {}
   }`
   it.each([
-    ['.scrollTransition', 'ScrollView { Text("A").scrollTransition { content, phase in content.opacity(phase.isIdentity ? 1 : 0.3) } }', '', /'\.scrollTransition' is recognised but not applied by the preview/],
+    ['.scrollTransition', 'ScrollView { Text("A").scrollTransition { content, phase in content.opacity(phase.isIdentity ? 1 : 0.3) } }', '', /'\.scrollTransition' is recognized but not applied by the preview/],
     ['pinnedViews', 'ScrollView { LazyVStack(pinnedViews: [.sectionHeaders]) { Section { Text("A") } header: { Text("H") } } }', '', /pinnedViews.*not applied/],
     ['.asymmetric', 'Text("A").transition(.asymmetric(insertion: .scale, removal: .opacity))', '', /asymmetric.*insertion/],
     ['.toolbar(.hidden, for: .tabBar)', 'TabView { Text("A").toolbar(.hidden, for: .tabBar).tabItem { Text("One") } }', '', /\.toolbar\(\.hidden, for: \.tabBar\).*not applied/],
