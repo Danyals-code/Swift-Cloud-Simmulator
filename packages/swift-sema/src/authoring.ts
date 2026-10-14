@@ -13,6 +13,7 @@ import { SUPPORTED_VIEWS, UNIMPLEMENTED_VIEWS } from './builtins'
 import { containerContent, helperCall, helperContent, helperReach, setByEveryInit, viewHelpers, writtenParameters, type MutableNode, type ViewHelper } from './authoring-helpers'
 import { joinedText } from './authoring-runs'
 import { colorOpacityParts, designControlRecipes, markViewBase, viewCallChain, AUTHORING_COLORS, AUTHORING_FONTS } from './design-controls'
+import { TOKEN_HOSTS } from './layer/tokens'
 
 /** What a name in scope reads: its kind of value, where it is declared, and whether a helper's call gives it. */
 interface Binding { kind: PropertyValueKind; source: SourceSpan; helper?: true }
@@ -38,9 +39,6 @@ function referencePath(expr: Expr): string[] | null {
   }
   return null
 }
-
-/** Framework types whose static members are design tokens, read with contextual `.name`. */
-const TOKEN_HOSTS = new Set(['Color', 'ShapeStyle', 'CGFloat', 'Double', 'Font', 'ShadowToken'])
 
 /** A conservative classification: a runtime value never authorizes a source edit. */
 function classify(expr: Expr, scope: Scope, tokens: ReadonlyMap<string, readonly VarDecl[]>, declaredNames: ReadonlySet<string>, contextual: ReadonlyMap<string, readonly VarDecl[]> = new Map()): { kind: PropertyValueKind; declaration?: SourceSpan; helper?: true } {
@@ -122,7 +120,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
   })
   const texts = new Map(input.files.map(f => [f.id, f.text]))
   const source = (span: SourceSpan) => texts.get(span.file)?.slice(span.start, span.end) ?? ''
-  const layers = layerProject(parsed, input.deploymentTarget)
+  const layers = layerProject(parsed, input.deploymentTarget, input.files)
   const nodes: MutableNode[] = []
   const byId = new Map<string, MutableNode>()
   /** What `inTemplate` found for each layer. */
@@ -337,7 +335,7 @@ export function buildAuthoringModel(input: AuthoringInput): AuthoringSnapshot {
     if (!diagnostics.some(d => d.span.file === node.source.file && (isSyntaxError(d) || d.severity === 'error' && d.span.start < node.source.end && d.span.end >= node.source.start))) {
       const template = inTemplate(parent)
       // A control that keeps its scope and description is kept as it is, rather than copied.
-      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', input.deploymentTarget).map(({ control }) => template || control.id.startsWith('fill:') ? { ...control, scope: template ? 'All rows in this template' : control.scope, description: control.id.startsWith('fill:') ? `${control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : control.description } : control)
+      const controls = designControlRecipes(node, expr, texts.get(node.source.file) ?? '', layers, input.deploymentTarget).map(({ control }) => template || control.id.startsWith('fill:') ? { ...control, scope: template ? 'All rows in this template' : control.scope, description: control.id.startsWith('fill:') ? `${control.description} Parent: ${parent.name}. Hug uses natural SwiftUI sizing; shapes may stay flexible. Fill expands where the parent supplies a finite size.` : control.description } : control)
       Object.assign(node, { controls })
       node.properties = node.properties.map(property => controls.some(c => c.source.start === property.source?.start && c.source.end === property.source.end) ? { ...property, valueKind: property.valueKind === 'computed' ? 'literal' : property.valueKind, writable: true, reason: 'Editable through a validated source control.' } : property)
     }

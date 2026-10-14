@@ -48,6 +48,7 @@ export function readLayer(expr: Expr, ctx: Omit<LayerContext, 'locked'>): LayerP
   const effects = readEffects(slots, full)
   claim(claimed, effects.opacity, 'effects')
   claim(claimed, effects.blur, 'effects')
+  claim(claimed, effects.shadow, 'effects')
   return {
     layout,
     // A run of joined text has no fill, corners or stroke of its own to set (Wave 3a).
@@ -55,6 +56,7 @@ export function readLayer(expr: Expr, ctx: Omit<LayerContext, 'locked'>): LayerP
     ...(text ? { text } : {}),
     effects,
     claimed,
+    ...(full.linked.size ? { tokens: Object.fromEntries(full.linked) } : {}),
     ...(full.locked ? { locked: full.locked } : {}),
     chain: { file: expr.span.file, start: slots.base.span.end, end: expr.span.end },
   }

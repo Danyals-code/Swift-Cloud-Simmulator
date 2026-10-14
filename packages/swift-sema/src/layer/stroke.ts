@@ -1,12 +1,12 @@
 import { sameLength, type LayerChange, type LayerValue, type Length, type StrokeValue } from '@studio/shared'
-import { BORDER_POSITIONS, borderOf, borderSource, cornersOf, modifierName, rewriteBorder, strokeCall, strokeStyleOf, type BorderLayout, type FoundBorder } from '../authoring-border'
+import { BORDER_POSITIONS, borderOf, borderSource, cornersOf, modifierName, ownBorderOf, rewriteBorder, strokeCall, strokeStyleOf, strokedOverlay, type BorderLayout, type Corners, type FoundBorder } from '../authoring-border'
 import { SLOT } from '../authoring-modifiers'
 import { insertCalls, insertionIndex, modifierPrefix, replaceRun, runHasComment, type Patch } from './chain-edit'
-import { colorSource, readColor, sameColor } from './color'
+import { keptColor, readColor, sameColor } from './color'
 import { SHAPE_CALLS } from '../builtins'
 import { isShapeView, runAt, type ChainSlots } from './slots'
 import { cardRefusal, commented, setTwice, type LayerContext } from './context'
-import { isToken, lengthOf, lengthSource } from './values'
+import { keepCondition, lengthOf, lengthSource, numberIn, sourceOf, writableLength } from './values'
 
 /**
  * Stroke: the line around the layer, as Figma's Stroke section draws it.
@@ -21,37 +21,65 @@ import { isToken, lengthOf, lengthSource } from './values'
 const SWIFT = 'This stroke is written in a way the panel can’t show. Change it in Code.'
 const FILLED_IN = 'Without its stroke this shape would be filled in. Add a fill first, or change it in Code.'
 
-/** What draws the stroke: a border overlay, the old square `.border`, or a shape's own stroke. */
-type Site = { readonly index: number } & ({ readonly kind: 'border'; readonly found: FoundBorder } | { readonly kind: 'square' | 'own' })
+/**
+ * What draws the stroke: a border overlay, the old square `.border`, a shape's own stroke, or
+ * an overlay that strokes a shape as a border does but is written in a way the panel can't
+ * read (Wave 3b). A border's `corners` are the shape its overlay is written with, when that
+ * is not written as the view's corners are but agrees with them, which a change writes it
+ * with again; `apart` says why one that does not agree is shown but left to Code.
+ */
+type Site = { readonly index: number } & (
+  | { readonly kind: 'border'; readonly found: FoundBorder; readonly corners?: Corners; readonly apart?: string }
+  | { readonly kind: 'square' | 'own' | 'unread' })
 /** The stroke as read, and its colour as written, which a change that keeps the colour keeps. */
 interface Read { readonly site: Site; readonly value: StrokeValue | string; readonly color?: string }
 
-/** A border's or a stroke's colour and width, or why the panel cannot show them. */
+/**
+ * A border's or a stroke's colour and width, or why the panel cannot show them. A stroke with
+ * no colour written, `.stroke(lineWidth: 2)`, is drawn in the foreground style (Wave 3b).
+ */
 function readSite(slots: ChainSlots, site: Site, ctx: LayerContext): Read {
   const call = slots.modifiers[site.index]!
   if (runHasComment(slots, runAt(slots, site.index), ctx.text)) return { site, value: commented('stroke') }
-  const [first, second, ...rest] = call.args
-  const colorExpr = site.kind === 'border' ? site.found.colorExpr : first?.label === null ? first.value : undefined
-  if (!colorExpr) return { site, value: 'This stroke takes its color from the foreground style. Change it in Code.' }
-  const color = readColor(colorExpr, ctx)
-  if (color.state === 'code') return { site, value: color.disabledReason! }
+  if (site.kind === 'unread') return { site, value: SWIFT }
+  const first = call.args[0]
+  const colorExpr = site.kind === 'border' ? site.found.colorExpr : first?.label === null ? first.value : null
+  const color = colorExpr && readColor(colorExpr, ctx)
+  if (color?.state === 'code') return { site, value: color.disabledReason! }
+  // What follows the colour: a width, or a shape's dashed style.
+  const [line, ...rest] = colorExpr ? call.args.slice(1) : call.args
   let width: Length | undefined = 1, dash: readonly number[] | undefined
   if (site.kind === 'border') ({ width, dash } = site.found)
   else if (rest.length || call.trailingClosure) width = undefined
-  else if (second?.label === 'style' && site.kind === 'own') ({ width, dash } = strokeStyleOf(second.value, ctx.text) ?? { width: undefined })
-  else if (second) width = second.label === (site.kind === 'own' ? 'lineWidth' : 'width') ? lengthOf(second.value, ctx) : undefined
-  if (width === undefined || site.kind === 'square' && typeof width !== 'number') return { site, value: SWIFT }
+  else if (line?.label === 'style' && site.kind === 'own') ({ width, dash } = strokeStyleOf(line.value, ctx.text) ?? { width: undefined })
+  else if (line) width = line.label === (site.kind === 'own' ? 'lineWidth' : 'width') ? lengthOf(line.value, ctx) : undefined
+  if (width === undefined || site.kind === 'square' && (typeof width !== 'number' || !color)) return { site, value: SWIFT }
   const position = site.kind === 'border' ? site.found.position : site.kind === 'own' && slots.names[site.index] === 'stroke' ? 'center' : 'inside'
-  return { site, value: { color: color.value, width, position, ...dash?.length ? { dash } : {} }, color: ctx.text.slice(colorExpr.span.start, colorExpr.span.end) }
+  return { site, value: { color: color?.value ?? null, width, position, ...dash?.length ? { dash } : {} }, ...colorExpr ? { color: sourceOf(ctx, colorExpr) } : {} }
+}
+
+const SHAPE_WORDS: Readonly<Record<Corners['kind'], string>> = { rectangle: 'a rectangle', rounded: 'a rounded rectangle', uneven: 'a rectangle with uneven corners', capsule: 'a capsule', circle: 'a circle', ellipse: 'an ellipse' }
+
+/** Why a stroke drawn around a shape that isn't the view's is shown but left to Code. */
+function apartFrom(shape: Corners): string {
+  const radius = shape.kind === 'rounded' && numberIn(shape.radius!.trim(), false) !== undefined ? ` with a radius of ${shape.radius!.trim()}` : ''
+  return `This stroke is drawn around ${SHAPE_WORDS[shape.kind]}${radius}, which isn’t this view’s shape. Give the view the same corners to change the stroke here, or change it in Code.`
 }
 
 /** What draws the layer's stroke, each in chain order. */
 function sitesOf(slots: ChainSlots, ctx: LayerContext): Site[] {
   const corners = cornersOf(slots, ctx.text), shape = isShapeView(slots)
   return slots.names.flatMap((name, index): Site[] => {
-    const found = name === 'border' ? borderOf(slots.modifiers[index]!, corners, ctx.text) : undefined
+    const call = slots.modifiers[index]!
+    const found = name === 'border' ? borderOf(call, corners, ctx.text) : undefined
     if (found) return [{ kind: 'border', index, found }]
-    if (name === 'border') return modifierName(slots.modifiers[index]!) === 'border' ? [{ kind: 'square', index }] : []
+    if (name === 'border') return modifierName(call) === 'border' ? [{ kind: 'square', index }] : []
+    if (name === 'overlay') {
+      // An overlay that strokes a shape in its own spelling, or with no colour of its own (Wave 3b).
+      const own = ownBorderOf(call, corners, ctx.text)
+      if (own) return [{ kind: 'border', index, found: own.found, corners: own.shape, ...own.agrees ? {} : { apart: apartFrom(own.shape) } }]
+      return strokedOverlay(call, ctx.text) ? [{ kind: 'unread', index }] : []
+    }
     return shape && (name === 'stroke' || name === 'strokeBorder') ? [{ kind: 'own', index }] : []
   })
 }
@@ -63,9 +91,11 @@ function read(slots: ChainSlots, ctx: LayerContext): { value: LayerValue<StrokeV
   if (!sites.length) return { value: { value: null, state: 'absent' } }
   const from = sites.map(site => ctx.ids[site.index]!)
   if (sites.length > 1) return { value: { value: null, state: 'code', from, disabledReason: setTwice('stroke') } }
-  const found = readSite(slots, sites[0]!, ctx)
+  const site = sites[0]!, found = readSite(slots, site, ctx)
   if (typeof found.value === 'string') return { value: { value: null, state: 'code', from, disabledReason: found.value } }
-  const token = 'token' in found.value.color || typeof found.value.width !== 'number'
+  // A stroke around another shape is shown as it is, and left to Code (Wave 3b).
+  if (site.kind === 'border' && site.apart) return { value: { value: found.value, state: 'code', from, disabledReason: site.apart } }
+  const token = !!found.value.color && 'token' in found.value.color || typeof found.value.width !== 'number'
   return { value: { value: found.value, state: token ? 'token' : 'literal', from }, read: found }
 }
 
@@ -74,12 +104,12 @@ export function readStroke(slots: ChainSlots, ctx: LayerContext): LayerValue<Str
 }
 
 const sameDash = (a: readonly number[] = [], b: readonly number[] = []) => a.length === b.length && a.every((length, index) => length === b[index])
-const sameStroke = (a: StrokeValue, b: StrokeValue) => sameColor(a.color, b.color) && sameLength(a.width, b.width) && a.position === b.position && sameDash(a.dash, b.dash)
+const sameStroke = (a: StrokeValue, b: StrokeValue) => (a.color && b.color ? sameColor(a.color, b.color) : a.color === b.color) && sameLength(a.width, b.width) && a.position === b.position && sameDash(a.dash, b.dash)
 
 /** The stroke a change asks for, checked, with a dash of nothing taken away. */
 function checked(next: StrokeValue): StrokeValue {
   const width = next.width
-  if (typeof width === 'number' ? !(Number.isFinite(width) && width >= 0) : !isToken(width.token)) throw new Error('A stroke’s width is a number of points, 0 or more.')
+  if (!writableLength(width, length => Number.isFinite(length) && length >= 0)) throw new Error('A stroke’s width is a number of points, 0 or more.')
   if (!BORDER_POSITIONS.includes(next.position)) throw new Error('A stroke is inside the edge, on it or outside it.')
   if (next.dash?.some(length => !(Number.isFinite(length) && length >= 0))) throw new Error('A dash and its gap are numbers of points, 0 or more.')
   const { dash, ...rest } = next
@@ -98,14 +128,15 @@ export function writeStroke(slots: ChainSlots, change: Extract<LayerChange, { se
   if (current.value.disabledReason) throw new Error(current.value.disabledReason)
   const next = change.stroke && checked(change.stroke)
   const before = current.value.value, site = current.read?.site
+  if (before && next) keepCondition(before.width, next.width, 'stroke width')
   if (next === null ? !before : before && sameStroke(before, next)) return []
   const filled = slots.names.includes('fill')
   if (!next) {
     if (site!.kind === 'own' && !filled) throw new Error(FILLED_IN)
     return [replaceRun(slots, runAt(slots, site!.index), [], ctx.text)]
   }
-  // A colour left as it was keeps its spelling, a token or `Color.gray.opacity(0.3)`.
-  const color = before && current.read?.color && sameColor(before.color, next.color) ? current.read.color : colorSource(next.color, 'ShapeStyle', ctx)
+  // A colour left as it was keeps its spelling, a token or `Color.gray.opacity(0.3)`; none stays none, the foreground style.
+  const color = next.color && keptColor(next.color, before?.color ?? undefined, current.read?.color, 'ShapeStyle', ctx)
   const width = lengthSource(next.width)
   /** A shape's own stroke before the modifier at `index`; only an inset keeps a trimmed or turned shape one that strokes inside its edge. */
   const own = (index: number) => {
@@ -128,7 +159,8 @@ export function writeStroke(slots: ChainSlots, change: Extract<LayerChange, { se
   if (typeof next.width !== 'number') throw new Error('A border’s width is a number of points. Type one to replace the token.')
   const border = { color, width: next.width, position: next.position, ...next.dash ? { dash: next.dash } : {} }
   const corners = cornersOf(slots, ctx.text)
-  if (site?.kind === 'border') return [rewriteBorder(slots.modifiers[site.index]!, site.found, corners, ctx.text, border)]
+  // A border whose overlay is written in its own spelling of the view's corners keeps it.
+  if (site?.kind === 'border') return [rewriteBorder(slots.modifiers[site.index]!, site.found, site.corners ?? corners, ctx.text, border)]
   if (site) return [replaceRun(slots, runAt(slots, site.index), [borderSource(border, corners, layoutOf(slots, ctx))], ctx.text)]
   if (ctx.locked) throw new Error(ctx.locked)
   return [insertCalls(slots, insertionIndex(slots, SLOT.stroke), [borderSource(border, corners, layoutOf(slots, ctx))], ctx.text)]

@@ -5,7 +5,7 @@ import { buttonLabel, type ButtonLabel } from '../design-controls'
 import { insertCalls, insertionIndex, replaceRun, runHasComment, type LabelPatch, type Patch } from './chain-edit'
 import { callsNamed, chainSlots, isShapeView, runsOf, type ChainSlots, type SlotRun } from './slots'
 import { commented, inSwift, setTwice, type LayerContext } from './context'
-import { lengthOf, lengthSource } from './values'
+import { keepCondition, lengthOf, lengthSource } from './values'
 
 /**
  * Layout: size, alignment, padding, margin, offset and pin.
@@ -117,6 +117,7 @@ export function paddingCalls(insets: Insets | null): string[] {
 function writeInsets(slots: ChainSlots, kind: 'padding' | 'margin', insets: Insets | null, ctx: LayerContext): Patch | null {
   const current = readInsets(slots, kind, ctx)
   if (current.disabledReason) throw new Error(current.disabledReason)
+  for (const side of SIDES) keepCondition(current.value?.[side], insets && insets[side], kind)
   const calls = paddingCalls(insets)
   const run = runsOf(slots, kind)[0]
   if (run) return replaceRun(slots, run, calls, ctx.text)
@@ -490,6 +491,7 @@ function writeSize(slots: ChainSlots, change: Extract<LayerChange, { section: 'l
   }
   const width = nextAxis('width', change.width, read.width.value, change.measured)
   const height = nextAxis('height', change.height, read.height.value, change.measured)
+  for (const [axis, size] of [['width', width], ['height', height]] as const) for (const key of ['size', 'min', 'max'] as const) keepCondition(read[axis].value[key], size[key], axis)
   const meaningful = setsSize(width) || setsSize(height)
   const asked = change.alignment !== undefined ? change.alignment : read.alignment.value
   if (change.alignment && change.alignment !== 'center' && !meaningful) throw new Error(ALIGN_HUG)
@@ -545,6 +547,7 @@ function writeOffset(slots: ChainSlots, offset: Offset | null, ctx: LayerContext
   const current = readOffset(slots, ctx)
   if (current.disabledReason) throw new Error(current.disabledReason)
   for (const length of offset ? [offset.x, offset.y] : []) if (typeof length === 'number' && !Number.isFinite(length)) throw new Error('An offset is a number of points.')
+  for (const axis of ['x', 'y'] as const) keepCondition(current.value?.[axis], offset && offset[axis], 'offset')
   const still = (value: Offset | null) => !value || value.x === 0 && value.y === 0
   if (still(offset) && still(current.value) || offset && current.value && sameLength(offset.x, current.value.x) && sameLength(offset.y, current.value.y)) return null
   const calls = offsetCalls(offset)

@@ -993,6 +993,9 @@ export function forEachChild(node: Node, visit: (child: Node) => void): void {
     case 'breakStmt':
     case 'continueStmt':
       return
+    case 'deferStmt':
+      visit(node.body)
+      return
     case 'forInStmt':
       visit(node.sequence)
       if (node.where) visit(node.where)

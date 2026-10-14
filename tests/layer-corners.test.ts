@@ -194,6 +194,50 @@ describe('a border follows the corners (D8)', () => {
   })
 })
 
+describe('a stroke overlay written in its own spelling of the corners follows them (Wave 3b)', () => {
+  it.each([
+    ['a radius with the default style left out, against a clip that writes it',
+      'Text("A").clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray, lineWidth: 1))', rounded(16),
+      'Text("A").clipShape(RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.gray, lineWidth: 1))'],
+    ['a radius written with a decimal point, in a closure',
+      'Text("A").clipShape(.rect(cornerRadius: 12)).overlay { RoundedRectangle(cornerRadius: 12.0).strokeBorder(Color.gray, lineWidth: 1) }', rounded(16),
+      'Text("A").clipShape(.rect(cornerRadius: 16)).overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.gray, lineWidth: 1) }'],
+    ['a shape as much larger as an outside line is wide',
+      'Text("A").clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(Color.gray, lineWidth: 1).padding(-1))', rounded(20),
+      'Text("A").clipShape(RoundedRectangle(cornerRadius: 20)).overlay(RoundedRectangle(cornerRadius: 21).strokeBorder(Color.gray, lineWidth: 1).padding(-1))'],
+    ['a style the overlay writes itself, kept while the corners keep it',
+      'Text("A").clipShape(.rect(cornerRadius: 12, style: .circular)).overlay(RoundedRectangle(cornerRadius: 12, style: .circular).stroke(.gray))', rounded(16, false),
+      'Text("A").clipShape(.rect(cornerRadius: 16, style: .circular)).overlay(RoundedRectangle(cornerRadius: 16, style: .circular).stroke(.gray))'],
+    ['a stroke in the foreground style, with no colour written',
+      'Text("A").clipShape(.rect(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke())', rounded(12),
+      'Text("A").clipShape(.rect(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke())'],
+    ['a square view’s rectangle, when corners are added',
+      'Text("A").background(.red).overlay(Rectangle().stroke(lineWidth: 2))', rounded(10),
+      'Text("A").background(.red).clipShape(.rect(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(lineWidth: 2))'],
+  ])('takes the new corners in the same step: %s', (_, body, corners, expected) => {
+    expect(written(body, corners)).toBe(`        ${expected}`)
+  })
+
+  it.skipIf(!XCODE)('builds in Xcode 27, each shape it writes', () => {
+    const cases: readonly (readonly [string, CornersValue])[] = [
+      ['Text("A").clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray, lineWidth: 1))', rounded(16)],
+      ['Text("A").clipShape(.rect(cornerRadius: 12)).overlay { RoundedRectangle(cornerRadius: 12.0).strokeBorder(Color.gray, lineWidth: 1) }', { shape: 'capsule' }],
+      ['Text("A").clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(Color.gray, lineWidth: 1).padding(-1))', { shape: 'uneven', radii: { topLeading: 20, topTrailing: 4, bottomTrailing: 0, bottomLeading: 8 } }],
+      ['Text("A").clipShape(.rect(cornerRadius: 12, style: .circular)).overlay(RoundedRectangle(cornerRadius: 12, style: .circular).stroke(.gray))', rounded(16, false)],
+      ['Text("A").clipShape(.rect(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke())', { shape: 'circle' }],
+      ['Text("A").background(.red).overlay(Rectangle().stroke(lineWidth: 2))', rounded({ token: 'Layout.radius' })],
+    ]
+    const sources = cases.map(([body, corners]) => text(setLayer(files(body), 'Text', [{ section: 'corners', corners }])))
+    typecheckInXcode(sources)
+    expect(sources).toHaveLength(6)
+  }, 600_000)
+
+  it('leaves a stroke around another shape as it was', () => {
+    expect(written('Text("A").background(.red).clipShape(.rect(cornerRadius: 12)).overlay { Circle().stroke(Color.gray, lineWidth: 1) }', rounded(16)))
+      .toBe('        Text("A").background(.red).clipShape(.rect(cornerRadius: 16)).overlay { Circle().stroke(Color.gray, lineWidth: 1) }')
+  })
+})
+
 describe('the preview draws what the Corners section writes', () => {
   /** The render tree after one corners change, compiled the way the canvas compiles it. */
   const drawn = (body: string, corners: CornersValue, name = 'Text', target?: string): readonly RenderNode[] => {

@@ -63,6 +63,9 @@ export interface EvaluationResult {
   readonly rootTypeName: string | null
 }
 
+/** The stored members a preview state holds, by the type that declares them. */
+type Held = ReadonlyMap<string, ReadonlySet<string>>
+
 /**
  * Owns one running app.
  *
@@ -117,7 +120,7 @@ export class AppRuntime {
   private handlers: ReadonlyMap<string, ViewIntent> = new Map()
   /** Identifies the loaded program, so a real edit reloads and a tap does not. */
   private programKey: string | null = null
-  private loadedProgram: { files: readonly SourceFileNode[]; model: SemanticModel; key: string; screen?: string } | null = null
+  private loadedProgram: { files: readonly SourceFileNode[]; model: SemanticModel; key: string; screen?: string; held?: Held } | null = null
 
   /**
    * A failure raised while loading, held over until the next `evaluate`.
@@ -194,11 +197,16 @@ export class AppRuntime {
     this.environmentInputs = inputs
   }
 
-  load(files: readonly SourceFileNode[], model: SemanticModel, programKey: string, screen?: string): void {
+  /**
+   * `held` is what a preview state holds (Wave 3b): the members it sets, which keep the
+   * state's values from this load until the first interaction, whatever the code writes.
+   */
+  load(files: readonly SourceFileNode[], model: SemanticModel, programKey: string, screen?: string, held?: Held): void {
     if (programKey === this.programKey && this.entryTypeName) return
 
-    this.loadedProgram = { files, model, key: programKey, screen }
+    this.loadedProgram = { files, model, key: programKey, screen, held }
     this.interpreter = new Interpreter({ host: this.host, ...(this.stepBudget !== undefined ? { stepBudget: this.stepBudget } : {}) })
+    this.interpreter.hold(held ?? null)
     this.host.expandStruct = (value) => this.expand(value)
     this.host.scopeIdentity = (key, fn) => this.identity.scope(key, fn)
     this.host.builderIdentity = (slot, branch, fn) => {
@@ -369,7 +377,8 @@ export class AppRuntime {
     const preview = new AppRuntime()
     preview.stepBudget = stepBudget
     if (screen) preview.previewPrefix = 'design:' + screen
-    preview.load(loaded.files, loaded.model, loaded.key, screen ?? loaded.screen)
+    // Drawn as the app is now: holding the state while it holds, and not once it was touched.
+    preview.load(loaded.files, loaded.model, loaded.key, screen ?? loaded.screen, this.interpreter.holding ?? undefined)
     const copied = new Map<object, unknown>()
     const boxes = new Map<string, { value: SwiftValue; initializer: string }>()
     for (const [key, box] of this.state.snapshot()) {
@@ -420,6 +429,9 @@ export class AppRuntime {
     const intent = this.handlers.get(event.handlerId)
     if (!intent) return false
 
+    // A designer's first touch ends a preview state's hold, so it acts on what the state
+    // drew. A tap the Studio sends for its own reasons, as a tab switch, leaves it held.
+    if (!(event.kind === 'tap' && event.origin === 'studio')) this.interpreter.hold(null)
     this.interpreter.resetSteps()
     this.animation = null
     this.host.pendingAnimation = null
@@ -496,7 +508,7 @@ export class AppRuntime {
     this.host.defaultGeometry = defaultGeometry
     this.host.geometry = this.geometry
     const loaded = this.loadedProgram
-    if (reload && loaded) this.load(loaded.files, loaded.model, loaded.key, loaded.screen)
+    if (reload && loaded) this.load(loaded.files, loaded.model, loaded.key, loaded.screen, loaded.held)
   }
 
   /**

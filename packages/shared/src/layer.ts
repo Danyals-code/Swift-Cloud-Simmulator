@@ -14,8 +14,56 @@ import type { SourceSpan } from './source'
  * exactly where and as it was.
  */
 
-/** A length in points, or a token's expression kept as written: `Layout.padding`, `.space16`. */
-export type Length = number | { readonly token: string }
+/**
+ * A constant a value is read through, where it is declared (Wave 3b): what Edit at
+ * declaration changes for every place that reads it.
+ */
+export interface TokenDeclaration {
+  /** Its initialiser, which Edit at declaration rewrites; a shared style's `source` when the constant is one. */
+  readonly span: SourceSpan
+  /** Its name from anywhere, as `style-edit` takes it: `ContentView.rowSpacing`, `Layout.pad`, `CGFloat.space16`. */
+  readonly name: string
+  /** How many places in the project read it, this one among them. */
+  readonly uses: number
+}
+
+/** A token's expression kept as written: `Layout.padding`, `.space16`, `rowSpacing`. */
+export interface TokenLength {
+  readonly token: string
+}
+
+/**
+ * What a token a layer reads is declared as, when it is a constant the panel can read
+ * (Wave 3b): its number, for a length, and where it is declared.
+ */
+export interface TokenValue {
+  readonly value?: number
+  /**
+   * A length's initialiser as written where it is worked out in Swift, `8 * 2`, rather than a
+   * number: shown with the token, with no value to change where it is declared.
+   */
+  readonly expression?: string
+  readonly declaration: TokenDeclaration
+}
+
+/**
+ * A value one condition chooses, `selected ? 16 : 8` (Wave 3b): the one when it is true,
+ * and the other otherwise. Each is changed on its own, and the condition stays as written.
+ */
+export interface Conditional<T> {
+  /** The condition, as written. */
+  readonly condition: string
+  readonly then: T
+  readonly otherwise: T
+}
+
+/** A length in points, a token, or one of two a condition chooses between. */
+export type Length = number | TokenLength | Conditional<number | TokenLength>
+
+/** Whether a value is one a condition chooses (`Conditional`). */
+export function isConditional<T>(value: T | Conditional<T> | null | undefined): value is Conditional<T> {
+  return typeof value === 'object' && value !== null && 'condition' in value
+}
 
 /**
  * How a value is written: not at all, as a literal the panel rewrites, through a token
@@ -106,7 +154,8 @@ export type ColorValue = ({ readonly name: string } | { readonly hex: string } |
 export interface UnitPoint { readonly x: number; readonly y: number }
 
 export type FillValue =
-  | { readonly kind: 'color'; readonly color: ColorValue }
+  /** `when`: a colour one condition chooses (Wave 3b), `color` when it is true and `when.otherwise` when not. */
+  | { readonly kind: 'color'; readonly color: ColorValue; readonly when?: { readonly condition: string; readonly otherwise: ColorValue } }
   | {
       readonly kind: 'gradient'
       readonly type: 'linear' | 'radial' | 'angular'
@@ -140,7 +189,11 @@ export interface CornersValue {
 }
 
 export interface StrokeValue {
-  readonly color: ColorValue
+  /**
+   * Null for a stroke with no colour written, `.stroke(lineWidth: 2)`, which SwiftUI draws
+   * in the foreground style (Wave 3b): a change keeps it so until a colour is chosen.
+   */
+  readonly color: ColorValue | null
   /** A token only on a shape's own stroke; a border's width is a number of points. */
   readonly width: Length
   /** Inside the edge, as a border is, centred on it, as a shape's stroke is, or outside it. */
@@ -163,7 +216,25 @@ export interface FontValue {
   readonly weight?: string
   readonly design?: string
   readonly italic?: boolean
+  /**
+   * Set on a font read through a constant, `.font(.heading)` (Wave 3b): its name as written,
+   * which the layer's `tokens` says more about. The rest is what it is declared as.
+   */
+  readonly token?: string
+  /**
+   * A custom face a font token is declared with, `Font.custom("Avenir", size: 20)` (Wave 3b):
+   * shown with the token, read only, as the panel offers no custom faces.
+   */
+  readonly face?: string
 }
+
+/**
+ * A drop shadow, as `.shadow(color:radius:x:y:)` draws one, in points; `color` is null for
+ * SwiftUI's own, a translucent black. A shadow token, `.shadow(.card)`, stays linked.
+ */
+export type ShadowValue =
+  | { readonly color: ColorValue | null; readonly radius: number; readonly x: number; readonly y: number }
+  | { readonly token: string }
 
 /**
  * A text's look. Each part is its own value, because one written in a way the panel
@@ -171,7 +242,7 @@ export interface FontValue {
  */
 export interface LayerText {
   readonly font: LayerValue<FontValue>
-  readonly color: LayerValue<ColorValue | null>
+  readonly color: LayerValue<ColorValue | Conditional<ColorValue> | null>
   readonly alignment: LayerValue<'leading' | 'center' | 'trailing' | null>
   /** Points between letters. */
   readonly tracking: LayerValue<number | null>
@@ -192,11 +263,18 @@ export interface LayerProperties {
   /** Text-bearing views only. */
   readonly text?: LayerText
   readonly effects: {
-    readonly opacity: LayerValue<number>
+    readonly opacity: LayerValue<number | Conditional<number>>
     readonly blur: LayerValue<number | null>
+    /** Always read; optional for layers made by hand, as tests make them. */
+    readonly shadow?: LayerValue<ShadowValue | null>
   }
   /** Which section shows each modifier it read, by `AuthoringModifier.id`. The stack tags these. */
   readonly claimed: Readonly<Record<string, LayerSectionId>>
+  /**
+   * The constants its values read that the panel can say more about (Wave 3b), by each token
+   * as written: what each is declared as and where, for its chip, Edit at declaration and Detach.
+   */
+  readonly tokens?: Readonly<Record<string, TokenValue>>
   /**
    * Why nothing new can be added to the chain, when something in it is not known well
    * enough to place a modifier around: existing values stay editable.
@@ -235,13 +313,13 @@ export type LayerChange =
       readonly section: 'text'
       /** The font's parts that change; the rest stay as they are. */
       readonly font?: Partial<FontValue>
-      readonly color?: ColorValue | null
+      readonly color?: ColorValue | Conditional<ColorValue> | null
       readonly alignment?: 'leading' | 'center' | 'trailing' | null
       readonly tracking?: number | null
       readonly lineSpacing?: number | null
       readonly textCase?: 'uppercase' | 'lowercase' | null
     }
-  | { readonly section: 'effects'; readonly opacity?: number; readonly blur?: number | null }
+  | { readonly section: 'effects'; readonly opacity?: number | Conditional<number>; readonly blur?: number | null; readonly shadow?: ShadowValue | null }
 
 export interface LayerSetOperation {
   readonly kind: 'layer-set'
@@ -253,7 +331,9 @@ export function evenInsets(length: Length): Insets {
   return { top: length, leading: length, bottom: length, trailing: length }
 }
 
-/** Two lengths are the same when both are the same number or the same token. */
+/** Two lengths are the same when both are the same number, the same token, or the same condition choosing between the same two. */
 export function sameLength(a: Length, b: Length): boolean {
-  return typeof a === 'number' ? a === b : typeof b !== 'number' && a.token === b.token
+  if (typeof a === 'number' || typeof b === 'number') return a === b
+  if (isConditional(a) || isConditional(b)) return isConditional(a) && isConditional(b) && a.condition === b.condition && sameLength(a.then, b.then) && sameLength(a.otherwise, b.otherwise)
+  return a.token === b.token
 }

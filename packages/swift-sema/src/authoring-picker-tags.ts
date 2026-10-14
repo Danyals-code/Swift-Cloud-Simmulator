@@ -1,7 +1,6 @@
 import type { AuthoringNode, SourceFile } from '@studio/shared'
 import { forEachChild, viewSiteAt, type Expr, type Node } from '@studio/swift-syntax'
-import { callOf, expressionOf, raw, type FeatureContext } from './authoring-context'
-import { enumCases } from './authoring-components'
+import { callOf, enumCases, expressionOf, raw, type FeatureContext } from './authoring-context'
 import { swiftString, viewCallChain } from './design-controls'
 
 const isTag = (item: Node): item is Extract<Node, { kind: 'call' }> => item.kind === 'call' && item.callee.kind === 'memberAccess' && item.callee.member === 'tag' && item.args.length === 1 && item.args[0]!.label === null

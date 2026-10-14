@@ -1,4 +1,5 @@
-import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion, type AuthoringNode } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion, type AuthoringNode, type SourceFile, type TokenValue } from '@studio/shared'
+import type { FeatureContext } from '../authoring-context'
 import type { SourceFileNode, StructDecl } from '@studio/swift-syntax'
 import { EDGE_SET_MEMBERS } from '../structural-check'
 
@@ -28,6 +29,13 @@ export interface LayerContext {
   readonly locked?: string
   /** The view is a run of texts joined with `+` (Wave 3a): only what keeps a Text a Text is written on it. */
   readonly run?: boolean
+  /** The project as the authoring features read it, where the constants a value reads are declared (Wave 3b). */
+  readonly project: FeatureContext
+  /**
+   * What each constant the view's values are linked to is declared as, by the token as
+   * written (`LayerProperties.tokens`): the readers add each one as they meet it (`linkToken`).
+   */
+  readonly linked: Map<string, TokenValue>
 }
 
 /** Why a run of joined text takes nothing but text styles, for `what` the change is about. */
@@ -42,17 +50,27 @@ export const setTwice = (what: string) => `This view’s ${what} is set in more 
 export const commented = (what: string) => `A comment is written in this view’s ${what}. Change it in Code.`
 export const inSwift = (what: string) => `This view’s ${what} is worked out in Swift. Change it in Code.`
 
-/** What every layer in a project shares, worked out once for the whole project. */
+/**
+ * What every layer in a project shares, worked out once for the whole project: what the
+ * authoring model, the planner and a drag's draft each read their views' layers and
+ * controls with, and hand on, so nothing of one compile outlives it.
+ */
 export interface LayerProject {
   readonly edges: ReadonlySet<string>
   readonly target: number
   readonly structs: ReadonlyMap<string, StructDecl>
+  readonly trees: readonly SourceFileNode[]
+  /**
+   * The same files as the authoring features read them, whose indexes find the constants a
+   * value reads (`declarationsNamed`, `extensionsNamed`), each found once for the project.
+   */
+  readonly context: FeatureContext
 }
 
-export function layerProject(trees: readonly SourceFileNode[], deploymentTarget = DEFAULT_DEPLOYMENT_TARGET): LayerProject {
+export function layerProject(trees: readonly SourceFileNode[], deploymentTarget = DEFAULT_DEPLOYMENT_TARGET, files: readonly SourceFile[] = []): LayerProject {
   const structs = new Map<string, StructDecl>()
   for (const tree of trees) for (const decl of tree.declarations) if (decl.kind === 'structDecl') structs.set(decl.name, decl)
-  return { edges: edgeSetMembers(trees), target: deploymentVersion(deploymentTarget), structs }
+  return { edges: edgeSetMembers(trees), target: deploymentVersion(deploymentTarget), structs, trees, context: { files, ast: trees, nodes: [], deploymentTarget } }
 }
 
 /** A view's layer context in its project; `node.modifiers` must already be read. */
@@ -64,6 +82,7 @@ export function layerContext(project: LayerProject, node: AuthoringNode, parent:
     inButton: node.name === 'Button' || parent?.name === 'Button',
     owner: project.structs.get(node.owner.split('.')[0]!),
     run: !!node.textRun,
+    project: project.context, linked: new Map(),
     overlapSized: parentKind(parent) === 'overlap' && !!parent?.layer && [parent.layer.layout.width, parent.layer.layout.height].every(axis => axis.value.mode !== 'hug'),
   }
 }

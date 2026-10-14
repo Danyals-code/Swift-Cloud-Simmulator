@@ -1,17 +1,28 @@
 import { Lexer, type CallExpr, type StructDecl } from '@studio/swift-syntax'
 import { deploymentVersion, isHelperDefinition, tappableProblem } from '@studio/shared'
 import type { AuthoringNode, BehaviorAction, BehaviorSettings, DesignValue, StateInput } from '@studio/shared'
-import { allDeclarations, callOf, expressionOf, hasComments, identifier, insertMember, layerById, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, callOf, enumCases, expressionOf, hasComments, identifier, insertMember, layerById, literal, modifierIndent, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, swiftValue, validScalar, type FeatureContext, type SourcePatch } from './authoring-context'
 import { collectionFor, recordsSwift } from './authoring-collections'
-import { enumCases, namedActions } from './authoring-components'
+import { namedActions } from './authoring-components'
 import { styleExpression } from './authoring-resources'
 import { insideNavigationStack } from './authoring-navigation'
 import { appRoot } from './authoring-navigation-app'
+import { screenStateInputs } from './authoring-states'
 import { viewCallChain } from './design-controls'
 
+/**
+ * The values a view's states can change. A screen's own definition also offers what its
+ * conditions read, on it or on a model, with the states they draw (Wave 3b); a view's
+ * settings, which bind controls and set values on tap, offer its own `@State` alone.
+ */
 export function stateInputs(ctx: FeatureContext, node: AuthoringNode): StateInput[] {
   // A helper is written inside its view, whose own definition reads the view's states (Wave 3a).
   if (isHelperDefinition(node)) return []
+  const plain = ownStates(ctx, node)
+  return node.kind === 'definition' ? screenStateInputs(ctx, node, plain) : plain
+}
+/** A view's own `@State` scalars, enums, dates and colours, as a state or a control sets them. */
+function ownStates(ctx: FeatureContext, node: AuthoringNode): StateInput[] {
   const owner = ownerOf(ctx, node)
   if (!owner) return []
   return owner.members.flatMap((member): StateInput[] => {

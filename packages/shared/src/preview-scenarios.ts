@@ -22,6 +22,12 @@ export function validatePreviewScenario(snapshot: AuthoringSnapshot, scenario: P
     if (state && !Array.isArray(input.value)) {
       if (typeof input.value === 'string') characters += input.value.length
       if (characters > 1_000_000) return 'Preview inputs exceed the 1 MB text limit.'
+      if (state.problem) return state.problem
+      // A list or a model's optional is one of the values the screen's code has, never Swift typed in.
+      if (state.choices) {
+        if (!state.choices.some(choice => choice.value === input.value)) return `${input.name} needs one of ${state.choices.map(choice => choice.label).join(' or ')}.`
+        continue
+      }
       if (state.type === 'Date') {
         if (typeof input.value !== 'number' || !Number.isFinite(input.value) || Math.abs(input.value) > 8.64e12) return `${input.name} needs a valid date.`
         continue

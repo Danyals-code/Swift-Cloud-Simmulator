@@ -107,3 +107,17 @@ test('each corner takes its own radius, Start and End, written in the order Swif
   await expect.poll(() => clipped(page)).toMatch(/^path\(.* A /)
   expect(await sourceInCode(page)).toContain('topTrailingRadius: 12, style: .circular))')
 })
+
+test('a stroke with no color written reads Foreground, keeps it through a width change, and takes a color typed (Wave 3b)', async ({ page }) => {
+  const view = `${CARD}.clipShape(.rect(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke())`
+  await openCard(page, view)
+  const hex = stroke(page).getByRole('textbox', { name: 'Stroke hex', exact: true })
+  await expect(hex).toHaveValue('')
+  await expect(hex).toHaveAttribute('placeholder', 'Foreground')
+  await expect(stroke(page).getByRole('textbox', { name: 'Stroke opacity', exact: true })).toBeDisabled()
+  await type(page, stroke(page).getByRole('textbox', { name: 'Stroke width', exact: true }), '3')
+  expect(await sourceInCode(page)).toContain(`${CARD}.clipShape(.rect(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(lineWidth: 3))`)
+  await type(page, hex, '#FF0000')
+  await expect.poll(() => stroked(page)).toEqual({ color: 'rgb(255, 0, 0)', width: '3' })
+  expect(await sourceInCode(page)).toContain(`${CARD}.clipShape(.rect(cornerRadius: 12)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 1, green: 0, blue: 0), lineWidth: 3))`)
+})

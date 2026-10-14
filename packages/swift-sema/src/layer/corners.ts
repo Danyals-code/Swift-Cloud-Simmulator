@@ -1,12 +1,12 @@
-import { CORNER_RADIUS_LABELS, sameLength, type CornerRadii, type CornersValue, type LayerChange, type LayerValue, type Length } from '@studio/shared'
+import { CORNER_RADIUS_LABELS, isConditional, sameLength, type CornerRadii, type CornersValue, type LayerChange, type LayerValue, type Length, type SourceSpan } from '@studio/shared'
 import type { CallExpr, Expr } from '@studio/swift-syntax'
-import { shapeCorners, type Corners } from '../authoring-border'
+import { cornerStyle, shapeCorners, type Corners } from '../authoring-border'
 import { SLOT } from '../authoring-modifiers'
 import { roundedCorners, viewCallChain } from '../design-controls'
 import { insertCalls, insertionIndex, replaceRun, runHasComment, type LabelPatch, type Patch } from './chain-edit'
 import { isShapeView, runAt, type ChainSlots } from './slots'
 import { cardRefusal, inSwift, type LayerContext } from './context'
-import { isToken, lengthSource, numberIn, sourceOf } from './values'
+import { isConstantToken, isToken, lengthSource, linkLength, numberIn, sourceOf } from './values'
 
 /**
  * Corners: the shape the layer is drawn in, as Figma's corner radius sets it.
@@ -44,26 +44,30 @@ interface Source {
 /** The call a shape is: `RoundedRectangle(…)` in `RoundedRectangle(…).inset(by: 2)`, which a change rewrites. */
 const shapeCall = (expr: Expr): Expr => expr.kind === 'call' ? viewCallChain(expr)!.base : expr
 
-/** A radius as written: 0 or more, or a token (a type's member, `.radius12`, a constant); undefined for one read off an instance. */
-const radiusOf = (written: string): Length | undefined => numberIn(written, false) ?? (isToken(written) && !/^(?:\.|[a-z])\w*\./.test(written) ? { token: written } : undefined)
+/**
+ * A radius as written: 0 or more, or a token (a type's member, `.radius12`, a constant) with
+ * what it is declared as where the panel can say (Wave 3b); undefined for one read off an
+ * instance. `at` is the shape or modifier it is written in, where its names are read.
+ */
+const radiusOf = (written: string, ctx: LayerContext, at: SourceSpan): Length | undefined => numberIn(written, false) ?? (isConstantToken(written) ? linkLength(written, ctx, at) : undefined)
 
 /** A shape as the panel shows it, or why it cannot. */
-function valueOf(corners: Corners): CornersValue | string {
-  const style = corners.style?.replace(/\s/g, '').replace(/^RoundedCornerStyle/, '')
-  if (style !== undefined && style !== '.continuous' && style !== '.circular') return COMPUTED
+function valueOf(corners: Corners, ctx: LayerContext, at: SourceSpan): CornersValue | string {
+  const style = cornerStyle(corners.style)
+  if (style !== '.continuous' && style !== '.circular') return COMPUTED
   const continuous = style !== '.circular'
   if (corners.kind === 'rectangle' || corners.kind === 'circle') return { shape: corners.kind === 'circle' ? 'circle' : 'rect' }
   if (corners.kind === 'ellipse') return 'An ellipse has no corners. Change its shape in Code.'
   if (corners.kind === 'capsule') return { shape: 'capsule', continuous }
   if (corners.kind === 'rounded') {
-    const radius = radiusOf(corners.radius!)
+    const radius = radiusOf(corners.radius!, ctx, at)
     return radius === undefined ? COMPUTED : { shape: 'rounded', radius, continuous }
   }
-  const radii = Object.fromEntries(CORNERS.map(([label, corner]) => { const written = corners.radii!.find(([at]) => at === label)?.[1]; return [corner, written === undefined ? 0 : radiusOf(written)] }))
+  const radii = Object.fromEntries(CORNERS.map(([label, corner]) => { const written = corners.radii!.find(([at]) => at === label)?.[1]; return [corner, written === undefined ? 0 : radiusOf(written, ctx, at)] }))
   return Object.values(radii).some(radius => radius === undefined) ? COMPUTED : { shape: 'uneven', radii: radii as CornersValue['radii'], continuous }
 }
 
-const shapeValue = (expr: Expr | undefined, ctx: LayerContext) => { const corners = expr && shapeCorners(expr, ctx.text); return corners && valueOf(corners) }
+const shapeValue = (expr: Expr | undefined, ctx: LayerContext) => { const corners = expr && shapeCorners(expr, ctx.text); return corners && valueOf(corners, ctx, expr.span) }
 
 function sourcesOf(slots: ChainSlots, ctx: LayerContext): Source[] {
   const sources: Source[] = isShapeView(slots) ? [{ index: -1, kind: 'shape', at: slots.base, value: shapeValue(slots.base, ctx) ?? UNKNOWN }] : []
@@ -72,7 +76,7 @@ function sourcesOf(slots: ChainSlots, ctx: LayerContext): Source[] {
     const only = call.args.length === 1 && call.args[0]!.label === null && !call.trailingClosure ? call.args[0]!.value : undefined
     const shape = call.args.find(arg => arg.label === 'in')?.value
     if (name === 'clipShape') sources.push({ index, kind: 'argument', ...only ? { at: only } : {}, value: shapeValue(only, ctx) ?? UNKNOWN })
-    else if (name === 'cornerRadius') sources.push({ index, kind: 'cornerRadius', value: only ? valueOf({ kind: 'rounded', radius: sourceOf(ctx, only) }) : UNKNOWN })
+    else if (name === 'cornerRadius') sources.push({ index, kind: 'cornerRadius', value: only ? valueOf({ kind: 'rounded', radius: sourceOf(ctx, only) }, ctx, only.span) : UNKNOWN })
     else if (name === 'buttonBorderShape') sources.push({ index, kind: 'argument', value: BUTTON })
     else if (shape && (name === 'background' || name === 'glassEffect')) sources.push({ index, kind: 'argument', at: shape, value: shapeValue(shape, ctx) ?? UNKNOWN })
     else if (name === 'glassEffect') sources.push({ index, kind: 'glass', value: { shape: 'capsule', continuous: true } })
@@ -119,7 +123,7 @@ export function readCorners(slots: ChainSlots, ctx: LayerContext): LayerValue<Co
 /** The shape a change asks for, checked, with four equal corners written as one radius. */
 function normalised(next: CornersValue): CornersValue {
   const check = (length: Length | undefined): Length => {
-    const fine = typeof length === 'number' ? Number.isFinite(length) && length >= 0 : !!length && isToken(length.token)
+    const fine = typeof length === 'number' ? Number.isFinite(length) && length >= 0 : !!length && !isConditional(length) && isToken(length.token)
     if (!fine) throw new Error('A corner radius is a number of points, 0 or more.')
     return length!
   }

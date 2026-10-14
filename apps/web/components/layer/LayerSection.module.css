@@ -10,13 +10,15 @@
 
 /* Two fields side by side, and a field with a button beside it. */
 .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; min-width: 0; }
+/* A value a condition chooses takes the whole row, so each case has room for its number. */
+.pair > [role='group'] { grid-column: 1 / -1; }
 .inset { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .inset > :first-child { flex: 1; }
 /* Shown in place of the one field while each side's or corner's field is out. */
 .eachNote { font-size: var(--text-footnote); line-height: var(--text-footnote--line-height); color: var(--color-xc-text-3); }
 
-/* A linked token, as a chip over its field. */
-.token { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; border-radius: var(--radius-sm); background: var(--color-xc-select); color: var(--color-xc-accent); font-family: var(--font-mono); font-size: var(--text-caption); line-height: 18px; }
+/* The two values a condition chooses between, each a field of its own, one above the other. */
+.branches { display: grid; gap: 4px; min-width: 0; }
 
 /* A small icon button, quiet until pointed at. */
 .iconButton { display: grid; place-items: center; flex-shrink: 0; width: var(--control-height-sm); height: var(--control-height-sm); border-radius: var(--radius-md); color: var(--color-xc-text-2); transition: background-color var(--duration-fast), color var(--duration-fast); }

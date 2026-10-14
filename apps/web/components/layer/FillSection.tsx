@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic'
 import type { ColorValue, FillValue } from '@studio/shared'
 import { ColorField } from '../controls/ColorField'
 import { cardColor, fillOfKind } from '../../lib/colorValue'
-import { AddRemove, Note, Section } from './parts'
+import { AddRemove, ColorCases, Note, Section } from './parts'
 import { useLayerWrite, type SectionProps } from './section'
 import shared from './LayerSection.module.css'
 import styles from './FillSection.module.css'
@@ -62,7 +62,10 @@ export function FillSection({ node, layer, set, busy, tokens, command }: Section
         </label>
         {reasons.map(reason => <Note key={reason}>{reason}</Note>)}
       </div>
-      {value.kind === 'color' && <ColorField label="Fill" value={value.color} tokens={tokens} disabled={!editable} onChange={color => write({ kind: 'color', color })} />}
+      {value.kind === 'color' && (value.when
+        ? <ColorCases label="Fill" value={{ condition: value.when.condition, then: value.color, otherwise: value.when.otherwise }} tokens={tokens} disabled={!editable}
+            onChange={next => write({ kind: 'color', color: next.then, when: { condition: next.condition, otherwise: next.otherwise } })} />
+        : <ColorField label="Fill" value={value.color} tokens={tokens} disabled={!editable} onChange={color => write({ kind: 'color', color })} />)}
       {value.kind === 'gradient' && <GradientEditor fill={value} tokens={tokens} disabled={!editable} onChange={write} />}
       {value.kind === 'material' && <label className={shared.row}><span>Thickness</span>
         <select aria-label="Material thickness" value={value.thickness} disabled={!editable} onChange={event => void write({ kind: 'material', thickness: event.target.value as typeof value.thickness })}>

@@ -1,10 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import type { CornersValue } from '@studio/shared'
-import { NumberField } from '../controls/NumberField'
+import type { CornersValue, Length } from '@studio/shared'
 import { Icon } from '../ui/Icon'
-import { chip, IconButton, Note, numberOf, Section, tokenOf } from './parts'
+import { IconButton, LengthField, Note, Section, tokenLookup } from './parts'
 import { useLayerWrite, type SectionProps } from './section'
 import styles from './LayerSection.module.css'
 
@@ -25,8 +24,10 @@ const Corner = ({ turn = 0 }: { turn?: number }) => <span style={{ display: 'blo
 /** Views that paint themselves, which corners round even with no fill of their own. */
 const PAINTS_ITSELF: ReadonlySet<string> = new Set(['Image', 'AsyncImage', 'Color', 'LinearGradient', 'RadialGradient', 'AngularGradient', 'Map', 'VideoPlayer'])
 
-export function CornersSection({ node, layer, set, busy }: SectionProps) {
+export function CornersSection(props: SectionProps) {
+  const { node, layer, set, busy } = props
   const corners = layer.corners
+  const lookup = tokenLookup(props)
   const { write, error } = useLayerWrite((next: CornersValue) => ({ section: 'corners', corners: next }), { set, busy })
   const [open, setOpen] = useState(corners?.value.shape === 'uneven')
   if (!corners) return null
@@ -39,7 +40,7 @@ export function CornersSection({ node, layer, set, busy }: SectionProps) {
   const smooth = value.continuous !== false
   const radius = value.shape === 'uneven' ? undefined : value.radius ?? 0
   const radii = value.radii ?? { topLeading: radius, topTrailing: radius, bottomTrailing: radius, bottomLeading: radius } as NonNullable<CornersValue['radii']>
-  const corner = (at: CornerName, next: number) => write({ shape: 'uneven', radii: { ...radii, [at]: next }, continuous: smooth })
+  const corner = (at: CornerName, next: Length) => write({ shape: 'uneven', radii: { ...radii, [at]: next }, continuous: smooth })
   const square = value.shape !== 'capsule' && value.shape !== 'circle'
   return <Section title="Corners" testId="layer-corners" error={error}>
     <label className={styles.row}><span>Shape</span>
@@ -51,15 +52,15 @@ export function CornersSection({ node, layer, set, busy }: SectionProps) {
     {square && <div className={styles.row}><span>Radius</span>
       <div className={styles.inset}>
         {open ? <span className={styles.eachNote}>Each corner</span>
-          : <NumberField label="Corner radius" caption={<Corner />} unit="pt" min={0} disabled={!editable} value={numberOf(radius)}
-              placeholder={radius === undefined ? 'Mixed' : tokenOf(radius)} overlay={chip(tokenOf(radius))} onCommit={next => write({ shape: 'rounded', radius: next, continuous: smooth })} />}
+          : <LengthField label="Corner radius" caption={<Corner />} unit="pt" min={0} disabled={!editable} value={radius} lookup={lookup}
+              placeholder={radius === undefined ? 'Mixed' : undefined} onCommit={next => write({ shape: 'rounded', radius: next, continuous: smooth })} />}
         <IconButton icon="corners" label="Corner radius on each corner" expanded={open} title={open ? 'One radius for every corner' : 'A radius for each corner'}
           disabled={!editable && !open} onClick={() => setOpen(current => !current)} />
       </div>
     </div>}
     {square && open && <div className={styles.row}><span aria-hidden="true" />
-      <div className={styles.pair}>{CORNERS.map(([at, name, turn]) => <NumberField key={at} label={`Corner ${name}`} caption={<Corner turn={turn} />} min={0} disabled={!editable}
-        value={numberOf(radii[at])} placeholder={tokenOf(radii[at])} overlay={chip(tokenOf(radii[at]))} onCommit={next => corner(at, next)} />)}</div>
+      <div className={styles.pair}>{CORNERS.map(([at, name, turn]) => <LengthField key={at} label={`Corner ${name}`} caption={<Corner turn={turn} />} min={0} disabled={!editable}
+        value={radii[at]} lookup={lookup} onCommit={next => corner(at, next)} />)}</div>
     </div>}
     {value.shape !== 'rect' && value.shape !== 'circle' && <label className={styles.check}>
       <input type="checkbox" checked={smooth} disabled={!editable} onChange={event => void write({ ...value, continuous: event.target.checked })} />Smooth corners
