@@ -77,9 +77,62 @@ describe('reading a shape’s own stroke', () => {
   })
 })
 
+describe('a stroke with no colour written, drawn in the foreground style (Wave 3b)', () => {
+  const foreground = (width: StrokeValue['width'], position: StrokeValue['position']): StrokeValue => ({ color: null, width, position })
+
+  it.each([
+    ['a border with nothing in its stroke', 'Text', `${CARD}\n            .overlay(RoundedRectangle(cornerRadius: 12).stroke())`, foreground(1, 'center')],
+    ['a border with only its width', 'Text', `${CARD}${border('RoundedRectangle(cornerRadius: 12)', '.strokeBorder(lineWidth: 2)')}`, foreground(2, 'inside')],
+    ['a shape’s own stroke', 'Circle', 'Circle().stroke(lineWidth: 2)', foreground(2, 'center')],
+    ['a shape’s own stroke coloured by a style after it', 'Circle', 'Circle().stroke(lineWidth: 2).foregroundStyle(.red)', foreground(2, 'center')],
+  ])('reads %s, its colour the foreground', (_, name, body, stroke) => {
+    expect(strokeOf(body, name)).toMatchObject({ value: stroke, state: 'literal' })
+  })
+
+  it('keeps the colour left out while the width or position changes, and writes one chosen', () => {
+    const body = `${CARD}\n            .overlay(RoundedRectangle(cornerRadius: 12).stroke())`
+    expect(written(body, foreground(3, 'center'))).toBe(`        ${CARD}\n            .overlay(RoundedRectangle(cornerRadius: 12).stroke(lineWidth: 3))`)
+    expect(written(body, foreground(1, 'inside'))).toBe(`        ${CARD}\n            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(lineWidth: 1))`)
+    expect(written(body, line(1, 'center', { name: 'red' }))).toBe(`        ${CARD}\n            .overlay(RoundedRectangle(cornerRadius: 12).stroke(.red, lineWidth: 1))`)
+    expect(written('Circle().stroke(lineWidth: 2)', foreground(2, 'center', ), 'Circle')).toBe('        Circle().stroke(lineWidth: 2)')
+    expect(written('Circle().stroke(lineWidth: 2)', { ...foreground(2, 'center'), dash: [4] }, 'Circle')).toBe('        Circle().stroke(style: StrokeStyle(lineWidth: 2, dash: [4]))')
+  })
+
+  it.skipIf(!XCODE)('builds in Xcode 27, each form it writes with no colour', () => {
+    const body = `${CARD}\n            .overlay(RoundedRectangle(cornerRadius: 12).stroke())`
+    const sources = [
+      text(setLayer(files(body), 'Text', [{ section: 'stroke', stroke: foreground(3, 'center') }])),
+      text(setLayer(files(body), 'Text', [{ section: 'stroke', stroke: foreground(1, 'inside') }])),
+      text(setLayer(files(body), 'Text', [{ section: 'stroke', stroke: foreground(2, 'outside') }])),
+      text(setLayer(files(body), 'Text', [{ section: 'stroke', stroke: { ...foreground(1, 'inside'), dash: [4, 2] } }])),
+      text(setLayer(files('Circle().stroke(lineWidth: 2)'), 'Circle', [{ section: 'stroke', stroke: { ...foreground(2, 'center'), dash: [4] } }])),
+      text(setLayer(files('Capsule().strokeBorder(lineWidth: 2)'), 'Capsule', [{ section: 'stroke', stroke: foreground(3, 'inside') }])),
+    ]
+    typecheckInXcode(sources)
+    expect(sources).toHaveLength(6)
+  }, 600_000)
+
+  it('shows one around a shape that isn’t the view’s, rather than no stroke', () => {
+    const stroke = strokeOf('Text("A").padding(8).overlay(RoundedRectangle(cornerRadius: 8).stroke())')
+    expect(stroke).toMatchObject({ state: 'code', value: foreground(1, 'center') })
+    expect(stroke.disabledReason).toMatch(/isn’t this view’s shape/)
+  })
+})
+
+describe('a border overlay the panel can’t read is still the view’s stroke (Wave 3b)', () => {
+  it.each([
+    ['a width a condition chooses', `${CARD}\n            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray, lineWidth: isOn ? 2 : 1))`],
+    ['a width worked out in Swift', `${CARD}\n            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.gray, lineWidth: Layout.hairline * 2))`],
+  ])('shows %s as Code, with why, and claims it', (_, body) => {
+    const layer = layerOf(files(body), 'Text'), stroke = layer.stroke!
+    expect(stroke.state).toBe('code')
+    expect(stroke.disabledReason).toMatch(/Change it in Code/)
+    expect(layer.claimed[stroke.from![0]!]).toBe('stroke')
+  })
+})
+
 describe('what the Stroke section leaves to Code', () => {
   it.each([
-    ['a stroke coloured by the foreground', 'Circle', 'Circle().stroke(lineWidth: 2).foregroundStyle(.red)', /foreground/],
     ['a colour worked out in Swift', 'Circle', 'Circle().stroke(isOn ? Color.red : Color.blue, lineWidth: 2)', /worked out in Swift/],
     ['a stroke style the panel does not show', 'Circle', 'Circle().stroke(.red, style: StrokeStyle(lineWidth: 2, lineCap: .round))', /can’t show/],
     ['a comment in the stroke', 'Circle', 'Circle().stroke(/* brand */ .red, lineWidth: 2)', /comment/],

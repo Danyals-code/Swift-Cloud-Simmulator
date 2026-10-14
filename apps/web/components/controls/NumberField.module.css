@@ -24,4 +24,5 @@
 .unit { flex-shrink: 0; padding-right: 8px; font-size: var(--text-caption); color: var(--color-xc-text-3); pointer-events: none; }
 /* A linked token over the empty field, until the field is typed in. */
 .overlay { position: absolute; inset: 0 0 0 24px; display: flex; align-items: center; min-width: 0; padding-right: 6px; pointer-events: none; }
-.field:focus-within .overlay { display: none; }
+/* Typing hides it; a chip that opens its token keeps it while its own button has focus. */
+.field input:focus ~ .overlay { display: none; }

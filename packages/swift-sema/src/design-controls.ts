@@ -1,9 +1,12 @@
-import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, authoringCapability, deploymentVersion, readTextParts, stackLayoutOf, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
+import { DEFAULT_DEPLOYMENT_TARGET, LAYOUT_WORDS, TEXT_STYLES, authoringCapability, deploymentVersion, helperPlaces, readTextParts, stackLayoutOf, writeTextParts, type AuthoringNode, type DesignControl, type SourceSpan } from '@studio/shared'
 import { advancedControls } from './design-advanced-controls'
 import { authoringViewMinimum } from './authoring-view'
 import { Lexer, type CallExpr, type Expr, type Stmt, type StringLiteralExpr } from '@studio/swift-syntax'
 import { BORDER_POSITIONS, borderOf, cornersOf, rewriteBorder, type BorderPosition } from './authoring-border'
 import { isAppleCall } from './builtins'
+import type { LayerProject } from './layer/context'
+import { LENGTH_HOSTS, constantNumber, declarationOf, literalNumber, resolveConstant } from './layer/tokens'
+import { isConstantToken } from './layer/values'
 
 interface Patch { readonly start: number; readonly end: number; readonly text: string }
 export interface ControlRecipe {
@@ -290,7 +293,7 @@ function autoSpacing(recipe: ControlRecipe, name: string, base: CallExpr, expr: 
     adds: `Spacer(); .frame(${max}: .infinity) ${value === 'auto' ? '' : `(spacing: ${value},)`}`,
     removes: `Spacer(); ${spacers.map(spacer => text.slice(spacer.span.start, endOf(spacer))).join(' ')} ${written ? text.slice(written.value.span.start, written.value.span.end) : ''}`,
   } : undefined
-  return { control: { ...recipe.control, value: auto ? 'auto' : recipe.control.value, options: ['auto'] }, patch, problem, reshapes }
+  return { control: { ...recipe.control, value: auto ? 'auto' : recipe.control.value, options: ['auto', ...recipe.control.options ?? []] }, patch, problem, reshapes }
 }
 
 /**
@@ -314,8 +317,12 @@ export function spreadRoomProblem(nodes: readonly AuthoringNode[], node: Authori
   return null
 }
 
-/** Recipes are reconstructed from syntax on every request; the UI never supplies offsets. */
-export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET): ControlRecipe[] {
+/**
+ * Recipes are reconstructed from syntax on every request; the UI never supplies offsets.
+ * `project` is the project the view is read in, as its layer is, where the constants a
+ * control reads are declared.
+ */
+export function designControlRecipes(node: AuthoringNode, expr: Expr, text: string, project: LayerProject, deploymentTarget = DEFAULT_DEPLOYMENT_TARGET): ControlRecipe[] {
   if (!['view', 'collection', 'component'].includes(node.kind) && node.undrawn !== 'unsupported' || node.name === 'WindowGroup') return []
   const chain = viewCallChain(expr)
   if (!chain || node.properties.some(p => p.name === 'Source')) return []
@@ -390,9 +397,34 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
   }
   /** A stack's Spacing, with Figma's Auto beside the number (D4). */
   function spacing(): void {
-    argument('spacing', 'Spacing', 'spacing', 'pt', '', undefined, 0)
+    const written = base.args.find(a => a.label === 'spacing')?.value
+    const linked = written && constantSpacing(written)
+    if (linked) add('spacing', 'Spacing', 'pt', linked.value, v => ({ ...written.span, text: v === linked.token ? v : String(Number(v)) }), [linked.token], 0, undefined, linked.description, written.span)
+    else argument('spacing', 'Spacing', 'spacing', 'pt', '', undefined, 0)
     const recipe = recipes.at(-1)
     if (recipe?.control.id === 'spacing') recipes[recipes.length - 1] = autoSpacing(recipe, node.name, base, expr, modifiers, text)
+    if (!linked) return
+    // Its value at this stack alone (Detach), and the constant where it is declared, when that is in this file (Wave 3b).
+    add('spacing:detach', `Detach ${linked.token}`, 'toggle', 'false', v => ({ ...written.span, text: v === 'true' ? linked.value : raw(written.span) }), undefined, undefined, undefined, `Writes ${linked.value} in place of ${linked.token}, at this stack only.`)
+    add('spacing:declaration', linked.token, 'pt', linked.value, linked.declaration ?? (() => ({ ...written.span, text: raw(written.span) })), undefined, 0, undefined, linked.description)
+    if (!linked.declaration) recipes[recipes.length - 1] = { ...recipes.at(-1)!, control: { ...recipes.at(-1)!.control, disabledReason: `${linked.token} is declared in another file, or with a comment. Change it there, in Code.` } }
+  }
+  /**
+   * A stack's spacing read through a constant (Wave 3b), `VStack(spacing: rowSpacing)` or
+   * `HStack(spacing: Self.gap)`: its value, and a writer for its declaration when it is in
+   * this file, whose text a control's patch is made in.
+   */
+  function constantSpacing(value: Expr): { token: string; value: string; description: string; declaration?: ControlRecipe['patch'] } | undefined {
+    const token = raw(value.span), context = project.context
+    if (!isConstantToken(token)) return undefined
+    const constant = resolveConstant(context, token, value.span, LENGTH_HOSTS)
+    const number = constant && literalNumber(constant.initializer)
+    if (number === undefined) return undefined
+    const { uses, span } = declarationOf(context, constant!)
+    // What the token's chip says of it: how many places read it.
+    const description = helperPlaces(uses)
+    const editable = span.file === node.source.file && !/\/\/|\/\*/.test(raw(span))
+    return { token, value: String(number), description, ...editable ? { declaration: v => ({ ...span, text: constantNumber(constant!, Number(v)) }) } : {} }
   }
   if (node.kind !== 'component' && constructorEditable && ['HStack', 'VStack', 'ZStack'].includes(node.name)) {
     const alignment = base.args.find(a => a.label === 'alignment')

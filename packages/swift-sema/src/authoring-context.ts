@@ -56,7 +56,8 @@ export function allDeclarations(ctx: FeatureContext): Decl[] {
 interface ContextIndex {
   structs?: ReadonlyMap<string, readonly StructDecl[]>
   topStructs?: ReadonlyMap<string, readonly StructDecl[]>
-  declared?: ReadonlyMap<unknown, number>
+  declared?: ReadonlyMap<unknown, readonly Decl[]>
+  extensions?: ReadonlyMap<string, readonly ExtensionDecl[]>
   layers?: ReadonlyMap<string, AuthoringNode>
   readonly owners: Map<string, StructDecl | undefined>
   readonly named: Map<string, StructDecl | undefined>
@@ -114,12 +115,29 @@ export function namedStruct(ctx: FeatureContext, name: string): StructDecl | und
   const index = indexOf(ctx)
   if (index.named.has(name)) return index.named.get(name)
   index.topStructs ??= grouped(ctx.ast.flatMap(f => f.declarations).filter((d): d is StructDecl => d.kind === 'structDecl'), d => d.name)
-  index.declared ??= [...grouped(allDeclarations(ctx), d => 'name' in d ? d.name as unknown : undefined)].reduce((counts, [declared, all]) => counts.set(declared, all.length), new Map<unknown, number>())
   // Nested or duplicate names require qualified resolution, outside this recipe.
   const declarations = index.topStructs.get(name) ?? []
-  const found = declarations.length === 1 && index.declared.get(name) === 1 ? declarations[0] : undefined
+  const found = declarations.length === 1 && declarationsNamed(ctx, name).length === 1 ? declarations[0] : undefined
   index.named.set(name, found)
   return found
+}
+/** Every declaration of a name in the project, nested ones included; extensions declare none. */
+export function declarationsNamed(ctx: FeatureContext, name: string): readonly Decl[] {
+  const index = indexOf(ctx)
+  index.declared ??= grouped(allDeclarations(ctx), d => 'name' in d ? d.name as unknown : undefined)
+  return index.declared.get(name) ?? []
+}
+/** The extensions of a type, from the files' top-level declarations. */
+export function extensionsNamed(ctx: FeatureContext, name: string): readonly ExtensionDecl[] {
+  const index = indexOf(ctx)
+  index.extensions ??= grouped(ctx.ast.flatMap(file => file.declarations).filter((d): d is ExtensionDecl => d.kind === 'extensionDecl'), d => d.name)
+  return index.extensions.get(name) ?? []
+}
+/** The cases of the one enum a name declares, when none carries a payload: values a control or a state can pick. */
+export function enumCases(ctx: FeatureContext, type: string): readonly string[] | undefined {
+  const matches = declarationsNamed(ctx, type)
+  const decl = matches.length === 1 ? matches[0] : undefined
+  return decl?.kind === 'enumDecl' && !decl.generics.length && decl.cases.length <= 32 && decl.cases.every(c => !c.associated.length) ? decl.cases.map(c => c.name) : undefined
 }
 /** The layer with an id, the first if more than one has it, as `find` gives it. */
 export function layerById(ctx: FeatureContext, id: string | undefined): AuthoringNode | undefined {

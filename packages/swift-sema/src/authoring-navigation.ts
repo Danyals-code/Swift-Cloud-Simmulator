@@ -1,8 +1,7 @@
 import type { AuthoringNode, NavigationDestination, NavigationSettings, SourceSpan } from '@studio/shared'
 import { forEachChild, Parser, type CallExpr, type ClosureExpr, type Expr, type Node, type StructDecl, type VarDecl } from '@studio/swift-syntax'
-import { callOf, expressionOf, hasComments, insertMember, lineIndent, modifierIndent, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
+import { callOf, enumCases, expressionOf, hasComments, insertMember, lineIndent, modifierIndent, namedStruct, ownerOf, patch, raw, type FeatureContext, type SourcePatch } from './authoring-context'
 import { viewCallChain } from './design-controls'
-import { enumCases } from './authoring-components'
 import { appRoot } from './authoring-navigation-app'
 
 /**

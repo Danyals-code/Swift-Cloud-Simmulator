@@ -1,6 +1,7 @@
 import { Parser, afterOffMarkers, forEachChild, hasHumanComment, offMarker, offMarkerText, offMarkersIn, type CallExpr, type Expr, type Node } from '@studio/swift-syntax'
 import { CORNER_RADIUS_LABELS } from '@studio/shared'
 import { viewCallChain } from './design-controls'
+import { numberIn } from './layer/values'
 
 /**
  * A view's border (D8): an outline over the view that follows its corners, drawn
@@ -36,17 +37,17 @@ export interface Corners {
 }
 
 export interface Border {
-  /** The colour as written: `Color.gray`, `.red`, a token. */
-  readonly color: string
+  /** The colour as written: `Color.gray`, `.red`, a token; null for none, which strokes in the foreground style. */
+  readonly color: string | null
   readonly width: number
   readonly position: BorderPosition
   /** Lengths of dash and gap, written in a `StrokeStyle`. */
   readonly dash?: readonly number[]
 }
 
-/** A border found in a view's modifiers: what it looks like, and where its colour is written. */
+/** A border found in a view's modifiers: what it looks like, and where its colour is written, when one is. */
 export interface FoundBorder extends Border {
-  readonly colorExpr: Expr
+  readonly colorExpr: Expr | null
   /** Written as `.overlay(shape)` rather than `.overlay { shape }`, which a rewrite keeps. */
   readonly argument: boolean
 }
@@ -121,23 +122,23 @@ function borderShape(corners: Corners, position: BorderPosition, width: number):
  * concentric; a square corner stays square.
  */
 function grown(radius: string, width: number): string {
-  const value = Number(radius)
-  return /^\d+(?:\.\d+)?$/.test(radius) && Number.isFinite(value) ? String(value ? value + width : 0) : `${radius} + ${width}`
+  const value = numberIn(radius, false)
+  return value !== undefined ? String(value ? value + width : 0) : `${radius} + ${width}`
 }
 
 /**
  * The stroke that draws a border, or a shape's own: `.strokeBorder` inside the edge,
  * `.stroke` on it, with a dash in a `StrokeStyle`. `width` is written as given.
  */
-export function strokeCall(color: string, width: number | string, position: BorderPosition, dash?: readonly number[]): string {
+export function strokeCall(color: string | null, width: number | string, position: BorderPosition, dash?: readonly number[]): string {
   const line = dash?.length ? `style: StrokeStyle(lineWidth: ${width}, dash: [${dash.join(', ')}])` : `lineWidth: ${width}`
-  return `.${position === 'center' ? 'stroke' : 'strokeBorder'}(${color}, ${line})`
+  return `.${position === 'center' ? 'stroke' : 'strokeBorder'}(${color === null ? line : `${color}, ${line}`})`
 }
 
 /** `StrokeStyle(lineWidth: 2, dash: [4, 2])` with literal numbers, as its width and dash; undefined for anything else. */
 export function strokeStyleOf(value: Expr, text: string): { width: number; dash?: number[] } | undefined {
   if (value.kind !== 'call' || value.trailingClosure || source(value.callee, text) !== 'StrokeStyle' || !['', 'lineWidth', 'dash', 'lineWidth,dash'].includes(value.args.map(arg => arg.label).join())) return undefined
-  const number = (expr: Expr) => /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(source(expr, text)) ? Number(source(expr, text)) : NaN
+  const number = (expr: Expr) => numberIn(source(expr, text), false) ?? NaN
   const width = value.args.find(arg => arg.label === 'lineWidth'), dash = value.args.find(arg => arg.label === 'dash')?.value
   const lengths = !dash ? [] : dash.kind === 'arrayLiteral' ? dash.elements.map(number) : [NaN]
   const lineWidth = width ? number(width.value) : 1
@@ -177,30 +178,123 @@ function lineIndentAt(text: string, offset: number): string {
   return /^[ \t]*/.exec(text.slice(text.lastIndexOf('\n', offset - 1) + 1, offset))![0]
 }
 
-/** The border a modifier draws, when it is an overlay drawn the way a border is, with the view's own corners. */
-export function borderOf(modifier: CallExpr, corners: Corners, text: string): FoundBorder | undefined {
-  // A person's comment in it would be lost to a rewrite, so it stays an overlay of its own.
+/**
+ * An overlay that strokes one shape and draws nothing else, as a border is drawn: the shape,
+ * its stroke, and the padding that pulls one outside the edge. A person's comment in it
+ * would be lost to a rewrite, so an overlay with one is not read as one.
+ */
+interface StrokedOverlay {
+  readonly shape: CallExpr
+  readonly stroke: CallExpr
+  readonly padding?: CallExpr
+  readonly argument: boolean
+}
+
+export function strokedOverlay(modifier: CallExpr, text: string): StrokedOverlay | undefined {
   if (modifierName(modifier) !== 'overlay' || hasHumanComment(text.slice(dotOf(modifier, text), modifier.span.end), 'border')) return undefined
   const closure = modifier.trailingClosure
   const content = closure && !modifier.args.length
     ? !closure.params.length && closure.body.statements.length === 1 && closure.body.statements[0]!.kind === 'exprStmt' ? closure.body.statements[0]!.expression : undefined
     : !closure && modifier.args.length === 1 && modifier.args[0]!.label === null ? modifier.args[0]!.value : undefined
   const chain = content && viewCallChain(content)
-  if (!chain) return undefined
-  const [stroke, padding, ...rest] = chain.modifiers
-  if (!stroke || rest.length || !['stroke', 'strokeBorder'].includes(modifierName(stroke))) return undefined
-  const color = stroke.args[0]
+  const [stroke, padding, ...rest] = chain?.modifiers ?? []
+  if (!stroke || rest.length || !['stroke', 'strokeBorder'].includes(modifierName(stroke)) || padding && modifierName(padding) !== 'padding') return undefined
+  return { shape: chain!.base, stroke, ...padding ? { padding } : {}, argument: !closure }
+}
+
+/**
+ * What a stroked overlay looks like, when the panel can say: its colour, or none for the
+ * foreground style; a width that is a number; and where it sits, outside the edge only when
+ * an inside stroke is pulled out by its own width.
+ */
+function strokeLook(overlay: StrokedOverlay, text: string): FoundBorder | undefined {
+  const { stroke, padding } = overlay
+  const first = stroke.args[0]
+  const colorExpr = first?.label === null ? first.value : null
   const lineWidth = stroke.args.find(arg => arg.label === 'lineWidth'), style = stroke.args.find(arg => arg.label === 'style')
   const dashed = style && strokeStyleOf(style.value, text)
-  if (!color || color.label !== null || stroke.trailingClosure || stroke.args.length !== (lineWidth || style ? 2 : 1) || style && !dashed) return undefined
-  const width = dashed ? dashed.width : lineWidth ? Number(source(lineWidth.value, text)) : 1
-  if (!Number.isFinite(width) || width < 0) return undefined
-  const outside = !!padding && modifierName(padding) === 'padding' && padding.args.length === 1 && padding.args[0]!.label === null && Number(source(padding.args[0]!.value, text)) === -width
+  if (stroke.trailingClosure || stroke.args.length !== (colorExpr ? 1 : 0) + (lineWidth || style ? 1 : 0) || lineWidth && style || style && !dashed) return undefined
+  const width = dashed ? dashed.width : lineWidth ? numberIn(source(lineWidth.value, text), false) : 1
+  if (width === undefined) return undefined
+  const outside = !!padding && padding.args.length === 1 && padding.args[0]!.label === null && !padding.trailingClosure && numberIn(source(padding.args[0]!.value, text)) === -width
   if (padding && !outside || outside && modifierName(stroke) !== 'strokeBorder') return undefined
   const position: BorderPosition = outside ? 'outside' : modifierName(stroke) === 'stroke' ? 'center' : 'inside'
+  return { color: colorExpr && source(colorExpr, text), colorExpr, width, position, ...dashed?.dash ? { dash: dashed.dash } : {}, argument: overlay.argument }
+}
+
+/** Whether a stroked overlay's shape is written exactly as a border of `corners` is, `RoundedRectangle(cornerRadius: 12)` for 12. */
+const drawnAs = (overlay: StrokedOverlay, look: Border, corners: Corners, text: string) => source(overlay.shape, text).replace(/\s+/g, '') === borderShape(corners, look.position, look.width).replace(/\s+/g, '')
+
+/** The border a modifier draws, when it is an overlay drawn the way a border is, with the view's own corners and a colour of its own. */
+export function borderOf(modifier: CallExpr, corners: Corners, text: string): (FoundBorder & { readonly colorExpr: Expr; readonly color: string }) | undefined {
+  const overlay = strokedOverlay(modifier, text), look = overlay && strokeLook(overlay, text)
   // Only the view's own corners: a stroke of some other shape is an overlay of its own.
-  if (source(chain.base, text).replace(/\s+/g, '') !== borderShape(corners, position, width).replace(/\s+/g, '')) return undefined
-  return { color: source(color.value, text), colorExpr: color.value, width, position, ...dashed?.dash ? { dash: dashed.dash } : {}, argument: !closure }
+  return look?.colorExpr && drawnAs(overlay!, look, corners, text) ? look as FoundBorder & { colorExpr: Expr; color: string } : undefined
+}
+
+/** A corner style as it draws: none written is SwiftUI's own, continuous in the Xcode 27 SDK. */
+export const cornerStyle = (style: string | undefined) => (style ?? '.continuous').replace(/\s/g, '').replace(/^RoundedCornerStyle/, '')
+
+/** Two radii as written that are the same: the same number, or the same token. */
+function sameRadius(a = '0', b = '0'): boolean {
+  const number = numberIn(a.trim(), false)
+  return a.replace(/\s/g, '') === b.replace(/\s/g, '') || number !== undefined && number === numberIn(b.trim(), false)
+}
+
+/** Whether two shapes are the same however each is written: a radius of `12` and `12.0`, or a style left to its default. */
+export function sameShape(a: Corners, b: Corners): boolean {
+  if (a.kind !== b.kind || a.kind !== 'rectangle' && a.kind !== 'circle' && a.kind !== 'ellipse' && cornerStyle(a.style) !== cornerStyle(b.style)) return false
+  if (a.kind === 'rounded') return sameRadius(a.radius, b.radius)
+  if (a.kind !== 'uneven') return true
+  const labels = new Set([...a.radii!, ...b.radii!].map(([label]) => label))
+  return [...labels].every(label => sameRadius(a.radii!.find(([at]) => at === label)?.[1], b.radii!.find(([at]) => at === label)?.[1]))
+}
+
+/** The shape an outside border's overlay strokes, as much smaller as its line is wide: the view's own corners. */
+function inner(corners: Corners, width: number): Corners | undefined {
+  const shrink = (radius: string) => {
+    const value = numberIn(radius.trim(), false)
+    return value !== undefined ? String(value ? value - width : 0) : radius.endsWith(` + ${width}`) ? radius.slice(0, -` + ${width}`.length) : undefined
+  }
+  if (corners.kind === 'rounded') { const radius = shrink(corners.radius!); return radius === undefined ? undefined : { ...corners, radius } }
+  if (corners.kind !== 'uneven') return corners
+  const radii = corners.radii!.map(([label, radius]) => [label, shrink(radius)] as const)
+  return radii.every(([, radius]) => radius !== undefined) ? { ...corners, radii: radii as [string, string][] } : undefined
+}
+
+/** A border written in its own spelling of a shape, which its rewrites keep. */
+export interface OwnBorder {
+  readonly found: FoundBorder
+  /** The shape it outlines as written: the view's own size, for one outside the edge, `12` where `13` is written for a line 1 wide. */
+  readonly shape: Corners
+  /** Where that shape is written, which a change of the view's corners rewrites. */
+  readonly at: CallExpr
+  /** Whether that shape is the view's, however each is written. */
+  readonly agrees: boolean
+}
+
+/**
+ * An overlay that strokes a shape as a border does, whose shape is written in its own way,
+ * or whose stroke has no colour of its own (Wave 3b): `.overlay(RoundedRectangle(cornerRadius:
+ * 8).stroke(.gray))` beside a `.clipShape(.rect(cornerRadius: 8))`, or the same in a closure.
+ * It is the view's border where its shape agrees with `corners`, the view's.
+ */
+export function ownBorderOf(modifier: CallExpr, corners: Corners, text: string): OwnBorder | undefined {
+  const overlay = strokedOverlay(modifier, text), found = overlay && strokeLook(overlay, text)
+  const drawn = found && shapeCorners(overlay!.shape, text)
+  const shape = drawn && (found!.position === 'outside' ? inner(drawn, found!.width) : drawn)
+  // Only a shape a rewrite writes back as it was: `RoundedRectangle(cornerRadius: 12.0)` is, `RoundedRectangle(cornerRadius: 12).inset(by: 1)` is not.
+  if (!shape || !drawnAs(overlay!, found!, shape, text)) return undefined
+  return { found: found!, shape, at: overlay!.shape, agrees: sameShape(shape, corners) }
+}
+
+/**
+ * The shape an own-spelling border outlines, for a view's new corners: the new shape, in the
+ * style the overlay wrote while it draws the same, as a border of its position and width.
+ */
+function ownShapeFor(border: OwnBorder, corners: Corners): string {
+  const style = cornerStyle(border.shape.style) === cornerStyle(corners.style) ? border.shape.style : corners.style
+  return borderShape({ ...corners, style }, border.found.position, border.found.width)
 }
 
 /**
@@ -222,29 +316,42 @@ function dotOf(modifier: CallExpr, text: string): number {
 
 /**
  * Fits a view's borders to its corners again after an edit changed them, in the same
- * step: a border that fitted the view before and is still written the same is written
- * for the new corners, switched off or not. `viewStart` is where the view's call begins
- * before the edit, and `nextStart` after it, when a property declared above it moved it.
+ * step: a border that fitted the view before and is still written the same outlines the
+ * new corners, switched off or not. Only its shape is written again, in the style it had
+ * while it draws the same, so its stroke stays as written, however it is spelled (Wave 3b).
+ * `viewStart` is where the view's call begins before the edit, and `nextStart` after it,
+ * when a property declared above it moved it.
  */
 export function followCorners(before: string, after: string, file: string, viewStart: number, nextStart = viewStart): string {
   const old = chainAt(before, file, viewStart), next = chainAt(after, file, nextStart)
   if (!old || !next) return after
   const oldCorners = cornersOf(old, before)
+  /** A border of the old corners: an overlay that strokes their shape, however it is spelled. */
+  const fitted = (modifier: CallExpr, text: string) => !!ownBorderOf(modifier, oldCorners, text)?.agrees
+  /** A modifier's own text, from its dot, by which one is found again after the edit. */
+  const written = (modifier: CallExpr, text: string) => text.slice(dotOf(modifier, text), modifier.span.end)
   // What the view's borders were, as written: the ones on, and the ones switched off.
   const were = new Set([
-    ...old.modifiers.filter(modifier => borderOf(modifier, oldCorners, before)).map(modifier => before.slice(dotOf(modifier, before), modifier.span.end)),
-    ...switchedOff(before, old).filter(off => borderOf(off.call, oldCorners, off.text)).map(off => off.original),
+    ...old.modifiers.filter(modifier => fitted(modifier, before)).map(modifier => written(modifier, before)),
+    ...switchedOff(before, old).filter(off => fitted(off.call, off.text)).map(off => off.original),
   ])
   if (!were.size) return after
   const corners = cornersOf(next, after)
+  /** The border's shape for the new corners, in `text`, or undefined where it already outlines them. */
+  const fit = (modifier: CallExpr, text: string) => {
+    const border = ownBorderOf(modifier, oldCorners, text)
+    return border?.agrees && !ownBorderOf(modifier, corners, text)?.agrees ? { start: border.at.span.start, end: border.at.span.end, text: ownShapeFor(border, corners) } : undefined
+  }
   const patches = [
     ...next.modifiers.flatMap(modifier => {
-      const found = were.has(after.slice(dotOf(modifier, after), modifier.span.end)) && !borderOf(modifier, corners, after) ? borderOf(modifier, oldCorners, after) : undefined
-      return found ? [rewriteBorder(modifier, found, corners, after, found)] : []
+      const patch = were.has(written(modifier, after)) ? fit(modifier, after) : undefined
+      return patch ? [patch] : []
     }),
     ...switchedOff(after, next).flatMap(off => {
-      const found = were.has(off.original) && !borderOf(off.call, corners, off.text) ? borderOf(off.call, oldCorners, off.text) : undefined
-      return found ? [{ start: off.start, end: off.end, text: offMarker(borderSource(found, corners, layoutOf(found, off.original, lineIndentAt(after, off.start)))) }] : []
+      const patch = were.has(off.original) ? fit(off.call, off.text) : undefined
+      // The switched-off modifier is parsed after a line of its own, which `from` is as long as.
+      const from = off.text.length - off.original.length
+      return patch ? [{ start: off.start, end: off.end, text: offMarker(off.original.slice(0, patch.start - from) + patch.text + off.original.slice(patch.end - from)) }] : []
     }),
   ]
   return patches.sort((a, b) => b.start - a.start).reduce((text, patch) => text.slice(0, patch.start) + patch.text + text.slice(patch.end), after)

@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { AUTO_SPACING, LAYOUT_WORDS, spreadOut, textPartsOf, writeTextParts, type Alignment9, type DesignControl } from '@studio/shared'
 import { Icon, type IconName } from './ui/Icon'
+import { TokenChip } from './controls/TokenChip'
 import { COLOR_NAME_LABELS } from '../lib/colorValue'
 import styles from './AuthoringInspector.module.css'
 import own from './PropertyControl.module.css'
+import chips from './controls/TokenChip.module.css'
 
 const RANGE_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
 const OPTION_LABELS: Record<string, string> = {
@@ -75,10 +77,20 @@ function choicesFor(control: DesignControl): readonly (readonly [string, IconNam
   return set?.filter(([option]) => options.includes(option))
 }
 
+/**
+ * The controls a stack's Spacing read through a constant writes with (Wave 3b): its value
+ * at this stack alone, and the constant where it is declared. Its chip offers both.
+ */
+const TOKEN_ACTIONS = /^spacing:(?:detach|declaration)$/
+
 /** `label` names the control for assistive tech; `caption`, when given, is what the row shows instead. */
 export function PropertyControl(props: PropertyControlProps) {
+  if (TOKEN_ACTIONS.test(props.control.id)) return null
   return textPartsOf(props.control) ? <TextPartsControl {...props} /> : <ValueControl {...props} />
 }
+
+/** The constant a number control is linked to, when it is one (Wave 3b): a word it takes besides numbers and Auto. */
+const linkedToken = (control: DesignControl) => control.kind === 'number' ? control.options?.find(option => option !== AUTO_SPACING) : undefined
 
 /**
  * Words with values among them: one field, with a run of words to type in on either side
@@ -215,6 +227,13 @@ function ValueControl({ control, onChange, label = control.label, caption }: Pro
   }
   const busy = pending || !!control.disabledReason
   const choose = (value: string) => { if (value !== latest.current) { change(value); void commit() } }
+  // A Spacing read through a constant shows it as a chip with its value until a number is typed (Wave 3b).
+  const linked = linkedToken(control), chipShown = !!linked && draft === initial && !spreadOut(draft)
+  const tokenChip = linked && <span className={chips.layer}><TokenChip token={linked} disabled={busy} actions={{
+    value: Number(control.value), unit: control.unit, uses: control.description,
+    onEdit: next => onChange('spacing:declaration', String(next)),
+    onDetach: () => onChange('spacing:detach', 'true'),
+  }} /></span>
   const choices = choicesFor(control)
   const places = control.id === 'alignment' && control.options?.includes('topLeading')
   // Auto beside the number: a Spacer between each pair of views (D4).
@@ -233,7 +252,10 @@ function ValueControl({ control, onChange, label = control.label, caption }: Pro
         {control.value === '' && <option value="" disabled>Use inherited / default</option>}
         {control.options?.map(option => <option key={option} value={option}>{propertyOptionLabel(option)}</option>)}
       </select> : control.kind === 'text' && /^(content|title)(:|$)/.test(control.id) ? <textarea {...input} readOnly={busy} rows={2} aria-description="Enter to apply. Shift+Enter for a new line." onChange={event => change(event.target.value)} /> : auto ? <span className={styles.spacing}>
-        {withUnit(<input {...input} value={spreadOut(draft) ? '' : draft} readOnly={busy} type="text" inputMode="decimal" placeholder={spreadOut(draft) ? 'Auto' : 'Default'} onChange={event => change(event.target.value)} />)}
+        <span className={chips.over}>
+          {withUnit(<input {...input} value={spreadOut(draft) || chipShown ? '' : draft} readOnly={busy} type="text" inputMode="decimal" placeholder={spreadOut(draft) ? 'Auto' : linked ?? 'Default'} onChange={event => change(event.target.value)} />)}
+          {chipShown && tokenChip}
+        </span>
         <button type="button" aria-pressed={spreadOut(draft)} disabled={busy} title="Spread the views out, with a Spacer between each pair. Type a number to go back." onClick={() => choose(AUTO_SPACING)}>Auto</button>
       </span> : withUnit(<input {...input} readOnly={busy} type={/^date:(from|through)$/.test(control.id) ? "datetime-local" : "text"} inputMode={control.kind === 'number' ? 'decimal' : 'text'} placeholder={control.kind === 'number' ? 'Default' : 'Enter value'} onChange={event => change(event.target.value)} />)}
     </label>}

@@ -135,7 +135,8 @@ export const AUTHORING_CAPABILITIES: readonly AuthoringCapability[] = [
   capability('stroke', 'modifier', [[], [null], ['lineWidth'], [null, 'lineWidth'], ['style'], [null, 'style']]),
   capability('strokeBorder', 'modifier', optionalForms(['antialiased']).flatMap(f => [f, [null, ...f], ['lineWidth', ...f], [null, 'lineWidth', ...f], ['style', ...f], [null, 'style', ...f]])),
   capability('border', 'modifier', [[null], [null, 'width']]),
-  capability('shadow', 'modifier', [[null], ['radius'], ['color', 'radius'], ['radius', 'x', 'y'], ['color', 'radius', 'x', 'y']]),
+  // A shadow token, `.shadow(.card)`, and every way `shadow(color:radius:x:y:)` is written with its defaults left out (Wave 3b).
+  capability('shadow', 'modifier', [[null], ...optionalForms(['color']).flatMap(color => optionalForms(['x', 'y']).map(offset => [...color, 'radius', ...offset]))]),
   capability('blur', 'modifier', [['radius']]),
   capability('italic', 'modifier', [[]]), capability('underline', 'modifier', [[], [null], ['color'], [null, 'color']]), capability('strikethrough', 'modifier', [[], [null], ['color'], [null, 'color']]),
   capability('tracking', 'modifier', [[null]], false, '16.0'), capability('lineSpacing', 'modifier', [[null]]),

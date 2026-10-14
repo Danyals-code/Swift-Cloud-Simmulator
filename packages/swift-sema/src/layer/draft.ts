@@ -51,7 +51,7 @@ export function layerDraftSites(input: LayerDraftInput): LayerDraftSites | null 
   if (!node || text === undefined || !expr || !chain) return null
   const view = draftChain({ expr, modifiers: chain.modifiers })
   if (!node.layer) return { view }
-  const ctx = layerContext(layerProject(input.trees, input.deploymentTarget), node, input.nodes.find(n => n.id === node.parentId), text)
+  const ctx = layerContext(layerProject(input.trees, input.deploymentTarget, input.files), node, input.nodes.find(n => n.id === node.parentId), text)
   const slots = chainSlots(expr, text, ctx.names)
   if (!slots) return { view }
   const layout = stackLayoutOf(node.name), spacing = stackSpacing(node)

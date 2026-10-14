@@ -3,11 +3,11 @@ import type { Argument, CallExpr, Expr } from '@studio/swift-syntax'
 import { SLOT } from '../authoring-modifiers'
 import { MATERIALS, materialThickness } from '../design-advanced-controls'
 import { insertCalls, insertionIndex, replaceRun, runHasComment, type Patch } from './chain-edit'
-import { HIERARCHICAL, colorSource, readColor, sameColor, type ColorSlot } from './color'
+import { HIERARCHICAL, colorSource, keptColor, readColor, sameColor, type ColorSlot } from './color'
 import { SHAPE_CALLS } from '../builtins'
 import { isShapeView, runAt, type ChainSlots } from './slots'
 import { cardRefusal, commented, type LayerContext } from './context'
-import { amount, numberOf, sourceOf } from './values'
+import { amount, casesOf, keepCondition, numberOf, sourceOf } from './values'
 
 /**
  * Fill: what paints the layer, as one colour, gradient, material or Liquid Glass.
@@ -193,6 +193,12 @@ function styleOf(value: Expr, ctx: LayerContext): Read | undefined {
   if (material) return { fill: { kind: 'material', thickness: material }, token: false, colors: [], ...(value.kind === 'memberAccess' && value.base ? { material: 'member' as const } : {}) }
   const gradient = gradientOf(value, ctx)
   if (gradient !== null) return gradient
+  if (value.kind === 'ternary') {
+    // Two colours a condition chooses between (Wave 3b), each read as one is: `selected ? Color.blue : Color.gray`.
+    const { condition, then, otherwise } = casesOf(value, ctx, branch => readColor(branch, ctx))!
+    if (then.state === 'code' || otherwise.state === 'code') return undefined
+    return { fill: { kind: 'color', color: then.value, when: { condition, otherwise: otherwise.value } }, token: then.state === 'token' || otherwise.state === 'token', colors: [sourceOf(ctx, value.then), sourceOf(ctx, value.else)] }
+  }
   const color = readColor(value, ctx)
   if (color.state === 'code') return undefined
   return { fill: { kind: 'color', color: color.value }, token: color.state === 'token', colors: [sourceOf(ctx, value)] }
@@ -245,7 +251,7 @@ const samePoint = (a: UnitPoint | undefined, b: UnitPoint | undefined) => near(a
 
 /** Whether two fills paint the same, however each was spelled. */
 export function sameFill(a: FillValue, b: FillValue): boolean {
-  if (a.kind === 'color' && b.kind === 'color') return sameColor(a.color, b.color)
+  if (a.kind === 'color' && b.kind === 'color') return sameColor(a.color, b.color) && (a.when && b.when ? a.when.condition === b.when.condition && sameColor(a.when.otherwise, b.when.otherwise) : !a.when && !b.when)
   if (a.kind === 'material' && b.kind === 'material') return a.thickness === b.thickness
   if (a.kind === 'glass' && b.kind === 'glass') return a.variant === b.variant && !a.interactive === !b.interactive && (a.tint && b.tint ? sameColor(a.tint, b.tint) : !a.tint && !b.tint)
   if (a.kind !== 'gradient' || b.kind !== 'gradient') return false
@@ -292,8 +298,18 @@ function gradientSource(fill: Extract<FillValue, { kind: 'gradient' }>, ctx: Lay
   return `LinearGradient(${list}, startPoint: ${start}, endPoint: ${end})`
 }
 
+/**
+ * Two colours a condition chooses between, each as a `Color`, which a generic style can take
+ * from a condition; a case left as it was keeps its spelling (Wave 3b).
+ */
+function choiceSource(fill: Extract<FillValue, { kind: 'color' }>, ctx: LayerContext, previous: Read | undefined): string {
+  const was = previous?.fill.kind === 'color' && previous.fill.when ? previous.fill : undefined
+  return `${fill.when!.condition} ? ${keptColor(fill.color, was?.color, previous?.colors[0], 'Color', ctx)} : ${keptColor(fill.when!.otherwise, was?.when?.otherwise, previous?.colors[1], 'Color', ctx)}`
+}
+
 /** The Swift for a colour, gradient or material in `slot`. */
 function styleSource(fill: Exclude<FillValue, { kind: 'glass' }>, slot: ColorSlot, ctx: LayerContext, previous: Read | undefined): string {
+  if (fill.kind === 'color' && fill.when) return choiceSource(fill, ctx, previous)
   if (fill.kind === 'color') return colorText(fill.color, 0, slot, ctx, previous?.fill.kind === 'color' ? previous : undefined)
   if (fill.kind === 'gradient') return gradientSource(fill, ctx, previous)
   if (!MATERIALS.includes(fill.thickness)) throw new Error('A material is ultra thin, thin, regular, thick or ultra thick.')
@@ -329,6 +345,9 @@ export function writeFill(slots: ChainSlots, change: Extract<LayerChange, { sect
   const current = readFill(slots, ctx)
   if (current.state === 'code') throw new Error(current.disabledReason)
   if (next === null ? current.value === null : current.value !== null && sameFill(current.value, next)) return []
+  // A condition stays as written: only each colour changes (Wave 3b).
+  const was = current.value?.kind === 'color' ? current.value.when : undefined, asked = next?.kind === 'color' ? next.when : undefined
+  keepCondition(was, next && (asked ?? next), 'fill')
   const unavailable = next && current.unavailable?.[next.kind]
   if (unavailable) throw new Error(unavailable)
   const site = siteOf(slots) as Site | null

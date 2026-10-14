@@ -3,7 +3,7 @@
 import type { StrokeValue } from '@studio/shared'
 import { ColorField } from '../controls/ColorField'
 import { NumberField } from '../controls/NumberField'
-import { AddRemove, chip, Note, numberOf, Section, tokenOf } from './parts'
+import { AddRemove, LengthField, Note, Section, tokenLookup } from './parts'
 import { useLayerWrite, type SectionProps } from './section'
 import styles from './LayerSection.module.css'
 
@@ -22,8 +22,10 @@ function dashed(value: StrokeValue, dash: number, gap: number): StrokeValue {
  * colour, width, where it sits on the edge (Inside, Center or Outside) and an optional
  * dash. On a view it is a border that follows the corners; on a shape, its own stroke.
  */
-export function StrokeSection({ layer, set, busy, tokens }: SectionProps) {
+export function StrokeSection(props: SectionProps) {
+  const { layer, set, busy, tokens } = props
   const stroke = layer.stroke
+  const lookup = tokenLookup(props)
   const { write, error } = useLayerWrite((next: StrokeValue | null) => ({ section: 'stroke', stroke: next }), { set, busy })
   if (!stroke) return null
   const value = stroke.value
@@ -33,9 +35,10 @@ export function StrokeSection({ layer, set, busy, tokens }: SectionProps) {
     action={<AddRemove name="stroke" present={!!value || stroke.state === 'code'} disabled={!editable} locked={layer.locked} onAdd={() => void write(NEW_STROKE)} onRemove={() => void write(null)} />}>
     <Note>{stroke.disabledReason}</Note>
     {value && <>
-      <ColorField label="Stroke" value={value.color} tokens={tokens} disabled={!editable} onChange={color => write({ ...value, color })} />
+      <ColorField label="Stroke" value={value.color} unset="Foreground" tokens={tokens} disabled={!editable} onChange={color => write({ ...value, color })} />
+      {!value.color && <Note>No color is written, so the stroke takes the foreground style. Choose one to set it.</Note>}
       <div className={styles.row}><span>Width</span>
-        <NumberField label="Stroke width" caption="W" unit="pt" min={0} step={0.5} disabled={!editable} value={numberOf(value.width)} placeholder={tokenOf(value.width)} overlay={chip(tokenOf(value.width))} onCommit={width => write({ ...value, width })} />
+        <LengthField label="Stroke width" caption="W" unit="pt" min={0} step={0.5} disabled={!editable} value={value.width} lookup={lookup} onCommit={width => write({ ...value, width })} />
       </div>
       <label className={styles.row}><span>Position</span>
         <select aria-label="Stroke position" value={value.position} disabled={!editable} onChange={event => void write({ ...value, position: event.target.value as StrokeValue['position'] })}>

@@ -63,6 +63,7 @@ describe('reading the rest of the text', () => {
 /** A colour token, and a flag a colour can be worked out from. */
 const TOKENS = `
 var on = false
+let palette = [Color.red]
 enum Theme {
     static let accent = Color.blue
 }
@@ -88,7 +89,7 @@ describe('reading the text colour', () => {
 
   it.each([
     ['a colour set twice', 'Text("A").foregroundStyle(.red).foregroundColor(.blue)', /more than one place/],
-    ['a colour worked out at run time', 'Text("A").foregroundStyle(on ? .red : .blue)', /worked out in Swift/],
+    ['a colour worked out at run time', 'Text("A").foregroundStyle(on ? .red : palette[0])', /worked out in Swift/],
     ['two levels of colour', 'Text("A").foregroundStyle(.red, .blue)', /Change it in Code/],
     ['a gradient', 'Text("A").foregroundStyle(.red.gradient)', /worked out in Swift/],
   ])('leaves %s to Code', (_, body, reason) => {

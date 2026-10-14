@@ -196,6 +196,14 @@ export class Interpreter {
   private readonly staticStorage = new Map<VarDecl, SwiftValue>()
   private readonly initializingStatics = new Set<VarDecl>()
   /**
+   * The stored members a preview state holds, by the type that declares them (Wave 3b).
+   * Each starts at the state's value, and while the hold lasts a write to one is dropped
+   * wherever the code makes it: the type's own methods, a static factory, a free function
+   * or the app root. So the screen draws the state that was chosen, and when the hold
+   * ends the app carries on from the values it drew.
+   */
+  private held: ReadonlyMap<string, ReadonlySet<string>> | null = null
+  /**
    * Members merged across extensions, protocol defaults and superclasses.
    *
    * Every member lookup goes through this rather than through a declaration's own
@@ -208,6 +216,45 @@ export class Interpreter {
   constructor(options: InterpreterOptions = {}) {
     this.host = options.host ?? {}
     this.stepBudget = options.stepBudget ?? DEFAULT_STEP_BUDGET
+  }
+
+  /** Holds `members` against writes, or ends the hold with null. See `held`. */
+  hold(members: ReadonlyMap<string, ReadonlySet<string>> | null): void {
+    this.held = members?.size ? members : null
+  }
+
+  /** What is held now, for another interpreter drawing the same state. */
+  get holding(): ReadonlyMap<string, ReadonlySet<string>> | null {
+    return this.held
+  }
+
+  /** Whether a write to `field` of `owner` is one the hold drops: a member of its class, or one it inherits. */
+  private holds(owner: StructValue, field: string): boolean {
+    if (this.held === null) return false
+    for (let type: string | null = owner.typeName; type; type = this.superclassOf(type)) if (this.held.get(type)?.has(field)) return true
+    return false
+  }
+
+  /** The storage `storage` handed out for members the hold covers. */
+  private readonly gated = new WeakSet<LValue>()
+
+  /**
+   * A stored property as storage. While the hold covers it, a write is dropped and a
+   * read is a copy, as `items.append(…)` and `items[0] = …` change the list they read
+   * in place. Both are asked again as they happen, as a binding made while it held is
+   * written by a control once it no longer does.
+   */
+  private storage(owner: StructValue, field: string, description: string | (() => string)): LValue {
+    const lvalue = fieldLValue(owner, field, description)
+    if (!this.holds(owner, field)) return lvalue
+    const gated: LValue = {
+      get: () => this.holds(owner, field) ? copyValue(lvalue.get()) : lvalue.get(),
+      set: (value) => { if (!this.holds(owner, field)) lvalue.set(value) },
+      get description() { return lvalue.description },
+      mutable: lvalue.mutable,
+    }
+    this.gated.add(gated)
+    return gated
   }
 
   // ------------------------------------------------------------------ loading
@@ -533,7 +580,8 @@ export class Interpreter {
 
     for (const property of stored) {
       const expected = namedTypeOf(property.typeAnnotation)
-      let provided = supplied.get(property.name)
+      // A member a preview state holds starts at the state's value, whatever it is given.
+      let provided = this.holds(instance, property.name) ? undefined : supplied.get(property.name)
       // `@ViewBuilder var content: Content` is given a closure and keeps the views it
       // builds, as Swift's memberwise init does; `@ViewBuilder let content: () -> Content`
       // keeps the closure, to build them each time it is called.
@@ -1117,7 +1165,19 @@ export class Interpreter {
     const builtin = getBuiltinProperty(target, member)
     if (builtin !== undefined) return builtin
     const extended = this.userMember(target, member, span)
-    return extended === undefined ? undefined : unwrapProjection(extended)
+    if (extended !== undefined) return unwrapProjection(extended)
+    return member === 'localizedDescription' ? this.localizedDescription(target, span) : undefined
+  }
+
+  /**
+   * `error.localizedDescription` of a `LocalizedError`: its `errorDescription`, as
+   * Foundation reads it. Without one Foundation writes a message of its own, which the
+   * preview can't know, so it is left unread.
+   */
+  private localizedDescription(target: SwiftValue, span: SourceSpan): SwiftValue | undefined {
+    if (target.kind !== 'struct' && target.kind !== 'enum' || !this.conformsTo(target.typeName, 'LocalizedError')) return undefined
+    const description = this.readMember(target, 'errorDescription', span)
+    return description?.kind === 'string' ? description : undefined
   }
 
   // -------------------------------------------------------------- statements
@@ -2102,7 +2162,7 @@ export class Interpreter {
     if (projected) {
       const owner = projected.get()
       if (owner.kind === 'struct' && owner.fields.has(member)) {
-        return memberProjection(projected, member, this.declaredTypeOf(owner.typeName, member))
+        return memberProjection(projected, member, this.declaredTypeOf(owner.typeName, member), (held) => this.holds(held, member))
       }
     }
 
@@ -2885,7 +2945,7 @@ export class Interpreter {
     if (self?.kind === 'struct' && self.fields.has(name)) {
       const current = self.fields.get(name)
       if (asProjection(current)) return current!
-      const field = fieldLValue(self, name, `self.${name}`)
+      const field = this.storage(self, name, `self.${name}`)
       const declared = this.declaredTypeOf(self.typeName, name)
       return projection(declared ? { get: field.get, set: field.set, description: field.description, declared } : field)
     }
@@ -2902,7 +2962,7 @@ export class Interpreter {
 
         const self = env.resolveSelf()
         if (self?.kind === 'struct' && self.fields.has(expr.name)) {
-          return throughProjection(fieldLValue(self, expr.name, expr.name))
+          return throughProjection(this.storage(self, expr.name, expr.name))
         }
         return null
       }
@@ -2929,7 +2989,7 @@ export class Interpreter {
         // Named by the path the user wrote - `bag.items` - rather than by the
         // receiver's value, which rendered a whole struct literal into the middle of
         // a sentence about a constant. Written out only if a message needs it.
-        const field = fieldLValue(target, expr.member, () => `${owner ? owner.description : describe(target, true)}.${expr.member}`)
+        const field = this.storage(target, expr.member, () => `${owner ? owner.description : describe(target, true)}.${expr.member}`)
         const projected = throughProjection(field)
 
         // A projection is storage somewhere else reached through a nonmutating
@@ -2953,7 +3013,9 @@ export class Interpreter {
       }
 
       case 'subscript': {
-        const base = this.evaluate(expr.base, env)
+        // A list a preview state holds is written as a copy, which nothing keeps.
+        const list = this.held && this.tryResolveLValue(expr.base, env)
+        const base = list && this.gated.has(list) ? list.get() : this.evaluate(expr.base, env)
         const indexExpr = expr.args[0]
         if (!indexExpr) return null
         const index = this.evaluate(indexExpr.value, env)
@@ -3514,7 +3576,7 @@ const FRAMEWORK_CONTEXTUAL: ReadonlySet<string> = new Set([
  * on every access rather than capturing it keeps a computed `Binding(get:set:)`
  * behaving like the storage it stands for.
  */
-function memberProjection(outer: ProjectionPayload, field: string, declared: DeclaredType | undefined): SwiftValue {
+function memberProjection(outer: ProjectionPayload, field: string, declared: DeclaredType | undefined, held: (owner: StructValue) => boolean): SwiftValue {
   return projection({
     ...(declared ? { declared } : {}),
     get: () => {
@@ -3523,7 +3585,8 @@ function memberProjection(outer: ProjectionPayload, field: string, declared: Dec
     },
     set: (value) => {
       const owner = outer.get()
-      if (owner.kind !== 'struct') return
+      // A member a preview state holds keeps its value until the hold ends, as with any write.
+      if (owner.kind !== 'struct' || held(owner)) return
       owner.fields.set(field, value)
       if (!owner.reference) outer.set(owner)
     },

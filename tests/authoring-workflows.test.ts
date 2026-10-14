@@ -566,7 +566,7 @@ enum Namespace { struct ContentView: View { @State var flag = false; var body: s
   const before = JSON.stringify(ast)
   const state = snapshot.inputs!.find(s => s.owner === 'Namespace.ContentView')!
   expect(state).toBeDefined()
-  const output = scenarioFiles({ files: sources, ast, nodes: snapshot.nodes }, snapshot, { name: 'Nested', owner: state.owner, hook: '', inputs: [{ owner: state.owner, name: state.name, signature: state.signature, value: true }] })
+  const output = scenarioFiles({ files: sources, ast, nodes: snapshot.nodes }, snapshot, { name: 'Nested', owner: state.owner, hook: '', inputs: [{ owner: state.owner, name: state.name, signature: state.signature, value: true }] }).files
   const root = output[0]!.declarations[1], namespace = output[0]!.declarations[2]
   expect(root?.kind === 'structDecl' && root.members[0]).toMatchObject({ initializer: { kind: 'booleanLiteral', value: false } })
   expect(namespace?.kind === 'enumDecl' && namespace.members[0]).toMatchObject({ members: [expect.objectContaining({ initializer: expect.objectContaining({ kind: 'booleanLiteral', value: true }) }), expect.anything()] })

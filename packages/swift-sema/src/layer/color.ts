@@ -139,6 +139,14 @@ export function colorSource(value: ColorValue, slot: ColorSlot, ctx: Pick<LayerC
   return opacity === 1 ? base : `${base}.opacity(${amount(opacity)})`
 }
 
+/**
+ * A colour as Swift in `slot`, in the spelling it was `written` in when it is still the
+ * colour it was `before`: a token, or `Color.gray.opacity(0.3)`, stays as written.
+ */
+export function keptColor(next: ColorValue, before: ColorValue | undefined, written: string | undefined, slot: ColorSlot, ctx: Pick<LayerContext, 'target'>): string {
+  return before && written !== undefined && sameColor(before, next) ? written : colorSource(next, slot, ctx)
+}
+
 /** A hex with its alpha and opacity taken together, `#RRGGBB` and an amount, so two spellings of one colour compare equal. */
 function hexKey(value: { hex: string; opacity?: number }): string {
   const channels = hexChannels(value.hex)

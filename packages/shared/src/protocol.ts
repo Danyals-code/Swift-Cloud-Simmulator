@@ -184,9 +184,13 @@ export interface CompileResult {
  * gesture is one interaction with a beginning, a middle and an end - and the handlers
  * that run differ only by which phase arrived. `translation` is cumulative from the
  * start of the drag, as SwiftUI reports it, not per-move.
+ *
+ * A tap the Studio sends for its own reasons, such as switching to the tab of a layer
+ * chosen in Layers, says so with `origin`: only a designer's touch in the preview ends
+ * a preview state's hold (Wave 3b).
  */
 export type UIEvent =
-  | { readonly kind: 'tap'; readonly handlerId: string; readonly location: Point }
+  | { readonly kind: 'tap'; readonly handlerId: string; readonly location: Point; readonly origin?: 'studio' }
   | { readonly kind: 'toggle'; readonly handlerId: string; readonly value: boolean }
   | { readonly kind: 'textChange'; readonly handlerId: string; readonly value: string }
   | { readonly kind: 'slide'; readonly handlerId: string; readonly value: number }

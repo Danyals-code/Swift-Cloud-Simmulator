@@ -113,14 +113,14 @@ export function planDesignEdit(request: DesignEditRequest): DesignEditPlan {
     if (!expression || !node.layer) return reject('This view no longer has an editable modifier chain. Select it again.')
     try {
       const parent = model.nodes.find(n => n.id === node.parentId)
-      const written = writeLayer(expression, operation.changes, layerContext(layerProject(ast, request.deploymentTarget), node, parent, file.text))
+      const written = writeLayer(expression, operation.changes, layerContext(layerProject(ast, request.deploymentTarget, request.files), node, parent, file.text))
       // A border takes the view's new corners in the same step (D8).
       changed = { text: followCorners(file.text, written.text, file.id, node.source.start, written.start), offset: written.start }
     } catch (error) { return reject(error instanceof Error ? error.message : 'This layer change could not be planned.') }
   } else if (operation.kind === 'property' && node) {
     const expression = callAt(ast, node.source)
     if (!expression) return reject('This source expression cannot be edited safely.')
-    const recipe = designControlRecipes(node, expression, file.text, request.deploymentTarget).find(r => r.control.id === operation.control)
+    const recipe = designControlRecipes(node, expression, file.text, layerProject(ast, request.deploymentTarget, request.files), request.deploymentTarget).find(r => r.control.id === operation.control)
     if (!recipe) return reject('This property is controlled by Swift or is outside the editable subset.')
     const invalid = validateControlValue(recipe.control, operation.value) ?? recipe.problem?.(operation.value)
       ?? (operation.control === 'spacing' && operation.value === 'auto' && recipe.control.value !== 'auto' ? spreadRoomProblem(model.nodes, node) : null)

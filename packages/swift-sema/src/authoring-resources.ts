@@ -2,7 +2,8 @@ import { DEFAULT_DEPLOYMENT_TARGET, deploymentVersion, isAccentColorSetName } fr
 import type { AuthoringNode, FontTokenValue, PreviewColorAsset, ResourceOperation, ShadowTokenValue, SharedStyle, StyleKind, StyleProperty, SourceSpan, SourceFile, TokenDefinition } from '@studio/shared'
 import { Parser, forEachChild, type Decl, type Expr, type ExtensionDecl, type Node, type VarDecl } from '@studio/swift-syntax'
 import { AUTHORING_COLORS, SYSTEM_COLORS, AUTHORING_FONTS, swiftString } from './design-controls'
-import { allDeclarations, applyPatches, callOf, hasComments, identifier, patch, raw, shadowsMember, type FeatureContext, type SourcePatch } from './authoring-context'
+import { allDeclarations, applyPatches, callOf, declarationsNamed, hasComments, identifier, patch, raw, shadowsMember, type FeatureContext, type SourcePatch } from './authoring-context'
+import { constantNamed, constantNumber, literalNumber, type Constant } from './layer/tokens'
 
 /**
  * Design tokens and the older shared styles they grew out of.
@@ -223,21 +224,31 @@ function tokenRecipes(ctx: FeatureContext): Recipe[] {
 
 function legacyRecipes(ctx: FeatureContext): Recipe[] {
   const result: Recipe[] = []
+  /** Every name and member read, by how it is written, found once at the first style: a walk of the project for each was quadratic. */
+  let reads: Map<string, SourceSpan[]> | undefined
+  const readsOf = () => {
+    if (reads) return reads
+    const found = new Map<string, SourceSpan[]>()
+    const visit = (n: Node) => {
+      if (n.kind === 'identifier' || n.kind === 'memberAccess') { const written = raw(ctx, n.span), spans = found.get(written); if (spans) spans.push(n.span); else found.set(written, [n.span]) }
+      forEachChild(n, visit)
+    }
+    ctx.ast.forEach(visit)
+    return reads = found
+  }
   function collect(decls: readonly Decl[], prefix = '') {
     for (const decl of decls) {
       if (decl.kind === 'structDecl' || decl.kind === 'enumDecl') {
-        if (!prefix && allDeclarations(ctx).filter(d => 'name' in d && d.name === decl.name).length === 1) collect(decl.members, `${decl.name}.`)
+        if (!prefix && declarationsNamed(ctx, decl.name).length === 1) collect(decl.members, `${decl.name}.`)
       }
       if (decl.kind !== 'varDecl' || !decl.isLet || decl.accessor || !decl.initializer || decl.attributes.length || prefix && !decl.modifiers.some(m => m.name === 'static') || decl.modifiers.some(m => ['private', 'fileprivate'].includes(m.name))) continue
-      if (!prefix && allDeclarations(ctx).filter(d => 'name' in d && d.name === decl.name).length !== 1) continue
+      if (!prefix && declarationsNamed(ctx, decl.name).length !== 1) continue
       const value = styleValue(raw(ctx, decl.initializer.span), decl.typeAnnotation ? raw(ctx, decl.typeAnnotation.span) : undefined)
       if (!value || hasComments(ctx, decl.initializer.span)) continue
       const framework = value.kind === 'color' ? 'Color' : value.kind === 'font' ? 'Font' : 'CGFloat'
-      if (allDeclarations(ctx).some(d => d.kind !== 'extensionDecl' && 'name' in d && d.name === framework)) continue
-      const name = prefix + decl.name, uses: SourceSpan[] = []
-      const visit = (n: Node) => { if ((n.kind === 'identifier' || n.kind === 'memberAccess') && raw(ctx, n.span) === name) uses.push(n.span); else forEachChild(n, visit) }
-      ctx.ast.forEach(visit)
-      result.push({ style: { name, ...value, form: 'legacy', reference: name, source: decl.initializer.span, uses }, declaration: decl })
+      if (declarationsNamed(ctx, framework).length) continue
+      const name = prefix + decl.name
+      result.push({ style: { name, ...value, form: 'legacy', reference: name, source: decl.initializer.span, uses: [...readsOf().get(name) ?? []] }, declaration: decl })
     }
   }
   ctx.ast.forEach(file => collect(file.declarations))
@@ -437,7 +448,11 @@ export function editResource(ctx: FeatureContext, node: AuthoringNode, op: Resou
     return createToken(ctx, op.style, op.name, op.token ?? { value: op.value })
   }
   if (op.kind === 'style-edit') {
-    const recipe = recipes(ctx).find(r => r.style.name === op.name)
+    // A constant the layer sections read (Wave 3b) is named from anywhere, `ContentView.rowSpacing`
+    // or `CGFloat.space16`: edited as the shared style it is, when it is one, or where it is declared.
+    const constant = recipes(ctx).some(r => r.style.name === op.name) ? undefined : constantNamed(ctx, op.name)
+    const recipe = recipes(ctx).find(r => constant ? r.declaration === constant.decl : r.style.name === op.name)
+    if (!recipe && constant) return { patches: editConstant(ctx, constant, op.value) }
     if (!recipe) throw new Error('This token is computed, ambiguous, or no longer editable.')
     const definition = op.token ?? { value: op.value }
     if (recipe.style.form === 'token') {
@@ -503,6 +518,20 @@ export function editResource(ctx: FeatureContext, node: AuthoringNode, op: Resou
     return { patches: [patch(argument.span, swiftString(op.name))] }
   }
   return { patches: assetReferences(ctx, op) }
+}
+
+/**
+ * A number constant written again where it is declared (Edit at declaration, Wave 3b), for
+ * every place that reads it. One written as a `Double` with no type keeps a decimal point,
+ * so it stays a `Double`; a comment in it would be lost, so it is left to Code.
+ */
+function editConstant(ctx: FeatureContext, constant: Constant, value: string): SourcePatch[] {
+  const before = literalNumber(constant.initializer)
+  if (before === undefined) throw new Error(`${constant.decl.name} isn’t a number. Change it where it is declared, in Code.`)
+  if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim()) || !Number.isFinite(Number(value)) || Math.abs(Number(value)) > 1_000_000) throw new Error('Enter a number of points.')
+  if (hasComments(ctx, constant.initializer.span)) throw new Error(`A comment is written in ${constant.decl.name}. Change it in Code.`)
+  const next = Number(value)
+  return next === before ? [] : [patch(constant.initializer.span, constantNumber(constant, next))]
 }
 
 /**

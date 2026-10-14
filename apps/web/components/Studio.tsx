@@ -634,7 +634,8 @@ export function Studio() {
     const preview = designPages?.find(item => item.id === page.id)
     if (preview) setDesignPageSelection({ projectId: project.id, id: preview.id })
     else if (page.page?.handlerId && !page.page.active) {
-      void dispatch({ kind: 'tap', handlerId: page.page.handlerId, location: { x: 0, y: 0 } })
+      // The Studio's own switch, not a touch: a state on show stays held.
+      void dispatch({ kind: 'tap', handlerId: page.page.handlerId, location: { x: 0, y: 0 }, origin: 'studio' })
     }
   }
 

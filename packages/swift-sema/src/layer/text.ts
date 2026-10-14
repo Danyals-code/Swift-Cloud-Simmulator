@@ -1,14 +1,15 @@
-import { TEXT_STYLES, type ColorValue, type FontValue, type LayerChange, type LayerText, type LayerValue } from '@studio/shared'
+import { TEXT_STYLES, isConditional, type ColorValue, type Conditional, type FontValue, type LayerChange, type LayerText, type LayerValue } from '@studio/shared'
 import type { CallExpr, Expr, VarDecl } from '@studio/swift-syntax'
 import { modifierName } from '../authoring-border'
 import { SLOT } from '../authoring-modifiers'
 import { keepsText } from '../builtins'
 import { STYLE_OPTIONS } from '../design-advanced-controls'
 import { insertCalls, insertionIndex, lineEnding, lineStart, replaceRun, type Patch } from './chain-edit'
-import { colorSource, readColor, sameColor } from './color'
+import { colorSource, keptColor, readColor, sameColor } from './color'
 import { callsNamed, type ChainSlots, type SlotRun } from './slots'
 import { runRefusal, type LayerContext } from './context'
-import { numberOf } from './values'
+import { casesOf, isToken, keepCondition, numberOf, sourceOf } from './values'
+import { FONT_HOSTS, declarationOf, literalNumber, resolveConstant } from './tokens'
 
 /**
  * Text: the font, colour, alignment, spacing and case of a view that shows text.
@@ -50,11 +51,16 @@ export function scaledSize(name: string, ctx: LayerContext): ScaledSize | undefi
   return relativeTo ? { decl, size, relativeTo } : undefined
 }
 
-/** A `Font` expression as the parts the panel sets, or undefined for one it cannot rewrite. */
-function fontOf(value: Expr, ctx: LayerContext): FontValue | undefined {
-  // `.title2.bold()`, `.headline.weight(.semibold)`, `.body.italic()`, `.title.monospaced()`.
-  if (value.kind === 'call' && value.callee.kind === 'memberAccess' && value.callee.base && !value.trailingClosure) {
-    const base = fontOf(value.callee.base, ctx)
+/**
+ * A `Font` expression as the parts the panel sets, or undefined for one it cannot rewrite.
+ * `declared` reads one where a constant is declared (Wave 3b), in a file whose text this
+ * view's is not: its numbers off the syntax, and no `@ScaledMetric` of the view's.
+ */
+function fontOf(value: Expr, ctx: LayerContext, declared = false): FontValue | undefined {
+  // `.title2.bold()`, `.headline.weight(.semibold)`, `.body.italic()`, `.title.monospaced()`; `Font.system(…)` is read below.
+  const onFont = (expr: Expr | null) => expr?.kind === 'identifier' && expr.name === 'Font'
+  if (value.kind === 'call' && value.callee.kind === 'memberAccess' && value.callee.base && !onFont(value.callee.base) && !value.trailingClosure) {
+    const base = fontOf(value.callee.base, ctx, declared)
     if (!base) return undefined
     const member = value.callee.member, args = value.args
     if (member === 'bold' && !args.length) return { ...base, weight: 'bold' }
@@ -88,9 +94,9 @@ function fontOf(value: Expr, ctx: LayerContext): FontValue | undefined {
   // `.system(size: 22, weight: .semibold, design: .rounded)`, the size a number or an `@ScaledMetric`.
   const size = arg('size')
   if (!size || labels.some(label => !['size', 'weight', 'design'].includes(label ?? ''))) return undefined
-  const fixed = numberOf(size, ctx)
+  const fixed = declared ? literalNumber(size) : numberOf(size, ctx)
   if (fixed !== undefined) return { style: null, size: fixed, relativeTo: null, ...parts }
-  const scaled = size.kind === 'identifier' ? scaledSize(size.name, ctx) : undefined
+  const scaled = size.kind === 'identifier' && !declared ? scaledSize(size.name, ctx) : undefined
   return scaled ? { style: null, size: scaled.size, relativeTo: scaled.relativeTo, ...parts } : undefined
 }
 
@@ -112,8 +118,11 @@ function readFont(slots: ChainSlots, ctx: LayerContext): LayerValue<FontValue> {
   const code = (reason: string): LayerValue<FontValue> => ({ value: fallback, state: 'code', from, disabledReason: `${reason} ${CODE}` })
   if (fonts.length > 1) return code('This text’s font is set in more than one place.')
   const written = fonts[0]?.calls[0]
-  const font = !written ? { style: fallback.style } : written.args.length === 1 && written.args[0]!.label === null && !written.trailingClosure ? fontOf(written.args[0]!.value, ctx) : undefined
+  const argument = written && written.args.length === 1 && written.args[0]!.label === null && !written.trailingClosure ? written.args[0]!.value : undefined
+  const font = !written ? { style: fallback.style } : argument && (fontOf(argument, ctx) ?? fontToken(argument, ctx))
   if (!font) return code('This text’s font is a custom font or worked out in Swift.')
+  // A custom face behind a token is shown as it is, with its name (Wave 3b).
+  if (font.face) return { value: font, state: 'code', from, disabledReason: `This text’s font, ${font.token}, is ${font.face}, a custom face the panel doesn’t offer. ${CODE}` }
   const one = (runs: SlotRun[], read: (call: CallExpr) => string | boolean | undefined, field: 'weight' | 'design' | 'italic') => {
     if (!runs.length) return undefined
     if (runs.length > 1 || font[field] !== undefined) return null
@@ -126,8 +135,32 @@ function readFont(slots: ChainSlots, ctx: LayerContext): LayerValue<FontValue> {
   if (weight === null || design === null || italic === null) return code('This text’s weight, design or italic is set in more than one place, or worked out in Swift.')
   return {
     value: { ...font, ...(weight !== undefined ? { weight: weight as string } : {}), ...(design !== undefined ? { design: design as string } : {}), ...(italic !== undefined ? { italic: true } : {}) },
-    state: 'literal', from,
+    state: font.token ? 'token' : 'literal', from,
   }
+}
+
+/**
+ * A font read through a constant, `.font(.heading)` where `extension Font { static let
+ * heading = Font.title2.bold() }`, or a static whose getter gives one, `static var heading:
+ * Font { .title2.bold() }` (Wave 3b): what it is declared as, with its name and where it is
+ * declared, when its declaration is a font the panel reads or a custom face it shows.
+ */
+function fontToken(value: Expr, ctx: LayerContext): FontValue | undefined {
+  const written = sourceOf(ctx, value)
+  if (!isToken(written)) return undefined
+  const constant = resolveConstant(ctx.project, written, value.span, FONT_HOSTS, true)
+  const font = constant && (fontOf(constant.initializer, ctx, true) ?? customFace(constant.initializer))
+  if (font) ctx.linked.set(written, { declaration: declarationOf(ctx.project, constant!) })
+  return font && { ...font, token: written }
+}
+
+/** `Font.custom("Avenir", size: 20)`, with `relativeTo:` or as `fixedSize:`: its face, and its size where it is a number. */
+function customFace(value: Expr): FontValue | undefined {
+  if (value.kind !== 'call' || value.trailingClosure || value.callee.kind !== 'memberAccess' || value.callee.member !== 'custom') return undefined
+  const base = value.callee.base, [name, size] = value.args
+  if (base && !(base.kind === 'identifier' && base.name === 'Font') || name?.label !== null || name.value.kind !== 'stringLiteral' || !name.value.segments.every(segment => segment.kind === 'text')) return undefined
+  const points = size && (size.label === 'size' || size.label === 'fixedSize') ? literalNumber(size.value) : undefined
+  return { style: null, ...points !== undefined ? { size: points } : {}, face: name.value.segments.map(segment => segment.kind === 'text' ? segment.value : '').join('') }
 }
 
 /** A text modifier that takes one value: `.tracking(1)`, `.textCase(.uppercase)`. */
@@ -147,14 +180,25 @@ const number = (ctx: LayerContext) => (value: Expr) => numberOf(value, ctx)
 const COLOR_CALLS = ['foregroundStyle', 'foregroundColor']
 
 /** The text's colour, from its one foreground style or colour, however the colour is spelled. */
-function readTextColor(slots: ChainSlots, ctx: LayerContext): LayerValue<ColorValue | null> {
+function readTextColor(slots: ChainSlots, ctx: LayerContext): LayerValue<ColorValue | Conditional<ColorValue> | null> {
   const runs = callsNamed(slots, COLOR_CALLS)
   if (!runs.length) return { value: null, state: 'absent' }
   const from = runs.map(run => ctx.ids[run.indices[0]!]!)
   const call = runs[0]!.calls[0]!
   if (runs.length > 1) return { value: null, state: 'code', from, disabledReason: `This text’s color is set in more than one place. ${CODE}` }
   if (call.args.length !== 1 || call.args[0]!.label !== null || call.trailingClosure) return { value: null, state: 'code', from, disabledReason: `This text’s color has more than one level. ${CODE}` }
-  return { ...readColor(call.args[0]!.value, ctx), from }
+  const value = call.args[0]!.value
+  if (value.kind !== 'ternary') return { ...readColor(value, ctx), from }
+  // Two colours a condition chooses between (Wave 3b), each read as one is.
+  const { condition, then, otherwise } = casesOf(value, ctx, branch => readColor(branch, ctx))!
+  if (then.state === 'code' || otherwise.state === 'code') return { value: null, state: 'code', from, disabledReason: then.disabledReason ?? otherwise.disabledReason }
+  return { value: { condition, then: then.value, otherwise: otherwise.value }, state: then.state === 'token' || otherwise.state === 'token' ? 'token' : 'literal', from }
+}
+
+/** Each branch's colour as written, which a change that keeps it keeps. */
+function branchesWritten(slots: ChainSlots, ctx: LayerContext): { then: string; otherwise: string } | undefined {
+  const value = callsNamed(slots, COLOR_CALLS)[0]?.calls[0]?.args[0]?.value
+  return value?.kind === 'ternary' ? { then: sourceOf(ctx, value.then), otherwise: sourceOf(ctx, value.else) } : undefined
 }
 
 export function readText(slots: ChainSlots, ctx: LayerContext): LayerText | undefined {
@@ -223,7 +267,9 @@ function scaledIn(slots: ChainSlots, ctx: LayerContext): (ScaledSize & { name: s
 function writeFont(slots: ChainSlots, change: Partial<FontValue>, ctx: LayerContext): Patch[] {
   const current = readFont(slots, ctx)
   if (current.disabledReason) throw new Error(current.disabledReason)
-  const next: FontValue = { ...current.value, ...change }
+  // A font read through a constant is written as the font itself, at this text only (Detach, Wave 3b).
+  const { token: _token, ...was } = current.value, { token: _asked, ...asked } = change
+  const next: FontValue = { ...was, ...asked }
   if (next.style !== null && next.style !== undefined && !TEXT_STYLES.includes(next.style)) throw new Error('Choose one of the text styles.')
   if (next.style === null && !(typeof next.size === 'number' && next.size > 0)) throw new Error('A font size is more than 0 points.')
   const scaled = scaledIn(slots, ctx)
@@ -286,13 +332,24 @@ const SIMPLE: readonly { readonly field: 'tracking' | 'alignment' | 'lineSpacing
  * before it. Below iOS 16 a `foregroundColor` in a Text's own run stays one: it keeps the
  * Text a Text, for the Text-only modifiers after it and any written with it.
  */
-function colorCall(slots: ChainSlots, color: ColorValue, ctx: LayerContext): string {
+function colorCall(slots: ChainSlots, color: ColorValue | Conditional<ColorValue>, ctx: LayerContext, before: LayerValue<ColorValue | Conditional<ColorValue> | null>): string {
   const at = callsNamed(slots, COLOR_CALLS)[0]?.indices[0]
   const staysText = ctx.target < 16 && ctx.node.name === 'Text' && at !== undefined && slots.names[at] === 'foregroundColor' && at < textOnlyIndex(slots, ctx.target)
   // A run of joined text must stay a Text, which `foregroundStyle` keeps it only from iOS 17 (Wave 3a).
   const style = ctx.run ? keepsText('foregroundStyle', ctx.target) : ctx.target >= 15 && !staysText
+  if (isConditional(color)) {
+    // Both cases as `Color`, which a generic style can take from a condition; a case left as it was keeps its spelling.
+    const was = isConditional(before.value) ? before.value : undefined, written = branchesWritten(slots, ctx)
+    const choice = `${color.condition} ? ${keptColor(color.then, was?.then, written?.then, 'Color', ctx)} : ${keptColor(color.otherwise, was?.otherwise, written?.otherwise, 'Color', ctx)}`
+    return style ? `.foregroundStyle(${choice})` : `.foregroundColor(${choice})`
+  }
   return style ? `.foregroundStyle(${colorSource(color, 'ShapeStyle', ctx)})` : `.foregroundColor(${colorSource(color, 'Color', ctx)})`
 }
+
+/** Whether two text colours are the same, each case of a condition included. */
+const sameTextColor = (a: ColorValue | Conditional<ColorValue>, b: ColorValue | Conditional<ColorValue>) => isConditional(a) || isConditional(b)
+  ? isConditional(a) && isConditional(b) && a.condition === b.condition && sameColor(a.then, b.then) && sameColor(a.otherwise, b.otherwise)
+  : sameColor(a, b)
 
 export function writeText(slots: ChainSlots, change: TextChange, ctx: LayerContext): Patch[] {
   const current = readText(slots, ctx)
@@ -302,8 +359,11 @@ export function writeText(slots: ChainSlots, change: TextChange, ctx: LayerConte
   if (change.color !== undefined) {
     const now = current.color
     if (now.disabledReason) throw new Error(now.disabledReason)
-    const same = change.color === null ? now.value === null : now.value !== null && sameColor(now.value, change.color)
-    const written = same ? undefined : change.color === null ? [] : [colorCall(slots, change.color, ctx)]
+    const next = change.color
+    // A condition stays as written: only each case changes (Wave 3b).
+    keepCondition(now.value, next, 'color')
+    const same = next === null ? now.value === null : now.value !== null && sameTextColor(now.value, next)
+    const written = same ? undefined : next === null ? [] : [colorCall(slots, next, ctx, now)]
     const run = callsNamed(slots, COLOR_CALLS)[0]
     if (written && run) patches.push(replaceRun(slots, run, written, ctx.text))
     else if (written) added.push(...written)

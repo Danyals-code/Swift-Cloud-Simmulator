@@ -22,7 +22,7 @@ describe('reading effects', () => {
   })
 
   it.each([
-    ['an opacity worked out at run time', 'Text("A").opacity(faded ? 0.5 : 1)', 'opacity'],
+    ['an opacity worked out at run time', 'Text("A").opacity(faded ? 0.5 : level)', 'opacity'],
     ['two opacities', 'Text("A").opacity(0.5).padding().opacity(0.5)', 'opacity'],
     ['a blur that keeps its edges', 'Text("A").blur(radius: 2, opaque: true)', 'blur'],
   ])('leaves %s to Code', (_, body, effect) => {

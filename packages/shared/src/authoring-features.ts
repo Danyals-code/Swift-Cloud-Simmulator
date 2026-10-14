@@ -64,6 +64,38 @@ export interface StateInput {
   readonly optional?: boolean
   readonly options?: readonly string[]
   readonly source: SourceSpan
+  /** A value picked rather than typed: a list either empty or with its items, or an optional either nil or a sample (Wave 3b). */
+  readonly choices?: readonly StateChoice[]
+  /**
+   * Where a value a condition of the screen reads is declared: on the screen, or on a model
+   * it reads, as `model.isLoading`. A state holds it there from when it is shown until the
+   * first touch in the preview, so code that runs as the screen appears, such as a model's
+   * `load()`, can't replace it, and the touch acts on what the state drew.
+   */
+  readonly held?: { readonly type: string; readonly member: string }
+  /** The states this value draws, named as a designer reads them: Loading, Empty, Error. */
+  readonly states?: readonly SuggestedState[]
+  /** What a value a condition reads holds, which says how its states set it: a list is empty or has its items. */
+  readonly kind?: StateKind
+  /**
+   * A condition the screen draws whose value the preview can't set, and why. It is listed
+   * so the panel can say so, and is never a value a state changes.
+   */
+  readonly problem?: string
+}
+/** A value a condition reads: a Bool, a number, a String, an optional, a list, or a case of a project enum. */
+export type StateKind = 'flag' | 'scalar' | 'text' | 'optional' | 'list' | 'case'
+/** One value a picked input can take, and the Swift a preview state puts in its place. */
+export interface StateChoice {
+  readonly value: string
+  readonly label: string
+  readonly swift: string
+}
+/** A state a branch of the screen's conditions draws, and the values that show it; or why it can't be shown. */
+export interface SuggestedState {
+  readonly name: string
+  readonly inputs: readonly PreviewInput[]
+  readonly problem?: string
 }
 export interface NavigationDestination {
   /** Original destination expression, including the route before parameter substitution. */

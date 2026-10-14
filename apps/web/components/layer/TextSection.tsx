@@ -1,11 +1,12 @@
 'use client'
 
-import { TEXT_STYLES } from '@studio/shared'
+import { TEXT_STYLES, helperPlaces, isConditional } from '@studio/shared'
 import { ColorField } from '../controls/ColorField'
 import { NumberField } from '../controls/NumberField'
+import { TokenChip } from '../controls/TokenChip'
 import { CHOICES, Choices, propertyOptionLabel } from '../PropertyControl'
 import { FONT_WEIGHTS, TEXT_STYLES as STYLE_SIZES } from '../../lib/tokens'
-import { IconButton, Note, Section } from './parts'
+import { ColorCases, IconButton, Note, Section } from './parts'
 import { useLayerWrite, type SectionChange, type SectionProps } from './section'
 import styles from './LayerSection.module.css'
 
@@ -47,7 +48,17 @@ export function TextSection({ node, layer, set, busy, tokens }: SectionProps) {
   // No alignment is SwiftUI's own, the start.
   const aligned = alignment.disabledReason ? null : alignment.value ?? 'leading'
 
+  // A font read through a constant (Wave 3b): its name, what it is, and Detach, which writes the font itself here.
+  // A custom face behind one is shown read only, with its name and size (Wave 3b).
+  const linked = value.token, declared = linked ? layer.tokens?.[linked]?.declaration : undefined
+  const described = [value.face ?? styleOf(value.style)?.label ?? `${size} pt`, ...value.face && value.size !== undefined ? [`${value.size} pt`] : [], ...value.weight ? [propertyOptionLabel(value.weight)] : []].join(', ')
   return <Section title="Text" testId="layer-text" error={error}>
+    {linked && <div className={styles.row}><span>Font</span>
+      <TokenChip token={linked} disabled={fontOff} actions={{ detail: described, ...declared ? { uses: helperPlaces(declared.uses) } : {}, ...value.face
+        ? { note: font.disabledReason }
+        : { onDetach: async () => (await write({ font: {} })) ? null : 'This font could not be detached.' } }} />
+    </div>}
+    {linked && !value.face && <Note>A change here sets this text’s own font, no longer linked to {linked}.</Note>}
     <label className={styles.row}><span>Style</span>
       <select aria-label="Text style" value={value.style ?? 'custom'} disabled={fontOff} onChange={event => chooseStyle(event.target.value)}>
         {STYLE_OPTIONS}<option value="custom">Custom size</option>
@@ -82,7 +93,9 @@ export function TextSection({ node, layer, set, busy, tokens }: SectionProps) {
     <div className={styles.heading}><h4>Color</h4>
       {color.value && <IconButton icon="minus" label="Remove text color" disabled={busy || !!color.disabledReason} onClick={() => void write({ color: null })} />}
     </div>
-    <ColorField label="Text" value={color.value ?? { name: 'primary' }} tokens={tokens} disabled={busy || !!color.disabledReason} onChange={next => write({ color: next })} />
+    {isConditional(color.value)
+      ? <ColorCases label="Text" value={color.value} tokens={tokens} disabled={busy || !!color.disabledReason} onChange={next => write({ color: next })} />
+      : <ColorField label="Text" value={color.value ?? { name: 'primary' }} tokens={tokens} disabled={busy || !!color.disabledReason} onChange={next => write({ color: next })} />}
     <Note>{color.disabledReason}</Note>
 
     <div className={styles.row}><span>Alignment</span>
@@ -104,3 +117,4 @@ export function TextSection({ node, layer, set, busy, tokens }: SectionProps) {
     <Note>{textCase.disabledReason}</Note>
   </Section>
 }
+

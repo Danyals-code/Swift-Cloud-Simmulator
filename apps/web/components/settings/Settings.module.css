@@ -99,7 +99,7 @@ label.iconButton:has(input:disabled) { opacity: .4; }
 .segmented button:disabled { opacity: .4; }
 /* A screen's states: rows, the one on show selected. */
 .states { display: grid; gap: 2px; }
-.stateRow { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: var(--row-height); padding: 0 8px; border-radius: var(--radius-md); color: var(--color-xc-text); text-align: left; transition: background-color var(--duration-fast); }
+.stateRow { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: var(--row-height); padding: 0 8px; border-radius: var(--radius-md); color: var(--color-xc-text); text-align: left; white-space: nowrap; transition: background-color var(--duration-fast); }
 .stateRow:hover { background: var(--color-xc-fill); }
 .stateRow[aria-pressed='true'] { background: var(--color-xc-select); }
 .stateRow > small { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-caption); color: var(--color-xc-text-3); }

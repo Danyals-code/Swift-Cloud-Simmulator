@@ -832,8 +832,8 @@ export function compile(request: CompileRequest): CompileResult {
   if (!program) return toResult(request, analysis, null, errorsNotice(request, analysis), startedAt, 0, 0)
 
   const evaluateStart = performance.now()
-  let evaluationFiles = program.files
-  try { evaluationFiles = scenarioFiles({ files: request.files, ast: program.files, nodes: analysis.authoring.nodes }, analysis.authoring, request.scenario) }
+  let scenario: ReturnType<typeof scenarioFiles> = { files: program.files, held: new Map() }
+  try { scenario = scenarioFiles({ files: request.files, ast: program.files, nodes: analysis.authoring.nodes }, analysis.authoring, request.scenario) }
   catch (error) {
     const message = error instanceof Error ? error.message : 'Invalid preview scenario.'
     const diagnostic: Diagnostic = { severity: 'error', code: 'invalid_preview_scenario', message, span: { file: request.files[0]?.id ?? '', start: 0, end: 0 } }
@@ -841,7 +841,7 @@ export function compile(request: CompileRequest): CompileResult {
     lastAnalysis = { request, analysis: failed }; lastEvaluation = null; runtime.reset(false)
     return toResult(request, failed, null, noticeTree(request, 'Preview scenario needs updating', message), startedAt, 0, 0)
   }
-  runtime.load(evaluationFiles, analysis.model, programKeyOf(request), request.previewScreen)
+  runtime.load(scenario.files, analysis.model, programKeyOf(request), request.previewScreen, scenario.held)
   runtime.setEnvironment(environmentFor(request))
   runtime.setDefaultGeometry(contentSizeOf(request))
 

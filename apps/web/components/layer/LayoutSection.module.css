@@ -3,6 +3,8 @@
 /* Hug, Fill or Fixed, with the Fixed size beside it. */
 .sizing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; min-width: 0; }
 .sizing > select { width: 100%; min-width: 0; }
+/* A size a condition chooses: both cases under the mode, each as wide as the row. */
+.sizing > [role='group'] { grid-column: 1 / -1; }
 .limits { display: grid; gap: 8px; min-width: 0; }
 .places { display: flex; align-items: center; gap: 8px; min-width: 0; }
 

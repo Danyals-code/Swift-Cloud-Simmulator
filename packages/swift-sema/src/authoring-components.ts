@@ -3,10 +3,11 @@ import type { AuthoringNode, ComponentSettings, ComponentVariant, DesignControl,
 import { Parser, callParameter, fitsParameters, insertView, forEachChild, type Attribute, type CallExpr, type Expr, type FuncDecl, type InitDecl, type Node, type StructDecl, type TypeRef, type VarDecl } from '@studio/swift-syntax'
 import { readsNoValue } from './authoring-clipboard'
 import { AUTHORING_COLORS, swiftString, validateControlValue, designControlRecipes } from './design-controls'
-import { applyPatches, allDeclarations, callOf, expressionOf, identifier, insertMember, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch, sourceRoot } from './authoring-context'
+import { applyPatches, allDeclarations, callOf, enumCases, expressionOf, identifier, insertMember, insertArgument, literal, namedStruct, ownerOf, patch, raw, scalarType, shadowsMember, signature, type FeatureContext, type SourcePatch, sourceRoot } from './authoring-context'
 import { SUPPORTED_VIEWS } from './builtins'
 import { enclosingCollection } from './authoring-collections'
 import { buildAuthoringModel } from './authoring'
+import { layerProject } from './layer'
 import { Checker } from './checker'
 
 export function namedActions(ctx: FeatureContext, node: AuthoringNode): FuncDecl[] {
@@ -24,11 +25,6 @@ export function namedActions(ctx: FeatureContext, node: AuthoringNode): FuncDecl
     return !next || safe(next, new Set([...path, fn.name]))
   })
   return actions.filter(fn => !shadowsMember(ctx, node, fn.name) && safe(fn, new Set()))
-}
-export function enumCases(ctx: FeatureContext, type: string): readonly string[] | undefined {
-  const matches = allDeclarations(ctx).filter(d => 'name' in d && d.name === type)
-  const decl = matches.length === 1 ? matches[0] : undefined
-  return decl?.kind === 'enumDecl' && !decl.generics.length && decl.cases.length <= 32 && decl.cases.every(c => !c.associated.length) ? decl.cases.map(c => c.name) : undefined
 }
 const emptyComponentCache = new WeakMap<FeatureContext, string[]>()
 export function emptyComponents(ctx: FeatureContext): string[] {
@@ -267,7 +263,7 @@ export function exposeComponentInput(ctx: FeatureContext, node: AuthoringNode, c
   const owner = ownerOf(ctx, node), expression = expressionOf(ctx, node)
   if (!owner || !expression || !ctx.nodes.some(n => n.kind === 'component' && n.name === owner.name)) throw new Error('Select text inside a reusable component’s shared design.')
   if (!identifier(name) || owner.members.some(m => 'name' in m && m.name === name) || owner.members.some(m => m.kind === 'initDecl')) throw new Error('Choose an unused input name on a component without a custom initializer.')
-  const recipe = designControlRecipes(node, expression, ctx.files.find(f => f.id === node.source.file)!.text, ctx.deploymentTarget).find(r => ['content', 'title'].includes(r.control.id) && r.control.id === control && r.control.kind === 'text')
+  const recipe = designControlRecipes(node, expression, ctx.files.find(f => f.id === node.source.file)!.text, layerProject(ctx.ast, ctx.deploymentTarget, ctx.files), ctx.deploymentTarget).find(r => ['content', 'title'].includes(r.control.id) && r.control.id === control && r.control.kind === 'text')
   if (!recipe) throw new Error('Only plain text or a plain control title can become a text input here. Linked or conditional text keeps its existing connection.')
   const patches = [insertMember(ctx, owner, `var ${name}: String = ${swiftString(recipe.control.value)}`), patch(recipe.control.source, `self.${name}`)]
   return { files: applyPatches(ctx, patches), offset: node.source.start + patches.filter(p => p.file === node.source.file && p.end <= node.source.start).reduce((delta, p) => delta + p.text.length - (p.end - p.start), 0) }

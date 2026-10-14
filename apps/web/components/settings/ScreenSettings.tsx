@@ -5,6 +5,7 @@ import { LAYOUT_WORDS, stackLayoutOf, type AuthoringNode, type AuthoringOperatio
 import { canRename, screenRemovalRefusal, type DesignScreenNode, type DesignTree } from '../../lib/designTree'
 import type { ScreenCommand } from '../../lib/screens'
 import { screenOverrideModifier, screenRoot, screenTitleControl, scenarioKey, scenarioScreen, lacksNavigationBar } from '../../lib/screens'
+import { describeState, stateSuggestions } from '../../lib/screenStates'
 import { PropertyControl } from '../PropertyControl'
 import { TokenField, valueFields } from './TokenField'
 import { Icon } from '../ui/Icon'
@@ -138,20 +139,27 @@ function describePresentation(screen: DesignScreenNode, tree: DesignTree): strin
  * The states a screen can be in: loading, empty, error, or anything else its inputs allow.
  *
  * A state never changes the app: it swaps the screen's preview inputs, using branches
- * the Swift already has, so the exported app still starts from its own defaults.
+ * the Swift already has, so the exported app still starts from its own defaults. The
+ * branches the screen's code draws are offered as states by name (Wave 3b), and one the
+ * preview can't show says why.
  */
 function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onSave, onDelete, onCreateValue }: { screen: DesignScreenNode; snapshot?: AuthoringSnapshot; busy: boolean; scenarios: readonly PreviewScenario[]; active: string; onSelect: (name: string) => void; onSave: ScreenSettingsProps['onSaveScenario']; onDelete: (name: string) => void; onCreateValue: ScreenSettingsProps['onCreateStateValue'] }) {
-  const inputs = (snapshot?.inputs ?? []).filter(input => input.owner === screen.view || input.owner.startsWith(`${screen.view}.`))
-  const collections = (snapshot?.nodes ?? []).flatMap(node => node.collection && node.collection.owner === screen.view ? [node.collection] : [])
+  const all = (snapshot?.inputs ?? []).filter(input => input.owner === screen.view || input.owner.startsWith(`${screen.view}.`))
+  // A condition the preview can't set is not a value a state changes.
+  const inputs = all.filter(input => !input.problem)
+  const keyOf = (item: { owner: string; name: string }) => `${item.owner}.${item.name}`
+  // A list a condition reads is picked as empty or with its items; its records are the same list.
+  const collections = (snapshot?.nodes ?? []).flatMap(node => node.collection && node.collection.owner === screen.view && !inputs.some(input => keyOf(input) === keyOf(node.collection!)) ? [node.collection] : [])
   const own = scenarios.filter(scenario => scenarioScreen(scenario) === screen.view)
+  const suggestions = stateSuggestions(all, own)
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('Empty')
   const [inputKey, setInputKey] = useState('')
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const input = inputs.find(item => `${item.owner}.${item.name}` === inputKey)
-  const collection = collections.find(item => `${item.owner}.${item.name}` === inputKey)
+  const input = inputs.find(item => keyOf(item) === inputKey)
+  const collection = collections.find(item => keyOf(item) === inputKey)
   // A screen with nothing to switch cannot have states, so the form makes the first
   // value itself rather than telling a designer to go and find one.
   const creating = inputKey === NEW_VALUE || (!inputs.length && !collections.length)
@@ -177,25 +185,41 @@ function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onS
     setError(problem)
     if (!problem) setAdding(false)
   }
+  const choose = (key: string) => {
+    setInputKey(key)
+    const chosen = inputs.find(item => keyOf(item) === key)
+    if (chosen?.choices) setValue(chosen.choices.some(choice => choice.value === chosen.value) ? String(chosen.value) : chosen.choices[0]?.value ?? '')
+    else setValue(chosen?.type === 'Date' ? typeof chosen.value === 'number' ? new Date(chosen.value * 1000).toISOString().slice(0, 16) : '' : chosen ? String(chosen.value ?? '') : 'empty')
+  }
   return <section className={styles.section} aria-label="States" data-testid="screen-states">
     <div className={styles.sectionHeader}><h3>States</h3><span><button type="button" className={styles.iconButton} aria-label="Add state" title="Add a state" aria-expanded={adding} disabled={busy || !screen.view} onClick={() => { setAdding(!adding); setError(null) }}><Icon name="plus" size={14} /></button></span></div>
     <div className={styles.states}>
       <button type="button" className={styles.stateRow} aria-pressed={!own.some(scenario => scenarioKey(scenario) === active)} onClick={() => onSelect('')}>Default<small>App data</small></button>
       {own.map(scenario => <div key={scenario.name} className={styles.inline}>
-        <button type="button" className={styles.stateRow} aria-pressed={scenarioKey(scenario) === active} onClick={() => onSelect(scenarioKey(scenario))}>{scenario.name}<small>{scenario.inputs?.map(item => Array.isArray(item.value) ? `${item.name}: ${item.value.length} items` : `${item.name}: ${String(item.value)}`).join(', ')}</small></button>
+        <button type="button" className={styles.stateRow} aria-pressed={scenarioKey(scenario) === active} onClick={() => onSelect(scenarioKey(scenario))}>{scenario.name}<small title={describeState(scenario.inputs, inputs)}>{describeState(scenario.inputs, inputs)}</small></button>
         <button type="button" className={styles.iconButton} aria-label={`Delete state ${scenario.name}`} disabled={busy} onClick={() => onDelete(scenarioKey(scenario))}><Icon name="xmark" size={12} /></button>
       </div>)}
     </div>
+    {!!suggestions.offered.length && <div className={styles.states} data-testid="state-suggestions">
+      <p className={styles.note}>The screen’s code also draws these. Add one to show it.</p>
+      {suggestions.offered.map(state => <button key={state.name} type="button" className={styles.stateRow} aria-label={`Add ${state.name} state`} title={`Add the ${state.name} state and show it · ${describeState(state.inputs, inputs)}`} disabled={busy} onClick={() => setError(onSave(state.name, state.inputs))}>
+        <Icon name="plus" size={12} />{state.name}<small>{describeState(state.inputs, inputs)}</small>
+      </button>)}
+    </div>}
+    {!!suggestions.refused.length && <div className={styles.states} data-testid="states-not-offered">
+      {/* A reason that starts with what it is about is not headed by it again. */}
+      {suggestions.refused.map((state, index) => <p key={`${index}:${state.name}`} className={styles.note}><strong>{state.name}</strong>{state.problem.startsWith(state.name) ? state.problem.slice(state.name.length) : ` · ${state.problem}`}</p>)}
+    </div>}
     {!inputs.length && !collections.length && !adding && <p className={styles.note}>A state shows this screen with different content: loading, empty, signed out. Add one and the screen gets a switch it can read.</p>}
     {adding && <div className={styles.tokenRow} data-open>
       <div className={styles.row}><label htmlFor="state-name">Name</label><input id="state-name" aria-label="State name" list="state-names" value={name} onChange={event => setName(event.target.value)} /></div>
       <datalist id="state-names"><option>Loading</option><option>Empty</option><option>Error</option><option>Signed out</option></datalist>
-      {!!(inputs.length || collections.length) && <div className={styles.row}><label htmlFor="state-input">Changes</label><select id="state-input" aria-label="State input" value={inputKey} onChange={event => { setInputKey(event.target.value); const chosen = inputs.find(item => `${item.owner}.${item.name}` === event.target.value); setValue(chosen?.type === 'Date' ? typeof chosen.value === 'number' ? new Date(chosen.value * 1000).toISOString().slice(0, 16) : '' : chosen ? String(chosen.value ?? '') : 'empty') }}><option value="" disabled>Choose…</option>{inputs.map(item => <option key={`${item.owner}.${item.name}`} value={`${item.owner}.${item.name}`}>{item.name}</option>)}{collections.map(item => <option key={`${item.owner}.${item.name}`} value={`${item.owner}.${item.name}`}>{item.name} (list)</option>)}<option value={NEW_VALUE}>A new on/off switch…</option></select></div>}
+      {!!(inputs.length || collections.length) && <div className={styles.row}><label htmlFor="state-input">Changes</label><select id="state-input" aria-label="State input" value={inputKey} onChange={event => choose(event.target.value)}><option value="" disabled>Choose…</option>{inputs.map(item => <option key={keyOf(item)} value={keyOf(item)}>{item.kind === 'list' ? `${item.name} (list)` : item.name}</option>)}{collections.map(item => <option key={keyOf(item)} value={keyOf(item)}>{item.name} (list)</option>)}<option value={NEW_VALUE}>A new on/off switch…</option></select></div>}
       {creating && <>
         <div className={styles.row}><label htmlFor="state-new-value">Switch</label><input id="state-new-value" aria-label="New value name" value={valueName} placeholder={suggestValueName(name)} onChange={event => setValueName(event.target.value)} /></div>
         <p className={styles.note}>The screen gets a switch called “{suggested}”, off to start with and on in this state. Use it with Shown when, or in any value field, to change what the screen shows.</p>
       </>}
-      {input && <div className={styles.row}><label htmlFor="state-value">{input.type === 'Date' ? 'To (UTC)' : 'To'}</label>{input.type === 'Bool' || input.options ? <select id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)}>{(input.options ?? ['true', 'false']).map(option => <option key={option}>{option}</option>)}</select> : <input type={input.type === 'Date' ? 'datetime-local' : 'text'} id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)} />}</div>}
+      {input && <div className={styles.row}><label htmlFor="state-value">{input.type === 'Date' ? 'To (UTC)' : 'To'}</label>{input.choices ? <select id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)}>{input.choices.map(choice => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select> : input.type === 'Bool' || input.options ? <select id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)}>{(input.options ?? ['true', 'false']).map(option => <option key={option}>{option}</option>)}</select> : <input type={input.type === 'Date' ? 'datetime-local' : 'text'} id="state-value" aria-label="State value" value={value} onChange={event => setValue(event.target.value)} />}</div>}
       {collection && <div className={styles.row}><label htmlFor="state-records">To</label><select id="state-records" aria-label="State records" value={value} onChange={event => setValue(event.target.value)}><option value="empty">No items</option><option value="app">The app’s items</option></select></div>}
       <p className={styles.note}>Only the preview changes. The app still starts from its own values.</p>
       <div className={styles.actions}><button type="button" className={styles.primary} disabled={busy || saving || !name.trim() || (!creating && !inputKey)} onClick={() => creating ? void createState() : save()}>Save state</button><button type="button" className={styles.button} onClick={() => setAdding(false)}>Cancel</button></div>
@@ -205,7 +229,7 @@ function ScreenStates({ screen, snapshot, busy, scenarios, active, onSelect, onS
 }
 
 function parse(input: StateInput, value: string): DesignValue {
-  if (input.options) return value
+  if (input.options || input.choices) return value
   if (input.type === 'Date') return Date.parse(value + 'Z') / 1000
   if (input.type === 'Bool') return value === 'true'
   if (['Int', 'Double'].includes(input.type)) return value === '' ? null : Number(value)

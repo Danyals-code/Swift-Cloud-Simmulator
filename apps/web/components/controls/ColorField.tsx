@@ -14,7 +14,10 @@ const ColorPopover = dynamic(() => import('./ColorPopover').then(module => modul
 export interface ColorFieldProps {
   /** Names the field's parts for assistive tech: "Fill" gives "Fill color", "Fill hex" and "Fill opacity". */
   readonly label: string
-  readonly value: ColorValue
+  /** Null for no colour written, which the field shows as `unset` says until one is chosen. */
+  readonly value: ColorValue | null
+  /** What no colour written draws, in words: `Foreground`, for a stroke in the foreground style. */
+  readonly unset?: string
   /** The project's tokens; the colour ones are offered. */
   readonly tokens: readonly SharedStyle[]
   readonly disabled?: boolean
@@ -28,15 +31,15 @@ export interface ColorFieldProps {
  *
  * The hex field also takes a system colour's name. A typed `#RRGGBBAA` sets the opacity
  * from its alpha, as Figma does. A token shows as a chip with its name, so a value linked
- * to the design system reads as one.
+ * to the design system reads as one. No colour written, as a stroke in the foreground style
+ * has, reads as `unset` says until one is chosen.
  */
-export function ColorField({ label, value, tokens, disabled = false, onChange }: ColorFieldProps) {
+export function ColorField({ label, value, unset, tokens, disabled = false, onChange }: ColorFieldProps) {
   const swatch = useRef<HTMLButtonElement | null>(null)
   /** Where the swatch was when it opened the colours, or null while they are closed. */
   const [anchor, setAnchor] = useState<DOMRect | null>(null)
   const toggle = (event: MouseEvent<HTMLButtonElement>) => setAnchor(anchor ? null : (swatch.current ?? event.currentTarget).getBoundingClientRect())
-  const token = 'token' in value
-  const text = colorLabel(value, tokens)
+  const text = value ? colorLabel(value, tokens) : ''
   // Drafts start again from the value whenever it changes, as after an Undo.
   const key = JSON.stringify(value)
   const [base, setBase] = useState(key)
@@ -48,23 +51,24 @@ export function ColorField({ label, value, tokens, disabled = false, onChange }:
     const typed = colorFromText(hex)
     if (!typed) { setInvalid(true); return }
     // A typed alpha is the opacity; without one the opacity stays as it was.
-    onChange(keepOpacity(typed, value))
+    onChange(value ? keepOpacity(typed, value) : typed)
   }
   const keys = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') { event.preventDefault(); commitHex() }
     // The canvas would take Escape as letting go of the selection.
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setHex(text); setInvalid(false) }
   }
-  const linked = token ? tokenFor(value, tokens) : undefined
+  const linked = value && 'token' in value ? tokenFor(value, tokens) : undefined
   return <div className={styles.field} data-testid="color-field">
-    <button ref={swatch} type="button" className={styles.swatch} aria-label={`${label} color`} aria-haspopup="dialog" aria-expanded={!!anchor} title={colorHex(value, tokens) ?? text} disabled={disabled} onClick={toggle}>
-      <i style={{ background: swatchCss(value, tokens) }} />
+    <button ref={swatch} type="button" className={styles.swatch} aria-label={`${label} color`} aria-haspopup="dialog" aria-expanded={!!anchor} title={value ? colorHex(value, tokens) ?? text : unset} disabled={disabled} onClick={toggle}>
+      {value ? <i style={{ background: swatchCss(value, tokens) }} /> : <i className={styles.unset} />}
     </button>
-    {token
+    {value && 'token' in value
       ? <button type="button" className={styles.chip} aria-label={`${label} token`} title={linked ? `${linked.name}: ${linked.light ?? linked.value}` : value.token} disabled={disabled} onClick={toggle}>{text}</button>
-      : <input className={styles.hex} aria-label={`${label} hex`} value={hex} placeholder="#RRGGBB" spellCheck={false} maxLength={32} disabled={disabled} aria-invalid={invalid || undefined}
+      : <input className={styles.hex} aria-label={`${label} hex`} value={hex} placeholder={value ? '#RRGGBB' : unset} spellCheck={false} maxLength={32} disabled={disabled} aria-invalid={invalid || undefined}
           onChange={event => { setHex(event.target.value); setInvalid(false) }} onBlur={commitHex} onKeyDown={keys} />}
-    <NumberField label={`${label} opacity`} caption={<Icon name="opacity" size={12} />} value={opacityPercent(value)} unit="%" min={0} max={100} disabled={disabled} onCommit={percent => onChange(withOpacity(value, percent))} />
+    <NumberField label={`${label} opacity`} caption={<Icon name="opacity" size={12} />} value={value && opacityPercent(value)} unit="%" min={0} max={100} disabled={disabled || !value}
+      title={value ? undefined : 'Choose a color to set its opacity.'} onCommit={percent => value && onChange(withOpacity(value, percent))} />
     {invalid && <p className={styles.error} role="alert">Use a hex such as #0A84FF, or a system color’s name.</p>}
     {anchor && <ColorPopover label={label} value={value} tokens={tokens} anchor={anchor} onChange={onChange} onClose={() => { setAnchor(null); swatch.current?.focus() }} />}
   </div>

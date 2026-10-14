@@ -12,6 +12,7 @@ beforeEach(resetPipelineState)
 
 const TOKENS = `
 let isOn = true
+let palette = [Color.red]
 enum Theme {
     static let accent = Color.blue
 }
@@ -299,7 +300,7 @@ describe('what the Fill section leaves to Code', () => {
   it.each([
     ['a background written as a view', 'Text("A").background { Color.red }', /view written in Swift/],
     ['a comment in the fill', 'Text("A").background(/* brand */ .red)', /comment/],
-    ['a computed colour', 'Text("A").background(isOn ? Color.red : Color.blue)', /worked out in Swift/],
+    ['a computed colour', 'Text("A").background(isOn ? Color.red : palette[0])', /worked out in Swift/],
     ['glass the panel does not offer', 'Text("A").glassEffect(.identity)', /worked out in Swift/],
     ['a background and glass both', 'Text("A").background(.red).glassEffect()', /background and Liquid Glass/],
   ])('shows %s and refuses to change it', (_, body, reason) => {

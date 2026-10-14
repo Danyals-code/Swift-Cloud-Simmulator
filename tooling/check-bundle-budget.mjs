@@ -114,8 +114,13 @@ const KB = 1024
  *              spacing handles, dragging to an offset and arrow-key nudging,
  *              with a live draft layout in the worker, estimated at 15 KB.
  *              Raised to 830 KB by decision, for 2b and some headroom.
+ *   Values, states and screens - 821.8 KB actual after Wave 3a and the
+ *              pipeline fixes. Wave 3b shows constants and tokens with their
+ *              values, view-model states, and alerts, dialogs and previews as
+ *              screens, estimated at 10 to 15 KB. Raised to 860 KB by
+ *              decision, for 3b and the start of Wave 4.
  */
-const BUDGET_KB = 830
+const BUDGET_KB = 860
 
 /**
  * The biggest single chunk, in KB gzipped - which is the studio's own.
