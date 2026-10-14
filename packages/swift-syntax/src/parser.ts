@@ -43,6 +43,8 @@ import type {
 export interface ParseResult {
   readonly sourceFile: SourceFileNode
   readonly diagnostics: readonly Diagnostic[]
+  /** The file's tokens as `Lexer.tokenize` gives them, before `#if` is applied, for a reader that would lex it again. */
+  readonly tokens: readonly Token[]
 }
 
 /** Declarations outside the subset, mapped to the name the diagnostic should use. */
@@ -155,6 +157,7 @@ export class Parser {
     return {
       sourceFile,
       diagnostics: [...lexed.diagnostics, ...compiled.diagnostics, ...parser.diagnostics],
+      tokens: lexed.tokens,
     }
   }
 

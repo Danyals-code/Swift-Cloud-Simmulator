@@ -48,13 +48,29 @@ export function allDeclarations(ctx: FeatureContext): Decl[] {
   declarationCache.set(ctx, result)
   return result
 }
+/**
+ * What `ownerOf` and `namedStruct` found, for each context: a view's settings ask both many
+ * times over, and each answer is a search of every declaration in the project.
+ */
+const ownerCache = new WeakMap<FeatureContext, Map<string, StructDecl | undefined>>()
+const structCache = new WeakMap<FeatureContext, Map<string, StructDecl | undefined>>()
+const remembered = <T>(cache: WeakMap<FeatureContext, Map<string, T>>, ctx: FeatureContext, key: string, find: () => T): T => {
+  let found = cache.get(ctx)
+  if (!found) cache.set(ctx, found = new Map())
+  if (!found.has(key)) found.set(key, find())
+  return found.get(key)!
+}
+
 export function ownerOf(ctx: FeatureContext, node: AuthoringNode): StructDecl | undefined {
-  const matches = allDeclarations(ctx).filter((d): d is StructDecl => d.kind === 'structDecl' && d.span.file === node.source.file && d.span.start <= node.source.start && d.span.end >= node.source.end)
-  const inside = matches.sort((a, b) => (a.span.end - a.span.start) - (b.span.end - b.span.start))[0]
-  if (inside) return inside
-  // A helper in `private extension ContentView { … }` belongs to ContentView, wherever that is (Wave 3a).
-  const extension = ctx.ast.flatMap(file => file.declarations).find((d): d is ExtensionDecl => d.kind === 'extensionDecl' && d.span.file === node.source.file && d.span.start <= node.source.start && d.span.end >= node.source.end)
-  return extension ? namedStruct(ctx, extension.name) : undefined
+  const { file, start, end } = node.source
+  return remembered(ownerCache, ctx, JSON.stringify([file, start, end]), () => {
+    const matches = allDeclarations(ctx).filter((d): d is StructDecl => d.kind === 'structDecl' && d.span.file === file && d.span.start <= start && d.span.end >= end)
+    const inside = matches.sort((a, b) => (a.span.end - a.span.start) - (b.span.end - b.span.start))[0]
+    if (inside) return inside
+    // A helper in `private extension ContentView { … }` belongs to ContentView, wherever that is (Wave 3a).
+    const extension = ctx.ast.flatMap(f => f.declarations).find((d): d is ExtensionDecl => d.kind === 'extensionDecl' && d.span.file === file && d.span.start <= start && d.span.end >= end)
+    return extension ? namedStruct(ctx, extension.name) : undefined
+  })
 }
 export function expressionOf(ctx: FeatureContext, node: AuthoringNode): Expr | undefined {
   let expressions = expressionCache.get(ctx)
@@ -70,9 +86,11 @@ export function expressionOf(ctx: FeatureContext, node: AuthoringNode): Expr | u
 }
 export function callOf(ctx: FeatureContext, node: AuthoringNode): CallExpr | undefined { const e = expressionOf(ctx, node); return e ? viewCallChain(e)?.base : undefined }
 export function namedStruct(ctx: FeatureContext, name: string): StructDecl | undefined {
-  // Nested or duplicate names require qualified resolution, outside this recipe.
-  const declarations = ctx.ast.flatMap(f => f.declarations).filter((d): d is StructDecl => d.kind === 'structDecl' && d.name === name)
-  return declarations.length === 1 && allDeclarations(ctx).filter(d => 'name' in d && d.name === name).length === 1 ? declarations[0] : undefined
+  return remembered(structCache, ctx, name, () => {
+    // Nested or duplicate names require qualified resolution, outside this recipe.
+    const declarations = ctx.ast.flatMap(f => f.declarations).filter((d): d is StructDecl => d.kind === 'structDecl' && d.name === name)
+    return declarations.length === 1 && allDeclarations(ctx).filter(d => 'name' in d && d.name === name).length === 1 ? declarations[0] : undefined
+  })
 }
 export function scalarType(type: TypeRef | null, initial?: Expr | null): { type: RecordField['type']; optional: boolean } | undefined {
   if (type?.kind === 'optionalType') { const inner = scalarType(type.wrapped); return inner && { ...inner, optional: true } }
@@ -191,7 +209,10 @@ export function shadowsMember(ctx: FeatureContext, node: AuthoringNode, name: st
 }
 export function hasComments(ctx: FeatureContext, span: SourceSpan): boolean {
   // The lexer omits comments but token ranges still expose only trivia between tokens.
-  const source = raw(ctx, span), tokens = Lexer.tokenize(source, span.file).tokens
+  const source = raw(ctx, span)
+  // A comment between tokens is in the source too, so source without one has none to find.
+  if (!/\/\/|\/\*/.test(source)) return false
+  const tokens = Lexer.tokenize(source, span.file).tokens
   let at = 0
   for (const token of tokens) {
     if (/\/\/|\/\*/.test(source.slice(at, token.span.start))) return true

@@ -472,8 +472,14 @@ export function designControlRecipes(node: AuthoringNode, expr: Expr, text: stri
     const capability = authoringCapability(name, 'modifier', m.args.map(a => a.label))
     if (!capability || targetVersion < Number.parseFloat(capability.minimumIOS)) continue
     if (name === 'padding' && !m.args.length && !m.trailingClosure) {
-      const close = Lexer.tokenize(raw(m.span), node.source.file).tokens.filter(t => t.text === ')').at(-1)
-      if (close) add(`modifier:${i}:default`, 'Padding', 'pt', '', v => ({ start: m.span.start + close.span.start, end: m.span.start + close.span.start, text: String(Number(v)) }), undefined, 0)
+      // Its last `)`, lexed from the end of its name: lexing from a token's end reads the rest
+      // as lexing the whole chain does, and the chain before it was lexed again for each call.
+      const lastClose = (from: number) => {
+        const close = Lexer.tokenize(text.slice(from, m.span.end), node.source.file).tokens.filter(t => t.text === ')').at(-1)
+        return close && from + close.span.start
+      }
+      const close = (m.callee.kind === 'memberAccess' ? lastClose(m.callee.memberSpan.end) : undefined) ?? lastClose(m.span.start)
+      if (close !== undefined) add(`modifier:${i}:default`, 'Padding', 'pt', '', v => ({ start: close, end: close, text: String(Number(v)) }), undefined, 0)
     }
     for (const [j, arg] of m.args.entries()) {
       const id = `modifier:${i}:${j}`

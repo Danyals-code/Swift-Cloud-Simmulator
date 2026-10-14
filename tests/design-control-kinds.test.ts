@@ -147,3 +147,14 @@ describe('a number says its unit', () => {
     expect(edited(turned, 'Text', 'rotationEffect · degrees', '45')).toBe(turned.replace('15', '45'))
   })
 })
+
+describe('a padding written with no value takes the first one inside its own parentheses', () => {
+  it.each([
+    ['VStack { Text("A") }.padding()', 'VStack', 'VStack { Text("A") }.padding(12)'],
+    ['Text("A").padding().opacity(0.5)', 'Text', 'Text("A").padding(12).opacity(0.5)'],
+    ['Text("A").padding( /* room ) */ )', 'Text', 'Text("A").padding( /* room ) */ 12)'],
+    ['Text(")")\n            .padding(\n            )', 'Text', 'Text(")")\n            .padding(\n            12)'],
+  ])('%s', (body, name, after) => {
+    expect(edited(wrap(body), name, 'Padding', '12')).toBe(wrap(after))
+  })
+})
